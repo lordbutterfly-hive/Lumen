@@ -706,25 +706,32 @@ func registerApply(s Store, creator string, block uint64, face, cap int64) {
 //     supply == 0 admission guard means every balance on this market, in BOTH
 //     families, is already zero (I3 sums both), so there is nothing to inherit.
 //
-//     kAllowance is DIFFERENT and does NOT self-heal, and that is a real
-//     residual, stated plainly: an allowance is a standing grant from an owner
-//     to a spender on a creator's token id. The creator id is the same string
-//     across incarnations, so a grant made before a market CLOSED remains a
-//     live spend authority over the NEW incarnation's tokens. It cannot be
-//     enumerated (per-owner-per-spender, unbounded), and it cannot be
-//     epoch-scoped either: magi-market reads this key from our raw state at a
-//     fixed 4-segment shape (allow|<owner>|<spender>|<tokenId>), so adding a
-//     segment would make every marketplace read miss — which is the whole
-//     reason we adopted their layout.
+//     kAllowance IS EPOCH-SCOPED (DEFECT FIX 2026-08-19, PRUNED finding F1).
+//     This block used to record the opposite as an accepted residual: an
+//     allowance is a standing grant on a creator's token id, the creator id is
+//     the same string across incarnations, so a grant made before a market
+//     CLOSED stayed live spend authority over the NEW incarnation's tokens. It
+//     cannot be enumerated (per-owner-per-spender, unbounded) and it was
+//     believed unscopeable, because magi-market reads the key from our raw
+//     state at a fixed 4-segment shape and adding a segment would make every
+//     marketplace read miss.
 //
-//     What bounds the damage: the grant is the OWNER's own signed instruction
-//     under active auth, it is spendable only against tokens that owner
-//     actually holds, and re-registration requires the previous incarnation to
-//     have drained to zero — so the spender inherits authority over a balance
-//     that does not exist until the owner buys again. A holder who wants it
-//     gone revokes it (approve to zero is always permitted, never blocked by
-//     the compare-and-set). It is recorded here so nobody later mistakes it
-//     for an oversight.
+//     That reasoning was sound about widening kAllowance and wrong about the
+//     conclusion. doors.go now stamps each grant with this creator's offering
+//     epoch in a SEPARATE key (kAllowanceEpoch), and the spend door treats a
+//     stale stamp as no authority. kAllowance keeps its exact 4-segment shape,
+//     so every marketplace read still hits, and the residual is closed.
+//
+//     It needed closing: the grant was measured moving 400 matured tokens of a
+//     re-registered market to an account that was never approved, cashing out
+//     8,540,519 base units and cutting an honest buyer's exit by 31% — with a
+//     POSTING key, because safeTransferFrom carries no HBD leg and therefore
+//     posting-routes. "The spender inherits authority over a balance that does
+//     not exist until the owner buys again" was true and was not a bound: the
+//     owner buying again is the ordinary case, not the exotic one.
+//
+//     A holder revoking (approve to zero) still always succeeds and now clears
+//     the stamp with it.
 //
 //   - kSeq — DELIBERATELY MONOTONE ACROSS INCARNATIONS. Resetting it to 0
 //     would be actively unsafe: escrow records at kEscrow(c, seq) are never

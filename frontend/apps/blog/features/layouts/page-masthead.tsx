@@ -86,7 +86,7 @@ const PageMasthead: FC<PageMastheadProps> = ({
       // ink cannot clear 4.5:1 over ANY ground dark enough to be a dark masthead
       // (measured: 4.48:1 even at #231815). Light keeps the 70% it was designed
       // with; dark restores full strength, which reads as the same weight there.
-      <p className="relative z-10 mb-1.5 text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-ink-brand-6/70 dark:text-ink-brand-6">
+      <p className="relative z-10 mb-1.5 text-label font-semibold uppercase tracking-[0.14em] text-ink-brand-6/70 dark:text-ink-brand-6">
         {eyebrow}
       </p>
     ) : null}
@@ -96,7 +96,7 @@ const PageMasthead: FC<PageMastheadProps> = ({
     </Heading>
 
     {children || actions ? (
-      <div className="relative z-10 mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] leading-[20px] text-ink-10">
+      <div className="relative z-10 mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-caption text-ink-10">
         {children}
         {actions ? <div className="ml-auto flex items-center gap-2">{actions}</div> : null}
       </div>

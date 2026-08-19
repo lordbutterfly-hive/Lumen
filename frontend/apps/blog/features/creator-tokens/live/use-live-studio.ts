@@ -15,7 +15,7 @@
  * async actions that reject. See that file's header for why.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
@@ -41,6 +41,14 @@ export interface LiveStudio {
   creator: string | null;
   loggedIn: boolean;
   isLite: boolean;
+  /**
+   * F14 fix: re-run `/api/users/me` — the retry affordance for
+   * status === 'session-unavailable'. Distinct from `retry` below, which only
+   * re-reads chain state and does nothing when the block is the session
+   * itself, since `creator` is null in that state and every chain query is
+   * disabled.
+   */
+  retrySession: () => void;
 
   market: LiveTokenMarket | null;
   /** Escrows awaiting this creator's answer. Chain-read, no indexer. */
@@ -82,7 +90,15 @@ export interface LiveStudio {
   /** market.go SetFace — the posted base price, banded to at most 2x in any 7 days. */
   setFace: (newPriceUsd: number) => Promise<void>;
   claimTradeFees: () => Promise<number>;
-  sell: (tokens: number) => Promise<void>;
+  /**
+   * F5 fix (2026-08-19): `minNetUsd` used to not exist on this signature at
+   * all — sell.go's checkMinNet floor (OUTFLOW-CLIFF-1) was structurally
+   * unreachable from the creator's own "Cash out" control, which is the ONE
+   * place a creator sells on the curve, no matter what token-modals.tsx grew
+   * around SellModal. Optional and additive: absent still means no floor,
+   * same as everywhere else this parameter appears.
+   */
+  sell: (tokens: number, minNetUsd?: number) => Promise<void>;
   retire: () => Promise<void>;
   createOffering: (input: { title: string; priceUsd: number }) => Promise<void>;
   setOfferingPrice: (input: { offeringId: number; priceUsd: number }) => Promise<void>;
@@ -101,7 +117,7 @@ export interface LiveStudio {
 
 export function useLiveStudio(): LiveStudio {
   const queryClient = useQueryClient();
-  const { user, isHydrated } = useUserClient();
+  const { user, isHydrated, sessionUnavailable, retrySession } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
   const creator = loggedIn ? user.username : null;
   const isLite = user.account_tier === 'lite';
@@ -148,17 +164,26 @@ export function useLiveStudio(): LiveStudio {
     staleTime: STALE_MS
   });
 
+  // F14 fix: `sessionUnavailable` is checked BEFORE `!creator` — a failed
+  // session ALSO makes `creator` null (loggedIn defaults false), and that
+  // used to read exactly like 'missing', rendering "Launch your Meritum.
+  // Free to launch." for a creator who already has a live market. Only
+  // reachable while `!loggedIn`: once the session answers, `sessionUnavailable`
+  // goes false again (use-user-core.ts's own doc on the flag).
+  const sessionCheckFailed = !loggedIn && sessionUnavailable;
   const status: LiveMarketStatus = unavailable
     ? 'unavailable'
-    : !creator
-      ? 'missing'
-      : marketQuery.isLoading
-        ? 'loading'
-        : readFailed
-          ? 'error'
-          : marketQuery.data === null
-            ? 'missing'
-            : 'ready';
+    : sessionCheckFailed
+      ? 'session-unavailable'
+      : !creator
+        ? 'missing'
+        : marketQuery.isLoading
+          ? 'loading'
+          : readFailed
+            ? 'error'
+            : marketQuery.data === null
+              ? 'missing'
+              : 'ready';
 
   const chainMarket: Market | null = status === 'ready' ? (marketQuery.data ?? null) : null;
   const market =
@@ -195,17 +220,50 @@ export function useLiveStudio(): LiveStudio {
 
   const requireSigner = useCallback((): { source: NonNullable<typeof dataSource>; signer: string } => {
     if (!dataSource) throw new Error('CREATOR_TOKENS_UNAVAILABLE: no contract is provisioned');
+    // F14 fix: distinct from "sign in to continue" — this is our OWN session
+    // check failing, not a genuine sign-out. Checked before the generic
+    // !creator branch so a signed-in creator whose /api/users/me merely
+    // blipped is told the truth instead of being asked to sign in again.
+    if (!creator && sessionUnavailable) {
+      throw new Error('CREATOR_TOKENS_SESSION_UNAVAILABLE: we couldn’t verify you’re signed in just now. Try again in a moment.');
+    }
     if (!creator) throw new Error('CREATOR_TOKENS_SIGNED_OUT: sign in to continue');
     if (isLite) throw new Error('CREATOR_TOKENS_LITE_ACCOUNT: this account has no Hive keys and cannot sign a transaction');
     return { source: dataSource, signer: creator };
-  }, [dataSource, creator, isLite]);
+  }, [dataSource, creator, isLite, sessionUnavailable]);
 
   const run = useMutation({
     mutationFn: async (fn: (ctx: { source: NonNullable<typeof dataSource>; signer: string }) => Promise<unknown>) => fn(requireSigner()),
     onSuccess: invalidate
   });
+  // F7 fix (2026-08-19): EVERY studio write funnels through `call()` —
+  // register, answer, decline, setCap, setFace, claimTradeFees, sell, retire,
+  // createOffering, setOfferingPrice, setOfferingTitle, deleteOffering, renew
+  // — so guarding ONCE, here, protects all of them at the choke point instead
+  // of duplicating a guard at every button (Raise cap, Sell, Claim, Renew,
+  // Remove offering, the two PriceInput commits, …). `run.isLoading` (below,
+  // as `isBusy`) is a useState-backed value that only updates on the NEXT
+  // render, so two same-tick invocations (a fast double-click, or two
+  // buttons fired together) would both read it as false and both broadcast.
+  // A ref mutates synchronously — mirrors
+  // ui/meritum/launch/use-meritum-launch.ts's inFlight ref, the one guard in
+  // this feature that was already correct. Throws (rather than silently
+  // no-op-ing) because `call()`'s return value is awaited and treated as
+  // success by its caller — a silent no-op on the SECOND click would let that
+  // click's UI believe it had succeeded when nothing was sent for it.
+  const inFlight = useRef(false);
   const call = useCallback(
-    async <T,>(fn: (ctx: { source: NonNullable<typeof dataSource>; signer: string }) => Promise<T>): Promise<T> => (await run.mutateAsync(fn as never)) as T,
+    async <T,>(fn: (ctx: { source: NonNullable<typeof dataSource>; signer: string }) => Promise<T>): Promise<T> => {
+      if (inFlight.current) {
+        throw new Error('CREATOR_TOKENS_BUSY: another action is still in progress. Wait for it to finish.');
+      }
+      inFlight.current = true;
+      try {
+        return (await run.mutateAsync(fn as never)) as T;
+      } finally {
+        inFlight.current = false;
+      }
+    },
     [run]
   );
 
@@ -214,6 +272,7 @@ export function useLiveStudio(): LiveStudio {
     creator,
     loggedIn,
     isLite,
+    retrySession,
     market,
     inbox,
     rawInbox,
@@ -274,9 +333,9 @@ export function useLiveStudio(): LiveStudio {
       [call]
     ),
     sell: useCallback(
-      (tokens: number) =>
+      (tokens: number, minNetUsd?: number) =>
         call(async ({ source, signer }) => {
-          await source.sell({ creator: signer, seller: signer, tokens });
+          await source.sell({ creator: signer, seller: signer, tokens, minNetHbd: minNetUsd });
         }),
       [call]
     ),

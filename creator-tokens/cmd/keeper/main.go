@@ -44,6 +44,15 @@ func main() {
 	block := flag.Uint64("block", 0, "mock current Magi block height for this demo sweep (0 = computed from the demo scenario's own registration blocks)")
 	flag.Parse()
 
+	// AN-24: refuse a caller shape the chain will reject, at startup, rather
+	// than submitting ops that silently fail on chain forever.
+	normalizedCaller, callerErr := keeper.NormalizeCaller(*caller)
+	if callerErr != nil {
+		fmt.Fprintln(os.Stderr, callerErr)
+		os.Exit(2)
+	}
+	*caller = normalizedCaller
+
 	cfg := keeper.OpConfig{NetID: *netID, ContractID: *contractID, RCLimit: *rcLimit}
 
 	if *live {
@@ -74,8 +83,19 @@ func main() {
 	views := collectMarketViews(store, holders, demoBlock, []string{"aliceart", "bobmusic", "carlwrites", "danerin"})
 	for _, v := range views {
 		fmt.Printf(">>> %-12s phase=%-7s supply=%-8s holders(verified-live-balance)=%d\n", v.Creator, v.Phase, safeStr(v.Supply), len(v.Holders))
+		inWindDown := v.Phase == core.StateFrozen || v.Retired
 		for _, h := range v.Holders {
-			fmt.Printf("      candidate holder %-10s live balance=%s\n", h.Holder, h.Balance)
+			blocked := ""
+			// Only annotate inside wind-down: RefundBlocked is also true for
+			// a market that is not in wind-down at all (RefundHolder would
+			// refuse it on the EARLIER inWindDown gate, H3 -- a different
+			// reason than the exit-tax gate this field specifically
+			// mirrors), and Plan never even reaches this holder's loop for
+			// such a market, so the annotation would misattribute the cause.
+			if inWindDown && h.RefundBlocked {
+				blocked = "  [exit-tax gate BLOCKS a push right now -- Plan will skip this holder; see keeper.HolderBalance.RefundBlocked]"
+			}
+			fmt.Printf("      candidate holder %-10s live balance=%s%s\n", h.Holder, h.Balance, blocked)
 		}
 		// The DELIVERY RECORD used to be printed here from this repo's own Go
 		// indexer. That package is DELETED (2026-07-28): the read side is the
@@ -117,11 +137,22 @@ func main() {
 	report := keeper.Sweep(views, flaky, policy, sleep)
 	fmt.Println()
 
-	fmt.Printf("=== sweep complete: %d succeeded, %d failed ===\n", report.Succeeded, report.Failed)
+	// F9 fix (2026-08-19 audit): this used to print "%d succeeded, %d
+	// failed" straight from report.Succeeded, which pre-fix meant nothing
+	// more than "Submit returned no transport error" -- NOT "the chain
+	// executed this and it did not revert." DryRunSubmitter (wrapped by
+	// this demo's simulated flake) never confirms execution, so every
+	// operator-visible "succeeded" below is honestly Unverified — see
+	// keeper.SweepReport.Summary's doc and keeper.ExecutionVerifier for the
+	// only way any Submitter earns a genuine Succeeded count.
+	fmt.Printf("=== sweep complete: %s ===\n", report.Summary())
 	for _, o := range report.Outcomes {
-		if o.Err != nil {
+		switch o.Status {
+		case keeper.StatusFailed:
 			fmt.Printf("  FAILED after %d attempt(s): %s -- %v\n", len(o.Attempts), o.Op, o.Err)
 			fmt.Println("    this is INCONVENIENCE, not harm: the holder can self-refund via `refund`, or any third party can push `refundHolder` for them; the next scheduled sweep will retry this op automatically from a fresh snapshot.")
+		case keeper.StatusUnverified:
+			fmt.Printf("  UNVERIFIED: %s -- receipt=%q, transport accepted but NOT confirmed as executed; do not treat this as a completed payment.\n", o.Op, o.Receipt)
 		}
 	}
 	fmt.Println("\nnothing above touched the network or the demo store -- this is exactly what --live would submit, once a signer and a deployed contract exist.")
@@ -300,7 +331,18 @@ func collectMarketViews(store *core.MemStore, holders map[string][]string, block
 		phase := core.Phase(store, creator, block)
 		var holderViews []keeper.HolderBalance
 		for _, h := range holders[creator] {
-			holderViews = append(holderViews, keeper.HolderBalance{Holder: h, Balance: core.BalanceOf(store, creator, h)})
+			holderViews = append(holderViews, keeper.HolderBalance{
+				Holder:  h,
+				Balance: core.BalanceOf(store, creator, h),
+				// F9 fix (2026-08-19 audit): a fresh LIVE read of the exact
+				// gate core/refund.go's RefundHolder itself enforces
+				// (core/refund.go:479-486) -- see keeper.HolderBalance.
+				// RefundBlocked's own doc. Without this, Plan used to emit a
+				// refundHolder op for every one of this demo's holders,
+				// every one of which the contract refuses for the first
+				// ExitTaxDecayBlocks (42 days) of wind-down.
+				RefundBlocked: core.RefundHolderTaxGateBlocked(store, creator, h, block),
+			})
 		}
 		// Retired is read separately from Phase on purpose: core.Phase is
 		// MAX(natural, retired), so a market retired mid-subscription still

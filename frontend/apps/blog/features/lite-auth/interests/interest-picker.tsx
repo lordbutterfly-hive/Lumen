@@ -299,7 +299,7 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
               {sectionsOf(options).map((section) => (
                 <div key={section.group || 'all'} className="mb-5">
                   {section.group ? (
-                    <h3 className="mb-2 font-sans text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-14">
+                    <h3 className="mb-2 font-sans text-label font-semibold uppercase tracking-[0.08em] text-ink-14">
                       {section.group}
                     </h3>
                   ) : null}
@@ -322,8 +322,8 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
                            * `icon` field. Those glyphs are drawn by the operating
                            * system, so the same screen renders Apple's, Google's and
                            * Microsoft's art side by side, at three different weights,
-                           * none of which is Lora or Open Sans. In a product whose
-                           * whole surface is two typefaces and a restrained palette,
+                           * none of which is Lora. In a product whose whole
+                           * surface is ONE typeface and a restrained palette,
                            * that one row read as a different app.
                            *
                            * The taxonomy keeps its `icon` field: it costs nothing,
@@ -363,7 +363,7 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
                 {COPY.skip}
               </button>
               <div className="flex items-center gap-3">
-                <span className="font-sans text-[13px] leading-[20px] text-ink-14">
+                <span className="font-sans text-caption text-ink-14">
                   {COPY.counter(picked.length, max)}
                 </span>
                 <Button

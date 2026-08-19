@@ -317,9 +317,19 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
           literal never had. */}
       {embedded ? null : <div className="fixed inset-x-0 top-0 h-[3px] bg-[linear-gradient(90deg,rgb(var(--line-brand-10)),#e07b3e)]" />}
 
-      {/* Wordmark: Open Sans to match the app shell's committed identity
-          (app-header design-handoff-v2: "no serif display face") — the login
-          mockup's Lora wordmark was the stray outlier. */}
+      {/* Wordmark: Lora, matching the app shell.
+
+          ★ THIS COMMENT USED TO ARGUE THE OPPOSITE, AND ITS PREMISE INVERTED
+          (2026-08-19). It read: "Open Sans to match the app shell's committed
+          identity (app-header design-handoff-v2: no serif display face) — the
+          login mockup's Lora wordmark was the stray outlier." The shell it cited
+          as the Open Sans reference became Lora itself on 2026-08-11 (owner:
+          "our logo is not fucking Lora, you need to set it Lora"), and the whole
+          product followed on 2026-08-19. The mockup was right and this note was
+          wrong. The `font-sans` below happens to render correctly today only
+          because that utility is now aliased to Lora — right result, backwards
+          reasoning, which is exactly the kind of comment that survives a
+          migration and misleads the next reader. */}
       {embedded ? null : (
         <div className="mb-8 mt-16 text-center">
           <Link href="/" className="font-sans text-[44px] leading-[52px] font-bold leading-none tracking-[-0.025em] text-ink-2">
@@ -408,7 +418,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       </svg>
                       {COPY.google}
                     </button>
-                    <p className="mt-2 text-center text-[13px] leading-[20px] text-ink-10">{COPY.googleSeam}</p>
+                    <p className="mt-2 text-center text-caption text-ink-10">{COPY.googleSeam}</p>
                   </div>
                 )}
 
@@ -422,7 +432,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     do not have a wallet. Its own divider separates them. */}
                 <div className="mx-0.5 my-4 flex items-center gap-3">
                   <div className="h-px flex-1 bg-surface-26" />
-                  <span className="text-xs font-semibold text-ink-14">{COPY.orGoogle}</span>
+                  <span className="text-caption font-semibold text-ink-14">{COPY.orGoogle}</span>
                   <div className="h-px flex-1 bg-surface-26" />
                 </div>
                 <div className="flex flex-col gap-2.5">
@@ -462,7 +472,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] leading-[24px] font-semibold text-ink-2">{COPY.btcTitle}</span>
-                      <span className="block text-xs text-ink-10">{COPY.btcSub}</span>
+                      <span className="block text-caption text-ink-10">{COPY.btcSub}</span>
                     </span>
                   </button>
 
@@ -500,7 +510,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] leading-[24px] font-semibold text-ink-2">{COPY.evmTitle}</span>
-                      <span className="block text-xs text-ink-10">{COPY.evmSub}</span>
+                      <span className="block text-caption text-ink-10">{COPY.evmSub}</span>
                     </span>
                   </button>
                 </div>
@@ -514,15 +524,15 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     options carry equal weight, and this is its own step. */}
                 <div className="mx-0.5 my-4 flex items-center gap-3">
                   <div className="h-px flex-1 bg-surface-26" />
-                  <span className="text-xs font-semibold text-ink-14">{COPY.orHive}</span>
+                  <span className="text-caption font-semibold text-ink-14">{COPY.orHive}</span>
                   <div className="h-px flex-1 bg-surface-26" />
                 </div>
 
                 <KeychainSignin />
 
-                {error ? <p className="mt-4 text-center text-[13px] leading-[20px] text-ink-warn-3">{error}</p> : null}
+                {error ? <p className="mt-4 text-center text-caption text-ink-warn-3">{error}</p> : null}
 
-                <p className="mt-[18px] text-center text-xs text-ink-14">
+                <p className="mt-[18px] text-center text-caption text-ink-14">
                   By continuing you agree to Lumen’s <Link href="/tos.html">Terms</Link> and{' '}
                   <Link href="/privacy.html">Privacy Policy</Link>.
                 </p>
@@ -538,7 +548,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                 setView('default');
                 setError(null);
               }}
-              className="mb-4 flex items-center gap-1.5 border-0 bg-transparent p-0 text-[13px] leading-[20px] font-semibold text-ink-10"
+              className="mb-4 flex items-center gap-1.5 border-0 bg-transparent p-0 text-caption font-semibold text-ink-10"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8">
                 <path d="M15 18l-6-6 6-6" />
@@ -568,9 +578,9 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                 className="min-w-0 flex-1 border-0 font-sans text-base font-semibold text-ink-2 outline-none"
               />
               {nameStatus.state === 'checking' ? (
-                <span className="text-[13px] leading-[20px] font-semibold text-ink-14">{COPY.checking}</span>
+                <span className="text-caption font-semibold text-ink-14">{COPY.checking}</span>
               ) : nameStatus.state === 'available' ? (
-                <span className="flex items-center gap-1.5 text-[13px] leading-[20px] font-semibold text-ink-ok-2">
+                <span className="flex items-center gap-1.5 text-caption font-semibold text-ink-ok-2">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2f7d4f" strokeWidth="2.8">
                     <path d="M20 6L9 17l-5-5" />
                   </svg>
@@ -579,9 +589,9 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
               ) : null}
             </div>
             {nameStatus.state === 'unavailable' ? (
-              <p className="mb-2 text-[13px] leading-[20px] font-medium text-ink-warn-3">{nameStatus.reason}</p>
+              <p className="mb-2 text-caption font-medium text-ink-warn-3">{nameStatus.reason}</p>
             ) : null}
-            <p className="mb-[18px] text-xs text-ink-14">{COPY.nameRules}</p>
+            <p className="mb-[18px] text-caption text-ink-14">{COPY.nameRules}</p>
 
             {/* Real Turnstile widget. Renders nothing when no site key is set — which
                 is also when the server passes the check through, so the two ends can
@@ -595,8 +605,8 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
             >
               {busy ? COPY.checking : COPY.create}
             </button>
-            {error ? <p className="mt-3 text-center text-[13px] leading-[20px] text-ink-warn-3">{error}</p> : null}
-            <p className="mt-3 text-center text-xs text-ink-10">{COPY.createReassure}</p>
+            {error ? <p className="mt-3 text-center text-caption text-ink-warn-3">{error}</p> : null}
+            <p className="mt-3 text-center text-caption text-ink-10">{COPY.createReassure}</p>
           </div>
         )}
       </div>
@@ -610,7 +620,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
       {/* v8: this footer belongs to the standalone PAGE. Rendered inside the dialog it
           became a single orphaned "Help" link under the card, with no context and no
           sibling. The page keeps it; the dialog does not. */}
-      <div className={`my-9 flex gap-5 text-[13px] leading-[20px] text-ink-14 ${embedded ? 'hidden' : ''}`}>
+      <div className={`my-9 flex gap-5 text-caption text-ink-14 ${embedded ? 'hidden' : ''}`}>
         {/* ★ HELP FOR THE PERSON ACTUALLY ON THIS SCREEN (2026-08-08, UX tester).
             This pointed at /faq.html — the inherited "Hive.blog FAQ", which opens
             on master passwords, owner keys, Resource Credits and MVESTs and refers

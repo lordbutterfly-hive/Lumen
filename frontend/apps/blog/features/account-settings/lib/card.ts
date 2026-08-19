@@ -14,10 +14,10 @@ export const SETTINGS_CARD =
 export const SETTINGS_CARD_TITLE = 'font-serif text-[18px] font-semibold leading-[28px] text-ink-2';
 
 /** The line under a card headline that says what the card is for. */
-export const SETTINGS_CARD_HINT = 'mt-1.5 text-[13px] leading-[20px] text-ink-10';
+export const SETTINGS_CARD_HINT = 'mt-1.5 text-caption text-ink-10';
 
 /** Field label above an input or a select. */
-export const SETTINGS_LABEL = 'mb-1.5 block text-[13px] leading-[20px] font-semibold text-ink-7';
+export const SETTINGS_LABEL = 'mb-1.5 block text-caption font-semibold text-ink-7';
 
 /** Text input / select trigger. */
 export const SETTINGS_INPUT =

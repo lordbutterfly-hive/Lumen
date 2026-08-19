@@ -12,10 +12,10 @@ export default function ReturnThresholdCard({ thresholdHp }: { thresholdHp: numb
       <div className="mb-1.5 font-sans text-[15px] leading-[24px] font-bold text-ink-2">
         {t('proposals.return_card.title')}
       </div>
-      <p className="mb-3.5 font-serif text-[13px] leading-[20px] text-ink-10">
+      <p className="mb-3.5 font-serif text-caption text-ink-10">
         {t('proposals.return_card.description')}
       </p>
-      <div className="flex items-center justify-between rounded-control border border-dashed border-line-20 p-[12px_14px] font-sans text-[13px] leading-[20px]">
+      <div className="flex items-center justify-between rounded-control border border-dashed border-line-20 p-[12px_14px] font-sans text-caption ">
         <span className="font-semibold text-ink-7">{t('proposals.return_card.label')}</span>
         <span className="tabular-nums font-bold text-ink-brand-6" data-testid="return-threshold-value">
           {thresholdHp === undefined ? t('global.loading') : formatHpCompact(thresholdHp)}

@@ -65,7 +65,7 @@ const CommunityDescription = ({
         })}
         data-testid="community-info-sidebar"
       >
-        <CardHeader className="px-0 font-light">
+        <CardHeader className="px-0">
           <CardTitle className="flex items-center gap-1">
             <span>{data.title}</span>
             {data.is_nsfw ? <Badge variant="red">NSFW</Badge> : null}
@@ -84,16 +84,16 @@ const CommunityDescription = ({
             >
               <div className="flex flex-col items-center" data-testid="community-subscribers">
                 {data.subscribers}
-                <span className="text-center text-xs">{t('communities.buttons.subscribers')}</span>
+                <span className="text-center text-caption">{t('communities.buttons.subscribers')}</span>
               </div>
             </SubsListDialog>
             <div className="flex flex-col items-center" data-testid="community-pending-rewards">
               ${data.sum_pending}
-              <span className="text-center text-xs">{t('communities.titles.pending_rewards')}</span>
+              <span className="text-center text-caption">{t('communities.titles.pending_rewards')}</span>
             </div>
             <div className="flex flex-col items-center" data-testid="community-active-posters">
               {data.num_authors}
-              <span className="text-center text-xs">{t('communities.titles.active_posters')}</span>
+              <span className="text-center text-caption">{t('communities.titles.active_posters')}</span>
             </div>
           </div>
           <div className="my-4 flex flex-col gap-2">
@@ -124,13 +124,13 @@ const CommunityDescription = ({
                 </>
               ) : null}
             </div>
-            <ul className="mt-1.5 text-xs">
+            <ul className="mt-1.5 text-caption">
               {data.team.slice(1).map((member: string[]) => (
                 <li key={member[0]} className="pt-0.5">
                   <BasePathLink href={`/@${member[0]}`} className="text-destructive hover:cursor-pointer">
                     @{member[0]}
                   </BasePathLink>{' '}
-                  <span className="text-[12px] leading-[18px] text-ink-info-6">{member[1].toUpperCase()}</span>{' '}
+                  <span className="text-caption text-ink-info-6">{member[1].toUpperCase()}</span>{' '}
                   {member[2] && member[2] !== '' ? (
                     <Badge variant="outline" className="ml-0.5 border-destructive py-0">
                       {member[2]}

@@ -1,10 +1,11 @@
 'use client';
 
-import { FC, useState, useEffect } from 'react';
+import { FC, useState, useEffect, useRef } from 'react';
 import { useLiveStudio, type LiveStudio } from '../../live/use-live-studio';
-import { MarketLoading, MarketReadFailed, MarketUnavailable } from '../../live/market-states';
+import { MarketLoading, MarketReadFailed, MarketSessionUnavailable, MarketUnavailable } from '../../live/market-states';
 import type { Ask } from '../../types';
 import { usdPrice, usdWhole } from '../../market/format';
+import { sellQuote, MIN_NET_DEFAULT_TOLERANCE_BPS } from '../../market/curve';
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
 import { MAX_HASH_LEN } from '../../lib/vsc/payload-contract';
@@ -35,11 +36,11 @@ const Stat: FC<{ label: string; value: string; sub?: string; green?: boolean }> 
   green
 }) => (
   <div>
-    <div className="text-[12px] font-semibold uppercase tracking-wide text-ink-14">{label}</div>
+    <div className="text-label font-semibold uppercase tracking-wide text-ink-14">{label}</div>
     <div className={`mt-1 text-[22px] leading-[34px] font-bold tabular-nums ${green ? 'text-ink-ok-2' : 'text-ink-2'}`}>
       {value}
     </div>
-    {sub ? <div className="mt-0.5 text-[13px] leading-[20px] text-ink-10">{sub}</div> : null}
+    {sub ? <div className="mt-0.5 text-caption text-ink-10">{sub}</div> : null}
   </div>
 );
 
@@ -57,13 +58,16 @@ const Stat: FC<{ label: string; value: string; sub?: string; green?: boolean }> 
 const PriceInput: FC<{
   value: number;
   onCommit: (usd: number) => Promise<void>;
+  /** F7 fix: this type carried no way to disable the input at all — see the callers below, which now pass studio.isBusy. */
+  disabled?: boolean;
   onFailure?: (message: string) => void;
-}> = ({ value, onCommit, onFailure }) => {
+}> = ({ value, onCommit, disabled, onFailure }) => {
   const [txt, setTxt] = useState(String(value));
   useEffect(() => setTxt(String(value)), [value]);
   return (
     <input
       value={txt}
+      disabled={disabled}
       inputMode="decimal"
       onChange={(e) => setTxt(e.target.value)}
       onBlur={async () => {
@@ -82,16 +86,14 @@ const PriceInput: FC<{
           await onCommit(n);
         } catch (error) {
           setTxt(String(value));
-          onFailure?.(
-            `The price stayed at $${value}. ${
-              error instanceof Error && error.message
-                ? error.message
-                : 'The chain refused the change. A price may only move 2x per 7 days.'
-            }`
-          );
+          // Routed through writeFailureMessage (F7 note) so a machine-coded
+          // refusal — including the new CREATOR_TOKENS_BUSY the F7 double-submit
+          // guard below can now throw — never paints its raw "CODE: " prefix
+          // into this banner.
+          onFailure?.(`The price stayed at $${value}. ${writeFailureMessage(error, 'The chain refused the change. A price may only move 2x per 7 days.')}`);
         }
       }}
-      className="ml-1 w-[70px] border-0 text-[15px] leading-[24px] font-bold tabular-nums text-ink-2 outline-none"
+      className="ml-1 w-[70px] border-0 text-[15px] leading-[24px] font-bold tabular-nums text-ink-2 outline-none disabled:opacity-60"
     />
   );
 };
@@ -136,13 +138,11 @@ const TitleInput: FC<{
           await onCommit(next);
         } catch (error) {
           setTxt(value);
-          onFailure?.(
-            `The name stayed "${value}". ${
-              error instanceof Error && error.message
-                ? error.message
-                : 'The chain refused the rename.'
-            }`
-          );
+          // Routed through writeFailureMessage (same F7 note as PriceInput
+          // above): a machine-coded refusal — including CREATOR_TOKENS_BUSY,
+          // reachable here too now that every studio write shares one guard —
+          // must not paint its raw "CODE: " prefix into this banner.
+          onFailure?.(`The name stayed "${value}". ${writeFailureMessage(error, 'The chain refused the rename.')}`);
         }
       }}
       className="w-full truncate border-0 bg-transparent text-[14px] leading-[22px] font-semibold text-ink-2 outline-none focus:underline disabled:opacity-60"
@@ -154,6 +154,12 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
   const [text, setText] = useState('');
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // F7 fix: shared by BOTH buttons below (decline and answer are mutually
+  // exclusive on one escrow) — see token-modals.tsx BuyModal's `inFlight`
+  // doc for why a ref, not this `busy` useState, is what actually stops a
+  // same-tick double-submit. `busy` stays for the disabled attribute and
+  // the "Confirm in your wallet…" label.
+  const inFlight = useRef(false);
   // core/ask.go:521 refuses a '|' in answerHash outright: the escrow record
   // is packed as a pipe-delimited string (core/ask.go:157), so one stray
   // pipe would re-partition it. maxLength handles the length bound; this
@@ -167,10 +173,10 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
             2026-07-28): it facilitates payment and reputation, and the two
             parties arrange the work between themselves. Showing the reference is
             honest; pretending a message arrived here would not be. */}
-      <div className="mb-3 rounded-control border border-line-9 bg-surface-16 px-3.5 py-3 text-[13px] leading-[20px] text-ink-8">
+      <div className="mb-3 rounded-control border border-line-9 bg-surface-16 px-3.5 py-3 text-caption text-ink-8">
         Reference <strong className="font-mono">{ask.contentHash || '—'}</strong> · from @{ask.asker}
       </div>
-      <p className="mb-3 text-[13px] leading-[20px] text-ink-10">
+      <p className="mb-3 text-caption text-ink-10">
         Arrange and deliver the work with @{ask.asker} however you normally would. Marking it delivered
         releases the escrow to you — and the buyer then rates it, which is what your token’s reputation is
         built from.
@@ -191,7 +197,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
         placeholder="Where did you deliver it? A link, a ticket number, “sent by email”…"
         className="h-[130px] w-full resize-y rounded-xl border border-line-11 px-4 py-3 font-serif text-[15px] leading-[24px] text-ink-2 outline-none focus:border-line-brand-10"
       />
-      <div className="mt-1 flex justify-between text-[12px] text-ink-14">
+      <div className="mt-1 flex justify-between text-caption text-ink-14">
         <span className={answerHasPipe ? 'font-semibold text-ink-brand-6' : ''}>
           {answerHasPipe
             ? 'Remove the “|”. The chain refuses it in this field.'
@@ -201,7 +207,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
           {text.length}/{MAX_HASH_LEN}
         </span>
       </div>
-      <div className="mt-3 rounded-control bg-surface-18 px-3.5 py-2.5 text-[13px] leading-[20px] text-ink-ok-2">
+      <div className="mt-3 rounded-control bg-surface-18 px-3.5 py-2.5 text-caption text-ink-ok-2">
         This pays you <strong>{tok(ask.tokensEscrowed)} tokens</strong> and closes the job. It can’t be undone
         — and the buyer rates it afterwards.
       </div>
@@ -213,7 +219,9 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
               take a black mark for work they simply cannot do. */}
         <button
           onClick={async () => {
-            if (busy) return;
+            // F7: synchronous — see the `inFlight` doc above.
+            if (inFlight.current) return;
+            inFlight.current = true;
             setBusy(true);
             setFailure(null);
             try {
@@ -223,6 +231,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
               // The REAL reason, not a guess. See ../write-failure.ts.
               setFailure(writeFailureMessage(err, 'That didn’t go through.'));
             } finally {
+              inFlight.current = false;
               setBusy(false);
             }
           }}
@@ -233,7 +242,10 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
         </button>
         <button
           onClick={async () => {
-            if (busy || !answerValid) return;
+            if (!answerValid) return;
+            // F7: synchronous — see the `inFlight` doc above.
+            if (inFlight.current) return;
+            inFlight.current = true;
             setBusy(true);
             setFailure(null);
             try {
@@ -250,6 +262,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
               // The REAL reason, not a guess. See ../write-failure.ts.
               setFailure(writeFailureMessage(err, 'That didn’t go through.'));
             } finally {
+              inFlight.current = false;
               setBusy(false);
             }
           }}
@@ -260,7 +273,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
         </button>
       </div>
       {failure ? (
-        <div className="mt-3 text-center text-[13px] leading-[20px] font-semibold text-ink-brand-6">{failure}</div>
+        <div className="mt-3 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
       ) : null}
     </ModalShell>
   );
@@ -274,6 +287,10 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
   const [confirm, setConfirm] = useState('');
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // F7 fix: see token-modals.tsx BuyModal's `inFlight` doc. Retire is
+  // ONCE-ONLY and irreversible — a double-submit here would waste RC on a
+  // second call the contract already refuses, at worst.
+  const inFlight = useRef(false);
   const ok = confirm.trim().toLowerCase().replace(/^@/, '') === handle.toLowerCase();
   return (
     <ModalShell
@@ -291,7 +308,7 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
         <li>· Your delivery record is lost. Coming back means a new token.</li>
         <li>· This can’t be undone.</li>
       </ul>
-      <label className="mb-1.5 block text-[13px] leading-[20px] font-semibold text-ink-10">
+      <label className="mb-1.5 block text-caption font-semibold text-ink-10">
         Type your handle (@{handle}) to confirm
       </label>
       <input
@@ -309,7 +326,10 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
         </button>
         <button
           onClick={async () => {
-            if (!ok || busy) return;
+            if (!ok) return;
+            // F7: synchronous — see the `inFlight` doc above.
+            if (inFlight.current) return;
+            inFlight.current = true;
             // Retire is IRREVERSIBLE on-chain. Close only after the broadcast
             // resolves — closing early would tell a creator they had ended
             // their market while the signer was still open, and there is no
@@ -323,6 +343,7 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
               // The REAL reason, not a guess. See ../write-failure.ts.
               setFailure(writeFailureMessage(err, 'Ending this token didn’t go through.'));
             } finally {
+              inFlight.current = false;
               setBusy(false);
             }
           }}
@@ -333,7 +354,7 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
         </button>
       </div>
       {failure ? (
-        <div className="mt-3 text-center text-[13px] leading-[20px] font-semibold text-ink-brand-6">{failure}</div>
+        <div className="mt-3 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
       ) : null}
     </ModalShell>
   );
@@ -352,7 +373,7 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
   const valid = title.trim().length > 0 && Number.isFinite(usd) && usd > 0;
   return (
     <div className="mt-4 border-t border-line-2 pt-4">
-      <div className="mb-2 text-[13px] leading-[20px] font-semibold text-ink-10">Add a service</div>
+      <div className="mb-2 text-caption font-semibold text-ink-10">Add a service</div>
       <div className="flex flex-wrap items-center gap-2">
         <input
           value={title}
@@ -390,12 +411,12 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
             }
           }}
           disabled={!valid || studio.isBusy}
-          className="rounded-control bg-surface-43 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 disabled:opacity-50"
+          className="rounded-control bg-surface-43 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
         >
           Add
         </button>
       </div>
-      {failure ? <div className="mt-2 text-[12px] font-semibold text-ink-brand-6">{failure}</div> : null}
+      {failure ? <div className="mt-2 text-caption font-semibold text-ink-brand-6">{failure}</div> : null}
     </div>
   );
 };
@@ -409,6 +430,13 @@ const CreatorStudio: FC = () => {
   const [capInput, setCapInput] = useState('');
   const [sellInput, setSellInput] = useState('');
   const [sellFailure, setSellFailure] = useState<string | null>(null);
+  // F5 fix (2026-08-19): this "Cash out" control had NO minNet parameter at
+  // all — sell.go's checkMinNet floor was structurally unreachable from the
+  // creator's own sell. See the derived defaultSellMinNetUsd below (and
+  // token-modals.tsx's SellModal, which gets the identical treatment) for
+  // why it defaults ON rather than needing to be discovered and typed.
+  const [sellMinNetText, setSellMinNetText] = useState('');
+  const [sellMinNetTouched, setSellMinNetTouched] = useState(false);
   const [actionFailure, setActionFailure] = useState<string | null>(null);
   // H-FE-8: the studio's fire-and-forget buttons (renew, deleteOffering, claimTradeFees)
   // used `void studio.X()`, silently swallowing a rejected write — the user clicked and
@@ -465,6 +493,13 @@ const CreatorStudio: FC = () => {
   // with a live market that they have no token, because the node blinked, is
   // exactly the "empty read rendered as real" failure this rewiring removes.
   if (status === 'error') return <MarketReadFailed onRetry={studio.retry} launchHref="/creators/launch" />;
+  // F14 fix: OUR session check failed, not the chain read — checked before
+  // `!market` below, which would otherwise render this exactly like
+  // status === 'missing' ("Launch your Meritum. Free to launch.") for a
+  // creator who already has a live market. retrySession re-fires
+  // /api/users/me itself; `retry` (used above) only re-reads chain queries,
+  // which stay disabled while the creator identity is unknown.
+  if (status === 'session-unavailable') return <MarketSessionUnavailable onRetry={studio.retrySession} />;
 
   // status === 'missing' -> genuinely no market yet (or signed out). The launch
   // wizard is the whole studio in that state.
@@ -492,6 +527,23 @@ const CreatorStudio: FC = () => {
   const overdue = subDaysLeft <= 0;
   const held = market.position?.tokens ?? 0;
 
+  // F5 fix: "Cash out" preview + default floor, same math and same shape as
+  // token-modals.tsx's SellModal (sellQuote + MIN_NET_DEFAULT_TOLERANCE_BPS)
+  // — a creator selling their own tokens is still an ordinary curve sell.
+  const sellTokens = parseFloat(sellInput.replace(/,/g, '')) || 0;
+  const sellPreview = sellQuote(sellTokens, market, market.position?.heldDays ?? 999);
+  const defaultSellMinNetUsd =
+    sellPreview.receiveUsd > 0 ? (sellPreview.receiveUsd * (10_000 - MIN_NET_DEFAULT_TOLERANCE_BPS)) / 10_000 : 0;
+  const sellMinNetParsed = parseFloat(sellMinNetText.replace(/,/g, ''));
+  const sellMinNetUsd = sellMinNetTouched
+    ? Number.isFinite(sellMinNetParsed) && sellMinNetParsed > 0
+      ? sellMinNetParsed
+      : undefined
+    : defaultSellMinNetUsd > 0
+      ? defaultSellMinNetUsd
+      : undefined;
+  const sellMinNetDisplay = sellMinNetTouched ? sellMinNetText : defaultSellMinNetUsd > 0 ? defaultSellMinNetUsd.toFixed(2) : '';
+
   const banner = overdue ? (
     <div className="mb-5 flex items-center justify-between gap-3 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5">
       <span className="text-[14px] leading-[22px] font-semibold text-ink-warn-3">
@@ -500,7 +552,7 @@ const CreatorStudio: FC = () => {
       <button
         onClick={() => void runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.')}
         disabled={studio.isBusy}
-        className="rounded-control bg-surface-warn-11 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 disabled:opacity-50"
+        className="rounded-control bg-surface-warn-11 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
       >
         Renew ~$10
       </button>
@@ -530,7 +582,7 @@ const CreatorStudio: FC = () => {
             >
               {s.label}
               {s.id === 'inbox' && inbox.length > 0 ? (
-                <span className="ml-1.5 rounded-full bg-surface-brand-12 px-1.5 text-[12px] leading-[18px] text-ink-27">
+                <span className="ml-1.5 rounded-full bg-surface-brand-12 px-1.5 text-caption text-ink-27">
                   {inbox.length}
                 </span>
               ) : null}
@@ -624,18 +676,18 @@ const CreatorStudio: FC = () => {
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-[15px] leading-[24px] font-semibold text-ink-2">{a.service}</div>
                     <div
-                      className={`text-[13px] leading-[20px] font-semibold ${a.urgent ? 'text-ink-warn-3' : 'text-ink-10'}`}
+                      className={`text-caption font-semibold ${a.urgent ? 'text-ink-warn-3' : 'text-ink-10'}`}
                     >
                       {a.dueLabel}
                     </div>
                   </div>
-                  <div className="mt-1 text-[13px] leading-[20px] tabular-nums text-ink-10">
+                  <div className="mt-1 text-caption tabular-nums text-ink-10">
                     {usdWhole(a.costUsd)} · {tok(a.tokens)} tokens escrowed
                   </div>
                   <div className="mt-3">
                     <button
                       onClick={() => setAnswering(rawInbox[i])}
-                      className="rounded-control bg-surface-brand-12 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 hover:bg-surface-brand-17"
+                      className="rounded-control bg-surface-brand-12 px-4 py-2 text-caption font-semibold text-ink-27 hover:bg-surface-brand-17"
                     >
                       Answer or decline
                     </button>
@@ -651,7 +703,7 @@ const CreatorStudio: FC = () => {
             <div className="mb-3 font-serif text-lg font-semibold text-ink-2">
               Your services &amp; prices
             </div>
-            <p className="mb-4 text-[13px] leading-[20px] text-ink-10">
+            <p className="mb-4 text-caption text-ink-10">
               Buyers pay these in your token at the live price. Set the dollar price — the token amount
               follows the market. A price can move at most 2× in any 7 days, and that limit follows the
               SERVICE NAME, so renaming or re-creating one won’t reset it.
@@ -667,7 +719,7 @@ const CreatorStudio: FC = () => {
             <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-line-11 bg-surface-5 px-4 py-3">
               <div className="min-w-0">
                 <div className="text-[14px] leading-[22px] font-semibold text-ink-2">Default ask price</div>
-                <div className="text-[12px] text-ink-14">
+                <div className="text-caption text-ink-14">
                   {studio.offerings === null
                     ? 'Shown on your token page as “Ask a question”.'
                     : studio.offerings.length === 0
@@ -683,6 +735,7 @@ const CreatorStudio: FC = () => {
                   // revert the field when the chain refuses — same contract the
                   // named-offering rows below use.
                   onCommit={(usd) => studio.setFace(usd)}
+                  disabled={studio.isBusy}
                   onFailure={(m) => setActionFailure(m || null)}
                 />
               </div>
@@ -694,18 +747,18 @@ const CreatorStudio: FC = () => {
                   collapsed a rejected read into an empty array. Retry, do not
                   reassure. */}
               {studio.offerings === null ? (
-                <div className="rounded-xl border border-dashed border-line-brand-2 px-4 py-5 text-center text-[13px] leading-[20px] text-ink-brand-2">
+                <div className="rounded-xl border border-dashed border-line-brand-2 px-4 py-5 text-center text-caption text-ink-brand-2">
                   <p>Your services couldn’t be loaded just now. This is not an empty shop.</p>
                   <button
                     type="button"
                     onClick={() => studio.retry()}
-                    className="mt-2 rounded-control border border-line-12 bg-surface-1 px-3 py-1.5 text-[13px] leading-[20px] font-semibold text-ink-2 hover:border-line-28"
+                    className="mt-2 rounded-control border border-line-12 bg-surface-1 px-3 py-1.5 text-caption font-semibold text-ink-2 hover:border-line-28"
                   >
                     Try again
                   </button>
                 </div>
               ) : studio.offerings.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-line-11 px-4 py-5 text-center text-[13px] leading-[20px] text-ink-14">
+                <p className="rounded-xl border border-dashed border-line-11 px-4 py-5 text-center text-caption text-ink-14">
                   You haven’t posted any services yet. Add one below and it appears on your token page.
                 </p>
               ) : (
@@ -721,7 +774,7 @@ const CreatorStudio: FC = () => {
                         onCommit={(title) => studio.setOfferingTitle({ offeringId: o.offeringId, title })}
                         onFailure={(m) => setActionFailure(m || null)}
                       />
-                      <div className="text-[12px] text-ink-14">
+                      <div className="text-caption text-ink-14">
                         {market.priceUsd > 0
                           ? `≈ ${tok(o.priceHbd / market.priceUsd)} tokens at today’s price`
                           : 'Token price unavailable'}
@@ -735,6 +788,7 @@ const CreatorStudio: FC = () => {
                           onCommit={(usd) =>
                             studio.setOfferingPrice({ offeringId: o.offeringId, priceUsd: usd })
                           }
+                          disabled={studio.isBusy}
                           onFailure={(m) => setActionFailure(m || null)}
                         />
                       </div>
@@ -747,7 +801,7 @@ const CreatorStudio: FC = () => {
                         }
                         disabled={studio.isBusy}
                         title="Delist this service. Asks already made against it are unaffected."
-                        className="rounded-control border border-line-11 px-3 py-2 text-[13px] leading-[20px] font-semibold text-ink-10 hover:bg-surface-16 disabled:opacity-50"
+                        className="rounded-control border border-line-11 px-3 py-2 text-caption font-semibold text-ink-10 hover:bg-surface-16 disabled:opacity-50"
                       >
                         Remove
                       </button>
@@ -772,7 +826,7 @@ const CreatorStudio: FC = () => {
               <Stat label="Reserve" value={usdWhole(market.reserveUsd)} sub="Backs the floor" />
             </div>
             <div className="mt-5">
-              <div className="mb-1 flex justify-between text-[13px] leading-[20px] text-ink-10">
+              <div className="mb-1 flex justify-between text-caption text-ink-10">
                 <span>Supply</span>
                 <span className="tabular-nums">
                   {market.supply.toLocaleString('en-US')} / {market.cap.toLocaleString('en-US')}
@@ -783,7 +837,7 @@ const CreatorStudio: FC = () => {
               </div>
             </div>
             <div className="mt-5 flex items-center gap-2">
-              <span className="text-[13px] leading-[20px] text-ink-10">Raise cap to</span>
+              <span className="text-caption text-ink-10">Raise cap to</span>
               <input
                 value={capInput}
                 onChange={(e) => setCapInput(e.target.value)}
@@ -827,24 +881,29 @@ const CreatorStudio: FC = () => {
                     await studio.setCap(v);
                   } catch (error) {
                     setCapInput(String(market.cap));
-                    setActionFailure(
-                      `The cap was not changed. ${
-                        error instanceof Error && error.message
-                          ? error.message
-                          : 'The chain refused the change.'
-                      }`
-                    );
+                    // Routed through writeFailureMessage (F7 note): the correctness
+                    // fix now lives centrally in use-live-studio.ts's `call()`, which
+                    // can throw a machine-coded CREATOR_TOKENS_BUSY on a same-tick
+                    // double-submit — this strips that prefix instead of painting it
+                    // raw into the banner.
+                    setActionFailure(`The cap was not changed. ${writeFailureMessage(error, 'The chain refused the change.')}`);
                   }
                 }}
-                className="rounded-control bg-surface-43 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27"
+                // F7 fix: this button had NO disabled attribute at all — the
+                // correctness guard against a double-submit now lives centrally in
+                // use-live-studio.ts's `call()` (every studio write funnels through
+                // it), but this still visually disables the button while busy so a
+                // reader is not left double-clicking into a caught CREATOR_TOKENS_BUSY.
+                disabled={studio.isBusy}
+                className="rounded-control bg-surface-43 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
               >
                 Raise cap
               </button>
-              <span className="text-[12px] text-ink-14">
+              <span className="text-caption text-ink-14">
                 lower only down to {market.supply.toLocaleString('en-US')} issued
               </span>
             </div>
-            <p className="mt-4 rounded-control bg-surface-16 px-3.5 py-3 text-[13px] leading-[20px] text-ink-10">
+            <p className="mt-4 rounded-control bg-surface-16 px-3.5 py-3 text-caption text-ink-10">
               Your token’s price is set by the market — buys raise it, sells lower it. You don’t set the
               price; you set your <strong>service prices</strong> in dollars.
             </p>
@@ -865,21 +924,21 @@ const CreatorStudio: FC = () => {
             >
               Renew ~$10
             </button>
-            <p className="mt-4 text-[13px] leading-[20px] text-ink-14">
+            <p className="mt-4 text-caption text-ink-14">
               If you stop paying, your token’s market winds down, holders are refunded at the floor, and your
               delivery record resets — coming back means a new token. Answering and cashing out are never
               blocked by billing.
             </p>
             <div className="mt-5 border-t border-line-2 pt-4">
               {market.windingDown ? (
-                <div className="text-[13px] leading-[20px] font-semibold text-ink-warn-3">
+                <div className="text-caption font-semibold text-ink-warn-3">
                   This token is winding down — holders are being refunded at the floor. Answering and cashing
                   out still work.
                 </div>
               ) : (
                 <button
                   onClick={() => setRetireOpen(true)}
-                  className="rounded-control border border-line-brand-1 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-brand-6 hover:bg-surface-brand-3"
+                  className="rounded-control border border-line-brand-1 px-4 py-2 text-caption font-semibold text-ink-brand-6 hover:bg-surface-brand-3"
                 >
                   End this token
                 </button>
@@ -953,7 +1012,7 @@ const CreatorStudio: FC = () => {
                 sub={`worth ${usdPrice(held * market.priceUsd)} · floor ${usdPrice(held * market.floorUsd)}`}
               />
               <div className="mt-4 flex items-center gap-2">
-                <span className="text-[13px] leading-[20px] text-ink-10">Cash out</span>
+                <span className="text-caption text-ink-10">Cash out</span>
                 <input
                   value={sellInput}
                   onChange={(e) => {
@@ -966,28 +1025,60 @@ const CreatorStudio: FC = () => {
                 />
                 <button
                   onClick={async () => {
-                    const n = parseFloat(sellInput.replace(/,/g, ''));
-                    if (!Number.isFinite(n) || n <= 0 || studio.isBusy) return;
+                    if (!Number.isFinite(sellTokens) || sellTokens <= 0) return;
+                    // F7 fix: correctness now comes from use-live-studio.ts's
+                    // `call()`, which every studio write (including this sell)
+                    // funnels through and which guards synchronously — see its
+                    // own doc. This still checks studio.isBusy so a genuine
+                    // double-click reads as a no-op rather than a caught
+                    // CREATOR_TOKENS_BUSY error.
+                    if (studio.isBusy) return;
                     setSellFailure(null);
                     try {
-                      await studio.sell(n);
+                      // F5 fix: sellMinNetUsd (defaulted just under the "you
+                      // receive" figure below — see its derivation above) was
+                      // structurally unreachable from this control before
+                      // use-live-studio.ts's sell() gained the parameter.
+                      await studio.sell(sellTokens, sellMinNetUsd);
                       setSellInput('');
                     } catch (err) {
                       // The REAL reason, not a guess. See ../write-failure.ts.
                       setSellFailure(writeFailureMessage(err, 'That sell didn’t go through.'));
                     }
                   }}
-                  className="rounded-control bg-surface-43 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27"
+                  disabled={!Number.isFinite(sellTokens) || sellTokens <= 0 || studio.isBusy}
+                  className="rounded-control bg-surface-43 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
                 >
                   Sell
                 </button>
               </div>
-              {sellFailure ? (
-                <div className="mt-2 text-[12px] font-semibold text-ink-brand-6">{sellFailure}</div>
+              {sellTokens > 0 ? (
+                <div className="mt-2.5 flex items-center gap-2">
+                  <label className="text-caption text-ink-10">Minimum you’ll accept</label>
+                  <div className="flex items-center rounded-control border border-line-11 px-2.5 py-1.5 focus-within:border-line-brand-10">
+                    <input
+                      value={sellMinNetDisplay}
+                      onChange={(e) => {
+                        setSellMinNetTouched(true);
+                        setSellMinNetText(e.target.value);
+                        setSellFailure(null);
+                      }}
+                      inputMode="decimal"
+                      placeholder="optional"
+                      className="w-[70px] border-0 text-[13px] leading-[20px] font-semibold tabular-nums text-ink-2 outline-none"
+                    />
+                    <span className="text-caption font-semibold text-ink-14">HBD</span>
+                  </div>
+                </div>
               ) : null}
-              <p className="mt-3 text-[12px] leading-[18px] text-ink-14">
+              {sellFailure ? (
+                <div className="mt-2 text-caption font-semibold text-ink-brand-6">{sellFailure}</div>
+              ) : null}
+              <p className="mt-3 text-caption text-ink-14">
                 Selling your own tokens returns them to dollars at the market price — it doesn’t affect anyone
-                else’s floor. Never blocked by billing.
+                else’s floor. Never blocked by billing. The minimum above is pre-filled just under what you’d get
+                right now, so the sell reverts (nothing spent) rather than fill lower — clear it for no floor, or
+                lower it to allow more slippage.
               </p>
             </Card>
           </div>

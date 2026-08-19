@@ -377,7 +377,7 @@ func (e *Engine) doTransfer(creator, from, to string, amount *big.Int) {
 	beforeTo := core.BalanceOf(e.Store, creator, to)
 
 	e.coreCall("transfer", ev, func() error {
-		return core.TransferCredits(e.Store, creator, from, to, e.Block, amount)
+		return core.TransferCredits(e.Store, from, creator, from, to, e.Block, amount)
 	})
 	if ev.OK {
 		e.addHolder(creator, to)
@@ -1832,7 +1832,21 @@ func (e *Engine) keeperTick() {
 		phase := core.Phase(e.Store, cname, e.Block)
 		holders := make([]keeper.HolderBalance, 0, len(e.holderOrder[cname]))
 		for _, h := range e.holderOrder[cname] {
-			holders = append(holders, keeper.HolderBalance{Holder: h, Balance: core.BalanceOf(e.Store, cname, h)})
+			holders = append(holders, keeper.HolderBalance{
+				Holder:  h,
+				Balance: core.BalanceOf(e.Store, cname, h),
+				// F9 fix (2026-08-19 audit): live-read the exact gate
+				// core.RefundHolder itself enforces (core/refund.go:479-486)
+				// so Plan never emits a refundHolder op this simulator's own
+				// core.RefundHolder call would then refuse — see
+				// keeper.HolderBalance.RefundBlocked's doc. Before this,
+				// doRefundHolder's coreCall wrapper already tolerated the
+				// refusal harmlessly (no state mutated, no invariant
+				// tripped — see engine.go's coreCall doc), so this is a
+				// pure efficiency/honesty improvement here, not a
+				// correctness fix for the simulator's own invariants.
+				RefundBlocked: core.RefundHolderTaxGateBlocked(e.Store, cname, h, e.Block),
+			})
 		}
 		views = append(views, keeper.MarketView{
 			Creator: cname, Phase: phase, Supply: core.Supply(e.Store, cname), Holders: holders,

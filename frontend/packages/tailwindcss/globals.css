@@ -862,6 +862,32 @@
   }
   html {
     scroll-padding-top: 5rem; /* 80px = sticky navbar (h-16/64px) + visual buffer */
+
+    /**
+     * ★★★ REQUIRED BY THE POST CARD'S DRAWER (2026-08-19). Without it the
+     * drawer cannot animate to `height: auto` at all.
+     *
+     * `interpolate-size` is an INHERITED property, so it belongs on the root
+     * and nowhere else — declaring it inside a CSS module would scope it to
+     * that module's class and quietly not apply to the element that needs it.
+     *
+     * It lets a keyword size (`auto`, `min-content`, `fit-content`) take part
+     * in a transition. The post card opens onto whatever its top comment needs
+     * — one line or four — with no max-height cap, nothing measured in
+     * JavaScript, and nothing clipped.
+     *
+     * ★ DO NOT "TIDY" THIS AWAY IN FAVOUR OF `grid-template-rows: 0fr -> 1fr`.
+     * That is the trick everyone reaches for and it does not work here: the
+     * transition wedges the used track size at its old value, the row never
+     * resolves, and the drawer stays SHUT. It fails silently, because a closed
+     * card still looks correct in a screenshot — which is exactly how a broken
+     * drawer would ship.
+     *
+     * Chrome 129+. In current Safari and Firefox the drawer SNAPS open instead
+     * of sliding; it still opens, and that is the accepted degradation rather
+     * than a reason to reimplement it in JS.
+     */
+    interpolate-size: allow-keywords;
   }
   * {
     @apply border-border;
@@ -871,7 +897,59 @@
       'rlig' 1,
       'calt' 1;
     color: rgb(var(--body-ink));
+    /* ★ ALL-LORA MIGRATION, 2026-08-19 (typography spec §3 rule 5). Lora is a
+       serif with genuine thin strokes; at the 14-15px UI sizes this app now
+       uses, the default subpixel rendering thickens those strokes unevenly and
+       the interface reads muddier than the same text at 17px. `antialiased` is
+       a no-op outside WebKit/Blink on macOS, so this costs nothing where it
+       does not help. `optimizeLegibility` enables kerning and default ligature
+       handling; Lora ships no discretionary `liga` table (verified), so this
+       buys kerning only, which is exactly what a serif at small sizes needs. */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
+
+  /**
+   * ★★★ ONE FAMILY, AND THE ONE EXCEPTION (2026-08-19, typography spec §7).
+   *
+   * `--font-lora` is bound by `app/layout.tsx` via next/font and is the only
+   * text face in the product. `--font-mono` is the single deliberate exception:
+   * a serif cannot do character-level disambiguation, so anything that is an
+   * IDENTIFIER rather than prose stays monospace — wallet addresses, keys,
+   * hashes, code blocks and inline `<code>`.
+   *
+   * The test is "would a human ever need to transcribe this character by
+   * character", not "does it look technical". A date, a payout figure, a
+   * version number and a block height are prose and belong in Lora.
+   *
+   * Declared here as well as in the Tailwind config because the CSS modules in
+   * this repo (`vote-control.module.css`, `meritum-coin.module.css`) write
+   * `font-family` directly and cannot reach a Tailwind key.
+   */
+  :root {
+    --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', 'Cascadia Mono', Menlo, Consolas,
+      'Liberation Mono', monospace;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+  }
+
+  /**
+   * ★ NEVER SMALL-CAPS (2026-08-19, typography spec §3 rule 2). Lora has NO
+   * `smcp` table — verified absent — so `font-variant-caps: small-caps` does
+   * not select a real cut. Chrome SYNTHESISES it by scaling capitals down,
+   * producing letterforms whose stroke weight is wrong beside the real capitals
+   * next to them. Uppercase plus letter-spacing is the house pattern and the
+   * only one: see the `label` / `micro` / `label-lg` ladder in
+   * `packages/tailwindcss/tailwind.config.js`. There is deliberately no utility
+   * for small-caps, so reaching for one means writing the property by hand,
+   * which is a review-visible act.
+   */
 
   /**
    * ★★★ THE ONLY FRACTIONAL FONT-SIZE LEFT IN THE APP WAS HERE
@@ -904,8 +982,22 @@
   sup {
     font-size: 12px;
   }
+  /**
+   * ★ `small` 13 -> 14 (2026-08-19, the sub-14px sweep). Hive authors use
+   * `<small>` as this platform's small-print CONVENTION — footnote sentences,
+   * not numeric annotations — so it is lowercase prose and the 14px floor binds
+   * on it exactly as it binds everywhere else. It keeps its own leading pair.
+   *
+   * ★ `sub`/`sup` ABOVE DELIBERATELY STAY AT 12px, and this is the one
+   * documented exemption in the sweep. They are not a line of prose; they are
+   * baseline-shifted glyphs inside one. A 14px subscript hanging off an 18px
+   * article body is not "legible", it is a broken subscript — the element's
+   * whole job is to be smaller than its host. The spec's QA check C will report
+   * them, and the honest answer is this comment rather than a silent filter.
+   */
   small {
-    font-size: 13px;
+    font-size: 14px;
+    line-height: 22px;
   }
 
   /**
@@ -1027,9 +1119,11 @@
   }
 }
 
+/* ★ 12 -> 14 (2026-08-19, sub-14px sweep). A community's description and rules
+   are running prose, so the floor binds. */
 .preview-description,
 .preview-rules {
-  @apply text-xs;
+  @apply text-caption;
 }
 .preview-description p,
 .preview-rules p {
@@ -2398,7 +2492,20 @@ summary {
 [data-testid*='reblog'],
 [data-testid^='post-'],
 .lm-nums,
-time {
+time,
+/* ★ EXTENDED FOR THE ALL-LORA MIGRATION (2026-08-19, typography spec §3 rule 1).
+   The note above's reasoning is unchanged and still right — tabular digits in
+   running PROSE look mechanical, so this stays off body copy. What it did not
+   cover is the structural case: every cell of every table in this app is a
+   readout by definition, and Lora's figures are wider than the sans's, so a
+   proportional column reshuffles more visibly than it used to. `[data-num]` is
+   the escape hatch for a figure that is not in a table and has no testid worth
+   matching — put it on the element rather than inventing another utility. */
+table,
+th,
+td,
+input[type='number'],
+[data-num] {
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
 }
@@ -2421,6 +2528,16 @@ h3,
 h4,
 .lm-balance {
   text-wrap: balance;
+}
+
+/* ★ `pretty` WIDENED FROM LEAD PARAGRAPHS TO ALL OF THEM (2026-08-19, all-Lora).
+   The note above already reasoned it out — `pretty` only re-breaks the LAST
+   line, so it is cheap on long text and cannot reflow a paragraph the way
+   `balance` would. It was never actually wired to a selector; it is now. A
+   serif at 18px/30 makes a one-word last line more conspicuous than the sans
+   did, which is the reason to spend it. */
+p {
+  text-wrap: pretty;
 }
 
 /**

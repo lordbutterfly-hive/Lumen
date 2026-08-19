@@ -567,3 +567,79 @@ func TestDelivery_OffenceTrackerClearedOnConviction(t *testing.T) {
 		t.Fatalf("kMaxOffenceUntil = %d after conviction, want 0", got)
 	}
 }
+
+// TestDelivery_RepeatConvictionCostsMore pins the anti-RATCHET (DEFECT FIX
+// 2026-08-19, PRUNED finding F10).
+//
+// THE DEFECT: conviction resets kDeliveredCount to zero — deliberately, so a
+// served sentence leaves a clean sheet — but a delinquent market also REFUSES
+// Ask, so the creator cannot rebuild the denominator while gated. The next
+// conviction therefore needed the same three misses as the first, forever:
+// three junk asks, measured at 0.105 HBD net of the returned commission, buy a
+// 7-day total inflow shutdown, and every subsequent round is the same price.
+// A creator who is attacked is attacked indefinitely for pocket change.
+//
+// THE FIX: the miss FLOOR (never the rate) rises for a repeat conviction that
+// lands inside ConvictionCooldownBlocks of the last sentence.
+func TestDelivery_RepeatConvictionCostsMore(t *testing.T) {
+	s, at := dgSetup(t)
+
+	// Round one: the documented three misses convict.
+	for i := 0; i < 3; i++ {
+		at = dgMiss(t, s, at) + 1
+	}
+	delinquent, until := DeliveryStanding(s, creator1, at)
+	if !delinquent {
+		t.Fatal("three misses did not convict — the base floor changed, fix this test")
+	}
+
+	// Serve it out, then attack again immediately with the same three misses.
+	at = until
+	if err := RequireInflowOpen(s, creator1, at); err != nil {
+		t.Fatalf("inflows still closed after the sentence: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		at = dgMiss(t, s, at) + 1
+	}
+	if delinquent, _ := DeliveryStanding(s, creator1, at); delinquent {
+		t.Fatal("a SECOND conviction landed for the same three misses — the ratchet is still open: " +
+			"the same 0.105 HBD buys another 7-day shutdown, and the creator could not have " +
+			"rebuilt their record because a gated market refuses Ask")
+	}
+
+	// It is a higher floor, not immunity: the second sentence still lands once
+	// the attacker pays for it — six misses, twice the price of round one.
+	for i := 0; i < 3; i++ {
+		at = dgMiss(t, s, at) + 1
+	}
+	if delinquent, _ := DeliveryStanding(s, creator1, at); !delinquent {
+		t.Fatal("six misses inside the cooldown did not convict — the floor is now too high, " +
+			"which would let a genuinely non-delivering creator escape the gate")
+	}
+}
+
+// TestDelivery_RepeatFloorDecaysAfterTheCooldown proves the raised floor is a
+// memory, not a permanent record: a creator who serves a sentence and then goes
+// a full ConvictionCooldownBlocks without another conviction is judged from the
+// base floor again. Without this the fix would quietly turn one bad week into a
+// permanent handicap, which is the opposite of the clean-sheet promise the
+// reset in recordMiss exists to keep.
+func TestDelivery_RepeatFloorDecaysAfterTheCooldown(t *testing.T) {
+	s, at := dgSetup(t)
+	for i := 0; i < 3; i++ {
+		at = dgMiss(t, s, at) + 1
+	}
+	_, until := DeliveryStanding(s, creator1, at)
+
+	// Wait out the whole cooldown, quietly.
+	at = until + ConvictionCooldownBlocks + 1
+	setU64(s, kPaidUntil(creator1), at+1_000_000)
+
+	for i := 0; i < 3; i++ {
+		at = dgMiss(t, s, at) + 1
+	}
+	if delinquent, _ := DeliveryStanding(s, creator1, at); !delinquent {
+		t.Fatal("three misses did not convict after a full quiet cooldown — the raised floor " +
+			"never decayed, so one bad week is now a permanent handicap")
+	}
+}

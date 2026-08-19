@@ -89,6 +89,34 @@ export const MarketReadFailed: FC<{ onRetry?: () => void; launchHref?: string }>
 );
 
 /**
+ * F14 fix (2026-08-19). OUR OWN session check (`/api/users/me`) failed —
+ * distinct from `MarketReadFailed` above, where the CHAIN read failed. Before
+ * this state existed, a failed session made `creator` resolve to null in
+ * use-live-studio.ts (loggedIn defaults false), which fell through to
+ * `MarketMissing`'s "Launch your Meritum. Free to launch." — telling a
+ * creator who already has a live market that they have none. Persists until
+ * the next focus/reconnect (use-user-core.ts's `sessionUnavailable` doc) —
+ * not a flicker, so this needs its own honest state and its own retry, which
+ * re-fires the session check itself (`onRetry` here is `retrySession`, not
+ * `retry` — `retry` only re-reads chain queries, all of which stay disabled
+ * while the creator identity is unknown).
+ */
+export const MarketSessionUnavailable: FC<{ onRetry?: () => void }> = ({ onRetry }) => (
+  <Panel title="Couldn’t check your account">
+    We couldn’t verify you’re signed in just now, so we can’t show your Studio. This is not the same as having no
+    token — reload, or try again in a moment.
+    {onRetry ? (
+      <>
+        {' '}
+        <button onClick={onRetry} className="font-semibold text-ink-brand-6 underline">
+          Try again
+        </button>
+      </>
+    ) : null}
+  </Panel>
+);
+
+/**
  * The read succeeded and this creator genuinely has no market.
  *
  * ★ MUST NOT BE A DEAD END (2026-08-07). This is the page you land on from the

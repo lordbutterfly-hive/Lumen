@@ -289,3 +289,55 @@ export function serviceQuote(usd: number, priceUsd: number): ServiceQuote {
     totalUsd: baseUnitsToUsd(tokenLegBaseUnits + commissionBaseUnits)
   };
 }
+
+/**
+ * F4 fix (2026-08-19): use-live-token-market.ts's askMutation used to build
+ * the asker's own spend cap as `humanToBaseUnits(input.maxCostUsd)` — an
+ * HBD-MILLIUNIT number (contract-math.ts's x1000 scale), while
+ * `AskInput.maxCreditsBaseUnits` is an INTEGER TOKEN COUNT (core/ask.go
+ * creditsSpent/maxCredits; see that field's own doc in types.ts: "may ONLY
+ * be derived from Quote.creditsRequiredBaseUnits... never
+ * baseUnitsToHuman'd" — the exact mistake this replaces). Measured
+ * 1,000x-18,000x too loose in production, which made the contract's own
+ * anti-price-spike guard (core/ask.go:352-356,429-430) effectively
+ * unlimited, because it was being fed a number a thousand-plus times bigger
+ * than what it was ever meant to bound.
+ *
+ * `toleranceBps` is UI headroom, not protocol logic — see the exported
+ * function's own doc below for why a little slack is safe.
+ */
+export const ASK_MAX_CREDITS_TOLERANCE_BPS = 200; // 2%
+
+/**
+ * The asker's signed cap, derived ONLY from the quote's own integer credits
+ * figure (Quote.creditsRequiredBaseUnits) — never from the HBD/USD price the
+ * modal shows. `toleranceBps` exists because vsc-data-source.ts's ask()
+ * re-reads the SAME quote server-side and rejects if the price moved past
+ * whatever cap it is handed (`quote.creditsRequiredBaseUnits >
+ * input.maxCreditsBaseUnits`); a little headroom over the figure THIS read
+ * just produced keeps an ordinary same-block rate tick from bouncing an
+ * otherwise-legitimate ask. It is still tight — the asker's real protection
+ * against a creator spiking `face` is the freshly-read quote itself, not
+ * this buffer.
+ */
+export function resolveAskMaxCreditsBaseUnits(
+  creditsRequiredBaseUnits: number,
+  toleranceBps: number = ASK_MAX_CREDITS_TOLERANCE_BPS
+): number {
+  return Math.ceil((creditsRequiredBaseUnits * (10_000 + toleranceBps)) / 10_000);
+}
+
+/**
+ * F5 fix (2026-08-19): the default headroom applied under a freshly-shown
+ * sell/redeem quote when pre-filling the minNet/minRefund exit floor
+ * (token-modals.tsx's SellModal, creator-studio.tsx's "Cash out"). The floor
+ * now defaults ON rather than absent — see sell.go's checkMinNet, reused by
+ * refund.go — but binding it to the EXACT previewed number would revert an
+ * otherwise-fine exit on ordinary same-block noise: redeem mode's own figure
+ * is a pro-rata SCALE of the position's floor value, not a fresh per-amount
+ * recompute (see redeemUsd's own comment in token-modals.tsx), so it can
+ * differ from the contract's real per-amount net by a base unit or two even
+ * with no price movement at all. This bps of slack still catches a real
+ * price move or front-run; it just isn't pixel-perfect about it.
+ */
+export const MIN_NET_DEFAULT_TOLERANCE_BPS = 100; // 1%

@@ -33,7 +33,7 @@ export default function AccountHistoryList({ username }: { username: string }) {
   return (
     <section id="wallet-history" className="mt-[34px]">
       <div className="mb-4 flex items-center gap-3.5">
-        <span className="text-[12px] font-bold uppercase tracking-[0.09em] text-ink-14">
+        <span className="text-label font-bold uppercase tracking-[0.09em] text-ink-14">
           {t('wallet.history.label')}
         </span>
         <div className="h-px flex-1 bg-surface-27" />
@@ -70,7 +70,7 @@ export default function AccountHistoryList({ username }: { username: string }) {
                   href={transfersUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[13px] leading-[20px] font-semibold text-ink-brand-6 hover:text-ink-brand-4"
+                  className="text-caption font-semibold text-ink-brand-6 hover:text-ink-brand-4"
                   data-testid="wallet-history-view-more"
                 >
                   {t('wallet.history.view_full')}

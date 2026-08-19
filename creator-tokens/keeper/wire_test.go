@@ -146,3 +146,56 @@ func TestBuildOp_AuthTierMatchesWhatTheContractDemands(t *testing.T) {
 		t.Log("note: the contract no longer gates these entrypoints on active auth; a posting-only envelope would now be acceptable and would be cheaper to operate")
 	}
 }
+
+// TestNormalizeCaller_OnlyTheShapeTheChainAcceptsGetsThrough pins the AN-24
+// fix. The keeper writes Caller into the vsc.call body while the outer
+// transaction carries the bare name in RequiredAuths; go-vsc-node derives the
+// effective caller from RequiredAuths[0] with a "hive:" prefix, so a caller in
+// any other shape is rejected on chain — silently, from the keeper's side, so a
+// misconfigured bot looks healthy and simply never does anything.
+func TestNormalizeCaller_OnlyTheShapeTheChainAcceptsGetsThrough(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+	}{
+		{"hive:keeper-bot", "hive:keeper-bot"},
+		{"keeper-bot", "hive:keeper-bot"}, // a bare name is unambiguous: normalise it
+		{"  hive:keeper-bot  ", "hive:keeper-bot"},
+	} {
+		got, err := NormalizeCaller(tc.in)
+		if err != nil {
+			t.Fatalf("NormalizeCaller(%q) errored: %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Fatalf("NormalizeCaller(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+
+	for _, bad := range []string{
+		"",
+		"   ",
+		"did:pkh:eip155:1:0xabc",
+		"system:treasury",
+		"hive:",
+		"hive:keeper:bot",
+		"contract:vsc1abc",
+	} {
+		if got, err := NormalizeCaller(bad); err == nil {
+			t.Fatalf("NormalizeCaller(%q) accepted it as %q — the chain would reject every op "+
+				"this keeper submits, with nothing to show for it locally", bad, got)
+		}
+	}
+}
+
+// TestBuildCustomJSON_RefusesABadCallerRatherThanSubmittingIt is the
+// defense-in-depth half: the package is importable, so a future caller could
+// hand it a raw flag value that main.go never saw.
+func TestBuildCustomJSON_RefusesABadCallerRatherThanSubmittingIt(t *testing.T) {
+	cfg := OpConfig{ContractID: "vsc1test", NetID: "vsc-testnet", RCLimit: 1000}
+	if _, err := buildCustomJSON(cfg, "refundHolder", map[string]interface{}{"creator": "alice"}, "did:pkh:eip155:1:0xabc"); err == nil {
+		t.Fatal("buildCustomJSON built an envelope for a caller shape the chain rejects")
+	}
+	// ANTI-VACUITY: the good shape must still build.
+	if _, err := buildCustomJSON(cfg, "refundHolder", map[string]interface{}{"creator": "alice"}, "hive:keeper-bot"); err != nil {
+		t.Fatalf("the valid caller shape was refused: %v", err)
+	}
+}

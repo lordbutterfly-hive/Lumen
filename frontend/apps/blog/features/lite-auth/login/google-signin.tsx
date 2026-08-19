@@ -149,6 +149,14 @@ const GSI_MAX_WIDTH = 400;
 const RENDER_GRACE_MS = 6000;
 
 /**
+ * How many times to ask GSI to render again before merely hinting. Three is enough to
+ * cover the realistic cause (a first render that beat layout); more would just delay the
+ * hint for a genuinely dead client.
+ */
+const RENDER_RETRIES = 3;
+const RENDER_RETRY_MS = 1500;
+
+/**
  * Measures whatever GSI actually put in the DOM rather than trusting the
  * holder's own auto-size: if GSI positions its iframe absolutely (common for
  * embedded-widget SDKs, precisely so they don't nudge host-page layout), the
@@ -248,10 +256,53 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
       observer.observe(container, { childList: true, subtree: true, attributes: true });
       check(); // covers a synchronous insert, so a fast load never waits on a mutation event
 
+      /**
+       * ★★★ IT RETRIES, AND IT FAILS OPEN (2026-08-19, owner-reported P0).
+       *
+       * This used to fire ONCE and, on a 0x0 button, call `setUnavailable(true)` - which
+       * greyed the row, set `aria-disabled`, and put `pointer-events: none` over Google's
+       * own button. So the single most prominent sign-in path, the ONLY one aimed at
+       * people without a crypto wallet, disabled itself ~6s after load and stayed dead
+       * for the rest of the session.
+       *
+       * TWO THINGS WERE WRONG WITH THAT, AND THE SECOND IS THE IMPORTANT ONE.
+       *
+       * 1. It gave up instead of trying again. GSI sizes the button from its container at
+       *    render time, so a render that lands before layout settles produces a 0x0
+       *    iframe permanently - re-rendering into a now-measured container is very likely
+       *    to succeed, and we never asked.
+       *
+       * 2. It failed CLOSED. A silent, recoverable, routinely-normal condition was
+       *    allowed to permanently remove the primary sign-in route. The geometry probe is
+       *    a heuristic about what GSI drew; it is NOT a statement about whether Google
+       *    sign-in works. Treating a heuristic as authority, and then acting
+       *    destructively on it, is how a working button ends up unclickable.
+       *
+       * Now: retry with backoff, and if every retry still measures zero, leave the button
+       * ENABLED and merely hint. A click on a genuinely broken button surfaces a real
+       * error, which is strictly better information than refusing the click.
+       */
+      const attemptRerender = (attempt: number) => {
+        if (cancelled || isGoogleButtonRendered(container)) {
+          setUnavailable(false);
+          return;
+        }
+        if (attempt >= RENDER_RETRIES) {
+          // Out of retries. Hint, but never disable - see (2) above.
+          setUnavailable(true);
+          return;
+        }
+        // Clear the guard so `render()` will actually run again, and let it re-measure
+        // the shell, which by now has certainly been laid out.
+        rendered.current = false;
+        render();
+        graceTimer = setTimeout(() => attemptRerender(attempt + 1), RENDER_RETRY_MS);
+      };
+
       graceTimer = setTimeout(() => {
         graceTimer = null;
         if (cancelled || isGoogleButtonRendered(container)) return;
-        setUnavailable(true);
+        attemptRerender(0);
       }, RENDER_GRACE_MS);
 
       stopWatching = () => {
@@ -393,10 +444,9 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
     <div
       ref={shell}
       data-testid="google-signin-row"
-      aria-disabled={unavailable}
-      className={`relative mb-1 h-[64px] w-full overflow-hidden rounded-card border border-line-11 bg-surface-1 focus-within:border-line-brand-10 ${
-        unavailable ? 'opacity-60' : ''
-      }`}
+      /* No `aria-disabled` and no dimming: the row stays fully live. `unavailable` is a
+         HINT that our geometry probe saw nothing, not a verdict that Google is down. */
+      className="relative mb-1 h-[64px] w-full overflow-hidden rounded-card border border-line-11 bg-surface-1 focus-within:border-line-brand-10"
     >
       <div
         aria-hidden="true"
@@ -416,7 +466,7 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
               subtitle, right on the row the reader was about to click, rather
               than only in a banner elsewhere on the page. */}
           <span
-            className={`block font-sans text-xs ${unavailable ? 'text-ink-warn-3' : 'text-ink-10'}`}
+            className={`block font-sans text-caption ${unavailable ? 'text-ink-warn-3' : 'text-ink-10'}`}
           >
             {unavailable ? t('lite_auth.google_signin.unavailable') : 'No wallet, no extension, nothing to install.'}
           </span>
@@ -427,11 +477,12 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
           actually clickable or focusable in this row. `pointer-events-none`
           while `unavailable` so a near-miss (tiny but nonzero) iframe can't
           eat a click the row is now telling the reader not to make. */}
-      <div
-        className={`absolute inset-0 z-10 flex items-center justify-center opacity-0 ${
-          unavailable ? 'pointer-events-none' : ''
-        }`}
-      >
+      {/* ★ NEVER `pointer-events-none`. The old code disabled clicks once the probe
+          reported zero size - so on the exact failure it was meant to explain, it also
+          removed the user's ability to try. If the iframe really is 0x0 the click lands
+          on nothing and costs the reader a second; if the probe was wrong, the button
+          works. Only one of those two outcomes is recoverable. */}
+      <div className="absolute inset-0 z-10 flex items-center justify-center opacity-0">
         <div ref={holder} style={{ transform: 'scale(1.8)' }} />
       </div>
     </div>

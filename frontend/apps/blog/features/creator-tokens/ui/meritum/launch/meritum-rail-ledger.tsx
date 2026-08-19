@@ -54,7 +54,7 @@ const MeritumRailLedger: FC<MeritumRailLedgerProps> = ({ rows, emptyLabel }) => 
           label naming what the value means is content. `ink-3` (#4b5563) is
           ~7.1:1 on the same ground and still reads as secondary.
         */}
-        <dt className="text-12 font-bold uppercase tracking-[0.1em] text-meritum-ink-3">{row.label}</dt>
+        <dt className="text-label font-bold uppercase tracking-[0.1em] text-meritum-ink-3">{row.label}</dt>
         {/*
           ★ THE NAME NEVER PUSHES THE PRICE OUT OF VIEW (C9-3). `detail` can be
           as long as a 120-character offer name; the price is the number the
@@ -68,7 +68,7 @@ const MeritumRailLedger: FC<MeritumRailLedgerProps> = ({ rows, emptyLabel }) => 
           }`}
         >
           {row.detail ? (
-            <span className="min-w-0 truncate text-13 font-normal normal-case tracking-normal text-meritum-ink-muted">
+            <span className="min-w-0 truncate text-caption font-normal normal-case tracking-normal text-meritum-ink-muted">
               {row.detail}
             </span>
           ) : null}

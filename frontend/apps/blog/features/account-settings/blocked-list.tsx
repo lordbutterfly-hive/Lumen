@@ -211,7 +211,7 @@ const BlockedList = ({ username }: { username: string }) => {
                       everyone else. */}
                   {fromChain ? (
                     <p
-                      className="mt-0.5 truncate text-[12px] text-ink-14"
+                      className="mt-0.5 truncate text-caption text-ink-14"
                       data-testid="settings-blocked-chain-badge"
                     >
                       {t('settings_page.blocked_accounts_chain_hint')}
@@ -222,7 +222,7 @@ const BlockedList = ({ username }: { username: string }) => {
                 <button
                   type="button"
                   data-testid="settings-unblock-button"
-                  className="inline-flex h-9 min-w-[92px] items-center justify-center rounded-card border border-line-11 bg-surface-1 px-4 text-[13px] leading-[20px] font-bold text-ink-brand-6 transition-colors hover:border-line-brand-10 hover:bg-surface-brand-5 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex h-9 min-w-[92px] items-center justify-center rounded-card border border-line-11 bg-surface-1 px-4 text-caption font-bold text-ink-brand-6 transition-colors hover:border-line-brand-10 hover:bg-surface-brand-5 disabled:cursor-not-allowed disabled:opacity-60"
                   onClick={() => (fromChain ? handleChainRemove(peer) : handleUnblock(peer))}
                   disabled={pending}
                 >

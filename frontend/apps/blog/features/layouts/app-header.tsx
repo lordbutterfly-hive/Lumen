@@ -251,8 +251,12 @@ const AppHeader: FC = () => {
           structurally, only visually, and the brief calls this trade out by
           name. */}
       <div className="mx-auto grid max-w-[1720px] grid-cols-[1fr_auto] items-center gap-3 px-6 py-[14px] md:grid-cols-[200px_minmax(0,1fr)_auto] md:gap-11 md:px-11">
-        {/* col 1 — Open Sans wordmark over the nav column (design-handoff-v2: no
-            serif display face). The 14px inset matches the left-rail rows' own
+        {/* col 1 — the wordmark over the nav column. (This line said "Open Sans
+            wordmark (design-handoff-v2: no serif display face)" until 2026-08-19,
+            while the note 10 lines below it — newer, dated 2026-08-11 — already
+            documented the wordmark as Lora. The file had corrected itself once
+            and left the old claim standing at the top, which is the worst place
+            for it.) The 14px inset matches the left-rail rows' own
             px-[14px], so the wordmark's left edge lands on the nav icons' left
             edge instead of sitting 14px proud of the column. */}
         <Link href="/" aria-label={LABELS.homeAriaLabel} className="flex items-center md:pl-[14px]">
@@ -260,9 +264,17 @@ const AppHeader: FC = () => {
               28 -> 34; a phone is the one width where the wordmark competes with
               the controls for room, and 24px buys 16 of the ~48 needed for the
               menu button. Unchanged at every width the design was drawn for. */}
-          {/* ★ THE WORDMARK IS LORA, NOT THE UI FACE (owner, 2026-08-11: "our logo
-              is not fucking Lora, you need to set it Lora"). `font-serif` binds to
-              --font-source-serif, which layout.tsx loads as Lora at 400/500/600/700.
+          {/* ★ THE WORDMARK IS LORA (owner, 2026-08-11: "our logo is not fucking
+              Lora, you need to set it Lora"). `font-serif` binds to `--font-lora`,
+              which layout.tsx loads at 400/500/600/700.
+
+              ★ THIS NOTE SAID "NOT THE UI FACE" AND NAMED `--font-source-serif`
+              UNTIL 2026-08-19 — a variable name TWO renames stale (it went
+              `--font-source-serif` -> `--font-serif` -> `--font-lora`), and a
+              distinction that no longer exists, because the UI face is now Lora
+              too. Both halves were wrong in the same sentence, which is how a
+              comment that was right when written ends up misleading three
+              readers in a row.
 
               600 rather than the old 700: Lora's bold is considerably heavier in
               colour than Open Sans's at the same nominal weight, and at 34px a
@@ -430,7 +442,7 @@ const AppHeader: FC = () => {
                 >
                   <Icons.bell className="h-5 w-5 text-ink-2" />
                   {unreadTotal > 0 ? (
-                    <span className="absolute right-0 top-0.5 z-10 inline-block -translate-y-1/2 translate-x-2/4 rounded-full bg-destructive-icon px-1.5 py-1 text-center align-baseline text-xs font-bold leading-none text-ink-27">
+                    <span className="absolute right-0 top-0.5 z-10 inline-block -translate-y-1/2 translate-x-2/4 rounded-full bg-destructive-icon px-1.5 py-1 text-center align-baseline text-caption font-bold leading-none text-ink-27">
                       {unreadTotal}
                     </span>
                   ) : null}

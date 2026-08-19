@@ -289,7 +289,7 @@ export default function TopicShell({ tag }: { tag: string }) {
           loadedCount={shown.length}
           loadingLabel={t('topic_page.pager.loading_more')}
           endLabel={shown.length > 0 ? t('topic_page.pager.end_of_topic', { tag }) : undefined}
-          className="py-8 text-center font-sans text-[13px] leading-[20px] text-[#6b7280]"
+          className="py-8 text-center font-sans text-caption text-[#6b7280]"
           testId="topic-pager"
         />
       </main>

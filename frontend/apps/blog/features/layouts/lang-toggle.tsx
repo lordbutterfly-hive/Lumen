@@ -72,7 +72,7 @@ const languages = supportedLocales.map((locale) => ({
   name: LANGUAGE_ENDONYMS[locale] ?? locale
 }));
 
-const META_CLASS = 'shrink-0 font-sans text-[13px] uppercase leading-[20px] text-ink-9';
+const META_CLASS = 'shrink-0 font-sans text-label uppercase text-ink-9 tracking-label';
 
 /**
  * ★ SUBMENU MODE (2026-08-13, QA V3-a11y item 2 / O5 build map item 1c

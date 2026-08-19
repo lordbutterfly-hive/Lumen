@@ -247,12 +247,12 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
 
       {/* The sentinel: scrolling it into view fetches the next page. */}
       {total > 0 && hasNextPage ? (
-        <div ref={ref} className="py-6 text-center font-sans text-[13px] leading-[20px] text-muted-foreground">
+        <div ref={ref} className="py-6 text-center font-sans text-caption text-muted-foreground">
           {isFetchingNextPage ? t('search_page.loading_more', { defaultValue: 'Loading more…' }) : ''}
         </div>
       ) : null}
       {total > 0 && !hasNextPage ? (
-        <p className="py-6 text-center font-sans text-[13px] leading-[20px] text-muted-foreground">
+        <p className="py-6 text-center font-sans text-caption text-muted-foreground">
           {t('search_page.end_of_results', { defaultValue: 'That’s every match.' })}
         </p>
       ) : null}

@@ -36,7 +36,7 @@ export default function WitnessesFiltersCard({
     <div data-testid="witnesses-filters-card">
       <div className="mb-4 font-sans text-[15px] leading-[24px] font-bold text-ink-2">{t('witnesses.filters.title')}</div>
 
-      <div className="mb-2.5 font-sans text-[12px] leading-[18px] font-bold uppercase tracking-[0.05em] text-ink-14">
+      <div className="mb-2.5 font-sans text-label font-bold uppercase tracking-[0.05em] text-ink-14">
         {t('witnesses.filters.witness_group')}
       </div>
       <div className="mb-[18px] flex flex-col gap-[11px]">
@@ -53,7 +53,7 @@ export default function WitnessesFiltersCard({
         ))}
       </div>
 
-      <div className="mb-2.5 font-sans text-[12px] leading-[18px] font-bold uppercase tracking-[0.05em] text-ink-14">
+      <div className="mb-2.5 font-sans text-label font-bold uppercase tracking-[0.05em] text-ink-14">
         {t('witnesses.filters.name_group')}
       </div>
       <div className="mb-4 flex items-center gap-[9px] rounded-control border border-line-11 px-3 py-[9px]">
@@ -69,7 +69,7 @@ export default function WitnessesFiltersCard({
         />
       </div>
 
-      <div className="mb-2.5 font-sans text-[12px] leading-[18px] font-bold uppercase tracking-[0.05em] text-ink-14">
+      <div className="mb-2.5 font-sans text-label font-bold uppercase tracking-[0.05em] text-ink-14">
         {t('witnesses.filters.version_group')}
       </div>
       <select

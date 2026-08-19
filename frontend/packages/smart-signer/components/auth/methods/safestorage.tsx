@@ -508,7 +508,7 @@ const SafeStorage = forwardRef<SafeStorageRef, SafeStorageProps>(
               <div className="flex justify-end">
                 <span
                   onClick={() => onSetStep(Steps.SAFE_STORAGE_KEY_UPDATE)}
-                  className="max-w-max cursor-pointer text-xs text-destructive hover:opacity-80 active:opacity-60"
+                  className="max-w-max cursor-pointer text-caption text-destructive hover:opacity-80 active:opacity-60"
                 >
                   Add new key
                 </span>
@@ -595,7 +595,7 @@ const SafeStorage = forwardRef<SafeStorageRef, SafeStorageProps>(
         {showPasskeyPrompt && (
           <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
             <p className="mb-2 text-sm font-medium">Enable biometric unlock?</p>
-            <p className="mb-3 text-xs text-muted-foreground">
+            <p className="mb-3 text-caption text-muted-foreground">
               Use fingerprint, Face ID, or device PIN to unlock instead of typing your password.
             </p>
             <div className="flex gap-2">

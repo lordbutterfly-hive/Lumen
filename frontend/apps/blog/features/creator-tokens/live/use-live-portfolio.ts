@@ -17,7 +17,7 @@
  * exists to build.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
@@ -34,6 +34,16 @@ export interface LivePortfolio {
   /** No contract provisioned in this build. */
   unavailable: boolean;
   loggedIn: boolean;
+  /**
+   * F14 fix: true when `/api/users/me` has definitively FAILED (not merely
+   * still loading) — see use-user-core.ts's own doc. `loggedIn` alone cannot
+   * tell a genuinely signed-out visitor from one whose session check simply
+   * hasn't answered, so a session blip made `holder` resolve to null for an
+   * already-verified user and your-tokens-view.tsx said "Sign in to see the
+   * Meritum you hold" to someone who already holds some. Persists until the
+   * next focus/reconnect, not a flicker.
+   */
+  sessionUnavailable: boolean;
   isLite: boolean;
   holder: string | null;
   isLoading: boolean;
@@ -83,7 +93,7 @@ export interface LivePortfolio {
 
 export function useLivePortfolio(): LivePortfolio {
   const queryClient = useQueryClient();
-  const { user, isHydrated } = useUserClient();
+  const { user, isHydrated, sessionUnavailable } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
   const isLite = user.account_tier === 'lite';
 
@@ -145,6 +155,10 @@ export function useLivePortfolio(): LivePortfolio {
   const reclaimMutation = useMutation({
     mutationFn: async (input: { creator: string; seq: number; deadlineBlock: number }) => {
       if (!dataSource) throw new Error('CREATOR_TOKENS_UNAVAILABLE: no contract is provisioned');
+      // F14 fix: distinct from "sign in to continue" — see use-live-token-market.ts's requireSigner for the identical reasoning.
+      if (!holder && sessionUnavailable) {
+        throw new Error('CREATOR_TOKENS_SESSION_UNAVAILABLE: we couldn’t verify you’re signed in just now. Try again in a moment.');
+      }
       if (!holder) throw new Error('CREATOR_TOKENS_SIGNED_OUT: sign in to continue');
       if (isLite) throw new Error('CREATOR_TOKENS_LITE_ACCOUNT: this account has no Hive keys and cannot sign a transaction');
       await dataSource.reclaim({ creator: input.creator, seq: input.seq, asker: holder, deadlineBlock: input.deadlineBlock });
@@ -158,6 +172,9 @@ export function useLivePortfolio(): LivePortfolio {
   const rateMutation = useMutation({
     mutationFn: async (input: { creator: string; seq: number; score: number }) => {
       if (!dataSource) throw new Error('CREATOR_TOKENS_UNAVAILABLE: no contract is provisioned');
+      if (!holder && sessionUnavailable) {
+        throw new Error('CREATOR_TOKENS_SESSION_UNAVAILABLE: we couldn’t verify you’re signed in just now. Try again in a moment.');
+      }
       if (!holder) throw new Error('CREATOR_TOKENS_SIGNED_OUT: sign in to continue');
       if (isLite) throw new Error('CREATOR_TOKENS_LITE_ACCOUNT: this account has no Hive keys and cannot sign a transaction');
       await dataSource.rate({ creator: input.creator, rater: holder, seq: input.seq, score: input.score });
@@ -167,9 +184,20 @@ export function useLivePortfolio(): LivePortfolio {
     }
   });
 
+  // F7 fix (2026-08-19): see token-modals.tsx BuyModal's `inFlight` doc for
+  // the full rationale — `reclaimMutation.isLoading`/`rateMutation.isLoading`
+  // are useState-backed react-query values with the identical same-tick race.
+  // Two separate refs: a double-submit on ONE reclaim/rate must not block an
+  // unrelated one on a different escrow. Throws (not a silent no-op) because
+  // the resolved promise is treated as success by AskCard/RateStrip's own
+  // try/catch (RateStrip flips to "Thanks, recorded" on resolve).
+  const reclaimInFlight = useRef(false);
+  const rateInFlight = useRef(false);
+
   return {
     unavailable,
     loggedIn,
+    sessionUnavailable,
     isLite,
     holder,
     isLoading: tokenAccounts.isLoading || walletQuery.isLoading || asksQuery.isLoading,
@@ -186,9 +214,35 @@ export function useLivePortfolio(): LivePortfolio {
     canSign: tokenAccounts.canSign,
     accountsFailed: tokenAccounts.failed,
     accountsLoading: tokenAccounts.isLoading,
-    reclaim: useCallback((input: { creator: string; seq: number; deadlineBlock: number }) => reclaimMutation.mutateAsync(input), [reclaimMutation]),
+    reclaim: useCallback(
+      async (input: { creator: string; seq: number; deadlineBlock: number }) => {
+        if (reclaimInFlight.current) {
+          throw new Error('CREATOR_TOKENS_BUSY: that reclaim is already in progress. Wait for it to finish.');
+        }
+        reclaimInFlight.current = true;
+        try {
+          await reclaimMutation.mutateAsync(input);
+        } finally {
+          reclaimInFlight.current = false;
+        }
+      },
+      [reclaimMutation]
+    ),
     isReclaiming: reclaimMutation.isLoading,
-    rate: useCallback((input: { creator: string; seq: number; score: number }) => rateMutation.mutateAsync(input), [rateMutation]),
+    rate: useCallback(
+      async (input: { creator: string; seq: number; score: number }) => {
+        if (rateInFlight.current) {
+          throw new Error('CREATOR_TOKENS_BUSY: that rating is already in progress. Wait for it to finish.');
+        }
+        rateInFlight.current = true;
+        try {
+          await rateMutation.mutateAsync(input);
+        } finally {
+          rateInFlight.current = false;
+        }
+      },
+      [rateMutation]
+    ),
     isRating: rateMutation.isLoading
   };
 }

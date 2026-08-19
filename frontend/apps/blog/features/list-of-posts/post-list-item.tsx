@@ -156,7 +156,7 @@ const PostListItem = memo(
         >
           {post.original_entry ? (
             <div className="mt-2 rounded-sm bg-background-secondary px-2 py-1 text-sm" data-testid="cross-post-banner">
-              <p className="flex items-center gap-1 text-xs md:text-sm">
+              <p className="flex items-center gap-1 text-caption md:text-sm">
                 <Icons.crossPost className="h-4 w-4 text-ink-info-6" />{' '}
                 <Link className="hover:cursor-pointer hover:text-destructive" href={`/@${post.author}`} data-testid="cross-post-author-link">
                   {post.author}
@@ -188,7 +188,7 @@ const PostListItem = memo(
             </div>
           ) : null}
           <CardHeader className="px-0 py-1">
-            <div className="md:text-md flex items-center text-sm">
+            <div className="flex items-center text-body-sm">
               {nsfw === 'show' && post.blacklists.length < 1 && !blacklistCheck ? (
                 // ★ CONVERGED (F6 item 22). This was a bare CSS `background-image`
                 // pointed at our own `/api/avatar` proxy with NO fallback at all —
@@ -222,7 +222,7 @@ const PostListItem = memo(
                 </span>
                 <PostCardBlacklistMark blacklistCheck={blacklistCheck} blacklists={post.blacklists} />
                 {post.author_role && post.author_role !== 'guest' && isCommunityPage ? (
-                  <span className="text-xs md:text-sm">&nbsp;{post.author_role.toUpperCase()}&nbsp;</span>
+                  <span className="text-caption md:text-sm">&nbsp;{post.author_role.toUpperCase()}&nbsp;</span>
                 ) : null}
                 {/*
                  * ★ THE author_title BADGE IS GONE (2026-08-16, spec "Remove the
@@ -244,7 +244,7 @@ const PostListItem = memo(
                  * renders on `/[param]/feed` and the profile Comments tab.
                  * Checked rather than assumed.
                  */}
-                <span className="flex items-center text-xs md:text-sm">
+                <span className="flex items-center text-caption md:text-sm">
                   {!isCommunityPage ? (
                     <>
                       &nbsp;{t('cards.post_card.in')}&nbsp;

@@ -83,8 +83,16 @@ export interface CreatorTokensDataSource {
   readMyAsks(asker: string): Promise<MyAsksResult>;
   /** Answered-vs-missed history + response time. Not contract state (SPEC §1.7.1) — always indexer-backed; degrades to source:'unavailable'. */
   readDeliveryRecord(creator: string): Promise<DeliveryRecord>;
-  /** Client-side preview of what Ask() would charge right now. Never authoritative — see Quote.asOfBlock doc. Rejects on a genuine read failure; a resolved oracleStatus other than 'ok' means AskRate()/SettlementRate() itself would refuse to price (RULING C: no PAR fallback any more — see Quote.rate's doc), so the caller must disable the ask action, not merely treat it as informational. */
-  readQuote(creator: string): Promise<Quote>;
+  /**
+   * Client-side preview of what Ask() would charge right now. Never authoritative — see Quote.asOfBlock doc. Rejects on a genuine read failure; a resolved oracleStatus other than 'ok' means AskRate()/SettlementRate() itself would refuse to price (RULING C: no PAR fallback any more — see Quote.rate's doc), so the caller must disable the ask action, not merely treat it as informational.
+   *
+   * `offeringId` (F4 fix, 2026-08-19): widened from `readQuote(creator)` so a
+   * caller can re-quote the SAME offering an ask will name before signing —
+   * see the doc on this method in vsc-data-source.ts, whose own ask() write
+   * already did this internally. Optional and additive; existing callers
+   * that only want the legacy face price are unaffected.
+   */
+  readQuote(creator: string, offeringId?: number): Promise<Quote>;
   /** tradefee.go kFeeBal(account) — the account's pull-claimable trade-fee balance (the 5% creator half of every trade fee, RULING F8), in HBD. Rejects on a genuine read failure — same reasoning as readHolderPosition, there is no honest 0-balance-shaped optimistic value. */
   readFeeBalance(account: string): Promise<number>;
   /** buy.go QuoteBuy — the read-only preview of Buy, sharing buyCompute with the real trade so the two can never disagree (RULING F: this quote is mandatory UI before signing). Rejects on a genuine read failure OR the same RequireInflowOpen refusal a real Buy would hit (e.g. market frozen/paused/retired, or cap exceeded) — the caller must disable the buy action on rejection, not merely surface an error toast. */

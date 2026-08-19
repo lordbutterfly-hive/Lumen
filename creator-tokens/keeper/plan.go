@@ -171,6 +171,25 @@ func Plan(markets []MarketView) []Op {
 			if h.Balance == nil || h.Balance.Sign() <= 0 {
 				continue // verify, don't trust — see doc above
 			}
+			if h.RefundBlocked {
+				// F9 FIX (2026-08-19): core/refund.go:479-486's exit-tax /
+				// wind-down-DoS-backstop gate would refuse this exact push —
+				// see HolderBalance.RefundBlocked's doc for the predicate
+				// (core.RefundHolderTaxGateBlocked) this mirrors, called by
+				// the caller that built this snapshot. Emitting the op
+				// anyway would be a doomed transaction: it wastes the
+				// keeper's RC, and — before the sweep.go honesty fix
+				// alongside this one — Sweep would have reported the revert
+				// as a completed payment. The holder is never stuck: the
+				// self-serve pull (core.Refund) is open the instant
+				// wind-down begins, taxed at their own decaying clock, and
+				// this same holder becomes plannable again the moment
+				// either their own clock finishes decaying or the market's
+				// backstop opens — Plan is stateless and re-derives this on
+				// every call against a fresh snapshot, so nothing needs to
+				// remember to retry them.
+				continue
+			}
 			holders = append(holders, h)
 		}
 		sort.Slice(holders, func(i, j int) bool {

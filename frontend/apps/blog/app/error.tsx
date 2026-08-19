@@ -70,7 +70,7 @@ export default function Error({
     <div className="mx-auto flex min-h-[70vh] max-w-[520px] flex-col items-center justify-center px-6 text-center">
       <div className="w-full text-left">
         <PageMasthead title={chunkError ? COPY.updatingTitle : COPY.title}>
-          <p className="max-w-[460px] font-serif text-[13px] leading-[20px] text-ink-10">
+          <p className="max-w-[460px] font-serif text-caption text-ink-10">
             {chunkError ? COPY.updatingBody : COPY.body}
           </p>
         </PageMasthead>

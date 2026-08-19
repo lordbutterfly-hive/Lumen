@@ -399,7 +399,8 @@ export type { BatchFileItem, FileProcessingStatus, ProcessingOptions };
 // the same prose (e.g. `medium-post-card.tsx`, `profile-identity.tsx`) uses
 // the working `font-serif` utility and renders Lora. `font-serif` already
 // resolves to the exact same variable (see `apps/blog/tailwind.config.js`,
-// where it is now called `--font-serif`) that `font-source` was meant to alias,
+// where it is now called `--font-lora`; this note said `--font-serif`, one rename
+// behind, until 2026-08-19) that `font-source` was meant to alias,
 // so swapping to it is a same-font, zero-behavior-change fix that makes post
 // bodies match excerpts instead of a rename that would need a new dead alias
 // chased down again later. (2026-08-13: `font-sanspro`, mentioned by the
@@ -443,5 +444,31 @@ export type { BatchFileItem, FileProcessingStatus, ProcessingOptions };
 // viewport, pushing all following text off-screen. `object-contain` alongside
 // the cap keeps `max-w-full` intact (an image can still be capped by width or
 // height, whichever binds first) rather than cropping or distorting it.
+// ★★★ THE ARTICLE BODY, ALL-LORA (2026-08-19, typography spec §5.4).
+//
+// `text-read` is 18px/30px — the ladder's reading step, and an ~8% bump on the
+// old 17/28. That is not a taste change: Lora's x-height measures 0.926 of Open
+// Sans's, so the same pixel value renders visibly smaller in the new face and
+// running text is where a reader notices it first. The leading rises with it
+// because a serif's longer extenders need more room than a sans at the same size.
+//
+// `max-w-[68ch]` is new and is a MEASURE, not a width. `.prose`'s own max-width
+// is already overridden to 100% in the shared config, and the outer container
+// caps at 896px — neither of which is expressed in characters, so the line length
+// drifted with the viewport. 68 characters is the spec's value and the one number
+// here that is about reading rather than rendering.
+//
+// `prose-h2:tracking-title` (-0.01em): H2 is 26px, big enough for a serif's
+// bracketed serifs to collide at the sans-tuned default. H3 goes 22 -> 21 per the
+// spec; 21 has no rung on either ladder, so it stays an arbitrary value rather
+// than being rounded onto one it does not belong to.
+//
+// H1 and H4 are deliberately UNCHANGED: §5.4 gives no target for them, and
+// inventing one to make the string look uniform is how a spec quietly becomes
+// something nobody agreed to.
+//
+// Blockquote needs no entry here. It carries no explicit font-size anywhere, so
+// it inherits 1em of this container and follows the bump automatically; its
+// italic comes from the typography plugin's own default, which §4 wants.
 export const postClassName =
-  'font-serif text-[17px] leading-[28px] prose-p:my-5 prose-h1:text-[34px] prose-h1:leading-[40px] prose-h2:text-[26px] prose-h2:leading-[32px] prose-h3:text-[22px] prose-h3:leading-[32px] prose-h4:text-[17px] prose-h4:leading-[24px] prose-img:cursor-pointer prose-img:max-w-full prose-img:h-auto prose-img:max-h-[70vh] prose-img:object-contain';
+  'font-lora text-read max-w-[68ch] prose-p:my-5 prose-h1:text-[34px] prose-h1:leading-[40px] prose-h2:text-[26px] prose-h2:leading-[32px] prose-h2:tracking-title prose-h3:text-[21px] prose-h3:leading-[32px] prose-h4:text-[17px] prose-h4:leading-[24px] prose-img:cursor-pointer prose-img:max-w-full prose-img:h-auto prose-img:max-h-[70vh] prose-img:object-contain';

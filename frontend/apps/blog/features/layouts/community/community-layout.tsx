@@ -107,7 +107,7 @@ const CommunityLayout = ({ children, community }: { children: ReactNode; communi
               <div className="mr-2 flex w-[320px] flex-col">
                 {isRolesPage ? (
                   <BasePathLink href={`/topics/${community}`}>
-                    <span className="text-md ml-10 font-medium text-destructive" data-testid="community-name">
+                    <span className="ml-10 text-body-lg font-semibold text-destructive" data-testid="community-name">
                       {isCommunity && isCommunityLoading ? (
                         <Skeleton className="inline-block h-6 w-48" />
                       ) : (
@@ -117,7 +117,7 @@ const CommunityLayout = ({ children, community }: { children: ReactNode; communi
                   </BasePathLink>
                 ) : (
                   <>
-                    <span className="text-md hidden font-medium md:block" data-testid="community-name">
+                    <span className="hidden text-body-lg font-semibold md:block" data-testid="community-name">
                       {isCommunity && isCommunityLoading ? (
                         <Skeleton className="inline-block h-6 w-48" />
                       ) : (
@@ -131,7 +131,7 @@ const CommunityLayout = ({ children, community }: { children: ReactNode; communi
                     </span>
 
                     <span
-                      className="hidden text-xs font-light md:block"
+                      className="hidden text-caption md:block"
                       data-testid="community-name-unmoderated"
                     >
                       {isCommunity && isCommunityLoading ? (

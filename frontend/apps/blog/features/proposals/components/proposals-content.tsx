@@ -106,11 +106,11 @@ export default function ProposalsContent({
             role="alert"
           >
             <p className="font-sans text-sm font-semibold text-destructive">{t('global.something_went_wrong')}</p>
-            <p className="font-sans text-[13px] leading-[20px] text-ink-10">{t('proposals.error.description')}</p>
+            <p className="font-sans text-caption text-ink-10">{t('proposals.error.description')}</p>
             <button
               type="button"
               onClick={refetch}
-              className="rounded-control border border-line-11 bg-surface-1 px-4 py-2 font-sans text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
+              className="rounded-control border border-line-11 bg-surface-1 px-4 py-2 font-sans text-caption font-semibold text-ink-7 transition-colors hover:bg-surface-16"
             >
               {t('proposals.error.retry')}
             </button>
@@ -134,7 +134,7 @@ export default function ProposalsContent({
                 the same `tab` the list itself filters by, so it never asserts
                 something about the tab's contents that isn't true for entries with a
                 different status. */}
-            <div className="mb-1.5 font-sans text-xs font-bold uppercase tracking-[0.05em] text-ink-14">
+            <div className="mb-1.5 font-sans text-label font-bold uppercase tracking-[0.05em] text-ink-14">
               {t(`proposals.list.heading.${tab}`)}
             </div>
             <ProposalList

@@ -1,7 +1,17 @@
 # Creator Tokens — status, 2026-07-28
 
 Per-creator token on a bonding curve. You buy a creator's token, spend it on
-their services, and the price moves with supply. Nothing is deployed.
+their services, and the price moves with supply.
+
+> **Deployment status, corrected 2026-08-19 (audit anomaly AN-01).** This line
+> used to read "Nothing is deployed." It is deployed on Magi **testnet** as
+> `vsc1BcaD8JrwJPAAN5cU1cHKCBdZrd7jz2WGt8` (`REACT_APP_CREATOR_TOKENS_NET_ID=vsc-testnet`)
+> — the chain returns a real output CID for it, and a local rebuild with the
+> pinned `tinygo/tinygo:0.41.1` recipe reproduced that CID byte for byte. One
+> market has ever existed on it, creator = owner = only holder, ~9.9 testnet
+> HBD, no third-party exposure. Nothing is on MAINNET. A status file that says
+> "nothing is deployed" when something is, is how an audit ends up rating the
+> wrong code.
 
 **One-line state: the contract is feature-complete and the product is connected
 to it. What remains is deployment, not code.**

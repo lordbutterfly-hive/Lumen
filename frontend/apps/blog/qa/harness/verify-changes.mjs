@@ -220,11 +220,16 @@ const ok=(c,m)=>{ console.log((c?'  PASS':'  FAIL')+'  '+m); if(!c) fail.push(m)
   const posts = await feed.evaluate(() =>
     [...new Set([...document.querySelectorAll('a[href*="/@"]')]
       .map((a) => a.getAttribute('href') || '')
-      .filter((h) => /\/@[^/]+\/[^/]+$/.test(h)))].slice(0, 8)
+      .filter((h) => /\/@[^/]+\/[^/]+$/.test(h)))].slice(0, 20)
   );
   await feed.close();
 
   for (const u of posts) {
+    // Widened 8 -> 20 posts (2026-08-19). The fix itself is verified - three body
+    // hashtags were measured resolving 200 in one hop - but on a feed whose first 8 posts
+    // happened to carry no tags the check reported INCONCLUSIVE. Correct behaviour,
+    // useless result; a check that depends on the luck of the feed is one people learn to
+    // ignore. Sampling wider makes the honest-inconclusive path rare rather than routine.
     if (tagsChecked >= 3) break;
     const q = await ctx.newPage();
     try {
@@ -255,58 +260,60 @@ const ok=(c,m)=>{ console.log((c?'  PASS':'  FAIL')+'  '+m); if(!c) fail.push(m)
     fail.push('hashtag check inconclusive');
   }
 }
-// ── GOOGLE SIGN-IN ACTUALLY RENDERS ──────────────────────────────────────────
+// ── GOOGLE SIGN-IN NEVER DISABLES ITSELF ─────────────────────────────────────
 /**
- * ★★★ THIS EXISTS BECAUSE THE OWNER HAD TO FIND IT IN A BROWSER, TWICE.
+ * ★★★ THIS CHECKS OUR CONTRACT, NOT GOOGLE'S AVAILABILITY - and the first version got
+ * that wrong, which is worth recording because it wasted the owner's time twice.
  *
- * "Continue with Google" paints for ~5s and then reports itself unavailable. That is our
- * code correctly surfacing a real failure: Google returns 403 for /gsi/button because the
- * page's origin is not in the OAuth client's Authorised JavaScript origins, so GSI paints
- * an optimistic placeholder and then collapses the iframe to 0x0.
+ * v1 asserted "the Google button renders" and, when it did not, printed instructions to
+ * add the origin in Google Cloud Console. Both halves were mistakes:
  *
- * Nothing in the test suite covered it, so the only way it ever surfaced was the owner
- * opening the page and asking why it was still broken after being told it was fixed. A
- * failure that can only be found by hand WILL keep coming back, which is the whole reason
- * this check is here rather than a note in a document.
+ *  - It measured GOOGLE. A headless browser gets a 403 from /gsi/button that a real
+ *    browser does not, so this check failed permanently in CI for a reason that does not
+ *    exist for a user. A check that cannot pass in the environment it runs in is noise.
+ *  - The remediation text was WRONG. The origin is fine in a real browser (verified in
+ *    the owner's Chrome: no `origin is not allowed` from GSI_LOGGER). The actual defect
+ *    was ours: GSI renders its overlay iframe at 0x0 when it beats layout, and our
+ *    component treated that single geometry sample as proof Google was down, then set
+ *    `aria-disabled` and `pointer-events: none` on the row - permanently killing the one
+ *    sign-in path aimed at people without a crypto wallet.
  *
- * It cannot be fixed in code. It is still worth failing on, loudly, with the client ID
- * printed - because the fix is one Console setting and the hard part was ever knowing.
+ * So the regression to guard is OURS and is provable anywhere: after the grace period and
+ * every retry, the row must still be interactive. Whether Google's iframe has size is
+ * reported as diagnostics, never asserted.
  */
 {
-  console.log('\n== google sign-in ==');
+  console.log('\n== google sign-in (fail-open contract) ==');
   const p = await ctx.newPage();
   let buttonStatus = null;
-  let originRejected = false;
   p.on('response', (r) => {
     if (r.url().includes('/gsi/button')) buttonStatus = r.status();
   });
-  p.on('console', (m) => {
-    if (/origin is not allowed/i.test(m.text())) originRejected = true;
-  });
   await p.goto(B + '/login', { waitUntil: 'domcontentloaded' });
-  await p.waitForTimeout(9000);
+  // Past RENDER_GRACE_MS (6s) plus every RENDER_RETRY_MS (1.5s x3) so the component has
+  // fully given up before we look. If it is going to disable itself, it has by now.
+  await p.waitForTimeout(13000);
   const g = await p.evaluate(() => {
-    const fr = document.querySelector('iframe[src*="accounts.google.com"]');
+    const row = document.querySelector('[data-testid="google-signin-row"]');
+    if (!row) return { missing: true };
+    const fr = row.querySelector('iframe[src*="accounts.google.com"]');
     const r = fr ? fr.getBoundingClientRect() : null;
-    const msg = [...document.querySelectorAll('*')].find(
-      (e) => e.children.length === 0 && /unavailable/i.test(e.textContent || '')
-    );
+    // The overlay that carries Google's real button.
+    const overlay = row.querySelector('.absolute.inset-0');
     return {
-      iframe: r ? `${Math.round(r.width)}x${Math.round(r.height)}` : 'NONE',
-      rendered: !!r && r.width > 0 && r.height > 0,
-      unavailableShown: !!msg,
-      clientId: window.__ENV?.REACT_APP_LITE_GOOGLE_CLIENT_ID ?? '(unknown)'
+      missing: false,
+      ariaDisabled: row.getAttribute('aria-disabled'),
+      overlayPointerEvents: overlay ? getComputedStyle(overlay).pointerEvents : null,
+      dimmed: /opacity-60/.test(row.className || ''),
+      iframe: r ? `${Math.round(r.width)}x${Math.round(r.height)}` : 'NONE'
     };
   });
   await p.close();
-  console.log(`   iframe=${g.iframe}  /gsi/button=${buttonStatus}  originRejected=${originRejected}`);
-  if (!g.rendered) {
-    console.log(`   client id: ${g.clientId}`);
-    console.log('   FIX (owner only, Google Cloud Console): add this page\'s origin to');
-    console.log('   "Authorised JavaScript origins" for that client. Not fixable in code.');
-  }
-  ok(g.rendered, `Google sign-in button renders (iframe ${g.iframe}, /gsi/button ${buttonStatus})`);
-  ok(!g.unavailableShown, 'Google sign-in does not fall back to "unavailable"');
+  console.log(`   diagnostics: iframe=${g.iframe} /gsi/button=${buttonStatus} (not asserted)`);
+  ok(!g.missing, 'the Google sign-in row is present');
+  ok(g.ariaDisabled === null, `row is never aria-disabled (got ${g.ariaDisabled})`);
+  ok(g.overlayPointerEvents !== 'none', `Google's button overlay still accepts clicks (got ${g.overlayPointerEvents})`);
+  ok(!g.dimmed, 'row is not dimmed into looking dead');
 }
 console.log('\n================ '+(fail.length?`${fail.length} FAILING`:'ALL PASS')+' ================');
 fail.forEach(f=>console.log('  x '+f));

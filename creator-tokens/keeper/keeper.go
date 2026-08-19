@@ -67,6 +67,43 @@ import "math/big"
 type HolderBalance struct {
 	Holder  string
 	Balance *big.Int
+
+	// RefundBlocked is set by the CALLER (a live core.RefundHolderTaxGateBlocked
+	// read against the real store, at the same block this snapshot was taken)
+	// to report whether core/refund.go's exit-tax / wind-down-DoS-backstop
+	// gate would refuse a refundHolder push for THIS holder right now — the
+	// gate documented at core/refund.go:479-486, immediately above
+	// RefundHolder's signature: a still-taxed holder (their own hold clock
+	// has not decayed to a 0% rate) cannot be force-pushed unless the MARKET
+	// itself has been continuously winding down for a full
+	// core.ExitTaxDecayBlocks (the DoS backstop). core.RefundHolderTaxGateBlocked
+	// is the exact predicate RefundHolder itself enforces (same function,
+	// called from both sides — see its doc), so this field can never
+	// silently drift from what the chain will actually do with the call.
+	//
+	// F9 (2026-08-19 audit): before this field existed, Plan had ZERO terms
+	// referencing the exit tax at all, so it emitted a refundHolder op for
+	// every positive-balance holder regardless of whether the push would
+	// revert — and Sweep (sweep.go) then reported every one of those
+	// doomed submissions as Succeeded, because a transport ack was the only
+	// thing it could ever observe. See Plan's doc for how this field is
+	// used, and sweep.go's StatusSucceeded/StatusUnverified split for the
+	// other half of that same finding.
+	//
+	// DEGRADE-TO-OLD-BEHAVIOUR CONVENTION: the zero value (false) means "not
+	// known to be blocked," and Plan then treats this holder exactly as it
+	// did before this field existed — see MarketView.Retired's doc for why
+	// this package uses that convention elsewhere. Unlike Retired's own
+	// degrade (which is genuinely harmless — at most delayed convenience),
+	// this one is NOT free: a caller that leaves RefundBlocked false for a
+	// holder who is, in live chain state, actually still inside the tax
+	// window reopens F9 for that one op. Every real producer in this
+	// repository (cmd/keeper/main.go's collectMarketViews, sim/actions.go's
+	// keeperTick) sets it from a live core.RefundHolderTaxGateBlocked call;
+	// the one deliberate exception is
+	// keeper/zz_pruned_phase2_deviation_test.go, an unmaintained pre-fix
+	// audit artifact left exactly as the audit found it.
+	RefundBlocked bool
 }
 
 // MarketView is everything Plan needs to know about one creator's market: a

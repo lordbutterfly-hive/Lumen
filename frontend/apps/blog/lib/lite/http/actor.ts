@@ -57,9 +57,10 @@ export type ActorResult = { ok: true; user: LumenUser } | { ok: false; response:
 
 export async function requireActiveLiteUser(
   sessionUser: User | undefined,
-  session: SessionRef
+  session: SessionRef,
+  options: { allowUpgraded?: boolean } = {}
 ): Promise<ActorResult> {
-  const check = await checkLiteActor(sessionUser, session);
+  const check = await checkLiteActor(sessionUser, session, options);
   if (check.ok) return { ok: true, user: check.user };
   return {
     ok: false,

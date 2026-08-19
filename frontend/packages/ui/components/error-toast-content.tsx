@@ -53,7 +53,7 @@ const ErrorToastContent: React.FC<ErrorToastContentProps> = ({
           it should be visible cannot fail that way. */}
       {displayControls && showMoreOpen && (
         <pre
-          className="mt-2 max-h-[60vh] w-full overflow-y-auto whitespace-pre-wrap break-words px-4 text-xs md:max-h-[80vh]"
+          className="mt-2 max-h-[60vh] w-full overflow-y-auto whitespace-pre-wrap break-words px-4 text-caption md:max-h-[80vh]"
           data-testid="error-toast-content-message"
         >
           {fullError}

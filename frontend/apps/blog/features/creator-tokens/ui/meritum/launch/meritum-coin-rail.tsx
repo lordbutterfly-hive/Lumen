@@ -168,13 +168,13 @@ const MeritumCoinRail: FC<MeritumCoinRailProps> = ({
 
       <div className="text-center">
         <div
-          className={`text-12 font-bold uppercase tracking-[0.2em] ${
-            captionBrand ? 'text-meritum-ink-brand' : 'text-meritum-ink-faint'
-          }`}
+          className={`text-label font-bold uppercase tracking-[0.2em] ${
+ captionBrand ? 'text-meritum-ink-brand' : 'text-meritum-ink-faint'
+ }`}
         >
           {caption}
         </div>
-        <p className="mx-auto mt-1.5 max-w-[30ch] font-serif text-13 text-meritum-ink-muted">{captionSub}</p>
+        <p className="mx-auto mt-1.5 max-w-[30ch] font-serif text-caption text-meritum-ink-muted">{captionSub}</p>
       </div>
 
       <MeritumRailLedger rows={rows} emptyLabel={ledgerEmptyLabel} />

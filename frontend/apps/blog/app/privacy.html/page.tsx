@@ -1,7 +1,7 @@
 const PrivacyPage = () => {
   return (
     <div className="my-12 flex flex-col items-center p-2">
-      <div className="mb-4 max-w-2xl text-sm font-light">
+      <div className="mb-4 max-w-2xl text-body-sm">
         <div>
           <h1 className="mb-4 text-4xl sm:text-6xl">Privacy Policy</h1>
           <h2 className="mb-4 text-3xl sm:text-5xl">Effective: 13 August 2026</h2>

@@ -109,7 +109,7 @@ const Field = ({
       ) : null}
     </label>
     {children}
-    {error ? <p className="mt-1.5 text-[12px] text-ink-brand-6">{error}</p> : null}
+    {error ? <p className="mt-1.5 text-caption text-ink-brand-6">{error}</p> : null}
   </div>
   );
 };
@@ -310,7 +310,7 @@ const SettingsForm = ({ username }: { username: string }) => {
               onChange={(e) => setSettings((prev) => ({ ...prev, profile_image: e.target.value }))}
             />
             <label
-              className="mt-1.5 inline-block cursor-pointer text-[13px] leading-[20px] font-semibold text-ink-brand-6 hover:text-ink-brand-4"
+              className="mt-1.5 inline-block cursor-pointer text-caption font-semibold text-ink-brand-6 hover:text-ink-brand-4"
               htmlFor="profilePicture"
             >
               {t('settings_page.upload_image')}
@@ -343,7 +343,7 @@ const SettingsForm = ({ username }: { username: string }) => {
               onChange={(e) => setSettings((prev) => ({ ...prev, cover_image: e.target.value }))}
             />
             <label
-              className="mt-1.5 inline-block cursor-pointer text-[13px] leading-[20px] font-semibold text-ink-brand-6 hover:text-ink-brand-4"
+              className="mt-1.5 inline-block cursor-pointer text-caption font-semibold text-ink-brand-6 hover:text-ink-brand-4"
               htmlFor="coverPicture"
             >
               {t('settings_page.upload_image')}
@@ -475,7 +475,9 @@ const SettingsForm = ({ username }: { username: string }) => {
           )}
         </div>
 
-        {/* House button: brand red, 14px radius, bold Open Sans. Still disabled
+        {/* House button: brand red, 14px radius, bold Lora. (Said "bold Open Sans"
+            until 2026-08-19 — and the button never carried a family utility at
+            all, so it has always simply inherited whatever `<body>` is.) Still disabled
             when there is nothing to save — but it now looks like the product's
             own button doing that, not a dead grey pill. */}
         <button
@@ -505,7 +507,7 @@ const SettingsForm = ({ username }: { username: string }) => {
             it is true regardless of which of those three is why the button
             looks the way it does right now. */}
         {sameData && !busy ? (
-          <p className="mt-2 text-[13px] leading-[20px] text-ink-10">{t('settings_page.update_hint')}</p>
+          <p className="mt-2 text-caption text-ink-10">{t('settings_page.update_hint')}</p>
         ) : null}
       </section>
 
@@ -518,7 +520,7 @@ const SettingsForm = ({ username }: { username: string }) => {
             per-account. Same muted-helper-text treatment `update_hint` already
             uses below the profile Update button, so this reads as the same
             kind of house copy, not a warning callout. */}
-        <p className="mt-2 text-[13px] leading-[20px] text-ink-10" data-testid="settings-preferences-device-scope">
+        <p className="mt-2 text-caption text-ink-10" data-testid="settings-preferences-device-scope">
           {t('settings_page.preferences_device_scope')}
         </p>
 
@@ -577,7 +579,7 @@ const SettingsForm = ({ username }: { username: string }) => {
           */}
           {isLite ? (
             <div className="md:col-span-2" data-testid="reward-settings-lite-hint">
-              <p className="text-[13px] leading-[20px] text-ink-10">
+              <p className="text-caption text-ink-10">
                 {t('settings_page.reward_settings_lite_hint')}
               </p>
             </div>

@@ -26,7 +26,7 @@ interface WitnessTableRowProps {
   hpAprPercent: number | null;
 }
 
-const CELL_NUM_CLASS = 'text-right font-sans text-[13px] leading-[20px] tabular-nums text-ink-10';
+const CELL_NUM_CLASS = 'text-right font-sans text-caption tabular-nums text-ink-10';
 
 /**
  * ★★★ THE APR COLUMN WAS THE SAME NUMBER 250 TIMES (2026-08-10, fuckery list W-1).
@@ -131,7 +131,7 @@ export default function WitnessTableRow({
           <span
             className={
               row.isStale
-                ? 'text-right font-sans text-[13px] leading-[20px] tabular-nums text-ink-16 line-through'
+                ? 'text-right font-sans text-caption tabular-nums text-ink-16 line-through'
                 : CELL_NUM_CLASS
             }
             title={row.isStale ? t('witnesses.stale_marker') : undefined}

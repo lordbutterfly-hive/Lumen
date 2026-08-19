@@ -52,10 +52,10 @@ func cloneStore(s *MemStore) *MemStore {
 // is what each caller asserts instead of the old "the clock went fresh".
 func bounceRefresh(t *testing.T, s Store, creator, x, y string, block uint64, amt int64) {
 	t.Helper()
-	if err := TransferCredits(s, creator, x, y, block, big.NewInt(amt)); err != nil {
+	if err := TransferCredits(s, x, creator, x, y, block, big.NewInt(amt)); err != nil {
 		t.Fatalf("bounce %s->%s: %v", x, y, err)
 	}
-	if err := TransferCredits(s, creator, y, x, block, big.NewInt(amt)); err != nil {
+	if err := TransferCredits(s, y, creator, y, x, block, big.NewInt(amt)); err != nil {
 		t.Fatalf("bounce %s->%s: %v", y, x, err)
 	}
 }
@@ -316,7 +316,7 @@ func TestRefundHolder_OUTFLOWK2_TinyPoisonWindowBoundary(t *testing.T) {
 	// still keeps the push refused — the in-window fresh-holder protection.
 	sShort, c, bob, open := build()
 	shortBlk := open + ExitTaxDecayBlocks - 1
-	if err := TransferCredits(sShort, c, "mallory", bob, shortBlk, big.NewInt(1)); err != nil {
+	if err := TransferCredits(sShort, "mallory", c, "mallory", bob, shortBlk, big.NewInt(1)); err != nil {
 		t.Fatal(err)
 	}
 	if bps := ExitTaxBpsAt(heldBlocksAt(sShort, c, bob, shortBlk)); bps == 0 {
@@ -335,7 +335,7 @@ func TestRefundHolder_OUTFLOWK2_TinyPoisonWindowBoundary(t *testing.T) {
 	// the wind-down opened (RequireInflowOpen refuses a retired market), and
 	// transfers only move maturity that already exists. So mallory's dust arrives
 	// carrying a FULL window of maturity and cannot move bob's rate at all.
-	if err := TransferCredits(sAt, c2, "mallory", bob2, atBlk, big.NewInt(1)); err != nil {
+	if err := TransferCredits(sAt, "mallory", c2, "mallory", bob2, atBlk, big.NewInt(1)); err != nil {
 		t.Fatal(err)
 	}
 	if bps := ExitTaxBpsAt(heldBlocksAt(sAt, c2, bob2, atBlk)); bps != 0 {
@@ -386,7 +386,7 @@ func TestSell_OUTFLOWK1_RefutedVictimEnriched(t *testing.T) {
 			if _, err := Buy(s, mallory, c, t1, big.NewInt(50000)); err != nil {
 				t.Fatal(err)
 			}
-			if err := TransferCredits(s, c, mallory, bob, t1, big.NewInt(50000)); err != nil {
+			if err := TransferCredits(s, mallory, c, mallory, bob, t1, big.NewInt(50000)); err != nil {
 				t.Fatal(err)
 			}
 		} else {
@@ -447,7 +447,7 @@ func TestSell_OUTFLOWK1_RefutedVictimEnriched(t *testing.T) {
 			t.Fatal(err)
 		}
 		if attack {
-			if err := TransferCredits(s, c, mallory, bob, t1, big.NewInt(50000)); err != nil {
+			if err := TransferCredits(s, mallory, c, mallory, bob, t1, big.NewInt(50000)); err != nil {
 				t.Fatal(err)
 			}
 		}

@@ -340,7 +340,7 @@ export function AdvancedSettingsPostForm({
           </DialogTitle>
           <Separator />
         </DialogHeader>
-        <div className="flex flex-col gap-4 text-xs">
+        <div className="flex flex-col gap-4 text-caption">
           <div className="flex flex-col gap-3">
             <span className="text-lg font-bold">
               {t('submit_page.advanced_settings_dialog.maximum_accepted_payout')}
@@ -454,7 +454,7 @@ export function AdvancedSettingsPostForm({
             {beneficiaries.length < 8 ? (
               <Button
                 variant="link"
-                className="h-fit w-fit px-0 py-1 text-xs text-destructive"
+                className="h-fit w-fit px-0 py-1 text-caption text-destructive"
                 onClick={handleAddAccount}
                 data-testid="add-beneficiar-account"
               >

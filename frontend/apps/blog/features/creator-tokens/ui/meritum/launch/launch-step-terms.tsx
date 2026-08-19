@@ -98,7 +98,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
       <dl className="mt-6 flex flex-col gap-px bg-meritum-line-card">
         {terms.map((term) => (
           <div key={term.id} className="flex flex-wrap items-baseline gap-x-[22px] gap-y-1.5 bg-meritum-card px-0.5 py-[15px]">
-            <dt className="flex-none basis-[164px] text-12 font-bold uppercase tracking-[0.13em] text-meritum-ink-3">
+            <dt className="flex-none basis-[164px] text-label font-bold uppercase tracking-[0.13em] text-meritum-ink-3">
               {term.label}
             </dt>
             <dd className="min-w-0 flex-1 basis-60 font-serif text-14 text-meritum-ink-2">{term.value}</dd>
@@ -109,7 +109,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
       <div className="mt-[22px] flex flex-wrap items-center justify-between gap-[18px] rounded-2xl border border-meritum-line-card bg-meritum-rail px-5 py-[18px]">
         <div className="min-w-[min(100%,230px)] flex-1 basis-64">
           <div className="text-14 font-bold text-meritum-ink">{t('meritum_launch.first_buy_title')}</div>
-          <p className="mt-1 max-w-[42ch] font-serif text-13 text-meritum-ink-muted">
+          <p className="mt-1 max-w-[42ch] font-serif text-caption text-meritum-ink-muted">
             {t('meritum_launch.first_buy_body')}
           </p>
         </div>
@@ -183,7 +183,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
               deposit is the answer, or how much to send. */}
           {isFundingFailure(failure) ? (
             <div className="mt-3">
-              <p className="mb-2 text-13">
+              <p className="mb-2 text-caption">
                 {firstBuy.trim() !== ''
                   ? `Your first buy costs ${firstBuy} HBD. Send that to your Magi account plus a little extra — on Magi, HBD also pays the resource credits every action needs, so deposit a bit more than the buy itself.`
                   : 'Send HBD to your Magi account before launching — on Magi, HBD also pays the resource credits that every action needs.'}
@@ -194,7 +194,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
         </Notice>
       ) : null}
       {blockMessage ? (
-        <p className="mt-5 text-13 font-semibold text-meritum-ink-brand" role="status">
+        <p className="mt-5 text-caption font-semibold text-meritum-ink-brand" role="status">
           {blockMessage}
         </p>
       ) : null}

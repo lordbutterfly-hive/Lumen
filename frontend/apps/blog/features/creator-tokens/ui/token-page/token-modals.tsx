@@ -1,9 +1,9 @@
 'use client';
 
-import { FC, useState } from 'react';
+import { FC, useState, useRef } from 'react';
 import type { Service } from '../../market/token-detail';
 import type { LiveTokenMarket } from '../../live/adapt';
-import { buyQuote, sellQuote, serviceQuote, EXIT_FEE_MAX } from '../../market/curve';
+import { buyQuote, sellQuote, serviceQuote, EXIT_FEE_MAX, MIN_NET_DEFAULT_TOLERANCE_BPS } from '../../market/curve';
 import { usdPrice, usdWhole } from '../../market/format';
 import { writeFailureMessage } from '../write-failure';
 import { useTokenAccounts } from '../../live/use-token-accounts';
@@ -30,6 +30,15 @@ const BuyModal: FC<{
   onClose: () => void;
 }> = ({ m, onBuy, onClose }) => {
   const [busy, setBusy] = useState(false);
+  // F7 fix: `busy` is a useState value — it only updates on the NEXT render,
+  // so two clicks in the same tick (a fast double-click) both read
+  // busy===false and both broadcast. A ref mutates synchronously, so the
+  // second invocation in the same tick sees what the first already set,
+  // before either has awaited anything. Mirrors
+  // ui/meritum/launch/use-meritum-launch.ts's inFlight ref, the one guard in
+  // this feature that was already correct. `busy` stays — it still drives
+  // the disabled attribute and the "Confirm in your wallet…" label.
+  const inFlight = useRef(false);
   const [amt, setAmt] = useState('50');
   const [adv, setAdv] = useState(false);
   const [maxPrice, setMaxPrice] = useState((m.priceUsd * 1.05).toFixed(2));
@@ -74,7 +83,7 @@ const BuyModal: FC<{
     <ModalShell width={460} onClose={onClose} title={`Buy @${m.handle} token`}>
       <ModalHead title={`Buy @${m.handle} token`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
-        <label className="mb-[7px] block text-[13px] leading-[20px] font-semibold text-ink-10">Amount (USD)</label>
+        <label className="mb-[7px] block text-caption font-semibold text-ink-10">Amount (USD)</label>
         <div className="mb-2.5 flex items-center rounded-xl border border-line-11 px-4 py-3 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
           <span className="text-[22px] leading-[34px] font-bold text-ink-2">$</span>
           <input
@@ -95,7 +104,7 @@ const BuyModal: FC<{
                 setAmt(v);
                 setFailure(null);
               }}
-              className="flex-1 rounded-control border border-line-11 py-2 text-[13px] leading-[20px] font-semibold text-ink-7 hover:border-line-brand-10 hover:text-ink-brand-6"
+              className="flex-1 rounded-control border border-line-11 py-2 text-caption font-semibold text-ink-7 hover:border-line-brand-10 hover:text-ink-brand-6"
             >
               ${v}
             </button>
@@ -103,24 +112,24 @@ const BuyModal: FC<{
         </div>
         <div className="mb-3.5 rounded-xl border border-line-9 bg-surface-12 px-4 py-3.5 tabular-nums">
           <div className="text-[15px] leading-[24px] font-bold text-ink-2">≈ {tok(q.tokens)} tokens</div>
-          <div className="mt-2 flex justify-between text-[13px] leading-[20px] text-ink-10">
+          <div className="mt-2 flex justify-between text-caption text-ink-10">
             <span>Average price</span>
             <span>~{usdPrice(q.avgPrice)} each</span>
           </div>
-          <div className="mt-1 flex justify-between text-[13px] leading-[20px] text-ink-10">
+          <div className="mt-1 flex justify-between text-caption text-ink-10">
             <span>Price after your buy</span>
             <span>~{usdPrice(q.priceAfter)}</span>
           </div>
         </div>
         <button
           onClick={() => setAdv((v) => !v)}
-          className="mb-3 flex items-center gap-1.5 border-0 bg-transparent text-[13px] leading-[20px] font-semibold text-ink-10"
+          className="mb-3 flex items-center gap-1.5 border-0 bg-transparent text-caption font-semibold text-ink-10"
         >
           Advanced {adv ? '▴' : '▾'}
         </button>
         {adv ? (
           <div className="mb-3.5">
-            <label className="mb-1.5 block text-xs text-ink-10">Max price per token</label>
+            <label className="mb-1.5 block text-caption text-ink-10">Max price per token</label>
             <div className="flex items-center rounded-control border border-line-11 px-3.5 py-2.5 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
               <span className="font-bold text-ink-14">$</span>
               <input
@@ -130,11 +139,11 @@ const BuyModal: FC<{
                 className="ml-0.5 flex-1 border-0 text-[15px] leading-[24px] font-semibold tabular-nums outline-none"
               />
             </div>
-            <div className="mt-1.5 text-[12px] text-ink-14">
+            <div className="mt-1.5 text-caption text-ink-14">
               Don’t buy above this — the curve moves as others trade.
             </div>
             {overMax ? (
-              <div className="mt-1.5 text-[12px] font-semibold text-ink-warn-3">
+              <div className="mt-1.5 text-caption font-semibold text-ink-warn-3">
                 Your buy would push the price to {usdPrice(q.priceAfter)}, above your max — lower the amount
                 or raise the cap.
               </div>
@@ -144,17 +153,21 @@ const BuyModal: FC<{
         {/* What you can actually spend, and whether you can send anything at all. */}
         <MagiFuelGauge state={spending} costBaseUnits={costBaseUnits} kind={payer?.kind} className="mb-3" />
         {blockedBySpending && payer ? <MagiFundingHelp kind={payer.kind} className="mb-3" /> : null}
-        <div className="mb-3 rounded-control bg-surface-16 px-3.5 py-3 text-[13px] leading-[20px] text-ink-10">
+        <div className="mb-3 rounded-control bg-surface-16 px-3.5 py-3 text-caption text-ink-10">
           Includes a 10% trade fee (5% to @{m.handle}, 5% to Lumen).
         </div>
-        <p className="mb-3.5 font-serif text-[13px] leading-[20px] text-ink-14">
+        <p className="mb-3.5 font-serif text-caption text-ink-14">
           This token’s price floats and you can lose money. The floor ({usdPrice(m.floorUsd)}) is what the reserve would
           pay out per token if the market wound down — not a price you can sell at on demand. Sell soon after buying and
           an early-exit fee applies on top of the trade fee.
         </p>
         <button
           onClick={async () => {
-            if (!Number.isFinite(usd) || usd <= 0 || overMax || busy) return;
+            if (!Number.isFinite(usd) || usd <= 0 || overMax) return;
+            // F7: synchronous — see the `inFlight` doc above. Checked and set
+            // BEFORE any await, so a same-tick second click is a no-op.
+            if (inFlight.current) return;
+            inFlight.current = true;
             // The action is a real broadcast now, not a synchronous store
             // mutation: it opens a signer, waits, and can be REJECTED by the
             // user or the chain. Close only after it resolves — closing early
@@ -169,6 +182,7 @@ const BuyModal: FC<{
               // The REAL reason, not a guess. See ../write-failure.ts.
               setFailure(writeFailureMessage(err, 'That buy didn’t go through.'));
             } finally {
+              inFlight.current = false;
               setBusy(false);
             }
           }}
@@ -189,9 +203,9 @@ const BuyModal: FC<{
                 : `Buy — ${usdWhole(usd)}`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-[13px] leading-[20px] font-semibold text-ink-brand-6">{failure}</div>
+          <div className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
         ) : null}
-        <div className="mt-2.5 text-center text-xs text-ink-14">One signature confirms your buy.</div>
+        <div className="mt-2.5 text-center text-caption text-ink-14">One signature confirms your buy.</div>
       </div>
     </ModalShell>
   );
@@ -215,17 +229,27 @@ const SellModal: FC<{
 }> = ({ m, onSell, onClose, mode = 'sell' }) => {
   const redeem = mode === 'redeem';
   const [busy, setBusy] = useState(false);
+  // F7 fix: see BuyModal's `inFlight` doc — same synchronous guard, same
+  // reason. `busy` stays for the disabled attribute and button label.
+  const inFlight = useRef(false);
   const held = m.position?.tokens ?? 0;
   const [amt, setAmt] = useState(String(held || 0));
   const [failure, setFailure] = useState<string | null>(null);
-  // H-FE-7: an OPTIONAL minimum-net floor (slippage protection), collapsed and OFF by
-  // default so the exit is never trapped — sell.go treats an absent minNet as NO floor,
-  // the escape hatch this deliberately preserves (design unchanged). The backend already
-  // threads minNetHbd (use-live-token-market), so this only surfaces the existing knob.
-  const [advOpen, setAdvOpen] = useState(false);
+  // F5 fix (2026-08-19). H-FE-7 added this floor but shipped it collapsed and
+  // OFF by default (minNetUsd stayed undefined until the reader opened
+  // Advanced AND typed a number), so the one real protection this dialog
+  // offers against a same-block price move or front-run was inert unless a
+  // reader knew to go looking for it. It now defaults ON: pre-filled just
+  // under the SAME "you receive"/"you get" figure already shown above,
+  // shown open rather than hidden (this IS the number being consented to —
+  // AskInput.maxCreditsBaseUnits's doc makes the identical point about
+  // showing a signed cap), and the escape hatch H-FE-7 cared about is still
+  // one click away: clearing the field is an explicit opt-out, exactly as
+  // absent minNet already meant "no floor" on the wire. Typing a lower
+  // number "widens" the floor (more slippage tolerated) the same way.
+  const [advOpen, setAdvOpen] = useState(true);
   const [minNetText, setMinNetText] = useState('');
-  const minNetParsed = parseFloat(minNetText.replace(/,/g, ''));
-  const minNetUsd = advOpen && Number.isFinite(minNetParsed) && minNetParsed > 0 ? minNetParsed : undefined;
+  const [minNetTouched, setMinNetTouched] = useState(false);
   const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
   const q = sellQuote(tokens, m, m.position?.heldDays ?? 999);
   const feePctLabel = Math.round(q.exitFeePct * 100);
@@ -235,6 +259,23 @@ const SellModal: FC<{
   // gross, so redeem mode shows one honest number instead of a breakdown whose
   // rows would have to be invented.
   const redeemUsd = redeem && held > 0 ? ((m.position?.floorValueUsd ?? 0) * tokens) / held : 0;
+  const shownNetUsd = redeem ? redeemUsd : q.receiveUsd;
+  // MIN_NET_DEFAULT_TOLERANCE_BPS (market/curve.ts) is headroom under the
+  // shown figure — see its own doc for why redeem mode in particular needs
+  // it (a pro-rata scale, not a fresh per-amount recompute).
+  const defaultMinNetUsd = shownNetUsd > 0 ? (shownNetUsd * (10_000 - MIN_NET_DEFAULT_TOLERANCE_BPS)) / 10_000 : 0;
+  const minNetParsed = parseFloat(minNetText.replace(/,/g, ''));
+  // Untouched: apply the default (or no floor, if there is nothing to
+  // protect yet — e.g. tokens===0). Touched: the reader's own value, INCLUDING
+  // nothing, which is the deliberate opt-out.
+  const minNetUsd = minNetTouched
+    ? Number.isFinite(minNetParsed) && minNetParsed > 0
+      ? minNetParsed
+      : undefined
+    : defaultMinNetUsd > 0
+      ? defaultMinNetUsd
+      : undefined;
+  const minNetDisplayValue = minNetTouched ? minNetText : defaultMinNetUsd > 0 ? defaultMinNetUsd.toFixed(2) : '';
   return (
     <ModalShell
       width={460}
@@ -244,10 +285,10 @@ const SellModal: FC<{
       <ModalHead title={redeem ? `Redeem @${m.handle} token` : `Sell @${m.handle} token`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
         <div className="mb-[7px] flex items-center justify-between">
-          <label className="text-[13px] leading-[20px] font-semibold text-ink-10">Amount (tokens)</label>
+          <label className="text-caption font-semibold text-ink-10">Amount (tokens)</label>
           <button
             onClick={() => setAmt(String(held))}
-            className="border-0 bg-transparent text-[13px] leading-[20px] font-semibold text-ink-brand-6"
+            className="border-0 bg-transparent text-caption font-semibold text-ink-brand-6"
           >
             {redeem ? 'Redeem all' : 'Sell all'} ({tok(held)})
           </button>
@@ -262,14 +303,14 @@ const SellModal: FC<{
             inputMode="decimal"
             className="flex-1 border-0 text-[22px] leading-[34px] font-bold tabular-nums text-ink-2 outline-none"
           />
-          <span className="text-[13px] leading-[20px] font-semibold text-ink-14">tokens</span>
+          <span className="text-caption font-semibold text-ink-14">tokens</span>
         </div>
         {q.exitFeePct > 0 ? (
           <div className="mb-3.5 rounded-xl border border-line-warn-2 bg-surface-warn-4 px-4 py-3.5">
             <div className="mb-1.5 text-[14px] leading-[22px] font-bold text-ink-warn-3">
               Early-exit fee: {feePctLabel}% now
             </div>
-            <p className="mb-2.5 text-[13px] leading-[20px] text-ink-warn-2">
+            <p className="mb-2.5 text-caption text-ink-warn-2">
               You’ve held these ~{m.position?.heldDays ?? 0} days. The fee drops to 0% if you hold ~6 weeks.
             </p>
             <div className="h-1.5 overflow-hidden rounded bg-surface-warn-9">
@@ -282,7 +323,7 @@ const SellModal: FC<{
                 style={{ width: `${(q.exitFeePct / EXIT_FEE_MAX) * 100}%` }}
               />
             </div>
-            <div className="mt-1.5 flex justify-between text-[12px] leading-[18px] tabular-nums text-ink-warn-3">
+            <div className="mt-1.5 flex justify-between text-caption tabular-nums text-ink-warn-3">
               <span>{feePctLabel}% now</span>
               <span>0% at 6 wks</span>
             </div>
@@ -298,12 +339,12 @@ const SellModal: FC<{
               rate genuinely applies to both doors (see Market position exitTaxBps). */}
           {redeem ? null : (
             <>
-              <div className="mb-1.5 flex justify-between text-[13px] leading-[20px] text-ink-7">
+              <div className="mb-1.5 flex justify-between text-caption text-ink-7">
                 <span>Curve proceeds</span>
                 <span>{usdPrice(q.curveProceedsUsd)}</span>
               </div>
               {q.exitFeeUsd > 0 ? (
-                <div className="mb-1.5 flex justify-between text-[13px] leading-[20px] text-ink-warn-3">
+                <div className="mb-1.5 flex justify-between text-caption text-ink-warn-3">
                   <span>Early-exit fee ({feePctLabel}%)</span>
                   <span>−{usdPrice(q.exitFeeUsd)}</span>
                 </div>
@@ -314,7 +355,7 @@ const SellModal: FC<{
               rail (refund.go) is a pro-rata slice of the reserve and does not pay
               it, so showing it here would be inventing a deduction. */}
           {redeem ? null : (
-            <div className="mb-2 flex justify-between text-[13px] leading-[20px] text-ink-warn-3">
+            <div className="mb-2 flex justify-between text-caption text-ink-warn-3">
               <span>Trade fee (10%)</span>
               <span>−{usdPrice(q.tradeFeeUsd)}</span>
             </div>
@@ -334,19 +375,20 @@ const SellModal: FC<{
         <button
           type="button"
           onClick={() => setAdvOpen((v) => !v)}
-          className="mb-2 border-0 bg-transparent text-[13px] leading-[20px] font-semibold text-ink-10"
+          className="mb-2 border-0 bg-transparent text-caption font-semibold text-ink-10"
         >
           Advanced {advOpen ? '▴' : '▾'}
         </button>
         {advOpen ? (
           <div className="mb-3.5">
-            <label className="mb-1.5 block text-xs text-ink-10">
-              Minimum {redeem ? 'refund' : 'net'} (HBD) — optional slippage floor
+            <label className="mb-1.5 block text-caption text-ink-10">
+              Minimum {redeem ? 'refund' : 'net'} (HBD) — protects you if the price moves
             </label>
             <div className="flex items-center rounded-xl border border-line-11 px-4 py-2.5 focus-within:border-line-brand-10">
               <input
-                value={minNetText}
+                value={minNetDisplayValue}
                 onChange={(e) => {
+                  setMinNetTouched(true);
                   setMinNetText(e.target.value);
                   setFailure(null);
                 }}
@@ -354,17 +396,21 @@ const SellModal: FC<{
                 placeholder="optional"
                 className="flex-1 border-0 text-[15px] leading-[24px] font-semibold tabular-nums text-ink-2 outline-none"
               />
-              <span className="text-[13px] leading-[20px] font-semibold text-ink-14">HBD</span>
+              <span className="text-caption font-semibold text-ink-14">HBD</span>
             </div>
-            <p className="mt-1.5 text-[12px] leading-[18px] text-ink-14">
-              Leave blank to always exit at the going rate. If set, the {redeem ? 'redeem' : 'sell'} reverts
-              (nothing spent) when the net would fall below it.
+            <p className="mt-1.5 text-caption text-ink-14">
+              Pre-filled just under what you’re shown above, so the {redeem ? 'redeem' : 'sell'} reverts (nothing
+              spent) if the net comes in lower — a price move or a same-block front-run, not you. Clear it to exit
+              at the going rate with no floor, or lower it to allow more slippage.
             </p>
           </div>
         ) : null}
         <button
           onClick={async () => {
-            if (!Number.isFinite(tokens) || tokens <= 0 || busy) return;
+            if (!Number.isFinite(tokens) || tokens <= 0) return;
+            // F7: synchronous — see BuyModal's `inFlight` doc.
+            if (inFlight.current) return;
+            inFlight.current = true;
             setBusy(true);
             setFailure(null);
             try {
@@ -374,6 +420,7 @@ const SellModal: FC<{
               // The REAL reason, not a guess. See ../write-failure.ts.
               setFailure(writeFailureMessage(err, 'That sell didn’t go through.'));
             } finally {
+              inFlight.current = false;
               setBusy(false);
             }
           }}
@@ -389,14 +436,14 @@ const SellModal: FC<{
                 : `Sell — get ~${usdPrice(q.receiveUsd)}`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-[13px] leading-[20px] font-semibold text-ink-brand-6">{failure}</div>
+          <div className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
         ) : null}
         {/* This used to read "Selling is always available — even if this market
             winds down", which is false: sell() throws once the market is
             retired/frozen/closed. The honest statement is that an EXIT is always
             available — via this dialog's redeem mode, which is what the page
             routes to in that state. */}
-        <div className="mt-2.5 text-center text-xs text-ink-14">
+        <div className="mt-2.5 text-center text-caption text-ink-14">
           {redeem
             ? 'Redeeming pays your share of the reserve at the floor. Available even while this market winds down.'
             : 'You can always exit. While this market is open by selling, and once it winds down by redeeming at the floor.'}
@@ -419,6 +466,8 @@ const AskModal: FC<{
   onClose: () => void;
 }> = ({ m, service, onSpend, onClose }) => {
   const [busy, setBusy] = useState(false);
+  // F7 fix: see BuyModal's `inFlight` doc.
+  const inFlight = useRef(false);
   const [deadline, setDeadline] = useState(7);
   const [question, setQuestion] = useState('');
   const [failure, setFailure] = useState<string | null>(null);
@@ -457,7 +506,7 @@ const AskModal: FC<{
           placeholder={`What do you want to ask @${m.handle}?`}
           className="h-[120px] w-full resize-y rounded-xl border border-line-11 px-4 py-3.5 font-serif text-[15px] leading-[24px] text-ink-2 outline-none focus:border-line-brand-10"
         />
-        <div className="my-2 mb-3.5 text-xs text-ink-14">
+        <div className="my-2 mb-3.5 text-caption text-ink-14">
           Private — stored on Lumen, only its fingerprint goes on-chain.
         </div>
         <div className="mb-4 rounded-xl border border-line-9 px-4 py-3.5 text-[14px] leading-[22px] text-ink-7">
@@ -467,7 +516,7 @@ const AskModal: FC<{
           commission paid in HBD — {usdWhole(usd)} total. If unanswered within your deadline, you get it all
           back.
         </div>
-        <label className="mb-2 block text-[13px] leading-[20px] font-semibold text-ink-10">Answer due within</label>
+        <label className="mb-2 block text-caption font-semibold text-ink-10">Answer due within</label>
         <div className="mb-4 flex items-center gap-3.5">
           <input
             type="range"
@@ -484,7 +533,10 @@ const AskModal: FC<{
         {blockedByCommission && askPayer ? <MagiFundingHelp kind={askPayer.kind} className="mb-3" /> : null}
         <button
           onClick={async () => {
-            if (!canAsk || busy) return;
+            if (!canAsk) return;
+            // F7: synchronous — see BuyModal's `inFlight` doc.
+            if (inFlight.current) return;
+            inFlight.current = true;
             setBusy(true);
             setFailure(null);
             try {
@@ -497,6 +549,7 @@ const AskModal: FC<{
               // The REAL reason, not a guess. See ../write-failure.ts.
               setFailure(writeFailureMessage(err, 'That request didn’t go through.'));
             } finally {
+              inFlight.current = false;
               setBusy(false);
             }
           }}
@@ -512,7 +565,7 @@ const AskModal: FC<{
                 : `Send question — ${tok(q.tokens)} tokens + ${usdPrice(q.commissionUsd)} HBD`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-[13px] leading-[20px] font-semibold text-ink-brand-6">{failure}</div>
+          <div className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
         ) : null}
       </div>
     </ModalShell>
@@ -525,6 +578,9 @@ const SendModal: FC<{
   onClose: () => void;
 }> = ({ m, onTransfer, onClose }) => {
   const [busy, setBusy] = useState(false);
+  // F7 fix: see BuyModal's `inFlight` doc. transfer is irreversible — a
+  // double-submit here sends the tokens twice.
+  const inFlight = useRef(false);
   const held = m.position?.tokens ?? 0;
   const [to, setTo] = useState('');
   const [amt, setAmt] = useState('');
@@ -535,7 +591,7 @@ const SendModal: FC<{
     <ModalShell width={420} onClose={onClose} title={`Send @${m.handle} tokens`}>
       <ModalHead title={`Send @${m.handle} tokens`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
-        <label className="mb-1.5 block text-[13px] leading-[20px] font-semibold text-ink-10">
+        <label className="mb-1.5 block text-caption font-semibold text-ink-10">
           To (Lumen or Hive name)
         </label>
         <input
@@ -548,10 +604,10 @@ const SendModal: FC<{
           className="mb-3.5 w-full rounded-xl border border-line-11 px-4 py-3 text-[15px] leading-[24px] font-semibold text-ink-2 outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
         />
         <div className="mb-1.5 flex items-center justify-between">
-          <label className="text-[13px] leading-[20px] font-semibold text-ink-10">Amount (tokens)</label>
+          <label className="text-caption font-semibold text-ink-10">Amount (tokens)</label>
           <button
             onClick={() => setAmt(String(held))}
-            className="border-0 bg-transparent text-[13px] leading-[20px] font-semibold text-ink-brand-6"
+            className="border-0 bg-transparent text-caption font-semibold text-ink-brand-6"
           >
             Max ({tok(held)})
           </button>
@@ -568,7 +624,10 @@ const SendModal: FC<{
         />
         <button
           onClick={async () => {
-            if (!valid || busy) return;
+            if (!valid) return;
+            // F7: synchronous — see BuyModal's `inFlight` doc.
+            if (inFlight.current) return;
+            inFlight.current = true;
             setBusy(true);
             setFailure(null);
             try {
@@ -583,6 +642,7 @@ const SendModal: FC<{
               // The REAL reason, not a guess. See ../write-failure.ts.
               setFailure(writeFailureMessage(err, 'That send didn’t go through.'));
             } finally {
+              inFlight.current = false;
               setBusy(false);
             }
           }}
@@ -596,9 +656,9 @@ const SendModal: FC<{
               : `Send ${tok(tokens)} tokens`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-[13px] leading-[20px] font-semibold text-ink-brand-6">{failure}</div>
+          <div className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
         ) : null}
-        <div className="mt-2.5 text-center text-xs text-ink-14">
+        <div className="mt-2.5 text-center text-caption text-ink-14">
           Transfers are free and instant on Lumen. Never blocked by billing.
         </div>
       </div>

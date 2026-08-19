@@ -220,13 +220,15 @@
 .tally {
   display: inline-block;
   min-width: 2ch;
-  /* ★ SANS, NOT SERIF (2026-08-14, owner-reported). The handoff specified Lora
-     for tallies, but on a feed card the tally sits inches from the payout
-     figure, the byline and the comment count — all Open Sans — and the serif
-     numeral read as a different product bolted on. Measured before the change:
-     tally Lora 14.5px/600 beside payout Open Sans 14px/700, on the same row.
-     The card's own face wins; the control is a guest on it. */
-  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  /* ★ THE REASON THIS LINE EXISTED IS GONE (2026-08-19, all-Lora migration).
+     It used to say "SANS, NOT SERIF": the handoff wanted Lora for tallies, but
+     the tally sits inches from the payout figure, the byline and the comment
+     count, all of which were Open Sans, and a lone serif numeral read as a
+     different product bolted on. The card is now entirely Lora, so the tally
+     matching its neighbours and the tally being Lora are the same thing. The
+     rule the old note was really defending still holds and is worth keeping:
+     the card's own face wins, the control is a guest on it. */
+  font-family: var(--font-lora), Georgia, Cambria, serif;
   font-weight: 700;
   font-size: 18px;
   font-variant-numeric: tabular-nums;

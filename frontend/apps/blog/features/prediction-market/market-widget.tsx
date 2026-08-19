@@ -28,7 +28,7 @@ export default function MarketWidget() {
           <Icons.marketChart className="h-[19px] w-[19px] text-ink-brand-6" />
           {t('prediction_market.heading')}
         </h3>
-        <p className="font-sans text-[13px] leading-[20px] text-ink-10">{t('prediction_market.unavailable_widget')}</p>
+        <p className="font-sans text-caption text-ink-10">{t('prediction_market.unavailable_widget')}</p>
       </div>
     );
   }
@@ -58,21 +58,21 @@ export default function MarketWidget() {
           >
             {round.question}
           </Link>
-          <div className="mb-3.5 mt-1.5 font-sans text-[13px] leading-[20px] text-ink-10">
+          <div className="mb-3.5 mt-1.5 font-sans text-caption text-ink-10">
             {t('prediction_market.ref')} ${round.referencePrice.toFixed(3)} · {t('prediction_market.locks_in')}{' '}
             <Countdown closesAt={round.closesAt} className="tabular-nums" />
           </div>
 
           <BucketBars buckets={round.buckets} size="compact" />
 
-          <div className="mt-3.5 flex items-center justify-between border-t border-line-3 pt-3.5 font-sans text-[13px] leading-[20px] text-ink-10">
+          <div className="mt-3.5 flex items-center justify-between border-t border-line-3 pt-3.5 font-sans text-caption text-ink-10">
             <span>
               <strong className="font-semibold tabular-nums text-ink-4">{round.totalPool.toFixed(0)}</strong> {round.asset}{' '}
               {t('prediction_market.pool').toLowerCase()}
             </span>
             <Link
               href="/?tab=predictions"
-              className="inline-flex items-center gap-0.5 font-sans text-[13px] leading-[20px] font-semibold text-ink-brand-6 hover:underline"
+              className="inline-flex items-center gap-0.5 font-sans text-caption font-semibold text-ink-brand-6 hover:underline"
             >
               {t('prediction_market.view_market')}
               <Icons.chevronRight className="h-3.5 w-3.5" />

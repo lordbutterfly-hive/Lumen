@@ -70,9 +70,9 @@ function LadderRow({ tier, current }: { tier: LeagueTier; current: boolean }) {
           tells the listener a whole section is missing. Level is structure; size is the
           class list, and the class list is unchanged. */}
           <h2 className="font-sans text-[18px] font-semibold leading-[28px] text-ink-2">{name}</h2>
-          <span className="font-sans text-[13px] leading-[20px] font-medium tabular-nums text-ink-10">{scale}</span>
+          <span className="font-sans text-caption font-medium tabular-nums text-ink-10">{scale}</span>
           {current ? (
-            <span className="rounded-full bg-surface-43 px-2 py-0.5 font-sans text-[12px] font-semibold uppercase tracking-[0.05em] text-ink-27">
+            <span className="rounded-full bg-surface-43 px-2 py-0.5 font-sans text-label font-semibold uppercase tracking-[0.05em] text-ink-27">
               {t('retention.ranks.you_are_here')}
             </span>
           ) : null}
@@ -144,7 +144,7 @@ function YourPosition({ summary }: { summary: NonNullable<ReturnType<typeof useV
       <div className="flex items-center gap-4">
         <LeagueEmblem tier={summary.rank.tier} size="popover" />
         <div className="min-w-0 flex-1">
-          <p className="font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-[0.06em] text-ink-14">
+          <p className="font-sans text-label font-semibold uppercase tracking-[0.06em] text-ink-14">
             {t('retention.ranks.your_position')}
           </p>
           <p className="mt-0.5 font-sans text-[22px] font-semibold leading-[28px] text-ink-2">

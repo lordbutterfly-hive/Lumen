@@ -23,8 +23,8 @@ export default function PriceCardHbd() {
   return (
     <div className={CARD_CLASS} data-testid="wallet-price-hbd">
       <div className="font-sans text-[24px] font-bold tabular-nums text-ink-2">$1.000</div>
-      <div className="mt-1.5 text-[13px] leading-[20px] text-ink-10">{t('wallet.market.hbd_price_label')}</div>
-      <div className="mt-1.5 text-[12px] text-ink-14">
+      <div className="mt-1.5 text-caption text-ink-10">{t('wallet.market.hbd_price_label')}</div>
+      <div className="mt-1.5 text-caption text-ink-14">
         {/* ★ Loading is not a failure (2026-08-17). This said "Price unavailable"
             for the whole of a healthy fetch — a verdict rendered before any
             evidence. Only a real error earns that word now. */}

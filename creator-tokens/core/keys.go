@@ -15,6 +15,18 @@ func kOwner() string    { return "owner" }    // platform owner (bound to contra
 func kTreasury() string { return "treasury" } // where commission + subscription land
 func kPaused() string   { return "paused" }   // global inbound pause (outflows never pause)
 
+// kPendingOwner — F19 DEFECT FIX (2026-08-19): the 2-step ownership-transfer
+// candidate slot (contract/main.go's `changeOwner`/`acceptOwnership`
+// entrypoints). Documented here for the same reason kOwner()/kTreasury()/
+// kPaused() are — a single source of truth for every global (non-"m|"-
+// prefixed) key this contract writes — even though, like kOwner() itself, no
+// core function reads or writes it: owner rotation is wrapper-level identity
+// plumbing, not fund-critical business logic, so it lives in contract/main.go
+// exactly where Init already bootstraps "owner" directly. Absent (empty)
+// means no transfer is in flight, the same "missing means the zero value"
+// convention every other accessor in this package follows.
+func kPendingOwner() string { return "pendingOwner" }
+
 // ---- per-market config ----
 
 func mk(c, field string) string { return "m|" + c + "|" + field }
@@ -87,6 +99,30 @@ func kDelinquentUntil(c string) string { return mk(c, "ddu") } // block until wh
 // same window, and that window is the one the creator's most recent offence
 // earned.
 func kMaxOffenceUntil(c string) string { return mk(c, "dou") }
+
+// kConvictionStreak / kLastConvictionEnd — the anti-RATCHET pair (DEFECT FIX
+// 2026-08-19, PRUNED finding F10).
+//
+// recordMiss resets kDeliveredCount to zero on conviction, deliberately: a
+// served sentence should leave a clean sheet rather than drop the creator back
+// into the same convicting ratio. The emergent consequence nobody had costed is
+// that the NEXT conviction then needs only MinMissesForDelinquency misses again
+// — and the creator cannot rebuild the denominator in the meantime, because a
+// delinquent market refuses Ask. So each round of griefing is at least as cheap
+// as the last: three junk asks, measured at 0.105 HBD net, buy a 7-day total
+// inflow shutdown, forever, for a tenth of an HBD a week.
+//
+// The streak raises the miss FLOOR for a repeat conviction that lands inside
+// ConvictionCooldownBlocks of the last sentence, so the attack gets strictly
+// more expensive each round instead of staying flat. It decays: a creator who
+// serves a sentence and then goes a full cooldown without another conviction is
+// back to the base floor, which keeps the "clean sheet" promise intact.
+//
+// It deliberately does NOT touch the RATE rule (MaxMissBps). A creator who
+// genuinely stops delivering is still convicted on the ratio; what changes is
+// only how many misses a REPEAT conviction needs.
+func kConvictionStreak(c string) string  { return mk(c, "dcs") }
+func kLastConvictionEnd(c string) string { return mk(c, "dce") }
 
 // ---- per-incarnation offering catalogue (N named priced offers, 2026-07-27) ----
 //
@@ -246,6 +282,25 @@ func kBal(c, holder string) string { return "mb|" + c + "|" + holder }
 // the ask module; the key builder lives here so the schema stays in one file.
 func kEscrow(c string, seq uint64) string {
 	return "e|" + c + "|" + strconv.FormatUint(seq, 10)
+}
+
+// em|<creator>|<seq> — the MATURED-bucket portion of one escrow's draw, in
+// credits. Absent (the zero value) means the whole draw came from the maturing
+// family, which is exactly how every escrow written before this key existed
+// behaved, so an old record needs no migration and reads back the old way.
+//
+// ★ A SIDE KEY RATHER THAN A TENTH FIELD IN THE PACKED RECORD, deliberately.
+// ask.go's layout is positional with an exact count check, and a 2026-07-24
+// audit already caught one insertion into it silently shifting every later
+// field. Adding a field would also make every escrow already on chain fail to
+// parse. A separate key changes no existing reader and cannot shift anything.
+//
+// It is "em|" and not "e|<c>|<seq>|m" because harness_test.go and the solvency
+// invariants scan the "e|<creator>|" prefix and feed every hit to unpackEscrow;
+// a second family under that prefix would rely on the parser rejecting it,
+// which is a coupling worth not having.
+func kEscrowMaturedLeg(c string, seq uint64) string {
+	return "em|" + c + "|" + strconv.FormatUint(seq, 10)
 }
 
 // ---- ratings (rating.go, USER RULING 2026-07-28) ----

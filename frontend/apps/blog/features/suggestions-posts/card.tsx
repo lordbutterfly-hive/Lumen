@@ -40,13 +40,13 @@ const SuggestionsCard = ({ entry, variant = 'rail' }: SuggestionsCardProps) => {
               />
             </div>
           ) : (
-            <div className="flex h-24 items-center justify-center bg-background-secondary text-xs text-muted-foreground">
+            <div className="flex h-24 items-center justify-center bg-background-secondary text-caption text-muted-foreground">
               No image
             </div>
           )}
           <div className="p-2">
-            <h2 className="line-clamp-2 text-xs font-semibold">{displayTitle}</h2>
-            <p className="mt-1 truncate text-[12px] leading-[18px] text-muted-foreground">@{displayAuthor}</p>
+            <h2 className="line-clamp-2 text-caption font-semibold">{displayTitle}</h2>
+            <p className="mt-1 truncate text-caption text-muted-foreground">@{displayAuthor}</p>
           </div>
         </Link>
       </div>
@@ -85,13 +85,13 @@ const SuggestionsCard = ({ entry, variant = 'rail' }: SuggestionsCardProps) => {
         <div className="flex min-w-0 flex-1 flex-col">
           <Link
             href={href}
-            className="line-clamp-2 font-sans text-[13px] font-semibold leading-[17px] text-ink-2 hover:underline"
+            className="line-clamp-2 font-sans text-caption font-semibold text-ink-2 hover:underline"
           >
             {displayTitle}
           </Link>
           <Link
             href={`/@${displayAuthor}`}
-            className="mt-0.5 truncate font-sans text-[12px] leading-[16px] text-ink-10 hover:text-ink-brand-6"
+            className="mt-0.5 truncate font-sans text-caption text-ink-10 hover:text-ink-brand-6"
           >
             @{displayAuthor}
           </Link>

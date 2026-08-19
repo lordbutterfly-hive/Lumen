@@ -93,12 +93,12 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
       {c.completionPct !== null ? (
         <div>
           <DeliveryStrip marks={marks} />
-          <div className="text-[13px] leading-[20px] tabular-nums text-ink-7">
+          <div className="text-caption tabular-nums text-ink-7">
             {c.completionPct}% completion rate · {c.answeredCount} of {c.answeredCount + c.missedCount}
             {c.medianResponseBlocks !== null ? ` · usually within ${responseLabel(c.medianResponseBlocks)}` : ''}
           </div>
           {c.avgRating !== null ? (
-            <div className="mt-1 text-[13px] leading-[20px] tabular-nums text-ink-10">
+            <div className="mt-1 text-caption tabular-nums text-ink-10">
               Rated {c.avgRating}/5 by {c.ratingCount} buyer{c.ratingCount === 1 ? '' : 's'}
             </div>
           ) : null}
@@ -106,14 +106,14 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
       ) : (
         // No record YET — this creator simply has not been hired. Deliberately
         // not dressed up as a positive, and it is why they sort last.
-        <div className="rounded-control border border-dashed border-line-11 px-3.5 py-3 text-[13px] leading-[20px] text-ink-14">
+        <div className="rounded-control border border-dashed border-line-11 px-3.5 py-3 text-caption text-ink-14">
           {COPY.recordUnavailable}
         </div>
       )}
 
       <div className="mt-3.5 flex items-center justify-between gap-3 border-t border-line-2 pt-3.5">
-        <span className="text-[13px] leading-[20px] tabular-nums text-ink-10">From {usdWhole(usdFromHbd(c.faceHbd))} per task</span>
-        <span className="text-[12px] tabular-nums text-ink-14">
+        <span className="text-caption tabular-nums text-ink-10">From {usdWhole(usdFromHbd(c.faceHbd))} per task</span>
+        <span className="text-caption tabular-nums text-ink-14">
           Token {usdPrice(usdFromHbd(c.priceHbd))} · cap {usdCompact(usdFromHbd(c.marketCapHbd))}
         </span>
       </div>
@@ -181,7 +181,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
           {[COPY.how1, COPY.how2, COPY.how3].map((line, i) => (
             <div key={i} className="flex gap-3">
               <span className="font-serif font-bold text-ink-brand-6">{i + 1}</span>
-              <span className="text-[13px] leading-[20px] text-ink-7">{line}</span>
+              <span className="text-caption text-ink-7">{line}</span>
             </div>
           ))}
         </div>
@@ -207,7 +207,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
         (any other caller) it stays the h1 it has always been.
       */}
       <PageMasthead title={COPY.title} headingLevel={intro ? 'h2' : 'h1'}>
-        <p className="max-w-[660px] text-[13px] leading-[20px] text-ink-10">{COPY.sub}</p>
+        <p className="max-w-[660px] text-caption text-ink-10">{COPY.sub}</p>
       </PageMasthead>
 
       <div className="my-5 flex flex-wrap items-center justify-between gap-4">
@@ -230,7 +230,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
         </div>
         <button
           onClick={() => setAnswersOnly((v) => !v)}
-          className={`rounded-full border px-[15px] py-2 text-[13px] leading-[20px] font-semibold ${answersOnly ? 'border-line-brand-10 bg-surface-brand-6 text-ink-brand-6' : 'border-line-11 bg-surface-1 text-ink-10 hover:border-line-brand-10'}`}
+          className={`rounded-full border px-[15px] py-2 text-caption font-semibold ${answersOnly ? 'border-line-brand-10 bg-surface-brand-6 text-ink-brand-6' : 'border-line-11 bg-surface-1 text-ink-10 hover:border-line-brand-10'}`}
         >
           {COPY.answers}
         </button>
@@ -241,7 +241,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
           <div className="mb-3.5 flex items-center justify-between">
             <div>
               <div className="text-[15px] leading-[24px] font-bold text-ink-2">{COPY.newHere}</div>
-              <div className="text-[13px] leading-[20px] text-ink-14">{COPY.newHereSub}</div>
+              <div className="text-caption text-ink-14">{COPY.newHereSub}</div>
             </div>
             <button onClick={() => setShowNew(false)} className="cursor-pointer text-xl leading-none text-ink-14">
               ×
@@ -260,8 +260,8 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
                     <div className="text-[15px] leading-[24px] font-bold text-ink-2">@{c.creator}</div>
                   </div>
                 </div>
-                <div className="text-[13px] leading-[20px] font-semibold text-ink-warn-3">{COPY.newNothing}</div>
-                <div className="mt-1.5 text-[13px] leading-[20px] tabular-nums text-ink-10">From {usdWhole(usdFromHbd(c.faceHbd))} per task</div>
+                <div className="text-caption font-semibold text-ink-warn-3">{COPY.newNothing}</div>
+                <div className="mt-1.5 text-caption tabular-nums text-ink-10">From {usdWhole(usdFromHbd(c.faceHbd))} per task</div>
               </Link>
             ))}
           </div>

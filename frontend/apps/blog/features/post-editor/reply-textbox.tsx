@@ -448,13 +448,13 @@ export function ReplyTextbox({
     >
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between rounded-md bg-background-secondary px-3 py-1.5">
-          <span className="text-xs text-muted-foreground">
+          <span className="text-caption text-muted-foreground">
             {editMode ? t('post_content.footer.comment.editing') : t('post_content.footer.comment.replying')}
           </span>
           <Button
             type="button"
             variant="ghost"
-            className="h-auto px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+            className="h-auto px-2 py-1 text-caption text-muted-foreground hover:text-foreground"
             onClick={() => handleCancel()}
           >
             {t('post_content.footer.comment.disable_editor')}
@@ -469,7 +469,7 @@ export function ReplyTextbox({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-auto px-2 py-1 text-xs"
+                className="h-auto px-2 py-1 text-caption"
                 onClick={() => {
                   setText(shadowReplyRecovery.body);
                   saveToStorage(shadowReplyRecovery.body);
@@ -483,7 +483,7 @@ export function ReplyTextbox({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-auto px-2 py-1 text-xs"
+                className="h-auto px-2 py-1 text-caption"
                 onClick={() => {
                   removeStorageItem(shadowReplyRecovery.key);
                   setShadowReplyRecovery(null);
@@ -518,7 +518,7 @@ export function ReplyTextbox({
             placeholder={t('post_content.footer.comment.reply')}
             ariaLabel={t('post_content.footer.comment.reply')}
           />
-          <div className="flex items-center rounded-b-md border-x border-b border-border bg-background-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
+          <div className="flex items-center rounded-b-md border-x border-b border-border bg-background-secondary/50 px-3 py-1.5 text-caption text-muted-foreground">
             {t('post_content.footer.comment.insert_images')} {t('post_content.footer.comment.selecting_them')}
             <TooltipProvider>
               <Tooltip>
@@ -608,7 +608,7 @@ export function ReplyTextbox({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span
-                      className="cursor-help text-xs text-muted-foreground"
+                      className="cursor-help text-caption text-muted-foreground"
                       title={RC_EXPLAINER}
                       data-testid="reply-resource-credits"
                     >
@@ -621,7 +621,7 @@ export function ReplyTextbox({
                       ) : null}
                     </span>
                   </TooltipTrigger>
-                  <TooltipContent className="max-w-[260px] text-xs">{RC_EXPLAINER}</TooltipContent>
+                  <TooltipContent className="max-w-[260px] text-caption">{RC_EXPLAINER}</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             </div>
@@ -633,10 +633,10 @@ export function ReplyTextbox({
 
       <div className="flex flex-col">
         <div className="flex items-center justify-between rounded-t-lg border border-b-0 border-border bg-background-secondary/50 px-3 py-1.5">
-          <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          <span className="text-label font-medium uppercase tracking-wider text-muted-foreground">
             {t('post_content.footer.comment.preview')}
           </span>
-          <div className="flex items-center gap-3 text-xs">
+          <div className="flex items-center gap-3 text-caption">
             {editMode || preferences.comment_rewards === '50%' ? null : (
               <span className="text-muted-foreground">
                 {t('post_content.footer.comment.rewards')}
@@ -666,7 +666,7 @@ export function ReplyTextbox({
           ) : (
             <div className="flex w-full flex-col items-center justify-center gap-2 p-6 text-muted-foreground">
               <Icons.eye className="h-6 w-6 opacity-20" />
-              <span className="text-xs">{t('submit_page.preview_placeholder')}</span>
+              <span className="text-caption">{t('submit_page.preview_placeholder')}</span>
             </div>
           )}
         </div>

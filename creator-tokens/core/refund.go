@@ -359,6 +359,61 @@ func Refund(s Store, caller, creator string, block uint64, credits *big.Int, min
 // The no-op sits behind the phase gate (the guard runs before the balance
 // read), so a zero-balance push outside wind-down is rejected exactly like
 // a nonzero one.
+
+// RefundHolderTaxGateBlocked reports whether RefundHolder(s, caller,
+// creator, holder, block) would be refused by the exit-tax /
+// wind-down-backstop gate below — the SAME predicate, called from both
+// sides, so a caller deciding whether to submit a push can never silently
+// drift from what the chain will actually enforce. It runs only the
+// state-dependent half of the gate: it does not check caller/creator/holder
+// well-formedness or inWindDown (those are unconditional prerequisites
+// RefundHolder still enforces on its own; this function answers ONLY "given
+// that this push were otherwise legal, does the exit-tax gate refuse it").
+//
+// Exported specifically so creator-tokens/keeper's Plan (an off-chain
+// planner that walks a candidate holder list and decides which
+// refundHolder calls are worth submitting) can predict a doomed push and
+// skip it, reusing this exact function rather than re-deriving the rule —
+// see this file's own gate, immediately below RefundHolder's signature, for
+// the full griefing-unprofitable / whale-dodge-closed / never-trapped /
+// liveness argument this predicate encodes.
+// ★ THE BACKSTOP'S OWN else-BRANCH IS PROVABLY UNREACHABLE TODAY (verified
+// 2026-08-19, PRUNED finding F13 — do not re-derive this from scratch).
+// "Reachable" means: can `taxBps != 0` and `block-open >= ExitTaxDecayBlocks`
+// both hold at once, i.e. can the market-level backstop ever actually fire on a
+// real account history rather than a fixture?
+//
+// PROOF: every acqBlock that can enter the system is bounded above by
+// windDownOpenBlock (`open`). Buy and Ask both require RequireInflowOpen
+// (buy.go, ask.go — ACTIVE/OVERDUE only, so both stop no later than `open`);
+// Answer credits the CREATOR with the ASKER's own acqBlock, captured at Ask
+// time and so itself <= open, never reset to `block` (the 2026-07-27
+// token-maturity ruling); TransferCredits carries the sender's own clock,
+// capped and size-weighted-averaged into the recipient's, rather than
+// refreshing it (same ruling, transfer.go). So no account's blended clock can
+// be younger than the newest input it was built from, and every input is
+// <= open. The soonest `block-open >= ExitTaxDecayBlocks` can hold is
+// block == open+ExitTaxDecayBlocks — by which point every account's held time
+// is already >= ExitTaxDecayBlocks, so ExitTaxBpsAt has floored to 0.
+//
+// KEPT ANYWAY, deliberately, as defense-in-depth against a future change that
+// reopens a clock-freshening channel — the same "provably can't happen, kept
+// anyway" idiom settlement.go's C5 tripwire uses. And it is NOT untested, which
+// is where the finding that raised this was wrong:
+// TestRefundHolder_EXITTAXDOS1_TwoAccountBounceBounded (fixround2_test.go,
+// continued in fixround3_test.go for the Retire-ordering case) constructs the
+// worst case directly via dosFreshenClock — a maximally-fresh clock written
+// past every public path, precisely because no organic path reaches it any
+// more — and asserts the sweep still fires exactly at the window boundary.
+func RefundHolderTaxGateBlocked(s Store, creator, holder string, block uint64) bool {
+	taxBps := ExitTaxBpsAt(heldBlocksAt(s, creator, holder, block))
+	if taxBps == 0 {
+		return false
+	}
+	open, ok := windDownOpenBlock(s, creator, block)
+	return !ok || block < open || block-open < ExitTaxDecayBlocks
+}
+
 func RefundHolder(s Store, caller, creator, holder string, block uint64) (*big.Int, error) {
 	if caller == "" {
 		return nil, newErr(ErrAuth, "empty caller")
@@ -438,6 +493,16 @@ func RefundHolder(s Store, caller, creator, holder string, block uint64) (*big.I
 	// "last inflow" is attacker-controlled and free, so the horizon was
 	// unbounded (proven: a 503-day-old retired wind-down still un-closeable).
 	//
+	// STATUS UPDATE (2026-08-19): the bounce vector described above — a transfer
+	// refreshing the RECIPIENT's clock toward `now` on every inflow — was
+	// independently closed by the LATER token-maturity ruling (2026-07-27,
+	// transfer.go/holdclock.go): a transfer now CARRIES the sender's own clock
+	// rather than resetting to fresh, so a bounce is INERT (proven directly by
+	// bounceAssertInert in TestRefundHolder_EXITTAXDOS1_TwoAccountBounceBounded).
+	// The paragraphs above are why this backstop was BUILT and are kept verbatim
+	// as the historical record; they are not evidence it is still needed for THAT
+	// reason today — see the reachability proof above RefundHolderTaxGateBlocked.
+	//
 	// THE ROOT CAUSE is that the eligibility clock was the transfer-refreshable
 	// PERSONAL clock. The fix anchors liveness to a clock NO transfer can touch:
 	// windDownOpenBlock — retiredAt for a Retire (irreversible), or the
@@ -477,14 +542,12 @@ func RefundHolder(s Store, caller, creator, holder string, block uint64) (*big.I
 	// heldBlocksAt now reports a graduated position as fully aged (holdclock.go),
 	// so this reads 0 for a wholly-matured holder without a special case here.
 	taxBps := ExitTaxBpsAt(heldBlocksAt(s, creator, holder, block))
-	if taxBps != 0 {
-		open, ok := windDownOpenBlock(s, creator, block)
-		if !ok || block < open || block-open < ExitTaxDecayBlocks {
-			return nil, newErr(ErrState, "permissionless refundHolder is only available once the holder's exit tax has fully decayed (held >= ExitTaxDecayBlocks) OR the market has been winding down for a full ExitTaxDecayBlocks; a still-taxed holder must choose their own exit via Refund")
-		}
-		// else: the market-level backstop is open — the push fires and taxes the
-		// holder's LIVE clock below (a possibly-nonzero, griefer-refreshed rate).
+	if RefundHolderTaxGateBlocked(s, creator, holder, block) {
+		return nil, newErr(ErrState, "permissionless refundHolder is only available once the holder's exit tax has fully decayed (held >= ExitTaxDecayBlocks) OR the market has been winding down for a full ExitTaxDecayBlocks; a still-taxed holder must choose their own exit via Refund")
 	}
+	// else: taxBps == 0, or the market-level backstop is open — the push
+	// fires and taxes the holder's LIVE clock below (a possibly-nonzero,
+	// griefer-refreshed rate).
 
 	supply := getMoney(s, kSupply(creator))
 	if mIsZero(supply) {

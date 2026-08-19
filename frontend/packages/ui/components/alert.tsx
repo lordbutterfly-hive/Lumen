@@ -29,9 +29,23 @@ const Alert = React.forwardRef<
 ));
 Alert.displayName = 'Alert';
 
+/**
+ * ★★★ `tracking-tight` REPLACED WITH `tracking-title` (2026-08-19, all-Lora).
+ *
+ * Tailwind's `tracking-tight` is -0.025em, and that value was chosen for Open
+ * Sans. Lora has real bracketed serifs and COLLIDES at it — this app has already
+ * proved that once, on the wordmark, where the tracking had to go -0.025em ->
+ * -0.01em the day the wordmark became Lora (`features/layouts/app-header.tsx`:
+ * "a serif with real bracketed serifs collides at that value, and 'Lumen' has an
+ * m-n pair that shows it first").
+ *
+ * `tracking-title` is that same measured -0.01em, now a named token
+ * (`packages/tailwindcss/tailwind.config.js`) so the next display face does not
+ * need this comment written a third time.
+ */
 const AlertTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(
   ({ className, ...props }, ref) => (
-    <h5 ref={ref} className={cn('mb-1 font-medium leading-none tracking-tight', className)} {...props} />
+    <h5 ref={ref} className={cn('mb-1 font-medium leading-none tracking-title', className)} {...props} />
   )
 );
 AlertTitle.displayName = 'AlertTitle';

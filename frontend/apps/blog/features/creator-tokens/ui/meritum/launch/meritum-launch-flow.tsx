@@ -308,12 +308,12 @@ const MeritumLaunchFlow: FC = () => {
     <TokenShell>
       <div className="min-w-0 max-w-[940px]">
         {flow.restoredFromDraft && !live ? (
-          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-meritum-line-card bg-meritum-rail px-4 py-3 text-13 text-meritum-ink-3">
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-meritum-line-card bg-meritum-rail px-4 py-3 text-caption text-meritum-ink-3">
             <span>{t('meritum_launch.draft_restored', { step: flow.step })}</span>
             <button
               type="button"
               onClick={flow.startOver}
-              className="flex-shrink-0 text-13 font-semibold text-meritum-ink-link hover:underline"
+              className="flex-shrink-0 text-caption font-semibold text-meritum-ink-link hover:underline"
             >
               {t('meritum_launch.draft_start_over')}
             </button>
@@ -352,12 +352,12 @@ const MeritumLaunchFlow: FC = () => {
               longer the right frame for what is on screen.
             */}
             {!live && !landing ? (
-              <div className="text-12 font-bold uppercase tracking-[0.14em] text-meritum-ink-faint">
+              <div className="text-label font-bold uppercase tracking-[0.14em] text-meritum-ink-faint">
                 {t('meritum_launch.step_indicator', { step: flow.step })}
               </div>
             ) : null}
             {header.eyebrow ? (
-              <span className="mt-2 inline-block text-12 font-bold uppercase tracking-[0.18em] text-meritum-ink-brand">
+              <span className="mt-2 inline-block text-label font-bold uppercase tracking-[0.18em] text-meritum-ink-brand">
                 {header.eyebrow}
               </span>
             ) : null}

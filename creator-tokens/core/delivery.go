@@ -118,7 +118,7 @@ func recordMiss(s Store, creator, asker string, offenceBlock uint64) {
 	setU64(s, kMaxOffenceUntil(creator), offenceUntil)
 
 	delivered := getU64(s, kDeliveredCount(creator))
-	if !overMissThreshold(misses, delivered) {
+	if !overMissThreshold(misses, delivered, missFloor(s, creator, offenceBlock)) {
 		return
 	}
 	// Serve one fixed penalty window and RESET the counters. The reset is what
@@ -144,12 +144,37 @@ func recordMiss(s Store, creator, asker string, offenceBlock uint64) {
 	setU64(s, kMissCount(creator), 0)
 	setU64(s, kDeliveredCount(creator), 0)
 	setU64(s, kMaxOffenceUntil(creator), 0)
+
+	// ANTI-RATCHET (2026-08-19, F10): record that a sentence was served, so the
+	// NEXT one inside the cooldown needs proportionally more misses. Without
+	// this the reset above — which exists to give a clean sheet — also hands an
+	// attacker a permanently flat price for the same shutdown, because the
+	// creator cannot rebuild the denominator while their market refuses Ask.
+	streak := uint64(1)
+	if offenceBlock < getU64(s, kLastConvictionEnd(creator))+ConvictionCooldownBlocks {
+		streak = getU64(s, kConvictionStreak(creator)) + 1
+	}
+	setU64(s, kConvictionStreak(creator), streak)
+	setU64(s, kLastConvictionEnd(creator), until)
+}
+
+// missFloor is MinMissesForDelinquency for a first offence, and rises with the
+// conviction streak for a repeat that lands inside the cooldown. See
+// kConvictionStreak for why the floor is the right lever and the rate is not.
+func missFloor(s Store, creator string, offenceBlock uint64) uint64 {
+	if offenceBlock >= getU64(s, kLastConvictionEnd(creator))+ConvictionCooldownBlocks {
+		return MinMissesForDelinquency
+	}
+	streak := getU64(s, kConvictionStreak(creator))
+	// streak+1 is the sentence this offence would BE, so the second conviction
+	// needs 2x the floor, the third 3x, and so on.
+	return MinMissesForDelinquency * (streak + 1)
 }
 
 // overMissThreshold is the whole judgement, in one place, on integers only:
 // enough misses to be a sample, and a miss RATE above the ruled ceiling.
-func overMissThreshold(misses, delivered uint64) bool {
-	if misses < MinMissesForDelinquency {
+func overMissThreshold(misses, delivered, floor uint64) bool {
+	if misses < floor {
 		return false
 	}
 	resolved := misses + delivered

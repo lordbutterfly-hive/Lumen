@@ -38,9 +38,10 @@ const ISSUE_KEYS: Record<ImageIssue, string> = {
 
 /**
  * "What's on your mind?" compose box near the top of the home feed. At rest it is
- * a single-line card (avatar + placeholder + ink Post button, all Open Sans per
- * design-handoff-v2 — no serif display face); clicking it expands into the real
- * editor surface.
+ * a single-line card (avatar + placeholder + ink Post button, all Lora — the
+ * product's only typeface since 2026-08-19; this used to read "all Open Sans per
+ * design-handoff-v2 — no serif display face", and both halves of that are now
+ * false); clicking it expands into the real editor surface.
  *
  * ★★★ "POST" POSTS. FOR EVERY ACCOUNT TIER. THAT IS THE WHOLE CONTRACT.
  * The tier decides which machinery runs (`useNotePublish`), never whether a post
@@ -415,7 +416,7 @@ export default function ShortFormComposer() {
       {overLimit ? (
         // ★ `ink-brand-6`, not `#c0392b` (2026-08-14 token-migration pass).
         <p
-          className="mt-2 pl-[56px] font-sans text-[13px] text-ink-brand-6"
+          className="mt-2 pl-[56px] font-sans text-caption text-ink-brand-6"
           data-testid="short-form-composer-over-limit"
         >
           {t('short_form_composer.over_limit', {
@@ -425,7 +426,7 @@ export default function ShortFormComposer() {
         </p>
       ) : null}
       {error ? (
-        <p className="mt-2 pl-[56px] font-sans text-[13px] text-ink-brand-6" data-testid="short-form-composer-error">
+        <p className="mt-2 pl-[56px] font-sans text-caption text-ink-brand-6" data-testid="short-form-composer-error">
           {error}
         </p>
       ) : null}

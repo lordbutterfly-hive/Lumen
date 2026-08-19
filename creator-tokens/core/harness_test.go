@@ -759,7 +759,7 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 
 	// ---- TRANSFER CREDITS (pre-lapse) ----
 	beforeTransfer := hzReserves(s, creators)
-	hzMustOK(t, TransferCredits(s, alice, "holdertwo", "holderfour", pb, big.NewInt(200)), "TransferCredits")
+	hzMustOK(t, TransferCredits(s, "holdertwo", alice, "holdertwo", "holderfour", pb, big.NewInt(200)), "TransferCredits")
 	hzAssertReserveDeltas(t, s, creators, beforeTransfer, nil, "post-TransferCredits")
 	hzAssertI3(t, s, alice, "post-TransferCredits")
 
@@ -1099,7 +1099,7 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 	t.Run("TransferCredits_stillWorks", func(t *testing.T) {
 		hzAssertPhase(t, s, creator, frozenTestBlock, StateFrozen, "precondition")
 		before := BalanceOf(s, creator, "holderc") // remainder after the 400 refund above
-		hzMustOK(t, TransferCredits(s, creator, "holderc", "holderd", frozenTestBlock, big.NewInt(100)), "TransferCredits while FROZEN")
+		hzMustOK(t, TransferCredits(s, "holderc", creator, "holderc", "holderd", frozenTestBlock, big.NewInt(100)), "TransferCredits while FROZEN")
 		after := BalanceOf(s, creator, "holderc")
 		if new(big.Int).Sub(before, after).Cmp(big.NewInt(100)) != 0 {
 			t.Fatalf("holderc balance moved by %s, want -10000", new(big.Int).Sub(after, before))

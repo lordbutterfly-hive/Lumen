@@ -118,7 +118,7 @@ export function MeritumTicker({
       {showLive ? (
         <div className={styles.live}>
           <span className={clsx(styles.dot, 'mt-dot bg-meritum-surface-brand')} aria-hidden="true" />
-          <span className="font-sans text-12 font-bold uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
+          <span className="font-sans text-label font-bold uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
             {liveLabel}
           </span>
           {/*

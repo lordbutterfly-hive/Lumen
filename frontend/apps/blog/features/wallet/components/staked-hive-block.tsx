@@ -13,9 +13,9 @@ import DelegatedOutPanel from './delegated-out-panel';
 
 // W-2/W-3: both were rounded-control, and Stake was bg-surface-ok-7.
 const STAKE_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-card bg-surface-brand-12 px-[15px] py-2 text-[13px] leading-[20px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
+  'flex items-center gap-1.5 rounded-card bg-surface-brand-12 px-[15px] py-2 text-caption font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
 const UNSTAKE_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-card border border-line-11 bg-surface-1 px-[15px] py-2 text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
+  'flex items-center gap-1.5 rounded-card border border-line-11 bg-surface-1 px-[15px] py-2 text-caption font-semibold text-ink-7 transition-colors hover:bg-surface-16';
 
 export default function StakedHiveBlock({
   username,
@@ -55,10 +55,10 @@ export default function StakedHiveBlock({
           <div className="mb-1 flex items-center gap-2">
             <span className="text-[15px] leading-[24px] font-bold text-ink-4">{t('wallet.staked.title')}</span>
             {/* ink-8 not ink-10: #6b7280 on the #f1f3f5 chip ground is 4.35:1, under the 4.5:1 AA floor. ink-8 is 6.79:1 on the same ground. Same fix as the REP pill on the profile (2026-08-16). */}
-            <span className="rounded-control bg-surface-23 px-2 py-[2px] text-[12px] font-bold text-ink-8">
+            <span className="rounded-control bg-surface-23 px-2 py-[2px] text-caption font-bold text-ink-8">
               {t('wallet.staked.badge')}
             </span>
-            <span className="rounded-control bg-surface-ok-5 px-2 py-[2px] text-[12px] font-bold text-ink-ok-2">
+            <span className="rounded-control bg-surface-ok-5 px-2 py-[2px] text-caption font-bold text-ink-ok-2">
               {t('wallet.staked.apr', { apr: hpApr.toFixed(2) })}
             </span>
           </div>
@@ -67,7 +67,7 @@ export default function StakedHiveBlock({
           {powerDown.isActive ? (
             <div
               // W-3: was rounded-control. A notice is a row; rows are 14px.
-              className="mt-2.5 flex items-center gap-2.5 rounded-card border border-line-warn-2 bg-surface-warn-3 px-3 py-2.5 text-[13px] leading-[20px] text-ink-warn-2"
+              className="mt-2.5 flex items-center gap-2.5 rounded-card border border-line-warn-2 bg-surface-warn-3 px-3 py-2.5 text-caption text-ink-warn-2"
               data-testid="wallet-power-down-notice"
             >
               <Icons.warning className="h-[15px] w-[15px] shrink-0 text-ink-warn-7" />
@@ -83,7 +83,7 @@ export default function StakedHiveBlock({
                 trigger={
                   <button
                     type="button"
-                    className="shrink-0 rounded-control border border-line-brand-6 bg-surface-1 px-2.5 py-[2px] text-[12px] leading-[18px] font-bold text-ink-brand-6 hover:bg-surface-brand-4"
+                    className="shrink-0 rounded-control border border-line-brand-6 bg-surface-1 px-2.5 py-[2px] text-caption font-bold text-ink-brand-6 hover:bg-surface-brand-4"
                     data-testid="wallet-stop-power-down"
                   >
                     {t('wallet.staked.stop')}
@@ -107,7 +107,7 @@ export default function StakedHiveBlock({
                 above, because it subtracts delegated-out HP). Both surfaces now
                 use `profile.stats.hp_effective` and the wallet's 3-decimal token
                 format. See features/account-profile/redesign/profile-stats-bar.tsx. */}
-            <div className="text-[12px] tabular-nums text-ink-14" data-testid="wallet-hp-effective">
+            <div className="text-caption tabular-nums text-ink-14" data-testid="wallet-hp-effective">
               {t('profile.stats.hp_effective', { value: formatTokenAmount(netHp) })}
             </div>
           </div>

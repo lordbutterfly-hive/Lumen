@@ -3,6 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { STATE_QUERY, STATE_QUERY_HEX, HEAD_QUERY } from '@/blog/features/creator-tokens/lib/vsc/reads';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceMagiGqlRate } from '@/blog/lib/lite/antispam/rate-limit';
+import { consumeLocalGlobal, consumeLocalPerIp } from '@/blog/lib/lite/antispam/local-rate-limit';
 import { cachedRead } from '@/blog/lib/server-read-cache';
 import { withRetry } from '@transaction/lib/retry';
 
@@ -161,13 +162,48 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // route works whether or not the lite-accounts Postgres backend is provisioned, so
   // a limiter-store outage must not take chain reads offline — only the limiter falls
   // open, not the allowlist or the upstream-config check above.
+  // ★ GLOBAL CEILING FIRST (audit anomaly AN-34, 2026-08-19). A per-IP cap of
+  // any kind is defeated by using more IPs, so nothing here bounded how much
+  // this server could amplify against the Magi node in total. This does, and it
+  // applies on every request rather than only when the durable limiter is
+  // unwell. See lib/lite/antispam/local-rate-limit.ts for the sizing argument.
+  if (!consumeLocalGlobal('creator_tokens_gql')) {
+    logger.warn('creator-tokens gql proxy: global in-process ceiling hit — shedding load');
+    return NextResponse.json({ errors: [{ message: 'rate limited' }] }, { status: 429 });
+  }
+
+  const ip = getClientIp(req);
   try {
-    if (!(await enforceMagiGqlRate(getClientIp(req), 'creator_tokens'))) {
+    if (!(await enforceMagiGqlRate(ip, 'creator_tokens'))) {
       return NextResponse.json({ errors: [{ message: 'rate limited' }] }, { status: 429 });
     }
-  } catch {
-    /* limiter unavailable — proceed */
+  } catch (err) {
+    // ★ NO LONGER A BARE FAIL-OPEN (AN-34). This used to be
+    // `catch { /* limiter unavailable — proceed */ }`, which meant that with
+    // the lite-accounts Postgres backend down — or simply never provisioned —
+    // the per-IP cap was not degraded but ABSENT, and this route was
+    // completely unbounded per caller. The original reasoning was right that a
+    // store outage must not take chain reads offline; what it missed is that
+    // "best effort" then means "no effort" in exactly the conditions a limiter
+    // is for.
+    //
+    // The durable counter stays authoritative. This only takes over when it
+    // cannot answer, and it is honestly weaker: per-process, resets on deploy.
+    // A floor, not a replacement.
+    if (!consumeLocalPerIp(ip, 'creator_tokens_gql')) {
+      return NextResponse.json({ errors: [{ message: 'rate limited' }] }, { status: 429 });
+    }
+    logger.warn({ err }, 'creator-tokens gql proxy: durable rate limiter unavailable, using in-process fallback');
   }
+
+  // ★ NO SESSION CHECK HERE, DELIBERATELY — recorded so it is not re-raised as
+  // an oversight (it was, in the 2026-08-19 audit ledger, as half of AN-34).
+  // This proxy serves PUBLIC chain reads to the token pages, which logged-out
+  // visitors are meant to see; gating it on a session would break anonymous
+  // browsing of every creator's market. It would also buy very little: sessions
+  // are free to create, so an attacker gets one as easily as an IP. The
+  // defensible bound on a public read proxy is the allowlist + the size caps +
+  // the rate limits above, and that is what this route relies on.
 
   // ★★★ A 3-SECOND MEMO OF *SUCCESSFUL* READS, KEYED ON THE FULL BODY (2026-08-13).
   //

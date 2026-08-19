@@ -222,69 +222,72 @@ func twapWindowRead(s Store, creator string, block uint64, cfg twapRingCfg) (*bi
 	if block < oldest {
 		return nil, newErr(ErrInput, "query block precedes oldest observation")
 	}
-	// STALENESS NO LONGER REFUSES ONCE A MARKET HAS BOOTSTRAPPED (owner ruling,
-	// 2026-08-12: "8 samples is fine for start but from there it should track
-	// only average price, no trade numbers should matter").
+	// STALENESS REFUSAL. Disabled 2026-08-12, RE-WIRED 2026-08-19 at a widened
+	// horizon. History kept below so nobody re-derives the same argument from
+	// scratch and re-disables it.
 	//
-	// WHAT THIS USED TO DO: refuse when the newest sample was older than
-	// cfg.maxStale, on the reasoning that "a market silent for a week would
-	// still price off week-old data".
+	// 2026-08-12 (owner ruling, adversarial finding S-2): this block used to
+	// refuse whenever the newest sample was older than cfg.maxStale
+	// (MaxStaleBlocks, then 3 days), on the reasoning that "a market silent
+	// for a week would still price off week-old data". That reasoning was
+	// itself wrong (it assumed a stale window implies an unchanged supply,
+	// which does not follow — RecordObs is rate-limited, so a trade inside
+	// the current sampling interval moves supply and writes no observation),
+	// but the PRACTICAL problem was simpler: 3 days fired on ordinary
+	// conditions, closing a quiet creator's shop for as long as nobody
+	// happened to trade — the "stalls indefinitely" failure the owner ruled
+	// out ("8 samples is fine for start but from there it should track only
+	// average price, no trade numbers should matter"). The fix at the time
+	// stopped consulting cfg.maxStale entirely, leaving MaxStaleBlocks
+	// assigned into the struct but read by nothing.
 	//
-	// WHY IT WAS REMOVED. In an ordinary price oracle, staleness means the
-	// OUTSIDE WORLD moved while the feed did not. This oracle has no outside
-	// world: the token's price is the bonding curve, a pure function of supply,
-	// and settlement is min(TWAP_short, TWAP_long, spot) where spot is always
-	// exactly current — so an old average can never price ABOVE the live curve.
-	// Refusing on staleness therefore did not protect a buyer from a high price;
-	// it closed a quiet creator's shop for as long as nobody happened to trade,
-	// which is the "stalls indefinitely" failure the owner ruled out.
+	// THE GAP THAT LEFT, MEASURED: with staleness unconsulted, an observation
+	// of ANY age priced successfully — an observation 36,500 days (100 years)
+	// old was accepted, rate unchanged. The only remaining bound was
+	// settlement.go's RULING C5 divergence tripwire (DivergenceRateMultiple =
+	// 4): backing-per-token may diverge from the settlement rate by up to a
+	// measured 4.0x before that refuses. (This comment previously said
+	// "roughly 8x" here — that was never right; DivergenceRateMultiple's own
+	// doc in params.go has always said 4.) A market could therefore sit at a
+	// real 4x overcharge ceiling on data of unbounded age, with no
+	// self-repair at all.
 	//
-	// ⚠ WHAT THIS COMMENT USED TO CLAIM, AND WHY IT WAS WRONG (corrected
-	// 2026-08-12 after an adversarial scrutiny pass, finding S-2). It asserted
-	// that "a stale window IMPLIES AN UNCHANGED SUPPLY", on the grounds that the
-	// only kSupply writers reachable while an ask can be created are buy.go and
-	// sell.go, both of which call RecordObs. The writer enumeration is correct
-	// (buy.go:167, sell.go:389, and refund.go:310/:520 which are inWindDown-
-	// gated) — but the conclusion does NOT follow, because RecordObs is
-	// RATE-LIMITED: a trade landing inside the current sampling interval
-	// (ShortObsSpacing / LongObsSpacing, see RecordObs above) moves supply and
-	// writes NO observation. So supply CAN move while the window stands still.
+	// THE RE-WIRE: MaxStaleBlocks is now WEEKS, not days — params.go sets it
+	// to 42 days (6 weeks), reusing this file's own ExitTaxDecayBlocks scale
+	// (the exit-tax hold clock already treats 6 weeks as "fully aged") rather
+	// than inventing a new number. 6 weeks sits far above the 3-day setting
+	// that caused the 2026-08-12 rollback — a market quiet for days, or even
+	// a couple of weeks, is unaffected — while still bounding data that is
+	// genuinely ancient.
 	//
-	// THE RESIDUAL THIS LEAVES, STATED HONESTLY: a window can genuinely lag the
-	// curve, and settlement can escrow more tokens than honest pricing would
-	// (measured: an ask escrowing 100 tokens where the live price implies 12).
-	// That divergence is PRE-EXISTING — the rate limiter, not this change,
-	// creates it — and it stays bounded by the C5 face-band tripwire
-	// (settlement.go) at roughly 8x. What this change removed is the
-	// SELF-REPAIR: previously a sufficiently stale window refused until fresh
-	// samples arrived, so the divergence healed itself; now it does not. Accepted
-	// on the owner's ruling, because the alternative was a shop that never opens.
-	// If that trade is ever revisited, a bounded backstop at a much larger
-	// horizon (weeks, not the 3 days maxStale encoded) is the shape to add — it
-	// restores self-repair without reintroducing the stall.
+	// WHO IS HURT, STATED HONESTLY: a fully-subscribed market with zero
+	// Buy/Sell activity for 6+ weeks has its Ask (service purchase) path
+	// refuse until a fresh sample lands. This is SELF-HEALING and cheap:
+	// RecordObs is written by every Buy/Sell (buy.go, sell.go), not by Ask,
+	// so one dust-sized trade by anyone — including the creator — writes a
+	// fresh observation and un-refuses every later Ask. No outflow is ever
+	// gated (settlement is inflow-only; TestSettlementRefusalGatesNoOutflow),
+	// so a refusal here never traps an existing balance — it only delays a
+	// NEW purchase until the market shows one sign of life.
 	//
-	// WHAT STILL GATES: the bootstrap requirement is UNCHANGED and still above
-	// (cfg.minCount distinct-block samples) and below (cfg.minSpan window span
-	// and accumulated un-clamped weight). Observations persist in the ring —
-	// nothing ages them out, and only Register clears the live set — so a market
-	// that has ONCE satisfied count+span continues to satisfy them while quiet.
-	// That is precisely "bootstrap once, then track the average": no separate
-	// latch key is needed, because the count+span gate IS the latch.
-	// The per-sample dwell clamp (cfg.maxWeight), the median deviation bound
-	// (MaxRateDeviationBps) and the positive-rate checks all still apply, and
-	// settlement still takes min(short, long, spot) with spot always exactly
-	// current — so an old average can never price ABOVE the live curve.
+	// WHAT ELSE STILL GATES (unchanged by any of this): the bootstrap
+	// requirement above (cfg.minCount distinct-block samples) and below
+	// (cfg.minSpan window span and accumulated un-clamped weight).
+	// Observations persist in the ring — nothing ages them out except this
+	// check, and only Register clears the live set — so a market that has
+	// ONCE satisfied count+span keeps satisfying them while quiet; the
+	// count+span gate IS the bootstrap latch. The per-sample dwell clamp
+	// (cfg.maxWeight), the median deviation bound (MaxRateDeviationBps), and
+	// C5 all still apply on top of this.
 	//
-	// cfg.maxStale is retained on the struct and still consulted by nothing
-	// else; it is left in place deliberately so the constant, its rationale and
-	// the FE's `stale` QuoteOracleStatus branch stay greppable rather than
-	// silently deleted.
-	//
-	// The `block < newest` regression case this block used to reach on its way
-	// to the staleness test is NOT lost: the weighting loop below already
-	// refuses it for the newest point (`i == len(points)-1`) with the identical
-	// ErrInput. No second check is added here, to keep exactly one refusal site
-	// per condition.
+	// The `block < newest` regression case is deferred to the weighting loop
+	// below (`i == len(points)-1`, identical ErrInput) rather than duplicated
+	// here, to keep exactly one refusal site per condition.
+	newest := points[len(points)-1].block
+	if block > newest && block-newest > cfg.maxStale {
+		return nil, newErr(ErrOracle, "newest observation exceeds the maximum staleness horizon")
+	}
+
 	windowBlocks := block - oldest
 	if windowBlocks < cfg.minSpan {
 		return nil, newErr(ErrOracle, "observations span less than the minimum window")

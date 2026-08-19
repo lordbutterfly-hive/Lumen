@@ -74,11 +74,15 @@ export async function checkSessionValidity(user: LumenUser, ref: SessionRef): Pr
  *   Compared against the live row by {@link checkSessionValidity}. Routes pass their
  *   iron `session` straight in — it satisfies the shape.
  */
-export async function checkLiteActor(sessionUser: User | undefined, ref: SessionRef): Promise<ActorCheck> {
+export async function checkLiteActor(
+  sessionUser: User | undefined,
+  ref: SessionRef,
+  options: { allowUpgraded?: boolean } = {}
+): Promise<ActorCheck> {
   if (!sessionUser?.userId || sessionUser.account_tier !== 'lite') {
     return { ok: false, status: 401, code: 'unauthorized', message: 'Not signed in as a lite account.' };
   }
-  return checkLiteActorById(sessionUser.userId, ref);
+  return checkLiteActorById(sessionUser.userId, { ...ref, ...options });
 }
 
 /**

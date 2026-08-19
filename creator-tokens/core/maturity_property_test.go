@@ -452,7 +452,7 @@ func TestP2_NoManufacture_AgeWeightLedger(t *testing.T) {
 				if amt.Cmp(bal) > 0 {
 					amt.Set(bal)
 				}
-				if err := TransferCredits(w.s, c, h, to, w.block, amt); err != nil {
+				if err := TransferCredits(w.s, h, c, h, to, w.block, amt); err != nil {
 					t.Fatalf("run %d op %d: TransferCredits rejected: %v", run, op, err)
 				}
 				what = "TransferCredits"
@@ -651,7 +651,7 @@ func TestP3_NoDestruction_TransferToEmptyPreservesRateExactly(t *testing.T) {
 		creditInflow(s, c, "owner", bal, acq)
 		senderRateBefore := mpRate(s, c, "owner", T)
 
-		if err := TransferCredits(s, c, "owner", "alt", T, amt); err != nil {
+		if err := TransferCredits(s, "owner", c, "owner", "alt", T, amt); err != nil {
 			t.Fatalf("iter %d: TransferCredits rejected: %v", i, err)
 		}
 
@@ -704,7 +704,7 @@ func TestP3_NoDestruction_SelfCustodySplitCostsAtMostCeilDust(t *testing.T) {
 		// (ii) move k to the holder's OWN alt first, then exit both, same block,
 		// same supply path — so the proceeds telescope to exactly the same total.
 		wB, _ := mk()
-		if err := TransferCredits(wB.s, c, "hodler", "hodler.alt", sellBlock, k); err != nil {
+		if err := TransferCredits(wB.s, "hodler", c, "hodler", "hodler.alt", sellBlock, k); err != nil {
 			t.Fatal(err)
 		}
 		s1, err := Sell(wB.s, "hodler", c, sellBlock, new(big.Int).Sub(N, k))
@@ -768,7 +768,7 @@ func TestP3_NoDestruction_ChainedTransfersBounded(t *testing.T) {
 			if amt.Cmp(bal) > 0 {
 				amt.Set(bal)
 			}
-			if err := TransferCredits(s, c, from, to, block, amt); err != nil {
+			if err := TransferCredits(s, from, c, from, to, block, amt); err != nil {
 				t.Fatalf("iter %d hop %d: %v", i, hop, err)
 			}
 		}
@@ -822,7 +822,7 @@ func TestP4_NoGriefProfit_VictimWorstCaseBounded(t *testing.T) {
 		before := mpRate(s, c, "victim", T)
 		attackerBalBefore := getMoney(s, kBal(c, "attacker"))
 
-		if err := TransferCredits(s, c, "attacker", "victim", T, ba); err != nil {
+		if err := TransferCredits(s, "attacker", c, "attacker", "victim", T, ba); err != nil {
 			t.Fatalf("iter %d: %v", i, err)
 		}
 		after := mpRate(s, c, "victim", T)
@@ -902,7 +902,7 @@ func TestP4_NoGriefProfit_CreatorTaxShareBelowDonationValue(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := TransferCredits(wB.s, c, c, "victim", blkB, g); err != nil {
+		if err := TransferCredits(wB.s, c, c, c, "victim", blkB, g); err != nil {
 			t.Fatal(err)
 		}
 		srB, err := Sell(wB.s, "victim", c, blkB, new(big.Int).Add(V, g))
@@ -1060,7 +1060,7 @@ func TestP6_Bounded_StoredClockWithinWindowAndNotAhead(t *testing.T) {
 				if amt.Cmp(bal) > 0 {
 					amt.Set(bal)
 				}
-				if err := TransferCredits(w.s, c, h, to, w.block, amt); err != nil {
+				if err := TransferCredits(w.s, h, c, h, to, w.block, amt); err != nil {
 					t.Fatalf("run %d op %d: %v", run, op, err)
 				}
 				touched = []string{to}

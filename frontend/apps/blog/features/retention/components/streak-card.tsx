@@ -129,7 +129,7 @@ export function StreakCard({ className, surface = 'rail' }: { className?: string
         </span>
 
         <div className="min-w-0 flex-1">
-          <p className="font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-[0.06em] text-ink-14">
+          <p className="font-sans text-label font-semibold uppercase tracking-[0.06em] text-ink-14">
             {t('retention.streak.title')}
           </p>
           <p
@@ -150,7 +150,7 @@ export function StreakCard({ className, surface = 'rail' }: { className?: string
           first screen on a 390x844 phone (measured 2026-08-09: the first post started at
           y≈786 of 844), which is how a rail widget ends up displacing the feed it is
           meant to sit beside. */}
-      <p className="mt-3 font-sans text-[13px] leading-[20px] text-ink-10" data-testid={tid('rule')}>
+      <p className="mt-3 font-sans text-caption text-ink-10" data-testid={tid('rule')}>
         {days > 0 ? t('retention.streak.rule') : t('retention.streak.rule_zero')}
       </p>
     </section>

@@ -629,6 +629,33 @@ func EvUnpaused(actor string) string {
 	return evOpenActor("unpaused", actor) + `}`
 }
 
+// EvOwnerTransferInitiated / EvOwnerChanged — F19 DEFECT FIX (2026-08-19):
+// the wasm wrapper's owner-rotation pair (contract/main.go's `changeOwner`/
+// `acceptOwnership` entrypoints), added because the platform owner used to be
+// bound write-once at Init with NO path to move it — a lost or compromised
+// owner key permanently locked withdrawTreasury and pause/unpause, both
+// unrecoverable. Two-step, mirroring magi-market's changeOwner/
+// acceptOwnership pattern (magi-market/contract/market.go:787): a 1-step
+// rotation to a typo'd account would be an instant permanent lockout, the
+// exact bug this closes, pointed the other way.
+//
+// NOT indexer-recognized events, same precedent as EvInit/EvPaused/EvUnpaused
+// above: core has no owner-rotation concept of its own (kOwner()/
+// kPendingOwner() are documented key builders core itself never reads or
+// writes), so these exist purely to give the wrapper's logs typed, pinned
+// constructors instead of a hand-built sdk.Log no test can catch drifting.
+func EvOwnerTransferInitiated(currentOwner, pendingOwner string) string {
+	return `{"type":"ownerTransferInitiated","v":` + evU64(evSchemaVersion) +
+		`,"currentOwner":"` + evJSONEscape(currentOwner) + `"` +
+		`,"pendingOwner":"` + evJSONEscape(pendingOwner) + `"}`
+}
+
+func EvOwnerChanged(previousOwner, newOwner string) string {
+	return `{"type":"ownerChanged","v":` + evU64(evSchemaVersion) +
+		`,"previousOwner":"` + evJSONEscape(previousOwner) + `"` +
+		`,"newOwner":"` + evJSONEscape(newOwner) + `"}`
+}
+
 // EvTreasuryWithdrawn — WithdrawTreasury (read.go). Wire shape matches
 // magi-indexer/creator_tokens_mappings.yaml's TreasuryWithdrawnEvent{Actor,Block,Amount} exactly
 // (verified by direct read of that struct and its own doc: "Deliberately no

@@ -1288,7 +1288,32 @@ const PostContent = () => {
                           exactly as it did before. */}
                       <h1
                         className={cn(
-                          'font-sans text-2xl font-extrabold leading-[30px] tracking-tight text-foreground sm:text-3xl sm:leading-[38px]',
+                          // ★★★ THE ONE PLACE WEIGHT 800 ACTUALLY MATTERED (2026-08-19, spec §6).
+                          //
+                          // This was `text-3xl font-extrabold tracking-tight` — 30px at
+                          // weight 800. Lora's wght axis stops at 700 and does NOT
+                          // synthesise, so leaving it would have made the post title
+                          // render at the SAME weight as the 700 text around it while
+                          // still claiming to be heavier: the headline would have got
+                          // quietly LIGHTER, which is the opposite of what the class asks
+                          // for and is invisible in a diff.
+                          //
+                          // The spec's answer is to buy the missing authority on two axes
+                          // that Lora does have: size 30 -> 36 (+20%) and tracking tightened
+                          // to -0.02em to rebuild the density the weight was carrying.
+                          // `text-hero` (36/44) and `tracking-hero` (-0.02em) are exactly
+                          // those values, now named. NOT `-webkit-text-stroke` and not a
+                          // synthetic bold — both fake a weight the file does not have and
+                          // look it.
+                          //
+                          // ★ THE RESPONSIVE STEP IS KEPT. The spec states one value; this
+                          // element has always had two, and 36px is a lot of headline on a
+                          // 390px phone. Mobile takes 28/36 — a proportional bump on the
+                          // old 24px mobile step — and `sm:` upward takes the spec's 36/44.
+                          // `tracking-tight` (-0.025em, tuned for a sans) is gone at both
+                          // widths: it is the value the wordmark had to abandon in August
+                          // when it became Lora, for the same collision reason.
+                          'text-[28px] font-bold leading-[36px] tracking-hero text-foreground sm:text-hero',
                           isNote && 'sr-only'
                         )}
                         data-testid="article-title"
@@ -2099,7 +2124,7 @@ const PostContent = () => {
               error state. */}
           {!!postData && !nsfwHidden && liteRepliesTruncated ? (
             <p
-              className="px-4 py-2 font-sans text-[13px] leading-[20px] text-ink-10"
+              className="px-4 py-2 font-sans text-caption text-ink-10"
               data-testid="lite-replies-truncated"
             >
               {t('post_content.lite_replies_truncated')}

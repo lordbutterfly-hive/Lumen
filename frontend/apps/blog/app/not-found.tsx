@@ -32,8 +32,10 @@ const SECONDARY =
  * back to Wallet, Creators, Witnesses, Proposals or Settings was the browser
  * button.
  *
- * Same two-column shell as `/ranks` (nav + content, no right rail), Lora for the
- * headline, Open Sans for everything else, the brand red for the primary action.
+ * Same two-column shell as `/ranks` (nav + content, no right rail), Lora for
+ * everything, the brand red for the primary action. (It said "Lora for the
+ * headline, Open Sans for everything else" until 2026-08-19; there is no second
+ * family in the product any more.)
  */
 export default function NotFound() {
   return (
@@ -56,7 +58,7 @@ export default function NotFound() {
             vocabulary the rest of the identity uses, and is aria-hidden because
             the headline beside it already says the same thing. */}
         <EmptyStateIllustration name="not-found" size={148} className="mb-6" />
-        <p className="font-sans text-[12px] font-bold uppercase tracking-[0.14em] text-ink-brand-6">
+        <p className="font-sans text-label font-bold uppercase tracking-[0.14em] text-ink-brand-6">
           {COPY.code}
         </p>
         <h1 className="mt-3 max-w-[16ch] font-serif text-[34px] font-bold leading-[44px] text-ink-2">

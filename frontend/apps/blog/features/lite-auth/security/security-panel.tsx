@@ -128,12 +128,12 @@ const MethodRow: FC<{ method: LiteAuthMethod; t: TFunction<'common_blog', undefi
         <span className="block text-[14px] leading-[22px] font-semibold text-ink-2">
           {METHOD_LABEL[method.method] ?? method.method}
           {method.isPrimary ? (
-            <span className="ml-2 rounded-md bg-surface-22 px-1.5 py-0.5 text-[12px] leading-[18px] font-semibold text-ink-8">
+            <span className="ml-2 rounded-md bg-surface-22 px-1.5 py-0.5 text-caption font-semibold text-ink-8">
               {COPY.primary}
             </span>
           ) : null}
         </span>
-        <span className="block truncate font-mono text-[13px] leading-[20px] text-ink-14">
+        <span className="block truncate font-mono text-caption text-ink-14">
           {method.hint ?? ''}
           {method.hint && method.createdAt ? ' · ' : ''}
           {formatDate(method.createdAt, t)}
@@ -383,7 +383,7 @@ const SecurityPanel: FC = () => {
             {atRisk ? COPY.atRisk : COPY.safe}
           </div>
 
-          <h2 className="mt-6 text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-ink-14">
+          <h2 className="mt-6 text-label font-semibold uppercase tracking-wide text-ink-14">
             {COPY.linked}
           </h2>
           <ul className="mt-2 flex flex-col gap-2">
@@ -394,7 +394,7 @@ const SecurityPanel: FC = () => {
         </>
       )}
 
-      <h2 className="mt-7 text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-ink-14">
+      <h2 className="mt-7 text-label font-semibold uppercase tracking-wide text-ink-14">
         {COPY.addTitle}
       </h2>
 
@@ -416,13 +416,13 @@ const SecurityPanel: FC = () => {
           {busy === 'evm' ? COPY.connecting : COPY.addEvm}
         </button>
         {!connectorReady ? (
-          <p className="text-[13px] leading-[20px] text-ink-14">{COPY.connectorMissing}</p>
+          <p className="text-caption text-ink-14">{COPY.connectorMissing}</p>
         ) : null}
 
         {googleLinked ? (
           // M11: Google is already listed above as the linked Primary method —
           // offering it again here as something to add is the same option twice.
-          <p className="text-[13px] leading-[20px] text-ink-14">
+          <p className="text-caption text-ink-14">
             {t('lite_auth.security.google_already_linked')}
           </p>
         ) : googleConfigured() ? (
@@ -434,14 +434,14 @@ const SecurityPanel: FC = () => {
               onError={setError}
             />
           ) : (
-            <p className="text-[13px] leading-[20px] text-ink-14">{COPY.loading}</p>
+            <p className="text-caption text-ink-14">{COPY.loading}</p>
           )
         ) : (
-          <p className="text-[13px] leading-[20px] text-ink-14">{COPY.googleMissing}</p>
+          <p className="text-caption text-ink-14">{COPY.googleMissing}</p>
         )}
       </div>
 
-      <h2 className="mt-8 text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-ink-14">
+      <h2 className="mt-8 text-label font-semibold uppercase tracking-wide text-ink-14">
         {COPY.signOutAllTitle}
       </h2>
       <p className="mt-2 text-[14px] leading-[22px] text-ink-8">{COPY.signOutAllBody}</p>
@@ -476,12 +476,12 @@ const SecurityPanel: FC = () => {
         </button>
       )}
       {signOutAllError ? (
-        <p className="mt-2 text-[13px] leading-[20px] text-destructive">{signOutAllError}</p>
+        <p className="mt-2 text-caption text-destructive">{signOutAllError}</p>
       ) : null}
 
-      {busy === 'google' ? <p className="mt-3 text-[13px] leading-[20px] text-ink-8">{COPY.linking}</p> : null}
-      {done ? <p className="mt-3 text-[13px] leading-[20px] font-medium text-ink-ok-1">{COPY.linkedOk}</p> : null}
-      {error ? <p className="mt-3 text-[13px] leading-[20px] text-ink-warn-3">{error}</p> : null}
+      {busy === 'google' ? <p className="mt-3 text-caption text-ink-8">{COPY.linking}</p> : null}
+      {done ? <p className="mt-3 text-caption font-medium text-ink-ok-1">{COPY.linkedOk}</p> : null}
+      {error ? <p className="mt-3 text-caption text-ink-warn-3">{error}</p> : null}
     </div>
   );
 };

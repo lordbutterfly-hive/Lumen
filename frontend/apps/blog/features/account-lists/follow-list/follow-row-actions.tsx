@@ -242,7 +242,7 @@ export default function FollowRowActions({
               // pass) — rgb(192,57,43), byte-identical to the literal in
               // light mode. `--destructive` renders a visibly different red
               // (rgb(218,43,43)) and is reserved for the vote control only.
-              className="cursor-pointer rounded-control px-2.5 py-2 text-[13px] leading-[20px] font-medium text-ink-brand-6 focus:bg-[#fdf2f0] focus:text-ink-brand-6"
+              className="cursor-pointer rounded-control px-2.5 py-2 text-caption font-medium text-ink-brand-6 focus:bg-[#fdf2f0] focus:text-ink-brand-6"
               data-testid="follow-row-block-menu-item"
             >
               {block.isBlocking
@@ -256,7 +256,7 @@ export default function FollowRowActions({
             // `profile-actions.tsx` gives it.
             <DropdownMenuItem
               disabled
-              className="cursor-not-allowed rounded-control px-2.5 py-2 text-[13px] leading-[20px] font-medium focus:bg-[#faf9f8]"
+              className="cursor-not-allowed rounded-control px-2.5 py-2 text-caption font-medium focus:bg-[#faf9f8]"
               data-testid="follow-row-block-menu-item-unknown"
               title={t('user_profile.block_status_unknown_hint')}
             >
@@ -269,7 +269,7 @@ export default function FollowRowActions({
               setMenuOpen(false);
               void copyProfileLink();
             }}
-            className="flex cursor-pointer items-center gap-2 rounded-control px-2.5 py-2 text-[13px] leading-[20px] font-medium text-[#3f4650] focus:bg-[#faf9f8] focus:text-[#161511]"
+            className="flex cursor-pointer items-center gap-2 rounded-control px-2.5 py-2 text-caption font-medium text-[#3f4650] focus:bg-[#faf9f8] focus:text-[#161511]"
             data-testid="follow-row-copy-link"
           >
             <Icons.link className="h-4 w-4" />

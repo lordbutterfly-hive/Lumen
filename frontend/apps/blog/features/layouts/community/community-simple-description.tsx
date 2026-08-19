@@ -82,7 +82,7 @@ const CommunitySimpleDescription = ({
       </div>
 
       {/* Stats Row */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption sm:text-sm">
         <SubsListDialog
           title={data.title}
           subs={subs}
@@ -118,7 +118,7 @@ const CommunitySimpleDescription = ({
       </div>
 
       {/* About */}
-      {data.about ? <p className="text-xs text-muted-foreground sm:text-sm">{data.about}</p> : null}
+      {data.about ? <p className="text-caption text-muted-foreground sm:text-sm">{data.about}</p> : null}
     </Card>
   );
 };

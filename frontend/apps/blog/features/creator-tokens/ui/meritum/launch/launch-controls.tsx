@@ -50,7 +50,7 @@ export const BackAction: FC<{ label: string; onClick: () => void }> = ({ label, 
   <button
     type="button"
     onClick={onClick}
-    className="border-0 bg-transparent text-13 font-semibold text-meritum-ink-muted transition-colors hover:text-meritum-ink"
+    className="border-0 bg-transparent text-caption font-semibold text-meritum-ink-muted transition-colors hover:text-meritum-ink"
   >
     {label}
   </button>

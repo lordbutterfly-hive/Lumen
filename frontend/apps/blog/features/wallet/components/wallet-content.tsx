@@ -8,6 +8,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import DialogLogin from '@/blog/components/dialog-login';
 import PageMasthead from '@/blog/features/layouts/page-masthead';
 import { useWalletAccount } from '../hooks/use-wallet-account';
+import { useTokenAccounts } from '@/blog/features/creator-tokens/live/use-token-accounts';
 import HiveTokenCard from './hive-token-card';
 import HbdTokenCard from './hbd-token-card';
 import SavingsVault from './savings-vault';
@@ -27,7 +28,7 @@ import { useDelegations } from '../hooks/use-delegations';
 const PRIMARY_BUTTON_CLASS =
   'rounded-card bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
 const SECONDARY_BUTTON_CLASS =
-  'lm-press rounded-card border border-line-11 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
+  'lm-press rounded-card border border-line-11 px-4 py-2 text-caption font-semibold text-ink-7 transition-colors hover:bg-surface-16';
 
 /**
  * Center column: fetches the logged-in user's real balances (see
@@ -75,6 +76,21 @@ export default function WalletContent() {
   // than guessing a tier. That is correct: it never shows a lite reader the
   // full-balance UI or a full reader the lite UI, it just waits one beat.
   const isLite = user.account_tier === 'lite';
+  /**
+   * ★ THE WALLET PAGE NOW ASKS WHICH KIND OF LITE ACCOUNT THIS IS (owner, 2026-08-19).
+   *
+   * It used to answer every lite account with one sentence: "No wallet yet - a Lumen
+   * account has no Hive wallet of its own." That is TRUE for a Google-only account and
+   * FLATLY FALSE for someone who signed in with an Ethereum or Bitcoin wallet - the
+   * security page shows them their own address on the same session, while this page told
+   * them they had no wallet at all.
+   *
+   * `useTokenAccounts` is the same source `/wallet/tokens` and the Meritum eligibility
+   * notice already use, so this page stops being the only surface in the app that
+   * believes "wallet" means "Hive wallet".
+   */
+  const tokenAccounts = useTokenAccounts();
+  const walletIdentities = tokenAccounts.accounts.filter((a) => a.kind !== 'hive');
   const { account, figures, dynamicGlobal, isLoading, isError } = useWalletAccount(
     isLite ? '' : user.username
   );
@@ -103,7 +119,7 @@ export default function WalletContent() {
     return (
       <div data-testid="wallet-content-logged-out">
         <PageMasthead title={t('wallet.page_title')}>
-          <p className="max-w-[620px] font-serif text-[13px] leading-[20px] text-ink-10">
+          <p className="max-w-[620px] font-serif text-caption text-ink-10">
             {t('wallet.login_required')}
           </p>
         </PageMasthead>
@@ -120,10 +136,59 @@ export default function WalletContent() {
   // loading status forever (fetchStatus idle), which is the same ordering the
   // logged-out branch above already depends on.
   if (isLite) {
+    /**
+     * ★ THREE STATES, NOT ONE - and the loading one matters. `canHold`/`accounts` default
+     * to empty BEFORE the lookup answers, so rendering the "no wallet" sentence eagerly
+     * would flash "you have nothing" at someone who has a wallet. Same first-paint
+     * mistake `meritum-eligibility.tsx` documents having made once already.
+     */
+    const walletsResolved = !tokenAccounts.isLoading && !tokenAccounts.failed;
+    const hasWallet = walletsResolved && walletIdentities.length > 0;
+
+    if (hasWallet) {
+      return (
+        <div data-testid="wallet-content-lite-wallet">
+          <PageMasthead title={t('wallet.wallet_title')}>
+            <p className="max-w-[620px] font-serif text-caption text-ink-10">
+              {t('wallet.wallet_body')}
+            </p>
+          </PageMasthead>
+          <ul className="mb-5 flex flex-col gap-2" data-testid="wallet-linked-identities">
+            {walletIdentities.map((a) => (
+              <li
+                key={a.id}
+                className="flex items-center justify-between gap-3 rounded-card border border-line-9 bg-surface-1 px-4 py-3"
+              >
+                <span className="flex min-w-0 flex-col">
+                  <span className="font-sans text-[14px] leading-[22px] font-semibold text-ink-2">
+                    {a.kind === 'evm' ? t('wallet.chain_evm') : t('wallet.chain_btc')}
+                  </span>
+                  {/* The address is the account tokens are held under. Shown in full-ish
+                      rather than a friendly label, because it is the thing a reader has to
+                      keep access to. */}
+                  <span className="truncate font-mono text-caption text-ink-10">
+                    {a.address ?? a.id}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link href="/wallet/tokens" className={PRIMARY_BUTTON_CLASS} data-testid="wallet-your-tokens-link">
+              {t('wallet.your_tokens_link')} →
+            </Link>
+            <Link href="/upgrade" className={SECONDARY_BUTTON_CLASS}>
+              {t('wallet.lite_upgrade')}
+            </Link>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div data-testid="wallet-content-lite">
         <PageMasthead title={t('wallet.lite_title')}>
-          <p className="max-w-[620px] font-serif text-[13px] leading-[20px] text-ink-10">
+          <p className="max-w-[620px] font-serif text-caption text-ink-10">
             {t('wallet.lite_body')}
           </p>
         </PageMasthead>
@@ -152,7 +217,7 @@ export default function WalletContent() {
     return (
       <div data-testid="wallet-content-error">
         <PageMasthead title={t('wallet.page_title')}>
-          <p className="text-[13px] leading-[20px] text-destructive">{t('global.something_went_wrong')}</p>
+          <p className="text-caption text-destructive">{t('global.something_went_wrong')}</p>
         </PageMasthead>
       </div>
     );
@@ -162,7 +227,7 @@ export default function WalletContent() {
     return (
       <div data-testid="wallet-content-loading">
         <PageMasthead title={t('wallet.page_title')}>
-          <p className="text-[13px] leading-[20px] text-ink-10">{t('wallet.loading')}</p>
+          <p className="text-caption text-ink-10">{t('wallet.loading')}</p>
         </PageMasthead>
       </div>
     );
@@ -182,7 +247,7 @@ export default function WalletContent() {
           </Link>
         }
       >
-        <p className="max-w-[620px] font-serif text-[13px] leading-[20px] text-ink-10">
+        <p className="max-w-[620px] font-serif text-caption text-ink-10">
           {t('wallet.masthead_meta', { username: user.username })}
         </p>
       </PageMasthead>

@@ -63,13 +63,13 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
       >
         <div className="min-w-0">
           <div className="flex items-center gap-[9px]">
-            <span aria-hidden="true" className="text-[13px] leading-[20px] leading-none text-ink-brand-6">
+            <span aria-hidden="true" className="text-caption leading-none text-ink-brand-6">
               ◈
             </span>
-            <span className="font-sans text-[12px] font-bold uppercase tracking-[0.14em] text-ink-brand-6">
+            <span className="font-sans text-label font-bold uppercase tracking-[0.14em] text-ink-brand-6">
               {COPY.eyebrow}
             </span>
-            <span className="font-sans text-[13px] leading-[20px] font-semibold text-ink-12">@{username}</span>
+            <span className="font-sans text-caption font-semibold text-ink-12">@{username}</span>
           </div>
           <div className="mt-[11px] flex flex-wrap items-baseline gap-3.5">
             <span className="font-sans text-[34px] leading-[52px] font-bold tabular-nums tracking-[-0.02em] text-ink-2">
@@ -89,13 +89,13 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
               {d.completionPct !== null ? (
                 <div className="flex flex-col gap-0.5">
                   <span className="font-sans text-[17px] leading-[26px] font-bold tabular-nums text-ink-2">{d.completionPct}%</span>
-                  <span className="text-[13px] leading-[20px] text-ink-12">{COPY.completionRate}</span>
+                  <span className="text-caption text-ink-12">{COPY.completionRate}</span>
                 </div>
               ) : null}
               {d.typicalResponse ? (
                 <div className="flex flex-col gap-0.5">
                   <span className="font-sans text-[17px] leading-[26px] font-bold tabular-nums text-ink-2">{d.typicalResponse}</span>
-                  <span className="text-[13px] leading-[20px] text-ink-12">{COPY.medianReply}</span>
+                  <span className="text-caption text-ink-12">{COPY.medianReply}</span>
                 </div>
               ) : null}
             </div>
@@ -124,7 +124,7 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
           </span>
           <div>
             <div className="font-sans text-[15px] leading-[24px] font-bold text-ink-2">{COPY.launchTitle}</div>
-            <p className="mt-0.5 font-sans text-[13px] leading-[20px] text-ink-12">{COPY.launchBody}</p>
+            <p className="mt-0.5 font-sans text-caption text-ink-12">{COPY.launchBody}</p>
           </div>
         </div>
         <Link

@@ -68,7 +68,7 @@ export default function ResetAllListsDialog({
           type="button"
           disabled={disabled}
           data-testid="reset-all-lists-trigger"
-          className="font-sans text-xs font-medium text-primary/50 underline-offset-2 transition-colors hover:text-destructive hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+          className="font-sans text-caption font-medium text-primary/50 underline-offset-2 transition-colors hover:text-destructive hover:underline disabled:cursor-not-allowed disabled:opacity-50"
         >
           {t('reset_all_lists_dialog.trigger')}
         </button>
@@ -79,7 +79,7 @@ export default function ResetAllListsDialog({
           <AlertDialogDescription>{t('reset_all_lists_dialog.description')}</AlertDialogDescription>
         </AlertDialogHeader>
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="reset-all-lists-confirm-input" className="text-xs text-primary/60">
+          <label htmlFor="reset-all-lists-confirm-input" className="text-caption text-primary/60">
             {t('reset_all_lists_dialog.type_to_confirm')}
           </label>
           <Input

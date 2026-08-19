@@ -163,12 +163,18 @@ var knownPhases = []string{PhaseActive, PhaseOverdue, PhaseFrozen, PhaseClosed}
 // pattern this codebase's own memory notes call "bespoke devnet=FAST
 // config") produced the trace being analyzed — see cfgU64.
 const (
-	defaultBlocksPerDay        uint64 = 28800
-	defaultSubscriptionPeriod  uint64 = 30 * defaultBlocksPerDay // params.go SubscriptionPeriod
-	defaultGraceBlocks         uint64 = 5 * defaultBlocksPerDay  // params.go GraceBlocks
-	defaultReclaimGrace        uint64 = 1200                     // params.go ReclaimGrace
-	defaultCommissionBps       uint64 = 1200                     // params.go CommissionBps
-	defaultParBaseUnitsPerCred int64  = 1                        // params.go ParBaseUnitsPerCredit
+	defaultBlocksPerDay       uint64 = 28800
+	defaultSubscriptionPeriod uint64 = 30 * defaultBlocksPerDay // params.go SubscriptionPeriod
+	defaultGraceBlocks        uint64 = 5 * defaultBlocksPerDay  // params.go GraceBlocks
+	defaultReclaimGrace       uint64 = 1200                     // params.go ReclaimGrace
+	defaultCommissionBps      uint64 = 1200                     // params.go CommissionBps
+	// defaultParBaseUnitsPerCred (mirroring params.go's ParBaseUnitsPerCredit)
+	// was DELETED here rather than kept: it had zero consumers even within
+	// this package (grep: only its own declaration), mirroring a core
+	// constant that itself had zero non-test consumers and was deleted for
+	// the same reason (params.go's "THERE IS NO ParBaseUnitsPerCredit" note).
+	// There is nothing left in core to mirror.
+	//
 	// defaultMaxExitTaxBps mirrors params.go's MaxExitTaxBps (F8, an
 	// adversarial review): the FRESHEST-hold, worst-case K2 exit tax rate
 	// (exittax.go: "tax(t) = 20% * max(0, 1 - t/6weeks)", so t=0 gives

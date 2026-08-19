@@ -105,7 +105,7 @@ export default function BetForm({ round }: { round: RoundState }) {
                       <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colors[bucket.id] }} aria-hidden="true" />
                       <span className="font-sans text-[14px] leading-[22px] text-ink-4">{bucket.label}</span>
                     </span>
-                    <span className="font-sans text-[13px] leading-[20px] font-bold tabular-nums text-ink-2">{bucket.oddsPct}¢</span>
+                    <span className="font-sans text-caption font-bold tabular-nums text-ink-2">{bucket.oddsPct}¢</span>
                   </button>
                 </li>
               ))}
@@ -125,7 +125,7 @@ export default function BetForm({ round }: { round: RoundState }) {
           </span>
           <span className="text-right">
             <span className="block font-sans text-[15px] leading-[24px] font-bold tabular-nums text-ink-2">{selected.oddsPct}¢</span>
-            <span className="block font-sans text-[12px] leading-[18px] text-ink-14">{t('prediction_market.pool_share')}</span>
+            <span className="block font-sans text-caption text-ink-14">{t('prediction_market.pool_share')}</span>
           </span>
         </div>
       )}
@@ -140,7 +140,7 @@ export default function BetForm({ round }: { round: RoundState }) {
           the unit suffix on hover. */}
       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-3">
         <div className="min-w-0">
-          <div className="mb-1 font-sans text-[13px] leading-[20px] font-semibold text-ink-10">{t('prediction_market.buy_in')}</div>
+          <div className="mb-1 font-sans text-caption font-semibold text-ink-10">{t('prediction_market.buy_in')}</div>
           <div className="flex min-w-0 items-baseline gap-1.5">
             <input
               type="number"
@@ -162,13 +162,13 @@ export default function BetForm({ round }: { round: RoundState }) {
         <Icons.arrowRight className="mb-[7px] h-[22px] w-[22px] shrink-0 text-ink-17" />
 
         <div className="min-w-0 text-right">
-          <div className="mb-1 font-sans text-[13px] leading-[20px] font-semibold text-ink-10">{t('prediction_market.est_payout')}</div>
+          <div className="mb-1 font-sans text-caption font-semibold text-ink-10">{t('prediction_market.est_payout')}</div>
           <div className="truncate font-sans text-[30px] leading-[46px] font-bold tracking-[-0.02em] tabular-nums text-ink-ok-2">
             {estimate > 0 ? fmt(estimate) : '—'}
           </div>
         </div>
       </div>
-      <p className="mt-1.5 text-right font-sans text-[12px] text-ink-14">{t('prediction_market.est_payout_caption')}</p>
+      <p className="mt-1.5 text-right font-sans text-caption text-ink-14">{t('prediction_market.est_payout_caption')}</p>
 
       {/* Amount chips */}
       <div className="mt-4 flex gap-2">
@@ -207,7 +207,7 @@ export default function BetForm({ round }: { round: RoundState }) {
               : t('prediction_market.place_bet')}
       </button>
 
-      <p className="mt-3 text-center font-sans text-[12px] leading-[18px] text-ink-14">{t('prediction_market.fine_print')}</p>
+      <p className="mt-3 text-center font-sans text-caption text-ink-14">{t('prediction_market.fine_print')}</p>
     </div>
   );
 }

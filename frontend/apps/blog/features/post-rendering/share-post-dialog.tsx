@@ -53,7 +53,7 @@ export function SharePost({ children, path, title }: { children: ReactNode; path
   ];
 
   const chip =
-    'flex items-center justify-between gap-2 rounded-control border border-line-9 px-3 py-2 font-sans text-[13px] leading-[20px] text-ink-8 transition-colors hover:border-line-brand-10 hover:bg-surface-brand-5 hover:text-ink-brand-6';
+    'flex items-center justify-between gap-2 rounded-control border border-line-9 px-3 py-2 font-sans text-caption text-ink-8 transition-colors hover:border-line-brand-10 hover:bg-surface-brand-5 hover:text-ink-brand-6';
 
   return (
     <Dialog>
@@ -92,7 +92,7 @@ export function SharePost({ children, path, title }: { children: ReactNode; path
 
         {/* The four networks, moved here from the action row's bordered icon strip. */}
         <div className="flex flex-col gap-2">
-          <h3 className="font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-ink-14">
+          <h3 className="font-sans text-label font-semibold uppercase tracking-wide text-ink-14">
             {t('post_content.footer.share_form.share_this_link')}
           </h3>
           <div
@@ -107,7 +107,7 @@ export function SharePost({ children, path, title }: { children: ReactNode; path
         </div>
 
         <div className="flex flex-col gap-2">
-          <h3 className="font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-ink-14">
+          <h3 className="font-sans text-label font-semibold uppercase tracking-wide text-ink-14">
             {t('post_content.footer.share_form.open_in_alternative')}
           </h3>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -127,7 +127,7 @@ export function SharePost({ children, path, title }: { children: ReactNode; path
         </div>
 
         <div className="flex flex-col gap-2">
-          <h3 className="font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-ink-14">
+          <h3 className="font-sans text-label font-semibold uppercase tracking-wide text-ink-14">
             {t('post_content.footer.share_form.open_in')}
           </h3>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">

@@ -1004,3 +1004,127 @@ func TestOfferings_TitleMustHaveAVisibleCharacter(t *testing.T) {
 		t.Fatalf("a title with visible content and invisible padding must be accepted: %v", err)
 	}
 }
+
+// ---- F16: a rename cannot donate a LOOSER anchor for future reprices ------
+//
+// DEFECT FIX (F16, 2026-08-19). SetOfferingTitle's already-anchored branch
+// (above) only ever checked that the id's CURRENT price fit the destination
+// title's band — a price sitting at the honest EDGE of that band (e.g.
+// exactly 2x an id's own real anchor) always passes, correctly, since a
+// straight reprice to that same edge would also be allowed. The gap: that
+// check says nothing about what happens to the DESTINATION's own anchor
+// going forward. SetOfferingPrice bands every future reprice purely against
+// the CURRENT title's persistent anchor (applyTitleBandedPrice) — never
+// against the id's own — so once a live id carries a renamed-onto title, ANY
+// anchor sitting there becomes the id's new ceiling, however it got there.
+//
+// Proven exploit: post a decoy title fresh (a virgin posting is always
+// unbanded) at exactly 2x a live offering's real price, delete the decoy
+// (the title's own band state deliberately survives — see DeleteOffering's
+// doc), rename the live offering onto the freed title (honest by the
+// existing check: its price sits at the edge of the decoy's band), then
+// reprice again in the SAME block. Before this fix, that second reprice
+// banded against the decoy's donated anchor — a SECOND, unrelated 2x window
+// stacked on top of the id's own — reaching 4x the id's true price with
+// nothing refused. A buyer holding a signed ask against that id then pays
+// the inflated price (Ask reads OfferingPrice live at settlement).
+func TestOfferings_RenameCannotDonateALooserAnchorForFutureReprices(t *testing.T) {
+	s, c := offSetup(t)
+	real, err := CreateOffering(s, c, c, 2000, "Consult", 25_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The decoy: a virgin title, so its initial posting is free — priced at
+	// exactly 2x "Consult", the honest edge of Consult's own band.
+	decoy, err := CreateOffering(s, c, c, 2000, "Decoy", 50_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteOffering(s, c, c, decoy); err != nil {
+		t.Fatal(err) // the title's own band state deliberately survives this
+	}
+	// The hop itself is honest by the existing per-rename check (25,000 fits
+	// Decoy's own [25000,100000] band exactly at the floor) and MUST still
+	// succeed — refusing this would break requirement 1 (honest renames must
+	// keep working), not just close the bug.
+	if err := SetOfferingTitle(s, c, c, real, "Decoy"); err != nil {
+		t.Fatalf("an honest rename at the edge of the destination's own band was refused: %v", err)
+	}
+	// THE BUG: without the fix, a same-block reprice to 4x the id's true
+	// price banded against the DECOY's donated anchor (50,000) and passed.
+	if err := SetOfferingPrice(s, c, c, 2000, real, 100_000); err == nil {
+		t.Fatal("BYPASS: a title hop donated a decoy's anchor, letting a live id reprice to 4x its true price in one block")
+	}
+	// The id's honest ceiling — exactly 2x its OWN real price (25,000), the
+	// same ceiling a straight same-title reprice would have hit — must still
+	// be reachable...
+	if err := SetOfferingPrice(s, c, c, 2000, real, 50_000); err != nil {
+		t.Fatalf("the id's own honest 2x ceiling was wrongly refused after the hop: %v", err)
+	}
+	if got := OfferingPrice(s, c, real); got.Cmp(big.NewInt(50_000)) != 0 {
+		t.Fatalf("price after the honest ceiling reprice = %s, want 50000", got)
+	}
+	// ...and capped there, exactly as an ordinary same-title reprice would be
+	// (compare TestOfferings_PriceBandIsTheSameAsFaces).
+	if err := SetOfferingPrice(s, c, c, 2000, real, 50_001); err == nil {
+		t.Fatal("BYPASS: one HBD over the honest post-hop ceiling still succeeded")
+	}
+}
+
+// TestOfferings_RenameOntoLooseDestinationIsNotTightened is the anti-vacuity
+// control for the fix above, from the OTHER direction: when the id being
+// renamed carries a LOOSER anchor than the destination it is moving onto,
+// the destination's own (already tighter) anchor is the correct, binding
+// constraint and must be left exactly alone — the fix only ever tightens,
+// never loosens, and must never fire at all when the destination is already
+// the stricter of the two.
+func TestOfferings_RenameOntoLooseDestinationIsNotTightened(t *testing.T) {
+	s, c := offSetup(t)
+	dest, err := CreateOffering(s, c, c, 2000, "Premium Slot", 40_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteOffering(s, c, c, dest); err != nil {
+		t.Fatal(err)
+	}
+	// This id's own anchor (80,000) is LOOSER than the destination's
+	// (40,000) — an ordinary, unrelated posting, priced at the edge of the
+	// destination's own band ([20000,80000]) so the rename is honest.
+	id, err := CreateOffering(s, c, c, 2000, "Custom Session", 80_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetOfferingTitle(s, c, c, id, "Premium Slot"); err != nil {
+		t.Fatalf("an honest rename onto a tighter, already-anchored title was refused: %v", err)
+	}
+	if got := OfferingPrice(s, c, id); got.Cmp(big.NewInt(80_000)) != 0 {
+		t.Fatalf("rename moved the price: got %s, want unchanged 80000", got)
+	}
+	// The destination's own band (unaffected by this id's looser history)
+	// still governs: 80,000 is already its ceiling, one more must refuse.
+	if err := SetOfferingPrice(s, c, c, 2001, id, 80_001); err == nil {
+		t.Fatal("the destination's own tighter band should still cap this id after the rename")
+	}
+}
+
+// TestOfferings_RenameToAFreshTitleIsUnaffectedByTheFix is a second,
+// deliberately mundane anti-vacuity control: the everyday case of renaming
+// an offering to a brand-new, never-used title (the virgin-destination
+// branch, which this fix does not touch at all) must keep working exactly
+// as it always has, at any price in range.
+func TestOfferings_RenameToAFreshTitleIsUnaffectedByTheFix(t *testing.T) {
+	s, c := offSetup(t)
+	id, err := CreateOffering(s, c, c, 2000, "old name", 12_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetOfferingTitle(s, c, c, id, "brand new name"); err != nil {
+		t.Fatalf("renaming to a never-used title was refused: %v", err)
+	}
+	if got := OfferingTitle(s, c, id); got != "brand new name" {
+		t.Fatalf("title = %q, want %q", got, "brand new name")
+	}
+	if got := OfferingPrice(s, c, id); got.Cmp(big.NewInt(12_000)) != 0 {
+		t.Fatalf("rename to a fresh title moved the price: got %s, want unchanged 12000", got)
+	}
+}

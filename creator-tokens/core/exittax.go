@@ -54,9 +54,19 @@ import "math/big"
 // the full 20% (holdclock.go's zero-value convention makes even
 // not-yet-clocked balances pay the max). HONEST LIMITS, disclosed, not
 // engineered against (RULING J "residual truths"): a six-week holder pays 0
-// by design (the patient dump is legal); OTC transfer converts the tax into
-// a risk-transfer discount (the buyer inherits a fresh clock) — claim
-// "un-dodgeable" ON-CHAIN only.
+// by design (the patient dump is legal); OTC transfer converts the tax into a
+// risk-transfer discount — claim "un-dodgeable" ON-CHAIN only.
+//
+// ★ CORRECTED 2026-08-19 (audit anomaly AN-23). This sentence used to end
+// "(the buyer inherits a fresh clock)", which THIS FILE contradicts 120 lines
+// below, where it states — correctly — that maturity now travels with the
+// tokens (holdclock.go, transfer.go, the 2026-07-27 token-maturity ruling).
+// Driven to settle it: a buyer matures at the SELLER's block, not at their
+// own. Two opposite claims about who pays what, in the file that defines the
+// tax, is the shape of comment that gets believed by whoever reads it first —
+// and the stale half here was the one that made the OTC route look costed
+// when it is not. The line below about the alt-account bypass being FREE is
+// the same fact stated correctly; both now agree.
 
 // ExitTaxBpsAt returns the tax rate in basis points for a position held
 // `heldBlocks` blocks:

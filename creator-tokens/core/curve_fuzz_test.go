@@ -681,7 +681,7 @@ func cfDoTransfer(t *testing.T, w *cfWorld, from, to string, amount *big.Int) {
 	// RULING K deleted the per-holder cost basis, so a transfer conserves only
 	// the balance and re-ages the recipient's clock (checked structurally in
 	// transfer_test.go); there is no basis quantity to conserve here.
-	err := TransferCredits(w.s, w.creator, from, to, w.block, amount)
+	err := TransferCredits(w.s, from, w.creator, from, to, w.block, amount)
 	if err != nil {
 		w.logf("XFER  %-8s -> %-8s amt=%-7s -> rejected (%s)", from, to, amount, errSymbol(err))
 	} else {
@@ -953,7 +953,7 @@ func TestCurveFuzz_SellAfterTransferIn_WAUnderflowLocksTheExit(t *testing.T) {
 
 	// The one ordinary action that used to poison it: an OLDER holder sends
 	// to a NEWER one. Nothing exotic, no privileged role, no timing trick.
-	if err := TransferCredits(s, c, "alice", "bob", 5000, cfBI(100)); err != nil {
+	if err := TransferCredits(s, "alice", c, "alice", "bob", 5000, cfBI(100)); err != nil {
 		t.Fatal(err)
 	}
 

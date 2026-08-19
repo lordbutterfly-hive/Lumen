@@ -64,14 +64,14 @@ export default function DelegatedOutPanel({
       {delegatedOpen ? (
         <div className="rounded-card border border-line-9 bg-surface-5 px-4 py-3.5" data-testid="wallet-delegated-out-list">
           <div className="mb-2.5 flex items-center justify-between">
-            <span className="text-[13px] leading-[20px] font-bold text-ink-4">
+            <span className="text-caption font-bold text-ink-4">
               {t('wallet.delegated.accounts_count', { count: delegatees?.length ?? 0 })}
             </span>
             <a
               href={getDelegationsUrl(username)}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[13px] leading-[20px] font-semibold text-ink-brand-6 hover:text-ink-brand-4"
+              className="text-caption font-semibold text-ink-brand-6 hover:text-ink-brand-4"
               data-testid="wallet-manage-delegations"
             >
               {t('wallet.delegated.manage')}
@@ -100,7 +100,7 @@ export default function DelegatedOutPanel({
               ))}
             </div>
           ) : (
-            <p className="text-[13px] leading-[20px] text-ink-14">{t('wallet.delegated.none')}</p>
+            <p className="text-caption text-ink-14">{t('wallet.delegated.none')}</p>
           )}
         </div>
       ) : null}

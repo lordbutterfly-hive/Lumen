@@ -93,7 +93,7 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
           ) : null}
         </p>
         <span
-          className="flex flex-wrap items-center gap-1.5 font-sans text-[12px] tabular-nums text-ink-14"
+          className="flex flex-wrap items-center gap-1.5 font-sans text-caption tabular-nums text-ink-14"
           data-testid="wallet-history-timestamp"
         >
           <time dateTime={date.toISOString()} title={date.toLocaleString(lang)}>
@@ -105,7 +105,7 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
           <TimeAgo date={entry.timestamp as string | number | Date} />
         </span>
         {entry.memo ? (
-          <p className="mt-0.5 break-all text-[12px] text-ink-14" data-testid="wallet-history-memo">
+          <p className="mt-0.5 break-all text-caption text-ink-14" data-testid="wallet-history-memo">
             {entry.memo}
           </p>
         ) : null}
@@ -126,7 +126,7 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
         // failed to load. These operations genuinely move nothing, so the row
         // says so instead of leaving the reader to guess which it was.
         <span
-          className="shrink-0 text-right font-sans text-[13px] leading-[20px] font-medium text-ink-14"
+          className="shrink-0 text-right font-sans text-caption font-medium text-ink-14"
           data-testid="wallet-history-no-amount"
         >
           {t('wallet.history.no_amount')}

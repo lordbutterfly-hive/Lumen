@@ -102,7 +102,7 @@ export default function EmojiPicker({
 
       {!query.trim() && recent.length > 0 ? (
         <div className="mb-2">
-          <div className="mb-1 px-1 font-sans text-[11px] font-semibold uppercase tracking-wide text-ink-14">
+          <div className="mb-1 px-1 font-sans text-label font-semibold uppercase tracking-wide text-ink-14">
             {labels.recent}
           </div>
           <div className="grid grid-cols-8 gap-1">
@@ -146,7 +146,7 @@ export default function EmojiPicker({
 
       <div className="max-h-[220px] overflow-y-auto">
         {shown.length === 0 ? (
-          <p className="px-1 py-4 text-center font-sans text-[13px] text-[#6b7280]">{labels.noResults}</p>
+          <p className="px-1 py-4 text-center font-sans text-caption text-[#6b7280]">{labels.noResults}</p>
         ) : (
           <div className="grid grid-cols-8 gap-1">
             {shown.map((entry) => (

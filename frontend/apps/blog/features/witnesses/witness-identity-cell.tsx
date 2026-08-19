@@ -67,7 +67,7 @@ export default function WitnessIdentityCell({ row, className }: WitnessIdentityC
           >
             {row.owner}
           </Link>
-          <span className="rounded-md bg-surface-info-2 px-[6px] py-px font-sans text-[12px] leading-[18px] font-bold tabular-nums text-ink-info-4">
+          <span className="rounded-md bg-surface-info-2 px-[6px] py-px font-sans text-caption font-bold tabular-nums text-ink-info-4">
             {row.running_version || t('witnesses.unknown_version')}
           </span>
           {externalUrl && (
@@ -95,7 +95,18 @@ export default function WitnessIdentityCell({ row, className }: WitnessIdentityC
             slicing one; `title` gives a sighted mouse user the untruncated text on
             hover, same mechanism as the stale-feed marker below in the table row. */}
         <div
-          className={`max-w-[340px] font-sans text-[13px] leading-[20px] text-ink-14 ${row.description ? 'line-clamp-2' : ''}`}
+          // ★ `break-words` ADDED 2026-08-19, and it was found by MEASUREMENT, not by
+          // reading. The all-Lora sweep took this tagline from 13px to 14px (the
+          // lowercase floor), and the live typography pass then reported five of
+          // these cells with `scrollWidth > clientWidth` inside their fixed 340px
+          // box — every one of them a witness who put a bare URL in their
+          // description ("Hive Pizza Community Witness - https://dis…"). A URL has
+          // no break opportunity, so at 13px it fitted and at 14px it ran past the
+          // edge and was silently clipped by `line-clamp`'s own `overflow:hidden`.
+          // `break-words` lets it wrap inside the two clamped lines instead of
+          // losing the tail. The `title` fallback below still carries the whole
+          // string for a mouse user either way.
+          className={`max-w-[340px] break-words font-sans text-caption text-ink-14 ${row.description ? 'line-clamp-2' : ''}`}
           title={row.description || t('witnesses.no_description')}
         >
           {row.description || t('witnesses.no_description')}

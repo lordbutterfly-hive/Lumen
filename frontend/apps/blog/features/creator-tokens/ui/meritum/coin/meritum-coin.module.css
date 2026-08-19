@@ -299,10 +299,22 @@
 
 .legend {
   fill: var(--mt-engrave);
-  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
-  font-size: 10.5px;
+  /* The coin engraving. One family on the coin as everywhere else
+     (2026-08-19): this was the last sans on the Meritum surface. */
+  font-family: var(--font-lora), Georgia, Cambria, serif;
+  /* ★ THE COIN ENGRAVING, ONTO THE UPPERCASE LADDER (2026-08-19).
+     10.5px was both fractional and below the floor. It is EXEMPT from the 14px
+     floor — the floor governs lowercase, and Lora's cap-height is only 2.8%
+     smaller where its x-height is 8% — but it still belongs on a rung: `micro`
+     is 11px/0.16em and exists precisely for this element (the spec derives the
+     step FROM this engraving). `text-transform` is stated rather than left to
+     the caps string the component happens to pass in, so the tracking is
+     measured against what actually renders. */
+  font-size: 11px;
+  line-height: 16px;
   font-weight: 700;
-  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
   opacity: 0.28;
 }
 
@@ -340,7 +352,7 @@
 }
 
 .deviceName {
-  font-family: var(--font-serif), Georgia, Cambria, serif;
+  font-family: var(--font-lora), Georgia, Cambria, serif;
   font-weight: 600;
   line-height: 1;
   letter-spacing: -0.02em;
@@ -352,7 +364,7 @@
 
 .deviceExergue {
   margin-top: 19px;
-  font-family: var(--font-serif), Georgia, Cambria, serif;
+  font-family: var(--font-lora), Georgia, Cambria, serif;
   font-size: 14.5px;
   font-weight: 600;
   letter-spacing: 0.04em;

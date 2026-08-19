@@ -210,11 +210,11 @@ const Topics = () => {
           ))}
         </div>
       ) : isError ? (
-        <p className="text-xs text-ink-13" data-testid="right-rail-topics-error">
+        <p className="text-caption text-ink-13" data-testid="right-rail-topics-error">
           {t('right_rail.topics.error')}
         </p>
       ) : topics.length === 0 ? (
-        <p className="text-xs text-ink-13" data-testid="right-rail-topics-empty">
+        <p className="text-caption text-ink-13" data-testid="right-rail-topics-empty">
           {t('right_rail.topics.empty')}
         </p>
       ) : (
@@ -228,7 +228,7 @@ const Topics = () => {
                   aria-current={current ? 'page' : undefined}
                   data-current={current ? 'true' : undefined}
                   className={cn(
-                    'inline-flex items-center gap-0.5 rounded-full border px-[11px] py-[5px] text-[13px] leading-[20px] font-medium capitalize transition-colors',
+                    'inline-flex items-center gap-0.5 rounded-full border px-[11px] py-[5px] text-caption font-medium capitalize transition-colors',
                     current
                       ? 'border-line-brand-10 bg-surface-brand-5 text-ink-brand-6'
                       : 'border-line-8 bg-surface-11 text-ink-8 hover:border-line-brand-10 hover:bg-surface-brand-5 hover:text-ink-brand-6'

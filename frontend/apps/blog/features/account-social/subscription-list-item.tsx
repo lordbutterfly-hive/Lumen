@@ -13,7 +13,7 @@ const SubscriptionListItem = ({ community }: { community: string[] }) => {
       >
         {community[1] ? community[1] : community[0]}
       </Link>
-      <span className="text-sm font-light opacity-60" data-testid="author-role-community">
+      <span className="text-sm opacity-60" data-testid="author-role-community">
         {community[2].toUpperCase()}
       </span>
       {community[3] ? (

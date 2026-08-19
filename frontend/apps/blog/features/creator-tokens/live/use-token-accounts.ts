@@ -108,7 +108,7 @@ function kindOf(method: string, network: string | null): TokenAccount['kind'] {
 }
 
 export function useTokenAccounts(): TokenAccounts {
-  const { user, isHydrated } = useUserClient();
+  const { user, isHydrated, sessionUnavailable } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
   const isLite = user.account_tier === 'lite';
 
@@ -121,18 +121,72 @@ export function useTokenAccounts(): TokenAccounts {
       if (!res.ok) throw new Error(`wallet DID lookup failed: ${res.status}`);
       return (await res.json()) as WalletDidsResponse;
     },
-    enabled: loggedIn && isLite,
+    /**
+     * ★ NOT `&& isLite` any more. An upgraded user still owns their wallet credentials,
+     * and while their session cookie still says `lite` (which it does for up to 14 days,
+     * since `/api/users/me` reads the cookie and never the DB) this lookup is what keeps
+     * their wallet-held tokens visible. Harmless for a never-lite Hive account: it has no
+     * lite session, the route answers 401, `query.data` stays undefined, and the branch
+     * below simply yields the Hive account on its own - exactly the old behaviour.
+     */
+    enabled: loggedIn,
     staleTime: 5 * 60 * 1000
   });
 
   if (!loggedIn) {
-    return { accounts: [], isLoading: false, failed: false, canHold: false, canSign: false };
+    // F14 fix: `/api/users/me` failing looks IDENTICAL to genuinely signed
+    // out through `loggedIn` alone. `sessionUnavailable` (use-user-core.ts's
+    // own doc on the flag) is the third state: we asked and got a definitive
+    // failure, not "no session". Reporting `failed` here — the SAME signal
+    // this hook already uses for "the wallet lookup itself failed" — routes
+    // it into the "couldn't check" notice every consumer (meritum-eligibility.tsx)
+    // already renders for that, instead of the confident-looking
+    // empty/logged-out shape a session blip used to produce.
+    return { accounts: [], isLoading: false, failed: sessionUnavailable, canHold: false, canSign: false };
   }
 
   if (!isLite) {
-    // A full Hive account signs with its own keys, so it can both hold and spend.
+    /**
+     * ★★★ AN UPGRADED USER KEEPS THEIR WALLET ACCOUNTS (2026-08-19).
+     *
+     * This used to return the Hive account ALONE, which silently deleted a real position
+     * from the interface. The sequence: someone signs in with a Bitcoin or Ethereum
+     * wallet, is credited creator tokens under that wallet's `did:pkh`, later creates a
+     * Hive account, and from that moment the app reads only `hive:<name>`. Their tokens
+     * are still on chain, still theirs, and gone from every screen - portfolio, token
+     * page, eligibility - with no message, because from the app's point of view the
+     * account set is complete and healthy.
+     *
+     * Nothing on chain links the two identities. Magi never hears about a Lumen upgrade;
+     * `markUpgraded` touches only our own DB row and does not remove the wallet
+     * credential. So the wallet account remains real, remains funded, and must remain
+     * VISIBLE - it is the only way its owner can see what is still theirs, or know there
+     * is something to move.
+     *
+     * ★★ WHAT THIS DOES NOT COVER, STATED PLAINLY. It restores the wallet accounts only
+     * while a LITE SESSION still exists - i.e. the whole window in which the upgraded
+     * user's cookie still says `lite`. Once they sign in with their Hive keys they have
+     * no lite session at all, `/api/lite/wallet/dids` cannot authenticate them, and their
+     * wallet accounts are invisible again. Closing that needs a server-side lookup keyed
+     * by `hive_account_name` (the DB row records it at upgrade), which is a route that
+     * does not exist yet. Until it does, this narrows the hole; it does not close it.
+     *
+     * `canSign` stays FALSE for the wallet entries and TRUE for the Hive one, which is
+     * the honest split: the Hive account signs with its own keys today, and the wallet
+     * rail is not built (see the note at the top of this file). The derived `canSign`
+     * below is `some(...)`, so the screens still correctly offer signing - they just do
+     * it through the account that can.
+     */
+    const hiveAccount: TokenAccount = { id: user.username, kind: 'hive', address: null, canSign: true };
+    const walletAccounts: TokenAccount[] =
+      query.data?.wallets.map((w) => ({
+        id: w.did,
+        kind: kindOf(w.method, w.network),
+        address: w.address,
+        canSign: false
+      })) ?? [];
     return {
-      accounts: [{ id: user.username, kind: 'hive', address: null, canSign: true }],
+      accounts: [hiveAccount, ...walletAccounts],
       isLoading: false,
       failed: false,
       canHold: true,

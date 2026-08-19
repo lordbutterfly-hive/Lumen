@@ -17,7 +17,9 @@ import path from 'node:path';
  * generated card and the drawn one cannot drift:
  *
  *   Canvas    1200 x 630, rgb(252 250 247), 88px margin on all four sides
- *   Imprint   Open Sans 700, 23px, 0.22em tracking, uppercase
+ *   Imprint   Lora 700, 23px, 0.22em tracking, uppercase (was Open Sans 700
+ *             until the all-Lora migration, 2026-08-19; the px value and the
+ *             tracking are unchanged because caps do not need compensating)
  *             LUMEN · COMMUNITY · @HANDLE — community segment AND its separator
  *             drop entirely when there is no community
  *   Title     Lora 700, max 3 lines, line-height 1.06, tracking -0.035em
@@ -29,12 +31,15 @@ import path from 'node:path';
  *
  * ★ WHY THE FONTS ARE VENDORED, AND WHY THEY ARE STATIC CUTS. `next/font/google`
  * self-hosts only `.woff2`, and Satori (what renders this) cannot read woff2 —
- * it needs ttf/otf. Google Fonts now publishes Lora and Open Sans ONLY as
- * variable fonts, and Satori cannot read those either: it dies in `parseFvarAxis`
- * with "Cannot read properties of undefined" the moment it meets an `fvar` table.
- * So both faces are instantiated down to a static wght=700 cut with fontTools and
- * committed to `public/fonts` beside their OFL licence. If this ever renders in
- * the wrong face, check that these files still have no `fvar` table.
+ * it needs ttf/otf. Google Fonts now publishes Lora ONLY as a variable
+ * font, and Satori cannot read those either: it dies in `parseFvarAxis` with
+ * "Cannot read properties of undefined" the moment it meets an `fvar` table.
+ * So the face is instantiated down to a static wght=700 cut with fontTools and
+ * committed to `public/fonts` beside its OFL licence. If this ever renders in
+ * the wrong face, check that file still has no `fvar` table. Do NOT replace it
+ * with a fresh Google download — that download is variable and will crash the
+ * route. (The Open Sans cut that used to sit beside it was deleted with the
+ * all-Lora migration, 2026-08-19.)
  */
 export const runtime = 'nodejs';
 
@@ -69,7 +74,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   const author = params.get('author') ?? '';
   const community = params.get('community') ?? '';
 
-  const [lora, openSans] = await Promise.all([font('Lora-Bold.ttf'), font('OpenSans-Bold.ttf')]);
+  const lora = await font('Lora-Bold.ttf');
 
   const title = fitTitle(rawTitle);
   const size = titleSize(title.length);
@@ -94,9 +99,20 @@ export async function GET(req: NextRequest): Promise<Response> {
         }}
       >
         {/*
-          ★ THE WORDMARK IS LORA, THE REST IS OPEN SANS CAPS — per the asset
-          README. Setting the whole line in Open Sans loses the one piece of the
-          imprint that is brand rather than metadata, which is the wordmark.
+          ★ THE WHOLE IMPRINT IS LORA NOW (2026-08-19, all-Lora migration).
+          This used to be Lora wordmark + Open Sans caps, and the note here
+          argued that setting the whole line in one family would lose the piece
+          that is brand rather than metadata. It would have, when the other
+          family was a sans. It does not now: the wordmark still separates from
+          the metadata on three axes it always had anyway — 30px against 23px,
+          zero tracking against 0.22em, and INK against INK_SOFT. What it no
+          longer does is contradict the product, where nothing is set in a sans.
+
+          ★ THIS FILE DOES NOT FOLLOW THE CSS TOKEN. Satori renders it from the
+          vendored `.ttf` below, so `--font-lora` means nothing here and the
+          family name is whatever the `fonts` array registers. Changing the app
+          font does NOT change this card; changing this card is a separate edit,
+          which is exactly why the old pairing survived every previous swap.
         */}
         <div style={{ display: 'flex', alignItems: 'baseline', color: INK_SOFT }}>
           <div style={{ display: 'flex', fontFamily: 'Lora', fontWeight: 700, fontSize: '30px', color: INK }}>
@@ -106,9 +122,14 @@ export async function GET(req: NextRequest): Promise<Response> {
             <div
               style={{
                 display: 'flex',
-                fontFamily: 'OpenSans',
+                fontFamily: 'Lora',
                 fontWeight: 700,
                 fontSize: '23px',
+                // Kept at 23px and 0.22em, NOT scaled up with the rest of the
+                // migration: Lora's cap-height is only 2.8% below Open Sans's
+                // (against 8% on the x-height), so uppercase does not need the
+                // compensation lowercase does. Growing it would make the
+                // metadata louder than the wordmark it sits beside.
                 letterSpacing: '0.22em',
                 marginLeft: '18px'
               }}
@@ -141,10 +162,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     {
       width: 1200,
       height: 630,
-      fonts: [
-        { name: 'Lora', data: lora, weight: 700, style: 'normal' },
-        { name: 'OpenSans', data: openSans, weight: 700, style: 'normal' }
-      ]
+      fonts: [{ name: 'Lora', data: lora, weight: 700, style: 'normal' }]
     }
   );
 }

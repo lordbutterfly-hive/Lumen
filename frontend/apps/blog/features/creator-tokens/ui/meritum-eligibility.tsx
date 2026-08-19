@@ -85,8 +85,8 @@ const Notice: FC<{
       className
         ? className
         : tone === 'blocked'
-        ? 'rounded-card border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-[13px] leading-[20px] text-ink-warn-3'
-        : 'rounded-card border border-line-16 bg-surface-23 px-4 py-3 text-[13px] leading-[20px] text-ink-8'
+        ? 'rounded-card border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-caption text-ink-warn-3'
+        : 'rounded-card border border-line-16 bg-surface-23 px-4 py-3 text-caption text-ink-8'
     }
   >
     {children}
@@ -225,7 +225,7 @@ export const MeritumEligibilityNotice: FC<{
  * looked up — the same first-paint mistake the launch gate made in August.
  */
 export function useMeritumEligibility(): MeritumEligibility & { isLoading: boolean; failed: boolean } {
-  const { user, isHydrated } = useUserClient();
+  const { user, isHydrated, sessionUnavailable } = useUserClient();
   const accounts = useTokenAccounts();
   const walletKind = accounts.accounts.find((a) => a.kind !== 'hive')?.kind ?? null;
   return {
@@ -235,7 +235,14 @@ export function useMeritumEligibility(): MeritumEligibility & { isLoading: boole
     canSign: accounts.canSign,
     walletKind: walletKind === 'btc' || walletKind === 'evm' ? walletKind : null,
     isLoading: accounts.isLoading,
-    failed: accounts.failed
+    // F14 fix: `accounts.failed` already folds in a session-check failure
+    // (use-token-accounts.ts's own F14 fix), but OR sessionUnavailable in
+    // directly too — this is the one place all 7 F14 consumers converge, and
+    // a caller reading it should not have to trust that every upstream hook
+    // propagated the flag correctly. `failed` renders BEFORE `!loggedIn`
+    // below, so this is what stops "Sign in to launch a Meritum token" from
+    // being shown to a creator whose session merely blipped.
+    failed: accounts.failed || sessionUnavailable
   };
 }
 

@@ -45,6 +45,8 @@ import { isNotePost } from '@/blog/lib/short-post-note';
 import { useModerationStatus } from '@/blog/features/mute-follow/hooks/use-moderation-status';
 import { classifyBlacklist } from '@/blog/lib/moderation/blacklist-reason';
 import { isOwnModerationHide } from '@/blog/lib/muted-reasons';
+import cardStyles from './post-card.module.css';
+import TopCommentDrawer from './top-comment-drawer';
 
 // TODO: move to i18n
 const LABELS = {
@@ -117,6 +119,45 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
   // proof that Hivemind mixes a synthetic "reputation-N" token into that array for
   // any low/negative-reputation author with no list involved at all.
   const blacklistReason = classifyBlacklist(post.blacklists);
+  /**
+   * ★★★ THE DRAWER'S FETCH GATE (2026-08-19, top-comment drawer).
+   *
+   * `engaged` flips once and never back. The card opens its drawer on
+   * `:hover`/`:focus-within` in CSS — no JS owns the OPEN state — but the
+   * comment inside has to be fetched, and the feed payload does not carry one:
+   * `Entry` has `children` (a count) and no bodies. So a drawer on every card
+   * would be one extra request per card, 20 per feed page, added to the most
+   * visited screen in the product. This app has already paid for that exact
+   * mistake: `/topics/photography` went 5.5-14.7s -> 0.38-0.68s in August purely
+   * by deleting serial trips.
+   *
+   * 140ms of intent before it fires, so brushing the cursor down a feed costs
+   * nothing. That is not a new number — it is the `delayDuration` this same file
+   * already uses for the lite-account quill tooltip, i.e. the app's existing
+   * answer to "did they mean to hover this".
+   *
+   * One-way on purpose: once a reader has looked at a card, moving away and back
+   * must not re-request. React Query caches the thread for the session on top of
+   * that.
+   */
+  const [engaged, setEngaged] = useState(false);
+  const engageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const engage = () => {
+    if (engaged || engageTimer.current) return;
+    engageTimer.current = setTimeout(() => {
+      engageTimer.current = null;
+      setEngaged(true);
+    }, 140);
+  };
+  const cancelEngage = () => {
+    if (!engageTimer.current) return;
+    clearTimeout(engageTimer.current);
+    engageTimer.current = null;
+  };
+  // A card unmounted mid-intent (infinite feed recycling a row) must not leave a
+  // timer to fire into a dead component.
+  useEffect(() => cancelEngage, []);
+
   const [moderationRevealed, setModerationRevealed] = useState(false);
   // ★ OWNER RULING 2026-08-12 — the post overflow menu's ONE moderation control is
   // Block, not separate Mute/Blacklist items (see comment-list-item.tsx for the
@@ -482,6 +523,13 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
 
   return (
     <article
+      // ★ Drawer intent. `onFocus` as well as pointer, because `:focus-within`
+      // opens the drawer for a keyboard reader too and an empty drawer opening
+      // under the keyboard would be worse than none. `onFocus` bubbles (unlike
+      // `focus` in the DOM), so this catches focus landing on any child.
+      onPointerEnter={engage}
+      onPointerLeave={cancelEngage}
+      onFocus={engage}
       // ★ THE ROOT TESTID THE TEST SUITE NEEDS (2026-08-09). The card had testids on
       // every child and none on itself, so nothing could count posts or scope a
       // locator to "the first post". `playwright/tests/support/pages/homePage.ts`
@@ -504,7 +552,14 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
         under prefers-reduced-motion. The flat 0.03-alpha shadow stays as the
         resting state and `--lift-2` takes over on hover.
       */
-      className="lm-card lm-enter mb-4 rounded-panel border border-[#ebebeb] bg-white p-[22px] shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-[#fdfcfb]"
+      className={cn(
+        cardStyles.card,
+        // `lm-card` / `lm-enter` are the app's own entrance animation and are kept.
+        // Everything the old string hardcoded — #ebebeb, white, #fdfcfb and a raw
+        // rgba shadow — now lives in `post-card.module.css` as `--pc-*` tokens that
+        // resolve to Lumen tokens, so this card follows dark mode for the first time.
+        'lm-card lm-enter mb-4'
+      )}
     >
       {/* Reblog provenance line — only present when the underlying query supplies
           it. `EntryFeed` in feed-tabs.tsx fetches the Following tab via
@@ -515,7 +570,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           reads the same way everywhere in the app. */}
       {post.reblogged_by && post.reblogged_by.length > 0 ? (
         <div
-          className="mb-2.5 flex items-center gap-1.5 font-sans text-[13px] leading-[20px] font-medium text-[#6b7280]"
+          className="mb-2.5 flex items-center gap-1.5 text-caption font-medium text-ink-10"
           data-testid="medium-card-reblogged-by"
         >
           <Icons.forward className="h-3.5 w-3.5 shrink-0" />
@@ -531,7 +586,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
       ) : null}
 
       {/* Byline row */}
-      <div className="flex flex-wrap items-center gap-2 font-sans text-[14px] leading-[22px] text-[#6b7280]">
+      <div className="flex flex-wrap items-center gap-2 text-body-sm text-ink-action">
         <Link href={`/@${displayAuthor}`} className="shrink-0" data-testid="medium-card-avatar">
           {/* ★ STRAIGHT TO THE IMAGE HOST (2026-08-10). This one line was 29 requests
               to our own `/api/avatar` per feed page, 6.0-6.3s each on a warm server,
@@ -544,7 +599,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
         </Link>
         <Link
           href={`/@${displayAuthor}`}
-          className="font-semibold text-[#2a2822] hover:underline"
+          className="font-semibold text-ink-4 hover:underline"
           data-testid="medium-card-author"
         >
           {displayAuthor}
@@ -638,7 +693,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             </Link>
           </>
         ) : null}
-        <span aria-hidden="true" className="text-[#cbd0d6]">
+        <span aria-hidden="true" className="text-ink-21">
           ·
         </span>
         <TimeAgo date={post.created} />
@@ -883,11 +938,11 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
            */}
           {isNote && !dek ? (
             <Link href={href} className="block" data-testid="medium-card-note-title">
-              <p className="line-clamp-4 font-serif text-[19px] leading-[30px] text-[#2a2822]">{displayTitle}</p>
+              <p className="line-clamp-4 text-lede text-ink-4">{displayTitle}</p>
             </Link>
           ) : isNote ? null : (
             <Link href={href} className="block" data-testid="medium-card-title">
-              <h2 className="line-clamp-2 font-sans text-[26px] font-semibold leading-[32px] tracking-[-0.015em] text-[#161511]">
+              <h2 className="line-clamp-2 text-title font-semibold tracking-title text-ink-2">
                 {displayTitle}
               </h2>
             </Link>
@@ -895,7 +950,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
 
           {isNote && dek ? (
             <Link href={href} className="block" data-testid="medium-card-note">
-              <p className="line-clamp-4 font-serif text-[19px] leading-[30px] text-[#2a2822]">{dek}</p>
+              <p className="line-clamp-4 text-lede text-ink-4">{dek}</p>
             </Link>
           ) : dek ? (
             // ★ REDUNDANT TAB STOP REMOVED (2026-08-13, O5 a11y build map item
@@ -906,7 +961,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             // reader's browse-mode link list) while the title link remains the
             // one real stop.
             <Link href={href} className="mt-[10px] block" data-testid="medium-card-dek" tabIndex={-1}>
-              <p className="line-clamp-2 font-serif text-[17px] leading-[26px] text-[#4b5563]">{dek}</p>
+              <p className="line-clamp-2 text-read text-ink-action">{dek}</p>
             </Link>
           ) : null}
 
@@ -915,13 +970,13 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               that has no image at all. */}
           {isNsfw ? (
             <div
-              className="mt-[10px] flex flex-wrap items-center gap-2 font-sans text-[13px] leading-[20px] text-[#6b7280]"
+              className="mt-[10px] flex flex-wrap items-center gap-2 text-caption text-ink-10"
               data-testid="medium-card-nsfw-notice"
             >
               {/* ★ `line-brand-10`/`ink-brand-6`, not `#c0392b` (2026-08-14
                   token-migration pass): border → `line-*`, text → `ink-*`, per
                   `tailwind.config.js`'s own role mapping. */}
-              <span className="rounded-control border border-line-brand-10 px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-ink-brand-6">
+              <span className="rounded-control border border-line-brand-10 px-1.5 py-0.5 text-label font-bold uppercase tracking-label text-ink-brand-6">
                 {LABELS.nsfwBadge}
               </span>
               {nsfwPreference === 'show' ? null : (
@@ -951,7 +1006,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             // like any other item. Colour (item 4): `#9aa1ab` measured 2.61:1
             // on this box's own `#f4f5f7` background; `#6f6963` is the
             // grey-ground replacement, 4.97:1 on `#f4f5f7`.
-            className="flex h-[132px] w-[190px] shrink-0 items-center justify-center rounded-card border border-dashed border-[#e0dcd4] bg-[#f4f5f7] font-sans text-[12px] font-medium uppercase tracking-wide text-[#6f6963]"
+            className="flex h-[132px] w-[190px] shrink-0 items-center justify-center rounded-card border border-dashed border-line-18 bg-surface-16 text-label font-bold uppercase tracking-label text-ink-9"
             data-testid="medium-card-nsfw-thumbnail-hidden"
           >
             {LABELS.nsfwBadge}
@@ -970,7 +1025,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             tabIndex={-1}
           >
             <div
-              className="flex h-[132px] w-[190px] flex-col items-center justify-center gap-1.5 rounded-card border border-dashed border-[#ded2c2] bg-[#f6efe6] font-sans text-[12px] font-medium text-[#8a7f72]"
+              className="flex h-[132px] w-[190px] flex-col items-center justify-center gap-1.5 rounded-card border border-dashed border-[#ded2c2] bg-[#f6efe6] text-label font-bold uppercase tracking-label text-ink-12"
               aria-hidden="true"
             >
               {/*
@@ -985,7 +1040,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
                 letter when a post has no community, per the same note.
               */}
               <span
-                className="font-serif text-[26px] leading-none text-[#8a7f72]"
+                className="text-title leading-none text-ink-12"
                 data-testid="thumbnail-fallback-initial"
               >
                 {(post.community_title || post.category || displayTitle || '?').trim().charAt(0).toUpperCase()}
@@ -1072,7 +1127,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           step (14px/22px, the scale's UI default) for the whole row now. Icons
           are unaffected — they are pinned at 20px in px, not em. */}
       <div
-        className="mt-[18px] flex flex-wrap items-center gap-2.5 font-sans text-[14px] leading-[22px]"
+        className="mt-[18px] flex flex-wrap items-center gap-2.5 text-body-sm"
         data-testid="medium-card-footer"
       >
         {/* Vote pill. The arrows are denser's real VotesComponent, so their size is
@@ -1207,8 +1262,24 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               // Plain green figure, no chip — same reasoning as the vote group above.
               // ★ text-base, not text-sm (2026-08-14, owner-reported): the payout was 14px
               // against a 14.5px vote tally, so the money was the SMALLEST number on
-              // the row. It is now 16px, one step above the 14px tally.
-              'ml-auto flex h-9 items-center rounded-control px-[6px] py-[6px] text-base font-bold text-[#2f7d4f] transition-colors hover:cursor-pointer',
+              // the row. It is now 17px (`text-body-lg`), still one step above the
+              // 15px tally after the all-Lora bump, so that ruling survives intact.
+              //
+              // ★ `min-w-[88px] justify-end`, NOT the handoff's fixed `width: 88px`
+              // (2026-08-19). The redesign wants money to read as one column down the
+              // feed, and a right-aligned minimum width delivers exactly that — while a
+              // HARD 88px clips the moment a payout needs more room. Measured: `$1234.56`
+              // is ~80px at Lora 17/700 and fits; `$12345.67` does not, and a truncated
+              // payout figure is a worse failure than a slightly wide column.
+              //
+              // ★ `tabular-nums` so a payout ticking up does not reflow the row it is
+              // the right-hand end of. Lora has a real `tnum` table (verified), so this
+              // selects a genuine cut rather than synthesising one.
+              //
+              // ★ `--pc-payout` (#2a6b44) replaces the literal #2f7d4f: the redesign
+              // deepens the payout green so it sits inside the paper palette instead of
+              // glowing out of it. Measured 6.4:1 on the card surface — AA at any size.
+              'ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-body-lg font-bold tabular-nums text-[color:var(--pc-payout)] transition-colors hover:cursor-pointer',
               payoutDeclined && 'bg-transparent text-muted-foreground line-through'
             )}
             data-testid="medium-card-payout"
@@ -1217,6 +1288,21 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           </span>
         </DetailsCardHover>
       </div>
+
+      {/* ★ THE DRAWER, AND THE ONE CONDITION IT DEPENDS ON.
+          "No comments: do not expand" is rule 4 of the handoff's selection rule,
+          and `post.children` answers it for free from the feed payload we
+          already have — so a post nobody has replied to never mounts a drawer,
+          never fires a request, and stays a card. No empty state, no disabled
+          affordance, no placeholder.
+
+          `children` is the whole subtree rather than direct replies, which makes
+          it wrong for RANKING comments (see `lib/top-comment.ts`) but exactly
+          right for this gate: any non-zero value means at least one comment
+          exists somewhere in the thread. */}
+      {post.children > 0 ? (
+        <TopCommentDrawer author={post.author} permlink={post.permlink} engaged={engaged} />
+      ) : null}
     </article>
   );
 }

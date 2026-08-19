@@ -90,7 +90,7 @@ export default function ComposerFooter({
             onMouseDown={(event) => event.preventDefault()}
             onClick={onCancel}
             data-testid="short-form-composer-cancel"
-            className="font-sans text-[13px] text-[#6b7280] underline-offset-2 hover:text-[#333] hover:underline"
+            className="font-sans text-caption text-[#6b7280] underline-offset-2 hover:text-[#333] hover:underline"
           >
             {labels.cancel}
           </button>
@@ -101,7 +101,7 @@ export default function ComposerFooter({
             cool-tinted token in an otherwise warm-neutral card. */}
         <span
           className={cn(
-            'font-sans text-xs tabular-nums',
+            'font-sans text-caption tabular-nums',
             // ★ `ink-brand-6`, not `#c0392b` (2026-08-14 token-migration pass):
             // brand INK role, matching how the rest of the app names a coloured
             // character count.

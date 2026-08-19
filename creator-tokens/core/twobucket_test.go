@@ -169,10 +169,16 @@ func TestTwoBucket_PositionGuardSeesBothBuckets(t *testing.T) {
 	}
 }
 
-// The escrow clock: a draw taken wholly from matured tokens must come back
-// matured, or reclaiming an unanswered ask silently restarts a holder's
-// 42-day wait — the same confiscation the ET-2 fix closed, through a new door.
-func TestTwoBucket_EscrowClockPreservesMaturity(t *testing.T) {
+// The escrow round trip: a draw taken wholly from matured tokens must come back
+// MATURED — in the matured bucket, not merely "clocked old enough" — or
+// reclaiming an unanswered ask silently restarts a holder's 42-day wait, the
+// same confiscation the ET-2 fix closed, arriving through a new door.
+//
+// REWRITTEN 2026-08-19 (F2/F17 fix). It used to assert the properties of
+// escrowAcqBlock's single blended clock. That blend WAS the defect, so a test
+// pinning its output could only ever pin the bug; this drives the real
+// settlement helper the three escrow doors now call instead.
+func TestTwoBucket_EscrowRoundTripPreservesMaturedBucket(t *testing.T) {
 	const c, h = "hive:alice", "hive:bob"
 	s := tbMarket(t, c)
 	at := tbMature(t, s, c, h, 500, 1_000_000)
@@ -181,24 +187,41 @@ func TestTwoBucket_EscrowClockPreservesMaturity(t *testing.T) {
 	if fromMaturing.Sign() != 0 {
 		t.Fatal("setup: the whole draw should come from the matured bucket")
 	}
-	acq := escrowAcqBlock(s, c, h, at, fromMatured, fromMaturing)
-
-	// Credit it back exactly as Reclaim/Decline would, then confirm it is
-	// immediately matured again rather than starting a fresh window.
-	creditInflowAt(s, c, h, big.NewInt(500), acq, at)
-	if !maturedNow(s, c, h, at) {
-		t.Fatalf("a matured escrow came back UNMATURED (recorded clock %d at block %d) — "+
-			"the holder would have to wait another full window for tokens they had "+
-			"already held", acq, at)
+	// Exactly what Ask records, in the same order.
+	acq := holderAcqBlock(s, c, h)
+	setMoney(s, kEscrowMaturedLeg(c, 0), fromMatured)
+	if err := debitPosition(s, c, h, big.NewInt(500)); err != nil {
+		t.Fatalf("debitPosition: %v", err)
 	}
-	if bps := ExitTaxBpsAt(heldBlocksAt(s, c, h, at)); bps != 0 {
-		t.Fatalf("returned escrow owes %d bps — it owed nothing when it went in", bps)
+
+	// Exactly what Reclaim and Decline do.
+	returnEscrowToOwner(s, c, h, 0, big.NewInt(500), acq, at)
+
+	if got := getMatured(s, c, h); got.Cmp(big.NewInt(500)) != 0 {
+		t.Fatalf("matured bucket holds %s after the round trip, want 500 — the escrow "+
+			"demoted matured tokens into the maturing family", got)
+	}
+	if got := getMoney(s, kBal(c, h)); got.Sign() != 0 {
+		t.Fatalf("maturing bucket holds %s, want 0", got)
+	}
+	// The property that actually matters is the money: a wholly-matured position
+	// owes nothing on exit. (maturedNow is deliberately NOT the assertion here —
+	// it reports on the MATURING bucket, which is now correctly empty.)
+	r, err := Sell(s, h, c, at, big.NewInt(500))
+	if err != nil {
+		t.Fatalf("sell: %v", err)
+	}
+	if r.Tax.Sign() != 0 || r.TaxableGross.Sign() != 0 {
+		t.Fatalf("returned escrow paid %s tax on a taxable base of %s — it owed nothing when it went in",
+			r.Tax, r.TaxableGross)
 	}
 }
 
-// A mixed escrow collapses to one clock. It must not be the older of the two,
-// which would hand the maturing half free age.
-func TestTwoBucket_MixedEscrowClockCannotMintMaturity(t *testing.T) {
+// A mixed escrow settles ONE LEG AT A TIME. The matured half returns matured,
+// the maturing half returns at its own clock, and neither donates age to the
+// other — which is the whole content of the F2 defect (the maturing half used
+// to ride the matured half's already-capped, therefore free, decay).
+func TestTwoBucket_MixedEscrowSettlesEachLegOnItsOwnClock(t *testing.T) {
 	const c, h = "hive:alice", "hive:bob"
 	s := tbMarket(t, c)
 	at := tbMature(t, s, c, h, 400, 1_000_000)
@@ -210,20 +233,48 @@ func TestTwoBucket_MixedEscrowClockCannotMintMaturity(t *testing.T) {
 	if fromMatured.Sign() == 0 || fromMaturing.Sign() == 0 {
 		t.Fatal("setup: the draw should span both buckets")
 	}
-	acq := escrowAcqBlock(s, c, h, at, fromMatured, fromMaturing)
+	acq := holderAcqBlock(s, c, h)
+	setMoney(s, kEscrowMaturedLeg(c, 0), fromMatured)
+	if err := debitPosition(s, c, h, big.NewInt(800)); err != nil {
+		t.Fatalf("debitPosition: %v", err)
+	}
 
-	// The collapsed clock must sit strictly between the two inputs: older than
-	// the fresh purchase, younger than a full window.
-	if acq <= maturityFloorBlock(at) {
-		t.Fatalf("mixed escrow clock %d is at or past a full window — the fresh half "+
-			"would exit tax-free on tokens it never aged", acq)
+	// Settle at a block well past the ask, which is where the old blend leaked:
+	// a frozen mean aged as one pool, so the fresh half came back older than it
+	// had any right to be.
+	later := at + ExitTaxDecayBlocks/2
+	returnEscrowToOwner(s, c, h, 0, big.NewInt(800), acq, later)
+
+	if got := getMatured(s, c, h); got.Cmp(fromMatured) != 0 {
+		t.Fatalf("matured leg came back as %s, want %s", got, fromMatured)
 	}
-	if acq > at {
-		t.Fatalf("mixed escrow clock %d is in the future (block %d)", acq, at)
+	if got := getMoney(s, kBal(c, h)); got.Cmp(fromMaturing) != 0 {
+		t.Fatalf("maturing leg came back as %s, want %s", got, fromMaturing)
 	}
-	creditInflowAt(s, c, h, big.NewInt(800), acq, at)
-	if maturedNow(s, c, h, at) {
-		t.Fatal("a half-fresh escrow came back fully matured — maturity was minted")
+	if w := getU64(s, kAcqBlock(c, h)); w != acq {
+		t.Fatalf("maturing leg returned on clock %d, want the clock it left with (%d)", w, acq)
+	}
+
+	// THE INVARIANT, stated as a control: escrowing and getting the tokens back
+	// must leave a holder owing exactly what an identical holder who never
+	// escrowed owes. `bob` above round-tripped 800 through an escrow; `carol`
+	// below did nothing. Same market, same blocks, same position shape.
+	const carol = "hive:carol"
+	sc := tbMarket(t, c)
+	tbMature(t, sc, c, carol, 400, 1_000_000)
+	if _, err := Buy(sc, carol, c, at, big.NewInt(400)); err != nil {
+		t.Fatalf("control buy: %v", err)
+	}
+
+	escrower := ExitTaxBpsAt(heldBlocksAt(s, c, h, later))
+	control := ExitTaxBpsAt(heldBlocksAt(sc, c, carol, later))
+	if escrower != control {
+		t.Fatalf("escrow round trip moved the exit rate: escrower owes %d bps, an identical "+
+			"holder who never escrowed owes %d bps. An escrow must be exactly age-neutral",
+			escrower, control)
+	}
+	if control == 0 {
+		t.Fatal("setup invalid: the control should still owe tax, or the comparison proves nothing")
 	}
 }
 
@@ -493,7 +544,7 @@ func TestTwoBucket_TransferDebitsBothBucketsAndKeepsMaturityIntact(t *testing.T)
 		t.Fatalf("buy: %v", err)
 	}
 	// 400 matured + 400 maturing. Move 600 — more than either bucket alone.
-	if err := TransferCredits(s, c, from, to, at, big.NewInt(600)); err != nil {
+	if err := TransferCredits(s, from, c, from, to, at, big.NewInt(600)); err != nil {
 		t.Fatalf("a transfer the guard admitted was refused by the debit: %v", err)
 	}
 

@@ -85,7 +85,7 @@ const EditorToolbar: FC<EditorToolbarProps> = ({
                   type="button"
                   data-name={btn.name}
                   aria-label={label}
-                  className="flex h-7 w-7 items-center justify-center rounded text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="flex h-7 w-7 items-center justify-center rounded text-caption text-muted-foreground hover:bg-accent hover:text-foreground"
                   onClick={() => onToolbarClick(btn.action)}
                   {...getItemProps(index)}
                 >

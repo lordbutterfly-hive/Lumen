@@ -25,9 +25,18 @@ type OpConfig struct {
 // verified comment). Neither op this package builds ever carries one:
 // refundHolder pays the HOLDER out of the market's own RESERVE — it never
 // draws HBD in from the caller — and closeIfDrained moves no funds at all
-// (core/refund.go). Intents is therefore always empty, which (per the
-// auth-routing rule on CustomJSON below) is exactly what keeps this
-// keeper's own bot account on a POSTING key rather than an ACTIVE key.
+// (core/refund.go). Intents is therefore always empty.
+//
+// ★ CORRECTED 2026-08-19 (audit anomaly AN-25). This used to conclude that an
+// empty Intents list "is exactly what keeps this keeper's own bot account on a
+// POSTING key rather than an ACTIVE key" — which is the reasoning of a defect
+// that was already FIXED on 2026-07-28, sitting 24 lines above the CustomJSON
+// doc and code that correctly use an ACTIVE key. The contract's
+// requireActiveAuth refuses an empty RequiredAuths outright, so a posting-key
+// keeper is refused on chain; buildCustomJSON below signs ACTIVE for exactly
+// that reason. A stale comment that reproduces a fixed bug's reasoning is
+// worse than no comment: the next person to "restore consistency" between the
+// doc and the code has a coin flip over which one to change.
 type Intent struct {
 	Type string            `json:"type"`
 	Args map[string]string `json:"args,omitempty"`
@@ -97,8 +106,54 @@ func accountName(caller string) string {
 	return caller
 }
 
+// NormalizeCaller turns an operator-supplied --caller into the ONE shape the
+// chain accepts, or refuses it loudly at startup.
+//
+// DEFECT FIX 2026-08-19 (audit anomaly AN-24). The keeper's Caller is written
+// into the vsc.call body, while accountName strips the scheme for the outer
+// transaction's RequiredAuths. go-vsc-node then derives the effective caller
+// from RequiredAuths[0] and prefixes it with "hive:" — so if the two do not
+// agree, every op the keeper submits is rejected with "caller is not in
+// required_auths". Nothing validated this: the full 10-shape domain was driven
+// and 8 shapes produced a value that fails on chain, including the plain bare
+// username an operator would most naturally type. The failure is silent from
+// the keeper's side (it is a chain-side rejection), so a misconfigured keeper
+// looks like it is running fine and simply never does anything.
+//
+// A BARE NAME IS NORMALISED, ANYTHING ELSE IS REFUSED. "keeper-bot" is
+// unambiguous — there is exactly one scheme this keeper can sign under — so
+// accepting it is a kindness with no ambiguity attached. A DID, an empty
+// string, an unknown scheme or a name with a second colon in it is NOT
+// unambiguous, and guessing at one of those is how you get a keeper that runs
+// for a week doing nothing.
+func NormalizeCaller(caller string) (string, error) {
+	c := strings.TrimSpace(caller)
+	if c == "" {
+		return "", fmt.Errorf("keeper: --caller is empty; it must be the keeper bot's own Hive account, e.g. hive:creator-keys-keeper")
+	}
+	if i := strings.Index(c, ":"); i >= 0 {
+		if !strings.HasPrefix(c, "hive:") {
+			return "", fmt.Errorf("keeper: --caller %q uses an unsupported scheme; this keeper signs Hive transactions, so the caller must be hive:<account>", caller)
+		}
+		name := c[len("hive:"):]
+		if name == "" || strings.Contains(name, ":") {
+			return "", fmt.Errorf("keeper: --caller %q is not a well-formed hive:<account>", caller)
+		}
+		return c, nil
+	}
+	return "hive:" + c, nil
+}
+
 // buildCustomJSON assembles one VSCCall + wraps it in the outer envelope.
 func buildCustomJSON(cfg OpConfig, action string, payload map[string]interface{}, caller string) (CustomJSON, error) {
+	// Defense in depth: main.go normalises at startup, but this package is
+	// importable and a future caller could hand us a raw flag value. A bad
+	// caller here means every op is rejected on chain with nothing to show for
+	// it locally, so refuse to BUILD one rather than submit it.
+	caller, err := NormalizeCaller(caller)
+	if err != nil {
+		return CustomJSON{}, err
+	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return CustomJSON{}, fmt.Errorf("keeper: encode %s payload: %w", action, err)

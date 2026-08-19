@@ -47,9 +47,9 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
           <div className="truncate font-serif text-20 font-semibold text-meritum-ink">
             {known ? handle : t('meritum_launch.account_unknown')}
           </div>
-          <div className="font-serif text-13 text-meritum-ink-muted">{t('meritum_launch.bound_sub')}</div>
+          <div className="font-serif text-caption text-meritum-ink-muted">{t('meritum_launch.bound_sub')}</div>
         </div>
-        <span className="ml-auto text-12 font-bold uppercase tracking-[0.16em] text-meritum-ink-muted">
+        <span className="ml-auto text-label font-bold uppercase tracking-[0.16em] text-meritum-ink-muted">
           {t('meritum_launch.bound_badge')}
         </span>
       </div>
@@ -74,7 +74,7 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
         — no new copy, same facts, just told on the screen where the reader
         first decides to do this at all, as plain text, not a tooltip.
       */}
-      <div className="mt-[26px] border-t border-meritum-line-card pt-[22px] font-serif text-13 text-meritum-ink-muted">
+      <div className="mt-[26px] border-t border-meritum-line-card pt-[22px] font-serif text-caption text-meritum-ink-muted">
         <p>{t('meritum_launch.term_launch_value')}</p>
         <p className="mt-1.5">
           <span className="font-semibold text-meritum-ink-3">{t('meritum_launch.term_listed_label')}:</span>{' '}

@@ -51,7 +51,7 @@ const LaunchStruck: FC<LaunchStruckProps> = ({
         {facts.map((fact) => (
           <div key={fact.id}>
             <div className="font-serif text-26 font-semibold tabular-nums text-meritum-ink">{fact.value}</div>
-            <div className="mt-1 font-serif text-12 text-meritum-ink-muted">{fact.label}</div>
+            <div className="mt-1 font-serif text-caption text-meritum-ink-muted">{fact.label}</div>
           </div>
         ))}
       </div>

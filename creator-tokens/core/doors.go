@@ -42,6 +42,28 @@ func kAllowance(owner, spender, c string) string {
 	return "allow|" + owner + "|" + spender + "|" + c
 }
 
+// kAllowanceEpoch stamps a grant with the market incarnation it was made
+// against: allowep|<owner>|<spender>|<creator>. It is OURS, not magi_nft's.
+//
+// ★ WHY A COMPANION KEY AND NOT A FIFTH SEGMENT ON kAllowance. market.go's
+// registration block used to record — correctly, given the option it
+// considered — that an allowance "cannot be epoch-scoped either: magi-market
+// reads this key from our raw state at a fixed 4-segment shape, so adding a
+// segment would make every marketplace read miss". That objection is only
+// fatal to widening kAllowance itself. A key beside it leaves the 4-segment
+// shape byte-identical, so every marketplace read still hits, and the spend
+// door gets the epoch it needs.
+//
+// A stale stamp reads as NO AUTHORITY (allowanceLive). magi-market's own raw
+// read of kAllowance can still see the dead number, and its settlement will be
+// REFUSED by TransferMatured rather than honoured — a failed settlement on a
+// market that closed and re-opened, which is the safe direction and vastly
+// better than the alternative it replaces (the grant silently spending the new
+// incarnation's tokens).
+func kAllowanceEpoch(owner, spender, c string) string {
+	return "allowep|" + owner + "|" + spender + "|" + c
+}
+
 func getAllowance(s Store, owner, spender, c string) *big.Int {
 	v, ok := s.Get(kAllowance(owner, spender, c))
 	if !ok || v == "" {
@@ -54,6 +76,36 @@ func getAllowance(s Store, owner, spender, c string) *big.Int {
 	return new(big.Int).SetUint64(n)
 }
 
+// allowanceLive is the allowance AS AUTHORITY: the stored number, or zero if
+// the grant was made against a previous incarnation of this market.
+//
+// DEFECT FIX 2026-08-19 (PRUNED finding F1). kAllowance survives CLOSE and
+// re-registration — it cannot be enumerated and cleared at registration, being
+// per-owner-per-spender and unbounded — so a grant made to a spender in a dead
+// market remained live spend authority over the NEXT incarnation's tokens.
+// Measured end to end: a former spender moved 400 matured tokens they were
+// never re-approved for and cashed out 8,540,519 base units, dropping an honest
+// buyer's exit by 31%. It needed no active key either: safeTransferFrom carries
+// no HBD leg, so it routes on POSTING auth (go-vsc-node transactions.go:119-126
+// derives the caller from RequiredPostingAuths[0] when RequiredAuths is empty),
+// widening the attacker set to anyone holding a posting delegation over the old
+// spender.
+//
+// Epoch-scoping is the same per-incarnation reset the offering catalogue
+// already uses (offerings.go's bumpOfferEpoch, called from registerApply): one
+// monotone counter retires everything from the dead life at once, without an
+// unbounded loop inside registration.
+func allowanceLive(s Store, owner, spender, c string) *big.Int {
+	v := getAllowance(s, owner, spender, c)
+	if v.Sign() == 0 {
+		return v
+	}
+	if getU64(s, kAllowanceEpoch(owner, spender, c)) != offerEpoch(s, c) {
+		return mZero()
+	}
+	return v
+}
+
 func setAllowance(s Store, owner, spender, c string, v *big.Int) {
 	if v.Sign() < 0 {
 		panic("setAllowance: negative allowance")
@@ -64,14 +116,22 @@ func setAllowance(s Store, owner, spender, c string, v *big.Int) {
 	key := kAllowance(owner, spender, c)
 	if v.Sign() == 0 {
 		s.Delete(key)
+		s.Delete(kAllowanceEpoch(owner, spender, c))
 		return
 	}
 	s.Set(key, string(u64ToLE(v.Uint64())))
+	// Stamp every write, including the decrement inside TransferMatured: the
+	// spend proved the grant was current, so re-stamping it is a no-op, and a
+	// write that forgot to stamp would silently kill a live allowance.
+	setU64(s, kAllowanceEpoch(owner, spender, c), offerEpoch(s, c))
 }
 
-// AllowanceOf is the read side (wrapper + UI + magi-market's own raw read).
+// AllowanceOf is the read side (wrapper + UI). It reports the LIVE authority,
+// so a holder is never shown a grant that the spend door would refuse.
+// magi-market reads kAllowance raw and cannot be routed through this — see
+// kAllowanceEpoch for why that divergence is safe.
 func AllowanceOf(s Store, owner, spender, creator string) *big.Int {
-	return getAllowance(s, owner, spender, creator)
+	return allowanceLive(s, owner, spender, creator)
 }
 
 // Approve sets an allowance with COMPARE-AND-SET.
@@ -102,7 +162,10 @@ func Approve(s Store, owner, spender, creator string, expected, amount *big.Int)
 		if expected == nil {
 			return newErr(ErrInput, "expected current allowance required (compare-and-set)")
 		}
-		if getAllowance(s, owner, spender, creator).Cmp(expected) != 0 {
+		// allowanceLive, not getAllowance: after a re-registration the stale
+		// number is not authority, so a holder re-granting must be able to pass
+		// `expected = 0` rather than being told their allowance "changed".
+		if allowanceLive(s, owner, spender, creator).Cmp(expected) != 0 {
 			return newErr(ErrState, "allowance changed since it was read; re-read and retry")
 		}
 	}
@@ -151,8 +214,16 @@ func TransferMatured(s Store, creator, from, to, spender string, amount *big.Int
 	}
 
 	if spender != from {
-		allowed := getAllowance(s, from, spender, creator)
+		allowed := allowanceLive(s, from, spender, creator)
 		if mLt(allowed, amount) {
+			// Name the real reason when the grant exists but belongs to a dead
+			// incarnation. "insufficient allowance" would send an integrator
+			// hunting for a balance problem that is not there, and this is
+			// exactly the case a marketplace hits after a market re-opens,
+			// because it reads the raw key and cannot see the epoch stamp.
+			if getAllowance(s, from, spender, creator).Sign() > 0 {
+				return newErr(ErrAuth, "allowance was granted against a previous incarnation of this market and is no longer authority; the holder must approve again")
+			}
 			return newErr(ErrAuth, "insufficient allowance")
 		}
 		next, err := mSub(allowed, amount)

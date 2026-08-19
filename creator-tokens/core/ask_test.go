@@ -1306,3 +1306,163 @@ func TestAsk_FreeFormHashesAreLengthBounded(t *testing.T) {
 		t.Fatalf("an answerHash of exactly MaxHashLen was refused: %v", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// EVENT-HASH SANITISATION (DEFECT FIX 2026-08-19, PRUNED finding F8)
+//
+// These two guards were PROMOTED here from the audit's own detector file, where
+// they lived asserting the vulnerable behaviour. They are inverted now: they
+// pin the refusal instead of documenting the hole. Same five cases as the
+// detector carried.
+//
+// The hole: a control byte in contentHash/answerHash makes the emitted
+// EvAsked/EvAnswered JSON invalid, and the indexer silently drops an event it
+// cannot unmarshal. Measured consequences were an indexer balance fold that
+// disagreed with the chain by the full ask size, and — through answerHash,
+// the only event carrying creditsToCreator — a creator the wind-down keeper
+// can no longer see at all.
+// ---------------------------------------------------------------------------
+
+// ctrlByteCases are the bytes an event payload must never carry. DEL (0x7f) is
+// included even though Go's own decoder tolerates a raw DEL inside a JSON
+// string: it is a non-printable control character with no legitimate place in a
+// content hash, and validOfferTitle has excluded it since 2026-07-28. Matching
+// its rule exactly is the point — this whole finding is a sibling that was
+// missed when that one was fixed.
+var ctrlByteCases = []struct {
+	name string
+	hash string
+}{
+	{"NUL", "a\x00b"},
+	{"newline", "a\x0ab"},
+	{"ESC", "a\x1bb"},
+	{"DEL_0x7f", "a\x7fb"},
+}
+
+func TestAsk_ControlByteInContentHashRefused(t *testing.T) {
+	for _, tc := range ctrlByteCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewMemStore()
+			curveMarket(s, creator1, 100)
+			setMoney(s, kFace(creator1), big.NewInt(1000))
+			setMoney(s, kBal(creator1, asker1), big.NewInt(5000))
+			block := seedSettleObs(s, creator1, 1000, big.NewInt(400))
+			activateMarket(s, creator1, block)
+
+			_, err := askAt0(s, asker1, creator1, block, big.NewInt(3),
+				commissionOwedFor(big.NewInt(1000)), tc.hash, MinAskDeadline)
+			if err == nil {
+				t.Fatalf("Ask accepted contentHash %q — the emitted event would be invalid JSON "+
+					"and the indexer would silently drop it", tc.hash)
+			}
+			if got := askErrSymbol(err); got != "INPUT" {
+				t.Fatalf("refused with %s, want INPUT", got)
+			}
+		})
+	}
+
+	// ANTI-VACUITY: a clean hash must still be accepted, or the four refusals
+	// above prove only that Ask is broken.
+	s := NewMemStore()
+	curveMarket(s, creator1, 100)
+	setMoney(s, kFace(creator1), big.NewInt(1000))
+	setMoney(s, kBal(creator1, asker1), big.NewInt(5000))
+	block := seedSettleObs(s, creator1, 1000, big.NewInt(400))
+	activateMarket(s, creator1, block)
+	if _, err := askAt0(s, asker1, creator1, block, big.NewInt(3),
+		commissionOwedFor(big.NewInt(1000)), "a-b_c.d", MinAskDeadline); err != nil {
+		t.Fatalf("a control-free hash was refused: %v — the guard is too wide", err)
+	}
+}
+
+func TestAnswer_ControlByteInAnswerHashRefused(t *testing.T) {
+	for _, tc := range ctrlByteCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewMemStore()
+			curveMarket(s, creator1, 100)
+			activateMarket(s, creator1, 1000)
+			mkPendingEscrow(s, creator1, 0, asker1, 3, 5000, "cid-1", 120)
+
+			_, err := Answer(s, creator1, creator1, 1100, 0, tc.hash)
+			if err == nil {
+				t.Fatalf("Answer accepted answerHash %q — this is the byte that hides a "+
+					"creator's own position from the wind-down keeper", tc.hash)
+			}
+			if got := askErrSymbol(err); got != "INPUT" {
+				t.Fatalf("refused with %s, want INPUT", got)
+			}
+		})
+	}
+
+	// ANTI-VACUITY.
+	s := NewMemStore()
+	curveMarket(s, creator1, 100)
+	activateMarket(s, creator1, 1000)
+	mkPendingEscrow(s, creator1, 0, asker1, 3, 5000, "cid-1", 120)
+	if _, err := Answer(s, creator1, creator1, 1100, 0, "a-b_c.d"); err != nil {
+		t.Fatalf("a control-free answerHash was refused: %v — the guard is too wide", err)
+	}
+}
+
+// TestReclaim_OutcomeIsIdenticalWhoeverPushesIt pins the property that settles
+// PRUNED finding F18: Reclaim is permissionless, so a stranger can push an
+// abandoned escrow and that push runs graduate() on the ASKER — which reads at
+// first glance like the third-party graduate transfer.go's F-C1 ruling refuses.
+//
+// The two are different acts, and this is the test that says so in code rather
+// than in a comment: whoever presses the button, the asker must end in exactly
+// the same state. A stranger can choose WHEN, never WHAT. If this ever fails,
+// permissionless reclaim really has become a lever a third party can pull
+// against a holder, and the F-C1 objection would apply to it after all.
+func TestReclaim_OutcomeIsIdenticalWhoeverPushesIt(t *testing.T) {
+	// Past one full maturity window, or graduate() has nothing to do and the
+	// comparison below is between two no-ops.
+	deadline := ExitTaxDecayBlocks + 500
+	block := deadline + ReclaimGrace + 1
+
+	// Two identical worlds, differing only in who calls Reclaim.
+	build := func() *MemStore {
+		s := NewMemStore()
+		curveMarket(s, creator1, 100)
+		activateMarket(s, creator1, block)
+		// An aged pile that has cleared the window, so graduate() has real work
+		// to do — otherwise the comparison is vacuous.
+		setMoney(s, kBal(creator1, asker1), big.NewInt(1000))
+		setU64(s, kAcqBlock(creator1, asker1), 1)
+		mkPendingEscrow(s, creator1, 0, asker1, 42, deadline, "cid", 7)
+		return s
+	}
+
+	selfPush, strangerPush := build(), build()
+	if _, err := Reclaim(selfPush, asker1, creator1, block, 0); err != nil {
+		t.Fatalf("asker's own reclaim: %v", err)
+	}
+	if _, err := Reclaim(strangerPush, rando1, creator1, block, 0); err != nil {
+		t.Fatalf("stranger's reclaim: %v", err)
+	}
+
+	// ANTI-VACUITY: graduate() must actually have moved something, or this
+	// compares two no-ops.
+	if MaturedOf(selfPush, creator1, asker1).Sign() == 0 {
+		t.Fatal("setup: nothing graduated, so the comparison proves nothing")
+	}
+
+	for _, f := range []struct {
+		name string
+		get  func(s Store) *big.Int
+	}{
+		{"maturing balance", func(s Store) *big.Int { return getMoney(s, kBal(creator1, asker1)) }},
+		{"matured balance", func(s Store) *big.Int { return MaturedOf(s, creator1, asker1) }},
+	} {
+		if a, b := f.get(selfPush), f.get(strangerPush); a.Cmp(b) != 0 {
+			t.Fatalf("%s differs by caller: asker's own push -> %s, stranger's push -> %s", f.name, a, b)
+		}
+	}
+	if a, b := getU64(selfPush, kAcqBlock(creator1, asker1)), getU64(strangerPush, kAcqBlock(creator1, asker1)); a != b {
+		t.Fatalf("hold clock differs by caller: %d vs %d", a, b)
+	}
+	// And the stranger is never paid, in either world.
+	if bal := getMoney(strangerPush, kBal(creator1, rando1)); bal.Sign() != 0 {
+		t.Fatalf("the pusher was credited %s", bal)
+	}
+}

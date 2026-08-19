@@ -205,7 +205,7 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
               type="button"
               onClick={handleMarkAllAsRead}
               disabled={markAllAsRead.isPending}
-              className="shrink-0 rounded-card px-2 py-1 font-sans text-[13px] leading-[20px] font-semibold text-ink-brand-6 transition-colors hover:bg-surface-brand-5 disabled:cursor-not-allowed disabled:opacity-50"
+              className="shrink-0 rounded-card px-2 py-1 font-sans text-caption font-semibold text-ink-brand-6 transition-colors hover:bg-surface-brand-5 disabled:cursor-not-allowed disabled:opacity-50"
               data-testid="notifications-mark-all-read"
             >
               {markAllAsRead.isPending ? (
@@ -247,7 +247,7 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
                     />
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <span className="text-ink-2">{n.msg}</span>
-                      <span className="text-xs text-ink-10">
+                      <span className="text-caption text-ink-10">
                         {/* Same single format as the chain rows below. */}
                         <TimeAgo date={n.date} numeric="always" />
                       </span>
@@ -286,7 +286,7 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
               <button
                 type="button"
                 onClick={() => refetch()}
-                className="font-sans text-[13px] leading-[20px] font-semibold text-ink-brand-6 underline-offset-2 hover:underline"
+                className="font-sans text-caption font-semibold text-ink-brand-6 underline-offset-2 hover:underline"
                 data-testid="notifications-popover-retry"
               >
                 {t('navigation.profile_notifications_tab_navbar.notifications_retry')}

@@ -656,7 +656,7 @@ function ForYouFeed() {
           promising posts and the next saying there are none. When there is
           nothing to show, the empty state is the only honest message on screen. */}
       {degradedMessage && shown.length > 0 ? (
-        <p className="mb-4 rounded-control bg-[#fdf6e7] px-3 py-2 font-sans text-[13px] leading-[20px] text-[#9a7b2e]">
+        <p className="mb-4 rounded-control bg-[#fdf6e7] px-3 py-2 font-sans text-caption text-[#9a7b2e]">
           {degradedMessage}
         </p>
       ) : null}

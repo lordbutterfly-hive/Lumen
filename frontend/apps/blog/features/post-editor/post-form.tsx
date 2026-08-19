@@ -343,7 +343,7 @@ export default function PostForm({
                       literal in light mode. */}
                   <button
                     type="button"
-                    className="rounded-card border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
+                    className="rounded-card border border-[#ebebeb] bg-white px-3 py-1.5 text-caption font-medium text-[#6b7280] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
                     onClick={() => setRestoredFromDraft(false)}
                     data-testid="restored-draft-keep"
                   >
@@ -358,7 +358,7 @@ export default function PostForm({
                       control only. */}
                   <button
                     type="button"
-                    className="rounded-card border border-line-brand-10 bg-white px-3 py-1.5 text-xs font-medium text-ink-brand-6 transition-colors hover:bg-surface-brand-12 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
+                    className="rounded-card border border-line-brand-10 bg-white px-3 py-1.5 text-caption font-medium text-ink-brand-6 transition-colors hover:bg-surface-brand-12 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
                     onClick={() => handleCancel()}
                     data-testid="restored-draft-discard"
                   >
@@ -407,7 +407,7 @@ export default function PostForm({
                       />
                     </div>
                   </FormControl>
-                  <div className="flex items-center rounded-b-md border-x border-b border-border bg-background-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
+                  <div className="flex items-center rounded-b-md border-x border-b border-border bg-background-secondary/50 px-3 py-1.5 text-caption text-muted-foreground">
                     {t("submit_page.insert_images_by_dragging")} {t("submit_page.selecting_them")}
                     <TooltipProvider>
                       <Tooltip>
@@ -552,7 +552,7 @@ export default function PostForm({
                   !watchedValues.postArea?.trim() ||
                   tagsRequiredAndEmpty) && (
                   <p
-                    className="text-xs text-muted-foreground"
+                    className="text-caption text-muted-foreground"
                     data-testid="submit-requirements-hint"
                   >
                     {altUsernameCheck

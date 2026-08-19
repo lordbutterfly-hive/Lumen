@@ -166,14 +166,14 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
 
         {!manual ? (
           <>
-            <p className="mb-4 text-[13px] leading-[20px] text-ink-10">{S.connectHelp}</p>
+            <p className="mb-4 text-caption text-ink-10">{S.connectHelp}</p>
             <button
               onClick={connectAndVerify}
               disabled={connecting || !connectorReady}
               className="flex h-12 w-full cursor-pointer items-center justify-center gap-2.5 rounded-xl bg-surface-43 text-[15px] leading-[24px] font-semibold text-ink-27 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <span
-                className="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full text-[13px] leading-[20px] font-extrabold text-ink-27"
+                className="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full text-caption font-bold text-ink-27"
                 style={{ backgroundColor: copy.symbolBg }}
               >
                 {copy.symbol}
@@ -181,7 +181,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
               {connecting ? S.connecting : copy.connect}
             </button>
             {!connectorReady ? (
-              <p className="mt-3 text-[13px] leading-[20px] text-ink-warn-3">{S.unconfigured}</p>
+              <p className="mt-3 text-caption text-ink-warn-3">{S.unconfigured}</p>
             ) : null}
             {chain === 'btc' ? (
               <button
@@ -194,10 +194,10 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
           </>
         ) : (
           <>
-            <label className="mb-1.5 block text-[13px] leading-[20px] font-semibold text-ink-8">{copy.addrLabel}</label>
+            <label className="mb-1.5 block text-caption font-semibold text-ink-8">{copy.addrLabel}</label>
             <div className="mb-3.5 flex items-center gap-2.5 rounded-xl border border-line-11 px-[15px] py-3">
               <span
-                className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-full font-extrabold text-ink-27"
+                className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-full font-bold text-ink-27"
                 style={{ backgroundColor: copy.symbolBg }}
               >
                 {copy.symbol}
@@ -226,7 +226,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
                 >
                   <path d="M12 9v4M12 17h.01M10.3 3.9l-8 14A2 2 0 004 21h16a2 2 0 001.7-3l-8-14a2 2 0 00-3.4 0z" />
                 </svg>
-                <p className="text-[13px] leading-[20px] text-ink-warn-3">{S.taproot}</p>
+                <p className="text-caption text-ink-warn-3">{S.taproot}</p>
               </div>
             ) : !challenge ? (
               <button
@@ -239,8 +239,8 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
             ) : (
               <div className="rounded-xl border border-line-9 bg-surface-12 p-4">
                 <div className="mb-2 text-sm font-semibold text-ink-2">{S.signHeading}</div>
-                <p className="mb-3 text-[13px] leading-[20px] text-ink-10">{S.signHelp}</p>
-                <div className="mb-3 whitespace-pre-wrap break-all rounded-control border border-line-11 bg-surface-1 px-3 py-2.5 font-mono text-[13px] leading-[20px] text-ink-2">
+                <p className="mb-3 text-caption text-ink-10">{S.signHelp}</p>
+                <div className="mb-3 whitespace-pre-wrap break-all rounded-control border border-line-11 bg-surface-1 px-3 py-2.5 font-mono text-caption text-ink-2">
                   {challenge.message}
                 </div>
                 <textarea
@@ -248,7 +248,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
                   onChange={(e) => setSignature(e.target.value)}
                   placeholder={S.sigPlaceholder}
                   rows={3}
-                  className="w-full resize-none rounded-control border border-line-11 bg-surface-1 px-3 py-2.5 font-mono text-[12px] text-ink-2 outline-none placeholder:text-ink-14 focus-visible:outline-2 focus-visible:outline-line-brand-10"
+                  className="w-full resize-none rounded-control border border-line-11 bg-surface-1 px-3 py-2.5 font-mono text-caption text-ink-2 outline-none placeholder:text-ink-14 focus-visible:outline-2 focus-visible:outline-line-brand-10"
                 />
                 <button
                   onClick={verifyManual}
@@ -275,7 +275,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
           </>
         )}
 
-        {error ? <p className="mt-3 text-[13px] leading-[20px] text-ink-warn-3">{error}</p> : null}
+        {error ? <p className="mt-3 text-caption text-ink-warn-3">{error}</p> : null}
 
         <button
           onClick={onClose}

@@ -184,15 +184,15 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
               <div className="grid grid-cols-3 gap-2 border-b border-border p-3" translate="no">
                 <div className="flex flex-col items-center" data-testid="user-followers">
                   <span className="text-lg font-semibold text-foreground">{follows.data?.follower_count ?? '—'}</span>
-                  <span className="text-xs text-muted-foreground">{t('post_content.header.hover_author.followers')}</span>
+                  <span className="text-caption text-muted-foreground">{t('post_content.header.hover_author.followers')}</span>
                 </div>
                 <div className="flex flex-col items-center" data-testid="user-following">
                   <span className="text-lg font-semibold text-foreground">{follows.data?.following_count ?? '—'}</span>
-                  <span className="text-xs text-muted-foreground">{t('post_content.header.hover_author.following')}</span>
+                  <span className="text-caption text-muted-foreground">{t('post_content.header.hover_author.following')}</span>
                 </div>
                 <div className="flex flex-col items-center" data-testid="user-hp">
                   <span className="text-lg font-semibold text-foreground">{numberWithCommas(hp.toFixed(0))}</span>
-                  <span className="text-xs text-muted-foreground" title="Hive Power after delegations">HP</span>
+                  <span className="text-caption text-muted-foreground" title="Hive Power after delegations">HP</span>
                 </div>
               </div>
 
@@ -204,7 +204,7 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
               )}
 
               {/* Footer with dates */}
-              <div className="flex items-center justify-center gap-2 p-3 text-xs text-muted-foreground">
+              <div className="flex items-center justify-center gap-2 p-3 text-caption text-muted-foreground">
                 <span>{t('post_content.header.hover_author.joined')} {dateToShow(account.created, t)}</span>
                 <span>•</span>
                 <span className="flex items-center gap-1">
@@ -242,7 +242,7 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
             <Icons.warning className="mr-1 h-4 w-4" />
             <span>{t('post_content.blacklisted')}</span>
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">{blacklist[0]}</p>
+          <p className="mt-1 text-caption text-muted-foreground">{blacklist[0]}</p>
         </div>
       )}
     </div>

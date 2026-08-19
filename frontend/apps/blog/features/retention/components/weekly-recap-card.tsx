@@ -157,7 +157,7 @@ export function WeeklyRecapCard({ className }: WeeklyRecapCardProps) {
         <Icons.close className="h-4 w-4" />
       </button>
 
-      <p className="pr-8 font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-[0.06em] text-ink-14">
+      <p className="pr-8 font-sans text-label font-semibold uppercase tracking-[0.06em] text-ink-14">
         {t('retention.recap.title')}
       </p>
       <p className="mt-1.5 font-sans text-[17px] font-semibold leading-[26px] text-ink-2" data-testid="retention-weekly-recap-line">

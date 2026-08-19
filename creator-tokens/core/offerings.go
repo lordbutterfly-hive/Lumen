@@ -595,6 +595,31 @@ func SetOfferingTitle(s Store, caller, creator string, id uint64, title string) 
 			return newErr(ErrInput, "renaming onto this title would move a price outside its 2x/7-day band (checked against the destination title's own anchor and last known price)")
 		}
 		setMoney(s, newPriceKey, idPrice)
+
+		// DEFECT FIX (F16, 2026-08-19): don't let this id DONATE a wider band
+		// to itself by hopping onto a title whose own anchor happens to be
+		// looser than the id's OWN existing anchor. The check above only
+		// verifies idPrice fits the destination's CURRENT band — a price at
+		// the edge of that band (e.g. exactly 2x an id's own anchor) always
+		// passes, honestly. The bug is what happens NEXT: SetOfferingPrice
+		// bands every future reprice purely against the TITLE's own
+		// persistent anchor (applyTitleBandedPrice, above) — never against
+		// this id's own anchor — so once this id carries the destination's
+		// title, ANY anchor sitting there, however it got there, becomes
+		// this id's new 2x ceiling too. A decoy title created fresh at 2x of
+		// this id's real price and then donated via delete+rename hands the
+		// id a SECOND, unrelated 2x window on top of its own — 4x in one
+		// block, proven by TestP45_X7. Clamping the destination's anchor
+		// down to this id's own (never up — an id's own anchor being LOOSER
+		// than the destination's is left alone; the destination is already
+		// the tighter, binding constraint then) means a live id can never
+		// end up with more headroom after a rename than it had before one.
+		// This cannot make an otherwise-honest rename fail: it never touches
+		// the check above, only what governs price changes AFTER the rename
+		// succeeds.
+		if ownAnchor := getMoney(s, kOfferAnchor(creator, epoch, id)); ownAnchor.Sign() > 0 && mLt(ownAnchor, getMoney(s, newAnchorKey)) {
+			setMoney(s, newAnchorKey, ownAnchor)
+		}
 	}
 
 	// Keep this id's own cached mirror in step with whichever title it now

@@ -184,7 +184,7 @@ const CommentsSection = memo(function CommentsSection({
           <p className="font-sans text-sm font-semibold text-foreground">
             {t('select_sort.sort_comments.no_comments_title')}
           </p>
-          <p className="font-sans text-[13px] leading-[20px] text-muted-foreground">
+          <p className="font-sans text-caption text-muted-foreground">
             {t('select_sort.sort_comments.no_comments_body')}
           </p>
           {/* Same trigger, same copy, same signed-out gate as the post's own
@@ -243,7 +243,7 @@ const CommentsSection = memo(function CommentsSection({
                   className="h-[20px] w-[36px] data-[state=checked]:bg-destructive data-[state=unchecked]:bg-muted [&>span]:h-4 [&>span]:w-4 [&>span]:data-[state=checked]:translate-x-4"
                   aria-label={t('select_sort.sort_comments.filter_label')}
                 />
-                <Label htmlFor="comment-filter" className="cursor-pointer text-xs text-muted-foreground">
+                <Label htmlFor="comment-filter" className="cursor-pointer text-caption text-muted-foreground">
                   {t('select_sort.sort_comments.filtered_count', { count: hiddenCount })}
                 </Label>
               </div>

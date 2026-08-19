@@ -3,6 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { STATE_QUERY, HEAD_QUERY } from '@/blog/features/prediction-market/lib/vsc-gql';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceMagiGqlRate } from '@/blog/lib/lite/antispam/rate-limit';
+import { consumeLocalGlobal, consumeLocalPerIp } from '@/blog/lib/lite/antispam/local-rate-limit';
 import { withRetry } from '@transaction/lib/retry';
 
 const logger = getLogger('app');
@@ -142,12 +143,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // route works whether or not the lite-accounts Postgres backend is provisioned, so
   // a limiter-store outage must not take chain reads offline — only the limiter falls
   // open, not the allowlist or the upstream-config check above.
+  // ★ GLOBAL CEILING + FAIL-CLOSED FALLBACK (audit anomaly AN-34, 2026-08-19).
+  // Applied here as well as on the creator-tokens proxy because these two
+  // routes are deliberate mirrors and their own docs say so — fixing one and
+  // not the other is how they drift. See that route, and
+  // lib/lite/antispam/local-rate-limit.ts, for the full argument: a bare
+  // `catch { proceed }` meant that with the limiter store down or simply never
+  // provisioned, the per-IP cap was not degraded but ABSENT.
+  if (!consumeLocalGlobal('prediction_market_gql')) {
+    logger.warn('prediction-market gql proxy: global in-process ceiling hit — shedding load');
+    return NextResponse.json({ errors: [{ message: 'rate limited' }] }, { status: 429 });
+  }
+
+  const ip = getClientIp(req);
   try {
-    if (!(await enforceMagiGqlRate(getClientIp(req), 'prediction_market'))) {
+    if (!(await enforceMagiGqlRate(ip, 'prediction_market'))) {
       return NextResponse.json({ errors: [{ message: 'rate limited' }] }, { status: 429 });
     }
-  } catch {
-    /* limiter unavailable — proceed */
+  } catch (err) {
+    if (!consumeLocalPerIp(ip, 'prediction_market_gql')) {
+      return NextResponse.json({ errors: [{ message: 'rate limited' }] }, { status: 429 });
+    }
+    logger.warn({ err }, 'prediction-market gql proxy: durable rate limiter unavailable, using in-process fallback');
   }
 
   // Pinned after the guard above: TypeScript does not carry that narrowing into

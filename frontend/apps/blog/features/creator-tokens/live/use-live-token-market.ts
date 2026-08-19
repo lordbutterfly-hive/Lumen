@@ -23,7 +23,7 @@ import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
-import { humanToBaseUnits } from '../lib/contract-math';
+import { resolveAskMaxCreditsBaseUnits } from '../market/curve';
 import type { BuyQuote, SellQuote } from '../types';
 import { adaptMarket, type LiveTokenMarket } from './adapt';
 
@@ -33,6 +33,19 @@ export type LiveMarketStatus =
   | 'loading'
   /** The chain read itself failed. NOT the same as "this creator has no market". */
   | 'error'
+  /**
+   * F14 fix (2026-08-19): OUR OWN session check (`/api/users/me`) failed —
+   * distinct from 'error', where the CHAIN read failed. A hook that derives
+   * its creator/holder identity from `loggedIn` cannot tell "genuinely signed
+   * out" from "session check merely blipped" without this: before this state
+   * existed, a failed session made `creator` resolve to null, which read
+   * exactly like 'missing' — telling a creator who already has a live market
+   * that they have none. Only reachable for hooks that need a signed-in
+   * identity to read at all (use-live-studio.ts); use-live-token-market.ts
+   * reads a public creator's page regardless of the viewer's own session, so
+   * it exposes `sessionUnavailable` directly instead of folding it in here.
+   */
+  | 'session-unavailable'
   /** Read succeeded; this creator has never registered a market. */
   | 'missing'
   | 'ready';
@@ -53,8 +66,8 @@ const deliveryKey = (creator: string) => ['creatorTokens', 'live', 'delivery', c
 const historyKey = (creator: string) => ['creatorTokens', 'live', 'priceHistory', creator];
 
 // A market's phase and price move with the curve, not with a ticker, so a 30s
-// poll keeps the page honest without hammering the node. Same cadence
-// use-creator-token.ts already settled on.
+// poll keeps the page honest without hammering the node. Same cadence used
+// elsewhere in this feature (use-live-studio.ts).
 const REFETCH_MS = 30_000;
 const STALE_MS = 15_000;
 
@@ -65,6 +78,16 @@ export interface LiveTokenMarketResult {
   /** The signed-in viewer, or null. Actions all require one. */
   viewer: string | null;
   loggedIn: boolean;
+  /**
+   * F14 fix: true when `/api/users/me` has definitively FAILED (not merely
+   * still loading) — see use-user-core.ts's own doc on the flag. `loggedIn`
+   * alone cannot tell a genuinely signed-out visitor from a signed-in one
+   * whose session check simply hasn't answered, so a session blip made
+   * `viewer` resolve to null for an already-verified creator and every write
+   * refused with "sign in to continue" — a falsehood, not a wait. Callers
+   * that render "sign in" copy off `!loggedIn` should check this first.
+   */
+  sessionUnavailable: boolean;
   /** A lite account holds no Hive keys and cannot sign — every money action must be gated on this, not left to fail at the signer. */
   isLite: boolean;
 
@@ -102,7 +125,7 @@ export interface LiveTokenMarketResult {
 
 export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   const queryClient = useQueryClient();
-  const { user, isHydrated } = useUserClient();
+  const { user, isHydrated, sessionUnavailable } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
   const viewer = loggedIn ? user.username : null;
   const isLite = user.account_tier === 'lite';
@@ -199,10 +222,17 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   // past the gate the button is supposed to enforce.
   const requireSigner = useCallback((): { source: NonNullable<typeof dataSource>; signer: string } => {
     if (!dataSource) throw new Error('CREATOR_TOKENS_UNAVAILABLE: no contract is provisioned');
+    // F14 fix: distinct from "sign in to continue" — this is our OWN session
+    // check failing, not a genuine sign-out. Checked before the generic
+    // !viewer branch so a signed-in user whose /api/users/me merely blipped
+    // is told the truth instead of being asked to sign in again.
+    if (!viewer && sessionUnavailable) {
+      throw new Error('CREATOR_TOKENS_SESSION_UNAVAILABLE: we couldn’t verify you’re signed in just now. Try again in a moment.');
+    }
     if (!viewer) throw new Error('CREATOR_TOKENS_SIGNED_OUT: sign in to continue');
     if (isLite) throw new Error('CREATOR_TOKENS_LITE_ACCOUNT: this account has no Hive keys and cannot sign a transaction');
     return { source: dataSource, signer: viewer };
-  }, [dataSource, viewer, isLite]);
+  }, [dataSource, viewer, isLite, sessionUnavailable]);
 
   const buyMutation = useMutation({
     mutationFn: async ({ tokens, maxTotalUsd }: { tokens: number; maxTotalUsd?: number }) => {
@@ -237,6 +267,20 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   const askMutation = useMutation({
     mutationFn: async (input: { offeringId: number; contentHash: string; deadlineDays: number; maxCostUsd: number }) => {
       const { source, signer } = requireSigner();
+      // F4 fix (2026-08-19): maxCreditsBaseUnits used to be built as
+      // `humanToBaseUnits(input.maxCostUsd)` — an HBD-milliunit number, while
+      // the field is an INTEGER TOKEN COUNT (see resolveAskMaxCreditsBaseUnits's
+      // doc above). `maxCostUsd` stays in this input type — the modal still
+      // shows it as the price the user is agreeing to — but the SIGNED cap is
+      // now the quote's own credits figure, re-read here (not the possibly
+      // stale one shown when the modal opened) so a creator can't spike `face`
+      // between this read and the signature. Quote the SAME offering the ask
+      // will name (readQuote's own offeringId doc) or this would price the
+      // wrong service.
+      const quote = await source.readQuote(creator, input.offeringId);
+      if (quote.creditsRequiredBaseUnits === null) {
+        throw new Error(`CREATOR_TOKENS_UNPRICED: we can’t price this ask right now (${quote.oracleStatus}). Try again in a moment.`);
+      }
       await source.ask({
         creator,
         asker: signer,
@@ -248,7 +292,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
         // which rejects a missing or zero value rather than defaulting to
         // unlimited. It is what stops a creator spiking their price between
         // this user signing and the transaction executing.
-        maxCreditsBaseUnits: humanToBaseUnits(input.maxCostUsd),
+        maxCreditsBaseUnits: resolveAskMaxCreditsBaseUnits(quote.creditsRequiredBaseUnits),
         // 0 is the reserved alias for the creator's legacy face price, so this
         // is always safe to pass through as-is.
         offeringId: input.offeringId
@@ -273,6 +317,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
     market,
     viewer,
     loggedIn,
+    sessionUnavailable,
     isLite,
 
     quoteBuy: useCallback(

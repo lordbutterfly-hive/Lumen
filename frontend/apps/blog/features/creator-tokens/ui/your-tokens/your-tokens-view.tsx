@@ -21,6 +21,7 @@
 
 import { FC, useState } from 'react';
 import { Link } from '@hive/ui';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useLivePortfolio } from '../../live/use-live-portfolio';
 import { usdFromHbd } from '../../live/adapt';
 import type { Ask, HolderPosition } from '../../types';
@@ -50,14 +51,14 @@ const HoldingRow: FC<{ h: HolderPosition }> = ({ h }) => (
           guaranteed back. There is deliberately no "current value" line: that
           needs the creator's live curve price, which is a per-market read this
           list does not make. The token page shows it. */}
-      <div className="text-[12px] text-ink-14">floor {usdPrice(usdFromHbd(h.floorValueHbd))}</div>
+      <div className="text-caption text-ink-14">floor {usdPrice(usdFromHbd(h.floorValueHbd))}</div>
     </div>
     <div className="flex gap-2">
       {['Buy', 'Sell', 'Send'].map((label) => (
         <Link
           key={label}
           href={`/creators/${h.creator}?a=${label.toLowerCase()}`}
-          className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-[13px] leading-[20px] font-semibold text-ink-7 hover:bg-surface-23"
+          className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-semibold text-ink-7 hover:bg-surface-23"
         >
           {label}
         </Link>
@@ -87,10 +88,10 @@ const askStyle: Record<string, { label: string; cls: string }> = {
 const RateStrip: FC<{ onRate: (score: number) => Promise<void>; busy: boolean }> = ({ onRate, busy }) => {
   const [failure, setFailure] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  if (done) return <div className="mt-3 text-[13px] leading-[20px] font-semibold text-ink-ok-2">Thanks. Your rating is recorded on-chain.</div>;
+  if (done) return <div className="mt-3 text-caption font-semibold text-ink-ok-2">Thanks. Your rating is recorded on-chain.</div>;
   return (
     <div className="mt-3 border-t border-line-2 pt-3">
-      <div className="mb-2 text-[13px] leading-[20px] text-ink-10">How did it go? Your rating is the creator’s public record.</div>
+      <div className="mb-2 text-caption text-ink-10">How did it go? Your rating is the creator’s public record.</div>
       <div className="flex items-center gap-1.5">
         {[1, 2, 3, 4, 5].map((score) => (
           <button
@@ -106,15 +107,15 @@ const RateStrip: FC<{ onRate: (score: number) => Promise<void>; busy: boolean }>
                 setFailure(writeFailureMessage(err, 'Your rating didn’t go through.'));
               }
             }}
-            className="h-8 w-8 rounded-control border border-line-11 bg-surface-1 text-[13px] leading-[20px] font-bold text-ink-7 hover:bg-surface-23 disabled:opacity-50"
+            className="h-8 w-8 rounded-control border border-line-11 bg-surface-1 text-caption font-bold text-ink-7 hover:bg-surface-23 disabled:opacity-50"
           >
             {score}
           </button>
         ))}
-        <span className="ml-1 text-[12px] text-ink-14">1 = poor · 5 = excellent</span>
+        <span className="ml-1 text-caption text-ink-14">1 = poor · 5 = excellent</span>
       </div>
       {failure ? (
-        <div className="mt-2 text-[12px] font-semibold text-ink-brand-6">{failure}</div>
+        <div className="mt-2 text-caption font-semibold text-ink-brand-6">{failure}</div>
       ) : null}
     </div>
   );
@@ -136,20 +137,20 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
         <div className="text-[15px] leading-[24px] font-semibold text-ink-2">
           Ask · <span className="text-ink-8">@{a.creator}</span>
         </div>
-        <div className={`text-[13px] leading-[20px] font-bold ${s.cls}`}>{s.label}</div>
+        <div className={`text-caption font-bold ${s.cls}`}>{s.label}</div>
       </div>
-      <div className="mt-1 text-[13px] leading-[20px] tabular-nums text-ink-10">
+      <div className="mt-1 text-caption tabular-nums text-ink-10">
         {a.tokensEscrowed.toFixed(2)} tokens{' '}
         {a.status === 'answered' ? 'paid to the creator' : a.status === 'reclaimed' || a.status === 'declined' ? 'returned to you' : 'in escrow'}
       </div>
       {/* The chain carries a REFERENCE, not the brief — this contract
           facilitates payment and reputation; the work is arranged between the
           two parties directly (USER RULING 2026-07-28). */}
-      {a.contentHash ? <div className="mt-1 font-mono text-[12px] text-ink-14">ref {a.contentHash}</div> : null}
+      {a.contentHash ? <div className="mt-1 font-mono text-caption text-ink-14">ref {a.contentHash}</div> : null}
       {a.status === 'answered' ? <RateStrip onRate={onRate} busy={rating} /> : null}
       {reclaimable ? (
         <div className="mt-3 flex items-center justify-between gap-3">
-          <div className="text-[13px] leading-[20px] text-ink-warn-2">You get {a.tokensEscrowed.toFixed(2)} tokens back to your balance — in full.</div>
+          <div className="text-caption text-ink-warn-2">You get {a.tokensEscrowed.toFixed(2)} tokens back to your balance — in full.</div>
           <button
             onClick={async () => {
               if (busy) return;
@@ -162,14 +163,14 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
               }
             }}
             disabled={busy}
-            className="rounded-control bg-surface-warn-11 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 hover:bg-surface-warn-13 disabled:opacity-50"
+            className="rounded-control bg-surface-warn-11 px-4 py-2 text-caption font-semibold text-ink-27 hover:bg-surface-warn-13 disabled:opacity-50"
           >
             {busy ? 'Confirm in your wallet…' : 'Get your tokens back'}
           </button>
         </div>
       ) : null}
       {failure ? (
-        <div className="mt-2 text-[12px] font-semibold text-ink-brand-6">{failure}</div>
+        <div className="mt-2 text-caption font-semibold text-ink-brand-6">{failure}</div>
       ) : null}
     </div>
   );
@@ -179,6 +180,10 @@ const YourTokensView: FC = () => {
   const eligibility = useMeritumEligibility();
   const [tab, setTab] = useState<'holdings' | 'asks'>('holdings');
   const p = useLivePortfolio();
+  // F14 fix: the retry affordance for p.sessionUnavailable below — re-fires
+  // /api/users/me itself, matching feed-tabs.tsx's established
+  // identity.retrySession pattern for the identical third state.
+  const { retrySession } = useUserClient();
 
   const floorTotalUsd = p.holdings.reduce((sum, h) => sum + usdFromHbd(h.floorValueHbd), 0);
   const reclaimable = p.asks.filter((a) => a.status === 'reclaimable').length;
@@ -202,6 +207,20 @@ const YourTokensView: FC = () => {
       {p.unavailable ? (
         <div className="mt-5">
           <Unavailable>Meritum isn’t available on this build yet.</Unavailable>
+        </div>
+      ) : !p.loggedIn && p.sessionUnavailable ? (
+        // F14 fix: OUR session check failed, not a genuine sign-out — checked
+        // before the `!p.loggedIn` branch below, which would otherwise tell an
+        // already-verified holder to sign in. Driven live: this persisted
+        // until the next focus/reconnect, not a flicker (use-user-core.ts's
+        // own doc on the flag).
+        <div className="mt-5">
+          <Unavailable>
+            We couldn’t check your account, so we can’t show what you hold.{' '}
+            <button onClick={retrySession} className="font-semibold text-ink-brand-6 underline">
+              Try again
+            </button>
+          </Unavailable>
         </div>
       ) : !p.loggedIn ? (
         <div className="mt-5">
@@ -256,7 +275,7 @@ const YourTokensView: FC = () => {
               per-market read. The floor is a number we actually have — and it is
               the honest one to lead with anyway. */}
           <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-1">
-            <div className="text-[34px] leading-[44px] font-extrabold tabular-nums text-ink-2">{p.holdingsUnavailable ? '—' : usdPrice(floorTotalUsd)}</div>
+            <div className="text-display font-bold tabular-nums text-ink-2">{p.holdingsUnavailable ? '—' : usdPrice(floorTotalUsd)}</div>
             <div className="pb-1.5 text-[15px] leading-[24px] tabular-nums text-ink-10">Floor value: what the reserve would pay out if the market wound down</div>
           </div>
           <p className="mt-1 text-[14px] leading-[22px] text-ink-10">
@@ -268,7 +287,7 @@ const YourTokensView: FC = () => {
               <span className="text-[14px] leading-[22px] font-semibold text-ink-warn-3">
                 You have {reclaimable} ask{reclaimable > 1 ? 's' : ''} with tokens to reclaim.
               </span>
-              <button onClick={() => setTab('asks')} className="text-[13px] leading-[20px] font-semibold text-ink-warn-3 underline">
+              <button onClick={() => setTab('asks')} className="text-caption font-semibold text-ink-warn-3 underline">
                 View
               </button>
             </div>
@@ -309,7 +328,7 @@ const YourTokensView: FC = () => {
                   p.holdings.map((h) => <HoldingRow key={h.creator} h={h} />)
                 )}
               </div>
-              <p className="mt-4 font-serif text-[13px] leading-[20px] text-ink-14">
+              <p className="mt-4 font-serif text-caption text-ink-14">
                 Token prices float and you can lose money. You can exit two ways: sell on the curve while the market is
                 open — at the curve’s price, after a 10% trade fee and any early-exit fee — or, once a market winds down,
                 redeem at the floor. The floor value is what the reserve would pay out then; it is not a price you can

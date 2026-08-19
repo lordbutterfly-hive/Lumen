@@ -27,7 +27,7 @@ export default function ScrollPagerFooter({
   endLabel,
   endIllustration = false,
   loadingLabel = 'Loading…',
-  className = 'py-8 text-center font-sans text-[13px] leading-[20px] text-muted-foreground',
+  className = 'py-8 text-center font-sans text-caption text-muted-foreground',
   testId
 }: {
   sentinel: InfiniteScrollSentinel;

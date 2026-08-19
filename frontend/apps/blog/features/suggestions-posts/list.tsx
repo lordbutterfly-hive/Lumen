@@ -45,7 +45,7 @@ const SuggestionsList = ({ suggestions, variant = 'rail', limit }: SuggestionsLi
           <SuggestionsCard entry={suggestion} key={i} variant={variant} />
         ))
       ) : (
-        <div className="flex flex-col items-center gap-2 p-4 text-center text-[13px] leading-[20px] text-ink-10">
+        <div className="flex flex-col items-center gap-2 p-4 text-center text-caption text-ink-10">
           <p>Sorry</p>
           <p>All suggested posts were hidden due to low ratings.</p>
         </div>

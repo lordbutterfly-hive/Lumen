@@ -82,7 +82,39 @@ import "math/big"
 // needs "now"; the wasm wrapper passes the same chain block every other
 // entrypoint gets. It is still load-bearing: `block` is what the maturity cap
 // is measured against on BOTH legs of the average.
-func TransferCredits(s Store, creator, from, to string, block uint64, amount *big.Int) error {
+//
+// `caller` — F12 DEFECT FIX (2026-08-19). Before this parameter existed, this
+// function took `from` as a bare, unauthenticated account name and validated
+// it for ACCOUNT-STRING FORMAT ONLY — nothing here proved `from` was the
+// transaction's actual signer. The entire "you can only move your own
+// credits" guarantee lived in exactly one line at the wasm wrapper
+// (contract/main.go's Transfer, which always passed the env caller as
+// `from`), and nothing in this package's own test suite could catch a
+// regression there: mutating that single call-site argument to read an
+// attacker-controlled payload field instead of the verified caller produced
+// live theft — a funded holder's entire balance moved to an account that had
+// never touched the market — while every existing test in the repository
+// still passed (core/fuzz_test.go's
+// TransferCreditsHasNoCallerAuthorization_DOCUMENTED_FINDING proved it
+// end-to-end, including a live Sell of the stolen tokens for real HBD).
+//
+// Every other value-moving function in this package (Buy/Ask/Refund/Sell/
+// Register/Graduate, ...) takes an explicit `caller` and acts only on that
+// caller's own balance/position by construction — see e.g. Refund's
+// `totalBalance(s, creator, caller)`. TransferCredits now follows the same
+// shape: the caller is a first-class parameter, and `caller == from` is
+// enforced HERE, structurally, rather than resting on the wrapper never
+// getting that one line wrong. The wasm wrapper still computes `caller` from
+// the verified active-auth signer (requireActiveAuth) and passes it as BOTH
+// `caller` and `from` on its one legitimate call shape; this function no
+// longer trusts that wiring blindly.
+func TransferCredits(s Store, caller, creator, from, to string, block uint64, amount *big.Int) error {
+	// The auth gate comes first, matching this package's own convention for
+	// every other caller-bound function (e.g. registerCheck, market.go:
+	// "if caller != creator { ErrAuth }" runs before any format validation).
+	if caller != from {
+		return newErr(ErrAuth, "caller must equal from: cannot move another account's credits")
+	}
 	// validAccount on ALL THREE — each is concatenated into kBal/kAcqBlock/
 	// kBasis keys with no escaping, so a '|' in any of them is a
 	// key-collision vector (the package-wide rule, applied at the door).
@@ -168,7 +200,23 @@ func TransferCredits(s Store, creator, from, to string, block uint64, amount *bi
 	// Infallible (holdclock.go).
 	//
 	// F-C1 DELIBERATELY DOES NOT graduate the recipient here (2026-07-31, USER
-	// RULING). Unlike the escrow-return legs (Answer/Reclaim/Decline), a transfer's
+	// RULING).
+	//
+	// ★ THE LINE BETWEEN THIS AND THE ESCROW LEGS, spelled out 2026-08-19 after
+	// PRUNED finding F18 read the two rules as contradicting each other. Reclaim
+	// is permissionless, so a STRANGER can push someone's abandoned escrow and
+	// that push graduates the asker — which looks like the very act this ruling
+	// refuses. It is not the same act. Here a third party's OWN tokens arrive as
+	// an inflow the recipient never asked for; there, the asker's OWN tokens come
+	// back from an escrow the asker opened, and the graduate protects them
+	// (banking their cleared pile BEFORE the return re-averages into it, F-C8).
+	// The test that pins it is TestReclaim_OutcomeIsIdenticalWhoeverPushesIt:
+	// a stranger's push must leave the asker in exactly the state their own push
+	// would have. What a third party must never do is CHOOSE something for you;
+	// pressing a button that returns your own property on your own terms is not
+	// that.
+	//
+	// Unlike the escrow-return legs (Answer/Reclaim/Decline), a transfer's
 	// inflow is chosen by a THIRD PARTY, and graduating the recipient's aged pile
 	// would segregate it into MATURED while leaving the sender's fresh gift alone in
 	// the maturing bucket. A maturing-first Sell would then force the recipient to

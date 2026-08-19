@@ -225,6 +225,8 @@ func TestAuthTier_EveryGatedWriteIsExercised(t *testing.T) {
 		"pause":            "platform-owner control; the payload builder exists but no data-source method wires it",
 		"unpause":          "platform-owner control; the payload builder exists but no data-source method wires it",
 		"withdrawTreasury": "platform-owner control; the data source has the method but no UI reaches it, so the harness journey cannot drive it as a user would",
+		"changeOwner":      "F19 defect fix (2026-08-19): platform-owner control, propose half of the 2-step ownership transfer; no client method exists yet, same tier as pause/unpause/withdrawTreasury above",
+		"acceptOwnership":  "F19 defect fix (2026-08-19): pending-owner control, accept half of the 2-step ownership transfer; no client method exists yet",
 		"closeIfDrained":   "permissionless keeper op; creator-tokens/keeper builds this envelope, and keeper/wire_test.go cross-checks ITS auth tier against the same gate",
 		// The market-facing doors (2026-07-30, milestone M2). No client method
 		// exists yet — the frontend wiring is milestone M4 — so the TS harness

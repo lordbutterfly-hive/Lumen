@@ -505,7 +505,7 @@ func TestSell_WhaleTax_UnrecoverableAcrossTranchesAndAccounts(t *testing.T) {
 	// (OTC laundering off-curve still applies — RULING J residual truth #3 —
 	// but any ON-CHAIN split, same account or cross account, over-pays.)
 	s2, c2, _ := build(t)
-	if err := TransferCredits(s2, c2, "whale", "whalealt", 1015, big.NewInt(100)); err != nil {
+	if err := TransferCredits(s2, "whale", c2, "whale", "whalealt", 1015, big.NewInt(100)); err != nil {
 		t.Fatal(err)
 	}
 	taxW, _ := dump(t, s2, c2, "whale", 1, 1020)

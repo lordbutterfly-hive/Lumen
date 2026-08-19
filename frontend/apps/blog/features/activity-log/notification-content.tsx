@@ -38,7 +38,7 @@ function EndOfNotificationsNotice({ t }: { t: (key: string) => string }) {
         <Icons.check className="h-4 w-4 text-ink-ok-4" />
       </div>
       <span>{t('navigation.profile_notifications_tab_navbar.end_of_notifications')}</span>
-      <span className="text-xs">{t('navigation.profile_notifications_tab_navbar.notifications_90_day_limit')}</span>
+      <span className="text-caption">{t('navigation.profile_notifications_tab_navbar.notifications_90_day_limit')}</span>
     </div>
   );
 }

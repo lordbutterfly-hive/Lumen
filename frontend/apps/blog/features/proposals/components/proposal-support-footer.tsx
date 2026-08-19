@@ -103,7 +103,7 @@ export default function ProposalSupportFooter({
        */
       aria-label={canRemoveOnHover ? t('proposals.card.remove_vote_aria') : undefined}
       className={cn(
-        'group rounded-control px-5 py-2.5 font-sans text-[13px] leading-[20px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+        'group rounded-control px-5 py-2.5 font-sans text-caption font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60',
         isSupported
           ? 'border border-line-11 bg-surface-1 text-ink-7 hover:border-line-brand-10 hover:bg-surface-brand-1 hover:text-ink-brand-6 focus-visible:border-line-brand-10 focus-visible:bg-surface-brand-1 focus-visible:text-ink-brand-6'
           : 'border border-line-11 bg-surface-1 text-ink-7 hover:bg-surface-16'
@@ -144,7 +144,7 @@ export default function ProposalSupportFooter({
 
   return (
     <div className="mt-4 flex items-center justify-between gap-4 border-t border-line-2 pt-3.5">
-      <span className="flex items-center gap-2 font-sans text-[13px] leading-[20px] text-ink-10">
+      <span className="flex items-center gap-2 font-sans text-caption text-ink-10">
         {/* ★ A HEART MISLABELS A STAKE FIGURE (2026-08-17). This is governance
             vote WEIGHT (HP behind the proposal), not a "like" — a heart reads
             as the wrong verb. `arrowBigUp` is already this app's icon for
@@ -167,7 +167,7 @@ export default function ProposalSupportFooter({
       </span>
       {showIndeterminate ? (
         <span
-          className="font-sans text-[13px] leading-[20px] italic text-ink-14"
+          className="font-sans text-caption italic text-ink-14"
           data-testid="proposal-support-unavailable"
         >
           {/* Pending says it is still looking; unavailable says it failed. */}

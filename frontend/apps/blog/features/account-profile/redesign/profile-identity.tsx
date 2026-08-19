@@ -146,7 +146,7 @@ export default function ProfileIdentity({
             // case a global token check on a white page never catches. ink-8
             // (#4b5563) measures 6.79:1 on the same ground and is one step on
             // the same ramp, so the pill stays secondary to the handle above it.
-            className="rounded-full bg-surface-23 px-2 py-0.5 font-sans text-[13px] leading-[20px] font-semibold tabular-nums text-ink-8 transition-colors hover:bg-surface-29"
+            className="rounded-full bg-surface-23 px-2 py-0.5 font-sans text-caption font-semibold tabular-nums text-ink-8 transition-colors hover:bg-surface-29"
             data-testid="profile-reputation"
             // A native title, on purpose: it is the same affordance hive.blog uses for
             // the same number, it survives without JS, and it needs no positioned
@@ -177,7 +177,7 @@ export default function ProfileIdentity({
           the touch and pointer paths can never drift apart. */}
       {showReputation && repOpen ? (
         <p
-          className="mt-1.5 max-w-[440px] font-sans text-[13px] leading-[20px] text-ink-10"
+          className="mt-1.5 max-w-[440px] font-sans text-caption text-ink-10"
           data-testid="profile-reputation-explainer"
         >
           {t('user_profile.reputation_title', {

@@ -4,7 +4,8 @@ import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceChallengeRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { consumeChallenge } from '@/blog/lib/lite/repositories/challenge-repository';
-import { verifyBtcSignature, loginMessage, btcNetwork, isTaproot, addressChallengeHash, normalizeBtcAddress } from '@/blog/lib/lite/auth/btc-verify';
+import { verifyBtcSignature, loginMessage, btcNetwork, isTaproot,
+  isMagiSignableBtcAddress, addressChallengeHash, normalizeBtcAddress } from '@/blog/lib/lite/auth/btc-verify';
 import { verifiedBtcKeyFingerprint } from '@/blog/lib/lite/auth/btc-key-fingerprint';
 import { resolveLogin } from '@/blog/lib/lite/auth/auth-service';
 
@@ -32,6 +33,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   if (isTaproot(address)) {
     return NextResponse.json({ error: 'taproot_unsupported' }, { status: 400 });
+  }
+  /**
+   * ★★★ MONEY-LOSS GUARD (2026-08-19). A non-mainnet Bitcoin address can be credited
+   * creator tokens on Magi and can NEVER sign anything - `dids.Parse` never reaches
+   * `ParseBtcTestnetDID`, so those tokens would be unrecoverable by anyone, forever.
+   * Refused at the door rather than warned about later: once the credential exists, the
+   * account can be funded, and there is no way back. See isMagiSignableBtcAddress.
+   */
+  if (!isMagiSignableBtcAddress(address)) {
+    return NextResponse.json({ error: 'btc_network_unsupported' }, { status: 400 });
   }
 
   try {

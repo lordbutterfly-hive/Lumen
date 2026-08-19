@@ -144,8 +144,39 @@ interface CommentListProps {
 // Deleting the base pair would hand every phone whatever `prose` defaults to
 // and take the comment ramp's smallest step with it. The claim was checked and
 // refused; leave the ramp intact.
+// ★★★ THE COMMENT RAMP AFTER ALL-LORA (2026-08-19, typography spec §5.4).
+//
+// The ramp above is KEPT. The spec asks for a flat 16/24 and the enumeration
+// proposed collapsing the three base steps to reach it — but the note directly
+// above this one records that deleting the base pair was already proposed once,
+// checked, and REFUSED, because it hands every phone whatever `prose` defaults
+// to. A spec written without that history does not get to overrule it silently.
+//
+// What the spec DOES override is the values, and it has to: the old base step was
+// 13px, and the 14px lowercase floor exists because Lora's x-height is 8% smaller
+// than the sans it replaced, so 13px in Lora reads roughly as 12 did before.
+// Every step therefore moves up while the structure stays:
+//
+//     phone   13/24  ->  14/24     (the floor, exactly)
+//     sm      14/24  ->  15/24
+//     lg      15/26  ->  16/24     (`text-body` — the spec's stated value)
+//
+// So the spec's number lands where most readers are, the ramp survives, and no
+// step is below the floor. `lg:leading-[26px]` becomes 24 with it, because
+// `text-body` is a paired size/leading token and splitting a pair is how this
+// file's own history says fractional line boxes get in.
+//
+// ★ WHY THE FEED CARD'S DRAWER COMMENT IS 19px AND THIS IS 16px. They are not
+// the same object. The drawer shows ONE chosen comment as a feature — the pull
+// quote of the card, sized a step above the 18px excerpt it sits under. This is
+// the full thread, many comments in sequence, where the job is density and an
+// even reading rhythm. A magazine sets a pull quote larger than its body for the
+// same reason. If they are ever unified, unify UP here, not down there.
+//
+// The in-body h1-h4 ramp is untouched: §5.4 gives no target for headings inside
+// a comment, and inventing one to make the string tidy is not a spec.
 export const commentClassName =
-  'font-serif text-[13px] leading-[24px] prose-h1:text-[20px] prose-h1:leading-[22px] prose-h2:text-[18px] prose-h2:leading-[24px] prose-h3:text-[15px] prose-h3:leading-[24px] prose-h4:text-[14px] prose-h4:leading-[22px] sm:text-[14px] sm:leading-[24px] sm:prose-h1:text-[22px] sm:prose-h1:leading-[24px] sm:prose-h2:text-[20px] sm:prose-h2:leading-[26px] sm:prose-h3:text-[16px] sm:prose-h3:leading-[26px] sm:prose-h4:text-[15px] sm:prose-h4:leading-[22px] lg:text-[15px] lg:leading-[26px] lg:prose-h1:text-[24px] lg:prose-h1:leading-[26px] lg:prose-h2:text-[20px] lg:prose-h2:leading-[28px] lg:prose-h3:text-[18px] lg:prose-h3:leading-[28px] lg:prose-h4:text-[16px] lg:prose-h4:leading-[24px] prose-p:mb-[10px] prose-p:mt-[2px] last:prose-p:mb-[4px] prose-img:max-w-full prose-img:h-auto prose-img:max-h-[400px]';
+  'font-lora text-[14px] leading-[24px] prose-h1:text-[20px] prose-h1:leading-[22px] prose-h2:text-[18px] prose-h2:leading-[24px] prose-h3:text-[15px] prose-h3:leading-[24px] prose-h4:text-[14px] prose-h4:leading-[22px] sm:text-[15px] sm:leading-[24px] sm:prose-h1:text-[22px] sm:prose-h1:leading-[24px] sm:prose-h2:text-[20px] sm:prose-h2:leading-[26px] sm:prose-h3:text-[16px] sm:prose-h3:leading-[26px] sm:prose-h4:text-[15px] sm:prose-h4:leading-[22px] lg:text-body lg:prose-h1:text-[24px] lg:prose-h1:leading-[26px] lg:prose-h2:text-[20px] lg:prose-h2:leading-[28px] lg:prose-h3:text-[18px] lg:prose-h3:leading-[28px] lg:prose-h4:text-[16px] lg:prose-h4:leading-[24px] prose-p:mb-[10px] prose-p:mt-[2px] last:prose-p:mb-[4px] prose-img:max-w-full prose-img:h-auto prose-img:max-h-[400px]';
 
 /**
  * ★★★ FOUR HONEST PUBLISH STATES, ONLY THE FIRST WITH A SPINNER (O7 F2a,
@@ -627,7 +658,7 @@ const CommentListItem = memo(function CommentListItem({
     return (
       <li data-testid="comment-list-item" className="lm-enter w-full min-w-0">
         <div
-          className="mb-4 flex w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded-card border border-dashed border-line-18 bg-surface-14 px-3 py-2.5 font-sans text-[13px] leading-[20px] text-ink-10"
+          className="mb-4 flex w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded-card border border-dashed border-line-18 bg-surface-14 px-3 py-2.5 font-sans text-caption text-ink-10"
           data-testid="comment-moderation-unknown"
         >
           <span>{t('cards.comment_card.moderation_status_unknown', { author: displayAuthor })}</span>
@@ -693,7 +724,7 @@ const CommentListItem = memo(function CommentListItem({
                         className="flex w-full flex-col justify-start sm:flex-row sm:items-center"
                         data-testid="comment-card-header"
                       >
-                        <div className="flex w-full items-center justify-between text-xs sm:text-sm">
+                        <div className="flex w-full items-center justify-between text-caption sm:text-sm">
                           <div className="flex flex-wrap items-center">
                             {comment._temporary && !comment._optimistic ? (
                               <div className="flex items-center font-bold hover:cursor-pointer hover:text-destructive">
@@ -703,7 +734,7 @@ const CommentListItem = memo(function CommentListItem({
                               <>
                                 {publishBadgeState && (
                                   <span
-                                    className={cn('mr-2 flex items-center gap-1 text-xs', {
+                                    className={cn('mr-2 flex items-center gap-1 text-caption', {
                                       'text-ink-info-9': publishBadgeState === 'publishing' || publishBadgeState === 'queued',
                                       'text-muted-foreground': publishBadgeState === 'waiting',
                                       'text-ink-warn-6': publishBadgeState === 'delayed'
@@ -782,7 +813,7 @@ const CommentListItem = memo(function CommentListItem({
                                     who a flattened reply is actually answering. */}
                                 {replyingToAuthor && (
                                   <span
-                                    className="whitespace-nowrap text-[12px] leading-[18px] text-muted-foreground"
+                                    className="whitespace-nowrap text-caption text-muted-foreground"
                                     data-testid="comment-replying-to"
                                   >
                                     {t('cards.comment_card.replying_to', { author: replyingToAuthor })}
@@ -830,7 +861,7 @@ const CommentListItem = memo(function CommentListItem({
                                 // per-depth indent (item 10) had eaten enough width.
                                 // whitespace-nowrap keeps it one line; the row itself is
                                 // free to wrap around it if the viewport is that narrow.
-                                className="cursor-pointer whitespace-nowrap text-xs sm:text-sm"
+                                className="cursor-pointer whitespace-nowrap text-caption sm:text-sm"
                                 // ★★★ ONE SOURCE OF TRUTH (2026-08-13, reported: the
                                 // stub read "Hide Comment" while `aria-expanded="false"`,
                                 // and the filter reason never appeared).
@@ -877,7 +908,7 @@ const CommentListItem = memo(function CommentListItem({
                               {collapsed && hiddenReasonListHref && identity.isLoggedIn ? (
                                 <Link
                                   href={hiddenReasonListHref}
-                                  className="whitespace-nowrap text-xs text-muted-foreground underline-offset-2 hover:text-destructive hover:underline sm:text-sm"
+                                  className="whitespace-nowrap text-caption text-muted-foreground underline-offset-2 hover:text-destructive hover:underline sm:text-sm"
                                   data-testid="comment-hidden-reason-list-link"
                                 >
                                   {t('cards.comment_card.manage_list_link')}
@@ -903,7 +934,7 @@ const CommentListItem = memo(function CommentListItem({
 
                         {comment._temporary && !comment._optimistic ? null : !openState ? (
                           <div
-                            className="flex h-5 items-center gap-2 text-xs sm:text-sm"
+                            className="flex h-5 items-center gap-2 text-caption sm:text-sm"
                             data-testid="comment-card-footer"
                           >
                             <VotesComponentWrapper post={comment} type="comment" />
@@ -988,7 +1019,7 @@ const CommentListItem = memo(function CommentListItem({
                           // half-width and the payout vanished past the card's right
                           // edge. flex-wrap means a still-narrow card reflows the row
                           // onto a second line instead of silently cutting it off.
-                          className="flex flex-wrap items-center gap-2 pt-1 text-xs sm:text-sm"
+                          className="flex flex-wrap items-center gap-2 pt-1 text-caption sm:text-sm"
                           data-testid="comment-card-footer"
                         >
                           <VotesComponentWrapper post={comment} type="comment" />

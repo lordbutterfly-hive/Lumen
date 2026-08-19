@@ -44,7 +44,7 @@ const ROW_CLASS =
 // row sits on the grey `#f6f5f2` hover ground, so it takes the darker
 // "grey-ground" replacement rather than the plain-white one: `#6f6963` is
 // 4.97:1 on `#f6f5f2` and 5.42:1 on white, independently measured.
-const META_CLASS = 'shrink-0 font-sans text-[13px] leading-[20px] tabular-nums text-ink-9';
+const META_CLASS = 'shrink-0 font-sans text-caption tabular-nums text-ink-9';
 
 // ★ DEFECT FIX (2026-08-17): Upgrade previously shared ROW_CLASS with every
 // other row, including Language — so a lite reader's one CTA to leave the
@@ -141,7 +141,7 @@ const AccountMenuContent = ({ user }: { user: User }) => {
             // floor. This block sits on the header's plain white background
             // (not the `#f6f5f2` hover row), so it takes the plain-white
             // replacement: `#7a7268` measures 4.74:1 on white.
-            <div className="truncate font-sans text-[13px] leading-[20px] text-ink-11">
+            <div className="truncate font-sans text-caption text-ink-11">
               ◈ @{user.username} · {usdPrice(chip.priceUsd)}
             </div>
           ) : null}

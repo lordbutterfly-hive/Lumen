@@ -87,7 +87,7 @@ const ListItem = ({
           </span>
         )}
         {item.blacklist_description ? (
-          <span className="hidden truncate text-xs text-primary/50 sm:inline">
+          <span className="hidden truncate text-caption text-primary/50 sm:inline">
             {item.blacklist_description}
           </span>
         ) : null}
@@ -100,7 +100,7 @@ const ListItem = ({
           // lowercase by convention — every other button label in the app is
           // Title Case, so this is a presentational fix, not a copy change; a
           // locale that capitalizes its own strings differently is unaffected.
-          className="ml-2 min-w-[90px] shrink-0 whitespace-nowrap px-2 py-1 text-xs capitalize"
+          className="ml-2 min-w-[90px] shrink-0 whitespace-nowrap px-2 py-1 text-caption capitalize"
           size="xs"
           onClick={() => handleDelete(item.name)}
           disabled={isItemLoading || item._temporary}

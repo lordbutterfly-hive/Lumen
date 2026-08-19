@@ -31,9 +31,18 @@ export function useCreatorFollow(handle: string): {
   busy: boolean;
   /** Signed out, or the relationship does not apply: the control should not be offered. */
   available: boolean;
+  /**
+   * F14 fix: true when `/api/users/me` has definitively FAILED — see
+   * use-user-core.ts's own doc. `available` folds this in as a fail-closed
+   * "don't offer the button" (consistent with `applies` also gating it), but
+   * a caller that wants to say WHY it is hidden — rather than just omitting
+   * it, as this hook's own consequence was milder than the other 6 F14
+   * consumers — can read this directly instead of inferring it.
+   */
+  sessionUnavailable: boolean;
   toggle: () => void;
 } {
-  const { user, isHydrated } = useUserClient();
+  const { user, isHydrated, sessionUnavailable } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
   const follow = useLumenFollow(handle, loggedIn);
 
@@ -55,6 +64,7 @@ export function useCreatorFollow(handle: string): {
     // Hidden until the server has answered, so the button never claims a state it
     // does not know.
     available: loggedIn && follow.applies,
+    sessionUnavailable,
     toggle
   };
 }

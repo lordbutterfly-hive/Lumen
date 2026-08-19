@@ -218,40 +218,121 @@ func maturingGrossShare(gross, fromMaturing, total *big.Int) *big.Int {
 	return mMulDivCeil(gross, fromMaturing, total)
 }
 
-// escrowAcqBlock is the single hold-clock an escrow records for a draw that may
-// span both buckets.
+// ---------------------------------------------------------------------------
+// THE ESCROW SPLIT (DEFECT FIX 2026-08-19, PRUNED findings F2 + F17)
+// ---------------------------------------------------------------------------
 //
-// The escrow record carries ONE acquisition block (ask.go's escrowRec), so a
-// mixed draw has to collapse to one number. The matured portion is represented
-// by maturityFloorBlock(block) — the oldest age that still counts, i.e. exactly
-// one full window — so a purely-matured escrow returns to its owner still
-// matured, with no special case and no new field. A mixed escrow collapses to
-// the size-weighted average of the two clocks, which is EXACTLY tax-neutral
-// because the rate is affine in age across the capped window (holdclock.go's
-// proof); it neither refunds tax the asker owed nor charges tax they did not.
+// An escrow's draw can span both buckets, and the two halves are NOT
+// interchangeable: a matured token owes no tax and has no clock, a maturing one
+// owes tax that depends on its own age. The old code collapsed the pair into a
+// single size-weighted mean block (escrowAcqBlock) and stored that as the
+// escrow's one clock.
 //
-// Rounded UP — a higher block is a YOUNGER clock, which is the more-tax
-// direction, consistent with every other rounding decision on this path.
-func escrowAcqBlock(s Store, c, h string, block uint64, fromMatured, fromMaturing *big.Int) uint64 {
-	floor := maturityFloorBlock(block)
-	if fromMaturing.Sign() == 0 {
-		return floor
+// ★ WHY THAT WAS WRONG, because the mean looked defensible and was measured for
+// a month before anyone caught it. The blend is exactly tax-neutral AT THE ASK
+// BLOCK — the rate is affine in age there, so mixing the two clocks charges
+// neither too much nor too little in that instant. But it was stored as an
+// ABSOLUTE block and then aged across the whole escrow. The matured leg's own
+// age was already at the cap and could earn nothing more by waiting; the blend
+// nonetheless let it age on behalf of the WHOLE pool, donating decay it was
+// never entitled to spend. Over a gap of g blocks a blended pool of A tokens
+// decays at A·slope where the honest maturing part of M tokens decays at
+// M·slope. One unanswered ask, reclaimed later, therefore erased 100% of a
+// holder's exit tax — measured at 15,645,141,985 base units against an
+// identical control holder who did nothing (F2). capAcqAge cannot catch it:
+// it only RAISES a clock older than one window, and one window of age is
+// exactly the tax-free point, so the laundered clock is indistinguishable from
+// an honestly aged one.
+//
+// The second defect was the same collapse seen from the other side: because the
+// return leg credited everything through creditInflowAt, which writes only the
+// maturing family, MATURED tokens came back MATURING. Age was conserved, bucket
+// membership was not — so a stranger pushing someone's abandoned escrow and
+// then dusting them one unit moved a position from 0 to 667 bps of exit tax
+// with the holder doing nothing at all (F17).
+//
+// THE FIX: record the two legs separately and settle them separately. Nothing
+// is blended, so nothing can be donated, and a matured token returns to the
+// bucket it left. The escrow's stored acqBlock now describes the MATURING leg
+// ONLY (see ask.go's Ask), and the matured leg lives in kEscrowMaturedLeg.
+
+// escrowMaturedLeg reads the matured-bucket portion recorded for one escrow,
+// clamped to the escrow's own credits. Absent reads zero — see kEscrowMaturedLeg
+// for why that is the correct reading of a pre-fix record rather than a gap.
+func escrowMaturedLeg(s Store, c string, seq uint64, credits *big.Int) *big.Int {
+	leg := getMoney(s, kEscrowMaturedLeg(c, seq))
+	if leg.Cmp(credits) > 0 {
+		return new(big.Int).Set(credits) // defensive: a leg can never exceed the draw
 	}
-	wacq := holderAcqBlock(s, c, h)
-	if fromMatured.Sign() == 0 {
-		return wacq
+	return leg
+}
+
+// returnEscrowToOwner puts an escrow's credits back into the SAME holder's
+// position — Reclaim and Decline, the two doors where nothing was delivered and
+// the correct outcome is "as if it never happened".
+//
+// The matured leg goes straight back into kMatured. It left with no clock and
+// no tax owed, so it returns with no clock and no tax owed: exact conservation,
+// which is what the ET-2 fix meant by age-neutral and what the blend broke. The
+// maturing leg goes back through creditInflowAt carrying the clock it left with
+// (see Ask), so its own age is neither restarted nor extended.
+func returnEscrowToOwner(s Store, c, holder string, seq uint64, credits *big.Int, acqBlock, block uint64) {
+	if credits == nil || credits.Sign() <= 0 {
+		return
 	}
-	// weighted mean of {floor × fromMatured, wacq × fromMaturing}, ceil.
-	num := mAdd(
-		new(big.Int).Mul(new(big.Int).SetUint64(floor), fromMatured),
-		new(big.Int).Mul(new(big.Int).SetUint64(wacq), fromMaturing),
-	)
-	den := mAdd(fromMatured, fromMaturing)
-	mean := mMulDivCeil(num, big.NewInt(1), den)
-	if !mean.IsUint64() {
-		return wacq // unreachable: a mean of two block heights is a block height
+	matured := escrowMaturedLeg(s, c, seq, credits)
+	maturing, err := mSub(credits, matured)
+	if err != nil {
+		maturing = mZero() // unreachable: escrowMaturedLeg clamps to credits
 	}
-	return mean.Uint64()
+	if maturing.Sign() > 0 {
+		creditInflowAt(s, c, holder, maturing, acqBlock, block)
+	}
+	if matured.Sign() > 0 {
+		setMatured(s, c, holder, mAdd(getMatured(s, c, holder), matured))
+	}
+	consumeEscrowMaturedLeg(s, c, seq)
+}
+
+// payEscrowToCreator credits an ANSWERED escrow to the creator, who is a
+// DIFFERENT party from the asker — which is why it is not returnEscrowToOwner.
+//
+// ★ THE MATURED LEG DOES NOT CROSS AS MATURED. No door in this contract puts
+// tokens into another account's matured bucket: TransferCredits and
+// TransferMatured both land in the recipient's ordinary position, and letting
+// delivery do otherwise would hand a creator tax-free tokens no transfer could
+// have given them. So the matured leg enters the creator's position at
+// maturityFloorBlock(block) — one full window, the oldest clock capAcqAge would
+// allow anything to donate, and exactly what a transfer of the same tokens
+// would have carried. The maturing leg carries its own recorded clock, as
+// before. Delivery still transfers maturity rather than incinerating it (the
+// 2026-07-27 ruling), it just can no longer transfer more than a transfer could.
+func payEscrowToCreator(s Store, c string, seq uint64, credits *big.Int, acqBlock, block uint64) {
+	if credits == nil || credits.Sign() <= 0 {
+		return
+	}
+	matured := escrowMaturedLeg(s, c, seq, credits)
+	maturing, err := mSub(credits, matured)
+	if err != nil {
+		maturing = mZero() // unreachable: escrowMaturedLeg clamps to credits
+	}
+	if maturing.Sign() > 0 {
+		creditInflowAt(s, c, c, maturing, acqBlock, block)
+	}
+	if matured.Sign() > 0 {
+		creditInflowAt(s, c, c, matured, maturityFloorBlock(block), block)
+	}
+	consumeEscrowMaturedLeg(s, c, seq)
+}
+
+// consumeEscrowMaturedLeg clears the leg once it has been paid out. The escrow
+// RECORD survives settlement (it is the delivery history an indexer and any
+// dispute read), but the leg is a settlement INPUT, not history: leaving a
+// spent one behind would let any future door that re-read it credit the same
+// matured tokens twice. The status flip already forbids re-settlement; this is
+// the second lock on the same door.
+func consumeEscrowMaturedLeg(s Store, c string, seq uint64) {
+	s.Delete(kEscrowMaturedLeg(c, seq))
 }
 
 // debitPosition removes `amount` from the holder's position, MATURING first

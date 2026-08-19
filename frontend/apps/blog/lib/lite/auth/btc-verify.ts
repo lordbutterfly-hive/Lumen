@@ -54,6 +54,48 @@ export function isTaproot(address: string): boolean {
   return TAPROOT.test(address.trim());
 }
 
+/**
+ * ════ THE ONLY BITCOIN ADDRESSES MAGI CAN EVER VERIFY ════
+ *
+ * ★★★ THIS IS A MONEY-LOSS GUARD, NOT A VALIDATION NICETY.
+ *
+ * A Bitcoin identity that Magi cannot verify a signature for can still be CREDITED
+ * creator tokens - the ledger passes through any `did:`-prefixed destination and the
+ * token balance key is an arbitrary string. So the account funds normally and can then
+ * never move anything, by anyone, forever. Two independent reads of `go-vsc-node`
+ * (@ 33adaeb5) found the cause:
+ *
+ *   - `dids.Parse` (lib/dids/dids.go:31-57) calls ParseBlsDID / ParseEthDID / ParseBtcDID
+ *     and **never ParseBtcTestnetDID**. That function exists, is correct, and is reachable
+ *     only from the read-only `verify_address` hostcall and the mapping-bot - never from
+ *     any signature-verification path, on any network.
+ *   - Every address derivation in the verifier decodes against `chaincfg.MainNetParams`
+ *     (btc.go:159/178/187/226/238/441), so a testnet string cannot match even if it got
+ *     there.
+ *   - There is zero test coverage for testnet DIDs in lib/dids.
+ *
+ * ★ IT IS AN ALLOWLIST BECAUSE A BLOCKLIST ALREADY FAILED HERE. `btcNetwork()` below
+ * detects testnet by `tb1|m|n|2`, which a regtest `bcrt1…` address does not match - so
+ * regtest was labelled MAINNET, given the mainnet CAIP-2, and then rejected by
+ * ParseBtcDID against MainNetParams. Same outcome, opposite path: creditable, unsignable.
+ * Enumerating what Magi ACCEPTS cannot fail that way; enumerating what it rejects can.
+ *
+ * Accepted: mainnet P2PKH (`1…`), P2SH / P2SH-P2WPKH (`3…`), P2WPKH (`bc1q…`).
+ * Refused: everything else, including Taproot (`bc1p`), which the verifier also declines
+ * (btc.go:51-53, 125-129) and which `isTaproot` already refuses separately.
+ */
+export function isMagiSignableBtcAddress(address: string): boolean {
+  const a = address.trim();
+  if (!a || isTaproot(a)) return false;
+  // Bech32 mainnet v0 witness program. `bc1q` only - `bc1p` is Taproot, and `tb1`/`bcrt1`
+  // are other networks.
+  if (/^bc1q[02-9ac-hj-np-z]+$/i.test(a)) return true;
+  // Base58 mainnet: version byte 0x00 renders as `1…`, 0x05 as `3…`. Testnet/regtest use
+  // `m`, `n` and `2`, which this deliberately does not match.
+  if (/^[13][1-9A-HJ-NP-Za-km-z]{25,39}$/.test(a)) return true;
+  return false;
+}
+
 /** Coarse network label for the credential row (informational). */
 export function btcNetwork(address: string): string {
   const a = address.trim().toLowerCase();

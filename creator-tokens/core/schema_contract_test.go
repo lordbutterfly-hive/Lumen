@@ -685,6 +685,37 @@ func TestSchemaContract_Unpaused(t *testing.T) {
 	scWantFieldCount(t, evName, m, 3, ref)
 }
 
+// TestSchemaContract_OwnerTransferInitiated/OwnerChanged (F19 DEFECT FIX,
+// 2026-08-19): same "NOT indexer-recognized, pin anyway" rationale as
+// Init/Paused/Unpaused above — no external consumer today, but a future
+// accidental change to either wire shape still gets caught here.
+
+func TestSchemaContract_OwnerTransferInitiated(t *testing.T) {
+	const evName = "ownerTransferInitiated"
+	const ref = "NOT an indexer-decoded event (F19 fix, no consumer yet)"
+	out := EvOwnerTransferInitiated("ownerAccount", "candidateAccount")
+	m := scDecode(t, out)
+
+	scWantStr(t, evName, m, "type", "ownerTransferInitiated", ref)
+	scWantNum(t, evName, m, "v", 1, ref)
+	scWantStr(t, evName, m, "currentOwner", "ownerAccount", ref)
+	scWantStr(t, evName, m, "pendingOwner", "candidateAccount", ref)
+	scWantFieldCount(t, evName, m, 4, ref)
+}
+
+func TestSchemaContract_OwnerChanged(t *testing.T) {
+	const evName = "ownerChanged"
+	const ref = "NOT an indexer-decoded event (F19 fix, no consumer yet)"
+	out := EvOwnerChanged("ownerAccount", "candidateAccount")
+	m := scDecode(t, out)
+
+	scWantStr(t, evName, m, "type", "ownerChanged", ref)
+	scWantNum(t, evName, m, "v", 1, ref)
+	scWantStr(t, evName, m, "previousOwner", "ownerAccount", ref)
+	scWantStr(t, evName, m, "newOwner", "candidateAccount", ref)
+	scWantFieldCount(t, evName, m, 4, ref)
+}
+
 // TestSchemaContract_KindConstantsCoverEveryEvName IS DELETED (2026-07-28).
 //
 // It asserted that every emitted event name appeared in a HARDCODED COPY of the
@@ -783,6 +814,10 @@ func TestSchemaContract_EveryConstructorIsPinned(t *testing.T) {
 		// test, where init/paused/unpaused are correctly absent.
 		"retired": true, "treasuryWithdrawn": true, "tradeFeesClaimed": true,
 		"init": true, "paused": true, "unpaused": true,
+		// F19 defect fix (2026-08-19): same bucket as init/paused/unpaused —
+		// contract-level, no per-market scope, pinned here (step 1) but
+		// deliberately absent from indexerKinds (step 2, sibling test).
+		"ownerTransferInitiated": true, "ownerChanged": true,
 	}
 	for ev := range names {
 		if !pinned[ev] {

@@ -120,8 +120,14 @@ func TestRefundPrice_NoParClamp_ReportsTheRealRatio(t *testing.T) {
 	if got := RefundPrice(s2, "curvemkt"); got.Cmp(want) != 0 {
 		t.Fatalf("RefundPrice on a curve market = %s, want floor(area(100)/100) = %s", got, want)
 	}
-	if want.Cmp(big.NewInt(ParBaseUnitsPerCredit)) <= 0 {
-		t.Fatalf("test is vacuous: the curve ratio %s is not above the deleted PAR cap %d", want, ParBaseUnitsPerCredit)
+	// The literal 1 here is the historical PAR ratio (1 credit == 1 HBD base
+	// unit) that RULING A deleted along with the RefundPrice clamp it used to
+	// justify — see params.go's "THERE IS NO ParBaseUnitsPerCredit" note.
+	// There is no longer a named constant for it; it survives only as this
+	// vacuity check's reference point.
+	const deletedParCap = 1
+	if want.Cmp(big.NewInt(deletedParCap)) <= 0 {
+		t.Fatalf("test is vacuous: the curve ratio %s is not above the deleted PAR cap %d", want, deletedParCap)
 	}
 }
 

@@ -28,7 +28,22 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
   // F-L2/F-L17: this exposes the account's full cross-wallet linkage (every bound
   // DID) — a banned/suspended/revoked session must be refused, so gate on the DB
   // status + F-L3 epoch, not a bare cookie presence check.
-  const actor = await requireActiveLiteUser(session.user, session);
+  /**
+   * ★★★ `allowUpgraded: true` (2026-08-19). Without it this route 403s
+   * `account_upgraded` the moment a user creates a Hive account - and because
+   * `/api/users/me` serves `account_tier` straight from the iron-session cookie with no
+   * DB read, that cookie still says `lite` for its full 14-day life. So the client keeps
+   * calling this route, keeps getting 403, and the tokens page shows "We couldn't check
+   * your wallet just now. Try reloading the page." - a transient-sounding error that
+   * could never resolve, for up to two weeks.
+   *
+   * The exemption is the right one on the merits, not just a workaround: the default
+   * FALSE exists to stop an upgraded user ACTING through the shared publishing account.
+   * This route acts on nothing. It reads back which wallet credentials the user still
+   * owns - Lumen-local identity data, no on-chain equivalent, exactly the class the
+   * exemption was written for. Their wallet did not stop being theirs.
+   */
+  const actor = await requireActiveLiteUser(session.user, session, { allowUpgraded: true });
   if (!actor.ok) return actor.response;
   const user = actor.user;
 

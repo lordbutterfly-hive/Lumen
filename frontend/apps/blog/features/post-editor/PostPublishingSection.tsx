@@ -108,14 +108,14 @@ export function PostPublishingSection({
       {/* Same one section-label treatment as the metadata card, which is the
           masthead eyebrow. See PostMetadataSection.tsx for the reasoning (C-14).
           ★ `ink-brand-6`, not `#c0392b` (2026-08-14). */}
-      <span className="text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-ink-brand-6/70 dark:text-ink-brand-6">
+      <span className="text-label font-semibold uppercase tracking-[0.14em] text-ink-brand-6/70 dark:text-ink-brand-6">
         {t("submit_page.publishing_section")}
       </span>
 
       {isLite ? (
         <div className="flex flex-col gap-2">
           <span className="text-sm font-medium">{t("submit_page.author_rewards")}</span>
-          <span className="text-xs text-muted-foreground" data-testid="lite-rewards-description">
+          <span className="text-caption text-muted-foreground" data-testid="lite-rewards-description">
             {LITE_REWARDS_NOTE}
           </span>
         </div>
@@ -124,21 +124,21 @@ export function PostPublishingSection({
           <span className="text-sm font-medium">{t("submit_page.post_options")}</span>
 
           {watchedValues.maxAcceptedPayout < 1000000 && watchedValues.maxAcceptedPayout > 0 ? (
-            <span className="text-xs text-muted-foreground">
+            <span className="text-caption text-muted-foreground">
               {t("submit_page.advanced_settings_dialog.maximum_accepted_payout")}:{" "}
               {watchedValues.maxAcceptedPayout} HBD
             </span>
           ) : null}
 
           {watchedValues.beneficiaries.length > 0 ? (
-            <span className="text-xs text-muted-foreground">
+            <span className="text-caption text-muted-foreground">
               {t("submit_page.advanced_settings_dialog.beneficiaries", {
                 num: watchedValues.beneficiaries.length,
               })}
             </span>
           ) : null}
 
-          <span className="text-xs text-muted-foreground" data-testid="author-rewards-description">
+          <span className="text-caption text-muted-foreground" data-testid="author-rewards-description">
             {t("submit_page.author_rewards")}
             {watchedValues.maxAcceptedPayout === 0
               ? ` ${t("submit_page.advanced_settings_dialog.decline_payout")}`
@@ -161,7 +161,7 @@ export function PostPublishingSection({
               type="button"
               // ★ `line-brand-10` / `ink-brand-6`, not `#c0392b` (2026-08-14):
               // rgb(192,57,43), byte-identical to the literal in light mode.
-              className="inline-flex w-fit items-center gap-1.5 rounded-card border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
+              className="inline-flex w-fit items-center gap-1.5 rounded-card border border-[#ebebeb] bg-white px-3 py-1.5 text-caption font-medium text-[#6b7280] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
               title={t("submit_page.advanced_tooltip")}
               data-testid="advanced-settings-button"
             >
@@ -181,7 +181,7 @@ export function PostPublishingSection({
                renders when payout is already final, so nothing needed that
                label's `id`, and a label with no value beside it just read as
                broken copy. One line now carries both. */
-            <span className="text-xs text-muted-foreground">
+            <span className="text-caption text-muted-foreground">
               {t("submit_page.author_rewards")} {t("submit_page.reward_options_final")}
             </span>
           ) : (
@@ -246,7 +246,7 @@ export function PostPublishingSection({
                   </FormItem>
                 )}
               />
-              <span className="text-xs text-muted-foreground">
+              <span className="text-caption text-muted-foreground">
                 {t("submit_page.reward_options_restrictive")}
               </span>
             </>
@@ -283,13 +283,13 @@ export function PostPublishingSection({
               indicatorClassName="bg-surface-brand-12"
             />
             <span
-              className="text-xs tabular-nums text-muted-foreground"
+              className="text-caption tabular-nums text-muted-foreground"
               data-testid="resource-credits-description"
             >
               {manabarsData?.rc.percentageValue ?? 0}%
             </span>
           </div>
-          <span className="text-xs text-muted-foreground">{RC_EXPLAINER}</span>
+          <span className="text-caption text-muted-foreground">{RC_EXPLAINER}</span>
         </div>
       )}
 

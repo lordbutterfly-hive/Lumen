@@ -194,6 +194,11 @@ func TestMagiMapping_EveryEmittedEventIsMapped(t *testing.T) {
 	mapping := magiMapping(t)
 	deliberatelyUnmapped := map[string]bool{
 		"init": true, "paused": true, "unpaused": true, "prepaid": true,
+		// F19 defect fix (2026-08-19): ownerTransferInitiated/ownerChanged are
+		// the same class as init/paused/unpaused above — contract-level,
+		// carry no creator, and no view queries owner rotation. See
+		// core/events.go's own doc on these two constructors.
+		"ownerTransferInitiated": true, "ownerChanged": true,
 		// ★ The magi_nft-family events (2026-07-30). These are deliberately NOT
 		// in OUR mapping, because they are not ours to map: the Magi indexer
 		// ships a stock mapping for them, discovers this contract by watching

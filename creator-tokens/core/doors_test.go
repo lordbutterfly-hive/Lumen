@@ -239,3 +239,66 @@ func TestDoors_FailedThirdPartyTransferLeavesAllowanceIntact(t *testing.T) {
 			"guard must run before the allowance is spent", got)
 	}
 }
+
+// ★ THE OTHER CRITICAL ONE (DEFECT FIX 2026-08-19, PRUNED finding F1). A grant
+// is authority over ONE INCARNATION of a market. It used to survive the market
+// closing and being re-registered, so a spender who was approved in a dead life
+// could move the tokens of the new one — measured at 8,540,519 base units taken
+// from a market that had re-opened, to an account that was never approved, and
+// reachable with a POSTING key because safeTransferFrom carries no HBD leg.
+func TestDoors_AllowanceDoesNotSurviveReRegistration(t *testing.T) {
+	const c, h, mkt, carol = "hive:alice", "hive:bob", "hive:market", "hive:carol"
+	s := tbMarket(t, c)
+	at := tbMature(t, s, c, h, 1000, 1_000_000)
+
+	if err := Approve(s, h, mkt, c, mZero(), big.NewInt(1000)); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	// ANTI-VACUITY: the grant works in the life it was made in, or the refusal
+	// below proves nothing about incarnations.
+	if err := TransferMatured(s, c, h, carol, mkt, big.NewInt(1)); err != nil {
+		t.Fatalf("the grant must work in its own incarnation: %v", err)
+	}
+
+	// Wind the market all the way down and re-register — the ONLY path that
+	// moves the offering epoch, which is what dates a grant.
+	if err := Retire(s, c, c, at+10); err != nil {
+		t.Fatalf("retire: %v", err)
+	}
+	windDown := at + 10 + GraceBlocks
+	if _, err := Refund(s, h, c, windDown, big.NewInt(999)); err != nil {
+		t.Fatalf("holder wind-down refund: %v", err)
+	}
+	if _, err := Refund(s, carol, c, windDown, big.NewInt(1)); err != nil {
+		t.Fatalf("carol wind-down refund: %v", err)
+	}
+	if !CloseIfDrained(s, c, windDown) {
+		t.Fatalf("market did not close; supply=%s", getMoney(s, kSupply(c)))
+	}
+	reReg := windDown + 100
+	if err := Register(s, c, c, reReg, 1000, 1_000_000_000); err != nil {
+		t.Fatalf("re-register: %v", err)
+	}
+	tbMature(t, s, c, h, 1000, reReg+10)
+
+	if got := AllowanceOf(s, h, mkt, c); got.Sign() != 0 {
+		t.Fatalf("a grant from the previous incarnation still reads as %s of live authority", got)
+	}
+	before := MaturedOf(s, c, h)
+	if err := TransferMatured(s, c, h, carol, mkt, big.NewInt(400)); err == nil {
+		t.Fatal("a spender approved in a DEAD market moved the new incarnation's tokens — " +
+			"this is the theft F1 measured")
+	}
+	if MaturedOf(s, c, h).Cmp(before) != 0 {
+		t.Fatal("the victim's balance moved on a refused transfer")
+	}
+
+	// And the holder can grant again in the new life: the dead number must not
+	// block the compare-and-set with a phantom "allowance changed" error.
+	if err := Approve(s, h, mkt, c, mZero(), big.NewInt(50)); err != nil {
+		t.Fatalf("re-granting in the new incarnation was blocked by the dead grant: %v", err)
+	}
+	if err := TransferMatured(s, c, h, carol, mkt, big.NewInt(50)); err != nil {
+		t.Fatalf("the fresh grant does not work — the fix over-reached: %v", err)
+	}
+}

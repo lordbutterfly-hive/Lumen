@@ -1536,7 +1536,11 @@
     "lite_title": "No wallet yet",
     "lite_body": "A Lumen account has no Hive wallet of its own. Upgrade to a full Hive account to get one. Your posts, followers and history all come with you on Lumen.",
     "lite_upgrade": "Upgrade my account",
-    "session_unavailable": "We couldn’t check your account, so the advanced tools are hidden. Reload to try again."
+    "session_unavailable": "We couldn’t check your account, so the advanced tools are hidden. Reload to try again.",
+    "wallet_title": "Your wallet",
+    "wallet_body": "This account signs in with a crypto wallet, so it holds Meritum tokens on Magi under that wallet rather than in a Hive wallet. Keep access to it: the tokens live under this address, not under your Lumen name.",
+    "chain_evm": "Ethereum wallet",
+    "chain_btc": "Bitcoin wallet"
   },
   "profile": {
     "following": "Following",

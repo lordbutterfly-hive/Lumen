@@ -119,13 +119,13 @@ export default function WitnessesShell() {
             className="my-3 flex items-center justify-between gap-4 rounded-xl border border-line-brand-4 bg-surface-brand-1 px-4 py-3"
             data-testid="witnesses-own-data-error"
           >
-            <span className="font-sans text-[13px] leading-[20px] text-ink-brand-6">
+            <span className="font-sans text-caption text-ink-brand-6">
               {t('witnesses.own_data_error.message')}
             </span>
             <button
               type="button"
               onClick={data.refetch}
-              className="shrink-0 font-sans text-[13px] leading-[20px] font-semibold text-ink-brand-6 underline hover:text-ink-brand-4"
+              className="shrink-0 font-sans text-caption font-semibold text-ink-brand-6 underline hover:text-ink-brand-4"
             >
               {t('witnesses.own_data_error.retry')}
             </button>

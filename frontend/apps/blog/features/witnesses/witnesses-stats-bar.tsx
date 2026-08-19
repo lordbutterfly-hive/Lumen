@@ -115,7 +115,7 @@ export default function WitnessesStatsBar({
         // as a restriction, not a stat: plain ink-10, not the brand-red
         // `votesLeft`/`proxy_active` treatment below, which is reserved for
         // things the viewer can actually act on.
-        <span className="ml-auto font-sans text-[13px] leading-[20px] text-ink-10" data-testid="witnesses-stats-lite">
+        <span className="ml-auto font-sans text-caption text-ink-10" data-testid="witnesses-stats-lite">
           {t('witnesses.lite_cannot_vote')}
         </span>
       ) : hasProxy ? (

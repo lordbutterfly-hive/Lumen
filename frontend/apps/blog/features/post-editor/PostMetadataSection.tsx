@@ -53,7 +53,7 @@ export function PostMetadataSection({
           ★ `ink-brand-6`, not `#c0392b` (2026-08-14): matches the masthead's
           own token, including its `dark:text-ink-brand-6` restore for the 70%
           opacity's contrast floor. */}
-      <span className="text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-ink-brand-6/70 dark:text-ink-brand-6">
+      <span className="text-label font-semibold uppercase tracking-[0.14em] text-ink-brand-6/70 dark:text-ink-brand-6">
         {t("submit_page.metadata_section")}
       </span>
 
@@ -73,7 +73,7 @@ export function PostMetadataSection({
                 />
                 <span
                   className={clsx(
-                    "pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs tabular-nums",
+                    "pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-caption tabular-nums",
                     field.value.length > 140 ? "text-red-500" : "text-muted-foreground"
                   )}
                 >
@@ -81,7 +81,7 @@ export function PostMetadataSection({
                 </span>
               </div>
             </FormControl>
-            <div className="text-xs text-destructive">{summaryCheck}</div>
+            <div className="text-caption text-destructive">{summaryCheck}</div>
             <FormMessage />
           </FormItem>
         )}
@@ -124,7 +124,7 @@ export function PostMetadataSection({
                 {parseTags(field.value).length > 0 && (
                   <span
                     className={clsx(
-                      "pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs tabular-nums",
+                      "pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-caption tabular-nums",
                       parseTags(field.value).length > MAX_TAGS ? "text-red-500" : "text-muted-foreground"
                     )}
                   >
@@ -139,7 +139,7 @@ export function PostMetadataSection({
                   <Badge
                     key={`${tag}-${index}`}
                     variant="secondary"
-                    className="cursor-pointer gap-1 pr-1 text-xs font-normal transition-colors hover:bg-destructive/10 hover:text-destructive"
+                    className="cursor-pointer gap-1 pr-1 text-caption font-normal transition-colors hover:bg-destructive/10 hover:text-destructive"
                     onClick={() => {
                       const tags = parseTags(field.value);
                       tags.splice(index, 1);
@@ -152,7 +152,7 @@ export function PostMetadataSection({
                 ))}
               </div>
             )}
-            <div className="text-xs text-destructive">{showTagsError ? tagsCheck : null}</div>
+            <div className="text-caption text-destructive">{showTagsError ? tagsCheck : null}</div>
             <FormMessage />
           </FormItem>
           );

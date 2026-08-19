@@ -584,8 +584,8 @@ const UpgradePanel: FC = () => {
         <p className="mt-2 text-[15px] leading-[24px] text-ink-8">
           <strong>@{hiveName}</strong> — {COPY.doneBody}
         </p>
-        {verifying ? <p className="mt-2 text-[13px] leading-[20px] text-ink-14">{COPY.verifying}</p> : null}
-        {notice ? <p className="mt-2 text-[13px] leading-[20px] text-ink-warn-3">{notice}</p> : null}
+        {verifying ? <p className="mt-2 text-caption text-ink-14">{COPY.verifying}</p> : null}
+        {notice ? <p className="mt-2 text-caption text-ink-warn-3">{notice}</p> : null}
         {error ? (
           <p className="mt-3 rounded-xl border border-line-brand-2 bg-surface-brand-5 p-4 text-[14px] font-semibold leading-[22px] text-ink-brand-2">
             {error}
@@ -624,15 +624,15 @@ const UpgradePanel: FC = () => {
           {rows.map(([label, value]) => (
             <div key={label} className="rounded-xl border border-line-11 bg-surface-1 p-3">
               <div className="mb-1 flex items-center justify-between">
-                <span className="text-[13px] leading-[20px] font-semibold text-ink-8">{label}</span>
+                <span className="text-caption font-semibold text-ink-8">{label}</span>
                 <button
                   onClick={() => copy(label, value)}
-                  className="cursor-pointer rounded-md border border-line-11 px-2 py-1 text-xs font-semibold text-ink-8 hover:bg-surface-8"
+                  className="cursor-pointer rounded-md border border-line-11 px-2 py-1 text-caption font-semibold text-ink-8 hover:bg-surface-8"
                 >
                   {copied === label ? COPY.copied : COPY.copy}
                 </button>
               </div>
-              <code className="block break-all font-mono text-[13px] leading-[20px] text-ink-2">{value}</code>
+              <code className="block break-all font-mono text-caption text-ink-2">{value}</code>
             </div>
           ))}
         </div>
@@ -653,7 +653,7 @@ const UpgradePanel: FC = () => {
           cookie. The spec has always required this for account-security actions;
           the button below is where it is asked for.
         */}
-        <p className="mt-4 text-[13px] leading-[20px] text-ink-8">{COPY.stepUpExplain}</p>
+        <p className="mt-4 text-caption text-ink-8">{COPY.stepUpExplain}</p>
         {googleOnly ? (
           googleConfigured() && googleNonce ? (
             <div className="mt-3" data-testid="upgrade-stepup-google">
@@ -668,7 +668,7 @@ const UpgradePanel: FC = () => {
               />
             </div>
           ) : (
-            <p className="mt-3 text-[13px] leading-[20px] text-ink-warn-3">{COPY.stepUpUnavailable}</p>
+            <p className="mt-3 text-caption text-ink-warn-3">{COPY.stepUpUnavailable}</p>
           )
         ) : (
           (['btc', 'evm'] as WalletChain[])
@@ -700,7 +700,7 @@ const UpgradePanel: FC = () => {
               </button>
             ))
         )}
-        {error ? <p className="mt-3 text-[13px] leading-[20px] text-ink-warn-3">{error}</p> : null}
+        {error ? <p className="mt-3 text-caption text-ink-warn-3">{error}</p> : null}
       </div>
     );
   }
@@ -719,7 +719,7 @@ const UpgradePanel: FC = () => {
       <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.title}</h1>
       <p className="mt-2 text-[15px] leading-[24px] text-ink-8">{COPY.intro}</p>
 
-      <label className="mt-6 block text-[13px] leading-[20px] font-semibold text-ink-8">{COPY.namePick}</label>
+      <label className="mt-6 block text-caption font-semibold text-ink-8">{COPY.namePick}</label>
       <div className={`mt-1.5 flex h-12 items-center gap-2 rounded-xl border-2 px-3.5 ${border}`}>
         <span className="font-bold text-ink-14">@</span>
         <input
@@ -737,10 +737,10 @@ const UpgradePanel: FC = () => {
       </div>
       {nameTouched && nameStatus.state === 'unavailable' ? (
         <>
-          <p className="mt-2 text-[13px] leading-[20px] font-medium text-ink-warn-3">{nameStatus.reason}</p>
+          <p className="mt-2 text-caption font-medium text-ink-warn-3">{nameStatus.reason}</p>
           {nameStatus.suggestions.length > 0 ? (
             <div className="mt-2.5">
-              <p className="text-[13px] leading-[20px] text-ink-8">{COPY.suggestionsLabel}</p>
+              <p className="text-caption text-ink-8">{COPY.suggestionsLabel}</p>
               <div className="mt-1.5 flex flex-wrap gap-2">
                 {nameStatus.suggestions.map((suggestion) => (
                   <button
@@ -749,13 +749,13 @@ const UpgradePanel: FC = () => {
                       setName(suggestion);
                       checkName(suggestion);
                     }}
-                    className="cursor-pointer rounded-lg border border-line-11 px-2.5 py-1 text-[13px] leading-[20px] font-semibold text-ink-2 hover:bg-surface-8"
+                    className="cursor-pointer rounded-lg border border-line-11 px-2.5 py-1 text-caption font-semibold text-ink-2 hover:bg-surface-8"
                   >
                     @{suggestion}
                   </button>
                 ))}
               </div>
-              <p className="mt-2 text-xs text-ink-8">{COPY.historyNote}</p>
+              <p className="mt-2 text-caption text-ink-8">{COPY.historyNote}</p>
             </div>
           ) : null}
         </>
@@ -769,13 +769,13 @@ const UpgradePanel: FC = () => {
           private keys for it. A name you cannot change later should never be
           altered without saying so. */}
       {name.trim() && name.trim() !== name.trim().toLowerCase() ? (
-        <p className="mt-2 text-xs leading-[20px] text-ink-warn-3">
+        <p className="mt-2 text-caption text-ink-warn-3">
           {COPY.nameLowercased(name.trim().toLowerCase())}
         </p>
       ) : null}
-      <p className="mt-2 text-xs text-ink-14">{COPY.nameHint}</p>
-      <p className="mt-2 text-xs leading-[20px] text-ink-14">{COPY.nameWarning}</p>
-      <p className="mt-2 text-xs leading-[20px] text-ink-14">{COPY.historyLimit}</p>
+      <p className="mt-2 text-caption text-ink-14">{COPY.nameHint}</p>
+      <p className="mt-2 text-caption text-ink-14">{COPY.nameWarning}</p>
+      <p className="mt-2 text-caption text-ink-14">{COPY.historyLimit}</p>
 
       <button
         onClick={generate}
@@ -785,7 +785,7 @@ const UpgradePanel: FC = () => {
       >
         {busy ? COPY.generating : COPY.continue}
       </button>
-      {error ? <p className="mt-3 text-[13px] leading-[20px] text-ink-warn-3">{error}</p> : null}
+      {error ? <p className="mt-3 text-caption text-ink-warn-3">{error}</p> : null}
     </div>
   );
 };

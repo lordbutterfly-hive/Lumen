@@ -126,7 +126,7 @@ export default function HomeIntro() {
       <span>{COPY.claim}</span>
       <a
         href={withBasePath('/login')}
-        className="rounded-control bg-surface-brand-12 px-3.5 py-1.5 font-sans text-[13px] leading-[20px] font-semibold text-ink-27 hover:bg-surface-brand-16"
+        className="rounded-control bg-surface-brand-12 px-3.5 py-1.5 font-sans text-caption font-semibold text-ink-27 hover:bg-surface-brand-16"
       >
         {googleReady ? COPY.startFree : COPY.startWallet}
       </a>

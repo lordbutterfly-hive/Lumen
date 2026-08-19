@@ -408,7 +408,7 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
               {t('submit_page.uploading_images', { count: uploadQueue.length })}
             </p>
             {uploadQueue.map((item) => (
-              <div key={item.id} className="mb-1.5 flex items-center gap-2 text-xs">
+              <div key={item.id} className="mb-1.5 flex items-center gap-2 text-caption">
                 {item.status === 'done' && <Icons.check className="h-3 w-3 shrink-0 text-green-600" />}
                 {item.status === 'error' && <Icons.close className="h-3 w-3 shrink-0 text-destructive" />}
                 {(item.status === 'pending' ||

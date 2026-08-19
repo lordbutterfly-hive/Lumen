@@ -111,7 +111,7 @@ export default function SetProxyDialog({ trigger, mode, currentProxy }: SetProxy
               autoFocus
             />
             {error && (
-              <p className="mt-1.5 font-sans text-xs text-ink-brand-6" data-testid="witnesses-proxy-error">
+              <p className="mt-1.5 font-sans text-caption text-ink-brand-6" data-testid="witnesses-proxy-error">
                 {error}
               </p>
             )}

@@ -181,7 +181,7 @@ export default function NewProposalDialog({ children }: { children: ReactNode })
               />
             </label>
           </div>
-          <p className="font-serif text-[13px] leading-[20px] text-ink-10">
+          <p className="font-serif text-caption text-ink-10">
             {t('proposals.new_dialog.fee_note')}
           </p>
         </div>

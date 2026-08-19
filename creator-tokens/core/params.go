@@ -206,6 +206,13 @@ const MaxMissBps uint64 = 2500 // 25% of resolved asks
 // an honest one who was ill or offline is not destroyed by it.
 const DelinquencyBlocks uint64 = 7 * BlocksPerDay
 
+// ConvictionCooldownBlocks is how long a served sentence keeps counting against
+// a creator for the purposes of the REPEAT-conviction floor (keys.go's
+// kConvictionStreak). Four sentences long: long enough that an attacker cannot
+// simply wait out the memory between rounds, short enough that a creator who
+// has one genuinely bad week is not marked for a season.
+const ConvictionCooldownBlocks uint64 = 4 * DelinquencyBlocks
+
 const MinAskDeadline uint64 = BlocksPerDay      // 1 day
 const MaxAskDeadline uint64 = 30 * BlocksPerDay // 30 days
 
@@ -319,15 +326,42 @@ const MaxRateDeviationBps uint64 = 2000 // 20%
 const MaxObsWeightBlocks uint64 = 2400 // ~2h
 
 // MaxStaleBlocks refuses to price at all when the newest observation is older
-// than this. The weight clamp stops one sample dominating, but a market that
-// has been silent for a week would still price off week-old data and call it a
-// rate. Refusing is the safe failure; pricing stale is not. Tunable at testnet.
-const MaxStaleBlocks uint64 = 3 * BlocksPerDay
+// than this — enforced in twap.go's twapWindowRead (see that file for the full
+// history and the self-heal argument this value depends on).
+//
+// VALUE, AND WHERE IT CAME FROM: 42 days (6 weeks) — reusing this file's own
+// ExitTaxDecayBlocks scale rather than inventing a new number. It replaces an
+// earlier 3-day setting that was disabled outright (owner ruling, 2026-08-12)
+// because 3 days fired on ordinary quiet markets. 6 weeks sits far above
+// ordinary dormancy while still bounding data that is genuinely ancient
+// (measured, at the old disabled setting: a 36,500-day-old observation priced
+// with rate unchanged). The refusal only ever gates an INFLOW (Ask; settlement
+// never gates an outflow) and is self-healing — any Buy or Sell writes a fresh
+// observation (RecordObs), so one trade by anyone, including the creator, and
+// pricing resumes immediately.
+const MaxStaleBlocks uint64 = 42 * BlocksPerDay
 
-// ParBaseUnitsPerCredit is PAR: 1 credit ⇔ 1 HBD base unit at issuance.
-// Hoisted here from refund.go so no module has to infer it from prose — the
-// refund cap and any future rate floor/ceiling must agree on one value.
-const ParBaseUnitsPerCredit int64 = 1
+// THERE IS NO ParBaseUnitsPerCredit. It existed as `const ParBaseUnitsPerCredit
+// int64 = 1` ("PAR: 1 credit ⇔ 1 HBD base unit at issuance"), documented as
+// hoisted here "so no module has to infer it from prose — the refund cap and
+// any future rate floor/ceiling must agree on one value" — and no module ever
+// did: it had zero non-test consumers (core, contract, cmd, keeper, indexer,
+// sim). RefundPrice and every settlement path price off the curve (Area/
+// SettlementRate), never off PAR — PAR pricing was RULING A's own deletion
+// (see transfer.go's header), and this constant is the leftover that deletion
+// should have taken with it.
+//
+// The two references that existed were not enforcement: refund_test.go used it
+// as a symbolic stand-in for "the deleted PAR cap of 1" in a vacuity check (now
+// a literal 1, with the same comment), and sim/analysis/report.go carried an
+// unused mirror constant that referenced this doc by name (now deleted with it).
+//
+// DELETED rather than left in place, for exactly the reason this file deletes
+// every other unenforced parameter (see MaxCommissionBps, RegistrationFee and
+// MinTip above): a named, exported protocol constant that nothing enforces is a
+// dead safety parameter — it reads as a guarantee that is not there. If a rate
+// floor/ceiling is ever built, its value gets added WITH it, enforced at the
+// call site that needs it, and tested there.
 
 // ---- market states ----
 
@@ -566,8 +600,8 @@ const LongMaxObsWeightBlocks uint64 = 2 * LongObsSpacing
 // sampling offset — under dense trading the long ring's newest sample lags
 // the newest trade by up to one spacing interval, so a bare MaxStaleBlocks
 // bound would spuriously refuse a market that traded continuously and then
-// went quiet for just under 3 days. Effective quietness tolerance is
-// therefore the same 3 days the short ring already enforces.
+// went quiet for just under 6 weeks. Effective quietness tolerance is
+// therefore the same 6 weeks the short ring already enforces.
 const LongMaxStaleBlocks uint64 = MaxStaleBlocks + LongObsSpacing
 
 // MaxServiceFaceAreaBps is RULING C2's depth ceiling: a service face may not

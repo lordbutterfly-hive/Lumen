@@ -103,6 +103,10 @@ import {
 // this file imports the payload builders FROM op-builders.ts).
 import './vsc/payload-contract.selftest';
 import './vsc/price-display.selftest';
+// Same side-effect wiring, for the same reason: the spender-shape guard and
+// its tripwire (audit anomaly A5-07) must run at app startup in development,
+// not only when somebody happens to import them.
+import './vsc/spender-shape.selftest';
 import { MagiIndexerClient } from './vsc/hasura';
 import {
   CreatorTokensGqlClient,

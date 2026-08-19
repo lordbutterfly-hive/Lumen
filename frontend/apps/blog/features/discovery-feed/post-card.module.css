@@ -1,0 +1,687 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE POST CARD THAT OPENS ONTO ITS TOP COMMENT
+   Built to `LUMEN-DOCS/lora-spec/handoff_post_card/SPEC.md` (2026-08-19).
+
+   ★★★ WHY THE HANDOFF'S `:root` BLOCK IS NOT IN THIS FILE, AND MUST NEVER BE.
+
+   `post-card.css` as delivered opens with a `:root` block declaring
+   `--ink-1: #1A1612; --ink-2: #3D362F; --ink-3: #6E645A; --ink-5: #BEB5AC;
+   --brand: #A62A22; --t-fast: 140ms`. Lumen ALREADY defines every one of those
+   names in `packages/tailwindcss/globals.css`, and defines them as RGB
+   TRIPLETS consumed through `rgb(var(--token))`:
+
+       --ink-2: 22 21 17;      (#161511, 224 uses app-wide)
+       --brand: 192 57 43;     (#c0392b, the brand red, light AND dark)
+
+   Feeding a hex string into `rgb()` does not merely change a colour, it makes
+   the declaration INVALID, and an invalid declaration is dropped. Pasting that
+   block would have silently un-coloured 224 elements and the entire brand,
+   across every route, from one card's stylesheet. So every token here is
+   namespaced `--pc-*` and every one of them RESOLVES to a Lumen token. Nothing
+   in this file redefines a name it does not own.
+
+   ★★ AND THE MAPPING IS NOT A COMPROMISE — THE HANDOFF WAS CUT FROM LUMEN.
+   Measured, three of the design's values are byte-identical to tokens this app
+   already ships:
+       handoff --ink-3   #6E645A  ==  Lumen --ink-action  (110 100 90)
+                                      documented as "the resting colour of
+                                      every neutral action icon"
+       handoff shadow rest         ==  Lumen --lift-1, to the last digit
+       handoff image radius 14px   ==  Lumen rounded-card (14px)
+   The rest land within 2% of an existing token. Only two values are genuinely
+   new — the payout green and the $0.00 grey — and those are the only two
+   `--pc-*` tokens below that carry a literal.
+
+   ★ THE THREE THINGS THE HANDOFF SAYS WILL SILENTLY BREAK, all honoured here:
+   1. `interpolate-size: allow-keywords` — declared on `:root` in globals.css,
+      NOT here. It is an inherited property and a CSS module is the wrong place
+      for a document-level declaration. Without it the drawer cannot animate to
+      `height: auto`, and the `grid-template-rows: 0fr -> 1fr` alternative FAILS
+      SILENTLY: the transition wedges the used track size, the row never
+      resolves, and a shut drawer still looks correct in a screenshot.
+   2. The action row is a SIBLING of the head row, not a child of the text
+      column — that is what keeps the payout on the card's own right edge when a
+      post has no image. Nest it back and imageless cards pull it 206px left.
+   3. The per-glyph icon nudges are per-glyph for a reason. See §ICONS.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.card {
+  /* ── ink ────────────────────────────────────────────────────────────────
+     Every one of these is a Lumen token. The handoff's names are kept as the
+     comment so the two documents can be read side by side. */
+  --pc-ink-strong: rgb(var(--ink-2)); /* handoff --ink-1: titles, comment body */
+  --pc-ink-name: rgb(var(--ink-4)); /* handoff --ink-2: author names */
+  --pc-ink-quiet: rgb(var(--ink-action)); /* handoff --ink-3: EXACT match */
+  --pc-brand: rgb(var(--brand)); /* handoff --brand */
+  --pc-brand-deep: rgb(var(--ink-brand-4)); /* handoff --brand-deep; 7.11:1, the app's link hover */
+
+  /* ── paper ──────────────────────────────────────────────────────────────
+     The handoff paints the card #FFFEFC on a #FCFAF7 page. Lumen is white on
+     white. A single off-white card on a white page reads as a rendering fault,
+     not as warmth, so the card takes Lumen's surface and the warm paper ladder
+     stays an owner decision for the whole app rather than a side effect of one
+     component. `--surface-3` IS the hover wash the shipped card already used
+     (#fdfcfb), so the hover is unchanged. */
+  --pc-surface: rgb(var(--surface-1));
+  --pc-surface-hover: rgb(var(--surface-3));
+  --pc-line: rgb(var(--line-9)); /* handoff --hairline #EDE9E2 vs #ebebeb; 99 uses */
+
+  /* ── money ──────────────────────────────────────────────────────────────
+     ★ THE TWO GENUINELY NEW VALUES IN THIS FILE. The handoff deepens the
+     payout green to #2A6B44 so it "sits inside the paper palette instead of
+     glowing out of it"; Lumen's nearest are --ink-ok-1 #1f6340 (2 uses) and
+     --ink-ok-2 #2f7d4f (19 uses), and the handoff value sits between them.
+     Taken as specified and namespaced, because a payout figure is the one
+     number on this card a reader acts on. Flagged for the owner: if the app
+     ever unifies on one green, this is the token to fold in.
+     Measured on --surface-1: #2A6B44 is 6.4:1, clears AA at any size. */
+  --pc-payout: #2a6b44;
+  --pc-payout-zero: #beb5ac; /* $0.00 only. 2.1:1 — deliberately not text you read. */
+
+  /* ── motion ─────────────────────────────────────────────────────────────
+     `--t-fast` in the handoff is 140ms; Lumen's global `--t-fast` is 120ms and
+     is used by everything else that hovers. Namespaced at the handoff's value
+     so this file cannot retime the rest of the app, and so a reviewer can see
+     the 20ms is a deliberate keep rather than an accident. */
+  --pc-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --pc-t-fast: 140ms;
+  --pc-t-base: 200ms;
+  --pc-t-drawer: 340ms;
+
+  /* ── the card itself ──────────────────────────────────────────────────── */
+  /* Radius is 18px, not the handoff's 20px, and that is deliberate. Lumen
+     collapsed FIFTEEN measured radii onto a three-step ladder — control 10 /
+     card 14 / panel 18 — each anchored on the value the codebase already used
+     most. Spending a sixteenth value on a 2px difference would undo that for
+     nothing anyone can see. The image below DOES take the handoff's 14px,
+     because that is already `rounded-card`. */
+  border-radius: 18px;
+  padding: 20px;
+  background: var(--pc-surface);
+  border: 1px solid var(--pc-line);
+  box-shadow: var(--lift-1);
+  transition:
+    box-shadow 320ms var(--pc-ease),
+    background-color var(--pc-t-fast) var(--pc-ease);
+}
+
+.card:hover,
+.card:focus-within {
+  background: var(--pc-surface-hover);
+  /* Between --lift-2 and --lift-3, so it is written out rather than snapped to
+     either: the drawer opening is the biggest motion in the feed and the lift
+     has to read as the card coming forward, not as a menu appearing. */
+  box-shadow:
+    0 3px 6px rgb(26 22 18 / 0.06),
+    0 14px 32px rgb(26 22 18 / 0.09);
+}
+
+/* ── FEED ─────────────────────────────────────────────────────────────────
+   16px between cards. Tighter and the drawer opening reads as the NEXT card
+   moving; looser and the feed stops being a column. */
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── HEAD ─────────────────────────────────────────────────────────────────
+   No image, no column. Never render an empty 186px box — the text takes the
+   full measure and the excerpt runs to the card's right padding edge. */
+.head {
+  display: flex;
+  gap: 20px;
+}
+.text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.image {
+  width: 186px;
+  height: 130px;
+  flex: none;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* 1.43:1, not 3:2 — crop to the box, never letterbox inside it. */
+  object-fit: cover;
+}
+
+/* ── BYLINE ───────────────────────────────────────────────────────────── */
+.byline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ── TYPE ─────────────────────────────────────────────────────────────────
+   ★★ SIZES ARE THE LUMEN LADDER, NOT THE HANDOFF'S LITERALS, AND THE REASON
+   IS THE 14px FLOOR.
+
+   The handoff sets timestamps at 13px, counts at 13.5px and the comment meta
+   at 13/13.5. The all-Lora typography spec abolishes the 13px tier outright:
+   "no lowercase text below 14px anywhere", because Lora's x-height is 8%
+   smaller than the sans it replaces and 13px lowercase in Lora reads as ~12.
+   That is a legibility rule, so it wins over a per-component literal. Every
+   value below is a step on the ladder in `packages/tailwindcss/tailwind.config.js`:
+
+       28/34  text-title    card title      (handoff 27)
+       19/30  text-lede     comment body    (handoff 16.5)
+       18/30  text-read     excerpt         (handoff 16)
+       17     ~text-body-lg payout          (handoff 17 — AGREE)
+       15/22  text-body-sm  meta, counts    (handoff 13-14)
+       12/16  text-label    TOP COMMENT     (handoff 11.5)
+
+   What IS taken verbatim from the handoff is the RELATIONSHIP it measured: the
+   excerpt and the comment body are both prose in one face, separated by colour
+   and one step of size — quiet ink at the smaller step against strong ink at
+   the larger. That survives the ladder intact, one full step instead of a half.
+
+   ★ COUNTS KEEP -0.01em. The handoff pins that value so a count reads
+   identically here and in the standalone vote control. */
+
+.title {
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--pc-ink-strong);
+}
+/* The title is the post link. It stays ink and only warms on hover: a
+   brand-coloured headline would fight the community tag beside it. */
+.title a {
+  color: inherit;
+  text-decoration: none;
+  transition: color var(--pc-t-fast) var(--pc-ease);
+}
+.title a:hover {
+  color: var(--pc-brand);
+}
+
+.excerpt {
+  font-size: 18px;
+  line-height: 30px;
+  font-weight: 400;
+  color: var(--pc-ink-quiet);
+}
+
+.author {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--pc-ink-name);
+  text-decoration: none;
+}
+.author:hover {
+  color: var(--pc-ink-strong);
+}
+
+.community {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--pc-brand);
+  text-decoration: none;
+}
+.community:hover {
+  color: var(--pc-brand-deep);
+}
+
+.time {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 400;
+  color: var(--pc-ink-quiet);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── AVATARS ──────────────────────────────────────────────────────────────
+   Sized from `assets/avatar.js`'s own rule (0.47 x diameter) rather than the
+   spec table's flat 14px: a 14px cap inside a 26px circle crowds the ring.
+   An initial is UPPERCASE, and the 14px floor governs lowercase only —
+   cap-height is 2.8% smaller in Lora, not 8% — so 13px here is not a
+   violation. background / border-color / color come from avatar.js per handle;
+   the returned ink is pre-darkened to hold 4.5:1 at 26px, which the bright
+   tints do not, so do not substitute a gradient or a hue generator. */
+.avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  /* Exempt from the 14px lowercase floor: an avatar initial is a single CAPITAL.
+     `text-transform` is declared rather than trusted to the caller's own
+     `.toUpperCase()`, so the exemption is provable from this file and a
+     lowercase initial can never sneak through at 13px. */
+  text-transform: uppercase;
+  font-size: 13px;
+  line-height: 1;
+  border: 1.5px solid;
+}
+.commentAvatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1;
+  border: 1.5px solid;
+}
+
+/* ── OVERFLOW ─────────────────────────────────────────────────────────── */
+.more {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  padding: 4px 2px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+}
+.more svg {
+  fill: var(--pc-ink-quiet);
+  transition: fill var(--pc-t-fast) var(--pc-ease);
+}
+.more:hover svg {
+  fill: var(--pc-brand);
+}
+
+/* ── ACTION ROW ───────────────────────────────────────────────────────────
+   Sibling of `.head`, so it spans the whole card and the payout always lands
+   on the card's right padding edge, image or not. */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding-top: 14px;
+}
+
+/* ★ ALL FOUR NEUTRAL ACTIONS REST AT ONE TOKEN and all four go brand on hover.
+   The card this replaces had three different greys in one row. Colour carries
+   state here, never accident. */
+.act {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums; /* a count that ticks must not shift the row */
+  color: var(--pc-ink-quiet);
+  transition: color var(--pc-t-fast) var(--pc-ease);
+}
+/* The vote tally is the one figure in this row a reader is voting ON, so it
+   carries the 700 the typography spec assigns to key figures. */
+.actVote {
+  font-weight: 700;
+}
+.act svg {
+  fill: var(--pc-ink-quiet);
+  transition: fill var(--pc-t-fast) var(--pc-ease);
+}
+.act:hover,
+.act:hover svg {
+  color: var(--pc-brand);
+  fill: var(--pc-brand);
+}
+.blade {
+  fill: none;
+  stroke: var(--pc-ink-quiet);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition:
+    stroke var(--pc-t-fast) var(--pc-ease),
+    fill var(--pc-t-fast) var(--pc-ease);
+}
+.act:hover .blade {
+  stroke: var(--pc-brand);
+}
+.isCast {
+  color: var(--pc-brand);
+}
+.isCast .blade {
+  stroke: var(--pc-brand);
+  fill: var(--pc-brand); /* cast = solid blade */
+}
+.isReblogged {
+  color: var(--pc-brand);
+}
+.isReblogged svg {
+  fill: var(--pc-brand);
+}
+
+/* ── ICONS: OPTICAL ALIGNMENT ─────────────────────────────────────────────
+   `align-items: center` centres each SVG BOX. It cannot centre the INK, because
+   a glyph's ink rarely sits in the middle of its own viewBox. The handoff
+   derives the correction as
+
+       nudge = C + (12 - inkMid) * size / 24
+
+   where C is the digit's own optical correction, given as 0.5px "constant for
+   Lora 600 at 13.5px". Two things about that formula do NOT transfer unchanged
+   to this app, and both were checked rather than assumed.
+
+   ★★★ 1. THE BLADE IS ALREADY CORRECTED, AND CORRECTED A DIFFERENT WAY.
+   `features/votes/blade.tsx` ships the BYTE-IDENTICAL path to the handoff's
+   BLADE constant — and it already solved this exact problem in 2026-08-18
+   ("the upvote blade is not level with everything else on cards"). It did NOT
+   use a transform. It shifted the viewBox: `viewBox="0 -3.5 24 24"`, moving the
+   artwork down 3.5 units inside the box. Its own note says why a transform was
+   rejected: `.glyph` already owns the cast animation's scale and the svg owns
+   the downvote's 180° rotation, so a third transform there would contend with
+   the pop.
+
+   Applying the handoff's 3.4px on top of that would DOUBLE-CORRECT the blade
+   and push it below the line it was fixed to sit on. What is actually left to
+   apply is only the part the viewBox does not cover:
+
+       viewBox shift at 20px = 3.5 x 20/24 = 2.917px
+       handoff total at 20px = 0.556 + 3.45 x 20/24 = 3.43px
+       remainder             = 0.51px
+
+       viewBox shift at 18px = 3.5 x 18/24 = 2.625px
+       handoff total at 18px = 0.556 + 3.45 x 18/24 = 3.14px
+       remainder             = 0.51px
+
+   The remainder is the digit correction alone, and it is the SAME at both
+   sizes — which is the arithmetic agreeing with itself, since the viewBox shift
+   and the ink-offset term scale identically with size. So the blade takes a
+   flat 0.5px here and keeps its viewBox untouched.
+
+   (C itself is 0.5 x 15/13.5 = 0.556, because these counts are Lora at 15px,
+   not the handoff's 13.5px. It rounds back to 0.5. If the count size moves
+   again, redo this table — do not nudge by eye.)
+
+   ★★ 2. THE OTHER GLYPHS ARE LUMEN'S, NOT THE HANDOFF'S, SO THEIR INK IS
+   ELSEWHERE. This app has a coherent icon set in
+   `packages/ui/components/custom-icons.tsx`, including FILLED `press*` variants
+   the card already uses. Reading their path data:
+
+       Lumen comment (pressComment)  ink y 4.0-19.5   mid 11.75
+       Lumen reblog                  ink y 5.8-18.2   mid ~12.00
+       handoff comment               ink y 3.2-21.4   mid 12.30
+       handoff reblog                                 mid 12.00
+
+   so `nudge = 0.556 + (12 - 11.75) x 20/24 = 0.76` for the comment glyph and
+   `0.556 + 0 = 0.56` for reblog.
+
+   ★ THESE THREE VALUES ARE DERIVED FROM PATH DATA, NOT YET MEASURED IN A
+   BROWSER, and the handoff is emphatic that measuring is the only way to be
+   sure. Phase 4 re-measures all three. TWO TRAPS WHEN IT DOES: a child path's
+   `getBoundingClientRect` does NOT reflect a transform on its parent `<svg>`,
+   so a probe reading the path rect reports no change and will argue the blade
+   up to ~4.9px, landing it 1.5px LOW — measure the SVG's own rect plus
+   `getBBox`. And a percentage translate resolves against a box that is not the
+   icon, overshooting by ~2px. Use pixels.
+
+   Targeted by class, never by `:has()` or an attribute-prefix match on the path
+   `d`: the handoff stylesheet matched `svg:has(path[d^="M3.4 7.4"])`, which
+   stops working silently the day anyone re-exports the icon. */
+.iconBlade {
+  transform: translateY(0.5px);
+}
+.iconComment {
+  transform: translateY(0.8px);
+}
+.iconReblog {
+  transform: translateY(0.5px);
+}
+
+/* ── PAYOUT ───────────────────────────────────────────────────────────────
+   Fixed slot. $0.00 greys; it does not move, resize or restyle. The post
+   payout and the comment payout land on the same right edge, so money reads as
+   one column down the feed. */
+.pay {
+  width: 88px;
+  flex: none;
+  margin-left: auto;
+  text-align: right;
+  font-weight: 700;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  color: var(--pc-payout);
+}
+.payZero {
+  color: var(--pc-payout-zero);
+}
+.commentActions .pay {
+  font-size: 15px; /* comments earn too, one step down */
+}
+
+/* ── DRAWER ───────────────────────────────────────────────────────────────
+   height 0 → auto, animated, enabled by `interpolate-size: allow-keywords` on
+   `:root` (globals.css). Opens to whatever the comment needs, one line or
+   four: no max-height cap, nothing measured in JavaScript, nothing clipped.
+
+   DO NOT substitute `grid-template-rows: 0fr → 1fr`. It looks like the tidier
+   trick and it does not work — the transition wedges the used track size at
+   its old value, the row never resolves, and the drawer stays shut. It fails
+   SILENTLY, because a closed card still looks correct.
+
+   Where `interpolate-size` is unsupported (Chrome < 129, current Safari and
+   Firefox) the drawer SNAPS open instead of sliding. It still opens. That is
+   the accepted degradation, not a bug to work around in JS. */
+.drawer {
+  height: 0;
+  overflow: hidden;
+  transition: height var(--pc-t-drawer) var(--pc-ease);
+}
+.card:hover .drawer,
+.card:focus-within .drawer {
+  height: auto;
+}
+.drawerInner {
+  padding-top: 16px;
+}
+
+/* the hairline draws itself from the left as the space appears */
+.seam {
+  display: block;
+  height: 1px;
+  margin-bottom: 16px;
+  background: var(--pc-line);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--pc-t-drawer) var(--pc-ease);
+}
+.card:hover .seam,
+.card:focus-within .seam {
+  transform: scaleX(1);
+}
+
+/* The comment fades and rises BEHIND the opening row, arriving after the space
+   exists rather than stretching with it. */
+.comment {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding-left: 2px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity var(--pc-t-base) var(--pc-ease) 60ms,
+    transform 260ms var(--pc-ease) 60ms;
+}
+.card:hover .comment,
+.card:focus-within .comment {
+  opacity: 1;
+  transform: none;
+}
+
+.commentBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+.commentMeta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.commentAuthor {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--pc-ink-name);
+}
+.commentTime {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 400;
+  color: var(--pc-ink-quiet);
+  font-variant-numeric: tabular-nums;
+}
+/* Uppercase + tracking, never small-caps: Lora has no `smcp` table, so
+   `font-variant-caps` would be synthesised from scaled capitals. */
+.commentLabel {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pc-ink-quiet);
+}
+.commentText {
+  font-size: 19px;
+  line-height: 30px;
+  font-weight: 400;
+  color: var(--pc-ink-strong);
+  max-width: 64ch;
+}
+.commentActions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding-top: 2px;
+}
+
+/* ── VOTE FEEDBACK ────────────────────────────────────────────────────────
+   Three curves, already shipped in the vote control and FROZEN. Do not retime
+   them: a vote must feel identical wherever it is cast. Fire all three by
+   remounting the animated span with a changing `key`. */
+@keyframes pop {
+  0% {
+    transform: scale(1);
+  }
+  38% {
+    transform: scale(1.34);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes ring {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+@keyframes countUp {
+  0% {
+    transform: translateY(9px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+@keyframes countDown {
+  0% {
+    transform: translateY(-9px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.pop {
+  display: grid;
+  animation: pop 400ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.ring {
+  position: absolute;
+  inset: 2px;
+  border-radius: 999px;
+  border: 2px solid var(--pc-brand);
+  pointer-events: none;
+  animation: ring 620ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+.count {
+  display: inline-block;
+  min-width: 2ch;
+  animation: countUp 300ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.countDown {
+  animation-name: countDown;
+}
+
+/* ── FOCUS ────────────────────────────────────────────────────────────────
+   `:focus-visible` only, so a mouse click does not paint a ring. */
+.card :focus-visible {
+  outline: 2px solid var(--pc-brand);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* ── REDUCED MOTION ───────────────────────────────────────────────────────
+   Everything collapses and the comment drops its translate — but THE DRAWER
+   STILL OPENS. Reduced motion means no animation, not no feature. */
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .card * {
+    transition-duration: 0.01ms !important;
+  }
+  .comment {
+    transform: none;
+  }
+  .pop,
+  .ring,
+  .count {
+    animation: none !important;
+  }
+}
+
+/* ── DARK MODE ────────────────────────────────────────────────────────────
+   The handoff specifies none (§7b: "come back rather than inventing one").
+   It does not need to: every token above except the two money literals
+   resolves through a Lumen token that already has a dark value, so the card
+   follows the theme for free — which is strictly better than the card this
+   replaces, whose nine hardcoded hexes could not follow it at all.
+
+   Only the two literals need a dark answer. Both are lightened to hold their
+   contrast on a dark surface rather than recoloured, so money stays green and
+   $0.00 stays absent. */
+:global(.dark) .card {
+  --pc-payout: #6fbf8e;
+  --pc-payout-zero: #6b645d;
+}

@@ -201,7 +201,7 @@ export default function MarketTab() {
 
             {/* Pool odds ladder */}
             <div className="mt-[26px] border-t border-line-3 pt-[22px]">
-              <div className="mb-3.5 font-sans text-[13px] leading-[20px] font-bold uppercase tracking-[0.05em] text-ink-10">
+              <div className="mb-3.5 font-sans text-label font-bold uppercase tracking-[0.05em] text-ink-10">
                 {t('prediction_market.pool_odds')}
               </div>
               <BucketBars buckets={round.buckets} size="full" />
@@ -271,7 +271,7 @@ export default function MarketTab() {
               when the position itself says the deadline has passed. */}
           {!isResolved && myPosition.reclaimable && (
             <div className="mt-3 rounded-card border border-line-warn-2 bg-surface-warn-4 p-3">
-              <p className="font-sans text-[13px] leading-[20px] text-ink-warn-3">
+              <p className="font-sans text-caption text-ink-warn-3">
                 {t('prediction_market.reclaim_explain')}
               </p>
               <button
@@ -294,7 +294,7 @@ export default function MarketTab() {
 function KeyStat({ label, value, last }: { label: string; value: string; last?: boolean }) {
   return (
     <div className={cn('px-6 py-[18px]', !last && 'border-r border-line-3')}>
-      <div className="mb-1.5 font-sans text-[12px] font-bold uppercase tracking-[0.05em] text-ink-10">{label}</div>
+      <div className="mb-1.5 font-sans text-label font-bold uppercase tracking-[0.05em] text-ink-10">{label}</div>
       <div className="font-sans text-[20px] leading-[30px] font-bold tabular-nums text-ink-2">{value}</div>
     </div>
   );

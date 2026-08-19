@@ -100,7 +100,7 @@ export default function PriceChart({
         ))}
       </svg>
       {placeholder && (
-        <p className={cn('mt-1 text-center text-[12px] leading-[18px] text-ink-14')}>{t('prediction_market.chart_caption')}</p>
+        <p className={cn('mt-1 text-center text-caption text-ink-14')}>{t('prediction_market.chart_caption')}</p>
       )}
     </div>
   );

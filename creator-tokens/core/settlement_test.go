@@ -412,18 +412,23 @@ func TestAskRateLong_MinimumHistory(t *testing.T) {
 		t.Fatalf("long TWAP = %s, want 1000 (constant history)", rate)
 	}
 
-	// Staleness NO LONGER REFUSES once bootstrapped (owner ruling 2026-08-12;
-	// see twapWindowRead). A long ring that satisfied count+span keeps quoting
-	// its average however long the market stays quiet — because a quiet market
-	// is one whose SUPPLY has not moved, so the average is still correct.
+	// Staleness is wired again (twap.go, re-enabled 2026-08-19 at a widened
+	// horizon — LongMaxStaleBlocks, 6 weeks + one spacing interval). A long
+	// ring that satisfied count+span keeps quoting its average through
+	// ordinary quiet spells, but a genuinely ancient newest sample refuses.
+	// Both sides pinned: just inside the horizon still prices, just past it
+	// refuses.
 	s3 := NewMemStore()
 	stFillLong(s3, creator1, q-50, stObsCount, big.NewInt(1000))
-	stale, err := askRateLong(s3, creator1, q-50+LongMaxStaleBlocks+1)
+	fresh, err := askRateLong(s3, creator1, q-50+LongMaxStaleBlocks)
 	if err != nil {
-		t.Fatalf("askRateLong refused a bootstrapped-but-quiet window: %v", err)
+		t.Fatalf("askRateLong refused a bootstrapped ring exactly at the staleness horizon: %v", err)
 	}
-	if stale.Cmp(big.NewInt(1000)) != 0 {
-		t.Fatalf("stale long TWAP = %s, want the unchanged 1000 (constant history)", stale)
+	if fresh.Cmp(big.NewInt(1000)) != 0 {
+		t.Fatalf("long TWAP at the horizon = %s, want the unchanged 1000 (constant history)", fresh)
+	}
+	if _, err := askRateLong(s3, creator1, q-50+LongMaxStaleBlocks+1); errSymbol(err) != ErrOracle {
+		t.Fatalf("askRateLong priced (or refused with the wrong symbol) past LongMaxStaleBlocks: err=%v", err)
 	}
 
 	// The epoch filter: samples recorded before the current incarnation's
@@ -487,7 +492,7 @@ func TestSettlement_AskUsesTheRuledDerivation(t *testing.T) {
 // balances. None of them can even reach a settlement refusal.
 //
 // The runtime half, end-to-end here: a REAL market prices services, opens
-// real escrows, then goes quiet past MaxStaleBlocks — settlement now REFUSES
+// real escrows, then a below-bootstrap ring drives settlement into refusal
 // (verified) — and then EVERY outflow in the package is exercised and
 // succeeds: Sell, TransferCredits, Answer, Reclaim, ClaimTradeFees,
 // WithdrawTreasury, and (after the natural lapse) Refund and RefundHolder.
@@ -523,15 +528,24 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 		t.Fatalf("Ask(to-reclaim): %v", err)
 	}
 
-	// Drive settlement into refusal. NOTE (2026-08-12): this used to go QUIET
-	// past MaxStaleBlocks, but staleness no longer refuses once a market has
-	// bootstrapped (owner ruling — see twapWindowRead). The property THIS test
-	// exists to pin is unchanged and still valuable: *whatever* makes
-	// settlement refuse, no outflow may be gated by it. So the refusal is now
-	// induced by the gate that does still bite — a ring below the bootstrap
-	// minimum, produced by resetting the write counter exactly as Register
-	// does when a market re-registers.
-	quiet := askBlock + MaxStaleBlocks + LongObsSpacing + 10
+	// Drive settlement into refusal. NOTE (2026-08-12, updated 2026-08-19):
+	// this used to go QUIET past MaxStaleBlocks; then (2026-08-12) staleness
+	// stopped refusing at all and "quiet" became a plain far-future offset
+	// that just happened to reuse MaxStaleBlocks' old (3-day) scale. Now that
+	// MaxStaleBlocks is wired again (twap.go) AND widened to 6 weeks, reusing
+	// it here would carry `quiet` past the market's own SubscriptionPeriod +
+	// GraceBlocks and freeze the market — a second, unwanted refusal source
+	// this test is not trying to exercise. The property THIS test exists to
+	// pin is unchanged and still valuable: *whatever* makes settlement
+	// refuse, no outflow may be gated by it. The refusal is induced by a
+	// DIFFERENT gate — a ring below the bootstrap minimum, produced by
+	// resetting the write counter exactly as Register does when a market
+	// re-registers — which needs no particular distance from askBlock at
+	// all, so `quiet` is now a small fixed offset instead — large enough to
+	// clear askR's own Reclaim window (MinAskDeadline + ReclaimGrace =
+	// 28,800 + 1,200 = 30,000) with margin, small enough to stay well inside
+	// the market's SubscriptionPeriod so it remains ACTIVE (checked below).
+	quiet := askBlock + 40_000
 	setU64(s, kObsIdx(creator), 0)
 	setU64(s, kObsLongIdx(creator), 0)
 	if _, err := SettlementRate(s, creator, quiet); err == nil {
@@ -550,7 +564,7 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 	if _, err := Sell(s, holder2, creator, quiet, big.NewInt(100)); err != nil {
 		t.Fatalf("OUTFLOW BLOCKED: Sell during settlement refusal: %v", err)
 	}
-	if err := TransferCredits(s, creator, holder1, holder2, quiet, big.NewInt(50)); err != nil {
+	if err := TransferCredits(s, holder1, creator, holder1, holder2, quiet, big.NewInt(50)); err != nil {
 		t.Fatalf("OUTFLOW BLOCKED: TransferCredits during settlement refusal: %v", err)
 	}
 	if _, err := Answer(s, creator, creator, quiet, askA.Seq, "answered-late"); err != nil {

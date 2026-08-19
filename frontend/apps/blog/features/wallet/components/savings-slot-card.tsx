@@ -9,9 +9,9 @@ import SavingsWithdrawDialog from './dialogs/savings-withdraw-dialog';
 
 // W-2/W-3: Deposit was bg-surface-ok-7 and both were rounded-control.
 const DEPOSIT_BUTTON_CLASS =
-  'rounded-card bg-surface-brand-12 px-[15px] py-2 text-[13px] leading-[20px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
+  'rounded-card bg-surface-brand-12 px-[15px] py-2 text-caption font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
 const WITHDRAW_BUTTON_CLASS =
-  'rounded-card border border-line-11 bg-surface-1 px-[15px] py-2 text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
+  'rounded-card border border-line-11 bg-surface-1 px-[15px] py-2 text-caption font-semibold text-ink-7 transition-colors hover:bg-surface-16';
 
 /**
  * One HIVE or HBD row inside the Savings Vault panel. Generic over currency
@@ -64,14 +64,14 @@ export default function SavingsSlotCard({
           <TokenIcon currency={currency} size={20} />
           <span className="text-[15px] leading-[24px] font-bold text-ink-4">{title}</span>
           <span
-            className={`rounded-control px-2 py-[2px] text-[12px] font-bold ${
-              chipTone === 'green' ? 'bg-surface-ok-5 text-ink-ok-2' : 'bg-surface-23 text-ink-10'
-            }`}
+            className={`rounded-control px-2 py-[2px] text-caption font-bold ${
+ chipTone === 'green' ? 'bg-surface-ok-5 text-ink-ok-2' : 'bg-surface-23 text-ink-10'
+ }`}
           >
             {chip}
           </span>
         </div>
-        {description ? <p className="font-serif text-[13px] leading-[20px] text-ink-10">{description}</p> : null}
+        {description ? <p className="font-serif text-caption text-ink-10">{description}</p> : null}
       </div>
       {/* ★ THE load-bearing change (map item 1). Wrapping the outer row
           alone is not enough: this button group is ~370px on its own

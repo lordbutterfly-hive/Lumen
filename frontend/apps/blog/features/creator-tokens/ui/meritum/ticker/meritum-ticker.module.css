@@ -183,6 +183,12 @@
  * scale has no 13 and should not grow one for an ornament.
  */
 .glyph {
+  /* ★ EXEMPT FROM THE 14px FLOOR, AND NOT BY OVERSIGHT (2026-08-19 sweep).
+     This is an ORNAMENT — a decorative mark rendered as a character — not a line
+     of prose, so the rule about lowercase legibility does not describe it. The
+     note above already argued the scale should not grow a 13 rung for it; that
+     is still true, and the uppercase ladder's `label-lg` 13px rung is a LABEL
+     step, which this also is not. It stays a local value on purpose. */
   font-size: 13px;
   margin-right: 12px;
 }
@@ -300,8 +306,12 @@
   background: none;
   padding: 2px 4px;
   font: inherit;
-  font-size: 11px;
-  line-height: 1;
+  /* ★ 11px -> 14px (2026-08-19, the sub-14px sweep). This is a real text button
+     ("pause"), lowercase prose by the floor's definition, not an ornament or a
+     tracked label — so the floor binds. Leading goes with it: `1` on a 14px
+     serif clips the descenders in "p" and "g", which is the whole word. */
+  font-size: 14px;
+  line-height: 20px;
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;

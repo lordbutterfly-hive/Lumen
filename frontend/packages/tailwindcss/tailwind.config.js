@@ -17,10 +17,27 @@ module.exports = {
       }
     },
     extend: {
+      /**
+       * ★ THESE THREE KEYS WERE TWO FONT SWAPS STALE (2026-08-19, all-Lora).
+       *
+       * `source` named Source Serif Pro and `sanspro` named Source Sans Pro —
+       * neither has been in this bundle for a long time, and `apps/blog`'s own
+       * config REPLACES this object wholesale, so nothing here was reaching the
+       * app at all. That is exactly why they survived: a dead key that compiles
+       * to nothing is invisible until someone believes it.
+       *
+       * ★ DELETED 2026-08-19, same day, once the sweep this comment asked for came
+       * back zero: `grep -rn 'font-source\b|font-sanspro' apps packages` (source
+       * only, build output excluded) returns nothing but comments describing their
+       * own removal. They are gone rather than left pointing at Lora, because a key
+       * that compiles is a key someone can reach for.
+       */
       fontFamily: {
-        source: ['"Source Serif Pro"', 'serif'],
-        sanspro: ['"Source Sans Pro"', '"Helvetica Neue"', 'Helvetica', 'Arial', 'sans-serif'],
-        consolas: ['Consolas', '"Liberation Mono"', 'Courier', 'monospace']
+        lora: ['var(--font-lora)', 'Georgia', 'Cambria', 'serif'],
+        sans: ['var(--font-lora)', 'Georgia', 'Cambria', 'serif'],
+        serif: ['var(--font-lora)', 'Georgia', 'Cambria', 'serif'],
+        mono: ['ui-monospace', 'SFMono-Regular', 'SF Mono', 'Cascadia Mono', 'Menlo', 'Consolas', '"Liberation Mono"', 'monospace'],
+        consolas: ['ui-monospace', 'SFMono-Regular', 'SF Mono', 'Cascadia Mono', 'Menlo', 'Consolas', '"Liberation Mono"', 'monospace']
       },
 
       /**
@@ -129,14 +146,88 @@ module.exports = {
          * file's rule is that both numbers are whole pixels — `1.0` on a 68px
          * size IS 68px, written out so it cannot drift if the size changes.
          */
-        'meritum-display': ['68px', '68px']
+        'meritum-display': ['68px', '68px'],
+
+        /* =====================================================================
+           ★★★ THE ALL-LORA LADDERS (2026-08-19). TWO of them, and that is the
+           whole point.
+
+           Lora replaced Open Sans as the only family. Measured on the two
+           faces at 100px:
+
+                            x-height   cap-height   lowercase advance
+             Lora              50.0        70.0            525.4
+             Open Sans         54.0        72.0            532.9
+             ratio            0.926       0.972            0.986
+
+           So LOWERCASE renders ~8% smaller at the same px value and must grow
+           to hold its old optical size, while UPPERCASE renders only ~3%
+           smaller and must NOT grow — bump a tracked 12px label by 8% and the
+           label starts shouting over the content it labels. Width is within
+           1.4%, so nothing reflows from the family change itself.
+
+           That asymmetry is why one ladder cannot serve both, and why the
+           numeric steps above are LEFT ALONE: they are still the truth about
+           what a `text-14` compiles to, and ~460 call sites depend on it. The
+           named steps below are the migration target. A call site moves from
+           `text-14` to `text-body-sm` when its surface is swept, not before,
+           so the diff stays reviewable one surface at a time.
+
+           Leading is stated in whole pixels on every step, for the reason the
+           note further up this file gives: the app inherits Preflight's
+           unitless `line-height:1.5` and prose overrides it with `1.75`, so any
+           ratio applied to a container that is not a multiple of 4 produces a
+           fractional line box and drags every following block off the device
+           pixel grid. Serifs need more leading than a sans at the same size,
+           which is why these are not the old numbers with a size bump.
+           ===================================================================== */
+
+        /* — LOWERCASE ladder. Every value ~8% over the Open Sans step it
+             replaces; the old value is named so the mapping is checkable. */
+        caption: ['14px', '20px'], //  was 13 — the floor. Nothing lowercase goes below this.
+        'body-sm': ['15px', '22px'], //  was 14 — the workhorse: buttons, tabs, labels, meta
+        body: ['16px', '24px'], //  was 15 — emphasis UI, comment reading body
+        'body-lg': ['17px', '26px'], //  was 16 — base UI, section tabs
+        read: ['18px', '30px'], //  was 17 — article body and feed excerpt
+        lede: ['19px', '30px'], //  was 18 — compact card title, opening paragraph
+        heading: ['20px', '28px'], //  ★ ADDED: §5.10 section heading and §5.12 modal
+        //  heading both specify 20/600 and the spec's own ladder skips from 19 to
+        //  22, so every implementer would have had to round one way or the other
+        //  and they would not all have rounded the same way. Named, not guessed.
+        stat: ['22px', '30px'], //  was 20 — stat figure, small heading
+        title: ['28px', '34px'], //  was 26 — feed card title
+        display: ['36px', '44px'], //  was 34 — page H1, masthead, profile name
+        hero: ['36px', '44px'], //  was 30 w800 — post detail title; see the note in §6 of the spec
+
+        /* — UPPERCASE ladder. px UNCHANGED from the sans values on purpose
+             (cap-height is only 2.8% smaller). Pair each with the matching
+             `tracking-*` token below; a tracked cap label without its tracking
+             is not a label, it is a small shout. */
+        micro: ['11px', '16px'], //  coin engraving, the tightest legible cap
+        label: ['12px', '16px'], //  every tracked uppercase label in the app
+        'label-lg': ['13px', '18px'] //  STREAK, section eyebrows
       },
       letterSpacing: {
         /* The two tracking values the Meritum intro needs; neither is on
            Tailwind's default scale, which stops at -0.05em / 0.1em. Scoped by
            name for the same reason as `meritum-display` above. */
         'meritum-display': '-0.035em', // the Lora headline
-        'meritum-eyebrow': '0.22em' // the 11px uppercase MERITUM eyebrow
+        'meritum-eyebrow': '0.22em', // the 11px uppercase MERITUM eyebrow
+
+        /* ★ TRACKING THAT BELONGS TO A LADDER STEP (2026-08-19, all-Lora).
+           Tailwind's `tracking-tight` is -0.025em, which was tuned for Open
+           Sans. A serif with real bracketed serifs COLLIDES at that value —
+           this app already hit it once, on the wordmark, where the tracking had
+           to go -0.025em -> -0.01em the day the wordmark became Lora
+           (`app-header.tsx`, 2026-08-11, "Lumen has an m-n pair that shows it
+           first"). These three are the retuned display values; the three cap
+           values are the tracking half of the uppercase ladder above. */
+        title: '-0.01em', //  pairs with text-title
+        display: '-0.015em', //  pairs with text-display
+        hero: '-0.02em', //  pairs with text-hero — buys back the weight 800 Lora does not have
+        micro: '0.16em', //  pairs with text-micro
+        label: '0.12em', //  pairs with text-label
+        'label-lg': '0.06em' //  pairs with text-label-lg
       },
       colors: {
         /**
@@ -580,7 +671,14 @@ module.exports = {
             code: {
               backgroundColor: 'hsl(var(--background-secondary))',
               color: 'hsl(var(--primary), 0.7)',
-              fontFamily: 'Consolas, monospace',
+              // ★ WAS `'Consolas, monospace'` (2026-08-19, all-Lora migration).
+              // `globals.css` now binds `code, kbd, samp, pre` to `var(--font-mono)`
+              // in the base layer, but a `.prose code` rule from this plugin is far
+              // more specific and silently won — so post bodies would have kept a
+              // two-font mono stack with no Menlo, no SF Mono and no ui-monospace,
+              // i.e. Courier on most Linux and Android readers. Pointing it at the
+              // same variable makes the base rule the single source of truth.
+              fontFamily: 'var(--font-mono)',
               fontWeight: '400',
               padding: '5px',
               textIndent: '-3px',

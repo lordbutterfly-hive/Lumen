@@ -243,3 +243,139 @@ func TestPlan_RetiredMarketInNoticeWindowIsSwept(t *testing.T) {
 		t.Fatalf("a CLOSED market must produce no ops, got %d: %+v", len(got), got)
 	}
 }
+
+// TestPlan_RefundBlockedHolderProducesNoRefundHolderOp is the synthetic,
+// table-style half of the F9 fix's regression guard: a positive-balance
+// holder flagged RefundBlocked must never get a refundHolder op, regardless
+// of Balance, while an ordinary (unblocked) holder in the SAME market still
+// does — and closeIfDrained is still appended unconditionally either way
+// (Plan's own doc). See TestPlan_RealCore_NoRefundHolderOpInsideExitTaxWindow
+// below for the end-to-end proof against the real core package.
+func TestPlan_RefundBlockedHolderProducesNoRefundHolderOp(t *testing.T) {
+	markets := []MarketView{{
+		Creator: "frozen1",
+		Phase:   core.StateFrozen,
+		Holders: []HolderBalance{
+			{Holder: "fresh", Balance: bi(400), RefundBlocked: true}, // still inside the exit-tax window
+			{Holder: "aged", Balance: bi(100), RefundBlocked: false}, // clock decayed / backstop open
+		},
+	}}
+	ops := Plan(markets)
+
+	var refundHolders []string
+	sawClose := false
+	for _, op := range ops {
+		switch op.Kind {
+		case OpRefundHolder:
+			refundHolders = append(refundHolders, op.Holder)
+		case OpCloseIfDrained:
+			sawClose = true
+		}
+	}
+	if len(refundHolders) != 1 || refundHolders[0] != "aged" {
+		t.Fatalf("refundHolder ops = %v, want exactly [aged] -- RefundBlocked must suppress fresh's doomed op without touching aged's legitimate one", refundHolders)
+	}
+	if !sawClose {
+		t.Fatal("closeIfDrained must still be appended even though one holder was blocked")
+	}
+}
+
+// TestPlan_RealCore_NoRefundHolderOpInsideExitTaxWindow is the end-to-end
+// proof for F9 (2026-08-19 audit): before this fix, this EXACT scenario --
+// lifted from the audit's own D1 detector (creator "aliceart", holder
+// "patron1", 400 tokens, cmd/keeper's own demo timings) -- made Plan emit a
+// refundHolder op that core.RefundHolder then refused on-chain every single
+// time, and Sweep (pre-fix) reported it Succeeded regardless. This proves
+// BOTH halves of the fix against the real core package: Plan emits ZERO
+// refundHolder ops while the holder is still inside the window, and DOES
+// emit one once core.RefundHolderTaxGateBlocked itself reports the gate
+// open -- so the fix suppresses exactly the doomed op, not refunds in
+// general.
+func TestPlan_RealCore_NoRefundHolderOpInsideExitTaxWindow(t *testing.T) {
+	const (
+		creator         = "aliceart"
+		holder          = "patron1"
+		registeredBlock = uint64(1_000_000)
+		face            = int64(1000)
+		cap             = int64(1_000_000)
+	)
+	build := func(t *testing.T) *core.MemStore {
+		t.Helper()
+		s := core.NewMemStore()
+		if err := core.Register(s, creator, creator, registeredBlock, face, cap); err != nil {
+			t.Fatalf("Register: %v", err)
+		}
+		if _, err := core.Buy(s, holder, creator, registeredBlock+1, big.NewInt(400)); err != nil {
+			t.Fatalf("Buy: %v", err)
+		}
+		return s
+	}
+	lapse := registeredBlock + core.SubscriptionPeriod + core.GraceBlocks
+	viewAt := func(s *core.MemStore, block uint64) MarketView {
+		_, retired := core.RetiredAt(s, creator)
+		return MarketView{
+			Creator: creator,
+			Phase:   core.Phase(s, creator, block),
+			Retired: retired,
+			Supply:  core.Supply(s, creator),
+			Holders: []HolderBalance{{
+				Holder:        holder,
+				Balance:       core.BalanceOf(s, creator, holder),
+				RefundBlocked: core.RefundHolderTaxGateBlocked(s, creator, holder, block),
+			}},
+		}
+	}
+
+	// INSIDE the window: cmd/keeper's own demo block, 500 blocks past the
+	// natural freeze -- patron1's clock is nowhere near ExitTaxDecayBlocks
+	// (42 days) old, and the market-level backstop hasn't opened either.
+	insideBlock := lapse + 500
+	sInside := build(t)
+	if phase := core.Phase(sInside, creator, insideBlock); phase != core.StateFrozen {
+		t.Fatalf("precondition: phase at insideBlock = %s, want FROZEN", phase)
+	}
+	viewInside := viewAt(sInside, insideBlock)
+	if !viewInside.Holders[0].RefundBlocked {
+		t.Fatal("precondition: core.RefundHolderTaxGateBlocked reports NOT blocked at insideBlock -- scenario is wrong, this must reproduce D1's window")
+	}
+	// Independently confirm the chain would actually refuse this call, so
+	// the assertion below is tied to a REAL revert, not just the flag.
+	if _, err := core.RefundHolder(sInside, "hive:keeperbot", creator, holder, insideBlock); err == nil {
+		t.Fatal("precondition: core.RefundHolder ACCEPTED the push at insideBlock -- scenario no longer matches D1")
+	}
+	insideOps := Plan([]MarketView{viewInside})
+	for _, op := range insideOps {
+		if op.Kind == OpRefundHolder {
+			t.Fatalf("F9 REGRESSION: Plan emitted %s for a holder still inside the exit-tax window (chain would refuse it)", op)
+		}
+	}
+
+	// PAST the window: a fresh store at the same lapse timing, evaluated
+	// core.ExitTaxDecayBlocks + 1000 blocks after the buy -- patron1's own
+	// clock has fully decayed (mirrors keeper_integration_test.go's
+	// TestIntegration_DoubleSubmitRefundHolderIsHarmless timing). Plan must
+	// still produce the op once the chain would actually accept it -- the
+	// fix suppresses doomed ops, it does not suppress refunds outright.
+	pastBlock := registeredBlock + 1 + core.ExitTaxDecayBlocks + 1000
+	sPast := build(t)
+	if phase := core.Phase(sPast, creator, pastBlock); phase != core.StateFrozen {
+		t.Fatalf("precondition: phase at pastBlock = %s, want still FROZEN", phase)
+	}
+	viewPast := viewAt(sPast, pastBlock)
+	if viewPast.Holders[0].RefundBlocked {
+		t.Fatal("precondition: core.RefundHolderTaxGateBlocked still reports blocked at pastBlock -- scenario needs a longer wait")
+	}
+	pastOps := Plan([]MarketView{viewPast})
+	sawRefund := false
+	for _, op := range pastOps {
+		if op.Kind == OpRefundHolder && op.Holder == holder {
+			sawRefund = true
+		}
+	}
+	if !sawRefund {
+		t.Fatalf("Plan emitted no refundHolder op once the exit-tax gate is genuinely open: ops=%+v", pastOps)
+	}
+	if _, err := core.RefundHolder(sPast, "hive:keeperbot", creator, holder, pastBlock); err != nil {
+		t.Fatalf("chain truth check: core.RefundHolder refused at pastBlock: %v (Plan's RefundBlocked=false disagreed with the real gate)", err)
+	}
+}

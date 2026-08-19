@@ -33,9 +33,9 @@ export function SubsListDialog({
               <BasePathLink href={`/@${e[0]}`} className="text-destructive">
                 @{e[0]}
               </BasePathLink>
-              <span className="text-xs font-thin">{e[1] !== 'guest' ? e[1].toLocaleUpperCase() : null}</span>
+              <span className="text-label font-bold uppercase tracking-label">{e[1] !== 'guest' ? e[1].toLocaleUpperCase() : null}</span>
               {e[2] ? (
-                <Badge className="font-light" variant="red">
+                <Badge variant="red">
                   <span className="mr-1">{e[2]}</span>
                   <ChangeTitleDialog
                     permlink=""

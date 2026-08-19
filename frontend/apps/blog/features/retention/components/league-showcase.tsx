@@ -111,7 +111,7 @@ function ShowcaseSkeleton() {
           <span className="lumen-shimmer w-16 truncate rounded font-sans text-[14px] leading-[22px] font-semibold text-transparent">
             &nbsp;
           </span>
-          <span className="lumen-shimmer w-12 truncate rounded font-sans text-[12px] font-medium tabular-nums text-transparent">
+          <span className="lumen-shimmer w-12 truncate rounded font-sans text-caption font-medium tabular-nums text-transparent">
             &nbsp;
           </span>
         </span>
@@ -180,7 +180,7 @@ function ShowcaseBlock({ summary }: { summary: RetentionSummaryResponse }) {
               <span className="truncate font-sans text-[14px] leading-[22px] font-semibold text-ink-2">{name}</span>
               {/* THE SCALE IS NOT OPTIONAL — a rank without it is just a word. */}
               <span
-                className="truncate font-sans text-[12px] font-medium tabular-nums text-ink-10"
+                className="truncate font-sans text-caption font-medium tabular-nums text-ink-10"
                 data-testid="league-showcase-scale"
               >
                 {scale}
@@ -198,7 +198,7 @@ function ShowcaseBlock({ summary }: { summary: RetentionSummaryResponse }) {
             <LeagueEmblem tier={rank.tier} size="popover" />
             <div className="min-w-0">
               <p className="font-sans text-[17px] font-semibold leading-[26px]">{name}</p>
-              <p className="mt-0.5 font-sans text-[13px] leading-[20px] font-medium tabular-nums text-ink-10">{scale}</p>
+              <p className="mt-0.5 font-sans text-caption font-medium tabular-nums text-ink-10">{scale}</p>
               {/* The floor flag travels with the number, never separately —
                   a bare 32 where the server only proved "at least 32" is the
                   same lie the active-weeks line was fixed for. */}

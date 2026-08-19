@@ -131,7 +131,7 @@ export default function FollowListView({
                 type="button"
                 onClick={() => setRawQuery('')}
                 data-testid="follow-list-clear-search"
-                className="font-sans text-[13px] leading-[20px] font-semibold text-ink-brand-6 hover:underline"
+                className="font-sans text-caption font-semibold text-ink-brand-6 hover:underline"
               >
                 {t('user_profile.lists.clear_search')}
               </button>
@@ -176,7 +176,7 @@ export default function FollowListView({
                   : 'user_profile.lists.empty_following_title'
               )}
             </p>
-            <p className="font-sans text-[13px] leading-[20px] font-normal text-[#6b7280]">
+            <p className="font-sans text-caption font-normal text-[#6b7280]">
               {loadFailed
                 ? t('user_profile.lists.list_unavailable_body')
                 : t(

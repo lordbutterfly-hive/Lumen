@@ -32,7 +32,7 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
   return (
     <article className="rounded-panel border border-line-9 bg-surface-1 p-[22px] transition-colors hover:border-line-17">
       {/* "replying to @x in community" header */}
-      <div className="mb-2.5 flex flex-wrap items-center gap-1.5 font-sans text-[13px] leading-[20px] text-ink-14">
+      <div className="mb-2.5 flex flex-wrap items-center gap-1.5 font-sans text-caption text-ink-14">
         <Icons.arrowBigUp className="h-[14px] w-[14px] -rotate-90 text-ink-21" aria-hidden="true" />
         {post.parent_author ? (
           <>

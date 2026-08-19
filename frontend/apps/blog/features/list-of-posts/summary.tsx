@@ -38,7 +38,7 @@ const PostSummary = ({
     <CardContent>
       {nsfw === 'show' ? (
         <>
-          <CardTitle data-testid="post-title" className="text-md">
+          <CardTitle data-testid="post-title" className="text-lede">
             {Array.isArray(post.json_metadata?.tags) && post.json_metadata.tags.includes('nsfw') ? (
               <Badge variant="outline" className="mx-1 border-destructive text-destructive">
                 nsfw

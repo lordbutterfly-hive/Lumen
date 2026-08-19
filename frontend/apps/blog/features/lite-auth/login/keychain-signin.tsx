@@ -158,14 +158,14 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
         />
         <span className="min-w-0 flex-1">
           <span className="block text-[15px] leading-[24px] font-semibold text-ink-2">{COPY.title}</span>
-          <span className="block text-xs text-ink-10">{COPY.sub}</span>
+          <span className="block text-caption text-ink-10">{COPY.sub}</span>
         </span>
         {/* ★ TOP-ALIGNED, NOT CENTRED (fuckery list C6). Centring a one-line chip
             against a two-line text block floated it between the title and the
             subtitle, so it read as a label for the subtitle. It describes the
             METHOD, so it sits level with the method's name. */}
         {detected ? (
-          <span className="mt-0.5 flex-shrink-0 self-start rounded-full bg-surface-ok-3 px-2.5 py-1 text-[12px] leading-[18px] font-semibold text-ink-ok-2">
+          <span className="mt-0.5 flex-shrink-0 self-start rounded-full bg-surface-ok-3 px-2.5 py-1 text-caption font-semibold text-ink-ok-2">
             {COPY.detected}
           </span>
         ) : null}
@@ -173,7 +173,7 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
 
       {open ? (
         <div className="mt-2.5 rounded-card border border-line-2 bg-surface-4 p-4">
-          <label htmlFor="keychain-username" className="block text-[13px] leading-[20px] font-medium text-ink-8">
+          <label htmlFor="keychain-username" className="block text-caption font-medium text-ink-8">
             {COPY.usernameLabel}
           </label>
           <div className="mt-1.5 flex items-center rounded-control border border-line-11 bg-surface-1 px-3 focus-within:border-line-brand-10">
@@ -201,9 +201,9 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
             {busy ? COPY.working : COPY.submit}
           </button>
           {detected === false ? (
-            <p className="mt-2.5 text-[13px] leading-[20px] text-ink-warn-3">{COPY.notDetected}</p>
+            <p className="mt-2.5 text-caption text-ink-warn-3">{COPY.notDetected}</p>
           ) : null}
-          {error ? <p className="mt-2.5 text-[13px] leading-[20px] text-ink-warn-3">{error}</p> : null}
+          {error ? <p className="mt-2.5 text-caption text-ink-warn-3">{error}</p> : null}
         </div>
       ) : null}
     </div>

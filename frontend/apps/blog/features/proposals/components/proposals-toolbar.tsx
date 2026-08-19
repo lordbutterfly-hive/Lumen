@@ -42,7 +42,7 @@ export default function ProposalsToolbar({ tab, onTabChange, sort, onSortChange 
         ))}
       </div>
 
-      <div className="flex items-center gap-2 font-sans text-[13px] leading-[20px] text-ink-10">
+      <div className="flex items-center gap-2 font-sans text-caption text-ink-10">
         <span id="proposals-sort-label">{t('proposals.toolbar.sort_label')}</span>
         <Select value={sort} onValueChange={(value) => onSortChange(value as ProposalSort)}>
           {/* Radix's SelectTrigger is role="combobox" and does not get an accessible
@@ -53,7 +53,7 @@ export default function ProposalsToolbar({ tab, onTabChange, sort, onSortChange 
               `aria-labelledby` wires that same text in for the accessibility tree
               instead of duplicating it. */}
           <SelectTrigger
-            className="h-auto w-auto gap-1.5 rounded-control border-line-11 px-3.5 py-2 font-sans text-[13px] leading-[20px] font-semibold text-ink-7"
+            className="h-auto w-auto gap-1.5 rounded-control border-line-11 px-3.5 py-2 font-sans text-caption font-semibold text-ink-7"
             data-testid="proposals-sort-select"
             aria-labelledby="proposals-sort-label"
           >

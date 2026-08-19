@@ -96,7 +96,7 @@ const AnimatedList = ({ suggestions }: { suggestions: Entry[] }) => {
             <button
               type="button"
               onClick={() => storeShowSuggestions(true)}
-              className="flex items-center gap-2 rounded-full border border-line-9 bg-surface-1 px-3 py-1.5 text-[13px] leading-[20px] text-ink-10 transition-all hover:border-line-brand-10 hover:text-ink-brand-6"
+              className="flex items-center gap-2 rounded-full border border-line-9 bg-surface-1 px-3 py-1.5 text-caption text-ink-10 transition-all hover:border-line-brand-10 hover:text-ink-brand-6"
             >
               <Sparkles className="h-3.5 w-3.5" />
               Suggestions

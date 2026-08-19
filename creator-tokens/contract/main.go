@@ -43,11 +43,16 @@
 //     (creator-controlled `face`, via SetFace) that none of §1.3b's
 //     oracle-only mitigations touch.
 //  2. `transfer`'s `from` is ALWAYS the env caller, never the payload.
-//     core.TransferCredits takes `from` as a bare string with no internal
-//     authorization check of its own (unlike Refund/RefundHolder, whose
-//     authority comes from which balance key they read/burn) — the entire
-//     "you can only move your own credits" guarantee is this wrapper's
-//     responsibility to enforce by construction. See the Transfer entrypoint.
+//     core.TransferCredits ALSO now takes that same verified caller as its
+//     own explicit `caller` parameter and refuses caller != from internally
+//     (F12 defect fix, 2026-08-19 — it used to take `from` as a bare string
+//     with no internal authorization check of its own, unlike Refund/
+//     RefundHolder, whose authority comes from which balance key they read/
+//     burn; the entire "you can only move your own credits" guarantee used
+//     to rest on this ONE wrapper line, unproven by any test, until it was
+//     mutated and a live-theft test proved the gap). This wrapper still
+//     never reads `from` from the payload — belt and suspenders — but the
+//     guarantee is now structural in core too. See the Transfer entrypoint.
 //
 // TESTING NOTE: this package cannot be built or tested by plain `go build`/
 // `go test` under any GOOS/GOARCH/tag combination — it unconditionally
@@ -389,14 +394,18 @@ func jsonEscape(s string) string { return parse.Escape(s) }
 // recorded by the VSC runtime at contract registration). `core` has no
 // Init/Owner concept of its own — core/keys.go's kOwner() is a documented key
 // builder ("platform owner (bound to contract.owner at init)") but no core
-// function anywhere reads or writes it; nothing in the 14 exported actions
-// needs an owner today. This wrapper still bootstraps and one-time-guards it
-// (matching the template and leaving a hook for any future owner-gated
-// action) using the SAME literal key ("owner") kOwner() would produce. Since
-// kOwner() is unexported it cannot be called from this package, but the
-// literal is safe to duplicate: no core market key ever collides with a bare
-// "owner" string (every per-market key is prefixed "m|", "mb|", "e|", or
-// "tw|" — see core/keys.go).
+// function anywhere reads or writes it; pause/unpause/withdrawTreasury/
+// changeOwner/acceptOwnership are the owner-gated actions that read it. This
+// wrapper still bootstraps and one-time-guards it here using the SAME
+// literal key ("owner") kOwner() would produce. Since kOwner() is unexported
+// it cannot be called from this package, but the literal is safe to
+// duplicate: no core market key ever collides with a bare "owner" string
+// (every per-market key is prefixed "m|", "mb|", "e|", or "tw|" — see
+// core/keys.go). F19 DEFECT FIX (2026-08-19): Init is no longer the ONLY
+// place this key is ever written — see the ChangeOwner/AcceptOwnership
+// section below, which is the (until now missing) rotation path for a lost
+// or compromised owner key. This entrypoint's own one-shot guard is
+// unchanged: Init still only ever WRITES "owner" once, from empty.
 //
 // ⚠ 2026-07-30: the bare "owner" key is ALSO what magi-market reads to identify
 // this contract's collection admin (magi-market/contract/internal.go:976-982).
@@ -511,6 +520,104 @@ func Unpause(a *string) *string {
 	// replaces.
 	sdk.Log(core.EvUnpaused(caller))
 	return strPtr(`{"paused":false}`)
+}
+
+// ===================================
+// Owner rotation (F19 defect fix, 2026-08-19)
+// ===================================
+//
+// BEFORE THIS EXISTED: `owner` (core/keys.go's kOwner()) was bound exactly
+// once, at Init, and nothing anywhere in this package or core ever moved it
+// again — a sweep of every state-changing export as a non-owner proved ZERO
+// of them could. A lost or compromised owner key therefore permanently
+// locked withdrawTreasury (the money-out control) and permanently froze
+// pause/unpause, both unrecoverable, for the life of the contract. All three
+// sibling contracts (magi-market, magi_token-contract, magi_nft-contract)
+// ship an owner-rotation path; this one had dropped it.
+//
+// TWO-STEP, following magi-market's changeOwner/acceptOwnership pattern
+// EXACTLY (magi-market/contract/market.go:787-838): changeOwner only
+// PROPOSES a candidate into the separate kPendingOwner() slot; ownership does
+// not move until the candidate itself calls acceptOwnership under its own
+// active auth. A ONE-step rotation would trade today's "permanently locked
+// if the key is lost" for "permanently locked if the new owner is typo'd or
+// wrong" — the identical failure mode this fix exists to close, just aimed
+// the other way. Two-step means a typo in changeOwner's payload is a no-op:
+// nothing moves until the (correct) named account proves it controls that
+// account by signing acceptOwnership itself.
+//
+// ⚠ NEITHER entrypoint below ever writes anything but kPendingOwner() until
+// acceptOwnership's own single `store.Set("owner", ...)` line. magi-market
+// reads our bare "owner" key AS RAW STATE to identify this collection's admin
+// (main.go's Init doc above) — the key's name, location, and shape (a plain
+// account-name string) are UNCHANGED; only WHEN it is written gains a second,
+// candidate-gated path alongside Init's original one-time bootstrap.
+
+// Payload: {"newOwner":"<hive-account>"}. Owner-only. PROPOSE half of the
+// 2-step transfer — see the section doc above for why this cannot move
+// ownership directly. `newOwner` is validated with the same isPayableAddress
+// gate Transfer's `to` uses: the eventual owner receives real HBD via
+// withdrawTreasury's HiveTransfer, so a system/contract-domain or otherwise
+// unpayable address would strand that path exactly like an unpayable
+// transfer destination would (see isPayableAddress's own doc).
+//
+//go:wasmexport changeOwner
+func ChangeOwner(a *string) *string {
+	payload := payloadStr(a)
+	caller := currentCaller()
+	if err := requireActiveAuth(caller); err != nil {
+		handleErr(err)
+		return nil
+	}
+	owner := core.Owner(store)
+	if owner == "" || caller != owner {
+		handleErr(authErr("changeOwner: caller must be contract owner"))
+		return nil
+	}
+	newOwner := jsonStr(payload, "newOwner")
+	if !isPayableAddress(newOwner) {
+		handleErr(inputErr("invalid new owner address"))
+		return nil
+	}
+	if newOwner == owner {
+		handleErr(inputErr("new owner must differ from the current owner"))
+		return nil
+	}
+	// Re-proposing simply overwrites any earlier, not-yet-accepted candidate
+	// — the same "last call wins" convention magi-market's changeOwner uses.
+	store.Set("pendingOwner", newOwner)
+	sdk.Log(core.EvOwnerTransferInitiated(owner, newOwner))
+	return strPtr(`{"owner":"` + jsonEscape(owner) + `","pendingOwner":"` + jsonEscape(newOwner) + `"}`)
+}
+
+// Payload: {} (ignored). Pending-owner-only — the ACCEPT half of the 2-step
+// transfer. This is the ONLY line in this file that ever moves the "owner"
+// key after Init. The caller must be the exact candidate changeOwner named,
+// signing under their OWN active auth (requireActiveAuth), not merely
+// mentioned in someone else's payload — the same "signer, not payload"
+// discipline Transfer's `from` uses (file-level comment, departure #2).
+//
+//go:wasmexport acceptOwnership
+func AcceptOwnership(a *string) *string {
+	caller := currentCaller()
+	if err := requireActiveAuth(caller); err != nil {
+		handleErr(err)
+		return nil
+	}
+	pending, ok := store.Get("pendingOwner")
+	if !ok || pending == "" {
+		handleErr(stateErr("no pending ownership transfer"))
+		return nil
+	}
+	if caller != pending {
+		handleErr(authErr("acceptOwnership: caller is not the pending owner"))
+		return nil
+	}
+	previous, _ := store.Get("owner")
+	store.Set("owner", caller)
+	store.Delete("pendingOwner")
+	sdk.Log(core.EvOwnerChanged(previous, caller))
+	return strPtr(`{"owner":"` + jsonEscape(caller) + `"}`)
 }
 
 // Payload: {"face":<int64 HBD base units>,"cap":<int64 credits>,"firstBuy":
@@ -721,10 +828,11 @@ func SetCap(a *string) *string {
 // Payload: {"creator":"<hive-account>","to":"<hive-account>","amount":
 // "<decimal big.Int credits string>"}. `from` is ALWAYS the env caller, NEVER
 // the payload — see the file-level comment (departure #2). core.TransferCredits
-// takes `from` as a bare string with no authorization check of its own; this
-// wrapper is the entire enforcement boundary for "you can only move your own
-// credits." No SDK money call: credits are an internal per-market ledger
-// balance, never HBD/HIVE, so nothing here ever touches HiveDraw/HiveTransfer.
+// now ALSO takes that same caller explicitly and refuses caller != from
+// internally (F12 fix, 2026-08-19), so this wrapper is defense-in-depth on
+// "you can only move your own credits," not the sole enforcement boundary.
+// No SDK money call: credits are an internal per-market ledger balance, never
+// HBD/HIVE, so nothing here ever touches HiveDraw/HiveTransfer.
 //
 //go:wasmexport transfer
 func Transfer(a *string) *string {
@@ -760,7 +868,7 @@ func Transfer(a *string) *string {
 	// which closed a test-proven exit-tax laundering bypass. The clock leg
 	// needs the chain block, so the core signature carries it since the
 	// money-core rewrite.
-	if err := core.TransferCredits(store, creator, caller, to, block, amount); err != nil {
+	if err := core.TransferCredits(store, caller, creator, caller, to, block, amount); err != nil {
 		handleErr(err)
 		return nil
 	}

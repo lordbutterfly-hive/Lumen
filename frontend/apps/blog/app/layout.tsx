@@ -14,50 +14,54 @@ import { StorageCleanup } from '@hive/ui';
 import CondenserMigration from '../components/condenser-migration';
 import OfflineGuard from '../components/offline-guard';
 import { getEnvVersion } from '../lib/env-version';
-import { Open_Sans, Lora } from 'next/font/google';
+import { Lora } from 'next/font/google';
 import { siteConfig } from '@ui/config/site';
 
-// Redesign typography (design-handoff-v2, 2026-07-21): Open Sans for ALL UI —
-// headers, nav, labels, chips, buttons, tabs, table headers and numbers
-// (tabular-nums) — and Lora for running body prose. The handoff is explicit:
-// "ONLY two families ... no Inter, no serif display face." Self-hosted via
-// next/font so it complies with the app CSP (font-src 'self').
+// ★★★ ONE FAMILY. LORA, AND NOTHING ELSE (owner ruling, 2026-08-19).
 //
-// ★ VARIABLE NAMES NOW MATCH THE FAMILY (2026-08-13, typography audit item 5).
-// These were `--font-inter` and `--font-source-serif` — names left over from
-// two font swaps ago. Nothing named Inter or Source Serif has been in this
-// bundle for a long time; keeping the old names meant every reader of
-// `tailwind.config.js` had to already know that to understand what
-// `font-serif` resolves to. Renamed to `--font-sans` / `--font-serif`, which
-// is what the two Tailwind utilities that consume them are already called.
+// Open Sans is gone — the import, its five weights, its preload link and the
+// vendored static cut the OG card used. Lora is now the only typeface in the
+// product: chrome, nav, labels, chips, buttons, tabs, table headers, numbers
+// and running prose. Still self-hosted via next/font, so it continues to
+// satisfy the app CSP (`font-src 'self'`).
 //
-// ★ PRELOAD (2026-08-13, typography audit item 7). `preload` is stated
-// explicitly rather than left to next/font's default because the audit's item 7
-// asked for the Lora latin subset at 400/600/700 to be preloaded. MEASURED on
-// the shipped build BEFORE this change, by walking the generated font
-// stylesheet: Lora normal 400, 500, 600 AND 700 all resolve to the SAME latin
-// file (`5c0c2bcbaa4149ca-s.p.woff2` — the `.p.` infix is next/font's own
-// "preloaded" marker), and that file is already emitted as
-// `<link rel="preload" as="font">` in the document, together with the Lora
-// italic file and the Open Sans file — 3 preload links, covering every weight
-// this app asks for. So item 7 was already satisfied; the audit's evidence for
-// it (`document.fonts.check('700 16.5px Lora')` returning false) is a
-// measurement artifact — the CSS family name in this document is
-// `__Lora_a0ef65`, not `Lora`, so that call was asking about a family that does
-// not exist in the page. Stating `preload: true` here keeps it true if someone
-// later adds a weight or a subset.
-const openSans = Open_Sans({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
-  variable: '--font-sans',
-  display: 'swap',
-  preload: true
-});
+// ★ ONE VARIABLE, NAMED AFTER THE FAMILY. This binding has already carried
+// three stale names — `--font-inter`, then `--font-source-serif`, then
+// `--font-sans`/`--font-serif` — each describing a face that had been swapped
+// out underneath it, and each one costing the next reader a grep to find out
+// what was actually loaded. `--font-lora` cannot go stale without the import
+// above going with it. `tailwind.config.js` keeps `font-sans` and `font-serif`
+// as COMPATIBILITY ALIASES of this single variable so the ~460 existing call
+// sites keep compiling while they are migrated; both resolve to Lora today.
+//
+// ★ WHAT LORA DOES NOT HAVE. Measured, not assumed, in
+// `next/dist/compiled/@next/font/dist/google/font-data.json`: Lora's wght axis
+// is 400-700. There is no 300 and there is no 800. Asking for either does not
+// throw and does not synthesise — it resolves to the nearest real cut, so a
+// `font-extrabold` element renders at the SAME weight as the 700 beside it,
+// and a `font-light` one at the same weight as the 400. Anything that needs
+// more authority than 700 buys it with size and negative tracking. Open Sans
+// also carried a `wdth` axis; nothing in this app used it.
+//
+// ★ PRELOAD (2026-08-13, re-checked and still true). MEASURED on the shipped
+// build by walking the generated font stylesheet: Lora normal 400, 500, 600
+// AND 700 all resolve to the SAME latin file (`5c0c2bcbaa4149ca-s.p.woff2` —
+// the `.p.` infix is next/font's own "preloaded" marker), emitted as
+// `<link rel="preload" as="font">` alongside the italic file. Dropping Open
+// Sans removes one of the three preload links outright. Stating `preload: true`
+// keeps the guarantee if someone later adds a weight or a subset.
+//
+// ★ NEVER HARDCODE THE GENERATED FAMILY NAME. next/font registers this under a
+// hashed family (`__Lora_a0ef65` in one build), NOT under `Lora`, and the hash
+// changes whenever this config changes. Anything that needs the family must
+// read `var(--font-lora)`. `masthead-glyph.tsx` records what that trap costs:
+// a canvas probe asked for "146px Lora", silently measured Georgia instead,
+// and every offset derived from it was wrong in a way that looked right.
 const lora = Lora({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
   style: ['normal', 'italic'],
-  variable: '--font-serif',
+  variable: '--font-lora',
   display: 'swap',
   preload: true
 });
@@ -211,7 +215,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const serverSession = await getServerSessionUser();
 
   return (
-    <html lang={locale} dir={isRTL ? 'rtl' : 'ltr'} className={`${openSans.variable} ${lora.variable}`}>
+    <html lang={locale} dir={isRTL ? 'rtl' : 'ltr'} className={lora.variable}>
       <head>
         {/* ★★★ THE ONLY THING THAT CAN CATCH A PURGED ROOT CHUNK (2026-08-11).
             `ChunkLoadError: Loading chunk app/layout failed` reached a real

@@ -973,11 +973,11 @@ function VoteTooltip({
     <div className="flex flex-col items-center justify-center">
       <div className="font-bold">{text}</div>
       {afterPayout && (
-        <div className="text-xs text-destructive opacity-80">
+        <div className="text-caption text-destructive opacity-80">
           Voting on Content after their payout does not generate any new rewards
         </div>
       )}
-      {disabledReason && <div className="text-xs text-destructive opacity-80">{disabledReason}</div>}
+      {disabledReason && <div className="text-caption text-destructive opacity-80">{disabledReason}</div>}
     </div>
   );
 }

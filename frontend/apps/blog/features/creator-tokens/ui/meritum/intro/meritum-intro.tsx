@@ -99,12 +99,14 @@ export default function MeritumIntro() {
           on the CONTENT rather than the card so the card's own border does not
           slide with it. */}
       <div className="mt-rise px-6 pb-12 pt-14 sm:px-11 sm:pb-[62px] sm:pt-[74px]">
-        {/* ★ `text-12`, NOT the reference's 11px. The type scale deliberately
-            folded 11 into 12 (see `packages/tailwindcss/tailwind.config.js`),
+        {/* ★ `text-label` (12px), NOT the reference's 11px. The type scale
+            deliberately folded 11 into 12 (see `packages/tailwindcss/tailwind.config.js`;
+            the class was `text-12` until the 2026-08-19 ladder made `text-label`
+            the named uppercase step at the same size),
             and the handoff's ground rule is that a value differing from an app
             token by a hair loses to the token. Weight, tracking and colour are
             the reference's. */}
-        <p className="font-sans text-12 font-bold uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
+        <p className="font-sans text-label font-bold uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
           {t('meritum.intro.eyebrow')}
         </p>
 

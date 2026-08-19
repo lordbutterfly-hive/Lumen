@@ -246,6 +246,42 @@ func saveEscrow(s Store, creator string, seq uint64, r escrowRec) {
 	setStr(s, kEscrow(creator, seq), packEscrow(r))
 }
 
+// validEventHash rejects the control bytes that would make an emitted event's
+// JSON invalid.
+//
+// DEFECT FIX 2026-08-19 (PRUNED finding F8), and the second time this exact
+// class has been closed here. contentHash and answerHash are the only two
+// free-form strings this contract puts into an event payload, and they were
+// validated for emptiness, length and '|' alone. A single control byte in
+// either makes the emitted EvAsked/EvAnswered JSON invalid, and the indexer
+// drops an event it cannot unmarshal (magi-mongo-indexer mapper.go:87-105:
+// a failed json.Unmarshal returns no mapping, and every caller gates the
+// structured insert on a non-nil mapping). Two consequences were measured:
+// five self-cycles left on-chain delta 0 and an indexer fold of +5, because the
+// `asked` debit is poisonable while the `reclaimed` credit is not; and one
+// newline in answerHash kills the only event carrying creditsToCreator, which
+// is the wind-down keeper's own holder-discovery source, so the automated
+// keeper never issues refundHolder for that creator and the market cannot
+// drain through it.
+//
+// ★ THE SIBLING WAS ALREADY FIXED AND THESE TWO WERE MISSED. offerings.go's
+// validOfferTitle has carried exactly this loop since 2026-07-28. A fix landed
+// on one member of a class is a map to the members that were never swept — the
+// whole 16-site emit surface was re-swept this time, and these were the only
+// two left open.
+//
+// Byte-wise, not rune-wise, for validOfferTitle's reason: MaxHashLen bounds the
+// byte length, and every UTF-8 continuation byte is >= 0x80, so this can never
+// mistake a legitimate multi-byte code point for a control byte.
+func validEventHash(field, v string) error {
+	for i := 0; i < len(v); i++ {
+		if c := v[i]; c < 0x20 || c == 0x7f {
+			return newErr(ErrInput, field+" must not contain a control character")
+		}
+	}
+	return nil
+}
+
 // creditsForAsk = ceil(face/rate) (API.md Units: "Credits spent per ask =
 // ceilDiv(face, rate); rounding favours the reserve"). rate is HBD base
 // units PER CREDIT (SPEC §1.3b): a higher rate (token appreciated) means
@@ -348,6 +384,9 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 	}
 	if strings.Contains(contentHash, "|") {
 		return nil, newErr(ErrInput, "contentHash must not contain '|'")
+	}
+	if err := validEventHash("contentHash", contentHash); err != nil {
+		return nil, err
 	}
 	if maxCredits == nil || !mGt(maxCredits, mZero()) {
 		// Reject a zero/absent cap rather than defaulting to unlimited: an
@@ -477,11 +516,15 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 	// the cost-basis half — the tax no longer caps at realized gain, so there
 	// is no basis to record. The asker's own remaining position keeps its clock
 	// either way — escrow-out never re-ages a remainder.
-	// The recorded clock now spans both buckets — see escrowAcqBlock. A draw
-	// taken wholly from matured tokens records one full window, so reclaiming or
-	// declining returns them still matured rather than silently re-starting
-	// their clock (which would be the same confiscation the ET-2 fix closed,
-	// arriving through a new door).
+	// THE TWO LEGS ARE RECORDED SEPARATELY (DEFECT FIX 2026-08-19, F2 + F17).
+	// The clock stored below describes the MATURING leg ONLY; the matured leg is
+	// recorded as a credit count in kEscrowMaturedLeg and carries no clock,
+	// because a matured token does not have one. The old code collapsed the pair
+	// into one size-weighted mean block, which was tax-neutral at THIS block and
+	// then aged as a single pool for the whole escrow — letting the matured half,
+	// whose own age was already capped and therefore free, donate decay to the
+	// maturing half. One unanswered ask erased 100% of a holder's exit tax that
+	// way. matured.go's ESCROW SPLIT block carries the full argument.
 	// Graduate first, as Sell and Refund do (Phase-0 model: Ask was the one
 	// value path that did not). Without it an asker whose position has cleared
 	// the window has their tokens drawn from a maturing bucket that should
@@ -490,8 +533,13 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 	// to the marketplace until an explicit Graduate. Every guard above has
 	// passed, so this is in the write phase where a mutation is safe.
 	graduate(s, creator, caller, block)
-	escFromMatured, escFromMaturing := splitDraw(s, creator, caller, creditsSpent)
-	acqAtEscrow := escrowAcqBlock(s, creator, caller, block, escFromMatured, escFromMaturing)
+	// Only the matured leg needs recording: the maturing leg is whatever the
+	// escrow's credits are not, so storing both would be one number too many
+	// and a chance for the two to disagree.
+	escFromMatured, _ := splitDraw(s, creator, caller, creditsSpent)
+	// Read the clock BEFORE the debit: draining the maturing bucket clears it.
+	// This is the maturing leg's own clock, not a blend of anything.
+	acqAtEscrow := holderAcqBlock(s, creator, caller)
 	if err := debitPosition(s, creator, caller, creditsSpent); err != nil {
 		return nil, err // unreachable given the check above; defense-in-depth
 	}
@@ -508,6 +556,12 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 		acqBlock:      acqAtEscrow,
 		offeringID:    offeringID,
 	})
+	// The matured leg, keyed to the escrow that holds it. Written only when it
+	// is non-zero so a wholly-maturing ask costs no extra state, and read back
+	// as zero when absent — which is exactly how a pre-fix record behaves.
+	if escFromMatured.Sign() > 0 {
+		setMoney(s, kEscrowMaturedLeg(creator, seq), escFromMatured)
+	}
 	setU64(s, kSeq(creator), seq+1)
 
 	// DEFECT FIX (2026-07-20): the commission is HELD here, in the escrow
@@ -546,6 +600,9 @@ func Answer(s Store, caller, creator string, block, seq uint64, answerHash strin
 	}
 	if strings.Contains(answerHash, "|") {
 		return nil, newErr(ErrInput, "answerHash must not contain '|'")
+	}
+	if err := validEventHash("answerHash", answerHash); err != nil {
+		return nil, err
 	}
 
 	rec, ok := loadEscrow(s, creator, seq)
@@ -588,7 +645,7 @@ func Answer(s Store, caller, creator string, block, seq uint64, answerHash strin
 	// by the fresh inflow and becomes taxable again — the recipient "rides an aged
 	// pile". graduate() is infallible and a no-op when nothing has aged out.
 	graduate(s, creator, creator, block)
-	creditInflowAt(s, creator, creator, rec.credits, rec.acqBlock, block)
+	payEscrowToCreator(s, creator, seq, rec.credits, rec.acqBlock, block)
 	addMoney(s, kTreasury(), rec.commissionHbd)
 	rec.status = askAnswered
 	rec.answerHash = answerHash
@@ -679,7 +736,7 @@ func Reclaim(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 	// out of the exit tax cannot be re-aged (and re-taxed) by this inflow. The
 	// graduated figure rides back in the result so the wrapper can emit the mint.
 	graduated := graduate(s, creator, rec.asker, block)
-	creditInflowAt(s, creator, rec.asker, rec.credits, rec.acqBlock, block)
+	returnEscrowToOwner(s, creator, rec.asker, seq, rec.credits, rec.acqBlock, block)
 	rec.status = askReclaimed
 	saveEscrow(s, creator, seq, rec)
 	// Delivery gate (delivery.go): reaching this line IS the definition of a
@@ -784,7 +841,7 @@ func Decline(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 	// (and re-tax) a pile that had already earned its way out. graduate() is
 	// infallible and a no-op when nothing has aged out.
 	graduated := graduate(s, creator, rec.asker, block)
-	creditInflowAt(s, creator, rec.asker, rec.credits, rec.acqBlock, block)
+	returnEscrowToOwner(s, creator, rec.asker, seq, rec.credits, rec.acqBlock, block)
 	rec.status = askDeclined
 	saveEscrow(s, creator, seq, rec)
 	// A DECLINE IS NEUTRAL IN THE GATE: it is neither a delivery nor a miss.

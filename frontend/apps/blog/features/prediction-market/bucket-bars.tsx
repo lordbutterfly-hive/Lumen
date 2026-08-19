@@ -25,7 +25,7 @@ export default function BucketBars({ buckets, size = 'compact' }: { buckets: Buc
             <span
               className={cn(
                 'flex-shrink-0 font-sans',
-                full ? 'w-28 text-[14px] leading-[22px] font-medium text-ink-6' : 'w-24 text-[13px] leading-[20px] text-ink-7'
+                full ? 'w-28 text-[14px] leading-[22px] font-medium text-ink-6' : 'w-24 text-caption text-ink-7'
               )}
             >
               {bucket.label}
@@ -44,7 +44,7 @@ export default function BucketBars({ buckets, size = 'compact' }: { buckets: Buc
             <span
               className={cn(
                 'flex-shrink-0 text-right font-sans font-bold tabular-nums text-ink-2',
-                full ? 'w-9 text-[14px] leading-[22px]' : 'w-[30px] text-xs'
+                full ? 'w-9 text-[14px] leading-[22px]' : 'w-[30px] text-caption'
               )}
             >
               {bucket.oddsPct}¢

@@ -30,27 +30,51 @@ module.exports = {
     extend: {
       ...shared.theme.extend,
       fontFamily: {
-        // ★ TOKENS RENAMED TO MATCH REALITY (2026-08-13, typography audit item
-        // 5). These used to be `--font-inter` and `--font-source-serif` while
-        // `app/layout.tsx` bound Open Sans and Lora to them — three layers of
-        // naming drift (Inter -> Open Sans, Source Serif -> Lora, Source Sans
-        // Pro -> Open Sans) that made every reader of this file believe a font
-        // was in use that has not been in the bundle for a long time.
-        // Redesign typography (handoff-v2): Open Sans for ALL UI/numbers, Lora
-        // for body prose.
-        sans: ['var(--font-sans)', 'ui-sans-serif', 'system-ui', 'Helvetica', 'Arial', 'sans-serif'],
-        serif: ['var(--font-serif)', 'Georgia', 'Cambria', 'serif'],
-        // Unchanged, carried over from the shared config (this object replaces
-        // it wholesale rather than spreading it).
-        consolas: ['Consolas', '"Liberation Mono"', 'Courier', 'monospace']
-        // ★ `sanspro` and `source` DELETED (2026-08-13, typography audit item
-        // 4). Both were byte-identical duplicates of `sans` / `serif` above:
-        // `font-sanspro` read like it was selecting a third face ("Source Sans
-        // Pro") and silently produced Open Sans, which is how the comment
-        // renderer ended up in a different family from the post body without
-        // anyone noticing. `font-source` had zero usages left. Every remaining
-        // `font-sanspro` call site has been rewritten to the utility it
-        // actually meant.
+        /**
+         * ★★★ ONE FAMILY. LORA (owner ruling, 2026-08-19).
+         *
+         * `app/layout.tsx` now loads exactly one face and binds it to
+         * `--font-lora`. Everything below is an alias of that one variable.
+         *
+         * `lora` is the truthful name and the one new code should reach for.
+         *
+         * `sans` and `serif` are COMPATIBILITY ALIASES, kept on purpose. There
+         * are ~460 `font-sans` / `font-serif` call sites in this repo; deleting
+         * the utilities in the same change that swaps the face would turn a
+         * font migration into a 460-file rewrite, and every one of those files
+         * would be un-reviewable next to the visual change. They resolve to the
+         * same file today, so the swap is provably a font change and nothing
+         * else. The call sites migrate to `font-lora` (or to inheriting the
+         * body face and carrying no family utility at all) surface by surface.
+         *
+         * ★ `sans` IS NOW A LIE AND THAT IS THE POINT OF THIS COMMENT. It reads
+         * as "select the sans-serif face" and there is no longer one. This file
+         * has carried a stale font name three times — Inter, Source Serif,
+         * Source Sans Pro — and each time a reader had to already know the
+         * history to understand what compiled. It is written down here instead.
+         * When the last `font-sans` call site is gone, delete this key.
+         *
+         * ★ THE FALLBACK STACK IS SERIF ON BOTH. It used to be
+         * `ui-sans-serif, system-ui, Helvetica, Arial, sans-serif` on `sans`,
+         * which meant a font-load failure repainted the entire UI in a system
+         * SANS while the prose next to it fell back to Georgia — two different
+         * families in one document, which is worse than either alone. Georgia
+         * and Cambria are the closest widely-installed matches to Lora's
+         * proportions, so a failed load now degrades to one consistent voice.
+         */
+        lora: ['var(--font-lora)', 'Georgia', 'Cambria', 'serif'],
+        sans: ['var(--font-lora)', 'Georgia', 'Cambria', 'serif'],
+        serif: ['var(--font-lora)', 'Georgia', 'Cambria', 'serif'],
+        /**
+         * ★ MONO IS THE ONE DELIBERATE EXCEPTION (typography spec §7). A serif
+         * cannot disambiguate characters in a hex string: wallet addresses,
+         * keys, hashes, code blocks and inline `<code>` stay monospace. Prose
+         * that merely *looks* technical — dates, ordinary numbers, labels —
+         * does not. `consolas` is the pre-existing key and is kept so its call
+         * sites keep compiling; `mono` is the name new code should use.
+         */
+        mono: ['ui-monospace', 'SFMono-Regular', 'SF Mono', 'Cascadia Mono', 'Menlo', 'Consolas', '"Liberation Mono"', 'monospace'],
+        consolas: ['ui-monospace', 'SFMono-Regular', 'SF Mono', 'Cascadia Mono', 'Menlo', 'Consolas', '"Liberation Mono"', 'monospace']
       }
     }
   }

@@ -208,7 +208,7 @@ const SafeStorageKeyUpdate = forwardRef<SafeStorageKeyUpdateRef, SafeStorageKeyU
                 : 'User not found in safe storage'}
             </div>
             {registeredUser && (
-              <div className="text-xs text-muted-foreground">
+              <div className="text-caption text-muted-foreground">
                 First, add the key to the appropriate authority in your wallet.
               </div>
             )}

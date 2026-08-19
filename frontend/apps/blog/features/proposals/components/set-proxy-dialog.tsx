@@ -149,7 +149,7 @@ export default function SetProxyDialog({ children, currentProxy }: Props) {
             data-testid="set-proxy-input"
           />
           {error ? (
-            <span className="text-xs text-destructive" data-testid="set-proxy-error">
+            <span className="text-caption text-destructive" data-testid="set-proxy-error">
               {error}
             </span>
           ) : null}

@@ -56,7 +56,7 @@ export default function SavingsVault({
   return (
     <section id="savings-vault">
       <div className="mb-4 mt-[34px] flex items-center gap-3.5">
-        <span className="text-[12px] font-bold uppercase tracking-[0.09em] text-ink-14">
+        <span className="text-label font-bold uppercase tracking-[0.09em] text-ink-14">
           {t('wallet.savings.label')}
         </span>
         <div className="h-px flex-1 bg-surface-27" />
@@ -77,7 +77,7 @@ export default function SavingsVault({
           </span>
           <div>
             <div className="text-[20px] font-semibold text-ink-2">{t('wallet.savings.heading')}</div>
-            <p className="mt-0.5 font-serif text-[13px] leading-[20px] text-ink-10">{t('wallet.savings.description')}</p>
+            <p className="mt-0.5 font-serif text-caption text-ink-10">{t('wallet.savings.description')}</p>
           </div>
         </div>
 
@@ -123,7 +123,7 @@ export default function SavingsVault({
               <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5">
                 {rewardHbd.gt(0) ? (
                   <div className="text-right">
-                    <div className="text-[12px] tabular-nums text-ink-14">
+                    <div className="text-caption tabular-nums text-ink-14">
                       {t('wallet.savings.claimable', { amount: formatTokenAmount(rewardHbd) })}
                     </div>
                   </div>
@@ -132,7 +132,7 @@ export default function SavingsVault({
                   type="button"
                   onClick={handleClaim}
                   disabled={!hasClaimableRewards || isClaiming}
-                  className="rounded-card bg-surface-42 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 transition-colors hover:bg-surface-44 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-card bg-surface-42 px-4 py-2 text-caption font-semibold text-ink-27 transition-colors hover:bg-surface-44 disabled:cursor-not-allowed disabled:opacity-40"
                   data-testid="wallet-claim-now-button"
                 >
                   {t('wallet.savings.claim_now')}

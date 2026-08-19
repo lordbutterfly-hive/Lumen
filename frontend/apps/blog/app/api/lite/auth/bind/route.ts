@@ -6,7 +6,8 @@ import { requireActiveLiteUser } from '@/blog/lib/lite/http/actor';
 import { verifyGoogleIdToken } from '@/blog/lib/lite/auth/google-verify';
 import { encryptEmail, emailHash } from '@/blog/lib/lite/auth/email-crypto';
 import { consumeChallenge } from '@/blog/lib/lite/repositories/challenge-repository';
-import { verifyBtcSignature, bindMessage, btcNetwork, isTaproot, normalizeBtcAddress } from '@/blog/lib/lite/auth/btc-verify';
+import { verifyBtcSignature, bindMessage, btcNetwork, isTaproot,
+  isMagiSignableBtcAddress, normalizeBtcAddress } from '@/blog/lib/lite/auth/btc-verify';
 import { verifiedBtcKeyFingerprint } from '@/blog/lib/lite/auth/btc-key-fingerprint';
 import {
   verifyEvmSignature,
@@ -100,6 +101,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
       if (isTaproot(address)) {
         return NextResponse.json({ error: 'taproot_unsupported' }, { status: 400 });
+      }
+      /**
+       * ★★★ SAME MONEY-LOSS GUARD AS THE LOGIN ROUTE (2026-08-19). Binding is the other
+       * door to the same outcome: a bound non-mainnet BTC credential mints a `did:pkh` that
+       * Magi will happily credit and can never verify a signature for. Both doors, or the
+       * guard is decoration.
+       */
+      if (!isMagiSignableBtcAddress(address)) {
+        return NextResponse.json({ error: 'btc_network_unsupported' }, { status: 400 });
       }
       // SEQ-1 (PRUNED 2026-07-22): bind requires a STEP-UP challenge (distinct
       // purpose, user-bound) — a plain login nonce can no longer be replayed here,

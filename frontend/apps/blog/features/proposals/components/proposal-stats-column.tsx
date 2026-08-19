@@ -18,7 +18,7 @@ export default function ProposalStatsColumn({ vm }: { vm: ProposalViewModel }) {
 
   if (proposal.status === 'expired') {
     return (
-      <div className="flex flex-col items-end gap-1 font-sans text-[13px] leading-[20px] text-ink-10" data-testid="proposal-stats-expired">
+      <div className="flex flex-col items-end gap-1 font-sans text-caption text-ink-10" data-testid="proposal-stats-expired">
         <div>{t('proposals.card.ended', { date: parseChainDate(proposal.end_date).format('MMM D, YYYY') })}</div>
       </div>
     );
@@ -26,7 +26,7 @@ export default function ProposalStatsColumn({ vm }: { vm: ProposalViewModel }) {
 
   if (proposal.status === 'inactive' && parseChainDate(proposal.start_date).isAfter(dayjs())) {
     return (
-      <div className="flex flex-col items-end gap-1 font-sans text-[13px] leading-[20px] text-ink-10" data-testid="proposal-stats-upcoming">
+      <div className="flex flex-col items-end gap-1 font-sans text-caption text-ink-10" data-testid="proposal-stats-upcoming">
         <div>{t('proposals.card.starts', { date: parseChainDate(proposal.start_date).format('MMM D, YYYY') })}</div>
       </div>
     );
@@ -34,7 +34,7 @@ export default function ProposalStatsColumn({ vm }: { vm: ProposalViewModel }) {
 
   if (!isFunded) {
     return (
-      <div className="flex flex-col items-end gap-1 font-sans text-[13px] leading-[20px] text-ink-10" data-testid="proposal-stats-unfunded">
+      <div className="flex flex-col items-end gap-1 font-sans text-caption text-ink-10" data-testid="proposal-stats-unfunded">
         <div>
           {t('proposals.card.requested')} <strong className="tabular-nums text-ink-7">{formatHbd(dailyPayHbd)}</strong>
         </div>
@@ -44,7 +44,7 @@ export default function ProposalStatsColumn({ vm }: { vm: ProposalViewModel }) {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1 font-sans text-[13px] leading-[20px] text-ink-10" data-testid="proposal-stats-funded">
+    <div className="flex flex-col items-end gap-1 font-sans text-caption text-ink-10" data-testid="proposal-stats-funded">
       <div>
         {t('proposals.card.daily_pay')}{' '}
         <strong className="tabular-nums text-ink-ok-2">{formatHbd(dailyPayHbd)}</strong>

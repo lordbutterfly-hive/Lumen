@@ -17,7 +17,7 @@ export default function PriceCardHive() {
         {/* ★ Loading is not a failure (2026-08-17). Both states show the same dash
             because we genuinely have no price either way — but only a real error
             is allowed to SAY the price is unavailable. */}
-        <div className="mt-1.5 text-[13px] leading-[20px] text-ink-10">
+        <div className="mt-1.5 text-caption text-ink-10">
           {isLoading ? t('wallet.market.loading') : t('wallet.market.unavailable')}
         </div>
       </div>
@@ -33,18 +33,18 @@ export default function PriceCardHive() {
           ${data.hiveUsd.toFixed(4)}
         </span>
         <span
-          className={`rounded-full px-2.5 py-[3px] text-[12px] font-bold ${
-            changePositive ? 'bg-surface-ok-5 text-ink-ok-2' : 'bg-surface-brand-8 text-ink-brand-6'
-          }`}
+          className={`rounded-full px-2.5 py-[3px] text-caption font-bold ${
+ changePositive ? 'bg-surface-ok-5 text-ink-ok-2' : 'bg-surface-brand-8 text-ink-brand-6'
+ }`}
         >
           {changePositive ? '+' : ''}
           {data.hiveUsd24hChange.toFixed(1)}%
         </span>
       </div>
-      <div className="mt-1.5 text-[13px] leading-[20px] text-ink-10">
+      <div className="mt-1.5 text-caption text-ink-10">
         {t('wallet.market.hive_via', { btc: data.hiveBtc.toFixed(8) })}
       </div>
-      <div className="mt-0.5 text-[12px] text-ink-14">{t('wallet.market.hive_source')}</div>
+      <div className="mt-0.5 text-caption text-ink-14">{t('wallet.market.hive_source')}</div>
       <Sparkline values={data.hiveSparkline} />
     </div>
   );

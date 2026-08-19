@@ -8,7 +8,10 @@ import type { LucideProps } from 'lucide-react';
  *
  * Design language:
  *  - 24×24 grid, ~20px live area, 1.75px stroke, `currentColor`, round caps/joins.
- *  - Refined line geometry that pairs with Open Sans + Lora, reads "modern tech".
+ *  - Refined line geometry that pairs with Lora, the product's only typeface,
+ *    and reads "modern tech". (Written for an Open Sans + Lora pairing; Open
+ *    Sans was removed 2026-08-19 and the geometry still holds — the stroke
+ *    weight was matched to Lora's, which is the half that carries the text.)
  *  - Signature: Hive's brand is built from rhombi, so the block up/down vote
  *    arrows and the wallet chip carry a HARD mitered rhombus facet — their
  *    corners opt out of the round default via `stroke-linejoin="miter"`. The

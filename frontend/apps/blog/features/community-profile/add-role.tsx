@@ -62,7 +62,7 @@ const AddRole = ({ community, loggedUserLevel }: { loggedUserLevel: number; comm
               <p className="text-14 text-ink-10">{t('communities.set_the_role_of_a_user_in_this_community')}</p>
 
               <div className="flex flex-col gap-1.5">
-                <label htmlFor="community-add-role-username" className="text-13 font-semibold text-ink-7">
+                <label htmlFor="community-add-role-username" className="text-caption font-semibold text-ink-7">
                   {t('communities.username')}
                 </label>
                 <Input
@@ -75,7 +75,7 @@ const AddRole = ({ community, loggedUserLevel }: { loggedUserLevel: number; comm
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <span className="text-13 font-semibold text-ink-7">{t('communities.role')}</span>
+                <span className="text-caption font-semibold text-ink-7">{t('communities.role')}</span>
                 <div className="w-48">
                   <RolesSelect
                     disabled={setRoleMutation.isLoading}

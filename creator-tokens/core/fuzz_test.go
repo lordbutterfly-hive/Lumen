@@ -663,12 +663,14 @@ func fzActTransferCredits(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace)
 	bal := getMoney(w.s, kBal(c, from))
 	amt := fzTransferAmount(rng, bal)
 
-	// TransferCredits(s, creator, from, to, block, amount) takes NO caller
-	// parameter (API.md's own signature — see the dedicated finding in
-	// TestFuzzNoFreeMoney). `from`/`to` are picked fully independently here
-	// on purpose: nothing in the real signature distinguishes "from consented"
-	// from "some third party named from as the source".
-	err := TransferCredits(w.s, c, from, to, w.block, amt)
+	// F12 fix (2026-08-19): TransferCredits now takes an explicit `caller`
+	// and refuses caller != from (transfer.go). This fuzz world has no
+	// separate "signer" identity distinct from `from`/`to`, so this action
+	// always calls as the consenting owner (caller == from) — it exercises
+	// the money-conservation/invariant surface of a legitimate transfer, not
+	// authorization; the authorization gap itself is the dedicated,
+	// now-closed finding in TestFuzzNoFreeMoney.
+	err := TransferCredits(w.s, from, c, from, to, w.block, amt)
 	tr.add("TransferCredits(creator=%s from=%s to=%s block=%d amt=%v) -> err=%v", c, from, to, w.block, amt, err)
 }
 
@@ -1186,13 +1188,18 @@ func TestFuzzNoFreeMoney(t *testing.T) {
 		tr := &fzTrace{seed: seed}
 
 		for i := 0; i < steps; i++ {
-			// TransferCredits is deliberately EXCLUDED from this walk's action
-			// mix: it has no caller/authorization check at all (see the
-			// dedicated finding sub-test below), so including it here would
-			// make this walk re-discover that SAME already-proven finding
-			// over and over instead of hunting for anything new. This walk's
-			// job is to catch OTHER, not-yet-known no-free-money violations
-			// across the rest of the surface.
+			// TransferCredits is EXCLUDED from this walk's action mix.
+			// HISTORICAL REASON (pre-F12, before 2026-08-19): it had no
+			// caller/authorization check at all, so including it here would
+			// have made this walk re-discover that same already-proven
+			// finding over and over instead of hunting for anything new.
+			// F12 closed that gap (transfer.go now enforces caller == from),
+			// and fzActTransferCredits always calls with a consenting caller
+			// (see its own doc), so the exclusion is no longer load-bearing
+			// for soundness — kept anyway to leave this walk's fixed-seed
+			// trajectory (and everything it has already proven) undisturbed.
+			// This walk's job is to catch OTHER, not-yet-known no-free-money
+			// violations across the rest of the surface.
 			fzApplyRandomActionExceptTransfer(t, rng, w, tr)
 			// Independently seeded from TestFuzzSolvencyUnderAnySequence, so
 			// this is a genuine second, decorrelated witness for every
@@ -1203,15 +1210,15 @@ func TestFuzzNoFreeMoney(t *testing.T) {
 	})
 
 	// -----------------------------------------------------------------
-	// Minimal, deterministic, documented finding — PORTED to the curve
-	// (the redemption path is now Sell on the live market; the PAR-exact
-	// payout expectation died with the peg).
+	// F12 DEFECT FIX (2026-08-19) — was "Minimal, deterministic, documented
+	// finding" (the redemption path is now Sell on the live market; the
+	// PAR-exact payout expectation died with the peg).
 	//
-	// TransferCredits(s Store, creator, from, to string, block uint64,
-	// amount *big.Int) error (transfer.go) is the ONE money-moving function
-	// in this entire package with NO caller/authorization parameter. Every
-	// sibling function binds an explicit `caller` to the account whose
-	// funds move:
+	// TransferCredits(s Store, caller, creator, from, to string, block
+	// uint64, amount *big.Int) error (transfer.go) USED TO BE the one
+	// money-moving function in this entire package with NO caller/
+	// authorization parameter — every sibling function binds an explicit
+	// `caller` to the account whose funds move:
 	//   Refund(s, caller, creator, block, credits)      burns CALLER's own balance
 	//   RefundHolder(s, caller, creator, holder, block)  caller is checked
 	//     non-empty but is structurally incapable of being paid; only
@@ -1219,15 +1226,23 @@ func TestFuzzNoFreeMoney(t *testing.T) {
 	//   Buy(s, caller, creator, block, n)                caller pays, caller mints
 	//   Sell(s, caller, creator, block, deltaS)          caller burns OWN tokens
 	//   Ask(s, caller, creator, ...)                     caller spends OWN credits
-	// TransferCredits alone takes `from` — an unauthenticated account name —
-	// with nothing proving it is the transaction signer. The wasm wrapper is
-	// therefore the ONLY authorization layer this function has; in-core, the
-	// gap is real and this test proves the theft end-to-end. Per the task:
-	// report the defect precisely, do not paper over it to keep the suite
-	// green. A future fix to transfer.go's signature would need this test
-	// updated alongside it.
+	// TransferCredits alone took `from` — an unauthenticated account name —
+	// with nothing proving it was the transaction signer. The wasm wrapper
+	// was therefore the ONLY authorization layer this function had; in-core,
+	// the gap was real, and this test proved the theft end-to-end (an
+	// attacker who never touched the market moved the victim's entire
+	// balance to itself and liquidated it on the live curve for real HBD,
+	// while every OTHER test in this repository still passed — nothing
+	// caught it but this one, deliberately-adversarial test).
+	//
+	// THE FIX: TransferCredits now takes `caller` explicitly and refuses
+	// caller != from internally (core/transfer.go). This subtest is KEPT,
+	// in place, as the regression proof that the exact scenario above is now
+	// refused rather than deleted once it stopped being a live finding — see
+	// also the dedicated TestTransferCredits_RejectsCallerMismatch in
+	// transfer_test.go, which is the canonical home for this guarantee.
 	// -----------------------------------------------------------------
-	t.Run("TransferCreditsHasNoCallerAuthorization_DOCUMENTED_FINDING", func(t *testing.T) {
+	t.Run("TransferCreditsRejectsCallerMismatch_F12_FIXED", func(t *testing.T) {
 		s := NewMemStore()
 		creator := "fzvictimmkt"
 		victim := "fzvictim01"
@@ -1246,36 +1261,31 @@ func TestFuzzNoFreeMoney(t *testing.T) {
 		}
 
 		// The attacker has never interacted with this market and paid
-		// nothing. It calls TransferCredits directly, naming the VICTIM as
-		// `from`. Nothing in this signature can reject that.
-		if err := TransferCredits(s, creator, victim, attacker, block, stolen); err != nil {
-			t.Fatalf("EXPECTED the unauthorized transfer to succeed (that is the finding); got err instead: %v — if this now fails, the authorization gap may have been closed upstream; re-verify against transfer.go before relying on this test either way", err)
+		// nothing. It calls TransferCredits as itself (caller=attacker),
+		// naming the VICTIM as `from`. This must now be refused.
+		err := TransferCredits(s, attacker, creator, victim, attacker, block, stolen)
+		if err == nil {
+			t.Fatal("expected the unauthorized transfer to be REFUSED (F12 fix); it succeeded instead — the gap is back open")
+		}
+		if sym := errSymbol(err); sym != ErrAuth {
+			t.Fatalf("want ErrAuth, got %v", err)
 		}
 
-		if got := getMoney(s, kBal(creator, victim)); !mIsZero(got) {
-			t.Fatalf("victim balance after the unauthorized transfer = %s, want 0", got)
+		if got := getMoney(s, kBal(creator, victim)); got.Cmp(stolen) != 0 {
+			t.Fatalf("victim balance after the REFUSED transfer = %s, want unchanged %s", got, stolen)
+		}
+		if got := getMoney(s, kBal(creator, attacker)); !mIsZero(got) {
+			t.Fatalf("attacker balance = %s, want 0 (the transfer must not have moved anything)", got)
+		}
+
+		// The victim's own, self-authorized transfer of the SAME tokens
+		// still works — the fix blocks impersonation, not legitimate use.
+		if err := TransferCredits(s, victim, creator, victim, attacker, block, stolen); err != nil {
+			t.Fatalf("victim's own consenting transfer unexpectedly rejected: %v", err)
 		}
 		if got := getMoney(s, kBal(creator, attacker)); got.Cmp(stolen) != 0 {
-			t.Fatalf("attacker balance = %s, want %s (the stolen amount)", got, stolen)
+			t.Fatalf("attacker balance after victim's OWN transfer = %s, want %s", got, stolen)
 		}
-
-		// The attacker liquidates the stolen tokens on the live curve for
-		// real HBD, having paid nothing into this market at any point. This
-		// is the money impact, not just a bookkeeping curiosity. (The
-		// transfer moved the victim's cost basis along with the tokens —
-		// RULING J1 — so the fresh-clock 20% rate is capped at the position's
-		// realized gain, which is ~0 here: the attacker's exit is barely even
-		// taxed. The exit tax is an anti-dump device, not an anti-theft one.)
-		rs, err := Sell(s, attacker, creator, block, stolen)
-		if err != nil {
-			t.Fatalf("attacker Sell of stolen tokens: %v", err)
-		}
-		if rs.Net.Sign() <= 0 {
-			t.Fatalf("attacker net = %s, want > 0 (the exploit is worthless if this is 0)", rs.Net)
-		}
-
-		t.Logf("FINDING: TransferCredits has no caller/authorization check. Attacker %q, who paid nothing, moved victim %q's entire %s-token balance to itself via TransferCredits(s, %q, from=%q, to=%q, block, %s) and liquidated it for %s HBD base units net via Sell — zero consent, zero legitimate claim. Every other value-moving function in this package binds an explicit caller; this one does not; the wasm wrapper's signer binding is the only thing standing between this and mainnet.",
-			attacker, victim, stolen, creator, victim, attacker, stolen, rs.Net)
 	})
 }
 
@@ -1389,7 +1399,7 @@ func fzBuildOrderingCandidates(rng *rand.Rand, w *fzWorld) []fzOpCandidate {
 		amt := big.NewInt(int64(1 + rng.Intn(50)))
 		id := fmt.Sprintf("xfer:%d:%s:%s:%s:%s", i, c, from, to, amt)
 		add(id, func(s *MemStore, block uint64) (string, error) {
-			return "", TransferCredits(s, c, from, to, block, amt)
+			return "", TransferCredits(s, from, c, from, to, block, amt)
 		})
 	}
 
@@ -1989,7 +1999,7 @@ func TestFuzzBoundarySweep(t *testing.T) {
 				t.Fatalf("setup: %v", err)
 			}
 			amt := fzAmount(rng)
-			err := TransferCredits(s, creator, "fzbtcfrom", "fzbtcto", 100, amt)
+			err := TransferCredits(s, "fzbtcfrom", creator, "fzbtcfrom", "fzbtcto", 100, amt)
 			validAmt := amt != nil && amt.Sign() > 0 && amt.Cmp(big.NewInt(1000)) <= 0
 			if validAmt && err != nil {
 				t.Fatalf("TransferCredits: amt=%s valid and within balance=1000 but rejected: %v", amt, err)

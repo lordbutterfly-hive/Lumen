@@ -31,11 +31,25 @@ CardHeader.displayName = 'CardHeader';
  * its own nesting passes something else. Level is structure; size is the class list, and
  * the class list does not change with the level.
  */
+/**
+ * ★★★ `tracking-tight` REPLACED WITH `tracking-title` (2026-08-19, all-Lora).
+ *
+ * Tailwind's `tracking-tight` is -0.025em, and that value was chosen for Open
+ * Sans. Lora has real bracketed serifs and COLLIDES at it — this app has already
+ * proved that once, on the wordmark, where the tracking had to go -0.025em ->
+ * -0.01em the day the wordmark became Lora (`features/layouts/app-header.tsx`:
+ * "a serif with real bracketed serifs collides at that value, and 'Lumen' has an
+ * m-n pair that shows it first").
+ *
+ * `tracking-title` is that same measured -0.01em, now a named token
+ * (`packages/tailwindcss/tailwind.config.js`) so the next display face does not
+ * need this comment written a third time.
+ */
 const CardTitle = React.forwardRef<
   HTMLHeadingElement,
   React.HTMLAttributes<HTMLHeadingElement> & { as?: 'h2' | 'h3' | 'h4' }
 >(({ className, as: Tag = 'h3', ...props }, ref) => (
-  <Tag ref={ref} className={cn('text-lg font-semibold leading-none tracking-tight', className)} {...props} />
+  <Tag ref={ref} className={cn('text-lg font-semibold leading-none tracking-title', className)} {...props} />
 ));
 CardTitle.displayName = 'CardTitle';
 

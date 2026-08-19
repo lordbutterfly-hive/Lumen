@@ -60,7 +60,7 @@ const CommunitiesSidebar: FC = () => {
             <li key={community.id}>
               <Link
                 href={`/topics/${community.name}`}
-                className="w-full text-sm font-light hover:text-destructive"
+                className="w-full text-body-sm hover:text-destructive"
               >
                 {community.title}
               </Link>

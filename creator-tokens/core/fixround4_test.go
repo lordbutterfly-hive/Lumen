@@ -104,7 +104,7 @@ func TestOUTFLOWCLIFF1_SellClockFrontRun_GuardStops(t *testing.T) {
 
 	// ---- the front-run: mallory forces 1 unit onto bob in the SAME block as
 	// bob's pre-quoted sell, re-aging bob's clock forward. ----
-	if err := TransferCredits(s, "alice", "mallory", "bob", t1, big.NewInt(1)); err != nil {
+	if err := TransferCredits(s, "mallory", "alice", "mallory", "bob", t1, big.NewInt(1)); err != nil {
 		t.Fatalf("poison TransferCredits: %v", err)
 	}
 	qAtk, err := QuoteSell(s, "bob", "alice", t1, big.NewInt(B))
@@ -203,7 +203,7 @@ func TestOUTFLOWCLIFF1_RefundClockFrontRun_GuardStops(t *testing.T) {
 
 	// Front-run: mallory forces 1 unit onto bob (TransferCredits works in
 	// wind-down — it is property, not gated by inWindDown).
-	if err := TransferCredits(s, "alice", "mallory", "bob", t1, big.NewInt(1)); err != nil {
+	if err := TransferCredits(s, "mallory", "alice", "mallory", "bob", t1, big.NewInt(1)); err != nil {
 		t.Fatalf("poison TransferCredits: %v", err)
 	}
 	if bps := ExitTaxBpsAt(heldBlocksAt(s, "alice", "bob", t1)); bps != 1 {

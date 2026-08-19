@@ -32,7 +32,7 @@ export default function WitnessesProxyCard({ isLoggedIn, hasProxy, proxyAccount 
       <div className="mb-1.5 font-sans text-[15px] leading-[24px] font-bold text-ink-2">
         {t('witnesses.proxy_card.title')}
       </div>
-      <p className="mb-3.5 font-serif text-[13px] leading-[20px] text-ink-10">
+      <p className="mb-3.5 font-serif text-caption text-ink-10">
         {isLite
           ? t('witnesses.lite_cannot_vote')
           : hasProxy

@@ -343,33 +343,54 @@ func TestTwapWeightClampChangesReturnedRate(t *testing.T) {
 }
 
 // A market nobody has touched for longer than MaxStaleBlocks must refuse to
-// price rather than quote from stale data.
-// REPLACES TestTwapRefusesStaleObservations (owner ruling 2026-08-12).
-// Staleness no longer refuses once a market has bootstrapped: observations are
-// written by exactly the functions that move supply while settlements are
-// possible, so a quiet window means an UNCHANGED supply, not a wrong price.
-// See twapWindowRead's comment for the full argument.
+// price rather than quote from stale data. Re-enabled 2026-08-19 at a
+// widened (6-week) horizon after being disabled outright 2026-08-12 (owner
+// ruling: the OLD 3-day setting fired on ordinary quiet markets). See
+// twapWindowRead's comment in twap.go for the full history and the
+// self-heal argument the new horizon depends on.
 //
-// Both directions are pinned here, because "never refuses" would be the wrong
-// fix and this test is what stops it drifting there.
+// Both directions are pinned here — a quiet-but-not-ancient market still
+// prices, a genuinely ancient one refuses — because either "never refuses"
+// or "always refuses past the old 3-day mark" would be the wrong fix, and
+// this test is what stops it drifting either way. TestTwapWeightClampChangesReturnedRate's
+// dwell (50,000 blocks, ~1.7 days) already proves an ORDINARY-quiet-gap
+// query still prices; this test covers the two ends this file must not
+// silently invert again.
 func TestTwapPricesWhenQuietOnceBootstrapped(t *testing.T) {
 	s := NewMemStore()
 	creator := "grace"
 	stableTenObservations(s, creator)
+	// stableTenObservations' newest observation is at block 27000 — every gap
+	// below is measured from there.
 
-	// (a) A bootstrapped ring PRICES after an arbitrarily long quiet gap.
-	for _, gap := range []uint64{MaxStaleBlocks + 1, 10 * MaxStaleBlocks, 100 * MaxStaleBlocks} {
+	// (a) A bootstrapped ring still PRICES through an ordinary quiet spell —
+	// including right up to the horizon itself (boundary is accept, not
+	// refuse: block-newest > cfg.maxStale is what refuses, so exactly
+	// MaxStaleBlocks of gap must still price).
+	for _, gap := range []uint64{1, BlocksPerDay, 2 * 7 * BlocksPerDay, MaxStaleBlocks} {
 		rate, err := AskRate(s, creator, 27000+gap)
 		if err != nil {
-			t.Fatalf("gap=%d: bootstrapped ring refused to price: %v", gap, err)
+			t.Fatalf("gap=%d: bootstrapped ring refused to price inside the staleness horizon: %v", gap, err)
 		}
 		if rate == nil || rate.Sign() <= 0 {
 			t.Fatalf("gap=%d: priced non-positively (%v) — a quiet market must still quote its average", gap, rate)
 		}
 	}
 
-	// (b) A market that has NOT bootstrapped still refuses. The count/span
-	// gate is the bootstrap latch and it must keep biting.
+	// (b) A ring genuinely older than the horizon REFUSES rather than quoting
+	// stale data — the anti-vacuity pin: this is what stops the check above
+	// from having been satisfied by a "never refuses" regression.
+	for _, gap := range []uint64{MaxStaleBlocks + 1, 10 * MaxStaleBlocks, 100 * MaxStaleBlocks} {
+		if _, err := AskRate(s, creator, 27000+gap); errSymbol(err) != ErrOracle {
+			t.Fatalf("gap=%d: expected an ErrOracle staleness refusal, got err=%v", gap, err)
+		}
+	}
+
+	// (c) A market that has NOT bootstrapped still refuses regardless of how
+	// far out it is queried. The count/span gate is the bootstrap latch and
+	// it must keep biting — this is checked at a gap the staleness horizon
+	// would also refuse, so a passing test here cannot be masking a broken
+	// bootstrap gate behind the (unrelated) staleness one.
 	fresh := NewMemStore()
 	RecordObs(fresh, "newbie", 1000, mpBig(5000))
 	if _, err := AskRate(fresh, "newbie", 1000+MaxStaleBlocks+1); err == nil {

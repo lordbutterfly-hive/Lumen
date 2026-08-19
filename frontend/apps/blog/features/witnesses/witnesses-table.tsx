@@ -48,7 +48,7 @@ const FIRST_PAGE = 60;
 const PAGE_STEP = 60;
 
 const HEADER_CLASS =
-  'grid items-center gap-3 px-3.5 py-3 font-sans text-[12px] leading-[18px] font-bold uppercase tracking-[0.04em] text-ink-14';
+  'grid items-center gap-3 px-3.5 py-3 font-sans text-label font-bold uppercase tracking-[0.04em] text-ink-14';
 
 export default function WitnessesTable({
   rows,
@@ -122,7 +122,7 @@ export default function WitnessesTable({
     <>
       {showScrollHint ? (
         <p
-          className="mb-1 px-3.5 font-sans text-[12px] text-ink-14 lg:hidden"
+          className="mb-1 px-3.5 font-sans text-caption text-ink-14 lg:hidden"
           data-testid="witnesses-scroll-hint"
         >
           {t('witnesses.scroll_hint')}
@@ -184,11 +184,11 @@ export default function WitnessesTable({
                 <p className="font-sans text-sm font-semibold text-destructive">
                   {t('global.something_went_wrong')}
                 </p>
-                <p className="font-sans text-[13px] leading-[20px] text-ink-10">{t('witnesses.error.description')}</p>
+                <p className="font-sans text-caption text-ink-10">{t('witnesses.error.description')}</p>
                 <button
                   type="button"
                   onClick={onRetry}
-                  className="rounded-control border border-line-11 bg-surface-1 px-4 py-2 font-sans text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
+                  className="rounded-control border border-line-11 bg-surface-1 px-4 py-2 font-sans text-caption font-semibold text-ink-7 transition-colors hover:bg-surface-16"
                 >
                   {t('witnesses.error.retry')}
                 </button>
@@ -215,7 +215,7 @@ export default function WitnessesTable({
             {/* Scroll sentinel. Renders only while rows remain, so it cannot spin at
                 the bottom of a fully-rendered table. */}
             {visibleRows.length < rows.length ? (
-              <div ref={moreRef} className="py-6 text-center font-sans text-[13px] leading-[20px] text-ink-14" data-testid="witnesses-more">
+              <div ref={moreRef} className="py-6 text-center font-sans text-caption text-ink-14" data-testid="witnesses-more">
                 {t('witnesses.showing_count', { shown: visibleRows.length, total: rows.length })}
               </div>
             ) : null}

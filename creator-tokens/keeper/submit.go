@@ -18,6 +18,43 @@ type Submitter interface {
 	Submit(op Op) (receipt string, err error)
 }
 
+// ExecutionVerifier is an OPTIONAL capability a Submitter can additionally
+// implement to earn StatusSucceeded (sweep.go) for a call it made.
+//
+// F9 (2026-08-19 audit): Submit's own (receipt, nil) means "no TRANSPORT
+// error" — it says nothing about whether the wasm entrypoint it named
+// actually committed. Sweep used to treat err == nil as proof of payment
+// (sweep.go's old Succeeded++ on err == nil); measured against a real
+// core.MemStore, a keeper submitting two refundHolder pushes that both
+// REVERTED on-chain still printed "2 succeeded, 0 failed" — 0 HBD moved.
+// Neither Submitter this package ships can tell the difference today:
+// DryRunSubmitter never touches a chain at all, and LiveSubmitter is
+// deliberately unwired (ErrLiveNotWired, this file's own doc) — so BOTH
+// leave every op it accepts for broadcast StatusUnverified, never
+// StatusSucceeded, until a real implementation of this interface exists.
+//
+// A future real broadcaster that waits for chain inclusion and reads back
+// the wasm call's own result should implement ExecutionVerifier alongside
+// Submitter; Sweep then asks it, after every Submit call that returned no
+// transport error, whether THIS SPECIFIC op is confirmed executed. A
+// Submitter that does not implement this interface is assumed to know
+// transport status only.
+type ExecutionVerifier interface {
+	// VerifyExecution reports whether op (just submitted, given the receipt
+	// Submit returned for it) is KNOWN to have executed on-chain without
+	// reverting.
+	//
+	//   ok == false                 : cannot confirm either way. Sweep
+	//                                  records StatusUnverified — exactly as
+	//                                  if this interface were not
+	//                                  implemented at all.
+	//   ok == true, executed == true : confirmed executed. StatusSucceeded.
+	//   ok == true, executed == false: a CONFIRMED REVERT. StatusFailed —
+	//                                  never StatusSucceeded, regardless of
+	//                                  what Submit itself returned.
+	VerifyExecution(op Op, receipt string) (executed bool, ok bool)
+}
+
 // DryRunSubmitter is a Submitter double: it builds the REAL broadcastable
 // envelope (via BuildOp) but never sends it anywhere — it only pretty-prints
 // it to Out (if set) and returns a deterministic fake receipt. This is what
@@ -71,9 +108,9 @@ var ErrLiveNotWired = errors.New("keeper: live submission not wired — delibera
 // which is in the identical, still-unimplemented state as of this writing)
 // once both prerequisites exist.
 type LiveSubmitter struct {
-	Cfg        OpConfig
-	Caller     string
-	NodeURL    string
+	Cfg       OpConfig
+	Caller    string
+	NodeURL   string
 	ActiveKey string // WIF, ACTIVE (not posting — see BuildOp's auth-routing doc); never logged, never given a default
 }
 

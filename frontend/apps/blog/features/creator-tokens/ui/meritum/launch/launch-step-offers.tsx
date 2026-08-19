@@ -93,10 +93,10 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
   return (
     <div className="mt-step">
       <div className="mt-[26px] flex items-baseline gap-[18px] px-5 pb-0.5">
-        <span className="min-w-0 flex-1 text-12 font-bold uppercase tracking-[0.14em] text-meritum-ink-faint">
+        <span className="min-w-0 flex-1 text-label font-bold uppercase tracking-[0.14em] text-meritum-ink-faint">
           {t('meritum_launch.offers_col_skill')}
         </span>
-        <span className="flex-none basis-[106px] text-right text-12 font-bold uppercase tracking-[0.14em] text-meritum-ink-faint">
+        <span className="flex-none basis-[106px] text-right text-label font-bold uppercase tracking-[0.14em] text-meritum-ink-faint">
           {t('meritum_launch.offers_col_price')}
         </span>
       </div>
@@ -156,10 +156,10 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
 
       <div className="mt-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2.5">
-          <span className="text-12 font-bold uppercase tracking-[0.14em] text-meritum-ink-muted">
+          <span className="text-label font-bold uppercase tracking-[0.14em] text-meritum-ink-muted">
             {t('meritum_launch.split_heading')}
           </span>
-          <span className="text-13 text-meritum-ink-faint">{t('meritum_launch.split_note')}</span>
+          <span className="text-caption text-meritum-ink-faint">{t('meritum_launch.split_note')}</span>
         </div>
         <div
           className="mt-2.5 flex h-[11px] overflow-hidden rounded-full bg-meritum-line-input"
@@ -176,13 +176,13 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
             <span className="font-serif text-20 font-semibold tabular-nums text-meritum-ink">
               {usdPrice(1 - COMMISSION)}
             </span>
-            <span className="font-serif text-13 text-meritum-ink-muted">{t('meritum_launch.split_you')}</span>
+            <span className="font-serif text-caption text-meritum-ink-muted">{t('meritum_launch.split_you')}</span>
           </span>
           <span className="flex items-baseline gap-2">
             <span className="font-serif text-20 font-semibold tabular-nums text-meritum-ink-muted">
               {usdPrice(COMMISSION)}
             </span>
-            <span className="font-serif text-13 text-meritum-ink-faint">{t('meritum_launch.split_lumen')}</span>
+            <span className="font-serif text-caption text-meritum-ink-faint">{t('meritum_launch.split_lumen')}</span>
           </span>
         </div>
       </div>
@@ -197,10 +197,10 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
         and it is one click away, so this points at it instead.
       */}
       <div className="mt-[26px] border-t border-meritum-line-card pt-[22px]">
-        <div className="text-12 font-bold uppercase tracking-[0.14em] text-meritum-ink-3">
+        <div className="text-label font-bold uppercase tracking-[0.14em] text-meritum-ink-3">
           {t('meritum_launch.work_heading')}
         </div>
-        <p className="mt-2 max-w-[48ch] font-serif text-13 text-meritum-ink-muted">{t('meritum_launch.work_body')}</p>
+        <p className="mt-2 max-w-[48ch] font-serif text-caption text-meritum-ink-muted">{t('meritum_launch.work_body')}</p>
         {/*
           ★ THERE IS NO BARE `/settings` ROUTE. It 404s. The settings page lives
           under the profile — `app/[param]/(user-profile)/settings/page.tsx` —
@@ -217,7 +217,7 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
       </div>
 
       {touched && blockMessage ? (
-        <p className="mt-5 text-13 font-semibold text-meritum-ink-brand" role="status">
+        <p className="mt-5 text-caption font-semibold text-meritum-ink-brand" role="status">
           {blockMessage}
         </p>
       ) : null}

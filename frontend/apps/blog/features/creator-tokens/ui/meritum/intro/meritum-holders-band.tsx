@@ -100,7 +100,7 @@ export default function MeritumHoldersBand() {
                 live markers on one screen that differed by 0.06em of tracking
                 would read as a mistake, not as a distinction. */}
             <span className="mt-dot h-[7px] w-[7px] flex-none rounded-full bg-meritum-surface-brand" aria-hidden="true" />
-            <span className="font-sans text-12 font-bold uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
+            <span className="font-sans text-label font-bold uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
               {t('meritum.intro.live_pill')}
             </span>
           </span>

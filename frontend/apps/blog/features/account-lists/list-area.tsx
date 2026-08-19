@@ -149,7 +149,7 @@ const ListArea = ({
           {titleBy}
         </h1>
         <p
-          className={clsx('mt-1.5 text-[13px] leading-[20px] text-[#6b7280]', {
+          className={clsx('mt-1.5 text-caption text-[#6b7280]', {
             hidden: !listDescription
           })}
         >
@@ -215,14 +215,14 @@ const ListArea = ({
               {t('user_profile.lists.list.last_button')}
             </Button>
           </div>
-          <span className="text-xs text-primary/50">
+          <span className="text-caption text-primary/50">
             {t('user_profile.lists.list.viewing_page', { current: page + 1, total: splitArrays.length })}
             {' \u00B7 '}
             {totalItems} {totalItems === 1 ? 'item' : 'items'}
           </span>
         </div>
       ) : totalItems > 0 ? (
-        <span className="mt-3 block text-xs text-primary/50">
+        <span className="mt-3 block text-caption text-primary/50">
           {totalItems} {totalItems === 1 ? 'item' : 'items'}
         </span>
       ) : null}
@@ -235,7 +235,7 @@ const ListArea = ({
             <Icons.userPlus className="h-4 w-4 text-ink-brand-6" />
             {t('user_profile.lists.list.add_account_to_list')}
           </h2>
-          <span className="mt-1 block text-xs text-[#6b7280]">{t('user_profile.lists.list.single_account')}</span>
+          <span className="mt-1 block text-caption text-[#6b7280]">{t('user_profile.lists.list.single_account')}</span>
           <div className="mt-3 flex w-full gap-2">
             <Input
               className="bg-background"
@@ -287,7 +287,7 @@ const ListArea = ({
               unexplained spinner, plus a way out instead of spinning forever. */}
           {addPhase === 'confirming' ? (
             <div
-              className="flex w-full items-center justify-between gap-2 rounded-md border border-border-primary/30 bg-background-tertiary/50 px-3 py-2 text-xs"
+              className="flex w-full items-center justify-between gap-2 rounded-md border border-border-primary/30 bg-background-tertiary/50 px-3 py-2 text-caption"
               data-testid="add-to-list-confirming"
             >
               <span className="flex items-center gap-2 text-primary/70">
@@ -306,7 +306,7 @@ const ListArea = ({
           ) : null}
 
           {addErrorText ? (
-            <p className="w-full text-center text-xs text-destructive" data-testid="add-to-list-error">
+            <p className="w-full text-center text-caption text-destructive" data-testid="add-to-list-error">
               {addErrorText}
             </p>
           ) : null}
@@ -339,7 +339,7 @@ const ListArea = ({
               }}
               size="sm"
               variant="outlineRed"
-              className="min-w-[120px] text-xs"
+              className="min-w-[120px] text-caption"
               disabled={disabled}
             >
               {resetListIsLoading ? <CircleSpinner loading size={18} color="#dc2626" /> : resetTitle}

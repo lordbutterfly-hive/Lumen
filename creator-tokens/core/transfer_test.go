@@ -64,7 +64,7 @@ func TestTransferCredits_HappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := TransferCredits(s, creator, "alice", "bob", 250, big.NewInt(200)); err != nil {
+	if err := TransferCredits(s, "alice", creator, "alice", "bob", 250, big.NewInt(200)); err != nil {
 		t.Fatalf("transfer failed: %v", err)
 	}
 	if got := getMoney(s, kBal(creator, "alice")); got.Cmp(big.NewInt(300)) != 0 {
@@ -124,7 +124,7 @@ func TestTransferCredits_RecipientClockReAverages_LaunderingClosed(t *testing.T)
 	if _, err := Buy(s, "sniper", c, later, big.NewInt(100)); err != nil {
 		t.Fatal(err)
 	}
-	if err := TransferCredits(s, c, "sniper", "aged.acct", later, big.NewInt(100)); err != nil {
+	if err := TransferCredits(s, "sniper", c, "sniper", "aged.acct", later, big.NewInt(100)); err != nil {
 		t.Fatal(err)
 	}
 	// wNew = ceil((1·b + 100·later)/101) — dominated by the fresh size, so
@@ -162,7 +162,7 @@ func TestTransferCredits_RecipientInheritsSenderClock_MaturityTravels(t *testing
 	if _, err := Buy(s, "alice", creator, 200, big.NewInt(300)); err != nil {
 		t.Fatal(err)
 	}
-	if err := TransferCredits(s, creator, "alice", "bob", 250, big.NewInt(100)); err != nil {
+	if err := TransferCredits(s, "alice", creator, "alice", "bob", 250, big.NewInt(100)); err != nil {
 		t.Fatal(err)
 	}
 	if got := getMoney(s, kBal(creator, "bob")); got.Cmp(big.NewInt(100)) != 0 {
@@ -214,7 +214,7 @@ func TestTransferCredits_Guards(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := TransferCredits(s, creator, c.from, c.to, 300, c.amount)
+			err := TransferCredits(s, c.from, creator, c.from, c.to, 300, c.amount)
 			if err == nil {
 				t.Fatalf("expected an error, got none")
 			}
@@ -226,6 +226,60 @@ func TestTransferCredits_Guards(t *testing.T) {
 	// none of the rejected transfers should have moved any balance.
 	if got := getMoney(s, kBal(creator, "alice")); got.Cmp(big.NewInt(500)) != 0 {
 		t.Fatalf("alice balance mutated by a rejected transfer: %s", got)
+	}
+}
+
+// TestTransferCredits_RejectsCallerMismatch — F12 DEFECT FIX regression test
+// (2026-08-19). This is the canonical proof that TransferCredits enforces
+// caller == from STRUCTURALLY, inside core, rather than relying on the wasm
+// wrapper's single call site to always pass the verified caller as `from`.
+//
+// BEFORE THE FIX: TransferCredits(s, creator, from, to, block, amount) took
+// no caller parameter at all. `from` was validated for ACCOUNT-STRING FORMAT
+// only (validAccount), never for WHO was asking. The entire "you can only
+// move your own credits" guarantee lived in exactly one line at the wrapper
+// (contract/main.go's Transfer, which always passed the env caller as
+// `from`) — mutate that one argument to read an attacker-controlled payload
+// field instead, and every test in the repository still passed except one
+// dedicated adversarial test (core/fuzz_test.go's
+// TransferCreditsRejectsCallerMismatch_F12_FIXED, formerly
+// TransferCreditsHasNoCallerAuthorization_DOCUMENTED_FINDING). This test is
+// the fast, minimal version of that same proof, and is the one the mutation
+// audit trail (see the task) re-derives directly against a throwaway mutant.
+func TestTransferCredits_RejectsCallerMismatch(t *testing.T) {
+	s := NewMemStore()
+	creator := "creatork"
+	setupMarket(s, creator, 100, 1000)
+	if _, err := Buy(s, "victim", creator, 200, big.NewInt(500)); err != nil {
+		t.Fatal(err)
+	}
+
+	// The attacker never bought into this market. It calls TransferCredits
+	// naming the victim as `from` but signing (caller) as itself.
+	err := TransferCredits(s, "attacker", creator, "victim", "attacker", 250, big.NewInt(100))
+	if err == nil {
+		t.Fatal("expected ErrAuth: caller != from must be refused")
+	}
+	if sym := errSymbol(err); sym != ErrAuth {
+		t.Fatalf("want ErrAuth, got %v", err)
+	}
+	// Nothing may have moved.
+	if got := getMoney(s, kBal(creator, "victim")); got.Cmp(big.NewInt(500)) != 0 {
+		t.Fatalf("victim balance = %s, want unchanged 500 (the transfer must be refused, not partially applied)", got)
+	}
+	if got := getMoney(s, kBal(creator, "attacker")); !mIsZero(got) {
+		t.Fatalf("attacker balance = %s, want 0", got)
+	}
+
+	// The legitimate owner can still move their own balance (caller == from).
+	if err := TransferCredits(s, "victim", creator, "victim", "friend", 250, big.NewInt(100)); err != nil {
+		t.Fatalf("legitimate transfer (caller == from) unexpectedly rejected: %v", err)
+	}
+	if got := getMoney(s, kBal(creator, "victim")); got.Cmp(big.NewInt(400)) != 0 {
+		t.Fatalf("victim balance after their own transfer = %s, want 400", got)
+	}
+	if got := getMoney(s, kBal(creator, "friend")); got.Cmp(big.NewInt(100)) != 0 {
+		t.Fatalf("friend balance = %s, want 100", got)
 	}
 }
 
@@ -246,7 +300,7 @@ func TestTransferCredits_WorksRegardlessOfBillingPhase(t *testing.T) {
 	// this one write is sufficient for any query block >= 50+GraceBlocks.
 	setU64(s, kPaidUntil(creator), 50)
 
-	if err := TransferCredits(s, creator, "alice", "bob", 50+GraceBlocks+10, big.NewInt(100)); err != nil {
+	if err := TransferCredits(s, "alice", creator, "alice", "bob", 50+GraceBlocks+10, big.NewInt(100)); err != nil {
 		t.Fatalf("transfer must work even when the market is FROZEN/lapsed: %v", err)
 	}
 	if got := getMoney(s, kBal(creator, "bob")); got.Cmp(big.NewInt(100)) != 0 {
@@ -256,7 +310,7 @@ func TestTransferCredits_WorksRegardlessOfBillingPhase(t *testing.T) {
 	// It must also work against a creator that was NEVER registered at all —
 	// TransferCredits has no market-existence gate (an unfunded balance simply
 	// fails on "insufficient balance", not on "no such market").
-	if err := TransferCredits(s, "neverregistered", "alice", "bob", 300, big.NewInt(1)); err == nil {
+	if err := TransferCredits(s, "alice", "neverregistered", "alice", "bob", 300, big.NewInt(1)); err == nil {
 		t.Fatal("expected insufficient-balance, not a silent success, against an unfunded holder")
 	} else if sym := errSymbol(err); sym != ErrBalance {
 		t.Fatalf("want ErrBalance (not a market-existence gate), got %v", err)
@@ -333,7 +387,7 @@ func TestFuzz_BuyTransferInvariants(t *testing.T) {
 			fromBefore := getMoney(s, kBal(c, from))
 			toBefore := getMoney(s, kBal(c, to))
 
-			err := TransferCredits(s, c, from, to, 200, amt)
+			err := TransferCredits(s, from, c, from, to, 200, amt)
 
 			switch {
 			case amt.Sign() <= 0:

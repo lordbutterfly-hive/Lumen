@@ -153,7 +153,7 @@ const NotificationListItem = ({
                 : null}
           </span>
         </Link>
-        <span className="flex items-center gap-2 text-xs text-ink-10" data-testid="notification-timestamp">
+        <span className="flex items-center gap-2 text-caption text-ink-10" data-testid="notification-timestamp">
           <span className={color}>{icon}</span>
           {/* One format for the whole list — see TimeAgo's `numeric` prop. */}
           <TimeAgo date={date} numeric="always" />
@@ -172,7 +172,7 @@ const NotificationListItem = ({
         <Tooltip>
           <TooltipTrigger asChild>
             <div
-              className="flex shrink-0 items-center gap-1 font-sans text-[12px] leading-[18px] text-ink-10"
+              className="flex shrink-0 items-center gap-1 font-sans text-caption text-ink-10"
               data-testid="notification-reputation-badge"
               title={t('navigation.profile_notifications_tab_navbar.reputation_at_time')}
               aria-label={`${t('navigation.profile_notifications_tab_navbar.reputation_label')} ${score}`}

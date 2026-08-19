@@ -70,7 +70,7 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable, votesP
       <div className="grid grid-cols-[1fr_190px] gap-[22px]">
         <div className="min-w-0">
           {/* Byline */}
-          <div className="mb-2 flex items-center gap-2.5 font-sans text-[13px] leading-[20px] text-ink-10">
+          <div className="mb-2 flex items-center gap-2.5 font-sans text-caption text-ink-10">
             {/* ★ CONVERGED (F6 item 22). This had no fallback at all — a dead
                 Steemit-era `profile_image` or a lite account with no Hive avatar
                 showed the browser's broken-image glyph next to the proposal's
@@ -99,10 +99,10 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable, votesP
           </Link>
 
           {/* Status pill + range + permlink */}
-          <div className="mt-[11px] flex flex-wrap items-center gap-2.5 font-sans text-[13px] leading-[20px] text-ink-14">
+          <div className="mt-[11px] flex flex-wrap items-center gap-2.5 font-sans text-caption text-ink-14">
             <span
               className={cn(
-                'rounded-control px-2.5 py-[3px] text-[12px] leading-[18px] font-bold uppercase tracking-[0.03em]',
+                'rounded-control px-2.5 py-[3px] text-label font-bold uppercase tracking-[0.03em]',
                 statusClass
               )}
             >
