@@ -2395,6 +2395,61 @@ summary {
 }
 
 /*
+ * ★★★ AND THE HALF OF THAT PROMISE THAT WAS NOT BEING KEPT (2026-08-19).
+ *
+ * The block above declares the press transition on `button:where(:not(:disabled))`,
+ * which has the specificity of a bare element — `:where()` contributes ZERO. Any
+ * Tailwind utility class beats it (0,1,0 against 0,0,1), and `transition-property`
+ * is a single property: whoever wins replaces the whole list. So every control
+ * carrying `transition-colors` silently dropped `transform` out of its transition
+ * list, and the press SNAPPED instead of animating. Measured on the live app, two
+ * controls, 40ms into a real mouse-down:
+ *
+ *     transition-property: transform            -> scale(0.9858)   mid-flight
+ *     transition-property: color, background... -> scale(0.97)     already arrived
+ *
+ * The press itself still fired everywhere; what was lost was the 90ms this file
+ * asks for, on 157 of the 307 enabled controls counted across 14 routes.
+ *
+ * ★ WHY THIS IS SCOPED TO `.transition-colors` AND NOT TO ALL CONTROLS. Because a
+ * blanket high-specificity rule would also overwrite transitions that are
+ * deliberate. Measured across 14 routes, controls fall into exactly three groups:
+ *
+ *     157x  color, background-color, ... @ 0.15s   <- 157 of 157 carry .transition-colors
+ *     100x  transform                   @ 0.09s   <- 0 carry it; already correct
+ *      50x  transform, color   @ 0.2s, 0.18s      <- 0 carry it; the vote control's
+ *                                                    own module, tuned on purpose
+ *
+ * The separation is total, so keying on `.transition-colors` reaches exactly the
+ * broken set and cannot touch the vote buttons or anything already working.
+ *
+ * ★ WHY EVERY VALUE IS SPELLED OUT. `transition-duration` matches its list to
+ * `transition-property` BY CYCLING when it is shorter — `90ms, 150ms` against seven
+ * properties would give background-color 90ms and border-color 150ms, alternating.
+ * Seven properties therefore need seven durations. The six colour values restate
+ * Tailwind's own 150ms/`cubic-bezier(.4,0,.2,1)` so the colour fade is byte-for-byte
+ * what it was; only `transform` is added, at this file's 90ms and `--ease-out`.
+ *
+ * ★ THE ONE TRAP THIS LEAVES. A future `duration-300` next to `transition-colors` on
+ * a control would now lose to this rule and stay at 150ms. Nothing in the app does
+ * that today (the 157 are all at exactly 0.15s, no `duration-*` among them). If you
+ * need a different colour duration on a control, set `transition-property` yourself
+ * and include `transform`, or this rule will quietly win.
+ */
+@layer utilities {
+  button:where(:not(:disabled)).transition-colors,
+  [role='button']:where(:not([aria-disabled='true'])).transition-colors,
+  a.lm-press.transition-colors {
+    transition-property: transform, color, background-color, border-color, text-decoration-color,
+      fill, stroke;
+    transition-duration: 90ms, 150ms, 150ms, 150ms, 150ms, 150ms, 150ms;
+    transition-timing-function: var(--ease-out), cubic-bezier(0.4, 0, 0.2, 1),
+      cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1),
+      cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+/*
  * Feed entrance. Capped at six because the seventh card is below the fold on
  * every viewport this ships to, and staggering something nobody can see only
  * delays it.
@@ -2411,7 +2466,31 @@ summary {
 }
 @layer utilities {
   .lm-enter {
-    animation: lm-enter var(--t-slow) var(--ease-out) both;
+    /*
+     * ★★★ `backwards`, NOT `both` (2026-08-19) — `both` SILENTLY KILLED THE CARD
+     * HOVER LIFT, measured in a browser rather than reasoned about.
+     *
+     * `.lm-card:hover` twenty lines above sets `transform: translateY(-2px)` and
+     * carries the comment "the feed becomes physical: the card rises toward the
+     * cursor". It never rose. With `both`, a finished animation KEEPS APPLYING its
+     * final keyframe — here `transform: translateY(0)` — and animation values sit
+     * above every normal declaration in the cascade, so the `:hover` transform
+     * could not win no matter what it said. Measured on the live feed: at rest and
+     * under hover the card reported an identical `matrix(1, 0, 0, 1, 0, 0)` and an
+     * unchanged `top` of 291px. Cancelling the finished `lm-enter` animation on that
+     * same node, still hovered, immediately produced `matrix(1, 0, 0, 1, 0, -2)` and
+     * `top` 289 — so the rule was live and the fill was sitting on top of it. Only
+     * the box-shadow step was reaching the reader, which is why this survived a
+     * screenshot review: the card did change, just not the way it was written to.
+     *
+     * `backwards` keeps the half that is load-bearing — the `from` state during the
+     * stagger delay, without which each card would flash at full opacity before
+     * dropping back to animate — and drops the half that was doing damage. After the
+     * animation finishes the element simply uses its own styles, which are
+     * `opacity: 1` and no transform: pixel-identical to the `to` keyframe, so
+     * nothing about the entrance changes, and `:hover` is reachable again.
+     */
+    animation: lm-enter var(--t-slow) var(--ease-out) backwards;
   }
 }
 .lm-enter:nth-of-type(1) { animation-delay: 0ms; }

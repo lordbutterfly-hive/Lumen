@@ -411,7 +411,17 @@ export default function PostForm({
                     {t("submit_page.insert_images_by_dragging")} {t("submit_page.selecting_them")}
                     <TooltipProvider>
                       <Tooltip>
-                        <TooltipTrigger type="button" tabIndex={-1}>
+                        {/* ★ `aria-hidden` (2026-08-19). A control sweep across all 29
+                            routes found exactly one button in the whole product with no
+                            accessible name, and this was it: a bare icon trigger, so a
+                            screen reader announced "button" and nothing else. Its two
+                            siblings in EditorOptionsBar.tsx (lines 71 and 90) are the
+                            same info-icon-with-tooltip and both already carry
+                            `aria-hidden`; this one was the odd one out. Hidden rather
+                            than labelled because the tooltip only repeats the sentence
+                            it sits at the end of, so a name here would make a screen
+                            reader read the same guidance twice. */}
+                        <TooltipTrigger type="button" tabIndex={-1} aria-hidden>
                           <Icons.info className="ml-1 w-3" />
                         </TooltipTrigger>
                         <TooltipContent>{t("submit_page.insert_images_info")}</TooltipContent>

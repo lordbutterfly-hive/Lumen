@@ -35,6 +35,12 @@ import type { Entry } from '@hive/common-hiveio-packages/wax';
  * below is the whole mechanism. `resetTopCommentPicks()` must be called on logout
  * and on a feed reset so a session's picks do not outlive it.
  *
+ * ★ WIRED 2026-08-19 — it had none. `top-comment-session-reset.tsx`, mounted
+ * globally in `features/layouts/providers.tsx`, watches the signed-in identity
+ * and calls this on every change. Identity rather than a logout handler because
+ * sign-out reaches the client from four directions and they only converge on
+ * `[QUERY_KEY.user]`; that file's header names all four.
+ *
  * ★ WHY `Math.random()` IS SAFE HERE DESPITE SSR. This module is only ever reached
  * from the drawer, and the drawer's thread is fetched lazily on hover/focus — a
  * client-only event. Nothing here runs during server rendering, so there is no

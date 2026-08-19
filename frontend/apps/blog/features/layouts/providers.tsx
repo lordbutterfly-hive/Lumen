@@ -9,6 +9,7 @@ import { GoogleOAuthRedirectHandler } from '@smart-signer/components/google-oaut
 import { siteConfig } from '@ui/config/site';
 import { getQueryClient } from '@/blog/lib/react-query';
 import { LoggedUserProvider } from '@/blog/features/votes/hooks/use-logged-user';
+import TopCommentSessionReset from '@/blog/features/discovery-feed/top-comment-session-reset';
 import { ModalContainer } from '@smart-signer/components/modal-container';
 import { Toaster } from '@ui/components/toaster';
 import {
@@ -48,6 +49,12 @@ export const Providers: FC<PropsWithChildren> = ({ children }) => {
               loadingText={t('login_form.completing_google_auth')}
             />
             <LoggedUserProvider>
+              {/* Renders nothing. Clears the post card's per-session top-comment
+                  picks when the signed-in identity changes — see the file's own
+                  header for why this watches identity instead of hooking the
+                  logout button. Mounted here because this is the one place that
+                  is inside the query client and mounted on every route. */}
+              <TopCommentSessionReset />
               {children}
             </LoggedUserProvider>
           </SignerProvider>

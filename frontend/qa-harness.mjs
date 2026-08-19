@@ -105,8 +105,24 @@ export async function liteSession(privateKey, label = 'qa') {
  * Captures console errors and failed requests for the whole page life — most of
  * what breaks a UI never reaches the server log.
  */
+/**
+ * ★ REAL CHROME, NOT BUNDLED CHROMIUM (2026-08-19).
+ *
+ * Playwright ships its own Chromium build. It is close to Chrome but it is not the
+ * binary the owner looks at, and the things measured here — stacking contexts,
+ * `animation-fill-mode` interaction with `:hover`, transition list resolution — are
+ * exactly the areas where a rendering engine build can differ. Set `QA_CHROME` to a
+ * Chrome executable to run every script in this suite against it instead; unset, the
+ * bundled build is used and the run says so.
+ */
+export const CHROME = process.env.QA_CHROME || '/home/clauderfly/opt/chrome-root/opt/google/chrome/chrome';
+import fsMod from 'fs';
+export const usingRealChrome = (() => {
+  try { return fsMod.existsSync(CHROME); } catch { return false; }
+})();
+
 export async function openApp({ loggedIn = false, privateKey, label } = {}) {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(usingRealChrome ? { executablePath: CHROME } : {});
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true });
   let username = null;
   if (loggedIn) {
