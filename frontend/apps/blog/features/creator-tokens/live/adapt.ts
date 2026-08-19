@@ -39,6 +39,30 @@ import { BLOCKS_PER_DAY } from '../lib/contract-math';
  * no oracle here and no silent correction; if we ever need one, it belongs at
  * this single function and nowhere else.
  */
+/**
+ * Strip the `hive:` scheme from a chain-side account id for display and for
+ * URLs.
+ *
+ * DEFECT FIX 2026-08-19. The indexer's discovery view returns `creator` in its
+ * chain form — `hive:lumen.aria` — because that is what the ledger keys on.
+ * The creators listing rendered that value straight into both the visible
+ * handle and the href, producing `@hive:lumen.aria` and a link to
+ * `/creators/hive:lumen.aria`. The route then URL-encodes the colon and the
+ * lookup misses, so EVERY creator card on the discovery page led to
+ * "@hive%3Alumen.aria hasn't launched a token" — for markets that demonstrably
+ * exist. `/creators/lumen.aria` worked the whole time; only the generated link
+ * was wrong, which is why it survived hand-testing by anyone who typed a
+ * handle directly.
+ *
+ * Only the `hive:` scheme is stripped. A `did:pkh:…` creator keeps its full
+ * identifier: there is no shorter form of it, and truncating one would produce
+ * a handle that does not resolve.
+ */
+export function displayHandle(account: string | null | undefined): string {
+  if (!account) return '';
+  return account.startsWith('hive:') ? account.slice('hive:'.length) : account;
+}
+
 export function usdFromHbd(hbd: number): number {
   return hbd;
 }

@@ -5,7 +5,7 @@ import { FC, ReactNode, useMemo, useState } from 'react';
 import { Link, LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { useLiveDiscovery } from '../../live/use-live-discovery';
-import { usdFromHbd } from '../../live/adapt';
+import { displayHandle, usdFromHbd } from '../../live/adapt';
 import type { CreatorSummary } from '../../types';
 import { usdCompact, usdPrice, usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
@@ -78,13 +78,13 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
   const marks = [...Array(Math.min(c.answeredCount, 14)).fill(true), ...Array(Math.min(c.missedCount, 4)).fill(false)] as boolean[];
   return (
     <Link
-      href={`/creators/${c.creator}`}
+      href={`/creators/${displayHandle(c.creator)}`}
       className="block rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-surface-12"
     >
       <div className="mb-3.5 flex items-center gap-3">
         <span className="h-[46px] w-[46px] flex-shrink-0 rounded-card" style={{ background: avatarFill(c.creator) }} />
         <div className="min-w-0 flex-1">
-          <div className="text-[16px] font-bold text-ink-2">@{c.creator}</div>
+          <div className="text-[16px] font-bold text-ink-2">@{displayHandle(c.creator)}</div>
           {/* No bio: not contract state, not indexed, and inventing one under
               someone's name reads as their words. */}
         </div>
@@ -251,13 +251,13 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
             {newCreators.map((c) => (
               <Link
                 key={c.creator}
-                href={`/creators/${c.creator}`}
+                href={`/creators/${displayHandle(c.creator)}`}
                 className="block min-w-[240px] rounded-2xl border border-line-9 bg-surface-1 p-4 transition-colors hover:border-line-17"
               >
                 <div className="mb-3 flex items-center gap-3">
                   <span className="h-10 w-10 rounded-control" style={{ background: avatarFill(c.creator) }} />
                   <div>
-                    <div className="text-[15px] leading-[24px] font-bold text-ink-2">@{c.creator}</div>
+                    <div className="text-[15px] leading-[24px] font-bold text-ink-2">@{displayHandle(c.creator)}</div>
                   </div>
                 </div>
                 <div className="text-caption font-semibold text-ink-warn-3">{COPY.newNothing}</div>
