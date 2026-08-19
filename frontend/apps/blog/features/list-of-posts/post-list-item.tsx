@@ -368,7 +368,7 @@ const PostListItem = memo(
                                 <button
                                   disabled={reblogMutation.isLoading}
                                   className={cn(
-                                    'flex items-center cursor-pointer hover:text-destructive',
+                                    'flex min-h-[24px] items-center cursor-pointer hover:text-destructive',
                                     { 'cursor-not-allowed opacity-50': reblogMutation.isLoading }
                                   )}
                                   data-testid="post-card-reblog-count"

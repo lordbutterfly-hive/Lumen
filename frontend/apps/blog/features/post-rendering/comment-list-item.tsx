@@ -1112,7 +1112,7 @@ const CommentListItem = memo(function CommentListItem({
                               onClick={() => {
                                 setEdit(!edit);
                               }}
-                              className="flex items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
+                              className="flex min-h-[24px] items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
                               data-testid="comment-card-footer-edit"
                             >
                               {t('cards.comment_card.edit')}
@@ -1129,7 +1129,7 @@ const CommentListItem = memo(function CommentListItem({
                             >
                               <button
                                 disabled={edit || deleteCommentMutation.isLoading}
-                                className="flex items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
+                                className="flex min-h-[24px] items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
                                 data-testid="comment-card-footer-delete"
                               >
                                 {deleteCommentMutation.isLoading ? (

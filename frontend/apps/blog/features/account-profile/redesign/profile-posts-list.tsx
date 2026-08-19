@@ -83,7 +83,7 @@ export default function ProfilePostsList({
           type="button"
           onClick={() => (sentinel.atPageCap ? sentinel.loadMore() : fetchNextPage())}
           disabled={isFetchingNextPage || (!hasNextPage && !isError)}
-          className="font-sans text-sm text-muted-foreground hover:text-foreground disabled:cursor-default"
+          className="font-sans text-sm min-h-[24px] text-muted-foreground hover:text-foreground disabled:cursor-default"
         >
           {/* ★ "Loading" while a fetch is FAILING is a lie the reader cannot
               act on. With the retry storm stopped, this is the only remaining
@@ -103,7 +103,7 @@ export default function ProfilePostsList({
             type="button"
             onClick={sentinel.backToTop}
             data-testid="profile-posts-back-to-top"
-            className="font-sans text-sm text-muted-foreground hover:text-foreground"
+            className="font-sans text-sm min-h-[24px] text-muted-foreground hover:text-foreground"
           >
             Back to top
           </button>
