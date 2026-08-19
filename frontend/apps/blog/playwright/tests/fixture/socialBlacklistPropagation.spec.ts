@@ -68,8 +68,8 @@ test('BL-PROP-01 — Blacklist add propagates "(1)" mark to author post cards', 
   const profile = new ProfilePage(page);
   await expect(profile.profileBlogPostsList).toBeVisible();
 
-  const firstPost = page.getByTestId('post-list-item').first();
-  await expect(firstPost.getByTestId('post-author')).toHaveText(FOLLOW_TARGET_USER);
+  const firstPost = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first();
+  await expect(firstPost.locator('[data-testid="post-author"], [data-testid="medium-card-author"]')).toHaveText(FOLLOW_TARGET_USER);
   // The marker — proves the client-side blacklistCheck path renders
   // the "(1)" badge once the viewer's blacklist contains the post author.
   const blacklistMark = firstPost.locator('span[title="My blacklist"]');

@@ -51,7 +51,7 @@ test.describe('Profile page of @gtg', () => {
 
     // Wait for new posts to load with dynamic timeout
     await page.waitForFunction(
-      () => document.querySelectorAll('[data-testid="post-list-item"]').length >= 40,
+      () => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= 40,
       { timeout: 10000 }
     );
 

@@ -55,7 +55,7 @@ test.describe('Profile page of @gtg', () => {
     expect(await profilePage.profileName).toBeVisible();
     // profilePostsLink was removed 2026-08-10 — Posts is the default view at
     // this URL already, no separate tab to click into.
-    await expect(profilePage.page.locator('[data-testid="post-author"]').first()).toContainText(
+    await expect(profilePage.page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').first()).toContainText(
       profileNameApi
     );
 

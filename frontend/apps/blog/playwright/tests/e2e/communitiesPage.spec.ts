@@ -45,11 +45,11 @@ test.describe('Communities page tests', () => {
 
     // Wait for new posts to load with dynamic timeout
     await page.waitForFunction(
-      () => document.querySelectorAll('[data-testid="post-list-item"]').length >= 40,
+      () => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= 40,
       { timeout: 10000 }
     );
 
-    const postsCount = await page.locator('[data-testid="post-list-item"]').count();
+    const postsCount = await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').count();
     expect(postsCount).toBeGreaterThanOrEqual(40);
     expect(postsCount).toBeLessThanOrEqual(60);
   });
@@ -65,11 +65,11 @@ test.describe('Communities page tests', () => {
 
     // Wait for new posts to load with dynamic timeout
     await page.waitForFunction(
-      () => document.querySelectorAll('[data-testid="post-list-item"]').length >= 40,
+      () => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= 40,
       { timeout: 10000 }
     );
 
-    const postsCount = await page.locator('[data-testid="post-list-item"]').count();
+    const postsCount = await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').count();
     expect(postsCount).toBeGreaterThanOrEqual(40);
     expect(postsCount).toBeLessThanOrEqual(60);
   });
@@ -166,9 +166,9 @@ test.describe('Communities page tests', () => {
       await page.waitForSelector(profilePage.profileName['_selector']);
       expect(await profilePage.profileName).toBeVisible();
 
-      if ((await profilePage.page.locator('[data-testid="post-author"]').count()) > 0) {
+      if ((await profilePage.page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').count()) > 0) {
         expect(await leadershipLinkNickNamesLists[i]).toContain(
-          await profilePage.page.locator('[data-testid="post-author"]').first().textContent()
+          await profilePage.page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').first().textContent()
         );
       }
       await page.goBack();
@@ -447,9 +447,9 @@ test.describe('Communities page tests', () => {
         await page.waitForSelector(profilePage.profileName['_selector']);
         expect(await profilePage.profileName).toBeVisible();
 
-        if ((await profilePage.page.locator('[data-testid="post-author"]').count()) > 0) {
+        if ((await profilePage.page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').count()) > 0) {
           expect(await leadershipLinkNickNamesLists[i]).toContain(
-            await profilePage.page.locator('[data-testid="post-author"]').first().textContent()
+            await profilePage.page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').first().textContent()
           );
         }
 

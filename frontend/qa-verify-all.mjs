@@ -221,14 +221,23 @@ for (const r of ITALIC_ROUTES) {
       if (Math.round(parseFloat(s.fontSize)) !== 12) return false;
       return (e.textContent || '').trim().length > 0 && !e.children.length;
     });
-    const off = caps.filter((e) => Math.abs(parseFloat(getComputedStyle(e).letterSpacing) - 1.44) > 0.05);
+    // ★ `letter-spacing: normal` PARSES TO NaN, AND NaN > 0.05 IS FALSE — so an
+    // element with NO tracking at all was silently PASSING this check. A label
+    // that lost its tracking entirely is exactly what this is meant to catch,
+    // and it was the one case it could not see. Resolve `normal` to 0 first.
+    const track = (e) => {
+      const v = getComputedStyle(e).letterSpacing;
+      const n = parseFloat(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const off = caps.filter((e) => Math.abs(track(e) - 1.44) > 0.05);
 
     return {
       italic: italic.length,
       forbidden: forbidden.slice(0, 6).map(describe),
       forbiddenN: forbidden.length,
       caps: caps.length,
-      off: off.map((e) => `${describe(e)} @ ${getComputedStyle(e).letterSpacing}`).slice(0, 6),
+      off: off.map((e) => `${describe(e)} @ ${getComputedStyle(e).letterSpacing} (=${track(e)}px)`).slice(0, 6),
       offN: off.length,
       is404Italic: location.pathname === '/this-route-does-not-exist'
         ? (() => { const p = [...document.querySelectorAll('p')].find((x) => /link may be wrong|couldn|not found|doesn/i.test(x.textContent || '')); return p ? /italic/.test(getComputedStyle(p).fontStyle) : null; })()

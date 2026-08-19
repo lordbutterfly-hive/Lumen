@@ -25,40 +25,40 @@ export class UnmoderatedTagPage {
     this.unmoderatedTag = page.getByTestId('community-name');
     this.unmoderatedTagHeader = page.getByTestId('community-name-unmoderated');
     this.firstPostAuthor = page
-      .locator('[data-testid="post-list-item"]')
+      .locator('[data-testid="post-list-item"], [data-testid="medium-card"]')
       .first()
-      .locator('[data-testid="post-author"]');
+      .locator('[data-testid="post-author"], [data-testid="medium-card-author"]');
     this.firstPostTitle = page
-      .locator('[data-testid="post-list-item"]')
+      .locator('[data-testid="post-list-item"], [data-testid="medium-card"]')
       .first()
-      .locator('[data-testid="post-title"]');
+      .locator('[data-testid="post-title"], [data-testid="medium-card-title"]');
     this.firstPostSummary = page
-      .locator('[data-testid="post-list-item"]')
+      .locator('[data-testid="post-list-item"], [data-testid="medium-card"]')
       .first()
-      .locator('[data-testid="post-description"]');
+      .locator('[data-testid="post-description"], [data-testid="medium-card-dek"]');
     this.firstPostCardFooter = page
-      .locator('[data-testid="post-list-item"]')
+      .locator('[data-testid="post-list-item"], [data-testid="medium-card"]')
       .first()
-      .locator('[data-testid="post-card-footer"]');
+      .locator('[data-testid="post-card-footer"], [data-testid="medium-card-footer"]');
     this.firstPostCardFooterDeclinePayout = page
-      .locator('[data-testid="post-list-item"]')
+      .locator('[data-testid="post-list-item"], [data-testid="medium-card"]')
       .first()
-      .locator('[data-testid="post-card-footer"]')
+      .locator('[data-testid="post-card-footer"], [data-testid="medium-card-footer"]')
       .locator('[data-testid="post-payout-decline"]');
     this.secondPostAuthor = page
-      .locator('[data-testid="post-list-item"]')
+      .locator('[data-testid="post-list-item"], [data-testid="medium-card"]')
       .nth(1)
-      .locator('[data-testid="post-author"]');
+      .locator('[data-testid="post-author"], [data-testid="medium-card-author"]');
     this.secondPostTitle = page
-      .locator('[data-testid="post-list-item"]')
+      .locator('[data-testid="post-list-item"], [data-testid="medium-card"]')
       .nth(1)
-      .locator('[data-testid="post-title"]');
+      .locator('[data-testid="post-title"], [data-testid="medium-card-title"]');
     this.secondPostSummary = page
-      .locator('[data-testid="post-list-item"]')
+      .locator('[data-testid="post-list-item"], [data-testid="medium-card"]')
       .nth(1)
-      .locator('[data-testid="post-description"]');
+      .locator('[data-testid="post-description"], [data-testid="medium-card-dek"]');
     this.firstPostCardPoweredUp100Trigger = page
-      .locator('[data-testid="post-list-item"]')
+      .locator('[data-testid="post-list-item"], [data-testid="medium-card"]')
       .first()
       .locator('[data-testid="powered-up-100-trigger"]');
     this.firstPostCardPoweredUp100TriggerLink = this.firstPostCardPoweredUp100Trigger.locator('a');

@@ -275,17 +275,17 @@ export class ProfilePage {
     this.userLinks = page.locator('[data-testid="user-links"]');
     this.profileBlogPostsList = page.getByTestId('post-list-profile-blog-list');
 
-    this.postBlogItem = page.locator('[data-testid="post-list-item"]');
+    this.postBlogItem = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]');
     this.postsMenu = page.locator('[data-testid="user-post-menu"]');
-    this.postsPostAuthor = page.locator('[data-testid="post-author"]');
+    this.postsPostAuthor = page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]');
     this.postsMenuPostsButton = page.locator('[data-testid="user-post-menu"]').getByText('Posts');
     this.postsMenuCommentsButton = page.locator('[data-testid="user-post-menu"]').getByText('Comments');
     this.postsMenuPayoutsButton = page.locator('[data-testid="user-post-menu"]').getByText('Payouts');
     this.postRebloggedLabel = page.locator('[data-testid="reblogged-label"]');
     this.firstPostRebloggedLabel = this.postBlogItem.first().locator(this.postRebloggedLabel);
     this.postRebloggedAuthorLink = page.locator('[data-testid="reblogged-author-link"]');
-    this.postTitle = this.postBlogItem.locator('[data-testid="post-title"] > a');
-    this.postDescription = this.postBlogItem.locator('[data-testid="post-description"]');
+    this.postTitle = this.postBlogItem.locator('[data-testid="post-title"] > a, [data-testid="medium-card-title"] > a');
+    this.postDescription = this.postBlogItem.locator('[data-testid="post-description"], [data-testid="medium-card-dek"]');
     this.postCommunityLink = page.locator('[data-testid="post-card-community"]');
     this.postCategoryLink = page.locator('[data-testid="post-card-category"]');
     this.postTimestamp = page.locator('[data-testid="post-card-timestamp"]');
@@ -293,7 +293,7 @@ export class ProfilePage {
     this.postDownvoteButton = page.locator('[data-testid="downvote-button"]');
     this.postUpvoteTooltip = page.locator('[data-testid="upvote-button-tooltip"]');
     this.postDownvoteTooltip = page.locator('[data-testid="downvote-button-tooltip"]');
-    this.postPayout = page.locator('[data-testid="post-payout"]');
+    this.postPayout = page.locator('[data-testid="post-payout"], [data-testid="medium-card-payout"]');
     this.postPayoutTooltip = page.locator('[data-testid="payout-post-card-tooltip"]');
     this.postVotes = page.locator('[data-testid="post-total-votes"]');
     this.postVotesTooltip = page.locator('[data-testid="post-card-votes-tooltip"]');
@@ -302,7 +302,7 @@ export class ProfilePage {
     // Reblog button on profile list pages (interactive - opens confirmation dialog)
     this.postReblogCountDisplay = page.locator('[data-testid="post-card-reblog-count"]');
     this.postReblogCountTooltip = page.locator('[data-testid="post-card-reblog-count-tooltip"]');
-    this.postAvatar = page.locator('[data-testid="post-card-avatar"]');
+    this.postAvatar = page.locator('[data-testid="post-card-avatar"], [data-testid="medium-card-avatar"]');
     this.postReputation = page.locator('[data-testid="post-author-reputation"]');
     this.postReputationTooltip = page.locator('[data-testid="post-reputation-tooltip"]');
     this.crossPostBanner = page.getByTestId('cross-post-banner');
@@ -324,7 +324,7 @@ export class ProfilePage {
     this.repliesCommentListItemDownvote = page.locator('[data-testid="comment-card-footer"] [data-testid="downvote-button"]');
     this.repliesCommentListItemUpvoteTooltip = page.locator('[data-testid="upvote-button-tooltip"]');
     this.repliesCommentListItemDownvoteTooltip = page.locator('[data-testid="downvote-button-tooltip"]');
-    this.repliesCommentListItemPayout = page.locator('[data-testid="post-payout"]');
+    this.repliesCommentListItemPayout = page.locator('[data-testid="post-payout"], [data-testid="medium-card-payout"]');
     this.repliesCommentListItemPayoutTooltip = page.locator('[data-testid="payout-post-card-tooltip"]');
     this.repliesCommentListItemVotes = page.locator('[data-testid="comment-vote"]');
     this.repliesCommentListItemVotesTooltip = page.locator('[data-testid="comment-vote-tooltip"]');

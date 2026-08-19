@@ -33,8 +33,8 @@ test.describe('Voting tests', () =>{
       await profileMenu.validateUserNameInProfileMenu(users.denserautotest4.username);
       // Click to close the profile menu
       await page.getByTestId('community-name').locator('..').locator('..').click({force: true});
-      const firstPostUpvoteButtonLocator = page.getByTestId('post-list-item').first().getByTestId('upvote-button').locator('svg');
-      const firstPostUpvoteButtonLocatorToClick = page.getByTestId('post-list-item').first().getByTestId('upvote-button');
+      const firstPostUpvoteButtonLocator = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first().getByTestId('upvote-button').locator('svg');
+      const firstPostUpvoteButtonLocatorToClick = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first().getByTestId('upvote-button');
       // Wait for expected color of upvote button - broadcasted button
       await waitForFirstBroadcastedUpvoteLightMode(page);
       // console.log('1 first upvote color: ', await homePage.getElementCssPropertyValue(firstPostUpvoteButtonLocator, 'color'));
@@ -76,8 +76,8 @@ test.describe('Voting tests', () =>{
       await profileMenu.validateUserNameInProfileMenu(users.denserautotest4.username);
       // Click to close the profile menu
       await page.getByTestId('community-name').locator('..').locator('..').click({force: true});
-      const firstPostUpvoteButtonLocator = page.getByTestId('post-list-item').first().getByTestId('upvote-button').locator('svg');
-      const firstPostUpvoteButtonLocatorToClick = page.getByTestId('post-list-item').first().getByTestId('upvote-button');
+      const firstPostUpvoteButtonLocator = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first().getByTestId('upvote-button').locator('svg');
+      const firstPostUpvoteButtonLocatorToClick = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first().getByTestId('upvote-button');
       // Wait for expected color of upvote button - processed upvote icon
       await waitForFirstProcessedUpvoteLightMode(page);
       // console.log('1 first upvote color: ', await homePage.getElementCssPropertyValue(firstPostUpvoteButtonLocator, 'color'));

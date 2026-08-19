@@ -243,7 +243,15 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
               <div className="text-[15px] leading-[24px] font-bold text-ink-2">{COPY.newHere}</div>
               <div className="text-caption text-ink-14">{COPY.newHereSub}</div>
             </div>
-            <button onClick={() => setShowNew(false)} className="cursor-pointer text-xl leading-none text-ink-14">
+            {/* ★ min-h/min-w-[24px] FOR THE HIT TARGET (2026-08-19, WCAG 2.2 AA
+                2.5.8). Glyph-only, `leading-none`, no padding: 10.6x20.
+                Measured live: the header row and the card itself were both
+                unchanged (44px / 232px before and after) — the row's height
+                comes from the "New Here" title block beside it. */}
+            <button
+              onClick={() => setShowNew(false)}
+              className="flex min-h-[24px] min-w-[24px] cursor-pointer items-center justify-center text-xl leading-none text-ink-14"
+            >
               ×
             </button>
           </div>

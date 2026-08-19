@@ -43,10 +43,10 @@ export class TagCommunityFeedsPage {
   constructor(page: Page) {
     this.page = page;
 
-    this.postListItems = page.locator('[data-testid="post-list-item"]');
+    this.postListItems = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]');
     this.firstPostItem = this.postListItems.first();
-    this.postAuthors = page.locator('[data-testid="post-author"]');
-    this.firstPostTitle = this.postListItems.first().locator('[data-testid="post-title"]');
+    this.postAuthors = page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]');
+    this.firstPostTitle = this.postListItems.first().locator('[data-testid="post-title"], [data-testid="medium-card-title"]');
 
     this.communityInfoSidebar = page.locator('[data-testid="community-info-sidebar"]');
     this.communityName = page.locator('[data-testid="community-name"]');
@@ -83,7 +83,7 @@ export class TagCommunityFeedsPage {
   }
 
   async waitForFeedToRender() {
-    await this.page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.HYDRATION });
+    await this.page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.HYDRATION });
   }
 
   async validateFeedHasPosts() {

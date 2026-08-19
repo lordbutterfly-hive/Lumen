@@ -40,7 +40,16 @@ export function UserPopoverCard({
     <>
       <Popover>
       <PopoverTrigger data-testid="author-name-link" asChild>
-        <button className="flex items-center gap-1 hover:cursor-pointer">
+        {/* ★ min-h-[24px] FOR THE HIT TARGET (2026-08-19, WCAG 2.2 AA 2.5.8).
+            Measured 22px tall wherever this renders without `withImage` (every
+            comment byline, and the post-footer "authored by" mention) — the
+            row hugs the button, no fixed height set anywhere. Measured across
+            6 different-length names (58px to 115px wide) on a live post: the
+            comment card heights and the post-footer box height were
+            byte-identical before and after. Not applied via a wrapper — this
+            IS the interactive element (a Popover trigger, not a plain link),
+            so growing its own box is the only way to grow its target. */}
+        <button className="flex min-h-[24px] items-center gap-1 hover:cursor-pointer">
           {withImage && <UserAvatar username={shownName} size="normal" />}
           {/* ★ ONE INK FOR A USERNAME (2026-08-13, audit §5.3). `text-foreground`
               computes rgb(51,51,51) — measured on the shipped build — while the

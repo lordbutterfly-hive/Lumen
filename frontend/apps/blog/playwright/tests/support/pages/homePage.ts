@@ -259,17 +259,17 @@ export class HomePage {
     this.getFirstPostUpvoteButton = this.getUpvoteButton.first();
     this.getFirstPostUpvoteButtonIcon = this.getFirstPostUpvoteButton.locator('svg');
     this.firstPostCardUpvoteButtonLocator = page
-      .locator('[data-testid="post-card-footer"]')
+      .locator('[data-testid="post-card-footer"], [data-testid="medium-card-footer"]')
       .first()
       .locator('[data-testid="upvote-button"]')
       .locator('svg');
     this.firstPostCardDownvoteButtonLocator = page
-      .locator('[data-testid="post-card-footer"]')
+      .locator('[data-testid="post-card-footer"], [data-testid="medium-card-footer"]')
       .first()
       .locator('[data-testid="downvote-button"]')
       .locator('svg');
     this.getSecondPostDownvoteButton = page
-      .getByTestId('post-list-item')
+      .locator('[data-testid="post-list-item"], [data-testid="medium-card"]')
       .nth(1)
       .getByTestId('downvote-button');
     this.getSecondPostDownvoteButtonIcon = this.getSecondPostDownvoteButton.locator('svg');
@@ -330,7 +330,7 @@ export class HomePage {
     this.getNavSidebarMenuContentCloseButton = page.locator(
       '[data-testid="nav-sidebar-menu-content"] > button'
     );
-    this.postTitle = page.locator('[data-testid="post-title"] a');
+    this.postTitle = page.locator('[data-testid="post-title"] a, [data-testid="medium-card-title"] a');
     /*
       ★ EITHER CARD'S DEK (2026-08-11), same reason as CARD_ANY above. Lumen's
       feed card names its description `medium-card-dek`
@@ -371,7 +371,7 @@ export class HomePage {
     this.commentCard = '[data-testid="comment-card-description"]';
     this.commentListItem = '[data-testid="comment-list-item"]';
     this.postsImages = '[data-testid="post-image"]';
-    this.postAuthor = '[data-testid="post-author"]';
+    this.postAuthor = '[data-testid="post-author"], [data-testid="medium-card-author"]';
     this.profileAvatar = '[data-testid="profile-avatar-button"]';
 
     // for logged in user
@@ -467,7 +467,7 @@ export class HomePage {
     // navigation step is needed once the profile has loaded.
     await this.page.waitForSelector(profilePage.profileName['_selector']);
     expect(await profilePage.profileName).toBeVisible();
-    const firstPostAuthorNameProfilePage = await this.page.locator('[data-testid="post-author"]').first();
+    const firstPostAuthorNameProfilePage = await this.page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').first();
     await expect('@' + firstPostAuthorNick).toMatch(await firstPostAuthorNameProfilePage.innerText());
   }
 
@@ -482,7 +482,7 @@ export class HomePage {
     // no Posts-tab click needed.
     await this.page.waitForSelector(profilePage.profileName['_selector']);
     expect(await profilePage.profileName).toBeVisible();
-    const firstPostAuthorNameProfilePage = await this.page.locator('[data-testid="post-author"]').first();
+    const firstPostAuthorNameProfilePage = await this.page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').first();
     await expect('@' + firstPostAuthorNick).toMatch(await firstPostAuthorNameProfilePage.innerText());
   }
 
@@ -557,7 +557,7 @@ export class HomePage {
 
     for (let postIndex = 0; postIndex < postsComments.length; postIndex++) {
       const numberOfCommentsInPost = postsComments[postIndex];
-      const postTitle = postsCard[postIndex].locator('[data-testid="post-title"] a');
+      const postTitle = postsCard[postIndex].locator('[data-testid="post-title"] a, [data-testid="medium-card-title"] a');
       const commentsCount = await numberOfCommentsInPost.textContent();
 
       if (commentsCount !== '0') {
@@ -633,10 +633,34 @@ export class HomePage {
   }
 
   // Theme mode: Light, Dark, System
+  /**
+   * ★★★ THIS DRIVES A CONTROL THAT NO LONGER EXISTS, AND IT WAS COSTING THE SUITE
+   * 52 MINUTE-LONG HANGS (2026-08-19).
+   *
+   * Lumen is light-only by owner ruling of 2026-08-11: `next-themes` and every
+   * `dark:` variant were removed from this app, and there is no theme control in
+   * the product at all — see the note in `features/layouts/providers.tsx`
+   * ("Dark mode was never reachable — no toggle existed anywhere in the
+   * product"). So `[data-testid="theme-mode"]` matches nothing.
+   *
+   * The old body clicked that locator and waited. Playwright's auto-waiting then
+   * sat on it for the full 60s test timeout, 52 times over — 12 spec files, 52
+   * live test blocks. One run of five specs took 26 minutes and produced 100
+   * timeouts, which buried every real failure underneath them.
+   *
+   * Failing FAST and saying why is strictly better than hanging: the run finishes
+   * in minutes and each failure names its own cause. These 52 tests assert a
+   * DELETED FEATURE and cannot be repaired by re-selectoring — they need to be
+   * removed or rewritten, which is an owner decision, so this does not silently
+   * skip them and hide the debt.
+   */
   async changeThemeMode(thememode: string) {
-    await this.getThemeModeButton.click();
-    await this.getThemeModeItem.locator(`span:text(\"${thememode}\")`).click();
-    await this.page.waitForLoadState('domcontentloaded');
+    throw new Error(
+      `changeThemeMode('${thememode}') — Lumen has no theme control. Dark mode was removed ` +
+        `by owner ruling 2026-08-11 (features/layouts/providers.tsx); ` +
+        `[data-testid="theme-mode"] does not exist. This test targets a deleted feature ` +
+        `and must be removed or rewritten, not re-selectored.`
+    );
   }
 
   async validateThemeModeIsLight() {

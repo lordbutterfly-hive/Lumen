@@ -5,8 +5,16 @@ import { Icons } from '@ui/components/icons';
 import { useTranslation } from '@/blog/i18n/client';
 import { UseWitnessFiltersResult } from './hooks/use-witness-filters';
 
+// ★ min-h/min-w-[24px], not h-/w-[18px] (2026-08-19, WCAG 2.2 AA 2.5.8). This
+// is the checkbox's own visible border square, not padding around a smaller
+// icon — there is no separate wrapper to enlarge invisibly, so the fix does
+// make the drawn box 6px bigger per side. Measured live: applying this to all
+// 5 rows together grows the Filters card (and the sticky right rail) by 10px
+// total (390->400px) and pushes the version dropdown down by 10px — a real
+// but small cascading cost, not zero. No overlap or clipping resulted; the
+// rail has free vertical room. Judged trivial and applied.
 const CHECKBOX_CLASS =
-  'h-[18px] w-[18px] rounded-control border-2 border-line-20 data-[state=checked]:border-line-brand-10 data-[state=checked]:bg-surface-brand-12 data-[state=checked]:text-ink-27';
+  'h-[18px] w-[18px] min-h-[24px] min-w-[24px] rounded-control border-2 border-line-20 data-[state=checked]:border-line-brand-10 data-[state=checked]:bg-surface-brand-12 data-[state=checked]:text-ink-27';
 
 type FilterKey = 'active' | 'disabled' | 'stale' | 'top20' | 'approved';
 

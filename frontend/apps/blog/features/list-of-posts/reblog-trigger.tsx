@@ -108,7 +108,17 @@ const ReblogTrigger = ({
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger disabled={isReblogged || reblogMutation.isLoading} aria-label={triggerLabel}>
+        {/* ★ min-h/min-w-[24px] FOR THE HIT TARGET (2026-08-19, WCAG 2.2 AA
+            2.5.8). No className at all before this — the rendered button was
+            exactly the h-4 w-4 icon, 16x16. Measured on the post footer (the
+            only place this icon-only variant renders): the action row
+            (`comment-respons-header`, already 36px tall from the "Reply"
+            chip's own h-9) was unchanged, 0px cost. */}
+        <TooltipTrigger
+          disabled={isReblogged || reblogMutation.isLoading}
+          aria-label={triggerLabel}
+          className="flex min-h-[24px] min-w-[24px] items-center justify-center"
+        >
           <ReblogDialog author={author} permlink={permlink} action={dialogAction} isReblogged={isReblogged}>
             {reblogMutation.isLoading ? (
               <CircleSpinner loading={reblogMutation.isLoading} size={18} color="#dc2626" />

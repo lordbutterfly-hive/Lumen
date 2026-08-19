@@ -103,8 +103,8 @@ export class CommentViewPage {
     this.getResponseCommentDownvoteButton = this.getResponseCommentFooter.locator(
       '[data-testid="comment-card-footer-downvote"]'
     );
-    this.getResponseCommentPayout = this.getResponseCommentFooter.locator('[data-testid="post-payout"]');
-    this.getResponsePostCommentPayout = this.page.getByTestId('post-card-footer').getByTestId('post-payout');
+    this.getResponseCommentPayout = this.getResponseCommentFooter.locator('[data-testid="post-payout"], [data-testid="medium-card-payout"]');
+    this.getResponsePostCommentPayout = this.page.locator('[data-testid="post-card-footer"], [data-testid="medium-card-footer"]').locator('[data-testid="post-payout"], [data-testid="medium-card-payout"]');
     this.getResponseCommentReply = this.getResponseCommentFooter.locator(
       '[data-testid="comment-card-footer-reply"]'
     );

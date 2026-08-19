@@ -25,14 +25,14 @@ test.describe('Sidebar tests (fixture-based)', () => {
   test('trending communities sidebar is visible on desktop', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.HYDRATION });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.HYDRATION });
     await expect(homePage.getTrendingCommunitiesSideBar).toBeVisible();
   });
 
   test('trending communities sidebar has community links', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.HYDRATION });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.HYDRATION });
 
     const communityLinks = homePage.getTrendingCommunitiesSideBarLinks;
     const count = await communityLinks.count();
@@ -42,7 +42,7 @@ test.describe('Sidebar tests (fixture-based)', () => {
   test('explore communities link is visible', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.HYDRATION });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.HYDRATION });
 
     await expect(homePage.getExploreCommunities).toBeVisible();
     await expect(homePage.getExploreCommunities).toHaveText(/Explore communities/);
@@ -51,7 +51,7 @@ test.describe('Sidebar tests (fixture-based)', () => {
   test('clicking community link navigates to community page', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.HYDRATION });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.HYDRATION });
 
     const firstCommunityLink = homePage.getTrendingCommunitiesSideBarLinks.first();
     const href = await firstCommunityLink.getAttribute('href');
@@ -63,13 +63,13 @@ test.describe('Sidebar tests (fixture-based)', () => {
     ]);
 
     // Wait for the destination feed to render its post list
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.HYDRATION });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.HYDRATION });
   });
 
   test('explore communities link navigates to communities page', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.HYDRATION });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.HYDRATION });
 
     await Promise.all([
       page.waitForURL('**/communities', { timeout: TIMEOUTS.HYDRATION }),
@@ -87,7 +87,7 @@ test.describe('Sidebar tests (fixture-based)', () => {
   test('explore hive card is visible on desktop', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.HYDRATION });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.HYDRATION });
 
     const exploreHiveCard = homePage.getCardExploreHive;
     const isVisible = await exploreHiveCard.isVisible().catch(() => false);
@@ -102,14 +102,14 @@ test.describe('Sidebar tests (fixture-based)', () => {
   test('sidebar is visible on hot feed', async ({ page }) => {
     await page.goto('/hot', { waitUntil: 'domcontentloaded' });
 
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.HYDRATION });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.HYDRATION });
     await expect(homePage.getTrendingCommunitiesSideBar).toBeVisible();
   });
 
   test('sidebar is visible on created feed', async ({ page }) => {
     await page.goto('/created', { waitUntil: 'domcontentloaded' });
 
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.HYDRATION });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.HYDRATION });
     await expect(homePage.getTrendingCommunitiesSideBar).toBeVisible();
   });
 });

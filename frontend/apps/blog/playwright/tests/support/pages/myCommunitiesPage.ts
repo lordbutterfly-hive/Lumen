@@ -11,7 +11,7 @@ export class MyCommunitiesPage {
         this.page = page;
         this.myCommunitiesHeader = page.locator('span.text-md:text("My communities")');
         this.myCommunitiesLink = page.getByTestId('card-trending-comunities').getByText('My communities');
-        this.postListItems = page.getByTestId('post-list-item');
+        this.postListItems = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]');
         this.firstPostListItem = this.postListItems.first();
 
     }

@@ -59,10 +59,10 @@ test.describe.skip('Creating post tests and use store', () =>{
     );
     // Validate the first post on the unmoderated post list
     // Validate post's author name
-    expect(await page.locator('[data-testid="post-list-item"]').first().locator('[data-testid="post-author"]').textContent()).toBe(users.denserautotest4.username);
+    expect(await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first().locator('[data-testid="post-author"], [data-testid="medium-card-author"]').textContent()).toBe(users.denserautotest4.username);
     // Validate the first post's title
-    expect(await page.locator('[data-testid="post-list-item"]').first().locator('[data-testid="post-title"]').textContent()).toBe(postTitle);
+    expect(await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first().locator('[data-testid="post-title"], [data-testid="medium-card-title"]').textContent()).toBe(postTitle);
     // Validate the first post's summary description
-    expect(await page.locator('[data-testid="post-list-item"]').first().locator('[data-testid="post-description"]').textContent()).toBe(postSummary);
+    expect(await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first().locator('[data-testid="post-description"], [data-testid="medium-card-dek"]').textContent()).toBe(postSummary);
   });
 });

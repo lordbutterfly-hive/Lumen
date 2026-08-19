@@ -25,8 +25,13 @@ const CommentSelectFilter = () => {
         router.replace(`${pathname?.split('#')[0].split('?')[0]}?sort=${e}#comments`);
       }}
     >
+      {/* ★ min-h-[24px], not h-5 (2026-08-19, WCAG 2.2 AA 2.5.8). h-5 (20px)
+          measured 99.4x20 — width was fine, only the fixed height failed.
+          Measured live: the enclosing "Sort:" row was already 24px tall
+          before this change (governed by a taller sibling), so raising the
+          trigger to 24px cost the row nothing. */}
       <SelectTrigger
-        className="h-5 w-fit border-none bg-transparent text-ink-brand-7"
+        className="min-h-[24px] w-fit border-none bg-transparent text-ink-brand-7"
         data-testid="posts-filter"
         aria-label="Sort comments"
       >

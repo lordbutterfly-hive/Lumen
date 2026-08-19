@@ -58,7 +58,7 @@ export class CommunitiesPage {
 
   constructor(page: Page) {
     this.page = page;
-    this.postTitle = page.getByTestId('post-title');
+    this.postTitle = page.locator('[data-testid="post-title"], [data-testid="medium-card-title"]');
     this.communityNameTitle = page.locator('[data-testid="community-name"]');
     this.communityInfoSidebar = page.locator('[data-testid="community-info-sidebar"]');
     this.communityDescriptionSidebar = page.locator('[data-testid="community-description-rules-sidebar"]');
@@ -87,9 +87,9 @@ export class CommunitiesPage {
     this.languageHeader = page.locator('[data-testid="community-language"]').locator('h6')
     this.communityChoosenLanguage = page.locator('[data-testid="community-choosen-language"]')
 
-    this.getFirstPostListItem = page.locator('[data-testid="post-list-item"]').first();
-    this.getFirstPostCardAvatar = page.locator('[data-testid="post-card-avatar"]').first();
-    this.getFirstPostAuthor = page.locator('[data-testid="post-author"]').first();
+    this.getFirstPostListItem = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first();
+    this.getFirstPostCardAvatar = page.locator('[data-testid="post-card-avatar"], [data-testid="medium-card-avatar"]').first();
+    this.getFirstPostAuthor = page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').first();
     this.getFirstPostAuthorReputation = this.getFirstPostAuthor.locator('..');
     this.getFirstPostCardTimestampLink = page.locator('[data-testid="post-card-timestamp"]').first();
     this.getFirstResponses = page.locator('[data-testid="post-children"]').first()

@@ -964,7 +964,22 @@ const CommentListItem = memo(function CommentListItem({
                       </div>
                       {!hiddenComment ? (
                         <AccordionTrigger
-                          className="mr-2 hidden pb-0 pt-1 !no-underline sm:block"
+                          /* ★ min-w-[24px] FOR THE HIT TARGET (2026-08-19, WCAG 2.2 AA
+                              2.5.8). This trigger renders no children of its own — the
+                              chevron icon (h-4 w-4) is the only content — so its width was
+                              exactly the icon's 16px with zero horizontal padding. Height
+                              was already 28px (py-4/pt-1 puts it above the 24px floor), so
+                              only the width needed a floor. Measured across all 5 comment
+                              threads on a live post: with `min-w-[24px]` applied, the
+                              enclosing `<h3>` row and the comment card's own height were
+                              byte-identical before and after (see comment-card-footer's own
+                              note two screens up for the same measurement discipline). The
+                              mobile counterpart just below (`sm:hidden`) is NOT touched here
+                              — at a 390px viewport it measures 16x20 too, but there the
+                              parent row hugs it tightly and grows 4px per comment when
+                              enlarged, a real (if modest) cost this pass did not get
+                              sign-off to spend. */
+                          className="mr-2 hidden min-w-[24px] pb-0 pt-1 !no-underline sm:block"
                           aria-label={openState === 'item-1' ? 'Collapse this reply' : 'Expand this reply'}
                           onClick={() => setOpenState((prev) => (prev === 'item-1' ? '' : 'item-1'))}
                         />
@@ -1066,11 +1081,17 @@ const CommentListItem = memo(function CommentListItem({
                               reply editor's own Cancel button (reply-textbox.tsx), the
                               nearest sibling component in this same feature, rather than
                               inventing a new de-emphasised-text convention here. */}
+                          {/* ★ min-h-[24px] FOR THE HIT TARGET (2026-08-19, WCAG 2.2 AA
+                              2.5.8). 35.8x22 measured — width was already fine, only the
+                              22px line-height-driven height failed. Measured across 5
+                              comment footers: the row (`comment-card-footer`, h-5 but
+                              governed by taller siblings) and the comment card itself were
+                              unchanged, 0px cost, same as the "More options" trigger below. */}
                           {identity.isLoggedIn ? (
                             <button
                               disabled={deleteCommentMutation.isLoading}
                               onClick={() => setReply(!reply)}
-                              className="flex items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
+                              className="flex min-h-[24px] items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
                               data-testid="comment-card-footer-reply"
                             >
                               {t('cards.comment_card.reply')}
@@ -1078,7 +1099,7 @@ const CommentListItem = memo(function CommentListItem({
                           ) : (
                             <DialogLogin>
                               <button
-                                className="flex items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
+                                className="flex min-h-[24px] items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
                                 data-testid="comment-card-footer-reply"
                               >
                                 {t('post_content.footer.reply')}
@@ -1171,7 +1192,14 @@ const CommentListItem = memo(function CommentListItem({
                                             : t('profile.overflow_menu_label')
                                         }
                                         className={cn(
-                                          'flex items-center hover:cursor-pointer hover:text-destructive',
+                                          // ★ min-h/min-w-[24px] FOR THE HIT TARGET (2026-08-19,
+                                          // WCAG 2.2 AA 2.5.8). No children besides the h-4 w-4
+                                          // icon and no padding, so the box was exactly 16x16.
+                                          // Measured across all 4 comments on this thread that
+                                          // render this trigger (plus the post's own overflow
+                                          // trigger, same fix, `content.tsx`): the footer row and
+                                          // the comment card's height were unchanged, 0px cost.
+                                          'flex min-h-[24px] min-w-[24px] items-center justify-center hover:cursor-pointer hover:text-destructive',
                                           // ★ item 4: colour alone is not an accessible signal —
                                           // the aria-label above already carries the same fact —
                                           // this is the SAME slate `--lm-vote-slate` resolves to

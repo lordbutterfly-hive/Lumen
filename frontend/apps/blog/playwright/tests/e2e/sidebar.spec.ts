@@ -18,7 +18,7 @@ test.describe('Sidebar tests', () => {
     await page.waitForLoadState('domcontentloaded');
 
     // Wait for posts to load
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.PAGE_LOAD });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.PAGE_LOAD });
 
     // Trending communities sidebar should be visible on desktop
     await expect(homePage.getTrendingCommunitiesSideBar).toBeVisible();
@@ -29,7 +29,7 @@ test.describe('Sidebar tests', () => {
     await page.waitForLoadState('domcontentloaded');
 
     // Wait for posts to load
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.PAGE_LOAD });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.PAGE_LOAD });
 
     // Should have community links
     const communityLinks = homePage.getTrendingCommunitiesSideBarLinks;
@@ -43,7 +43,7 @@ test.describe('Sidebar tests', () => {
     await page.waitForLoadState('domcontentloaded');
 
     // Wait for posts to load
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.PAGE_LOAD });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.PAGE_LOAD });
 
     // Explore communities link should be visible
     await expect(homePage.getExploreCommunities).toBeVisible();
@@ -57,7 +57,7 @@ test.describe('Sidebar tests', () => {
     await page.waitForLoadState('domcontentloaded');
 
     // Wait for posts to load
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.PAGE_LOAD });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.PAGE_LOAD });
 
     // Get first community link
     const firstCommunityLink = homePage.getTrendingCommunitiesSideBarLinks.first();
@@ -78,7 +78,7 @@ test.describe('Sidebar tests', () => {
     await page.waitForLoadState('domcontentloaded');
 
     // Wait for posts to load
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.PAGE_LOAD });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.PAGE_LOAD });
 
     // Click explore communities
     await homePage.getExploreCommunities.click();
@@ -96,7 +96,7 @@ test.describe('Sidebar tests', () => {
     await page.waitForLoadState('domcontentloaded');
 
     // Wait for posts to load
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.PAGE_LOAD });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.PAGE_LOAD });
 
     // Explore Hive card should be visible
     const exploreHiveCard = homePage.getCardExploreHive;
@@ -116,7 +116,7 @@ test.describe('Sidebar tests', () => {
     await page.waitForLoadState('domcontentloaded');
 
     // Wait for posts to load
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.PAGE_LOAD });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.PAGE_LOAD });
 
     // Sidebar should be visible
     await expect(homePage.getTrendingCommunitiesSideBar).toBeVisible();
@@ -127,7 +127,7 @@ test.describe('Sidebar tests', () => {
     await page.waitForLoadState('domcontentloaded');
 
     // Wait for posts to load
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.PAGE_LOAD });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.PAGE_LOAD });
 
     // Sidebar should be visible
     await expect(homePage.getTrendingCommunitiesSideBar).toBeVisible();

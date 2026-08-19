@@ -66,7 +66,7 @@ test.describe('Tag Filtering tests', () => {
 
     try {
       await page.waitForFunction(
-        (initial) => document.querySelectorAll('[data-testid="post-list-item"]').length > initial,
+        (initial) => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length > initial,
         initialCount,
         { timeout: TIMEOUTS.PAGE_LOAD }
       );

@@ -136,10 +136,10 @@ export class PostPage {
     this.showPostBodyBtn = page.locator('div').filter({
       hasText: /^Content (were hidden due to low ratings|hidden (by community moderators|because parent content is muted|due to low author reputation)|hidden: author (not allowed to post in this community|is muted in this community))\.Show$/
     }).getByRole('button');
-    this.postListItemOnHomePage = page.locator('li[data-testid="post-list-item"]');
-    this.firstPostImageOnHomePage = page.locator('li[data-testid="post-list-item"]:nth-of-type(1) img');
+    this.postListItemOnHomePage = page.locator('li[data-testid="post-list-item"], li[data-testid="medium-card"]');
+    this.firstPostImageOnHomePage = page.locator('li[data-testid="post-list-item"]:nth-of-type(1) img, li[data-testid="medium-card"]:nth-of-type(1) img');
     this.firstPostTitleOnHomePage = page
-      .locator('[data-testid="post-list-item"] [data-testid="post-title"] a')
+      .locator('[data-testid="post-list-item"] [data-testid="post-title"] a, [data-testid="medium-card"] [data-testid="medium-card-title"] a')
       .first();
     this.articleTitle = page.locator('[data-testid="article-title"]');
     this.articleBody = page.locator('#articleBody').first();
@@ -181,14 +181,14 @@ export class PostPage {
     this.commentCardsHeaders = page.locator('[data-testid="comment-card-header"]');
     this.commentCardsHeadersAutorAndReputation = this.commentAuthorLink.locator('..'); // Parent of commentAuthorLink
     this.commentCardsHeadersTimeStampLink = page.locator('[data-testid="comment-timestamp-link"]');
-    this.commentCardsTitles = page.locator('[data-testid="post-title"]');
+    this.commentCardsTitles = page.locator('[data-testid="post-title"], [data-testid="medium-card-title"]');
     this.commentCardsDescriptions = page.locator('[data-testid="comment-card-description"]');
     this.commentCard = '[data-testid="comment-card-description"]';
     this.commentCardsFooters = page.locator('[data-testid="comment-card-footer"]');
     this.commentCardsFooterUpvotes = this.commentCardsFooters.locator('[data-testid="upvote-button"]');
     this.commentCardsFooterDownvotes = this.commentCardsFooters.locator('[data-testid="downvote-button"]');
     this.commentCardsFooterPayoutNonZero = page.locator('[data-testid="comment-card-footer-payout"]');
-    this.commentCardsFooterPayoutZero = page.locator('[data-testid="post-payout"]');
+    this.commentCardsFooterPayoutZero = page.locator('[data-testid="post-payout"], [data-testid="medium-card-payout"]');
     this.commentCardsFooterVotes = this.commentCardsFooters.locator('[data-testid="comment-votes"]');
     this.postVoterList = page.locator('[data-testid="list-of-voters"]');
     this.commentCardsFooterReply = this.commentCardsFooters.locator(
@@ -242,7 +242,7 @@ export class PostPage {
       '[data-testid="author-data-post-footer"] [data-testid="comment-votes"]'
     );
     this.postsCommentsTab = page.getByRole('tab', { name: 'Comments' });
-    this.postsCommentsFirstAvatar = page.locator('[data-testid="post-card-avatar"]').first();
+    this.postsCommentsFirstAvatar = page.locator('[data-testid="post-card-avatar"], [data-testid="medium-card-avatar"]').first();
     this.mutedPostsBannedImageText = page.locator('#articleBody .text-red-500').first();
     this.userPostMenu = page.getByTestId('user-post-menu');
     this.postFooterUpvoteTooltip = page.locator('[data-testid="upvote-button-tooltip"]');
@@ -361,7 +361,7 @@ export class PostPage {
 
   async findPostWithLabel() {
     const postWithLabel = this.page
-      .locator('li[data-testid="post-list-item"]')
+      .locator('li[data-testid="post-list-item"], li[data-testid="medium-card"]')
       .locator('div.flex.items-center')
       .locator('.inline-flex.items-center.border.rounded-full')
       .first();

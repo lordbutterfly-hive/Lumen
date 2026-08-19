@@ -67,7 +67,7 @@ test.describe('Muted posts tests', () => {
 
     // check if post picture is visible
     const numberOfImagesInPostCard = await postPage.page
-      .locator('li[data-testid="post-list-item"]:nth-of-type(1):has(img)')
+      .locator('li[data-testid="post-list-item"]:nth-of-type(1):has(img), li[data-testid="medium-card"]:nth-of-type(1):has(img)')
       .count();
     if (numberOfImagesInPostCard <= 0)
       await expect(postPage.firstPostImageOnHomePage).toHaveCount(0);
@@ -153,12 +153,12 @@ test.describe('Muted posts tests', () => {
 
     await expect (profilePage.postBlogItem.first()).toBeVisible();
 
-    const postListItems = await page.$$('[data-testid="post-list-item"]');
+    const postListItems = await page.$$('[data-testid="post-list-item"], [data-testid="medium-card"]');
 
     for (const postItem of postListItems) {
       const textContent: any = await postItem.textContent();
       if (textContent.includes('RE:')) {
-        const postTittle = await postItem.$$('[data-testid="post-title"] > a');
+        const postTittle = await postItem.$$('[data-testid="post-title"] > a, [data-testid="medium-card-title"] > a');
 
         if (postTittle.length > 0) {
 

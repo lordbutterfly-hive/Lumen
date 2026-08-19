@@ -33,20 +33,20 @@ export async function testFeedPagination(
 
   await page.goto(config.url);
 
-  await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.SEARCH_RESULTS });
+  await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.SEARCH_RESULTS });
 
-  const initialCount = await page.locator('[data-testid="post-list-item"]').count();
+  const initialCount = await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').count();
   expect(initialCount).toBe(PAGINATION.INITIAL_POSTS_COUNT);
 
   await page.keyboard.press('End');
 
   await page.waitForFunction(
-    (minPosts) => document.querySelectorAll('[data-testid="post-list-item"]').length >= minPosts,
+    (minPosts) => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= minPosts,
     PAGINATION.MIN_POSTS_AFTER_SCROLL,
     { timeout }
   );
 
-  const postsCount = await page.locator('[data-testid="post-list-item"]').count();
+  const postsCount = await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').count();
   expect(postsCount).toBeGreaterThanOrEqual(PAGINATION.MIN_POSTS_AFTER_SCROLL);
   expect(postsCount).toBeLessThanOrEqual(PAGINATION.MAX_POSTS_AFTER_SCROLL);
 }

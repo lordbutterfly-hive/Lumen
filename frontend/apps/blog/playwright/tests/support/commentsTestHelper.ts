@@ -55,7 +55,7 @@ export async function findPostWithVisibleComments(
 
   for (let postIndex = 0; postIndex < postsToCheck; postIndex++) {
     const numberOfCommentsInPost = postsComments[postIndex];
-    const postTitle = postsCard[postIndex].locator('[data-testid="post-title"] a');
+    const postTitle = postsCard[postIndex].locator('[data-testid="post-title"] a, [data-testid="medium-card-title"] a');
     const commentsCount = await numberOfCommentsInPost.textContent();
 
     // Skip posts with 0 comments

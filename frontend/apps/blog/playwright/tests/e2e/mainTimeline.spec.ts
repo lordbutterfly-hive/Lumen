@@ -36,11 +36,11 @@ test.describe('Home page tests', () => {
 
     // Wait for new posts to load with dynamic timeout
     await page.waitForFunction(
-      () => document.querySelectorAll('[data-testid="post-list-item"]').length >= 40,
+      () => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= 40,
       { timeout: 10000 }
     );
 
-    const postsCount = await page.locator('[data-testid="post-list-item"]').count();
+    const postsCount = await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').count();
     expect(postsCount).toBeGreaterThanOrEqual(40);
     expect(postsCount).toBeLessThanOrEqual(60);
   });
@@ -566,11 +566,11 @@ test.describe('Home page tests', () => {
 
     // Wait for new posts to load with dynamic timeout
     await page.waitForFunction(
-      () => document.querySelectorAll('[data-testid="post-list-item"]').length >= 40,
+      () => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= 40,
       { timeout: 10000 }
     );
 
-    const postsCount = await page.locator('[data-testid="post-list-item"]').count();
+    const postsCount = await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').count();
     expect(postsCount).toBeGreaterThanOrEqual(40);
     expect(postsCount).toBeLessThanOrEqual(60);
 
@@ -595,11 +595,11 @@ test.describe('Home page tests', () => {
 
     // Wait for new posts to load with dynamic timeout
     await page.waitForFunction(
-      () => document.querySelectorAll('[data-testid="post-list-item"]').length >= 40,
+      () => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= 40,
       { timeout: 10000 }
     );
 
-    const postsCount = await page.locator('[data-testid="post-list-item"]').count();
+    const postsCount = await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').count();
     expect(postsCount).toBeGreaterThanOrEqual(40);
     expect(postsCount).toBeLessThanOrEqual(60);
 
@@ -620,11 +620,11 @@ test.describe('Home page tests', () => {
     await homePage.page.keyboard.down('End');
     // Wait for new posts to load with dynamic timeout
     await page.waitForFunction(
-      () => document.querySelectorAll('[data-testid="post-list-item"]').length >= 40,
+      () => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= 40,
       { timeout: 10000 }
     );
 
-    const postsCount = await page.locator('[data-testid="post-list-item"]').count();
+    const postsCount = await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').count();
     expect(postsCount).toBeGreaterThanOrEqual(40);
     expect(postsCount).toBeLessThanOrEqual(60);
 
@@ -666,11 +666,11 @@ test.describe('Home page tests', () => {
     await homePage.page.keyboard.down('End');
     // Wait for new posts to load with dynamic timeout
     await page.waitForFunction(
-      () => document.querySelectorAll('[data-testid="post-list-item"]').length >= 40,
+      () => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= 40,
       { timeout: 10000 }
     );
 
-    const postsCount = await page.locator('[data-testid="post-list-item"]').count();
+    const postsCount = await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').count();
     expect(postsCount).toBeGreaterThanOrEqual(40);
     expect(postsCount).toBeLessThanOrEqual(60);
 
@@ -695,11 +695,11 @@ test.describe('Home page tests', () => {
     await homePage.page.keyboard.down('End');
     // Wait for new posts to load with dynamic timeout
     await page.waitForFunction(
-      () => document.querySelectorAll('[data-testid="post-list-item"]').length >= 40,
+      () => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= 40,
       { timeout: 10000 }
     );
 
-    const postsCount = await page.locator('[data-testid="post-list-item"]').count();
+    const postsCount = await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').count();
     expect(postsCount).toBeGreaterThanOrEqual(40);
     expect(postsCount).toBeLessThanOrEqual(60);
 
@@ -722,11 +722,11 @@ test.describe('Home page tests', () => {
     await homePage.page.keyboard.down('End');
     // Wait for new posts to load with dynamic timeout
     await page.waitForFunction(
-      () => document.querySelectorAll('[data-testid="post-list-item"]').length >= 40,
+      () => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= 40,
       { timeout: 10000 }
     );
 
-    const postsCount = await page.locator('[data-testid="post-list-item"]').count();
+    const postsCount = await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').count();
     expect(postsCount).toBeGreaterThanOrEqual(40);
     expect(postsCount).toBeLessThanOrEqual(60);
 

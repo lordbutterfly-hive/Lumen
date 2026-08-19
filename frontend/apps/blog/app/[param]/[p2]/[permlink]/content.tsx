@@ -1378,7 +1378,13 @@ const PostContent = () => {
                                   ? t('profile.overflow_menu_label_downvoted')
                                   : t('profile.overflow_menu_label')
                               }
-                              className="flex items-center justify-center"
+                              /* ★ min-h/min-w-[24px] FOR THE HIT TARGET (2026-08-19, WCAG
+                                  2.2 AA 2.5.8). Icon-only, no padding, exactly 16x16.
+                                  Measured live: the wrapper div around this button grows
+                                  from 30x30 to 38x38 (it hugs the button plus its own
+                                  padding), but the post title row it sits in is governed
+                                  by the h1's own height (44px either way) — unchanged. */
+                              className="flex min-h-[24px] min-w-[24px] items-center justify-center"
                               style={hasDownvoted ? { color: 'var(--lm-vote-slate)' } : undefined}
                             >
                               <Icons.moreHorizontal className="h-4 w-4" aria-hidden />
@@ -2029,8 +2035,16 @@ const PostContent = () => {
                       ) : null}
                       <TooltipProvider>
                         <Tooltip>
-                          <TooltipTrigger className="flex items-center" data-testid="comment-respons">
-                            <Link href={postData.url} className="flex cursor-pointer items-center text-muted-foreground transition-colors hover:text-foreground">
+                          {/* ★ min-h-[24px] FOR THE HIT TARGET (2026-08-19, WCAG 2.2 AA
+                              2.5.8). This is the post page's OWN response-count control —
+                              a separate, unfixed sibling of `post-card-comment-tooltip.tsx`
+                              (the feed card's version, already fixed 2026-08-19). Measured
+                              27.6x22; the icon (h-4 w-4) plus text-sm line-height gave 22px
+                              with nothing setting a height. Measured live: the action row
+                              (`comment-respons-header`) stayed 36px, governed by the
+                              "Reply" chip's own h-9 — 0px cost. */}
+                          <TooltipTrigger className="flex min-h-[24px] items-center" data-testid="comment-respons">
+                            <Link href={postData.url} className="flex min-h-[24px] cursor-pointer items-center text-muted-foreground transition-colors hover:text-foreground">
                               {/* ★ SAME SINGLE GLYPH AS THE FEED (owner, 2026-08-18). The
                                   post page carried the identical count-dependent swap that
                                   `post-card-comment-tooltip.tsx` did, so a reader clicking

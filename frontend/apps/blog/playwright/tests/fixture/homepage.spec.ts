@@ -22,7 +22,7 @@ test.describe('Homepage — post list loads', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
 
     // Wait for at least one post to appear
-    const postListItems = page.locator('[data-testid="post-list-item"]');
+    const postListItems = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]');
     await expect(postListItems.first()).toBeVisible({ timeout: 30000 });
 
     // Verify multiple posts loaded

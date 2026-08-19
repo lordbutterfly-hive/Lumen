@@ -37,7 +37,7 @@ test.describe('@flaky Feed pages tests', () => {
 
   test('hot feed displays 20 posts by default', async ({ page }) => {
     await page.goto('/hot');
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.SEARCH_RESULTS });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.SEARCH_RESULTS });
 
     const postsCount = await homePage.getMainTimeLineOfPosts.count();
     expect(postsCount).toBe(PAGINATION.INITIAL_POSTS_COUNT);
@@ -58,7 +58,7 @@ test.describe('@flaky Feed pages tests', () => {
     await page.keyboard.press('End');
 
     await page.waitForFunction(
-      (minPosts) => document.querySelectorAll('[data-testid="post-list-item"]').length >= minPosts,
+      (minPosts) => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= minPosts,
       PAGINATION.MIN_POSTS_AFTER_SCROLL,
       { timeout: TIMEOUTS.HYDRATION }
     );
@@ -103,7 +103,7 @@ test.describe('@flaky Feed pages tests', () => {
     test.skip(!isApiEndpointConfigured(), 'REACT_APP_API_ENDPOINT not configured');
 
     await page.goto('/created');
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.SEARCH_RESULTS });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.SEARCH_RESULTS });
 
     const url = getApiEndpoint();
     const response = await request.post(`${url}/`, {
@@ -145,7 +145,7 @@ test.describe('@flaky Feed pages tests', () => {
     await page.keyboard.press('End');
 
     await page.waitForFunction(
-      (minPosts) => document.querySelectorAll('[data-testid="post-list-item"]').length >= minPosts,
+      (minPosts) => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= minPosts,
       PAGINATION.MIN_POSTS_AFTER_SCROLL,
       { timeout: TIMEOUTS.HYDRATION }
     );
@@ -174,7 +174,7 @@ test.describe('@flaky Feed pages tests', () => {
     test.skip(!isApiEndpointConfigured(), 'REACT_APP_API_ENDPOINT not configured');
 
     await page.goto('/payout');
-    await page.waitForSelector('[data-testid="post-list-item"]', { timeout: TIMEOUTS.SEARCH_RESULTS });
+    await page.waitForSelector('[data-testid="post-list-item"], [data-testid="medium-card"]', { timeout: TIMEOUTS.SEARCH_RESULTS });
 
     const url = getApiEndpoint();
     const response = await request.post(`${url}/`, {
@@ -211,7 +211,7 @@ test.describe('@flaky Feed pages tests', () => {
     await page.keyboard.press('End');
 
     await page.waitForFunction(
-      (minPosts) => document.querySelectorAll('[data-testid="post-list-item"]').length >= minPosts,
+      (minPosts) => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= minPosts,
       PAGINATION.MIN_POSTS_AFTER_SCROLL,
       { timeout: TIMEOUTS.HYDRATION }
     );

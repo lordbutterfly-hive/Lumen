@@ -54,9 +54,9 @@ test('FOL-PROP-01 — Following a user makes their posts appear in /created/my',
   await expect(page.getByTestId('login-btn')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
-  const firstPostBaseline = page.getByTestId('post-list-item').first();
+  const firstPostBaseline = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first();
   await expect(firstPostBaseline).toBeVisible();
-  await expect(firstPostBaseline.getByTestId('post-author')).not.toHaveText(
+  await expect(firstPostBaseline.locator('[data-testid="post-author"], [data-testid="medium-card-author"]')).not.toHaveText(
     FOLLOW_TARGET_USER
   );
 
@@ -75,7 +75,7 @@ test('FOL-PROP-01 — Following a user makes their posts appear in /created/my',
   await expect(page.getByTestId('login-btn')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
-  const firstPost = page.getByTestId('post-list-item').first();
+  const firstPost = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first();
   await expect(firstPost).toBeVisible();
-  await expect(firstPost.getByTestId('post-author')).toHaveText(FOLLOW_TARGET_USER);
+  await expect(firstPost.locator('[data-testid="post-author"], [data-testid="medium-card-author"]')).toHaveText(FOLLOW_TARGET_USER);
 });
