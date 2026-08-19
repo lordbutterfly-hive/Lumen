@@ -1,4 +1,5 @@
 import { AuthMethod } from '../types';
+import { checksumEvmAddress } from '@/blog/lib/lite/auth/evm-verify';
 
 /**
  * Turn a bound wallet credential into the Magi account identifier for that wallet.
@@ -54,7 +55,36 @@ export function walletDid(
   if (!address) return null;
 
   if (method === 'evm_wallet') {
-    return `did:pkh:${EVM_CAIP2}:${address.toLowerCase()}`;
+    // ★ EIP-55 CHECKSUMMED, NOT LOWERCASE (DEFECT FIX 2026-08-19).
+    //
+    // This used to be `address.toLowerCase()`. Signature verification would not
+    // have cared — go-vsc-node compares recovered addresses with
+    // `strings.EqualFold` (lib/dids/eth.go:169) — which is exactly what makes the
+    // bug so expensive: a lowercase DID signs and verifies perfectly while
+    // reading ZERO balance and ZERO resource credits, because the ledger keys on
+    // the exact string and canonicalises to EIP-55
+    // (modules/ledger-system/ledger_system.go:1186,
+    // modules/state-processing/utils.go:61), and `GetBalance` does not normalise.
+    // Since RC *is* the HBD balance (modules/rc-system/rc-system.go:33), every
+    // submit would be refused "not enough RCS available" while the money sat
+    // under the checksummed key — a funding bug wearing a signing bug's clothes.
+    //
+    // It is also a sybil hole, and that half is already written up and confirmed:
+    // case-folding makes `0xAbCd…` and `0xabcd…` two independently-authenticated
+    // callers for ONE key, which defeats one-market-per-creator, the delinquency
+    // gate, and the self-deal filter. See
+    // LUMEN-DOCS/creator-tokens/FINDING-did-case-identity-2026-07-28.md.
+    //
+    // ★ THE FIX IS METHOD-CONDITIONAL, AND MUST STAY THAT WAY. Normalising every
+    // account would CORRUPT Bitcoin identities: base58 (P2PKH/P2SH) is
+    // case-sensitive, so case-folding a valid bip122 DID yields a string that is
+    // no longer that address. Only the eip155 branch is touched; the bip122
+    // branch below preserves case deliberately.
+    //
+    // No migration is needed: `externalRef` stores the raw address and this DID
+    // is derived on every read, and EIP-55 is a pure function of the lowercase
+    // hex — so an already-stored lowercase address checksums to the same result.
+    return `did:pkh:${EVM_CAIP2}:${checksumEvmAddress(address)}`;
   }
   if (method === 'btc_wallet') {
     const caip2 = network === 'testnet' ? BTC_TESTNET_CAIP2 : BTC_MAINNET_CAIP2;
