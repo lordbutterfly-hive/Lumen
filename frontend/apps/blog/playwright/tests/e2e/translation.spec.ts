@@ -6,7 +6,17 @@ import { CommentViewPage } from '../support/pages/commentViewPage';
 import { CommunitiesPage } from '../support/pages/communitiesPage';
 import { CommunitiesExplorePage } from '../support/pages/communitiesExplorerPage';
 import { WitnessPage } from '../support/pages/witnessesPage';
-import { WalletPage } from '../../../../wallet/playwright/tests/support/pages/walletPage';
+/* ★★★ THE `WalletPage` IMPORT IS GONE, AND IT WAS ZEROING THE ENTIRE SUITE
+   (2026-08-19). It pointed at `apps/wallet/playwright/.../walletPage`, and
+   `apps/wallet` DOES NOT EXIST in this fork — `apps/` contains only `blog`, and
+   Lumen's wallet is a feature inside it. Playwright resolves every spec file at
+   collection time, so this one unresolvable require made the whole run report
+   "Total: 0 tests in 0 files" — not a failure, an empty run. That is why the
+   ledger recorded 35 specs as "never run": the suite could not be collected at
+   all, and a green-looking `0 passed` never said so.
+
+   The object was never used: `walletPage.` appears zero times in this file. The
+   declaration and the `new WalletPage(page)` line below are removed with it. */
 import { LoginToVoteDialog } from '../support/pages/loginToVoteDialog';
 
 /**
@@ -49,7 +59,6 @@ test.describe.skip('Translation tests', () => {
   let commentViewPage: CommentViewPage;
   let communitiesPage: CommunitiesPage;
   let witnessPage: WitnessPage;
-  let walletPage: WalletPage;
   let loginDialogEnglish: LoginToVoteDialog;
 
   test.beforeEach(async ({ page, browserName }) => {
@@ -59,7 +68,6 @@ test.describe.skip('Translation tests', () => {
     commentViewPage = new CommentViewPage(page);
     communitiesPage = new CommunitiesPage(page);
     witnessPage = new WitnessPage(page);
-    walletPage = new WalletPage(page);
     test.skip(browserName === 'webkit', 'Automatic test works well on chromium');
   });
 
