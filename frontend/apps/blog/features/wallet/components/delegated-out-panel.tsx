@@ -64,7 +64,7 @@ export default function DelegatedOutPanel({
       {delegatedOpen ? (
         <div className="rounded-card border border-line-9 bg-surface-5 px-4 py-3.5" data-testid="wallet-delegated-out-list">
           <div className="mb-2.5 flex items-center justify-between">
-            <span className="text-caption font-bold text-ink-4">
+            <span className="text-caption font-bold tabular-nums text-ink-4">
               {t('wallet.delegated.accounts_count', { count: delegatees?.length ?? 0 })}
             </span>
             <a

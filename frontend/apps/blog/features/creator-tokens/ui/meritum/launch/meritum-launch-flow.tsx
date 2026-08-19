@@ -352,7 +352,7 @@ const MeritumLaunchFlow: FC = () => {
               longer the right frame for what is on screen.
             */}
             {!live && !landing ? (
-              <div className="text-label font-bold uppercase tracking-label text-meritum-ink-faint">
+              <div className="text-label font-bold uppercase tracking-label tabular-nums text-meritum-ink-faint">
                 {t('meritum_launch.step_indicator', { step: flow.step })}
               </div>
             ) : null}

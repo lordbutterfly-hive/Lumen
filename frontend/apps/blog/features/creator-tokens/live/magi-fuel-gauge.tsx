@@ -119,7 +119,7 @@ export function MagiFuelGauge({
     <div className={`flex items-start gap-3 ${className}`} data-testid="magi-fuel-ok">
       {ring(readiness, short ? SHORT : READY)}
       <div className="text-caption ">
-        <div className="font-semibold text-ink-2">{hbd(balance.hbdBaseUnits)} HBD on Magi</div>
+        <div className="font-semibold tabular-nums text-ink-2">{hbd(balance.hbdBaseUnits)} HBD on Magi</div>
         {short ? (
           <div className="text-ink-warn-3">
             This purchase needs {hbd(costBaseUnits)} HBD — {hbd(costBaseUnits - balance.hbdBaseUnits)} more

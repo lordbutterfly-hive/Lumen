@@ -35,6 +35,8 @@ const ButtonsContainer = ({
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- accepted but
   // inert, see the `hideMute?: boolean` doc comment below.
   hideMute: _hideMute = false,
+  hideBlock = false,
+  followButtonClassName,
   liteTarget = false
 }: {
   username: string;
@@ -64,6 +66,27 @@ const ButtonsContainer = ({
    * `popover-card-data.tsx` is next touched for its own reasons.
    */
   hideMute?: boolean;
+  /**
+   * ★ REMOVES THE BLOCK PILL FROM THIS ROW (owner ruling 2026-08-19: "Block
+   * does not belong in the post header — it's already in the '···' overflow
+   * menu"). Verified in the browser before this was wired in: the post-detail
+   * page's overflow menu (`content.tsx`, `post-header-block-menu-item`)
+   * genuinely renders a working Block/Unblock item — same `useLumenBlock`
+   * target/name-space, a real `POST /api/lite/block`, confirmed round-tripping
+   * Block -> Unblock -> Block against this server. This prop only hides the
+   * REDUNDANT copy that used to sit on this row; the other three callers of
+   * this component (`popover-card-data.tsx`, `followers/content.tsx`,
+   * `followed/content.tsx`) have no overflow-menu equivalent, so they do not
+   * pass this and keep Block exactly as before.
+   */
+  hideBlock?: boolean;
+  /**
+   * Extra classes appended to `FollowButton`'s `className` — see that
+   * component's own doc comment. Only the post-header call site
+   * (`content.tsx`) passes this, to match its Follow pill to the Reblog pill
+   * beside it; every other caller is unaffected.
+   */
+  followButtonClassName?: string;
   user: User;
   variant:
     | 'default'
@@ -182,7 +205,11 @@ const ButtonsContainer = ({
   const block = useLumenBlock(
     username,
     liteTarget ? 'lumen' : 'hive',
-    identity.isLoggedIn && username !== identity.username
+    // `!hideBlock`: when the caller hides this row's Block pill (the post-header
+    // call site, which has its own overflow-menu Block instead), there is
+    // nothing here for this state to drive — skip the request rather than
+    // fetching block state that will never render.
+    identity.isLoggedIn && username !== identity.username && !hideBlock
   );
 
   /**
@@ -354,54 +381,59 @@ const ButtonsContainer = ({
             // chain follow" — see `LumenFollow.unknown`'s doc and `handlerFollow`'s
             // guard above. Disabled + honestly labelled, same pattern as BlockButton.
             unknown={lumen.unknown}
+            className={followButtonClassName}
           />
-          {block.available || block.unknown ? (
-            // `block.unknown`: the read failed rather than "this pair cannot be
-            // blocked" (use-lumen-block.ts). Still mounted so BlockButton can render
-            // its disabled, honestly-labelled state instead of vanishing during a
-            // backend outage — see BlockButton's `unknown` prop.
-            <BlockButton
-              loading={block.busy}
-              variant={variant}
-              isBlocking={block.isBlocking}
-              onClick={handlerBlock}
-              unknown={block.unknown}
-            />
-          ) : null}
-          <AlertDialog open={blockConfirmOpen} onOpenChange={setBlockConfirmOpen}>
-            <AlertDialogContent
-              className="flex flex-col gap-4 sm:max-w-md sm:rounded-panel"
-              data-testid="byline-block-dialog"
-            >
-              <AlertDialogHeader className="gap-2">
-                <AlertDialogTitle>{t('block_confirm_dialog.title', { username })}</AlertDialogTitle>
-                <AlertDialogDescription>{t('block_confirm_dialog.description')}</AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter className="gap-2 sm:flex-row-reverse">
-                <AlertDialogAction
-                  disabled={block.busy}
-                  data-testid="byline-block-confirm"
-                  className="rounded-control bg-destructive text-white hover:bg-destructive/90"
-                  onClick={(event) => {
-                    // Radix closes the dialog on action by default; `preventDefault`
-                    // keeps the close explicit so it cannot race the mutation.
-                    event.preventDefault();
-                    void commitBlock();
-                    setBlockConfirmOpen(false);
-                  }}
+          {!hideBlock && (
+            <>
+              {block.available || block.unknown ? (
+                // `block.unknown`: the read failed rather than "this pair cannot be
+                // blocked" (use-lumen-block.ts). Still mounted so BlockButton can render
+                // its disabled, honestly-labelled state instead of vanishing during a
+                // backend outage — see BlockButton's `unknown` prop.
+                <BlockButton
+                  loading={block.busy}
+                  variant={variant}
+                  isBlocking={block.isBlocking}
+                  onClick={handlerBlock}
+                  unknown={block.unknown}
+                />
+              ) : null}
+              <AlertDialog open={blockConfirmOpen} onOpenChange={setBlockConfirmOpen}>
+                <AlertDialogContent
+                  className="flex flex-col gap-4 sm:max-w-md sm:rounded-panel"
+                  data-testid="byline-block-dialog"
                 >
-                  {block.busy ? (
-                    <CircleSpinner loading size={16} color="#ffffff" />
-                  ) : (
-                    t('block_confirm_dialog.action')
-                  )}
-                </AlertDialogAction>
-                <AlertDialogCancel className="rounded-control" data-testid="byline-block-cancel">
-                  {t('global.cancel')}
-                </AlertDialogCancel>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+                  <AlertDialogHeader className="gap-2">
+                    <AlertDialogTitle>{t('block_confirm_dialog.title', { username })}</AlertDialogTitle>
+                    <AlertDialogDescription>{t('block_confirm_dialog.description')}</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter className="gap-2 sm:flex-row-reverse">
+                    <AlertDialogAction
+                      disabled={block.busy}
+                      data-testid="byline-block-confirm"
+                      className="rounded-control bg-destructive text-white hover:bg-destructive/90"
+                      onClick={(event) => {
+                        // Radix closes the dialog on action by default; `preventDefault`
+                        // keeps the close explicit so it cannot race the mutation.
+                        event.preventDefault();
+                        void commitBlock();
+                        setBlockConfirmOpen(false);
+                      }}
+                    >
+                      {block.busy ? (
+                        <CircleSpinner loading size={16} color="#ffffff" />
+                      ) : (
+                        t('block_confirm_dialog.action')
+                      )}
+                    </AlertDialogAction>
+                    <AlertDialogCancel className="rounded-control" data-testid="byline-block-cancel">
+                      {t('global.cancel')}
+                    </AlertDialogCancel>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </>
+          )}
         </>
       ) : (
         <DialogLogin>

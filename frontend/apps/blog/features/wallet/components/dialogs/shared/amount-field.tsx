@@ -68,7 +68,7 @@ export default function AmountField({
       <button
         type="button"
         onClick={onUseMax}
-        className="w-fit text-caption font-medium text-ink-brand-6 underline underline-offset-2 hover:text-ink-brand-4"
+        className="w-fit text-caption font-medium tabular-nums text-ink-brand-6 underline underline-offset-2 hover:text-ink-brand-4"
       >
         {balanceLabel}
       </button>

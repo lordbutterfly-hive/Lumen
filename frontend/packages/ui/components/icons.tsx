@@ -46,7 +46,14 @@ export const Icons = {
   link: CI.pressLink,
   link2: CI.link2,
   link2Off: CI.link2Off,
-  pencil: CI.pressCompose,
+  /* ★ THE LINE PENCIL, NOT THE FILLED COMPOSE (2026-08-19, owner):
+     "make the pencil more like a pencil writing and not a black brick".
+     `FILLED_PATHS.compose` is two solid slabs — at 22px it reads as a diagonal
+     black brick, which is exactly the complaint. `PATHS.pencil` is a pencil body
+     with a nib cross-line AND a wavy baseline under it (the `q3.3-1.5 6.6 0t6.6 0`
+     stroke), so it reads as a pencil mid-stroke. Rendered both at 120px side by
+     side before choosing. */
+  pencil: CI.pencil,
   sidebarClose: CI.sidebarClose,
   sidebarOpen: CI.sidebarOpen,
   menu: CI.pressMenu,
@@ -64,7 +71,17 @@ export const Icons = {
   comment: CI.pressComment,
   search: CI.pressSearch,
   forward: CI.pressShare,
-  bell: CI.bell,
+  /* ★★★ FILLED, REVERSING THE 2026-08-18 REJECTION (2026-08-19, owner: "fill
+     the bell"). The note below records that the filled bell was rejected on
+     sight and the line cut kept. That decision is now explicitly overturned by
+     the owner, so it is changed here rather than worked around — and the note
+     is corrected instead of left contradicting the code.
+
+     WHY IT CAME BACK: the compose icon beside it is delivered art, so the pair
+     sat in one cluster with two different drawing styles — a solid pencil next
+     to a hairline bell. The pencil is now the LINE cut (see above) and the bell
+     is FILLED, which is the owner's explicit pairing. */
+  bell: CI.pressNotifications,
   reblog: CI.reblog,
   moreHorizontal: CI.pressMore,
   layoutList: CI.layoutList,
@@ -116,9 +133,11 @@ export const Icons = {
      in this object pointed at them, so they were dead code. Owner: "the rest
      are old icons."
 
-     Two of the forty are deliberately still not here:
-       * `notifications` — the filled bell was rejected by the owner on sight;
-         `bell` above stays on the line cut.
+     One of the forty is deliberately still not here (was two — see below):
+       * `notifications` — WAS rejected by the owner on sight on 2026-08-18, and
+         that rejection was REVERSED by the owner on 2026-08-19 ("fill the
+         bell"). `bell` above now points at `pressNotifications`. Left recorded
+         rather than deleted, so the reversal is legible to the next reader.
        * `upvote`/`downvote`/`upvoteCast`/`downvoteCast` — the vote control is
          its own component (votes/blade.tsx) and the owner likes it as it is.
          They also cannot go through `makeFilled`, which hardcodes a fill and so

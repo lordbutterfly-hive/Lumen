@@ -160,7 +160,7 @@ export function WeeklyRecapCard({ className }: WeeklyRecapCardProps) {
       <p className="pr-8 font-sans text-label font-semibold uppercase tracking-label text-ink-14">
         {t('retention.recap.title')}
       </p>
-      <p className="mt-1.5 font-sans text-[17px] font-semibold leading-[26px] text-ink-2" data-testid="retention-weekly-recap-line">
+      <p className="mt-1.5 font-sans text-[17px] font-semibold leading-[26px] tabular-nums text-ink-2" data-testid="retention-weekly-recap-line">
         {segments.join(' · ')}
       </p>
       {/* ★ THE "note" LINE IS DELETED (2026-08-09). It read: "No trophy, no

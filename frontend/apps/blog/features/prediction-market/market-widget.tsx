@@ -58,7 +58,7 @@ export default function MarketWidget() {
           >
             {round.question}
           </Link>
-          <div className="mb-3.5 mt-1.5 font-sans text-caption text-ink-10">
+          <div className="mb-3.5 mt-1.5 font-sans text-caption tabular-nums text-ink-10">
             {t('prediction_market.ref')} ${round.referencePrice.toFixed(3)} · {t('prediction_market.locks_in')}{' '}
             <Countdown closesAt={round.closesAt} className="tabular-nums" />
           </div>

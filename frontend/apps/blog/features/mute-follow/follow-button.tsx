@@ -9,7 +9,8 @@ const FollowButton = ({
   isFollow,
   onClick,
   disabled,
-  unknown = false
+  unknown = false,
+  className
 }: {
   variant:
     | 'default'
@@ -36,14 +37,31 @@ const FollowButton = ({
    * chain cannot represent at all.
    */
   unknown?: boolean;
+  /**
+   * ★ POST-HEADER PILL PARITY (owner ruling 2026-08-19: "the positioning and
+   * outlines are off" on the post detail page). `variant="outlineRed"` gives this
+   * button `border-line-info-5` (slate, rgb(71,85,105)), a transparent
+   * background and the shared `font-medium` (500) base weight, while the Reblog
+   * pill it now sits directly beside (`reblog-trigger.tsx`'s `showLabel` button)
+   * uses `border-border` (rgb(237,237,237)), `bg-background` (white) and no
+   * weight override (400). Appended last, these utilities win over the
+   * variant's via `cn`'s `twMerge` (Button component) without touching
+   * `outlineRed` itself or any other caller of this component that does not
+   * pass a `className`.
+   */
+  className?: string;
 }) => {
   const { t } = useTranslation('common_blog');
 
   return (
     <Button
-      className={clsx('hover:text-destructive', {
-        'text-destructive': disabled
-      })}
+      className={clsx(
+        'hover:text-destructive',
+        {
+          'text-destructive': disabled
+        },
+        className
+      )}
       variant={variant}
       size="sm"
       data-testid="profile-follow-button"

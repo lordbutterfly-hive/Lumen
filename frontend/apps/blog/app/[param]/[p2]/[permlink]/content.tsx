@@ -1583,28 +1583,54 @@ const PostContent = () => {
                         firstPost ? firstPost.blacklists : thisPost ? thisPost.blacklists : postData.blacklists
                       }
                     />
-                    {postFollowTarget ? (
-                      <ButtonsContainer
-                        username={postFollowTarget}
-                        user={user}
-                        variant="outlineRed"
-                        liteTarget={Boolean(litePost?.author)}
-                        hideMute
-                        follow={postAuthorFollow}
-                        mute={postAuthorMute}
-                      />
-                    ) : null}
-                    {/* Reblog Button in Header */}
-                    {!commentSite && (
-                      <ReblogTrigger
-                        author={litePost?.chainAuthor || postData.author}
-                        permlink={postData.permlink}
-                        dataTestidTooltipContent="post-header-reblog-tooltip"
-                        dataTestidTooltipIcon="post-header-reblog-icon"
-                        isReblogged={isReblogged}
-                        showLabel
-                      />
-                    )}
+                    {/* ★ FOLLOW AND REBLOG ARE ONE GROUP (2026-08-19, owner: "move
+                        follow to the right next to reblog"). Removing the Block pill
+                        left three children in a `justify-between` row — UserInfo,
+                        Follow, Reblog — so the free space was shared out BETWEEN them
+                        and Follow landed 69px clear of Reblog rather than beside it.
+                        Wrapping the two actions in their own flex group makes the row
+                        two children again: identity left, actions right, `gap-2`
+                        between the pills. Measured 69px -> 8px. */}
+                    <div className="flex items-center gap-2">
+                      {postFollowTarget ? (
+                        // ★ BLOCK PILL REMOVED FROM THIS ROW (owner ruling 2026-08-19:
+                        // "Block does not belong in the post header — it's already in
+                        // the '···' overflow menu"). Verified live in the browser
+                        // before removing it: opening `post-header-overflow-trigger`
+                        // shows a working `post-header-block-menu-item`
+                        // (Block -> POST /api/lite/block -> Unblock, round-tripped
+                        // against this server) — see `buttons-container.tsx`'s
+                        // `hideBlock` doc comment. Follow now sits directly beside
+                        // Reblog as a result, and `followButtonClassName` matches its
+                        // resting-state border/background/weight to the Reblog pill's
+                        // (`border-border bg-background`, no `outlineRed` slate
+                        // border/transparent background, and `font-normal` instead of
+                        // the shared `font-medium` base) — see FollowButton's own doc
+                        // comment for the token-vs-token comparison.
+                        <ButtonsContainer
+                          username={postFollowTarget}
+                          user={user}
+                          variant="outlineRed"
+                          liteTarget={Boolean(litePost?.author)}
+                          hideMute
+                          hideBlock
+                          followButtonClassName="border-border bg-background font-normal"
+                          follow={postAuthorFollow}
+                          mute={postAuthorMute}
+                        />
+                      ) : null}
+                      {/* Reblog Button in Header */}
+                      {!commentSite && (
+                        <ReblogTrigger
+                          author={litePost?.chainAuthor || postData.author}
+                          permlink={postData.permlink}
+                          dataTestidTooltipContent="post-header-reblog-tooltip"
+                          dataTestidTooltipIcon="post-header-reblog-icon"
+                          isReblogged={isReblogged}
+                          showLabel
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
                 {postIsLoading ? (

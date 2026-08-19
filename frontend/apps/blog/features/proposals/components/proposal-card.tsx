@@ -88,13 +88,13 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable, votesP
             <span aria-hidden="true" className="text-ink-21">
               ·
             </span>
-            <span>{parseChainDate(proposal.start_date).format('MMM D, YYYY')}</span>
+            <span className="tabular-nums">{parseChainDate(proposal.start_date).format('MMM D, YYYY')}</span>
           </div>
 
           {/* Title */}
           <Link href={postHref} data-testid="proposal-card-title">
             <h2 className="font-sans text-[22px] font-semibold leading-[28px] tracking-[-0.01em] text-ink-2">
-              {proposal.subject} <span className="font-normal text-ink-14">#{id}</span>
+              {proposal.subject} <span className="font-normal tabular-nums text-ink-14">#{id}</span>
             </h2>
           </Link>
 
@@ -108,7 +108,7 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable, votesP
             >
               {t(`proposals.status.${proposal.status}`, proposal.status)}
             </span>
-            <span>{formatDateRange(proposal.start_date, proposal.end_date)}</span>
+            <span className="tabular-nums">{formatDateRange(proposal.start_date, proposal.end_date)}</span>
             {/* ★ RAW PERMLINK REMOVED (2026-08-17). This used to print
                 `@creator/permlink` as its own prominent brand-red link — the
                 chain's internal slug, not something a reader needs to see.

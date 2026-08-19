@@ -23,7 +23,7 @@ import { FC, useState } from 'react';
 import { Link } from '@hive/ui';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useLivePortfolio } from '../../live/use-live-portfolio';
-import { usdFromHbd } from '../../live/adapt';
+import { displayHandle, usdFromHbd } from '../../live/adapt';
 import type { Ask, HolderPosition } from '../../types';
 import { usdPrice } from '../../market/format';
 import TokenShell from '../token-shell';
@@ -40,8 +40,8 @@ const HoldingRow: FC<{ h: HolderPosition }> = ({ h }) => (
   <div className="flex flex-wrap items-center gap-4 rounded-card border border-line-9 bg-surface-1 px-5 py-4">
     <span className="h-11 w-11 flex-shrink-0 rounded-control bg-surface-28" />
     <div className="min-w-0 flex-1">
-      <Link href={`/creators/${h.creator}`} className="text-[15px] leading-[24px] font-bold text-ink-2 hover:text-ink-brand-6">
-        @{h.creator}
+      <Link href={`/creators/${displayHandle(h.creator)}`} className="text-[15px] leading-[24px] font-bold text-ink-2 hover:text-ink-brand-6">
+        @{displayHandle(h.creator)}
       </Link>
       {/* No bio line: it is not contract state, and the Hive profile is not read on this route. */}
     </div>
@@ -57,7 +57,7 @@ const HoldingRow: FC<{ h: HolderPosition }> = ({ h }) => (
       {['Buy', 'Sell', 'Send'].map((label) => (
         <Link
           key={label}
-          href={`/creators/${h.creator}?a=${label.toLowerCase()}`}
+          href={`/creators/${displayHandle(h.creator)}?a=${label.toLowerCase()}`}
           className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-semibold text-ink-7 hover:bg-surface-23"
         >
           {label}
@@ -135,7 +135,7 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
     <div className={`rounded-card border bg-surface-1 px-5 py-4 ${reclaimable ? 'border-line-warn-2 bg-surface-warn-4' : 'border-line-9'}`}>
       <div className="flex items-center justify-between gap-3">
         <div className="text-[15px] leading-[24px] font-semibold text-ink-2">
-          Ask · <span className="text-ink-8">@{a.creator}</span>
+          Ask · <span className="text-ink-8">@{displayHandle(a.creator)}</span>
         </div>
         <div className={`text-caption font-bold ${s.cls}`}>{s.label}</div>
       </div>

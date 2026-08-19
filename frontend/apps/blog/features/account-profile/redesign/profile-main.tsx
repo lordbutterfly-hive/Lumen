@@ -12,7 +12,6 @@ import { useSSRObserver, useInitialPosts } from '@/blog/components/observer-prov
 import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/use-following-infinitequery';
 import { useModerationStatus } from '@/blog/features/mute-follow/hooks/use-moderation-status';
 import NoDataError from '@/blog/components/no-data-error';
-import { ProfileLeagueCard } from '@/blog/features/retention/components/profile-league-card';
 import ProfileTokenCard from '@/blog/features/creator-tokens/ui/profile-token-card';
 import PageMasthead from '@/blog/features/layouts/page-masthead';
 import { cn } from '@ui/lib/utils';
@@ -301,7 +300,24 @@ export default function ProfileMain() {
           its own when there is nothing real to show — see the component's doc. */}
       <ProfileTokenCard username={username} isOwnProfile={isOwnProfile} />
 
-      <ProfileLeagueCard username={username} className="mt-5" chainAccount={!profileData._temporary} />
+      {/* ★ THE RANK CARD IS GONE FROM THE PROFILE (2026-08-19, owner):
+          "get rid of that card completely. its enough what we have, it doesnt
+          have to take up so much room. we already have the left navbar with same
+          text and its not needed there."
+
+          It rendered the emblem, "Ember / rank 2 of 9", the rung sentence, a
+          progress bar, "N more active days to Candle" and the whole stats list —
+          roughly half a screen on the owner's 1080p capture, directly above the
+          Posts/Comments tabs. The rank and its position are already on the page
+          twice over: `ProfileLeagueChip` in the identity block and the rank line
+          in the left rail.
+
+          ★ ONLY THE MOUNT IS REMOVED. `ProfileLeagueCard` is left in the tree
+          because four comments elsewhere (use-post-form-actions, use-post-mutation,
+          use-viewer-retention, lite/retention/wire) cite it when explaining which
+          query keys they invalidate, and `RetentionStats` — the block it rendered —
+          is still live inside `LeagueShowcase` and `RanksLadder`. Deleting the file
+          would strand those references without removing anything from the screen. */}
 
       <div className="mt-7">
         <ProfileTabs

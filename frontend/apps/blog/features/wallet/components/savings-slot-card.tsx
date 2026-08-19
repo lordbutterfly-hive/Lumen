@@ -64,7 +64,7 @@ export default function SavingsSlotCard({
           <TokenIcon currency={currency} size={20} />
           <span className="text-[15px] leading-[24px] font-bold text-ink-4">{title}</span>
           <span
-            className={`rounded-control px-2 py-[2px] text-caption font-bold ${
+            className={`rounded-control px-2 py-[2px] text-caption font-bold tabular-nums ${
  chipTone === 'green' ? 'bg-surface-ok-5 text-ink-ok-2' : 'bg-surface-23 text-ink-10'
  }`}
           >

@@ -439,14 +439,38 @@
    Targeted by class, never by `:has()` or an attribute-prefix match on the path
    `d`: the handoff stylesheet matched `svg:has(path[d^="M3.4 7.4"])`, which
    stops working silently the day anyone re-exports the icon. */
+/* ★★★ PHASE 4 RAN, 2026-08-19 — AND THE PATH-DATA VALUES WERE BACKWARDS.
+   The note above says these three were derived from path arithmetic and never
+   measured, and that measuring is the only way to be sure. It was right to
+   doubt them. Measured in real Chrome on `/` and `/topics/[tag]`, using
+   `svg.getBBox()` (exact vector ink extent) mapped through `getScreenCTM()` —
+   which, unlike a child path's `getBoundingClientRect`, DOES carry every
+   ancestor transform, the trap the note above warns about — against a `Range`
+   over the adjacent count's text node:
+
+                        as shipped     with the nudge removed     correct value
+     .iconBlade         +1.25px low          +0.75px low          -0.75px
+     .iconComment       +1.775px low         +0.975px low         -0.975px
+
+   Both icons already sat BELOW the number they pair with, and both nudges
+   pushed them further down — the arithmetic had the sign inverted, so each
+   value made its own alignment worse by exactly its own magnitude. The figures
+   above reproduced to three decimals across three cards with three different
+   digit counts and on two routes, so this is a deterministic property of the
+   shared component, not per-post noise.
+
+   ★ `.iconReblog` IS DELETED RATHER THAN CORRECTED. It had zero usages: grep
+   for it across every .tsx/.ts in apps/blog and packages returns nothing, and
+   the live reblog icon (`medium-post-card.tsx:1247`) carries no module class at
+   all. It was never reachable, so it was never a nudge that needed fixing — it
+   was dead CSS carrying a wrong number, which is worse than no rule, because
+   the next reader would have trusted it. If a reblog icon is ever given this
+   class it needs its OWN measurement; do not copy a value from the two above. */
 .iconBlade {
-  transform: translateY(0.5px);
+  transform: translateY(-0.75px);
 }
 .iconComment {
-  transform: translateY(0.8px);
-}
-.iconReblog {
-  transform: translateY(0.5px);
+  transform: translateY(-0.975px);
 }
 
 /* ── PAYOUT ───────────────────────────────────────────────────────────────

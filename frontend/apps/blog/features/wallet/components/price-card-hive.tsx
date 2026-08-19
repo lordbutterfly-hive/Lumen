@@ -33,7 +33,7 @@ export default function PriceCardHive() {
           ${data.hiveUsd.toFixed(4)}
         </span>
         <span
-          className={`rounded-full px-2.5 py-[3px] text-caption font-bold ${
+          className={`rounded-full px-2.5 py-[3px] text-caption font-bold tabular-nums ${
  changePositive ? 'bg-surface-ok-5 text-ink-ok-2' : 'bg-surface-brand-8 text-ink-brand-6'
  }`}
         >
@@ -41,7 +41,7 @@ export default function PriceCardHive() {
           {data.hiveUsd24hChange.toFixed(1)}%
         </span>
       </div>
-      <div className="mt-1.5 text-caption text-ink-10">
+      <div className="mt-1.5 text-caption tabular-nums text-ink-10">
         {t('wallet.market.hive_via', { btc: data.hiveBtc.toFixed(8) })}
       </div>
       <div className="mt-0.5 text-caption text-ink-14">{t('wallet.market.hive_source')}</div>

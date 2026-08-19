@@ -145,7 +145,7 @@ export default function MarketTab() {
             <MarketStatusChip status={round.status} />
           </div>
           <div className="mt-3 flex flex-wrap gap-x-[22px] gap-y-1 font-sans text-[14px] leading-[22px] text-ink-10">
-            <span>
+            <span className="tabular-nums">
               <strong className="font-semibold text-ink-4">{t('prediction_market.ref')}</strong> ${round.referencePrice.toFixed(3)}
             </span>
             <span>
@@ -177,7 +177,7 @@ export default function MarketTab() {
             ) : round.status === 'locked' ? (
               <p className="font-sans text-sm text-ink-10">{t('prediction_market.locked')}</p>
             ) : (
-              <p className="font-sans text-sm text-ink-2">
+              <p className="font-sans text-sm tabular-nums text-ink-2">
                 {round.status === 'void'
                   ? t('prediction_market.round_voided', { reason: voidReasonText(t, round.voidReason) })
                   : t('prediction_market.settled_at', { price: round.settlementPrice ?? '', asset: round.asset })}

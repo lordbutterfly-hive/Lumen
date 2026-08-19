@@ -1,5 +1,20 @@
 'use client';
 
+/*
+ * ★★★ NOT MOUNTED ANYWHERE AS OF 2026-08-19.
+ *
+ * The owner removed this card from the profile page: "get rid of that card
+ * completely. its enough what we have, it doesnt have to take up so much room.
+ * we already have the left navbar with same text and its not needed there."
+ * The mount was `profile-main.tsx`, and that line is now a comment explaining
+ * the removal.
+ *
+ * The file is kept, not deleted, because four other files cite this component by
+ * name when documenting which React Query keys they invalidate. If you are
+ * looking for what this used to render on screen: nothing does now. Do not
+ * re-mount it without asking.
+ */
+
 import { Link } from '@hive/ui';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useTranslation } from '@/blog/i18n/client';

@@ -215,7 +215,7 @@ export default function WitnessesTable({
             {/* Scroll sentinel. Renders only while rows remain, so it cannot spin at
                 the bottom of a fully-rendered table. */}
             {visibleRows.length < rows.length ? (
-              <div ref={moreRef} className="py-6 text-center font-sans text-caption text-ink-14" data-testid="witnesses-more">
+              <div ref={moreRef} className="py-6 text-center font-sans text-caption tabular-nums text-ink-14" data-testid="witnesses-more">
                 {t('witnesses.showing_count', { shown: visibleRows.length, total: rows.length })}
               </div>
             ) : null}

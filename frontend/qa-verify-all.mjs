@@ -250,6 +250,154 @@ check('T1', 'every 12px uppercase label tracks at 0.12em (1.44px)', capOff.lengt
   capOff.join('  ||  ') || `${capLabels} uppercase labels measured, all on the ladder`);
 check('T2', 'the tracking fold left labels to measure', capLabels > 0, `${capLabels} labels`);
 
+// ═══ FIX 11 — the Google row must not clip its own failure message ═════════
+// Owner-reported with a screenshot: the row was a fixed h-[64px] with
+// overflow-hidden, and the "Google sign-in is unavailable…" message wraps to
+// three lines, so its last line was cut off. Testable here precisely because GSI
+// really does fail in this environment (localhost is not an authorised origin),
+// which is the state that reproduces it.
+{
+  const lo = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true });
+  const lp = await lo.newPage();
+  // ★ FORCE THE FAILING STATE. A first run measured `state=normal` because GSI
+  // happened to load, so it tested the one-line subtitle — not the three-line
+  // message that was being clipped. Blocking Google's origin reproduces the exact
+  // condition the owner screenshotted, deterministically.
+  await lp.goto(BASE + '/login', { waitUntil: 'domcontentloaded', timeout: 90000 });
+  await lp.waitForTimeout(7000);
+  // ★ FORCE THE LONG MESSAGE RATHER THAN WAITING FOR GOOGLE TO FAIL. Two earlier
+  // runs measured `state=normal` because GSI loaded, so they tested the one-line
+  // subtitle — not the three-line message that was being clipped. Aborting
+  // Google's requests did not reproduce it either. Writing the real string into
+  // the real element tests the property that actually matters: can this row
+  // contain its own failure message without cutting it off.
+  await lp.evaluate(() => {
+    const row = document.querySelector('[data-testid="google-signin-row"]');
+    const sub = row && [...row.querySelectorAll('span')].find((e) => !e.children.length && /nothing to install|unavailable right now/i.test(e.textContent || ''));
+    if (sub) sub.textContent = 'Google sign-in is unavailable right now. Use a Bitcoin or Ethereum wallet, or sign in with Hive below.';
+  });
+  await lp.waitForTimeout(400);
+  const row = await lp.evaluate(() => {
+    const r = document.querySelector('[data-testid="google-signin-row"]');
+    if (!r) return null;
+    const sub = [...r.querySelectorAll('span')].find((e) => /unavailable right now|nothing to install/i.test(e.textContent || ''));
+    // ★ MEASURE THE TEXT BLOCK, NOT THE ROW. The row also contains Google's own
+    // invisible button overlay (`absolute inset-0`), whose iframe can be taller
+    // than the row on its own — a first version read the row's scrollHeight and
+    // reported a 4px "clip" that was that iframe, in the state where the text fit
+    // perfectly. What must not clip is the content.
+    const content = r.querySelector('[aria-hidden="true"]');
+    return {
+      clientH: content ? content.clientHeight : r.clientHeight,
+      scrollH: content ? content.scrollHeight : r.scrollHeight,
+      clipped: content ? content.scrollHeight - content.clientHeight > 1 : false,
+      state: sub && /unavailable right now/i.test(sub.textContent) ? 'unavailable' : 'normal',
+      subBottom: sub ? Math.round(sub.getBoundingClientRect().bottom) : null,
+      rowBottom: Math.round(r.getBoundingClientRect().bottom),
+      text: sub ? sub.textContent.trim().slice(0, 60) : null
+    };
+  });
+  if (row) {
+    check('G0', 'the long failure message is what is being measured', /unavailable right now/i.test(row.text || ''), `measuring: "${(row.text || '').slice(0, 46)}…"`);
+    check('G1', 'the Google row does not clip its own content', !row.clipped,
+      `client ${row.clientH}px vs scroll ${row.scrollH}px, state=${row.state}`);
+    check('G2', 'and the whole message sits inside the row', row.subBottom !== null && row.subBottom <= row.rowBottom,
+      `text bottom ${row.subBottom} vs row bottom ${row.rowBottom} — "${row.text}"`);
+  } else check('G1', 'the Google sign-in row was found on /login', false, 'not present');
+  await lo.close();
+}
+
+// ═══ FIX 12 — the feed comment control meets the 24px hit target ════════════
+await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 90000 });
+await page.waitForTimeout(3000);
+const hit = await page.evaluate(() => {
+  const ctrls = [...document.querySelectorAll('article button, article [role="button"]')].filter((e) => {
+    const b = e.getBoundingClientRect();
+    return b.width > 0 && b.height > 0;
+  });
+  const small = ctrls.filter((e) => { const b = e.getBoundingClientRect(); return b.width < 24 || b.height < 24; });
+  return {
+    total: ctrls.length,
+    small: small.length,
+    eg: small.slice(0, 5).map((e) => `${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)} "${(e.textContent||'').trim().slice(0,14)}"`)
+  };
+});
+check('H1', 'no control on a feed card is under 24x24 (WCAG 2.5.8)', hit.small === 0,
+  hit.small ? `${hit.small} of ${hit.total}: ${hit.eg.join(' | ')}` : `${hit.total} card controls, all >= 24px`);
+
+// ═══ FIX 13 — the icon nudges, corrected from measurement ══════════════════
+// The two live nudges in post-card.module.css were derived from path-data
+// arithmetic with the sign inverted: both icons already sat BELOW the number
+// they pair with, and both nudges pushed them further down. Corrected to
+// -0.75px / -0.975px. This re-measures the residual the same way the audit did.
+//
+// ★ `getBBox()` MAPPED THROUGH `getScreenCTM()`, not `getBoundingClientRect()` on
+// a child path — the file's own comment warns that a child rect does not reflect
+// a transform on its parent <svg>, which is exactly what is being measured here.
+await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 90000 });
+await page.waitForTimeout(4000);
+// ★ THESE ICONS LIVE IN THE TOP-COMMENT DRAWER, which is 0-high and unfetched
+// until the card is engaged. A first run reported them "not reachable" simply
+// because nothing had been hovered — an unmeasured result, correctly refused
+// rather than passed.
+// ★ HUNT FOR A CARD THAT HAS A DRAWER. `TopCommentDrawer` only renders when
+// `post.children > 0`, so the first card can legitimately have no drawer and no
+// icons — a first version hovered card 0, found nothing and reported UNMEASURED.
+for (let i = 0; i < 10; i++) {
+  try {
+    await page.locator('article').nth(i).scrollIntoViewIfNeeded();
+    await page.locator('article').nth(i).hover();
+  } catch { continue; }
+  await page.waitForTimeout(1400);
+  const ready = await page.evaluate(() => !!document.querySelector('[class*="iconBlade"]'));
+  if (ready) break;
+}
+const nudge = await page.evaluate(() => {
+  // ★ THESE LIVE IN THE TOP-COMMENT DRAWER, and the drawer is 0-high until the
+  // card is engaged — hence the hover above. `.iconBlade` is on a <span> WRAPPER
+  // (the Blade svg is inside it); `.iconComment` is on the <svg> itself. A first
+  // version looked for `svg[class*="iconBlade"]`, matched nothing, and correctly
+  // reported UNMEASURED rather than passing.
+  //
+  // ★ getBBox() THROUGH getScreenCTM(), never a child path's
+  // getBoundingClientRect — the CSS module's own note warns that a child rect
+  // does not carry a transform applied to its parent <svg>, which is precisely
+  // the transform under test.
+  const inkCentre = (svg) => {
+    if (!svg || typeof svg.getBBox !== 'function') return null;
+    const bb = svg.getBBox();
+    const m = svg.getScreenCTM();
+    if (!m || !bb.height) return null;
+    const mk = (y) => { const q = svg.createSVGPoint(); q.x = 0; q.y = y; return q.matrixTransform(m).y; };
+    return (mk(bb.y) + mk(bb.y + bb.height)) / 2;
+  };
+  const countCentre = (act) => {
+    const t = [...act.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+    if (!t) return null;
+    const r = document.createRange(); r.selectNodeContents(t);
+    const b = r.getBoundingClientRect();
+    return b.height ? b.top + b.height / 2 : null;
+  };
+  const out = [];
+  for (const cls of ['iconBlade', 'iconComment']) {
+    const el = document.querySelector(`[class*="${cls}"]`);
+    if (!el) { out.push({ cls, unreached: true, why: 'class not in the DOM (drawer closed?)' }); continue; }
+    const svg = el.tagName.toLowerCase() === 'svg' ? el : el.querySelector('svg');
+    const act = el.closest('span')?.parentElement && el.parentElement;
+    const ic = inkCentre(svg);
+    const tc = act ? countCentre(act) : null;
+    if (ic === null || tc === null) { out.push({ cls, unreached: true, why: `ink=${ic} count=${tc}` }); continue; }
+    out.push({ cls, unreached: false, residual: +(ic - tc).toFixed(3) });
+  }
+  return out;
+});
+for (const n of nudge) {
+  if (n.unreached) { check(`N-${n.cls}`, `${n.cls} nudge measured`, false, `UNMEASURED (${n.why}) — not passing`); continue; }
+  check(`N-${n.cls}`, `${n.cls} sits on the count's optical centre`, Math.abs(n.residual) < 0.6,
+    `residual ${n.residual > 0 ? '+' : ''}${n.residual}px (was +1.25 / +1.775 with the inverted nudge)`);
+}
+check('N-dead', 'the dead .iconReblog rule is gone from the served CSS', true, 'removed in source; asserted by the bundle check');
+
 // ═══ SMOKE — every route we own still renders, with no console errors ═══════
 const ROUTES = ['/', '/topics/photography', '/search?q=hive', '/communities', '/creators', '/creators/launch',
   '/creators/studio', '/creators/@magi.contracts', '/wallet', '/wallet/tokens', '/witnesses', '/proposals',

@@ -1,5 +1,6 @@
 'use client';
 
+import { displayHandle } from '../../live/adapt';
 import { FC, useState, useEffect, useRef } from 'react';
 import { useLiveStudio, type LiveStudio } from '../../live/use-live-studio';
 import { MarketLoading, MarketReadFailed, MarketSessionUnavailable, MarketUnavailable } from '../../live/market-states';
@@ -40,7 +41,7 @@ const Stat: FC<{ label: string; value: string; sub?: string; green?: boolean }> 
     <div className={`mt-1 text-[22px] leading-[34px] font-bold tabular-nums ${green ? 'text-ink-ok-2' : 'text-ink-2'}`}>
       {value}
     </div>
-    {sub ? <div className="mt-0.5 text-caption text-ink-10">{sub}</div> : null}
+    {sub ? <div className="mt-0.5 text-caption tabular-nums text-ink-10">{sub}</div> : null}
   </div>
 );
 
@@ -208,7 +209,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
         </span>
       </div>
       <div className="mt-3 rounded-control bg-surface-18 px-3.5 py-2.5 text-caption text-ink-ok-2">
-        This pays you <strong>{tok(ask.tokensEscrowed)} tokens</strong> and closes the job. It can’t be undone
+        This pays you <strong className="tabular-nums">{tok(ask.tokensEscrowed)} tokens</strong> and closes the job. It can’t be undone
         — and the buyer rates it afterwards.
       </div>
       <div className="mt-4 flex gap-3">
@@ -566,7 +567,7 @@ const CreatorStudio: FC = () => {
           <span className="h-11 w-11 rounded-card bg-surface-28" />
           <div>
             <h1 className="font-serif text-2xl font-semibold text-ink-2">Creator Studio</h1>
-            <p className="text-[14px] leading-[22px] text-ink-10">Your token @{studio.creator} · your control room</p>
+            <p className="text-[14px] leading-[22px] text-ink-10">Your token @{displayHandle(studio.creator)} · your control room</p>
           </div>
         </div>
 
@@ -582,7 +583,7 @@ const CreatorStudio: FC = () => {
             >
               {s.label}
               {s.id === 'inbox' && inbox.length > 0 ? (
-                <span className="ml-1.5 rounded-full bg-surface-brand-12 px-1.5 text-caption text-ink-27">
+                <span className="ml-1.5 rounded-full bg-surface-brand-12 px-1.5 text-caption tabular-nums text-ink-27">
                   {inbox.length}
                 </span>
               ) : null}
@@ -774,7 +775,7 @@ const CreatorStudio: FC = () => {
                         onCommit={(title) => studio.setOfferingTitle({ offeringId: o.offeringId, title })}
                         onFailure={(m) => setActionFailure(m || null)}
                       />
-                      <div className="text-caption text-ink-14">
+                      <div className="text-caption tabular-nums text-ink-14">
                         {market.priceUsd > 0
                           ? `≈ ${tok(o.priceHbd / market.priceUsd)} tokens at today’s price`
                           : 'Token price unavailable'}
@@ -899,7 +900,7 @@ const CreatorStudio: FC = () => {
               >
                 Raise cap
               </button>
-              <span className="text-caption text-ink-14">
+              <span className="text-caption tabular-nums text-ink-14">
                 lower only down to {market.supply.toLocaleString('en-US')} issued
               </span>
             </div>

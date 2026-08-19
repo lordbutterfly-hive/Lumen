@@ -52,9 +52,29 @@ const PostCardCommentTooltip = ({
     <div className="flex items-center" data-testid="post-children">
       <TooltipProvider>
         <Tooltip>
-          <TooltipTrigger className="flex items-center">
+          {/* ★ `min-h-[24px]` FOR THE HIT TARGET (2026-08-19, WCAG 2.2 AA 2.5.8).
+              A control sweep across 29 routes found ~150 controls under the 24x24
+              minimum, and they were all this one: the comment count rendered
+              40x22 with a single-digit count and 50x22 with two. The 22 came from
+              two directions at once - the icon's own `h-[22px]` passed in from
+              `medium-post-card.tsx`, and the count link inheriting the footer
+              row's `text-body-sm` line-height of 22px - so nothing here ever set
+              a height at all. Its neighbours did: the reblog button and payout
+              chip were both bumped to `h-9` on 2026-08-15; this control was
+              missed.
+
+              ★ THE 2px COSTS NOTHING, AND THAT WAS MEASURED, NOT ASSUMED. The
+              footer row's height is set by its tallest child, the vote pill at
+              50px (a 38px blade plus 6+6 padding), so a 22->24 change never
+              approaches the ceiling. Overriding these three elements to 24px in
+              the live DOM and re-measuring five cards: footer row 50px -> 50px
+              and card height unchanged on every one, with no overlap against the
+              element below. `min-height` rather than a fixed height so the icon
+              and the digits keep their own sizes and flex centring absorbs the
+              difference invisibly. */}
+          <TooltipTrigger className="flex min-h-[24px] items-center">
             <>
-              <Link href={url} className="flex cursor-pointer items-center" aria-label={accessibleLabel}>
+              <Link href={url} className="flex min-h-[24px] cursor-pointer items-center" aria-label={accessibleLabel}>
                 {/* ★ ONE GLYPH, WHATEVER THE COUNT (owner, 2026-08-18). This used to swap
                     between `messagesSquare` (stacked bubbles) above 1 and `comment` (a
                     single bubble) at 0 or 1, so the same control changed shape as a post
@@ -70,7 +90,7 @@ const PostCardCommentTooltip = ({
               </Link>
               <Link
                 href={url}
-                className="flex cursor-pointer items-center pl-1 hover:text-destructive"
+                className="flex min-h-[24px] cursor-pointer items-center pl-1 hover:text-destructive"
                 data-testid="post-card-response-link"
                 aria-label={accessibleLabel}
               >

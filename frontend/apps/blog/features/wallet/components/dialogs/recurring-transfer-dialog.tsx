@@ -193,7 +193,7 @@ export default function RecurringTransferDialog({
         <button
           type="button"
           onClick={() => form.setValue('amount', currencyBalance.toNumber())}
-          className="w-fit text-caption font-medium text-ink-brand-6 underline underline-offset-2 hover:text-ink-brand-4"
+          className="w-fit text-caption font-medium tabular-nums text-ink-brand-6 underline underline-offset-2 hover:text-ink-brand-4"
         >
           {`${t('wallet.dialogs.common.balance')}: ${currencyBalance.toFixed(3)}`}
         </button>

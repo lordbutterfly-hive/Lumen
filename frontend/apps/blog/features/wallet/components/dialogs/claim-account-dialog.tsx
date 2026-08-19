@@ -55,7 +55,7 @@ export default function ClaimAccountDialog({
             {t('wallet.dialogs.claim_account.description')}
           </DialogDescription>
         </DialogHeader>
-        <p className="rounded-control bg-surface-16 px-3 py-2 text-caption text-ink-7">
+        <p className="rounded-control bg-surface-16 px-3 py-2 text-caption tabular-nums text-ink-7">
           {pendingClaimedAccounts > 0
             ? t('wallet.dialogs.claim_account.pending', { count: pendingClaimedAccounts })
             : t('wallet.dialogs.claim_account.pending_none')}

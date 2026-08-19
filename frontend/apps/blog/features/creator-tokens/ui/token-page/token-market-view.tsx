@@ -388,7 +388,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                   changePctWeek null for exactly this reason). An arrow computed
                   from a single current price would be invented. */}
               {market.changePctWeek !== null ? (
-                <span className={`inline-flex items-center gap-1 text-[15px] leading-[24px] font-bold ${market.changePctWeek >= 0 ? 'text-ink-ok-2' : 'text-ink-brand-6'}`}>
+                <span className={`inline-flex items-center gap-1 text-[15px] leading-[24px] font-bold tabular-nums ${market.changePctWeek >= 0 ? 'text-ink-ok-2' : 'text-ink-brand-6'}`}>
                   {market.changePctWeek >= 0 ? '▲' : '▼'} {Math.abs(market.changePctWeek)}%
                 </span>
               ) : null}
@@ -469,7 +469,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
             {market.chart ? (
               <>
                 <PriceChart points={market.chart} />
-                <div className="mt-2 text-center text-caption text-ink-14">
+                <div className="mt-2 text-center text-caption tabular-nums text-ink-14">
                   {market.chart.length} trades · price is set by the curve, not by a last-traded quote
                 </div>
               </>

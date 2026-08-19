@@ -19,7 +19,7 @@ export default function ProposalStatsColumn({ vm }: { vm: ProposalViewModel }) {
   if (proposal.status === 'expired') {
     return (
       <div className="flex flex-col items-end gap-1 font-sans text-caption text-ink-10" data-testid="proposal-stats-expired">
-        <div>{t('proposals.card.ended', { date: parseChainDate(proposal.end_date).format('MMM D, YYYY') })}</div>
+        <div className="tabular-nums">{t('proposals.card.ended', { date: parseChainDate(proposal.end_date).format('MMM D, YYYY') })}</div>
       </div>
     );
   }
@@ -27,7 +27,7 @@ export default function ProposalStatsColumn({ vm }: { vm: ProposalViewModel }) {
   if (proposal.status === 'inactive' && parseChainDate(proposal.start_date).isAfter(dayjs())) {
     return (
       <div className="flex flex-col items-end gap-1 font-sans text-caption text-ink-10" data-testid="proposal-stats-upcoming">
-        <div>{t('proposals.card.starts', { date: parseChainDate(proposal.start_date).format('MMM D, YYYY') })}</div>
+        <div className="tabular-nums">{t('proposals.card.starts', { date: parseChainDate(proposal.start_date).format('MMM D, YYYY') })}</div>
       </div>
     );
   }

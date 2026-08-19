@@ -192,7 +192,7 @@ const BuyModal: FC<{
           // Note it does NOT block on `affordability === 'unknown'`: a failed
           // balance read must not stop a user who may well be able to afford this.
           disabled={!Number.isFinite(usd) || usd <= 0 || overMax || busy || blockedBySpending}
-          className="w-full rounded-card bg-surface-brand-12 py-[15px] text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-brand-16 disabled:opacity-50"
+          className="w-full rounded-card bg-surface-brand-12 py-[15px] text-[15px] leading-[24px] font-bold tabular-nums text-ink-27 hover:bg-surface-brand-16 disabled:opacity-50"
         >
           {busy
             ? 'Confirm in your wallet…'
@@ -288,7 +288,7 @@ const SellModal: FC<{
           <label className="text-caption font-semibold text-ink-10">Amount (tokens)</label>
           <button
             onClick={() => setAmt(String(held))}
-            className="border-0 bg-transparent text-caption font-semibold text-ink-brand-6"
+            className="border-0 bg-transparent text-caption font-semibold tabular-nums text-ink-brand-6"
           >
             {redeem ? 'Redeem all' : 'Sell all'} ({tok(held)})
           </button>
@@ -307,7 +307,7 @@ const SellModal: FC<{
         </div>
         {q.exitFeePct > 0 ? (
           <div className="mb-3.5 rounded-xl border border-line-warn-2 bg-surface-warn-4 px-4 py-3.5">
-            <div className="mb-1.5 text-[14px] leading-[22px] font-bold text-ink-warn-3">
+            <div className="mb-1.5 text-[14px] leading-[22px] font-bold tabular-nums text-ink-warn-3">
               Early-exit fee: {feePctLabel}% now
             </div>
             <p className="mb-2.5 text-caption text-ink-warn-2">
@@ -425,7 +425,7 @@ const SellModal: FC<{
             }
           }}
           disabled={!Number.isFinite(tokens) || tokens <= 0 || held <= 0 || tokens > held || busy}
-          className="w-full rounded-card bg-surface-42 py-[15px] text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-44 disabled:opacity-50"
+          className="w-full rounded-card bg-surface-42 py-[15px] text-[15px] leading-[24px] font-bold tabular-nums text-ink-27 hover:bg-surface-44 disabled:opacity-50"
         >
           {busy
             ? 'Confirm in your wallet…'
@@ -513,7 +513,7 @@ const AskModal: FC<{
           This costs <strong className="tabular-nums text-ink-2">{tok(q.tokens)} tokens</strong> from your
           balance, plus a separate{' '}
           <strong className="tabular-nums text-ink-2">{usdPrice(q.commissionUsd)}</strong> platform
-          commission paid in HBD — {usdWhole(usd)} total. If unanswered within your deadline, you get it all
+          commission paid in HBD — <strong className="tabular-nums text-ink-2">{usdWhole(usd)}</strong> total. If unanswered within your deadline, you get it all
           back.
         </div>
         <label className="mb-2 block text-caption font-semibold text-ink-10">Answer due within</label>
@@ -554,7 +554,7 @@ const AskModal: FC<{
             }
           }}
           disabled={!canAsk || busy}
-          className="w-full rounded-card bg-surface-42 py-[15px] text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-44 disabled:opacity-50"
+          className="w-full rounded-card bg-surface-42 py-[15px] text-[15px] leading-[24px] font-semibold tabular-nums text-ink-27 hover:bg-surface-44 disabled:opacity-50"
         >
           {busy
             ? 'Confirm in your wallet…'
@@ -607,7 +607,7 @@ const SendModal: FC<{
           <label className="text-caption font-semibold text-ink-10">Amount (tokens)</label>
           <button
             onClick={() => setAmt(String(held))}
-            className="border-0 bg-transparent text-caption font-semibold text-ink-brand-6"
+            className="border-0 bg-transparent text-caption font-semibold tabular-nums text-ink-brand-6"
           >
             Max ({tok(held)})
           </button>
@@ -647,7 +647,7 @@ const SendModal: FC<{
             }
           }}
           disabled={!valid || busy}
-          className="w-full rounded-card bg-surface-42 py-[15px] text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-44 disabled:opacity-50"
+          className="w-full rounded-card bg-surface-42 py-[15px] text-[15px] leading-[24px] font-bold tabular-nums text-ink-27 hover:bg-surface-44 disabled:opacity-50"
         >
           {busy
             ? 'Confirm in your wallet…'

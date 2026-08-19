@@ -58,7 +58,7 @@ export default function StakedHiveBlock({
             <span className="rounded-control bg-surface-23 px-2 py-[2px] text-caption font-bold text-ink-8">
               {t('wallet.staked.badge')}
             </span>
-            <span className="rounded-control bg-surface-ok-5 px-2 py-[2px] text-caption font-bold text-ink-ok-2">
+            <span className="rounded-control bg-surface-ok-5 px-2 py-[2px] text-caption font-bold tabular-nums text-ink-ok-2">
               {t('wallet.staked.apr', { apr: hpApr.toFixed(2) })}
             </span>
           </div>
@@ -71,7 +71,7 @@ export default function StakedHiveBlock({
               data-testid="wallet-power-down-notice"
             >
               <Icons.warning className="h-[15px] w-[15px] shrink-0 text-ink-warn-7" />
-              <span className="flex-1">
+              <span className="flex-1 tabular-nums">
                 {t('wallet.staked.power_down_notice', {
                   days: powerDown.daysUntilNext,
                   amount: powerDown.nextPaymentHp.toFixed(3),

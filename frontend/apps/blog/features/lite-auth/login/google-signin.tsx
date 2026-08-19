@@ -446,11 +446,22 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
       data-testid="google-signin-row"
       /* No `aria-disabled` and no dimming: the row stays fully live. `unavailable` is a
          HINT that our geometry probe saw nothing, not a verdict that Google is down. */
-      className="relative mb-1 h-[64px] w-full overflow-hidden rounded-card border border-line-11 bg-surface-1 focus-within:border-line-brand-10"
+      /* ★ `min-h`, NOT `h` (2026-08-19, owner-reported with a screenshot).
+         This was a fixed `h-[64px]` with `overflow-hidden` — sized for the
+         one-line subtitle ("No wallet, no extension, nothing to install."). The
+         B3 swap below replaces that subtitle IN PLACE with a much longer
+         sentence ("Google sign-in is unavailable right now. Use a Bitcoin or
+         Ethereum wallet, or sign in with Hive below."), which wraps to three
+         lines at this width and had its last line clipped off by the fixed
+         height. So the row explaining the failure was itself broken, and the
+         reader was told to "sign in with Hive bel" — the instruction was the
+         part that got cut. The row now grows to fit its own message; 64px stays
+         as the floor so the normal state is pixel-identical. */
+      className="relative mb-1 min-h-[64px] w-full overflow-hidden rounded-card border border-line-11 bg-surface-1 focus-within:border-line-brand-10"
     >
       <div
         aria-hidden="true"
-        className="pointer-events-none flex h-full w-full items-center gap-3 px-4 text-left"
+        className="pointer-events-none flex min-h-[64px] w-full items-center gap-3 px-4 py-2 text-left"
       >
         <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-control bg-surface-1">
           <svg width="22" height="22" viewBox="0 0 48 48" aria-hidden>
