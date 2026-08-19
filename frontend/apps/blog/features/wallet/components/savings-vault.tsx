@@ -56,7 +56,7 @@ export default function SavingsVault({
   return (
     <section id="savings-vault">
       <div className="mb-4 mt-[34px] flex items-center gap-3.5">
-        <span className="text-label font-bold uppercase tracking-[0.09em] text-ink-14">
+        <span className="text-label font-bold uppercase tracking-label text-ink-14">
           {t('wallet.savings.label')}
         </span>
         <div className="h-px flex-1 bg-surface-27" />

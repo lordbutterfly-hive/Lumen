@@ -58,13 +58,13 @@ export default function NotFound() {
             vocabulary the rest of the identity uses, and is aria-hidden because
             the headline beside it already says the same thing. */}
         <EmptyStateIllustration name="not-found" size={148} className="mb-6" />
-        <p className="font-sans text-label font-bold uppercase tracking-[0.14em] text-ink-brand-6">
+        <p className="font-sans text-label font-bold uppercase tracking-label text-ink-brand-6">
           {COPY.code}
         </p>
         <h1 className="mt-3 max-w-[16ch] font-serif text-[34px] font-bold leading-[44px] text-ink-2">
           {COPY.title}
         </h1>
-        <p className="mt-4 max-w-[46ch] font-serif text-[15px] leading-[26px] text-ink-10">
+        <p className="mt-4 max-w-[46ch] font-serif text-[15px] leading-[26px] italic text-ink-10">
           {COPY.body}
         </p>
         <div className="mt-7 flex flex-wrap items-center gap-3">

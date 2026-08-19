@@ -476,7 +476,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
             ) : (
               <div className="flex h-full min-h-[160px] flex-col justify-center rounded-card border border-dashed border-line-11 px-5 py-6 text-center">
                 <div className="text-[14px] leading-[22px] font-semibold text-ink-10">No price history yet</div>
-                <p className="mt-1 text-caption text-ink-14">
+                <p className="mt-1 text-caption italic text-ink-14">
                   The price above is live from the curve. A chart appears once this market has traded more than once.
                 </p>
               </div>
@@ -523,7 +523,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
 
       {/* 4. Services */}
       <div className="mb-4 rounded-panel border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
-        <div className="mb-3.5 text-label font-bold uppercase tracking-[0.05em] text-ink-14">What you can do with the token</div>
+        <div className="mb-3.5 text-label font-bold uppercase tracking-label text-ink-14">What you can do with the token</div>
         <div className="mb-3.5 flex flex-col gap-2.5">
           {market.services.map((sv) => (
             <div

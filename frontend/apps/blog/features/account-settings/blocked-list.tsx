@@ -181,7 +181,7 @@ const BlockedList = ({ username }: { username: string }) => {
           {t('settings_page.blocked_accounts_error')}
         </p>
       ) : !data || data.length === 0 ? (
-        <p className="mt-4 rounded-card bg-surface-15 px-4 py-5 text-center text-[14px] leading-[22px] text-ink-10">
+        <p className="mt-4 rounded-card bg-surface-15 px-4 py-5 text-center text-[14px] leading-[22px] italic text-ink-10">
           {t('settings_page.blocked_accounts_empty')}
         </p>
       ) : (

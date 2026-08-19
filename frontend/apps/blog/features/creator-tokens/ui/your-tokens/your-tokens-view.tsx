@@ -321,7 +321,7 @@ const YourTokensView: FC = () => {
                     unreachable. Your tokens are safe on-chain; each creator’s own token page still shows your balance.
                   </Unavailable>
                 ) : p.holdings.length === 0 ? (
-                  <p className="py-8 text-center font-serif text-sm text-ink-14">
+                  <p className="py-8 text-center font-serif text-sm italic text-ink-14">
                     You don’t hold any Meritum yet. Browse creators and buy in to start.
                   </p>
                 ) : (
@@ -345,7 +345,7 @@ const YourTokensView: FC = () => {
                   creator’s own page still shows the asks made to them.
                 </Unavailable>
               ) : p.asks.length === 0 ? (
-                <p className="py-8 text-center font-serif text-sm text-ink-14">
+                <p className="py-8 text-center font-serif text-sm italic text-ink-14">
                   No asks yet. Spend your tokens on a creator’s service from their token page.
                 </p>
               ) : (

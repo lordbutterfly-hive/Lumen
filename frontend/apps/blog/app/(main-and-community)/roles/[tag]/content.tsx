@@ -107,13 +107,13 @@ const Content = ({ community }: { community: string }) => {
                 `hover:bg-muted/50` (the same slate ramp), not to add a new
                 hover effect on a header nobody meaningfully hovers. */}
             <TableRow className="border-b border-line-9 bg-surface-10 hover:bg-surface-10">
-              <TableHead className="px-4 py-3 text-label font-semibold uppercase tracking-[0.14em] text-ink-10">
+              <TableHead className="px-4 py-3 text-label font-semibold uppercase tracking-label text-ink-10">
                 {t('communities.account')}
               </TableHead>
-              <TableHead className="w-48 px-4 py-3 text-label font-semibold uppercase tracking-[0.14em] text-ink-10">
+              <TableHead className="w-48 px-4 py-3 text-label font-semibold uppercase tracking-label text-ink-10">
                 {t('communities.role')}
               </TableHead>
-              <TableHead className="px-4 py-3 text-label font-semibold uppercase tracking-[0.14em] text-ink-10">
+              <TableHead className="px-4 py-3 text-label font-semibold uppercase tracking-label text-ink-10">
                 {t('communities.title')}
               </TableHead>
             </TableRow>

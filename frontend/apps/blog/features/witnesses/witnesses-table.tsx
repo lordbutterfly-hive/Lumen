@@ -48,7 +48,7 @@ const FIRST_PAGE = 60;
 const PAGE_STEP = 60;
 
 const HEADER_CLASS =
-  'grid items-center gap-3 px-3.5 py-3 font-sans text-label font-bold uppercase tracking-[0.04em] text-ink-14';
+  'grid items-center gap-3 px-3.5 py-3 font-sans text-label font-bold uppercase tracking-label text-ink-14';
 
 export default function WitnessesTable({
   rows,

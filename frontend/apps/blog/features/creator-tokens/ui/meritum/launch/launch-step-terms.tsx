@@ -98,7 +98,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
       <dl className="mt-6 flex flex-col gap-px bg-meritum-line-card">
         {terms.map((term) => (
           <div key={term.id} className="flex flex-wrap items-baseline gap-x-[22px] gap-y-1.5 bg-meritum-card px-0.5 py-[15px]">
-            <dt className="flex-none basis-[164px] text-label font-bold uppercase tracking-[0.13em] text-meritum-ink-3">
+            <dt className="flex-none basis-[164px] text-label font-bold uppercase tracking-label text-meritum-ink-3">
               {term.label}
             </dt>
             <dd className="min-w-0 flex-1 basis-60 font-serif text-14 text-meritum-ink-2">{term.value}</dd>

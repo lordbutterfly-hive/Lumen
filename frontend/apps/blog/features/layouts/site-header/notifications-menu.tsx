@@ -294,7 +294,7 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
             </div>
           ) : lumenItems.length > 0 ? null : (
             <div
-              className="flex flex-col items-center justify-center px-4 py-10 text-center text-sm text-ink-10"
+              className="flex flex-col items-center justify-center px-4 py-10 text-center text-sm italic text-ink-10"
               data-testid="notifications-popover-empty"
             >
               {t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}

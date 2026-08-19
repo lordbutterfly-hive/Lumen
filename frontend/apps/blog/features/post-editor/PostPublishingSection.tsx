@@ -108,7 +108,7 @@ export function PostPublishingSection({
       {/* Same one section-label treatment as the metadata card, which is the
           masthead eyebrow. See PostMetadataSection.tsx for the reasoning (C-14).
           ★ `ink-brand-6`, not `#c0392b` (2026-08-14). */}
-      <span className="text-label font-semibold uppercase tracking-[0.14em] text-ink-brand-6/70 dark:text-ink-brand-6">
+      <span className="text-label font-semibold uppercase tracking-label text-ink-brand-6/70 dark:text-ink-brand-6">
         {t("submit_page.publishing_section")}
       </span>
 

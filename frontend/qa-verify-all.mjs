@@ -175,6 +175,81 @@ check('W1', 'witness taglines carry break-words', wit.cells > 0 && wit.wrapped =
 check('W2', 'the risky input is still present (so this is not a vacuous pass)', wit.risky > 0, `${wit.risky} cells with an unbreakable token`);
 check('W3', 'and none overflow', wit.over === 0, `${wit.over} overflowing`);
 
+// ═══ FIX 9/10 — italic policy §4, and the uppercase tracking fold ══════════
+//
+// §4 is TWO-SIDED: italic marks editorial voice (empty-state prose, end-of-list
+// lines, captions, the page-header second phrase) and is NEVER used for interface
+// state (buttons, nav, table cells, numbers, timestamps, uppercase tracked labels,
+// status text). Both directions are checked, because only removing italic would
+// pass trivially on a page that has none.
+const ITALIC_ROUTES = ['/', '/witnesses', '/this-route-does-not-exist', '/@lordbutterfly'];
+const italicFindings = [];
+let italicSeen = 0;
+let capLabels = 0;
+const capOff = [];
+for (const r of ITALIC_ROUTES) {
+  try {
+    await page.goto(BASE + r, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await page.waitForTimeout(2500);
+    await page.evaluate(() => document.fonts.ready);
+  } catch { continue; }
+  const res = await page.evaluate(() => {
+    const isThirdParty = (e) => !!e.closest('[class*="nsm7Bb"], iframe');
+    const all = [...document.querySelectorAll('body *')].filter((e) => {
+      const s = getComputedStyle(e);
+      return s.display !== 'none' && s.visibility !== 'hidden' && !isThirdParty(e);
+    });
+    const describe = (e) =>
+      `${e.tagName.toLowerCase()}${e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/).slice(0, 2).join('.') : ''} "${(e.textContent || '').trim().slice(0, 34)}"`;
+
+    // ── the §4 NEVER list, as things a browser can actually see ──────────────
+    const italic = all.filter((e) => /italic|oblique/.test(getComputedStyle(e).fontStyle));
+    const forbidden = italic.filter((e) => {
+      const s = getComputedStyle(e);
+      const t = (e.textContent || '').trim();
+      if (e.closest('button, [role="button"], nav, th, td, [role="tab"]')) return true;
+      if (s.textTransform === 'uppercase') return true;          // uppercase tracked label
+      if (/^[\s$€£+\-0-9.,%]+$/.test(t) && t.length > 0) return true; // a number of any kind
+      if (/^\d+\s+(second|minute|hour|day|week|month|year)s?\s+ago$/i.test(t)) return true;
+      return false;
+    });
+
+    // ── the uppercase label ladder: 12px labels must all track at 0.12em ─────
+    const caps = all.filter((e) => {
+      const s = getComputedStyle(e);
+      if (s.textTransform !== 'uppercase') return false;
+      if (Math.round(parseFloat(s.fontSize)) !== 12) return false;
+      return (e.textContent || '').trim().length > 0 && !e.children.length;
+    });
+    const off = caps.filter((e) => Math.abs(parseFloat(getComputedStyle(e).letterSpacing) - 1.44) > 0.05);
+
+    return {
+      italic: italic.length,
+      forbidden: forbidden.slice(0, 6).map(describe),
+      forbiddenN: forbidden.length,
+      caps: caps.length,
+      off: off.map((e) => `${describe(e)} @ ${getComputedStyle(e).letterSpacing}`).slice(0, 6),
+      offN: off.length,
+      is404Italic: location.pathname === '/this-route-does-not-exist'
+        ? (() => { const p = [...document.querySelectorAll('p')].find((x) => /link may be wrong|couldn|not found|doesn/i.test(x.textContent || '')); return p ? /italic/.test(getComputedStyle(p).fontStyle) : null; })()
+        : null
+    };
+  });
+  italicSeen += res.italic;
+  capLabels += res.caps;
+  if (res.forbiddenN) italicFindings.push(`${r}: ${res.forbiddenN} — ${res.forbidden.join(' | ')}`);
+  if (res.offN) capOff.push(`${r}: ${res.offN} — ${res.off.join(' | ')}`);
+  if (res.is404Italic !== null) {
+    check('I2', 'the 404 body renders italic (spec §5.12)', res.is404Italic === true, `italic=${res.is404Italic}`);
+  }
+}
+check('I1', 'nothing on the §4 NEVER list renders italic', italicFindings.length === 0,
+  italicFindings.join('  ||  ') || `${italicSeen} italic elements seen across ${ITALIC_ROUTES.length} routes, none forbidden`);
+check('I3', 'italic is actually in use (so I1 is not passing on an empty set)', italicSeen > 0, `${italicSeen} italic elements`);
+check('T1', 'every 12px uppercase label tracks at 0.12em (1.44px)', capOff.length === 0,
+  capOff.join('  ||  ') || `${capLabels} uppercase labels measured, all on the ladder`);
+check('T2', 'the tracking fold left labels to measure', capLabels > 0, `${capLabels} labels`);
+
 // ═══ SMOKE — every route we own still renders, with no console errors ═══════
 const ROUTES = ['/', '/topics/photography', '/search?q=hive', '/communities', '/creators', '/creators/launch',
   '/creators/studio', '/creators/@magi.contracts', '/wallet', '/wallet/tokens', '/witnesses', '/proposals',

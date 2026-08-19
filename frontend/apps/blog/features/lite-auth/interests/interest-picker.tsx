@@ -299,7 +299,7 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
               {sectionsOf(options).map((section) => (
                 <div key={section.group || 'all'} className="mb-5">
                   {section.group ? (
-                    <h3 className="mb-2 font-sans text-label font-semibold uppercase tracking-[0.08em] text-ink-14">
+                    <h3 className="mb-2 font-sans text-label font-semibold uppercase tracking-label text-ink-14">
                       {section.group}
                     </h3>
                   ) : null}

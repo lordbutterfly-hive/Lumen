@@ -56,7 +56,7 @@ const EditorOptionsBar: FC<EditorOptionsBarProps> = ({
           `dark:text-ink-brand-6` restore-to-full-strength override — 70% of
           the brand ink cannot clear 4.5:1 on any dark-enough ground, which
           the flat literal could never account for. */}
-      <span className="text-label font-semibold uppercase tracking-[0.14em] text-ink-brand-6/70 dark:text-ink-brand-6">
+      <span className="text-label font-semibold uppercase tracking-label text-ink-brand-6/70 dark:text-ink-brand-6">
         {EDITOR_OPTIONS_LABEL}
       </span>
 

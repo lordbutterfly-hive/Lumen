@@ -102,7 +102,7 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable, votesP
           <div className="mt-[11px] flex flex-wrap items-center gap-2.5 font-sans text-caption text-ink-14">
             <span
               className={cn(
-                'rounded-control px-2.5 py-[3px] text-label font-bold uppercase tracking-[0.03em]',
+                'rounded-control px-2.5 py-[3px] text-label font-bold uppercase tracking-label',
                 statusClass
               )}
             >

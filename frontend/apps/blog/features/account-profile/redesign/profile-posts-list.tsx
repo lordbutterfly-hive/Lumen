@@ -63,7 +63,7 @@ export default function ProfilePostsList({
 
   if (entries.length === 0) {
     return (
-      <p className="py-12 text-center font-sans text-sm text-muted-foreground">
+      <p className="py-12 text-center font-sans text-sm italic text-muted-foreground">
         {t('user_profile.no_blogging_yet', { username })}
       </p>
     );

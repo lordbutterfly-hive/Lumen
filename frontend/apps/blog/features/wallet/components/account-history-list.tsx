@@ -33,7 +33,7 @@ export default function AccountHistoryList({ username }: { username: string }) {
   return (
     <section id="wallet-history" className="mt-[34px]">
       <div className="mb-4 flex items-center gap-3.5">
-        <span className="text-label font-bold uppercase tracking-[0.09em] text-ink-14">
+        <span className="text-label font-bold uppercase tracking-label text-ink-14">
           {t('wallet.history.label')}
         </span>
         <div className="h-px flex-1 bg-surface-27" />

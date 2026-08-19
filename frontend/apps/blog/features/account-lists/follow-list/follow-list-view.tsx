@@ -176,7 +176,7 @@ export default function FollowListView({
                   : 'user_profile.lists.empty_following_title'
               )}
             </p>
-            <p className="font-sans text-caption font-normal text-[#6b7280]">
+            <p className="font-sans text-caption font-normal italic text-[#6b7280]">
               {loadFailed
                 ? t('user_profile.lists.list_unavailable_body')
                 : t(

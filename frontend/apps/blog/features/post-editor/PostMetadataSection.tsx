@@ -53,7 +53,7 @@ export function PostMetadataSection({
           ★ `ink-brand-6`, not `#c0392b` (2026-08-14): matches the masthead's
           own token, including its `dark:text-ink-brand-6` restore for the 70%
           opacity's contrast floor. */}
-      <span className="text-label font-semibold uppercase tracking-[0.14em] text-ink-brand-6/70 dark:text-ink-brand-6">
+      <span className="text-label font-semibold uppercase tracking-label text-ink-brand-6/70 dark:text-ink-brand-6">
         {t("submit_page.metadata_section")}
       </span>
 

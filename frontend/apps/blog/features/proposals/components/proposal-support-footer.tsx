@@ -167,7 +167,7 @@ export default function ProposalSupportFooter({
       </span>
       {showIndeterminate ? (
         <span
-          className="font-sans text-caption italic text-ink-14"
+          className="font-sans text-caption text-ink-14"
           data-testid="proposal-support-unavailable"
         >
           {/* Pending says it is still looking; unavailable says it failed. */}

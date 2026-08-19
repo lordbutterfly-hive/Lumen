@@ -134,7 +134,7 @@ export default function ProposalsContent({
                 the same `tab` the list itself filters by, so it never asserts
                 something about the tab's contents that isn't true for entries with a
                 different status. */}
-            <div className="mb-1.5 font-sans text-label font-bold uppercase tracking-[0.05em] text-ink-14">
+            <div className="mb-1.5 font-sans text-label font-bold uppercase tracking-label text-ink-14">
               {t(`proposals.list.heading.${tab}`)}
             </div>
             <ProposalList

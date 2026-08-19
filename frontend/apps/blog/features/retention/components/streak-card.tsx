@@ -129,7 +129,7 @@ export function StreakCard({ className, surface = 'rail' }: { className?: string
         </span>
 
         <div className="min-w-0 flex-1">
-          <p className="font-sans text-label font-semibold uppercase tracking-[0.06em] text-ink-14">
+          <p className="font-sans text-label font-semibold uppercase tracking-label text-ink-14">
             {t('retention.streak.title')}
           </p>
           <p

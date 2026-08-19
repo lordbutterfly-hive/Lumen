@@ -66,7 +66,7 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
             <span aria-hidden="true" className="text-caption leading-none text-ink-brand-6">
               ◈
             </span>
-            <span className="font-sans text-label font-bold uppercase tracking-[0.14em] text-ink-brand-6">
+            <span className="font-sans text-label font-bold uppercase tracking-label text-ink-brand-6">
               {COPY.eyebrow}
             </span>
             <span className="font-sans text-caption font-semibold text-ink-12">@{username}</span>

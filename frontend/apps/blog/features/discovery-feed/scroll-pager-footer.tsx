@@ -56,14 +56,30 @@ export default function ScrollPagerFooter({
   const { ref, atPageCap, loadMore, backToTop, retry } = sentinel;
 
   if (!hasNextPage) {
+    /*
+     * ★ ITALIC ON THE END-OF-LIST LINE ONLY (2026-08-19, spec §4).
+     *
+     * "Nothing more to load" is one of §4's two worked examples of the editorial
+     * voice italic is for, and all five infinite lists reach it through this one
+     * branch — so the three call sites ("That's everything for now.", "You're all
+     * caught up", the end-of-topic line) are covered here rather than three times
+     * over in their own classNames.
+     *
+     * ★ IT IS NOT ADDED TO `className` ITSELF, AND THAT IS THE WHOLE POINT. The
+     * same `className` is reused below for the loading sentinel and the retry
+     * state, which are INTERFACE STATE, and §4's NEVER list covers status text.
+     * Italicising the shared value would have italicised "Loading…" and the retry
+     * copy along with it — the exact confusion the rule of thumb exists to stop.
+     */
     if (!endLabel) return null;
+    const endClassName = `${className} italic`;
     return endIllustration ? (
-      <div className={`flex flex-col items-center gap-2 ${className}`} data-testid={testId ? `${testId}-end` : undefined}>
+      <div className={`flex flex-col items-center gap-2 ${endClassName}`} data-testid={testId ? `${testId}-end` : undefined}>
         <EmptyStateIllustration name="end-of-feed" size={96} />
         <span>{endLabel}</span>
       </div>
     ) : (
-      <p className={className} data-testid={testId ? `${testId}-end` : undefined}>
+      <p className={endClassName} data-testid={testId ? `${testId}-end` : undefined}>
         {endLabel}
       </p>
     );

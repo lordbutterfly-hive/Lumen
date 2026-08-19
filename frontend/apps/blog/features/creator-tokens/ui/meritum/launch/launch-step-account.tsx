@@ -49,7 +49,7 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
           </div>
           <div className="font-serif text-caption text-meritum-ink-muted">{t('meritum_launch.bound_sub')}</div>
         </div>
-        <span className="ml-auto text-label font-bold uppercase tracking-[0.16em] text-meritum-ink-muted">
+        <span className="ml-auto text-label font-bold uppercase tracking-label text-meritum-ink-muted">
           {t('meritum_launch.bound_badge')}
         </span>
       </div>

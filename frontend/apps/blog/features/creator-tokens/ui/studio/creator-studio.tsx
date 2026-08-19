@@ -661,7 +661,7 @@ const CreatorStudio: FC = () => {
           <div className="flex flex-col gap-2.5">
             {inbox.length === 0 ? (
               <Card>
-                <p className="py-6 text-center font-serif text-sm text-ink-14">
+                <p className="py-6 text-center font-serif text-sm italic text-ink-14">
                   No requests waiting. Nice — you’re all caught up.
                 </p>
               </Card>
@@ -758,7 +758,7 @@ const CreatorStudio: FC = () => {
                   </button>
                 </div>
               ) : studio.offerings.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-line-11 px-4 py-5 text-center text-caption text-ink-14">
+                <p className="rounded-xl border border-dashed border-line-11 px-4 py-5 text-center text-caption italic text-ink-14">
                   You haven’t posted any services yet. Add one below and it appears on your token page.
                 </p>
               ) : (

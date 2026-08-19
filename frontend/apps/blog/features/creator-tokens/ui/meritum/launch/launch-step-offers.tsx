@@ -93,10 +93,10 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
   return (
     <div className="mt-step">
       <div className="mt-[26px] flex items-baseline gap-[18px] px-5 pb-0.5">
-        <span className="min-w-0 flex-1 text-label font-bold uppercase tracking-[0.14em] text-meritum-ink-faint">
+        <span className="min-w-0 flex-1 text-label font-bold uppercase tracking-label text-meritum-ink-faint">
           {t('meritum_launch.offers_col_skill')}
         </span>
-        <span className="flex-none basis-[106px] text-right text-label font-bold uppercase tracking-[0.14em] text-meritum-ink-faint">
+        <span className="flex-none basis-[106px] text-right text-label font-bold uppercase tracking-label text-meritum-ink-faint">
           {t('meritum_launch.offers_col_price')}
         </span>
       </div>
@@ -156,7 +156,7 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
 
       <div className="mt-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2.5">
-          <span className="text-label font-bold uppercase tracking-[0.14em] text-meritum-ink-muted">
+          <span className="text-label font-bold uppercase tracking-label text-meritum-ink-muted">
             {t('meritum_launch.split_heading')}
           </span>
           <span className="text-caption text-meritum-ink-faint">{t('meritum_launch.split_note')}</span>
@@ -197,7 +197,7 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
         and it is one click away, so this points at it instead.
       */}
       <div className="mt-[26px] border-t border-meritum-line-card pt-[22px]">
-        <div className="text-label font-bold uppercase tracking-[0.14em] text-meritum-ink-3">
+        <div className="text-label font-bold uppercase tracking-label text-meritum-ink-3">
           {t('meritum_launch.work_heading')}
         </div>
         <p className="mt-2 max-w-[48ch] font-serif text-caption text-meritum-ink-muted">{t('meritum_launch.work_body')}</p>
