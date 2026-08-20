@@ -65,7 +65,6 @@ import {
   reserveCoverageRatio,
   settlementRateBaseUnits,
   BLOCKS_PER_DAY,
-  spotRateBaseUnits,
   displayPricePerTokenBaseUnits,
   splitFaceBaseUnits,
   type AskRateEstimate
@@ -146,7 +145,7 @@ import {
   toU64,
   unknownMarket,
   STATE_CLOSED, assertTransferDestination } from './vsc/reads';
-import { spotPriceUsd } from '../market/curve';
+import { displayPriceUsd } from '../market/curve';
 
 // Real, on-chain implementation. Reads live contract state via GraphQL
 // getStateByKeys (plumbing + decoding in ./vsc/reads.ts); builds custom_json
@@ -295,7 +294,12 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
           out.set(c, { status: 'unknown', priceUsd: null });
           continue;
         }
-        out.set(c, { status: 'ready', priceUsd: spotPriceUsd(supply) });
+        // ★ displayPriceUsd, NOT spotPriceUsd. `spotRateBaseUnits` is the contract's
+        // ORACLE rate and is 0 by design at supply 0, so a brand-new market would
+        // render "$0.00" — the token advertised as free on the screen that sells it.
+        // The display price is Area(S+1) - Area(S): what the next buyer is charged,
+        // which is what a price next to a Buy control has to mean.
+        out.set(c, { status: 'ready', priceUsd: displayPriceUsd(supply) });
       }
     }
     return out;
@@ -1223,7 +1227,13 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         // index says — the index can lag, and chain state is the record.
         if (toU64(state[kRegisteredAt(r.creator)]) === 0) return null;
         const supply = toU64(state[kSupply(r.creator)]);
-        const priceBaseUnits = spotRateBaseUnits(supply);
+        // ★ THE DISPLAY PRICE, NOT THE ORACLE RATE (QA, 2026-08-20). This called
+        // `spotRateBaseUnits`, which returns 0 at supply 0 by design — so a
+        // freshly launched market showed "Token $0.00" on the directory while its
+        // OWN page correctly showed $1.01, at the same moment. The detail page was
+        // fixed for exactly this once; the grid is a second call site the fix
+        // never reached. `contract-math.ts` warns against confusing the two.
+        const priceBaseUnits = displayPricePerTokenBaseUnits(supply);
         const faceBaseUnits = toU64(state[kFace(r.creator)]);
         return {
           creator: r.creator,

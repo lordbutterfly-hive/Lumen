@@ -14,6 +14,7 @@ import { LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { StreakCardNarrow } from '@/blog/features/retention/components/streak-card';
+import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
 
 /**
  * A TOPIC IS THE FEED, FILTERED — not a different, older-looking page.
@@ -151,6 +152,7 @@ export default function TopicShell({ tag }: { tag: string }) {
     'community_title' as keyof typeof shown[number]
   ] as string | undefined;
   const displayName = isCommunityId && communityName ? communityName : tag;
+  const { prices } = useTokenPriceChips(shown.map((e) => e.author));
 
   return (
     <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
@@ -267,7 +269,11 @@ export default function TopicShell({ tag }: { tag: string }) {
           </div>
         ) : (
           shown.map((entry) => (
-            <MediumPostCard key={`${entry.author}-${entry.permlink}`} post={entry} />
+            <MediumPostCard
+                key={`${entry.author}-${entry.permlink}`}
+                post={entry}
+                price={prices.get(entry.author)}
+              />
           ))
         )}
 

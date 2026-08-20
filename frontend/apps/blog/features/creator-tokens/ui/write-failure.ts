@@ -1,3 +1,4 @@
+import { walletErrorMessage } from '@/blog/features/lite-auth/wallet/appkit';
 import { scrubSensitiveData } from '@ui/lib/sentry-scrub';
 
 /**
@@ -49,6 +50,14 @@ import { scrubSensitiveData } from '@ui/lib/sentry-scrub';
 const CODE_PREFIX = /^(CREATOR_TOKENS_[A-Z_]+):\s*/;
 
 /**
+ * The failures `walletErrorMessage` knows how to phrase. Matched on the raw
+ * text rather than on an error class, because these travel as plain messages
+ * from the wallet adapter and arrive here as ordinary Errors.
+ */
+const WALLET_ERROR_TOKENS =
+  /no_evm_signer|no_bitcoin_signer|wallet_connect_unconfigured|wallet_connect_timeout|wallet_connect_cancelled|taproot_unsupported|bad_signature_shape|User rejected|\b4001\b/i;
+
+/**
  * Non-coded errors thrown deliberately by the data source / view layer whose
  * message is already a complete, accurate, user-facing sentence. Matched on a
  * distinctive fragment so a reworded message degrades to the neutral fallback
@@ -89,6 +98,15 @@ export function writeFailureMessage(err: unknown, fallback: string): string {
   for (const known of KNOWN_PLAIN_MESSAGES) {
     if (raw.includes(known)) return scrubSensitiveData(raw);
   }
+
+  // ★ WALLET ERRORS ALREADY HAVE HUMAN TRANSLATIONS — USE THEM (QA, 2026-08-20).
+  // A failed buy showed the user "That buy didn't go through. (no_evm_signer)":
+  // a raw internal token, in red, with no explanation and no way forward. The
+  // sentence for exactly that condition already existed in `walletErrorMessage`
+  // ("That wallet can't sign messages. Try another wallet.") and this path
+  // simply never called it. Now that a wallet can sign a creator-token write,
+  // wallet-shaped failures reach here routinely, which they did not before.
+  if (WALLET_ERROR_TOKENS.test(raw)) return walletErrorMessage(err);
 
   // Unrecognised: almost always a wallet rejection or a node error. Say what
   // is certainly true (it did not go through), then hand over the actual text

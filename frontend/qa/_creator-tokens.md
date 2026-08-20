@@ -1,7 +1,10 @@
-# Creator tokens — shared context for this round (2026-08-07)
+# Creator tokens — shared context (2026-08-20)
 
 Read this **in addition to** `_system.md`, `_honesty.md`, `_browser.md`, `_report.md`.
-Everything here was verified by the coordinator today, on chain, before you started.
+Everything below was verified on chain by the coordinator today, immediately before you started.
+
+★ **REWRITTEN 2026-08-20.** The previous version said "no browser can sign" and named
+ONE market. Both are now false and would have sent you hunting the wrong things.
 
 ## What is actually deployed
 
@@ -10,19 +13,42 @@ Everything here was verified by the coordinator today, on chain, before you star
 | contract id | `vsc1BcaD8JrwJPAAN5cU1cHKCBdZrd7jz2WGt8` |
 | network | Magi **testnet** (`vsc-testnet`) |
 | GraphQL | `https://magi-test.techcoderx.com/api/v1/graphql` |
-| owner | `hive:magi.contracts` (init confirmed on chain) |
-| code CID | `bafkreid34kd4qml6jnydkgd3w2lfiuuqsohs22fxtntvj4v2adjehxofku` (== a fresh build of the source in this repo) |
+| owner | `hive:magi.contracts` |
+| code CID | `bafkreic2nphgjnwte32nkwix7bga2hjcwx5hfo6n5xrgllczpt7ldfu4pi` |
 
-**One real market exists:** creator `magi.contracts` — face 25.000 HBD, cap
-100,000 tokens, **supply 10, reserve 10,434 base units**, registered at block
-5,480,298. Visit it at `/creators/magi.contracts`. Any other handle genuinely has
-no market.
+## Twelve markets exist, not one
 
-★**ROUND 2 UPDATE (2026-08-07).** Round 1's findings have been FIXED and the
-market now has real state (10 tokens were bought on chain by the coordinator,
-since no browser can sign). Verified live against the curve: price **$1.09**,
-market cap **$11**, floor **$1.04**, a $25 service quotes **21 tokens**. If you
-see `$0.00` anywhere, that is a REGRESSION and is your highest-value finding.
+Ten Hive-account creators, live, each with two offerings and supply 31:
+`lumen.aria` `lumen.beat` `lumen.cole` `lumen.dana` `lumen.echo`
+`lumen.finn` `lumen.gray` `lumen.hana` `lumen.iris` `lumen.jude`
+
+Plus a market owned by a WALLET identity, which is the new thing:
+`/creators/did:pkh:eip155:1:0xB41fEE7B3a034a474ae8E0C41DA8B211b73A980B`
+
+Any handle not in that list genuinely has no market, and the app should say so
+plainly rather than erroring.
+
+## ★ WALLETS CAN NOW SIGN. This is the headline change.
+
+An Ethereum or Bitcoin wallet is a first-class Magi account: it can register a
+market, buy, sell, ask and create offerings, signing with its own key. No Hive
+account, no Hive keys. Proven on chain today.
+
+**So:** "this account has no Hive keys and cannot sign a transaction" is a WRONG
+message wherever a wallet is connected, and a Buy control disabled for a
+wallet-connected user is a BUG. Both were correct yesterday. Report either.
+
+**Deliberately still Hive-only:** LAUNCHING a market from the UI. A wallet user is
+told they need a full Hive account. That is a product rule, not a defect — do not
+report it as one. DO report it if the wording claims a *technical* reason, because
+the contract accepts a wallet creator.
+
+## Known-broken today, do not re-report
+
+- Google sign-in returns 403 on this origin (Cloud Console, owner's).
+- Price and holdings appear ~1.1s after the page paints; they are read from chain
+  client-side. Slow is expected. WRONG is not.
+- A 68-character DID renders as a shortened `0xB41f…980B` handle. That is intended.
 
 **Fixed in round 1 — re-verify rather than re-report, and hunt what each fix may
 have broken next door:**

@@ -7,6 +7,7 @@ import NoDataError from '@/blog/components/no-data-error';
 import MediumPostCard from '@/blog/features/discovery-feed/medium-post-card';
 import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import { useAccountEntries } from './hooks/use-account-entries';
+import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
 
 /**
  * Posts tab body — reuses the discovery-feed MediumPostCard (the "if it
@@ -41,6 +42,8 @@ export default function ProfilePostsList({
   // entries.length meaning "posts you will actually see".
   const nsfwPreference = useNsfwPreference();
   const entries = filterVisiblePosts(rawEntries, nsfwPreference);
+  /* One market read for the whole page — see the same call in feed-tabs.tsx. */
+  const { prices } = useTokenPriceChips(entries.map((e) => e.author));
 
   // ★★★ AN ERROR ON PAGE 2 MUST NOT DELETE PAGE 1.
   //
@@ -72,7 +75,11 @@ export default function ProfilePostsList({
   return (
     <div>
       {entries.map((entry) => (
-        <MediumPostCard key={`${entry.author}-${entry.permlink}`} post={entry} />
+        <MediumPostCard
+            key={`${entry.author}-${entry.permlink}`}
+            post={entry}
+            price={prices.get(entry.author)}
+          />
       ))}
       {/* ★ THE PAGE CAP (2026-08-13) — same control, same reasoning, as the
           Comments tab beside it. See

@@ -26,6 +26,7 @@ import InterestPicker from '@/blog/features/lite-auth/interests/interest-picker'
 import DialogLogin from '@/blog/components/dialog-login';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useOffline } from '@/blog/components/offline-guard';
+import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
 
 // TODO: move to i18n
 const LABELS = {
@@ -424,6 +425,10 @@ function ForYouFeed() {
   // every render, so it reads the list computed above rather than being derived
   // after an early return.
   const marks = useRankMarks(shown.map((e) => e.author));
+  /* One market read for the whole page (3 state keys per creator, chunked at 33
+     inside the data source). Threaded to the cards exactly like `useRankMarks`
+     beside it — a per-card fetch is the N+1 that cost this feed 30s a load. */
+  const { prices } = useTokenPriceChips(shown.map((e) => e.author));
 
   // Posts the silent poll found that are not on the reader's page yet. Filtered the
   // same way the list is, so the button can never offer posts that would render as
@@ -895,6 +900,10 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   // query flips state. Derived from the raw pages rather than the NSFW-filtered list
   // below: hiding a post is a display decision and must not change hook behaviour.
   const marks = useRankMarks((data?.pages.flat() ?? []).map((e) => e.author));
+  /* One market read for the whole page (3 state keys per creator, chunked at 33
+     inside the data source). Threaded to the cards exactly like `useRankMarks`
+     beside it — a per-card fetch is the N+1 that cost this feed 30s a load. */
+  const { prices } = useTokenPriceChips((data?.pages.flat() ?? []).map((e) => e.author));
 
   // ★ EVERY DERIVED LIST IS BUILT ABOVE THE GUARDS, same reason as ForYouFeed:
   // the empty-answer guard right below reads it, and a hook may never run

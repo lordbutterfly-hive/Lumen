@@ -19,6 +19,7 @@ import MediumPostCard from '@/blog/features/discovery-feed/medium-post-card';
 import { useRankMarks } from '@/blog/features/retention/hooks/use-rank-marks';
 import NoDataError from '@/blog/components/no-data-error';
 import { PER_PAGE } from './lib/utils';
+import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
 
 // Fallbacks for the same reason every label on this page carries one: SSR
 // resolves no translations in this app (see search-input.tsx), and the result
@@ -143,6 +144,10 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
   const nsfwPreference = useNsfwPreference();
   const rawEntries = (data?.pages ?? []).flatMap((page) => page ?? []);
   const marks = useRankMarks(rawEntries.map((entry) => entry.author));
+  /* One market read for the whole page (3 state keys per creator, chunked at 33
+     inside the data source). Threaded to the cards exactly like `useRankMarks`
+     above/below it — a per-card fetch is the N+1 that cost this feed 30s a load. */
+  const { prices } = useTokenPriceChips(rawEntries.map((entry) => entry.author));
 
   // Filter at the LIST, so the count below means "matches you will actually
   // see" and the scroll sentinel is not sitting in a zero-height list.
@@ -237,6 +242,7 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
         <div data-testid="search-results-list">
           {entries.map((entry) => (
             <MediumPostCard
+            price={prices.get(entry.author)}
               key={`${entry.author}-${entry.permlink}`}
               post={entry}
               mark={marks.get(entry.author?.toLowerCase() ?? '')}

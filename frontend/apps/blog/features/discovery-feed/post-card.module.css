@@ -931,3 +931,180 @@
      light one — on dark the ramp inverts, so the quieter ink is the darker. */
   --pc-ink-faint: #7d746b;
 }
+
+/* ── IDENTITY CLUSTER (N1) ────────────────────────────────────────────────
+   `handoff_identity_pill/SPEC.md`, option N1. Face outside the pill, pill
+   tucked underneath it. See `identity-pill.tsx` for the click model and the
+   tab-stop ruling; this file owns only the shapes.
+
+   ★ THREE NEW LITERALS, and they are genuinely new — I checked. The warm pill
+   tints (#FAEEEB fill, #EBD3CE border, #F5E2DC hover) sit in the same family as
+   the `--lum-*` ramp added by the illumination pass but match none of them
+   (--lum-2 is #FBEAE2, one step off the fill). The spec names them explicitly,
+   so they ship as written rather than being bent onto a near-neighbour. The two
+   values that DO have tokens use them: the brand red is `--pc-brand`, the near
+   black is `--pc-ink-strong`. */
+.idCluster {
+  display: inline-flex;
+  align-items: center;
+  /* No gap: the overlap below is negative space, not positive. */
+}
+.idFace {
+  display: flex;
+  flex: none;
+  /* Above the pill, so the pill's flat edge is hidden behind the circle. */
+  position: relative;
+  z-index: 1;
+  border-radius: 999px;
+}
+.idPill {
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  /* ★ THE OVERLAP. -16px pulls the pill's left edge under the face's right
+     edge. The spec's arithmetic: a 38px pill against a 40px circle needs
+     >= 13.75px before the square corner clears the curve; 16px keeps 2.2px of
+     margin. Do not reduce without redoing that sum. */
+  margin-left: -16px;
+  /* Left end cut flat and hidden by the face; right end fully rounded. */
+  border-radius: 0 999px 999px 0;
+  background: #faeeeb;
+  border: 1px solid #ebd3ce;
+  /* No left border: the face covers where it would be, and drawing it would
+     put a hairline through the middle of the circle. */
+  border-left: 0;
+  /* The face's own left half sits over the pill, so the pill's content has to
+     start clear of it: 16px of overlap plus the padding the handle wants. */
+  padding-left: 24px;
+  padding-right: 4px;
+  transition: background-color var(--pc-t-fast) var(--pc-ease);
+}
+.idHandle {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 10px 0 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--pc-ink-strong);
+  white-space: nowrap;
+  border-radius: 999px;
+}
+/* ★ EACH HALF LIGHTS ALONE (spec §"The two click targets"). The hover is on the
+   HALVES, never on `.idPill`, because a pill that lights as one object tells the
+   reader it has one destination — and it has two. */
+.idHandle:hover {
+  background: #f5e2dc;
+}
+.idSeam {
+  width: 1px;
+  align-self: stretch;
+  margin: 7px 0;
+  background: #ebd3ce;
+  flex: none;
+}
+.idMarket {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 4px 0 10px;
+  border-radius: 0 999px 999px 0;
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+.idMarket:hover {
+  background: #f5e2dc;
+}
+.idPriceGlyph {
+  color: var(--pc-brand);
+}
+.idPriceFigure {
+  color: var(--pc-ink-strong);
+  font-variant-numeric: tabular-nums;
+}
+/* 51x28 chip. Fills solid brand with white text on hover — the one element in
+   the cluster that inverts, because it is the only one that commits money. */
+.idBuy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 51px;
+  height: 28px;
+  flex: none;
+  border-radius: 999px;
+  background: #fffefc;
+  border: 1px solid #ebd3ce;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--pc-ink-strong);
+  transition:
+    background-color var(--pc-t-fast) var(--pc-ease),
+    color var(--pc-t-fast) var(--pc-ease),
+    border-color var(--pc-t-fast) var(--pc-ease);
+}
+.idMarket:hover .idBuy {
+  background: var(--pc-brand);
+  border-color: var(--pc-brand);
+  color: #fff;
+}
+/* §10-style focus, matching the drawer's: the ring goes on whichever half is
+   focused, so a keyboard reader sees the same two targets a pointer does. */
+.idHandle:focus-visible,
+.idMarket:focus-visible {
+  outline: 2px solid var(--pc-brand);
+  outline-offset: -2px;
+}
+
+/* ── RUBRIC ───────────────────────────────────────────────────────────────
+   Community name, or the post's first tag when there is no community. The spec
+   gives it its own type: 13px, 700, .12em, uppercase, brand. */
+.rubric {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pc-brand);
+}
+
+/* ── DATE, INLINE AFTER THE TITLE ─────────────────────────────────────────
+   The spec is emphatic that this is NOT pinned to a corner: "it must sit next
+   to the headline ... do not float or absolutely-position it, that reads as the
+   date having run away from the title." So it is an inline sibling of the title
+   text with a 10px gap, and it wraps with the headline rather than escaping it. */
+/* The headline text itself, clamped. See the note at its call site: the clamp
+   cannot live on the element that also contains the date, or the date is what
+   gets truncated.
+
+   ★★ THE RESERVED GUTTER IS WHAT KEEPS THE DATE ON THE LAST LINE. Clamping the
+   title alone fixed the clipping (6 of 20 two-line headlines had lost their date)
+   and immediately caused a worse problem: with no room left on line two, the date
+   wrapped onto a THIRD line and cards went from 283px to as much as 337px.
+   Measured, both times.
+
+   `calc(100% - 92px)` holds back just over the widest date the feed produces
+   ("16 hours ago" measured 72px, plus the 10px gap), so the clamped title never
+   reaches the right edge and the date always has somewhere to sit. It costs the
+   headline ~92px of measure on both lines, which is the price of the date being
+   legible on every card rather than most of them. Same technique as the drawer's
+   counts gutter in the §7 block above, and for the same reason. */
+.titleText {
+  /* ★ INLINE-box, not box. `-webkit-box` is BLOCK-level, so it claimed the full
+     line and the date wrapped underneath it no matter how much width was
+     reserved — measured, twice, at 337px cards. `-webkit-inline-box` clamps
+     identically but sits inline, which is the whole point: the date has to be
+     able to share the last line with it. */
+  display: -webkit-inline-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: calc(100% - 92px);
+}
+.titleDate {
+  margin-left: 10px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--pc-ink-quiet);
+  white-space: nowrap;
+}

@@ -38,7 +38,6 @@ import { QuillMark } from '@/blog/features/post-rendering/quill-mark';
 import DetailsCardHover from '@/blog/features/list-of-posts/details-card-hover';
 import { LeagueByline } from '@/blog/features/retention/components/league-byline';
 import type { RankMark } from '@/blog/features/retention/hooks/use-rank-marks';
-import TokenAuthorChip from '@/blog/features/creator-tokens/ui/token-author-chip';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { isNsfwPost, useNsfwPreference } from '@/blog/lib/nsfw';
 import { isNotePost } from '@/blog/lib/short-post-note';
@@ -47,6 +46,8 @@ import { classifyBlacklist } from '@/blog/lib/moderation/blacklist-reason';
 import { isOwnModerationHide } from '@/blog/lib/muted-reasons';
 import cardStyles from './post-card.module.css';
 import TopCommentDrawer from './top-comment-drawer';
+import IdentityPill from './identity-pill';
+import type { MarketPrice } from '@/blog/features/creator-tokens/types';
 import { useVisibleDiscussion } from './lib/use-visible-discussion';
 import {
   DWELL_MS,
@@ -76,7 +77,23 @@ const LABELS = {
  * components (`VotesComponentWrapper`, `ReblogDialog`, the card tooltips) so
  * voting/reblog behaviour stays identical to the classic feed.
  */
-export default function MediumPostCard({ post, mark }: { post: Entry; mark?: RankMark }) {
+export default function MediumPostCard({
+  post,
+  mark,
+  price
+}: {
+  post: Entry;
+  mark?: RankMark;
+  /*
+   * This author's creator-token market, read ONCE PER PAGE by whichever list
+   * mounts these cards — exactly like `mark` above, and for the same reason.
+   * `useTokenPriceChips(authors)` asks the chain for the whole page in one
+   * request; a card that fetched its own would restore the N+1 that cost this
+   * feed 30 seconds a load in August. Optional so a list that has not wired it
+   * yet still renders (handle-only pill), rather than failing to compile.
+   */
+  price?: MarketPrice;
+}) {
   const { t } = useTranslation('common_blog');
   // ★ `sessionUnavailable` added alongside the pre-existing `user` (2026-08-16,
   // downvote-in-overflow-menu). Both feed `tierPending` below — see that
@@ -525,6 +542,43 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
   const nsfwShown = !isNsfw || nsfwPreference === 'show' || revealed;
 
   const href = `/${post.category}/@${displayAuthor}/${post.permlink}`;
+
+  /*
+   * ★ THE RUBRIC SLOT (handoff_identity_pill/SPEC.md, "Rubric fallback").
+   *
+   * "If a post has no community, the rubric slot shows the post's first tag
+   * instead, capitalized, no `#` prefix. If there is no tag either, the rubric is
+   * omitted (do not leave an empty styled slot)."
+   *
+   * ★ THE FALLBACK TAG IS NOT ALLOWED TO BE THE COMMUNITY. On a community post
+   * `category` IS the community id (`hive-100067`), so a naive
+   * `tags[0] ?? category` would print a raw community id as a "tag" on exactly
+   * the posts that already have a proper community name — and it looks like a
+   * bug, because it is one. The community branch wins first, and the fallback
+   * skips any tag matching the category for the same reason.
+   *
+   * `label` is what a reader sees, `tag` is what the URL uses; keeping them
+   * apart is the same split `routeHandle`/`displayHandle` makes in creator-tokens,
+   * and for the same reason — one of them is capitalized and the other must not be.
+   */
+  const rubric = ((): { label: string; tag: string } | null => {
+    if (post.community && post.community_title) {
+      return { label: post.community_title, tag: post.community };
+    }
+    let tags: unknown = undefined;
+    try {
+      const meta = typeof post.json_metadata === 'string' ? JSON.parse(post.json_metadata) : post.json_metadata;
+      tags = (meta as { tags?: unknown } | null)?.tags;
+    } catch {
+      // A post with unparseable metadata still gets a rubric from its category.
+    }
+    const first = Array.isArray(tags)
+      ? tags.find((t) => typeof t === 'string' && t.trim() && t !== post.category)
+      : undefined;
+    const raw = (typeof first === 'string' ? first : post.category || '').trim().replace(/^#/, '');
+    if (!raw) return null;
+    return { label: raw.charAt(0).toUpperCase() + raw.slice(1), tag: raw };
+  })();
   const dek = getPostSummary(post.json_metadata, post.body);
   /**
    * ★ A NOTE IS NOT AN ARTICLE (2026-08-14, composer audit finding 7 / §9.6).
@@ -801,23 +855,14 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
 
       {/* Byline row */}
       <div className="flex flex-wrap items-center gap-2 text-body-sm text-ink-action">
-        <Link href={`/@${displayAuthor}`} className="shrink-0" data-testid="medium-card-avatar">
-          {/* ★ STRAIGHT TO THE IMAGE HOST (2026-08-10). This one line was 29 requests
-              to our own `/api/avatar` per feed page, 6.0-6.3s each on a warm server,
-              19 of them still unreturned 45s in — see the long note on
-              `getUserAvatarDirectUrl`. The proxy stays as the error path, which is
-              what keeps lite accounts and dead profile images working.
-              ★ Now the app's one avatar component (F6 item 22, converged) — same
-              direct→proxy chain this card originated, applied everywhere else too. */}
-          <UserAvatarImg username={displayAuthor} pixelSize={26} alt={displayAuthor} />
-        </Link>
-        <Link
-          href={`/@${displayAuthor}`}
-          className="font-semibold text-ink-4 hover:underline"
-          data-testid="medium-card-author"
-        >
-          {displayAuthor}
-        </Link>
+        {/* ★★★ THE IDENTITY CLUSTER (handoff_identity_pill/SPEC.md, option N1, the
+            owner's choice). Face, handle, price and Buy are ONE object now — this
+            replaces the separate 26px avatar and handle link that sat here AND the
+            `TokenAuthorChip` further along this row. Two components each deciding
+            "does this author have a token" was the real duplication; the visual
+            doubling was only the symptom. See `identity-pill.tsx` for the click
+            model, the 16px overlap arithmetic and the tab-stop ruling. */}
+        <IdentityPill handle={displayAuthor} price={price} />
         {/*
           ★★★ THE QUILL BELONGS IN THE BYLINE (2026-08-18, owner-reported: "no
           feather quill on my profile feed").
@@ -894,29 +939,28 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             `LeagueByline` renders nothing below Torch, so this is silent by default
             rather than noisy. */}
         {mark ? <LeagueByline tier={mark.tier} rankNumber={mark.rankNumber} /> : null}
-        {post.community && post.community_title ? (
-          <>
-            {/* ★ A COMMUNITY IS SHOWN AS A TAG (owner ruling, 2026-08-07).
-                Lumen has no community PAGES — no moderators, roles or subscribe —
-                so this must never link to the old community layout. But the name
-                is real provenance and a useful way to browse, so it links to that
-                community's TAG FEED: the same Lumen feed, filtered. */}
-            <span>{LABELS.in}</span>
-            <Link href={`/topics/${post.community}`} className="font-semibold text-ink-brand-6 hover:underline">
-              {post.community_title}
-            </Link>
-          </>
+        {/* ★ THE RUBRIC. Spec: the community name, and where a post has no community
+            "the rubric slot shows the post's first tag instead, capitalized, no `#`
+            prefix. If there is no tag either, the rubric is omitted (do not leave an
+            empty styled slot)."
+
+            It still links to the community's TAG FEED rather than a community page —
+            Lumen has no community pages (owner ruling 2026-08-07) and this spec does
+            not change that. The tag fallback links to its own topic feed for the same
+            reason: same browse surface, filtered.
+
+            ★ THE DATE HAS LEFT THIS ROW. It now sits inline after the title, which is
+            where the spec puts it and why it is not here any more. */}
+        {rubric ? (
+          <Link href={`/topics/${rubric.tag}`} className={cardStyles.rubric} data-testid="medium-card-rubric">
+            {rubric.label}
+          </Link>
         ) : null}
-        <span aria-hidden="true" className="text-ink-21">
-          ·
-        </span>
-        <TimeAgo date={post.created} />
 
         {/* Creator-token chip (design brief §2) — owner ruling: a token price
             indicator belongs next to every post and every name. Renders
             nothing when the author has no token, or the answer isn't known
             yet; see the component's own doc. */}
-        <TokenAuthorChip handle={displayAuthor} />
 
         {/* ★ E2, REVISED 2026-08-12 (owner ruling) — THE POST OVERFLOW MENU'S ONE
             MODERATION CONTROL IS BLOCK. Before this pass there was no way to
@@ -1156,8 +1200,35 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             </Link>
           ) : isNote ? null : (
             <Link href={href} className="block" data-testid="medium-card-title">
-              <h2 className="line-clamp-2 text-title font-semibold tracking-title text-ink-2">
-                {displayTitle}
+              <h2 className="text-title font-semibold tracking-title text-ink-2">
+                {/* ★★ THE CLAMP IS ON THE TITLE TEXT, NOT ON THE BOX THAT ALSO HOLDS THE DATE.
+                     Measured 2026-08-20: with `line-clamp-2` on the h2 and the date inline
+                     inside it, 6 of 20 two-line headlines on the live feed had the date CLIPPED
+                     AWAY — the clamp truncates whatever reaches the end of line two, and the
+                     date is the last thing there. A date nobody can see is not "next to the
+                     title", which is the one thing the spec is emphatic about.
+                
+                     Clamping an inline-block span instead means the ellipsis lands on the title
+                     and the date is a sibling AFTER that box, so it can never be the thing that
+                     gets truncated. `align-bottom` keeps it on the last line rather than
+                     floating beside a two-line block, which is what "immediately after the
+                     title text" means. */}
+                <span className={cn(cardStyles.titleText, 'align-bottom')}>{displayTitle}</span>
+                {/* ★ THE DATE, INLINE AFTER THE HEADLINE (handoff_identity_pill/SPEC.md).
+                    The spec is emphatic about this one: "immediately after the title text,
+                    10px gap — NOT pinned to a corner. It must sit next to the headline ...
+                    do not float or absolutely-position it, that reads as the date having run
+                    away from the title."
+                
+                    So it is a real inline sibling of the title text INSIDE the h2, which is
+                    what makes it wrap with the headline instead of escaping it. It used to
+                    live in the byline row beside the community name.
+                
+                    ★ `font-normal` because the h2 is 600 and a bold date would read as part
+                    of the headline. This is the date's only weight, not a size step. */}
+                <span className={cardStyles.titleDate}>
+                  <TimeAgo date={post.created} />
+                </span>
               </h2>
             </Link>
           )}

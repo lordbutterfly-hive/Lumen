@@ -282,8 +282,15 @@ export function walletErrorMessage(error: unknown): string {
   // Closing the picker is a decision, not a failure — say nothing alarming, and
   // above all release the button (see connectWallet's cancel path).
   if (/wallet_connect_cancelled/.test(raw)) return 'No wallet connected. You can try again whenever you like.';
+  // ★ THIS MEANS "NO WALLET IS CONNECTED", NOT "THIS WALLET IS BROKEN" (QA,
+  // 2026-08-20). The old sentence said "try another wallet", which sends the
+  // user to swap a wallet that was never the problem. It is thrown whenever
+  // there is no live AppKit provider in this browser session — including for
+  // someone who signed in through the BTC "Sign manually instead" path, which
+  // authenticates fine and establishes no signer, so every later buy, sell,
+  // send and ask fails here. Say what is actually wrong and what fixes it.
   if (/no_bitcoin_signer|no_evm_signer/.test(raw))
-    return 'That wallet can’t sign messages. Try another wallet.';
+    return 'No wallet is connected in this browser, so nothing can be signed. Connect your wallet and try again.';
   if (/User rejected|rejected|denied|4001/i.test(raw)) return 'You cancelled the signature request.';
   return 'Couldn’t complete the wallet signature. Please try again.';
 }

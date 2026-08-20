@@ -161,6 +161,13 @@ function buildConnectSrcHosts(): Set<string> {
     hosts.add('https://relay.walletconnect.org');
     hosts.add('wss://relay.walletconnect.org');
     hosts.add('https://explorer-api.walletconnect.com');
+    // ★ `rpc.walletconnect.org` was MISSING, found in QA 2026-08-20. AppKit's
+    // Ethers adapter calls it during a connection, so the browser blocked it on
+    // every real wallet connect, not just a synthetic test one. It produced no
+    // obvious user-visible symptom, which is why it survived — a silent CSP
+    // violation in the console while the flow appears to work is exactly the
+    // shape that never gets reported.
+    hosts.add('https://rpc.walletconnect.org');
   }
 
   // Sentry error reporting
