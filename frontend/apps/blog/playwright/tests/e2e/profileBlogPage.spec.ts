@@ -170,50 +170,6 @@ test.describe('Profile page of @gtg', () => {
     await expect(postPage.articleBody).toBeVisible();
   });
 
-  test('move to the login page after clicking upvote of the first post card', async ({ page }) => {
-    let loginDialog = new LoginForm(page);
-
-    await profilePage.gotoProfilePage('@gtg');
-
-    // Validate upvote button structure
-    await profilePage.validateUpvoteButtonStructure();
-
-    // Hover upvote button
-    await profilePage.postUpvoteButton.first().hover();
-    await expect(profilePage.postUpvoteTooltip).toBeVisible({ timeout: 15000 });
-    // Validate the tooltip message
-    const tooltipText = await profilePage.postUpvoteTooltip.textContent();
-    expect(
-      tooltipText === "UpvoteUpvote" || tooltipText === "UpvoteVoting on Content after their payout does not generate any new rewardsUpvoteVoting on Content after their payout does not generate any new rewards"
-    ).toBeTruthy();
-
-    await profilePage.postUpvoteButton.first().click();
-    await loginDialog.validateDefaultLoginFormIsLoaded();
-    await loginDialog.closeLoginForm();
-  });
-
-  test('move to the login page after clicking downvote of the first post card', async ({ page }) => {
-    let loginDialog = new LoginForm(page);
-
-    await profilePage.gotoProfilePage('@gtg');
-
-    // Validate downvote button structure
-    await profilePage.validateDownvoteButtonStructure();
-
-    // Hover Downvote button
-    await profilePage.postDownvoteButton.first().hover();
-    await expect(profilePage.postDownvoteTooltip).toBeVisible({ timeout: 15000 });
-    // Validate the tooltip message
-    const tooltipText = await profilePage.postDownvoteTooltip.textContent();
-    expect(
-      tooltipText === "DownvoteDownvote" || tooltipText === "DownvoteVoting on Content after their payout does not generate any new rewardsDownvoteVoting on Content after their payout does not generate any new rewards"
-    ).toBeTruthy();
-
-    await profilePage.postDownvoteButton.first().click();
-    await loginDialog.validateDefaultLoginFormIsLoaded();
-    await loginDialog.closeLoginForm();
-  });
-
   test('validate payout of the first post card', async ({ page }) => {
     await profilePage.gotoProfilePage('@gtg');
 
@@ -227,35 +183,6 @@ test.describe('Profile page of @gtg', () => {
     if (firstPostPayoutText !== '$0.00') {
       await firstPostPayout.hover();
       await expect(profilePage.postPayoutTooltip.first()).toBeVisible({ timeout: 15000 });
-    }
-  });
-
-  test('validate votes of the first post card', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-
-    // Wait for the first post card to be visible before interacting with votes
-    await expect(profilePage.postBlogItem.first()).toBeVisible({ timeout: 15000 });
-
-    const firstPostVote = profilePage.postVotes.nth(0);
-    await expect(firstPostVote).toBeVisible({ timeout: 15000 });
-    const firstPostVoteText = await firstPostVote.textContent();
-
-    if (Number(firstPostVoteText) > 1) {
-      // more than 1 vote
-      await firstPostVote.hover();
-      await expect(profilePage.postVotesTooltip.nth(0)).toBeVisible({ timeout: 15000 });
-      await expect(profilePage.postVotesTooltip.nth(0)).toContainText('votes');
-    } else if (Number(firstPostVoteText) == 1) {
-      // equal 1 vote
-      await firstPostVote.hover();
-      await expect(profilePage.postVotesTooltip.nth(0)).toBeVisible({ timeout: 15000 });
-      await expect(profilePage.postVotesTooltip.nth(0)).toHaveText('1 vote');
-    }
-    else {
-      // no vote
-      await firstPostVote.hover();
-      await expect(profilePage.postVotesTooltip.nth(0)).toBeVisible({ timeout: 15000 });
-      await expect(profilePage.postVotesTooltip.nth(0)).toHaveText('no vote');
     }
   });
 

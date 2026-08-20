@@ -88,7 +88,7 @@ export function ownPostUrl(): string {
  */
 export async function gotoOwnPostLoggedIn(page: Page): Promise<void> {
   await page.goto(ownPostUrl(), { waitUntil: 'domcontentloaded' });
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
   // Wait for the post-detail footer to mount — it carries the `post-edit`

@@ -68,7 +68,7 @@ test.describe('Comment draft recovery (§5)', () => {
     // (DRAFT, 30-day TTL) is then read by useStorageWithTTL and
     // applied to the CodeMirror surface.
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('login-btn')).toBeHidden();
+    await expect(page.getByTestId('login-link')).toBeHidden();
 
     const cm = page.getByTestId('reply-editor').locator('.cm-content').first();
     await expect(cm).toContainText(draftBody, { timeout: 10000 });

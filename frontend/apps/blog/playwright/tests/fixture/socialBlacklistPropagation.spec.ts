@@ -61,7 +61,7 @@ test('BL-PROP-01 — Blacklist add propagates "(1)" mark to author post cards', 
   // bridge.get_follow_list(blacklisted) response (populated with
   // hiveio) on this call, simulating the post-broadcast chain state.
   await page.goto(`/@${FOLLOW_TARGET_USER}`);
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
 

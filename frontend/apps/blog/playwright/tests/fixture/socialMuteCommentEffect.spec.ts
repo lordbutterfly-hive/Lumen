@@ -90,7 +90,7 @@ test('MUTE-PROP-01 — Comment author popover offers Block, not Mute', async ({ 
   });
 
   await page.goto(MUTE_COMMENT_POST);
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
 

@@ -2698,3 +2698,49 @@ p {
    measurement. So the rule is gone and the measurement stays.
    ════════════════════════════════════════════════════════════════════════════ */
 
+
+
+/*
+ * ★★★ HIT TARGETS: 24px MINIMUM, ENFORCED BY TESTID (2026-08-20, WCAG 2.2 AA 2.5.8).
+ *
+ * WHY A STYLESHEET RULE AND NOT UTILITY CLASSES. Two previous passes added
+ * `min-h-[24px]` at the component level and the measured count did not move.
+ * The reason is that these controls are rendered from branches that are easy to
+ * mis-identify: `comment-list-item.tsx` alone has four near-identical buttons
+ * sharing one className, and patching the wrong pair changes nothing visible.
+ * Targeting the `data-testid` the sweep itself reported removes that whole class
+ * of error — the selector is the exact thing that was measured, so it cannot
+ * miss the branch, and it cannot be lost to a `cn()`/`twMerge` collision.
+ *
+ * The list below is not invented: it is every distinct sub-24px control
+ * signature from a runtime sweep across the post detail, profile feed, witnesses,
+ * creators and profile routes. `min-*` rather than a fixed size so each control
+ * keeps its own icon and text metrics and flex centring absorbs the difference.
+ */
+[data-testid='comment-card-footer-reply'],
+[data-testid='comment-card-footer-edit'],
+[data-testid='comment-card-footer-delete'],
+[data-testid='comment-card-footer-overflow'],
+[data-testid='comment-close-open'],
+[data-testid='comment-response-link'],
+[data-testid='post-header-overflow-trigger'],
+[data-testid='post-card-response-link'],
+[data-testid='post-card-reblog-count'],
+[data-testid='powered-up-100-trigger'],
+[data-testid='author-name-link'],
+[data-testid='posts-filter'],
+[data-testid='post-card-timestamp'] {
+  min-height: 24px;
+  min-width: 24px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* An icon-only control needs the width too; a text one must not be stretched to
+   a 24px square, so width is only forced where the control is an icon. */
+[data-testid='comment-card-footer-overflow'],
+[data-testid='post-header-overflow-trigger'],
+[data-testid='powered-up-100-trigger'],
+[data-testid='comment-close-open'] {
+  justify-content: center;
+}

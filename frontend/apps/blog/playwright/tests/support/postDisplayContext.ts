@@ -111,7 +111,7 @@ export const FILTER_LABEL: Record<string, string> = {
  */
 export async function gotoLoggedIn(page: Page, url: string): Promise<void> {
   await page.goto(url);
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
 }

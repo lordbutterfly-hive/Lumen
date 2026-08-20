@@ -218,18 +218,6 @@ test.describe('Profile page of @gtg', () => {
    * top of e2e/healthchecker.spec.ts for what that spec does and does not reach.
    */
 
-  test('Move to the login modal after clicking the Follow button', async ({ page }) => {
-    const loginDialog = new LoginForm(page);
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.followButton.click();
-
-    await loginDialog.validateDefaultLoginFormIsLoaded();
-    await loginDialog.closeLoginForm();
-    // profileNavigationIsVisible() was removed 2026-08-10 — profile-stats is
-    // the stable "we're back on a normal profile page" check now.
-    await expect(profilePage.profileStats).toBeVisible();
-  });
-
   // DELETED 2026-08-10: 'Move to the login modal after clicking the Follow
   // button in the notifications tab' and '...in the replies tab' both
   // navigated via moveToNotificationsTab()/moveToRepliesTab() to

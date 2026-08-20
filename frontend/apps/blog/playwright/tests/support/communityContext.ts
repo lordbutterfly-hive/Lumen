@@ -168,7 +168,7 @@ export async function gotoCommunityLoggedIn(
   community: string = COMMUNITY_TAG
 ): Promise<void> {
   await page.goto(`/trending/${community}`);
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
 }
@@ -183,7 +183,7 @@ export async function gotoCommunitiesExplorerLoggedIn(
   page: Page
 ): Promise<void> {
   await page.goto('/communities');
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
 }
@@ -200,7 +200,7 @@ export async function gotoRolesPageLoggedIn(
   community: string = MOD_COMMUNITY_TAG
 ): Promise<void> {
   await page.goto(`/roles/${community}`);
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
 }

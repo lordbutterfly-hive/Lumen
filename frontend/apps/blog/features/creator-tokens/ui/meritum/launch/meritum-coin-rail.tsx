@@ -167,14 +167,30 @@ const MeritumCoinRail: FC<MeritumCoinRailProps> = ({
       </div>
 
       <div className="text-center">
+        {/* ★ SPEC §5.8 APPLIED (2026-08-20): Lora 16 w400 ITALIC — `font-bold`,
+            `uppercase` and the 0.2em tracking are all dropped, so the state word
+            stops being a label and becomes quiet prose.
+
+            ★ THE SPEC'S OWN "CURRENT" COLUMN IS WRONG FOR THIS ROW, and that was
+            checked before applying rather than after. §5.8 describes the current
+            state as "Lora 15 w400" — plain prose. It was not: it was a 12px BOLD
+            UPPERCASE label tracked at 0.2em, a different visual class entirely.
+            So the row was written against a baseline that did not exist, and the
+            change is a bigger step than the spec implies: it demotes a status
+            indicator to running text and costs some at-a-glance scannability of
+            the coin's state. Applied on the owner's instruction to clear the
+            ledger; if the state word stops reading as a state, this row is why
+            and reverting it is a three-class change. */}
         <div
-          className={`text-label font-bold uppercase tracking-[0.2em] ${
+          className={`text-body italic ${
  captionBrand ? 'text-meritum-ink-brand' : 'text-meritum-ink-faint'
  }`}
         >
           {caption}
         </div>
-        <p className="mx-auto mt-1.5 max-w-[30ch] font-serif text-caption text-meritum-ink-muted">{captionSub}</p>
+        {/* §4's own literal example of editorial voice ("Only your handle is
+            engraved so far"), so it is italic too. */}
+        <p className="mx-auto mt-1.5 max-w-[30ch] font-serif text-caption italic text-meritum-ink-muted">{captionSub}</p>
       </div>
 
       <MeritumRailLedger rows={rows} emptyLabel={ledgerEmptyLabel} />

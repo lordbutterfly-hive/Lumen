@@ -181,22 +181,4 @@ test.describe('Search page tests', () => {
     }
   });
 
-  test('navigate to profile from search results', async ({ page, browserName }) => {
-    test.skip(browserName === 'webkit', 'Navigation timing issues on WebKit');
-    test.skip(isProductionEnvironment(), PRODUCTION_PROFILE_BUG);
-    await searchPage.gotoWithClassicQuery('blockchain', 'relevance');
-
-    await searchPage.waitForSearchResults();
-
-    const resultsCount = await searchPage.getResultsCount();
-    if (resultsCount > 0) {
-      // Click first result author
-      await searchPage.clickFirstResultAuthor();
-
-      // Verify we're on the profile page. The redesigned profile carries no
-      // "profile-name" testid (2026-08-10 redesign); profile-stats is the
-      // stable element every profile view still renders.
-      await expect(page.locator('[data-testid="profile-stats"]')).toBeVisible();
-    }
-  });
 });

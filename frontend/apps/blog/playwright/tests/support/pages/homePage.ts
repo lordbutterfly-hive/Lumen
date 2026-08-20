@@ -350,7 +350,7 @@ export class HomePage {
     this.postDescription = page.locator(
       '[data-testid="medium-card-dek"], [data-testid="post-description"]'
     );
-    this.loginBtn = page.locator('[data-testid="login-btn"]');
+    this.loginBtn = page.locator('[data-testid="login-link"]');
     this.signupBtn = page.locator('[data-testid="signup-btn"]');
     this.loginModal = page.locator('[role="dialog"]');
     this.loginModalHeader = page.locator('h2');

@@ -26,7 +26,7 @@ export class NotificationsPage {
     this.notificationItems = page.getByTestId('notification-list-item');
     this.firstNotificationItem = this.notificationItems.first();
     this.markAllAsReadButton = page.getByRole('button', { name: 'Mark all as read' });
-    this.loginButton = page.getByTestId('login-btn');
+    this.loginButton = page.getByTestId('login-link');
   }
 
   /**

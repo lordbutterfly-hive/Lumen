@@ -82,7 +82,7 @@ test.describe('Post voting — weight persistence (§6.1)', () => {
     // The seeder's addInitScript re-seeds user+wif on every navigation;
     // it does not touch `votesValues`, so the stored percent survives.
     await page.reload();
-    await expect(page.getByTestId('login-btn')).toBeHidden();
+    await expect(page.getByTestId('login-link')).toBeHidden();
 
     // Step 4 — open the slider again; it should hydrate from stored
     // value rather than the DEFAULT_VOTES_VALUES of 100%.

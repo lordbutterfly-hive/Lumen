@@ -42,7 +42,7 @@ export const REMOVE_VOTE = 0;
  */
 export async function gotoPostLoggedIn(page: Page): Promise<void> {
   await page.goto(POST_PATH, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
 }

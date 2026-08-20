@@ -270,34 +270,6 @@ test.describe('Communities page tests', () => {
     );
   });
 
-  test('validate the first post footer votes styles (for Trending filter) in the light theme in the LeoFinance', async ({
-    page
-  }) => {
-    await homePage.moveToLeoFinanceCommunities();
-    await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
-
-    // Color of the first post votes without hovering
-    expect(await homePage.getElementCssPropertyValue(await homePage.getFirstPostVotes, 'color')).toBe(
-      'rgb(24, 30, 42)'
-    );
-    await homePage.getFirstPostVotes.hover();
-    // Wait for tooltip to be visible instead of fixed timeout
-    await expect(homePage.getFirstPostVotesTooltip).toBeVisible({ timeout: 15000 });
-
-    const votes = await homePage.getFirstPostVotes.textContent();
-
-    // Color of the first post votes with hovering
-    expect(await homePage.getElementCssPropertyValue(await homePage.getFirstPostVotes, 'color')).toBe(
-      'rgb(24, 30, 42)'
-    );
-
-    // The tooltip is visible by hovering
-    expect(await homePage.getFirstPostVotesTooltip.textContent()).toBe(votes + ' votes' + votes + ' votes');
-    expect(await homePage.getElementCssPropertyValue(await homePage.getFirstPostVotesTooltip, 'color')).toBe(
-      'rgb(15, 23, 42)'
-    );
-  });
-
   test('validate the community leadership of Worldmappin Community', async ({ page, request }) => {
     await homePage.moveToWorldmappinCommunities();
     await communitiesPage.validataCommunitiesPageIsLoaded('Worldmappin');

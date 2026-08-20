@@ -28,7 +28,7 @@ export const OWN_COMMENT_NESTED_PERMLINK = 're-blocktrades-test-1';
 
 export async function gotoPostLoggedIn(page: Page): Promise<void> {
   await page.goto(POST_PATH, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
 }

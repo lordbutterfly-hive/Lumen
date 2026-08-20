@@ -25,7 +25,7 @@ test.describe('Homepage — seeded logged-in user', () => {
   }) => {
     await page.goto('/');
 
-    await expect(page.getByTestId('login-btn')).toBeHidden();
+    await expect(page.getByTestId('login-link')).toBeHidden();
     await expect(page.getByTestId('signup-btn')).toBeHidden();
 
     const pencil = page.getByTestId('nav-pencil');

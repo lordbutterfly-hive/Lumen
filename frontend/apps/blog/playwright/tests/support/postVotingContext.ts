@@ -47,7 +47,7 @@ export const SLIDER_DRAG_TOLERANCE = 3;
  */
 export async function gotoTrendingLoggedIn(page: Page): Promise<void> {
   await page.goto('/trending');
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
 }

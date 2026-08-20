@@ -89,7 +89,7 @@ export const DEFAULT_TAG = 'test';
  */
 export async function gotoSubmitLoggedIn(page: Page): Promise<void> {
   await page.goto(SUBMIT_PATH, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
 }
@@ -152,7 +152,7 @@ export async function gotoCommunityNewPostLoggedIn(page: Page): Promise<void> {
   await page.goto(`${SUBMIT_PATH}?category=${POST_COMMUNITY}`, {
     waitUntil: 'domcontentloaded'
   });
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
   await expect(page.getByTestId('post-title-input')).toBeVisible({

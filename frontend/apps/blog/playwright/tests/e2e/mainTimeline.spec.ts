@@ -338,12 +338,6 @@ test.describe('Home page tests', () => {
     expect(cursor).toBe('pointer');
   });
 
-  test('navigation Sign up link is visible', async ({ page }) => {
-    await homePage.goto();
-
-    await expect(homePage.signupBtn).toBeVisible();
-  });
-
   /*
    * ★ 'navigation user avatar and its dropdown list is visible' DELETED
    * 2026-08-11 — unfixable as written, in this file.

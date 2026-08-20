@@ -101,7 +101,7 @@ export async function gotoProfileLoggedIn(
   target: string = FOLLOW_TARGET_USER
 ): Promise<void> {
   await page.goto(`/@${target}`);
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
 }
@@ -117,7 +117,7 @@ export async function gotoOwnList(
   list: OwnerListSlug
 ): Promise<void> {
   await page.goto(`/@${FOLLOWER}/lists/${list}`);
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
   await expect(page.getByTestId('user-list-area')).toBeVisible();

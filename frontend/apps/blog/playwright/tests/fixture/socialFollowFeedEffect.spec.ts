@@ -51,7 +51,7 @@ test('FOL-PROP-01 — Following a user makes their posts appear in /created/my',
   // Step 1: /created/my pre-state — feed has 20 unrelated posts;
   // hiveio is NOT the first author.
   await page.goto(FOLLOW_FEED_PATH);
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
   const firstPostBaseline = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first();
@@ -72,7 +72,7 @@ test('FOL-PROP-01 — Following a user makes their posts appear in /created/my',
   // entry (populated with hiveio posts). First post-list-item's
   // author should be hiveio.
   await page.goto(FOLLOW_FEED_PATH);
-  await expect(page.getByTestId('login-btn')).toBeHidden({
+  await expect(page.getByTestId('login-link')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
   const firstPost = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first();
