@@ -59,6 +59,20 @@ export interface FaceBand {
   windowEndsAtBlock: number;
 }
 
+/**
+ * One creator's spot price for a compact display (a feed chip, a byline pill).
+ *
+ * Three states on purpose. A price of 0 cannot say WHY it is 0, and the three
+ * reasons need different UI: `ready` has a market and a figure, `none` has no
+ * market at all (so a Buy affordance would be a dead control), and `unknown` is
+ * "we have not been told" — a failed read, which must never be rendered as
+ * "this creator has no token".
+ */
+export interface MarketPrice {
+  status: 'ready' | 'none' | 'unknown';
+  priceUsd: number | null;
+}
+
 export interface Market {
   creator: string;
   faceHbd: number;

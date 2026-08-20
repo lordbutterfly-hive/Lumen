@@ -32,8 +32,7 @@ import type {
   SetFaceInput,
   TransferTokensInput,
   WalletPositionsResult,
-  WithdrawTreasuryInput
-} from '../types';
+  WithdrawTreasuryInput, MarketPrice } from '../types';
 import type { CreatorTokensConfig, CreatorTokensDataSource } from './creator-tokens-data-source';
 import {
   MAX_ASK_DEADLINE_BLOCKS,
@@ -147,6 +146,7 @@ import {
   toU64,
   unknownMarket,
   STATE_CLOSED, assertTransferDestination } from './vsc/reads';
+import { spotPriceUsd } from '../market/curve';
 
 // Real, on-chain implementation. Reads live contract state via GraphQL
 // getStateByKeys (plumbing + decoding in ./vsc/reads.ts); builds custom_json
@@ -233,6 +233,73 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   }
 
   // ---- reads ----
+
+  /**
+   * The spot price for MANY creators in as few requests as possible.
+   *
+   * ★ WHY THIS EXISTS SEPARATELY FROM `readMarket`. A price chip on every feed
+   * card is N creators per page. Calling `readMarket` per creator is the N+1
+   * this codebase has already paid for twice, and the existing chip only avoids
+   * it by making almost every card ineligible for a read — which stops being
+   * true the moment creators actually have markets. This batches instead, so the
+   * cost does not grow when the feature succeeds.
+   *
+   * ★ IT ASKS FOR THREE KEYS, NOT THE FIFTEEN `readMarket` NEEDS. A spot price
+   * is a function of SUPPLY alone (`spotPriceUsd`, curve.go SpotRate), so the
+   * rest of a Market would be fetched and thrown away. `state` and `registeredAt`
+   * come along only to tell "no market" apart from "market with zero supply",
+   * which a price of 0 cannot express.
+   *
+   * ★ CHUNKING LIVES HERE. `MAX_STATE_KEYS` is 100 per request and the caller
+   * must not have to know that — a feed page is 20 today but profile and topic
+   * feeds paginate. Callers pass whatever they have.
+   *
+   * The returned map has an entry for EVERY handle asked for, so a caller can
+   * always tell "no market" from "not answered yet" without tracking which
+   * handles it sent.
+   */
+  /** Mirrors app/api/creator-tokens/gql/route.ts MAX_STATE_KEYS, and the node's own bound. */
+  private static readonly MAX_STATE_KEYS_PER_REQUEST = 100;
+
+  async readMarketPrices(creators: readonly string[]): Promise<Map<string, MarketPrice>> {
+    const out = new Map<string, MarketPrice>();
+    const unique = [...new Set(creators.map((c) => c.trim()).filter((c) => c.length > 0))];
+    if (unique.length === 0) return out;
+
+    const KEYS_PER_CREATOR = 3;
+    const perRequest = Math.floor(VscCreatorTokensDataSource.MAX_STATE_KEYS_PER_REQUEST / KEYS_PER_CREATOR);
+
+    for (let i = 0; i < unique.length; i += perRequest) {
+      const batch = unique.slice(i, i + perRequest);
+      const keys = batch.flatMap((c) => [kSupply(toDid(c)), kState(toDid(c)), kRegisteredAt(toDid(c))]);
+      let state: Record<string, string | null>;
+      try {
+        state = await this.gql.getStateByKeys(this.config.contractId, keys);
+      } catch {
+        // A failed read is NOT "no market" — saying so would tell a creator with
+        // a live market that they have none. Report it as unanswered.
+        for (const c of batch) out.set(c, { status: 'unknown', priceUsd: null });
+        continue;
+      }
+
+      for (const c of batch) {
+        const did = toDid(c);
+        const registered = state[kRegisteredAt(did)];
+        const marketState = state[kState(did)];
+        if (!registered && !marketState) {
+          out.set(c, { status: 'none', priceUsd: null });
+          continue;
+        }
+        const supply = Number(state[kSupply(did)] ?? '0');
+        if (!Number.isFinite(supply) || supply < 0) {
+          out.set(c, { status: 'unknown', priceUsd: null });
+          continue;
+        }
+        out.set(c, { status: 'ready', priceUsd: spotPriceUsd(supply) });
+      }
+    }
+    return out;
+  }
 
   async readMarket(creator: string): Promise<Market | null> {
     const keys = [

@@ -33,8 +33,7 @@ import type {
   SetFaceInput,
   TransferTokensInput,
   WalletPositionsResult,
-  WithdrawTreasuryInput
-} from '../types';
+  WithdrawTreasuryInput, MarketPrice } from '../types';
 import { MockCreatorTokensDataSource } from './mock/mock-data-source';
 import { hiveTransactionBroadcaster } from './vsc/broadcaster';
 import { routingBroadcaster } from './vsc/wallet-broadcaster';
@@ -128,6 +127,8 @@ export interface CreatorTokensDataSource {
   setFace(input: SetFaceInput): Promise<Market>;
   setCap(input: SetCapInput): Promise<Market>;
   /** buy.go Buy — mints input.tokens whole tokens to input.buyer at the exact curve cost. Replaces the deleted prepay()/core.Prepay (the PAR mint). */
+  /** Spot prices for many creators in as few requests as possible — the feed-chip read. Every requested handle gets an entry, so "no market" and "not answered" stay distinguishable. */
+  readMarketPrices(creators: readonly string[]): Promise<Map<string, MarketPrice>>;
   buy(input: BuyInput): Promise<HolderPosition>;
   /** sell.go Sell — redeems input.tokens of input.seller's balance at the exact curve slice, less the K2 exit tax and the 10% trade fee. The curve exit rail; see refund()/RefundInput for the wind-down rail. */
   sell(input: SellInput): Promise<HolderPosition>;

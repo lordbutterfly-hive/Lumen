@@ -33,8 +33,7 @@ import type {
   SetCapInput,
   SetFaceInput,
   TransferTokensInput,
-  WithdrawTreasuryInput
-} from '../../types';
+  WithdrawTreasuryInput, MarketPrice } from '../../types';
 import type { CreatorTokensDataSource } from '../creator-tokens-data-source';
 import {
   BLOCKS_PER_DAY,
@@ -291,6 +290,29 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       spotPriceHbd: baseUnitsToHuman(displayPricePerTokenBaseUnits(seed.supplyTokens)),
       reserveCoverage: reserveCoverageRatio(seed.reserveBaseUnits, seed.supplyTokens)
     };
+  }
+
+  /**
+   * Mirrors the live batched read: ONE call for many creators, and an entry for
+   * every handle asked for. Built on this mock's own `readMarket` so the demo
+   * and the chain agree about which creators have markets.
+   */
+  async readMarketPrices(creators: readonly string[]): Promise<Map<string, MarketPrice>> {
+    await delay(120);
+    const out = new Map<string, MarketPrice>();
+    for (const creator of creators) {
+      const market = await this.readMarket(creator).catch(() => null);
+      if (market === null) {
+        out.set(creator, { status: 'none', priceUsd: null });
+        continue;
+      }
+      if (market.phase === 'UNKNOWN') {
+        out.set(creator, { status: 'unknown', priceUsd: null });
+        continue;
+      }
+      out.set(creator, { status: 'ready', priceUsd: market.spotPriceHbd /* usdFromHbd is identity; see live/adapt */ });
+    }
+    return out;
   }
 
   async readMarket(creator: string): Promise<Market | null> {
