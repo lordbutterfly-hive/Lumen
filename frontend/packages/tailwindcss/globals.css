@@ -2744,3 +2744,13 @@ p {
 [data-testid='comment-close-open'] {
   justify-content: center;
 }
+
+/* ★ AND ONE TEXT INPUT (2026-08-20). The control sweep scopes itself to buttons
+   and `[role=button]`, so it reports zero — but a click-through found the
+   witnesses search field rendering 221x22, a pointer target 2px under the same
+   24px floor. It sits inside a taller bordered box, so the two pixels cost
+   nothing. Caught by clicking, not by the sweep, which is the point of doing
+   both. */
+input[data-testid='witnesses-filter-search'] {
+  min-height: 24px;
+}
