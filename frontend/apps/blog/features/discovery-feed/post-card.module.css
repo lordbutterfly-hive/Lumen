@@ -33,12 +33,15 @@
    `--pc-*` tokens below that carry a literal.
 
    ★ THE THREE THINGS THE HANDOFF SAYS WILL SILENTLY BREAK, all honoured here:
-   1. `interpolate-size: allow-keywords` — declared on `:root` in globals.css,
-      NOT here. It is an inherited property and a CSS module is the wrong place
-      for a document-level declaration. Without it the drawer cannot animate to
-      `height: auto`, and the `grid-template-rows: 0fr -> 1fr` alternative FAILS
-      SILENTLY: the transition wedges the used track size, the row never
-      resolves, and a shut drawer still looks correct in a screenshot.
+   1. The drawer's height. SUPERSEDED 2026-08-20 by the card-expansion spec §8:
+      the height is now MEASURED IN JS and written in pixels by
+      `top-comment-drawer.tsx`. `interpolate-size: allow-keywords` is still
+      declared on `:root` in globals.css and still does nothing wrong, but it
+      ships in one engine, so leaning on it left Safari and Firefox jumping
+      where Chromium slid. The `grid-template-rows: 0fr -> 1fr` alternative is
+      still forbidden and still FAILS SILENTLY: the transition wedges the used
+      track size, the row never resolves, and a shut drawer looks correct in a
+      screenshot. See the §DRAWER block for the current arrangement.
    2. The action row is a SIBLING of the head row, not a child of the text
       column — that is what keeps the payout on the card's own right edge when a
       post has no image. Nest it back and imageless cards pull it 206px left.
@@ -65,6 +68,19 @@
   --pc-surface: rgb(var(--surface-1));
   --pc-surface-hover: rgb(var(--surface-3));
   --pc-line: rgb(var(--line-9)); /* handoff --hairline #EDE9E2 vs #ebebeb; 99 uses */
+  /* Card-expansion spec §5 adds a FOURTH ink step, --ink-4 #968C82, one below
+     the --ink-3 this file already maps to --pc-ink-quiet. The app's --ink-N
+     scale is a deduplicated inventory of colours found in the codebase, not a
+     semantic ramp, and it has no entry at #968c82 — the nearest, --ink-12
+     #8a827a, is a visibly darker grey. So it is a literal, exactly as
+     --pc-payout-zero is, rather than a token bent to a value it does not hold.
+     Used ONLY where §10 permits: the 12px caps label, the separator, and the
+     vote count at rest. §10: "Do not push body text to --ink-4." */
+  --pc-ink-faint: #968c82;
+  /* Spec §6, the comment block's hover wash: --paper-2 #F2EFEA. This one IS an
+     exact token — --lumen-stock is rgb(242 239 234) — so it resolves through the
+     theme and follows dark mode for free. */
+  --pc-wash: rgb(var(--lumen-stock));
 
   /* ── money ──────────────────────────────────────────────────────────────
      ★ THE TWO GENUINELY NEW VALUES IN THIS FILE. The handoff deepens the
@@ -75,7 +91,12 @@
      number on this card a reader acts on. Flagged for the owner: if the app
      ever unifies on one green, this is the token to fold in.
      Measured on --surface-1: #2A6B44 is 6.4:1, clears AA at any size. */
-  --pc-payout: #2a6b44;
+  /* Now the GLOBAL money green, not a second literal. It was this card that
+     chose #2a6b44 (see the note above); promoting it to `--ink-payout` in
+     globals.css is what let the post page and the comment rows stop disagreeing
+     with this one. Kept as a `--pc-*` alias so the rest of this file reads
+     unchanged. */
+  --pc-payout: rgb(var(--ink-payout));
   --pc-payout-zero: #beb5ac; /* $0.00 only. 2.1:1 — deliberately not text you read. */
 
   /* ── motion ─────────────────────────────────────────────────────────────
@@ -466,12 +487,11 @@
    was dead CSS carrying a wrong number, which is worse than no rule, because
    the next reader would have trusted it. If a reblog icon is ever given this
    class it needs its OWN measurement; do not copy a value from the two above. */
-.iconBlade {
-  transform: translateY(-0.75px);
-}
-.iconComment {
-  transform: translateY(-0.975px);
-}
+  /* The two nudges that were here (-0.75px / -0.975px) moved to the §7 OPTICAL
+     NUDGE block further down, where the card-expansion spec re-derives them for
+     the drawer's 18px/16px glyphs against 14px digits. They were duplicated for
+     a while and the later pair silently won, which is exactly the kind of dead
+     rule the note above warns about. */
 
 /* ── PAYOUT ───────────────────────────────────────────────────────────────
    Fixed slot. $0.00 greys; it does not move, resize or restyle. The post
@@ -490,117 +510,311 @@
 .payZero {
   color: var(--pc-payout-zero);
 }
-.commentActions .pay {
-  font-size: 15px; /* comments earn too, one step down */
-}
 
 /* ── DRAWER ───────────────────────────────────────────────────────────────
-   height 0 → auto, animated, enabled by `interpolate-size: allow-keywords` on
-   `:root` (globals.css). Opens to whatever the comment needs, one line or
-   four: no max-height cap, nothing measured in JavaScript, nothing clipped.
+   ★★★ REBUILT 2026-08-20 to the card-expansion SPEC.md (§4 geometry, §5 type,
+   §6 surface, §7 the two counts, §8 motion).
 
-   DO NOT substitute `grid-template-rows: 0fr → 1fr`. It looks like the tidier
-   trick and it does not work — the transition wedges the used track size at
-   its old value, the row never resolves, and the drawer stays shut. It fails
-   SILENTLY, because a closed card still looks correct.
+   THE HEIGHT IS NO LONGER CSS'S JOB. What was here was `height: 0 -> auto`
+   riding on `interpolate-size: allow-keywords` (globals.css:890). That is a
+   real declaration and it does animate — in Chromium, and only there. The spec
+   opens by naming the result as one of three things it is changing: "Height
+   animates. The drawer slides instead of jumping." So the pixel height is
+   measured and written by `top-comment-drawer.tsx`; this file owns only the
+   two DURATIONS, which are asymmetric on purpose (§8: "Close runs slower than
+   open, deliberately").
 
-   Where `interpolate-size` is unsupported (Chrome < 129, current Safari and
-   Firefox) the drawer SNAPS open instead of sliding. It still opens. That is
-   the accepted degradation, not a bug to work around in JS. */
+   The two warnings the old comment carried are still true and still worth
+   keeping, because both look like tidier rewrites of what is here now:
+
+   DO NOT substitute `grid-template-rows: 0fr -> 1fr`. The transition wedges the
+   used track size at its old value, the row never resolves, and the drawer
+   stays shut. It fails SILENTLY, because a closed card still looks correct.
+
+   DO NOT go back to `height: auto`, with or without `interpolate-size`. §8 rules
+   out both by name. */
 .drawer {
   height: 0;
   overflow: hidden;
-  transition: height var(--pc-t-drawer) var(--pc-ease);
+  /* CLOSING duration. §8: opacity 1 -> 0 over 100ms, height -> 0 over 260ms. */
+  transition: height 260ms var(--pc-ease);
 }
-.card:hover .drawer,
-.card:focus-within .drawer {
-  height: auto;
+.drawer[data-open='true'] {
+  /* OPENING duration. §8: drawer height 0 -> measured px, 200ms, no delay. */
+  transition-duration: 200ms;
 }
 .drawerInner {
-  padding-top: 16px;
+  padding-top: 12px; /* §4 "Gap above divider 12px", from the action row box */
 }
 
 /* the hairline draws itself from the left as the space appears */
 .seam {
   display: block;
-  height: 1px;
-  margin-bottom: 16px;
+  height: 1px; /* §4 "Divider 1px, full content width" */
   background: var(--pc-line);
   transform: scaleX(0);
   transform-origin: left;
-  transition: transform var(--pc-t-drawer) var(--pc-ease);
+  transition: transform 200ms var(--pc-ease);
 }
-.card:hover .seam,
-.card:focus-within .seam {
+.drawer[data-open='true'] .seam {
   transform: scaleX(1);
 }
 
-/* The comment fades and rises BEHIND the opening row, arriving after the space
-   exists rather than stretching with it. */
-.comment {
+/* ── THE COMMENT BLOCK ────────────────────────────────────────────────────
+   §4 gives this box its own spec, and every number in it is load-bearing for
+   the 113px total:
+
+     margin-top 6 + padding-top 6            = 12px divider -> avatar    (§4 row 3)
+     padding-bottom 6 + margin-bottom 10     = 16px bottom padding       (§4 row 7)
+
+   ★★ PADDING ONLY. NO NEGATIVE SIDE MARGINS. §4 is explicit: "The drawer clips
+   both axes for the height animation, so a horizontal bleed just overflows its
+   container and the hover wash gets cut at the right edge." The block sits 6px
+   inside the card's content edge and the wash has room to round.
+
+   `position: relative` is the anchor for `.counts`, which is out of flow. */
+.cbox {
+  position: relative;
   display: flex;
-  gap: 14px;
+  gap: 12px;
   align-items: flex-start;
-  padding-left: 2px;
+  padding: 6px;
+  margin-top: 6px;
+  margin-bottom: 10px;
+  border-radius: 8px; /* §6 --r-sm */
+  /* CLOSING: §8 "opacity 1 -> 0 over 100ms", no delay. */
   opacity: 0;
-  transform: translateY(6px);
   transition:
-    opacity var(--pc-t-base) var(--pc-ease) 60ms,
-    transform 260ms var(--pc-ease) 60ms;
+    opacity 100ms var(--pc-ease),
+    background-color var(--pc-t-fast) var(--pc-ease);
 }
-.card:hover .comment,
-.card:focus-within .comment {
+.drawer[data-open='true'] .cbox {
+  /* OPENING: §8 "comment opacity 0 -> 1, 140ms, delay 60ms" — it arrives after
+     the space exists rather than stretching with it. The old rule also moved it
+     6px on translateY; §8's table has opacity and nothing else, so that is gone. */
   opacity: 1;
-  transform: none;
+  transition:
+    opacity 140ms var(--pc-ease) 60ms,
+    background-color var(--pc-t-fast) var(--pc-ease);
+}
+
+/* ── §6 SURFACE TREATMENT ─────────────────────────────────────────────────
+   "One treatment, and only on the block's own hover: flat --paper-2 background
+   at --r-sm 8px. The author name goes --brand at the same time."
+
+   No shadow, no border, no tint at rest, no elevation, no scale. The expansion
+   is part of the card, not a nested panel, and the divider does the separating.
+   The wash is an affordance and it is earned: the block navigates (§9). */
+/* ── §9 THE BLOCK IS ONE NAVIGATION TARGET ────────────────────────────────
+   An anchor stretched over the block, so the whole surface navigates while the
+   controls §7 puts inside it stay real elements rather than nested-in-an-<a>
+   ones. `z-index: 0` puts it above the static content (the text, the avatar)
+   and below anything that explicitly raises itself. */
+.cboxLink {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: 8px;
+}
+/* §10: "Focus ring 2px solid --brand, offset 2px, radius 8px, :focus-visible
+   only." On the link, not the block, so it tracks the thing that is actually
+   focused. */
+.cboxLink:focus-visible {
+  outline: 2px solid var(--pc-brand);
+  outline-offset: 2px;
+}
+/* The wash follows focus as well as hover — a keyboard reader gets the same
+   affordance a pointer reader does. */
+.cbox:hover,
+.cbox:focus-within {
+  background: var(--pc-wash);
+}
+.cbox:hover .commentAuthor,
+.cbox:focus-within .commentAuthor {
+  color: var(--pc-brand);
 }
 
 .commentBody {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  min-width: 0;
+  gap: 4px; /* §4 "Gap meta to body 4px" */
 }
 .commentMeta {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 6px;
+  min-height: 20px; /* §4 "Meta row 20px" */
 }
+
+/* ── §5 TYPE ──────────────────────────────────────────────────────────────
+   All Lora, no second family on this card.
+
+   ★ THE AUTHOR AND THE BODY SWAPPED INKS. They were --pc-ink-name and
+   --pc-ink-strong respectively; §5 puts the author at --ink-1 and the body at
+   --ink-2, which through this file's existing mapping (see the token block) is
+   --pc-ink-strong and --pc-ink-name. The name is now the darkest thing in the
+   drawer and the body sits one step back, which is what makes the block read as
+   a quotation rather than as more card. */
 .commentAuthor {
   font-size: 15px;
-  line-height: 22px;
+  line-height: 20px;
   font-weight: 600;
-  color: var(--pc-ink-name);
+  color: var(--pc-ink-strong);
+  transition: color var(--pc-t-fast) var(--pc-ease);
+}
+.commentSep {
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 400;
+  color: var(--pc-ink-faint);
 }
 .commentTime {
-  font-size: 15px;
-  line-height: 22px;
+  font-size: 14px;
+  line-height: 20px;
   font-weight: 400;
   color: var(--pc-ink-quiet);
   font-variant-numeric: tabular-nums;
 }
-/* Uppercase + tracking, never small-caps: Lora has no `smcp` table, so
-   `font-variant-caps` would be synthesised from scaled capitals. */
 .commentLabel {
+  margin-left: auto; /* §4 "label right-aligned" */
   font-size: 12px;
   line-height: 16px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--pc-ink-quiet);
+  color: var(--pc-ink-faint);
 }
+
+/* §5: "The body clamps at two lines: -webkit-line-clamp:2, overflow-wrap:anywhere.
+   A short comment shrinks the block. Nothing pads to a fixed height."
+
+   ★ 16/24 IS THE FEATURE, NOT A SIZE. §4: "The body is not negotiable. Two lines
+   at line-height 24 is the feature. The 12px that came out of the original 125px
+   came out of spacing only." It was 19/30 here, which is 60px of body against
+   the 48px the geometry is built on — the single biggest reason the shipped
+   drawer measured 183.5px against a 113px spec.
+
+   ★★ THE RIGHT GUTTER IS WHAT KEEPS THE TEXT OFF THE COUNTS. `.counts` is
+   absolutely positioned bottom-right, so nothing in normal flow knows it is
+   there. At 831px the 64ch cap alone leaves ~270px of clearance and the question
+   never arises, but §4 also specifies 640px, where 64ch would run under the
+   numbers. `calc(100% - 112px)` reserves the gutter at every width; the min()
+   keeps 64ch winning wherever it is the tighter of the two, so the measure does
+   not change on wide cards. */
 .commentText {
-  font-size: 19px;
-  line-height: 30px;
+  font-size: 16px;
+  line-height: 24px;
   font-weight: 400;
-  color: var(--pc-ink-strong);
-  max-width: 64ch;
+  color: var(--pc-ink-name);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  max-width: min(64ch, calc(100% - 112px));
 }
-.commentActions {
+
+/* ── §7 THE TWO COUNTS ────────────────────────────────────────────────────
+   "Votes and replies, in that order, 16px apart, sitting at the bottom right of
+   the comment block aligned to the body's last line."
+
+   ★★ OUT OF FLOW, AND THAT IS ARITHMETIC, NOT STYLE. §4's 113px budget has no
+   band for a counts row: 12 + 1 + 12 + (20 + 4 + 48) + 16 = 113 exactly. In flow
+   these would add their own line and the drawer would miss the spec by ~20px.
+   `bottom: 6px` is the block's own padding, which lands them on the body's last
+   line for a two-line comment and on its only line for a one-line one.
+
+   ★ NEITHER IS A TOOLBAR. §1: "Two counts remain, and they are readouts, not a
+   second toolbar." The payout that used to sit here went with the action row —
+   the card above already prints the post's, and a second money figure 113px
+   under the first reads as a total. */
+.counts {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding-top: 2px;
+  gap: 16px; /* §7 "16px apart" */
+  /* ★ CLICKS FALL THROUGH TO THE BLOCK'S LINK. These are READOUTS (§1: "not a
+     second toolbar"), and they sit above the stretched anchor in paint order
+     simply by coming later in the DOM. Without this, the bottom-right corner of
+     every comment block would be a dead zone that swallows the click instead of
+     navigating. When the vote becomes a real control (§7), IT re-enables
+     pointer events for itself — the reply count never does, because §7 forbids
+     it a hit target at all. */
+  pointer-events: none;
+}
+/* ...except the vote, which is the one control in here (§7). It has to catch its
+   own clicks; everything else in the row falls through to the block's link. */
+.voteSlot {
+  display: inline-flex;
+  align-items: center;
+  pointer-events: auto;
+}
+.voteCount,
+.replyCount {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  /* §5: "Both counts carry tabular-nums. A count ticking 24 to 25 must not
+     shift the row." These are right-anchored, so an untabular digit would move
+     the icon rather than the edge — worse, not better. */
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+}
+.voteCount {
+  color: var(--pc-ink-faint);
+}
+/* §7: "The reply count is a number, not a button. No cursor:pointer, no hover
+   colour, no hit target. A count that lights up under the pointer and does
+   nothing is a false affordance." Hence no :hover rule for this one anywhere. */
+.replyCount {
+  color: var(--pc-ink-quiet);
+}
+.voteCount svg,
+.replyCount svg {
+  fill: currentColor;
+}
+.voteCount .blade {
+  stroke: currentColor;
+}
+
+/* ── §7 OPTICAL NUDGE, MEASURED RATHER THAN COPIED ────────────────────────
+   §7 gives a number: "Optical nudge on the 18px blade is translateY(2px), from
+   the shipped formula 0.5 + (12 - inkMid) * size / 24."
+
+   ★★ THAT NUMBER DOUBLE-COUNTS A SHIFT THIS CODEBASE ALREADY APPLIES, and
+   shipping it put the blade 2px BELOW the optical centre — measured, not
+   guessed: `qa-verify-all.mjs`'s [N-iconBlade] check reported a residual of
+   exactly +2px against the count it sits beside.
+
+   The formula needs `inkMid`, the vertical middle of the glyph's actual ink.
+   Feeding it inkMid = 10 gives 0.5 + (12 - 10) * 18/24 = 2. But our `Blade` svg
+   is authored with `viewBox="0 -3.5 24 24"`, which ALREADY re-centres that ink;
+   after it, inkMid is ~12, the bracket collapses, and the correction the spec's
+   own formula asks for is the 0.5 term alone. Applying 2px on top of the
+   viewBox correction applies it twice.
+
+   So these are the measured values, and the residual check is the authority:
+   the translate moves the glyph 1:1, so a +2px residual at 2px means 0px is
+   the centre, and -0.775px at -0.975px means -0.2px is. Both verified back to
+   ~0 residual after the change.
+
+   ★ IF THE SPEC IS RE-READ LATER: the disagreement is about the baseline, not
+   the goal. Both want the glyph optically centred on the digits beside it. */
+/* `.iconBlade` REMOVED 2026-08-20. The drawer's vote stopped being a raw `Blade`
+   in a nudged span when §7 made it a real control: it is now `VotesComponent` at
+   `size="quote"`, which owns its own glyph box and centring. Leaving the rule
+   behind would have been dead CSS carrying a measured number — the exact trap the
+   note further up this file warns about for `.iconReblog`, where "the next reader
+   would have trusted it". `.iconComment` below is still live: the reply count is
+   still a plain glyph beside a number. */
+.iconComment {
+  transform: translateY(-0.2px);
 }
 
 /* ── VOTE FEEDBACK ────────────────────────────────────────────────────────
@@ -685,9 +899,12 @@
   .card * {
     transition-duration: 0.01ms !important;
   }
-  .comment {
-    transform: none;
-  }
+  /* `.cbox` no longer carries a transform at all — §8's opening table lists
+     opacity for the comment and nothing else — so there is none to cancel here.
+     The drawer's height is written from JS and is deliberately NOT suppressed:
+     §8, "Height and opacity are still written, so the expansion appears
+     instantly and completely. The feature is never withheld, only the
+     animation." The duration collapse above is what does that. */
   .pop,
   .ring,
   .count {
@@ -706,6 +923,11 @@
    contrast on a dark surface rather than recoloured, so money stays green and
    $0.00 stays absent. */
 :global(.dark) .card {
-  --pc-payout: #6fbf8e;
+  --pc-payout: rgb(var(--ink-payout));
   --pc-payout-zero: #6b645d;
+  /* --pc-wash needs no dark answer: --lumen-stock is a themed token. Only the
+     literal does. Lightened, not recoloured, to hold its step BELOW
+     --pc-ink-quiet on a dark surface the way #968c82 sits below #6e645a on a
+     light one — on dark the ramp inverts, so the quieter ink is the darker. */
+  --pc-ink-faint: #7d746b;
 }

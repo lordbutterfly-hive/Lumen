@@ -48,12 +48,43 @@ const getApiTimeout = (): number => {
  * `REACT_APP_` prefix on purpose: it is a server-side dial, invisible to browser
  * bundles, and it is also the seam the failover test injects a dead node through.
  */
+/*
+ * ★★★ TWO DEAD NODES REMOVED (2026-08-20, owner-reported "Lumen crashes when I
+ * click Following").
+ *
+ * The Following tab on a HIVE-keyed account calls `bridge.get_account_posts`
+ * straight from the browser, so whichever endpoint this rotation hands out is
+ * paid for directly by the reader. Measured from this machine:
+ *
+ *     https://api.hive.blog          200    388ms
+ *     https://api.openhive.network   200    144ms
+ *     https://api.deathwing.me       200    110ms
+ *     https://rpc.mahdiyari.info     200    150ms
+ *     https://anyx.io                502    376ms   <- removed
+ *     https://hive-api.arcange.eu    000  12007ms   <- removed, and the bad one
+ *
+ * `anyx.io` at least fails fast. `hive-api.arcange.eu` does not answer at all:
+ * it burns the whole request timeout, the query retries once, and the tab sits
+ * dead for roughly twice the timeout before it can even show an error. The
+ * server log for this instance is full of
+ * `Request timed out: "POST https://hive-api.arcange.eu" (gave up after 8001ms)`.
+ *
+ * ★ THIS IS A LIVENESS LIST, NOT A CONSTANT. Nodes come back; this is the state
+ * measured today, not a permanent judgement, and the two are removed rather than
+ * reordered because a dead node anywhere in a rotation still gets handed out.
+ * The durable fix is to pick by measured health rather than by list order, which
+ * is a bigger change than this bug needs.
+ *
+ * ★ A READER CAN ALSO PIN A NODE. `getDefaultClientOptions` below reads
+ * `localStorage['node-endpoint']`, which /healthchecker writes. A pin overrides
+ * this list entirely, so anyone still seeing the hang after this change should
+ * clear that key first — that is exactly the failure the /healthchecker
+ * production gate was added to prevent.
+ */
 const FALLBACK_ENDPOINTS = [
   'https://api.hive.blog',
   'https://api.openhive.network',
-  'https://anyx.io',
   'https://api.deathwing.me',
-  'https://hive-api.arcange.eu',
   'https://rpc.mahdiyari.info'
 ];
 

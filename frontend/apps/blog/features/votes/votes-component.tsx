@@ -439,6 +439,7 @@ const VotesComponent = ({
   // hole exactly where the arrow used to be, which reads as a deleted element.
   const rootClass = clsx(voteStyles.root, {
     [voteStyles.sm]: size === 'sm',
+    [voteStyles.quote]: size === 'quote',
     [voteStyles.upOnly]: !showDownvote
   });
   const upBtnClass = clsx(voteStyles.btn, voteStyles.up, {

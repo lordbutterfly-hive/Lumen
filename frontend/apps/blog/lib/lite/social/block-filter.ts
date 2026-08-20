@@ -215,16 +215,63 @@ export async function applyOwnerBlocksToThread<T extends Entry>(entries: T[]): P
   // (and, on other paths, cached), and quietly editing an array someone else may hold
   // a reference to is how a filter starts affecting requests it was never applied to.
   //
-  // `children` is deliberately LEFT ALONE. It is a count, not an identity — it leaks
-  // nobody — and rewriting it would mean this filter silently disagreeing with the
-  // chain's own reply count everywhere else in the app.
+  // ★★★ `children` IS NO LONGER LEFT ALONE (2026-08-20, owner report: "the
+  // blocked accounts still show up as if their comments exist. the comments
+  // are hidden but under the card it says 2"). It used to be, on the reasoning
+  // that it is a count rather than an identity and rewriting it would put this
+  // filter at odds with "the chain's own reply count everywhere else in the
+  // app". That reasoning was backwards: `children` is Hivemind's raw recursive
+  // descendant count, computed with no knowledge of a Lumen block or chain
+  // mute at all, so it was ALREADY disagreeing with what this function had just
+  // decided to serve — the bug was the disagreement existing, not fixing it.
+  // Every consumer of the returned entries (a comment's own "N replies"
+  // affordance, a thread's total) reads `children` off these same objects, so
+  // leaving it wrong here meant it stayed wrong everywhere downstream.
+  //
+  // Zero extra cost: the whole thread is already in hand and `hidden` has
+  // already been walked to its fixed point above, so this is one more
+  // pointer-chase per hidden entry, not a fetch. Every ancestor is credited,
+  // not just the immediate parent — `children` sums the WHOLE subtree the way
+  // Hivemind computed it, so a hidden GRANDCHILD owes its grandparent a
+  // decrement too, regardless of whether the entry in between is itself
+  // hidden (its own count no longer renders, but a SURVIVING ancestor two
+  // levels up must not overstate on its account).
+  const childrenDelta = new Map<string, number>();
+  for (const hiddenCoord of hidden) {
+    const hiddenEntry = byCoord.get(hiddenCoord);
+    const seenAncestors = new Set<string>([hiddenCoord]);
+    let cursor: string | null = hiddenEntry ? parentCoordKey(hiddenEntry) : null;
+    while (cursor && !seenAncestors.has(cursor)) {
+      seenAncestors.add(cursor);
+      childrenDelta.set(cursor, (childrenDelta.get(cursor) ?? 0) + 1);
+      const ancestor = byCoord.get(cursor);
+      cursor = ancestor ? parentCoordKey(ancestor) : null;
+    }
+  }
+
   return entries
     .filter((entry) => !hidden.has(coordKey(entry)))
     .map((entry) => {
+      const coord = coordKey(entry);
       const replies = entry.replies;
-      if (!Array.isArray(replies) || replies.length === 0) return entry;
-      const kept = replies.filter((r) => typeof r !== 'string' || !hidden.has(r));
-      return kept.length === replies.length ? entry : { ...entry, replies: kept };
+      const trimmedReplies =
+        Array.isArray(replies) && replies.length > 0
+          ? replies.filter((r) => typeof r !== 'string' || !hidden.has(r))
+          : null;
+      const repliesChanged = trimmedReplies !== null && trimmedReplies.length !== (replies as unknown[]).length;
+
+      const delta = childrenDelta.get(coord) ?? 0;
+      if (!repliesChanged && delta === 0) return entry;
+
+      return {
+        ...entry,
+        ...(repliesChanged ? { replies: trimmedReplies } : {}),
+        // `Math.max(0, ...)` is a defensive floor on an already-EXACT
+        // subtraction (delta can never legitimately exceed a well-formed
+        // subtree's own count), not the blind "clamp to 0" this fix is
+        // explicitly not allowed to be — every other post's count is untouched.
+        ...(delta > 0 ? { children: Math.max(0, entry.children - delta) } : {})
+      };
     });
 }
 

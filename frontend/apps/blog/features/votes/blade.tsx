@@ -22,7 +22,18 @@ import styles from './vote-control.module.css';
 const BLADE_PATH =
   'M12 3.1c3 3.8 5.4 7.4 7.2 10.8-2.3-1.4-4.7-2.1-7.2-2.1s-4.9.7-7.2 2.1C6.6 10.5 9 6.9 12 3.1z';
 
-export type VoteSize = 'default' | 'sm';
+/**
+ * `default` = post page (28px glyph / 53x53 target / 18px tally).
+ * `sm`      = feed density (22px / 38x38 / 14.5px).
+ * `quote`   = the post card's top-comment drawer (18px / 24x24 / 14px), added
+ *             2026-08-20 for the card-expansion spec §7. It is DELIBERATELY the
+ *             smallest: "The vote is subordinate to the post's. The post's blade
+ *             is 22px, the comment's is 18px. With the drawer open the two arrows
+ *             sit about 113px apart with the same icon and different meaning,
+ *             which is a mis-click risk. The smaller one has to read as belonging
+ *             to the quote, not as a peer of the post's vote."
+ */
+export type VoteSize = 'default' | 'sm' | 'quote';
 
 /**
  * The glyph. `filled` is the cast state; the fill is `currentColor` so the

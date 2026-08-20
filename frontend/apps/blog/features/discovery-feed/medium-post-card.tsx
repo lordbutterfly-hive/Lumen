@@ -47,6 +47,15 @@ import { classifyBlacklist } from '@/blog/lib/moderation/blacklist-reason';
 import { isOwnModerationHide } from '@/blog/lib/muted-reasons';
 import cardStyles from './post-card.module.css';
 import TopCommentDrawer from './top-comment-drawer';
+import { useVisibleDiscussion } from './lib/use-visible-discussion';
+import {
+  DWELL_MS,
+  claimOpen,
+  isScrollSuppressed,
+  releaseOpen,
+  subscribeToScroll,
+  withinBottomGuard
+} from './lib/card-expansion';
 
 // TODO: move to i18n
 const LABELS = {
@@ -122,9 +131,10 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
   /**
    * ★★★ THE DRAWER'S FETCH GATE (2026-08-19, top-comment drawer).
    *
-   * `engaged` flips once and never back. The card opens its drawer on
-   * `:hover`/`:focus-within` in CSS — no JS owns the OPEN state — but the
-   * comment inside has to be fetched, and the feed payload does not carry one:
+   * `engaged` flips once and never back. It is the FETCH gate only — the open
+   * state moved into JS on 2026-08-20 and lives in `open` just below, with the
+   * spec §8 rules that go with it. The comment inside has to be fetched, and the
+   * feed payload does not carry one:
    * `Entry` has `children` (a count) and no bodies. So a drawer on every card
    * would be one extra request per card, 20 per feed page, added to the most
    * visited screen in the product. This app has already paid for that exact
@@ -154,9 +164,211 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
     clearTimeout(engageTimer.current);
     engageTimer.current = null;
   };
+
+  /*
+   * ═════════════════════════════════════════════════════════════════════════
+   * THE DRAWER'S OPEN STATE, moved into JS by the 2026-08-20 card-expansion
+   * spec (§1 "Dwell replaces instant fire", §8 "Motion and triggers").
+   *
+   * It used to be `.card:hover .drawer { height: auto }` — no JS, no state. That
+   * was the right shape for "open on hover" and the wrong one for every rule §8
+   * adds, none of which CSS can express: a 350ms dwell, a scroll flag, a
+   * viewport-bottom guard, and "opening a card closes any other". So the trigger
+   * is here and the three cross-card rules are in `lib/card-expansion.ts`.
+   *
+   * ★★ THE FETCH GATE AND THE OPEN GATE ARE DIFFERENT CLOCKS, ON PURPOSE.
+   * `engage` above still fires at 140ms and still only starts the REQUEST; the
+   * drawer opens at 350ms. Collapsing them to one 350ms timer would be tidier
+   * and would mean the comment arrives 350ms after the pointer lands rather than
+   * 140ms, so the drawer would slide open onto an empty box and reflow when the
+   * thread resolved. Two clocks buys the fetch a 210ms head start inside the
+   * dwell the reader is already spending.
+   *
+   * ★ `engaged` STAYS ONE-WAY. Once a reader has looked at a card, moving away
+   * and back must not re-request. `open` is the one that goes both ways.
+   * ═════════════════════════════════════════════════════════════════════════
+   */
+  /*
+   * ★★ THE COMMENT COUNT, CORRECTED ONCE THE THREAD IS KNOWN (2026-08-20, owner
+   * report: "the comments are hidden but under the card it says 2").
+   *
+   * `post.children` is Hivemind's raw count and is blind to BOTH of this
+   * product's block mechanisms — the post owner's (server-side, global) and this
+   * reader's own (client-side, personal). The hook returns the thread as this
+   * reader would actually see it, so its count is the one that matches the page
+   * they land on.
+   *
+   * Same query as the drawer's, same key, deduped by React Query: this adds no
+   * request. It is `engaged`-gated for the same reason the drawer is — fetching
+   * every thread on feed paint is the regression this screen has already paid
+   * for once. So the number self-corrects on hover rather than on paint, which
+   * is the accepted trade recorded in the hook's header.
+   */
+  const { count: visibleComments } = useVisibleDiscussion(post.author, post.permlink, engaged);
+
+  const [open, setOpen] = useState(false);
+  const cardRef = useRef<HTMLElement | null>(null);
+  const dwellTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /*
+   * ★ ONE STABLE IDENTITY FOR THE WHOLE MOUNT. `claimOpen`/`releaseOpen` hold
+   * this function in a module-level Set, so it has to be the SAME function
+   * object every render — a `useCallback` that ever re-created it would leave a
+   * stale closer registered and that card could never be closed by another
+   * card's claim. Built once in a ref and self-referencing through that ref.
+   */
+  const closeSelf = useRef<() => void>();
+  if (!closeSelf.current) {
+    closeSelf.current = () => {
+      if (dwellTimer.current) {
+        clearTimeout(dwellTimer.current);
+        dwellTimer.current = null;
+      }
+      setOpen(false);
+      releaseOpen(closeSelf.current!);
+    };
+  }
+
+  const cancelDwell = () => {
+    if (!dwellTimer.current) return;
+    clearTimeout(dwellTimer.current);
+    dwellTimer.current = null;
+  };
+  const cancelClose = () => {
+    if (!closeTimer.current) return;
+    clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  };
+
+  const openNow = () => {
+    // §8 "One at a time. Opening a card closes any other."
+    claimOpen(closeSelf.current!);
+    setOpen(true);
+  };
+
+  /*
+   * ★ THE POINTER'S PRESENCE IS STATE, not just an event. Needed because a
+   * pointer that entered during a scroll must be able to arm LATER, when
+   * scrolling settles, without any further pointer event — see the `onSettle`
+   * note in `lib/card-expansion.ts`. `onPointerEnter` alone cannot express
+   * that: it has already fired and will not fire again.
+   */
+  const pointerInside = useRef(false);
+  /*
+   * ★ `open` MIRRORED INTO A REF because `tryArm` is reached from a listener
+   * registered once, on mount. That listener holds the FIRST render's closure,
+   * where `open` is permanently false, so reading the state variable there would
+   * let a settle re-arm a card that is already open — claiming it a second time
+   * and re-running its dwell under a reader who is already reading it.
+   */
+  const openRef = useRef(false);
+  openRef.current = open;
+
+  /** Every reason not to arm, in one place, so entry and settle cannot drift. */
+  const tryArm = () => {
+    if (openRef.current) return;
+    // §8 "Never restart a running timer. A pointer moving within an
+    // already-armed card must not reset its dwell."
+    if (dwellTimer.current) return;
+    // §8 "Pointer entry returns early while [the scroll flag] is set."
+    if (isScrollSuppressed()) return;
+    // §8 "If its bottom edge is within 120px of the viewport bottom, the dwell
+    // timer never starts. An expansion that opens offscreen pushes what nobody
+    // can see." Re-measured here rather than cached, because on the settle path
+    // the card has just moved.
+    if (withinBottomGuard(cardRef.current)) return;
+    dwellTimer.current = setTimeout(() => {
+      dwellTimer.current = null;
+      openNow();
+    }, DWELL_MS);
+  };
+
+  const onCardEnter = () => {
+    pointerInside.current = true;
+    cancelClose();
+    engage();
+    if (open) return;
+    // §8 "Never restart a running timer. A pointer moving within an already-armed
+    // card must not reset its dwell." `onPointerEnter` does not fire on internal
+    // movement, but it DOES fire again when the pointer crosses out of the card
+    // and back inside the close grace, and re-arming there would make a reader
+    // who wobbled at the edge wait 350ms twice.
+    tryArm();
+  };
+
+  /*
+   * §8: "The expansion stays open while the pointer is over the card or the
+   * drawer. The close timer starts only when the pointer leaves both. The drawer
+   * is a child of the card, so containment gives this for free. Do not
+   * reimplement the trigger as a sub-region of the card: the reader moves DOWN
+   * into the comment to read it, and a zone-based keep-open would start closing
+   * the moment they move toward the thing it just revealed."
+   *
+   * `onPointerLeave` on the card root is exactly that containment — it does not
+   * fire while the pointer is anywhere inside, drawer included. The 200ms is
+   * grace for the border and the internal gap, nothing more.
+   */
+  const onCardLeave = () => {
+    pointerInside.current = false;
+    cancelDwell();
+    cancelEngage();
+    if (!open) return;
+    cancelClose();
+    closeTimer.current = setTimeout(() => {
+      closeTimer.current = null;
+      closeSelf.current!();
+    }, 200);
+  };
+
+  /*
+   * ★ FOCUS OPENS WITHOUT A DWELL, and that is a deliberate reading of §10
+   * ("Keyboard opening is not specified ... come back for it rather than
+   * inventing one"). This is not an invention, it is the behaviour ALREADY
+   * SHIPPED — `.card:focus-within` opened the drawer — preserved through the
+   * move to JS. Dropping it would be the change, and a regression: the drawer's
+   * markup stays in the DOM at `height: 0; overflow: hidden`, so a reader
+   * tabbing into the comment's own link would land focus inside a clipped box
+   * with nothing visible. A dwell makes no sense here either; focus has no
+   * pointer travel to disambiguate.
+   */
+  const onCardFocus = () => {
+    cancelClose();
+    engage();
+    if (!open) openNow();
+  };
+  const onCardBlur = (e: React.FocusEvent<HTMLElement>) => {
+    // Focus moving BETWEEN children of the card is not a blur of the card.
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    closeSelf.current!();
+  };
+
   // A card unmounted mid-intent (infinite feed recycling a row) must not leave a
-  // timer to fire into a dead component.
-  useEffect(() => cancelEngage, []);
+  // timer to fire into a dead component, nor a closer registered in the shared
+  // Set — a stale entry there would be called on the next card's claim and set
+  // state on something that no longer exists.
+  useEffect(
+    () => () => {
+      cancelEngage();
+      cancelDwell();
+      cancelClose();
+      releaseOpen(closeSelf.current!);
+    },
+    []
+  );
+
+  /*
+   * §8's scroll listener is shared and reference-counted; this mount is one
+   * reference. See `lib/card-expansion.ts` for why it is capture-phase.
+   *
+   * The callback is what makes the suppression END rather than LATCH: when the
+   * feed stops moving, a card still under the pointer arms its dwell, with no
+   * further pointer event required. Without it, "scroll, stop, rest the pointer"
+   * — the ordinary way a feed is read — never opens anything.
+   */
+  useEffect(() => subscribeToScroll(() => {
+    if (pointerInside.current) tryArm();
+  }), []);
 
   const [moderationRevealed, setModerationRevealed] = useState(false);
   // ★ OWNER RULING 2026-08-12 — the post overflow menu's ONE moderation control is
@@ -527,9 +739,11 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
       // opens the drawer for a keyboard reader too and an empty drawer opening
       // under the keyboard would be worse than none. `onFocus` bubbles (unlike
       // `focus` in the DOM), so this catches focus landing on any child.
-      onPointerEnter={engage}
-      onPointerLeave={cancelEngage}
-      onFocus={engage}
+      ref={cardRef}
+      onPointerEnter={onCardEnter}
+      onPointerLeave={onCardLeave}
+      onFocus={onCardFocus}
+      onBlur={onCardBlur}
       // ★ THE ROOT TESTID THE TEST SUITE NEEDS (2026-08-09). The card had testids on
       // every child and none on itself, so nothing could count posts or scope a
       // locator to "the first post". `playwright/tests/support/pages/homePage.ts`
@@ -1127,7 +1341,12 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           step (14px/22px, the scale's UI default) for the whole row now. Icons
           are unaffected — they are pinned at 20px in px, not em. */}
       <div
-        className="mt-[18px] flex flex-wrap items-center gap-2.5 text-body-sm"
+        /* ★ 14px, not 18px (2026-08-20, owner-reported: "too much space between the
+           text image in the card and the icons and payout below"). 14px is the
+           handoff's own number — `handoff_post_card/SPEC.md`'s box model reads
+           `.pc__actions flex, align center, gap 24, padding-top 14`. The 18px
+           shipped here was never the spec's; it was 4px of drift. */
+        className="mt-[14px] flex flex-wrap items-center gap-2.5 text-body-sm"
         data-testid="medium-card-footer"
       >
         {/* Vote pill. The arrows are denser's real VotesComponent, so their size is
@@ -1220,7 +1439,9 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               left alone: it is lucide, already stroke 2, and on a different
               row from the one the owner is looking at. */}
           <PostCardCommentTooltip
-            comments={post.children}
+            /* Hivemind's number until the thread is in hand, this reader's real
+               number after. See `useVisibleDiscussion`. */
+            comments={visibleComments ?? post.children}
             url={`${href}/#comments`}
             iconClassName="h-[22px] w-[22px] stroke-2"
             postTitle={displayTitle}
@@ -1301,7 +1522,13 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           right for this gate: any non-zero value means at least one comment
           exists somewhere in the thread. */}
       {post.children > 0 ? (
-        <TopCommentDrawer author={post.author} permlink={post.permlink} engaged={engaged} />
+        <TopCommentDrawer
+              author={post.author}
+              permlink={post.permlink}
+              engaged={engaged}
+              open={open}
+              postHref={href}
+            />
       ) : null}
     </article>
   );

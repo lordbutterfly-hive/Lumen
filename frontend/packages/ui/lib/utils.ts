@@ -1,5 +1,5 @@
 import { ClassValue, clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { extendTailwindMerge } from 'tailwind-merge';
 import Big from 'big.js';
 import { convertStringToBig } from './helpers';
 import { TFunction } from 'i18next';
@@ -61,6 +61,53 @@ export const prepareVotes = (entry: Entry, votes: IVote[]) => {
     });
   });
 };
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ★★★ tailwind-merge HAS TO BE TOLD ABOUT OUR FONT SCALE, OR IT DELETES IT.
+ * (2026-08-20, owner-reported: "you made the payouts too small".)
+ *
+ * `twMerge` only knows Tailwind's DEFAULT size names — xs, sm, base, lg, xl and
+ * so on. This app replaced that scale with its own (`tailwind.config.js`
+ * `fontSize`: `body-lg`, `caption`, `read`, `lede`, `stat`, the numeric steps,
+ * ...). Faced with `text-body-lg`, twMerge cannot match it against the font-size
+ * group, so it falls through and classifies it as a text COLOUR — colours being
+ * the group that accepts arbitrary names.
+ *
+ * The consequence is silent and specific: any element that sets a custom size
+ * AND a colour in the same `cn()`, size first, loses the SIZE. twMerge sees two
+ * "text colours", keeps the last, and drops the other. The class never reaches
+ * the DOM at all, so nothing in the stylesheet can explain the wrong size and
+ * devtools shows no losing rule — it shows no rule.
+ *
+ * MEASURED: the feed card's payout is written `text-body-lg` (17px) and
+ * rendered at 15px, inherited, with `text-body-lg` absent from `className`,
+ * because `text-[color:var(--pc-payout)]` follows it. That is the second time
+ * the owner has reported this exact figure as too small — the first fix
+ * (2026-08-14, `text-sm` -> `text-body-lg`) could never have worked, because the
+ * class it added was being thrown away.
+ *
+ * Eight `cn()` call sites across the app have this shape today. Declaring the
+ * scale fixes all of them and stops the next one happening.
+ *
+ * ★ WHY THE LIST IS SPELLED OUT rather than imported from the Tailwind config:
+ * this package cannot import the config (it is a CommonJS file outside the
+ * package's own graph), and a wrong-but-silent drift is exactly what this fixes.
+ * If a size is added to `fontSize` in `tailwind.config.js`, ADD IT HERE TOO.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+const FONT_SIZES = [
+  '12', '13', '14', '15', '16', '17', '18', '20', '22', '24', '26', '30', '34', '44', '60',
+  'xs', 'sm', 'base', 'lg', 'xl', '2xl', '3xl', '4xl', '5xl', '6xl',
+  'meritum-display', 'caption', 'body-sm', 'body', 'body-lg', 'read', 'lede', 'heading',
+  'stat', 'title', 'display', 'hero', 'micro', 'label', 'label-lg'
+];
+
+const twMerge = extendTailwindMerge({
+  classGroups: {
+    'font-size': [{ text: FONT_SIZES }]
+  }
+});
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));

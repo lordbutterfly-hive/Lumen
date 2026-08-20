@@ -341,7 +341,9 @@ const PostListItem = memo(
 
                   <DetailsCardHover post={post} decline={parseFloat(post.max_accepted_payout) === 0}>
                     <div
-                      className={`flex items-center hover:cursor-pointer hover:text-destructive ${
+                      /* ★ Money green, no red hover — same change as the post page and the
+                         comment row (2026-08-20, owner report). */
+                      className={`flex items-center text-[color:rgb(var(--ink-payout))] hover:cursor-pointer ${
                         parseFloat(post.max_accepted_payout) === 0 ? 'text-ink-8 line-through' : ''
                       }`}
                       data-testid="post-payout"

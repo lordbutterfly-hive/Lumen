@@ -1,0 +1,58 @@
+/**
+ * Illumination spec §2 ("Rank as luminosity") — the Profile reputation-badge
+ * treatment, `.rep-badge` in the spec, renamed `.repBadge` here only because
+ * this is a CSS Module (kebab-case class names are not valid JS identifiers
+ * off `styles.`) — see `vote-control.module.css` for the same convention.
+ *
+ * A CSS Module, not an addition to `packages/tailwindcss/globals.css`,
+ * because that file is owned by another agent this session (same reason
+ * `vote-control.module.css` and `meritum-ticker.module.css` exist).
+ *
+ * Every colour below is a token: `--lum` and `--brand` are consumed through
+ * `rgb(var(--token) / alpha)`, never redefined here. `rgb(255 255 255 / …)`
+ * is the spec's own inset highlight (white, not a brand colour) and is
+ * copied verbatim from §2, not introduced by this file.
+ *
+ * ★★ NOT APPLIED ANYWHERE YET — READ BEFORE WIRING (2026-08-20).
+ *
+ * `.repBadge` is written exactly to spec and is ready to use, but nothing in
+ * `profile-identity.tsx` currently applies it, on purpose. The live
+ * "reputation" pill on Profile (`data-testid="profile-reputation"`) is fed by
+ * `reputation`, the Hive chain reputation score from `bridge.get_profile` —
+ * see the doc block above `ProfileIdentity` in that file: "TWO DIFFERENT
+ * THINGS, DELIBERATELY SIDE BY SIDE AND DELIBERATELY UNALIKE," reconfirmed by
+ * the owner on 2026-08-09 specifically so this pill would NOT be read as a
+ * rank. Hive reputation is not the LUMEN 1..9 rank the sidebar shows, and
+ * spec §2 is explicit: "Do not fall back to reputation, payout, or follower
+ * count, and do not compute a rank client-side from anything else."
+ *
+ * The one thing on this page that DOES carry the real 1..9 rank is
+ * `<ProfileLeagueChip>` (`features/retention/components/profile-league-chip.tsx`),
+ * used a few lines below in `profile-identity.tsx` — but that component, and
+ * the `useProfileRetention` hook that feeds it, live outside
+ * `features/account-profile/`, so they are outside this pass's ownership and
+ * were left untouched rather than edited on spec. It also does not currently
+ * accept a `style`/`--l` override, only `className`.
+ *
+ * `--l` is therefore never set on the reputation pill. Applying `.repBadge`
+ * without it would not be a no-op: `background`/`box-shadow` are
+ * non-inherited properties, so an unset `--l` makes every `calc(var(--l) * …)`
+ * invalid at computed-value time and the declaration resolves to its INITIAL
+ * value — i.e. it would strip the pill's current grey background rather than
+ * leave it alone. So the class stays defined and unused until a real rank is
+ * threaded to this component; wiring it from `reputation` would reintroduce
+ * exactly the proxy the 2026-08-09 ladder rework tore out (`types.ts`: "WHY
+ * REPUTATION IS GONE").
+ */
+
+.repBadge {
+  background: linear-gradient(
+    135deg,
+    rgb(var(--lum) / calc(var(--l) * 0.5)),
+    rgb(var(--brand) / calc(var(--l) * 0.42))
+  );
+  box-shadow:
+    0 2px 8px rgb(var(--lum) / calc(var(--l) * 0.3)),
+    inset 0 1px 0 rgb(255 255 255 / calc(var(--l) * 0.3)),
+    0 0 calc(var(--l) * 16px) calc(var(--l) * 2px) rgb(var(--lum) / calc(var(--l) * 0.55));
+}

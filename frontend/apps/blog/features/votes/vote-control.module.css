@@ -63,6 +63,64 @@
   gap: 10px;
 }
 
+/* ── QUOTE SIZE ───────────────────────────────────────────────────────────
+   The post card's top-comment drawer. Card-expansion SPEC.md §7.
+
+   ★★ WHY THIS IS A SIZE ON THE SHARED CONTROL AND NOT A NEW BUTTON. The drawer
+   needs a real vote — optimistic, `aria-pressed`, the frozen pop/ring/count-up
+   curves — and all of that already exists here. What it does NOT need is a
+   second copy of the guards: the lite-vs-Hive tier split, the self-engagement
+   400 a lite author gets on their own post, and the hydration window where
+   `identity.isLoggedIn` is true while `account_tier` is still unknown. Those are
+   ~200 lines in `votes-component.tsx`, each one added after a real defect, and a
+   hand-rolled drawer vote would have reintroduced them one at a time. A size
+   variant inherits every one of them for free.
+
+   ★ SUBORDINATE BY CONSTRUCTION (§7): 18px against the post's 22px. The two
+   blades sit ~113px apart once the drawer is open, same glyph, different target,
+   so the smaller one has to read as belonging to the quotation. */
+.quote {
+  /* Up side only (`showDownvote` is false), so there is no group gap to set. */
+  gap: 0;
+  /* §7 rest colour is the spec's --ink-4 #968C82 — the same literal
+     `post-card.module.css` carries as `--pc-ink-faint`, and for the same reason:
+     the app's --ink-N scale is an inventory of found colours and has no entry at
+     this value. Hover resolves to --lm-vote-brand through the shared rule. */
+  --lm-vote-muted: #968c82;
+}
+/* 6px glyph-to-number, matching the drawer's own icon/number spacing so the vote
+   and the (non-interactive) reply count beside it read as one row. */
+.quote .side {
+  gap: 6px;
+}
+/* 24x24: the WCAG 2.5.8 floor this app enforces on every feed-card control, and
+   the largest box that still sits inside the comment block's last line without
+   touching the body text above it. */
+.quote .btn {
+  width: 24px;
+  height: 24px;
+}
+.quote .btn svg {
+  width: 18px;
+  height: 18px;
+}
+/* §5's type table: vote count 14px / 500 / tabular / --ink-4. The base `.tally`
+   is 18px/700 and `.tallyUp` is near-black; both are wrong for a readout that
+   must not compete with the comment it annotates. */
+.quote .tally {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 18px;
+}
+.quote .tallyUp {
+  color: var(--lm-vote-muted);
+}
+/* Cast state still wins, exactly as everywhere else — the number going brand is
+   how a reader knows the vote landed. */
+.quote .tallyUp.mine {
+  color: var(--lm-vote-brand);
+}
+
 /**
  * Dark values chosen to match tokens this app already ships, so the control
  * sits in the same tonal family as everything around it:

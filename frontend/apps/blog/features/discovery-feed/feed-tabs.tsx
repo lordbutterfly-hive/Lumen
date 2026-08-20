@@ -1007,10 +1007,44 @@ function TabButton({
         // (`text-14`/`text-sm`, 423 call sites) so the label now matches every
         // other button and tab in the product instead of being a size of one.
         'whitespace-nowrap rounded-control px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold transition-colors',
+        // ★ ILLUMINATION SPEC §1 (2026-08-20). There is no separate absolutely-
+        // positioned `.tab-pill` in this codebase — checked, grepped, none
+        // exists anywhere in the repo. This `isActive` branch IS the entire
+        // active-state surface: the only place a background says "this tab is
+        // current". So the treatment lands here rather than on a sliding
+        // indicator that doesn't exist, which also means the spec's own
+        // warning ("a background on `.tab[aria-current]` would double the
+        // active state") doesn't apply — there is nothing else to double
+        // against. One step weaker than the nav rail per §4: `--lift-1` (the
+        // ordinary resting elevation, same token every other card already
+        // uses) plus a soft warm glow, not the nav's inset ring + bloom.
+        // `aria-selected` above and the ink-colour swap below are unchanged,
+        // so light stays additive per §6, not the only carrier of state.
         isActive
-          ? 'bg-white text-[#161511] shadow-[0_1px_2px_rgba(20,18,10,0.08),0_1px_3px_rgba(20,18,10,0.05)]'
+          /* ★★ THE SHADOW IS A STYLE, NOT A TAILWIND ARBITRARY VALUE, AND THAT IS
+             NOT a stylistic preference — the class version SILENTLY DID NOT APPLY.
+             Measured on the built app 2026-08-20: this tab's computed `box-shadow`
+             was `none` while its background was correctly `--lum-1`, so the pill
+             had the warm fill and none of the glow.
+
+             The cause is the `/` in `rgb(var(--lum)/.85)`. Inside a Tailwind
+             arbitrary value a slash is the OPACITY shorthand (`bg-black/50`), so
+             the class does not survive the parser and no rule is emitted at all.
+             Nothing warns; the utility simply never exists.
+
+             An inline style takes the exact §1 value with no parser between it and
+             the browser. `--lift-1` and `--lum` still resolve as tokens, so this is
+             not a hardcoded colour — it is the same declaration the spec writes. */
+          ? 'bg-[var(--lum-1)] text-[#161511]'
           : 'bg-transparent text-[#5c6472] hover:text-[#161511]'
       )}
+      style={
+        isActive
+          ? // §1: one step weaker than the nav rail (§4). See the note above for why
+            // this is not a Tailwind class.
+            { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' }
+          : undefined
+      }
     >
       {children}
     </button>
@@ -1134,7 +1168,13 @@ export default function FeedTabs() {
            `w-fit` + `max-w-full` still hug the content at every larger width,
            where all three sit on one row exactly as before (820px: 674px of
            tabs in 820px of viewport — no wrap, no visual change). */
-        className="mb-5 inline-flex w-fit max-w-full flex-wrap gap-1.5 rounded-card border border-[#ebedf0] bg-[#f4f5f7] p-[5px]"
+        /* ★ ILLUMINATION SPEC §3 (2026-08-20): "troughs follow the ground they
+           sit on, never lighter." This is the track the active pill sits in
+           — the tab-bar trough — so its background moves from the old
+           unrelated cool grey to the warm ambient token, same as every other
+           trough in this pass. Border untouched: §7 rules out any border
+           change. */
+        className="mb-5 inline-flex w-fit max-w-full flex-wrap gap-1.5 rounded-card border border-[#ebedf0] bg-[var(--amb-1)] p-[5px]"
       >
         <TabButton isActive={activeTab === 'for-you'} onClick={() => selectTab('for-you')}>
           {LABELS.forYou}

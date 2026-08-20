@@ -122,6 +122,17 @@ export default function ProfileIdentity({
     <div className={cn('min-w-0', moderated && 'opacity-60 grayscale')} data-testid="profile-identity-block">
       <div className="flex flex-wrap items-center gap-2 font-sans text-[15px] leading-[24px] text-ink-10">
         <span className="font-semibold text-ink-7">@{username}</span>
+        {/* ★ ILLUMINATION SPEC §2 ("Rank as luminosity") LANDS INSIDE THIS CHIP, NOT HERE
+            (2026-08-20). `ProfileLeagueChip` is the one thing in this row with a real
+            1..9 rank, and it now self-derives `--l` from that rank and applies its own
+            `.repBadge` fill internally — see `profile-league-chip.tsx` /
+            `profile-league-chip.module.css` in `features/retention/components/`. The
+            reputation pill just below is fed by Hive `reputation` instead, a different
+            quantity the doc block above this component already spends several
+            paragraphs keeping distinct from rank; spec §2 forbids driving `--l` from it
+            ("do not fall back to reputation"). `.repBadge` is written to spec in the
+            sibling `profile-identity.module.css` too, and stays unwired there — see
+            that file's header for the full reasoning. */}
         <ProfileLeagueChip username={username} chainAccount={chainAccount} />
         {showReputation ? (
           <button

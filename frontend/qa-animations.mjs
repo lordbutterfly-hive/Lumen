@@ -142,7 +142,57 @@ if (press.found) {
   rec('a pressable control was found', false, 'none');
 }
 
-// ── 4. drawer transition ────────────────────────────────────────────────────
+
+/*
+ * ★★ OPEN A DRAWER THAT ACTUALLY HAS A COMMENT IN IT.
+ *
+ * `[data-testid="post-card-drawer"]` is on EVERY card — the element is rendered
+ * unconditionally so it stays in the accessibility tree while closed — so
+ * `querySelector` of it plus `article:first.hover()` frequently lands on a post
+ * with no comments, where 0px is the CORRECT answer (§2: a post with no comments
+ * has nothing to open onto). That reads as "the drawer is broken" and is not.
+ *
+ * Also: §8 added a 350ms dwell, a scroll-suppression flag and a 120px
+ * viewport-bottom guard. `hover()` scrolls the card wherever it likes and can
+ * park it against the bottom, where the guard correctly refuses to open it. So
+ * position the card deliberately and drive a real pointer.
+ *
+ * Returns the locator of a card whose drawer opened, or null.
+ */
+async function openCardWithComment(p) {
+  const n = await p.locator('article').count();
+  for (let i = 0; i < Math.min(n, 10); i++) {
+    const c = p.locator('article').nth(i);
+    const d = c.locator('[data-testid="post-card-drawer"]');
+    if ((await d.count()) === 0) continue;
+    await c.scrollIntoViewIfNeeded();
+    await p.evaluate(() => window.scrollBy(0, -180));
+    await p.mouse.move(4, 4);
+    await p.waitForTimeout(400);
+    const b = await c.boundingBox();
+    if (!b) continue;
+    await p.mouse.move(b.x + b.width / 2, b.y + 40);
+    await p.waitForTimeout(1600);
+    /*
+     * ★ RE-CHECK ONCE BEFORE GIVING UP ON A CARD. §8 closes any open card on the
+     * first scroll event, and a stray one — the browser's own scroll anchoring
+     * adjusting position as feed images load — is indistinguishable from a
+     * reader scrolling, so an open drawer can close on its own. It SELF-HEALS:
+     * the pointer is still inside, so 150ms after the scroll settles the card
+     * re-arms and reopens (see `subscribeToScroll`'s onSettle). Measuring inside
+     * that window is what made this probe flap between 0px and 113px.
+     */
+    let h = await d.evaluate((el) => el.getBoundingClientRect().height);
+    if (h <= 10) {
+      await p.waitForTimeout(1200);
+      h = await d.evaluate((el) => el.getBoundingClientRect().height);
+    }
+    if (h > 10) return c;
+  }
+  return null;
+}
+
+// ── 4. drawer transition ───────────────────────────────────────────────────
 const drawerCheck = await (async () => {
   // ★ PARK THE CURSOR FIRST. Without this the "at rest" reading is taken with the
   // pointer wherever the press probe left it — which can be on a card — so the
@@ -150,24 +200,20 @@ const drawerCheck = await (async () => {
   // the reading that exposed this). A resting measurement has to be taken at rest.
   await page.mouse.move(2, 2);
   await page.waitForTimeout(900);
-  const closed = await page.evaluate(() => {
-    const d = document.querySelector('[data-testid="post-card-drawer"]');
-    return d ? { h: d.getBoundingClientRect().height, transition: getComputedStyle(d).transitionProperty, dur: getComputedStyle(d).transitionDuration } : null;
-  });
-  if (!closed) return { ok: false, why: 'no drawer in DOM' };
-  await page.locator('article').first().hover();
-  await page.waitForTimeout(1200);
-  const open = await page.evaluate(() => {
-    const d = document.querySelector('[data-testid="post-card-drawer"]');
-    return d ? d.getBoundingClientRect().height : -1;
-  });
+  const card = await openCardWithComment(page);
+  if (!card) return { ok: false, why: 'no card in the first 10 had a comment to open onto' };
+  const d = card.locator('[data-testid="post-card-drawer"]');
+
+  // measure OPEN first (we are already hovering it), then at rest
+  const open = await d.evaluate((el) => el.getBoundingClientRect().height);
+  const style = await d.evaluate((el) => ({
+    transition: getComputedStyle(el).transitionProperty,
+    dur: getComputedStyle(el).transitionDuration
+  }));
   await page.mouse.move(2, 2);
-  await page.waitForTimeout(900);
-  const shut = await page.evaluate(() => {
-    const d = document.querySelector('[data-testid="post-card-drawer"]');
-    return d ? d.getBoundingClientRect().height : -1;
-  });
-  return { ok: true, closed: closed.h, open, shut, transition: closed.transition, dur: closed.dur };
+  await page.waitForTimeout(1200);
+  const shut = await d.evaluate((el) => el.getBoundingClientRect().height);
+  return { ok: true, closed: shut, open, shut, transition: style.transition, dur: style.dur };
 })();
 if (drawerCheck.ok) {
   rec('drawer is 0-high at rest', drawerCheck.closed === 0, `${drawerCheck.closed}px`);

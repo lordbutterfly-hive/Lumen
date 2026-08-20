@@ -1,0 +1,38 @@
+/**
+ * Illumination spec §2 ("Rank as luminosity") — the reputation-badge treatment
+ * (`.rep-badge` in the spec) applied to the Profile rank chip, per the
+ * coordinator's 2026-08-20 ruling: the chip is the one thing on the Profile
+ * page that carries the real 1..9 rank, so this is where §2's Profile anchor
+ * actually lands, not the Hive-reputation pill in `account-profile/`.
+ *
+ * A CSS Module, not an addition to `packages/tailwindcss/globals.css` — that
+ * file is owned by another agent this session (same reason
+ * `vote-control.module.css` and `meritum-ticker.module.css` exist).
+ *
+ * Every colour is a token, consumed through `rgb(var(--token) / alpha)`, never
+ * redefined here. `rgb(255 255 255 / …)` is the spec's own inset highlight
+ * (white, not a brand colour) and is copied verbatim from §2.
+ *
+ * ★★ `--l: 0` DEFAULT, BELT AND BRACES (coordinator, 2026-08-20). `background`
+ * and `box-shadow` are non-inherited: if this class is ever applied to an
+ * element with no `--l` set on it, every `calc(var(--l) * …)` inside is
+ * invalid at computed-value time and the WHOLE declaration falls back to its
+ * initial value — `background: none`, `box-shadow: none` — which would strip
+ * the chip's fill rather than leave it alone. `profile-league-chip.tsx` also
+ * always sets `--l` inline in the same render that adds this class (the first
+ * brace); this default is the second, so the failure mode is unreachable even
+ * if a future edit adds the class somewhere that forgets to.
+ */
+
+.repBadge {
+  --l: 0;
+  background: linear-gradient(
+    135deg,
+    rgb(var(--lum) / calc(var(--l) * 0.5)),
+    rgb(var(--brand) / calc(var(--l) * 0.42))
+  );
+  box-shadow:
+    0 2px 8px rgb(var(--lum) / calc(var(--l) * 0.3)),
+    inset 0 1px 0 rgb(255 255 255 / calc(var(--l) * 0.3)),
+    0 0 calc(var(--l) * 16px) calc(var(--l) * 2px) rgb(var(--lum) / calc(var(--l) * 0.55));
+}

@@ -31,12 +31,57 @@ const onPaint = discussionCalls.length;
 console.log(`1. drawers in DOM ..................... ${await page.locator('[data-testid="post-card-drawer"]').count()}`);
 console.log(`2. /api/discussion calls on paint ..... ${onPaint}  ${onPaint === 0 ? '(lazy gate HOLDS)' : '*** LAZY GATE LEAKING ***'}`);
 
-// find the first card that actually has a drawer
-const idx = await page.evaluate(() => {
-  const cards = [...document.querySelectorAll('article')];
-  return cards.findIndex((c) => c.querySelector('[data-testid="post-card-drawer"]'));
-});
-console.log(`   first card with a drawer ........... index ${idx}`);
+/*
+ * ★★ PICK A CARD WHOSE POST ACTUALLY HAS A COMMENT, and do it by HOVERING.
+ *
+ * The old selection was "first article containing a [data-testid=post-card-drawer]",
+ * which is every card on the page: the drawer element is rendered
+ * unconditionally so it stays in the accessibility tree while closed (see the
+ * component's header). So that index was really just "card 0", and whenever card
+ * 0's post had no comments this probe measured an empty drawer, reported
+ * "DID NOT OPEN", and blamed the open mechanism. It had been getting lucky.
+ *
+ * A drawer with no comment is CORRECTLY 0-high — §2: "A post with zero comments
+ * has nothing to open onto. The drawer is not rendered at all." So the only
+ * honest way to find a testable card is to open one and see if a comment arrives.
+ *
+ * Also positions the card clear of the viewport bottom, because §8's guard
+ * refuses to open a card whose bottom edge is within 120px of it.
+ */
+let idx = -1;
+const cardCount = await page.locator('article').count();
+for (let i = 0; i < Math.min(cardCount, 10); i++) {
+  const c = page.locator('article').nth(i);
+  const d = c.locator('[data-testid="post-card-drawer"]');
+  if ((await d.count()) === 0) continue;
+  await c.scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.scrollBy(0, -180));
+  await page.mouse.move(4, 4);
+  await page.waitForTimeout(400);
+  const b = await c.boundingBox();
+  if (!b) continue;
+  await page.mouse.move(b.x + b.width / 2, b.y + 40);
+  await page.waitForTimeout(1600);
+  // Re-check once: §8 closes an open card on any scroll event, including the
+  // browser's own scroll-anchoring adjustments as feed images load. It re-arms
+  // itself 150ms later because the pointer is still inside, so a single reading
+  // can catch the gap. See the same note in qa-animations.mjs.
+  let h = await d.evaluate((el) => el.getBoundingClientRect().height);
+  if (h <= 10) {
+    await page.waitForTimeout(1200);
+    h = await d.evaluate((el) => el.getBoundingClientRect().height);
+  }
+  if (h > 10) { idx = i; break; }
+}
+if (idx < 0) {
+  console.log('   ABORT: no card in the first 10 opened a drawer with a comment in it.');
+  console.log('   Nothing below would be measuring the drawer, so this run proves nothing.');
+  await browser.close();
+  process.exit(1);
+}
+await page.mouse.move(4, 4);
+await page.waitForTimeout(900);
+console.log(`   first card with a COMMENT .......... index ${idx}`);
 
 const card = page.locator('article').nth(idx);
 const drawer = card.locator('[data-testid="post-card-drawer"]');

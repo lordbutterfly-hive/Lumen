@@ -862,13 +862,67 @@ const PostContent = () => {
     // Create the final list using Set for O(1) lookup
     const paginatedComments = discussionState.filter((comment) => pageIncludedIds.has(keyOf(comment)));
 
+
+    /*
+     * ★★ WHICH PAGE IS A GIVEN COMMENT ON. Added 2026-08-20 for the
+     * card-expansion spec §9 ("Jump to comment"), which names this exact
+     * problem as a blocker: "On a thread with 183 comments, confirm whether the
+     * target comment is in the DOM at click time or whether the list is
+     * paginated. If it is, resolve and render the correct page BEFORE the jump,
+     * or the anchor does not exist and the jump silently fails."
+     *
+     * It IS paginated — that is what `pages` above is — so a bare `#@a/b` hash
+     * lands on nothing for any comment past page 1. This map is the resolution
+     * step: `comments-section.tsx` reads it on arrival and moves to the right
+     * page before scrolling.
+     *
+     * Built FROM `pages` rather than recomputed, so it cannot disagree with the
+     * pagination it describes. First page wins if a key somehow appears twice,
+     * which matches the render.
+     */
+    const pageOfKey = new Map<string, number>();
+    pages.forEach((set, i) => {
+      for (const k of set) if (!pageOfKey.has(k)) pageOfKey.set(k, i + 1);
+    });
+
     return {
       comments: paginatedComments,
       totalPages,
       currentPage: validPage,
-      totalMainComments: mainComments.length
+      totalMainComments: mainComments.length,
+      pageOfKey
     };
   }, [discussionState, postData, commentsPage]);
+
+  /*
+   * ★★ THE COUNT THE READER CAN ACTUALLY SEE (2026-08-20, owner report: "the
+   * comments are hidden but under the card it says 2").
+   *
+   * `postData.children` is Hivemind's raw recursive count and is wrong in BOTH
+   * directions on this page:
+   *   TOO HIGH — it counts comments the post owner blocked (filtered server-side
+   *     in `/api/discussion`) and comments THIS reader blocked (filtered just
+   *     above, in `discussionState`).
+   *   TOO LOW  — it cannot count a lite reply that has been accepted but not yet
+   *     broadcast to chain, which `discussionState` merges in for every reader.
+   * So the header could claim 2 over an empty thread, or 0 over a visible reply.
+   *
+   * `discussionState` is the list this page actually renders, after both block
+   * mechanisms and after the lite merge, so its length IS the answer — minus the
+   * root post, which `bridge.get_discussion` always includes and which is not a
+   * comment. It costs nothing: the thread is already in hand.
+   *
+   * ★ THE DELETE GATE DELIBERATELY DOES NOT USE THIS. A few lines below,
+   * `postData.children === 0` still decides whether the hard-Delete control is
+   * offered, and it must keep reading the CHAIN's count: `canDelete` in
+   * `hive-broadcaster.ts` re-checks the same thing against a live node, and a
+   * blocked reply still exists on chain. Showing Delete because a reply is hidden
+   * would offer an action the chain will refuse.
+   */
+  const visibleCommentCount =
+    discussionState && discussionState.length > 0
+      ? discussionState.filter((c) => c.depth !== (postData?.depth ?? 0)).length
+      : (postData?.children ?? 0);
   const firstPost = discussionState?.find((post) => post.depth === 0);
   const post_is_pinned = firstPost?.stats?.is_pinned ?? false;
 
@@ -1864,7 +1918,15 @@ const PostContent = () => {
                           // DECLINED state two lines below (`!text-ink-8`) and for the
                           // `post_page` decline branch in `details-card-hover.tsx`, so
                           // this is the same family, not a new one.
-                          className={`text-sm font-bold text-ink-brand-8 hover:cursor-pointer ${
+                          // ★★ GREEN, NOT RED (2026-08-20, owner-reported: "the payout there is red
+                          // instead of green ... that shows unprofessional as on feed payout is green").
+                          // The note above is right about its own question and never asked the bigger
+                          // one: it found raw Tailwind red-500 here and swapped in the token that is
+                          // byte-identical to it, which tokenised the red and left the money red.
+                          // Measured: this figure #ef4444, the feed card #2a6b44 — same number, two
+                          // opposite colours. `--ink-payout` is the feed card's own green, promoted to a
+                          // global token so these two cannot drift again.
+                          className={`text-sm font-bold text-[color:rgb(var(--ink-payout))] hover:cursor-pointer ${
                             parseFloat(postData.max_accepted_payout) === 0
                               ? '!text-ink-8 line-through'
                               : ''
@@ -2052,16 +2114,16 @@ const PostContent = () => {
                                   as well as between cards. The count beside it already
                                   says how many. */}
                               <Icons.comment className="mr-1 h-4 w-4" />
-                              <span className="font-medium">{postData.children}</span>
+                              <span className="font-medium">{visibleCommentCount}</span>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent data-testid="post-footer-response-tooltip">
                             <p>
-                              {postData.children === 0
+                              {visibleCommentCount === 0
                                 ? t('post_content.footer.no_responses')
-                                : postData.children === 1
+                                : visibleCommentCount === 1
                                   ? t('post_content.footer.response')
-                                  : t('post_content.footer.responses', { responses: postData.children })}
+                                  : t('post_content.footer.responses', { responses: visibleCommentCount })}
                             </p>
                           </TooltipContent>
                         </Tooltip>

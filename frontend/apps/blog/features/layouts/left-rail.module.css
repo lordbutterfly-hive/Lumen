@@ -33,7 +33,10 @@
 
 .rail {
   /* Light: the design's own values. */
-  --lm-nav-seat: 250 238 235; /* #faeeeb - the brand tint under the current page */
+  --lm-nav-seat: 250 238 235; /* #faeeeb - the brand tint under the current page. Superseded
+    as a BACKGROUND by the illumination spec §1 lit gradient below, but left declared
+    (rather than deleted) because --lm-nav-active-ink's contrast note two lines down was
+    measured against it and still describes the surface the ink sits on. */
   --lm-nav-hover: 242 239 234; /* #f2efea - neutral paper wash under the cursor */
   --lm-nav-active-ink: var(--ink-brand-4); /* 7.11:1 on the seat; see above */
   --lm-nav-hover-ink: 26 22 18;
@@ -47,6 +50,10 @@
  * wrong here, where the contrast runs the other way.
  */
 :global(.dark) .rail {
+  /* --lm-nav-seat is unused here too post-§1 (see the light block above) — the lit
+     gradient it's superseded by is out of scope in dark mode: illumination (§0, §7)
+     is defined against the cream paper ramp only, and none of --lum/--lum-1/--lum-2
+     has a dark counterpart, so this rail's dark active background is untouched. */
   --lm-nav-seat: 58 34 30;
   --lm-nav-hover: 50 44 38; /* matches --background-tertiary dark */
   --lm-nav-active-ink: var(--brand);
@@ -64,18 +71,52 @@
   transition-duration: 140ms;
 }
 
+/*
+ * ★★★ ILLUMINATION §1 ("The illuminated rail"), 2026-08-20. The spec is written
+ * against `.nav-item[aria-current]`, a class that does not exist in this repo. The
+ * real active nav item is this `.row[data-active='true']` span — `data-active` is
+ * `isActive || isPending` (see NavRowContent above), not raw `aria-current`, because
+ * the row the reader just clicked needs the same lit treatment while its
+ * destination is still loading. Mapped 1:1 onto that selector.
+ *
+ * The flat `--lm-nav-seat` tint becomes the lit surface: a 90deg warm gradient
+ * falling off to transparent at the right, plus an inset ring and a soft drop,
+ * exactly as the spec's block. The falloff direction is load-bearing (spec's own
+ * words): reversed, it reads as a selected table row, not light coming from the
+ * rail.
+ *
+ * ★ TOKEN SUBSTITUTION: the spec's gradient ends at `rgb(var(--paper-1)/0)`.
+ * `--paper-1` does not exist in this codebase (checked packages/tailwindcss/
+ * globals.css — no `--paper-0/1/2` anywhere), unlike `--lum`/`--amb`, which
+ * really are being added there. `--surface-1` (255 255 255, the card/page
+ * white, x196) is this repo's real equivalent. Since the stop is alpha 0, the
+ * RGB channel is invisible either way — this only keeps the declaration from
+ * resolving to a guaranteed-invalid var() and dropping the whole background.
+ */
 .row[data-active='true'] {
-  background-color: rgb(var(--lm-nav-seat));
+  background: linear-gradient(90deg, var(--lum-2) 0%, var(--lum-1) 62%, rgb(var(--surface-1) / 0) 100%);
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--lum) / 0.13),
+    0 1px 10px -4px rgb(var(--lum) / 0.5);
   color: rgb(var(--lm-nav-active-ink));
   font-weight: 600;
 }
 
-/* Hover must not repaint the seat out from under the row you are already on. */
+/* Hover must not repaint the seat out from under the row you are already on — now
+   the lit surface above, not the old flat tint. This re-asserts the active look
+   rather than adding to it: a lit hover on a lit active row would read as two
+   current items (§1's own warning), so nothing new is introduced here. */
 .row[data-active='true']:hover {
-  background-color: rgb(var(--lm-nav-seat));
+  background: linear-gradient(90deg, var(--lum-2) 0%, var(--lum-1) 62%, rgb(var(--surface-1) / 0) 100%);
   color: rgb(var(--lm-nav-active-ink));
 }
 
+/*
+ * §1: the 2px rule goes from a flat brand fill to a warm-to-brand gradient with a
+ * bloom. Height 60% -> 66% is the ONLY geometry change permitted anywhere in this
+ * spec (§8 item 5); it is repeated in the `navRule` keyframe's `to` state below so
+ * the grow-in animation lands on 66% instead of overshooting to 60% and snapping.
+ */
 .row[data-active='true']::before {
   content: '';
   position: absolute;
@@ -83,8 +124,9 @@
   top: 50%;
   translate: 0 -50%;
   width: 2px;
-  height: 60%;
-  background: rgb(var(--brand));
+  height: 66%;
+  background: linear-gradient(180deg, rgb(var(--lum)), rgb(var(--brand)));
+  box-shadow: 0 0 7px 0 rgb(var(--lum) / 0.7);
   border-radius: 999px;
   animation: navRule 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
@@ -95,7 +137,7 @@
     opacity: 0;
   }
   to {
-    height: 60%;
+    height: 66%;
     opacity: 1;
   }
 }

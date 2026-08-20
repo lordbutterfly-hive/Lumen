@@ -4,6 +4,7 @@ import { LeagueEmblem } from '../emblems/league-emblem';
 import { TIERS } from '../lib/tiers';
 import { useProfileRetention } from '../hooks/use-viewer-retention';
 import { useRankNaming } from './rank-scale';
+import styles from './profile-league-chip.module.css';
 
 /**
  * The small rank chip beside a profile's display name.
@@ -77,15 +78,55 @@ function ChipSkeleton({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Illumination spec §2 ("Rank as luminosity") — the ramp, copied verbatim. Deliberately
+ * a lookup, not a formula: the curve is hand-tuned to be "slow at the bottom... or the
+ * lowest rank looks like a state rather than a floor", so interpolating between the
+ * given points would silently redraw it. Only 1..9 are defined — rank 0 (Unranked) is
+ * never looked up here; see the `lit` guard below.
+ */
+const RANK_LUMINOSITY: Record<number, number> = {
+  1: 0.06,
+  2: 0.16,
+  3: 0.27,
+  4: 0.38,
+  5: 0.5,
+  6: 0.62,
+  7: 0.74,
+  8: 0.87,
+  9: 1
+};
+
 function ChipBody({ tier, className }: { tier: keyof typeof TIERS; className?: string }) {
-  const { name, scale } = useRankNaming(tier);
+  const { name, scale, position } = useRankNaming(tier);
+
+  // ★ RANK 0 STAYS UNLIT (coordinator ruling, 2026-08-20). `position` is 0..9 — rank 0
+  // (Unranked) is a real, reachable state, not a stale edge case (see the "1..9" comment
+  // on `LeagueRank.rankNumber` in types.ts, which predates rank 0 and is out of date).
+  // §2's ramp is defined for 1..9 only and is deliberately slow at the bottom already;
+  // stretching it to cover 0 as well would put an unranked account ON the floor instead
+  // of below it. So `position === 0` renders exactly as before this pass: the flat
+  // `bg-surface-12` fill, no gradient, no glow, `--l` never set.
+  const lit = position > 0;
+  const l = lit ? RANK_LUMINOSITY[position] : 0;
 
   return (
     <span
       title={`${name} · ${scale}`}
-      className={`inline-flex items-center gap-2 rounded-card border border-line-9 bg-surface-12 py-1 pl-1.5 pr-3 ${
-        className ?? ''
-      }`}
+      // Only the FILL changes (spec §2's own words) — `rounded-card`, the border, and the
+      // padding are exactly what this chip shipped with; illumination spec §7 forbids any
+      // geometry change and the coordinator's ruling repeats it for this file specifically.
+      // `bg-surface-12` (flat grey) is swapped for `styles.repBadge` (the token-driven
+      // gradient + glow) only when a real rank lights it; unranked keeps the flat fill.
+      className={`inline-flex items-center gap-2 rounded-card border border-line-9 py-1 pl-1.5 pr-3 ${
+        lit ? styles.repBadge : 'bg-surface-12'
+      } ${className ?? ''}`}
+      // `--l` is set inline, in the same render that adds `styles.repBadge`, straight off
+      // the ramp above — never from reputation, payout or a client-side guess (spec §2).
+      // `profile-league-chip.module.css` also defaults `--l: 0` on the class itself, so
+      // the "class applied, `--l` unset" failure mode (see that file's header) cannot
+      // occur even if a future edit adds the class somewhere that forgets this prop.
+      style={lit ? ({ '--l': l } as React.CSSProperties) : undefined}
       data-testid="profile-league-chip"
     >
       <LeagueEmblem tier={tier} size="nav" />

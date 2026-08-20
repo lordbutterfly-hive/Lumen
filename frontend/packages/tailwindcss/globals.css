@@ -21,6 +21,68 @@
      * already warm (`27 19% 9%`).
      */
     --background-secondary: 36 45% 98%;
+
+    /**
+     * ★★★ THE LUMEN ILLUMINATION PALETTE (2026-08-20, illumination spec §0).
+     *
+     * Six tokens backing three treatments: the illuminated nav rail, rank as
+     * luminosity, and the card backlight. The spec says to add these "next
+     * to the existing paper ramp in `:root`" — placed here, next to
+     * `--background-secondary` above, because THAT is this app's page-ground
+     * token and the closest thing to a "paper ramp" this file has. There is
+     * no token anywhere in the repo literally named `--paper-0` or
+     * `--paper-1` (grepped repo-wide, zero hits outside comments describing
+     * it as a still-open decision — see `apps/blog/features/discovery-feed/
+     * post-card.module.css` line ~65: "the warm paper ladder stays an owner
+     * decision for the whole app"). §3's ground gradient reads `--paper-0`
+     * directly, so it cannot be wired as written; see the note at `body`
+     * below.
+     *
+     * ★ THE SPEC'S "NOTHING HERE INTRODUCES A COLOUR" CLAIM, VERIFIED AGAINST
+     * WHAT ACTUALLY SHIPS TODAY (not assumed):
+     *   `--lum` (224 123 62 / #e07b3e) IS byte-identical to an existing
+     *     token — `--surface-warn-10` below — and ships today as the second
+     *     stop of two avatar-adjacent gradients: the Profile page's cover +
+     *     avatar fallback (`account-profile/redesign/profile-cover.tsx`,
+     *     `bg-gradient-to-br from-surface-brand-12 to-surface-warn-10`) and
+     *     one creator's token-portfolio avatar swatch
+     *     (`creator-tokens/market/portfolio.ts`, handle "delm":
+     *     `linear-gradient(135deg,rgb(var(--surface-brand-12)),#e07b3e)`).
+     *     Not literally "the composer avatar gradient" the spec names — no
+     *     composer-owned gradient uses this value — but the claim that the
+     *     value already ships on an avatar gradient is confirmed true.
+     *   `--lum-1` / `--lum-2` / `--lum-3` (#FDF5F1 / #FBEAE2 / #F7DCD0) are
+     *     NOT byte-identical to anything shipped. This app's one hero
+     *     treatment is `PageMasthead` (per a comment in `creator-tokens/ui/
+     *     meritum/intro/meritum-intro.tsx`: "Lumen already has a
+     *     promotional-hero treatment and it is `PageMasthead`"); its
+     *     gradient stops are `--masthead-1..4` below — #F7C9BD / #FBDFD6 /
+     *     #FDEFE9 / #FFFDFC. Same warm-cream family, but every channel is
+     *     off by 6-19 from the values this spec names. Added exactly as the
+     *     spec specifies regardless, since the task hands over the literal
+     *     values to ship — flagged here because "nothing introduces a
+     *     colour" does not hold at the byte level for these three.
+     *   `--amb-0` / `--amb-1` are the two values the spec itself calls
+     *     genuinely new ("--paper-0 warmed and darkened"). Since --paper-0
+     *     doesn't exist there is nothing to check them against; taken as
+     *     literals, as given.
+     *
+     * ★ TWO FORMATS ON PURPOSE. `--lum` and `--lum-2-rgb` are space-separated
+     * RGB triples, like every other token in this file, because both are
+     * consumed as `rgb(var(--x)/<alpha>)`. `--lum-1`, `--lum-2`, `--lum-3`,
+     * `--amb-0` and `--amb-1` are hex strings, NOT triples, because the spec
+     * consumes them unwrapped — `var(--lum-2)` directly inside a
+     * `linear-gradient()`, never `rgb(var(--lum-2))`. Storing them as bare
+     * triples would silently break every consumer.
+     */
+    --lum: 224 123 62; /* #e07b3e — the warm light; already --surface-warn-10 below */
+    --lum-1: #FDF5F1; /* lightest warm paper */
+    --lum-2: #FBEAE2; /* mid warm paper */
+    --lum-3: #F7DCD0; /* deepest warm paper */
+    --amb-0: #F7F2EB; /* ambient ground, page edge — --paper-0 warmed+darkened, per spec */
+    --amb-1: #FAF6F1; /* ambient ground, mid — --paper-0 warmed+darkened, per spec */
+    --lum-2-rgb: 251 234 226; /* space-separated form of --lum-2, for §2's rgb(var(--lum-2-rgb)/…) */
+
     --background-tertiary: 214, 32%, 91%;
 
     --muted: 210 40% 96.1%;
@@ -240,6 +302,29 @@
     /* ink / ok */
     --ink-ok-1: 31 99 64; /* #1f6340 x2 */
     --ink-ok-2: 47 125 79; /* #2f7d4f x19 */
+    /*
+     * ★★★ ONE MONEY GREEN, EVERYWHERE (2026-08-20, owner-reported: "the payout
+     * there is red instead of green ... that shows unprofessional as on feed
+     * payout is green").
+     *
+     * Before this the app rendered a payout FOUR different ways, measured on the
+     * built site:
+     *   feed card            #2a6b44 green, 17px/700   <- the intended treatment
+     *   post page            #ef4444 RED,   14px/700
+     *   comment footer       #181e2a near-black, 14px/400
+     *   classic card         inherited, and RED on hover
+     * The red was not a mistake anybody made on purpose: an earlier pass found
+     * raw Tailwind red-500 on the post payout and correctly replaced it with the
+     * token that is byte-identical to it (`--ink-brand-8`), which tokenised the
+     * colour without ever asking why money was red.
+     *
+     * The value is the feed card's, because that is the one the redesign chose
+     * deliberately: `post-card.module.css` documents picking #2a6b44 over the
+     * existing `--ink-ok-2` #2f7d4f. Promoting it here rather than leaving it in
+     * a CSS module is what lets the post page and the comment rows use the SAME
+     * green instead of one that is merely close.
+     */
+    --ink-payout: 42 107 68; /* #2a6b44 — money, and only money */
     --ink-ok-3: 77 124 15; /* #4d7c0f x13 */
     --ink-ok-4: 22 163 74; /* #16a34a x17 */
     --ink-ok-5: 34 197 94; /* #22c55e x29 */
@@ -664,6 +749,9 @@
     /* ink / ok */
     --ink-ok-1: 103 207 154; /* #1f6340 -> #67cf9a x2 */
     --ink-ok-2: 78 199 128; /* #2f7d4f -> #4ec780 x19 */
+    /* Lightened to hold contrast on a dark surface rather than recoloured, so
+       money stays green. Same value the post card's own dark block already used. */
+    --ink-payout: 111 191 142; /* #6fbf8e */
     --ink-ok-3: 115 186 22; /* #4d7c0f -> #73ba16 x13 */
     --ink-ok-4: 25 182 82; /* #16a34a -> #19b652 x17 */
     --ink-ok-5: 29 171 82; /* #22c55e -> #1dab52 x29 */
@@ -891,6 +979,73 @@
   }
   * {
     @apply border-border;
+  }
+  /**
+   * ★★ ILLUMINATION SPEC §3 — "THE APP SHELL, BEHIND EVERYTHING" (2026-08-20).
+   *
+   * The spec's literal rule is
+   *   `linear-gradient(90deg, var(--amb-0) 0%, var(--amb-1) 16%,
+   *     rgb(var(--paper-0)) 33%, rgb(var(--paper-0)) 67%, var(--amb-1) 84%,
+   *     var(--amb-0) 100%)` on `body, .app-shell`.
+   * There is no `.app-shell` in this codebase, and `--paper-0` does not
+   * exist anywhere in the repo (see the §0 token block above
+   * `--background-tertiary` — zero declarations, grepped repo-wide). An
+   * undefined custom property does not fall back to anything: `rgb(var(
+   * --paper-0))` is invalid at computed-value time, which drops the WHOLE
+   * `background` declaration, not just that stop — it would have shipped as
+   * dead CSS that silently does nothing, indistinguishable from the feature
+   * never having been applied.
+   *
+   * `body` IS this app's ground-painting element — confirmed, not assumed:
+   * `apps/blog/app/layout.tsx` renders `<body className="bg-background-
+   * secondary font-sans">`. `--background-secondary` (`36 45% 98%`, this
+   * file's own "PAPER, NOT GREY" token, declared above) is today's EXACT
+   * page-ground colour, not a lookalike substitute, so it is what the two
+   * centre stops resolve to below — satisfying §3's acceptance table
+   * ("Page centre ... exactly today's value, unchanged") to the letter.
+   * It is HSL where the outer stops are hex; CSS permits mixing colour
+   * functions within one gradient, so this is not a format hazard.
+   *
+   * This `background` shorthand only sets `background-image` (the gradient)
+   * and `background-attachment`; it does not touch `background-color`.
+   * `bg-background-secondary`'s `background-color: hsl(var(--background-
+   * secondary))` from the Tailwind class in layout.tsx still applies
+   * underneath, and because the gradient's own centre is that exact same
+   * colour, the two are seamless — the visible change is only at the edges,
+   * where `--amb-0`/`--amb-1` darken the periphery.
+   *
+   * ★ Unverifiable against §3's literal delta table (+3/+4/+5 R/G/B etc.):
+   * that table is computed from `--paper-0` vs `--paper-1`, and neither
+   * exists here — this app's card colour is `--surface-1`, pure `#FFFFFF`,
+   * not the spec's `#FFFEFC`. What IS guaranteed: the centre is today's
+   * ground colour verbatim (the hard floor — never brighter), and the
+   * periphery is measurably darker via `--amb-0`/`--amb-1`. Flagged for the
+   * owner: a real `--paper-0`/`--paper-1` ramp is a bigger decision than
+   * this file's illumination scope covers (the post-card owner reached the
+   * same conclusion — see `discovery-feed/post-card.module.css` line ~65).
+   *
+   * ★ NOT WRITTEN DIRECTLY ONTO THE `body` RULE BELOW, AND SCOPED TO
+   * `:root:not(.dark)` INSTEAD — `--background-secondary` IS dark-mode
+   * aware (it is repointed to `27 19% 9%` under `.dark`, ~30 lines above,
+   * commented "this is what <body> wears"), but `--amb-0`/`--amb-1` are NOT:
+   * per this spec's own §7 ("No dark mode... defined against the cream
+   * paper ramp only") they are light-only hex literals with no dark
+   * counterpart. An unscoped rule on `body` would have put a light-cream
+   * gradient with a DARK centre on `apps/wallet` in dark mode — worse than
+   * shipping nothing. Scoping keeps this illumination work light-only, as
+   * specified, instead of quietly breaking dark mode's ground colour.
+   */
+  :root:not(.dark) body {
+    background: linear-gradient(
+      90deg,
+      var(--amb-0) 0%,
+      var(--amb-1) 16%,
+      hsl(var(--background-secondary)) 33%,
+      hsl(var(--background-secondary)) 67%,
+      var(--amb-1) 84%,
+      var(--amb-0) 100%
+    );
+    background-attachment: fixed;
   }
   body {
     font-feature-settings:
@@ -2356,6 +2511,46 @@ summary {
       box-shadow: var(--lift-2);
     }
   }
+  /**
+   * ★ THE CARD'S SHADOW STOPS BEING GREY, LIGHT MODE ONLY (illumination spec
+   * §3, 2026-08-20).
+   *
+   * ★★ THE SPEC'S `rgb(var(--ink-1)/.035)` IS A NAME COLLISION, NOT A MATCH.
+   * The spec comp's own `--ink-1` is #1A1612 (rgb(26,22,18)) — this file's
+   * `--ink-1` is `0 0 0`, pure black (line ~160). Using our `--ink-1` here
+   * would have shipped pure black at 3.5% instead of the warm near-black the
+   * spec means. `26 22 18` is not a stray guess: it is the exact literal
+   * `--lift-1`/`--lift-2`/`--lift-3` already use (the elevation-ladder block
+   * above) for this card's own existing shadow, just above via `var(--lift-
+   * 1)`/`var(--lift-2)` — "one light source ... warm-black, never pure
+   * black". Kept as that same hand-written literal rather than reintroduced
+   * as a token, matching how the elevation ladder itself does it.
+   *
+   * `70 46 30` is `--ink-1` warmed, per the spec — a SHADOW colour only
+   * ("it is a shadow colour, not a surface colour, and it appears nowhere
+   * else"); never reuse it as a fill.
+   *
+   * ★ SCOPED TO `:root:not(.dark)`, NOT WRITTEN DIRECTLY ONTO `.lm-card`,
+   * because `.lm-card`'s box-shadow above is `var(--lift-1)`/`var(--lift-2)`,
+   * and `.dark` (below, via `next-themes`, applied to `<html>`) repoints
+   * those two to the dark-mode elevation values — with a light rim, not a
+   * shadow, per that block's own comment. `apps/blog` never reaches dark
+   * mode, but `apps/wallet` keeps a real toggle and consumes this same
+   * stylesheet. Overwriting `.lm-card`'s box-shadow directly, unscoped,
+   * would have silently flattened its dark-mode card shadow to this light
+   * warm one. This illumination spec is light-only by its own §7 ("No dark
+   * mode... defined against the cream paper ramp only") — this scoping is
+   * what keeps it that way instead of quietly doing dark-mode work.
+   */
+  :root:not(.dark) .lm-card {
+    box-shadow: 0 1px 2px rgb(26 22 18 / 0.035), 0 3px 12px -6px rgb(70 46 30 / 0.13);
+  }
+  @media (hover: hover) {
+    :root:not(.dark) .lm-card:hover {
+      /* Same warm shadow, one step up. */
+      box-shadow: 0 1px 3px rgb(26 22 18 / 0.04), 0 8px 22px -12px rgb(70 46 30 / 0.3);
+    }
+  }
 }
 
 /*
@@ -2454,6 +2649,45 @@ summary {
  * every viewport this ships to, and staggering something nobody can see only
  * delays it.
  */
+/* ── ARRIVING ON A LINKED COMMENT ─────────────────────────────────────────
+   Card-expansion SPEC.md §9: "On arrival, flash a --brand-tint highlight on the
+   target comment for about 600ms, then fade out."
+
+   ★ THE TINT IS DERIVED, NOT INVENTED. There is no `--brand-tint` token in this
+   build; the spec names one from its own palette. `--brand` at 10% is the same
+   colour the app already uses for brand washes, and deriving it from the token
+   means it follows the theme instead of pinning a light-mode literal into a
+   surface that goes dark.
+
+   ★ 900ms TOTAL FOR A 600ms FLASH: it holds the tint, then fades. A hard cut
+   back to transparent reads as a rendering glitch rather than as the highlight
+   ending — the fade is what makes it legible as one gesture.
+
+   ★ Applied and removed from JS (`comments-section.tsx`), not a :target rule.
+   `:target` cannot survive the page-resolution step: the anchor may not exist
+   in the DOM at all when the hash first lands. */
+@keyframes lm-comment-flash {
+  0%,
+  62% {
+    background-color: rgb(var(--brand) / 0.1);
+  }
+  100% {
+    background-color: rgb(var(--brand) / 0);
+  }
+}
+.lm-comment-flash {
+  border-radius: 8px;
+  animation: lm-comment-flash 900ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The highlight is INFORMATION — it is how the reader knows which of 50
+     comments they were sent to — so it is not removed, only stilled. */
+  .lm-comment-flash {
+    animation: none;
+    background-color: rgb(var(--brand) / 0.1);
+  }
+}
+
 @keyframes lm-enter {
   from {
     opacity: 0;

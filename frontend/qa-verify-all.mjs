@@ -358,7 +358,7 @@ for (let i = 0; i < 10; i++) {
     await page.locator('article').nth(i).hover();
   } catch { continue; }
   await page.waitForTimeout(1400);
-  const ready = await page.evaluate(() => !!document.querySelector('[class*="iconBlade"]'));
+  const ready = await page.evaluate(() => !!document.querySelector('[class*="iconComment"]'));
   if (ready) break;
 }
 const nudge = await page.evaluate(() => {
@@ -388,7 +388,17 @@ const nudge = await page.evaluate(() => {
     return b.height ? b.top + b.height / 2 : null;
   };
   const out = [];
-  for (const cls of ['iconBlade', 'iconComment']) {
+  /*
+   * ★ `iconBlade` DROPPED FROM THIS LIST 2026-08-20, and the rule it measured
+   * is deleted from the CSS module. The drawer's vote is no longer a raw
+   * Blade in a nudged span — spec §7 made it a real control, so it is
+   * `VotesComponent` at size="quote", which owns its own glyph box. The
+   * N-quoteVote check above asks the same question of the element that now
+   * renders it. Left here, this would have reported UNMEASURED forever —
+   * which is the correct failure for a check that cannot see its target,
+   * but the wrong target to keep looking for.
+   */
+  for (const cls of ['iconComment']) {
     const el = document.querySelector(`[class*="${cls}"]`);
     if (!el) { out.push({ cls, unreached: true, why: 'class not in the DOM (drawer closed?)' }); continue; }
     const svg = el.tagName.toLowerCase() === 'svg' ? el : el.querySelector('svg');
@@ -400,6 +410,30 @@ const nudge = await page.evaluate(() => {
   }
   return out;
 });
+// The drawer's vote glyph, now owned by the shared control at size="quote". The
+// question is unchanged — is the glyph on the number's optical centre — but the
+// element that answers it moved when §7 turned the tally into a real control.
+const quoteNudge = await page.evaluate(() => {
+  const btn = document.querySelector('[class*="counts"] button');
+  const tally = document.querySelector('[class*="counts"] [class*="tallyUp"]');
+  if (!btn || !tally) return { unreached: true, why: 'quote vote not in the DOM (drawer closed?)' };
+  const svg = btn.querySelector('svg');
+  if (!svg || typeof svg.getBBox !== 'function') return { unreached: true, why: 'no svg' };
+  const bb = svg.getBBox();
+  const m = svg.getScreenCTM();
+  if (!m || !bb.height) return { unreached: true, why: 'no bbox' };
+  const mk = (y) => { const q = svg.createSVGPoint(); q.x = 0; q.y = y; return q.matrixTransform(m).y; };
+  const ink = (mk(bb.y) + mk(bb.y + bb.height)) / 2;
+  const r = tally.getBoundingClientRect();
+  return { unreached: false, residual: +(ink - (r.top + r.height / 2)).toFixed(3) };
+});
+if (quoteNudge.unreached) {
+  check('N-quoteVote', 'the drawer vote glyph measured', false, `UNMEASURED (${quoteNudge.why}) — not passing`);
+} else {
+  check('N-quoteVote', "the drawer vote glyph sits on its count's optical centre",
+    Math.abs(quoteNudge.residual) < 1.5, `residual ${quoteNudge.residual > 0 ? '+' : ''}${quoteNudge.residual}px`);
+}
+
 for (const n of nudge) {
   if (n.unreached) { check(`N-${n.cls}`, `${n.cls} nudge measured`, false, `UNMEASURED (${n.why}) — not passing`); continue; }
   check(`N-${n.cls}`, `${n.cls} sits on the count's optical centre`, Math.abs(n.residual) < 0.6,

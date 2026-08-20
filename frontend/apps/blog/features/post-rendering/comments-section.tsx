@@ -40,6 +40,12 @@ interface CommentsSectionProps {
     totalPages: number;
     currentPage: number;
     totalMainComments: number;
+    /**
+     * `author/permlink` -> 1-based page. Built in `content.tsx` from the same
+     * `pages` array the list renders, for the jump in `useCommentHashArrival`
+     * below. Optional so an older caller cannot break the build.
+     */
+    pageOfKey?: Map<string, number>;
   };
   userCanModerate: boolean;
   mutedList: IFollowList[];
@@ -156,6 +162,183 @@ const CommentsSection = memo(function CommentsSection({
       sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [commentsPage]);
+
+    /*
+     * ═══════════════════════════════════════════════════════════════════════
+     * ARRIVING ON A SINGLE COMMENT (`#@author/permlink`).
+     * Card-expansion SPEC.md §9, "Jump to comment".
+     *
+     * The post card's drawer links straight at one comment. Four rules from §9,
+     * and each one is a thing that goes wrong without it:
+     *
+     * ★★★ 1. RESOLVE THE PAGE FIRST. §9 calls this a blocker in its own right,
+     * and it is real here: this list IS paginated (50 main comments a page —
+     * `paginatedDiscussionState` in `content.tsx`). A bare hash lands on nothing
+     * for any comment past page 1, and "nothing" means the browser leaves the
+     * reader at the top of the post with no error. So the page is switched
+     * FIRST and the scroll happens on the next pass, once the target exists.
+     *
+     * ★★ 2. JUMP, DO NOT SMOOTH-SCROLL. §9: "On a long post, animating thousands
+     * of pixels is slow and disorienting. Land directly on the comment." Hence
+     * `behavior: 'auto'`, deliberately unlike the page-change scroll above,
+     * which is a short move the reader asked for.
+     *
+     * ★★ 3. HEADROOM, NOT PINNED TO THE TOP. §9: "Scroll it into view with
+     * headroom above it." A comment flush against the viewport top reads as the
+     * start of the page rather than as a place inside a conversation.
+     *
+     * ★★★ 4. RE-PIN WHILE THE PAGE IS STILL SETTLING. This is §9's OTHER named
+     * blocker, handled rather than waited on: "30 of 38 images on post pages
+     * ship with no width/height and no aspect-ratio. If the jump happens before
+     * the article's images resolve, every image that loads afterwards pushes the
+     * anchor down, and the reader lands hundreds or thousands of pixels from the
+     * comment they clicked." Giving every image intrinsic dimensions is the
+     * right fix and is still worth doing; until then, re-running the scroll
+     * while the layout is still moving gets the reader there anyway.
+     *
+     * The re-pin STOPS the instant the reader scrolls themselves. A jump that
+     * keeps yanking the page back is worse than one that lands slightly off,
+     * and a wheel/touch/key event is unambiguous intent.
+     *
+     * ★ NEVER DO NOTHING. §9's fallback: if the comment cannot be resolved — it
+     * was deleted, or blocked out of the thread — land at the top of the comment
+     * section rather than leaving the reader wherever they happened to be.
+     * ═══════════════════════════════════════════════════════════════════════
+     */
+    const jumpedFor = useRef<string | null>(null);
+  /*
+   * ★★★ THE RE-PIN OUTLIVES THE EFFECT, AND IT HAS TO. Measured 2026-08-20 on a
+   * 9,914px post: scrollY went 183 -> 383 -> 0 and stayed 0 forever, with the
+   * target's highlight flashing 9,269px below the reader.
+   *
+   * The landing worked. What killed it was this effect's own CLEANUP.
+   * `paginatedDiscussionState` is a fresh object on every memo pass, so the
+   * effect re-runs on ordinary re-renders; React ran the cleanup, the cleanup
+   * cleared the re-pin interval, and the re-run returned immediately because
+   * `jumpedFor` said the jump was already done. So the ONE thing that could have
+   * recovered from the reset had just been switched off by a re-render.
+   *
+   * Holding the controller in a ref decouples it: a re-render cannot cancel a
+   * landing in progress, and only unmount can.
+   */
+  const repin = useRef<{ stop: () => void } | null>(null);
+  useEffect(() => () => repin.current?.stop(), []);
+    /*
+     * ★ A HASH CHANGE ON THE PAGE YOU ARE ALREADY ON is a same-document
+     * navigation: nothing remounts and no prop changes, so the effect below
+     * would never re-run. That is the case where someone follows a second
+     * comment link while already reading the post. Bumping this counter is what
+     * makes the effect fire again; `jumpedFor` still guards against re-jumping
+     * the SAME fragment, so this cannot loop.
+     */
+    const [hashTick, setHashTick] = useState(0);
+    useEffect(() => {
+      const onHash = () => setHashTick((n) => n + 1);
+      window.addEventListener("hashchange", onHash);
+      return () => window.removeEventListener("hashchange", onHash);
+    }, []);
+    useEffect(() => {
+      const raw = typeof window === 'undefined' ? '' : window.location.hash;
+      if (!raw.startsWith('#@')) return;
+      const domId = decodeURIComponent(raw.slice(1)); // "@author/permlink"
+      const key = domId.slice(1); // "author/permlink", the pagination's own key
+      if (jumpedFor.current === domId) return;
+
+      /*
+       * ★★★ DO NOT DECLARE THE JUMP DONE BEFORE THE THREAD HAS LOADED. This was a
+       * REAL BUG, caught 2026-08-20 by `qa-comment-jump-paged.mjs` against a live
+       * 177-comment thread, and it is worth spelling out because it defeated the
+       * whole page-resolution step while looking like it worked.
+       *
+       * This effect first runs on the pass where the post is on screen and the
+       * comments are still in flight. `pageOfKey` is empty then, so `wanted` was
+       * undefined, `getElementById` found nothing, and the old code took the
+       * "cannot resolve" fallback AND set `jumpedFor`. Every later pass — the ones
+       * that actually HAD the thread and the page map — then returned early on that
+       * flag. The reader was left at the top of the post: exactly the silent
+       * failure §9 names, reintroduced by the code meant to prevent it.
+       *
+       * The fix is to treat "no data yet" as NOT AN ANSWER. It is not a failed
+       * lookup, it is an absent one, and that difference is the whole bug.
+       */
+      const pageOfKey = paginatedDiscussionState.pageOfKey;
+      if (!pageOfKey || pageOfKey.size === 0) return;
+
+      const wanted = pageOfKey.get(key);
+      if (wanted && wanted !== paginatedDiscussionState.currentPage) {
+        /*
+         * ★★ SUPPRESS THE PAGE-CHANGE SCROLL, or it fights this one. The effect
+         * above scrolls to the TOP of the comments section whenever the page
+         * changes — correct when a reader clicks "2", wrong here, where the page
+         * change is a means to an end. Both run in the same commit, and that one is
+         * `behavior: 'smooth'`, so its animation continues after this one's instant
+         * jump and quietly drags the reader back up.
+         *
+         * Moving the ref forward makes that effect see no change at all — cheaper
+         * and less fragile than a second "was this a jump" flag.
+         */
+        prevCommentsPageRef.current = wanted;
+        // Deliberately NOT marked as jumped: this pass only changed the page. The
+        // effect runs again when the new page renders, and that pass scrolls.
+        setCommentsPage(wanted);
+        return;
+      }
+
+      const target = document.getElementById(domId);
+      if (!target) {
+        // The thread IS loaded and the comment still is not in it — deleted, or
+        // blocked out of the thread. That is a real answer, so mark it and take
+        // §9's fallback rather than leaving the reader where they were.
+        jumpedFor.current = domId;
+        sectionRef.current?.scrollIntoView({ block: 'start' });
+        return;
+      }
+
+      // Resolved: the comment is on screen. Mark it so a later re-render does not
+      // re-jump under a reader who has since scrolled away.
+      jumpedFor.current = domId;
+
+      const HEADROOM_PX = 96;
+      const land = () =>
+        window.scrollTo({
+          top: window.scrollY + target.getBoundingClientRect().top - HEADROOM_PX,
+          behavior: 'auto'
+        });
+      land();
+
+      // Any landing already in flight loses to this one.
+      repin.current?.stop();
+      let ticks = 0;
+      const stop = () => {
+        window.clearInterval(timer);
+        window.clearTimeout(flash);
+        for (const evt of ['wheel', 'touchstart', 'keydown']) window.removeEventListener(evt, stop);
+        if (repin.current === controller) repin.current = null;
+      };
+      const controller = { stop };
+      /* 24 ticks, not 12: the reset this recovers from lands at ~700ms, and the
+         images that move the anchor keep loading well past three seconds on an
+         image-heavy post — which §9 notes are exactly the posts with the longest
+         threads. Six seconds of settling, abandoned the instant the reader
+         touches the page. */
+      const timer = window.setInterval(() => {
+        if (++ticks > 24) return stop();
+        land();
+      }, 250);
+      for (const evt of ['wheel', 'touchstart', 'keydown']) {
+        window.addEventListener(evt, stop, { passive: true });
+      }
+      repin.current = controller;
+
+      // §9: "flash a --brand-tint highlight on the target comment for about
+      // 600ms, then fade out." One shared global class — `lm-comment-flash` in
+      // globals.css, beside the `lm-enter` this list already uses.
+      target.classList.add('lm-comment-flash');
+      const flash = window.setTimeout(() => target.classList.remove('lm-comment-flash'), 900);
+      // Deliberately NO cleanup returned: see the `repin` note above. A re-render
+      // must not cancel a landing that is still fighting the page's own layout.
+    }, [paginatedDiscussionState, setCommentsPage, hashTick]);
+
 
   const handlePrevPage = useCallback(() => {
     setCommentsPage((prev: number) => Math.max(1, prev - 1));

@@ -7,18 +7,22 @@ import type { Entry } from '@hive/common-hiveio-packages/wax';
  *
  * The rule, run in order, stopping at the first that resolves:
  *
- *   1. Most DIRECT responses wins — replies to the comment, not its whole subtree.
- *   2. Tie: random among the tied.
- *   3. All zero: random among all. A post where nothing has been answered has no
- *      best comment; do not quietly fall back to payout or recency.
- *   4. No comments: return null. The card does not expand, and no empty state,
+ *   1. score = (votes + replies) * (authorReplied ? 2 : 1). Highest wins.
+ *   2. Tie: highest raw votes.
+ *   3. No comments: return null. The card does not expand, and no empty state,
  *      disabled affordance or placeholder is rendered in its place.
  *
- * ★ WHAT IS DELIBERATELY *NOT* A TIEBREAKER: payout, vote count, recency, and the
- * post author's own reply. Each of those produces a materially different feed —
- * payout surfaces whoever is already winning, recency surfaces whoever spoke last,
- * the author's reply surfaces the author twice. This rule answers exactly one
- * question, and it is a reader's question: which thread would I join.
+ * Superseded 2026-08-20 by the card-expansion spec §3. The previous rule was
+ * "most direct replies, random among ties", which ignored votes entirely.
+ *
+ * ★ WHAT IS DELIBERATELY *NOT* IN THE SCORE: payout and recency. Payout surfaces
+ * whoever is already winning, recency surfaces whoever spoke last. This rule
+ * answers exactly one question, and it is a reader's question: which thread would
+ * I join. Votes and the author's own reply WERE on this exclusion list until
+ * 2026-08-20; §3 moved both into the score, and the spec's worked example is why
+ * — on "The vote that pays a stranger" ada has 96 votes and 0 replies against
+ * tomasz's 41 votes, 12 replies and an author answer, 96 to 106. Votes alone
+ * would show ada.
  *
  * ★★★ "DIRECT" IS COMPUTED, NOT READ OFF A FIELD, AND THAT MATTERS.
  * `Entry.children` from Hivemind is the count of the WHOLE subtree beneath a
@@ -29,24 +33,27 @@ import type { Entry } from '@hive/common-hiveio-packages/wax';
  * node carries `parent_author` / `parent_permlink`, so the exact direct count is a
  * single pass over that map. No extra request, no approximation.
  *
- * ★★ THE PICK IS CACHED PER POST PER SESSION, AND THAT IS LOAD-BEARING.
- * If the random pick happened per render, the card would change its mind between
- * one hover and the next and the feed would stop feeling like a place. The Map
- * below is the whole mechanism. `resetTopCommentPicks()` must be called on logout
- * and on a feed reset so a session's picks do not outlive it.
+ * ★★ THE PICK IS CACHED PER POST PER SESSION, AND THAT IS STILL LOAD-BEARING —
+ * but for a different reason than it used to be. The score is DETERMINISTIC, so
+ * there is no longer a random roll for a re-render to change. What the cache buys
+ * now is §3's "do not re-rank on the reader's own vote": voting the shown comment
+ * raises its own score and could swap which comment is displayed, and swapping
+ * the text under the pointer mid-hover is worse than a stale winner. The Map
+ * holds the winner steady while that vote is in flight.
  *
  * ★ WIRED 2026-08-19 — it had none. `top-comment-session-reset.tsx`, mounted
  * globally in `features/layouts/providers.tsx`, watches the signed-in identity
- * and calls this on every change. Identity rather than a logout handler because
- * sign-out reaches the client from four directions and they only converge on
- * `[QUERY_KEY.user]`; that file's header names all four.
+ * and calls `resetTopCommentPicks()` on every change. Identity rather than a
+ * logout handler because sign-out reaches the client from four directions and
+ * they only converge on `[QUERY_KEY.user]`; that file's header names all four.
+ * With a deterministic score this reset is a much smaller thing than it was: it
+ * no longer changes which comment a given thread resolves to, it only drops
+ * held-steady winners so a new session re-reads current vote counts.
  *
- * ★ WHY `Math.random()` IS SAFE HERE DESPITE SSR. This module is only ever reached
- * from the drawer, and the drawer's thread is fetched lazily on hover/focus — a
- * client-only event. Nothing here runs during server rendering, so there is no
- * server pick for a client pick to disagree with, and no hydration mismatch. If
- * this is ever called during render on the server, that stops being true; seed the
- * pick from the post id instead of changing anything else.
+ * ★ NO RNG, SO NO SSR HAZARD. The previous implementation called `Math.random()`
+ * and needed an argument for why that could not produce a hydration mismatch.
+ * The score removed the call, so the question is moot: the same discussion map
+ * resolves to the same comment on a server and a client alike.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -61,6 +68,15 @@ export interface TopComment {
   upvotes: number;
   /** Replies to THIS comment. Not `Entry.children`, which is the whole subtree. */
   directResponseCount: number;
+  /**
+   * The raw node, carried through for the drawer's VOTE (card-expansion spec §7,
+   * wired 2026-08-20). `VotesComponent` takes an `Entry` — it reads the author,
+   * the permlink, the payout window and the active votes off it — and reusing
+   * the shipped control is what gives the drawer every tier/auth guard for free
+   * instead of a second hand-rolled vote. The flat fields above stay because the
+   * drawer renders from them; this is for the control, not for the markup.
+   */
+  entry: Entry;
 }
 
 /** `${author}/${permlink}` — the key `bridge.get_discussion` uses for its map. */
@@ -69,9 +85,10 @@ export function discussionKey(author: string, permlink: string): string {
 }
 
 /**
- * Random is picked ONCE per post per session. Keyed on the ROOT post's key, valued
- * with the chosen comment's key, so a re-fetch of the same thread re-resolves to the
- * same comment rather than re-rolling.
+ * The winner is held ONCE per post per session. Keyed on the ROOT post's key,
+ * valued with the chosen comment's key, so a re-fetch of the same thread — or a
+ * re-render after the reader votes — resolves to the same comment instead of
+ * re-scoring against the vote they just cast (§3).
  */
 const picked = new Map<string, string>();
 
@@ -109,7 +126,8 @@ function toTopComment(key: string, entry: Entry, directResponseCount: number): T
     upvotes: Array.isArray(entry.active_votes)
       ? entry.active_votes.filter((v) => Number(v?.rshares ?? 0) > 0).length
       : 0,
-    directResponseCount
+    directResponseCount,
+    entry
   };
 }
 
@@ -138,13 +156,63 @@ export function selectTopComment(rootKey: string, discussion: Record<string, Ent
     if (hit) return toTopComment(hit[0], hit[1], counts.get(hit[0]) ?? 0);
   }
 
-  const max = Math.max(...comments.map(([key]) => counts.get(key) ?? 0));
-  // Rule 3 collapses into rule 2: when `max` is 0, every comment is tied, so the
-  // "all zero" case is the "everything tied" case and needs no separate branch.
-  const tied = comments.filter(([key]) => (counts.get(key) ?? 0) === max); // rules 1-3
-  const [chosenKey, chosenEntry] =
-    tied.length === 1 ? tied[0] : tied[Math.floor(Math.random() * tied.length)];
+  /*
+   * ★★★ THE SCORE, from the 2026-08-20 card-expansion spec §3:
+   *
+   *     score = (votes + replies) * (authorReplied ? 2 : 1)
+   *
+   * replacing "most direct replies, random among ties". Three things changed and
+   * each one matters:
+   *
+   *  1. VOTES AND REPLIES COUNT THE SAME, one point each. A reply is a person who
+   *     wrote something back, which on this network is at least as much signal as
+   *     a vote.
+   *  2. A REPLY FROM THE POST'S AUTHOR DOUBLES THE TOTAL. The author choosing to
+   *     answer is the strongest available marker that a thread is alive.
+   *  3. TIES BREAK ON RAW VOTES, not at random.
+   *
+   * The spec's own worked example is the argument: on "The vote that pays a
+   * stranger", ada has 96 votes and 0 replies while tomasz has 41 votes, 12
+   * replies and an author answer — 96 against 106. Votes alone would show ada.
+   *
+   * ★ THIS MAKES THE PICK DETERMINISTIC, which quietly demotes the session cache
+   * below. That cache exists so a random pick could not change under the reader
+   * between one hover and the next; with a formula there is nothing to re-roll.
+   * It is KEPT because it still holds the winner steady while a reader's own vote
+   * is in flight — see the re-rank note below, which is the case §3 actually
+   * cares about — but `resetTopCommentPicks()` is now a much smaller thing than
+   * it was.
+   *
+   * ★ DO NOT RE-RANK ON THE READER'S OWN VOTE (§3). Voting the shown comment
+   * changes its score and could swap which comment is displayed. Swapping the
+   * text under the pointer mid-hover is worse than a stale winner, and the cache
+   * is what prevents it.
+   */
+  const rootAuthor = rootKey.split('/')[0];
+  const authorRepliedTo = new Set<string>();
+  for (const entry of Object.values(discussion)) {
+    if (entry?.author !== rootAuthor) continue;
+    if (!entry?.parent_author || !entry?.parent_permlink) continue;
+    authorRepliedTo.add(discussionKey(entry.parent_author, entry.parent_permlink));
+  }
 
+  const netUpvotes = (entry: Entry): number =>
+    Array.isArray(entry?.active_votes)
+      ? entry.active_votes.filter((v) => Number(v?.rshares ?? 0) > 0).length
+      : 0;
+
+  const score = ([key, entry]: [string, Entry]): number =>
+    (netUpvotes(entry) + (counts.get(key) ?? 0)) * (authorRepliedTo.has(key) ? 2 : 1);
+
+  let best = comments[0];
+  for (const c of comments.slice(1)) {
+    const d = score(c) - score(best);
+    // Ties break on raw votes (§3), and only then on nothing at all — the first
+    // encountered wins, which is stable for a given discussion map.
+    if (d > 0 || (d === 0 && netUpvotes(c[1]) > netUpvotes(best[1]))) best = c;
+  }
+
+  const [chosenKey, chosenEntry] = best;
   picked.set(rootKey, chosenKey);
   return toTopComment(chosenKey, chosenEntry, counts.get(chosenKey) ?? 0);
 }
