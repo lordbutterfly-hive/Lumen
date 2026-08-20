@@ -9,6 +9,7 @@ import { buildFooter, buildJsonMetadata } from './footer';
 import { ensureContainerPublished, isContainerPermlink } from './container';
 import { noteBroadcast, pauseForCommentInterval } from './pace';
 import { checkRc } from './rc-guard';
+import { enforcePublisherGlobalRate } from '../antispam/rate-limit';
 
 /**
  * Publisher worker (spec §D.3). Claims a ready job, builds the comment op authored
@@ -176,6 +177,24 @@ export type ProcessOutcome = 'idle' | 'paused' | 'processed' | 'failed';
 export let lastPauseReason: string | null = null;
 
 /** Process at most one job. Returns 'idle' when there is nothing to do. */
+/**
+ * Spend one unit of the platform-wide daily broadcast ceiling.
+ *
+ * ★ CONSUMED PER BROADCAST, NOT PER WORKER TICK (audit C1-9, 2026-08-20). The
+ * first version of this check sat at the top of `runPublisherOnce`, which the
+ * worker calls on a timer whether or not there is anything to publish — so an
+ * idle platform would have burned its entire daily budget on empty polls and
+ * then refused real posts. The budget has to be spent where the resource is:
+ * immediately before a broadcast actually goes out.
+ *
+ * Returns false to mean HOLD, never fail: the job stays queued and drains when
+ * the window rolls. A ceiling is a pacing decision, and destroying someone's
+ * post because the platform was busy is the worse outcome.
+ */
+async function takeGlobalBroadcastBudget(): Promise<boolean> {
+  return enforcePublisherGlobalRate();
+}
+
 export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome> {
   if (!liteConfig.enabled) {
     lastPauseReason = 'lite accounts are disabled';
@@ -315,6 +334,10 @@ export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome
       // (hive_evaluator_social.cpp:60,66,68-69) — in that case blank the content
       // instead, which always works. `canDelete` fails closed, so an unreachable
       // node soft-deletes rather than burning retries on a doomed op.
+      if (!(await takeGlobalBroadcastBudget())) {
+        await jobs.hold(job.jobId, 'held: the platform-wide daily broadcast ceiling is reached');
+        return 'failed';
+      }
       if (await broadcaster.canDelete(author, permlink)) {
         await broadcaster.deleteComment(author, permlink);
       } else {
@@ -412,6 +435,10 @@ export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome
         return 'failed';
       }
 
+      if (!(await takeGlobalBroadcastBudget())) {
+        await jobs.hold(job.jobId, 'held: the platform-wide daily broadcast ceiling is reached');
+        return 'failed';
+      }
       await pauseForCommentInterval();
       // `delete` returned above and can never reach here.
       await broadcaster.broadcastComment(buildCommentOp(job));

@@ -99,6 +99,17 @@ export interface Entry {
   _temporary?: boolean;
   _optimistic?: boolean;
   /**
+   * TRUE when a lite post has exhausted its publish generations and will never
+   * reach the chain without a human. Attached server-side, and NOT a chain field.
+   *
+   * ★ Distinct from `_optimistic` on purpose. `_optimistic` means "not on chain
+   * yet", which was true both for a post landing in ten seconds and for one that
+   * failed permanently three days ago — so the badge aged the second into
+   * "delayed", a word that promises it will still arrive. Absent means unknown,
+   * never "fine": only a read path that has actually checked sets it.
+   */
+  _publishFailed?: boolean;
+  /**
    * Lumen identity, attached SERVER-SIDE. Not a chain field.
    *
    * Every Lumen "lite" post is published on chain by one shared account, so Hivemind

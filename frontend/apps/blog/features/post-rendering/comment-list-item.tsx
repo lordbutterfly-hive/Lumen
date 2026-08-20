@@ -206,14 +206,21 @@ export const commentClassName =
 const PUBLISH_QUEUED_WINDOW_MS = 15 * 60 * 1000;
 const PUBLISH_WAITING_WINDOW_MS = 6 * 60 * 60 * 1000;
 
-type PublishBadgeState = 'publishing' | 'queued' | 'waiting' | 'delayed' | null;
+type PublishBadgeState = 'publishing' | 'queued' | 'waiting' | 'delayed' | 'failed' | null;
 
 function getPublishBadgeState(
   isOptimistic: boolean,
   isLitePipeline: boolean,
-  createdIso: string
+  createdIso: string,
+  publishFailed = false
 ): PublishBadgeState {
   if (!isOptimistic) return null;
+  // ★ FAILED OUTRANKS EVERY AGE-BASED STATE. The ladder below is a function of
+  // how OLD the post is, so a publish that permanently failed simply aged into
+  // "delayed" and sat there — a word that promises it will still land. It will
+  // not: its publish generations are exhausted and it needs a human. Saying so
+  // is the difference between a wait and a lie.
+  if (publishFailed) return 'failed';
   // Chain path: a fresh client-side optimistic comment, not from the lite
   // pipeline at all. Unchanged from before this fix — still spinning, still
   // "Publishing...", still expected to resolve in seconds via
@@ -230,7 +237,8 @@ const PUBLISH_BADGE_COPY_KEY: Record<Exclude<PublishBadgeState, null>, string> =
   publishing: 'global.publishing',
   queued: 'cards.comment_card.publish_queued',
   waiting: 'cards.comment_card.publish_waiting',
-  delayed: 'cards.comment_card.publish_delayed'
+  delayed: 'cards.comment_card.publish_delayed',
+  failed: 'cards.comment_card.publish_failed'
 };
 
 // ★ SAME localStorage KEY, SHAPE AND STABLE-REFERENCE REQUIREMENT as
@@ -306,7 +314,7 @@ const CommentListItem = memo(function CommentListItem({
   const liteOverlay = useLiteOverlay(comment);
   const displayAuthor = liteOverlay?.author ?? comment.author;
   // See the four-state badge doc above `commentClassName`.
-  const publishBadgeState = getPublishBadgeState(!!comment._optimistic, !!liteOverlay, comment.created);
+  const publishBadgeState = getPublishBadgeState(!!comment._optimistic, !!liteOverlay, comment.created, !!comment._publishFailed);
 
   const isMutedByViewer = mutedList?.some((x) => x.name === comment.author);
   const isGrayedByStats = comment.stats?.gray;
@@ -1045,7 +1053,11 @@ const CommentListItem = memo(function CommentListItem({
                             <div
                               data-testid="comment-card-footer-payout"
                               className={clsx(
-                                'flex items-center hover:cursor-pointer hover:text-destructive',
+                                /* ★ Money is green, and it does not go RED under the pointer (2026-08-20,
+                                   owner report). This inherited near-black and hovered to --destructive, so
+                                   the one figure on the row that is money looked like body text until you
+                                   touched it and then looked like an error. */
+                                'flex items-center text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
                                 {
                                   'line-through opacity-50': parseFloat(comment.max_accepted_payout) === 0
                                 }

@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { enforceFeedRefreshRate } from '@/blog/lib/lite/antispam/rate-limit';
+import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { getLogger } from '@ui/lib/logging';
 import { guardRead } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
@@ -94,6 +96,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const limitParam = Number(req.nextUrl.searchParams.get('limit'));
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 50) : 30;
   const refresh = req.nextUrl.searchParams.get('refresh') === '1';
+
+  // ★ `refresh=1` BYPASSES THE 60s CACHE AND FANS OUT TO HIVE — up to
+  // MAX_CHAIN_AUTHORS bridge calls per request. Unlimited, that is free
+  // ammunition pointed at a Hive node, from one authenticated session, which is
+  // exactly the class of bug this repo already fixes on `name/check`,
+  // `follow/state` and the Magi GQL proxies. The CACHED path stays unlimited:
+  // it is an in-memory read that costs nothing and rate-limiting it would
+  // degrade an ordinary user's feed for no gain. (Audit B3, M2, 2026-08-20.)
+  if (refresh && !(await enforceFeedRefreshRate(getClientIp(req)))) {
+    return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
+  }
 
   const cached = refresh ? undefined : cache.get(userId);
   if (cached && Date.now() - cached.at < FRESH_MS) {

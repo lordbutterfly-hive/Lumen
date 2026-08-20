@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardRead, guardWrite } from '@/blog/lib/lite/http/guard';
+import { guardRead, guardWrite, guardBodySize } from '@/blog/lib/lite/http/guard';
+import { enforceProfileWriteRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { requireActiveLiteUser, requireLiteUser } from '@/blog/lib/lite/http/actor';
 import { sanitizeProfile } from '@/blog/lib/lite/profile/profile-service';
@@ -33,9 +34,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
 
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
+
+
+
   const session = await getLiteSession();
   const actor = await requireActiveLiteUser(session.user, session);
   if (!actor.ok) return actor.response;
+
+  // ★ KEYED ON THE USER, NOT THE IP, and in its OWN bucket. Keying on the IP
+  // would let one person behind a shared NAT exhaust everyone else's edits, and
+  // the earlier version of this limit borrowed the signup-funnel `lookup` budget
+  // — which this file already documents as the way to deny real signups.
+  if (!(await enforceProfileWriteRate(actor.user.userId))) {
+    return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
+  }
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body) return NextResponse.json({ error: 'invalid_body' }, { status: 400 });

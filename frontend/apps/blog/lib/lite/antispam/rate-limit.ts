@@ -376,3 +376,65 @@ export async function enforceHiveFollowRate(hiveName: string): Promise<boolean> 
     dayKey()
   );
 }
+
+/**
+ * The platform-wide daily ceiling on chain broadcasts by the shared publisher
+ * key. See `liteConfig.publisherGlobalPerDay` for the sizing argument.
+ *
+ * Consumed at the moment a broadcast is about to happen — not when a post is
+ * accepted — so a queued job that never broadcasts (deleted, moderated, parent
+ * vanished) does not spend the budget, and a retry of a failed broadcast does
+ * not spend it twice for one post.
+ *
+ * Returns false to mean "hold": the caller should leave the job queued rather
+ * than fail it. A daily ceiling is a pacing signal, not a rejection.
+ */
+export async function enforcePublisherGlobalRate(): Promise<boolean> {
+  return enforceGlobalDaily('publisher_broadcast', liteConfig.publisherGlobalPerDay);
+}
+
+/**
+ * ★ EACH OF THESE HAS ITS OWN BUCKET, AND THAT IS THE WHOLE POINT.
+ *
+ * The first version of these four limits reused `enforceLookupRate`, which is
+ * the SIGNUP-FUNNEL budget (`lookup`, 300 per IP per day — name check, name
+ * suggest, follow state). This file already documents, twenty lines above, why
+ * that is wrong: the streak route was moved OFF that bucket precisely because a
+ * high-traffic endpoint sharing it "would spend the entire shared budget and
+ * then deny real signups". Feed refresh and follower-list browsing are exactly
+ * that kind of traffic. Reusing the bucket would have limited the routes AND
+ * broken signup, which is a worse outcome than the missing limit it replaced.
+ *
+ * Sized by what each endpoint actually costs and how often an honest user hits
+ * it, not by a shared round number.
+ */
+
+/** Feed refresh fans out to Hive (up to MAX_CHAIN_AUTHORS bridge calls). Costly, user-initiated. */
+export async function enforceFeedRefreshRate(ip: string): Promise<boolean> {
+  return rateRepo.checkAndConsume(
+    `ip:${ip}`,
+    'feed_refresh',
+    envPositiveInt('LITE_FEED_REFRESH_PER_IP_PER_DAY', 1_000),
+    dayKey()
+  );
+}
+
+/** Public follower/following browsing. Cheap per call, but unbounded scraping is the concern. */
+export async function enforceFollowListRate(ip: string): Promise<boolean> {
+  return rateRepo.checkAndConsume(
+    `ip:${ip}`,
+    'follow_list',
+    envPositiveInt('LITE_FOLLOW_LIST_PER_IP_PER_DAY', 3_000),
+    dayKey()
+  );
+}
+
+/** Profile and interests writes. One parameterised UPDATE each; nobody edits these often. */
+export async function enforceProfileWriteRate(userId: string): Promise<boolean> {
+  return rateRepo.checkAndConsume(
+    `user:${userId}`,
+    'profile_write',
+    envPositiveInt('LITE_PROFILE_WRITE_PER_DAY', 200),
+    dayKey()
+  );
+}

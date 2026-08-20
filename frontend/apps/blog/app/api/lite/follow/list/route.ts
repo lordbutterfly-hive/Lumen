@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { enforceFollowListRate } from '@/blog/lib/lite/antispam/rate-limit';
+import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { getLogger } from '@ui/lib/logging';
 import { guardRead } from '@/blog/lib/lite/http/guard';
 import { listFollowingPeers, listFollowerPeers } from '@/blog/lib/lite/repositories/follow-repository';
@@ -34,6 +36,16 @@ const MAX_LIMIT = 100;
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const blocked = guardRead();
   if (blocked) return blocked;
+
+  // ★ PUBLIC BY DESIGN, BUT NOT UNLIMITED. Per-request size is already capped
+  // at MAX_LIMIT, which bounds one answer — it does not bound how many answers
+  // an anonymous caller may ask for, so the complete follower/following graph
+  // of every account was scrapable at whatever rate the caller liked. Its
+  // siblings `follow/state` and `block/state` already carry this exact limiter;
+  // this one was simply missed. (Audit B3, L1, 2026-08-20.)
+  if (!(await enforceFollowListRate(getClientIp(req)))) {
+    return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
+  }
 
   const account = req.nextUrl.searchParams.get('account')?.trim().toLowerCase();
   const type = req.nextUrl.searchParams.get('type') === 'followers' ? 'followers' : 'following';

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardRead, guardWrite } from '@/blog/lib/lite/http/guard';
+import { guardRead, guardWrite, guardBodySize } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { deleteLitePost, getLitePost } from '@/blog/lib/lite/content/post-service';
 import { liteEntryForPost } from '@/blog/lib/lite/render/lite-entry';
@@ -62,6 +62,10 @@ export async function DELETE(
 ): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
+
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
 
   const session = await getLiteSession();
   const user = session.user;

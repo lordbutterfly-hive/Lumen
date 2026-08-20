@@ -124,6 +124,21 @@ export const liteConfig = {
    */
   signupGlobalPerDay: Number(process.env.LITE_SIGNUP_GLOBAL_PER_DAY || 5000),
   /**
+   * ★ THE PLATFORM-WIDE CEILING ON CHAIN BROADCASTS (audit C1-9, 2026-08-20).
+   * Every lite post and comment is broadcast by ONE shared Hive key, so its
+   * Resource Credits are a common resource. Per-account caps existed and an RC
+   * floor pauses the publisher, but nothing bounded AGGREGATE demand: accounts
+   * created within the 5,000/day signup budget can together exceed what the
+   * publisher can physically broadcast (~24,600/day at one per 3.5s) long before
+   * any single account looks abusive — degrading latency for every legitimate
+   * user and walking RC down to the floor-pause with no earlier brake.
+   *
+   * 15,000/day sits comfortably above realistic honest volume and well under the
+   * physical throughput ceiling, so it bites on abuse rather than on success.
+   * The floor-pause remains the last line; this is the first.
+   */
+  publisherGlobalPerDay: Number(process.env.LITE_PUBLISHER_GLOBAL_PER_DAY || 15000),
+  /**
    * F-L30: aggregate daily ceiling on signup ATTEMPTS (success OR failure), sized well
    * above honest mistype volume. It exists so failed attempts (name_taken, name_on_chain,
    * vetting retries) still have a platform-wide bound on the upstream Hive-API

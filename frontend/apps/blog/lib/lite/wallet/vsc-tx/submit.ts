@@ -27,7 +27,7 @@
  * endpoint and re-reads in between.
  */
 
-import { NONCE_OPERATION, SUBMIT_OPERATION } from '@/blog/app/api/creator-tokens/submit/operations';
+import { NONCE_OPERATION, SUBMIT_OPERATION, TX_STATUS_OPERATION } from '@/blog/app/api/creator-tokens/submit/operations';
 
 /** Same-origin write proxy. Never dial the node directly — CORS forbids it. */
 export const SUBMIT_PROXY_PATH = '/api/creator-tokens/submit';
@@ -35,6 +35,14 @@ export const SUBMIT_PROXY_PATH = '/api/creator-tokens/submit';
 export interface SubmitResult {
   /** The transaction CID the node assigned. */
   id: string;
+  /**
+   * What the chain did with it.
+   *  - `included`  — sequenced into a block. The action really happened.
+   *  - `failed`    — sequenced and rejected at execution. It did NOT happen.
+   *  - `pending`   — accepted into the mempool, not yet sequenced when we
+   *                  stopped waiting. It may still land, or may be dropped.
+   */
+  status: 'included' | 'failed' | 'pending';
 }
 
 interface GqlResponse<T> {
@@ -108,7 +116,51 @@ export interface SubmitInput {
   sig: string;
 }
 
-/** One submit attempt, no retry logic. */
+/**
+ * How long to wait for a transaction to be sequenced before reporting `pending`.
+ * Testnet blocks land in well under a minute; 90s leaves real headroom without
+ * holding a UI hostage to a node that has stopped producing.
+ */
+const INCLUSION_TIMEOUT_MS = 90_000;
+const INCLUSION_POLL_MS = 3_000;
+
+/**
+ * Wait for the chain to say what happened to a transaction.
+ *
+ * ★★ A SUCCESSFUL SUBMIT IS NOT A SUCCESSFUL TRANSACTION, and treating it as one
+ * was wrong in a way that shows a user "done" for something that never happened.
+ * `submitTransactionV1` returning a CID means the node ACCEPTED the transaction
+ * into its mempool — nothing more. Sequencing is a separate, later decision.
+ *
+ * The case that makes this concrete: two transactions submitted for the SAME
+ * nonce are BOTH accepted and BOTH get real CIDs (`IngestTx` only rejects a
+ * nonce below the confirmed one, or a gap above it). At sequencing, the block
+ * producer includes the first to match the account's nonce and drops the other
+ * with a log line and no notification. That is not a double-spend — exactly one
+ * executes — but the loser's caller was already told it succeeded. A double
+ * click, two tabs, or a retry after an ambiguous network error is enough.
+ *
+ * So the honest answer needs the chain, not the mempool.
+ */
+export async function waitForInclusion(id: string, timeoutMs = INCLUSION_TIMEOUT_MS): Promise<'included' | 'failed' | 'pending'> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const res = await postProxy<{ findTransaction: Array<{ id: string; status: string }> | null }>(
+      TX_STATUS_OPERATION,
+      { id }
+    );
+    // A read failure here is not a transaction failure. Report `pending` rather
+    // than inventing a verdict we did not get.
+    const status = res.data?.findTransaction?.[0]?.status;
+    if (status === 'INCLUDED' || status === 'CONFIRMED') return 'included';
+    if (status === 'FAILED') return 'failed';
+
+    if (Date.now() + INCLUSION_POLL_MS >= deadline) return 'pending';
+    await new Promise((resolve) => setTimeout(resolve, INCLUSION_POLL_MS));
+  }
+}
+
+/** One submit attempt, no retry logic. Does NOT wait for the chain. */
 export async function submitOnce(input: SubmitInput): Promise<SubmitResult> {
   const res = await postProxy<{ submitTransactionV1: { id: string } | null }>(SUBMIT_OPERATION, {
     tx: input.tx,
@@ -121,7 +173,9 @@ export async function submitOnce(input: SubmitInput): Promise<SubmitResult> {
   if (typeof id !== 'string' || id.length === 0) {
     throw new Error('submit: the node accepted the transaction but returned no id');
   }
-  return { id };
+  // Accepted into the mempool. Whether it EXECUTES is a separate question, and
+  // `submitWithNonce` asks it before reporting back.
+  return { id, status: 'pending' };
 }
 
 export interface SignForNonce {
@@ -148,7 +202,16 @@ export interface SignForNonce {
 export async function submitWithNonce(account: string, sign: SignForNonce): Promise<SubmitResult> {
   const nonce = await fetchNonce(account);
   try {
-    return await submitOnce(await sign(nonce));
+    const accepted = await submitOnce(await sign(nonce));
+    // ★ CONFIRM BEFORE CLAIMING. See waitForInclusion: acceptance is not
+    // execution, and a transaction that loses a nonce race is dropped silently.
+    const status = await waitForInclusion(accepted.id);
+    if (status === 'failed') {
+      throw new Error(
+        `submit: the transaction was included in a block but failed at execution (${accepted.id}). Nothing was transferred.`
+      );
+    }
+    return { ...accepted, status };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
@@ -168,6 +231,13 @@ export async function submitWithNonce(account: string, sign: SignForNonce): Prom
         `${message} — the account nonce is still ${nonce}, so retrying would fail identically.`
       );
     }
-    return submitOnce(await sign(fresh));
+    const retried = await submitOnce(await sign(fresh));
+    const status = await waitForInclusion(retried.id);
+    if (status === 'failed') {
+      throw new Error(
+        `submit: the transaction was included in a block but failed at execution (${retried.id}). Nothing was transferred.`
+      );
+    }
+    return { ...retried, status };
   }
 }

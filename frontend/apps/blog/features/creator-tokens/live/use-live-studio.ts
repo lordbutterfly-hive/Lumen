@@ -18,6 +18,7 @@
 import { useCallback, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useTokenAccounts } from './use-token-accounts';
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
 import { BLOCKS_PER_DAY } from '../lib/contract-math';
 import type { Ask, Market, Offering } from '../types';
@@ -121,6 +122,16 @@ export function useLiveStudio(): LiveStudio {
   const loggedIn = isHydrated && user.isLoggedIn;
   const creator = loggedIn ? user.username : null;
   const isLite = user.account_tier === 'lite';
+
+  // ★ CAPABILITY, NOT TIER (2026-08-20, audit A3-F1). `use-live-token-market`
+  // was migrated to a capability check when the wallet rail landed and this hook
+  // was NOT, so every studio action — setFace, setCap, answer, decline,
+  // createOffering, retire, claimTradeFees — stayed hard-refused for a lite
+  // account even when its bound wallet demonstrably signs. A wallet identity
+  // registers its market under its OWN did:pkh, so that DID is also the creator
+  // whose market this studio administers.
+  const tokenAccounts = useTokenAccounts();
+  const signingAccount = tokenAccounts.accounts.find((a) => a.canSign) ?? null;
 
   const dataSource = getCreatorTokensDataSource();
   const unavailable = dataSource === null;
@@ -228,9 +239,16 @@ export function useLiveStudio(): LiveStudio {
       throw new Error('CREATOR_TOKENS_SESSION_UNAVAILABLE: we couldn’t verify you’re signed in just now. Try again in a moment.');
     }
     if (!creator) throw new Error('CREATOR_TOKENS_SIGNED_OUT: sign in to continue');
-    if (isLite) throw new Error('CREATOR_TOKENS_LITE_ACCOUNT: this account has no Hive keys and cannot sign a transaction');
+    if (isLite) {
+      if (!signingAccount) {
+        throw new Error(
+          'CREATOR_TOKENS_LITE_ACCOUNT: this account has no key that can sign a transaction — connect an Ethereum or Bitcoin wallet to manage your token.'
+        );
+      }
+      return { source: dataSource, signer: signingAccount.id };
+    }
     return { source: dataSource, signer: creator };
-  }, [dataSource, creator, isLite, sessionUnavailable]);
+  }, [dataSource, creator, isLite, signingAccount, sessionUnavailable]);
 
   const run = useMutation({
     mutationFn: async (fn: (ctx: { source: NonNullable<typeof dataSource>; signer: string }) => Promise<unknown>) => fn(requireSigner()),

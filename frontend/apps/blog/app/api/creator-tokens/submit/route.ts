@@ -3,7 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceMagiGqlRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { consumeLocalGlobal, consumeLocalPerIp } from '@/blog/lib/lite/antispam/local-rate-limit';
-import { NONCE_OPERATION, SUBMIT_OPERATION } from './operations';
+import { NONCE_OPERATION, SUBMIT_OPERATION, TX_STATUS_OPERATION } from './operations';
 
 const logger = getLogger('app');
 
@@ -32,9 +32,13 @@ const logger = getLogger('app');
  * caller exceeding that is not a user.
  */
 
-const ALLOWED = new Map<string, 'nonce' | 'submit'>([
+const ALLOWED = new Map<string, 'nonce' | 'submit' | 'status'>([
   [NONCE_OPERATION, 'nonce'],
-  [SUBMIT_OPERATION, 'submit']
+  [SUBMIT_OPERATION, 'submit'],
+  // A cheap, idempotent read, so it shares the generous nonce budget rather
+  // than the submit one — confirming a transaction must never be rationed as
+  // tightly as sending one, or a user cannot find out what happened to theirs.
+  [TX_STATUS_OPERATION, 'status']
 ]);
 
 /**
@@ -97,6 +101,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (kind === 'nonce') {
     if (typeof variables.account !== 'string' || variables.account.length === 0 || variables.account.length > 200) {
       return NextResponse.json({ errors: [{ message: 'account must be a non-empty string' }] }, { status: 400 });
+    }
+  } else if (kind === 'status') {
+    if (typeof variables.id !== 'string' || variables.id.length === 0 || variables.id.length > 200) {
+      return NextResponse.json({ errors: [{ message: 'id must be a non-empty string' }] }, { status: 400 });
     }
   } else {
     for (const field of ['tx', 'sig'] as const) {

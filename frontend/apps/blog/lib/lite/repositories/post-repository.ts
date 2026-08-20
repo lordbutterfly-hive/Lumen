@@ -906,3 +906,35 @@ export async function countAuthoredByUser(userId: string): Promise<number> {
   ]);
   return Number(res.rows[0]?.n ?? 0);
 }
+
+/**
+ * Of the given posts, which have exhausted their publish generations — i.e.
+ * will never reach Hive without a human.
+ *
+ * ★ THE AUTHOR HAS TO BE ABLE TO SEE THIS (audit D1-11, 2026-08-20). The same
+ * predicate already existed as {@link listPermanentlyFailed}, but its only
+ * consumer wrote an operator log line. To the author, and to every reader, a
+ * post whose publish permanently failed looked EXACTLY like one still in
+ * flight — `_optimistic` is true for both, forever. This is the set-shaped
+ * version so a read path can mark them.
+ */
+export async function filterPermanentlyFailed(
+  postIds: string[],
+  maxGenerations = 3
+): Promise<Set<string>> {
+  if (postIds.length === 0) return new Set();
+  const res = await query<{ post_id: string }>(
+    `SELECT p.post_id FROM lumen_post p
+      WHERE p.post_id = ANY($1)
+        AND p.deleted_locally = false
+        AND p.hive_permlink IS NULL
+        AND (SELECT count(*) FROM publish_job j WHERE j.post_id = p.post_id) >= $2
+        AND NOT EXISTS (
+              SELECT 1 FROM publish_job j
+               WHERE j.post_id = p.post_id
+                 AND j.status NOT IN ('failed','rejected')
+            )`,
+    [postIds, maxGenerations]
+  );
+  return new Set(res.rows.map((r) => r.post_id));
+}

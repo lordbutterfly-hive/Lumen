@@ -99,8 +99,15 @@ export function walletDid(
     // about to canonicalise anyway. Checking the lowercase form asks the only
     // question that belongs here — "is this 20 bytes of hex" — and leaves the
     // canonical casing to `checksumEvmAddress` below.
-    if (!isEvmAddress(address.toLowerCase())) return null;
-    return `did:pkh:${EVM_CAIP2}:${checksumEvmAddress(address)}`;
+    // ★ CHECKSUM THE FORM WE VALIDATED, NOT THE RAW INPUT. The guard lowercases
+    // before validating, so `0X…` passes it — but viem's `getAddress` requires a
+    // literal lowercase `0x` and THROWS on `0X`, and `walletDids` maps this over
+    // every credential, so one such row would hide every good wallet the user
+    // has. Unreachable today (stored refs are normalised at write time), which is
+    // exactly why it would have surfaced as a 500 the first time it wasn't.
+    const lowered = address.toLowerCase();
+    if (!isEvmAddress(lowered)) return null;
+    return `did:pkh:${EVM_CAIP2}:${checksumEvmAddress(lowered)}`;
   }
   if (method === 'btc_wallet') {
     const caip2 = network === 'testnet' ? BTC_TESTNET_CAIP2 : BTC_MAINNET_CAIP2;

@@ -261,10 +261,11 @@ const YourTokensView: FC = () => {
         </div>
       ) : (
         <>
-          {/* Viewing works, signing does not — yet. A wallet identity holds tokens
-              at its own `did:pkh` and can be paid, but initiating a transaction
-              needs a signature over the transaction itself, which is a rail that
-              is not ported. Stated up front rather than discovered on a click. */}
+          {/* Signing is live per chain (chainCanSign: evm and btc), so this is
+              no longer "wallets cannot sign". It is the remaining case: an
+              identity that holds tokens at its own `did:pkh` but has no chain
+              bound that can sign — a Google-only account, or a chain not yet
+              enabled. Stated up front rather than discovered on a click. */}
           {p.isLite && !p.canSign ? (
             <div className="mt-5">
               <MeritumEligibilityNotice surface="hold" who={eligibility} />
@@ -325,7 +326,7 @@ const YourTokensView: FC = () => {
                     You don’t hold any Meritum yet. Browse creators and buy in to start.
                   </p>
                 ) : (
-                  p.holdings.map((h) => <HoldingRow key={h.creator} h={h} />)
+                  p.holdings.map((h) => <HoldingRow key={`${h.holder}:${h.creator}`} h={h} />)
                 )}
               </div>
               <p className="mt-4 font-serif text-caption text-ink-14">

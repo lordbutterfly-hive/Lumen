@@ -1,4 +1,4 @@
-import { Exec, query } from '../db/pool';
+import { Exec, query, withTransaction } from '../db/pool';
 import { ulid } from '../ids';
 import { AuthMethod, LumenAuthCredential } from '../types';
 
@@ -169,9 +169,13 @@ export async function writeCredentialAudit(
   userId: string,
   credentialId: string | null,
   action: 'bind' | 'unbind',
-  method: string | null
+  method: string | null,
+  // Optional executor so the audit row can be written INSIDE the caller's
+  // transaction. An unbind that commits without its audit row, or an audit row
+  // for an unbind that rolled back, are both worse than useless.
+  exec: Exec = query
 ): Promise<void> {
-  await query(
+  await exec(
     `INSERT INTO lumen_credential_audit (audit_id, user_id, credential_id, action, method)
      VALUES ($1, $2, $3, $4, $5)`,
     [ulid(), userId, credentialId, action, method]
@@ -181,24 +185,40 @@ export async function writeCredentialAudit(
 export type UnbindResult = 'ok' | 'last_credential' | 'not_found';
 
 /**
- * Remove a linked sign-in method (F-L2). REFUSES to remove the account's last
- * credential — a lite account with zero credentials is unrecoverable (no password, no
- * email), so this is the one deletion that must never succeed. Ownership is enforced by
- * scoping every read/write to `user_id`, so one user can never unbind another's method.
- * Writes an `unbind` audit row on success.
+ * Remove a linked sign-in method (F-L2), never the last one. A lite account with zero
+ * credentials is unrecoverable (no password, no email), so that is the one deletion that
+ * must never succeed. Ownership is enforced by scoping every read/write to `user_id`, so
+ * one user can never unbind another's method. Writes an `unbind` audit row on success.
+ *
+ * ★★ THE COUNT AND THE DELETE MUST BE IN ONE TRANSACTION, WITH THE ROWS LOCKED
+ * (audit B1, 2026-08-20). This used to SELECT, count in JavaScript, and then
+ * DELETE on a separate autocommit connection. Two concurrent unbinds issued when
+ * exactly two credentials remain could BOTH read two rows, BOTH pass the
+ * `< 2` check, and BOTH commit — leaving ZERO credentials on an account that has
+ * no password and no recovery email. That is not a lockout, it is an
+ * unrecoverable account whose globally-unique display name is permanently
+ * squatted.
+ *
+ * `FOR UPDATE` serialises the two transactions: the second blocks until the
+ * first commits, then re-reads and correctly sees one row left. The invariant is
+ * enforced by the database rather than by a check that was true a moment ago.
  */
 export async function unbindMethod(userId: string, credentialId: string): Promise<UnbindResult> {
-  const { rows } = await query<CredentialRow>(
-    `SELECT * FROM lumen_auth_credential WHERE user_id = $1`,
-    [userId]
-  );
-  if (rows.length < 2) return 'last_credential'; // cannot remove the only way in
-  const target = rows.find((r) => r.credential_id === credentialId);
-  if (!target) return 'not_found';
-  await query(`DELETE FROM lumen_auth_credential WHERE credential_id = $1 AND user_id = $2`, [
-    credentialId,
-    userId
-  ]);
-  await writeCredentialAudit(userId, credentialId, 'unbind', target.method);
-  return 'ok';
+  return withTransaction(async (tx) => {
+    const { rows } = await tx.query<CredentialRow>(
+      `SELECT * FROM lumen_auth_credential WHERE user_id = $1 FOR UPDATE`,
+      [userId]
+    );
+    if (rows.length < 2) return 'last_credential'; // cannot remove the only way in
+    const target = rows.find((r) => r.credential_id === credentialId);
+    if (!target) return 'not_found';
+    await tx.query(`DELETE FROM lumen_auth_credential WHERE credential_id = $1 AND user_id = $2`, [
+      credentialId,
+      userId
+    ]);
+    await writeCredentialAudit(userId, credentialId, 'unbind', target.method, (text, params) =>
+      tx.query(text, params as unknown[])
+    );
+    return 'ok';
+  });
 }

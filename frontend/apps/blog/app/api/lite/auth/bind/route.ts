@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardWrite } from '@/blog/lib/lite/http/guard';
+import { guardWrite, guardBodySize } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { requireActiveLiteUser } from '@/blog/lib/lite/http/actor';
 import { verifyGoogleIdToken } from '@/blog/lib/lite/auth/google-verify';
@@ -37,6 +37,10 @@ const logger = getLogger('app');
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
+
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
 
   const session = await getLiteSession();
   // F-L2: gate on the DB row's status (checkLiteActorById), not the cookie tier — a

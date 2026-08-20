@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardWrite, guardRead } from '@/blog/lib/lite/http/guard';
+import { guardWrite, guardRead, guardBodySize } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { createLitePost, getLiteUserPosts, CreatePostRequest } from '@/blog/lib/lite/content/post-service';
 import { findUserByDisplayName } from '@/blog/lib/lite/repositories/user-repository';
+import { filterPermanentlyFailed } from '@/blog/lib/lite/repositories/post-repository';
 import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
 import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
 import { applyOwnerBlocksToAuthoredEntries } from '@/blog/lib/lite/social/block-filter';
@@ -128,6 +129,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
 
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
+
   const session = await getLiteSession();
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body) return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
@@ -246,8 +251,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     //     permlink straight from the id without ever needing an author
     //     string, so the placeholder author here is a formality the normal
     //     path never reads (see `UNRESOLVED_LITE_PARENT_AUTHOR`).
+    // ★ Which of these will NEVER reach chain. One query for the whole page, so
+    // a post that permanently failed to publish is shown as failed instead of
+    // wearing a "still publishing" badge forever. See filterPermanentlyFailed.
+    const failedIds = await filterPermanentlyFailed(list.map((entry) => entry.postId));
+
     const withParents: Entry[] = list.map((post) => {
-      const entry = dbPostToEntry(post, names.get(post.postId));
+      const entry = dbPostToEntry(post, names.get(post.postId), failedIds.has(post.postId));
       if (post.parentRef?.type === 'chain') {
         return { ...entry, parent_author: post.parentRef.author, parent_permlink: post.parentRef.permlink };
       }

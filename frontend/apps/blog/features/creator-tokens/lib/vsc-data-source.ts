@@ -146,8 +146,7 @@ import {
   toDid,
   toU64,
   unknownMarket,
-  STATE_CLOSED
-} from './vsc/reads';
+  STATE_CLOSED, assertTransferDestination } from './vsc/reads';
 
 // Real, on-chain implementation. Reads live contract state via GraphQL
 // getStateByKeys (plumbing + decoding in ./vsc/reads.ts); builds custom_json
@@ -1549,6 +1548,11 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (!isWellFormedDid(toDidAccount)) {
       throw new Error('VscCreatorTokensDataSource: destination account is not well-formed');
     }
+    // ★ AND it must be a destination that can actually RECEIVE. Well-formed is
+    // not the same as real: `toDid()` turns any bare string into `hive:<string>`,
+    // so a Lumen display name became a nonexistent Hive account and the tokens
+    // were stranded with no way back. See assertTransferDestination.
+    assertTransferDestination(input.to);
     const op = buildOp({
       netId: this.config.netId,
       contractId: this.config.contractId,

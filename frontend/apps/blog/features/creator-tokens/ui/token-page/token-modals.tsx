@@ -67,7 +67,10 @@ const BuyModal: FC<{
   // before they sign, not after they have spent resource credits on a transaction
   // that could never land.
   const tokenAccounts = useTokenAccounts();
-  const payer = tokenAccounts.accounts[0] ?? null;
+  // ★ The account whose balance is checked must be the account that will SIGN,
+  // or the gauge measures one identity and the transaction spends another. It
+  // was `accounts[0]`, which is merely the oldest-bound credential.
+  const payer = tokenAccounts.accounts.find((a) => a.canSign) ?? tokenAccounts.accounts[0] ?? null;
   const spending = useMagiSpendingPower(payer?.id ?? null);
   // HBD is a 3-decimal base-unit integer; the modal works in whole USD, and HBD is
   // dollar-pegged (see live/adapt.ts usdFromHbd — the one documented 1:1).
@@ -489,7 +492,8 @@ const AskModal: FC<{
   // the caller's RC. Same payer resolution + spending gauge BuyModal uses; HBD is
   // dollar-pegged, so the USD commission is its base-unit amount ×1000.
   const askTokenAccounts = useTokenAccounts();
-  const askPayer = askTokenAccounts.accounts[0] ?? null;
+  // Same reasoning as `payer` above: check the balance of whoever signs.
+  const askPayer = askTokenAccounts.accounts.find((a) => a.canSign) ?? askTokenAccounts.accounts[0] ?? null;
   const askSpending = useMagiSpendingPower(askPayer?.id ?? null);
   const commissionBaseUnits = Math.round(q.commissionUsd * 1000);
   const commissionAffordability = askSpending.affordability(commissionBaseUnits);

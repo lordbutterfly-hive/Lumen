@@ -10,7 +10,9 @@ import { NOTE_METADATA_TYPE } from '@/blog/lib/short-post-note';
  * DB-first. Post-publish, the chain entry is fetched under its REAL author and the
  * lite identity is laid over it (see render/lite-entry.ts).
  */
-export function dbPostToEntry(post: LumenPost, publicName?: string): Entry {
+export function dbPostToEntry(post: LumenPost, publicName?: string,
+  publishFailed?: boolean
+): Entry {
   // `publicName` is the author's name TODAY (see render/current-name.ts). It differs
   // from the snapshot after an upgrade, when the account has a new Hive name and its
   // whole Lumen history has to move with it. Callers that cannot resolve it fall back
@@ -104,6 +106,10 @@ export function dbPostToEntry(post: LumenPost, publicName?: string): Entry {
     // ownership per the build map's file partition) — this one-line change does
     // not deduplicate the row, but it does kill the permanent spinner on it,
     // which was the visible harm.
-    _optimistic: !post.hivePermlink
+    _optimistic: !post.hivePermlink,
+    // ★ "will never land" is a DIFFERENT state from "has not landed yet", and
+    // the UI had no way to tell them apart. Only set when a caller has actually
+    // checked; absent means unknown, never "fine".
+    _publishFailed: publishFailed === true
   };
 }

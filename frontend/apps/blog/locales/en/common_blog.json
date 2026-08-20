@@ -416,7 +416,8 @@
       "manage_list_link": "Manage list",
       "publish_queued": "Queued to publish to Hive.",
       "publish_waiting": "Saved on Lumen. Still waiting for its turn to reach Hive.",
-      "publish_delayed": "Saved on Lumen, but it hasn't reached Hive yet. Your writing is safe and nothing is lost."
+      "publish_delayed": "Saved on Lumen, but it hasn't reached Hive yet. Your writing is safe and nothing is lost.",
+      "publish_failed": "Couldn't be published. This one needs a look from us."
     }
   },
   "alert_dialog_reblog": {
@@ -1997,7 +1998,8 @@
     "wallet_trade_lead": "Your {{wallet}} can hold Meritum tokens, but not trade them from Lumen yet.",
     "wallet_trade_why": "Tokens sent to you are held against your wallet identity on Magi and stay yours. Buying and selling needs a signature over the Magi transaction itself, which is a different signature from the one you signed in with, and that rail is still being built for your {{wallet}}. To trade today,",
     "wallet_trade_tail": ".",
-    "check_failed": "We couldn't check your wallet just now. Try reloading the page."
+    "check_failed": "We couldn't check your wallet just now. Try reloading the page.",
+    "wallet_btc_signing_warning": "Your Bitcoin wallet approves Magi transactions by signing a short reference code. Only ever sign one inside Lumen: a code you are asked to sign anywhere else can authorise a transaction on your account."
   },
   "lite_auth": {
     "name_check": {

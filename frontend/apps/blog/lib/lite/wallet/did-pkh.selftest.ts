@@ -70,6 +70,19 @@ export function runDidPkhSelfTest(): void {
     threw = true;
   }
   check('walletDid does not throw on a malformed address', !threw);
+
+  // ★ A `0X`-prefixed address passed the guard (which lowercases first) and then
+  // threw inside viem's getAddress (which demands a literal `0x`). Because
+  // walletDids maps over every credential, one such row hid EVERY wallet.
+  let upperThrew = false;
+  let upperDid: string | null = null;
+  try {
+    upperDid = walletDid('evm_wallet', '0X742d35cc6634c0532925a3b844bc9e7595f0beb7', null);
+  } catch {
+    upperThrew = true;
+  }
+  check('a 0X-prefixed address does not throw', !upperThrew);
+  check('a 0X-prefixed address yields the same EIP-55 DID', upperDid === EIP55, String(upperDid));
   try {
     const list = walletDids([
       { method: 'evm_wallet', externalRef: 'not-an-address', network: null },

@@ -72,7 +72,7 @@ export interface WalletCallInput {
 export function prepareWalletCall(
   input: WalletCallInput,
   nonce: number
-): { tx: string; typedData: unknown } {
+): { tx: string; typedData: unknown; shellBytes: Uint8Array } {
   const op: ContainerOp = buildCallOp({
     contractId: input.contractId,
     action: input.action,
@@ -98,9 +98,17 @@ export function prepareWalletCall(
 
   return {
     tx: toBase64(serializeContainer(container)),
-    typedData: toWalletTypedData(convertCborToEip712TypedData(shellBytes))
+    typedData: toWalletTypedData(convertCborToEip712TypedData(shellBytes)),
+    // The BTC rail signs these bytes' CID instead of the typed data. Returned
+    // rather than rebuilt so both rails provably sign the same container.
+    shellBytes
   };
 }
+
+/** The BTC path never signs typed data; this makes that unmistakable. */
+const neverSignsTypedData: TypedDataSigner = () => {
+  throw new Error('wallet-broadcaster: the Bitcoin rail does not sign typed data');
+};
 
 /**
  * The whole flow: read the nonce, build, prompt the wallet, submit — retrying
@@ -128,15 +136,35 @@ export async function broadcastWalletCall(input: WalletCallInput): Promise<Submi
 
 import { type CustomJsonOp } from './op-builders';
 
-/** `did:pkh:bip122:<genesis>:<address>` → the Bitcoin address that signs. */
+/** CAIP-2 chain id for Bitcoin MAINNET: the first 16 bytes of the genesis hash. */
+const BTC_MAINNET_CAIP2 = '000000000019d6689c085ae165831e93';
+
+/**
+ * `did:pkh:bip122:<genesis>:<address>` → the Bitcoin address that signs.
+ *
+ * ★ THE GENESIS IS PINNED TO MAINNET, not matched loosely. The node's
+ * `dids.Parse` only ever tries `ParseBtcDID` (mainnet params) and never
+ * `ParseBtcTestnetDID`, so a testnet-genesis DID can never verify — but with a
+ * loose `[^:]+` it still ROUTED here, prompted the wallet, and was refused at
+ * the node afterwards (adversarial review, 2026-08-20). Refusing to route it
+ * costs the user nothing; routing it costs them a signing prompt.
+ */
 export function btcAddressFromDid(did: string): string | null {
-  const m = /^did:pkh:bip122:[^:]+:([A-Za-z0-9]+)$/.exec(did);
+  const m = new RegExp(`^did:pkh:bip122:${BTC_MAINNET_CAIP2}:([A-Za-z0-9]+)$`).exec(did);
   return m ? m[1] : null;
 }
 
 /** Which of the two address types the node will accept a BIP-322 signature for. */
 export function btcAddressType(address: string): 'p2pkh' | 'p2sh' | 'p2wpkh' | null {
-  if (address.startsWith('bc1q')) return 'p2wpkh';
+  // ★ LENGTH MATTERS, because `bc1q` covers BOTH witness-v0 types. A P2WPKH
+  // address encodes a 20-byte program and is 42 characters; a P2WSH encodes a
+  // 32-byte program and is 62. The node classifies structurally and refuses
+  // P2WSH outright ("unsupported Bitcoin address type:
+  // *btcutil.AddressWitnessScriptHash"), so a prefix-only check told the user
+  // to sign something that could never verify (adversarial review 2026-08-20).
+  // Not reachable from a consumer wallet today; the gate should still match the
+  // node's shape rather than its common case.
+  if (address.startsWith('bc1q')) return address.length === 42 ? 'p2wpkh' : null;
   if (address.startsWith('3')) return 'p2sh';
   if (address.startsWith('1')) return 'p2pkh';
   // bc1p (taproot) is refused at DID parse by the node (btc.go:52) and blocked
@@ -231,23 +259,12 @@ export async function broadcastBtcWalletCall(
   }
 
   return submitWithNonce(input.did, async (nonce): Promise<SubmitInput> => {
-    const op: ContainerOp = buildCallOp({
-      contractId: input.contractId,
-      action: input.action,
-      payload: input.payload,
-      rcLimit: input.rcLimit,
-      intents: input.intents,
-      caller: input.did
-    });
-    const container = buildContainer({
-      netId: input.netId,
-      nonce,
-      rcLimit: input.rcLimit,
-      requiredAuths: [input.did],
-      ops: [op]
-    });
-    const shell = createSigningShell(container as never, (p) => decodeDagCbor(p as Uint8Array));
-    const shellBytes = encodeDagCbor(shell as unknown as Record<string, unknown>);
+    // ★ ONE BUILDER FOR BOTH RAILS. This used to re-implement `prepareWalletCall`
+    // inline. The two were byte-identical, which is precisely why the drift
+    // would have been invisible: add a header field to one and the other keeps
+    // signing the old shape, and the only symptom is "the signature stopped
+    // verifying" (adversarial review, 2026-08-20).
+    const { tx, shellBytes } = prepareWalletCall({ ...input, address: '', signTypedData: neverSignsTypedData }, nonce);
 
     const message = await btcSigningMessage(shellBytes);
     const raw = await input.signMessage(input.address, message);
@@ -256,8 +273,32 @@ export async function broadcastBtcWalletCall(
 
     const envelope = buildSigEnvelope([{ alg: ALG_BIP137, sig: signature, kid: input.did }]);
     assertEnvelopeMatchesAuths(envelope, [input.did]);
-    return { tx: toBase64(serializeContainer(container)), sig: serializeSigEnvelope(envelope) };
+    return { tx, sig: serializeSigEnvelope(envelope) };
   });
+}
+
+/**
+ * Collapse a confirmed result into the transaction id the broadcaster contract
+ * returns — and refuse to do so for anything we could not confirm.
+ *
+ * ★ `pending` MUST NOT READ AS SUCCESS. That was the whole defect: a transaction
+ * that loses a nonce race is accepted, given a real CID, then dropped at
+ * sequencing with no notification, and it sits UNCONFIRMED forever. Returning
+ * its id here would put the user back exactly where they started — told it
+ * worked, when it may never happen.
+ *
+ * The message deliberately does NOT say "failed". It says we do not know, and
+ * warns against a blind retry, because a retry of something that did land is how
+ * a user pays twice.
+ */
+function requireConfirmed(result: SubmitResult): string {
+  if (result.status === 'pending') {
+    throw new Error(
+      `We couldn't confirm this transaction on chain (${result.id}). It may still land. ` +
+        'Check your balance before trying again rather than retrying straight away.'
+    );
+  }
+  return result.id;
 }
 
 /** A broadcaster in the shape `vsc-data-source.ts` injects. */
@@ -283,15 +324,15 @@ export function routingBroadcaster(
 
     const evm = evmAddressFromDid(auth);
     if (evm) {
-      const result = await broadcastWalletCall(opToWalletCall(op, signTypedData));
-      return result.id;
+      return requireConfirmed(await broadcastWalletCall(opToWalletCall(op, signTypedData)));
     }
 
     const btc = btcAddressFromDid(auth);
     if (btc) {
       const base = opToWalletCall(op, signTypedData);
-      const result = await broadcastBtcWalletCall({ ...base, address: btc, signMessage: signBtcMessage });
-      return result.id;
+      return requireConfirmed(
+        await broadcastBtcWalletCall({ ...base, address: btc, signMessage: signBtcMessage })
+      );
     }
 
     throw new Error(`wallet-broadcaster: ${auth} is not a DID this client can sign for.`);

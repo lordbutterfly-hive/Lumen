@@ -123,9 +123,30 @@ function prop(value: unknown, key: string): unknown {
  */
 const CREATOR_TOKENS_GQL_PROXY_PATH = '/api/creator-tokens/gql';
 
-export async function readMagiSpendingPower(gqlUrl: string, account: string): Promise<MagiSpendingPower> {
+export async function readMagiSpendingPower(gqlUrl: string, rawAccount: string): Promise<MagiSpendingPower> {
+
   if (!gqlUrl) throw new Error('Magi balance read: no GraphQL endpoint configured');
-  if (!account) throw new Error('Magi balance read: no account given');
+  if (!rawAccount) throw new Error('Magi balance read: no account given');
+
+  // ★★ THE ACCOUNT MUST CARRY ITS SCHEME PREFIX, AND CALLERS DO NOT ALWAYS SEND
+  // ONE (2026-08-20). `TokenAccount.id` for a Hive identity is the BARE username
+  // (`use-token-accounts.ts`), while a wallet identity is already a full
+  // `did:pkh:...`. On the Magi ledger an account id is an exact string, so a bare
+  // name is simply a different account — one that has never existed.
+  //
+  // Measured on testnet: `lumen.aria` returns balance null / RC 0, while
+  // `hive:lumen.aria` returns 92,946 HBD / RC 96,494. And a present-but-zero RC
+  // row beside a missing balance row is deliberately read as a genuine zero
+  // (see below), so this did not fail loudly — it reported "you hold 0.000 HBD"
+  // and DISABLED THE BUY AND ASK BUTTONS for every full Hive account, whatever
+  // their real balance.
+  //
+  // Normalising here rather than at each call site because this is the one
+  // function that turns an account string into money, and every caller that
+  // forgets the prefix gets the same silent zero.
+  const account = rawAccount.startsWith('hive:') || rawAccount.startsWith('did:')
+    ? rawAccount
+    : `hive:${rawAccount}`;
 
   const res = await fetch(CREATOR_TOKENS_GQL_PROXY_PATH, {
     method: 'POST',

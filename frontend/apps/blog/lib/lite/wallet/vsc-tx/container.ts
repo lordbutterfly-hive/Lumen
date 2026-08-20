@@ -117,6 +117,27 @@ export function buildCallOp(input: BuildCallOpInput): ContainerOp {
   if (!Number.isInteger(input.rcLimit) || input.rcLimit < 0) {
     throw new Error(`container: rc_limit must be a non-negative integer, got ${input.rcLimit}`);
   }
+  // ★ THE BODY AND THE HEADERS MUST CARRY THE SAME rc_limit, and they used to
+  // be able to disagree. `buildContainer` defaults a non-positive value to
+  // NODE_DEFAULT_RC_LIMIT for the HEADERS, while this function wrote the raw
+  // value into the signed BODY. The node reads them from different places:
+  // admission and the RC-availability check use the HEADER
+  // (transaction-pool.go:214), but execution takes the contract's gas ceiling
+  // from the BODY (`gas := min(availableGas, t.RcLimit)`,
+  // state-processing/transactions.go:112).
+  //
+  // So `rcLimit: 0` produced a transaction that was ADMITTED on a header of 500,
+  // charged the caller RC, consumed a nonce slot, and then executed with ZERO
+  // GAS — a guaranteed silent failure on every wallet write, for every user,
+  // until someone noticed. Reachable today: `CREATOR_TOKENS_RC_LIMIT=0` survives
+  // `opts.rcLimit ?? DEFAULT_RC_LIMIT`, because `??` does not catch 0.
+  // (Audit A1, F1, 2026-08-20.)
+  if (input.rcLimit === 0) {
+    throw new Error(
+      'container: rc_limit 0 would be admitted on the header default (500) and then execute with zero ' +
+        'gas, failing silently after charging RC. Pass a positive rc_limit, or omit it at the caller.'
+    );
+  }
 
   const body: CallOpBody = {
     contract_id: input.contractId,
@@ -190,6 +211,11 @@ export function buildContainer(input: BuildContainerInput): Container {
     headers: {
       nonce: input.nonce,
       required_auths: requiredAuths,
+      // Equal to the op body's by construction: `buildCallOp` refuses 0 and
+      // refuses negatives, so this ternary can no longer produce a header that
+      // differs from the body it is signed alongside. Kept as a ternary only so
+      // a caller building a container with no ops (there is none today) still
+      // gets the node's documented default rather than a 0.
       rc_limit: input.rcLimit > 0 ? input.rcLimit : NODE_DEFAULT_RC_LIMIT,
       net_id: input.netId
     },

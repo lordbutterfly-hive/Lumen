@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardWrite } from '@/blog/lib/lite/http/guard';
+import { guardWrite, guardBodySize } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { followByName } from '@/blog/lib/lite/social/follow-service';
 
@@ -17,6 +17,10 @@ const logger = getLogger('app');
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
+
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
 
   const session = await getLiteSession();
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;

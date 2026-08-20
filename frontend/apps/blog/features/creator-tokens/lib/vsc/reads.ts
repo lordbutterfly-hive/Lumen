@@ -564,3 +564,55 @@ export function buildAskFromParsed(creator: string, seq: number, parsed: ParsedE
     answerHash: parsed.answerHash || null
   };
 }
+
+/**
+ * Hive account grammar: 3-16 characters, lowercase, dot-separated segments,
+ * each starting with a letter, containing digits and dashes, ending
+ * alphanumeric. Hive's own documented rule, not an approximation.
+ */
+const HIVE_SEGMENT = /^[a-z][a-z0-9-]{1,}[a-z0-9]$/;
+
+function isHiveAccountName(name: string): boolean {
+  if (name.length < 3 || name.length > 16) return false;
+  return name.split('.').every((seg) => HIVE_SEGMENT.test(seg));
+}
+
+/**
+ * Refuse a transfer destination that cannot receive.
+ *
+ * ★★ THIS CLOSES A FUND-LOSS PATH (audit, 2026-08-20). `toDid()` prefixes any
+ * unprefixed string with `hive:`, and the only guard was `isWellFormedDid`,
+ * which checks charset and length and nothing else. So the Send dialog — whose
+ * own label invited "Lumen or Hive name" — took a LUMEN DISPLAY NAME, silently
+ * rewrote it to `hive:<display name>`, an account that has never existed, and
+ * broadcast the transfer against it. The tokens are gone: no one holds the key
+ * to an account that was never created.
+ *
+ * A Lumen display name is NOT a Hive username. They look alike and are not the
+ * same namespace, which is exactly why this needed a guard rather than a label.
+ *
+ * ★ WHAT THIS DOES NOT DO: it cannot prove a well-formed Hive account actually
+ * EXISTS — that needs a chain lookup this layer has no client for. So a
+ * correctly-shaped name for an account nobody registered still strands. The
+ * shape check removes the large, likely class (display names, typos, wrong
+ * namespace); an existence check remains worth building.
+ */
+export function assertTransferDestination(account: string): void {
+  const did = toDid(account);
+
+  if (did.startsWith('did:')) {
+    if (!isWellFormedDid(did)) {
+      throw new Error('That destination is not a valid wallet address.');
+    }
+    return;
+  }
+
+  const name = did.slice('hive:'.length);
+  if (!isHiveAccountName(name)) {
+    throw new Error(
+      `"${name}" is not a Hive username, so tokens sent there would be lost. ` +
+        'Send to a Hive username, or to a wallet address starting with did:pkh: — ' +
+        'a Lumen display name is not the same thing as a Hive username.'
+    );
+  }
+}

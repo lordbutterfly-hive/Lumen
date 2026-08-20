@@ -96,3 +96,39 @@ export function guardRecsys(req: NextRequest): NextResponse | null {
   }
   return null;
 }
+
+/**
+ * The largest JSON body any ordinary lite write may send.
+ *
+ * Sized off the biggest legitimate one: an advanced post caps title at 255 and
+ * body at 100,000 characters (`content/pre-screen.ts`), and multi-byte UTF-8
+ * plus tags and JSON framing can carry that well past 100 KB of bytes. 512 KiB
+ * leaves real headroom for the largest honest post while refusing anything that
+ * is obviously not one. Uploads are exempt: `upload/route.ts` is multipart and
+ * does its own `content-length` check for a different, larger limit.
+ */
+export const MAX_JSON_BODY_BYTES = 512 * 1024;
+
+/**
+ * Refuse an oversized body BEFORE it is buffered and parsed.
+ *
+ * ★ THE ORDER IS THE POINT (audit D1-12, 2026-08-20). Every lite write route
+ * called `await req.json()` first and checked length afterwards — so the whole
+ * body was already read into memory and parsed before any limit applied, and
+ * the post-parse caps in `pre-screen.ts` bounded what was STORED, not what was
+ * ALLOCATED. There is no backstop behind them either: no body limit in
+ * `next.config.js` (the Server Actions setting does not apply to route
+ * handlers), and none in the Caddyfile. The three chain proxies already guard
+ * this carefully; the ordinary routes never got it.
+ *
+ * `content-length` can be absent or lied about, so this is a cheap first gate,
+ * not the only one — a chunked body that overruns still fails at the parse. It
+ * removes the trivial case, which is the one an attacker actually sends.
+ */
+export function guardBodySize(req: NextRequest, maxBytes = MAX_JSON_BODY_BYTES): NextResponse | null {
+  const declared = Number(req.headers.get('content-length') ?? '');
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    return NextResponse.json({ error: 'payload_too_large' }, { status: 413 });
+  }
+  return null;
+}

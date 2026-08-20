@@ -183,6 +183,20 @@ export const MeritumEligibilityNotice: FC<{
   // cannot launch, because a launch is a Hive-account act. This branch is dark
   // until `canSign` flips per chain — see the honesty note at the top.
   if (who.canSign) {
+    // ★ BITCOIN USERS GET A WARNING THE OTHER CHAINS DO NOT NEED. The node
+    // signs a Magi transaction as a bare Bitcoin message with no domain tag
+    // (btc.go:135), so a code signed anywhere else is a valid authorisation on
+    // this account. The EVM rail is immune because EIP-712 binds the domain.
+    // We cannot close that from here — it is the node's preimage — so the least
+    // we owe a Bitcoin user is to say it before they are ever asked to sign.
+    // See N-0 in LUMEN-DOCS/multichain/NODE-BUGS-TO-FILE-2026-08-20.md.
+    if (who.walletKind === 'btc' && surface !== 'launch') {
+      return (
+        <Notice tone="partial" testId="meritum-eligibility-btc-signing" className={className} inline={inline}>
+          {t('meritum_eligibility.wallet_btc_signing_warning')}
+        </Notice>
+      );
+    }
     if (surface !== 'launch') return null;
     return (
       <Notice tone="partial" testId="meritum-eligibility-wallet-can-trade" className={className} inline={inline}>

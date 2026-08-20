@@ -109,6 +109,21 @@ export function useLivePortfolio(): LivePortfolio {
   // Hive keys) and for query-key continuity on a full Hive session.
   const holder = loggedIn && accountIds.length > 0 ? accountIds[0] : null;
 
+  // ★ THE ACTING identity, which is NOT always `holder`. `holder` is
+  // `accountIds[0]` — fine for READS, which fan out across every account — but a
+  // WRITE must be signed by an identity that can actually sign.
+  //
+  // ★★ KNOWN LIMIT, stated rather than hidden (audit A3-F2): with TWO signable
+  // wallets bound, this picks the first, which is not necessarily the one that
+  // owns the ask being reclaimed or rated. `rate` is caller-gated at the
+  // contract (core/rating.go:68 refuses `caller != rec.asker`), so signing as
+  // the wrong identity fails ON CHAIN with a permissions error rather than
+  // doing something wrong — it wastes a wallet prompt, it does not misapply an
+  // action. Fixing it properly means threading the owning account down from the
+  // ask row, which is a data change, not a one-line one.
+  const signingAccount = tokenAccounts.accounts.find((a) => a.canSign) ?? null;
+  const actingSigner = isLite ? signingAccount?.id ?? null : holder;
+
   const dataSource = getCreatorTokensDataSource();
   const unavailable = dataSource === null;
   const enabled = accountIds.length > 0 && !unavailable;
@@ -160,8 +175,12 @@ export function useLivePortfolio(): LivePortfolio {
         throw new Error('CREATOR_TOKENS_SESSION_UNAVAILABLE: we couldn’t verify you’re signed in just now. Try again in a moment.');
       }
       if (!holder) throw new Error('CREATOR_TOKENS_SIGNED_OUT: sign in to continue');
-      if (isLite) throw new Error('CREATOR_TOKENS_LITE_ACCOUNT: this account has no Hive keys and cannot sign a transaction');
-      await dataSource.reclaim({ creator: input.creator, seq: input.seq, asker: holder, deadlineBlock: input.deadlineBlock });
+      if (!actingSigner) {
+        throw new Error(
+          'CREATOR_TOKENS_LITE_ACCOUNT: this account has no key that can sign a transaction — connect an Ethereum or Bitcoin wallet.'
+        );
+      }
+      await dataSource.reclaim({ creator: input.creator, seq: input.seq, asker: actingSigner, deadlineBlock: input.deadlineBlock });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: walletKey(holder ?? '') });
@@ -176,8 +195,12 @@ export function useLivePortfolio(): LivePortfolio {
         throw new Error('CREATOR_TOKENS_SESSION_UNAVAILABLE: we couldn’t verify you’re signed in just now. Try again in a moment.');
       }
       if (!holder) throw new Error('CREATOR_TOKENS_SIGNED_OUT: sign in to continue');
-      if (isLite) throw new Error('CREATOR_TOKENS_LITE_ACCOUNT: this account has no Hive keys and cannot sign a transaction');
-      await dataSource.rate({ creator: input.creator, rater: holder, seq: input.seq, score: input.score });
+      if (!actingSigner) {
+        throw new Error(
+          'CREATOR_TOKENS_LITE_ACCOUNT: this account has no key that can sign a transaction — connect an Ethereum or Bitcoin wallet.'
+        );
+      }
+      await dataSource.rate({ creator: input.creator, rater: actingSigner, seq: input.seq, score: input.score });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: myAsksKey(holder ?? '') });

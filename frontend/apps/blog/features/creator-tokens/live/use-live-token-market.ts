@@ -147,6 +147,20 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   const tokenAccounts = useTokenAccounts();
   const signingAccount = tokenAccounts.accounts.find((a) => a.canSign) ?? null;
 
+  // ★★ THE ACCOUNT A POSITION IS HELD UNDER IS NOT `viewer` (audit, 2026-08-20).
+  // `viewer` is `user.username` — for a lite account that is the chosen LUMEN
+  // DISPLAY NAME, and `readHolderPosition` runs it through `toDid()`, producing
+  // `hive:<display name>`: an account that has never existed and never will. So
+  // a wallet holder who successfully BOUGHT tokens (their balance sits under
+  // their own `did:pkh`) read their position back as ZERO on that token's page.
+  //
+  // That is not a cosmetic zero. `held` feeds SellModal, RefundModal, AskModal
+  // and SendModal, so every exit from the position was blocked while the tokens
+  // were provably on chain — and `/wallet/tokens`, which reads across the real
+  // account ids, showed them the whole time. Reads and writes must name the SAME
+  // identity, so this is the one the signer will use.
+  const positionAccount = (isLite ? signingAccount?.id : viewer) ?? null;
+
   const dataSource = getCreatorTokensDataSource();
   const unavailable = dataSource === null;
   const enabled = Boolean(creator) && !unavailable;
@@ -166,9 +180,9 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   const readFailed = marketQuery.isError || marketQuery.data?.phase === 'UNKNOWN';
 
   const positionQuery = useQuery({
-    queryKey: positionKey(creator, viewer ?? undefined),
-    queryFn: () => dataSource!.readHolderPosition(creator, viewer as string),
-    enabled: enabled && Boolean(viewer) && !readFailed,
+    queryKey: positionKey(creator, positionAccount ?? undefined),
+    queryFn: () => dataSource!.readHolderPosition(creator, positionAccount as string),
+    enabled: enabled && Boolean(positionAccount) && !readFailed,
     staleTime: STALE_MS
   });
 
@@ -229,8 +243,8 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
 
   const invalidate = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: creatorMarketKey(creator) });
-    queryClient.invalidateQueries({ queryKey: positionKey(creator, viewer ?? undefined) });
-  }, [queryClient, creator, viewer]);
+    queryClient.invalidateQueries({ queryKey: positionKey(creator, positionAccount ?? undefined) });
+  }, [queryClient, creator, positionAccount]);
 
   // Every money action funnels through this. It refuses with a NAMED error
   // instead of letting an undefined data source or a missing signer surface as
@@ -364,10 +378,12 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
     quoteSell: useCallback(
       (tokens: number) => {
         if (!dataSource) return Promise.reject(new Error('CREATOR_TOKENS_UNAVAILABLE'));
-        if (!viewer) return Promise.reject(new Error('CREATOR_TOKENS_SIGNED_OUT'));
-        return dataSource.quoteSell(creator, viewer, tokens);
+        // Exit tax is the SELLER's own hold clock, so this must be quoted for
+        // the identity that actually holds the tokens — not the display name.
+        if (!positionAccount) return Promise.reject(new Error('CREATOR_TOKENS_SIGNED_OUT'));
+        return dataSource.quoteSell(creator, positionAccount, tokens);
       },
-      [dataSource, creator, viewer]
+      [dataSource, creator, positionAccount]
     ),
 
     buy: useCallback((tokens: number, maxTotalUsd?: number) => buyMutation.mutateAsync({ tokens, maxTotalUsd }), [buyMutation]),
@@ -381,7 +397,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
 
     isBuying: buyMutation.isLoading,
     retry: () => {
-      for (const key of [creatorMarketKey(creator), positionKey(creator, viewer ?? undefined), offeringsKey(creator), deliveryKey(creator), historyKey(creator)]) {
+      for (const key of [creatorMarketKey(creator), positionKey(creator, positionAccount ?? undefined), offeringsKey(creator), deliveryKey(creator), historyKey(creator)]) {
         queryClient.invalidateQueries({ queryKey: key });
       }
     },

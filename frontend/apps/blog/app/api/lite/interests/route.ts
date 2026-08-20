@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardRead, guardWrite } from '@/blog/lib/lite/http/guard';
+import { guardRead, guardWrite, guardBodySize } from '@/blog/lib/lite/http/guard';
+import { enforceProfileWriteRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { requireActiveLiteUser } from '@/blog/lib/lite/http/actor';
 import { setInterests } from '@/blog/lib/lite/repositories/user-repository';
@@ -269,10 +270,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
 
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
+
+
+
   const session = await getLiteSession();
   const reader = whichReader(session);
   if (reader.kind === 'none') {
     return NextResponse.json({ error: 'not_signed_in' }, { status: 401 });
+  }
+
+  // ★ KEYED ON THE WRITER, NOT THE IP, and in its own bucket. This route serves
+  // BOTH a lite user and a Hive reader, so the key is whichever identity is
+  // actually writing. An IP key would let one person on a shared connection
+  // exhaust everyone else's edits, and the first version of this limit borrowed
+  // the signup-funnel `lookup` budget, which this repo already documents as the
+  // way to deny real signups. Each call writes a row and invalidates the
+  // viewer's feed cache, so it is cheap for the caller and not for us.
+  // `whichReader`'s lite arm carries no userId — the lite actor is resolved
+  // further down — so the key comes from the session, which holds `userId` for a
+  // lite account and `username` for a Hive reader. `reader.kind !== 'none'`
+  // already guarantees a username exists, so this is never empty.
+  const writerKey = session.user?.userId ?? session.user?.username ?? '';
+  if (!(await enforceProfileWriteRate(writerKey))) {
+    return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
   }
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;

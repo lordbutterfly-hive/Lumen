@@ -140,6 +140,27 @@ async function main(): Promise<void> {
   await throws('no endpoint throws', () => readMagiSpendingPower('', 'hive:a'), 'no GraphQL endpoint');
   await throws('no account throws', () => readMagiSpendingPower('http://x', ''), 'no account');
 
+// ★ A BARE Hive username must be prefixed before it reaches the ledger. Without
+// this the balance read queried an account that never existed, returned a
+// present-but-zero RC row beside a missing balance row (a genuine zero by
+// design), and disabled Buy and Ask for every full Hive account. Measured on
+// testnet: `lumen.aria` -> null / RC 0; `hive:lumen.aria` -> 92,946 HBD.
+{
+  let sent: string | null = null;
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (_u: unknown, init: { body: string }) => {
+    sent = JSON.parse(init.body).variables.account as string;
+    return { ok: true, json: async () => ({ data: { getAccountBalance: { hbd: 1, block_height: 1 }, getAccountRC: { amount: 1, max_rcs: 1 } } }) };
+  }) as never;
+  await readMagiSpendingPower('http://x', 'lumen.aria');
+  check('a bare Hive username is sent as hive:<name>', sent === 'hive:lumen.aria', String(sent));
+  await readMagiSpendingPower('http://x', 'hive:lumen.aria');
+  check('an already-prefixed account is not double-prefixed', sent === 'hive:lumen.aria', String(sent));
+  await readMagiSpendingPower('http://x', 'did:pkh:eip155:1:0xabc');
+  check('a DID is passed through untouched', sent === 'did:pkh:eip155:1:0xabc', String(sent));
+  globalThis.fetch = original;
+}
+
   // ── affordability reasons ───────────────────────────────────────────────────
   {
     const funded: MagiSpendingPower = {

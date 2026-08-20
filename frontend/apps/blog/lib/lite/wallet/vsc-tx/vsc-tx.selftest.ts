@@ -230,11 +230,17 @@ function buildFixture() {
 {
   // rc_limit 0 means "use the protocol default" — and the default belongs in
   // the HEADERS only. The op BODY keeps the 0 it was given (crafter.go:641-644).
-  const op = buildCallOp({ contractId: CONTRACT, action: 'register', payload: { face: 1 }, rcLimit: 0, caller: TEST_DID });
-  const c = buildContainer({ netId: 'vsc-testnet', nonce: 0, rcLimit: 0, requiredAuths: [TEST_DID], ops: [op] });
-  check('rc_limit 0 becomes the node default (500) in the headers', c.headers.rc_limit === 500, String(c.headers.rc_limit));
-  const body = JSON.parse(decodeDagCbor(op.payload) ? JSON.stringify(decodeDagCbor(op.payload)) : '{}') as { rc_limit: number };
-  check('rc_limit 0 stays 0 in the op body', body.rc_limit === 0, String(body.rc_limit));
+  // ★ rc_limit 0 is now REFUSED, not defaulted. The header would have been 500
+  // (admitted, RC charged, nonce consumed) while the signed body stayed 0, and
+  // the node takes the contract's GAS from the body — so it executed with zero
+  // gas and failed silently. Audit A1, F1.
+  let zeroThrew = false;
+  try { buildCallOp({ contractId: CONTRACT, action: 'register', payload: { face: 1 }, rcLimit: 0, caller: TEST_DID }); } catch { zeroThrew = true; }
+  check('rc_limit 0 is REFUSED at build time', zeroThrew);
+  const op = buildCallOp({ contractId: CONTRACT, action: 'register', payload: { face: 1 }, rcLimit: 500, caller: TEST_DID });
+  const c = buildContainer({ netId: 'vsc-testnet', nonce: 0, rcLimit: 500, requiredAuths: [TEST_DID], ops: [op] });
+  const body = decodeDagCbor(op.payload) as { rc_limit: number };
+  check('the header and the op body carry the SAME rc_limit', c.headers.rc_limit === body.rc_limit, `${c.headers.rc_limit} vs ${body.rc_limit}`);
   // Anti-vacuity: a real limit must pass straight through, not be defaulted.
   const c2 = buildContainer({ netId: 'vsc-testnet', nonce: 0, rcLimit: 30_000, requiredAuths: [TEST_DID], ops: [op] });
   check('a real rc_limit is NOT overwritten by the default', c2.headers.rc_limit === 30_000, String(c2.headers.rc_limit));
@@ -279,6 +285,69 @@ function buildFixture() {
   // Taproot is refused at DID parse by the node, so guessing a type for it
   // would send a signature that can never verify.
   check('taproot is refused, not guessed', btcAddressType('bc1p5cyxnuxmeuwuvkwfem96l0i') === null);
+}
+
+
+// ── the BTC guards the review found unguarded ──────────────────────────────
+// Every case below was reported by adversarial review as passing our gate and
+// being refused by the node, i.e. a wasted wallet prompt and a burnt submit.
+{
+  const b64 = (bytes: number[]): string => Buffer.from(Uint8Array.from(bytes)).toString('base64');
+  const refuses = (label: string, sig: string, type: 'p2pkh' | 'p2sh' | 'p2wpkh' = 'p2wpkh'): void => {
+    let threw = false;
+    try { assertBtcSignature(sig, type); } catch { threw = true; }
+    check(`btc REFUSES ${label}`, threw);
+  };
+
+  // F2: the BIP-322 branch (Leather's default) accepted literally anything.
+  refuses('an empty signature', '');
+  refuses('a 3-byte blob', 'AAAA');
+  refuses('a wallet error string instead of a signature', Buffer.from('user rejected').toString('base64'));
+  refuses('a witness claiming 3 items', b64([3, 1, 0x30, 33, ...Array(33).fill(2)]));
+  refuses('a witness with an empty signature item', b64([2, 0, 33, ...Array(33).fill(2)]));
+  refuses('a witness with a 32-byte (uncompressed-ish) key', b64([2, 2, 0x30, 0x06, 32, ...Array(32).fill(2)]));
+  refuses('a truncated witness', b64([2, 10, 1, 2]));
+  // Anti-vacuity: a well-formed 2-item P2WPKH witness must still be ACCEPTED,
+  // or the branch is simply closed rather than validated.
+  let ok = true;
+  try { assertBtcSignature(b64([2, 71, ...Array(71).fill(0x30), 33, ...Array(33).fill(2)]), 'p2wpkh'); } catch { ok = false; }
+  check('btc ACCEPTS a well-formed BIP-322 witness', ok);
+
+  // F3: the decode used to throw a raw DOMException before any guard ran.
+  for (const bad of ['not base64 !!!', '0x1234abcd', '']) {
+    let threw = false;
+    try { normalizeBip137Header(bad); } catch { threw = true; }
+    check(`normalizeBip137Header does not throw on ${JSON.stringify(bad)}`, !threw);
+  }
+  refuses('a 7-byte blob that happens to be base64', '0x1234abcd');
+
+  // F9: the high-S check had no coverage at all. S = N/2 is the last legal
+  // value; S = N/2 + 1 is the first the node refuses.
+  const HALF = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0n;
+  const compact = (sv: bigint): string => {
+    const out = new Uint8Array(65);
+    out[0] = 32;
+    for (let i = 0; i < 32; i++) out[33 + i] = Number((sv >> BigInt(8 * (31 - i))) & 0xffn);
+    return Buffer.from(out).toString('base64');
+  };
+  let lowOk = true;
+  try { assertBtcSignature(compact(HALF), 'p2wpkh'); } catch { lowOk = false; }
+  check('btc ACCEPTS canonical S exactly at N/2', lowOk);
+  refuses('high-S at N/2 + 1', compact(HALF + 1n));
+  refuses('S = 0', compact(0n));
+
+  // F4: bc1q covers BOTH witness-v0 types; P2WSH is 62 chars and the node
+  // refuses it by TYPE, so classifying it as p2wpkh sent an unverifiable sig.
+  check('a 62-char bc1q (P2WSH) is NOT classified p2wpkh',
+    btcAddressType('bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3') === null,
+    String(btcAddressType('bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3')));
+
+  // F5: a testnet-genesis DID can never verify (the node only parses mainnet),
+  // so it must not route to the BTC rail and prompt a wallet.
+  check('a testnet-genesis BTC DID does not route',
+    btcAddressFromDid('did:pkh:bip122:000000000933ea01ad0ee984209779ba:bc1qewdludr3fpy3k903hqave02ue4xm9ha83c9c0m') === null);
+  check('the mainnet-genesis BTC DID still routes',
+    btcAddressFromDid('did:pkh:bip122:000000000019d6689c085ae165831e93:bc1qewdludr3fpy3k903hqave02ue4xm9ha83c9c0m') === 'bc1qewdludr3fpy3k903hqave02ue4xm9ha83c9c0m');
 }
 
 void (async () => {

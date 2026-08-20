@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardRead, guardWrite } from '@/blog/lib/lite/http/guard';
+import { guardRead, guardWrite, guardBodySize } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { requireActiveLiteUser } from '@/blog/lib/lite/http/actor';
 import { listByUser, unbindMethod } from '@/blog/lib/lite/repositories/credential-repository';
-import { consumeChallenge } from '@/blog/lib/lite/repositories/challenge-repository';
+import { parseStepUpProof, verifyStepUpProof } from '@/blog/lib/lite/auth/step-up';
 
 const logger = getLogger('app');
 
@@ -68,14 +68,36 @@ export async function GET(): Promise<NextResponse> {
  * DELETE /api/lite/auth/methods — unbind a linked sign-in method (F-L2).
  *
  * Removing a credential is as sensitive as adding one, so it demands a fresh, user-bound
- * `stepup` challenge (not a plain login nonce) and the DB-status gate. The repository
+ * `stepup` challenge AND A CREDENTIAL PROOF, plus the DB-status gate. The repository
  * REFUSES to remove the account's last credential — a lite account has no password or
  * recovery email, so zero credentials is unrecoverable. Success writes an audit row.
- * Body: { credentialId, nonce }.
+ * Body: { credentialId, stepUp: { method, address, signature | idToken, nonce } }.
+ *
+ * ★★ THE PROOF WAS MISSING AND THAT WAS AN ACCOUNT TAKEOVER (audit B1, 2026-08-20).
+ * This handler consumed a `stepup` nonce and stopped there. A `stepup` nonce proves only
+ * that the caller HAS A SESSION — `POST /api/lite/auth/stepup` issues one to any live
+ * session — so it is not evidence of key possession. `step-up.ts`'s own docblock says
+ * exactly this: "a session thief CANNOT produce a fresh SIGNATURE".
+ *
+ * The full takeover, from session theft alone and with no key and no Google account:
+ *   1. bind YOUR OWN wallet as a second credential (properly signature-gated — you own it)
+ *   2. POST /stepup for a nonce (a session is all that is required)
+ *   3. DELETE here to remove the VICTIM'S original credential — two remain, so the
+ *      last-credential guard does not fire
+ *   4. the account now has exactly one credential: yours. The victim has no password and
+ *      no recovery email. They are locked out permanently.
+ *
+ * `verifyStepUpProof` is the same helper `app/api/account/upgrade/route.ts` already uses,
+ * and it consumes the challenge itself, so the manual `consumeChallenge` is gone rather
+ * than duplicated.
  */
 export async function DELETE(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
+
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
 
   const session = await getLiteSession();
   const actor = await requireActiveLiteUser(session.user, session);
@@ -84,13 +106,39 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const credentialId = body?.credentialId;
-  const nonce = body?.nonce;
-  if (typeof credentialId !== 'string' || typeof nonce !== 'string') {
+  if (typeof credentialId !== 'string') {
     return NextResponse.json({ error: 'invalid_request' }, { status: 400 });
   }
-  const consumed = await consumeChallenge(nonce, 'stepup');
-  if (!consumed || consumed.userId !== user.userId) {
-    return NextResponse.json({ error: 'invalid_or_expired_challenge' }, { status: 401 });
+
+  // Prove possession of a credential this account owns — not merely possession
+  // of a session. See the takeover written out above.
+  const proof = parseStepUpProof(body?.stepUp);
+  if (!proof) {
+    return NextResponse.json(
+      {
+        error: 'step_up_required',
+        message: 'Confirm with the wallet or Google account you signed in with before removing a sign-in method.'
+      },
+      { status: 401 }
+    );
+  }
+  const verdict = await verifyStepUpProof(user.userId, proof);
+  if (!verdict.ok) {
+    return NextResponse.json({ error: verdict.code }, { status: verdict.status });
+  }
+
+  // ★ AND IT MUST NOT BE THE CREDENTIAL BEING REMOVED. Proving control of the
+  // credential you are deleting is circular: an attacker who bound their own
+  // wallet could sign with THAT to remove the victim's. The proof has to come
+  // from a credential that SURVIVES the removal.
+  if (verdict.credentialId === credentialId) {
+    return NextResponse.json(
+      {
+        error: 'step_up_other_credential_required',
+        message: 'Confirm with a different sign-in method than the one you are removing.'
+      },
+      { status: 400 }
+    );
   }
 
   try {
