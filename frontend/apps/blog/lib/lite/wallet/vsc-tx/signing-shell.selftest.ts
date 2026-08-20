@@ -145,6 +145,41 @@ check(
   );
 }
 
+// ── the guard is WIRED, not merely present ─────────────────────────────────
+// A guard nothing calls protects nothing. These prove createSigningShell itself
+// refuses an unsignable payload, so the check cannot be skipped by a future
+// caller that forgets to run it. Each case also asserts the shell ACCEPTS the
+// same container once the offending value is fixed — otherwise a shell that
+// threw unconditionally would pass this block while breaking every signature.
+{
+  const unsignable: Array<[string, unknown]> = [
+    ['NaN', { action: 'buy', amount: NaN }],
+    ['Infinity', { action: 'buy', amount: Infinity }],
+    ['an unsafe integer', { action: 'buy', amount: 9007199254740993 }],
+    ['undefined', { action: 'buy', amount: undefined }],
+    ['a numeric-string key', { action: 'buy', '10': 'x' }]
+  ];
+  for (const [label, payload] of unsignable) {
+    let threw = false;
+    try {
+      createSigningShell(container(payload as Record<string, unknown>), identity);
+    } catch {
+      threw = true;
+    }
+    check(`createSigningShell REFUSES ${label}`, threw);
+  }
+
+  // Anti-vacuity: the same shape minus the offending value must still succeed,
+  // proving the refusals above come from the guard and not from the fixture.
+  let ok = true;
+  try {
+    createSigningShell(container({ action: 'buy', amount: '25.000' }), identity);
+  } catch {
+    ok = false;
+  }
+  check('createSigningShell still ACCEPTS an ordinary signable payload', ok);
+}
+
 // ── the shell's own shape ───────────────────────────────────────────────────
 
 {

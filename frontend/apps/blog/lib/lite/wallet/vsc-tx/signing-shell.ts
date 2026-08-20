@@ -135,10 +135,19 @@ export function createSigningShell(container: VscTxContainer, decode: PayloadDec
       rc_limit: container.headers.rc_limit,
       net_id: container.headers.net_id
     },
-    tx: container.tx.map((op) => ({
-      type: op.type,
-      payload: JSON.stringify(sortKeys(decode(op.payload)))
-    }))
+    tx: container.tx.map((op, i) => {
+      const decoded = decode(op.payload);
+      // The guard belongs HERE rather than at each call site. This is the one
+      // point every signed payload passes through, so checking it here means an
+      // unsignable shape is refused by construction instead of whenever a
+      // caller remembers to ask. Every divergence `assertSignableShape` catches
+      // otherwise ends the same way: a signature that binds different bytes
+      // than the user approved, and a node-side failure with nothing to explain
+      // it. Refusing before the wallet is invoked also means the user has not
+      // yet spent resource credits on a transaction that could never verify.
+      assertSignableShape(decoded, `tx[${i}].payload`);
+      return { type: op.type, payload: JSON.stringify(sortKeys(decoded)) };
+    })
   };
 }
 
