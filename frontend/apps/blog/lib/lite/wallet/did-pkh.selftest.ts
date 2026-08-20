@@ -22,7 +22,7 @@
 // case-sensitive, so normalising every account would corrupt bip122 identities.
 // The last two checks exist to fail if anyone ever "tidies" that up.
 
-import { walletDid } from './did-pkh';
+import { walletDid, walletDids } from './did-pkh';
 
 const LOWER = '0x742d35cc6634c0532925a3b844bc9e7595f0beb7';
 const MIXED = '0x742D35Cc6634C0532925a3b844Bc9e7595f0bEb7';
@@ -58,6 +58,27 @@ export function runDidPkhSelfTest(): void {
   // A method with no keypair behind it holds nothing and must not mint a DID.
   check('a non-wallet method yields no DID', walletDid('google' as never, 'someone@example.com', null) === null);
   check('an empty address yields no DID', walletDid('evm_wallet', '   ', null) === null);
+
+  // ★ A malformed address must return null, NEVER throw. `checksumEvmAddress`
+  // is viem's `getAddress`, which throws — and `walletDids` maps this over every
+  // credential, so a throw here would hide every good wallet a user has behind
+  // one bad row.
+  let threw = false;
+  try {
+    check('a malformed EVM address yields no DID', walletDid('evm_wallet', 'not-an-address', null) === null);
+  } catch {
+    threw = true;
+  }
+  check('walletDid does not throw on a malformed address', !threw);
+  try {
+    const list = walletDids([
+      { method: 'evm_wallet', externalRef: 'not-an-address', network: null },
+      { method: 'evm_wallet', externalRef: '0x742d35cc6634c0532925a3b844bc9e7595f0beb7', network: null }
+    ]);
+    check('walletDids skips the bad row and keeps the good one', list.length === 1 && list[0].did === EIP55);
+  } catch (e) {
+    check('walletDids does not throw on a malformed row', false, e instanceof Error ? e.message : String(e));
+  }
 
   if (failures.length > 0) {
     throw new Error(`did-pkh self-test FAILED:\n- ${failures.join('\n- ')}`);

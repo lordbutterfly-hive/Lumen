@@ -1,5 +1,5 @@
 import { AuthMethod } from '../types';
-import { checksumEvmAddress } from '@/blog/lib/lite/auth/evm-verify';
+import { checksumEvmAddress, isEvmAddress } from '@/blog/lib/lite/auth/evm-verify';
 
 /**
  * Turn a bound wallet credential into the Magi account identifier for that wallet.
@@ -84,6 +84,22 @@ export function walletDid(
     // No migration is needed: `externalRef` stores the raw address and this DID
     // is derived on every read, and EIP-55 is a pure function of the lowercase
     // hex — so an already-stored lowercase address checksums to the same result.
+    // ★ GUARDED, because `checksumEvmAddress` is viem's `getAddress` and it
+    // THROWS on a malformed address. This function is contracted to return
+    // `string | null`, and `walletDids` below maps it over every credential —
+    // so one bad `external_ref` row would throw out of the map and take the
+    // whole /api/lite/wallet/dids response with it, hiding every GOOD wallet a
+    // user has. Returning null degrades to "this credential has no wallet
+    // identity", which is what the null contract already means everywhere else
+    // here. (Caught in adversarial review of the 2026-08-19 casing fix, which
+    // introduced the call unguarded.)
+    // Shape-check the LOWERCASED form: viem's `isAddress` also validates the
+    // EIP-55 checksum when the input is mixed-case, and an address that is
+    // simply cased differently by a wallet is perfectly valid input we are
+    // about to canonicalise anyway. Checking the lowercase form asks the only
+    // question that belongs here — "is this 20 bytes of hex" — and leaves the
+    // canonical casing to `checksumEvmAddress` below.
+    if (!isEvmAddress(address.toLowerCase())) return null;
     return `did:pkh:${EVM_CAIP2}:${checksumEvmAddress(address)}`;
   }
   if (method === 'btc_wallet') {

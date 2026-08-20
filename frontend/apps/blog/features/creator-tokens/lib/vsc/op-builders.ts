@@ -80,16 +80,46 @@ export const VSC_CALL_ID = 'vsc.call';
  * side, because the broadcast genuinely succeeded. So every creator-token write
  * from the UI would have appeared to work and silently done nothing.
  *
- * Set to the higher proven value rather than just above the floor. `rc_limit` is
- * a CEILING on what the call may spend, not an amount charged, so headroom is
- * close to free — and the only entrypoint measured here is `createOffering`.
- * `buy`/`sell` run the curve and may well cost more; they are still UNMEASURED,
- * and picking a value that only just clears the cheapest write would reintroduce
- * exactly this failure on the expensive ones.
+ * ★ CORRECTED 2026-08-19 — 100_000 WAS UNAFFORDABLE FOR A REAL USER.
+ *
+ * The reasoning above ("a CEILING, not an amount charged, so headroom is close
+ * to free") is true about COST and false about ADMISSION, and admission is what
+ * decides. go-vsc-node refuses the transaction unless the caller can AFFORD the
+ * whole ceiling: `rcsAvailable < RcLimit || RcLimit == 0` →
+ * `not enough RCS available` (modules/transaction-pool/transaction-pool.go:214).
+ * Available RC is the account's HBD balance in base units, plus a free tier that
+ * applies ONLY to `hive:`-prefixed accounts (modules/rc-system/rc-system.go:33-45).
+ *
+ * So `rc_limit: 100_000` demanded ~90 HBD from a Hive user and a full 100 HBD
+ * from a wallet (`did:pkh`) user, who gets no free tier at all. Below that the
+ * call is rejected BEFORE the contract runs — no contract output, nothing for
+ * the UI to report. This is the same silent-failure shape the paragraphs above
+ * describe, one layer earlier, and it was proven live:
+ *
+ *   ten `register` calls at rc_limit 100_000 from creators holding 30 HBD
+ *     → rejected at ingest, ZERO contract outputs produced
+ *   the same ten at rc_limit 30_000 (available RC 40_000) → all ten ACTIVE
+ *   twenty `createOffering` at 20_000 → all ok
+ *   ten `buy` at 30_000 → all ok
+ *   (Magi testnet, 2026-08-19, contract vsc1BcaD8…)
+ *
+ * 30_000 is therefore the lowest value PROVEN to clear the three writes that
+ * matter most, and it brings the affordability floor to ~20 HBD for a Hive user
+ * and 30 HBD for a wallet. `buy`/`sell` against a much larger curve than today's
+ * remain unmeasured, which is why this is not lowered to the 20_000 that
+ * `createOffering` alone would justify.
+ *
+ * ★ THE REAL FIX IS DERIVATION, NOT A CONSTANT. Any fixed value is either
+ * unaffordable for a small account or too tight for a big call. `rc_limit`
+ * should be computed per call from the caller's own RC
+ * (`getAccountRC` — already read by `useMagiSpendingPower`, whose measured
+ * `MAGI_MIN_RC_FOR_A_CALL = 10_000` is the floor), clamped into
+ * [floor, available]. That needs the value threaded from the hook to the
+ * builder, which no write path does today.
  *
  * Override with `REACT_APP_CREATOR_TOKENS_RC_LIMIT` rather than editing this.
  */
-export const DEFAULT_RC_LIMIT = 100_000;
+export const DEFAULT_RC_LIMIT = 30_000;
 
 export function buildOp(opts: {
   netId: string;
@@ -389,7 +419,47 @@ export function transferTokensPayload(creator: string, to: string, tokens: numbe
 // ===================================
 
 /** main.go CreateOffering (main.go:1673-1701). `priceBaseUnits` is HBD in base units (3 decimals), e.g. 200_000 for 200.000 HBD. */
+/**
+ * The rules `core/offerings.go`'s `validOfferTitle` enforces, checked HERE so a
+ * creator is told before they sign rather than after the chain refuses them.
+ *
+ * DEFECT FIX 2026-08-19, found by launching ten real markets: the offering
+ * "Copy edit, 1k words" was accepted by the form, signed, broadcast, included in
+ * a block — and refused by the contract with an empty result. Nothing surfaced
+ * client-side, because the broadcast genuinely succeeded. The comma is
+ * deliberate on the chain side (`core/offerings.go:202-206`: the live-id list is
+ * comma-separated, so every free-form field in that file stays safe for a
+ * concatenating reader) — it is not a contract bug, it is a missing client check.
+ *
+ * Mirrors the contract exactly, in its order: non-empty, <= MaxOfferTitleLen
+ * (64), no '|', no ',', no control bytes or DEL. Kept in sync by citation; if
+ * `validOfferTitle` changes, change this with it.
+ */
+const MAX_OFFER_TITLE_LEN = 64;
+
+export function assertValidOfferTitle(title: string): void {
+  if (title.trim() === '') {
+    throw new Error('An offering needs a title.');
+  }
+  if (title.length > MAX_OFFER_TITLE_LEN) {
+    throw new Error(`An offering title can be at most ${MAX_OFFER_TITLE_LEN} characters.`);
+  }
+  if (title.includes('|')) {
+    throw new Error('An offering title cannot contain "|".');
+  }
+  if (title.includes(',')) {
+    throw new Error('An offering title cannot contain a comma. Try a dash or a colon instead.');
+  }
+  for (const ch of title) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) {
+      throw new Error('An offering title cannot contain control characters.');
+    }
+  }
+}
+
 export function createOfferingPayload(title: string, priceBaseUnits: number): Record<string, unknown> {
+  assertValidOfferTitle(title);
   return { title, price: offeringPriceNum(priceBaseUnits) };
 }
 
@@ -404,6 +474,7 @@ export function setOfferingPricePayload(offeringId: number, newPriceBaseUnits: n
 
 /** main.go SetOfferingTitle (main.go:1747-1786). Renaming ONTO another live offering's title is refused on-chain (it would launder that title's price band). */
 export function setOfferingTitlePayload(offeringId: number, title: string): Record<string, unknown> {
+  assertValidOfferTitle(title);
   return { offeringId: offeringIdNum(offeringId), title };
 }
 

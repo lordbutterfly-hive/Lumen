@@ -266,5 +266,55 @@ refuses('a bad shape nested deep in objects', { a: { b: { c: undefined } } }, 'u
   check('accepts keys that merely contain digits', threw === '', threw);
 }
 
+// ── Divergences 4-7 (added 2026-08-19) ──────────────────────────────────────
+// Each was proven by running go-vsc-node's own packages at 33adaeb5 and diffing
+// the signed string against this file's algorithm. None was guarded before, and
+// the HTML-escaping one hits ORDINARY CONTENT — a memo, an offering title, any
+// URL with a query string — so it is the likeliest of the whole set to bite.
+{
+  const refuses = (label: string, v: unknown): void => {
+    let threw = '';
+    try {
+      assertSignableShape(v);
+    } catch (e) {
+      threw = e instanceof Error ? e.message : String(e);
+    }
+    check(`refuses ${label}`, threw !== '', 'was accepted');
+  };
+  const accepts = (label: string, v: unknown): void => {
+    let threw = '';
+    try {
+      assertSignableShape(v);
+    } catch (e) {
+      threw = e instanceof Error ? e.message : String(e);
+    }
+    check(`accepts ${label}`, threw === '', threw);
+  };
+
+  refuses('NaN (the node signs an EMPTY payload and the signature stops binding it)', { a: NaN });
+  refuses('Infinity', { a: Infinity });
+  refuses('-Infinity', { a: -Infinity });
+  refuses('an integer past 2^53 (already rounded before stringify)', { a: 9007199254740993 });
+  refuses('"<" in a value (Go escapes it, JS does not)', { memo: 'a<b' });
+  refuses('">" in a value', { memo: 'a>b' });
+  refuses('"&" in a value', { memo: 'a & b' });
+  refuses('U+2028 in a value', { memo: 'a\u2028b' });
+  refuses('U+2029 in a value', { memo: 'a\u2029b' });
+
+  // ANTI-VACUITY: the guard must not refuse ordinary content, or every write breaks.
+  accepts('a plain space', { memo: 'a b' });
+  accepts('an ordinary sentence with a comma', { memo: 'Song feedback, 1k words' });
+  accepts('a safe integer', { price: 25000 });
+  accepts('a negative and a float', { a: -1, b: 1.5 });
+  accepts('an explicit null (matches on both sides)', { a: null });
+  accepts('an emoji in a VALUE (only KEYS outside the BMP diverge)', { memo: 'nice \u{1F3B5}' });
+  accepts('a realistic ask payload', {
+    creator: 'hive:alice',
+    tokens: '30',
+    price: 25000,
+    title: 'Song feedback'
+  });
+}
+
 console.log(`\n${checks - failures}/${checks} passed`);
 process.exit(failures === 0 ? 0 : 1);

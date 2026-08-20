@@ -166,6 +166,52 @@ export function assertSignableShape(value: unknown, path = 'payload'): void {
       `${path}: an undefined value cannot be signed — JSON.stringify drops the key while the node decodes it to null and keeps it, so the two sides hash different strings. Omit the field or send null explicitly.`
     );
   }
+  // ── Divergences 4-7, added 2026-08-19 ────────────────────────────────────
+  // Each was proven by running the node's OWN packages at commit 33adaeb5 and
+  // diffing the signed string against this file's algorithm. All fail closed
+  // (the signature simply will not verify), and none was guarded before.
+  if (typeof value === 'number') {
+    // NaN / ±Infinity. Go's json.Marshal REFUSES them, and
+    // transaction-pool.go:109 discards that error — so the op's signed payload
+    // becomes the EMPTY STRING while JSON.stringify emits `null`. Worse than a
+    // mismatch: every NaN-bearing payload collapses to the same signable bytes,
+    // so the signature stops binding the payload at all (measured: two different
+    // payloads, one signature, both verify). Refuse it here; the node-side fix
+    // is theirs to make.
+    if (!Number.isFinite(value)) {
+      throw new Error(
+        `${path}: ${String(value)} cannot be signed — the node's JSON encoder refuses it and (discarding the error) signs an EMPTY payload instead, which also stops the signature binding what you sent. Send a finite number, or a decimal string.`
+      );
+    }
+    // Above 2^53 the JS Number has ALREADY lost the value before stringify runs;
+    // the node prints the exact uint64. BigInt is caught above, but a plain
+    // lossy Number was not.
+    if (!Number.isSafeInteger(value) && Number.isInteger(value)) {
+      throw new Error(
+        `${path}: the integer ${value} is outside Number.MAX_SAFE_INTEGER — JavaScript has already rounded it, so you would sign a different number than you meant. Send it as a decimal STRING.`
+      );
+    }
+  }
+  if (typeof value === 'string') {
+    // Go's encoding/json escapes these by default (\u003c, \u003e, \u0026);
+    // JSON.stringify does not. This is the likeliest real-world break of the
+    // whole set because it hits ordinary CONTENT — a memo, an offering title,
+    // any URL carrying a query string.
+    const html = /[<>&]/.exec(value);
+    if (html) {
+      throw new Error(
+        `${path}: the character ${JSON.stringify(html[0])} cannot appear in a signed string — the node escapes it as \\u00xx and JavaScript does not, so the two sides hash different bytes. Strip or replace it before signing.`
+      );
+    }
+    // U+2028 / U+2029: same asymmetry, Go escapes and JS emits raw.
+    const sep = /[\u2028\u2029]/.exec(value);
+    if (sep) {
+      throw new Error(
+        `${path}: a U+${(sep[0].codePointAt(0) ?? 0).toString(16).toUpperCase()} line/paragraph separator cannot appear in a signed string — the node escapes it and JavaScript does not.`
+      );
+    }
+  }
+
   if (Array.isArray(value)) {
     value.forEach((v, i) => assertSignableShape(v, `${path}[${i}]`));
     return;
@@ -183,7 +229,7 @@ export function assertSignableShape(value: unknown, path = 'payload'): void {
     }
     // Anything outside the BMP: JS sorts by UTF-16 code unit, Go by UTF-8 byte.
     for (const ch of key) {
-      if (ch.codePointAt(0)! > 0xffff) {
+      if ((ch.codePointAt(0) ?? 0) > 0xffff) {
         throw new Error(
           `${path}.${key}: a key containing a character outside the Basic Multilingual Plane cannot be signed — JS and the node disagree on where a surrogate pair sorts. Use a BMP-only key.`
         );
