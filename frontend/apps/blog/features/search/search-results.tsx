@@ -16,7 +16,7 @@ import { StaleTime } from '@/blog/lib/react-query';
 import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import MediumPostCard from '@/blog/features/discovery-feed/medium-post-card';
 // ONE batched request per list, never one per card — see use-rank-marks.ts.
-import { useRankMarks } from '@/blog/features/retention/hooks/use-rank-marks';
+import { useRankLuminosity, useRankMarks } from '@/blog/features/retention/hooks/use-rank-marks';
 import NoDataError from '@/blog/components/no-data-error';
 import { PER_PAGE } from './lib/utils';
 import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
@@ -148,6 +148,8 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
      inside the data source). Threaded to the cards exactly like `useRankMarks`
      above/below it — a per-card fetch is the N+1 that cost this feed 30s a load. */
   const { prices } = useTokenPriceChips(rawEntries.map((entry) => entry.author));
+  /* §2 rank luminosity for the avatar glow — shares `useRankMarks`' request. */
+  const luminosity = useRankLuminosity(rawEntries.map((entry) => entry.author));
 
   // Filter at the LIST, so the count below means "matches you will actually
   // see" and the scroll sentinel is not sitting in a zero-height list.
@@ -243,6 +245,7 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
           {entries.map((entry) => (
             <MediumPostCard
             price={prices.get(entry.author)}
+              luminosity={luminosity.get((entry.author ?? '').toLowerCase())}
               key={`${entry.author}-${entry.permlink}`}
               post={entry}
               mark={marks.get(entry.author?.toLowerCase() ?? '')}

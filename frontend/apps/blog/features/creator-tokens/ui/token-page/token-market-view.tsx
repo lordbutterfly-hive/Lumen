@@ -203,6 +203,18 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
 
   const d = market.delivery;
   const supplyPct = market.cap > 0 ? Math.min(100, Math.round((market.supply / market.cap) * 100)) : 0;
+  /**
+   * What the reader sees next to the bar. `supplyPct` drives the BAR width and
+   * must stay a number; this is the LABEL.
+   *
+   * ★ "0%" IS NOT THE SAME CLAIM AS "NONE" (QA, 2026-08-20). 31 of 100,000
+   * rounds to 0, so a market that has genuinely issued tokens announced itself
+   * as untouched. The rounding was arithmetically right and the sentence it
+   * produced was wrong, which is the worse kind of wrong on a number about
+   * money. Anything above zero but below half a percent now reads "<1%".
+   */
+  const supplyPctLabel =
+    supplyPct === 0 && market.supply > 0 ? '<1%' : `${supplyPct}%`;
   const avatarColor = avatarFill(handle);
 
   const openAsk = (sv: Service) => {
@@ -429,7 +441,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 <span>
                   {market.supply.toLocaleString('en-US')} of {market.cap.toLocaleString('en-US')} tokens issued
                 </span>
-                <span>{supplyPct}%</span>
+                <span>{supplyPctLabel}</span>
               </div>
               <div className="h-2 overflow-hidden rounded-md bg-surface-23">
                 <div className="h-full bg-surface-info-9" style={{ width: `${supplyPct}%` }} />

@@ -294,14 +294,26 @@ const YourTokensView: FC = () => {
             </div>
           ) : null}
 
-          <div className="mb-4 mt-5 inline-flex gap-1.5 rounded-xl border border-line-6 bg-surface-21 p-[5px]">
+          /* ★ WARM TAB TREATMENT (illumination SPEC.md §1, owner 2026-08-21: "fill the
+             creators, wallet tokens and proposals tab bar gap"). Track on --amb-1 so it
+             "follows the ground it sits on, never lighter" (§3); active pill on --lum-1
+             with --lift-1 plus a soft warm glow. One step weaker than the nav rail (§4) —
+             the rail is the anchor and the only surface at full strength.
+          
+             ★ THE GLOW IS AN INLINE STYLE, NOT A TAILWIND CLASS, and that is not a
+             preference: a `/` inside a Tailwind arbitrary value is the OPACITY shorthand,
+             so `shadow-[...rgb(var(--lum)/.85)]` never compiles and no rule is emitted at
+             all. Measured on the feed's own tab bar, which shipped with `box-shadow: none`
+             until it was caught. */
+          <div className="mb-4 mt-5 inline-flex gap-1.5 rounded-xl border border-line-6 bg-[var(--amb-1)] p-[5px]">
             {(['holdings', 'asks'] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
                 aria-pressed={tab === t}
+                style={tab === t ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
                 className={`rounded-lg px-[18px] py-2 text-[14px] leading-[22px] font-semibold capitalize ${
-                  tab === t ? 'bg-surface-1 text-ink-2 shadow-[0_1px_2px_rgba(20,18,10,0.08)]' : 'text-ink-10'
+                  tab === t ? 'bg-[var(--lum-1)] text-ink-2' : 'text-ink-10'
                 }`}
               >
                 {t}

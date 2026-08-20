@@ -2,13 +2,12 @@
 
 import { FC, useState } from 'react';
 import { Dialog, DialogContentBare, DialogDescription, DialogTitle } from '@ui/components/dialog';
-import { useLiteLogin, type WalletChallenge, type WalletChain } from './use-lite-login';
+import { useLiteLogin, type WalletChain } from './use-lite-login';
 import {
   connectWallet,
   signMessageWith,
   walletConnectAvailable,
   walletErrorMessage,
-  isTaprootAddress
 } from '../wallet/appkit';
 
 /**
@@ -33,29 +32,23 @@ const COPY = {
   btc: {
     title: 'Continue with a Bitcoin wallet',
     connect: 'Connect a Bitcoin wallet',
-    addrLabel: 'Your Bitcoin address',
-    addrPlaceholder: 'bc1q… or 1…',
     symbol: '₿',
     symbolBg: '#f7931a'
   },
   evm: {
     title: 'Continue with an Ethereum wallet',
     connect: 'Connect an Ethereum wallet',
-    addrLabel: 'Your wallet address',
-    addrPlaceholder: '0x…',
     symbol: '◈',
     symbolBg: '#627eea'
   },
   shared: {
     connectHelp: 'You’ll approve a signature. It’s free, moves no funds and authorizes no transaction.',
-    manualToggle: 'Sign manually instead',
-    connectToggle: 'Use a connected wallet instead',
-    getMessage: 'Get sign-in message',
-    signHeading: 'Sign to prove ownership',
-    signHelp:
-      'Sign this message in your wallet. It’s free and moves no funds. Then paste the signature below.',
-    sigPlaceholder: 'Paste the signature from your wallet',
-    verify: 'Verify & sign in',
+    // ★ SAY THE LIMIT BEFORE THEY RELY ON IT (QA, 2026-08-20). Signing in this
+    // way authenticates perfectly and establishes NO signer, because every money
+    // action goes through a connected wallet provider. So a reader who chose
+    // this path could browse, hold and be paid, and then hit a hard refusal the
+    // first time they tried to buy — at the till, with no warning. The
+    // limitation is real and structural; the surprise was avoidable.
     working: 'Working…',
     connecting: 'Waiting for your wallet…',
     cancel: 'Cancel',
@@ -77,16 +70,13 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
   const S = COPY.shared;
 
   const connectorReady = walletConnectAvailable();
-  // EVM has no manual path, so an unconfigured connector leaves nothing to do.
-  const [manual, setManual] = useState(chain === 'btc' && !connectorReady);
   const [address, setAddress] = useState('');
-  const [challenge, setChallenge] = useState<WalletChallenge | null>(null);
-  const [signature, setSignature] = useState('');
-  const [busy, setBusy] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const taproot = chain === 'btc' && isTaprootAddress(address);
+  // NOTE: the taproot refusal itself lives in `signMessageWith` (appkit.ts),
+  // which disconnects and throws `taproot_unsupported`. Nothing computes it here
+  // any more now that the manual address field is gone.
 
   const settle = (outcome: { status: string; message?: string }) => {
     if (outcome.status === 'authenticated') onAuthenticated();
@@ -113,24 +103,6 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
     } finally {
       setConnecting(false);
     }
-  };
-
-  const requestMessage = async () => {
-    setError(null);
-    setBusy(true);
-    const res = await walletChallenge(chain, address.trim());
-    setBusy(false);
-    if ('status' in res) setError(res.message);
-    else setChallenge(res);
-  };
-
-  const verifyManual = async () => {
-    if (!challenge) return;
-    setError(null);
-    setBusy(true);
-    const outcome = await walletVerify(chain, address.trim(), signature.trim(), challenge.nonce);
-    setBusy(false);
-    settle(outcome);
   };
 
   // Same real Radix `Dialog` treatment as the creator-token money modals
@@ -164,8 +136,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
           </button>
         </div>
 
-        {!manual ? (
-          <>
+        <>
             <p className="mb-4 text-caption text-ink-10">{S.connectHelp}</p>
             <button
               onClick={connectAndVerify}
@@ -183,97 +154,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
             {!connectorReady ? (
               <p className="mt-3 text-caption text-ink-warn-3">{S.unconfigured}</p>
             ) : null}
-            {chain === 'btc' ? (
-              <button
-                onClick={() => setManual(true)}
-                className="mt-3 h-10 w-full cursor-pointer border-0 bg-transparent text-[14px] leading-[22px] font-semibold text-ink-10"
-              >
-                {S.manualToggle}
-              </button>
-            ) : null}
-          </>
-        ) : (
-          <>
-            <label className="mb-1.5 block text-caption font-semibold text-ink-8">{copy.addrLabel}</label>
-            <div className="mb-3.5 flex items-center gap-2.5 rounded-xl border border-line-11 px-[15px] py-3">
-              <span
-                className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-full font-bold text-ink-27"
-                style={{ backgroundColor: copy.symbolBg }}
-              >
-                {copy.symbol}
-              </span>
-              <input
-                value={address}
-                onChange={(e) => {
-                  setAddress(e.target.value);
-                  setChallenge(null);
-                }}
-                placeholder={copy.addrPlaceholder}
-                className="min-w-0 flex-1 border-0 font-sans text-sm font-semibold tabular-nums text-ink-2 outline-none placeholder:text-ink-14"
-              />
-            </div>
-
-            {taproot ? (
-              <div className="mb-4 flex gap-2.5 rounded-control border border-line-warn-2 bg-surface-warn-4 px-3.5 py-3">
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#b45309"
-                  strokeWidth="2.6"
-                  className="mt-px flex-shrink-0"
-                >
-                  <path d="M12 9v4M12 17h.01M10.3 3.9l-8 14A2 2 0 004 21h16a2 2 0 001.7-3l-8-14a2 2 0 00-3.4 0z" />
-                </svg>
-                <p className="text-caption text-ink-warn-3">{S.taproot}</p>
-              </div>
-            ) : !challenge ? (
-              <button
-                onClick={requestMessage}
-                disabled={busy || address.trim().length < 8}
-                className="h-12 w-full cursor-pointer rounded-xl bg-surface-43 text-[15px] leading-[24px] font-semibold text-ink-27 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {busy ? S.working : S.getMessage}
-              </button>
-            ) : (
-              <div className="rounded-xl border border-line-9 bg-surface-12 p-4">
-                <div className="mb-2 text-sm font-semibold text-ink-2">{S.signHeading}</div>
-                <p className="mb-3 text-caption text-ink-10">{S.signHelp}</p>
-                <div className="mb-3 whitespace-pre-wrap break-all rounded-control border border-line-11 bg-surface-1 px-3 py-2.5 font-mono text-caption text-ink-2">
-                  {challenge.message}
-                </div>
-                <textarea
-                  value={signature}
-                  onChange={(e) => setSignature(e.target.value)}
-                  placeholder={S.sigPlaceholder}
-                  rows={3}
-                  className="w-full resize-none rounded-control border border-line-11 bg-surface-1 px-3 py-2.5 font-mono text-caption text-ink-2 outline-none placeholder:text-ink-14 focus-visible:outline-2 focus-visible:outline-line-brand-10"
-                />
-                <button
-                  onClick={verifyManual}
-                  disabled={busy || signature.trim().length < 8}
-                  className="mt-3 h-12 w-full cursor-pointer rounded-xl bg-surface-brand-12 text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-brand-16 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {busy ? S.working : S.verify}
-                </button>
-              </div>
-            )}
-
-            {connectorReady ? (
-              <button
-                onClick={() => {
-                  setManual(false);
-                  setChallenge(null);
-                  setError(null);
-                }}
-                className="mt-3 h-10 w-full cursor-pointer border-0 bg-transparent text-[14px] leading-[22px] font-semibold text-ink-10"
-              >
-                {S.connectToggle}
-              </button>
-            ) : null}
-          </>
-        )}
+        </>
 
         {error ? <p className="mt-3 text-caption text-ink-warn-3">{error}</p> : null}
 

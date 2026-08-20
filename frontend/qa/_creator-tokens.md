@@ -18,7 +18,10 @@ ONE market. Both are now false and would have sent you hunting the wrong things.
 
 ## Twelve markets exist, not one
 
-Ten Hive-account creators, live, each with two offerings and supply 31:
+Ten Hive-account creators, live, each with two offerings. Supply is MIXED, not
+uniform (verified on chain 2026-08-20): 31 for aria, beat, cole, dana, gray; 30
+for echo, finn, hana, iris, jude. An earlier version of this file said "all 31",
+which was wrong — a tester correctly flagged the mismatch.
 `lumen.aria` `lumen.beat` `lumen.cole` `lumen.dana` `lumen.echo`
 `lumen.finn` `lumen.gray` `lumen.hana` `lumen.iris` `lumen.jude`
 

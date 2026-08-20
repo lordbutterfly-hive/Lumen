@@ -15,6 +15,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { StreakCardNarrow } from '@/blog/features/retention/components/streak-card';
 import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
+import { useRankLuminosity } from '@/blog/features/retention/hooks/use-rank-marks';
 
 /**
  * A TOPIC IS THE FEED, FILTERED — not a different, older-looking page.
@@ -153,6 +154,8 @@ export default function TopicShell({ tag }: { tag: string }) {
   ] as string | undefined;
   const displayName = isCommunityId && communityName ? communityName : tag;
   const { prices } = useTokenPriceChips(shown.map((e) => e.author));
+  /* §2 rank luminosity for the avatar glow — shares `useRankMarks`' request. */
+  const luminosity = useRankLuminosity(shown.map((e) => e.author));
 
   return (
     <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
@@ -273,6 +276,7 @@ export default function TopicShell({ tag }: { tag: string }) {
                 key={`${entry.author}-${entry.permlink}`}
                 post={entry}
                 price={prices.get(entry.author)}
+              luminosity={luminosity.get((entry.author ?? '').toLowerCase())}
               />
           ))
         )}

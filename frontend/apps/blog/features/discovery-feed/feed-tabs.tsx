@@ -20,7 +20,7 @@ import { getMarketDataSource } from '@/blog/features/prediction-market/lib/marke
 import MarketTab from '@/blog/features/prediction-market/market-tab';
 import MediumPostCard from './medium-post-card';
 // ONE batched request per list, never one per card — see use-rank-marks.ts.
-import { useRankMarks } from '@/blog/features/retention/hooks/use-rank-marks';
+import { useRankLuminosity, useRankMarks } from '@/blog/features/retention/hooks/use-rank-marks';
 import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import InterestPicker from '@/blog/features/lite-auth/interests/interest-picker';
 import DialogLogin from '@/blog/components/dialog-login';
@@ -429,6 +429,8 @@ function ForYouFeed() {
      inside the data source). Threaded to the cards exactly like `useRankMarks`
      beside it — a per-card fetch is the N+1 that cost this feed 30s a load. */
   const { prices } = useTokenPriceChips(shown.map((e) => e.author));
+  /* §2 rank luminosity for the avatar glow — shares `useRankMarks`' request. */
+  const luminosity = useRankLuminosity(shown.map((e) => e.author));
 
   // Posts the silent poll found that are not on the reader's page yet. Filtered the
   // same way the list is, so the button can never offer posts that would render as
@@ -904,6 +906,8 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
      inside the data source). Threaded to the cards exactly like `useRankMarks`
      beside it — a per-card fetch is the N+1 that cost this feed 30s a load. */
   const { prices } = useTokenPriceChips((data?.pages.flat() ?? []).map((e) => e.author));
+  /* §2 rank luminosity for the avatar glow — shares `useRankMarks`' request. */
+  const luminosity = useRankLuminosity((data?.pages.flat() ?? []).map((e) => e.author));
 
   // ★ EVERY DERIVED LIST IS BUILT ABOVE THE GUARDS, same reason as ForYouFeed:
   // the empty-answer guard right below reads it, and a hook may never run

@@ -211,7 +211,18 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
       </PageMasthead>
 
       <div className="my-5 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex gap-1.5 rounded-xl border border-line-6 bg-surface-21 p-[5px]">
+        /* ★ WARM TAB TREATMENT (illumination SPEC.md §1, owner 2026-08-21: "fill the
+           creators, wallet tokens and proposals tab bar gap"). Track on --amb-1 so it
+           "follows the ground it sits on, never lighter" (§3); active pill on --lum-1
+           with --lift-1 plus a soft warm glow. One step weaker than the nav rail (§4) —
+           the rail is the anchor and the only surface at full strength.
+        
+           ★ THE GLOW IS AN INLINE STYLE, NOT A TAILWIND CLASS, and that is not a
+           preference: a `/` inside a Tailwind arbitrary value is the OPACITY shorthand,
+           so `shadow-[...rgb(var(--lum)/.85)]` never compiles and no rule is emitted at
+           all. Measured on the feed's own tab bar, which shipped with `box-shadow: none`
+           until it was caught. */
+        <div className="flex gap-1.5 rounded-xl border border-line-6 bg-[var(--amb-1)] p-[5px]">
           {SORTS.map((s) => {
             const on = sort === s.id;
             return (
@@ -219,8 +230,9 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
                 key={s.id}
                 onClick={() => setSort(s.id)}
                 aria-pressed={on}
+                style={on ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
                 className={`rounded-lg px-[15px] py-2 text-[14px] leading-[22px] font-semibold ${
-                  on ? 'bg-surface-1 text-ink-2 shadow-[0_1px_2px_rgba(20,18,10,0.08)]' : 'text-ink-10'
+                  on ? 'bg-[var(--lum-1)] text-ink-2' : 'text-ink-10'
                 }`}
               >
                 {s.label}
@@ -314,9 +326,24 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
          * is exactly as useful — a direct handle still resolves.
          */
         <div className="rounded-card border border-dashed border-line-11 px-5 py-8 text-center text-[14px] leading-[22px] text-ink-14">
-          No creators to list yet. The index that ranks creators by their delivery record has nothing in it — that may
-          mean nobody has launched, or simply that no one has been indexed. If you already know a creator, their token
-          page still works: /creators/their-name.
+          {newCreators.length > 0 ? (
+            /* ★ DO NOT SAY "nobody has launched" WHILE THIS PAGE IS LISTING
+               CREATORS (QA, 2026-08-20). The "New here" strip sits directly
+               above this box, and with a filter applied it can be showing real
+               launches an inch away from a sentence claiming there may be none.
+               The hedge is honest in the general case and false in this one, so
+               it is only offered when the page genuinely knows of nobody. */
+            <>
+              No creators match this filter yet. The index that ranks creators by their delivery record has nothing for
+              it. Creators who have just launched appear above, and their token pages work:{' '}
+            </>
+          ) : (
+            <>
+              No creators to list yet. The index that ranks creators by their delivery record has nothing in it — that
+              may mean nobody has launched, or simply that no one has been indexed. If you already know a creator, their
+              token page still works: /creators/their-name.
+            </>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

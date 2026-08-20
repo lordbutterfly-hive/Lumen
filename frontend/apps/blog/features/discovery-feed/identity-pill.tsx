@@ -1,5 +1,6 @@
 'use client';
 
+import type React from 'react';
 import { Link, UserAvatarImg } from '@hive/ui';
 import { cn } from '@ui/lib/utils';
 import { routeHandle } from '@/blog/features/creator-tokens/live/adapt';
@@ -75,9 +76,15 @@ export interface IdentityPillProps {
    * same as `none`.
    */
   price?: MarketPrice;
+  /**
+   * This author's rank luminosity, 0.06 (rank 1) to 1 (rank 9), from §2's ramp.
+   * Undefined for an unranked author, which renders unlit. Read once per page by
+   * the list that mounts these cards — see `useRankLuminosity`.
+   */
+  luminosity?: number;
 }
 
-export default function IdentityPill({ handle, price }: IdentityPillProps) {
+export default function IdentityPill({ handle, price, luminosity }: IdentityPillProps) {
   /*
    * ★★ THREE STATES, AND `unknown` IS NOT `none`. `ready` means there is a market
    * and a figure. `none` means this author has no token. `unknown` means the read
@@ -106,7 +113,16 @@ export default function IdentityPill({ handle, price }: IdentityPillProps) {
     <span className={styles.idCluster} data-testid="identity-pill">
       {/* The face. Decorative to assistive tech (see the tab-stop note above) —
           the handle link immediately after it carries the accessible name. */}
-      <Link href={profileHref} className={styles.idFace} tabIndex={-1} aria-hidden="true">
+      {/* ★ THE GLOW GOES ON THE FACE (§2). `--l` is set inline because it is
+          per-author data, not a style; the CSS defaults it to 0 so an unranked
+          author is unlit rather than invalid. Decorative: no aria, no title. */}
+      <Link
+        href={profileHref}
+        className={styles.idFace}
+        style={luminosity ? ({ '--l': luminosity } as React.CSSProperties) : undefined}
+        tabIndex={-1}
+        aria-hidden="true"
+      >
         <UserAvatarImg username={handle} pixelSize={40} alt="" />
       </Link>
 

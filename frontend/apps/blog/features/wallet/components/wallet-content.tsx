@@ -163,10 +163,17 @@ export default function WalletContent() {
                   <span className="font-sans text-[14px] leading-[22px] font-semibold text-ink-2">
                     {a.kind === 'evm' ? t('wallet.chain_evm') : t('wallet.chain_btc')}
                   </span>
-                  {/* The address is the account tokens are held under. Shown in full-ish
+                  {/* The address is the account tokens are held under. Shown in FULL
                       rather than a friendly label, because it is the thing a reader has to
-                      keep access to. */}
-                  <span className="truncate font-mono text-caption text-ink-10">
+                      keep access to.
+                      ★ IT USED TO BE `truncate` (QA, 2026-08-20). On a 390px viewport that
+                      cut a Bitcoin address to `bc1qewdludr3fpy3k903hqave02ue4xm9ha...` with
+                      no title, no copy control and no way to expand — so the one string the
+                      sentence above tells you to keep was unreadable on a phone, and the
+                      code comment claiming "in full-ish" was not true there. Wrapping is
+                      the right trade: a monospace address over two lines is still an
+                      address; half an address is not. */}
+                  <span className="break-all font-mono text-caption text-ink-10" title={a.address ?? a.id}>
                     {a.address ?? a.id}
                   </span>
                 </span>

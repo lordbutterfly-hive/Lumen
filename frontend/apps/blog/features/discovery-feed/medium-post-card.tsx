@@ -80,7 +80,8 @@ const LABELS = {
 export default function MediumPostCard({
   post,
   mark,
-  price
+  price,
+  luminosity
 }: {
   post: Entry;
   mark?: RankMark;
@@ -93,6 +94,13 @@ export default function MediumPostCard({
    * yet still renders (handle-only pill), rather than failing to compile.
    */
   price?: MarketPrice;
+  /*
+   * This author's §2 rank luminosity, read once per page alongside `mark` and
+   * `price`. Drives the glow on the identity cluster's face — see
+   * `useRankLuminosity`, which shares `useRankMarks`' request rather than making
+   * a second one.
+   */
+  luminosity?: number;
 }) {
   const { t } = useTranslation('common_blog');
   // ★ `sessionUnavailable` added alongside the pre-existing `user` (2026-08-16,
@@ -862,7 +870,7 @@ export default function MediumPostCard({
             "does this author have a token" was the real duplication; the visual
             doubling was only the symptom. See `identity-pill.tsx` for the click
             model, the 16px overlap arithmetic and the tab-stop ruling. */}
-        <IdentityPill handle={displayAuthor} price={price} />
+        <IdentityPill handle={displayAuthor} price={price} luminosity={luminosity} />
         {/*
           ★★★ THE QUILL BELONGS IN THE BYLINE (2026-08-18, owner-reported: "no
           feather quill on my profile feed").
@@ -1200,7 +1208,7 @@ export default function MediumPostCard({
             </Link>
           ) : isNote ? null : (
             <Link href={href} className="block" data-testid="medium-card-title">
-              <h2 className="text-title font-semibold tracking-title text-ink-2">
+              <h2 className={cn(cardStyles.titleRow, 'text-title font-semibold tracking-title text-ink-2')}>
                 {/* ★★ THE CLAMP IS ON THE TITLE TEXT, NOT ON THE BOX THAT ALSO HOLDS THE DATE.
                      Measured 2026-08-20: with `line-clamp-2` on the h2 and the date inline
                      inside it, 6 of 20 two-line headlines on the live feed had the date CLIPPED

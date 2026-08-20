@@ -64,6 +64,7 @@ const g = await page.evaluate(() => {
     borderLeft: cs ? parseFloat(cs.borderLeftWidth) : null,
     pillBg: cs ? cs.backgroundColor : null,
     pillBorderColor: cs ? cs.borderTopColor : null,
+    pillBorderWidth: cs ? parseFloat(cs.borderTopWidth) : null,
     buyW: br ? br.width : null,
     buyH: br ? br.height : null,
     hasMarketHalf: !!market,
@@ -92,8 +93,23 @@ check('§N1 pill left edge is flat', g.radiusTopLeft, 0, 0.5);
 checkTrue('§N1 pill right edge is fully rounded', (g.radiusTopRight ?? 0) >= 19,
   `${px(g.radiusTopRight)} on a 38px pill`);
 check('§N1 no left border (the face covers it)', g.borderLeft, 0, 0.5);
-checkTrue('§ colours — pill fill #FAEEEB', g.pillBg === 'rgb(250, 238, 235)', g.pillBg);
-checkTrue('§ colours — pill border #EBD3CE', g.pillBorderColor === 'rgb(235, 211, 206)', g.pillBorderColor);
+/* ★★ THE PILL'S CHROME IS CONDITIONAL (owner, 2026-08-20): no outline until the
+   author has a token. So the fill/border assertions depend on which state this
+   card is in, and the handle-only state asserts their ABSENCE rather than
+   skipping — "no pill outline" is the requirement, not the default. */
+if (g.hasMarketHalf) {
+  checkTrue('§ colours — pill fill #FAEEEB', g.pillBg === 'rgb(250, 238, 235)', g.pillBg);
+  checkTrue('§ colours — pill border #EBD3CE', g.pillBorderColor === 'rgb(235, 211, 206)', g.pillBorderColor);
+} else {
+  checkTrue('§ no market: pill has NO fill', /rgba\(0, 0, 0, 0\)|transparent/.test(g.pillBg || ''), g.pillBg);
+  /* ★ THE REQUIREMENT IS "no outline VISIBLE", not "no border box". The border
+     keeps its 1px WIDTH in both states deliberately — dropping the width shrinks
+     the content box and drags the handle down 1px when a token appears, which is
+     the position shift this file caught. So what must be absent is the COLOUR. */
+  checkTrue('§ no market: pill outline is invisible',
+    /rgba\(0, 0, 0, 0\)|transparent/.test(g.pillBorderColor || ''),
+    `${g.pillBorderColor} at ${g.pillBorderWidth}px`);
+}
 checkTrue('§ type — handle 14.5px / 600', g.handleSize === '14.5px' && g.handleWeight === '600',
   `${g.handleSize}/${g.handleWeight}`);
 
@@ -112,6 +128,49 @@ if (g.hasMarketHalf) {
   checkTrue('§ market half points at the market', /^\/creators\//.test(g.marketHref || ''), g.marketHref || 'none');
 } else {
   rows['market half'] = 'absent — this author has no creator token (handle-only pill, as specified)';
+}
+
+/* ── THE HANDLE MUST NOT MOVE WHEN THE PILL APPEARS ─────────────────────────
+   The owner's requirement is that the two states are "positioned the same" — the
+   no-pill option and the pill option put the handle in exactly the same place,
+   and only the chrome differs.
+
+   ★ THIS CANNOT BE OBSERVED ON THE LIVE FEED, because no author currently has a
+   market, so every pill is in the handle-only state. Forcing the class is the
+   only way to see both. It is a DOM-level toggle of the exact class the component
+   applies, so it exercises the real rule rather than a mock of it. */
+const shift = await page.evaluate(() => {
+  const cluster = document.querySelector('[data-testid="identity-pill"]');
+  const pill = cluster.querySelector('[class*="idPill"]');
+  const handle = cluster.querySelector('[data-testid="identity-pill-profile"]');
+  const face = cluster.querySelector('[data-testid="user-avatar-img"]');
+  const snap = () => {
+    const h = handle.getBoundingClientRect(), f = face.getBoundingClientRect(), p = pill.getBoundingClientRect();
+    return { hx: h.left, hy: h.top, fx: f.left, ph: p.height, overlap: f.right - p.left };
+  };
+  const before = snap();
+  // The split class is the one the component adds when a market exists.
+  const splitClass = [...pill.classList].find((c) => /idPill/.test(c) && /Split/i.test(c));
+  const guess = splitClass || [...document.styleSheets].flatMap((sh) => {
+    try { return [...sh.cssRules]; } catch { return []; }
+  }).map((r) => r.selectorText).filter(Boolean).map((t) => (t.match(/\.(post-card_idPillSplit__[A-Za-z0-9_-]+)/) || [])[1]).find(Boolean);
+  if (!guess) return { ok: false, why: 'could not resolve the idPillSplit class' };
+  pill.classList.add(guess);
+  const after = snap();
+  pill.classList.remove(guess);
+  return { ok: true, before, after };
+});
+if (!shift.ok) {
+  checkTrue('§ handle does not move when the pill appears', false, shift.why);
+} else {
+  checkTrue('§ handle does not move when the pill appears',
+    Math.abs(shift.after.hx - shift.before.hx) < 0.5 && Math.abs(shift.after.hy - shift.before.hy) < 0.5,
+    `x ${px(shift.before.hx)} -> ${px(shift.after.hx)}, y ${px(shift.before.hy)} -> ${px(shift.after.hy)}`);
+  checkTrue('§ face does not move either',
+    Math.abs(shift.after.fx - shift.before.fx) < 0.5, `${px(shift.before.fx)} -> ${px(shift.after.fx)}`);
+  checkTrue('§ pill height and underlap are identical in both states',
+    Math.abs(shift.after.ph - shift.before.ph) < 0.5 && Math.abs(shift.after.overlap - shift.before.overlap) < 0.5,
+    `h ${px(shift.before.ph)}->${px(shift.after.ph)}, overlap ${px(shift.before.overlap)}->${px(shift.after.overlap)}`);
 }
 
 /* ── each half lights ALONE ──────────────────────────────────────────────────

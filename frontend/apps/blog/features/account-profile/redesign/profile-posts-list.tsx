@@ -8,6 +8,7 @@ import MediumPostCard from '@/blog/features/discovery-feed/medium-post-card';
 import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import { useAccountEntries } from './hooks/use-account-entries';
 import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
+import { useRankLuminosity } from '@/blog/features/retention/hooks/use-rank-marks';
 
 /**
  * Posts tab body — reuses the discovery-feed MediumPostCard (the "if it
@@ -44,6 +45,8 @@ export default function ProfilePostsList({
   const entries = filterVisiblePosts(rawEntries, nsfwPreference);
   /* One market read for the whole page — see the same call in feed-tabs.tsx. */
   const { prices } = useTokenPriceChips(entries.map((e) => e.author));
+  /* §2 rank luminosity for the avatar glow — shares `useRankMarks`' request. */
+  const luminosity = useRankLuminosity(entries.map((e) => e.author));
 
   // ★★★ AN ERROR ON PAGE 2 MUST NOT DELETE PAGE 1.
   //
@@ -79,6 +82,7 @@ export default function ProfilePostsList({
             key={`${entry.author}-${entry.permlink}`}
             post={entry}
             price={prices.get(entry.author)}
+              luminosity={luminosity.get((entry.author ?? '').toLowerCase())}
           />
       ))}
       {/* ★ THE PAGE CAP (2026-08-13) — same control, same reasoning, as the
