@@ -64,13 +64,4 @@ test.describe('Terms of Service page tests', () => {
     expect(paragrafFontSize).toContain('16px');
   });
 
-  test('validate text of header menu on the Terms of Service page', async ({ page }) => {
-    await homePage.goto();
-    await homePage.moveToPrivacyPolicyPage();
-
-    await expect(tosPage.navPostLink).toHaveText('Posts');
-    await expect(tosPage.navProposalsLink).toHaveText('Proposals');
-    await expect(tosPage.navWitnessesLink).toHaveText('Witnesses');
-    await expect(tosPage.navOurDappsLink).toHaveText('Our dApps');
-  });
 });

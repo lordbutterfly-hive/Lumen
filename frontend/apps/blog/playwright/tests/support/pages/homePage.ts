@@ -33,7 +33,6 @@ export class HomePage {
   readonly getNavPostsLink: Locator;
   readonly getNavProposalsLink: Locator;
   readonly getNavWitnessesLink: Locator;
-  readonly getNavOurdAppsLink: Locator;
   readonly getNavHbauthLink: Locator;
   readonly getNavHbauthButton: Locator;
   readonly getNavSearchInput: Locator;
@@ -198,10 +197,9 @@ export class HomePage {
       .getByText('Worldmappin');
     this.getLifestyleCommunityLink = page.getByTestId('card-trending-comunities').getByText('Lifestyle');
     this.getHomeNavLink = page.locator('header a span:text("Hive Blog")');
-    this.getNavPostsLink = page.locator('[data-testid="nav-posts-link"]');
-    this.getNavProposalsLink = page.locator('[data-testid="nav-proposals-link"]');
-    this.getNavWitnessesLink = page.locator('[data-testid="nav-witnesses-link"]');
-    this.getNavOurdAppsLink = page.locator('[data-testid="nav-our-dapps-link"]');
+    this.getNavPostsLink = page.locator('[data-testid="left-rail-home"]');
+    this.getNavProposalsLink = page.locator('[data-testid="left-rail-vote-proposals"]');
+    this.getNavWitnessesLink = page.locator('[data-testid="left-rail-vote-witness"]');
     this.getHeaderAllCommunities = page.locator('[data-testid="card-trending-comunities"]');
     // Either card — Lumen's on the feed/trending, the classic one on profile tabs,
     // search and tag pages. See HomePage.CARD_ANY.
@@ -325,10 +323,18 @@ export class HomePage {
     this.getNavUserAvatar = page.locator('[data-testid="profile-menu"]');
     this.getNavProfileMenuContent = page.locator('[data-testid="profile-menu-content"]');
     this.getNavCreatePost = page.locator('[data-testid="nav-pencil"]');
-    this.getNavSidebarMenu = page.locator('[data-testid="nav-sidebar-menu-button"]');
-    this.getNavSidebarMenuContent = page.locator('[data-testid="nav-sidebar-menu-content"]');
+    /* ★ MOBILE-ONLY (2026-08-19). `nav-sidebar-menu-button` / `-content` are gone;
+       their current equivalent is `mobile-nav-trigger` / `mobile-nav-content`,
+       and it is exactly that — mobile. Measured: `display: none` at a 1280
+       viewport, 40x40 at 390. On desktop the LeftRail is simply always open, so
+       there is NO control to click and the old "open the sidebar, then click a
+       link" flow has no desktop equivalent. Any test using this must set a mobile
+       viewport first; at the default 1280 it will fail as not-visible, which is
+       the honest failure rather than a missing-element one. */
+    this.getNavSidebarMenu = page.locator('[data-testid="mobile-nav-trigger"]');
+    this.getNavSidebarMenuContent = page.locator('[data-testid="mobile-nav-content"]');
     this.getNavSidebarMenuContentCloseButton = page.locator(
-      '[data-testid="nav-sidebar-menu-content"] > button'
+      '[data-testid="mobile-nav-content"] > button'
     );
     this.postTitle = page.locator('[data-testid="post-title"] a, [data-testid="medium-card-title"] a');
     /*
@@ -588,30 +594,8 @@ export class HomePage {
     await expect(this.page.url()).toBe(`https://${url}/trending`);
   }
 
-  async moveToNavProposalsPage() {
-    const pagePromise = await this.page.context().waitForEvent('page');
-    await this.getNavProposalsLink.click();
-    await this.page.$eval('[data-testid="nav-proposals-link"]', (el) => el.removeAttribute('target'));
-    const newPage = await pagePromise;
-    // await this.page.waitForSelector(this.page.locator('[data-testid="proposals-body"]')['_selector']);
-    expect(await newPage.url().includes(`/proposals`)).toBeTruthy();
-  }
 
-  async moveToNavWitnessesPage() {
-    const pagePromise = this.page.context().waitForEvent('page');
-    await this.getNavWitnessesLink.click();
-    await this.page.$eval('[data-testid="nav-witnesses-link"]', (el) => el.removeAttribute('target'));
-    const newPage = await pagePromise;
-    // await this.page.waitForSelector(this.page.locator('[data-testid="witness-table-body"]')['_selector']);
-    await expect(newPage.url().includes(`/~witnesses`)).toBeTruthy();
-  }
 
-  async moveToNavOurdAppsPage() {
-    const pagePromise = this.page.context().waitForEvent('page');
-    await this.getNavOurdAppsLink.click();
-    const newPage = await pagePromise;
-    await expect(newPage.url()).toBe(`https://hive.io/eco/`);
-  }
 
   async isTrendingCommunitiesVisible() {
     await expect(this.getTrandingCommunitiesHeader).toBeVisible();

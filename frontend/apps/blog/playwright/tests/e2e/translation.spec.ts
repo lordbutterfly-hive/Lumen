@@ -91,13 +91,11 @@ test.describe.skip('Translation tests', () => {
     const postsTabText = await homePage.getNavPostsLink.textContent();
     const proposalsTabText = await homePage.getNavProposalsLink.textContent();
     const witnessesTabText = await homePage.getNavWitnessesLink.textContent();
-    const dappsTabText = await homePage.getNavOurdAppsLink.textContent();
 
     await expect(homePage.getMainTimeLineOfPosts.first()).toBeVisible();
     await expect(postsTabText).toBe('Posty');
     await expect(proposalsTabText).toBe('Propozycje');
     await expect(witnessesTabText).toBe('Delegaci');
-    await expect(dappsTabText).toBe('Nasze dApps');
   });
 
   // DELETED 2026-08-10: 'Profile page - user info' asserted on

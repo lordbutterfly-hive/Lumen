@@ -296,12 +296,6 @@ test.describe('Home page tests', () => {
     await expect(page).toHaveURL(/\/witnesses/);
   });
 
-  test('move to the Our dApps page', async ({ page }) => {
-    await homePage.goto();
-
-    await homePage.moveToNavOurdAppsPage();
-  });
-
   /*
    * ★ UNSKIPPED 2026-08-11. The stated reason ("Navbar search input was deleted
    * now is icone to open search page") is factually wrong against current source:

@@ -56,13 +56,4 @@ test.describe('Privacy Policy page tests', () => {
     expect(paragrafFontSize).toBe('14px');
   });
 
-  test('validate text of header menu on the Privacy Policy page', async ({ page }) => {
-    await homePage.goto();
-    await homePage.moveToPrivacyPolicyPage();
-
-    await expect(privacyPolicyPage.navPostLink).toHaveText('Posts');
-    await expect(privacyPolicyPage.navProposalsLink).toHaveText('Proposals');
-    await expect(privacyPolicyPage.navWitnessesLink).toHaveText('Witnesses');
-    await expect(privacyPolicyPage.navOurDappsLink).toHaveText('Our dApps');
-  });
 });

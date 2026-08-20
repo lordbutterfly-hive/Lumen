@@ -9,7 +9,6 @@ export class TOSPage {
   readonly navPostLink: Locator;
   readonly navProposalsLink: Locator;
   readonly navWitnessesLink: Locator;
-  readonly navOurDappsLink: Locator;
 
   constructor(page: Page) {
     this.page = page;
@@ -17,10 +16,9 @@ export class TOSPage {
     this.firstSubtitle = this.subtitles.first();
     this.mainElement = page.locator('#articleBody');
     this.paragrafText = page.getByText('If we decide to make changes to this Agreement');
-    this.navPostLink = this.page.locator('[data-testid="nav-posts-link"]');
-    this.navProposalsLink = this.page.locator('[data-testid="nav-proposals-link"]');
-    this.navWitnessesLink = this.page.locator('[data-testid="nav-witnesses-link"]');
-    this.navOurDappsLink = this.page.locator('[data-testid="nav-our-dapps-link"]');
+    this.navPostLink = this.page.locator('[data-testid="left-rail-home"]');
+    this.navProposalsLink = this.page.locator('[data-testid="left-rail-vote-proposals"]');
+    this.navWitnessesLink = this.page.locator('[data-testid="left-rail-vote-witness"]');
   }
 
   async getElementCssPropertyValue(element: Locator, cssProperty: string) {

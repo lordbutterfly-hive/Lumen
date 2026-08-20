@@ -71,7 +71,15 @@ export class HealthcheckerPage {
     }
 
     async gotoFromSidebar() {
-        const sidebarMenuButton = this.page.locator('[data-testid="nav-sidebar-menu-button"]');
+    /* ★ MOBILE-ONLY (2026-08-19). `nav-sidebar-menu-button` / `-content` are gone;
+       their current equivalent is `mobile-nav-trigger` / `mobile-nav-content`,
+       and it is exactly that — mobile. Measured: `display: none` at a 1280
+       viewport, 40x40 at 390. On desktop the LeftRail is simply always open, so
+       there is NO control to click and the old "open the sidebar, then click a
+       link" flow has no desktop equivalent. Any test using this must set a mobile
+       viewport first; at the default 1280 it will fail as not-visible, which is
+       the honest failure rather than a missing-element one. */
+        const sidebarMenuButton = this.page.locator('[data-testid="mobile-nav-trigger"]');
         await sidebarMenuButton.click();
 
         const healthcheckerLink = this.page.locator('text=Healthchecker');

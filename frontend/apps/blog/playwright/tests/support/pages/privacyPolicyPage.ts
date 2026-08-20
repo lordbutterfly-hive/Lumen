@@ -9,7 +9,6 @@ export class PrivacyPolicyPage {
   readonly navPostLink: Locator;
   readonly navProposalsLink: Locator;
   readonly navWitnessesLink: Locator;
-  readonly navOurDappsLink: Locator;
 
   constructor(page: Page) {
     this.page = page;
@@ -17,10 +16,9 @@ export class PrivacyPolicyPage {
     this.firstSubtitle = this.subtitles.first();
     this.mainElement = this.page.locator('.mb-4.max-w-2xl.text-body-sm');
     this.firstParagraf = this.page.getByText('This Privacy Policy describes');
-    this.navPostLink = this.page.locator('[data-testid="nav-posts-link"]');
-    this.navProposalsLink = this.page.locator('[data-testid="nav-proposals-link"]');
-    this.navWitnessesLink = this.page.locator('[data-testid="nav-witnesses-link"]');
-    this.navOurDappsLink = this.page.locator('[data-testid="nav-our-dapps-link"]');
+    this.navPostLink = this.page.locator('[data-testid="left-rail-home"]');
+    this.navProposalsLink = this.page.locator('[data-testid="left-rail-vote-proposals"]');
+    this.navWitnessesLink = this.page.locator('[data-testid="left-rail-vote-witness"]');
   }
 
   async getElementCssPropertyValue(element: Locator, cssProperty: string) {
