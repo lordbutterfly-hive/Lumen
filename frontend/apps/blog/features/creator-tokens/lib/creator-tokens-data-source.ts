@@ -38,7 +38,7 @@ import type {
 import { MockCreatorTokensDataSource } from './mock/mock-data-source';
 import { hiveTransactionBroadcaster } from './vsc/broadcaster';
 import { routingBroadcaster } from './vsc/wallet-broadcaster';
-import { signTypedDataWith } from '@/blog/features/lite-auth/wallet/appkit';
+import { signMessageWith, signTypedDataWith } from '@/blog/features/lite-auth/wallet/appkit';
 import { VscCreatorTokensDataSource } from './vsc-data-source';
 
 // Protocol constants, money conversion and every ported piece of core/*.go's
@@ -267,7 +267,15 @@ export function getCreatorTokensDataSource(): CreatorTokensDataSource | null {
       // byte-identical to what it was before this line changed.
       instance = new VscCreatorTokensDataSource({
         config,
-        broadcaster: routingBroadcaster(hiveTransactionBroadcaster, signTypedDataWith)
+        broadcaster: routingBroadcaster(
+          hiveTransactionBroadcaster,
+          signTypedDataWith,
+          // BTC signs a plain message (the container CID), which is exactly what
+          // the existing login/bind signer already does — same wallet, same
+          // provider call, different message. Bound to the 'btc' chain here so
+          // the broadcaster never has to know which chains exist.
+          (address, message) => signMessageWith('btc', address, message)
+        )
       });
     } else if (isCreatorTokensDemoEnabled()) {
       instance = new MockCreatorTokensDataSource();

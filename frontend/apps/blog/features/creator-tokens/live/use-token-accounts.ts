@@ -115,22 +115,30 @@ export interface TokenAccounts {
  * EIP-712 typed data from `vsc-tx/eip712.ts` and verified by the node's own
  * `lib/dids.EthDID.Verify`.
  *
- * ★★ btc: STILL FALSE, and NOT because the crypto is unproven — it is. A real
- * mainnet `bc1q` BIP-137 signature over the container CID verifies TRUE against
- * `lib/dids.BtcDID.Verify` after `normalizeBip137Header` rewrites the
- * native-segwit recovery byte (40 → 32; raw fails with "recovery code 40 is not
- * in the valid range [27, 34]").
+ * ★ btc: TRUE since 2026-08-20, and the reason it was withheld turned out to be
+ * a misreading worth recording. `dids.Parse` only ever tries `ParseBtcDID`
+ * (mainnet params), never `ParseBtcTestnetDID`, and that was read as "the first
+ * Bitcoin transaction is real mainnet money". It is not. The mainnet constraint
+ * is on the ADDRESS FORMAT of the identity, not on the network the transaction
+ * runs on — a Magi transaction signed with a Bitcoin key moves HBD on Magi and
+ * never touches the Bitcoin chain, so the key spends no BTC and needs to hold
+ * none. A mainnet-format `bc1q` address is therefore a perfectly testable
+ * identity on Magi TESTNET, which is where this was proven.
  *
- * It stays false because BTC CANNOT BE REHEARSED. `dids.Parse` tries
- * `ParseEthDID` then `ParseBtcDID` — MAINNET ONLY — and never
- * `ParseBtcTestnetDID`, and every helper in btc.go is pinned to
- * `chaincfg.MainNetParams`. So the first Bitcoin transaction this app ever
- * sends is real mainnet money on a path no testnet run can exercise first.
- * Flipping this without that decision being made deliberately, by a person,
- * would spend a user's BTC to find out. See `vsc-tx/btc.ts`.
+ * Bitcoin signs the container's CID STRING as a plain Bitcoin Signed Message,
+ * not typed data (btc.go:135), and the native-segwit recovery byte must be
+ * rewritten from 39-42 into 27-34 or the node cannot recover the key. See
+ * `vsc-tx/btc.ts`.
+ *
+ * Proven end to end on testnet, not in a unit test: a `bc1q` identity bought a
+ * token on lumen.cole's market
+ * (tx bafyreiapynq4ee6nihqi7lsf3i633twoc3vyp47jubasuykgouosycosdy, INCLUDED —
+ * supply 30→31, holder credit 1, balance 125,000 → 123,629 HBD). The wallet was
+ * shown `bafyreicgfbx6fezho7jvamxxbkck5gq3a6o6zj4dpfctzejqxrkee2mdbi`, signed
+ * with a native-segwit header of 40, which this client rewrote to 32.
  */
 function chainCanSign(kind: TokenAccount['kind']): boolean {
-  return kind === 'evm';
+  return kind === 'evm' || kind === 'btc';
 }
 
 function kindOf(method: string, network: string | null): TokenAccount['kind'] {

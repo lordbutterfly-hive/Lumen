@@ -38,12 +38,17 @@ import {
   buildSigEnvelope,
   serializeSigEnvelope
 } from '@/blog/lib/lite/wallet/vsc-tx/envelope';
+import { ALG_BIP137 } from '@/blog/lib/lite/wallet/vsc-tx/envelope';
+import { assertBtcSignature, btcSigningMessage, normalizeBip137Header } from '@/blog/lib/lite/wallet/vsc-tx/btc';
 import { type Intent } from '@/blog/lib/lite/wallet/vsc-tx/intents';
 import { createSigningShell } from '@/blog/lib/lite/wallet/vsc-tx/signing-shell';
 import { submitWithNonce, type SubmitInput, type SubmitResult } from '@/blog/lib/lite/wallet/vsc-tx/submit';
 
 /** Signs EIP-712 typed data. The real one prompts a wallet; tests pass a key. */
 export type TypedDataSigner = (address: string, typedData: unknown) => Promise<string>;
+
+/** Signs a plain message with a Bitcoin wallet, returning base64. */
+export type BtcMessageSigner = (address: string, message: string) => Promise<string>;
 
 export interface WalletCallInput {
   /** `did:pkh:eip155:1:0x…` — the caller AND the sole required auth. */
@@ -123,6 +128,23 @@ export async function broadcastWalletCall(input: WalletCallInput): Promise<Submi
 
 import { type CustomJsonOp } from './op-builders';
 
+/** `did:pkh:bip122:<genesis>:<address>` → the Bitcoin address that signs. */
+export function btcAddressFromDid(did: string): string | null {
+  const m = /^did:pkh:bip122:[^:]+:([A-Za-z0-9]+)$/.exec(did);
+  return m ? m[1] : null;
+}
+
+/** Which of the two address types the node will accept a BIP-322 signature for. */
+export function btcAddressType(address: string): 'p2pkh' | 'p2sh' | 'p2wpkh' | null {
+  if (address.startsWith('bc1q')) return 'p2wpkh';
+  if (address.startsWith('3')) return 'p2sh';
+  if (address.startsWith('1')) return 'p2pkh';
+  // bc1p (taproot) is refused at DID parse by the node (btc.go:52) and blocked
+  // at connect time in appkit.ts. Anything else is unknown and must not be
+  // guessed at: a wrong type sends a signature the node cannot check.
+  return null;
+}
+
 /** `did:pkh:eip155:<chain>:<0xaddress>` → the address the wallet signs with. */
 export function evmAddressFromDid(did: string): string | null {
   const m = /^did:pkh:eip155:[^:]+:(0x[0-9a-fA-F]{40})$/.exec(did);
@@ -158,12 +180,11 @@ export function opToWalletCall(op: CustomJsonOp, signTypedData: TypedDataSigner)
   };
 
   const did = op.required_auths[0];
-  const address = did ? evmAddressFromDid(did) : null;
-  if (!did || !address) {
-    throw new Error(
-      `wallet-broadcaster: required_auths[0] is not an EVM DID (${String(did)}) — only did:pkh:eip155 can sign here today.`
-    );
-  }
+  if (!did) throw new Error('wallet-broadcaster: the op carries no required auth');
+  // The EVM address is absent for a BTC DID; the BTC path supplies its own and
+  // never reads this field. Keeping one converter for both rails means the op
+  // body is built identically whichever wallet signs it.
+  const address = evmAddressFromDid(did) ?? '';
 
   return {
     did,
@@ -176,6 +197,67 @@ export function opToWalletCall(op: CustomJsonOp, signTypedData: TypedDataSigner)
     intents: body.intents ?? [],
     signTypedData
   };
+}
+
+/**
+ * Broadcast one call signed by a BITCOIN wallet.
+ *
+ * ★ BITCOIN SIGNS THE CONTAINER'S CID STRING, NOT TYPED DATA. The node hashes
+ * `data.Cid().String()` as a plain Bitcoin Signed Message (btc.go:135), so the
+ * wallet prompt shows an opaque `bafyrei…`. That is the intended prompt content
+ * — the wallet names itself at setup, so the user has a label for what they are
+ * approving — and it cannot be made structured without a node change.
+ *
+ * ★ THE RECOVERY BYTE IS REWRITTEN, AND ONLY HERE. Real SegWit wallets emit
+ * BIP-137 headers of 35-38 (P2SH-P2WPKH) or 39-42 (native P2WPKH); Go's
+ * `RecoverCompact` accepts only 27-34 and otherwise fails with "failed to
+ * recover public key", which reads like a broken wallet. `normalizeBip137Header`
+ * fixes that. It must NEVER be applied to the login verifier
+ * (`lib/lite/auth/btc-verify.ts`): normalising a header there would accept an
+ * ownership proof in a form the wallet did not actually produce.
+ */
+export async function broadcastBtcWalletCall(
+  input: Omit<WalletCallInput, 'signTypedData' | 'address'> & {
+    address: string;
+    signMessage: BtcMessageSigner;
+  }
+): Promise<SubmitResult> {
+  const addressType = btcAddressType(input.address);
+  if (!addressType) {
+    throw new Error(
+      `wallet-broadcaster: ${input.address} is not an address type the node can verify. ` +
+        'Taproot (bc1p) is refused at DID parse; use a native segwit (bc1q), P2SH (3…) or legacy (1…) address.'
+    );
+  }
+
+  return submitWithNonce(input.did, async (nonce): Promise<SubmitInput> => {
+    const op: ContainerOp = buildCallOp({
+      contractId: input.contractId,
+      action: input.action,
+      payload: input.payload,
+      rcLimit: input.rcLimit,
+      intents: input.intents,
+      caller: input.did
+    });
+    const container = buildContainer({
+      netId: input.netId,
+      nonce,
+      rcLimit: input.rcLimit,
+      requiredAuths: [input.did],
+      ops: [op]
+    });
+    const shell = createSigningShell(container as never, (p) => decodeDagCbor(p as Uint8Array));
+    const shellBytes = encodeDagCbor(shell as unknown as Record<string, unknown>);
+
+    const message = await btcSigningMessage(shellBytes);
+    const raw = await input.signMessage(input.address, message);
+    const signature = normalizeBip137Header(raw);
+    assertBtcSignature(signature, addressType);
+
+    const envelope = buildSigEnvelope([{ alg: ALG_BIP137, sig: signature, kid: input.did }]);
+    assertEnvelopeMatchesAuths(envelope, [input.did]);
+    return { tx: toBase64(serializeContainer(container)), sig: serializeSigEnvelope(envelope) };
+  });
 }
 
 /** A broadcaster in the shape `vsc-data-source.ts` injects. */
@@ -192,20 +274,26 @@ export type OpBroadcaster = (op: CustomJsonOp) => Promise<string>;
  */
 export function routingBroadcaster(
   hiveBroadcaster: OpBroadcaster,
-  signTypedData: TypedDataSigner
+  signTypedData: TypedDataSigner,
+  signBtcMessage: BtcMessageSigner
 ): OpBroadcaster {
   return async (op: CustomJsonOp): Promise<string> => {
     const auth = op.required_auths[0] ?? '';
     if (!auth.startsWith('did:')) return hiveBroadcaster(op);
 
-    if (!evmAddressFromDid(auth)) {
-      // A BTC DID reaches here only if `chainCanSign` was flipped for btc.
-      // Refusing loudly beats signing nothing and reporting a wallet error.
-      throw new Error(
-        'wallet-broadcaster: Bitcoin transaction signing is not enabled — see vsc-tx/btc.ts for why the first one is mainnet-only.'
-      );
+    const evm = evmAddressFromDid(auth);
+    if (evm) {
+      const result = await broadcastWalletCall(opToWalletCall(op, signTypedData));
+      return result.id;
     }
-    const result = await broadcastWalletCall(opToWalletCall(op, signTypedData));
-    return result.id;
+
+    const btc = btcAddressFromDid(auth);
+    if (btc) {
+      const base = opToWalletCall(op, signTypedData);
+      const result = await broadcastBtcWalletCall({ ...base, address: btc, signMessage: signBtcMessage });
+      return result.id;
+    }
+
+    throw new Error(`wallet-broadcaster: ${auth} is not a DID this client can sign for.`);
   };
 }

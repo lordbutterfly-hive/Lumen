@@ -30,6 +30,7 @@ import { hbdBaseUnitsToDecimalString, transferAllowIntent, assertIntentsShape } 
 import { createSigningShell } from './signing-shell';
 import { dagCborCid } from './cid';
 import { assertBtcSignature, normalizeBip137Header } from './btc';
+import { btcAddressFromDid, btcAddressType, evmAddressFromDid } from '@/blog/features/creator-tokens/lib/vsc/wallet-broadcaster';
 
 const TEST_DID = 'did:pkh:eip155:1:0xB41fEE7B3a034a474ae8E0C41DA8B211b73A980B';
 const CONTRACT = 'vsc1BcaD8JrwJPAAN5cU1cHKCBdZrd7jz2WGt8';
@@ -256,6 +257,28 @@ function buildFixture() {
   const td = convertCborToEip712TypedData(withEmpty, 'probe');
   check('an empty array contributes no type entry', !td.types['probe']?.some((f) => f.name === 'e'), JSON.stringify(td.types['probe']));
   check('a non-empty sibling still gets its type', td.types['probe']?.some((f) => f.name === 'a' && f.type === 'string') === true);
+}
+
+
+// ── the DID → address split that decides which rail signs ──────────────────
+{
+  const EVM = 'did:pkh:eip155:1:0xB41fEE7B3a034a474ae8E0C41DA8B211b73A980B';
+  const BTC = 'did:pkh:bip122:000000000019d6689c085ae165831e93:bc1qewdludr3fpy3k903hqave02ue4xm9ha83c9c0m';
+
+  check('an EVM DID yields its address', evmAddressFromDid(EVM) === '0xB41fEE7B3a034a474ae8E0C41DA8B211b73A980B');
+  check('an EVM DID is NOT read as Bitcoin', btcAddressFromDid(EVM) === null);
+  check('a BTC DID yields its address', btcAddressFromDid(BTC) === 'bc1qewdludr3fpy3k903hqave02ue4xm9ha83c9c0m');
+  check('a BTC DID is NOT read as EVM', evmAddressFromDid(BTC) === null, String(evmAddressFromDid(BTC)));
+
+  // ★ Routing by the WRONG rail is the failure this split exists to prevent:
+  // an EVM DID sent down the BTC path would sign a CID with typed data, or
+  // vice versa, and the node would simply refuse with "signature invalid".
+  check('native segwit is p2wpkh', btcAddressType('bc1qewdludr3fpy3k903hqave02ue4xm9ha83c9c0m') === 'p2wpkh');
+  check('a 3… address is p2sh', btcAddressType('3FZbgi29cpjq2GjdwV8eyHuJJnkLtktZc5') === 'p2sh');
+  check('a 1… address is p2pkh', btcAddressType('1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2') === 'p2pkh');
+  // Taproot is refused at DID parse by the node, so guessing a type for it
+  // would send a signature that can never verify.
+  check('taproot is refused, not guessed', btcAddressType('bc1p5cyxnuxmeuwuvkwfem96l0i') === null);
 }
 
 void (async () => {
