@@ -330,11 +330,24 @@ refuses('a bad shape nested deep in objects', { a: { b: { c: undefined } } }, 'u
   refuses('Infinity', { a: Infinity });
   refuses('-Infinity', { a: -Infinity });
   refuses('an integer past 2^53 (already rounded before stringify)', { a: 9007199254740993 });
-  refuses('"<" in a value (Go escapes it, JS does not)', { memo: 'a<b' });
-  refuses('">" in a value', { memo: 'a>b' });
-  refuses('"&" in a value', { memo: 'a & b' });
-  refuses('U+2028 in a value', { memo: 'a\u2028b' });
-  refuses('U+2029 in a value', { memo: 'a\u2029b' });
+  // ★ THESE FIVE ARE NOW MATCHED, NOT REFUSED (2026-08-20). Refusing them was
+  // safe but wrong: it made "Q&A session" an impossible offering title on the
+  // wallet rail while the Hive rail and the contract both accept it. The shell
+  // now escapes exactly as Go does, so the signature verifies AND the content
+  // survives. Proven against the node's real verifier.
+  for (const [label, memo, escaped] of [
+    ['<', 'a<b', 'a\\u003cb'],
+    ['>', 'a>b', 'a\\u003eb'],
+    ['&', 'a & b', 'a \\u0026 b'],
+    ['U+2028', 'a\u2028b', 'a\\u2028b'],
+    ['U+2029', 'a\u2029b', 'a\\u2029b']
+  ] as Array<[string, string, string]>) {
+    const shell = createSigningShell(container({ memo }), identity);
+    check(`"${label}" in a value is ESCAPED the way Go escapes it`, shell.tx[0].payload.includes(escaped), shell.tx[0].payload);
+    // Anti-vacuity: the raw character must NOT survive into the signed string,
+    // or the escape did nothing and the signature would not verify.
+    check(`the raw "${label}" does not reach the signed string`, !shell.tx[0].payload.includes(memo), shell.tx[0].payload);
+  }
 
   // ANTI-VACUITY: the guard must not refuse ordinary content, or every write breaks.
   accepts('a plain space', { memo: 'a b' });

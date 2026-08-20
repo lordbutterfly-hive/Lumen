@@ -5,7 +5,7 @@ import { FC, ReactNode, useMemo, useState } from 'react';
 import { Link, LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { useLiveDiscovery } from '../../live/use-live-discovery';
-import { displayHandle, usdFromHbd } from '../../live/adapt';
+import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
 import type { CreatorSummary } from '../../types';
 import { usdCompact, usdPrice, usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
@@ -78,7 +78,7 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
   const marks = [...Array(Math.min(c.answeredCount, 14)).fill(true), ...Array(Math.min(c.missedCount, 4)).fill(false)] as boolean[];
   return (
     <Link
-      href={`/creators/${displayHandle(c.creator)}`}
+      href={`/creators/${routeHandle(c.creator)}`}
       className="block rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-surface-12"
     >
       <div className="mb-3.5 flex items-center gap-3">
@@ -259,7 +259,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
             {newCreators.map((c) => (
               <Link
                 key={c.creator}
-                href={`/creators/${displayHandle(c.creator)}`}
+                href={`/creators/${routeHandle(c.creator)}`}
                 className="block min-w-[240px] rounded-2xl border border-line-9 bg-surface-1 p-4 transition-colors hover:border-line-17"
               >
                 <div className="mb-3 flex items-center gap-3">

@@ -175,10 +175,10 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
             parties arrange the work between themselves. Showing the reference is
             honest; pretending a message arrived here would not be. */}
       <div className="mb-3 rounded-control border border-line-9 bg-surface-16 px-3.5 py-3 text-caption text-ink-8">
-        Reference <strong className="font-mono">{ask.contentHash || '—'}</strong> · from @{ask.asker}
+        Reference <strong className="font-mono">{ask.contentHash || '—'}</strong> · from @{displayHandle(ask.asker)}
       </div>
       <p className="mb-3 text-caption text-ink-10">
-        Arrange and deliver the work with @{ask.asker} however you normally would. Marking it delivered
+        Arrange and deliver the work with @{displayHandle(ask.asker)} however you normally would. Marking it delivered
         releases the escrow to you — and the buyer then rates it, which is what your token’s reputation is
         built from.
       </p>

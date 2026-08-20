@@ -4,6 +4,7 @@ import { FC, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { Service } from '../../market/token-detail';
 import { buyQuote, serviceQuote } from '../../market/curve';
+import { displayHandle } from '../../live/adapt';
 import { useLiveTokenMarket } from '../../live/use-live-token-market';
 import { useCreatorFollow } from '../../live/use-creator-follow';
 import { MarketLoading, MarketMissing, MarketReadFailed, MarketUnavailable } from '../../live/market-states';
@@ -73,10 +74,15 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   const hasMarket = market !== null;
   const eligibility = useMeritumEligibility();
 
+  // ★ GATED ON CAPABILITY, NOT TIER (2026-08-20). This used to refuse every
+  // lite account outright — correct while no wallet could sign, and wrong the
+  // moment one could. A lite account with a live wallet chain now trades
+  // natively on Magi, signing as its own DID; a lite account WITHOUT one still
+  // cannot, and is told the actual fix rather than being sent to upgrade.
   const writeBlockedReason: string | null = !live.loggedIn
     ? 'Sign in to trade this token.'
-    : live.isLite
-      ? 'This account has no Hive keys yet, so it can’t sign a transaction. Upgrade to a full account to trade.'
+    : !live.canTrade
+      ? 'This account has no key that can sign a transaction yet. Connect an Ethereum wallet, or upgrade to a full Hive account, to trade.'
       : null;
   const writesBlocked = writeBlockedReason !== null;
   // ★ The way OUT of the gate must be clickable (2026-08-07). This page told a
@@ -302,7 +308,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         <span className="h-[60px] w-[60px] flex-shrink-0 rounded-2xl" style={{ background: avatarColor }} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
-            <span className="text-xl font-bold text-ink-2">@{handle}</span>
+            <span className="text-xl font-bold text-ink-2">@{displayHandle(handle)}</span>
           </div>
           {/* No bio and no reputation score here: neither is contract state, and
               the Hive profile is not read on this route yet. The demo showed
@@ -375,7 +381,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               every other page in the feature has exactly one — so a screen-reader
               user navigating by headings had nothing to land on for the single
               most important screen here. Styling unchanged; only the element is. */}
-          <h1 className="text-[15px] leading-[24px] font-bold text-ink-2">@{market.handle} token</h1>
+          <h1 className="text-[15px] leading-[24px] font-bold text-ink-2">@{displayHandle(market.handle)} token</h1>
         </div>
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
           <div>

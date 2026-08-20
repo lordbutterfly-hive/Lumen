@@ -22,6 +22,7 @@
 import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useTokenAccounts } from './use-token-accounts';
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
 import { resolveAskMaxCreditsBaseUnits } from '../market/curve';
 import type { BuyQuote, SellQuote } from '../types';
@@ -90,6 +91,10 @@ export interface LiveTokenMarketResult {
   sessionUnavailable: boolean;
   /** A lite account holds no Hive keys and cannot sign — every money action must be gated on this, not left to fail at the signer. */
   isLite: boolean;
+  /** Can this viewer sign a write at all — by Hive key OR by a live wallet chain? */
+  canTrade: boolean;
+  /** The identity writes are signed AS. */
+  signingIdentity: string | null;
 
   /** buy.go QuoteBuy — the MANDATORY preview before a buy (RULING F). Rejects exactly where a real Buy would. */
   quoteBuy: (tokens: number) => Promise<BuyQuote>;
@@ -129,6 +134,18 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   const loggedIn = isHydrated && user.isLoggedIn;
   const viewer = loggedIn ? user.username : null;
   const isLite = user.account_tier === 'lite';
+
+  // ★ A LITE ACCOUNT IS NO LONGER THE SAME THING AS "CANNOT SIGN" (2026-08-20).
+  // It used to be, and the refusal below said so. Now a lite account whose EVM
+  // wallet is bound signs natively on Magi, so the question changed from "what
+  // TIER is this account" to "does this account hold a key that can sign" —
+  // which is what `canSign` answers, per chain, from proof. `signingAccount` is
+  // the identity that will actually appear in `required_auths`, and every write
+  // is signed AS it: a balance lives under the account that bought it, and
+  // `rate` is caller-gated at the contract (core/rating.go:68), so signing as
+  // the wrong one of a user's identities fails at the chain rather than here.
+  const tokenAccounts = useTokenAccounts();
+  const signingAccount = tokenAccounts.accounts.find((a) => a.canSign) ?? null;
 
   const dataSource = getCreatorTokensDataSource();
   const unavailable = dataSource === null;
@@ -230,9 +247,20 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
       throw new Error('CREATOR_TOKENS_SESSION_UNAVAILABLE: we couldn’t verify you’re signed in just now. Try again in a moment.');
     }
     if (!viewer) throw new Error('CREATOR_TOKENS_SIGNED_OUT: sign in to continue');
-    if (isLite) throw new Error('CREATOR_TOKENS_LITE_ACCOUNT: this account has no Hive keys and cannot sign a transaction');
+    // A lite account signs through its wallet when one of its bound chains is
+    // live; otherwise it genuinely cannot sign and is told so. The message names
+    // the fix (connect a wallet) rather than the tier, because the tier is no
+    // longer the reason.
+    if (isLite) {
+      if (!signingAccount) {
+        throw new Error(
+          'CREATOR_TOKENS_LITE_ACCOUNT: this account has no key that can sign a transaction — connect an Ethereum wallet to trade.'
+        );
+      }
+      return { source: dataSource, signer: signingAccount.id };
+    }
     return { source: dataSource, signer: viewer };
-  }, [dataSource, viewer, isLite, sessionUnavailable]);
+  }, [dataSource, viewer, isLite, signingAccount, sessionUnavailable]);
 
   const buyMutation = useMutation({
     mutationFn: async ({ tokens, maxTotalUsd }: { tokens: number; maxTotalUsd?: number }) => {
@@ -319,6 +347,12 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
     loggedIn,
     sessionUnavailable,
     isLite,
+    // ★ `isLite` is no longer sufficient to gate a write, and every surface that
+    // treated it that way now understates what a wallet user can do. `canTrade`
+    // is the capability, derived from the same per-chain proof `canSign` is.
+    canTrade: !isLite || signingAccount !== null,
+    /** The identity writes are signed AS — a `hive:` name, or a wallet DID. */
+    signingIdentity: (isLite ? signingAccount?.id : viewer) ?? null,
 
     quoteBuy: useCallback(
       (tokens: number) => {

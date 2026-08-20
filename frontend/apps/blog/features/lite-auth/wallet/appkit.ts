@@ -230,6 +230,41 @@ export async function signMessageWith(
   return signature;
 }
 
+/**
+ * Sign EIP-712 typed data with the connected EVM wallet — the TRANSACTION
+ * signer, as opposed to `signMessageWith`'s login/bind proof.
+ *
+ * ★ WHY A SECOND FUNCTION AND NOT A FLAG ON THE FIRST. These sign different
+ * things for different purposes with different failure consequences. A
+ * `personal_sign` proof authenticates a session; a typed-data signature
+ * AUTHORISES A TRANSFER OF VALUE. Keeping them apart means the login path can
+ * never be pointed at a transaction payload by a stray argument, and every
+ * caller of this one is visible in a single grep.
+ *
+ * `typedData` must already carry `types.EIP712Domain` — see `toWalletTypedData`.
+ * It is passed as a JSON STRING because that is what `eth_signTypedData_v4`
+ * takes; a wallet handed an object silently rejects it.
+ */
+export async function signTypedDataWith(address: string, typedData: unknown): Promise<string> {
+  const modal = await getModal();
+  const provider = modal.getProvider<{
+    request: (args: { method: string; params: unknown[] }) => Promise<unknown>;
+  }>('eip155');
+  if (!provider?.request) throw new Error('no_evm_signer');
+
+  const signature = await provider.request({
+    method: 'eth_signTypedData_v4',
+    params: [address, JSON.stringify(typedData)]
+  });
+  if (typeof signature !== 'string') throw new Error('bad_signature_shape');
+  if (!/^0x[0-9a-fA-F]{130}$/.test(signature)) {
+    // A wallet that returns a differently-shaped signature has not signed what
+    // we asked; submitting it would burn a nonce slot to no effect.
+    throw new Error('bad_signature_shape');
+  }
+  return signature;
+}
+
 export async function disconnectWallet(chain?: WalletChain): Promise<void> {
   if (!modalPromise) return;
   const modal = await getModal();

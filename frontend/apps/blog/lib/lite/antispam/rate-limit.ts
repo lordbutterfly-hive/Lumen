@@ -172,11 +172,22 @@ export async function enforceStreakRate(ip: string): Promise<boolean> {
  */
 const MAGI_GQL_PER_IP_PER_DAY = envPositiveInt('LITE_MAGI_GQL_PER_IP_PER_DAY', 10_000);
 
-export async function enforceMagiGqlRate(
-  ip: string,
-  scope: 'creator_tokens' | 'prediction_market'
-): Promise<boolean> {
-  return rateRepo.checkAndConsume(`ip:${ip}`, `${scope}_gql`, MAGI_GQL_PER_IP_PER_DAY, dayKey());
+/**
+ * ★ SUBMITS GET THEIR OWN, MUCH SMALLER BUDGET (2026-08-20). The 10,000/day
+ * above is sized for READS — 15-45s polling from every open tab. A wallet-signed
+ * SUBMIT is a different animal: it is non-idempotent, it consumes a nonce slot,
+ * it costs the signer resource credits, and every real one requires a human to
+ * approve a wallet prompt. Nobody legitimately signs 10,000 transactions a day,
+ * and sharing the read bucket would mean a submit flood silently eats the read
+ * budget for the same IP and takes that user's chain reads offline with it.
+ */
+const MAGI_SUBMIT_PER_IP_PER_DAY = envPositiveInt('LITE_MAGI_SUBMIT_PER_IP_PER_DAY', 500);
+
+export type MagiGqlScope = 'creator_tokens' | 'prediction_market' | 'creator_tokens_submit';
+
+export async function enforceMagiGqlRate(ip: string, scope: MagiGqlScope): Promise<boolean> {
+  const limit = scope === 'creator_tokens_submit' ? MAGI_SUBMIT_PER_IP_PER_DAY : MAGI_GQL_PER_IP_PER_DAY;
+  return rateRepo.checkAndConsume(`ip:${ip}`, `${scope}_gql`, limit, dayKey());
 }
 
 /**

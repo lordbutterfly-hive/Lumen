@@ -13,6 +13,7 @@
  */
 
 import { FC, ReactNode } from 'react';
+import { displayHandle } from './adapt';
 import TokenShell from '../ui/token-shell';
 import { LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
@@ -128,7 +129,7 @@ export const MarketMissing: FC<{ handle: string }> = ({ handle }) => (
   <TokenShell>
     <div className="mt-[26px] rounded-panel border border-line-9 bg-surface-1 p-8 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
       <h1 className="mb-2 font-serif text-[20px] leading-[30px] font-semibold text-ink-2">
-        @{handle} hasn’t launched a token
+        @{displayHandle(handle)} hasn’t launched a token
       </h1>
       <p className="mb-5 max-w-[52ch] text-[14px] leading-[22px] text-ink-10">
         This creator hasn’t opened a market yet, so there’s nothing to buy or spend here.
@@ -150,7 +151,7 @@ export const MarketMissing: FC<{ handle: string }> = ({ handle }) => (
           href={`/@${handle}`}
           className="rounded-card border border-line-11 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-2 hover:bg-surface-16"
         >
-          Back to @{handle}
+          Back to @{displayHandle(handle)}
         </a>
       </div>
     </div>

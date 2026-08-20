@@ -99,6 +99,40 @@ export interface TokenAccounts {
   canSign: boolean;
 }
 
+/**
+ * Can this chain's wallets SIGN a Magi transaction yet?
+ *
+ * Flipped per KIND as each chain is proven end to end, never both at once —
+ * the two rails share a container format and share nothing else.
+ *
+ * ★ evm: TRUE since 2026-08-20, proven on testnet, not merely in a unit test.
+ * A `did:pkh:eip155` identity registered its own market
+ * (tx bafyreicoa3ttbkzq6agipz2vg6luuq55zpxt2cqvzjlabwedjqm2ius72i, INCLUDED,
+ * state `m|did:pkh:…|st` = ACTIVE at block 5,852,790) and then BOUGHT a token
+ * on another creator's market with a `transfer.allow` intent
+ * (bafyreifsv3teq7c5plemu33by6wbnow3vntq5nhqn4bwyq55a3uqsupjnm — supply 30→31,
+ * reserve +1,247, buyer debited 1,371 including fee). Signature produced by
+ * EIP-712 typed data from `vsc-tx/eip712.ts` and verified by the node's own
+ * `lib/dids.EthDID.Verify`.
+ *
+ * ★★ btc: STILL FALSE, and NOT because the crypto is unproven — it is. A real
+ * mainnet `bc1q` BIP-137 signature over the container CID verifies TRUE against
+ * `lib/dids.BtcDID.Verify` after `normalizeBip137Header` rewrites the
+ * native-segwit recovery byte (40 → 32; raw fails with "recovery code 40 is not
+ * in the valid range [27, 34]").
+ *
+ * It stays false because BTC CANNOT BE REHEARSED. `dids.Parse` tries
+ * `ParseEthDID` then `ParseBtcDID` — MAINNET ONLY — and never
+ * `ParseBtcTestnetDID`, and every helper in btc.go is pinned to
+ * `chaincfg.MainNetParams`. So the first Bitcoin transaction this app ever
+ * sends is real mainnet money on a path no testnet run can exercise first.
+ * Flipping this without that decision being made deliberately, by a person,
+ * would spend a user's BTC to find out. See `vsc-tx/btc.ts`.
+ */
+function chainCanSign(kind: TokenAccount['kind']): boolean {
+  return kind === 'evm';
+}
+
 function kindOf(method: string, network: string | null): TokenAccount['kind'] {
   if (method === 'btc_wallet') return 'btc';
   if (method === 'evm_wallet') return 'evm';
@@ -171,11 +205,18 @@ export function useTokenAccounts(): TokenAccounts {
      * by `hive_account_name` (the DB row records it at upgrade), which is a route that
      * does not exist yet. Until it does, this narrows the hole; it does not close it.
      *
-     * `canSign` stays FALSE for the wallet entries and TRUE for the Hive one, which is
-     * the honest split: the Hive account signs with its own keys today, and the wallet
-     * rail is not built (see the note at the top of this file). The derived `canSign`
-     * below is `some(...)`, so the screens still correctly offer signing - they just do
-     * it through the account that can.
+     * `canSign` is TRUE for the Hive one and per-chain for the wallet entries — the
+     * same `chainCanSign` the pure-lite branch uses, so the two paths cannot drift
+     * into disagreeing about what a given wallet can do. The derived `canSign` below
+     * is `some(...)`, so the screens offer signing whenever ANY held account can sign.
+     *
+     * ★ A DUAL USER NOW HAS TWO SIGNERS, AND THAT IS A REAL CHANGE. Before the EVM
+     * rail landed, a Hive+wallet user had exactly one signing identity, so "which
+     * account signs" was never a question. It is now: holdings under the EVM DID must
+     * be acted on BY that DID (`rate` is caller-gated at core/rating.go:68, and a
+     * balance lives under the account that bought it), and a surface that always signs
+     * as `accounts[0]` will refuse at the contract with a message about permissions
+     * rather than about identity.
      */
     const hiveAccount: TokenAccount = { id: user.username, kind: 'hive', address: null, canSign: true };
     const walletAccounts: TokenAccount[] =
@@ -183,7 +224,7 @@ export function useTokenAccounts(): TokenAccounts {
         id: w.did,
         kind: kindOf(w.method, w.network),
         address: w.address,
-        canSign: false
+        canSign: chainCanSign(kindOf(w.method, w.network))
       })) ?? [];
     return {
       accounts: [hiveAccount, ...walletAccounts],
@@ -205,9 +246,7 @@ export function useTokenAccounts(): TokenAccounts {
     id: w.did,
     kind: kindOf(w.method, w.network),
     address: w.address,
-    // FALSE for every wallet identity today: the signing rail is not ported.
-    // Flip per KIND as each chain is proven end to end — never both at once.
-    canSign: false
+    canSign: chainCanSign(kindOf(w.method, w.network))
   }));
 
   return {

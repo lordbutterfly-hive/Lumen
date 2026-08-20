@@ -60,6 +60,9 @@ importers:
       '@codemirror/lang-markdown':
         specifier: ^6.5.0
         version: 6.5.0
+      '@codemirror/language':
+        specifier: 6.12.1
+        version: 6.12.1
       '@codemirror/language-data':
         specifier: ^6.5.2
         version: 6.5.2
@@ -102,6 +105,9 @@ importers:
       '@hive/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@hiveio/beekeeper':
+        specifier: 1.28.6-rc10-stable.260317081625
+        version: 1.28.6-rc10-stable.260317081625
       '@hiveio/healthchecker-component':
         specifier: catalog:hiveio-toolset
         version: 2.0.0-stable.260313120516(@hiveio/wax@1.28.6-rc10-stable.260326112051)(react-dom@18.3.0(react@18.3.0))(react@18.3.0)(tailwindcss@3.4.6(ts-node@10.9.2(@types/node@20.10.4)(typescript@5.3.3)))
@@ -120,6 +126,15 @@ importers:
       '@noble/hashes':
         specifier: 1.4.0
         version: 1.4.0
+      '@radix-ui/react-label':
+        specifier: 2.1.1
+        version: 2.1.1(@types/react-dom@18.3.0)(@types/react@18.3.0)(react-dom@18.3.0(react@18.3.0))(react@18.3.0)
+      '@radix-ui/react-popover':
+        specifier: 1.1.4
+        version: 1.1.4(@types/react-dom@18.3.0)(@types/react@18.3.0)(react-dom@18.3.0(react@18.3.0))(react@18.3.0)
+      '@radix-ui/react-visually-hidden':
+        specifier: 1.1.1
+        version: 1.1.1(@types/react-dom@18.3.0)(@types/react@18.3.0)(react-dom@18.3.0(react@18.3.0))(react@18.3.0)
       '@reown/appkit':
         specifier: 1.8.23
         version: 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)
@@ -237,6 +252,9 @@ importers:
       react-hook-form:
         specifier: ^7.49.2
         version: 7.54.2(react@18.3.0)
+      react-i18next:
+        specifier: 15.4.0
+        version: 15.4.0(i18next@23.16.8)(react-dom@18.3.0(react@18.3.0))(react@18.3.0)
       react-intersection-observer:
         specifier: ^9.5.2
         version: 9.15.0(react-dom@18.3.0(react@18.3.0))(react@18.3.0)
@@ -352,7 +370,7 @@ importers:
         version: 7.37.5(eslint@8.57.1)
       eslint-plugin-turbo:
         specifier: latest
-        version: 2.10.10(eslint@8.57.1)(turbo@2.3.3)
+        version: 2.10.11(eslint@8.57.1)(turbo@2.3.3)
     devDependencies:
       '@typescript-eslint/eslint-plugin':
         specifier: 7.15.0
@@ -6410,8 +6428,8 @@ packages:
   eslint-plugin-security@1.7.1:
     resolution: {integrity: sha512-sMStceig8AFglhhT2LqlU5r+/fn9OwsA72O5bBuQVTssPCdQAOQzL+oMn/ZcpeUY6KcNfLJArgcrsSULNjYYdQ==}
 
-  eslint-plugin-turbo@2.10.10:
-    resolution: {integrity: sha512-COwgw1Nc4vdIQtZLbDPrCAB/m/BiWe9ybacamE1ti/UYFom/Y4PaEaUrsyRugEge8eZEn1yErRv6bRzZUvebSw==}
+  eslint-plugin-turbo@2.10.11:
+    resolution: {integrity: sha512-O8EyyiHpP6sMYVweD1Ix+l9ub21rW3NYE+/VPSuhm2WhPW3AF6mOdlkuJofHA2RMHt6zR3zoiUA4AF15dQPHNA==}
     peerDependencies:
       eslint: '>6.6.0'
       turbo: '>2.0.0'
@@ -7117,6 +7135,9 @@ packages:
 
   html-escaper@2.0.2:
     resolution: {integrity: sha512-H2iMtd0I4Mt5eYiapRdIDjp+XzelXQ0tFE4JS7YFwFevXXMmOp9myNrUvCg0D6ws8iqkRPBfKHgbwig1SmlLfg==}
+
+  html-parse-stringify@3.0.1:
+    resolution: {integrity: sha512-KknJ50kTInJ7qIScF3jeaFRpMpE8/lfiTdzf/twXyPBLAGrLRTmkz3AdTnKeh40X8k9L2fdYwEp/42WGXIRGcg==}
 
   htmlparser2@8.0.2:
     resolution: {integrity: sha512-GYdjWKDkbRLkZ5geuHs5NY1puJ+PXwP7+fHPRz06Eirsb9ugf6d8kkXav6ADhcODhFFPMIXyxkxSuMf3D6NCFA==}
@@ -9270,6 +9291,19 @@ packages:
     peerDependencies:
       react: ^16.8.0 || ^17 || ^18 || ^19
 
+  react-i18next@15.4.0:
+    resolution: {integrity: sha512-Py6UkX3zV08RTvL6ZANRoBh9sL/ne6rQq79XlkHEdd82cZr2H9usbWpUNVadJntIZP2pu3M2rL1CN+5rQYfYFw==}
+    peerDependencies:
+      i18next: '>= 23.2.3'
+      react: '>= 16.8.0'
+      react-dom: '*'
+      react-native: '*'
+    peerDependenciesMeta:
+      react-dom:
+        optional: true
+      react-native:
+        optional: true
+
   react-intersection-observer@9.15.0:
     resolution: {integrity: sha512-qul9TzGgZtHIHAsLOXnRfMWNYCrqjU87HMKhRjwC8l6XSxz2Bo0xmpq5pklaXGj+brx2gSMe8lp1K17mMP2Q8w==}
     peerDependencies:
@@ -10821,6 +10855,10 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
+
+  void-elements@3.1.0:
+    resolution: {integrity: sha512-Dhxzh5HZuiHQhbvTW9AMetFfBHDMYpo23Uo9btPXgdYP+3T5S+p+jgNy7spra+veYhBP2dCSgxR/i2Y02h5/6w==}
+    engines: {node: '>=0.10.0'}
 
   w3c-keyname@2.2.8:
     resolution: {integrity: sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ==}
@@ -18687,7 +18725,7 @@ snapshots:
     dependencies:
       safe-regex: 2.1.1
 
-  eslint-plugin-turbo@2.10.10(eslint@8.57.1)(turbo@2.3.3):
+  eslint-plugin-turbo@2.10.11(eslint@8.57.1)(turbo@2.3.3):
     dependencies:
       dotenv: 16.0.3
       eslint: 8.57.1
@@ -19643,6 +19681,10 @@ snapshots:
       whatwg-encoding: 3.1.1
 
   html-escaper@2.0.2: {}
+
+  html-parse-stringify@3.0.1:
+    dependencies:
+      void-elements: 3.1.0
 
   htmlparser2@8.0.2:
     dependencies:
@@ -21717,6 +21759,15 @@ snapshots:
     dependencies:
       react: 18.3.0
 
+  react-i18next@15.4.0(i18next@23.16.8)(react-dom@18.3.0(react@18.3.0))(react@18.3.0):
+    dependencies:
+      '@babel/runtime': 7.28.4
+      html-parse-stringify: 3.0.1
+      i18next: 23.16.8
+      react: 18.3.0
+    optionalDependencies:
+      react-dom: 18.3.0(react@18.3.0)
+
   react-intersection-observer@9.15.0(react-dom@18.3.0(react@18.3.0))(react@18.3.0):
     dependencies:
       react: 18.3.0
@@ -23557,6 +23608,8 @@ snapshots:
       - bufferutil
       - utf-8-validate
       - zod
+
+  void-elements@3.1.0: {}
 
   w3c-keyname@2.2.8: {}
 

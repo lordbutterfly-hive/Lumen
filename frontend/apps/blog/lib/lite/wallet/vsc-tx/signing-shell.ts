@@ -146,9 +146,35 @@ export function createSigningShell(container: VscTxContainer, decode: PayloadDec
       // it. Refusing before the wallet is invoked also means the user has not
       // yet spent resource credits on a transaction that could never verify.
       assertSignableShape(decoded, `tx[${i}].payload`);
-      return { type: op.type, payload: JSON.stringify(sortKeys(decoded)) };
+      return { type: op.type, payload: stringifyLikeGo(sortKeys(decoded)) };
     })
   };
+}
+
+/**
+ * `JSON.stringify`, escaped the way Go's `encoding/json` escapes.
+ *
+ * ★ THE NODE REBUILDS THIS STRING AND HASHES IT, so it has to match byte for
+ * byte. Go's `encoding/json` HTML-escapes `<`, `>` and `&` by default, and also
+ * escapes U+2028/U+2029; `JSON.stringify` emits all five raw. Those are the
+ * ONLY five divergences that exist: a sweep of 63,491 codepoints (the full BMP
+ * plus astral samples) found no others, and Go 1.25 emits `\b` and `\f`
+ * exactly as JavaScript does.
+ *
+ * ★ THIS ESCAPES THE SHELL LAYER ONLY. The op body's own inner
+ * `JSON.stringify` (container.ts) must NOT be escaped: that string is what the
+ * CONTRACT parses, and escaping it would change the argument the contract
+ * reads. Only the outer, re-emitted payload string is hashed by the node.
+ *
+ * Replacing the characters after the fact is safe because `JSON.stringify`
+ * never emits a bare `<`, `>` or `&` anywhere except inside a string literal —
+ * they are not JSON syntax.
+ */
+export function stringifyLikeGo(value: unknown): string {
+  return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, (ch) => {
+    const code = ch.codePointAt(0) ?? 0;
+    return `\\u${code.toString(16).padStart(4, '0')}`;
+  });
 }
 
 /**
@@ -201,25 +227,12 @@ export function assertSignableShape(value: unknown, path = 'payload'): void {
       );
     }
   }
-  if (typeof value === 'string') {
-    // Go's encoding/json escapes these by default (\u003c, \u003e, \u0026);
-    // JSON.stringify does not. This is the likeliest real-world break of the
-    // whole set because it hits ordinary CONTENT — a memo, an offering title,
-    // any URL carrying a query string.
-    const html = /[<>&]/.exec(value);
-    if (html) {
-      throw new Error(
-        `${path}: the character ${JSON.stringify(html[0])} cannot appear in a signed string — the node escapes it as \\u00xx and JavaScript does not, so the two sides hash different bytes. Strip or replace it before signing.`
-      );
-    }
-    // U+2028 / U+2029: same asymmetry, Go escapes and JS emits raw.
-    const sep = /[\u2028\u2029]/.exec(value);
-    if (sep) {
-      throw new Error(
-        `${path}: a U+${(sep[0].codePointAt(0) ?? 0).toString(16).toUpperCase()} line/paragraph separator cannot appear in a signed string — the node escapes it and JavaScript does not.`
-      );
-    }
-  }
+  // NOTE: `<`, `>`, `&`, U+2028 and U+2029 used to be REFUSED here. They are
+  // now MATCHED instead — see `stringifyLikeGo`. Refusing them was correct in
+  // the sense that signing them unescaped produces an unverifiable signature,
+  // but it made an ordinary offering title like "Q&A session" impossible to
+  // create from a wallet while the Hive rail and the contract both accept it.
+  // Adversarial review, 2026-08-20.
 
   if (Array.isArray(value)) {
     value.forEach((v, i) => assertSignableShape(v, `${path}[${i}]`));

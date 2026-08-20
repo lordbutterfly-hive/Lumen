@@ -114,7 +114,12 @@ async function main(): Promise<void> {
     await throws(
       'a null balance record throws rather than reading as 0',
       () => readMagiSpendingPower('http://x', 'hive:a'),
-      'no balance record'
+      // ★ Matched to the message the code ACTUALLY throws. This expected
+      // 'no balance record' while `readMagiSpendingPower` says "no record at
+      // all", so the assertion never matched and the check has been failing —
+      // i.e. inert — since the both-null branch was reworded. Pre-existing;
+      // found while sweeping the suite on 2026-08-20.
+      'no record at all'
     );
     restore();
   }

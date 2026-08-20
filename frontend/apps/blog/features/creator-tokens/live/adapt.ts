@@ -54,13 +54,43 @@ import { BLOCKS_PER_DAY } from '../lib/contract-math';
  * was wrong, which is why it survived hand-testing by anyone who typed a
  * handle directly.
  *
- * Only the `hive:` scheme is stripped. A `did:pkh:…` creator keeps its full
- * identifier: there is no shorter form of it, and truncating one would produce
- * a handle that does not resolve.
+ * ★ TWO FUNCTIONS, BECAUSE A LINK AND A LABEL WANT DIFFERENT THINGS. `hive:`
+ * accounts made them look like one job: strip the scheme and you have both a
+ * readable handle and a working route. A wallet creator breaks that. Since
+ * 2026-08-20 an EVM identity can launch its own market, and its account id is
+ * `did:pkh:eip155:1:0x…` — 68 characters, which rendered on the discovery page
+ * as a full-width unreadable `@did:pkh:eip155:1:0xB41f…980B` sitting next to
+ * `@lumen.aria`. Truncating it in one place would have been the obvious fix and
+ * the wrong one, because the SAME value is the href, and a shortened DID does
+ * not resolve.
+ *
+ * So: `routeHandle` is what goes in a URL, `displayHandle` is what a person
+ * reads. Use the wrong one and either the link 404s or the layout breaks.
+ */
+export function routeHandle(account: string | null | undefined): string {
+  if (!account) return '';
+  return account.startsWith('hive:') ? account.slice('hive:'.length) : account;
+}
+
+/** How long a wallet address reads before it stops being scannable. */
+const DID_HEAD = 6;
+const DID_TAIL = 4;
+
+/**
+ * The human-readable form. `hive:alice` → `alice`; a wallet DID collapses to
+ * the familiar `0xB41fEE…980B` shortening every wallet UI uses, so it sits
+ * beside a Hive handle instead of dwarfing it. NEVER put this in a URL.
  */
 export function displayHandle(account: string | null | undefined): string {
   if (!account) return '';
-  return account.startsWith('hive:') ? account.slice('hive:'.length) : account;
+  if (account.startsWith('hive:')) return account.slice('hive:'.length);
+
+  const address = /^did:pkh:[^:]+:[^:]+:(.+)$/.exec(account)?.[1];
+  if (!address) return account;
+  // A short address (or an unexpected shape) is left alone rather than being
+  // mangled into something shorter than the ellipsis it would replace.
+  if (address.length <= DID_HEAD + DID_TAIL + 3) return address;
+  return `${address.slice(0, DID_HEAD)}…${address.slice(-DID_TAIL)}`;
 }
 
 export function usdFromHbd(hbd: number): number {

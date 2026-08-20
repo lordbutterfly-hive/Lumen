@@ -37,6 +37,8 @@ import type {
 } from '../types';
 import { MockCreatorTokensDataSource } from './mock/mock-data-source';
 import { hiveTransactionBroadcaster } from './vsc/broadcaster';
+import { routingBroadcaster } from './vsc/wallet-broadcaster';
+import { signTypedDataWith } from '@/blog/features/lite-auth/wallet/appkit';
 import { VscCreatorTokensDataSource } from './vsc-data-source';
 
 // Protocol constants, money conversion and every ported piece of core/*.go's
@@ -256,7 +258,17 @@ export function getCreatorTokensDataSource(): CreatorTokensDataSource | null {
   if (!instance) {
     const config = getCreatorTokensConfig();
     if (config) {
-      instance = new VscCreatorTokensDataSource({ config, broadcaster: hiveTransactionBroadcaster });
+      // ★ ROUTED, not replaced (2026-08-20). `required_auths[0]` decides the
+      // rail: a `hive:` account signs a Hive custom_json exactly as before, and
+      // a `did:pkh:eip155` identity signs a native Magi container with its EVM
+      // wallet. Routing HERE rather than at each call site means all 24 write
+      // actions gained the wallet rail at once, through the same `buildOp` that
+      // already enforces the payload and auth contracts. A Hive user's path is
+      // byte-identical to what it was before this line changed.
+      instance = new VscCreatorTokensDataSource({
+        config,
+        broadcaster: routingBroadcaster(hiveTransactionBroadcaster, signTypedDataWith)
+      });
     } else if (isCreatorTokensDemoEnabled()) {
       instance = new MockCreatorTokensDataSource();
     } else {
