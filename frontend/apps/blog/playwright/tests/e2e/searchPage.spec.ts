@@ -154,39 +154,6 @@ test.describe('Search page tests', () => {
     await expect(page.locator('html')).not.toHaveClass(/dark/);
   });
 
-  test('search input styles in dark theme', async ({ page }) => {
-    test.skip(isProductionEnvironment(), PRODUCTION_DROPDOWN_BUG);
-    await searchPage.goto();
-
-    // Switch to dark mode
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
-
-    // Verify search input is visible and functional in dark mode
-    await expect(searchPage.searchInput).toBeVisible();
-    await expect(searchPage.searchButton).toBeVisible();
-  });
-
-  test('search results styles in light and dark theme', async ({ page }) => {
-    test.skip(isProductionEnvironment(), PRODUCTION_DROPDOWN_BUG);
-    await searchPage.gotoWithClassicQuery('hive', 'relevance');
-
-    await searchPage.waitForSearchResults();
-
-    const resultsCount = await searchPage.getResultsCount();
-    if (resultsCount > 0) {
-      // Light theme - verify author is visible
-      await expect(searchPage.firstPostAuthor).toBeVisible();
-
-      // Switch to dark theme
-      await homePage.changeThemeMode('Dark');
-      await homePage.validateDarkModeByClass();
-
-      // Dark theme - verify author is still visible
-      await expect(searchPage.firstPostAuthor).toBeVisible();
-    }
-  });
-
   /**
    * NAVIGATION TESTS
    */

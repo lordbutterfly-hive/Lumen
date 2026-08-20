@@ -315,8 +315,6 @@ test.describe('Voting tests with fixture and POM', () => {
       const firstPostUpvoteButtonLocatorToClick = homePage.getFirstPostUpvoteButton;
 
       // Set the dark theme
-      await profileMenu.setTheme('Dark');
-      await profileMenu.page.waitForTimeout(500);
 
       if (
         (await homePage.getElementCssPropertyValue(firstPostUpvoteButtonLocator, 'color')) == darkModeRedColor
@@ -378,8 +376,6 @@ test.describe('Voting tests with fixture and POM', () => {
       const firstPostUpvoteButtonLocatorToClick = homePage.getFirstPostUpvoteButton;
 
       // Set the dark theme
-      await profileMenu.setTheme('Dark');
-      await profileMenu.page.waitForTimeout(500);
 
       if (
         (await homePage.getElementCssPropertyValue(firstPostUpvoteButtonLocator, 'color')) ==
@@ -573,8 +569,6 @@ test.describe('Voting tests with fixture and POM', () => {
       const secondPostDownvoteButtonLocatorToClick = homePage.getSecondPostDownvoteButton;
 
       // Set the dark theme
-      await profileMenu.setTheme('Dark');
-      await profileMenu.page.waitForTimeout(500);
 
       if (
         (await homePage.getElementCssPropertyValue(secondPostDownvoteButtonLocator, 'color')) ==
@@ -637,8 +631,6 @@ test.describe('Voting tests with fixture and POM', () => {
       const secondPostDownvoteButtonLocatorToClick = homePage.getSecondPostDownvoteButton;
 
       // Set the dark theme
-      await profileMenu.setTheme('Dark');
-      await profileMenu.page.waitForTimeout(500);
 
       if (
         (await homePage.getElementCssPropertyValue(secondPostDownvoteButtonLocator, 'color')) ==

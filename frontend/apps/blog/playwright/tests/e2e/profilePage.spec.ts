@@ -257,29 +257,6 @@ test.describe('Profile page of @gtg', () => {
     ).toBe('rgb(24, 30, 42)');
   });
 
-  test('The Follow button changes color when you hover over it (Dark theme)', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    await expect.poll(async () => {
-      return await profilePage.getElementCssPropertyValue(profilePage.followButton, 'color');
-    }).toBe('rgb(2, 2, 5)');
-    await expect.poll(async () => {
-      return await profilePage.getElementCssPropertyValue(profilePage.followButton, 'background-color');
-    }).toBe('rgb(248, 250, 252)');
-
-    await profilePage.followButton.hover();
-    // Wait for hover color to change
-    await expect.poll(async () => {
-      return await profilePage.getElementCssPropertyValue(profilePage.followButton, 'color');
-    }).toBe('rgb(246, 85, 85)');
-    await expect.poll(async () => {
-      return await profilePage.getElementCssPropertyValue(profilePage.followButton, 'background-color');
-    }).toBe('rgb(248, 250, 252)');
-  });
-
   test("User Banner Row - Description",async ({page}) =>{
     await profilePage.gotoProfilePage('@gtg');
     await expect(profilePage.profileInfo).toBeVisible()

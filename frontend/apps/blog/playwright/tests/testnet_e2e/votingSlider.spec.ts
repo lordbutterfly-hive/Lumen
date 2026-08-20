@@ -302,8 +302,6 @@ test.describe('Test for slider voting', () => {
       const profileMenu: ProfileUserMenu = new ProfileUserMenu(denserAutoTest3Page.page);
 
       // Set the dark theme
-      await profileMenu.setTheme('Dark');
-      await profileMenu.page.waitForTimeout(500);
 
       const firstPostUpvoteButtonLocatorToClick: Locator = homePage.getFirstPostUpvoteButton;
       await firstPostUpvoteButtonLocatorToClick.click();
@@ -663,8 +661,6 @@ test.describe('Test for slider voting', () => {
       const profileMenu: ProfileUserMenu = new ProfileUserMenu(denserAutoTest3Page.page);
 
       // Set the dark theme
-      await profileMenu.setTheme('Dark');
-      await profileMenu.page.waitForTimeout(500);
 
       const firstPostDownvoteButtonLocatorToClick: Locator = homePage.getFirstPostDownvoteButton;
       await firstPostDownvoteButtonLocatorToClick.click();

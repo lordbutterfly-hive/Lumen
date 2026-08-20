@@ -61,42 +61,6 @@ test.describe('Comments of post', () => {
     ).toBe('rgb(225, 231, 239)');
   });
 
-  test('Validate a hovered comment changes backgroundcolor style in the dark mode', async ({
-    page,
-    browserName
-  }) => {
-    test.skip(browserName === 'firefox', 'Automatic test works well on chromium');
-    await homePage.goto();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-    await navigateToPostWithVisibleCommentsOrSkip(page, homePage, postPage);
-
-    await postPage.commentCardsHeaders.first().scrollIntoViewIfNeeded();
-    if (await postPage.commentCardsDescriptions.first().isHidden())
-      await postPage.commentCardsHeaders.first().click();
-
-    // Move cursor away to clear any hover state from clicking
-    await page.mouse.move(0, 0);
-
-    // Before hover
-    expect(
-      await postPage.getElementCssPropertyValue(
-        postPage.commentContentToHover.first(),
-        'background-color'
-      )
-    ).toBe('rgba(0, 0, 0, 0)');
-
-    // After hover
-    await postPage.commentContentToHover.first().hover();
-    await postPage.commentContentToHover.first().waitFor({state:'visible'});
-    expect(
-      await postPage.getElementCssPropertyValue(
-        postPage.commentContentToHover.first(),
-        'background-color'
-      )
-    ).toBe('rgb(56, 66, 82)');
-  });
-
   test('move to the comment view page of the first comment of the first post', async ({ page }) => {
     const commentViewPage = new CommentViewPage(page);
 
@@ -354,93 +318,6 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
     await expect(atrTitle).toContain('Fri Jun 18 2021');
   });
 
-  test('Validate the first comment author link styles in the post in the dark mode', async ({ page }) => {
-    await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
-
-    // Move to the dark theme
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    await postPage.page.waitForSelector(postPage.commentAuthorLink.first()['_selector']);
-    await expect(postPage.commentAuthorLink.first()).toBeVisible();
-    // Color of the author of the first comment without hovering
-    expect(
-      await postPage.getElementCssPropertyValue(
-        await postPage.commentAuthorLink.first(),
-        'color'
-      )
-    ).toBe('rgb(225, 231, 239)');
-    // Color of the author of the first comment after hovering
-    await postPage.commentAuthorLink.first().hover();
-    await homePage.page.waitForTimeout(1000);
-    expect(
-      await postPage.getElementCssPropertyValue(
-        await postPage.commentAuthorLink.first(),
-        'color'
-      )
-    ).toBe('rgb(246, 85, 85)');
-
-    // Validate the user info popover card is visible
-    await postPage.commentAuthorLink.first().click();
-    await expect(postPage.userPopoverCard).toBeVisible();
-  });
-
-  test('Validate the first comment reputation styles in the post in the dark mode', async ({ page }) => {
-    await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
-
-    // Move to the dark theme
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    await postPage.page.waitForSelector(postPage.commentAuthorLink.first()['_selector']);
-    await expect(postPage.commentAuthorLink.first()).toBeVisible();
-    // Color of the reputation of the first comment without hovering
-    expect(
-      await postPage.getElementCssPropertyValue(await postPage.commentAuthorReputation.first(), 'color')
-    ).toBe('rgb(127, 142, 163)');
-    // Color of the reputation of the first comment after hovering
-    await postPage.commentAuthorReputation.first().hover();
-    await homePage.page.waitForTimeout(500);
-    expect(
-      await postPage.getElementCssPropertyValue(await postPage.commentAuthorReputation.first(), 'color')
-    ).toBe('rgb(127, 142, 163)');
-
-    // Validate the tooltip of reputation
-    const atrTitle = await postPage.commentAuthorReputation.first().getAttribute('title');
-    await expect(atrTitle).toBe('Reputation');
-  });
-
-  test('Validate the first comment timestamp styles in the post in the dark mode', async ({ page }) => {
-    await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
-
-    // Move to the dark theme
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    await postPage.page.waitForSelector(postPage.commentAuthorLink.first()['_selector']);
-    await expect(postPage.commentAuthorLink.first()).toBeVisible();
-    // Color of the timestamp of the first comment without hovering
-    expect(
-      await postPage.getElementCssPropertyValue(
-        await postPage.commentCardsHeadersTimeStampLink.first(),
-        'color'
-      )
-    ).toBe('rgb(248, 250, 252)');
-    // Color of the timestamp of the first comment after hovering
-    await postPage.commentCardsHeadersTimeStampLink.first().hover();
-    await homePage.page.waitForTimeout(1000);
-    expect(
-      await postPage.getElementCssPropertyValue(
-        await postPage.commentCardsHeadersTimeStampLink.first(),
-        'color'
-      )
-    ).toBe('rgb(246, 85, 85)');
-
-    // Validate the timestamp tooltip
-    const atrTitle = await postPage.commentCardsHeadersTimeStampLink.first().getAttribute('title');
-    await expect(atrTitle).toContain('Fri Jun 18 2021');
-  });
-
   test('Validate the popover card name, nickname and avatar is displayed after click username in the post', async ({
     page
   }) => {
@@ -594,71 +471,6 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
     );
     expect(await postPage.getElementCssPropertyValue(postPage.buttonFollowPopoverCard, 'border-style')).toBe(
       'solid'
-    );
-  });
-
-  test('Validate Follow button style in the popover card of the first comment author in dark theme', async ({
-    page
-  }) => {
-    await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
-
-    // move to the dark mode
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    await postPage.page.waitForSelector(postPage.commentAuthorLink.first()['_selector']);
-    await expect(postPage.commentAuthorLink.first()).toBeVisible();
-    // Click the first comment author link
-    await postPage.commentAuthorLink.first().click();
-    await page.waitForSelector(await postPage.userAboutPopoverCard['_selector']);
-
-    // button styles
-    expect(await postPage.getElementCssPropertyValue(postPage.buttonFollowPopoverCard, 'color')).toBe(
-      'rgb(2, 2, 5)'
-    );
-    expect(
-      await postPage.getElementCssPropertyValue(postPage.buttonFollowPopoverCard, 'background-color')
-    ).toBe('rgb(248, 250, 252)');
-    expect(await postPage.getElementCssPropertyValue(postPage.buttonFollowPopoverCard, 'border-color')).toBe(
-      'rgb(29, 40, 58)'
-    );
-    expect(await postPage.getElementCssPropertyValue(postPage.buttonFollowPopoverCard, 'border-style')).toBe(
-      'solid'
-    );
-
-    // button styles when hovered over it
-    await postPage.buttonFollowPopoverCard.hover();
-    await postPage.page.waitForTimeout(1000);
-
-    expect(await postPage.getElementCssPropertyValue(postPage.buttonFollowPopoverCard, 'color')).toBe(
-      'rgb(246, 85, 85)'
-    );
-    expect(
-      await postPage.getElementCssPropertyValue(postPage.buttonFollowPopoverCard, 'background-color')
-    ).toBe('rgb(248, 250, 252)');
-    expect(await postPage.getElementCssPropertyValue(postPage.buttonFollowPopoverCard, 'border-color')).toBe(
-      'rgb(29, 40, 58)'
-    );
-    expect(await postPage.getElementCssPropertyValue(postPage.buttonFollowPopoverCard, 'border-style')).toBe(
-      'solid'
-    );
-  });
-
-  test('Validate styles of the popover card of the first comment author in dark mode', async ({ page }) => {
-    await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
-
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    // Popover the first comment author link
-    await postPage.commentAuthorLink.first().click();
-    await page.waitForSelector(await postPage.userAboutPopoverCard['_selector']);
-
-    expect(await postPage.getElementCssPropertyValue(postPage.userPopoverCard, 'background-color')).toBe(
-      'rgb(44, 48, 53)'
-    );
-    expect(await postPage.getElementCssPropertyValue(postPage.userPopoverCard, 'color')).toBe(
-      'rgb(148, 163, 184)'
     );
   });
 

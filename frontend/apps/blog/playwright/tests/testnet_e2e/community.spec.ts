@@ -239,10 +239,6 @@ test.describe('Test for commonities in the blog app', () => {
         const communityExplorerPage: CommunitiesExplorePage = new CommunitiesExplorePage(denserAutoTest3Page.page);
         const photographyLoversCommunityLocator: Locator = denserAutoTest3Page.page.locator('[href="/trending/hive-100006"]');
 
-        // Change theme to Dark
-        await profileMenu.setTheme('Dark');
-        await profileMenu.page.waitForTimeout(500);
-        await homePage.validateThemeModeIsDark();
         // Validate the Photography Lovers link is in My subscriptions
         await denserAutoTest3Page.page.waitForSelector(photographyLoversCommunityLocator['_selector']);
         await expect(photographyLoversCommunityLocator).toHaveText(communityName);

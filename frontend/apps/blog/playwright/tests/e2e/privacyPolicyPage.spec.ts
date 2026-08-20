@@ -56,42 +56,6 @@ test.describe('Privacy Policy page tests', () => {
     expect(paragrafFontSize).toBe('14px');
   });
 
-  test('validate styles in the Privacy Policy in the dark mode', async ({ page, browserName }) => {
-    test.skip(browserName === 'firefox' || browserName === "webkit", 'Automatic test works well on chromium');
-    await homePage.goto();
-    await homePage.moveToPrivacyPolicyPage();
-    // move to the dark mode
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    // Validate subtitle styles of the privacy policy page
-    const subtitleColor = await privacyPolicyPage.getElementCssPropertyValue(
-      privacyPolicyPage.firstSubtitle,
-      'color'
-    );
-    expect(subtitleColor).toBe('rgb(255, 255, 255)');
-    const subtitleFontSize = await privacyPolicyPage.getElementCssPropertyValue(
-      privacyPolicyPage.firstSubtitle,
-      'font-size'
-    );
-    expect(subtitleFontSize).toBe('30px');
-    const backgroundColorPage = await privacyPolicyPage.getElementCssPropertyValue(
-      privacyPolicyPage.mainElement,
-      'background-color'
-    );
-    expect(backgroundColorPage).toBe('rgba(0, 0, 0, 0)');
-    const paragrafColor = await privacyPolicyPage.getElementCssPropertyValue(
-      privacyPolicyPage.firstParagraf,
-      'color'
-    );
-    expect(paragrafColor).toBe('rgb(255, 255, 255)');
-    const paragrafFontSize = await privacyPolicyPage.getElementCssPropertyValue(
-      privacyPolicyPage.firstParagraf,
-      'font-size'
-    );
-    expect(paragrafFontSize).toBe('14px');
-  });
-
   test('validate text of header menu on the Privacy Policy page', async ({ page }) => {
     await homePage.goto();
     await homePage.moveToPrivacyPolicyPage();

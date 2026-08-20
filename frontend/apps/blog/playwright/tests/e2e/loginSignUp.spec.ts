@@ -45,24 +45,6 @@ test.describe('Login and Sign Up tests', () =>{
     await expect(homePage.signupBtn).toHaveCSS('background-color', 'rgb(220, 38, 38)');
   });
 
-  test('Check if login and sign up buttons are displayed correctly - dark mode', async ({ page }) => {
-    await homePage.changeThemeMode("Dark")
-    await expect(homePage.loginBtn).toBeVisible()
-    // expect(await homePage.getElementCssPropertyValue(homePage.loginBtn, 'color')).toBe("rgb(52, 60, 77)");
-    await expect(homePage.loginBtn).toHaveText("Login")
-    await homePage.loginBtn.hover()
-    // Wait for hover state with auto-retry instead of fixed timeout
-    await expect(homePage.loginBtn).toHaveCSS('color', 'rgb(246, 85, 85)');
-
-    await expect(homePage.signupBtn).toBeVisible()
-    expect(await homePage.getElementCssPropertyValue(homePage.signupBtn, 'color')).toBe("rgb(255, 255, 255)");
-    await expect(homePage.signupBtn).toHaveText("Sign up")
-    await homePage.signupBtn.hover()
-    // Wait for hover state with auto-retry instead of fixed timeout
-    await expect(homePage.signupBtn).toHaveCSS('background-color', 'rgb(220, 38, 38)');
-    await homePage.changeThemeMode("Light")
-  });
-
   test('Check if after click login button correct modal is open', async ({page}) =>{
     const loginFormDefaut = new LoginForm(page);
 
@@ -346,39 +328,6 @@ test.describe('Login and Sign Up tests', () =>{
     expect(await homePage.getElementCssPropertyValue(await loginForm.otherSignInOptionsButton, 'background-color')).toBe("rgb(241, 245, 249)");
   });
 
-  test('Check if Sign in with safe storage styles are correct in the dark mode', async ({ page, browserName }) => {
-    test.skip(browserName === 'webkit', 'Automatic test works well on chromium');
-    test.skip(browserName === 'firefox', 'Automatic test works well on chromium');
-
-    const loginForm = new LoginForm(page);
-
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    await homePage.loginBtn.click()
-    await loginForm.validateDefaultLoginFormIsLoaded();
-    // Default - empty Sign in with safe stroage form
-    // Color and background color of the form
-    expect(await homePage.getElementCssPropertyValue(await loginForm.loginDialog, 'color')).toBe("rgb(255, 255, 255)");
-    expect(await homePage.getElementCssPropertyValue(await loginForm.loginDialog, 'background-color')).toBe("rgb(44, 48, 53)");
-    // Header color
-    expect(await homePage.getElementCssPropertyValue(await loginForm.loginFormHeader, 'color')).toBe("rgb(255, 255, 255)");
-    // Description color
-    expect(await homePage.getElementCssPropertyValue(await loginForm.loginFormDescription, 'color')).toBe("rgb(127, 142, 163)");
-    // Username input text color
-    expect(await homePage.getElementCssPropertyValue(await loginForm.usernameInput, 'color')).toBe("rgb(255, 255, 255)");
-    // Safe storage password input text color
-    expect(await homePage.getElementCssPropertyValue(await loginForm.passwordInput, 'color')).toBe("rgb(255, 255, 255)");
-    // WIF posting private key input text color
-    expect(await homePage.getElementCssPropertyValue(await loginForm.wifInput, 'color')).toBe("rgb(255, 255, 255)");
-    // Save and sign in button color when disabled
-    expect(await homePage.getElementCssPropertyValue(await loginForm.saveSignInButton, 'color')).toBe("rgb(255, 255, 255)");
-    expect(await homePage.getElementCssPropertyValue(await loginForm.saveSignInButton, 'background-color')).toBe("rgb(220, 38, 38)");
-    // Other sign in options background-color and text color
-    expect(await homePage.getElementCssPropertyValue(await loginForm.otherSignInOptionsButton, 'color')).toBe("rgb(248, 250, 252)");
-    expect(await homePage.getElementCssPropertyValue(await loginForm.otherSignInOptionsButton, 'background-color')).toBe("rgb(15, 23, 42)");
-  });
-
   test('Check if Other sign in options styles are correct in the light mode', async ({ page }) => {
     const loginForm = new LoginForm(page);
 
@@ -405,41 +354,6 @@ test.describe('Login and Sign Up tests', () =>{
     expect(await homePage.getElementCssPropertyValue(await loginForm.hiveAuthButton, 'background-color')).toBe("rgba(0, 0, 0, 0)");
     // HiveSigner button
     expect(await homePage.getElementCssPropertyValue(await loginForm.hiveSignerButton, 'color')).toBe("rgb(15, 23, 42)");
-    expect(await homePage.getElementCssPropertyValue(await loginForm.hiveSignerButton, 'background-color')).toBe("rgba(0, 0, 0, 0)");
-  });
-
-  test('Check if Other sign in options styles are correct in the dark mode', async ({ page, browserName }) => {
-    test.skip(browserName === 'webkit', 'Automatic test works well on chromium');
-    test.skip(browserName === 'firefox', 'Automatic test works well on chromium');
-
-    const loginForm = new LoginForm(page);
-
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    await homePage.loginBtn.click()
-    await loginForm.validateDefaultLoginFormIsLoaded();
-    // Move to the Other sign in options
-    await loginForm.otherSignInOptionsButton.click();
-    // Default - empty Other sign in options form
-    // Color and background color of the form
-    expect(await homePage.getElementCssPropertyValue(await loginForm.loginDialog, 'color')).toBe("rgb(255, 255, 255)");
-    expect(await homePage.getElementCssPropertyValue(await loginForm.loginDialog, 'background-color')).toBe("rgb(44, 48, 53)");
-    // Header color
-    expect(await homePage.getElementCssPropertyValue(await loginForm.otherSignInOptionsHeader, 'color')).toBe("rgb(255, 255, 255)");
-    // Description color
-    expect(await homePage.getElementCssPropertyValue(await loginForm.otherSignInOptionsDescription, 'color')).toBe("rgb(127, 142, 163)");
-    // Username input text color
-    expect(await homePage.getElementCssPropertyValue(await loginForm.otherSignInOptionsUsernameInput, 'color')).toBe("rgb(255, 255, 255)");
-    // Keychain Extension Button Color
-    expect(await homePage.getElementCssPropertyValue(await loginForm.hiveKeychainExtensionButton, 'color')).toBe("rgb(255, 255, 255)");
-    // WIF button color
-    expect(await homePage.getElementCssPropertyValue(await loginForm.signInWithWifButton, 'color')).toBe("rgb(255, 255, 255)");
-    // HiveAuth button
-    expect(await homePage.getElementCssPropertyValue(await loginForm.hiveAuthButton, 'color')).toBe("rgb(255, 255, 255)");
-    expect(await homePage.getElementCssPropertyValue(await loginForm.hiveAuthButton, 'background-color')).toBe("rgba(0, 0, 0, 0)");
-    // HiveSigner button
-    expect(await homePage.getElementCssPropertyValue(await loginForm.hiveSignerButton, 'color')).toBe("rgb(255, 255, 255)");
     expect(await homePage.getElementCssPropertyValue(await loginForm.hiveSignerButton, 'background-color')).toBe("rgba(0, 0, 0, 0)");
   });
 
@@ -487,59 +401,6 @@ test.describe('Login and Sign Up tests', () =>{
     expect(await homePage.getElementCssPropertyValue(await loginForm.wifInputErrorMessage, 'color')).toBe("rgb(218, 43, 43)");
   });
 
-  test('Validate styles in the error message for wrong username in the dark mode', async ({page}) =>{
-    const loginForm = new LoginForm(page);
-
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    await homePage.loginBtn.click()
-    await loginForm.validateDefaultLoginFormIsLoaded();
-    // Type username with less then 3 characters into the username login form
-    await loginForm.usernameInput.fill('ak');
-    expect(await homePage.getElementCssPropertyValue(await loginForm.usernameErrorMessage, 'color')).toBe("rgb(246, 85, 85)");
-    // Type empty string into the username login form
-    await loginForm.usernameInput.fill('');
-    expect(await homePage.getElementCssPropertyValue(await loginForm.usernameErrorMessage, 'color')).toBe("rgb(246, 85, 85)");
-  });
-
-  test('Validate styles in the error message for too short password in the dark mode', async ({page}) =>{
-    const loginForm = new LoginForm(page);
-
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    await homePage.loginBtn.click()
-    await loginForm.validateDefaultLoginFormIsLoaded();
-    // Type Safe storage password with less then 6 characters into the password login form
-    await loginForm.passwordInput.fill('ako');
-    await loginForm.page.waitForSelector(loginForm.passwordErrorMessage['_selector']);
-    expect(await homePage.getElementCssPropertyValue(await loginForm.passwordErrorMessage, 'color')).toBe("rgb(246, 85, 85)");
-    // Type empty string into the safe storage password in the login form
-    await loginForm.passwordInput.fill('');
-    await loginForm.page.waitForSelector(loginForm.passwordErrorMessage['_selector']);
-    expect(await homePage.getElementCssPropertyValue(await loginForm.passwordErrorMessage, 'color')).toBe("rgb(246, 85, 85)");
-  });
-
-  test('Validate styles in the error message for wrong WIF format in the dark mode', async ({page}) =>{
-    const loginForm = new LoginForm(page);
-
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    await homePage.loginBtn.click()
-    await loginForm.validateDefaultLoginFormIsLoaded();
-    // Type username (more than 3 chars)
-    await loginForm.page.waitForSelector(loginForm.usernameInput['_selector']);
-    await loginForm.usernameInput.fill(user.username);
-    // Type wrong WIF format to the input
-    await loginForm.wifInput.fill('wrongWif');
-    expect(await homePage.getElementCssPropertyValue(await loginForm.wifInputErrorMessage, 'color')).toBe("rgb(246, 85, 85)");
-    // Type empty string to the WIF input
-    await loginForm.wifInput.fill('');
-    expect(await homePage.getElementCssPropertyValue(await loginForm.wifInputErrorMessage, 'color')).toBe("rgb(246, 85, 85)");
-  });
-
   test('Validate styles of the Invalid WIF checksum in the Enter your WIF form in the light mode', async ({page}) =>{
     const loginForm = new LoginForm(page);
 
@@ -580,22 +441,4 @@ test.describe('Login and Sign Up tests', () =>{
     expect(await homePage.getElementCssPropertyValue(await loginForm.saveSignInButton, 'background-color')).toBe("rgb(220, 38, 38)");
   });
 
-  test('Validate styles during Unlock user with password in the Denser App in the dark mode', async ({page}) =>{
-    const loginForm = new LoginForm(page);
-
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    await homePage.loginBtn.click()
-    await loginForm.validateDefaultLoginFormIsLoaded();
-    // Sign In
-    await loginForm.usernameInput.fill(user.username);
-    await loginForm.passwordInput.fill(user.password);
-    await loginForm.wifInput.fill(user.keys[0].private); // Posting Key
-    expect(await homePage.getElementCssPropertyValue(await loginForm.usernameInput, 'color')).toBe("rgb(255, 255, 255)");
-    expect(await homePage.getElementCssPropertyValue(await loginForm.passwordInput, 'color')).toBe("rgb(255, 255, 255)");
-    expect(await homePage.getElementCssPropertyValue(await loginForm.wifInput, 'color')).toBe("rgb(255, 255, 255)");
-    expect(await homePage.getElementCssPropertyValue(await loginForm.saveSignInButton, 'color')).toBe("rgb(255, 255, 255)");
-    expect(await homePage.getElementCssPropertyValue(await loginForm.saveSignInButton, 'background-color')).toBe("rgb(220, 38, 38)");
-  });
 });

@@ -250,38 +250,6 @@ test.describe('Communities page tests', () => {
     await expect(communitiesPage.getFirstPostAuthorReputation).toHaveCSS('color', 'rgb(24, 30, 42)');
   });
 
-  test('validate the first post header styles (for Trending filter) in the dark theme', async ({ page }) => {
-    await homePage.moveToLeoFinanceCommunities();
-    await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
-
-    // Move to the dark theme
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    // Post author link color without hovering
-    expect(await homePage.getElementCssPropertyValue(await communitiesPage.getFirstPostAuthor, 'color')).toBe(
-      'rgb(248, 250, 252)'
-    );
-    // Post author link color after hovering
-    await communitiesPage.getFirstPostAuthor.hover();
-    await expect(communitiesPage.getFirstPostAuthor).toHaveCSS('color', 'rgb(246, 85, 85)');
-
-    // Timestamp link color without hovering
-    expect(
-      await homePage.getElementCssPropertyValue(await communitiesPage.getFirstPostCardTimestampLink, 'color')
-    ).toBe('rgb(248, 250, 252)');
-    // Timestamp link color after hovering
-    await communitiesPage.getFirstPostCardTimestampLink.hover();
-    await expect(communitiesPage.getFirstPostCardTimestampLink).toHaveCSS('color', 'rgb(246, 85, 85)');
-    // Author reputation color without hovering
-    expect(
-      await homePage.getElementCssPropertyValue(await communitiesPage.getFirstPostAuthorReputation, 'color')
-    ).toBe('rgb(248, 250, 252)');
-    // Author reputation color after hovering
-    await communitiesPage.getFirstPostAuthorReputation.hover();
-    await expect(communitiesPage.getFirstPostAuthorReputation).toHaveCSS('color', 'rgb(248, 250, 252)');
-  });
-
   test('validate the first post footer payouts styles (for Trending filter) in the light theme in the LeoFinance', async ({
     page
   }) => {
@@ -300,33 +268,6 @@ test.describe('Communities page tests', () => {
     expect(await homePage.getElementCssPropertyValue(await homePage.getFirstPostPayoutTooltip, 'color')).toBe(
       'rgb(15, 23, 42)'
     );
-  });
-
-  test('validate the first post footer payouts styles (for Trending filter) in the dark theme in the LeoFinance', async ({
-    page
-  }) => {
-    await homePage.moveToLeoFinanceCommunities();
-    await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
-
-    // Move to the dark theme
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    // Color of the first post payouts without hovering
-    expect(await homePage.getElementCssPropertyValue(await homePage.getFirstPostPayout, 'color')).toBe(
-      'rgb(248, 250, 252)'
-    );
-    await homePage.getFirstPostPayout.hover();
-    // Wait for tooltip to be visible instead of fixed timeout
-    await expect(homePage.getFirstPostPayoutTooltip).toBeVisible({ timeout: 15000 });
-    // Color of the first post payouts with hovering
-    await expect(homePage.getFirstPostPayout).toHaveCSS('color', 'rgb(246, 85, 85)');
-    expect(await homePage.getElementCssPropertyValue(await homePage.getFirstPostPayoutTooltip, 'color')).toBe(
-      'rgb(148, 163, 184)'
-    );
-    expect(
-      await homePage.getElementCssPropertyValue(await homePage.getFirstPostPayoutTooltip, 'background-color')
-    ).toBe('rgb(3, 7, 17)');
   });
 
   test('validate the first post footer votes styles (for Trending filter) in the light theme in the LeoFinance', async ({
@@ -355,40 +296,6 @@ test.describe('Communities page tests', () => {
     expect(await homePage.getElementCssPropertyValue(await homePage.getFirstPostVotesTooltip, 'color')).toBe(
       'rgb(15, 23, 42)'
     );
-  });
-
-  test('validate the first post footer votes styles (for Trending filter) in the dark theme in the LeoFinance', async ({
-    page
-  }) => {
-    await homePage.moveToLeoFinanceCommunities();
-    await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
-
-    // Move to the dark theme
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    // Color of the first post votes without hovering
-    expect(await homePage.getElementCssPropertyValue(await homePage.getFirstPostVotes, 'color')).toBe(
-      'rgb(248, 250, 252)'
-    );
-    await homePage.getFirstPostVotes.hover();
-    // Wait for tooltip to be visible instead of fixed timeout
-    await expect(homePage.getFirstPostVotesTooltip).toBeVisible({ timeout: 15000 });
-
-    const votes = await homePage.getFirstPostVotes.textContent();
-
-    // Color of the first post votes with hovering
-    expect(await homePage.getElementCssPropertyValue(await homePage.getFirstPostVotes, 'color')).toBe(
-      'rgb(248, 250, 252)'
-    );
-    // The tooltip is visible by hovering
-    expect(await homePage.getFirstPostVotesTooltip.textContent()).toBe(votes + ' votes' + votes + ' votes');
-    expect(await homePage.getElementCssPropertyValue(await homePage.getFirstPostVotesTooltip, 'color')).toBe(
-      'rgb(148, 163, 184)'
-    );
-    expect(
-      await homePage.getElementCssPropertyValue(await homePage.getFirstPostVotesTooltip, 'background-color')
-    ).toBe('rgb(34, 38, 42)');
   });
 
   test('validate the community leadership of Worldmappin Community', async ({ page, request }) => {
@@ -478,29 +385,6 @@ test.describe('Communities page tests', () => {
     expect(
       await homePage.getElementCssPropertyValue(await homePage.getFirstPostReblogCountTooltip, 'background-color')
     ).toBe('rgb(247, 247, 247)');
-  });
-
-  test('validate reblog count display styles in the dark theme', async ({ page }) => {
-    await homePage.moveToLeoFinanceCommunities();
-    await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    // Color of reblog count display
-    expect(await homePage.getElementCssPropertyValue(await homePage.getFirstPostReblogCountDisplay, 'color')).toBe(
-      'rgb(248, 250, 252)'
-    );
-
-    // The tooltip message and colors (now shows reblog count)
-    await homePage.getFirstPostReblogCountDisplay.hover();
-    // Tooltip now shows "No reblogs", "1 reblog", or "X reblogs"
-    expect(await homePage.getFirstPostReblogCountTooltip.textContent()).toMatch(/reblog/i);
-    expect(await homePage.getElementCssPropertyValue(await homePage.getFirstPostReblogCountTooltip, 'color')).toBe(
-      'rgb(148, 163, 184)'
-    );
-    expect(
-      await homePage.getElementCssPropertyValue(await homePage.getFirstPostReblogCountTooltip, 'background-color')
-    ).toBe('rgb(34, 38, 42)');
   });
 
   test('move to the reblog this post dialog ', async ({ page }) => {
@@ -688,54 +572,6 @@ test.describe('Communities page tests', () => {
     await expect(secondReputationBadge).toHaveText(String(sub.result[1].score));
   });
 
-  test('validate styles of the list of the subscribers in the modal in the dark mode', async ({ page, browserName }) => {
-    test.skip(browserName === 'webkit', 'Automatic test works well on chromium');
-    test.skip(browserName === 'firefox', 'Automatic test works well on chromium');
-
-    const leoFinanceCommunityAccount: string = 'hive-167922';
-
-    // Move to the dark theme
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-    // Move to the LeoFinance Community
-    await homePage.moveToLeoFinanceCommunities();
-    await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
-    await communitiesPage.activityLogButton.click();
-    await communitiesPage.page.waitForSelector(communitiesPage.subscribersNotificationContent['_selector']);
-
-    // Get list of subscribers by the api request
-    const sub = await apiHelper.getCommunitySubscribersAPI(leoFinanceCommunityAccount);
-
-    // Get first notification list item
-    const firstListItem = communitiesPage.subscribersNotificationContent.locator('[data-testid="notification-list-item"]').first();
-
-    // Validate base background (transparent by default, no alternating colors)
-    await expect(await homePage.getElementCssPropertyValue(firstListItem, 'background-color')).toBe(
-      'rgba(0, 0, 0, 0)'
-    );
-
-    // Validate reputation badge exists and shows score
-    const firstReputationBadge = firstListItem.locator('[data-testid="notification-reputation-badge"]');
-    await expect(firstReputationBadge).toBeVisible();
-    await expect(firstReputationBadge).toHaveText(String(sub.result[0].score));
-
-    // Validate badge background in dark mode (bg-background-tertiary = hsl(217, 19%, 27%) ≈ rgb(56, 66, 82))
-    await expect(await homePage.getElementCssPropertyValue(firstReputationBadge, 'background-color')).toBe(
-      'rgb(56, 66, 82)'
-    );
-
-    // Validate second item has same styling (no odd/even distinction)
-    const secondListItem = communitiesPage.subscribersNotificationContent.locator('[data-testid="notification-list-item"]').nth(1);
-    await expect(await homePage.getElementCssPropertyValue(secondListItem, 'background-color')).toBe(
-      'rgba(0, 0, 0, 0)'
-    );
-
-    // Validate second reputation badge
-    const secondReputationBadge = secondListItem.locator('[data-testid="notification-reputation-badge"]');
-    await expect(secondReputationBadge).toBeVisible();
-    await expect(secondReputationBadge).toHaveText(String(sub.result[1].score));
-  });
-
   test('validate styles of the menu of list of the subscribers in the modal in the light mode', async ({
     page
   }) => {
@@ -821,103 +657,6 @@ test.describe('Communities page tests', () => {
         'color'
       )
     ).toBe('rgb(100, 116, 139)');
-    await expect(
-      await homePage.getElementCssPropertyValue(
-        communitiesPage.subscribersNotificationLocalMenu.getByText('Reblogs'),
-        'background-color'
-      )
-    ).toBe('rgba(0, 0, 0, 0)');
-  });
-
-  test('validate styles of the menu of list of the subscribers in the modal in the dark mode', async ({
-    page
-  }) => {
-    // Move to the dark theme
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-    // Move to the LeoFinance Community
-    await homePage.moveToLeoFinanceCommunities();
-    await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
-    await communitiesPage.activityLogButton.click();
-    await communitiesPage.page.waitForSelector(communitiesPage.subscribersNotificationLocalMenu['_selector']);
-    // All button (default)
-    await expect(communitiesPage.subscribersNotificationLocalMenu.getByText('All')).toBeVisible();
-    await expect(
-      await homePage.getElementCssPropertyValue(
-        communitiesPage.subscribersNotificationLocalMenu.getByText('All'),
-        'color'
-      )
-    ).toBe('rgb(225, 231, 239)');
-    await expect(
-      await homePage.getElementCssPropertyValue(
-        communitiesPage.subscribersNotificationLocalMenu.getByText('All'),
-        'background-color'
-      )
-    ).toBe('rgb(44, 48, 53)');
-    // Replies button
-    await expect(communitiesPage.subscribersNotificationLocalMenu.getByText('Replies')).toBeVisible();
-    await expect(
-      await homePage.getElementCssPropertyValue(
-        communitiesPage.subscribersNotificationLocalMenu.getByText('Replies'),
-        'color'
-      )
-    ).toBe('rgb(127, 142, 163)');
-    await expect(
-      await homePage.getElementCssPropertyValue(
-        communitiesPage.subscribersNotificationLocalMenu.getByText('Replies'),
-        'background-color'
-      )
-    ).toBe('rgba(0, 0, 0, 0)');
-    // Mentions button
-    await expect(communitiesPage.subscribersNotificationLocalMenu.getByText('Mentions')).toBeVisible();
-    await expect(
-      await homePage.getElementCssPropertyValue(
-        communitiesPage.subscribersNotificationLocalMenu.getByText('Mentions'),
-        'color'
-      )
-    ).toBe('rgb(127, 142, 163)');
-    await expect(
-      await homePage.getElementCssPropertyValue(
-        communitiesPage.subscribersNotificationLocalMenu.getByText('Mentions'),
-        'background-color'
-      )
-    ).toBe('rgba(0, 0, 0, 0)');
-    // Follows button
-    await expect(communitiesPage.subscribersNotificationLocalMenu.getByText('Follows')).toBeVisible();
-    await expect(
-      await homePage.getElementCssPropertyValue(
-        communitiesPage.subscribersNotificationLocalMenu.getByText('Follows'),
-        'color'
-      )
-    ).toBe('rgb(127, 142, 163)');
-    await expect(
-      await homePage.getElementCssPropertyValue(
-        communitiesPage.subscribersNotificationLocalMenu.getByText('Follows'),
-        'background-color'
-      )
-    ).toBe('rgba(0, 0, 0, 0)');
-    // Upvotes button
-    await expect(communitiesPage.subscribersNotificationLocalMenu.getByText('Upvotes')).toBeVisible();
-    await expect(
-      await homePage.getElementCssPropertyValue(
-        communitiesPage.subscribersNotificationLocalMenu.getByText('Upvotes'),
-        'color'
-      )
-    ).toBe('rgb(127, 142, 163)');
-    await expect(
-      await homePage.getElementCssPropertyValue(
-        communitiesPage.subscribersNotificationLocalMenu.getByText('Upvotes'),
-        'background-color'
-      )
-    ).toBe('rgba(0, 0, 0, 0)');
-    // Reblogs button
-    await expect(communitiesPage.subscribersNotificationLocalMenu.getByText('Reblogs')).toBeVisible();
-    await expect(
-      await homePage.getElementCssPropertyValue(
-        communitiesPage.subscribersNotificationLocalMenu.getByText('Reblogs'),
-        'color'
-      )
-    ).toBe('rgb(127, 142, 163)');
     await expect(
       await homePage.getElementCssPropertyValue(
         communitiesPage.subscribersNotificationLocalMenu.getByText('Reblogs'),
@@ -1100,33 +839,4 @@ test.describe('Communities page tests', () => {
     ).toBe('rgb(0, 0, 0)');
   });
 
-  test('validate style of the create post message page in the dark mode', async ({ page, browserName }) => {
-    test.skip(browserName === 'webkit', 'Automatic test works well on chromium');
-    test.skip(browserName === 'firefox', 'Automatic test works well on chromium');
-    // expected specific message is "Log in to make a post."
-    const leoFinanceCommunity: string = 'hive-167922';
-    const logInToMakePostMessagePage = new MakePostWarningPage(page);
-
-    // Move to the dark theme
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    await homePage.moveToLeoFinanceCommunities();
-    await expect(communitiesPage.communityNewPostButton).toBeVisible();
-    await communitiesPage.communityNewPostButton.click();
-    await logInToMakePostMessagePage.validateMakePostWarningPageIsLoadedOfSpecificCommunities(
-      leoFinanceCommunity
-    );
-
-    expect(
-      await homePage.getElementCssPropertyValue(
-        logInToMakePostMessagePage.logInToMakePostMessage,
-        'background-color'
-      )
-    ).toBe('rgb(30, 41, 59)');
-
-    expect(
-      await homePage.getElementCssPropertyValue(logInToMakePostMessagePage.logInToMakePostMessage, 'color')
-    ).toBe('rgb(255, 255, 255)');
-  });
 });

@@ -157,18 +157,6 @@ test.describe('Profile page of @gtg', () => {
     await profilePage.validatePostHeaderHoverBehavior();
   });
 
-  test('validate styles of the post header in the dark mode', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
-
-    // Validate post header elements are visible and have correct attributes
-    await profilePage.validatePostHeaderElementsVisible();
-
-    // Validate interactive elements have pointer cursor (links)
-    await profilePage.validatePostHeaderHoverBehavior();
-  });
-
   test('move to the post page after clicking the timestamp', async ({ page }) => {
     await profilePage.gotoProfilePage('@gtg');
 
@@ -315,15 +303,6 @@ test.describe('Profile page of @gtg', () => {
 
   test('validate reblog count display styles in the light theme', async ({ page }) => {
     await profilePage.gotoProfilePage('@gtg');
-
-    // Validate reblog count is visible and tooltip shows reblog info
-    await profilePage.validateReblogCountWithTooltip();
-  });
-
-  test('validate reblog count display styles in the dark theme', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
 
     // Validate reblog count is visible and tooltip shows reblog info
     await profilePage.validateReblogCountWithTooltip();

@@ -632,57 +632,26 @@ export class HomePage {
     return bcg;
   }
 
-  // Theme mode: Light, Dark, System
   /**
-   * ★★★ THIS DRIVES A CONTROL THAT NO LONGER EXISTS, AND IT WAS COSTING THE SUITE
-   * 52 MINUTE-LONG HANGS (2026-08-19).
+   * ★ THE THEME API IS GONE (2026-08-19). Lumen is light-only by owner ruling of
+   * 2026-08-11: `next-themes` and every `dark:` variant were removed and there is
+   * no theme control in the product (see `features/layouts/providers.tsx`). The
+   * 52 test blocks that drove it have been deleted, so `changeThemeMode`,
+   * `validateThemeModeIsDark`, `validateThemeModeIsSystem` and
+   * `validateDarkModeByClass` went with them rather than being left as helpers
+   * for a feature nobody can reach.
    *
-   * Lumen is light-only by owner ruling of 2026-08-11: `next-themes` and every
-   * `dark:` variant were removed from this app, and there is no theme control in
-   * the product at all — see the note in `features/layouts/providers.tsx`
-   * ("Dark mode was never reachable — no toggle existed anywhere in the
-   * product"). So `[data-testid="theme-mode"]` matches nothing.
-   *
-   * The old body clicked that locator and waited. Playwright's auto-waiting then
-   * sat on it for the full 60s test timeout, 52 times over — 12 spec files, 52
-   * live test blocks. One run of five specs took 26 minutes and produced 100
-   * timeouts, which buried every real failure underneath them.
-   *
-   * Failing FAST and saying why is strictly better than hanging: the run finishes
-   * in minutes and each failure names its own cause. These 52 tests assert a
-   * DELETED FEATURE and cannot be repaired by re-selectoring — they need to be
-   * removed or rewritten, which is an owner decision, so this does not silently
-   * skip them and hide the debt.
+   * ONE SURVIVES, and it needed correcting. The app is always light, so this is
+   * no longer "is the light theme active" — it is "is the paper background what
+   * it should be". Its expected value was `rgb(247, 247, 247)`, the old neutral
+   * grey; Lumen's paper is warm and measures `rgb(252, 250, 248)` on the running
+   * build. That literal would have failed on every run — stale in exactly the
+   * same way the dark-mode tests were, just quieter about it.
    */
-  async changeThemeMode(thememode: string) {
-    throw new Error(
-      `changeThemeMode('${thememode}') — Lumen has no theme control. Dark mode was removed ` +
-        `by owner ruling 2026-08-11 (features/layouts/providers.tsx); ` +
-        `[data-testid="theme-mode"] does not exist. This test targets a deleted feature ` +
-        `and must be removed or rewritten, not re-selectored.`
-    );
-  }
-
   async validateThemeModeIsLight() {
     expect(await this.getElementCssPropertyValue(this.getBody, 'background-color')).toBe(
-      'rgb(247, 247, 247)'
+      'rgb(252, 250, 248)'
     );
-  }
-
-  async validateThemeModeIsSystem() {
-    expect(await this.getElementCssPropertyValue(this.getBody, 'background-color')).toBe(
-      'rgb(247, 247, 247)'
-    );
-  }
-
-  async validateThemeModeIsDark() {
-    await this.page.waitForLoadState('domcontentloaded');
-    expect(await this.getElementCssPropertyValue(this.getBody, 'background-color')).toBe('rgb(34, 38, 42)');
-  }
-
-  async validateDarkModeByClass() {
-    await this.page.waitForLoadState('domcontentloaded');
-    await expect(this.page.locator('html')).toHaveClass(/dark/);
   }
 
   async validateLightModeByClass() {

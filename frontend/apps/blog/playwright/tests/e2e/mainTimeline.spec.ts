@@ -98,28 +98,10 @@ test.describe('Home page tests', () => {
     await homePage.validateFirstPostPayoutWithTooltip();
   });
 
-  test('validate the first post footer payouts styles (for Trending filter) in the dark theme', async ({
-    page
-  }) => {
-    await homePage.goto();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
-    await homePage.validateFirstPostPayoutWithTooltip();
-  });
-
   test('validate the first post footer votes styles (for Trending filter) in the light theme', async ({
     page
   }) => {
     await homePage.goto();
-    await homePage.validateFirstPostVotesWithTooltip();
-  });
-
-  test('validate the first post footer votes styles (for Trending filter) in the dark theme', async ({
-    page
-  }) => {
-    await homePage.goto();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
     await homePage.validateFirstPostVotesWithTooltip();
   });
 
@@ -130,24 +112,8 @@ test.describe('Home page tests', () => {
     await homePage.validateFirstPostResponsesWithTooltip();
   });
 
-  test('validate the first post footer responses styles (for Trending filter) in the dark theme', async ({
-    page
-  }) => {
-    await homePage.goto();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
-    await homePage.validateFirstPostResponsesWithTooltip();
-  });
-
   test('validate the first post header styles (for Trending filter) in the light theme', async ({ page }) => {
     await homePage.goto();
-    await homePage.validateFirstPostHeaderElements();
-  });
-
-  test('validate the first post header styles (for Trending filter) in the dark theme', async ({ page }) => {
-    await homePage.goto();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
     await homePage.validateFirstPostHeaderElements();
   });
 
@@ -239,39 +205,9 @@ test.describe('Home page tests', () => {
     await expect(homePage.postDescription.first()).toBeVisible();
   });
 
-  test('validate styles of the description of the post card in the dark mode', async ({ page }) => {
-    await homePage.goto();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
-    await expect(homePage.postDescription.first()).toBeVisible();
-  });
-
   test('move to the first post content by clicking the responses', async ({ page }) => {
     await homePage.goto();
     await homePage.moveToTheFirstPostCommentContantPageByClickingResponses();
-  });
-
-  test('@flaky move to the dark mode and back to the light mode', async ({ page }) => {
-    await homePage.goto();
-
-    await homePage.validateThemeModeIsLight();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-    await homePage.changeThemeMode('Light');
-    await homePage.validateThemeModeIsLight();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-    await homePage.changeThemeMode('System');
-    await homePage.validateThemeModeIsSystem();
-  });
-
-  test('validate change background color style after hovering the post card in the dark mode', async ({
-    page
-  }) => {
-    await homePage.goto();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
-    await expect(homePage.getFirstPostListItem).toBeVisible();
   });
 
   test('filtr posts in maintimeline', async ({ browserName }) => {
@@ -408,16 +344,6 @@ test.describe('Home page tests', () => {
     expect(cursor).toBe('pointer');
   });
 
-  test('validate styles of navigation Login link in the dark mode', async ({ page, browserName }) => {
-    test.skip(browserName === 'firefox', 'Automatic test works well on chromium');
-    await homePage.goto();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
-    await expect(homePage.loginBtn).toBeVisible();
-    const cursor = await homePage.getElementCssPropertyValue(homePage.loginBtn, 'cursor');
-    expect(cursor).toBe('pointer');
-  });
-
   test('navigation Sign up link is visible', async ({ page }) => {
     await homePage.goto();
 
@@ -469,15 +395,6 @@ test.describe('Home page tests', () => {
     await homePage.validateFirstPostUpvoteButtonWithTooltip();
   });
 
-  test('validate upvote button styles and the tooltip of the first post in the dark theme', async ({
-    page
-  }) => {
-    await homePage.goto();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
-    await homePage.validateFirstPostUpvoteButtonWithTooltip();
-  });
-
   test('click upvote button and move to the dialog "Login to Vote" ', async ({ page }) => {
     await homePage.goto();
 
@@ -494,15 +411,6 @@ test.describe('Home page tests', () => {
     await homePage.validateFirstPostDownvoteButtonWithTooltip();
   });
 
-  test('validate downvote button styles and the tooltip of the first post in the dark theme', async ({
-    page
-  }) => {
-    await homePage.goto();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
-    await homePage.validateFirstPostDownvoteButtonWithTooltip();
-  });
-
   test('click downvote button and move to the login dialog', async ({ page }) => {
     await homePage.goto();
 
@@ -514,13 +422,6 @@ test.describe('Home page tests', () => {
 
   test('validate reblog count display styles in the light theme', async ({ page }) => {
     await homePage.goto();
-    await homePage.validateFirstPostReblogCountWithTooltip();
-  });
-
-  test('validate reblog count display styles in the dark theme', async ({ page }) => {
-    await homePage.goto();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
     await homePage.validateFirstPostReblogCountWithTooltip();
   });
 
@@ -546,13 +447,6 @@ test.describe('Home page tests', () => {
     await homePage.validateFirstPostReputationWithTooltip();
   });
 
-  test('validate styles of the reputation in the post card header in the dark mode', async ({ page }) => {
-    await homePage.goto();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
-    await homePage.validateFirstPostReputationWithTooltip();
-  });
-
   test('validate styles of the affiliation tag (badge) in the post card in the light mode', async ({
     page
     // browserName
@@ -561,35 +455,6 @@ test.describe('Home page tests', () => {
 
     // Load 40 posts - more likely to occur a badge
     await homePage.goto();
-    await homePage.mainPostsTimelineVisible(20);
-    await homePage.page.keyboard.down('End');
-
-    // Wait for new posts to load with dynamic timeout
-    await page.waitForFunction(
-      () => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= 40,
-      { timeout: 10000 }
-    );
-
-    const postsCount = await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').count();
-    expect(postsCount).toBeGreaterThanOrEqual(40);
-    expect(postsCount).toBeLessThanOrEqual(60);
-
-    if (await homePage.postCardAffiliationTag.first().isVisible()) {
-      await expect(homePage.postCardAffiliationTag.first()).toBeVisible();
-    } else console.log('No affiliation tags on the 40 post cards');
-  });
-
-  test('validate styles of the affiliation tag (badge) in the post card in the dark mode', async ({
-    page
-    // browserName
-  }) => {
-    // test.skip(browserName === 'webkit', 'Automatic test works well on chromium');
-
-    await homePage.goto();
-    // Move to the dark theme
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
-    // Load 40 posts - more likely to occur a badge
     await homePage.mainPostsTimelineVisible(20);
     await homePage.page.keyboard.down('End');
 
@@ -661,35 +526,6 @@ test.describe('Home page tests', () => {
 
     await homePage.goto();
 
-    // Load 40 posts - more likely to occur a badge
-    await homePage.mainPostsTimelineVisible(20);
-    await homePage.page.keyboard.down('End');
-    // Wait for new posts to load with dynamic timeout
-    await page.waitForFunction(
-      () => document.querySelectorAll('[data-testid="post-list-item"], [data-testid="medium-card"]').length >= 40,
-      { timeout: 10000 }
-    );
-
-    const postsCount = await page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').count();
-    expect(postsCount).toBeGreaterThanOrEqual(40);
-    expect(postsCount).toBeLessThanOrEqual(60);
-
-    if (await homePage.postCardPoweredUp100Trigger.first().isVisible()) {
-      await homePage.postCardPoweredUp100Trigger.first().hover();
-      await expect(homePage.postCardPoweredUp100Tooltip).toHaveText('100% Hive Power100% Hive Power');
-    } else console.log('No Powered Up 100% tags on the 40 post cards');
-  });
-
-  test('validate styles of Powered Up 100% in the post card in the dark mode', async ({
-    page
-    // browserName
-  }) => {
-    // test.skip(browserName === 'webkit', 'Automatic test works well on chromium');
-
-    await homePage.goto();
-    // Move to the dark theme
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
     // Load 40 posts - more likely to occur a badge
     await homePage.mainPostsTimelineVisible(20);
     await homePage.page.keyboard.down('End');

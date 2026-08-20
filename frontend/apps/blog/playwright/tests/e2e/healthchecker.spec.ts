@@ -244,16 +244,6 @@ test.describe('Healthchecker page - Theme mode', () => {
         await homePage.validateLightModeByClass();
     });
 
-    test('Validate healthchecker page in dark mode', async ({ page }) => {
-        await healthcheckerPage.goto();
-
-        // Switch to dark mode
-        await homePage.changeThemeMode('Dark');
-
-        // Verify dark mode is active (dark class on html)
-        await homePage.validateDarkModeByClass();
-    });
-
     test('Validate tab styling in light mode', async ({ page }) => {
         await healthcheckerPage.goto();
 
@@ -262,39 +252,6 @@ test.describe('Healthchecker page - Theme mode', () => {
         await expect(healthcheckerPage.hiveApiTab).toBeVisible();
     });
 
-    test('Validate tab styling in dark mode', async ({ page }) => {
-        await healthcheckerPage.goto();
-
-        // Switch to dark mode
-        await homePage.changeThemeMode('Dark');
-        await homePage.validateThemeModeIsDark();
-
-        // Check active tab styling
-        await healthcheckerPage.validateHiveApiTabIsActive();
-        await expect(healthcheckerPage.hiveApiTab).toBeVisible();
-    });
-
-    test('Validate page title visibility in dark mode', async ({ page }) => {
-        await healthcheckerPage.goto();
-
-        // Switch to dark mode
-        await homePage.changeThemeMode('Dark');
-        await homePage.validateThemeModeIsDark();
-
-        // Verify title is still visible
-        await expect(healthcheckerPage.pageTitle).toBeVisible();
-    });
-
-    test('Validate CircleCheck icon visibility in dark mode', async ({ page }) => {
-        await healthcheckerPage.goto();
-
-        // Switch to dark mode
-        await homePage.changeThemeMode('Dark');
-        await homePage.validateThemeModeIsDark();
-
-        // Verify icon is still visible
-        await healthcheckerPage.validateCircleCheckIconIsVisible();
-    });
 });
 
 test.describe('Healthchecker page - UI elements and content', () => {

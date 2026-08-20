@@ -142,20 +142,6 @@ test.describe('Explore communities page tests', () => {
     await communitiesPage.validateFirstCommunityCardElements();
   });
 
-  test('validate first community card styles in the dark mode', async ({ page }) => {
-    const communitiesPage = new CommunitiesExplorePage(page);
-
-    await homePage.goto();
-    // move to the dark mode
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateDarkModeByClass();
-
-    await homePage.getExploreCommunities.click();
-    await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
-
-    await communitiesPage.validateFirstCommunityCardElements();
-  });
-
   test('validate no results for your search message', async ({ page }) => {
     const communitiesPage = new CommunitiesExplorePage(page);
     const nonExistentCommunity: string = 'abcdefgh';
