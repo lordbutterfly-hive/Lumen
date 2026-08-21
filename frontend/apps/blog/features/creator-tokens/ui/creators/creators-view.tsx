@@ -17,8 +17,27 @@ const COPY = {
   answers: 'Answers',
   newHere: 'New here',
   newHereSub: 'Just launched, so not ranked by reliability yet.',
-  newNothing: 'New, nothing completed yet.',
+  newNothing: 'No deliveries yet',
   recordUnavailable: 'Delivery record unavailable',
+  /**
+   * ★ ONE FACT, TWO CONTRADICTORY SENTENCES, ON THE SAME PAGE (2026-08-21 —
+   * flagged independently by three separate testers, which is how obvious it is
+   * to a first-time reader).
+   *
+   * Every creator appeared twice: once in the "New here" shelf reading "New,
+   * nothing completed yet." and again in the grid below reading "Delivery record
+   * unavailable". One says the creator is simply new; the other reads as an
+   * outage. `market/types.ts:39-41` defines them as genuinely DIFFERENT states —
+   * available:false is a failed read, completionPct:null is a fine read with
+   * nothing to report — and the grid was printing the failure wording for both,
+   * because `CreatorSummary` carries no availability flag to tell them apart.
+   *
+   * It carries the COUNTS, though, and those answer the question: nobody asked
+   * (0 answered, 0 missed) is "no deliveries yet". Anything else with no
+   * percentage really is a record we could not read. Both places now use the
+   * same phrase for the same fact.
+   */
+  noDeliveries: 'No deliveries yet',
   launchTitle: 'Launch your Meritum',
   launchSub: 'Let people hold your token and pay you for your time.',
   launchCta: 'Set up in Creator Studio →',
@@ -107,7 +126,7 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
         // No record YET — this creator simply has not been hired. Deliberately
         // not dressed up as a positive, and it is why they sort last.
         <div className="rounded-control border border-dashed border-line-11 px-3.5 py-3 text-caption text-ink-14">
-          {COPY.recordUnavailable}
+          {c.answeredCount === 0 && c.missedCount === 0 ? COPY.noDeliveries : COPY.recordUnavailable}
         </div>
       )}
 

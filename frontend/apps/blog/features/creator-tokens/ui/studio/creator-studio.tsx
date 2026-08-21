@@ -11,6 +11,7 @@ import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
 import { MAX_HASH_LEN } from '../../lib/vsc/payload-contract';
 import ModalShell from '../modal-shell';
+import { offerTitleProblem } from '../../lib/vsc/op-builders';
 
 type Section = 'overview' | 'inbox' | 'offerings' | 'market' | 'billing' | 'earnings';
 const SECTIONS: { id: Section; label: string }[] = [
@@ -371,7 +372,15 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
   const [price, setPrice] = useState('');
   const [failure, setFailure] = useState<string | null>(null);
   const usd = parseFloat(price.replace(/,/g, ''));
-  const valid = title.trim().length > 0 && Number.isFinite(usd) && usd > 0;
+  // ★ VALIDATE THE TITLE WHILE IT IS BEING TYPED, not at the signature.
+  // The contract refuses a comma, a pipe, control bytes, and anything over 64
+  // characters (core/offerings.go validOfferTitle). Until 2026-08-21 nothing
+  // client-side checked any of it: "Copy edit, 1k words" was accepted by this
+  // form, signed, broadcast, INCLUDED IN A BLOCK, and then refused on chain with
+  // an empty result, so the broadcast genuinely succeeded and nothing surfaced.
+  // The creator's RC was spent and their offering did not exist.
+  const titleProblem = title.trim() === '' ? null : offerTitleProblem(title);
+  const valid = title.trim().length > 0 && titleProblem === null && Number.isFinite(usd) && usd > 0;
   return (
     <div className="mt-4 border-t border-line-2 pt-4">
       <div className="mb-2 text-caption font-semibold text-ink-10">Add a service</div>
@@ -383,7 +392,12 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
             setFailure(null);
           }}
           placeholder="e.g. Review my code"
-          className="min-w-[200px] flex-1 rounded-control border border-line-11 px-3 py-2 text-[14px] leading-[22px] outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
+          aria-invalid={titleProblem !== null}
+          className={`min-w-[200px] flex-1 rounded-control border px-3 py-2 text-[14px] leading-[22px] outline-none focus:ring-1 ${
+            titleProblem !== null
+              ? 'border-line-warn-2 focus:border-line-warn-2 focus:ring-line-warn-2'
+              : 'border-line-11 focus:border-line-brand-10 focus:ring-line-brand-10'
+          }`}
         />
         <div className="flex items-center rounded-control border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
           <span className="font-bold text-ink-14">$</span>
@@ -417,7 +431,13 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
           Add
         </button>
       </div>
-      {failure ? <div className="mt-2 text-caption font-semibold text-ink-brand-6">{failure}</div> : null}
+      {/* The typing-time problem takes precedence: it is actionable right now,
+          whereas `failure` is the outcome of an attempt already made. */}
+      {titleProblem ? (
+        <div className="mt-2 text-caption font-semibold text-ink-warn-3">{titleProblem}</div>
+      ) : failure ? (
+        <div className="mt-2 text-caption font-semibold text-ink-brand-6">{failure}</div>
+      ) : null}
     </div>
   );
 };
@@ -457,11 +477,19 @@ const CreatorStudio: FC = () => {
     if (marketCap !== null) setCapInput(String(marketCap));
   }, [marketCap]);
 
-  // A lite account has no Hive keys, so every button on this page would open a
-  // signer that does not exist; use-live-studio.ts's requireSigner refuses each
+  // An account with NO key that can sign would open a signer that does not
+  // exist on every button here; use-live-studio.ts's requireSigner refuses each
   // one, but only on click. launch-wizard.tsx:234 already gates its own Launch
   // button on exactly this, so the studio saying nothing was the inconsistency.
-  if (studio.isLite) {
+  //
+  // ★ THIS USED TO READ `studio.isLite` ALONE, AND THAT LOCKED CREATORS OUT OF
+  // THEIR OWN TOKEN (2026-08-21). A wallet-backed lite account can sign now that
+  // the multichain rail is live. Two identities owning real, publicly tradeable
+  // markets were shown "this account can't sign transactions yet" here and "No
+  // Meritum yet" on their profile, while anyone else could buy the very token
+  // they were told they did not have. The capability question is `canSign`;
+  // `isLite` only says which KIND of account it is.
+  if (studio.isLite && !studio.canSign) {
     return (
       <TokenShell>
         <div className="mx-auto max-w-[560px] pt-16 text-center">

@@ -3,6 +3,7 @@
 import { FC } from 'react';
 import { Link } from '@hive/ui';
 import { useLiveTokenMarket } from '../live/use-live-token-market';
+import { useTokenAccounts } from '../live/use-token-accounts';
 import { pctLabel, usdPrice } from '../market/format';
 
 // TODO i18n — staged copy, same precedent as the rest of this feature.
@@ -52,7 +53,49 @@ const COPY = {
  *    has not resolved.
  */
 const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ username, isOwnProfile }) => {
-  const { status, market } = useLiveTokenMarket(username);
+  const byName = useLiveTokenMarket(username);
+
+  /**
+   * ★ A WALLET CREATOR'S OWN TOKEN WAS INVISIBLE TO THEM (found 2026-08-21 by an
+   * agent signing in as a wallet that owns a live, tradeable market).
+   *
+   * The market is keyed by the identity that REGISTERED it. For a Hive user that
+   * is `hive:<username>`, so looking it up by the profile handle works. For a
+   * wallet-backed account it is a `did:pkh:…`, and `toDid` (lib/vsc/reads.ts:32)
+   * turns a bare handle into `hive:<handle>` — a key that market was never
+   * stored under. The read came back 'missing', and 'missing' on your own
+   * profile renders "No Meritum yet. Launch your token." So a creator whose
+   * token strangers could buy that very moment was invited to create it.
+   *
+   * Same identity drift as `use-live-token-market.ts:162`, which already derives
+   * its position account as `isLite ? signingAccount?.id : viewer` for exactly
+   * this reason. Reads and writes must name the identity with the SAME string.
+   *
+   * Only the viewer's OWN profile can be repaired here, because only the viewer's
+   * own wallet ids are in the client. A VISITOR to a wallet creator's
+   * `/@handle` page still sees nothing, since resolving someone else's handle to
+   * their did needs a server-side index that does not exist yet. That gap is
+   * real and is deliberately left visible rather than half-closed.
+   */
+  const accounts = useTokenAccounts();
+  const ownWalletDid = isOwnProfile ? (accounts.accounts.find((a) => a.kind !== 'hive')?.id ?? null) : null;
+  // Empty string disables the query (use-live-token-market gates on Boolean(creator)),
+  // so this costs nothing for a Hive user or a visitor.
+  const byDid = useLiveTokenMarket(ownWalletDid ?? '');
+
+  // ★ FALL BACK ONLY ON AN ACTUAL HIT, never merely because the first read was
+  // not ready. `byDid` is DISABLED when there is no wallet did to try (a Hive
+  // user, or anyone else's profile), and a disabled query does not report
+  // 'missing' — so handing its status through unconditionally would have
+  // suppressed the "Launch your token" prompt for every Hive creator who has
+  // not launched one. `byName` stays the source of the not-found state.
+  const resolved =
+    byName.status === 'ready' && byName.market
+      ? byName
+      : ownWalletDid && byDid.status === 'ready' && byDid.market
+        ? byDid
+        : byName;
+  const { status, market } = resolved;
 
   if (status === 'ready' && market) {
     const d = market.delivery;

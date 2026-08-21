@@ -15,6 +15,7 @@ import MeritumCoinRail from './meritum-coin-rail';
 import { MAX_PRICE_USD, MIN_PRICE_USD } from '../../launch-money';
 import { MERITUM_COMMISSION_PCT, useMeritumLaunch } from './use-meritum-launch';
 import type { MeritumLaunchBlock } from './use-meritum-launch';
+import { offerTitleProblem } from '@/blog/features/creator-tokens/lib/vsc/op-builders';
 
 /**
  * SCREEN 2 — THE MERITUM LAUNCH FLOW.
@@ -203,6 +204,18 @@ const MeritumLaunchFlow: FC = () => {
         return t('meritum_launch.error_offer_needs_name');
       case 'offer-duplicate-name':
         return t('meritum_launch.error_offer_duplicate_name');
+      case 'offer-bad-title':
+        // ★ The validator's OWN sentence, not a translated paraphrase. It names
+        // the specific rule broken ("cannot contain a comma. Try a dash or a
+        // colon instead."), and it is generated from the same mirror of
+        // core/offerings.go that decides the block — so the reason shown and the
+        // reason enforced cannot drift apart the way a hand-written copy string
+        // would. Deliberately untranslated for that reason; a translated variant
+        // must come from the validator too, never from a second list of rules.
+        return (
+          flow.offers.map((o) => offerTitleProblem(o.name)).find((m) => m !== null) ??
+          t('meritum_launch.error_offer_needs_name')
+        );
       case 'price-band':
         // Bounds come from the contract's own params, never from copy. They
         // used to be formatted two different ways: the max through `usdWhole`,

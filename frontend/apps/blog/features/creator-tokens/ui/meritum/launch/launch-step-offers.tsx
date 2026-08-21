@@ -6,6 +6,7 @@ import { COMMISSION_BPS } from '../../../lib/contract-math';
 import { usdPrice } from '../../../market/format';
 import { BackAction, PrimaryAction } from './launch-controls';
 import type { MeritumLaunchBlock, MeritumOffer } from './use-meritum-launch';
+import { MAX_OFFER_TITLE_LEN, offerTitleProblem } from '@/blog/features/creator-tokens/lib/vsc/op-builders';
 
 /**
  * STEP 2 — the three open offers.
@@ -110,13 +111,27 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
             <span className="flex-none font-serif text-15 font-semibold text-meritum-ink-faint" aria-hidden="true">
               {`0${i + 1}`}
             </span>
+            {/*
+              ★ `maxLength` WAS 120 AND THE CONTRACT'S LIMIT IS 64
+              (core/params.go MaxOfferTitleLen), so the field invited a creator to
+              type nearly twice what the chain will accept and refused it only at
+              execution. Corrected to the real bound, and the remaining rules
+              (no comma, no pipe, no control characters) are checked as the
+              creator types rather than at the signature: `offerTitleProblem`
+              mirrors `core/offerings.go validOfferTitle` exactly. Before
+              2026-08-21 none of this was enforced anywhere a person could see it,
+              and "Copy edit, 1k words" was accepted here, signed, broadcast,
+              included in a block, and then discarded on chain with an empty
+              result and no error the UI could show.
+            */}
             <input
               type="text"
               value={offer.name}
               onChange={(e) => handleName(i, e.target.value)}
               placeholder={examples[i]}
               aria-label={t('meritum_launch.offer_name_aria', { n: i + 1 })}
-              maxLength={120}
+              aria-invalid={offerTitleProblem(offer.name) !== null}
+              maxLength={MAX_OFFER_TITLE_LEN}
               className="min-w-[min(100%,180px)] flex-1 basis-60 border-0 border-b-[1.5px] border-meritum-line-input bg-transparent pb-1 font-serif text-16 font-semibold text-meritum-ink outline-none placeholder:text-meritum-ink-faint"
             />
             <div className="flex flex-none items-baseline gap-[5px]">

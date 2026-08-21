@@ -12,6 +12,7 @@ import { writeFailureMessage } from '../../write-failure';
 import { MAX_PRICE_USD, MIN_PRICE_USD, STANDARD_CAP, parseMoney, sanitizeMoneyInput } from '../../launch-money';
 import { MERITUM_STUD_COUNT } from '../coin';
 import { getStorageItem, removeStorageItem, setStorageItem } from '@ui/lib/storage-with-ttl';
+import { offerTitleProblem } from '@/blog/features/creator-tokens/lib/vsc/op-builders';
 
 /**
  * THE MERITUM LAUNCH FLOW — all of its state, and the real launch write.
@@ -71,6 +72,14 @@ export type MeritumLaunchBlock =
   | 'offer-needs-name'
   /** Two priced offers carry the same name — the buyer cannot tell them apart. */
   | 'offer-duplicate-name'
+  /**
+   * A title carries something the CONTRACT refuses: a comma, a pipe, a control
+   * byte, or more than 64 characters (core/offerings.go validOfferTitle).
+   * Blocked here because the chain's refusal is INVISIBLE otherwise — the
+   * broadcast succeeds, the block includes it, and the offering silently does
+   * not exist. Proven live on 2026-08-19 with "Copy edit, 1k words".
+   */
+  | 'offer-bad-title'
   | 'price-band'
   | 'first-buy-max';
 
@@ -491,15 +500,23 @@ export function useMeritumLaunch(): MeritumLaunchApi {
   const capBroken = STANDARD_CAP < MIN_CAP_CREDITS_BASE_UNITS || STANDARD_CAP > MAX_CAP_CREDITS_BASE_UNITS;
   const firstBuyTooBig = firstBuyUsd > MAX_PRICE_USD;
 
+  // A title the contract will refuse. Only PRICED offers matter: an empty row is
+  // not submitted, and `offer-needs-name` already covers a priced row with none.
+  const offerTitleRejected = offers.some(
+    (o) => o.name.trim() !== '' && offerTitleProblem(o.name) !== null
+  );
+
   const offerBlock: MeritumLaunchBlock | null = priceBandBroken
     ? 'price-band'
     : offerMissingName
       ? 'offer-needs-name'
-      : offerNamesDuplicated
-        ? 'offer-duplicate-name'
-        : offersPriced === 0
-          ? 'no-offer'
-          : null;
+      : offerTitleRejected
+        ? 'offer-bad-title'
+        : offerNamesDuplicated
+          ? 'offer-duplicate-name'
+          : offersPriced === 0
+            ? 'no-offer'
+            : null;
 
   /**
    * A failed market read is NOT "no market". `register` enforces one market per

@@ -168,6 +168,15 @@ function buildConnectSrcHosts(): Set<string> {
     // violation in the console while the flow appears to work is exactly the
     // shape that never gets reported.
     hosts.add('https://rpc.walletconnect.org');
+    // ★ The Verify API, added alongside its frame-src entry (QA 2026-08-21).
+    // The frame is what draws the QR; the SDK also talks to the same origin to
+    // fetch and post its attestation. This file has now recorded three outages
+    // from one missing WalletConnect host, each invisible in the UI, so the
+    // network side is granted at the same moment as the frame side rather than
+    // waiting to be discovered as a fourth. Both TLDs, for the version reason
+    // spelled out at authFrameSrcHosts.
+    hosts.add('https://verify.walletconnect.org');
+    hosts.add('https://verify.walletconnect.com');
   }
 
   // Sentry error reporting
@@ -242,7 +251,29 @@ function authFrameSrcHosts(): string[] {
   // is enough on its own to make signup impossible.
   if (turnstileEnabled()) hosts.push('https://challenges.cloudflare.com');
   // The Reown modal renders wallet handoff in an iframe.
-  if (reownEnabled()) hosts.push('https://secure.walletconnect.org');
+  //
+  // ★ `verify.walletconnect.*` IS A SECOND, DIFFERENT HOST, and omitting it
+  // broke the ONLY sign-in route open to a visitor with no wallet extension
+  // (found in live QA, 2026-08-21). `secure.walletconnect.org` covers the
+  // handoff frame, so the modal opened and looked healthy; the Verify API frame
+  // is served from `verify.walletconnect.org`, was refused, and the QR code
+  // rendered as a SOLID EMPTY BOX with no error text anywhere on screen:
+  //   "Refused to frame 'https://verify.walletconnect.org/' because it violates
+  //    the following Content Security Policy directive: frame-src ..."
+  // Someone on a phone, with no extension, choosing the mobile-pairing tab that
+  // exists precisely for them, saw a blank square and nothing else.
+  //
+  // BOTH TLDs are listed on purpose. WalletConnect serves Verify from the .com
+  // domain on older SDK builds and .org on newer ones, and which one is
+  // requested is decided inside the packaged SDK, not by us — so pinning only
+  // the one observed today would re-break this on a dependency bump, silently
+  // and in exactly the same invisible way. Same vendor, same purpose, no wider
+  // surface than the frame already permitted.
+  if (reownEnabled()) {
+    hosts.push('https://secure.walletconnect.org');
+    hosts.push('https://verify.walletconnect.org');
+    hosts.push('https://verify.walletconnect.com');
+  }
   // GIS renders both the button and the One Tap prompt in iframes.
   if (googleSignInEnabled()) hosts.push('https://accounts.google.com');
   return hosts;

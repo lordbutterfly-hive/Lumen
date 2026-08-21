@@ -43,6 +43,20 @@ export interface LiveStudio {
   loggedIn: boolean;
   isLite: boolean;
   /**
+   * TRUE when this account has SOME key that can sign, whatever kind.
+   *
+   * ★ `isLite` IS NOT THE SAME QUESTION, and treating it as one locked creators
+   * out of their own token (found 2026-08-21 by an agent signing in as a wallet
+   * that owns a live market). A lite account backed by an Ethereum or Bitcoin
+   * wallet CAN sign now that the multichain rail is live, and `requireSigner`
+   * below already knows that: it returns `signingAccount.id` for exactly this
+   * case. The Studio's own gate did not, so a creator with a real, tradeable
+   * token was shown "this account can't sign transactions yet, so it can't run
+   * a Meritum" while strangers could buy it. Read this, never `isLite`, before
+   * telling anyone what they cannot do.
+   */
+  canSign: boolean;
+  /**
    * F14 fix: re-run `/api/users/me` — the retry affordance for
    * status === 'session-unavailable'. Distinct from `retry` below, which only
    * re-reads chain state and does nothing when the block is the session
@@ -290,6 +304,7 @@ export function useLiveStudio(): LiveStudio {
     creator,
     loggedIn,
     isLite,
+    canSign: signingAccount !== null,
     retrySession,
     market,
     inbox,

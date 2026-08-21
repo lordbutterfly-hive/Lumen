@@ -449,7 +449,29 @@ export function transferTokensPayload(creator: string, to: string, tokens: numbe
  * (64), no '|', no ',', no control bytes or DEL. Kept in sync by citation; if
  * `validOfferTitle` changes, change this with it.
  */
-const MAX_OFFER_TITLE_LEN = 64;
+export const MAX_OFFER_TITLE_LEN = 64;
+
+/**
+ * The same rules, as a MESSAGE rather than a throw, for validating while a
+ * person types.
+ *
+ * ★ `assertValidOfferTitle` had ZERO CALLERS when this was written
+ * (2026-08-21). It was added on 2026-08-19 as the fix for the "Copy edit, 1k
+ * words" defect, correct in every detail, and never connected to anything — so
+ * the defect it was written to prevent was still fully reproducible: type a
+ * comma, price it, review it, reach the sign button, and learn nothing. A guard
+ * that is not wired to a caller is not a fix, it is a note about one.
+ *
+ * Returns null when the title is acceptable, otherwise the sentence to show.
+ */
+export function offerTitleProblem(title: string): string | null {
+  try {
+    assertValidOfferTitle(title);
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : 'That offering title cannot be used.';
+  }
+}
 
 export function assertValidOfferTitle(title: string): void {
   if (title.trim() === '') {

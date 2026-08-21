@@ -70,8 +70,14 @@ Hive has its own vocabulary. On a Lumen account, **none of it is something you h
 to manage**:
 
 * **Resource Credits (RC)** — a Hive account's free allowance for posting,
-  commenting and voting. It refills by itself. A Lumen account doesn't have or
-  need any; the allowance used to publish your posts is ours.
+  commenting and voting. It refills by itself. You do not need any to write on
+  Lumen; the allowance used to publish your posts is ours.
+  Buying and selling creator tokens is different, because that happens on Magi
+  rather than on Hive. There it is your own HBD balance that pays, and there is
+  still no fee: holding 1 HBD gives you 1,000 credits, spending them sets aside
+  part of your balance for a while, and it comes back on its own over about five
+  days. Adding HBD raises it again straight away. One purchase needs roughly
+  2 HBD of credit.
 * **Keys / master password / owner key** — how a Hive account proves itself. A
   Lumen account has none: you sign in with Google or a wallet instead.
 * **HP, VESTS, MVEST** — Hive's stake and voting-weight units. They belong to Hive
@@ -94,5 +100,5 @@ your own name, and you keep your rewards.
 
 If you want the blockchain-level detail — key types, Resource Credits, account
 creation, governance — the full Hive FAQ is at
-[/faq.html](/faq.html). It is written for people running their own Hive account,
-and you do not need it to use Lumen.
+[hive.io/faq](https://hive.io/faq.html). It is written for people running their
+own Hive account, and you do not need it to use Lumen.
