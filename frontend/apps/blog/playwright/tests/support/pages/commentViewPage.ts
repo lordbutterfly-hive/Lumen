@@ -103,7 +103,7 @@ export class CommentViewPage {
     this.getResponseCommentDownvoteButton = this.getResponseCommentFooter.locator(
       '[data-testid="comment-card-footer-downvote"]'
     );
-    this.getResponseCommentPayout = this.getResponseCommentFooter.locator('[data-testid="post-payout"], [data-testid="medium-card-payout"]');
+    this.getResponseCommentPayout = this.getResponseCommentFooter.locator('[data-testid="comment-card-footer-payout"]');
     this.getResponsePostCommentPayout = this.page.locator('[data-testid="post-card-footer"], [data-testid="medium-card-footer"]').locator('[data-testid="post-payout"], [data-testid="medium-card-payout"]');
     this.getResponseCommentReply = this.getResponseCommentFooter.locator(
       '[data-testid="comment-card-footer-reply"]'
@@ -112,7 +112,17 @@ export class CommentViewPage {
     this.payoutPostCardTooltip = page.getByTestId('payout-post-card-tooltip');
     this.commentVote = page.locator('[data-testid="post-total-votes"]');
     this.commentVoteTooltip = page.getByTestId('post-card-votes-tooltip');
-    this.commentGreenSection = page.locator('.bg-card-noContent');
+    // ★ `.bg-card-noContent` no longer renders here. `context-links.tsx`
+    // ("You are viewing a single comment's thread from") dropped the pale-
+    // green empty-state styling for a neutral card (owner, 2026-08-16, QA
+    // defect B1 cosmetic: "NEUTRAL SURFACE, NOT SUCCESS GREEN" ->
+    // `border-line-18 bg-surface-14`). That class combo isn't unique to this
+    // banner (also used by comment-list-item.tsx), so anchor on the banner's
+    // own unique heading text instead and walk up to its container, which is
+    // stable regardless of future color/token changes.
+    this.commentGreenSection = page
+      .getByText("You are viewing a single comment")
+      .locator('xpath=..');
   }
 
   async validataCommentViewPageIsLoaded(postTitle: string) {

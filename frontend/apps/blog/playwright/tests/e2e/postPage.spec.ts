@@ -254,7 +254,16 @@ test.describe('Post page tests', () => {
     await expect(postPage.footerAuthorName).toBeVisible();
 
     const footerAuthorName = await page.locator('[data-testid="author-data-post-footer"] [data-testid="author-name-link"] span.font-semibold').innerText();
-    await expect(firstPostAuthor).toEqual(footerAuthorName);
+    /*
+     * ★ THE CARD BYLINE NOW CARRIES A LEADING `@` (2026-08-21). `getFirstPostAuthor`
+     * resolves to the identity pill's `identity-pill-profile`, which renders `@handle`,
+     * where the retired `medium-card-author` rendered it bare. The footer side is
+     * already scoped to `span.font-semibold`, so it yields the bare handle (measured
+     * live: the footer link's full text is `gtg(76)`, the name span alone is `gtg`).
+     * Stripping the `@` compares exactly what this test is named for — same account on
+     * the card and in the post footer — without loosening it to a substring match.
+     */
+    expect(firstPostAuthor.trim().replace('@', '')).toEqual(footerAuthorName.trim());
   });
 
   test('Post Header/Footer - Affiliation tag', async ({ page }) => {

@@ -45,7 +45,10 @@ export class TagCommunityFeedsPage {
 
     this.postListItems = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]');
     this.firstPostItem = this.postListItems.first();
-    this.postAuthors = page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]');
+    // `medium-card-author` no longer exists — the byline is now
+    // `identity-pill-profile` (features/discovery-feed/identity-pill.tsx),
+    // which renders "@handle" (leading @), unlike the old bare-handle testid.
+    this.postAuthors = page.locator('[data-testid="post-author"], [data-testid="identity-pill-profile"]');
     this.firstPostTitle = this.postListItems.first().locator('[data-testid="post-title"], [data-testid="medium-card-title"]');
 
     this.communityInfoSidebar = page.locator('[data-testid="community-info-sidebar"]');
@@ -62,7 +65,11 @@ export class TagCommunityFeedsPage {
 
     this.postsFilter = page.locator('[data-testid="posts-filter"]');
 
-    this.rolesHeading = page.getByRole('heading', { name: 'User roles' });
+    // `/roles/:tag`'s restyle (2026-08-14) replaced the literal "User roles"
+    // heading with a PageMasthead whose <h1> holds the community name instead
+    // (`data-testid="community-roles-heading"`, app/(main-and-community)/roles/[tag]/content.tsx)
+    // — no heading with "User roles" text exists on this page any more.
+    this.rolesHeading = page.getByTestId('community-roles-heading');
     this.rolesTable = page.locator('table');
     this.rolesTableHeader = this.rolesTable.locator('thead');
     this.rolesTableRows = this.rolesTable.locator('tbody tr');
@@ -70,7 +77,10 @@ export class TagCommunityFeedsPage {
     this.rolesRoleHeader = this.rolesTableHeader.getByRole('columnheader', { name: 'Role' });
     this.rolesTitleHeader = this.rolesTableHeader.getByRole('columnheader', { name: 'Title' });
 
-    this.notFoundHeading = page.getByRole('heading', { name: /page not found|404/i });
+    // app/not-found.tsx's <h1> reads "That page is not here" — the page's
+    // "404" code is a separate, non-heading <p> above it, so no heading text
+    // matches /page not found|404/i any more.
+    this.notFoundHeading = page.getByRole('heading', { name: 'That page is not here' });
     this.noDataError = page.getByTestId('no-data-error');
   }
 

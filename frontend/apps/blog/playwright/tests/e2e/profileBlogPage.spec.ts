@@ -33,11 +33,17 @@ test.describe('Profile page of @gtg', () => {
     const firstPostRebloggedLabel = await profilePage.postBlogItem.first();
     const firstPostRebloggedAuthorLink = await profilePage.postRebloggedAuthorLink.nth(0);
     const firstPostAuthor = await profilePage.postsPostAuthor.nth(0);
+    // `postsPostAuthor` now resolves to `identity-pill-profile`, which renders
+    // `@handle` (leading `@`) instead of the old bare handle. Stripped here rather
+    // than left in, otherwise the reblog-branch `.not.toBe()` below would ALWAYS be
+    // true just from the `@`/no-`@` format mismatch — a vacuous pass that would never
+    // catch a real self-reblog.
+    const firstPostAuthorHandle = (await firstPostAuthor.textContent())?.replace(/^@/, '');
 
-    if (await firstPostRebloggedLabel.locator('[data-testid="reblogged-label"]').isVisible())
-      expect(await firstPostRebloggedAuthorLink.textContent()).not.toBe(await firstPostAuthor.textContent());
+    if (await firstPostRebloggedLabel.locator('[data-testid="medium-card-reblogged-by"]').isVisible())
+      expect(await firstPostRebloggedAuthorLink.textContent()).not.toBe(firstPostAuthorHandle);
     else
-      expect(await firstPostAuthor.textContent()).toBe('gtg');
+      expect(firstPostAuthorHandle).toBe('gtg');
   });
 
   test('validate amount of post items before and after loading more cards', async ({ page }) => {
@@ -219,7 +225,10 @@ test.describe('Profile page of @gtg', () => {
 
     const firstPostResponse: any = await profilePage.postResponse.first();
     const firstPostTitle: any = await profilePage.postTitle.first().textContent();
-    const firstPostAuthor: any = await profilePage.postsPostAuthor.first().textContent();
+    // `postsPostAuthor` now resolves to `identity-pill-profile`, which renders
+    // `@handle`; stripped here so the exact `toHaveText` comparison below still
+    // measures the same thing it did before the card redesign (the bare handle).
+    const firstPostAuthor: any = (await profilePage.postsPostAuthor.first().textContent())?.replace(/^@/, '');
 
     await firstPostResponse.click();
 
@@ -275,7 +284,13 @@ test.describe('Profile page of @polish.hive - cross-post author', () => {
     test.skip(crossPostCount === 0, 'No cross-posted items found on this profile');
 
     const firstCrossPostedItem = crossPostedItems.first();
-    const postAuthorText = await firstCrossPostedItem.locator(profilePage.postsPostAuthor).textContent();
+    // `postsPostAuthor` now resolves to `identity-pill-profile`, which renders
+    // `@handle`; `originalAuthor` already has its `@` stripped below, so this needs
+    // the same stripping to keep the `toBe` comparison exact rather than always-false.
+    const postAuthorText = (await firstCrossPostedItem.locator(profilePage.postsPostAuthor).textContent())?.replace(
+      /^@/,
+      ''
+    );
     const originalLinkText = await firstCrossPostedItem.locator(profilePage.crossPostOriginalLink).textContent();
     const originalAuthor = originalLinkText?.replace(/^@/, '').split('/')[0];
 

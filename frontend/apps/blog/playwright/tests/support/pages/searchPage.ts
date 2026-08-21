@@ -28,6 +28,7 @@ export class SearchPage {
   readonly postListItems: Locator;
   readonly firstPostItem: Locator;
   readonly firstPostTitle: Locator;
+  readonly firstPostTitleText: Locator;
   readonly firstPostAuthor: Locator;
 
   // Loading and empty states
@@ -37,7 +38,11 @@ export class SearchPage {
     this.page = page;
 
     // The only search field left (header-mounted; see features/search/search-input.tsx).
-    this.searchInput = page.getByTestId('header-search-input');
+    // ★ TWO `header-search-input` NODES EXIST (2026-08-21) — the header renders a
+    // desktop and a mobile field; measured 2 in the DOM, exactly 1 visible. A bare
+    // `getByTestId` is therefore a strict-mode violation. Pinning the visible one
+    // also fixes `searchButton` below, which hangs off this locator.
+    this.searchInput = page.locator('[data-testid="header-search-input"]:visible');
     // No testid on the submit button; it is the input's sibling in the same
     // pill, so this holds regardless of the (translated) aria-label text.
     this.searchButton = this.searchInput.locator('xpath=following-sibling::button');
@@ -49,7 +54,15 @@ export class SearchPage {
     this.postListItems = page.locator('[data-testid="medium-card"]');
     this.firstPostItem = this.postListItems.first();
     this.firstPostTitle = this.firstPostItem.locator('[data-testid="medium-card-title"]');
-    this.firstPostAuthor = this.firstPostItem.locator('[data-testid="medium-card-author"]');
+    // `firstPostTitle`'s <h2> renders the headline AND the inline post date as
+    // sibling <span>s with no separator between them (medium-post-card.tsx), so
+    // its raw textContent is "TitleTimeAgo". This isolates the title's own span
+    // for exact-text comparisons; use `firstPostTitle` itself for click/visibility.
+    this.firstPostTitleText = this.firstPostTitle.locator('h2 > span').first();
+    // `medium-card-author` no longer exists — the byline is now
+    // `identity-pill-profile` (features/discovery-feed/identity-pill.tsx),
+    // which renders "@handle" (leading @), unlike the old bare-handle testid.
+    this.firstPostAuthor = this.firstPostItem.locator('[data-testid="identity-pill-profile"]');
 
     // Actual copy (locales/en/common_blog.json, search_page.no_results_for):
     // `No results for "{{query}}". Try different or fewer words.`

@@ -137,7 +137,27 @@ export class PostPage {
       hasText: /^Content (were hidden due to low ratings|hidden (by community moderators|because parent content is muted|due to low author reputation)|hidden: author (not allowed to post in this community|is muted in this community))\.Show$/
     }).getByRole('button');
     this.postListItemOnHomePage = page.locator('li[data-testid="post-list-item"], [data-testid="medium-card"]');
-    this.firstPostImageOnHomePage = page.locator('li[data-testid="post-list-item"]:nth-of-type(1) img, [data-testid="medium-card"]:nth-of-type(1) img');
+    /*
+     * ★ `:nth-of-type(1)` DOES NOT MEAN "THE FIRST CARD" (2026-08-21). Each card is
+     * the only `<article>` inside its own wrapper `<div>`, so EVERY card satisfies
+     * `:nth-of-type(1)` — measured 39 matching images across the home feed, which is
+     * a strict-mode violation rather than "the first post's image". Scoping to the
+     * first card and taking its thumbnail is what this locator always meant.
+     *
+     * ★★ AND IT MUST BE THE THUMBNAIL SPECIFICALLY, NOT "the first img in the card".
+     * A first attempt at this fix used `[data-testid="medium-card-thumbnail"] img, img`
+     * — and the FIRST `<img>` inside a card is the AVATAR, not the thumbnail
+     * (measured: avatar `user-avatar-img`, 40px, inside a link to `/@handle`;
+     * thumbnail second, 190px, inside a link to the post). So the click landed on the
+     * author's profile, the post body never rendered, and 7 postPage.spec tests failed
+     * waiting for `#articleBody`. `medium-card-thumbnail` is itself the `<a>` to the
+     * post, which is exactly what "click the post's image" means.
+     */
+    this.firstPostImageOnHomePage = page
+      .locator('li[data-testid="post-list-item"], [data-testid="medium-card"]')
+      .first()
+      .locator('[data-testid="medium-card-thumbnail"]')
+      .first();
     this.firstPostTitleOnHomePage = page
       .locator('[data-testid="post-list-item"] [data-testid="post-title"] a, [data-testid="medium-card"] a[data-testid="medium-card-title"]')
       .first();
@@ -188,7 +208,20 @@ export class PostPage {
     this.commentCardsFooterUpvotes = this.commentCardsFooters.locator('[data-testid="upvote-button"]');
     this.commentCardsFooterDownvotes = this.commentCardsFooters.locator('[data-testid="downvote-button"]');
     this.commentCardsFooterPayoutNonZero = page.locator('[data-testid="comment-card-footer-payout"]');
-    this.commentCardsFooterPayoutZero = page.locator('[data-testid="post-payout"], [data-testid="medium-card-payout"]');
+    /*
+     * ★ `post-payout` / `medium-card-payout` NEVER APPEAR IN A COMMENT FOOTER
+     * (2026-08-21). Those testids belong to the FEED CARD components
+     * (features/list-of-posts/post-list-item.tsx, details-card-hover.tsx,
+     * features/discovery-feed/medium-post-card.tsx). A comment's payout is
+     * `comment-card-footer-payout`, rendered unconditionally inside
+     * `comment-card-footer` for EVERY comment whatever its value
+     * (features/post-rendering/comment-list-item.tsx:1061) — there is no separate
+     * zero/non-zero element, so this is deliberately the same locator as
+     * `commentCardsFooterPayoutNonZero` above; the zero-vs-non-zero distinction
+     * lives in WHICH comment the spec selects, not in the testid. Before this the
+     * locator matched zero elements and its caller waited out the full timeout.
+     */
+    this.commentCardsFooterPayoutZero = page.locator('[data-testid="comment-card-footer-payout"]');
     this.commentCardsFooterVotes = this.commentCardsFooters.locator('[data-testid="comment-votes"]');
     this.postVoterList = page.locator('[data-testid="list-of-voters"]');
     this.commentCardsFooterReply = this.commentCardsFooters.locator(
@@ -242,7 +275,14 @@ export class PostPage {
       '[data-testid="author-data-post-footer"] [data-testid="comment-votes"]'
     );
     this.postsCommentsTab = page.getByRole('tab', { name: 'Comments' });
-    this.postsCommentsFirstAvatar = page.locator('[data-testid="post-card-avatar"], [data-testid="medium-card-avatar"]').first();
+    // `medium-card-avatar` no longer exists — the redesigned card has no testid
+    // of its own for the avatar; it's the first `<a>` inside
+    // `[data-testid="identity-pill"]` (the aria-hidden face link that wraps
+    // UserAvatarImg — see features/discovery-feed/identity-pill.tsx). The
+    // classic-card alternative `post-card-avatar` (features/list-of-posts/
+    // post-list-item.tsx) is still live and kept for pages rendering that
+    // card type.
+    this.postsCommentsFirstAvatar = page.locator('[data-testid="post-card-avatar"], [data-testid="identity-pill"] a').first();
     this.mutedPostsBannedImageText = page.locator('#articleBody .text-red-500').first();
     this.userPostMenu = page.getByTestId('user-post-menu');
     this.postFooterUpvoteTooltip = page.locator('[data-testid="upvote-button-tooltip"]');

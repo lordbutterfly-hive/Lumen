@@ -1,38 +1,135 @@
 import { Locator, Page, expect } from '@playwright/test';
 
 /**
- * ★★★ `[data-testid="profile-navigation"]` IS GONE (2026-08-10).
+ * ★★★ `[data-testid="profile-navigation"]` IS GONE (2026-08-10, verified still true
+ * 2026-08-21). See the DELETED-tests comments in profilePage.spec.ts /
+ * profileBlogPage.spec.ts for what that removal already covered — no live locator in
+ * this file references it any more, only historical comments do.
  *
- * The legacy `ProfileLayout` — dark-navy cover, translucent card, a slate
- * "Blog / Social" tab bar and its Posts/Replies/Social/Notifications/Wallet/
- * Settings links — was replaced by the redesigned profile
- * (features/account-profile/redesign/*) and its sub-page shell
- * (features/layouts/user-profile/profile-subpage-shell.tsx). Confirmed by
- * grep (zero occurrences of "profile-navigation" anywhere under
- * features/app/components) and live: `/@user/posts`, `/@user/payout`,
- * `/@user/replies` and `/@user/notifications` all 302 to `/404` today —
- * those routes were deleted along with the chrome that linked to them
- * (`/comments`, `/communities`, `/settings`, `/followers`, `/following`
- * still resolve). Every locator and helper that targeted that chrome has
- * been removed below rather than left pointing at nothing.
+ * ★★★ RE-AUDITED 2026-08-21 against a further redesign pass (`profile-redesign-main`,
+ * `profile-identity-block`, `ProfileLeagueChip`, `IdentityPill` on post cards) that
+ * landed after the 2026-08-10/13 notes below were written. Those notes are now WRONG
+ * in places (most importantly: `profile-stats` is NOT alive any more) and have been
+ * superseded by this pass. Ground truth used: /tmp/testid-inventory.json (live
+ * per-page testid capture) + direct source reads, cited inline at each field.
  *
- * ★ NOT FIXED, AND STILL STALE (out of scope for this pass — flagging
- * rather than guessing): `profileInfo`/`profile-info`, `profileName`/
- * `profile-name`, `profileAbout`/`profile-about`, `profileNickName`/
- * `profile-nickname`, `profileJoined`/`user-joined`,
- * `profileLastTimeActive`/`user-last-time-active`, `profileLocation`/
- * `user-location`, `userLinks`/`user-links`, `userBannerLevelLink`/
- * `userBannerLevelImg`/`profile-level-link`/`profile-level-image`,
- * `userBannerTwitterBadgeLink`/`profile-twitter-badge`, and
- * `profileBlogPostsList`/`post-list-profile-blog-list` are ALSO confirmed
- * absent from current source (same grep). The display name is now a bare
- * `<h1>` inside `PageMasthead` with no testid at all
- * (features/layouts/page-masthead.tsx). `gotoProfilePage()` below still
- * waits on the dead `profileInfo` selector and will time out — fixing that
- * needs new, verified locators for the redesigned identity block, which is
- * a bigger job than the profile-navigation removal this pass covers.
- * `profile-stats` and `profile-follow-button` ARE confirmed alive and safe
- * to use as substitutes where a "we're on a profile page" check is needed.
+ * ★ `profile-info` → repointed to `[data-testid="profile-identity-block"]`
+ * (features/account-profile/redesign/profile-identity.tsx:122). That block now holds
+ * everything the old profile-info card held except the display name (moved to the
+ * shared masthead's bare `<h1>`, no testid — profile-main.tsx:247,
+ * features/layouts/page-masthead.tsx:94) and the discrete stats-bar wrapper (the
+ * stats line is now un-wrapped content inside this same block —
+ * profile-identity.tsx:255-296).
+ *
+ * ★ `profile-stats` → ALSO repointed to `[data-testid="profile-identity-block"]`. The
+ * old standalone `ProfileStatsBar` card was deleted 2026-08-13 (see
+ * profile-identity.tsx's own doc comment); the four numbers are now an un-wrapped
+ * line inside the identity block, so there is no narrower live container to point at.
+ * `profileFollowers`/`profileNumberOfPosts`/`profileFollowing`/`profileHP` below no
+ * longer derive from `profileStats` as a scoping parent — each is now independently,
+ * more precisely selected (href for the two still-`<a>` stats, a text pattern for
+ * Posts since it became a bare `<span>`, the live `profile-hp-effective` testid for
+ * HP).
+ *
+ * ★ `profile-name` → repointed to `page.locator('h1')`. Confirmed by source
+ * (page-masthead.tsx:94, `headingLevel` defaults to `'h1'`; profile-main.tsx:247 does
+ * not override it) that this is the only `<h1>` profile-main.tsx or any component it
+ * mounts renders (grepped features/account-profile, features/layouts/user-profile,
+ * features/discovery-feed for `<h1`/`headingLevel` — the only other sitewide `<h1>`
+ * is home-shell.tsx's sr-only heading, a different route).
+ *
+ * ★ `profileAbout` → repointed to `[data-testid="profile-identity-block"] > p`. The
+ * bio paragraph itself carries NO testid (profile-identity.tsx:202, confirmed by
+ * grep — genuinely missing, not renamed) but it is structurally the ONLY `<p>` that
+ * component ever renders (the empty-bio prompt at line 208-214 is an `<a>`, not a
+ * `<p>`), so this is unambiguous.
+ *
+ * ★ `profileJoined`/`profileLastTimeActive`/`profileLocation` → all three are bare
+ * `<span className="flex items-center gap-1.5">` siblings with NO testid and
+ * IDENTICAL classes (profile-identity.tsx:217-234) — genuinely missing testids.
+ * Repointed by TEXT, since the translated label words are stable and exclusive:
+ * "Joined ..." / "Active ..." (locales/en/common_blog.json: user_profile.joined /
+ * user_profile.active). `profileLocation` is derived by ELIMINATION — the meta row
+ * renders at most these three spans, in this order, and location has no label of its
+ * own (it is the raw `profile.location` string with an icon), so "neither Joined nor
+ * Active" is exactly location-or-absent. This correctly resolves to an EMPTY locator
+ * (not a wrong one) on a profile with no location set, which is the safe failure mode.
+ *
+ * ★ `userBannerLevelLink`/`userBannerLevelImg`/`userBannerTwitterBadgeLink` → NOT
+ * fixed, left pointing at dead testids, see the two `User Banner Row - User level
+ * badge` tests in profilePage.spec.ts for why: the HiveBuzz whale/orca badge these
+ * checked (title="X is a Whale...", src="/whale.png") has been replaced by an
+ * unrelated feature — `ProfileLeagueChip` (features/retention/components/
+ * profile-league-chip.tsx), Lumen's own tier/rank system ("Beacon · rank 7 of 9"),
+ * different data source, different image (an SVG emblem, not `/whale.png`), different
+ * copy entirely. There is no drift-fix here, the feature the test describes is gone.
+ *
+ * ★ `postsPostAuthor`/`postAvatar` (`medium-card-author`/`medium-card-avatar`) →
+ * repointed per the handoff brief: `identity-pill-profile` (renders `@handle`, so
+ * every textContent comparison downstream needed the leading `@` accounted for — done
+ * at each call site in the two spec files, not by weakening the assertions) and the
+ * first `<a>` inside `identity-pill` respectively. See features/discovery-feed/
+ * identity-pill.tsx.
+ *
+ * ★ `postRebloggedLabel`/`postRebloggedAuthorLink` → repointed to
+ * `medium-card-reblogged-by` / `medium-card-reblogged-by-link`
+ * (medium-post-card.tsx:850-863), the current card's reblog-provenance testids. The
+ * old `reblogged-label`/`reblogged-author-link` testids still exist in source but only
+ * on the legacy `post-list-item.tsx` "classic" card, which the live testid inventory
+ * confirms is NOT what renders on `/@handle` any more (medium-post-card.tsx replaced
+ * it — see that file's own doc comment at line 812).
+ *
+ * ★ `postTitle` → repointed to the title-only inner `<span>`
+ * (`a[data-testid="medium-card-title"] h2 span:first-child`), NOT the whole anchor.
+ * The anchor's full textContent now includes the post date, inlined right after the
+ * title with no separator (medium-post-card.tsx:1210-1233, "THE DATE HAS LEFT THIS
+ * ROW... It now sits inline after the title"), which would corrupt any exact title
+ * comparison. The title span is always the first child of the `<h2>`, so this stays
+ * exact-text-safe. Clicking the span still navigates — it is nested inside the same
+ * `<a>`, so the click bubbles to it exactly like clicking the date does.
+ *
+ * ★ `postTimestamp` → there is no more separate, clickable timestamp element; the
+ * date moved inside the title anchor (same note as above). Repointed to the one
+ * element inside that anchor carrying a native `title` attribute — the bare
+ * `<span title="...">` `TimeAgo` renders (packages/ui/components/time-ago.tsx:115) —
+ * which is the closest live equivalent of "the timestamp, as its own sub-element".
+ *
+ * ★ `postCommunityLink`/`postCategoryLink` → NOT fixed, left dead. The redesigned
+ * card collapsed both into ONE `medium-card-rubric` slot (medium-post-card.tsx:963,
+ * doc comment: "the rubric slot shows the post's first tag instead... If there is no
+ * tag either, the rubric is omitted") with no way to tell from a testid alone which
+ * case rendered. Pointing both fields at the same element would make BOTH branches of
+ * the test that uses them ('move to the community page after clicking
+ * community/category link...') fire together, running the community-only assertions
+ * even on a tag-fallback post. That is a test-logic decision, not a locator fix — see
+ * the report handed back with this pass.
+ *
+ * ★ `postReputation`/`postReputationTooltip` → NOT fixed, left dead. The
+ * redesigned card's byline (`IdentityPill`) has no reputation display at all — grepped
+ * medium-post-card.tsx and identity-pill.tsx for "reputation", zero hits. Reputation
+ * now only appears via the hover-triggered `UserPopoverCard`
+ * (features/post-rendering/user-popover-card.tsx), not as a static, always-visible
+ * element, so there is nothing to point a "visible with title=Reputation" check at.
+ *
+ * ★ `crossPostBanner`/`crossPostAuthorLink`/`crossPostOriginalLink` → NOT fixed, left
+ * dead. Same story as reblog: these testids exist only on the legacy
+ * `post-list-item.tsx` card. `medium-post-card.tsx` has no cross-post attribution
+ * surface at all (grepped for "cross-post", zero hits) — this is a feature gap in the
+ * redesign, not a rename, and the test that depends on it
+ * ('cross-post original link author matches...') will keep silently `test.skip`-ing
+ * (`crossPostCount` is always 0) until either the feature is rebuilt or the test is
+ * retired.
+ *
+ * ★ `postReblogCountDisplay`/`postReblogCountTooltip` → repointed to
+ * `medium-card-reblog-count` / `medium-card-reblog-tooltip`
+ * (medium-post-card.tsx:1531-1553); confirmed the tooltip text is literally `Reblog`
+ * (LABELS.reblog, medium-post-card.tsx:64), matching the existing `/reblog/i` check.
+ *
+ * ★ `postResponse`/`postResponseTooltip` (`post-card-response-link`/
+ * `post-card-responses`) and `postPayoutTooltip` (`payout-post-card-tooltip`) needed
+ * NO fix — both are shared components (`PostCardCommentTooltip`, `DetailsCardHover`)
+ * that `medium-post-card.tsx` reuses as-is, confirmed still wired in
+ * (medium-post-card.tsx:1502-1509, 1568).
  */
 export class ProfilePage {
   readonly page: Page;
@@ -242,7 +339,9 @@ export class ProfilePage {
   constructor(page: Page) {
     this.page = page;
     this.followBtn = '[data-testid="profile-follow-button"]'
-    this.profileInfo = page.locator('[data-testid="profile-info"]');
+    // ★ `profile-info` DEAD → `profile-identity-block` (profile-identity.tsx:122).
+    // See the class doc comment above for the full mapping rationale.
+    this.profileInfo = page.locator('[data-testid="profile-identity-block"]');
     /**
      * ★ The live "we are on a profile SUBPAGE" anchor (added 2026-08-11):
      * `features/layouts/user-profile/profile-subpage-shell.tsx:87`. Server-rendered,
@@ -251,20 +350,55 @@ export class ProfilePage {
      * on /communities, /followers, /following, /settings and friends.
      */
     this.profileSubpageMain = page.locator('[data-testid="profile-subpage-main"]');
-    this.profileName = page.locator('[data-testid="profile-name"]');
-    this.profileNameString = '[data-testid="profile-name"]';
+    // ★ `profile-name` DEAD → the shared masthead's bare `<h1>`, no testid
+    // (page-masthead.tsx:94, profile-main.tsx:247). Only `<h1>` on this route.
+    this.profileName = page.locator('h1');
+    this.profileNameString = 'h1';
     this.profileNickName = page.locator('[data-testid="profile-nickname"]');
-    this.profileAbout = page.locator('[data-testid="profile-about"]');
-    this.profileLastTimeActive = page.locator('[data-testid="user-last-time-active"]');
-    this.profileJoined = page.locator('[data-testid="user-joined"]');
-    this.profileLocation = page.locator('[data-testid="user-location"]');
-    this.profileStats = page.locator('[data-testid="profile-stats"]');
-    this.profileStatsString = '[data-testid="profile-stats"]'
-    // New design uses Link/div elements instead of li, order: Followers, Posts, Following, HP
-    this.profileFollowers = this.profileStats.locator('> a').nth(0);
-    this.profileNumberOfPosts = this.profileStats.locator('> a').nth(1);
-    this.profileFollowing = this.profileStats.locator('> a').nth(2);
-    this.profileHP = this.profileStats.locator('> div').first();
+    // ★ `profile-about` has no testid at all (profile-identity.tsx:202) — it is the
+    // ONLY `<p>` the identity block ever renders (the empty-bio prompt is an `<a>`).
+    this.profileAbout = page.locator('[data-testid="profile-identity-block"] > p');
+    // ★ `user-last-time-active`/`user-joined`/`user-location` all DEAD — none of the
+    // three meta-row spans (profile-identity.tsx:217-234) carry a testid, and all
+    // three share identical classes. Repointed by the stable, mutually-exclusive
+    // translated label text; profileLocation is "neither Joined nor Active" by
+    // elimination, which resolves to an empty (not wrong) locator when absent.
+    this.profileLastTimeActive = page
+      .locator('[data-testid="profile-identity-block"] span.items-center')
+      .filter({ hasText: /^Active/ });
+    this.profileJoined = page
+      .locator('[data-testid="profile-identity-block"] span.items-center')
+      .filter({ hasText: /^Joined/ });
+    this.profileLocation = page
+      .locator('[data-testid="profile-identity-block"] span.items-center')
+        // ★ `.first()`: the identity block holds several `span.items-center` rows and
+        // more than one survives the Joined/Active exclusion, which makes this a
+        // strict-mode violation rather than "the location". Location is the first
+        // such row; measured as a strict-mode failure in the 2026-08-21 run.
+        .filter({ hasNotText: /^(Joined|Active)/ })
+        .first();
+    // ★ `profile-stats` DEAD — the standalone stats card was deleted 2026-08-13; its
+    // four numbers are now unwrapped content inside `profile-identity-block`
+    // (profile-identity.tsx:255-296), so that block is the closest live "we're on a
+    // profile page, stats are visible" proxy. See class doc comment for why the child
+    // locators below no longer scope off this field.
+    this.profileStats = page.locator('[data-testid="profile-identity-block"]');
+    this.profileStatsString = '[data-testid="profile-identity-block"]'
+    // ★ Followers/Following are still real `<a href="/@user/followers|following">`
+    // links (profile-identity.tsx:256,268) — selected by href, not position, since
+    // Posts is no longer an `<a>` (see below) and the old `> a` nth-index would now
+    // silently pick the wrong element. HP has its own live testid.
+    this.profileFollowers = page.locator('[data-testid="profile-identity-block"] a[href$="/followers"]');
+    this.profileFollowing = page.locator('[data-testid="profile-identity-block"] a[href$="/following"]');
+    // ★ Posts count is now a bare `<span>`, no href, no testid (profile-identity.tsx:
+    // 261-263) — matched by its own rendered text shape ("<number> post(s)"), which is
+    // the only element in the block matching that exact anchored pattern.
+    this.profileNumberOfPosts = page
+      .locator('[data-testid="profile-identity-block"]')
+      .getByText(/^[\d,—]+\s+posts?$/);
+    // ★ HP now has its OWN live testid (profile-identity.tsx:286) — direct, not
+    // derived from a stats-line index any more.
+    this.profileHP = page.locator('[data-testid="profile-hp-effective"]');
     this.followButton = page.locator('[data-testid="profile-follow-button"]');
     // ★ `muteButton` REMOVED (2026-08-12, Block consolidation cleanup). It
     // targeted `data-testid="profile-mute-button"`, which no longer renders
@@ -277,34 +411,82 @@ export class ProfilePage {
 
     this.postBlogItem = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]');
     this.postsMenu = page.locator('[data-testid="user-post-menu"]');
-    this.postsPostAuthor = page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]');
+    // ★ `post-author`/`medium-card-author` DEAD → `identity-pill-profile`
+    // (identity-pill.tsx:134). Renders `@handle` (leading `@`), unlike the old bare
+    // handle — every textContent comparison against this field in the spec files
+    // strips the `@` explicitly rather than weakening the assertion.
+    this.postsPostAuthor = page.locator('[data-testid="identity-pill-profile"]');
     this.postsMenuPostsButton = page.locator('[data-testid="user-post-menu"]').getByText('Posts');
     this.postsMenuCommentsButton = page.locator('[data-testid="user-post-menu"]').getByText('Comments');
     this.postsMenuPayoutsButton = page.locator('[data-testid="user-post-menu"]').getByText('Payouts');
-    this.postRebloggedLabel = page.locator('[data-testid="reblogged-label"]');
+    // ★ `reblogged-label`/`reblogged-author-link` DEAD on this card → the current
+    // card's reblog-provenance testids (medium-post-card.tsx:850-863).
+    this.postRebloggedLabel = page.locator('[data-testid="medium-card-reblogged-by"]');
     this.firstPostRebloggedLabel = this.postBlogItem.first().locator(this.postRebloggedLabel);
-    this.postRebloggedAuthorLink = page.locator('[data-testid="reblogged-author-link"]');
-    this.postTitle = this.postBlogItem.locator('[data-testid="post-title"] > a, a[data-testid="medium-card-title"]');
+    this.postRebloggedAuthorLink = page.locator('[data-testid="medium-card-reblogged-by-link"]');
+    // ★ `a[data-testid="medium-card-title"]` per the established mapping (the testid
+    // IS the anchor), scoped one level deeper to the title-only span
+    // (medium-post-card.tsx:1210-1230): the anchor's full text now also contains the
+    // post date inlined right after the title with no separator, which would corrupt
+    // any exact-title comparison. The span is always the `<h2>`'s first child.
+    // Clicking it still navigates — it is nested inside the same `<a>`.
+    this.postTitle = this.postBlogItem.locator(
+      '[data-testid="post-title"] > a, a[data-testid="medium-card-title"] h2 span:first-child'
+    );
     this.postDescription = this.postBlogItem.locator('[data-testid="post-description"], [data-testid="medium-card-dek"]');
+    // ★ `post-card-community`/`post-card-category` DEAD on this card — NOT fixed. The
+    // redesign collapsed both into ONE `medium-card-rubric` slot with no testid-level
+    // way to tell which case rendered; see the class doc comment above for why a
+    // single-locator fix here would be a confident-but-wrong guess, not a repoint.
     this.postCommunityLink = page.locator('[data-testid="post-card-community"]');
     this.postCategoryLink = page.locator('[data-testid="post-card-category"]');
-    this.postTimestamp = page.locator('[data-testid="post-card-timestamp"]');
+    // ★ `post-card-timestamp` DEAD — there is no separate clickable timestamp any
+    // more, the date moved inside the title anchor (see postTitle above). Repointed
+    // to the one element inside that anchor with a native `title` attribute — the
+    // bare `<span title="...">` `TimeAgo` renders (time-ago.tsx:115) — the closest
+    // live equivalent of "the timestamp, as its own sub-element". Still nested inside
+    // `a[data-testid="medium-card-title"]`, so `.click()` still navigates.
+    this.postTimestamp = page.locator('a[data-testid="medium-card-title"] span[title]');
     this.postUpvoteButton = page.locator('[data-testid="upvote-button"]');
     this.postDownvoteButton = page.locator('[data-testid="downvote-button"]');
     this.postUpvoteTooltip = page.locator('[data-testid="upvote-button-tooltip"]');
     this.postDownvoteTooltip = page.locator('[data-testid="downvote-button-tooltip"]');
     this.postPayout = page.locator('[data-testid="post-payout"], [data-testid="medium-card-payout"]');
     this.postPayoutTooltip = page.locator('[data-testid="payout-post-card-tooltip"]');
+    // ★ `post-total-votes` DEAD — NOT fixed, and NOT a rename. Confirmed by inventory
+    // (absent from every captured page) and by source comment
+    // (medium-post-card.tsx:1461): the standalone total-votes display was DELETED
+    // 2026-08-14 for being a duplicate — "this sibling printed total_votes a second
+    // time, so every card read '759 759'". `vote-tally-up`/`vote-tally-down`
+    // (votes-component.tsx:509,529, alive, inside `vote-control`) are a DIFFERENT
+    // metric (the up/down split, not a combined total), so pointing this field at
+    // either would silently change what is being measured, not repoint it. This field
+    // has zero consumers across the whole test suite (grepped), so nothing regresses
+    // by leaving it dead — flagging rather than guessing.
     this.postVotes = page.locator('[data-testid="post-total-votes"]');
     this.postVotesTooltip = page.locator('[data-testid="post-card-votes-tooltip"]');
     this.postResponse = page.locator('[data-testid="post-card-response-link"]');
     this.postResponseTooltip = page.locator('[data-testid="post-card-responses"]');
     // Reblog button on profile list pages (interactive - opens confirmation dialog)
-    this.postReblogCountDisplay = page.locator('[data-testid="post-card-reblog-count"]');
-    this.postReblogCountTooltip = page.locator('[data-testid="post-card-reblog-count-tooltip"]');
-    this.postAvatar = page.locator('[data-testid="post-card-avatar"], [data-testid="medium-card-avatar"]');
+    // ★ `post-card-reblog-count`/`-tooltip` DEAD on this card → `medium-card-reblog-count`
+    // / `medium-card-reblog-tooltip` (medium-post-card.tsx:1531-1553). Tooltip text is
+    // literally `Reblog` (LABELS.reblog, medium-post-card.tsx:64) — still matches /reblog/i.
+    this.postReblogCountDisplay = page.locator('[data-testid="medium-card-reblog-count"]');
+    this.postReblogCountTooltip = page.locator('[data-testid="medium-card-reblog-tooltip"]');
+    // ★ `post-card-avatar`/`medium-card-avatar` DEAD → per the handoff brief, the
+    // card's face has no testid of its own; it is the first `<a>` inside
+    // `[data-testid="identity-pill"]` (identity-pill.tsx:130-141), scoped per-card via
+    // `:first-child` (the avatar Link is literally the pill's first DOM child).
+    this.postAvatar = page.locator('[data-testid="identity-pill"] > a:first-child');
+    // ★ `post-author-reputation`/`post-reputation-tooltip` DEAD — NOT fixed. The
+    // redesigned byline (`IdentityPill`) has no reputation display at all (grepped
+    // medium-post-card.tsx + identity-pill.tsx, zero hits); reputation now only
+    // appears via the hover-triggered `UserPopoverCard`, not a static element.
     this.postReputation = page.locator('[data-testid="post-author-reputation"]');
     this.postReputationTooltip = page.locator('[data-testid="post-reputation-tooltip"]');
+    // ★ `cross-post-*` DEAD on this card — NOT fixed. These testids exist only on the
+    // legacy `post-list-item.tsx` card; `medium-post-card.tsx` has no cross-post
+    // attribution surface at all (grepped, zero hits) — a feature gap, not a rename.
     this.crossPostBanner = page.getByTestId('cross-post-banner');
     this.crossPostAuthorLink = page.getByTestId('cross-post-author-link');
     this.crossPostOriginalLink = page.getByTestId('cross-post-original-link');
@@ -466,6 +648,12 @@ export class ProfilePage {
     this.userHasNotStartedBloggingYetMsg = page.locator('[data-testid="user-has-not-started-blogging-yet"]');
     this.userDoesNotHaveAnySubscriptionsYetMsg = page.locator('[data-testid="user-does-not-have-any-subscriptions-yet"]');
     this.userHasNotHadAnyNotificationsYetMsg = page.locator('[data-testid="user-has-not-had-any-notifications-yet"]');
+    // ★ `profile-level-link`/`profile-level-image`/`profile-twitter-badge` DEAD — NOT
+    // fixed. The HiveBuzz whale/orca level badge these targeted no longer exists;
+    // `ProfileLeagueChip` (profile-league-chip.tsx) replaced it with an unrelated
+    // feature (Lumen's own tier/rank system, different data source, an SVG emblem
+    // instead of `/whale.png`/`/orca.png`, different copy entirely). See the class
+    // doc comment above.
     this.userBannerLevelLink = page.locator('[data-testid="profile-level-link"]');
     this.userBannerLevelImg = page.locator('[data-testid="profile-level-image"]');
     this.userBannerTwitterBadgeLink = page.locator('[data-testid="profile-twitter-badge"]');

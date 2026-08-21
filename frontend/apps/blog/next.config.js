@@ -186,6 +186,42 @@ const nextConfig = {
         { source: `/${sort}/my`, destination: sort === 'muted' ? '/' : '/?tab=feed', permanent: false },
         { source: `/${sort}/:tag`, destination: '/topics/:tag', permanent: false }
       ]),
+        /**
+         * ★ THE BARE COMMUNITY PATH 404'd, AND IT IS THE PREFIX OF EVERY POST URL
+         * THIS APP EMITS (2026-08-21).
+         *
+         * Our own post links look like `/hive-160391/@gtg/<permlink>`. Delete the
+         * tail — which is what a reader does to get "the rest of this community",
+         * and what a copy-paste truncation does by accident — and `/hive-160391`
+         * answered 404. So did `/hive-139531`, the spelling pasted out of other
+         * Hive front ends.
+         *
+         * ★ MATCHED AGAINST WHAT THE OTHER FRONT ENDS ACTUALLY DO, not assumed.
+         * Measured 2026-08-21:
+         *
+         *     hive.blog/hive-139531      404
+         *     hive.blog/c/hive-139531    404
+         *     peakd.com/hive-139531      200
+         *     peakd.com/c/hive-139531    200
+         *
+         * hive.blog treats `/trending/hive-…` as the only community URL; peakd
+         * serves the bare path and its own `/c/` form. Following peakd is the
+         * owner's call (2026-08-21: "id still rather it not show 404"), and it
+         * costs nothing — both spellings land on the one canonical topic page
+         * rather than becoming a second place a community can live.
+         *
+         * `hive-\d+` and nothing looser: community accounts on Hive are always
+         * `hive-` plus digits, and a bare `:tag` here would swallow every unknown
+         * single-segment path in the app (`/photography`, and any future top-level
+         * route) into a topic page that may not exist. A one-segment source cannot
+         * match `/hive-160391/@gtg/<permlink>`, so post URLs are untouched.
+         *
+         * `permanent: false` to match the retired-sort redirects above rather than
+         * pinning a 308 into every reader's browser cache while the topic surface
+         * is still settling.
+         */
+        { source: '/:community(hive-\\d+)', destination: '/topics/:community', permanent: false },
+        { source: '/c/:community(hive-\\d+)', destination: '/topics/:community', permanent: false },
       // The four legacy moderation lists — one Blocked list now (owner ruling,
       // 2026-08-12). A hash fragment is never sent to the server, so it is carried
       // here in the destination for the browser to apply on arrival.

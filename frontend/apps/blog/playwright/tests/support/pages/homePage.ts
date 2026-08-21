@@ -210,11 +210,24 @@ export class HomePage {
     this.getFirstPostListItemReblogButton = this.getFirstPostListItem
       .locator('[data-testid="medium-card-reblog"], [data-testid="post-card-reblog"]')
       .first();
-    this.getPostCardAvatar = page.locator('[data-testid="medium-card-avatar"], [data-testid="post-card-avatar"]');
+    // ★ 2026-08-21 REPAIR: `medium-card-avatar`/`post-card-avatar` never existed on
+    // the redesigned card. The face is `UserAvatarImg` inside `IdentityPill`
+    // (features/discovery-feed/identity-pill.tsx), which renders
+    // `data-testid="user-avatar-img"` (packages/ui/components/user-avatar-img.tsx:251)
+    // — confirmed present once per card in the live inventory, and the header's own
+    // avatar is gated behind `identity.isLoggedIn` (app-header.tsx), so `.first()`
+    // reliably lands on card 0's face for a signed-out run.
+    this.getPostCardAvatar = page.locator('[data-testid="user-avatar-img"]');
     this.getFirstPostCardAvatar = this.getPostCardAvatar.first();
-    this.getFirstPostAuthor = page
-      .locator('[data-testid="medium-card-author"], [data-testid="post-author"]')
-      .first();
+    // ★ 2026-08-21 REPAIR: `medium-card-author`/`post-author` no longer exist
+    // anywhere (verified against /tmp/testid-inventory.json across all 8 captured
+    // pages). The card's byline is now `IdentityPill`
+    // (features/discovery-feed/identity-pill.tsx:130-138), whose profile link
+    // carries `data-testid="identity-pill-profile"` and renders `@{handle}` — WITH
+    // the leading `@`, unlike the old bare-handle `post-author`. Callers that used
+    // to prepend '@' to this locator's text must not any more (see
+    // moveToFirstPostAuthorProfilePage[ByAvatar] below).
+    this.getFirstPostAuthor = page.locator('[data-testid="identity-pill-profile"]').first();
     // ★ LUMEN'S FEED CARD SHOWS NO REPUTATION, AND THIS SELECTOR CANNOT FIX THAT.
     //
     // `post-author-reputation` exists in exactly one component —
@@ -231,25 +244,75 @@ export class HomePage {
     // (`user-popover-card.tsx`, `author-reputation`), the redesigned profile
     // (`profile-reputation`), and the classic card above.
     this.getFirstPostAuthorReputation = page.locator('[data-testid="post-author-reputation"]').first();
-    this.getFirstPostCardCommunityLink = page.locator('[data-testid="post-card-community"]').first();
-    this.getFirstPostCardCategoryLink = page.locator('[data-testid="post-card-category"]').first();
-    this.getFirstPostCardTimestampLink = page.locator('[data-testid="post-card-timestamp"]').first();
+    // ★ 2026-08-21 REPAIR: `post-card-community`/`post-card-category` are gone.
+    // medium-post-card.tsx:950-966 collapsed both into ONE "rubric" link —
+    // community name, or the post's first tag as a fallback — `data-testid=
+    // "medium-card-rubric"`, always routing to `/topics/{tag}` ("Lumen has no
+    // community pages", same comment). There is no DOM-observable way left to
+    // tell "was this a community or a fallback tag" apart before the click, so
+    // both fields now point at the same element; see the report for what is
+    // still broken PAST the click in moveToFirstPostCommunityOrCategory() (the
+    // destination assertions target `community-name`/`community-info-sidebar`,
+    // which do not exist anywhere — community pages are gone).
+    this.getFirstPostCardCommunityLink = page.locator('[data-testid="medium-card-rubric"]').first();
+    this.getFirstPostCardCategoryLink = page.locator('[data-testid="medium-card-rubric"]').first();
+    // ★ 2026-08-21 REPAIR: `post-card-timestamp` is gone. medium-post-card.tsx:
+    // 1210-1240 moved the date INSIDE the title anchor as a second sibling span
+    // ("THE DATE HAS LEFT THIS ROW... It now sits inline after the title") — there
+    // is no separate, independently-styled timestamp link any more. This points at
+    // that date span (still inside the clickable `medium-card-title` anchor, so
+    // clicking it still navigates), but it is no longer a distinct interactive
+    // element in its own right — `cursor:pointer` on it is inherited from the
+    // anchor, not its own rule.
+    this.getFirstPostCardTimestampLink = page
+      .locator('[data-testid="medium-card-title"] h2 > span:nth-child(2)')
+      .first();
     // Lumen's card exposes the title as its own testid; the classic one only had an
     // `h3 a`, so keep both rather than depend on a heading level that already differs.
+    // ★ 2026-08-21 REPAIR: `[data-testid="medium-card-title"]` IS the anchor
+    // (medium-post-card.tsx:1210), and its textContent now has the post date
+    // appended with no separating space (e.g. "Burn Post12 hours ago") because
+    // the date moved into a sibling span INSIDE the same h2 (:1224-1239, "the date
+    // has left this row" — see the timestamp-link note above). Scoping to the
+    // title's own span (the h2's first child; the date is the second) keeps
+    // `.textContent()`/`toHaveText()` comparisons against the bare API title and
+    // the post page's `article-title` (which never carries the date) exact.
+    // `post-list-item` is confirmed absent from every captured page — the classic
+    // card no longer exists anywhere in this build.
     this.getFirstPostTitle = page
-      .locator('[data-testid="medium-card-title"], li[data-testid="post-list-item"] h3 a')
+      .locator('[data-testid="medium-card-title"] h2 > span:nth-child(1)')
       .first();
     this.getFirstPostPayout = page
       .locator('[data-testid="medium-card-payout"], [data-testid="post-payout"]')
       .first();
     this.getFirstPostPayoutTooltip = page.locator('[data-testid="payout-post-card-tooltip"]').first();
-    this.getFirstPostVotes = page.locator('[data-testid="post-total-votes"]').first();
+    // ★ 2026-08-21 REPAIR: `post-total-votes` never existed on the redesigned card
+    // and there is no combined "total votes" figure left at all — the Blade vote
+    // control (features/votes/blade.tsx VoteTally) renders separate up/down
+    // tallies, `vote-tally-up`/`vote-tally-down`, the down one absent entirely
+    // when there are no downvotes. This points at the up tally as the closest
+    // surviving "vote count" figure on the card. There is no tooltip on VoteTally
+    // at all (plain `<span aria-live>`), so `getFirstPostVotesTooltip` below has no
+    // real target — see the report.
+    this.getFirstPostVotes = page.locator('[data-testid="vote-tally-up"]').first();
     this.getFirstPostVotesTooltip = page.locator('[data-testid="post-card-votes-tooltip"]').first();
     this.getFirstPostResponseButton = page.locator('[data-testid="post-card-response-link"]').first();
     this.getFirstPostResponseButtonTooltip = page.locator('[data-testid="post-card-responses"]');
     this.getFirstPostChildren = page.locator('[data-testid="post-children"]').first();
-    this.getFirstPostChildernIcon = this.getFirstPostChildren.locator('a:nth-of-type(1)');
-    this.getFirstPostChildernCommentNumber = this.getFirstPostChildren.locator('a:nth-of-type(2)');
+    // ★ 2026-08-21 REPAIR: `a:nth-of-type(1)`/`(2)` assumed TWO separate anchors
+    // (icon link + count link) inside `post-children`. As of TODAY's a11y fix
+    // (features/list-of-posts/post-card-comment-tooltip.tsx:75-98, "ONE CONTROL,
+    // ONE TAB STOP, ONE NAME") that DOM used to ship as `<button><a/><a/></button>`
+    // — invalid HTML and three tab stops for one destination — and was collapsed
+    // into a single `<a data-testid="post-card-response-link">` holding both the
+    // icon and the count span. `a:nth-of-type(2)` now matches nothing.
+    this.getFirstPostChildernIcon = this.getFirstPostChildren.locator(
+      '[data-testid="post-card-response-link"] svg'
+    );
+    this.getFirstPostChildernCommentNumber = this.getFirstPostChildren.locator(
+      '[data-testid="post-card-response-link"] span'
+    );
+    // Unchanged — already correct: post-card-comment-tooltip.tsx:99.
     this.getFirstPostChildernTooltip = page.locator('[data-testid="post-card-responses"]');
     this.getPostChildren = page.locator('[data-testid="post-children"]');
     this.getPostCardFooter = page.locator('[data-testid="medium-card-footer"], [data-testid="post-card-footer"]');
@@ -283,7 +346,12 @@ export class HomePage {
       '[data-testid="medium-card-reblog-count"], [data-testid="post-card-reblog-count"]'
     );
     this.getFirstPostReblogCountDisplay = this.getReblogCountDisplay.first();
-    this.getFirstPostReblogCountTooltip = page.locator('[data-testid="post-card-reblog-count-tooltip"]').first();
+    // ★ 2026-08-21 REPAIR: `post-card-reblog-count-tooltip` only ever existed on
+    // the classic card (features/list-of-posts/post-list-item.tsx), which is
+    // confirmed absent from every captured page. The redesigned card's reblog
+    // hover tooltip is `medium-card-reblog-tooltip`
+    // (features/discovery-feed/medium-post-card.tsx:1552), text "Reblog".
+    this.getFirstPostReblogCountTooltip = page.locator('[data-testid="medium-card-reblog-tooltip"]').first();
     this.getSecondPostReblogCountDisplay = this.getReblogCountDisplay.nth(1);
     this.getSecondPostReblogCountTooltip = page.locator('[data-testid="post-card-reblog-count-tooltip"]').nth(1);
     this.getBody = page.locator('body');
@@ -318,7 +386,8 @@ export class HomePage {
     // suite calls them after the dropdown-dependent tests that did were
     // deleted.
     this.getNavSearchAIInput = page.getByPlaceholder('AI Search', { exact: true });
-    this.getNavSearchClassicInput = page.getByTestId('header-search-input');
+    // ★ Same two-node/one-visible situation as `getNavSearchInput` above.
+    this.getNavSearchClassicInput = page.locator('[data-testid="header-search-input"]:visible');
     this.getNavSearchTagsInput = page.getByPlaceholder('Search tags...');
     this.getNavUserAvatar = page.locator('[data-testid="profile-menu"]');
     this.getNavProfileMenuContent = page.locator('[data-testid="profile-menu-content"]');
@@ -377,7 +446,13 @@ export class HomePage {
     this.commentCard = '[data-testid="comment-card-description"]';
     this.commentListItem = '[data-testid="comment-list-item"]';
     this.postsImages = '[data-testid="post-image"]';
-    this.postAuthor = '[data-testid="post-author"], [data-testid="medium-card-author"]';
+    // ★ 2026-08-21 REPAIR: `post-author` and `medium-card-author` are both dead —
+    // neither renders anywhere in the app. The card byline is the identity pill's
+    // profile link, which renders `@handle` rather than a bare handle. This is the
+    // raw-selector twin of `getFirstPostAuthor` above; its only consumer is
+    // `testnet_e2e/followUser.spec.ts`, which is outside the chromium project's
+    // testDir and so is not exercised by the desktop suite.
+    this.postAuthor = '[data-testid="identity-pill-profile"]';
     this.profileAvatar = '[data-testid="profile-avatar-button"]';
 
     // for logged in user
@@ -473,8 +548,16 @@ export class HomePage {
     // navigation step is needed once the profile has loaded.
     await this.page.waitForSelector(profilePage.profileName['_selector']);
     expect(await profilePage.profileName).toBeVisible();
-    const firstPostAuthorNameProfilePage = await this.page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').first();
-    await expect('@' + firstPostAuthorNick).toMatch(await firstPostAuthorNameProfilePage.innerText());
+    // ★ 2026-08-21 REPAIR: `post-author`/`medium-card-author` are dead everywhere
+    // (verified in /tmp/testid-inventory.json, including this profile page — it
+    // renders the same MediumPostCard/IdentityPill as home). `identity-pill-profile`
+    // is the live equivalent. `firstPostAuthorNick` above already carries the
+    // leading '@' now that getFirstPostAuthor points at identity-pill-profile, so
+    // prepending a SECOND '@' here (the old code) built "@@handle" — which only
+    // ever passed because toMatch's substring check finds "@handle" starting at
+    // index 1 of "@@handle". Dropping the extra '@' makes this an honest match.
+    const firstPostAuthorNameProfilePage = await this.page.locator('[data-testid="identity-pill-profile"]').first();
+    await expect(firstPostAuthorNick).toMatch(await firstPostAuthorNameProfilePage.innerText());
   }
 
   async moveToFirstPostAuthorProfilePageByAvatar() {
@@ -488,8 +571,16 @@ export class HomePage {
     // no Posts-tab click needed.
     await this.page.waitForSelector(profilePage.profileName['_selector']);
     expect(await profilePage.profileName).toBeVisible();
-    const firstPostAuthorNameProfilePage = await this.page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').first();
-    await expect('@' + firstPostAuthorNick).toMatch(await firstPostAuthorNameProfilePage.innerText());
+    // ★ 2026-08-21 REPAIR: `post-author`/`medium-card-author` are dead everywhere
+    // (verified in /tmp/testid-inventory.json, including this profile page — it
+    // renders the same MediumPostCard/IdentityPill as home). `identity-pill-profile`
+    // is the live equivalent. `firstPostAuthorNick` above already carries the
+    // leading '@' now that getFirstPostAuthor points at identity-pill-profile, so
+    // prepending a SECOND '@' here (the old code) built "@@handle" — which only
+    // ever passed because toMatch's substring check finds "@handle" starting at
+    // index 1 of "@@handle". Dropping the extra '@' makes this an honest match.
+    const firstPostAuthorNameProfilePage = await this.page.locator('[data-testid="identity-pill-profile"]').first();
+    await expect(firstPostAuthorNick).toMatch(await firstPostAuthorNameProfilePage.innerText());
   }
 
   async moveToFirstPostCommunityOrCategory() {

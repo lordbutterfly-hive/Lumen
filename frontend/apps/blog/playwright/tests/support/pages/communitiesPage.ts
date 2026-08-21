@@ -88,9 +88,30 @@ export class CommunitiesPage {
     this.communityChoosenLanguage = page.locator('[data-testid="community-choosen-language"]')
 
     this.getFirstPostListItem = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first();
+    // ★ `medium-card-avatar` NEVER EXISTED (2026-08-21). Grepped
+    // features/discovery-feed/medium-post-card.tsx: no such testid anywhere. The avatar Lumen
+    // renders is `identity-pill.tsx`'s face `<Link>` — `tabIndex={-1} aria-hidden="true"` and
+    // carries no testid at all (decorative; the handle link right next to it is the
+    // accessible/testable element). No current-app equivalent exists to repoint this at; left
+    // as the classic-card selector only, unused by any test in this file.
     this.getFirstPostCardAvatar = page.locator('[data-testid="post-card-avatar"], [data-testid="medium-card-avatar"]').first();
-    this.getFirstPostAuthor = page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').first();
+    // ★ `medium-card-author` NEVER EXISTED (2026-08-21). Same grep as above. The author byline
+    // on Lumen's card is `identity-pill.tsx`'s handle link,
+    // `[data-testid="identity-pill-profile"]` (renders `@{handle}`), not a `medium-card-*`
+    // testid — the naming pattern this fallback guessed at doesn't apply to this component.
+    this.getFirstPostAuthor = page.locator('[data-testid="post-author"], [data-testid="identity-pill-profile"]').first();
+    // `.locator('..')`'s parent-of-author trick predates this pass; with `getFirstPostAuthor`
+    // now pointing at `identity-pill-profile`, this resolves to that link's own wrapper span,
+    // not a dedicated reputation element — there is no reputation testid on Lumen's card at
+    // all (only in the hover popover, `author-reputation`, a different DOM entirely). Left
+    // unchanged: its only caller in this suite already can't pass for an unrelated reason (no
+    // route renders both the community sidebar and a post feed — see communitiesPage.spec.ts).
     this.getFirstPostAuthorReputation = this.getFirstPostAuthor.locator('..');
+    // ★ NO CURRENT-APP EQUIVALENT (2026-08-21). `post-card-timestamp` only exists in
+    // features/list-of-posts/post-list-item.tsx (the classic card); Lumen's medium-post-card.tsx
+    // has no timestamp testid at all — its own source comment says the date "sits inline after
+    // the title" now, with no `data-testid` on it. Left pointed at the classic testid since
+    // there's nothing correct to repoint it to; its only caller is the same unfixable test above.
     this.getFirstPostCardTimestampLink = page.locator('[data-testid="post-card-timestamp"]').first();
     this.getFirstResponses = page.locator('[data-testid="post-children"]').first()
     this.postCardResponses = page.locator('[data-testid="post-card-responses"]')

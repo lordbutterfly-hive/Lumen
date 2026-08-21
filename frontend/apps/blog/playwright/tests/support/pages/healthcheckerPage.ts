@@ -38,15 +38,41 @@ export class HealthcheckerPage {
         // Page header and description
         this.pageTitle = page.locator('h3:has-text("API switch and HealthChecker")');
         this.pageDescription = page.locator('p:has-text("You can switch your provider here")');
-        this.pageDescriptionContinuousCheck = page.locator('p:has-text("You can switch your provider here")');
+        // ★ COPY REWRITTEN 2026-08-18, LOCATOR NEVER FOLLOWED. The intro paragraphs
+        // were rewritten (see the WHY note in components/healthcheckers-wrapper.tsx):
+        // this one is now `healthchecker.intro_pin`. The old string matched nothing, and
+        // with `actionTimeout: 0` a 0-match locator hangs to the full test timeout.
+        this.pageDescriptionContinuousCheck = page.locator('p:has-text("Pin a specific Hive API provider below")');
         this.pageDescriptionBestExperience = page.locator('p:has-text("For the best experience")');
+        /*
+         * ★ THE PARAGRAPH THIS NAMES WAS DELIBERATELY DELETED (2026-08-18), AND THERE
+         * IS NO SUCCESSOR TO POINT AT.
+         *
+         * `components/healthcheckers-wrapper.tsx` records the decision in its own WHY
+         * note: the third intro paragraph ("Click 'Switch to Best' button for
+         * Healthchecker to…") "only narrated a button rendered a few inches below by
+         * <HealthCheckerComponent> itself, which is already labelled 'Switch to Best'
+         * — cut rather than rewritten".
+         *
+         * The page now renders exactly TWO intro paragraphs, `intro_pin` and
+         * `intro_healthy`, and both are already covered —
+         * `pageDescriptionContinuousCheck` and `pageDescriptionBestExperience`
+         * respectively. Retargeting this locator at either one would duplicate an
+         * existing assertion while looking like coverage, so it is kept pointing at
+         * the removed copy and its test is retired rather than quietly re-aimed. See
+         * the note on the retired test in healthchecker.spec.ts.
+         */
         this.pageDescriptionSwitchToBest = page.locator('p:has-text("Click \\"Switch to Best\\" button")');
         this.circleCheckIcon = page.locator('svg.lucide-circle-check');
 
         // Tabs
         this.tabsList = page.locator('[role="tablist"]');
         this.hiveApiTab = page.locator('[role="tab"]:has-text("HIVE API providers")');
-        this.hiveSenseApiTab = page.locator('[role="tab"]:has-text("HiveSense API providers")');
+        // ★ TAB RENAMED "HiveSense API providers" -> "AI Search providers"
+        // (`healthchecker.tab_ai_search` in locales/en/common_blog.json). This single
+        // stale string was the top cause of healthchecker failures: 9 of 14 in a
+        // measured run waited on it, each burning the full 60s timeout.
+        this.hiveSenseApiTab = page.locator('[role="tab"]:has-text("AI Search providers")');
         this.nodeTabContent = page.locator('[role="tabpanel"][data-state="active"]').filter({ has: page.locator('text=/Condenser|Bridge/') });
         this.hiveSenseTabContent = page.locator('[role="tabpanel"][data-state="active"]').filter({ has: page.locator('text=/AI search/') });
 

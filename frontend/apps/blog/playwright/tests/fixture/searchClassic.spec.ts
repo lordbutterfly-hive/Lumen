@@ -30,7 +30,11 @@ const CLASSIC_QUERY = 'hive';
 
 // Pinned from the committed fixture (relevance-sorted first result for
 // q='hive'). Re-recording may change this — update alongside the fixture.
-const RELEVANCE_FIRST_AUTHOR = 'bradleyarrow';
+// ★ LEADING `@` (2026-08-21). `searchPage.firstPostAuthor` was repointed from the
+// retired `medium-card-author` (bare handle) to `identity-pill-profile`, which renders
+// `@handle`. This constant is compared with `toHaveText`, so it has to carry the `@`
+// too — otherwise the repaired locator would resolve correctly and still fail.
+const RELEVANCE_FIRST_AUTHOR = '@bradleyarrow';
 
 test.describe('§13 Search — classic text search', () => {
   let searchPage: SearchPage;

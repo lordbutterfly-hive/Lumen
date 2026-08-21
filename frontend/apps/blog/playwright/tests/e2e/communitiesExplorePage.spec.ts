@@ -13,6 +13,23 @@ test.describe('Explore communities page tests', () => {
     communitiesPage = new CommunitiesExplorePage(page);
   });
 
+  /*
+   * ★★ THE ONE TEST LEFT POINTING AT THE DEAD LINK, ON PURPOSE (2026-08-21). This test's
+   * subject IS the home-page entry point: `homePage.getExploreCommunities` clicks
+   * `[data-testid="explore-communities-link"]`, which (per ground truth) exists only inside
+   * features/layouts/community/communities-sidebar.tsx, rendered solely by
+   * `CommunityLayout` (features/layouts/community/community-layout.tsx) — never on `/`. Grepped
+   * the whole app: `explore-communities-link` appears in exactly that one source file. There is
+   * no home-page link to click any more; the entry point itself is gone, not just moved.
+   *
+   * Every OTHER test below used this same click purely as a MEANS to reach `/communities` in
+   * order to test that page's own search/filter/list behavior — for those, rerouting straight
+   * to `/communities` via `homePage.gotoSpecificUrl(...)` preserves the test's real subject
+   * (ground truth: "the feature exists, only the entry point moved"). This test's subject IS
+   * the click, so rerouting it would test something else entirely and quietly hide a real
+   * regression. Left calling the dead link so the failure documents it honestly. See the audit
+   * report.
+   */
   test('move to Explore communities... from Home Page', async ({ page }) => {
     const communitiesPage = new CommunitiesExplorePage(page);
 
@@ -21,13 +38,16 @@ test.describe('Explore communities page tests', () => {
     await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
   });
 
+  // ★ Rerouted straight to `/communities` (2026-08-21) — this test's subject is the explorer
+  // page's Rank list, not the home-page click; see the comment on the test above for why that
+  // one test is treated differently. `/communities` is confirmed live: 200, lists 100
+  // communities (ground truth).
   test('validate amount of communities in the Rank list', async ({ page }) => {
     const communitiesPage = new CommunitiesExplorePage(page);
     const apiHelper = new ApiHelper(page);
     const rankCommunitiesListAPI = await apiHelper.getListCommunitiesAPI();
 
-    await homePage.goto();
-    await homePage.getExploreCommunities.click();
+    await homePage.gotoSpecificUrl('/communities');
     await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
 
     await expect(await communitiesPage.communityListItem.all()).toHaveLength(await rankCommunitiesListAPI.result.length);
@@ -38,8 +58,7 @@ test.describe('Explore communities page tests', () => {
     const apiHelper = new ApiHelper(page);
     const subscribersCommunitiesListAPI = await apiHelper.getListCommunitiesAPI('',100,null,'subs','');
 
-    await homePage.goto();
-    await homePage.getExploreCommunities.click();
+    await homePage.gotoSpecificUrl('/communities');
     await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
 
     await communitiesPage.communitiesFilter.click();
@@ -54,8 +73,7 @@ test.describe('Explore communities page tests', () => {
     const apiHelper = new ApiHelper(page);
     const newCommunitiesListAPI = await apiHelper.getListCommunitiesAPI('',100,null,'new','');
 
-    await homePage.goto();
-    await homePage.getExploreCommunities.click();
+    await homePage.gotoSpecificUrl('/communities');
     await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
 
     await communitiesPage.communitiesFilter.click();
@@ -72,8 +90,7 @@ test.describe('Explore communities page tests', () => {
     const firstRankCommunitiesListAPI = await rankCommunitiesListAPI.result[0];
     const firstRankCommunitiesTitleAPI = await firstRankCommunitiesListAPI.title;
 
-    await homePage.goto();
-    await homePage.getExploreCommunities.click();
+    await homePage.gotoSpecificUrl('/communities');
     await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
 
     await expect(communitiesPage.communityListItemTitle.first()).toHaveText(firstRankCommunitiesTitleAPI);
@@ -86,8 +103,7 @@ test.describe('Explore communities page tests', () => {
     const firstRankCommunitiesListAPI = await rankCommunitiesListAPI.result[0];
     const firstRankCommunitiesAboutAPI = await firstRankCommunitiesListAPI.about;
 
-    await homePage.goto();
-    await homePage.getExploreCommunities.click();
+    await homePage.gotoSpecificUrl('/communities');
     await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
 
     await expect(communitiesPage.communityListItemAbout.first()).toHaveText(firstRankCommunitiesAboutAPI);
@@ -100,8 +116,7 @@ test.describe('Explore communities page tests', () => {
     const firstRankCommunitiesListAPI = await rankCommunitiesListAPI.result[0];
     const firstAdminsAmountRankCommunitiesAPI = await firstRankCommunitiesListAPI.admins;
 
-    await homePage.goto();
-    await homePage.getExploreCommunities.click();
+    await homePage.gotoSpecificUrl('/communities');
     await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
 
     const footerText = await communitiesPage.communityListItemFooter.first().textContent();
@@ -122,8 +137,7 @@ test.describe('Explore communities page tests', () => {
     const communitiesPage = new CommunitiesExplorePage(page);
     const defaultLoginForm = new LoginForm(page);
 
-    await homePage.goto();
-    await homePage.getExploreCommunities.click();
+    await homePage.gotoSpecificUrl('/communities');
     await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
 
     const subscribeButton = await communitiesPage.communityListItemSubscribeButton.first();
@@ -135,8 +149,7 @@ test.describe('Explore communities page tests', () => {
   test('validate first community card styles in the light mode', async ({ page }) => {
     const communitiesPage = new CommunitiesExplorePage(page);
 
-    await homePage.goto();
-    await homePage.getExploreCommunities.click();
+    await homePage.gotoSpecificUrl('/communities');
     await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
 
     await communitiesPage.validateFirstCommunityCardElements();
@@ -147,8 +160,7 @@ test.describe('Explore communities page tests', () => {
     const nonExistentCommunity: string = 'abcdefgh';
     const noResultsMessage: string = 'No results for your search';
 
-    await homePage.goto();
-    await homePage.getExploreCommunities.click();
+    await homePage.gotoSpecificUrl('/communities');
     await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
 
     await communitiesPage.searchInput.fill(nonExistentCommunity);
@@ -162,8 +174,7 @@ test.describe('Explore communities page tests', () => {
     const noResultsMessage: string = 'No results for your search';
     const emptyString: string = '';
 
-    await homePage.goto();
-    await homePage.getExploreCommunities.click();
+    await homePage.gotoSpecificUrl('/communities');
     await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
 
     // write non-existing to the communities search
@@ -181,8 +192,7 @@ test.describe('Explore communities page tests', () => {
     const communitiesPage = new CommunitiesExplorePage(page);
     const communityName: string = 'LeoFinance';
 
-    await homePage.goto();
-    await homePage.getExploreCommunities.click();
+    await homePage.gotoSpecificUrl('/communities');
     await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
 
     // fill input search by comunity name
@@ -202,8 +212,7 @@ test.describe('Explore communities page tests', () => {
     const communitiesPage = new CommunitiesExplorePage(page);
     const communityName: string = 'LeoFinance';
 
-    await homePage.goto();
-    await homePage.getExploreCommunities.click();
+    await homePage.gotoSpecificUrl('/communities');
     await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
 
     // fill input search by comunity name

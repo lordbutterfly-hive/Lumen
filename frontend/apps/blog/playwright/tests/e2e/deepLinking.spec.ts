@@ -22,7 +22,12 @@ test.describe('Deep Linking tests', () => {
   test('direct link to post loads correctly', async ({ page }) => {
     await homePage.goto();
 
-    const postTitle = await homePage.getFirstPostTitle.textContent();
+    // homePage.getFirstPostTitle resolves to the `medium-card-title` anchor;
+    // its <h2> now renders the headline AND the inline post date as sibling
+    // <span>s with NO separator between them (medium-post-card.tsx), so the
+    // anchor's raw textContent is "TitleTimeAgo", not the title. Scope to the
+    // first span (the title text) so this compares clean title to clean title.
+    const postTitle = (await homePage.getFirstPostTitle.locator('h2 > span').first().textContent())?.trim();
     const postHref = await homePage.getFirstPostTitle.getAttribute('href');
 
     if (!postHref) {
@@ -146,9 +151,11 @@ test.describe('Deep Linking tests', () => {
    */
 
   test('@flaky direct link to hot feed loads correctly', async ({ page }) => {
+    // Bare sort feeds (`/hot`, `/created`, `/payout`, ...) 307-redirect to `/`
+    // now (verified live) — there is no standalone /hot feed any more.
     await page.goto('/hot');
 
-    await expect(page).toHaveURL('/hot');
+    await expect(page).toHaveURL('/');
 
     await expect(homePage.getMainTimeLineOfPosts.first()).toBeVisible({ timeout: TIMEOUTS.SEARCH_RESULTS });
     const postsCount = await homePage.getMainTimeLineOfPosts.count();
@@ -156,9 +163,10 @@ test.describe('Deep Linking tests', () => {
   });
 
   test('@flaky direct link to created/new feed loads correctly', async ({ page }) => {
+    // Bare sort feeds 307-redirect to `/` now (verified live).
     await page.goto('/created');
 
-    await expect(page).toHaveURL('/created');
+    await expect(page).toHaveURL('/');
 
     await expect(homePage.getMainTimeLineOfPosts.first()).toBeVisible({ timeout: TIMEOUTS.SEARCH_RESULTS });
     const postsCount = await homePage.getMainTimeLineOfPosts.count();
@@ -166,9 +174,10 @@ test.describe('Deep Linking tests', () => {
   });
 
   test('direct link to payout feed loads correctly', async ({ page }) => {
+    // Bare sort feeds 307-redirect to `/` now (verified live).
     await page.goto('/payout');
 
-    await expect(page).toHaveURL('/payout');
+    await expect(page).toHaveURL('/');
 
     await expect(homePage.getMainTimeLineOfPosts.first()).toBeVisible({ timeout: TIMEOUTS.SEARCH_RESULTS });
     const postsCount = await homePage.getMainTimeLineOfPosts.count();

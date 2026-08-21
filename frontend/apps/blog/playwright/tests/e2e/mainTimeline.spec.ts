@@ -74,7 +74,10 @@ test.describe('Home page tests', () => {
     const postPayout = (await response.json()).result[0].payout.toFixed(2);
     // console.log("Post payout: ", await postPayout)
 
-    expect(homePage.getFirstPostAuthor).toHaveText(postAuthor);
+    // ★ 2026-08-21 REPAIR: getFirstPostAuthor now targets identity-pill-profile,
+    // which renders "@handle" (features/discovery-feed/identity-pill.tsx), so the
+    // expected value needs the leading '@' the bare API `author` field doesn't carry.
+    expect(homePage.getFirstPostAuthor).toHaveText('@' + postAuthor);
     // ROUND, not floor (2026-08-09). `accountReputation` floored until then, which was
     // one too low against hive.blog for every account whose fractional part was >= .5.
     // The formatter now rounds everywhere; this assertion has to follow it or it pins
@@ -152,7 +155,10 @@ test.describe('Home page tests', () => {
     const postPayout = (await response.json()).result[0].payout.toFixed(2);
     // console.log("Post payout: ", await postPayout)
 
-    expect(homePage.getFirstPostAuthor).toHaveText(postAuthor);
+    // ★ 2026-08-21 REPAIR: getFirstPostAuthor now targets identity-pill-profile,
+    // which renders "@handle" (features/discovery-feed/identity-pill.tsx), so the
+    // expected value needs the leading '@' the bare API `author` field doesn't carry.
+    expect(homePage.getFirstPostAuthor).toHaveText('@' + postAuthor);
     // ROUND, not floor (2026-08-09). `accountReputation` floored until then, which was
     // one too low against hive.blog for every account whose fractional part was >= .5.
     // The formatter now rounds everywhere; this assertion has to follow it or it pins

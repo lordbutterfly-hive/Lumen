@@ -32,7 +32,18 @@ export class CommunitiesExplorePage{
         this.comboboxDefaultValue = page.getByTestId('communities-filter');
         this.communitiesFilter = page.locator('[data-testid="communities-filter"]');
         this.communitiesFilterItems = page.locator('[data-testid="communities-filter-item"]');
-        this.firstCommunityDefault = page.locator('div ul div div div h3').first();
+        /*
+         * ★ FIXED — WRONG TAG, WRONG PATH (2026-08-21). This was `page.locator('div ul div div
+         * div h3').first()`, a fragile CSS chain that never matched: the community list wraps a
+         * bare `<ul>` of `<Card data-testid="community-list-item">`s
+         * (features/communities-list/communities-list.tsx), and each card's title is an `<h2>`
+         * (`<CardTitle as="h2">`, features/communities-list/communities-list-item.tsx:40) inside
+         * an `<a data-testid="community-list-item-title">` — never an `<h3>`. Every single test
+         * in this file calls `validataExplorerCommunitiesPageIsLoaded()`, which asserts on this
+         * locator, so this was silently timing out/mismatching on every run. Repointed at the
+         * real testid instead of guessing DOM structure.
+         */
+        this.firstCommunityDefault = page.locator('[data-testid="community-list-item-title"]').first();
 
         this.communityListItem = page.locator('[data-testid="community-list-item"]');
         this.communityListItemTitle = page.locator('[data-testid="community-list-item-title"]');

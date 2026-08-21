@@ -15,11 +15,17 @@ test.describe('User parmlink redirect tests', () => {
     const expectedContentElementText: string = 'Nyunya';
     await homePage.gotoSpecificUrl(userPermlinkEndpoint);
     await homePage.page.waitForSelector(homePage.articleBodyString);
+    // `#articleBody` is not a unique id: every comment body carries one too, so
+    // `.locator(homePage.articleBodyString)` alone resolves to multiple elements
+    // (strict-mode violation). The post's own body is first in DOM order and is
+    // now server-rendered, so `.first()` deterministically selects it instead of
+    // whichever comment happens to also contain "Nyunya".
     const specificContentTextLocator: Locator = homePage.page
       .locator(homePage.articleBodyString)
+      .first()
       .locator('p > strong')
       .getByText(expectedContentElementText);
-    expect(specificContentTextLocator).toBeVisible();
+    await expect(specificContentTextLocator).toBeVisible();
   });
 
   test('validate redirect location for user/permlink endpoint', async ({ page, request }) => {

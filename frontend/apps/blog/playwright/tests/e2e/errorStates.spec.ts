@@ -53,10 +53,14 @@ test.describe('Error States tests', () => {
   });
 
   test('rare tag with no posts shows appropriate state', async ({ page }) => {
-    await page.goto('/trending/xyznonexistenttag987654321');
+    // `/trending/:tag` is a retired chain-sort route (owner ruling 2026-08-08)
+    // and now 307-redirects to `/topics/:tag` (next.config.js redirects(),
+    // RETIRED_SORTS; also documented in app/topics/[tag]/page.tsx). `page.goto`
+    // follows the redirect, so the final URL is `/topics/...`, not `/trending/...`.
+    await page.goto('/topics/xyznonexistenttag987654321');
     await page.waitForLoadState('networkidle');
 
-    await expect(page).toHaveURL(/\/trending\/xyznonexistenttag987654321/);
+    await expect(page).toHaveURL(/\/topics\/xyznonexistenttag987654321/);
 
     const postsCount = await homePage.getMainTimeLineOfPosts.count();
     expect(postsCount).toBeGreaterThanOrEqual(0);
@@ -132,9 +136,12 @@ test.describe('Error States tests', () => {
   test('@flaky app remains functional after navigation', async ({ page }) => {
     await homePage.goto();
 
+    // `/hot` is a retired chain-sort route (owner ruling 2026-08-08) and now
+    // 307-redirects to `/` (next.config.js redirects(), RETIRED_SORTS). `page.goto`
+    // follows the redirect, so the final URL is `/`, not `/hot`.
     await page.goto('/hot');
 
-    await expect(page).toHaveURL('/hot');
+    await expect(page).toHaveURL('/');
     await expect(homePage.getMainTimeLineOfPosts.first()).toBeVisible({ timeout: TIMEOUTS.SEARCH_RESULTS });
 
     const postsCount = await homePage.getMainTimeLineOfPosts.count();

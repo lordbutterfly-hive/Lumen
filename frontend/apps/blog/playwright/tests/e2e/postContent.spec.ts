@@ -154,9 +154,24 @@ test.describe('Post Content tests', () => {
       const twitterVisible = await postPage.twitterIcon.isVisible().catch(() => false);
 
       // At least one social icon should be visible if share dialog opened
-      if (facebookVisible || twitterVisible) {
-        expect(facebookVisible || twitterVisible).toBe(true);
-      }
+      /*
+       * ★ THIS ASSERTION USED TO BE A TAUTOLOGY (2026-08-21).
+       *
+       * It read `if (facebookVisible || twitterVisible) { expect(facebookVisible
+       * || twitterVisible).toBe(true) }` — the assertion was the SAME expression as
+       * its own guard, so it could only ever run in the case where it was already
+       * true. It could not fail for any input, including "the share dialog rendered
+       * no social icons at all", which is the one outcome this test exists to catch.
+       * It has been reporting green while checking nothing.
+       *
+       * Asserting unconditionally here is a real check, not a stricter guess: both
+       * testids are live in the app — `share-on-facebook`
+       * (features/post-rendering/share-post-facebook.tsx:27) and `share-on-twitter`
+       * (share-post-twitter.tsx:32) — and the dialog they live in is only reached
+       * inside the `shareVisible` guard above, which is a genuine precondition and
+       * is deliberately left as it was.
+       */
+      expect(facebookVisible || twitterVisible).toBe(true);
 
       // Close dialog if it's open
       await page.keyboard.press('Escape');

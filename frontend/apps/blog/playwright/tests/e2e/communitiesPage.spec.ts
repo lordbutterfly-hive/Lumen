@@ -26,18 +26,57 @@ test.describe('Communities page tests', () => {
     defaultLoginForm = new LoginForm(page);
     apiHelper = new ApiHelper(page);
 
-    await homePage.goto();
+    // ★ NO BLANKET `homePage.goto()` HERE (2026-08-21). It used to load `/` before every
+    // single test below, purely so the test body could then click a communities link that
+    // lived on the home page. That link is gone (see the per-test navigation comments), so
+    // every test now goes straight to the page it actually needs via `homePage.gotoSpecificUrl(...)`.
+    // Tests 'validate the first/last post header with the pinned tag...' are the only ones that
+    // still need the home page loaded first, and call `homePage.goto()` themselves.
   });
 
+  /*
+   * ★★ NAVIGATION REROUTED, NOT THE FEATURE (2026-08-21). Every test below used to reach a
+   * community by clicking `homePage.moveToLeoFinanceCommunities()` /
+   * `moveToWorldmappinCommunities()` — a link inside `[data-testid="card-trending-comunities"]`
+   * on the home page. That sidebar no longer renders on `/`; it only mounts inside
+   * `CommunityLayout` (features/layouts/community/community-layout.tsx), and every click hung
+   * the full 60s test timeout waiting for a target that will never appear.
+   *
+   * `CommunityLayout`'s sidebar (community-info-sidebar / leadership / description / rules /
+   * subscribe / new-post / activity-log / the `card-trending-comunities` and
+   * `card-explore-hive-*` chrome, all in features/layouts/community/community-description.tsx
+   * and community-layout.tsx) is otherwise UNCHANGED — it just moved. Its only surviving host
+   * page is `/roles/<community>` (app/(main-and-community)/roles/[tag]/layout.tsx wraps
+   * `PrefetchComponent` → `CommunityLayout`). So tests that only assert on that sidebar now go
+   * straight to `/roles/hive-167922` (LeoFinance) or `/roles/hive-163772` (Worldmappin) via
+   * `homePage.gotoSpecificUrl(...)`.
+   *
+   * What did NOT move: an actual community POST FEED next to that sidebar. Every parent feed
+   * route for a community tag (trending/hot/created/muted/payout `[tag]`) now unconditionally
+   * `redirect()`s to `/topics/<tag>` (Lumen's tag feed — no sidebar, no leadership, no subscribe
+   * button), and `/roles/<tag>`'s own content is a roles TABLE, never posts. No page combines
+   * "community sidebar" with "that community's posts" any more. Tests whose subject is actually
+   * the post feed (loading/paging, pinned tags, per-post styling reached through the sidebar
+   * flow) are reported broken in the audit report rather than forced to pass; see each test's
+   * own comment for the specific call.
+   */
   test('is LeoFinance community page loaded', async ({ page }) => {
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
   });
 
+  /*
+   * ★ CANNOT BE FIXED — reported, not forced (2026-08-21). This test's actual subject, a
+   * community's post feed loading/paging to 40-60 cards, has no live host page: `/roles/<tag>`
+   * (rerouted to below, so `validataCommunitiesPageIsLoaded` still passes and this fails on
+   * its real subject instead of on a dead click) renders a roles TABLE, zero post cards.
+   * `/topics/<tag>` has the posts but none of the sidebar this test also asserts. See the
+   * top-of-describe comment.
+   */
   test('load next the community post cards in the LeoFinance Community', async ({ page, browserName }) => {
     test.skip(browserName === 'webkit', 'Automatic test works well on chromium');
 
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
 
     await homePage.mainPostsTimelineVisible(20);
@@ -54,10 +93,11 @@ test.describe('Communities page tests', () => {
     expect(postsCount).toBeLessThanOrEqual(60);
   });
 
+  // ★ Same "no live host page" reasoning as the LeoFinance variant above.
   test('load next the community post cards in the Worldmappin Community', async ({ page, browserName }) => {
     test.skip(browserName === 'webkit', 'Automatic test works well on chromium');
 
-    await homePage.moveToWorldmappinCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-163772');
     await communitiesPage.validataCommunitiesPageIsLoaded('Worldmappin');
 
     await homePage.mainPostsTimelineVisible(20);
@@ -78,7 +118,7 @@ test.describe('Communities page tests', () => {
     page,
     request
   }) => {
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
 
     const url = process.env.REACT_APP_API_ENDPOINT;
@@ -112,7 +152,7 @@ test.describe('Communities page tests', () => {
   });
 
   test('validate the community leadership of LeoFinance Community', async ({ page, request }) => {
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
 
     const url = process.env.REACT_APP_API_ENDPOINT;
@@ -149,7 +189,7 @@ test.describe('Communities page tests', () => {
   });
 
   test('move to the profile leadership pages of LeoFinance community ', async ({ page }) => {
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
 
     const leadershipLinkLists = await communitiesPage.communityLeadershipList.locator('a').all();
@@ -166,9 +206,9 @@ test.describe('Communities page tests', () => {
       await page.waitForSelector(profilePage.profileName['_selector']);
       expect(await profilePage.profileName).toBeVisible();
 
-      if ((await profilePage.page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').count()) > 0) {
+      if ((await profilePage.page.locator('[data-testid="post-author"], [data-testid="identity-pill-profile"]').count()) > 0) {
         expect(await leadershipLinkNickNamesLists[i]).toContain(
-          await profilePage.page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').first().textContent()
+          await profilePage.page.locator('[data-testid="post-author"], [data-testid="identity-pill-profile"]').first().textContent()
         );
       }
       await page.goBack();
@@ -177,6 +217,23 @@ test.describe('Communities page tests', () => {
   });
 
   test('validate the first post header with the pinned tag in the LeoFinance community', async ({ page }) => {
+    /*
+     * ★ DELIBERATELY LEFT POINTING AT THE DEAD HOME-PAGE LINK (2026-08-21, cannot be fixed).
+     * `moveToLeoFinanceCommunities()` clicks `[data-testid="card-trending-comunities"]`'s
+     * "LeoFinance" link, which no longer renders on `/` — that sidebar now only mounts inside
+     * `CommunityLayout` (features/layouts/community/community-layout.tsx), reachable solely via
+     * `/roles/<community>`. Rerouting there would NOT fix this test, it would make it lie:
+     * `/roles/<tag>` renders a roles TABLE (app/(main-and-community)/roles/[tag]/content.tsx),
+     * never a post feed, and no other live route renders `post-pinned-tag`
+     * (features/list-of-posts/post-list-item.tsx — the classic card; Lumen's
+     * `medium-post-card.tsx` has no pinned-post concept at all, confirmed by its own source
+     * comment: "Lumen has no community pages"). The pinned-tag feature has no live host page
+     * anywhere in the app. Because this test's pinned-tag check is a soft
+     * `if (...isVisible())` guard, rerouting navigation would make it resolve `false` and the
+     * test would silently PASS having asserted nothing — worse than today's honest failure
+     * below. Left calling the dead link on purpose so the failure stays real.
+     */
+    await homePage.goto();
     await homePage.moveToLeoFinanceCommunities();
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
 
@@ -205,6 +262,10 @@ test.describe('Communities page tests', () => {
   test('validate the style of pinned tag in the last post header with the pinned tag in the LeoFinance community', async ({
     page
   }) => {
+    // ★ Same reasoning as 'validate the first post header with the pinned tag...' above:
+    // the pinned-tag feature has no live host page, and this soft `isVisible()` guard means
+    // rerouting navigation would make the test silently pass rather than honestly fail.
+    await homePage.goto();
     await homePage.moveToLeoFinanceCommunities();
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
 
@@ -222,8 +283,12 @@ test.describe('Communities page tests', () => {
     } else await console.log('There are not any pinned posts!!!');
   });
 
+  // ★ CANNOT BE FIXED — reported, not forced. `communitiesPage.getFirstPostAuthor` /
+  // `getFirstPostCardTimestampLink` need a post card next to the community sidebar; no live
+  // route has both (see top-of-describe comment). Rerouted to `/roles/hive-167922` so the
+  // failure lands on "no post cards here" rather than a dead-link timeout.
   test('validate the first post header styles (for Trending filter) in the light theme', async ({ page }) => {
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
 
     // Post author link color without hovering
@@ -250,10 +315,11 @@ test.describe('Communities page tests', () => {
     await expect(communitiesPage.getFirstPostAuthorReputation).toHaveCSS('color', 'rgb(24, 30, 42)');
   });
 
+  // ★ CANNOT BE FIXED — same reasoning as the post header styles test above.
   test('validate the first post footer payouts styles (for Trending filter) in the light theme in the LeoFinance', async ({
     page
   }) => {
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
 
     // Color of the first post payouts without hovering
@@ -271,7 +337,7 @@ test.describe('Communities page tests', () => {
   });
 
   test('validate the community leadership of Worldmappin Community', async ({ page, request }) => {
-    await homePage.moveToWorldmappinCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-163772');
     await communitiesPage.validataCommunitiesPageIsLoaded('Worldmappin');
 
     const url = process.env.REACT_APP_API_ENDPOINT;
@@ -308,7 +374,7 @@ test.describe('Communities page tests', () => {
   });
 
   test('move to the first-three leadership profile pages of Worldmappin community ', async ({ page }) => {
-    await homePage.moveToWorldmappinCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-163772');
     await communitiesPage.validataCommunitiesPageIsLoaded('Worldmappin');
 
     const leadershipLinkLists = await communitiesPage.communityLeadershipList.locator('a').all();
@@ -326,9 +392,9 @@ test.describe('Communities page tests', () => {
         await page.waitForSelector(profilePage.profileName['_selector']);
         expect(await profilePage.profileName).toBeVisible();
 
-        if ((await profilePage.page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').count()) > 0) {
+        if ((await profilePage.page.locator('[data-testid="post-author"], [data-testid="identity-pill-profile"]').count()) > 0) {
           expect(await leadershipLinkNickNamesLists[i]).toContain(
-            await profilePage.page.locator('[data-testid="post-author"], [data-testid="medium-card-author"]').first().textContent()
+            await profilePage.page.locator('[data-testid="post-author"], [data-testid="identity-pill-profile"]').first().textContent()
           );
         }
 
@@ -338,8 +404,10 @@ test.describe('Communities page tests', () => {
     }
   });
 
+  // ★ CANNOT BE FIXED — same "no route has both sidebar and posts" reasoning, see
+  // top-of-describe comment. Rerouted to `/roles/hive-167922` for an honest failure.
   test('validate reblog count display styles in the light theme', async ({ page }) => {
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
 
     // Color of reblog count display
@@ -359,8 +427,10 @@ test.describe('Communities page tests', () => {
     ).toBe('rgb(247, 247, 247)');
   });
 
+  // ★ CANNOT BE FIXED — same "no route has both sidebar and posts" reasoning, see
+  // top-of-describe comment. Rerouted to `/roles/hive-167922` for an honest failure.
   test('move to the reblog this post dialog ', async ({ page }) => {
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
 
     // Navigate to first post page (reblog is now interactive only on post pages)
@@ -376,8 +446,24 @@ test.describe('Communities page tests', () => {
     await reblogThisPostDialog.closeReblogDialog();
   });
   // new tests
+  /*
+   * ★ NAVIGATION FIXED, BUT STILL BLOCKED BY A BUG OUTSIDE THIS FILE (2026-08-21). This test
+   * needs a community post feed (not the sidebar), so it goes straight to `/topics/hive-167922`
+   * — Lumen's tag feed, which genuinely does render `hive-167922`'s posts (confirmed live:
+   * medium-card, medium-card-title, upvote-button, post-children all present per
+   * /tmp/testid-inventory.json's "topic" key). That part of this fix is real.
+   *
+   * It will still fail on `postAuthor.innerText()` below, and inside
+   * `postPage.moveToTheFirstPostInHomePageByPostTitle()` (playwright/tests/support/pages/
+   * postPage.ts:352), both of which read `homePage.getFirstPostAuthor` — a file I do not own.
+   * homePage.ts:215-217 points that locator at `[data-testid="medium-card-author"],
+   * [data-testid="post-author"]`; neither testid exists on Lumen's medium-card (grepped
+   * features/discovery-feed/medium-post-card.tsx — no such testid anywhere in that file). The
+   * author is now `[data-testid="identity-pill-profile"]` (features/discovery-feed/
+   * identity-pill.tsx:134, renders `@{handle}`). See the audit report for the exact fix.
+   */
   test('check if posts in specific communities loading correctly', async ({ page }) => {
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/topics/hive-167922');
     const firstPostTitle = homePage.postTitle.first();
     const firstPostTitleText = await firstPostTitle.innerText();
 
@@ -401,10 +487,12 @@ test.describe('Communities page tests', () => {
     await expect(postAuthorTextSubstring).toContain(articleAuthorTextSubstring);
   });
 
+  // ★ Needs the post feed, not the sidebar — routed to `/topics/hive-167922`
+  // (upvote-button/downvote-button confirmed live there per the testid inventory).
   test('check if upvote and downvote button are displayed correctly on communities page', async ({
     page
   }) => {
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/topics/hive-167922');
     await expect(homePage.getFirstPostUpvoteButton).toBeVisible();
     await homePage.getFirstPostUpvoteButton.click();
     await defaultLoginForm.validateDefaultLoginFormIsLoaded();
@@ -415,9 +503,11 @@ test.describe('Communities page tests', () => {
     await defaultLoginForm.closeLoginForm();
   });
 
+  // ★ Needs the post feed, not the sidebar — routed to `/topics/hive-167922`
+  // (post-children/post-card-responses confirmed live there per the testid inventory).
   test('check if responses are displayed correctly on communities page', async ({ page, browserName }) => {
     test.skip(browserName === 'webkit', 'Automatic test works well on chromium');
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/topics/hive-167922');
 
     await expect(communitiesPage.getFirstResponses).toBeVisible();
 
@@ -435,7 +525,7 @@ test.describe('Communities page tests', () => {
   });
 
   test('check sidebar on specific communities - description, rules, language', async ({ page, request }) => {
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     //description
     await expect(communitiesPage.communityDescription).toBeVisible();
     await expect(communitiesPage.communityDescriptionHeader).toBeVisible();
@@ -486,7 +576,7 @@ test.describe('Communities page tests', () => {
 
   test('move to the dialog of subscribers after clicking Activity Log', async ({ page }) => {
     const leoFinanceCommunityAccount: string = 'hive-167922';
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
     await communitiesPage.activityLogButton.click();
     await communitiesPage.page.waitForSelector(communitiesPage.subscribersNotificationContent['_selector']);
@@ -506,7 +596,7 @@ test.describe('Communities page tests', () => {
     test.skip(browserName === 'webkit' || browserName === 'firefox', 'Automatic test works well on chromium');
 
     const leoFinanceCommunityAccount: string = 'hive-167922';
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
     await communitiesPage.activityLogButton.click();
     await communitiesPage.page.waitForSelector(communitiesPage.subscribersNotificationContent['_selector']);
@@ -547,7 +637,7 @@ test.describe('Communities page tests', () => {
   test('validate styles of the menu of list of the subscribers in the modal in the light mode', async ({
     page
   }) => {
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
     await communitiesPage.activityLogButton.click();
     await communitiesPage.page.waitForSelector(communitiesPage.subscribersNotificationLocalMenu['_selector']);
@@ -650,7 +740,7 @@ test.describe('Communities page tests', () => {
   test('validate load more button in the community subscribers list', async ({ page }) => {
     const leoFinanceCommunityAccount: string = 'hive-167922';
 
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
     await communitiesPage.activityLogButton.click();
     await communitiesPage.page.waitForSelector(communitiesPage.subscribersNotificationLocalMenu['_selector']);
@@ -673,8 +763,20 @@ test.describe('Communities page tests', () => {
     expect(subscribersUIAfterLoadMoreClick.length).toBe(2 * subscribersUIBeforeLoadMoreClik.length);
   });
 
+  /*
+   * ★ NAVIGATION FIXED; THE COLOR ASSERTIONS BELOW MAY STILL FAIL — NOT TOUCHED (2026-08-21).
+   * `SubscribeCommunity` (features/community-profile/subscribe-community.tsx:47,102) now paints
+   * this button with the redesign's semantic tokens (`bg-surface-info-7` /
+   * `hover:bg-surface-info-8`) instead of the old hardcoded `bg-blue-600`/`bg-blue-700` this
+   * test's `rgb(37, 99, 235)` / `rgb(29, 78, 216)` values were measured against. I cannot run a
+   * browser (out of scope, rule 3) to find the tokens' current computed RGB, and hard rule 1
+   * forbids changing an expected value to whatever the app now returns without that
+   * measurement — so the expected colors are left exactly as they were. This may well be a
+   * real, separate color-drift failure once run; it needs someone who can drive a browser to
+   * read the computed values and update them deliberately, not guess them here.
+   */
   test('validate Subscribe button styles in the light theme', async ({ page }) => {
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
     let communitySubscribeButton;
 
@@ -700,7 +802,7 @@ test.describe('Communities page tests', () => {
     const sideBarDesktop = await page.locator('[data-testid="card-explore-hive-desktop"]');
     const sideBarMobile = await page.locator('[data-testid="card-explore-hive-mobile"]');
 
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
 
     // Validate community sidebar visibility before changing viewport size
@@ -736,7 +838,7 @@ test.describe('Communities page tests', () => {
   }) => {
     const trendingCommunitiesSideBar = await page.locator('[data-testid="card-trending-comunities"]');
 
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
 
     // Validate trending communities sidebar visibility before changing viewport size
@@ -764,7 +866,7 @@ test.describe('Communities page tests', () => {
     const leoFinanceCommunity: string = 'hive-167922';
     const logInToMakePostMessagePage = new MakePostWarningPage(page);
 
-    await homePage.moveToLeoFinanceCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-167922');
     await expect(communitiesPage.communityNewPostButton).toBeVisible();
     await communitiesPage.communityNewPostButton.click();
     await logInToMakePostMessagePage.validateMakePostWarningPageIsLoadedOfSpecificCommunities(
@@ -779,7 +881,7 @@ test.describe('Communities page tests', () => {
     const worldmappinCommunity: string = 'hive-163772';
     const logInToMakePostMessagePage = new MakePostWarningPage(page);
 
-    await homePage.moveToWorldmappinCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-163772');
     await expect(communitiesPage.communityNewPostButton).toBeVisible();
     await communitiesPage.communityNewPostButton.click();
     await logInToMakePostMessagePage.validateMakePostWarningPageIsLoadedOfSpecificCommunities(
@@ -792,7 +894,7 @@ test.describe('Communities page tests', () => {
     const worldmappinCommunity: string = 'hive-163772';
     const logInToMakePostMessagePage = new MakePostWarningPage(page);
 
-    await homePage.moveToWorldmappinCommunities();
+    await homePage.gotoSpecificUrl('/roles/hive-163772');
     await expect(communitiesPage.communityNewPostButton).toBeVisible();
     await communitiesPage.communityNewPostButton.click();
     await logInToMakePostMessagePage.validateMakePostWarningPageIsLoadedOfSpecificCommunities(

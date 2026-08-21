@@ -126,10 +126,14 @@ test.describe('Healthchecker page - Tab functionality', () => {
         expect(initialSelectedNode).toBeTruthy();
         console.log('Initially selected node:', initialSelectedNode);
 
-        // Find all API endpoint cards with "Condenser - Get accounts" checker
+        // Find all API endpoint cards with the "find accounts" checker. Title
+        // renamed again 2026-08-18 (components/healthcheckers-wrapper.tsx: its own
+        // WHY-comment there) from the internal-namespace "Database - Find accounts"
+        // to the plain-language "Account lookup" (locales/en/common_blog.json,
+        // healthchecker.check_find_accounts) — no namespace prefix at all now.
         const condenserCards = page
             .locator('.rounded-lg.border')
-            .filter({ has: page.getByText('Database - Find accounts') });
+            .filter({ has: page.getByText('Account lookup') });
 
         const cardsCount = await condenserCards.count();
         expect(cardsCount).toBeGreaterThan(1); // Should have at least 2 nodes to switch between
@@ -154,7 +158,7 @@ test.describe('Healthchecker page - Tab functionality', () => {
         console.log('Target node to switch to:', targetNodeUrl);
 
         // Click Set Main button for the target node
-        await healthcheckerPage.clickSetMainForApiChecker('Database - Find accounts', targetNodeUrl!);
+        await healthcheckerPage.clickSetMainForApiChecker('Account lookup', targetNodeUrl!);
 
         // Wait for the confirmation dialog to appear and click the Confirm button
         const confirmDialog = page.locator('[role="dialog"]');
@@ -267,11 +271,25 @@ test.describe('Healthchecker page - UI elements and content', () => {
     });
 
     test('Validate continuous check description text', async ({ page }) => {
+        /*
+         * ★ BOTH EXPECTED STRINGS WERE STALE (2026-08-21), AND ONE OF THEM WAS A TYPO
+         * THE APP DELIBERATELY FIXED.
+         *
+         * The intro copy was rewritten on 2026-08-18 to `healthchecker.intro_pin`:
+         * "Pin a specific Hive API provider below, or turn on Continuous Check to keep
+         * testing them in the background." The old expectation "You can switch your
+         * provider here" no longer appears anywhere.
+         *
+         * The second assertion asserted "Continuos Check" — the misspelling. That copy
+         * pass fixed the typo precisely so the paragraph matches the toggle's real
+         * label, so asserting the correct spelling is what actually guards it now.
+         * Keeping the old string would have pinned the typo back in place.
+         */
         await expect(healthcheckerPage.pageDescriptionContinuousCheck).toContainText(
-            'You can switch your provider here'
+            'Pin a specific Hive API provider below'
         );
         await expect(healthcheckerPage.pageDescriptionContinuousCheck).toContainText(
-            'Continuos Check'
+            'Continuous Check'
         );
     });
 

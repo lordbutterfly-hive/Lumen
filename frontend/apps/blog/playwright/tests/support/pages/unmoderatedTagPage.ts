@@ -24,10 +24,13 @@ export class UnmoderatedTagPage {
 
     this.unmoderatedTag = page.getByTestId('community-name');
     this.unmoderatedTagHeader = page.getByTestId('community-name-unmoderated');
+    // `medium-card-author` no longer exists — the byline is now
+    // `identity-pill-profile` (features/discovery-feed/identity-pill.tsx),
+    // which renders "@handle" (leading @), unlike the old bare-handle testid.
     this.firstPostAuthor = page
       .locator('[data-testid="post-list-item"], [data-testid="medium-card"]')
       .first()
-      .locator('[data-testid="post-author"], [data-testid="medium-card-author"]');
+      .locator('[data-testid="post-author"], [data-testid="identity-pill-profile"]');
     this.firstPostTitle = page
       .locator('[data-testid="post-list-item"], [data-testid="medium-card"]')
       .first()
@@ -48,7 +51,7 @@ export class UnmoderatedTagPage {
     this.secondPostAuthor = page
       .locator('[data-testid="post-list-item"], [data-testid="medium-card"]')
       .nth(1)
-      .locator('[data-testid="post-author"], [data-testid="medium-card-author"]');
+      .locator('[data-testid="post-author"], [data-testid="identity-pill-profile"]');
     this.secondPostTitle = page
       .locator('[data-testid="post-list-item"], [data-testid="medium-card"]')
       .nth(1)
@@ -76,10 +79,22 @@ export class UnmoderatedTagPage {
 
   async validateFirstPostInTheUnmoderatedTagList(author: string, postTitle: string, postSummary: string) {
     // Validate the first post on the unmoderated post list
-    // Validate post's author name
-    expect(await this.firstPostAuthor.textContent()).toBe(author);
-    // Validate the first post's title
-    expect(await this.firstPostTitle.textContent()).toBe(postTitle);
+    // Validate post's author name — `identity-pill-profile` renders "@handle"
+    // (leading @), unlike the old bare-handle `medium-card-author`; strip it so
+    // this still compares the real handle, not weaker text.
+    const authorText = await this.firstPostAuthor.textContent();
+    expect(authorText?.replace(/^@/, '')).toBe(author);
+    // Validate the first post's title — on the Lumen card `firstPostTitle`'s
+    // <h2> renders the headline AND the inline post date as sibling <span>s
+    // with no separator (medium-post-card.tsx), so raw textContent would be
+    // "TitleTimeAgo". Isolate the title's own (first) span there; the classic
+    // `post-title` card has no such span and its full textContent is already
+    // clean, so this falls back to it when no span is found.
+    const titleSpan = this.firstPostTitle.locator('h2 > span').first();
+    const titleText = (await titleSpan.count())
+      ? await titleSpan.textContent()
+      : await this.firstPostTitle.textContent();
+    expect(titleText).toBe(postTitle);
     // Validate the first post's summary description
     expect(await this.firstPostSummary.textContent()).toBe(postSummary);
   }

@@ -166,8 +166,11 @@ test.describe('Search page tests', () => {
 
     const resultsCount = await searchPage.getResultsCount();
     if (resultsCount > 0) {
-      // Get first post title
-      const firstPostTitle = await searchPage.firstPostTitle.textContent();
+      // Get first post title — `firstPostTitleText` isolates the title's own
+      // span; `firstPostTitle`'s full textContent now has the inline post date
+      // appended with no separator (medium-post-card.tsx's h2 renders title and
+      // date as sibling spans), which would never equal the clean article title.
+      const firstPostTitle = (await searchPage.firstPostTitleText.textContent())?.trim();
 
       // Click first result
       await searchPage.clickFirstResult();
