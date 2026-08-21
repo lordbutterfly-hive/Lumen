@@ -3,6 +3,8 @@ import { Locator, Page, expect } from '@playwright/test';
 export class LoginForm {
   readonly page: Page;
   readonly loginDialog: Locator;
+  readonly keychainRow: Locator;
+  readonly googleSigninRow: Locator;
   readonly loginFormHeader: Locator;
   readonly loginFormDescription: Locator;
   readonly usernameInput: Locator;
@@ -49,6 +51,11 @@ export class LoginForm {
   constructor(page: Page) {
     this.page = page;
     this.loginDialog = page.getByTestId('login-dialog');
+    // ★ Lumen's sign-in dialog (2026-08-21): Keychain and Google are the only two
+    // methods it offers. `features/lite-auth/login/lumen-login.tsx`, rendered by
+    // `components/dialog-login.tsx`.
+    this.keychainRow = page.getByTestId('keychain-row');
+    this.googleSigninRow = page.getByTestId('google-signin-row');
     this.loginFormHeader = page.getByText('Sign in with safe storage');
     this.loginFormDescription = page.getByTestId('login-form-description');
     this.usernameInput = page.getByTestId('username-input');
@@ -106,14 +113,32 @@ export class LoginForm {
     }
   }
 
+  /*
+   * ★★★ REWRITTEN FOR LUMEN'S SIGN-IN DIALOG (2026-08-21).
+   *
+   * This used to assert the denser safe-storage form: a description reading "Save
+   * your posting key by filling form below", plus Username / Safe storage password
+   * / WIF placeholders and a Save-sign-in button. Every one of those is gone —
+   * `packages/smart-signer/components/auth/methods/safestorage.tsx` and its
+   * siblings have ZERO imports anywhere in `apps/blog`.
+   *
+   * This method is the single highest-leverage locator in the suite: 20 call sites
+   * across 6 spec files, almost all of them "click something while signed out and
+   * check the login surface appears". One dead testid here failed all of them.
+   *
+   * Measured live by clicking a comment upvote while signed out: a `role="dialog"`
+   * opens, headed "Sign In", containing exactly `keychain-row`, `google-signin-row`
+   * and `close-dialog`. The assertions below check that surface, at the same
+   * strength as before (six assertions, none conditional).
+   */
   async validateDefaultLoginFormIsLoaded() {
-    await this.page.waitForSelector(this.loginFormDescription['_selector']);
-    await expect(this.loginFormDescription).toHaveText('Save your posting key by filling form below');
-    await expect(this.usernameInput).toHaveAttribute('placeholder', 'Username');
-    await expect(this.passwordInput).toHaveAttribute('placeholder', 'Safe storage password');
-    await expect(this.wifInput).toHaveAttribute('placeholder', 'WIF posting private key');
-    await expect(this.saveSignInButton).toBeVisible();
-    await expect(this.otherSignInOptionsButton).toBeVisible();
+    const dialog = this.page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('heading', { name: 'Sign In' })).toBeVisible();
+    await expect(this.keychainRow).toBeVisible();
+    await expect(this.googleSigninRow).toBeVisible();
+    await expect(this.closeDialog).toBeVisible();
+    await expect(dialog).toContainText('posting key');
   }
 
   async validateUnlockUserWithPasswordLoginFormIsLoaded(username: string) {

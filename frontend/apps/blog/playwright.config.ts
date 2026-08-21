@@ -58,8 +58,32 @@ export default defineConfig({
     /* Maximum time each action such as `click()` can take. Defaults to 0 (no limit). */
     actionTimeout: 0,
 
-    /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: process.env.CI ? process.env.DENSER_URL : 'http://localhost:3000',
+    /*
+     * Base URL to use in actions like `await page.goto('/')`.
+     *
+     * ★★★ HTTPS LOCALLY, AND NOT AS A PREFERENCE (2026-08-21). Every auth cookie
+     * this app sets is flagged `Secure` — measured straight off the server:
+     *
+     *   set-cookie: app_login_challenge_server=…; Path=/; Secure; HttpOnly; SameSite=lax
+     *   set-cookie: session_uid=…;                Path=/; Secure; …
+     *
+     * A browser will not send a `Secure` cookie back over plain http, so an
+     * `http://localhost:3000` baseURL cannot exercise ANY signed-in path: the
+     * session is minted, the cookie is stored, and it is never sent. That is why
+     * every login-dependent test failed regardless of its locators.
+     *
+     * `scripts/lumen-https-front.mjs` is the TLS front; it proxies the same
+     * `next start` on :3000 (verified: `/` and `/witnesses` both 200 through
+     * either), so nothing about the content under test changes — only whether
+     * authentication is expressible at all. `ignoreHTTPSErrors` below is for its
+     * self-signed certificate.
+     *
+     * Override with `LUMEN_E2E_BASE` if you are running the server some other way.
+     */
+    baseURL: process.env.CI
+      ? process.env.DENSER_URL
+      : process.env.LUMEN_E2E_BASE || 'https://localhost:3444',
+    ignoreHTTPSErrors: true,
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: {

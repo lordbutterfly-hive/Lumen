@@ -76,15 +76,20 @@ export class CommunitiesPage {
     this.communityNewPostButtonMobilePage = page.locator('[data-testid="community-simple-description-sidebar"] [data-testid="community-new-post-button"]');
 
     this.communityLeadership = page.locator('[data-testid="community-leadership"]');
-    this.communityLeadershipHeader = this.communityLeadership.locator('h6');
+    // ★ FIXED (2026-08-21): all four `.locator('h6')` calls below never matched —
+    // community-description.tsx renders every one of these section headers as an
+    // `<h4>` (leadership at line 111, description at 158, rules at 172, language
+    // at 187 — none is an h6 anywhere in that component). Confirmed by reading the
+    // component directly, not by guessing from the app's current output.
+    this.communityLeadershipHeader = this.communityLeadership.locator('h4');
     this.communityLeadershipList = this.communityLeadership.locator('ul li');
     this.communityDescription = page.locator('[data-testid="community-description"]');
-    this.communityDescriptionHeader = this.communityDescription.locator('h6');
+    this.communityDescriptionHeader = this.communityDescription.locator('h4');
     this.communityDescriptionConntent = page.locator('[data-testid="community-description-content"]');
     this.communityRules = page.locator('[data-testid="community-rules"]');
-    this.communityRulesHeader = this.communityRules.locator('h6');
+    this.communityRulesHeader = this.communityRules.locator('h4');
     this.communityRulesContent = page.locator('[data-testid="community-rules-content"]');
-    this.languageHeader = page.locator('[data-testid="community-language"]').locator('h6')
+    this.languageHeader = page.locator('[data-testid="community-language"]').locator('h4')
     this.communityChoosenLanguage = page.locator('[data-testid="community-choosen-language"]')
 
     this.getFirstPostListItem = page.locator('[data-testid="post-list-item"], [data-testid="medium-card"]').first();
@@ -215,7 +220,22 @@ export class CommunitiesPage {
   }
 
   async quickValidataCommunitiesPageIsLoaded(communityName: string) {
-    await this.page.waitForTimeout(3000);
+    // ★ REMOVED a fixed `waitForTimeout(3000)` that used to sit here (2026-08-21).
+    // It bought nothing: `expect(...).toHaveText()` below already auto-retries
+    // until its own timeout regardless of whether you sleep first, so the fixed
+    // sleep was pure dead time — and it is charged against the whole TEST's
+    // timeout, not against the assertion's retry budget. Every caller of this
+    // helper (`move to the profile leadership pages...` / `...Worldmappin
+    // community`) calls it once per loop iteration, immediately after
+    // `page.goBack()` forces `CommunityLayout` to remount and its community
+    // query to resettle — so on a community with several team members, the
+    // fixed sleep alone consumed several extra seconds of the test's overall
+    // budget before the real (auto-retrying) assertion even started, on a
+    // route that already server-renders `getCommunity` twice per visit (see
+    // packages/transaction/lib/bridge-api.ts's own TTFB comment on that
+    // function). Removing it does not loosen what's checked below — the same
+    // assertions still have to pass — it just stops throwing away time they
+    // could otherwise use to retry.
     await expect(this.communityNameTitle).toHaveText(communityName);
     await expect(this.communityInfoSidebar).toBeVisible();
     await expect(this.communityDescriptionSidebar).toBeVisible();

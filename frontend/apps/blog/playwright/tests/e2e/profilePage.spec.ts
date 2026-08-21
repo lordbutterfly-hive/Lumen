@@ -63,7 +63,13 @@ test.describe('Profile page of @gtg', () => {
     );
 
     const profilePostCountApi = accountsData.result.accounts[0].post_count;
-    expect(await profilePage.profileNumberOfPosts.textContent()).toContain(String(profilePostCountApi));
+    // ★ profile-identity.tsx's `StatNumber` formats the count with
+    // `.toLocaleString('en-US')` (thousands commas) — the raw API integer is a
+    // substring of "5,000 posts" only below 1000; comparing the same format
+    // fixes the `.toContain()` mismatch measured on @gtg (post_count >= 1000).
+    expect(await profilePage.profileNumberOfPosts.textContent()).toContain(
+      profilePostCountApi.toLocaleString('en-US')
+    );
 
     // Compare follower and following number from api to the respondent on the website
     const responseGetProfile = await request.post(`${url}/`, {
@@ -102,14 +108,19 @@ test.describe('Profile page of @gtg', () => {
   // directly, not via a profile nav click.
 
   test('move to Peakd by link in Social Tab', async ({ page }) => {
-    // gotoSocialProfilePage navigates to `/gtg/communities` directly — the
-    // removed profileSocialLink used to reach the same page via a nav click.
-    await profilePage.gotoSocialProfilePage('gtg');
+    // ★ FIX (2026-08-21): was `gotoSocialProfilePage('gtg')` (no `@`). The
+    // helper builds `/${nickName}/communities` verbatim (profilePage.ts) — it
+    // does not prepend `@` itself, so the bare handle produced `/gtg/communities`,
+    // an unrouted 2-segment path with no `profile-subpage-main` to wait for
+    // (confirmed: `profileSocialPage.spec.ts` calls the same helper with
+    // `'@gtg'` and reaches `/@gtg/communities` correctly). Passing `'@gtg'`
+    // here matches that convention.
+    await profilePage.gotoSocialProfilePage('@gtg');
     await profilePage.moveToPeakdByLinkInSocialTab();
   });
 
   test('validate Hivebuzz link in Social Tab', async ({ page }) => {
-    await profilePage.gotoSocialProfilePage('gtg');
+    await profilePage.gotoSocialProfilePage('@gtg');
     // URL varies based on REACT_APP_ENABLE_THIRD_PARTY_API flag
     await expect(await profilePage.thirdPartyAppHivebuzzLink.getAttribute('href')).toContain('hivebuzz.me');
     // await profilePage.moveToHivebuzzByLinkInSocialTab();

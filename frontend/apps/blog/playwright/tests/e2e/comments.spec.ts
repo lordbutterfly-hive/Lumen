@@ -250,8 +250,13 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
     // Color of the author of the first comment without hovering
     await postPage.page.waitForSelector(postPage.commentAuthorLink.first()['_selector']);
     await expect(postPage.commentAuthorLink.first()).toBeVisible();
+    // rgb(22, 21, 17) = #161511, not rgb(51, 51, 51) = text-foreground.
+    // features/post-rendering/user-popover-card.tsx ("ONE INK FOR A USERNAME",
+    // 2026-08-13, audit §5.3) moved the username span from `text-foreground`
+    // to `text-ink-2`, which resolves to `--ink-2: 22 21 17` in light mode
+    // (packages/tailwindcss/globals.css). The old value is stale.
     expect(await postPage.getElementCssPropertyValue(postPage.commentAuthorLink.first(), 'color')).toBe(
-      'rgb(51, 51, 51)'
+      'rgb(22, 21, 17)'
     );
     // expect(
     //   await postPage.getElementCssPropertyValue(
@@ -323,7 +328,13 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
   }) => {
     await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
 
-    // Click comment name to display the author info popover card
+    // Click comment name to display the author info popover card.
+    // scrollIntoViewIfNeeded() first — measured live: a bare .click() on this
+    // Radix PopoverTrigger (features/post-rendering/user-popover-card.tsx:42,
+    // PopoverTrigger asChild) does nothing when the trigger starts below the
+    // fold; Playwright's own auto-scroll-before-click is not enough here.
+    // Bringing it into view explicitly first is what actually opens it.
+    await postPage.commentAuthorLink.first().scrollIntoViewIfNeeded();
     await postPage.commentAuthorLink.first().click();
     // Validate if the author avatar is displayed in the popover card
     await expect(postPage.userPopoverCardAvatar).toHaveAttribute('href', '/@sicarius');
@@ -343,7 +354,11 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
 
     await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
 
-    // Click comment name to display the author info popover card
+    // Click comment name to display the author info popover card.
+    // scrollIntoViewIfNeeded() first — see the same note in "Validate the
+    // popover card name, nickname and avatar..." above; a bare .click() on
+    // this trigger below the fold does not open the popover.
+    await postPage.commentAuthorLink.first().scrollIntoViewIfNeeded();
     await postPage.commentAuthorLink.first().click();
 
     const firstCommentAuthorName = await postPage.userPopoverCardName.first().textContent();
@@ -359,7 +374,11 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
 
     await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
 
-    // Click comment name to display the author info popover card
+    // Click comment name to display the author info popover card.
+    // scrollIntoViewIfNeeded() first — see the same note in "Validate the
+    // popover card name, nickname and avatar..." above; a bare .click() on
+    // this trigger below the fold does not open the popover.
+    await postPage.commentAuthorLink.first().scrollIntoViewIfNeeded();
     await postPage.commentAuthorLink.first().click();
 
     const firstCommentAuthorName = await postPage.userPopoverCardName.first().textContent();
@@ -375,7 +394,11 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
 
     await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
 
-    // Click comment name to display the author info popover card
+    // Click comment name to display the author info popover card.
+    // scrollIntoViewIfNeeded() first — see the same note in "Validate the
+    // popover card name, nickname and avatar..." above; a bare .click() on
+    // this trigger below the fold does not open the popover.
+    await postPage.commentAuthorLink.first().scrollIntoViewIfNeeded();
     await postPage.commentAuthorLink.first().click();
 
     const firstCommentAuthorName = await postPage.userPopoverCardName.first().textContent();
@@ -391,7 +414,11 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
 
     await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
 
-    // Click comment name to display the author info popover card
+    // Click comment name to display the author info popover card.
+    // scrollIntoViewIfNeeded() first — see the same note in "Validate the
+    // popover card name, nickname and avatar..." above; a bare .click() on
+    // this trigger below the fold does not open the popover.
+    await postPage.commentAuthorLink.first().scrollIntoViewIfNeeded();
     await postPage.commentAuthorLink.first().click();
     await page.waitForSelector(await postPage.userAboutPopoverCard['_selector']);
 
@@ -439,6 +466,10 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
   }) => {
     await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
 
+    // scrollIntoViewIfNeeded() first — see the same note in "Validate the
+    // popover card name, nickname and avatar..." above; a bare .click() on
+    // this trigger below the fold does not open the popover.
+    await postPage.commentAuthorLink.first().scrollIntoViewIfNeeded();
     await postPage.commentAuthorLink.first().click();
     await page.waitForSelector(await postPage.userAboutPopoverCard['_selector']);
 
@@ -485,10 +516,14 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
     await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
 
     // click comment link of the first comment.
-    // Don't separate scrollIntoViewIfNeeded from click — on webkit the
-    // comment list re-renders during hydration and the locator captured
-    // by scrollIntoViewIfNeeded gets detached before click. Playwright's
-    // .click() already auto-scrolls and retries on stale elements.
+    // scrollIntoViewIfNeeded() first, then click — measured live: the same
+    // interaction-order problem as the author-name popover trigger
+    // (`commentAuthorLink`, see the popover-card tests above) also applies
+    // here, and Playwright's Locator API re-resolves the DOM node on every
+    // call rather than holding an ElementHandle reference, so scrolling with
+    // one call and clicking with another does not risk a stale-element error
+    // on webkit the way an ElementHandle-based approach would.
+    await postPage.commentPageLink.first().scrollIntoViewIfNeeded();
     await postPage.commentPageLink.first().click();
     await commentViewPage.page.waitForLoadState('domcontentloaded');
     // validate re-title of the comment's thread
@@ -547,8 +582,9 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
     await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
 
     // click comment link of the first comment.
-    // .click() auto-scrolls and retries on detached, which matters on
-    // webkit where the comment list re-renders during hydration.
+    // scrollIntoViewIfNeeded() first — see the same note in "validate the
+    // main comment" above.
+    await postPage.commentPageLink.first().scrollIntoViewIfNeeded();
     await postPage.commentPageLink.first().click();
     await commentViewPage.page.waitForLoadState('domcontentloaded');
     // validate re-title of the comment's thread - comment view page is loaded
@@ -579,6 +615,9 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
     // Move to the post with comments
     await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
     // Click comment link of the second comment(nested comment - gtg as author)
+    // scrollIntoViewIfNeeded() first — see the same note in "validate the
+    // main comment" above.
+    await postPage.commentPageLink.nth(1).scrollIntoViewIfNeeded();
     await postPage.commentPageLink.nth(1).click();
     await commentViewPage.page.waitForLoadState('domcontentloaded');
     // Validate re-title of the comment's thread - comment view page is loaded
@@ -613,6 +652,9 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
     // Move to the post with comments
     await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
     // Click comment link of the second comment(nested comment - gtg as author)
+    // scrollIntoViewIfNeeded() first — see the same note in "validate the
+    // main comment" above.
+    await postPage.commentPageLink.nth(1).scrollIntoViewIfNeeded();
     await postPage.commentPageLink.nth(1).click();
     await commentViewPage.page.waitForLoadState('domcontentloaded');
     // Validate re-title of the comment's thread - comment view page is loaded

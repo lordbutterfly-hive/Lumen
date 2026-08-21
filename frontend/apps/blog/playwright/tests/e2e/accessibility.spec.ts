@@ -100,8 +100,16 @@ test.describe('Accessibility tests', () => {
     await homePage.goto();
     await page.waitForLoadState('networkidle');
 
-    // Find the first post title link
-    const firstPostTitle = homePage.getFirstPostTitle;
+    // Find the first post title link.
+    // ★ FIX (2026-08-21): `homePage.getFirstPostTitle` was repointed
+    // (2026-08-21 REPAIR, homePage.ts) to the title-only <span> inside the
+    // card's <h2>, not the anchor — a deliberate change for clean text
+    // comparisons elsewhere. A bare <span> has no native tabindex, so
+    // `.focus()` on it is a no-op: focus never actually left <body>, Enter
+    // activated nothing, and this test hung waiting for a navigation that
+    // never started. `homePage.postTitle` (`a[data-testid="medium-card-title"]`)
+    // is the real anchor and the element a keyboard user actually tabs to.
+    const firstPostTitle = homePage.postTitle.first();
     await expect(firstPostTitle).toBeVisible({ timeout: TIMEOUTS.SEARCH_RESULTS });
 
     // Focus on the link

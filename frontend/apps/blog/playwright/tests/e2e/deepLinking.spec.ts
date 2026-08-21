@@ -22,13 +22,18 @@ test.describe('Deep Linking tests', () => {
   test('direct link to post loads correctly', async ({ page }) => {
     await homePage.goto();
 
-    // homePage.getFirstPostTitle resolves to the `medium-card-title` anchor;
-    // its <h2> now renders the headline AND the inline post date as sibling
-    // <span>s with NO separator between them (medium-post-card.tsx), so the
-    // anchor's raw textContent is "TitleTimeAgo", not the title. Scope to the
-    // first span (the title text) so this compares clean title to clean title.
-    const postTitle = (await homePage.getFirstPostTitle.locator('h2 > span').first().textContent())?.trim();
-    const postHref = await homePage.getFirstPostTitle.getAttribute('href');
+    // ★ FIX (2026-08-21): `homePage.getFirstPostTitle` was itself repointed
+    // (2026-08-21 REPAIR, homePage.ts) to
+    // `[data-testid="medium-card-title"] h2 > span:nth-child(1)` — the
+    // title-only span, not the anchor — precisely so its textContent is clean
+    // title text with no inlined date. The old `.locator('h2 > span').first()`
+    // chained here re-scoped INTO that span looking for a nested `h2 > span`
+    // that cannot exist (a span has no `<h2>` descendant), which timed out.
+    // The href also no longer lives on this locator (a `<span>` has none) —
+    // `homePage.postTitle` (`a[data-testid="medium-card-title"]`) is the real
+    // anchor and is what carries it.
+    const postTitle = (await homePage.getFirstPostTitle.textContent())?.trim();
+    const postHref = await homePage.postTitle.first().getAttribute('href');
 
     if (!postHref) {
       throw new Error('Post href is null - cannot proceed with deep link test');
@@ -44,7 +49,11 @@ test.describe('Deep Linking tests', () => {
   test('post URL format is correct', async () => {
     await homePage.goto();
 
-    const postHref = await homePage.getFirstPostTitle.getAttribute('href');
+    // ★ FIX (2026-08-21): `homePage.getFirstPostTitle` resolves to the
+    // title-only <span> (2026-08-21 REPAIR, homePage.ts), which carries no
+    // `href` — this always read `null` here. `homePage.postTitle`
+    // (`a[data-testid="medium-card-title"]`) is the real anchor.
+    const postHref = await homePage.postTitle.first().getAttribute('href');
 
     expect(postHref).not.toBeNull();
     // URL format: /@author/permlink OR /community/@author/permlink

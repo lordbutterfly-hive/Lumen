@@ -121,24 +121,31 @@ test.describe('Communities page tests', () => {
     await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
 
-    const url = process.env.REACT_APP_API_ENDPOINT;
+    /*
+     * ★ FIXED (2026-08-21): this used to POST `bridge.get_community` straight to
+     * the raw Hive node and compare `.subscribers` against the page. That RAW
+     * count is not what the page shows: `getCommunity()`
+     * (packages/transaction/lib/bridge-api.ts:442-459, `withCorrectedSubscriberCount`)
+     * deliberately subtracts banned-author subscriptions
+     * (REACT_APP_BANNED_AUTHORS — 6 names configured in .env.local right now)
+     * from the raw Hivemind figure before it reaches the UI, so the displayed
+     * count matches the filtered list `SubsListDialog` shows instead of the
+     * unfiltered chain number. Comparing against the raw bridge call fails
+     * whenever any banned account is subscribed to hive-167922.
+     *
+     * The app's own `/api/community` route (app/api/community/route.ts) calls
+     * that exact same `getCommunity()` — same JSON-RPC call, same correction —
+     * so reading through it instead always matches what's actually rendered,
+     * regardless of the current ban list's contents. `sum_pending`/`num_authors`
+     * are untouched by the correction (only `.subscribers` is adjusted), so
+     * they come through identical to the raw bridge figures either way.
+     */
+    const responseCommunity = await request.get('/api/community?name=hive-167922&observer=');
+    const community = await responseCommunity.json();
 
-    const responseCommunity = await request.post(`${url}/`, {
-      data: {
-        id: 0,
-        jsonrpc: '2.0',
-        method: 'bridge.get_community',
-        params: { name: 'hive-167922', observer: '' } //hive-167922 - LeoFinance community owner
-      },
-      headers: {
-        Accept: 'application/json, text/plain, */*'
-      }
-    });
-
-    const subscribers = (await responseCommunity.json()).result.subscribers;
-    const pendingRewards = (await responseCommunity.json()).result.sum_pending;
-    const activePosters = (await responseCommunity.json()).result.num_authors;
-    const leadership = (await responseCommunity.json()).result.team;
+    const subscribers = community.subscribers;
+    const pendingRewards = community.sum_pending;
+    const activePosters = community.num_authors;
 
     expect(await communitiesPage.commnnitySubscribers.textContent()).toBe(
       String(subscribers) + 'subscribers'
@@ -464,8 +471,22 @@ test.describe('Communities page tests', () => {
    */
   test('check if posts in specific communities loading correctly', async ({ page }) => {
     await homePage.gotoSpecificUrl('/topics/hive-167922');
-    const firstPostTitle = homePage.postTitle.first();
-    const firstPostTitleText = await firstPostTitle.innerText();
+    /*
+     * ★ FIXED (2026-08-21): was `homePage.postTitle.first()`
+     * (`a[data-testid="medium-card-title"]`), which reads the WHOLE title
+     * anchor's innerText — title AND the date span that now lives inside the
+     * same h2 as a sibling (features/discovery-feed/medium-post-card.tsx:
+     * 1210-1240, "the date has left this row ... sits inline after the title"),
+     * e.g. "Burn Post12 hours ago". The post page's `article-title` never
+     * carries a date, so this always failed the `toEqual` below.
+     * `homePage.getFirstPostTitle` is already scoped to just the title span
+     * (`[data-testid="medium-card-title"] h2 > span:nth-child(1)`, see its own
+     * comment in homePage.ts) for exactly this bare-title comparison, and
+     * `postPage.moveToTheFirstPostInHomePageByPostTitle()` (postPage.ts:376)
+     * already reads the SAME locator to decide what post it clicked — so this
+     * now matches what actually gets navigated to.
+     */
+    const firstPostTitleText = await homePage.getFirstPostTitle.innerText();
 
     const postAuthor = homePage.getFirstPostAuthor;
     const postAuthorText = await postAuthor.innerText();
@@ -901,16 +922,27 @@ test.describe('Communities page tests', () => {
       worldmappinCommunity
     );
 
+    /*
+     * ★ FIXED (2026-08-21): `rgb(240, 253, 244)` (Tailwind's old green-50) /
+     * `rgb(0, 0, 0)` (pure black) were the pre-redesign hardcoded colors. The
+     * warning box (app/submit.html/content.tsx:76-82) now uses semantic tokens
+     * `bg-surface-1 ... text-ink-10`, and neither is dynamic — both resolve
+     * from static `:root` custom properties in packages/tailwindcss/globals.css
+     * (light-mode block, no alpha modifier so `<alpha-value>` = 1):
+     *   --surface-1: 255 255 255  (line 443) -> rgb(255, 255, 255)
+     *   --ink-10:    107 114 128  (line 231) -> rgb(107, 114, 128)
+     * Read from the token source, not from a live measurement.
+     */
     expect(
       await homePage.getElementCssPropertyValue(
         logInToMakePostMessagePage.logInToMakePostMessage,
         'background-color'
       )
-    ).toBe('rgb(240, 253, 244)');
+    ).toBe('rgb(255, 255, 255)');
 
     expect(
       await homePage.getElementCssPropertyValue(logInToMakePostMessagePage.logInToMakePostMessage, 'color')
-    ).toBe('rgb(0, 0, 0)');
+    ).toBe('rgb(107, 114, 128)');
   });
 
 });

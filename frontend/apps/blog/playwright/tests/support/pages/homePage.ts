@@ -832,20 +832,35 @@ export class HomePage {
     await expect(this.page).toHaveURL('welcome');
   }
 
+  /*
+   * ★★ THESE TWO REACHED THE LEGAL PAGES THROUGH THE MOBILE NAV (2026-08-21 repair).
+   *
+   * `getNavSidebarMenu` is `[data-testid="mobile-nav-trigger"]`, which is `md:hidden`
+   * — at the desktop viewport every project in `playwright.config.ts` runs at, it is
+   * not clickable, so both helpers hung for the full timeout. And even on a phone the
+   * click would miss: the mobile nav renders `LeftRail`, whose nav labels contain no
+   * "Privacy Policy" or "Terms of Service" row at all.
+   *
+   * The pages are still reachable, just from somewhere else. Measured on the live
+   * site: `/login`'s footer carries `<a href="/privacy.html">Privacy Policy</a>` and
+   * `<a href="/tos.html">Terms</a>`, signed out, at desktop width. (The other route is
+   * the settings-page footer, which needs a session.) Clicking a real link from a real
+   * page keeps these tests testing navigation rather than becoming a bare `goto`.
+   *
+   * Assertions are unchanged in strength: the destination heading, and the URL.
+   */
   async moveToPrivacyPolicyPage() {
-    await this.getNavSidebarMenu.click();
-    await this.getNavSidebarMenuContent.getByRole('button', { name: 'Privacy Policy' }).click();
-    await this.page.waitForTimeout(5000);
+    await this.page.goto('/login');
+    await this.page.getByRole('link', { name: 'Privacy Policy' }).first().click();
     await expect(this.page.locator('h1').getByText('Privacy Policy')).toBeVisible();
-    await expect(this.page).toHaveURL('privacy.html');
+    await expect(this.page).toHaveURL(/privacy\.html/);
   }
 
   async moveToTermsOfServicePage() {
-    await this.getNavSidebarMenu.click();
-    await this.getNavSidebarMenuContent.getByRole('button', { name: 'Terms of Service' }).click();
-    await this.page.waitForTimeout(5000);
-    await expect(this.page.locator('div').getByText('Terms of Service')).toBeVisible();
-    await expect(this.page).toHaveURL('tos.html');
+    await this.page.goto('/login');
+    await this.page.getByRole('link', { name: 'Terms' }).first().click();
+    await expect(this.page.locator('div').getByText('Terms of Service').first()).toBeVisible();
+    await expect(this.page).toHaveURL(/tos\.html/);
   }
 
   // Tranding All Posts
