@@ -88,6 +88,24 @@ export default function DetailsCardHover({ post, children, decline, post_page }:
         onMouseLeave={handleMouseLeave}
         onClick={() => setOpen(!open)}
         asChild
+        /* ★★ REACHABLE BY KEYBOARD (2026-08-21, found by a keyboard-only pass).
+
+           The trigger only wired `onMouseEnter` / `onMouseLeave` / `onClick`, and
+           `children` is a plain <span>, so the payout figure had NO tab stop at all: a
+           mouse user could see the author/curator split, and a keyboard user had no
+           path to it whatever. Measured: `tabIndex -1`, no `tabindex` attribute.
+
+           `tabIndex={0}` puts it in the tab order and `onFocus`/`onBlur` mirror the
+           pointer handlers, so focusing the figure opens the same card that hovering
+           it does. Escape closes it — `HoverCard` already handles that.
+
+           ★ NO role="button". This opens a disclosure, it does not act, and the
+           figure's own text ("$14.30") is the accessible name a reader needs.
+           `aria-expanded` carries the state instead. */
+        tabIndex={0}
+        aria-expanded={open}
+        onFocus={handleMouseEnter}
+        onBlur={handleMouseLeave}
       >
         {children}
       </HoverCardTrigger>

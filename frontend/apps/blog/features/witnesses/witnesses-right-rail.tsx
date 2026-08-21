@@ -9,7 +9,7 @@ interface WitnessesRightRailProps {
   proxyAccount: string;
 }
 
-const CARD_CLASS = 'rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]';
+const CARD_CLASS = 'rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]';
 
 /**
  * Page-specific right rail for /witnesses: Filters + Set-a-proxy, per the

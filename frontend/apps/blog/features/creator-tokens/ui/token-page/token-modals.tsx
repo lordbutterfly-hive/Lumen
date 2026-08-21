@@ -4,7 +4,7 @@ import { FC, useState, useRef } from 'react';
 import type { Service } from '../../market/token-detail';
 import type { LiveTokenMarket } from '../../live/adapt';
 import { buyQuote, sellQuote, serviceQuote, EXIT_FEE_MAX, MIN_NET_DEFAULT_TOLERANCE_BPS } from '../../market/curve';
-import { usdPrice, usdWhole } from '../../market/format';
+import { pctLabel, usdPrice, usdWhole } from '../../market/format';
 import { writeFailureMessage } from '../write-failure';
 import { useTokenAccounts } from '../../live/use-token-accounts';
 import { useMagiSpendingPower } from '../../live/use-magi-spending-power';
@@ -79,7 +79,7 @@ const BuyModal: FC<{
   // maxTotalUsd (maxP × tokens), which can exceed `usd`; checking only `usd` would pass
   // a user whose balance covers the budget but not the higher ceiling they authorised.
   const costBaseUnits = Math.round(Math.max(usd, maxTotalUsd ?? 0) * 1000);
-  const affordability = spending.affordability(costBaseUnits);
+  const affordability = spending.affordability(costBaseUnits, 'buy');
   const blockedBySpending = affordability === 'no_resource_credits' || affordability === 'insufficient_hbd';
 
   return (
@@ -255,7 +255,12 @@ const SellModal: FC<{
   const [minNetTouched, setMinNetTouched] = useState(false);
   const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
   const q = sellQuote(tokens, m, m.position?.heldDays ?? 999);
-  const feePctLabel = Math.round(q.exitFeePct * 100);
+  // ★ TWIN OF THE "0%" BUG (2026-08-21). `exitFeePct` is a FRACTION, so a real
+  // but small early-exit fee rounded to a flat "0%" — printed beside the nonzero
+  // dollar deduction it was supposedly explaining. `pctLabel` reads "<1%" for
+  // anything above zero that rounds below half a percent, so the rate and the
+  // amount can no longer contradict each other.
+  const feePctLabel = pctLabel(q.exitFeePct, 1) ?? '0%';
   // REDEEM amount, derived from the position's own already-taxed floor value and
   // scaled pro rata (the slice is linear in tokens; the tax rate does not vary
   // with size). This is the ONLY figure we have for this rail — we do NOT have a
@@ -311,7 +316,7 @@ const SellModal: FC<{
         {q.exitFeePct > 0 ? (
           <div className="mb-3.5 rounded-xl border border-line-warn-2 bg-surface-warn-4 px-4 py-3.5">
             <div className="mb-1.5 text-[14px] leading-[22px] font-bold tabular-nums text-ink-warn-3">
-              Early-exit fee: {feePctLabel}% now
+              Early-exit fee: {feePctLabel} now
             </div>
             <p className="mb-2.5 text-caption text-ink-warn-2">
               You’ve held these ~{m.position?.heldDays ?? 0} days. The fee drops to 0% if you hold ~6 weeks.
@@ -327,7 +332,7 @@ const SellModal: FC<{
               />
             </div>
             <div className="mt-1.5 flex justify-between text-caption tabular-nums text-ink-warn-3">
-              <span>{feePctLabel}% now</span>
+              <span>{feePctLabel} now</span>
               <span>0% at 6 wks</span>
             </div>
           </div>
@@ -348,7 +353,7 @@ const SellModal: FC<{
               </div>
               {q.exitFeeUsd > 0 ? (
                 <div className="mb-1.5 flex justify-between text-caption text-ink-warn-3">
-                  <span>Early-exit fee ({feePctLabel}%)</span>
+                  <span>Early-exit fee ({feePctLabel})</span>
                   <span>−{usdPrice(q.exitFeeUsd)}</span>
                 </div>
               ) : null}
@@ -496,7 +501,7 @@ const AskModal: FC<{
   const askPayer = askTokenAccounts.accounts.find((a) => a.canSign) ?? askTokenAccounts.accounts[0] ?? null;
   const askSpending = useMagiSpendingPower(askPayer?.id ?? null);
   const commissionBaseUnits = Math.round(q.commissionUsd * 1000);
-  const commissionAffordability = askSpending.affordability(commissionBaseUnits);
+  const commissionAffordability = askSpending.affordability(commissionBaseUnits, 'ask');
   const blockedByCommission =
     commissionAffordability === 'no_resource_credits' || commissionAffordability === 'insufficient_hbd';
   const canAsk = canAffordTokens && !blockedByCommission;

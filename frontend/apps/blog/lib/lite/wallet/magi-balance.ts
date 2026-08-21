@@ -233,11 +233,32 @@ export async function readMagiSpendingPower(gqlUrl: string, rawAccount: string):
  */
 export type AffordabilityReason = 'ok' | 'no_resource_credits' | 'insufficient_hbd';
 
-export function checkAffordable(power: MagiSpendingPower, costBaseUnits: number): AffordabilityReason {
+export function checkAffordable(
+  power: MagiSpendingPower,
+  costBaseUnits: number,
+  /**
+   * The `rc_limit` this call will declare. Defaults to 0 for callers that only
+   * want the old cost-vs-balance question answered.
+   *
+   * ★ WHY IT HAS TO BE PASSED IN (measured on chain, 2026-08-21). `rc_limit` is
+   * RESERVED AGAINST THE SAME HBD the purchase is spent from — it is not a
+   * separate allowance. A wallet holding 6.375 HBD, buying a token for 1.442,
+   * was refused with `insufficient balance` at rc_limit 6,000 and went through
+   * at 3,000. Checking only `cost > balance` therefore says "affordable" about
+   * a call the chain will refuse, and the user is told their wallet is short
+   * when the real cause is the ceiling we chose. See
+   * features/creator-tokens/lib/vsc/rc-budget.ts.
+   */
+  rcLimitBaseUnits = 0
+): AffordabilityReason {
   // Order matters: zero RC blocks everything, so report it first even when the
   // balance would also be short. Telling someone to add 5 HBD when no amount would
   // let them transact is a wrong instruction.
   if (power.cannotTransact) return 'no_resource_credits';
-  if (costBaseUnits > power.balance.hbdBaseUnits) return 'insufficient_hbd';
+  // The node's ingest gate: the declared ceiling must be covered by available RC
+  // (`transaction-pool.go:213-215`).
+  if (rcLimitBaseUnits > power.rc.amount) return 'no_resource_credits';
+  // ...and the reservation plus the purchase must both fit in the balance.
+  if (costBaseUnits + rcLimitBaseUnits > power.balance.hbdBaseUnits) return 'insufficient_hbd';
   return 'ok';
 }

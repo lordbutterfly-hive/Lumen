@@ -5,8 +5,8 @@ import { FC, useState, useEffect, useRef } from 'react';
 import { useLiveStudio, type LiveStudio } from '../../live/use-live-studio';
 import { MarketLoading, MarketReadFailed, MarketSessionUnavailable, MarketUnavailable } from '../../live/market-states';
 import type { Ask } from '../../types';
-import { usdPrice, usdWhole } from '../../market/format';
-import { sellQuote, MIN_NET_DEFAULT_TOLERANCE_BPS } from '../../market/curve';
+import { pctLabel, pctValue, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
+import { sellQuote, serviceQuote, MIN_NET_DEFAULT_TOLERANCE_BPS } from '../../market/curve';
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
 import { MAX_HASH_LEN } from '../../lib/vsc/payload-contract';
@@ -25,7 +25,7 @@ const SECTIONS: { id: Section; label: string }[] = [
 const tok = (n: number) => n.toFixed(2);
 const Card: FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
   <div
-    className={`rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)] ${className}`}
+    className={`rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)] ${className}`}
   >
     {children}
   </div>
@@ -524,7 +524,14 @@ const CreatorStudio: FC = () => {
     );
   }
 
-  const supplyPct = market.cap > 0 ? Math.min(100, Math.round((market.supply / market.cap) * 100)) : 0;
+  // ★ TWIN OF THE "0%" BUG, FOUND 2026-08-21. This is the same
+  // `Math.round(supply / cap * 100)` that was fixed in
+  // `ui/token-page/token-market-view.tsx` — and the fix never reached this copy,
+  // so the creator's OWN dashboard kept reporting "cap 0% used" about a market
+  // that had genuinely issued tokens. `pctValue` drives the bar geometry (where
+  // rounding to 0 is correct); `supplyPctLabel` is what a person reads.
+  const supplyPct = pctValue(market.supply, market.cap);
+  const supplyPctLabel = pctLabel(market.supply, market.cap) ?? '0%';
   const overdue = subDaysLeft <= 0;
   const held = market.position?.tokens ?? 0;
 
@@ -572,13 +579,20 @@ const CreatorStudio: FC = () => {
         </div>
 
         {/* Section tabs */}
-        <div className="mb-5 mt-4 flex flex-wrap gap-1.5 rounded-card border border-line-6 bg-surface-21 p-[5px]">
+        {/* ★ WARM TAB TREATMENT (illumination §1/§3) — the FOURTH copy of this
+            segmented control, after the feed, creators and proposals. Track on
+            --amb-1 (§3: troughs follow the ground they sit on, never lighter),
+            active pill on --lum-1 with a soft warm glow, one step weaker than the
+            nav rail (§4). The glow is an inline style because a `/` in a Tailwind
+            arbitrary value is the opacity shorthand and silently kills the class. */}
+        <div className="mb-5 mt-4 flex flex-wrap gap-1.5 rounded-card border border-line-6 bg-[var(--amb-1)] p-[5px]">
           {SECTIONS.map((s) => (
             <button
               key={s.id}
               onClick={() => setSection(s.id)}
+              style={section === s.id ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
               className={`rounded-control px-4 py-2 font-sans text-[14px] leading-[22px] font-semibold transition-colors ${
-                section === s.id ? 'bg-surface-1 text-ink-2 shadow-sm' : 'text-ink-10 hover:text-ink-2'
+                section === s.id ? 'bg-[var(--lum-1)] text-ink-2' : 'text-ink-10 hover:text-ink-2'
               }`}
             >
               {s.label}
@@ -604,7 +618,7 @@ const CreatorStudio: FC = () => {
               <Stat
                 label="Token price"
                 value={usdPrice(market.priceUsd)}
-                sub={`Floor ${usdPrice(market.floorUsd)} · cap ${supplyPct}% used`}
+                sub={`Floor ${usdPrice(market.floorUsd)} · cap ${supplyPctLabel} used`}
               />
             </Card>
             <Card>
@@ -620,7 +634,7 @@ const CreatorStudio: FC = () => {
                 /* The creator's own dashboard read "0%" and "0/0 answered · " on
                    the day they launched. Nothing has been asked of them yet; say
                    that, rather than scoring them zero for it. */
-                value={market.delivery.completionPct === null ? '—' : `${market.delivery.completionPct}%`}
+                value={market.delivery.completionPct === null ? '—' : (pctLabel(market.delivery.answered, market.delivery.total) ?? '0%')}
                 sub={
                   market.delivery.completionPct === null
                     ? 'No deliveries yet'
@@ -643,7 +657,7 @@ const CreatorStudio: FC = () => {
                   below: say we do not know. */}
               <Stat
                 label="Trade-fee share (claimable)"
-                value={tradeFeeClaimableUsd === null ? '—' : usdWhole(tradeFeeClaimableUsd)}
+                value={tradeFeeClaimableUsd === null ? '—' : usdWholeNonZero(tradeFeeClaimableUsd)}
                 green
                 sub={
                   tradeFeeClaimableUsd === null
@@ -775,9 +789,20 @@ const CreatorStudio: FC = () => {
                         onCommit={(title) => studio.setOfferingTitle({ offeringId: o.offeringId, title })}
                         onFailure={(m) => setActionFailure(m || null)}
                       />
+                      {/* ★ A THIRD, WRONG WAY TO QUOTE THE SAME OFFERING (found
+                          2026-08-21). This was a raw `price / tokenPrice`: no 12%
+                          commission carve-out and no rounding up, while both the
+                          buyer-facing paths use `serviceQuote`, which applies
+                          both. On a real market (supply 31, token $1.255) a $60
+                          service read 47.81 tokens HERE and 43 on the page a
+                          buyer actually sees, an 11% gap on the creator's own
+                          pricing screen. `serviceQuote` matches what a live ask
+                          settles at, verified against `creditsForAskBaseUnits`
+                          at the contract's settlement rate for four offerings.
+                          One quote function, or the two screens disagree. */}
                       <div className="text-caption tabular-nums text-ink-14">
                         {market.priceUsd > 0
-                          ? `≈ ${tok(o.priceHbd / market.priceUsd)} tokens at today’s price`
+                          ? `≈ ${tok(serviceQuote(o.priceHbd, market.priceUsd).tokens)} tokens at today’s price`
                           : 'Token price unavailable'}
                       </div>
                     </div>
@@ -954,7 +979,7 @@ const CreatorStudio: FC = () => {
               <div className="flex items-center justify-between">
                 <Stat
                   label="Trade-fee share"
-                  value={tradeFeeClaimableUsd === null ? '—' : usdWhole(tradeFeeClaimableUsd)}
+                  value={tradeFeeClaimableUsd === null ? '—' : usdWholeNonZero(tradeFeeClaimableUsd)}
                   green
                   sub={
                     tradeFeeClaimableUsd === null

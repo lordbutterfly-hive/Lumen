@@ -19,11 +19,24 @@ import {
  * The address must be known before the challenge is requested: the server binds
  * every nonce to one address (SEQ-1).
  *
- * Fallback path — manual, BTC only: paste an address, get the message, sign it in
- * any wallet, paste the signature back. Kept because it needs no project id, no
- * WalletConnect relay and no extension, so BTC sign-in still works if the
- * connector is unconfigured or a wallet is unsupported. EVM has no manual path —
- * hand-signing an EIP-191 payload is not a real user flow.
+ * THERE IS NO FALLBACK PATH, and this comment used to say there was.
+ *
+ * A manual BTC route once lived here: paste an address, get the message, sign it
+ * somewhere else, paste the signature back. It was removed on 2026-08-20 and this
+ * header was not updated with it, so the file went on describing an
+ * implementation that no longer existed below it. Altera, the reference client,
+ * has no such path either: its login is three controls and nothing else
+ * (`routes/login/+page.svelte:216-251`).
+ *
+ * The reason it had to go is not tidiness. A manual sign-in authenticates the
+ * account and establishes NO SIGNER, so the session works and then every buy,
+ * sell, send and ask fails at signing time with nothing on screen to explain it.
+ * An account that can log in but can never transact is worse than one that
+ * cannot log in.
+ *
+ * Do not reintroduce it. If a wallet is unsupported or the connector is
+ * unconfigured, the honest answer is to say so, not to mint a session that
+ * cannot sign.
  */
 
 // TODO i18n — staged copy while the redesign lands (mirrors app-header's LABELS

@@ -3,7 +3,7 @@
 import { FC } from 'react';
 import { Link } from '@hive/ui';
 import { useLiveTokenMarket } from '../live/use-live-token-market';
-import { usdPrice } from '../market/format';
+import { pctLabel, usdPrice } from '../market/format';
 
 // TODO i18n — staged copy, same precedent as the rest of this feature.
 const COPY = {
@@ -88,7 +88,7 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
                   failure to deliver. Same rule as `typicalResponse` below. */}
               {d.completionPct !== null ? (
                 <div className="flex flex-col gap-0.5">
-                  <span className="font-sans text-[17px] leading-[26px] font-bold tabular-nums text-ink-2">{d.completionPct}%</span>
+                  <span className="font-sans text-[17px] leading-[26px] font-bold tabular-nums text-ink-2">{pctLabel(d.answered, d.total) ?? '0%'}</span>
                   <span className="text-caption text-ink-12">{COPY.completionRate}</span>
                 </div>
               ) : null}

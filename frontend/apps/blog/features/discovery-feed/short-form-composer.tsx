@@ -250,7 +250,7 @@ export default function ShortFormComposer() {
   if (!loggedIn) {
     return (
       <DialogLogin>
-        <div className="cursor-pointer rounded-panel border border-[#ebebeb] bg-white p-[20px_22px] font-sans text-[18px] leading-[30px] text-ink-14 shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-background-secondary">
+        <div className="cursor-pointer rounded-panel border border-[#ebebeb] bg-white p-[20px_22px] font-sans text-[18px] leading-[30px] text-ink-14 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)] transition-colors hover:bg-background-secondary">
           {t('short_form_composer.login_prompt')}
         </div>
       </DialogLogin>
@@ -262,7 +262,7 @@ export default function ShortFormComposer() {
       <div
         data-testid="short-form-composer"
         data-state="collapsed"
-        className="flex items-center gap-4 rounded-panel border border-[#ebebeb] bg-white p-[20px_22px] shadow-[0_1px_2px_rgba(20,18,10,0.03)]"
+        className="flex items-center gap-4 rounded-panel border border-[#ebebeb] bg-white p-[20px_22px] shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]"
       >
         <UserAvatarImg username={displayUsername} pixelSize={44} alt={displayUsername} />
         <button
@@ -305,7 +305,7 @@ export default function ShortFormComposer() {
         void images.handleFiles(files);
       }}
       className={cn(
-        'rounded-panel border bg-white p-[20px_22px] font-sans shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors',
+        'rounded-panel border bg-white p-[20px_22px] font-sans shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)] transition-colors',
         // ★ `line-brand-10`, not `#c0392b` (2026-08-14 token-migration pass):
         // brand LINE role (a border), matching `tailwind.config.js`'s own
         // border → `line-*` mapping.

@@ -80,7 +80,7 @@ export function MagiFuelGauge({
       <div className={`flex items-center gap-3 ${className}`} data-testid="magi-fuel-failed">
         {ring(0, UNKNOWN)}
         <span className="text-caption text-ink-10">
-          Couldn’t check your Magi balance just now — nothing is wrong with your funds.
+          Couldn’t check your Magi balance just now. Nothing is wrong with your funds.
         </span>
       </div>
     );
@@ -104,9 +104,17 @@ export function MagiFuelGauge({
                 while a wallet identity is granted none and has never been able
                 to send anything. Telling a wallet user they "ran low" would be
                 a lie about why they are stuck. */}
+            {/* ★ SAY HOW TO FIX IT, AND SAY IT IN THE SAME BREATH (2026-08-21).
+                This used to stop at "you cannot send anything", which is a dead
+                end: the reader has no way to know that transaction credit on
+                Magi is simply their HBD balance, that spending it is normal and
+                not a penalty, or that topping up works INSTANTLY rather than
+                after a wait. All three facts are needed before the sentence
+                becomes an instruction instead of a rejection. The figure is the
+                measured cost of a real buy, not a guess — see rc-budget.ts. */}
             {kind === 'btc' || kind === 'evm'
-              ? `A wallet account starts with no Magi resource credits at all, so nothing can be sent until you hold some HBD here. On Magi your HBD is also what pays for sending.`
-              : `You hold ${hbd(balance.hbdBaseUnits)} HBD. On Magi your HBD is also what pays for sending, and about ${hbd(MAGI_MIN_RC_FOR_A_CALL)} HBD is the minimum for one purchase.`}
+              ? `On Magi, the HBD you hold is also what pays for sending. There is no separate gas token and no fee. A wallet account starts with none, so add at least ${hbd(MAGI_MIN_RC_FOR_A_CALL)} HBD to make your first purchase. Every 1 HBD gives you 1,000 credits, and it counts the moment it arrives.`
+              : `You hold ${hbd(balance.hbdBaseUnits)} HBD. On Magi that balance is also what pays for sending, and about ${hbd(MAGI_MIN_RC_FOR_A_CALL)} HBD is what one purchase needs. Credit you have already spent comes back on its own over about five days, or you can add HBD to top it up straight away.`}
           </div>
         </div>
       </div>
@@ -122,7 +130,7 @@ export function MagiFuelGauge({
         <div className="font-semibold tabular-nums text-ink-2">{hbd(balance.hbdBaseUnits)} HBD on Magi</div>
         {short ? (
           <div className="text-ink-warn-3">
-            This purchase needs {hbd(costBaseUnits)} HBD — {hbd(costBaseUnits - balance.hbdBaseUnits)} more
+            This purchase needs {hbd(costBaseUnits)} HBD, which is {hbd(costBaseUnits - balance.hbdBaseUnits)} more
             than you hold.
           </div>
         ) : (
@@ -201,7 +209,7 @@ export function MagiFundingHelp({
         <>
           <p>
             Send HBD from your Hive wallet to <strong>@{MAGI_GATEWAY}</strong> and leave the memo{' '}
-            <strong>empty</strong> — an empty memo credits your own Magi account. It arrives as spendable
+            <strong>empty</strong>. An empty memo credits your own Magi account. It arrives as spendable
             Magi HBD; an ordinary Hive transfer, no extra signing.
           </p>
           {transferUrl ? (
@@ -220,7 +228,7 @@ export function MagiFundingHelp({
         <>
           <p>
             Your {chainName} wallet holds {kind === 'btc' ? 'BTC' : 'ETH'}, not HBD. Trade it for HBD on
-            Altera — the market on Magi itself — and the HBD lands in the same Magi account you are signed
+            Altera, the market on Magi itself, and the HBD lands in the same Magi account you are signed
             in with here. You sign on {chainName} as normal; it never needs a Magi signature, which is why
             an empty account can always fund itself.
           </p>
@@ -238,7 +246,7 @@ export function MagiFundingHelp({
             // No dead button. `ALTERA_MARKET_URL` is unset in this deployment, and
             // a link that goes nowhere is worse than a sentence that admits it.
             <p className="mt-2 italic">
-              The link to Altera isn’t configured in this deployment yet — ask an admin for the market
+              The link to Altera isn’t configured in this deployment yet. Ask an admin for the market
               address.
             </p>
           )}

@@ -54,7 +54,14 @@ export function reownProjectId(): string {
   }
 }
 
-/** False when no project id is configured — callers must fall back to manual signing. */
+/**
+ * False when no project id is configured.
+ *
+ * ★ There is NO manual fallback to fall back TO; this comment used to claim
+ * there was. The BTC paste-a-signature route was removed on 2026-08-20. When
+ * this returns false the honest response is to tell the reader wallet sign-in is
+ * unavailable in this deployment, never to mint a session that cannot sign.
+ */
 export function walletConnectAvailable(): boolean {
   return reownProjectId().length > 0;
 }
@@ -285,10 +292,12 @@ export function walletErrorMessage(error: unknown): string {
   // ★ THIS MEANS "NO WALLET IS CONNECTED", NOT "THIS WALLET IS BROKEN" (QA,
   // 2026-08-20). The old sentence said "try another wallet", which sends the
   // user to swap a wallet that was never the problem. It is thrown whenever
-  // there is no live AppKit provider in this browser session — including for
-  // someone who signed in through the BTC "Sign manually instead" path, which
-  // authenticates fine and establishes no signer, so every later buy, sell,
-  // send and ask fails here. Say what is actually wrong and what fixes it.
+  // there is no live AppKit provider in this browser session. It used to also
+  // catch accounts created through the BTC "Sign manually instead" path, which
+  // authenticated fine and established no signer, so every later buy, sell, send
+  // and ask failed here; that path was removed on 2026-08-20, but any account
+  // made through it while it existed still lands in exactly this state and needs
+  // to connect a real wallet. Say what is wrong and what fixes it.
   if (/no_bitcoin_signer|no_evm_signer/.test(raw))
     return 'No wallet is connected in this browser, so nothing can be signed. Connect your wallet and try again.';
   if (/User rejected|rejected|denied|4001/i.test(raw)) return 'You cancelled the signature request.';

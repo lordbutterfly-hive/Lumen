@@ -24,6 +24,7 @@ import DetailsCardVoters from '@/blog/features/post-rendering/details-card-voter
 import FlagIcon from '@/blog/features/post-rendering/flag-icon';
 import MutePostDialog from '@/blog/features/post-rendering/mute-post-dialog';
 import PostBodySection from '@/blog/features/post-rendering/post-body-section';
+import PostedViaLumen from '@/blog/features/post-rendering/posted-via-lumen';
 import { PostDeleteDialog } from '@/blog/features/post-rendering/post-delete-dialog';
 import { SharePost } from '@/blog/features/post-rendering/share-post-dialog';
 import UserInfo from '@/blog/features/post-rendering/user-info';
@@ -1738,6 +1739,12 @@ const PostContent = () => {
                     onShowNsfwContent={handleShowNsfwContent}
                   />
                 )}
+                {/* ★ "posted via lumen" — the attribution line, under the post body and above
+                    the tags. OUTSIDE the branch above on purpose: that ternary also renders the
+                    muted, legal-block and copyright stand-ins, and an attribution under a post
+                    nobody can read would be attributing something invisible. Renders nothing
+                    for an entry Lumen did not publish — see the component. */}
+                <PostedViaLumen entry={postData} className="mt-6" />
                 {/* Tags Section */}
                 <div className="clear-both mt-6 border-t border-border pt-5">
                   {!commentSite ? (
@@ -2105,8 +2112,23 @@ const PostContent = () => {
                               with nothing setting a height. Measured live: the action row
                               (`comment-respons-header`) stayed 36px, governed by the
                               "Reply" chip's own h-9 — 0px cost. */}
-                          <TooltipTrigger className="flex min-h-[24px] items-center" data-testid="comment-respons">
-                            <Link href={postData.url} className="flex min-h-[24px] cursor-pointer items-center text-muted-foreground transition-colors hover:text-foreground">
+                          {/* ★★ `asChild` + a LABEL (2026-08-21, found by a keyboard-only pass).
+                          
+                              Without `asChild`, Radix renders its own <button> AROUND this <Link> — so
+                              the control was `<button><a/></button>`: interactive content nested inside
+                              interactive content, which is invalid HTML and gives TWO tab stops for one
+                              destination. Measured live: both the button and the link were reachable,
+                              and NEITHER carried an aria-label, so a screen reader announced "8, button"
+                              then "8, link" — a number with no noun attached.
+                          
+                              The note above already called this "a separate, unfixed sibling of
+                              post-card-comment-tooltip.tsx". It is now fixed the same way: `asChild`
+                              makes the Link itself the trigger (one stop, one element), and the label
+                              reuses the same translated string the tooltip shows, so the count is
+                              announced as "N responses" rather than as a bare digit. */}
+                          <TooltipTrigger asChild data-testid="comment-respons">
+                            <Link href={postData.url} aria-label={t('post_content.footer.responses', { responses: visibleCommentCount })}
+                              className="flex min-h-[24px] cursor-pointer items-center text-muted-foreground transition-colors hover:text-foreground">
                               {/* ★ SAME SINGLE GLYPH AS THE FEED (owner, 2026-08-18). The
                                   post page carried the identical count-dependent swap that
                                   `post-card-comment-tooltip.tsx` did, so a reader clicking

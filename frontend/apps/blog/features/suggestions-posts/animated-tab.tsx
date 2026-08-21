@@ -68,7 +68,7 @@ const AnimatedList = ({ suggestions }: { suggestions: Entry[] }) => {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -16 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]"
+            className="rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]"
           >
             <div className="flex items-start justify-between gap-2">
               <h2 className="font-serif text-[18px] font-semibold leading-[28px] text-ink-2">

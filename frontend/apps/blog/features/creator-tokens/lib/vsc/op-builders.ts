@@ -38,6 +38,7 @@
 // ./broadcaster.ts.
 
 import { assertAuthContract, assertHashField, assertPayloadShape } from './payload-contract';
+import { rcLimitForAction } from './rc-budget';
 
 export interface CustomJsonOp {
   id: string;
@@ -109,17 +110,30 @@ export const VSC_CALL_ID = 'vsc.call';
  * remain unmeasured, which is why this is not lowered to the 20_000 that
  * `createOffering` alone would justify.
  *
- * ★ THE REAL FIX IS DERIVATION, NOT A CONSTANT. Any fixed value is either
- * unaffordable for a small account or too tight for a big call. `rc_limit`
- * should be computed per call from the caller's own RC
- * (`getAccountRC` — already read by `useMagiSpendingPower`, whose measured
- * `MAGI_MIN_RC_FOR_A_CALL = 10_000` is the floor), clamped into
- * [floor, available]. That needs the value threaded from the hook to the
- * builder, which no write path does today.
+ * ★ SUPERSEDED 2026-08-21 — THE CONSTANT IS GONE, AND IT WAS A REAL DEFECT.
+ * Everything above is the record of guessing this number by broadcasting real
+ * transactions and seeing which ones survived. That method can only ever find a
+ * value that WORKS, never the value that is RIGHT, so it ratcheted upward: each
+ * failure argued for a bigger ceiling, and nothing ever argued for a smaller one.
  *
- * Override with `REACT_APP_CREATOR_TOKENS_RC_LIMIT` rather than editing this.
+ * `rc_limit` is reserved against the caller's HBD, so the ceiling we declare is a
+ * balance requirement we impose. At 30_000 we required every user to hold 30 HBD
+ * before they could attempt a purchase costing 1.4 HBD. A wallet holding 3.454 HBD
+ * could not make a single call, and the node's answer — `insufficient balance` —
+ * pointed at the user's wallet rather than at us.
+ *
+ * The node exposes `simulateContractCalls`, which dry-runs the real WASM and
+ * reports true `rc_used`. Measured with it on 2026-08-21: a buy costs 1,802 RC, a
+ * sell 2,531, a transfer 1,970. We were declaring roughly seventeen times the cost
+ * of a buy. The per-action figures now live in `./rc-budget.ts` alongside the
+ * affordability check that must run BEFORE signing — because an under-funded call
+ * does not merely fail, it burns the whole granted budget on the way down
+ * (`state_engine.go:2025-2026` records the debit; `:2088-2092` rolls back only the
+ * state).
+ *
+ * Override a single call by passing `opts.rcLimit`, or globally with
+ * `REACT_APP_CREATOR_TOKENS_RC_LIMIT`. Do not reintroduce a blanket constant.
  */
-export const DEFAULT_RC_LIMIT = 30_000;
 
 export function buildOp(opts: {
   netId: string;
@@ -148,7 +162,7 @@ export function buildOp(opts: {
     contract_id: opts.contractId,
     action: opts.action,
     payload: opts.payload,
-    rc_limit: opts.rcLimit ?? DEFAULT_RC_LIMIT,
+    rc_limit: opts.rcLimit ?? rcLimitForAction(opts.action),
     intents
   };
   // ★ 2026-07-29: `opts.activeAuth ? [...] : []` used to fail OPEN. `activeAuth`

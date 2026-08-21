@@ -294,7 +294,7 @@ const YourTokensView: FC = () => {
             </div>
           ) : null}
 
-          /* ★ WARM TAB TREATMENT (illumination SPEC.md §1, owner 2026-08-21: "fill the
+          {/* ★ WARM TAB TREATMENT (illumination SPEC.md §1, owner 2026-08-21: "fill the
              creators, wallet tokens and proposals tab bar gap"). Track on --amb-1 so it
              "follows the ground it sits on, never lighter" (§3); active pill on --lum-1
              with --lift-1 plus a soft warm glow. One step weaker than the nav rail (§4) —
@@ -304,7 +304,7 @@ const YourTokensView: FC = () => {
              preference: a `/` inside a Tailwind arbitrary value is the OPACITY shorthand,
              so `shadow-[...rgb(var(--lum)/.85)]` never compiles and no rule is emitted at
              all. Measured on the feed's own tab bar, which shipped with `box-shadow: none`
-             until it was caught. */
+             until it was caught. */}
           <div className="mb-4 mt-5 inline-flex gap-1.5 rounded-xl border border-line-6 bg-[var(--amb-1)] p-[5px]">
             {(['holdings', 'asks'] as const).map((t) => (
               <button

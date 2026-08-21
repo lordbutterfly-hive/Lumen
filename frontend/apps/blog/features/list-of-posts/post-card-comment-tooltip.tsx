@@ -72,31 +72,29 @@ const PostCardCommentTooltip = ({
               element below. `min-height` rather than a fixed height so the icon
               and the digits keep their own sizes and flex centring absorbs the
               difference invisibly. */}
-          <TooltipTrigger className="flex min-h-[24px] items-center">
-            <>
-              <Link href={url} className="flex min-h-[24px] cursor-pointer items-center" aria-label={accessibleLabel}>
-                {/* ★ ONE GLYPH, WHATEVER THE COUNT (owner, 2026-08-18). This used to swap
-                    between `messagesSquare` (stacked bubbles) above 1 and `comment` (a
-                    single bubble) at 0 or 1, so the same control changed shape as a post
-                    gained its second reply - the icon appeared to mean two different
-                    things while doing one job, and two cards side by side in the same feed
-                    showed two different marks for the same action.
+          {/* ★★ ONE CONTROL, ONE TAB STOP, ONE NAME (2026-08-21, keyboard-only pass).
 
-                    Plurality is already carried by the NUMBER rendered right beside it,
-                    and by the tooltip and the accessible name, all three of which still
-                    say one/none/many correctly. The icon's job is to say "responses", and
-                    that does not change with the count. */}
-                <Icons.comment className={cn(iconClassName, 'sm:mr-1')} aria-hidden="true" />
-              </Link>
-              <Link
-                href={url}
-                className="flex min-h-[24px] cursor-pointer items-center pl-1 hover:text-destructive"
-                data-testid="post-card-response-link"
-                aria-label={accessibleLabel}
-              >
-                {comments}
-              </Link>
-            </>
+              This was a `TooltipTrigger` WITHOUT `asChild` wrapping a fragment of TWO
+              Links — the icon and the count, each its own anchor to the same url. Radix
+              renders its own <button> when not given `asChild`, so the shipped DOM was
+              `<button><a/><a/></button>`: interactive content nested in interactive
+              content, invalid HTML, and THREE tab stops for one destination. Measured
+              live on four cards.
+
+              `asChild` makes the Link itself the trigger, and the icon and count live
+              inside that one anchor. The hover colour moved from the count to the whole
+              control: with one element there is one hover, and lighting the number while
+              its icon stayed dark would advertise two controls again. */}
+          <TooltipTrigger asChild>
+            <Link
+              href={url}
+              className="flex min-h-[24px] cursor-pointer items-center hover:text-destructive"
+              data-testid="post-card-response-link"
+              aria-label={accessibleLabel}
+            >
+              <Icons.comment className={cn(iconClassName, 'sm:mr-1')} aria-hidden="true" />
+              <span className="pl-1">{comments}</span>
+            </Link>
           </TooltipTrigger>
           <TooltipContent data-testid="post-card-responses">
             <p>

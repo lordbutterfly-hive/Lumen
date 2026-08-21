@@ -27,6 +27,7 @@ import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
 import { resolveAskMaxCreditsBaseUnits } from '../market/curve';
 import type { BuyQuote, SellQuote } from '../types';
 import { adaptMarket, type LiveTokenMarket } from './adapt';
+import { magiSpendingPowerKey } from './use-magi-spending-power';
 
 export type LiveMarketStatus =
   /** No contract provisioned and no dev demo flag — the feature is not available in this build. */
@@ -244,6 +245,15 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   const invalidate = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: creatorMarketKey(creator) });
     queryClient.invalidateQueries({ queryKey: positionKey(creator, positionAccount ?? undefined) });
+    // ★ THE BALANCE TOO. Every mutation below routes through this callback, and
+    // until 2026-08-21 none of them touched the spending-power query — so the
+    // number that says how much money you have was the ONE number a trade never
+    // refreshed. With a 20s staleTime and both modals closing on success, a user
+    // who re-opened Buy inside that window saw their pre-trade balance presented
+    // as current: it read as "I wasn't charged". Invalidating on the same
+    // identity the signer used keeps the money view and the position view honest
+    // together.
+    queryClient.invalidateQueries({ queryKey: magiSpendingPowerKey(positionAccount) });
   }, [queryClient, creator, positionAccount]);
 
   // Every money action funnels through this. It refuses with a NAMED error

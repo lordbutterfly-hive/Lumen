@@ -39,9 +39,6 @@ export interface WalletChallenge {
   message: string;
 }
 
-/** @deprecated use WalletChallenge — kept so existing imports keep compiling. */
-export type BtcChallenge = WalletChallenge;
-
 /** Which wallet family a proof came from; picks the /api/lite/auth/{btc,evm} pair. */
 export type WalletChain = 'btc' | 'evm';
 
@@ -243,16 +240,6 @@ export function useLiteLogin() {
     [resolveFrom]
   );
 
-  const btcChallenge = useCallback(
-    (address: string) => walletChallenge('btc', address),
-    [walletChallenge]
-  );
-
-  const btcVerify = useCallback(
-    (address: string, signature: string, nonce: string) => walletVerify('btc', address, signature, nonce),
-    [walletVerify]
-  );
-
   const createAccount = useCallback(
     async (displayName: string, captchaToken?: string): Promise<SignupOutcome> => {
       const res = await fetch('/api/lite/auth/name', {
@@ -337,8 +324,6 @@ export function useLiteLogin() {
     googleChallenge,
     walletChallenge,
     walletVerify,
-    btcChallenge,
-    btcVerify,
     createAccount
   };
 }

@@ -8,7 +8,7 @@ import { displayHandle } from '../../live/adapt';
 import { useLiveTokenMarket } from '../../live/use-live-token-market';
 import { useCreatorFollow } from '../../live/use-creator-follow';
 import { MarketLoading, MarketMissing, MarketReadFailed, MarketUnavailable } from '../../live/market-states';
-import { usdPrice, usdWhole } from '../../market/format';
+import { pctLabel, pctValue, usdPrice, usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
 import PriceChart from './price-chart';
 import TokenModals, { type TokenDialog } from './token-modals';
@@ -202,7 +202,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   if (status === 'error' || !market) return <MarketReadFailed onRetry={live.retry} />;
 
   const d = market.delivery;
-  const supplyPct = market.cap > 0 ? Math.min(100, Math.round((market.supply / market.cap) * 100)) : 0;
+  const supplyPct = pctValue(market.supply, market.cap);
   /**
    * What the reader sees next to the bar. `supplyPct` drives the BAR width and
    * must stay a number; this is the LABEL.
@@ -213,8 +213,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
    * produced was wrong, which is the worse kind of wrong on a number about
    * money. Anything above zero but below half a percent now reads "<1%".
    */
-  const supplyPctLabel =
-    supplyPct === 0 && market.supply > 0 ? '<1%' : `${supplyPct}%`;
+  const supplyPctLabel = pctLabel(market.supply, market.cap) ?? '0%';
   const avatarColor = avatarFill(handle);
 
   const openAsk = (sv: Service) => {
@@ -381,7 +380,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
       ) : null}
 
       {/* 2. Token market — centerpiece */}
-      <div className="mb-4 rounded-panel border border-line-9 bg-surface-1 p-[26px] shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+      <div className="mb-4 rounded-panel border border-line-9 bg-surface-1 p-[26px] shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
         <div className="mb-[18px] flex items-center gap-2.5">
           <span
             className="flex h-6 w-6 items-center justify-center rounded-control text-caption font-bold text-ink-27"
@@ -504,7 +503,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
       </div>
 
       {/* 3. Trust record */}
-      <div className="mb-4 rounded-panel border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+      <div className="mb-4 rounded-panel border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
         <div className="mb-3.5 font-serif text-[20px] leading-[30px] font-semibold text-ink-2">Delivery record</div>
         {d.available ? (
           <>
@@ -520,7 +519,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 <strong>No deliveries yet</strong>
               ) : (
                 <>
-                  <strong>{d.completionPct}% completion rate</strong> — completed {d.answered} of {d.total}
+                  <strong>{pctLabel(d.answered, d.total) ?? '0%'} completion rate</strong> — completed {d.answered} of {d.total}
                   {/* Guarded: an empty median left the sentence ending "usually within ." */}
                   {d.typicalResponse ? (
                     <>
@@ -540,7 +539,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
       </div>
 
       {/* 4. Services */}
-      <div className="mb-4 rounded-panel border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+      <div className="mb-4 rounded-panel border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
         <div className="mb-3.5 text-label font-bold uppercase tracking-label text-ink-14">What you can do with the token</div>
         <div className="mb-3.5 flex flex-col gap-2.5">
           {market.services.map((sv) => (

@@ -25,7 +25,7 @@ import ResetAllListsDialog from './reset-all-lists-dialog';
 // page is also no longer force-narrowed to `max-w-lg` (512px) — it now fills
 // the same main-column width settings does.
 const LIST_CARD =
-  'w-full rounded-panel border border-[#ebebeb] bg-white p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]';
+  'w-full rounded-panel border border-[#ebebeb] bg-white p-6 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]';
 const LIST_CARD_TITLE = 'font-serif text-[18px] font-semibold leading-[28px] text-[#161511]';
 const LIST_SECTION_HEADING = 'flex items-center gap-2 text-[15px] leading-[24px] font-semibold text-[#161511]';
 

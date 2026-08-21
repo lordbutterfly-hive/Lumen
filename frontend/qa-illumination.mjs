@@ -97,19 +97,24 @@ for (const [path, label] of [['/', 'feed'], ['/moviereviews/@hanshotfirst/a-geek
   rows[`${label} — card vs edge`] = `+${vsEdge.r}/+${vsEdge.g}/+${vsEdge.b}  (spec +8/+12/+17)`;
   rows[`${label} — centre vs edge`] = `+${centreVsEdge.r}/+${centreVsEdge.g}/+${centreVsEdge.b}  (spec +5/+8/+12)`;
 
-  // The hard floor first, because it is the one that must never bend (§3):
-  // "the reading column never goes above --paper-1 minus 3 on any channel."
-  checkTrue(`${label}: reading column never brightens past the floor`,
-    vsCentre.r >= 3 && vsCentre.g >= 3 && vsCentre.b >= 3,
-    `card-minus-centre +${vsCentre.r}/+${vsCentre.g}/+${vsCentre.b}`);
-  checkTrue(`${label}: the edge is darker than the centre`,
-    centreVsEdge.r > 0 && centreVsEdge.g > 0 && centreVsEdge.b > 0,
-    `+${centreVsEdge.r}/+${centreVsEdge.g}/+${centreVsEdge.b}`);
+  /*
+   * ★★★ THE PAGE GROUND IS FLAT, AND THAT IS NOW THE REQUIREMENT (owner,
+   * 2026-08-21): "you gave the paper background a color. you need to get rid of
+   * it. only all cards have background glow we said."
+   *
+   * This file used to assert the OPPOSITE — §3's ambient gradient, edges darker
+   * than the centre — and it passed, because that gradient was implemented
+   * exactly to spec. The spec was not what the owner wanted. So the assertion is
+   * inverted rather than deleted: a flat ground is a rule that can regress
+   * (someone re-adds the gradient), and a rule that can regress deserves a test.
+   */
+  checkTrue(`${label}: page ground is FLAT — no edge gradient`,
+    Math.abs(centreVsEdge.r) <= 1 && Math.abs(centreVsEdge.g) <= 1 && Math.abs(centreVsEdge.b) <= 1,
+    `centre-minus-edge ${centreVsEdge.r}/${centreVsEdge.g}/${centreVsEdge.b} (expect 0/0/0)`);
   // Informational only — see the note on CARD above for why these are not
   // pass/fail against a card colour this app does not have.
-  rows[`${label} — spec-absolute comparison`] =
-    `centre ${vsCentre.r === 3 && vsCentre.g === 4 && vsCentre.b === 5 ? 'matches' : 'differs'}, ` +
-    `edge ${vsEdge.r === 8 && vsEdge.g === 12 && vsEdge.b === 17 ? 'matches' : 'differs'}`;
+  rows[`${label} — card sits above the ground`] =
+    `card-minus-ground +${vsCentre.r}/+${vsCentre.g}/+${vsCentre.b} (the card is what glows now)`;
 }
 
 report('ILLUMINATION §3 — acceptance deltas', rows);

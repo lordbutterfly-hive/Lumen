@@ -7,7 +7,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { useLiveDiscovery } from '../../live/use-live-discovery';
 import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
 import type { CreatorSummary } from '../../types';
-import { usdCompact, usdPrice, usdWhole } from '../../market/format';
+import { pctLabel, usdCompact, usdPrice, usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
 
 // TODO i18n — staged copy; move to locales/*/common_blog.json once final.
@@ -79,7 +79,7 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
   return (
     <Link
       href={`/creators/${routeHandle(c.creator)}`}
-      className="block rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-surface-12"
+      className="block rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)] transition-colors hover:bg-surface-12"
     >
       <div className="mb-3.5 flex items-center gap-3">
         <span className="h-[46px] w-[46px] flex-shrink-0 rounded-card" style={{ background: avatarFill(c.creator) }} />
@@ -94,7 +94,7 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
         <div>
           <DeliveryStrip marks={marks} />
           <div className="text-caption tabular-nums text-ink-7">
-            {c.completionPct}% completion rate · {c.answeredCount} of {c.answeredCount + c.missedCount}
+            {pctLabel(c.answeredCount, c.answeredCount + c.missedCount) ?? '0%'} completion rate · {c.answeredCount} of {c.answeredCount + c.missedCount}
             {c.medianResponseBlocks !== null ? ` · usually within ${responseLabel(c.medianResponseBlocks)}` : ''}
           </div>
           {c.avgRating !== null ? (
@@ -165,7 +165,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
 
   const rightRail = (
     <div className="flex flex-col gap-5 pt-[26px]">
-      <div className="rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+      <div className="rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
         <div className="mb-1.5 font-serif text-lg font-semibold text-ink-2">{COPY.launchTitle}</div>
         <p className="mb-4 font-serif text-[14px] leading-[22px] text-ink-10">{COPY.launchSub}</p>
         <Link
@@ -211,7 +211,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
       </PageMasthead>
 
       <div className="my-5 flex flex-wrap items-center justify-between gap-4">
-        /* ★ WARM TAB TREATMENT (illumination SPEC.md §1, owner 2026-08-21: "fill the
+        {/* ★ WARM TAB TREATMENT (illumination SPEC.md §1, owner 2026-08-21: "fill the
            creators, wallet tokens and proposals tab bar gap"). Track on --amb-1 so it
            "follows the ground it sits on, never lighter" (§3); active pill on --lum-1
            with --lift-1 plus a soft warm glow. One step weaker than the nav rail (§4) —
@@ -221,7 +221,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
            preference: a `/` inside a Tailwind arbitrary value is the OPACITY shorthand,
            so `shadow-[...rgb(var(--lum)/.85)]` never compiles and no rule is emitted at
            all. Measured on the feed's own tab bar, which shipped with `box-shadow: none`
-           until it was caught. */
+           until it was caught. */}
         <div className="flex gap-1.5 rounded-xl border border-line-6 bg-[var(--amb-1)] p-[5px]">
           {SORTS.map((s) => {
             const on = sort === s.id;

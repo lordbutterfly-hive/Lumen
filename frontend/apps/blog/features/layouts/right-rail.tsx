@@ -6,7 +6,18 @@ import { StreakCard } from '@/blog/features/retention/components/streak-card';
 import Topics from './right-rail/topics';
 
 const CARD_CLASS =
-  'rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]';
+/* ★ WARM CARD SHADOW (illumination SPEC.md §3, owner 2026-08-21: "do the
+   illumination gap, composer widgets skeletons and login").
+
+   §3: "the card's shadow stops being grey". `70 46 30` is --ink-1 warmed and is
+   a SHADOW colour only — it appears nowhere as a surface. The tight first layer
+   uses the same `26 22 18` the elevation ladder already hand-writes.
+
+   ★ rgba() WITH COMMAS, NOT rgb()/alpha. A `/` inside a Tailwind arbitrary value
+   is the OPACITY shorthand, so `shadow-[...rgb(70_46_30/0.13)]` never compiles
+   and no rule is emitted — measured on the feed's tab bar, which shipped with
+   `box-shadow: none` until it was caught. */
+  'rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]';
 
 // Communities widget removed from the right rail (owner request, 2026-08-06).
 // `right-rail/communities.tsx` (subscriptions query + card) was deleted with

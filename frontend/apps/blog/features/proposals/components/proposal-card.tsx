@@ -67,10 +67,23 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable, votesP
       className="rounded-2xl border border-line-9 bg-surface-1 p-[20px_22px] transition-colors hover:border-line-17"
       data-testid="proposal-card"
     >
-      <div className="grid grid-cols-[1fr_190px] gap-[22px]">
+      {/* ★★ ONE COLUMN ON A PHONE (2026-08-21, found by driving the page at 390px).
+      
+          This was `grid-cols-[1fr_190px]` at every width. At 390px the left track
+          collapses to ~138px while the stats column keeps its hard 190px, so the
+          byline — a `flex` row with no wrap — overflowed its track and rendered ON TOP
+          of the "Daily pay / Remaining / Paid" figures. Visible on every funded card:
+          "MDaily pay", "15, Remaining 267 days". Two independent reviewers reported it
+          before it was traced.
+      
+          A fixed 190px track has nowhere to go on a narrow screen, so the grid stacks
+          below `sm` instead and keeps the two-column layout from `sm` up. The byline
+          also gains `flex-wrap` below, so a long handle wraps rather than overflowing
+          even in the single column. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_190px] sm:gap-[22px]">
         <div className="min-w-0">
           {/* Byline */}
-          <div className="mb-2 flex items-center gap-2.5 font-sans text-caption text-ink-10">
+          <div className="mb-2 flex flex-wrap items-center gap-2.5 font-sans text-caption text-ink-10">
             {/* ★ CONVERGED (F6 item 22). This had no fallback at all — a dead
                 Steemit-era `profile_image` or a lite account with no Hive avatar
                 showed the browser's broken-image glyph next to the proposal's

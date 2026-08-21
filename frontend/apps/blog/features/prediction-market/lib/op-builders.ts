@@ -34,6 +34,22 @@ export const VSC_CALL_ID = 'vsc.call';
 
 // WIRING-VERIFY (deploy): placeholder rc_limit; override via
 // REACT_APP_VSC_MARKET_RC_LIMIT once a devnet bet/claim reports real gas_used.
+//
+// ★ WHEN YOU CALIBRATE THIS, READ features/creator-tokens/lib/vsc/rc-budget.ts
+// FIRST. Creator-tokens carried this same 30,000 placeholder and it was a real
+// defect, for a reason that is not obvious: `rc_limit` is RESERVED AGAINST THE
+// CALLER'S HBD, so the ceiling declared here is a minimum balance imposed on
+// every user. At 30,000 a bettor had to hold 30 HBD before they could place a
+// 1 HBD bet, and the node's refusal reads `insufficient balance`, which points
+// at the user's wallet rather than at this line. Measured costs for the
+// creator-tokens contract came out between 142 and 3,460 RC, roughly a tenth of
+// this.
+//
+// Do not calibrate by broadcasting and seeing what survives: that only ever
+// finds a value that WORKS, never the value that is RIGHT, and it ratchets
+// upward because success never argues for a smaller number. The node exposes
+// `simulateContractCalls`, which dry-runs the real WASM and returns true
+// `rc_used` and `gas_used`. Use it, and record the numbers next to the constant.
 export const DEFAULT_RC_LIMIT = 30_000;
 
 export interface BuildBetOpParams {

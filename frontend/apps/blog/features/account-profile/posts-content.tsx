@@ -22,7 +22,19 @@ import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
 import { QueryTypes } from './lib/utils';
 
-const PostsContent = ({ query }: { query: QueryTypes }) => {
+const PostsContent = ({
+  query,
+  variant = 'classic'
+}: {
+  query: QueryTypes;
+  /*
+   * Which card the list renders. `/@user/feed` asks for `medium` so a reader's
+   * own feed matches every other feed in the product; the Comments tab keeps
+   * `classic`, because a reply has no headline, dek or thumbnail to put in an
+   * editorial card. See `posts-loader.tsx`.
+   */
+  variant?: 'classic' | 'medium';
+}) => {
   const params = useParams<{ param: string }>();
   const username = params?.param.replace('%40', '') ?? '';
   const legalBlockedUser = userIllegalContent.includes(username);
@@ -153,6 +165,7 @@ const PostsContent = ({ query }: { query: QueryTypes }) => {
               return page ? (
                 <div key={`page-${pageIndex}`}>
                   <PostList
+              variant={variant}
                     data={page}
                     key={`x-${pageIndex}`}
                     nsfwPreferences={preferences.nsfw}

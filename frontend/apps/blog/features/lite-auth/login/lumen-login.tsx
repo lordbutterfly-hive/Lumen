@@ -350,7 +350,13 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
               className={
                 embedded
                   ? 'overflow-hidden bg-surface-1'
-                  : 'overflow-hidden rounded-panel border border-line-9 bg-surface-1 shadow-[0_12px_40px_rgba(192,57,43,0.07),0_1px_2px_rgba(20,18,10,0.04)]'
+                  /* ★ THE TIGHT LAYER GOES WARM; THE BRAND GLOW STAYS (illumination §3).
+                     This card's outer `rgba(192,57,43,0.07)` bloom is a deliberate hero
+                     treatment and is not what §3 is replacing — but its second, tight layer was
+                     still the app's old grey `rgba(20,18,10,0.04)`. Found only after fixing the
+                     coverage probe: `/login` REDIRECTS to `/` for a signed-in session, so the
+                     signed-in run had been measuring the feed and reporting it as login. */
+                  : 'overflow-hidden rounded-panel border border-line-9 bg-surface-1 shadow-[0_12px_40px_rgba(192,57,43,0.07),0_1px_2px_rgba(26,22,18,0.035)]'
               }
             >
               <div
@@ -542,7 +548,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
             {/* Tier-2: full Hive account, secondary. */}
           </>
         ) : (
-          <div className="rounded-panel border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+          <div className="rounded-panel border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
             <button
               onClick={() => {
                 setView('default');

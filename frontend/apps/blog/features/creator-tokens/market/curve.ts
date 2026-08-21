@@ -194,14 +194,27 @@ export function buyQuote(usdGross: number, m: CurveMarketInput): BuyQuote {
   const affordable = tokensAffordableForBudget(supply, budgetBaseUnits);
   const tokens = Math.min(affordable, capHeadroom);
   if (tokens <= 0) {
-    return { tokens: 0, avgPrice: 0, priceAfter: baseUnitsToUsd(spotRateBaseUnits(supply)), tradeFeeUsd: 0, totalUsd: 0 };
+    // ★ THE ORACLE RATE LEAKED INTO A BUYER-FACING PRICE HERE (found 2026-08-21,
+    // the same fault as the "$0.00 in the directory" bug one layer up).
+    // `spotRateBaseUnits` returns 0 at supply 0 BY DESIGN — curve.go wants an
+    // empty market to record no observation — so on a new market this branch
+    // rendered "Price after your buy: ~$0.00" for a token that costs $1.007.
+    // At any other supply it understated the real price by about 1%, which also
+    // made the max-price slippage guard below (token-modals.tsx) that much too
+    // lenient. contract-math.ts's own doc forbids conflating the two.
+    return { tokens: 0, avgPrice: 0, priceAfter: baseUnitsToUsd(displayPricePerTokenBaseUnits(supply)), tradeFeeUsd: 0, totalUsd: 0 };
   }
   const q = quoteBuyBaseUnits(supply, tokens);
   const totalUsd = baseUnitsToUsd(q.totalDueBaseUnits);
   return {
     tokens,
     avgPrice: totalUsd / tokens,
-    priceAfter: baseUnitsToUsd(q.rateAfterBaseUnits),
+    // Same correction as the zero branch: `q.rateAfterBaseUnits` is
+    // `spotRateBaseUnits(S + n)`, the ORACLE rate, because `quoteBuyBaseUnits`
+    // is a faithful mirror of the contract's own `quoteBuy` entrypoint and must
+    // stay one. What belongs above a Buy button is what the NEXT token will
+    // actually cost, so the conversion to a shown price happens here instead.
+    priceAfter: baseUnitsToUsd(displayPricePerTokenBaseUnits(supply + tokens)),
     tradeFeeUsd: baseUnitsToUsd(q.feeBaseUnits),
     totalUsd
   };

@@ -135,7 +135,7 @@ export default function MarketTab() {
 
   return (
     <div className="pt-6 font-sans text-ink-2">
-      <div className="overflow-hidden rounded-panel border border-line-9 bg-surface-1 shadow-[0_1px_3px_rgba(20,18,10,0.04)]">
+      <div className="overflow-hidden rounded-panel border border-line-9 bg-surface-1 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
         {/* Header */}
         <div className="border-b border-line-3 px-7 pb-5 pt-[22px]">
           <div className="flex items-start justify-between gap-4">
@@ -224,7 +224,7 @@ export default function MarketTab() {
       </div>
 
       {hasPosition && myPosition && (
-        <div className="mt-5 rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+        <div className="mt-5 rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
           <h3 className="mb-3 font-sans text-sm font-semibold text-ink-2">{t('prediction_market.my_position')}</h3>
           <ul className="space-y-1 font-sans text-sm">
             {round.buckets

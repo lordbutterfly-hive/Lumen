@@ -52,6 +52,7 @@ import dmcaUserList from '@hive/ui/config/lists/dmca-user-list';
 import userIllegalContent from '@hive/ui/config/lists/user-illegal-content';
 import gdprUserList from '@ui/config/lists/gdpr-user-list';
 import RendererContainer from './rendererContainer';
+import PostedViaLumen from './posted-via-lumen';
 import { useDeleteCommentMutation } from './hooks/use-comment-mutations';
 import { handleError } from '@ui/lib/handle-error';
 import { CircleSpinner } from 'react-spinners-kit';
@@ -1022,6 +1023,7 @@ const CommentListItem = memo(function CommentListItem({
                           observer={observer}
                         />
                       ) : (
+                        <>
                         <CardDescription data-testid="comment-card-description">
                           <RendererContainer
                             body={comment.body}
@@ -1030,6 +1032,11 @@ const CommentListItem = memo(function CommentListItem({
                             className={commentClassName}
                           />
                         </CardDescription>
+                        {/* ★ "posted via lumen", under the comment body and above its action row —
+                            the same line the post page carries, from the same component so the two
+                            cannot drift. Renders nothing for a comment Lumen did not publish. */}
+                        <PostedViaLumen entry={comment} className="mt-2" />
+                        </>
                       )}
                     </CardContent>
                     <CardFooter className="px-3 py-2">
@@ -1057,7 +1064,20 @@ const CommentListItem = memo(function CommentListItem({
                                    owner report). This inherited near-black and hovered to --destructive, so
                                    the one figure on the row that is money looked like body text until you
                                    touched it and then looked like an error. */
-                                'flex items-center text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
+                                /* ★★ ON THE RIGHT, LIKE EVERY OTHER PAYOUT (2026-08-21, owner: "comments
+                                   started mixing up the payout for comments with all the icons. the value
+                                   needs to be on the right like on posts, like on feeds").
+                                
+                                   It sat SECOND of four in this flex row — between the vote control and the
+                                   vote count — so the one figure on the row that is money read as just
+                                   another icon label. `ml-auto` is what the feed card uses to push its payout
+                                   to the card's right edge; `order-last` is what keeps it there, because this
+                                   element is not last in the markup and `ml-auto` alone would drag the vote
+                                   count and Reply across with it.
+                                
+                                   ★ MEDIUM, NOT NORMAL (same report): "the payouts need to be medium, not
+                                   normal to give them a little bit of Lora font boldness." 400 -> 500. */
+                                'order-last ml-auto flex items-center font-medium text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
                                 {
                                   'line-through opacity-50': parseFloat(comment.max_accepted_payout) === 0
                                 }

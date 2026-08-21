@@ -33,6 +33,7 @@ import {
   type AffordabilityReason,
   type MagiSpendingPower
 } from '@/blog/lib/lite/wallet/magi-balance';
+import { rcLimitForAction } from '../lib/vsc/rc-budget';
 import { getCreatorTokensConfig } from '../lib/creator-tokens-data-source';
 
 /**
@@ -71,7 +72,38 @@ import { getCreatorTokensConfig } from '../lib/creator-tokens-data-source';
  *
  * Narrow it only by measuring again, never by guessing downward.
  */
-export const MAGI_MIN_RC_FOR_A_CALL = 10_000;
+export const MAGI_MIN_RC_FOR_A_CALL = rcLimitForAction('buy');
+
+/**
+ * ★ RE-BASED ON MEASUREMENT, 2026-08-21. The 10,000 above it was the smallest
+ * value a real `createOffering` broadcast had been SEEN to survive — a bound
+ * found by trial, which can only ever move upward, because a success never
+ * argues for a smaller number. It was roughly five times the truth, and since RC
+ * is the HBD balance, it told wallet users they needed 10 HBD in hand before the
+ * UI would let them try anything.
+ *
+ * `simulateContractCalls` dry-runs the real WASM and reports actual `rc_used`.
+ * Measured against the live contract: a buy costs 1,802 RC, a sell 2,531, a
+ * transfer 1,970. `rcLimitForAction` is those figures plus 25% headroom, and it
+ * is THE SAME function `buildOp` uses to set the ceiling — so the number we gate
+ * on and the number we declare can no longer drift apart, which is how the old
+ * pair got five times out of step in the first place.
+ */
+
+/**
+ * The query key for one account's spending power — EXPORTED because something
+ * outside this file has to be able to invalidate it.
+ *
+ * ★ NOTHING EVER DID, AND THAT WAS THE BUG (found 2026-08-21). After a buy or a
+ * sell, `use-live-token-market.ts` invalidated the market and the position and
+ * stopped there. This key was written in one place and read in none, so with
+ * `staleTime` at 20s the Buy modal re-opened showing the PRE-TRADE balance and a
+ * user could reasonably conclude they had not been charged. Keep this exported
+ * and keep it the single source of the shape; a locally re-typed array would
+ * drift and silently stop matching.
+ */
+export const magiSpendingPowerKey = (account: string | null) =>
+  ['creatorTokens', 'magiSpendingPower', account] as const;
 
 const STALE_MS = 20_000;
 const REFETCH_MS = 45_000;
@@ -86,8 +118,15 @@ export interface MagiSpendingPowerState {
   unavailable: boolean;
   /** TRUE when the account has too little RC to send even one call. */
   cannotTransact: boolean;
-  /** Ask whether a specific cost is affordable, and why not if it isn't. */
-  affordability: (costBaseUnits: number) => AffordabilityReason | 'unknown';
+  /**
+   * Ask whether a specific cost is affordable, and why not if it isn't.
+   *
+   * `action` names the write this is being asked about, so the check can include
+   * the `rc_limit` that call will actually declare — which is reserved from the
+   * same HBD the purchase spends, and is therefore part of what has to fit.
+   * Defaults to 'buy', the only cost this was ever called with before.
+   */
+  affordability: (costBaseUnits: number, action?: string) => AffordabilityReason | 'unknown';
 }
 
 export function useMagiSpendingPower(account: string | null): MagiSpendingPowerState {
@@ -96,7 +135,7 @@ export function useMagiSpendingPower(account: string | null): MagiSpendingPowerS
   const enabled = Boolean(account) && gqlUrl !== '';
 
   const query = useQuery({
-    queryKey: ['creatorTokens', 'magiSpendingPower', account],
+    queryKey: magiSpendingPowerKey(account),
     queryFn: () => readMagiSpendingPower(gqlUrl, account as string),
     enabled,
     staleTime: STALE_MS,
@@ -116,10 +155,12 @@ export function useMagiSpendingPower(account: string | null): MagiSpendingPowerS
     // Below the floor for a single call, not merely at zero: 0.5 HBD is a balance
     // and still cannot send anything, which is the confusing case worth naming.
     cannotTransact: power !== null && power.rc.amount < MAGI_MIN_RC_FOR_A_CALL,
-    affordability: (costBaseUnits: number) => {
+    affordability: (costBaseUnits: number, action = 'buy') => {
       if (power === null) return 'unknown';
       if (power.rc.amount < MAGI_MIN_RC_FOR_A_CALL) return 'no_resource_credits';
-      return checkAffordable(power, costBaseUnits);
+      // The SAME ceiling `buildOp` will declare for this action — passed through
+      // so the reservation is counted against the balance alongside the purchase.
+      return checkAffordable(power, costBaseUnits, rcLimitForAction(action));
     }
   };
 }

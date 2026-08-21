@@ -980,73 +980,28 @@
   * {
     @apply border-border;
   }
-  /**
-   * ★★ ILLUMINATION SPEC §3 — "THE APP SHELL, BEHIND EVERYTHING" (2026-08-20).
-   *
-   * The spec's literal rule is
-   *   `linear-gradient(90deg, var(--amb-0) 0%, var(--amb-1) 16%,
-   *     rgb(var(--paper-0)) 33%, rgb(var(--paper-0)) 67%, var(--amb-1) 84%,
-   *     var(--amb-0) 100%)` on `body, .app-shell`.
-   * There is no `.app-shell` in this codebase, and `--paper-0` does not
-   * exist anywhere in the repo (see the §0 token block above
-   * `--background-tertiary` — zero declarations, grepped repo-wide). An
-   * undefined custom property does not fall back to anything: `rgb(var(
-   * --paper-0))` is invalid at computed-value time, which drops the WHOLE
-   * `background` declaration, not just that stop — it would have shipped as
-   * dead CSS that silently does nothing, indistinguishable from the feature
-   * never having been applied.
-   *
-   * `body` IS this app's ground-painting element — confirmed, not assumed:
-   * `apps/blog/app/layout.tsx` renders `<body className="bg-background-
-   * secondary font-sans">`. `--background-secondary` (`36 45% 98%`, this
-   * file's own "PAPER, NOT GREY" token, declared above) is today's EXACT
-   * page-ground colour, not a lookalike substitute, so it is what the two
-   * centre stops resolve to below — satisfying §3's acceptance table
-   * ("Page centre ... exactly today's value, unchanged") to the letter.
-   * It is HSL where the outer stops are hex; CSS permits mixing colour
-   * functions within one gradient, so this is not a format hazard.
-   *
-   * This `background` shorthand only sets `background-image` (the gradient)
-   * and `background-attachment`; it does not touch `background-color`.
-   * `bg-background-secondary`'s `background-color: hsl(var(--background-
-   * secondary))` from the Tailwind class in layout.tsx still applies
-   * underneath, and because the gradient's own centre is that exact same
-   * colour, the two are seamless — the visible change is only at the edges,
-   * where `--amb-0`/`--amb-1` darken the periphery.
-   *
-   * ★ Unverifiable against §3's literal delta table (+3/+4/+5 R/G/B etc.):
-   * that table is computed from `--paper-0` vs `--paper-1`, and neither
-   * exists here — this app's card colour is `--surface-1`, pure `#FFFFFF`,
-   * not the spec's `#FFFEFC`. What IS guaranteed: the centre is today's
-   * ground colour verbatim (the hard floor — never brighter), and the
-   * periphery is measurably darker via `--amb-0`/`--amb-1`. Flagged for the
-   * owner: a real `--paper-0`/`--paper-1` ramp is a bigger decision than
-   * this file's illumination scope covers (the post-card owner reached the
-   * same conclusion — see `discovery-feed/post-card.module.css` line ~65).
-   *
-   * ★ NOT WRITTEN DIRECTLY ONTO THE `body` RULE BELOW, AND SCOPED TO
-   * `:root:not(.dark)` INSTEAD — `--background-secondary` IS dark-mode
-   * aware (it is repointed to `27 19% 9%` under `.dark`, ~30 lines above,
-   * commented "this is what <body> wears"), but `--amb-0`/`--amb-1` are NOT:
-   * per this spec's own §7 ("No dark mode... defined against the cream
-   * paper ramp only") they are light-only hex literals with no dark
-   * counterpart. An unscoped rule on `body` would have put a light-cream
-   * gradient with a DARK centre on `apps/wallet` in dark mode — worse than
-   * shipping nothing. Scoping keeps this illumination work light-only, as
-   * specified, instead of quietly breaking dark mode's ground colour.
-   */
-  :root:not(.dark) body {
-    background: linear-gradient(
-      90deg,
-      var(--amb-0) 0%,
-      var(--amb-1) 16%,
-      hsl(var(--background-secondary)) 33%,
-      hsl(var(--background-secondary)) 67%,
-      var(--amb-1) 84%,
-      var(--amb-0) 100%
-    );
-    background-attachment: fixed;
-  }
+    /*
+     * ★★★ THE PAGE GROUND IS NOT LIT, AND THAT IS THE OWNER'S RULING
+     * (2026-08-21): "you gave the paper background a color. you need to get rid
+     * of it. only all cards have background glow we said, i never said to change
+     * the background color. revert it on every page everywhere."
+     *
+     * What was here: illumination SPEC.md §3's ambient ground — a 90deg gradient
+     * on `body` warming and darkening the page toward its left and right edges,
+     * so cards read brighter "by comparison, not by paint". It measured exactly to
+     * spec (edges 247,242,235, centre 252,250,247) and it was still wrong for this
+     * product: the brief the owner actually gave was card glow, and the page
+     * beneath it stays the paper it already was.
+     *
+     * ★ THE CARD TREATMENT STAYS. `.lm-card`'s warm shadow and the warm shadow
+     * now on every other card surface are the "glow" that was asked for; they do
+     * not depend on this rule and are unaffected by its removal.
+     *
+     * ★ `--amb-0` / `--amb-1` ARE KEPT as tokens. They are still consumed by the
+     * tab-bar troughs (§3: "troughs follow the ground they sit on, never
+     * lighter"), which are component surfaces rather than the page ground. Do not
+     * delete them assuming they are dead.
+     */
   body {
     font-feature-settings:
       'rlig' 1,
