@@ -86,7 +86,7 @@ export class TagTransformingSanitizer {
                 // the attribute object from scratch and runs BEFORE allowedAttributes filtering
                 // (see sanitize-html's applyPerTagBaseAttributes ordering), so an unvalidated entry
                 // here would be silently dropped, not silently accepted.
-                img: ['src', 'alt', 'loading', 'decoding', 'width', 'height'],
+                img: ['src', 'alt', 'loading', 'decoding', 'width', 'height', 'srcset'],
 
                 // title is only set in the case of an external link warning
                 a: ['href', 'rel', 'title', 'class', 'target', 'id'],
@@ -159,14 +159,44 @@ export class TagTransformingSanitizer {
                     // there is no way to smuggle a script/style/URL vector through a bare
                     // digit string, and anything that isn't one (percentages, "auto",
                     // `1" onerror=...`, huge numbers meant to force a giant CLS-inducing box)
-                    // is dropped rather than passed on. These two are the ONLY attributes this
-                    // sanitizer widens for <img>; src/alt/loading/decoding are unchanged.
+                    // is dropped rather than passed on. 2026-08-21: `srcset` joined them —
+                    // see `isSafeSrcSet` below, which is strictly tighter than these two
+                    // because it is validating urls rather than digits. width/height/srcset
+                    // are the only attributes this sanitizer widens for <img>;
+                    // src/alt/loading/decoding are unchanged.
                     const isSafeDimension = (v: unknown): v is string => typeof v === 'string' && /^\d{1,4}$/.test(v) && v !== '0';
+                    /*
+                     * `srcset` carries URLS, so it gets the same treatment `src` does and
+                     * then some. Every candidate must be an absolute http(s) (or
+                     * protocol-relative) url followed by a bare density descriptor — no
+                     * spaces inside the url, no quotes, no angle brackets, nothing that
+                     * could close the attribute and start another one. A single bad
+                     * candidate drops the WHOLE attribute rather than being filtered out
+                     * of it, because a partially-rewritten srcset is a silent downgrade
+                     * nobody would notice.
+                     *
+                     * Splitting on `,` is safe HERE because this project's own
+                     * `proxifyImageSrc` emits `…/p/<base58>?format=…&width=…` — base58 and
+                     * query params, no commas by construction — and any candidate that did
+                     * contain one would fail the per-candidate test and take the attribute
+                     * with it. `w`-descriptors are deliberately NOT accepted: nothing in
+                     * this codebase emits them, and accepting a syntax we never generate
+                     * only widens what an author could smuggle in as raw HTML.
+                     */
+                    const isSafeSrcSet = (v: unknown): v is string => {
+                        if (typeof v !== 'string' || v.length === 0 || v.length > 2000) return false;
+                        const candidates = v.split(',');
+                        if (candidates.length < 2 || candidates.length > 4) return false;
+                        return candidates.every((c) => /^(?:https?:)?\/\/[^\s"'<>]+ [1-3]x$/.test(c.trim()));
+                    };
                     if (isSafeDimension(attribs.width)) {
                         atts.width = attribs.width;
                     }
                     if (isSafeDimension(attribs.height)) {
                         atts.height = attribs.height;
+                    }
+                    if (isSafeSrcSet(attribs.srcset)) {
+                        atts.srcset = attribs.srcset;
                     }
                     // Lazy-load off-screen images to reduce layout shifts during scroll sync
                     // and avoid blocking the main thread with eager decoding of large images

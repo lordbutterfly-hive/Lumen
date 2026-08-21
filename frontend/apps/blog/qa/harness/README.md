@@ -94,7 +94,8 @@ measured here), intercepts errors before they reach the real `error.tsx`, and hy
 differently. A dev sweep measures the dev server.
 
 ```bash
-NEXT_DIST_DIR=.next-qa pnpm build && NEXT_DIST_DIR=.next-qa pnpm start   # shell 1
+NEXT_DIST_DIR=.next-qa pnpm build \
+  && LUMEN_ENABLE_HEALTHCHECKER=yes NEXT_DIST_DIR=.next-qa pnpm start   # shell 1
 
 node qa/harness/sweep.mjs --state=anon                    # signed out, 1440x900
 node qa/harness/sweep.mjs --state=auth --user=lordbutterfly
@@ -103,6 +104,17 @@ node qa/harness/api-sweep.mjs                              # all 95 app/api rout
 node qa/harness/verify-changes.mjs                         # regression checks (pnpm qa:changes)
 node qa/harness/anti-cheat.mjs HEAD                        # test-weakening scan
 ```
+
+> **Why `LUMEN_ENABLE_HEALTHCHECKER=yes` is on that line.** `/healthchecker` calls
+> `notFound()` whenever `NODE_ENV === 'production'` and that flag is unset — and this
+> harness deliberately runs a production build, so without it the route 404s for us
+> exactly as it does for a visitor. That is not hypothetical: started without the flag,
+> **29 of 30 `healthchecker.spec.ts` tests failed**, every one of them timing out
+> waiting for a tab on a 404 page. With it set: **15 passed**. (The other 15 wait on
+> `mobile-nav-trigger`, which is a separate, mobile-only issue.) The flag is read
+> server-side only and can never be set by a visitor, so enabling it here changes
+> nothing about the real deployment. See the long note in `app/healthchecker/layout.tsx`.
+
 
 Exit codes: `0` clean · `1` findings · `2` aborted (harness itself is broken) ·
 `3` nothing to inspect.

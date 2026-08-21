@@ -65,6 +65,36 @@ const renderDefaultOptions = {
   // 1100 (the audit's original, narrower reference point) forced a real
   // downscale and a meaningfully smaller file.
   imageProxyFn: (url: string) => proxifyImageSrc(url, 1420, 0),
+  // ★ AND A 1x CANDIDATE BESIDE IT (2026-08-21) — what hive.blog actually serves.
+  //
+  // The width above is a 2x figure, and until now it was the ONLY width offered:
+  // a reader on an ordinary 1x display downloaded a 1420px-wide image to paint a
+  // ~694px column (measured on `/hive-151327/@miprimerconcurso/…-dung-mushrooms`
+  // at a 1440px viewport; 634px @1024w, 378px @768w — the 854px figure in the note
+  // above predates `max-w-[68ch]` on `postClassName`). Fetching the same post from
+  // hive.blog shows the shape to copy: `src` at 768 wide with
+  // `srcset="…768x0 1x, …1536x0 2x"`, one url per density.
+  //
+  // 768 is hive.blog's own 1x step and clears our widest measured column (694px)
+  // with room to spare; 1420 stays the 2x candidate because it is the measured,
+  // deliberate value documented above — not 1536, which the note already explains
+  // was an overshoot here.
+  //
+  // Returns `undefined` when the two widths collapse to the same url, which is not
+  // an edge case: `proxifyImageSrc` omits width for GIFs (resizing them breaks the
+  // animation), returns relative urls untouched, and passes already-proxied urls
+  // straight through. In every one of those the second candidate would be a byte-
+  // for-byte duplicate of the first, so no srcset is emitted at all.
+  imageSrcSetFn: (url: string) => {
+    const oneX = proxifyImageSrc(url, 768, 0);
+    const twoX = proxifyImageSrc(url, 1420, 0);
+    if (!oneX || !twoX || oneX === twoX) return undefined;
+    // A comma or a space inside a candidate breaks srcset parsing outright, and a
+    // quote would break out of the attribute. Ours never contain any (base58 hash
+    // plus query params) — this is the guard for the day that stops being true.
+    if (/[\s,"'<>]/.test(oneX) || /[\s,"'<>]/.test(twoX)) return undefined;
+    return `${oneX} 1x, ${twoX} 2x`;
+  },
   usertagUrlFn: (account: string) => (basePath ? `${basePath}/@${account}` : `/@${account}`),
   /**
    * ★★ `/topics/`, NOT `/trending/` (2026-08-18).
@@ -108,6 +138,21 @@ export function getPreviewRenderer(token: string, author: string = ''): DefaultR
   const options = {
     ...renderDefaultOptions,
     imageProxyFn: (url: string) => proxifyImageSrc(url, 1420, 0, 'match', token),
+    // ★ THE SRCSET NEEDS THE TOKEN TOO (2026-08-21). Spreading
+    // `renderDefaultOptions` brings in an `imageSrcSetFn` that builds its
+    // candidates WITHOUT the preview token — and the token is the whole reason
+    // this renderer exists (it is what lets an editor preview show an image the
+    // whitelist has not seen yet). Left inherited, the browser would pick the
+    // untokened 1x candidate and the author would watch their own just-uploaded
+    // image fail to load in the preview only. Same widths as above, same
+    // `undefined` contract; `'match'` matches the proxy fn beside it.
+    imageSrcSetFn: (url: string) => {
+      const oneX = proxifyImageSrc(url, 768, 0, 'match', token);
+      const twoX = proxifyImageSrc(url, 1420, 0, 'match', token);
+      if (!oneX || !twoX || oneX === twoX) return undefined;
+      if (/[\s,"'<>]/.test(oneX) || /[\s,"'<>]/.test(twoX)) return undefined;
+      return `${oneX} 1x, ${twoX} 2x`;
+    }
   };
   if (!!author && imageUserBlocklist.includes(author)) {
     return new DefaultRenderer({ ...options, doNotShowImages: true });

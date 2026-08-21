@@ -5,6 +5,7 @@ import { Metadata } from 'next';
 import type { Viewport } from 'next';
 import { cookies } from 'next/headers';
 import AppHeader from '../features/layouts/app-header';
+import SkipToContent from '../features/layouts/skip-to-content';
 import ClientEffects from '../features/layouts/site-header/client-effects';
 import ScrollReset from '../features/layouts/scroll-reset';
 import { ServerSessionProvider } from '../features/layouts/server-session';
@@ -605,6 +606,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 <CondenserMigration />
                 {/* Every route lands at the top of its own page. See scroll-reset.tsx. */}
                 <ScrollReset />
+                {/* First tab stop on every route — see skip-to-content.tsx. */}
+                <SkipToContent />
                 <AppHeader />
                 {/* ★ NOT <main> (2026-08-13). Every page shell already renders its own
                     <main> (home-shell, page-shell, main-page-layout), so this outer one
@@ -613,7 +616,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                     landmarks. The inner ones are the correct ones because they wrap the
                     page content without the surrounding chrome, so this becomes a plain
                     wrapper rather than removing the landmark entirely. */}
-                <div className="mx-auto">{children}</div>
+                <div className="mx-auto" id="main-content" tabIndex={-1}>
+                  {children}
+                </div>
               </ServerSessionProvider>
             </OfflineGuard>
           </Providers>

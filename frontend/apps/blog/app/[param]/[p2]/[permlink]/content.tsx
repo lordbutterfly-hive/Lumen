@@ -308,9 +308,20 @@ const PostContent = () => {
     // treat it as valid for the full `staleTime` (2 minutes) and skip the
     // `queryFn` on mount, so the merge never ran on an ordinary page view — a
     // reader's own Lumen vote reverted to the chain-only count on every
-    // reload. `0` still paints the SSR data instantly (no spinner, no layout
-    // shift) but marks it stale, so the merge runs one round trip later.
-    // `staleTime` still governs every fetch AFTER that first one.
+    // reload. `0` marks the SSR data stale so the merge runs one round trip
+    // later; `staleTime` still governs every fetch AFTER that first one.
+    //
+    // ★ CORRECTION (2026-08-21). This note used to end "`0` still paints the
+    // SSR data instantly (no spinner, no layout shift)". The DATA is indeed
+    // still painted — but the claim about the spinner was wrong, and it cost
+    // this page its server-rendered article for eight days. React Query v4
+    // reports `isLoading === true` for the whole lifetime of a query carrying
+    // `initialDataUpdatedAt: 0`, data present or not (measured with
+    // `renderToString` against this repo's own v4). Anything gating on
+    // `postIsLoading` therefore rendered its loading arm on EVERY server
+    // render. One did: the article body's slot. Keep `0` — it is correct for
+    // the reason above — but never gate rendered output on `postIsLoading`
+    // while it is set; gate on whether `postData` exists.
     initialDataUpdatedAt: 0,
     staleTime: StaleTime.MEDIUM,
     onError: (error) => {
@@ -1694,9 +1705,42 @@ const PostContent = () => {
                     </div>
                   </div>
                 </div>
-                {postIsLoading ? (
-                  <Loading loading={postIsLoading} />
-                ) : edit && isReplyOnChain && postData.parent_author && postData.parent_permlink ? (
+                {/*
+                 * ★★★ NO `postIsLoading` GATE HERE — IT HID THE ARTICLE FROM EVERY
+                 * SERVER RENDER (2026-08-21).
+                 *
+                 * This slot used to read `postIsLoading ? <Loading/> : ...`. Two facts
+                 * combine to make that gate permanently true on the server:
+                 *
+                 *  1. Everything from `{postData ? (` (:1326) down to its `) : (`
+                 *     (:2230) ALREADY runs only when `postData` exists, so a
+                 *     "still loading" arm inside it can never be the honest case.
+                 *  2. React Query v4 reports `isLoading === true` whenever
+                 *     `initialDataUpdatedAt: 0` is set (:314) — even though `data` is
+                 *     present. Measured directly against this repo's own v4 with
+                 *     `renderToString`: `initialDataUpdatedAt: 0` -> isLoading=true,
+                 *     hasData=true; the same query with the field omitted ->
+                 *     isLoading=false. `0` is deliberate and must stay (see :304), so
+                 *     the gate was true on EVERY server render of EVERY post.
+                 *
+                 * The result was that the SSR HTML carried the title, the byline, the
+                 * tags and all 40 comment bodies — and a spinner where the article
+                 * should be. Confirmed by curl on four different posts: the document
+                 * held exactly one `#articleBody` fewer than the browser did, and the
+                 * missing one was always the post's own. That is the precise defect
+                 * `page.tsx`'s "WHY THIS ROUTE HAS NO loading.tsx" note says it
+                 * removed the route-level `loading.tsx` to prevent: an article that is
+                 * invisible without JavaScript, and a loader-to-article swap that IS
+                 * this page's layout shift.
+                 *
+                 * It also broke `postContentOrder.spec.ts` (7 tests, imported from
+                 * denser 2026-07-23, never modified since). `#articleBody` is NOT a
+                 * unique id — every comment carries one — so `.first()` resolved to
+                 * the first COMMENT while the post body was still absent, and every
+                 * "this text should exist in the body" assertion read a stranger's
+                 * reply instead.
+                 */}
+                {edit && isReplyOnChain && postData.parent_author && postData.parent_permlink ? (
                   <ReplyTextbox
                     editMode={edit}
                     onSetReply={setEdit}

@@ -49,6 +49,7 @@ export class HtmlDOMParser {
                 height: this.options.height,
                 hideImages: this.options.hideImages,
                 imageProxyFn: this.options.imageProxyFn,
+                imageSrcSetFn: this.options.imageSrcSetFn,
                 hashtagUrlFn: this.options.hashtagUrlFn,
                 usertagUrlFn: this.options.usertagUrlFn,
                 baseUrl: this.options.baseUrl
@@ -572,6 +573,30 @@ export class HtmlDOMParser {
             const url: string = node.getAttribute('src') || '';
             if (!linksRe.alreadyProxied.test(url)) {
                 node.setAttribute('src', this.options.imageProxyFn(url));
+                /*
+                 * ★ 1x/2x `srcset`, COPYING WHAT hive.blog SERVES (2026-08-21).
+                 *
+                 * Fetched from hive.blog for the same post, a body image is:
+                 *
+                 *   <img src="…/768x0/<orig>"
+                 *        srcset="…/768x0/<orig> 1x, …/1536x0/<orig> 2x" />
+                 *
+                 * i.e. one url per pixel density, both through the same resize
+                 * proxy. This project shipped a SINGLE url sized for 2x, so a
+                 * reader on an ordinary 1x display downloaded roughly four times
+                 * the pixels their screen could show.
+                 *
+                 * `src` deliberately keeps the LARGE url rather than the small
+                 * one hive.blog puts there: `image-gallery.tsx` builds the
+                 * lightbox's slides from `image.src`, so pointing `src` at the 1x
+                 * candidate would have made every full-screen image worse to fix
+                 * a thumbnail. Browsers that understand `srcset` never load `src`
+                 * anyway, and the ones that don't get the same url they get today.
+                 */
+                const srcSet = this.options.imageSrcSetFn?.(url);
+                if (srcSet) {
+                    node.setAttribute('srcset', srcSet);
+                }
             }
         });
     }

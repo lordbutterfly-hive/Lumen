@@ -112,17 +112,26 @@ export default function WitnessesTable({
   const visibleRows = useMemo(() => rows.slice(0, visibleCount), [rows, visibleCount]);
   const gridTemplate = GENERAL_GRID_TEMPLATE;
   const minWidthClass = GENERAL_MIN_WIDTH_CLASS;
-  // Below lg the table scrolls inside itself, and a touch device shows no
-  // scrollbar until you are already scrolling — so nothing on the page said the
-  // remaining columns existed. One line, only where it is true, only when there
-  // is actually a table to scroll.
+  // The table scrolls inside itself, and a touch device shows no scrollbar until
+  // you are already scrolling — so nothing on the page said the remaining columns
+  // existed. One line, only where it is true, only when there is actually a table
+  // to scroll.
+  //
+  // ★ HIDDEN AT `2xl`, NOT `lg` (2026-08-21). This hint used to carry `lg:hidden`
+  // while the scroller below releases at `2xl:overflow-visible` — so from 1024px
+  // to 1535px the table still scrolled sideways with nothing on the page saying
+  // so. That is the widest, most common desktop-window band on this site, and the
+  // only one where the extra columns were both hidden AND unannounced. The hint's
+  // breakpoint and the scroller's are one mechanism and must be the same number,
+  // exactly as `GENERAL_MIN_WIDTH_CLASS` and the scroller already are (see the
+  // note on the scroller below).
   const showScrollHint = !isLoading && !isError && rows.length > 0;
 
   return (
     <>
       {showScrollHint ? (
         <p
-          className="mb-1 px-3.5 font-sans text-caption text-ink-14 lg:hidden"
+          className="mb-1 px-3.5 font-sans text-caption text-ink-14 2xl:hidden"
           data-testid="witnesses-scroll-hint"
         >
           {t('witnesses.scroll_hint')}

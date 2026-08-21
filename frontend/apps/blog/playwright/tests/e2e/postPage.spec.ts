@@ -253,7 +253,7 @@ test.describe('Post page tests', () => {
     await postPage.moveToTheFirstPostInHomePageByImage();
     await expect(postPage.footerAuthorName).toBeVisible();
 
-    const footerAuthorName = await page.locator('[data-testid="author-data-post-footer"] [data-testid="author-name-link"] span[class="font-semibold text-foreground hover:text-destructive"]').innerText();
+    const footerAuthorName = await page.locator('[data-testid="author-data-post-footer"] [data-testid="author-name-link"] span.font-semibold').innerText();
     await expect(firstPostAuthor).toEqual(footerAuthorName);
   });
 

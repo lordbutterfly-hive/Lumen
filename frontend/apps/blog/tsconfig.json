@@ -27,10 +27,7 @@
     "../../packages/ui/elements/common/layout.tsx",
     "../../packages/ui/components/time-ago.tsx",
     "../../packages/ui/components/card-skeleton.tsx",
-    ".next*/types/**/*.ts",
-    ".next-qa/types/**/*.ts",
-    ".next-fix/types/**/*.ts",
-    ".next-fix2/types/**/*.ts"
+    ".next*/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

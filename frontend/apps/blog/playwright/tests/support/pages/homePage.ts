@@ -336,7 +336,7 @@ export class HomePage {
     this.getNavSidebarMenuContentCloseButton = page.locator(
       '[data-testid="mobile-nav-content"] > button'
     );
-    this.postTitle = page.locator('[data-testid="post-title"] a, [data-testid="medium-card-title"] a');
+    this.postTitle = page.locator('[data-testid="post-title"] a, a[data-testid="medium-card-title"]');
     /*
       ★ EITHER CARD'S DEK (2026-08-11), same reason as CARD_ANY above. Lumen's
       feed card names its description `medium-card-dek`
@@ -563,7 +563,7 @@ export class HomePage {
 
     for (let postIndex = 0; postIndex < postsComments.length; postIndex++) {
       const numberOfCommentsInPost = postsComments[postIndex];
-      const postTitle = postsCard[postIndex].locator('[data-testid="post-title"] a, [data-testid="medium-card-title"] a');
+      const postTitle = postsCard[postIndex].locator('[data-testid="post-title"] a, a[data-testid="medium-card-title"]');
       const commentsCount = await numberOfCommentsInPost.textContent();
 
       if (commentsCount !== '0') {

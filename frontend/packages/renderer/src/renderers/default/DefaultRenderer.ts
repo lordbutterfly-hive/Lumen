@@ -55,6 +55,7 @@ export class DefaultRenderer {
                 ipfsPrefix: this.options.ipfsPrefix,
                 baseUrl: this.options.baseUrl,
                 imageProxyFn: this.options.imageProxyFn,
+                imageSrcSetFn: this.options.imageSrcSetFn,
                 hashtagUrlFn: this.options.hashtagUrlFn,
                 usertagUrlFn: this.options.usertagUrlFn,
                 hideImages: this.options.doNotShowImages
@@ -224,6 +225,7 @@ export class DefaultRenderer {
         ow(o.assetsWidth, 'RendererOptions.assetsWidth', ow.number.integer.positive);
         ow(o.assetsHeight, 'RendererOptions.assetsHeight', ow.number.integer.positive);
         ow(o.imageProxyFn, 'RendererOptions.imageProxyFn', ow.function);
+        ow(o.imageSrcSetFn, 'RendererOptions.imageSrcSetFn', ow.optional.function);
         ow(o.hashtagUrlFn, 'RendererOptions.hashtagUrlFn', ow.function);
         ow(o.usertagUrlFn, 'RendererOptions.usertagUrlFn', ow.function);
         ow(o.isLinkSafeFn, 'RendererOptions.isLinkSafeFn', ow.function);
@@ -261,6 +263,11 @@ export interface RendererOptions {
     assetsHeight: number;
     /** Function to proxy image URLs */
     imageProxyFn: (url: string) => string;
+    /**
+     * Optional: build a 1x/2x `srcset` for a body image, the way hive.blog does.
+     * Return `undefined` when the two densities would resolve to the same url.
+     */
+    imageSrcSetFn?: (url: string) => string | undefined;
     /** Function to generate hashtag URLs */
     hashtagUrlFn: (hashtag: string) => string;
     /** Function to generate user profile URLs */

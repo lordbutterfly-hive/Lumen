@@ -284,7 +284,7 @@ export class ProfilePage {
     this.postRebloggedLabel = page.locator('[data-testid="reblogged-label"]');
     this.firstPostRebloggedLabel = this.postBlogItem.first().locator(this.postRebloggedLabel);
     this.postRebloggedAuthorLink = page.locator('[data-testid="reblogged-author-link"]');
-    this.postTitle = this.postBlogItem.locator('[data-testid="post-title"] > a, [data-testid="medium-card-title"] > a');
+    this.postTitle = this.postBlogItem.locator('[data-testid="post-title"] > a, a[data-testid="medium-card-title"]');
     this.postDescription = this.postBlogItem.locator('[data-testid="post-description"], [data-testid="medium-card-dek"]');
     this.postCommunityLink = page.locator('[data-testid="post-card-community"]');
     this.postCategoryLink = page.locator('[data-testid="post-card-category"]');

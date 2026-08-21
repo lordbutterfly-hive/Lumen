@@ -136,10 +136,10 @@ export class PostPage {
     this.showPostBodyBtn = page.locator('div').filter({
       hasText: /^Content (were hidden due to low ratings|hidden (by community moderators|because parent content is muted|due to low author reputation)|hidden: author (not allowed to post in this community|is muted in this community))\.Show$/
     }).getByRole('button');
-    this.postListItemOnHomePage = page.locator('li[data-testid="post-list-item"], li[data-testid="medium-card"]');
-    this.firstPostImageOnHomePage = page.locator('li[data-testid="post-list-item"]:nth-of-type(1) img, li[data-testid="medium-card"]:nth-of-type(1) img');
+    this.postListItemOnHomePage = page.locator('li[data-testid="post-list-item"], [data-testid="medium-card"]');
+    this.firstPostImageOnHomePage = page.locator('li[data-testid="post-list-item"]:nth-of-type(1) img, [data-testid="medium-card"]:nth-of-type(1) img');
     this.firstPostTitleOnHomePage = page
-      .locator('[data-testid="post-list-item"] [data-testid="post-title"] a, [data-testid="medium-card"] [data-testid="medium-card-title"] a')
+      .locator('[data-testid="post-list-item"] [data-testid="post-title"] a, [data-testid="medium-card"] a[data-testid="medium-card-title"]')
       .first();
     this.articleTitle = page.locator('[data-testid="article-title"]');
     this.articleBody = page.locator('#articleBody').first();
@@ -173,7 +173,7 @@ export class PostPage {
     this.commentListItem = '[data-testid="comment-list-item"]'
     this.commentListLocator = page.locator('[data-testid="comment-list"]');
     this.commentAuthorLink = page.locator(
-      '[data-testid="comment-card-header"] [data-testid="author-name-link"] span[class="font-semibold text-foreground hover:text-destructive"]'
+      '[data-testid="comment-card-header"] [data-testid="author-name-link"] span.font-semibold'
     );
     this.commentAuthorReputation = page.locator(
       '[data-testid="comment-card-header"] [data-testid="author-reputation"]'
@@ -361,7 +361,7 @@ export class PostPage {
 
   async findPostWithLabel() {
     const postWithLabel = this.page
-      .locator('li[data-testid="post-list-item"], li[data-testid="medium-card"]')
+      .locator('li[data-testid="post-list-item"], [data-testid="medium-card"]')
       .locator('div.flex.items-center')
       .locator('.inline-flex.items-center.border.rounded-full')
       .first();

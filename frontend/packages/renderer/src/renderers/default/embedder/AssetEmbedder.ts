@@ -38,6 +38,7 @@ export class AssetEmbedder {
         ow(o.hideImages, 'AssetEmbedderOptions.hideImages', ow.boolean);
         ow(o.baseUrl, 'AssetEmbedderOptions.baseUrl', ow.string.nonEmpty);
         ow(o.imageProxyFn, 'AssetEmbedderOptions.imageProxyFn', ow.function);
+        ow(o.imageSrcSetFn, 'AssetEmbedderOptions.imageSrcSetFn', ow.optional.function);
         ow(o.hashtagUrlFn, 'AssetEmbedderOptions.hashtagUrlFn', ow.function);
         ow(o.usertagUrlFn, 'AssetEmbedderOptions.usertagUrlFn', ow.function);
     }
@@ -93,6 +94,15 @@ export interface AssetEmbedderOptions {
     hideImages: boolean;
     baseUrl: string;
     imageProxyFn: (url: string) => string;
+    /**
+     * Optional 1x/2x `srcset` builder, mirroring how hive.blog serves post images
+     * (`<img src=… srcset="…768 1x, …1536 2x">`). Return `undefined` to emit no
+     * srcset at all — the caller is expected to do that whenever the two widths
+     * would resolve to the SAME url (GIFs, relative paths and already-proxied
+     * urls all bypass resizing), because a srcset whose candidates are identical
+     * costs bytes in the HTML and buys the browser nothing.
+     */
+    imageSrcSetFn?: (url: string) => string | undefined;
     hashtagUrlFn: (hashtag: string) => string;
     usertagUrlFn: (account: string) => string;
 }

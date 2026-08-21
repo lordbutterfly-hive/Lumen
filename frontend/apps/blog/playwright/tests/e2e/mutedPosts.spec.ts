@@ -67,7 +67,7 @@ test.describe('Muted posts tests', () => {
 
     // check if post picture is visible
     const numberOfImagesInPostCard = await postPage.page
-      .locator('li[data-testid="post-list-item"]:nth-of-type(1):has(img), li[data-testid="medium-card"]:nth-of-type(1):has(img)')
+      .locator('li[data-testid="post-list-item"]:nth-of-type(1):has(img), [data-testid="medium-card"]:nth-of-type(1):has(img)')
       .count();
     if (numberOfImagesInPostCard <= 0)
       await expect(postPage.firstPostImageOnHomePage).toHaveCount(0);
@@ -158,7 +158,7 @@ test.describe('Muted posts tests', () => {
     for (const postItem of postListItems) {
       const textContent: any = await postItem.textContent();
       if (textContent.includes('RE:')) {
-        const postTittle = await postItem.$$('[data-testid="post-title"] > a, [data-testid="medium-card-title"] > a');
+        const postTittle = await postItem.$$('[data-testid="post-title"] > a, a[data-testid="medium-card-title"]');
 
         if (postTittle.length > 0) {
 
