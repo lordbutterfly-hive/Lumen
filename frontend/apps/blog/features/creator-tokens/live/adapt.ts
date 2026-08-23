@@ -350,7 +350,17 @@ function adaptAskState(status: Ask['status']): PortfolioAsk['state'] {
   }
 }
 
-function dueLabelFor(ask: Ask): string | undefined {
+/**
+ * Exported 2026-08-23 for the Studio's AnswerModal (A14). That modal asks a creator to
+ * commit to a job and never showed them the clock, while `ask.deadlineBlock` sat on the
+ * very object it passes to `studio.answer()`. Missing the deadline records a miss against
+ * the creator (`core/ask.go` recordMiss), so the one screen where they decide whether to
+ * take the work is the screen that most needs the number. One formatter, not two.
+ *
+ * Returns undefined for a non-awaiting ask and for one already past its deadline — the
+ * caller decides what to say about those, since "due in -3h" is not a sentence.
+ */
+export function dueLabelFor(ask: Ask): string | undefined {
   if (ask.status !== 'awaiting') return undefined;
   const ms = ask.deadlineAt - Date.now();
   if (ms <= 0) return undefined;

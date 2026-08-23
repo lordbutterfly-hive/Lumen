@@ -85,6 +85,10 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
       ? 'This account has no key that can sign a transaction yet. Connect an Ethereum wallet, or upgrade to a full Hive account, to trade.'
       : null;
   const writesBlocked = writeBlockedReason !== null;
+  // Same predicate the Buy button has always disabled on, named once so the label, the
+  // tooltip and the disable cannot drift apart. `>=` not `==`: a cap lowered below supply
+  // must not re-enable buying.
+  const soldOut = market !== null && market.supply >= market.cap;
   // ★ The way OUT of the gate must be clickable (2026-08-07). This page told a
   // lite reader "Upgrade to a full account to trade" as flat text, right where
   // they had just formed the intent to trade — while Studio and Wallet both
@@ -313,7 +317,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   );
 
   return (
-    <TokenShell rightRail={rightRail}>
+    <TokenShell rightRail={rightRail} back={{ href: '/creators', label: '← All creators' }}>
       {/* 1. Creator header */}
       <div className="mb-5 flex items-center gap-4">
         <span className="h-[60px] w-[60px] flex-shrink-0 rounded-2xl" style={{ background: avatarColor }} />
@@ -447,13 +451,24 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               </div>
             </div>
             <div className="mt-5 flex gap-3">
+              {/* ★★★ THE SOLD-OUT REASON BELONGS HERE, NOT IN THE MODAL (corrected 2026-08-23).
+                  `market.supply >= market.cap` has disabled this button for a long time and said
+                  NOTHING about why — a greyed control with the ordinary label, indistinguishable
+                  from a bug. My first pass at this put the explanation on the BuyModal's submit
+                  button, which a sold-out visitor can never reach: the modal only opens from this
+                  button, and this button is disabled. A label on an unreachable branch is not a
+                  fix. Verified live on a 30/30 market by a decorrelated session, which is how the
+                  miss was caught.
+
+                  The modal's own guard stays — supply can cross the cap while the modal is open,
+                  and that race is a real one — but it is a guard, not the disclosure. */}
               <button
                 onClick={() => setDialog('buy')}
-                disabled={!market.canBuy || market.supply >= market.cap || writesBlocked}
-                title={writeBlockedReason ?? undefined}
+                disabled={!market.canBuy || soldOut || writesBlocked}
+                title={soldOut ? 'Every token on this curve has been issued.' : (writeBlockedReason ?? undefined)}
                 className="flex-1 rounded-xl bg-surface-brand-12 py-3.5 text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-brand-16 disabled:opacity-50"
               >
-                Buy
+                {soldOut ? 'Sold out' : 'Buy'}
               </button>
               {/* ★ Sell is CLOSED during wind-down — sell.go's curve rail refuses
                   once the market is retired/frozen/closed, and this button used

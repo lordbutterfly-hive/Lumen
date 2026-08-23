@@ -187,6 +187,7 @@
     "publish_queued": "Saved and visible on Lumen. It will appear on Hive shortly."
   },
   "navigation": {
+    "skip_to_content": "Skip to content",
     "main_nav_bar": {
       "posts": "Posts",
       "proposals": "Proposals",
@@ -361,6 +362,7 @@
       "undo_upvote": "Undo your upvote",
       "undo_upvote_percent": "Undo your upvote {{votePercent}}%",
       "downvote": "Downvote",
+      "copy_link": "Copy link",
       "remove_downvote": "Remove your downvote",
       "undo_downvote": "Undo your downvote",
       "undo_downvote_percent": "Undo your downvote {{votePercent}}%",
@@ -1966,8 +1968,9 @@
   "meritum": {
     "intro": {
       "eyebrow": "Meritum",
-      "headline": "Launch your own Meritum token in seconds!",
+      "headline": "Launch your own Meritum token.",
       "live": "Live",
+      "example": "Example",
       "subhead": "Anyone can start one. Your community decides what it’s worth.",
       "cta": "Launch here",
       "quote": "Social media users have followers. The next generation of users have <holders>holders</holders>.",

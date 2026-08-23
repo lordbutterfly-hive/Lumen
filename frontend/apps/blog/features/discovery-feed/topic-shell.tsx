@@ -13,7 +13,6 @@ import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import { LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { Entry } from '@hive/common-hiveio-packages/wax';
-import { StreakCardNarrow } from '@/blog/features/retention/components/streak-card';
 import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
 import { useRankLuminosity } from '@/blog/features/retention/hooks/use-rank-marks';
 
@@ -169,7 +168,6 @@ export default function TopicShell({ tag }: { tag: string }) {
       </aside>
 
       <main className="min-w-0">
-        <StreakCardNarrow />
         {/* Masthead. Deliberately the SAME vocabulary as the rest of Lumen —
             Lora display, the warm radial wash the login card uses, the single
             #c0392b accent — because the whole point of this page is that a topic

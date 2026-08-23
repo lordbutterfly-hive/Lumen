@@ -147,13 +147,40 @@ export function useLiveStudio(): LiveStudio {
   const tokenAccounts = useTokenAccounts();
   const signingAccount = tokenAccounts.accounts.find((a) => a.canSign) ?? null;
 
+  /**
+   * ★★★ THE STUDIO READS ITS OWN MARKET UNDER THE ACCOUNT THAT REGISTERED IT (2026-08-23).
+   *
+   * The 2026-08-20 pass fixed `canSign` and stopped telling a wallet-backed creator they
+   * could not sign — but left every READ on this hook keyed to `user.username`, which for
+   * a lite account is the chosen LUMEN DISPLAY NAME, not the identity the contract keys
+   * markets by. So a creator whose `did:pkh` owns a live, publicly buyable market opened
+   * their own Studio and was shown "Launch your Meritum" onboarding. Confirmed on chain by
+   * a decorrelated session: `m|did:pkh:…|st = ACTIVE`, the token renders and trades at
+   * `/creators/did:pkh:…`, and the owner's own Studio said it did not exist.
+   *
+   * A wrong key returns ZERO, never an error — the same silent-zero this codebase has now
+   * been bitten by three times. `use-live-token-market.ts` already fixed the identical bug
+   * for HOLDINGS (`positionAccount`, 2026-08-20) with exactly this expression; the Studio
+   * was its twin and was missed.
+   *
+   * Falls back to `creator` rather than null on purpose: a lite account with no signing
+   * wallet cannot have registered a market, so reading under the display name correctly
+   * returns nothing and the onboarding it then shows is the right answer. Nulling instead
+   * would disable the query and hang the Studio on a permanent loader.
+   *
+   * ALL FIVE READS AND EVERY INVALIDATION KEY MOVE TOGETHER. Half of them keyed on the DID
+   * and half on the username would find the market but not its asks, offerings, delivery
+   * record or fee balance.
+   */
+  const creatorAccount = (isLite ? signingAccount?.id : creator) ?? creator;
+
   const dataSource = getCreatorTokensDataSource();
   const unavailable = dataSource === null;
   const enabled = Boolean(creator) && !unavailable;
 
   const marketQuery = useQuery({
-    queryKey: marketKey(creator ?? ''),
-    queryFn: () => dataSource!.readMarket(creator as string),
+    queryKey: marketKey(creatorAccount ?? ''),
+    queryFn: () => dataSource!.readMarket(creatorAccount as string),
     enabled,
     staleTime: STALE_MS,
     refetchInterval: REFETCH_MS
@@ -161,30 +188,30 @@ export function useLiveStudio(): LiveStudio {
   const readFailed = marketQuery.isError || marketQuery.data?.phase === 'UNKNOWN';
 
   const asksQuery = useQuery({
-    queryKey: asksKey(creator ?? ''),
-    queryFn: () => dataSource!.readCreatorAsks(creator as string),
+    queryKey: asksKey(creatorAccount ?? ''),
+    queryFn: () => dataSource!.readCreatorAsks(creatorAccount as string),
     enabled: enabled && !readFailed,
     staleTime: STALE_MS,
     refetchInterval: REFETCH_MS
   });
 
   const offeringsQuery = useQuery({
-    queryKey: offeringsKey(creator ?? ''),
-    queryFn: () => dataSource!.listOfferings(creator as string),
+    queryKey: offeringsKey(creatorAccount ?? ''),
+    queryFn: () => dataSource!.listOfferings(creatorAccount as string),
     enabled: enabled && !readFailed,
     staleTime: STALE_MS
   });
 
   const deliveryQuery = useQuery({
-    queryKey: deliveryKey(creator ?? ''),
-    queryFn: () => dataSource!.readDeliveryRecord(creator as string),
+    queryKey: deliveryKey(creatorAccount ?? ''),
+    queryFn: () => dataSource!.readDeliveryRecord(creatorAccount as string),
     enabled: enabled && !readFailed,
     staleTime: STALE_MS
   });
 
   const feeQuery = useQuery({
-    queryKey: feeKey(creator ?? ''),
-    queryFn: () => dataSource!.readFeeBalance(creator as string),
+    queryKey: feeKey(creatorAccount ?? ''),
+    queryFn: () => dataSource!.readFeeBalance(creatorAccount as string),
     enabled: enabled && !readFailed,
     staleTime: STALE_MS
   });
@@ -236,12 +263,15 @@ export function useLiveStudio(): LiveStudio {
   const subDaysLeft = chainMarket ? blocksToDays(Math.max(0, chainMarket.paidUntilBlock - headOf(chainMarket))) : 0;
 
   const invalidate = useCallback(() => {
-    if (!creator) return;
-    queryClient.invalidateQueries({ queryKey: marketKey(creator) });
-    queryClient.invalidateQueries({ queryKey: asksKey(creator) });
-    queryClient.invalidateQueries({ queryKey: offeringsKey(creator) });
-    queryClient.invalidateQueries({ queryKey: feeKey(creator) });
-  }, [queryClient, creator]);
+    // Guards and depends on `creatorAccount`, not `creator`: after a write we must
+    // invalidate the keys the reads actually used, or a wallet creator's Studio keeps
+    // serving the pre-write cache under a key nothing refetches.
+    if (!creatorAccount) return;
+    queryClient.invalidateQueries({ queryKey: marketKey(creatorAccount) });
+    queryClient.invalidateQueries({ queryKey: asksKey(creatorAccount) });
+    queryClient.invalidateQueries({ queryKey: offeringsKey(creatorAccount) });
+    queryClient.invalidateQueries({ queryKey: feeKey(creatorAccount) });
+  }, [queryClient, creatorAccount]);
 
   const requireSigner = useCallback((): { source: NonNullable<typeof dataSource>; signer: string } => {
     if (!dataSource) throw new Error('CREATOR_TOKENS_UNAVAILABLE: no contract is provisioned');
@@ -409,7 +439,7 @@ export function useLiveStudio(): LiveStudio {
     ),
 
     retry: () => {
-      for (const key of [marketKey(creator ?? ''), asksKey(creator ?? ''), offeringsKey(creator ?? ''), deliveryKey(creator ?? '')]) {
+      for (const key of [marketKey(creatorAccount ?? ''), asksKey(creatorAccount ?? ''), offeringsKey(creatorAccount ?? ''), deliveryKey(creatorAccount ?? '')]) {
         queryClient.invalidateQueries({ queryKey: key });
       }
     },

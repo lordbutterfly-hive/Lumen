@@ -134,6 +134,29 @@
      */
     --brand: 192 57 43; /* #c0392b — the single brand red */
 
+    /* ★ THE ACCENT RAIL, DEFINED ONCE (2026-08-23). The left-navbar active rail
+       and the crimson rule on every masthead/hero card read as one design
+       element and were two unrelated implementations sharing a colour value.
+       Both now read these three, so the ember-to-crimson relationship cannot
+       drift between them again.
+
+       `--rail-fade` is an ABSOLUTE LENGTH on purpose. Two stops at percentages
+       over a 33px nav rail is a fast, visible ember-to-crimson transition; the
+       same two stops over the 1007px meritum card become an imperceptible drift
+       and the rail reads as flat crimson — which is the defect being fixed.
+       A length makes the transition happen at the same RATE on every surface,
+       with crimson holding for the remainder.
+
+       ★ `--lum` HAS NO DARK COUNTERPART and that is deliberate here. In dark
+       mode this gradient runs ember to `--brand`'s dark value (229 146 137)
+       rather than to crimson — which is exactly what `left-rail.module.css`
+       already does, so the nav rail and the card rails still match. If someone
+       later gives `--lum` a dark value, both move together and nothing here
+       needs to change. */
+    --rail-fade: 120px;
+    --rail-fill: linear-gradient(180deg, rgb(var(--lum)) 0, rgb(var(--brand)) var(--rail-fade));
+    --rail-glow: 0 0 7px 0 rgb(var(--lum) / 0.7);
+
     /* ★ THE ONE FOCUS-RING OVERRIDE (2026-08-13, O5 a11y build map item 7).
        `outline-none` (Tailwind) does not remove a focus outline — it sets
        `outline: 2px solid transparent` on purpose, so forced-colors mode
@@ -228,7 +251,20 @@
     --ink-7: 63 70 80; /* #3f4650 x83 */
     --ink-8: 75 85 99; /* #4b5563 x70 */
     --ink-9: 111 105 99; /* #6f6963 x4 */
-    --ink-10: 107 114 128; /* #6b7280 x257 */
+    /* ★ WARM AND DARKER (2026-08-23). This is the app's most-used muted ink -- 257
+       call sites, and the colour under nearly every small label -- and it was
+       `#6b7280`, stock Tailwind gray-500: a COOL, blue-shifted grey sitting
+       between two WARM neighbours (`--ink-9` 111 105 99, `--ink-11` 122 114 104).
+       Same defect as the brand ramp: the step is a different colour family from
+       the steps either side of it, so muted text read cooler than everything
+       around it on a warm paper ground, which costs perceived contrast on top of
+       the measured 4.83:1 it actually had.
+       Now warm, and monotonic in its own ramp -- 5.09:1, sitting correctly
+       between `--ink-9` (5.42:1) and `--ink-11` (4.74:1) instead of jumping
+       outside both. Helps Lora's hairline horizontals at small sizes, which is
+       what the owner is reporting; it is NOT the whole fix (see the body rule --
+       weight is the dominant lever). */
+    --ink-10: 116 109 102; /* #746b66, was #6b7280 gray-500. x257 */
     --ink-11: 122 114 104; /* #7a7268 x2 */
     --ink-12: 138 130 122; /* #8a827a x5 */
     --ink-13: 138 138 138; /* #8a8a8a x2 */
@@ -1007,16 +1043,30 @@
       'rlig' 1,
       'calt' 1;
     color: rgb(var(--body-ink));
-    /* ★ ALL-LORA MIGRATION, 2026-08-19 (typography spec §3 rule 5). Lora is a
-       serif with genuine thin strokes; at the 14-15px UI sizes this app now
-       uses, the default subpixel rendering thickens those strokes unevenly and
-       the interface reads muddier than the same text at 17px. `antialiased` is
-       a no-op outside WebKit/Blink on macOS, so this costs nothing where it
-       does not help. `optimizeLegibility` enables kerning and default ligature
-       handling; Lora ships no discretionary `liga` table (verified), so this
-       buys kerning only, which is exactly what a serif at small sizes needs. */
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    /* ★★★ THE STROKE-THINNING SMOOTHING IS GONE (2026-08-23, owner report: "I
+       CANNOT SEE THE LETTER H ... the LORA font is poorly visible in many
+       places. H is literally invisible in middle").
+ 
+       What was here: `-webkit-font-smoothing: antialiased` and
+       `-moz-osx-font-smoothing: grayscale`, added in the all-Lora migration to
+       stop subpixel rendering "thickening those strokes unevenly". They do
+       thin strokes -- that is the whole effect -- and thinning is the last
+       thing a high-contrast serif needs at 12-16px. MEASURED on the rendered
+       pixels: at 14px/400 in `--ink-10`, the crossbar of an H carries only
+       0.61-0.67 of the ink its stems do. It is the first thing to disappear,
+       and the letter reads as two disconnected posts.
+ 
+       ★ BE HONEST ABOUT THE SCOPE OF THIS ONE. In Chrome
+       `-webkit-font-smoothing` is macOS-only, so removing it helps Mac readers
+       and does NOT fix a Windows reader. The Windows lever is the ink colour
+       (`--ink-10`, below) and, dominantly, WEIGHT: the same measurement at 700
+       gives a crossbar/stem ratio of 1.00. Do not let this line be recorded as
+       "the H fix".
+ 
+       `text-rendering: optimizeLegibility` STAYS. It buys kerning, which is
+       what a serif at small sizes needs, and it does not touch stroke weight;
+       Lora ships no discretionary `liga` table (verified), so nothing else
+       comes with it. */
     text-rendering: optimizeLegibility;
   }
 
@@ -2942,4 +2992,160 @@ p {
    both. */
 input[data-testid='witnesses-filter-search'] {
   min-height: 24px;
+}
+
+/* ============================================================
+   THE ACCENT RAIL — ONE CONSTRUCTION, EVERY SURFACE (2026-08-23)
+   ============================================================
+
+   ★ WHY A BORDER CAN NEVER MATCH THE NAV RAIL. A border is part of the box
+   model, so on a box with `border-radius: 18px` the browser MUST arc the left
+   border into both corners and taper it to nothing where it meets the top and
+   bottom borders. Measured on `/witnesses` before this change: of the card's
+   142 rows, 6 carried NO rule at all and 9 carried a thinned one. The bend is
+   not a rounding artifact and cannot be tuned away with a per-corner radius,
+   `background-clip`, or a width change. The construction has to change.
+
+   ★ WHY A GLOBAL CLASS RATHER THAN A CSS MODULE. The four call sites are split
+   between pure-Tailwind components (`page-masthead.tsx` and two `loading.tsx`
+   skeletons) and a CSS-module component (`meritum-intro.tsx`). A global utility
+   is the only shape all four can reach without one importing another's module.
+
+   ★ THE GLOW IS INNER-ONLY, AND THAT IS AUTOMATIC. A `box-shadow` at `left: 0`
+   throws light both ways. Three call sites clip with `overflow: hidden`; the
+   fourth (`meritum-intro`) clips with `clip-path: inset(0 round 18px)`,
+   deliberately, because `overflow: hidden` would make that card the scrollport
+   for the launch flow's sticky coin. So all four already clip the outward half
+   and the rails match without any call site opting in. Do NOT "fix" this by
+   setting `overflow: visible` on one of them: the masthead's radial wash relies
+   on the clip to stay inside the 18px radius, and one card glowing outward
+   while its neighbours do not is the exact inconsistency this removes. */
+
+.accent-rail {
+  /* The rail is absolutely positioned, so the call site MUST be a containing
+     block. `page-masthead` and both skeletons already carry `relative`;
+     `meritum-intro`'s `.card` is `static` and is given `position: relative` in
+     its own module by this change. Declaring it here too means a fifth call
+     site cannot forget it and silently hang the rail off an ancestor. */
+  position: relative;
+}
+
+.accent-rail::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  /* ★ INSET BY THE CORNER RADIUS, NOT BY A PERCENTAGE. The nav rail is
+     `height: 66%` of a 51px row = 33px, which does not survive the jump to card
+     scale: 66% of the 1007px meritum card is 665px, a floating bar with 170px
+     of nothing above and below it. Insetting by the 18px radius starts and
+     stops the rail exactly where the card's straight left edge begins and ends,
+     so it reads as full-height at 142px, at 236px and at 1007px alike, and
+     never collides with the curve. */
+  top: var(--rail-inset, 18px);
+  bottom: var(--rail-inset, 18px);
+  width: 3px;
+  border-radius: 999px;
+  background: var(--rail-fill);
+  box-shadow: var(--rail-glow);
+  /* Above the masthead watermark (`z-0`), below the content (`z-10`). */
+  z-index: 1;
+  transform-origin: center;
+  animation: accent-rail 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* ★ `scaleY`, NOT an animated `height`. The nav rail animates `height` on a
+   33px element, which is harmless; the same keyframe on a 1007px element is
+   not. `scaleY` from a centred origin gives the identical read — both ends
+   travelling outward together — and stays on the compositor. */
+@keyframes accent-rail {
+  from {
+    opacity: 0;
+    transform: scaleY(0);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+/* Matches the guard `left-rail.module.css:149-154` already gives the nav rail,
+   so the two indicators behave the same way for a reader who asks for less
+   motion: the rail is present at its final state, it just does not travel. */
+@media (prefers-reduced-motion: reduce) {
+  .accent-rail::before {
+    animation: none;
+  }
+}
+
+/* ============================================================
+   MUTED SMALL TEXT CARRIES WEIGHT (2026-08-23)
+   ============================================================
+
+   ★ THE DEFECT, MEASURED ON TWO INDEPENDENT RASTERISERS. Lora is a
+   high-contrast serif: thick stems, hairline horizontals. At 14px and weight
+   400 its thin strokes render at roughly HALF the ink of the stems beside
+   them, so parts of letters simply disappear. Measured as weakest-interior-
+   stroke over strongest-stem, 62-character set, at 14px:
+
+       weight 400 -> 9 characters below 0.50, 23 below 0.60
+       weight 500 -> 2 below 0.50   (Chrome says ~0 change for H specifically)
+       weight 600 -> ZERO below 0.50
+       weight 700 -> zero
+
+   ★ IT IS NOT THE LETTER H. The owner reported H, but H is MID-TABLE. Both
+   instruments rank `7 L T i u y` at or worse than it, and the FreeType run
+   also flags `0 1 2 a j m o p`. Two of the worst are DIGITS, on a product
+   whose wallet is mostly digits. A fix aimed at H alone would have missed
+   most of it.
+
+   ★ SIZE IS NOT THE LEVER, THOUGH IT LOOKED LIKE ONE. "20px fixes it" was an
+   H-only result: across the full alphabet, 20px/400 still leaves 7 and h
+   below 0.60. Weight is the only lever that cleans up the whole set.
+
+   ★ WHY ONLY *MUTED* TEXT, when the dropout is colour-independent. Weight and
+   contrast substitute for each other. Muted text is recessive because of its
+   COLOUR, so adding weight restores the strokes without disturbing hierarchy.
+   Dark text at the same size has enough contrast that its thin strokes still
+   read — and rendered side by side, putting 600 on NON-muted captions makes a
+   metadata line compete with the card title above it. Verified by rendering
+   both. So this is deliberately scoped to the muted inks, not to the type
+   scale: a `fontWeight` on the `caption` step would have moved 303 elements
+   and flattened the hierarchy on 212 of them.
+
+   ★ ALL THREE 14px SPELLINGS, or this closes nothing. The same size is
+   written three ways in this codebase — `text-caption` (91 muted, unweighted
+   sites), `text-sm` (19) and `text-[14px]` (25). Scoping to `text-caption`
+   alone would have left 44 sites defective. 135 total.
+
+   ★ THE `:not()` GUARDS ARE LOAD-BEARING. 21 muted caption sites already set
+   an explicit weight (17 `font-semibold`, 4 `font-medium`). This selector is
+   two classes, so it outranks a single `font-*` utility and would silently
+   overrule a deliberate choice. The guards hand those back.
+
+   ★ MAINTENANCE. This is coupled to Tailwind's generated class names. A NEW
+   14px spelling, or a new muted ink step, will not be covered and must be
+   added here. That coupling is the price of not editing 135 call sites; it is
+   stated so the next reader can weigh it rather than discover it.
+
+   ★ NINE SELECTORS HERE BECOME FIFTEEN IN THE BUILD, and that is correct, not a
+   duplication bug. `@apply text-caption` further down this file (the
+   `.preview-description, .preview-rules` block) makes Tailwind copy every rule
+   whose selector contains `.text-caption`, substituting the applying class — so
+   this rule propagates to those two as
+   `.preview-description.text-ink-10:not(...)` and so on. Verified in the built
+   stylesheet. It is desirable: those elements ARE 14px captions. But it means
+   editing this selector list silently changes any `@apply text-caption`
+   consumer too, so check for new ones before assuming the blast radius is only
+   what is written here. */
+
+.text-caption.text-ink-10:not(.font-medium):not(.font-semibold):not(.font-bold),
+.text-caption.text-ink-11:not(.font-medium):not(.font-semibold):not(.font-bold),
+.text-caption.text-ink-12:not(.font-medium):not(.font-semibold):not(.font-bold),
+.text-sm.text-ink-10:not(.font-medium):not(.font-semibold):not(.font-bold),
+.text-sm.text-ink-11:not(.font-medium):not(.font-semibold):not(.font-bold),
+.text-sm.text-ink-12:not(.font-medium):not(.font-semibold):not(.font-bold),
+.text-\[14px\].text-ink-10:not(.font-medium):not(.font-semibold):not(.font-bold),
+.text-\[14px\].text-ink-11:not(.font-medium):not(.font-semibold):not(.font-bold),
+.text-\[14px\].text-ink-12:not(.font-medium):not(.font-semibold):not(.font-bold) {
+  font-weight: 600;
 }

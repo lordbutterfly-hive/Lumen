@@ -38,9 +38,26 @@ const COPY = {
    * same phrase for the same fact.
    */
   noDeliveries: 'No deliveries yet',
+  // Three market states a visitor can act on. ACTIVE deliberately has no copy: a badge on
+  // every healthy card is noise, and absence-means-healthy is only ambiguous when the
+  // failure case is silent too — which is what `stateUnavailable` exists to prevent.
+  stateUnavailable: 'Market status unavailable',
+  stateOverdue: 'Listing lapsed — may freeze soon',
+  stateClosed: 'Market closed — you cannot buy this token',
   launchTitle: 'Launch your Meritum',
   launchSub: 'Let people hold your token and pay you for your time.',
-  launchCta: 'Set up in Creator Studio →',
+  /**
+   * ★ POINTS AT THE WIZARD, NOT THE STUDIO (2026-08-23, journey run: "/creators/studio is
+   * a redundant hop"). Everyone who clicks this has no token yet, and for them the Studio
+   * renders a one-heading interstitial whose only control is "Open the launch wizard" -
+   * a page whose entire job was to repeat the button they just pressed. It also named the
+   * destination three different ways (button "Creator Studio", <title> "Creator Studio",
+   * <h1> "Launch your Meritum"). Straight to the wizard, and the label now matches what
+   * the destination calls itself. The Studio route is untouched and still reached from
+   * the header pill and the user menu, which are the paths creators who DO have a token
+   * take - for them it is a real studio, not an interstitial.
+   */
+  launchCta: 'Open the launch wizard →',
   howTitle: 'How it works',
   how1: 'Hold a creator’s token.',
   how2: 'Spend it on a question or session.',
@@ -130,8 +147,31 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
         </div>
       )}
 
+      {/* ★ A WOUND-DOWN MARKET LOOKED IDENTICAL TO A HEALTHY ONE HERE (2026-08-23).
+          The grid rendered a price and a "From $X" for FROZEN and CLOSED markets with nothing
+          saying they cannot be bought — the token page has disclosed this for months, and the
+          card a visitor meets FIRST disclosed nothing. Three states, following the same
+          discipline the delivery record already uses one block up: a real failure
+          (`UNKNOWN`) says so and is not dressed as healthy, a genuinely closed market says
+          so, and ACTIVE renders nothing rather than adding a badge to every healthy card. */}
+      {c.phase === 'UNKNOWN' ? (
+        <div
+          className="mt-3.5 rounded-control border border-dashed border-line-11 px-3.5 py-2 text-caption text-ink-14"
+          data-testid="creator-card-state"
+        >
+          {COPY.stateUnavailable}
+        </div>
+      ) : c.phase !== 'ACTIVE' ? (
+        <div
+          className="mt-3.5 rounded-control bg-surface-warn-4 px-3.5 py-2 text-caption font-semibold text-ink-warn-3"
+          data-testid="creator-card-state"
+        >
+          {c.phase === 'OVERDUE' ? COPY.stateOverdue : COPY.stateClosed}
+        </div>
+      ) : null}
+
       <div className="mt-3.5 flex items-center justify-between gap-3 border-t border-line-2 pt-3.5">
-        <span className="text-caption tabular-nums text-ink-10">From {usdWhole(usdFromHbd(c.faceHbd))} per task</span>
+        <span className="text-caption tabular-nums text-ink-10">From {usdWhole(usdFromHbd(c.fromPriceHbd))} per task</span>
         <span className="text-caption tabular-nums text-ink-14">
           Token {usdPrice(usdFromHbd(c.priceHbd))} · cap {usdCompact(usdFromHbd(c.marketCapHbd))}
         </span>
@@ -188,7 +228,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
         <div className="mb-1.5 font-serif text-lg font-semibold text-ink-2">{COPY.launchTitle}</div>
         <p className="mb-4 font-serif text-[14px] leading-[22px] text-ink-10">{COPY.launchSub}</p>
         <Link
-          href="/creators/studio"
+          href="/creators/launch"
           className="block rounded-control bg-surface-brand-12 py-3 text-center text-sm font-semibold text-ink-27 hover:bg-surface-brand-16"
         >
           {COPY.launchCta}
@@ -250,7 +290,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
                 onClick={() => setSort(s.id)}
                 aria-pressed={on}
                 style={on ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
-                className={`rounded-lg px-[15px] py-2 text-[14px] leading-[22px] font-semibold ${
+                className={`rounded-control px-[15px] py-2 text-[14px] leading-[22px] font-semibold ${
                   on ? 'bg-[var(--lum-1)] text-ink-2' : 'text-ink-10'
                 }`}
               >
@@ -300,7 +340,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
                   </div>
                 </div>
                 <div className="text-caption font-semibold text-ink-warn-3">{COPY.newNothing}</div>
-                <div className="mt-1.5 text-caption tabular-nums text-ink-10">From {usdWhole(usdFromHbd(c.faceHbd))} per task</div>
+                <div className="mt-1.5 text-caption tabular-nums text-ink-10">From {usdWhole(usdFromHbd(c.fromPriceHbd))} per task</div>
               </Link>
             ))}
           </div>

@@ -1218,8 +1218,50 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     const rows = await this.indexer.discovery(limit);
     if (rows.length === 0) return [];
 
-    const keys = rows.flatMap((r) => [kSupply(r.creator), kFace(r.creator), kRegisteredAt(r.creator)]);
+    /**
+     * ★ ONE PASS, FOUR BATCHED ROUND TRIPS, NOT PER-CREATOR (2026-08-23).
+     *
+     * This read now answers three questions it used to leave to the UI to guess at: the price,
+     * the ENTRY price, and whether the market can be bought at all. All three are batched
+     * ACROSS every creator on the page — the round-trip count is constant no matter how many
+     * creators come back, which is the property that made the old N+1 price read unacceptable.
+     *
+     * Round 1 adds `kOfferEpoch` (for the offering lookup) and the three phase inputs
+     * `kPaidUntil`/`kState`/`kRetiredAt`, which `derivePhase` needs and which
+     * `readMarket` already reads the same way (see :718-733). Rounds 2 and 3 resolve every
+     * creator's offering ids and then every offering price in two flat batches.
+     */
+    const keys = rows.flatMap((r) => [
+      kSupply(r.creator),
+      kFace(r.creator),
+      kRegisteredAt(r.creator),
+      kOfferEpoch(r.creator),
+      kPaidUntil(r.creator),
+      kState(r.creator),
+      kRetiredAt(r.creator)
+    ]);
     const [state, head] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock()]);
+
+    const epochOf = (c: string) => toU64(state[kOfferEpoch(c)]);
+    const idsState = await this.gql.getStateByKeys(
+      this.config.contractId,
+      rows.map((r) => kOfferIds(r.creator, epochOf(r.creator)))
+    );
+    const idsOf = (c: string) => parseOfferIds(idsState[kOfferIds(c, epochOf(c))]);
+    const priceKeys = rows.flatMap((r) =>
+      idsOf(r.creator).map((id) => kOfferPrice(r.creator, epochOf(r.creator), id))
+    );
+    const priceState = priceKeys.length
+      ? await this.gql.getStateByKeys(this.config.contractId, priceKeys)
+      : {};
+    // A price of 0 is deleted/unset (reads.ts), never a free offering — skipping them is what
+    // stops a removed offering from advertising a creator's entry price as $0.
+    const fromBaseUnitsOf = (c: string, faceBaseUnits: number) => {
+      const prices = idsOf(c)
+        .map((id) => toU64(priceState[kOfferPrice(c, epochOf(c), id)]))
+        .filter((pr) => pr > 0);
+      return prices.length ? Math.min(...prices, faceBaseUnits) : faceBaseUnits;
+    };
 
     return rows
       .map((r) => {
@@ -1246,6 +1288,18 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
           priceHbd: baseUnitsToHuman(priceBaseUnits),
           marketCapHbd: baseUnitsToHuman(priceBaseUnits * supply),
           faceHbd: baseUnitsToHuman(faceBaseUnits),
+          fromPriceHbd: baseUnitsToHuman(fromBaseUnitsOf(r.creator, faceBaseUnits)),
+          // Without a head we cannot date the lapse clock, so the phase is genuinely UNKNOWN
+          // rather than assumed healthy — the UI renders that as "status unavailable".
+          phase:
+            head === null
+              ? ('UNKNOWN' as const)
+              : derivePhase(
+                  state[kState(r.creator)] === STATE_CLOSED,
+                  toU64(state[kPaidUntil(r.creator)]),
+                  head,
+                  toU64(state[kRetiredAt(r.creator)]) || null
+                ),
           // "New" is measured from the LATEST registration, and only when we
           // actually know the head — guessing would put every creator in the
           // new shelf, or none.

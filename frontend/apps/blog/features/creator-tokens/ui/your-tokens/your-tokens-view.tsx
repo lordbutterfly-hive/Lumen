@@ -30,7 +30,10 @@ import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
 import { MeritumEligibilityNotice, useMeritumEligibility } from '../meritum-eligibility';
 
-const tok = (n: number) => n.toFixed(1);
+// ★ toFixed(2), matching token-market-view, token-modals and creator-studio (2026-08-23).
+// This file alone printed 30.0 where the other three print 30.00 for the same balance,
+// so the same holding read as two different numbers depending on which screen you were on.
+const tok = (n: number) => n.toFixed(2);
 
 const Unavailable: FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="rounded-card border border-dashed border-line-11 px-5 py-6 text-center text-[14px] leading-[22px] text-ink-14">{children}</div>
@@ -280,7 +283,7 @@ const YourTokensView: FC = () => {
             <div className="pb-1.5 text-[15px] leading-[24px] tabular-nums text-ink-10">Floor value: what the reserve would pay out if the market wound down</div>
           </div>
           <p className="mt-1 text-[14px] leading-[22px] text-ink-10">
-            {p.holdingsUnavailable ? 'Your holdings can’t be loaded right now.' : `You hold tokens from ${p.holdings.length} creators.`}
+            {p.holdingsUnavailable ? 'Your holdings can’t be loaded right now.' : `You hold tokens from ${p.holdings.length} ${p.holdings.length === 1 ? 'creator' : 'creators'}.`}
           </p>
 
           {reclaimable > 0 ? (

@@ -6,7 +6,6 @@ import RightRail from '@/blog/features/layouts/right-rail';
 import PageMasthead from '@/blog/features/layouts/page-masthead';
 import BasePathLink from '@/blog/components/base-path-link';
 import { useTranslation } from '@/blog/i18n/client';
-import { StreakCardNarrow } from '@/blog/features/retention/components/streak-card';
 
 /**
  * The one chrome for every `/@username/<sub-page>` route.
@@ -112,7 +111,6 @@ const ProfileSubpageShell = ({
           </BasePathLink>
         </PageMasthead>
 
-        {usesDefaultRail ? <StreakCardNarrow /> : null}
         {children}
       </main>
 

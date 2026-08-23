@@ -952,7 +952,34 @@ const CommentListItem = memo(function CommentListItem({
                               post={comment}
                               decline={parseFloat(comment.max_accepted_payout) === 0}
                             >
-                              <div className="flex items-center hover:cursor-pointer hover:text-destructive ">
+                              <div
+                                data-testid="comment-card-footer-payout"
+                                className={clsx(
+                                  /* ★★★ THE SECOND FOOTER. THE 2026-08-21 FIX ONLY REACHED THE
+                                     OTHER ONE (corrected 2026-08-23, owner: "why is the comment
+                                     payout still in the same place on the left").
+
+                                     This file renders TWO comment footers, both carrying
+                                     `data-testid="comment-card-footer"`: the `CardFooter` below,
+                                     and THIS one, which is the COLLAPSED comment's row. The owner
+                                     report ("the value needs to be on the right like on posts,
+                                     like on feeds") and the money-colour fix from the same report
+                                     were both applied to the other site only, so every collapsed
+                                     comment kept the exact layout that was reported - payout
+                                     second of three, between the vote control and the reply
+                                     count, and hovering RED like an error rather than reading as
+                                     money.
+
+                                     Same three properties as the sibling, deliberately identical:
+                                     `order-last ml-auto` puts it at the row's right edge,
+                                     `font-medium` is the requested Lora weight, and the payout ink
+                                     stops it inheriting near-black and hovering to --destructive. */
+                                  'order-last ml-auto flex items-center font-medium text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
+                                  {
+                                    'line-through opacity-50': parseFloat(comment.max_accepted_payout) === 0
+                                  }
+                                )}
+                              >
                                 {'$'}
                                 {comment.payout.toFixed(2)}
                               </div>

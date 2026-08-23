@@ -609,8 +609,35 @@ export interface CreatorSummary {
   /** Live curve price, from a batched chain read — the indexer stores no price. */
   priceHbd: number;
   marketCapHbd: number;
-  /** The creator's default posted ask price ("from $X"). */
+  /** The creator's default posted ask price. NOT the "from" price — see `fromPriceHbd`. */
   faceHbd: number;
+  /**
+   * The cheapest thing a customer can actually buy: `min(faceHbd, cheapest live offering)`.
+   *
+   * ★ THE GRID USED TO RENDER `faceHbd` AS "From $X" AND IT OVERSTATED EVERY TIME (2026-08-23).
+   * `kFace` is the REGISTRATION anchor — the "ask a question" default — while a creator's real
+   * entry price is whatever their cheapest custom offering costs. Measured live on 5 of 5
+   * customized creators, the card was always dearer than the truth (aria $25 vs $15, gray $15
+   * vs $12, dana $40 vs $35, beat $18 vs $12, wallet $25 vs $15). Overstating an entry price is
+   * the direction that costs a creator the customer.
+   *
+   * Falls back to `faceHbd` for a creator with no offerings, where the ask price genuinely IS
+   * the only task. Offerings priced 0 are deleted/unset (`reads.ts`) and are skipped.
+   */
+  fromPriceHbd: number;
+  /**
+   * Market phase, derived from chain state the same way `readMarket` derives it.
+   *
+   * ★ THE DIRECTORY LISTED FROZEN AND CLOSED MARKETS AS IF THEY WERE HEALTHY (2026-08-23).
+   * `readDiscovery` read supply/face/registeredAt and no state at all, so a wound-down market
+   * sat in the grid with a live-looking price and nothing saying it could not be bought. The
+   * token page has disclosed this for months (`token-market-view.tsx` wind-down and OVERDUE
+   * banners); the grid a visitor sees FIRST disclosed nothing.
+   *
+   * `UNKNOWN` is reserved for a failed read and must render as "status unavailable", never as
+   * healthy — the rule this type's own doc states at `MarketPhase`.
+   */
+  phase: MarketPhase;
   /** Registered within the last ~30 days, by the LATEST registration (a re-registered market is a new incarnation). */
   isNew: boolean;
 }

@@ -1039,7 +1039,18 @@ export default function MediumPostCard({
                     // the aria-label above says so in words too, since a
                     // colour-only change is not accessible on its own.
                     className={cn(
-                      'flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[#f4f5f7] hover:text-[#4b5563]',
+                      /* ★ 40x40 OF REACHABLE AREA, 24x24 OF PAINT (2026-08-23, journey run:
+                         "my first click landed 20px off and produced NOTHING - no menu, no
+                         feedback"). A near-miss on the only overflow control on an 831px card
+                         was silent. The button stays visually 24px so the action row's
+                         rhythm is unchanged; `before:-inset-2` adds 8px of invisible,
+                         clickable padding on every side, which is 24+16 = 40 exactly. Done
+                         with a pseudo-element rather than `h-10 w-10` because the latter also
+                         inflates the hover circle to 40px, which reads as a different, heavier
+                         control. */
+                      'relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors',
+                      "before:absolute before:-inset-2 before:content-['']",
+                      'hover:bg-[#f4f5f7] hover:text-[#4b5563]',
                       vote_downvoted ? 'text-[#5b6470] dark:text-[#a3adba]' : 'text-ink-action'
                     )}
                     data-testid="medium-card-overflow-trigger"
@@ -1058,6 +1069,24 @@ export default function MediumPostCard({
                   data-testid="medium-card-downvote-menu-item"
                 >
                   {vote_downvoted ? t('cards.post_card.remove_downvote') : t('cards.post_card.downvote')}
+                </DropdownMenuItem>
+                {/* ★ A MENU OF TWO HOSTILE ACTIONS IS NOT A MENU (2026-08-23, journey run:
+                    "no Mute, no Report, no Copy link, no Share, no Hide ... Downvote sitting
+                    directly above Block, which is styled destructive - two adjacent items,
+                    both hostile, one mis-click apart"). Copy link is the cheapest honest
+                    non-hostile entry: it needs no new endpoint, no new state and no
+                    permission, and it is the thing readers most often open this menu for.
+                    It sits ABOVE the separator so the destructive half stays visually its
+                    own group. */}
+                <DropdownMenuItem
+                  onSelect={() => {
+                    void navigator.clipboard
+                      ?.writeText(`${window.location.origin}${href}`)
+                      .catch(() => {});
+                  }}
+                  data-testid="medium-card-copy-link-menu-item"
+                >
+                  {t('cards.post_card.copy_link')}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 {block.available ? (

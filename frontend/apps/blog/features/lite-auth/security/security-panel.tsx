@@ -47,6 +47,8 @@ import GoogleSignIn, { googleConfigured } from '../login/google-signin';
  */
 
 const COPY = {
+  backToSettings: 'Settings',
+  backToHome: 'Home',
   title: 'Sign-in & recovery',
   intro:
     'Your Lumen account has no password. Whatever is listed here is how you get back in. So it is worth having more than one.',
@@ -112,6 +114,29 @@ function formatDate(value: string | null, t: TFunction<'common_blog', undefined>
   if (!value || Number.isNaN(new Date(value).getTime())) return '';
   return dateToShow(value, t);
 }
+
+/**
+ * ★ THE ONLY WAY OUT OF THIS ROUTE (2026-08-23, journey run: "/security is a trap").
+ *
+ * `/security` has no app shell - no nav, no sidebar - and it is reached FROM Settings and
+ * from the avatar menu, neither of which is reachable once you are here. The only exit was
+ * the logo, which drops the reader on the home feed, so leaving cost them their place
+ * entirely. A sub-page of Settings with no relationship back to its parent.
+ *
+ * Rendered in EVERY branch below, including the signed-out gate and the error state: those
+ * are the branches a stuck reader is most likely to be looking at, and a back link that
+ * only exists on the happy path is not an exit.
+ */
+const BackToSettings: FC<{ username?: string }> = ({ username }) => (
+  <a
+    href={username ? `/@${username}/settings` : '/'}
+    data-testid="security-back-link"
+    className="mb-4 inline-flex items-center gap-1.5 text-[14px] leading-[22px] font-medium text-ink-8 transition-colors hover:text-ink-2"
+  >
+    <span aria-hidden>&larr;</span>
+    {username ? COPY.backToSettings : COPY.backToHome}
+  </a>
+);
 
 const MethodRow: FC<{ method: LiteAuthMethod; t: TFunction<'common_blog', undefined> }> = ({ method, t }) => {
   const mark = METHOD_MARK[method.method] ?? { symbol: '•', bg: '#9ca3af' };
@@ -298,6 +323,7 @@ const SecurityPanel: FC = () => {
   if (!identity.isLoggedIn) {
     return (
       <div className="mx-auto max-w-[560px] p-6">
+        <BackToSettings username={user?.username} />
         {/* ★ A GATE IS STILL A PAGE, AND A PAGE NEEDS ITS NAME (A7, 2026-08-18). Measured
               live: /security and /upgrade returned ZERO headings of any level to a
               signed-out visitor, because the panel early-returns one sentence. A
@@ -322,6 +348,7 @@ const SecurityPanel: FC = () => {
     if (identity.sessionUnavailable) {
       return (
         <div className="mx-auto max-w-[560px] p-6">
+          <BackToSettings username={user?.username} />
           <p className="text-[15px] leading-[24px] text-ink-8">{COPY.sessionError}</p>
           <button
             type="button"
@@ -338,6 +365,7 @@ const SecurityPanel: FC = () => {
   if (!isLite) {
     return (
       <div className="mx-auto max-w-[560px] p-6">
+        <BackToSettings username={user?.username} />
         {/* ★ A GATE IS STILL A PAGE, AND A PAGE NEEDS ITS NAME (A7, 2026-08-18). Measured
               live: /security and /upgrade returned ZERO headings of any level to a
               signed-out visitor, because the panel early-returns one sentence. A
@@ -355,6 +383,7 @@ const SecurityPanel: FC = () => {
 
   return (
     <div className="mx-auto max-w-[560px] p-6">
+      <BackToSettings username={user?.username} />
       <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.title}</h1>
       <p className="mt-2 text-[15px] leading-[24px] text-ink-8">{COPY.intro}</p>
 

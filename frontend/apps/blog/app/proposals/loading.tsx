@@ -37,7 +37,7 @@ function SidebarSkeleton() {
  *  so the card's size/border/gradient don't change when the real one lands. */
 function MastheadSkeleton() {
   return (
-    <header className="relative mb-7 overflow-hidden rounded-panel border border-line-warn-3 border-l-[3px] border-l-line-brand-10 bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)] px-7 pb-5 pt-7">
+    <header className="relative mb-7 overflow-hidden rounded-panel border border-line-warn-3 accent-rail bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)] px-7 pb-5 pt-7">
       <Skeleton className="h-[38px] w-[300px]" />
       <div className="mt-3.5 flex flex-wrap items-center gap-3">
         <Skeleton className="h-4 w-[420px] max-w-full" />

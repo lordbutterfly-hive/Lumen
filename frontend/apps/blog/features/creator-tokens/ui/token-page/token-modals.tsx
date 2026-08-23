@@ -2,7 +2,7 @@
 
 import { FC, useState, useRef } from 'react';
 import type { Service } from '../../market/token-detail';
-import type { LiveTokenMarket } from '../../live/adapt';
+import { displayHandle, type LiveTokenMarket } from '../../live/adapt';
 import { buyQuote, sellQuote, serviceQuote, EXIT_FEE_MAX, MIN_NET_DEFAULT_TOLERANCE_BPS } from '../../market/curve';
 import { pctLabel, usdPrice, usdWhole } from '../../market/format';
 import { writeFailureMessage } from '../write-failure';
@@ -47,6 +47,16 @@ const BuyModal: FC<{
   const q = buyQuote(usd, m);
   const maxP = parseFloat(maxPrice.replace(/,/g, ''));
   const overMax = adv && Number.isFinite(maxP) && maxP > 0 && q.priceAfter > maxP; // slippage guard
+  /**
+   * ★ A SOLD-OUT MARKET DISABLED BUY AND SAID NOTHING (2026-08-23).
+   *
+   * `overMax` above is the SLIPPAGE guard and was the only reason this button could be
+   * dark for a reason other than money. When `supply >= cap` every token is issued, the
+   * contract refuses the buy, and the reader got a greyed control with the ordinary
+   * label and no explanation — indistinguishable from a bug. Seen live on a cap-reached
+   * market. `>=` not `==`: a cap that moves down must not leave the button live.
+   */
+  const soldOut = Number.isFinite(m.supply) && Number.isFinite(m.cap) && m.cap > 0 && m.supply >= m.cap;
   // The "max price per token" cap, converted to a TOTAL-cost bound for the
   // quoted count — buy.go's own doc: "slippage protection is the buyer's own
   // signed transfer.allow" on TotalDue, not on a per-token price the chain
@@ -83,8 +93,8 @@ const BuyModal: FC<{
   const blockedBySpending = affordability === 'no_resource_credits' || affordability === 'insufficient_hbd';
 
   return (
-    <ModalShell width={460} onClose={onClose} title={`Buy @${m.handle} token`}>
-      <ModalHead title={`Buy @${m.handle} token`} onClose={onClose} />
+    <ModalShell width={460} onClose={onClose} title={`Buy @${displayHandle(m.handle)} token`}>
+      <ModalHead title={`Buy @${displayHandle(m.handle)} token`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
         <label className="mb-[7px] block text-caption font-semibold text-ink-10">Amount (USD)</label>
         <div className="mb-2.5 flex items-center rounded-xl border border-line-11 px-4 py-3 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
@@ -157,7 +167,7 @@ const BuyModal: FC<{
         <MagiFuelGauge state={spending} costBaseUnits={costBaseUnits} kind={payer?.kind} className="mb-3" />
         {blockedBySpending && payer ? <MagiFundingHelp kind={payer.kind} className="mb-3" /> : null}
         <div className="mb-3 rounded-control bg-surface-16 px-3.5 py-3 text-caption text-ink-10">
-          Includes a 10% trade fee (5% to @{m.handle}, 5% to Lumen).
+          Includes a 10% trade fee (5% to @{displayHandle(m.handle)}, 5% to Lumen).
         </div>
         <p className="mb-3.5 font-serif text-caption text-ink-14">
           This token’s price floats and you can lose money. The floor ({usdPrice(m.floorUsd)}) is what the reserve would
@@ -194,12 +204,14 @@ const BuyModal: FC<{
           // not enough for this particular purchase), so the label stays short.
           // Note it does NOT block on `affordability === 'unknown'`: a failed
           // balance read must not stop a user who may well be able to afford this.
-          disabled={!Number.isFinite(usd) || usd <= 0 || overMax || busy || blockedBySpending}
+          disabled={!Number.isFinite(usd) || usd <= 0 || overMax || busy || blockedBySpending || soldOut}
           className="w-full rounded-card bg-surface-brand-12 py-[15px] text-[15px] leading-[24px] font-bold tabular-nums text-ink-27 hover:bg-surface-brand-16 disabled:opacity-50"
         >
           {busy
             ? 'Confirm in your wallet…'
-            : affordability === 'no_resource_credits'
+            : soldOut
+              ? 'Sold out — every token is issued'
+              : affordability === 'no_resource_credits'
               ? 'Add HBD on Magi first'
               : affordability === 'insufficient_hbd'
                 ? 'Not enough HBD'
@@ -288,9 +300,9 @@ const SellModal: FC<{
     <ModalShell
       width={460}
       onClose={onClose}
-      title={redeem ? `Redeem @${m.handle} token` : `Sell @${m.handle} token`}
+      title={redeem ? `Redeem @${displayHandle(m.handle)} token` : `Sell @${displayHandle(m.handle)} token`}
     >
-      <ModalHead title={redeem ? `Redeem @${m.handle} token` : `Sell @${m.handle} token`} onClose={onClose} />
+      <ModalHead title={redeem ? `Redeem @${displayHandle(m.handle)} token` : `Sell @${displayHandle(m.handle)} token`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
         <div className="mb-[7px] flex items-center justify-between">
           <label className="text-caption font-semibold text-ink-10">Amount (tokens)</label>
@@ -506,13 +518,13 @@ const AskModal: FC<{
     commissionAffordability === 'no_resource_credits' || commissionAffordability === 'insufficient_hbd';
   const canAsk = canAffordTokens && !blockedByCommission;
   return (
-    <ModalShell width={500} onClose={onClose} title={`Ask @${m.handle}`}>
-      <ModalHead title={`Ask @${m.handle}`} onClose={onClose} />
+    <ModalShell width={500} onClose={onClose} title={`Ask @${displayHandle(m.handle)}`}>
+      <ModalHead title={`Ask @${displayHandle(m.handle)}`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
         <textarea
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          placeholder={`What do you want to ask @${m.handle}?`}
+          placeholder={`What do you want to ask @${displayHandle(m.handle)}?`}
           className="h-[120px] w-full resize-y rounded-xl border border-line-11 px-4 py-3.5 font-serif text-[15px] leading-[24px] text-ink-2 outline-none focus:border-line-brand-10"
         />
         <div className="my-2 mb-3.5 text-caption text-ink-14">
@@ -522,8 +534,16 @@ const AskModal: FC<{
           This costs <strong className="tabular-nums text-ink-2">{tok(q.tokens)} tokens</strong> from your
           balance, plus a separate{' '}
           <strong className="tabular-nums text-ink-2">{usdPrice(q.commissionUsd)}</strong> platform
-          commission paid in HBD — <strong className="tabular-nums text-ink-2">{usdWhole(usd)}</strong> total. If unanswered within your deadline, you get it all
-          back.
+          commission paid in HBD — <strong className="tabular-nums text-ink-2">{usdWhole(usd)}</strong> total.
+            {/* ★ "YOU GET IT ALL BACK" WAS FALSE (2026-08-23). Verified against the contract,
+                not against the claim: core/ask.go:767 retains
+                `mMulDivCeil(commission, MissReclaimSliceBps, 10000)` with
+                MissReclaimSliceBps = 2500 (core/params.go:251) — 25% of the HELD COMMISSION
+                goes to the treasury on a miss. The credits/tokens DO return whole (returned
+                above that line, untouched). The slice applies only when `rec.asker != creator`,
+                so asking yourself is genuinely free — an edge case not worth a sentence here. */}{' '}
+            If it&rsquo;s unanswered by your deadline you can reclaim your tokens in full and 75% of the
+            commission &mdash; the platform keeps 25% so a missed deadline cannot be manufactured for free.
         </div>
         <label className="mb-2 block text-caption font-semibold text-ink-10">Answer due within</label>
         <div className="mb-4 flex items-center gap-3.5">
@@ -568,7 +588,7 @@ const AskModal: FC<{
           {busy
             ? 'Confirm in your wallet…'
             : !canAffordTokens
-              ? `You need ${tok(q.tokens)} @${m.handle} tokens — buy some first`
+              ? `You need ${tok(q.tokens)} @${displayHandle(m.handle)} tokens — buy some first`
               : blockedByCommission
                 ? `You need ${usdPrice(q.commissionUsd)} in HBD for the commission`
                 : `Send question — ${tok(q.tokens)} tokens + ${usdPrice(q.commissionUsd)} HBD`}
@@ -597,8 +617,8 @@ const SendModal: FC<{
   const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
   const valid = to.trim().length > 0 && Number.isFinite(tokens) && tokens > 0 && tokens <= held;
   return (
-    <ModalShell width={420} onClose={onClose} title={`Send @${m.handle} tokens`}>
-      <ModalHead title={`Send @${m.handle} tokens`} onClose={onClose} />
+    <ModalShell width={420} onClose={onClose} title={`Send @${displayHandle(m.handle)} tokens`}>
+      <ModalHead title={`Send @${displayHandle(m.handle)} tokens`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
         <label className="mb-1.5 block text-caption font-semibold text-ink-10">
           To (Lumen or Hive name)

@@ -31,6 +31,8 @@ catalogs:
       specifier: 1.28.4-rc1-stable.260317120349
       version: 1.28.4-rc1-stable.260317120349
 
+packageExtensionsChecksum: sha256-XKXJ4vq1+vtc/p9YUrAMeGrbVcvJBDgsQwCfFRLtaMA=
+
 importers:
 
   .:
@@ -861,6 +863,9 @@ importers:
       tailwind-merge:
         specifier: ^1.13.2
         version: 1.14.0
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
     devDependencies:
       typescript:
         specifier: 5.3.3
@@ -12748,6 +12753,7 @@ snapshots:
   '@hookform/resolvers@3.10.0(react-hook-form@7.54.2(react@18.3.0))':
     dependencies:
       react-hook-form: 7.54.2(react@18.3.0)
+      zod: 3.25.76
 
   '@humanwhocodes/config-array@0.11.14':
     dependencies:

@@ -120,3 +120,40 @@ def test_the_trust_snapshot_filter_is_not_a_single_collapsed_set() -> None:
         "the trust-snapshot edge filter no longer reads as ban-symmetric / "
         "curator-outgoing-only"
     )
+
+
+def test_no_banned_account_is_also_a_trusted_seed() -> None:
+    """A structural invariant, not a style rule.
+
+    A banned account's engagement edges are dropped in BOTH directions
+    (`build_trust_snapshot`), so as a TrustRank seed it would receive seed teleport
+    mass and propagate none of it — `graph_cred.py` then scatters that mass uniformly
+    instead of to accounts the seed endorses, diluting the anchor for every other seed.
+    Three accounts (ecency, qurator, worldmappin) sat in exactly that state until
+    2026-08-23. Nothing warned; the two lists are edited independently.
+    """
+    from recsys.config import _load_trusted_seeds
+    from recsys.core.banned import banned_authors
+
+    overlap = sorted(_load_trusted_seeds() & banned_authors())
+    assert not overlap, (
+        f"these accounts are BOTH banned and trusted seeds: {overlap}. A banned seed "
+        "takes teleport mass and anchors nothing with it — remove them from one list."
+    )
+
+
+def test_the_three_owner_named_accounts_are_out_of_the_ranker() -> None:
+    """Owner call, 2026-08-23: "remove ecency, qurator and worldmappin from algo
+    ranker, they keep taking spots".
+
+    Being on `curator_accounts.txt` alone did NOT do this — that list excludes an
+    account's engagement and deliberately leaves their own posts ranking, which is why
+    they kept taking slots. Only a ranker ban reaches `filter_eligible`.
+    """
+    from recsys.core.banned import is_banned
+
+    for account in ("ecency", "qurator", "worldmappin"):
+        assert is_banned(account), (
+            f"{account} is no longer banned from the ranker — its posts will take feed "
+            "slots again. Being on curator_accounts.txt does not prevent this."
+        )

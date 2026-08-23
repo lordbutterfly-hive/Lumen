@@ -3,7 +3,6 @@
 import { ReactNode } from 'react';
 import LeftRail from './left-rail';
 import RightRail from './right-rail';
-import { StreakCardNarrow } from '@/blog/features/retention/components/streak-card';
 
 /**
  * ★★★ THE ONE APP FRAME (F9, 2026-08-11, buildmap item 12 / P3 "container widths").
@@ -94,7 +93,6 @@ export default function PageShell({
       </aside>
 
       <main className={mainClassName}>
-        {usesDefaultRail ? <StreakCardNarrow /> : null}
         {children}
       </main>
 

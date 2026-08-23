@@ -318,7 +318,7 @@ const MeritumLaunchFlow: FC = () => {
   });
 
   return (
-    <TokenShell>
+    <TokenShell back={{ href: '/creators', label: '← All creators' }}>
       <div className="min-w-0 max-w-[940px]">
         {flow.restoredFromDraft && !live ? (
           <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-meritum-line-card bg-meritum-rail px-4 py-3 text-caption text-meritum-ink-3">

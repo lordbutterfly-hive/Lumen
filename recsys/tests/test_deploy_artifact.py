@@ -429,13 +429,23 @@ def test_a_failed_run_retries_in_retry_s_not_retry_s_plus_interval_s() -> None:
         "the scheduler does not track its next sleep explicitly, so a failed run "
         "falls back through the interval sleep and recovers in RETRY + INTERVAL"
     )
-    assert re.search(r'sleep\s+"\$NEXT_SLEEP_S"', cron), (
+    # ★ BOTH PATTERNS MUST TOLERATE COMPOSE'S `$$` ESCAPE (fixed 2026-08-23).
+    # In a compose file a literal `$` for the container shell is written `$$`, so the
+    # artifact correctly reads `sleep "$$NEXT_SLEEP_S"` — the file's own comment at
+    # :358 says so. These regexes were written against the UNESCAPED form.
+    # Consequences, both real:
+    #   * the positive assertion never matched, so this test had been RED since it was
+    #     written and was being read as a known-failure rather than a signal;
+    #   * the negative assertion never matched either, which is worse — it is the guard
+    #     against the actual bug, and against `sleep "$${RECSYS_TRUST_BATCH_INTERVAL_S`
+    #     it was INERT. The mutant this docstring describes would have passed.
+    assert re.search(r'sleep\s+"\$\$?NEXT_SLEEP_S"', cron), (
         "the loop does not sleep on the tracked variable"
     )
     # The loop must NOT sleep the interval literal as a statement of its own —
     # that is precisely the bug: it re-applies on the retry pass.
     assert not re.search(
-        r'^\s*sleep\s+"\$\{RECSYS_TRUST_BATCH_INTERVAL_S', cron, re.MULTILINE
+        r'^\s*sleep\s+"\$\$?\{RECSYS_TRUST_BATCH_INTERVAL_S', cron, re.MULTILINE
     ), (
         "the interval is slept directly inside the loop, so a retry waits "
         "RETRY + INTERVAL — the exact defect this test exists for"

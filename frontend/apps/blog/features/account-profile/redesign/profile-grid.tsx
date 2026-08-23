@@ -1,7 +1,6 @@
 import LeftRail from '@/blog/features/layouts/left-rail';
 import RightRail from '@/blog/features/layouts/right-rail';
 import ProfileMain from './profile-main';
-import { StreakCardNarrow } from '@/blog/features/retention/components/streak-card';
 
 /**
  * Profile page shell — the same fixed 3-column grid as the homepage's
@@ -24,7 +23,6 @@ export default function ProfileGrid() {
       </aside>
 
       <main className="min-w-0">
-        <StreakCardNarrow />
         <ProfileMain />
       </main>
 

@@ -194,11 +194,41 @@ export async function readMagiSpendingPower(gqlUrl: string, rawAccount: string):
   //
   // BOTH null is still a genuine unknown and still throws — that is a node that
   // told us nothing, which must never be rendered as "you have no money".
+  // ★★★ BOTH NULL IS "NO MAGI ACCOUNT", NOT "WE COULD NOT CHECK" (2026-08-23).
+  //
+  // This threw, and the paragraph above used to argue that both-null is "a node that told
+  // us nothing". That was true when it was written and is not true here, because every way
+  // the node can fail to answer has ALREADY thrown by this line: no endpoint, no account,
+  // a non-2xx (`!res.ok`), and any GraphQL `errors` entry. Reaching this point means the
+  // node returned HTTP 200 with a well-formed body and no errors — it answered, and its
+  // answer is that it holds no record for this account. For a ledger that is a definite
+  // zero, not an unknown.
+  //
+  // The distinction is not academic; it was measured live. A brand-new lite account with no
+  // Magi account at all took the throw, which lands in `useMagiSpendingPower` as
+  // `power === null`, which makes `affordability()` return 'unknown', which is a deliberate
+  // FAIL-OPEN — so `blockedBySpending` stayed false, the Buy button stayed ENABLED, and
+  // `MagiFundingHelp` (the @vsc.gateway panel written for exactly this person) never
+  // rendered. A user with nothing was invited to sign a transaction that cannot succeed.
+  //
+  // That is the identical defect the 2026-08-09 pass fixed for the balance-null case, on
+  // the identical reasoning: the node answered, so report the answer. This extends it to
+  // the last branch that still guessed.
+  //
+  // ★ THE FAIL-OPEN ITSELF IS KEPT, AND MUST BE. A genuinely failed READ must never block
+  // someone who may well be able to pay — that is why the throws above remain throws. What
+  // changes is only that a definite "no such account" stops being routed through the
+  // unknown path. `rc.amount: 0` then trips `no_resource_credits`, which disables Buy and
+  // renders the funding help — the honest outcome for an unfunded account.
   if (
     (balanceNode === null || balanceNode === undefined) &&
     (rcNode === null || rcNode === undefined)
   ) {
-    throw new Error(`Magi balance read: the node has no record at all for ${account}`);
+    return {
+      balance: { account, hbdBaseUnits: 0, blockHeight: 0 },
+      rc: { account, amount: 0, maxRcs: 0 },
+      cannotTransact: true
+    };
   }
   if (rcNode === null || rcNode === undefined) {
     throw new Error(`Magi balance read: the node has no resource-credit record for ${account}`);

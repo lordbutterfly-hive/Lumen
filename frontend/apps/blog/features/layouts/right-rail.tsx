@@ -2,7 +2,6 @@
 
 import { getMarketDataSource } from '@/blog/features/prediction-market/lib/market-data-source';
 import MarketWidget from '@/blog/features/prediction-market/market-widget';
-import { StreakCard } from '@/blog/features/retention/components/streak-card';
 import Topics from './right-rail/topics';
 
 const CARD_CLASS =
@@ -38,14 +37,14 @@ export default function RightRail() {
   const marketAvailable = getMarketDataSource() !== null;
   return (
     <aside className="flex w-full flex-col gap-5 font-sans text-foreground" data-testid="right-rail">
-      {/* Top of the rail, and it brings its own card chrome — it renders nothing at all
-          for a signed-out reader or before the summary lands, and an empty bordered box
-          would be worse than an absent one.
-
-          ★ THE DAILY GOAL WENT WITH IT (owner, 2026-08-18). This was `TodayCard`: a
-          goal ring, a goal picker, a deadline, a freeze count. It is the streak and the
-          rule that produces it, and nothing else. */}
-      <StreakCard />
+      {/* ★ THE STREAK CARD IS GONE (owner, 2026-08-23: "we have it already on left side,
+          we dont need it there"). It was not just redundant, it CONTRADICTED the sidebar:
+          the same viewport showed "Ember - rank 2 of 9" on the left and "STREAK 0 days -
+          post or comment today and it goes to 1" here, ~200px apart, implying they measure
+          the same thing. Rank is the durable signal, it is on every page, and it survives
+          a missed day, so the weaker of the two was cut. NOT relocated - see the component
+          file. If daily-activity feedback is wanted later it belongs on the profile rank
+          card, where the rank explanation already lives. */}
       {marketAvailable ? (
         <div className={CARD_CLASS}>
           <MarketWidget />

@@ -35,3 +35,24 @@ bpcvoter1
 bpcvoter2
 bpcvoter3
 bpcvoter4
+
+# --- owner call 2026-08-23: "remove ecency, qurator and worldmappin from algo
+# ranker, they keep taking spots".
+#
+# These three were ONLY on curator_accounts.txt, which excludes an account's
+# ENGAGEMENT and deliberately leaves their own posts ranking normally. That is why
+# they kept taking feed slots: nothing was stopping their posts, only their votes.
+# A ranker ban is the mechanism that stops the posts (`filter_eligible`).
+#
+# THIS IS THE RANKER LIST, NOT THE SITE-WIDE ONE. It removes them from ranked feeds
+# and from every engagement signal. It does NOT hide them from Lumen: their profiles
+# and their posts still load when linked to directly, because that is governed by the
+# frontend's REACT_APP_BANNED_AUTHORS, which they are deliberately NOT on. They are
+# service/curation accounts, not trolls.
+#
+# They were also removed from trusted_seeds.txt in the same change: an account whose
+# edges are dropped in both directions cannot anchor TrustRank, and leaving them there
+# would have kept handing them seed teleport mass they could not propagate.
+ecency
+qurator
+worldmappin

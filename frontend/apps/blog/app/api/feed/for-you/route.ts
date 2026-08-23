@@ -520,18 +520,74 @@ function trimFeedEntries(entries: Entry[], viewer: string): Entry[] {
  * added by someone who has not read this file. A branch that forgets to trim does
  * not fail loudly — it just quietly ships a megabyte again.
  */
+/**
+ * ★★★ THE RANKING METADATA REACHES THE CLIENT (2026-08-23).
+ *
+ * recsys computes a lane and a score for EVERY post it returns
+ * (`service/app.py`'s `serialize_scored`: `source`, and
+ * `score{vote_norm,rep_norm,organic,final}`), and this route already rebuilds
+ * them into `lanes` further down. Until now that array went to
+ * `recordFeedServe` and into the `lumen_feed_store.lanes` column and was then
+ * DROPPED before the response. So the browser received bare Hive posts and
+ * nothing could answer "why is this post first?" — not a debugger, not an
+ * explanation string, not an A/B test of a lane budget. The data existed and
+ * was thrown away one line early.
+ *
+ * ★ JOINED ON `key`, NOT ON INDEX, AND THAT IS THE WHOLE CARE HERE. `lanes` is
+ * built index-aligned with the BUILT page, and `FeedLane.rank`'s own doc says
+ * "the served position can differ". By the time a page is served it has been
+ * through `filterBannedEntries`, a `.slice(0, limit)` and possibly the viewer's
+ * block filter. Attaching by position would therefore hand entries their
+ * NEIGHBOUR's score on any page where something was dropped — a wrong number
+ * that looks perfectly plausible, which is worse than no number. `key` is
+ * `author/permlink` and survives every one of those filters.
+ *
+ * ★ `rank` IS REPORTED AS BUILT, not renumbered to the served position. It is
+ * the ranker's own output and renaming it to something else would misreport
+ * what the ranker decided — see the standing rule that relabelling a number
+ * re-opens its proof.
+ *
+ * ★ NO `reason` FIELD. The audit that asked for this wanted `{score, lane,
+ * reason}`. recsys does not compute a reason — grepped, there is no
+ * per-candidate justification anywhere in the ranker — so inventing one here
+ * would be fabricating an explanation the system never produced.
+ */
+type RankedEntry = Entry & {
+  _rank?: { lane: string | null; score: number; rank: number; engagers: number | null };
+};
+
+function attachLanes(entries: Entry[], lanes?: FeedLane[] | null): Entry[] {
+  if (!lanes || lanes.length === 0) return entries;
+  const byKey = new Map(lanes.map((lane) => [lane.key, lane]));
+  return entries.map((entry) => {
+    const lane = byKey.get(`${entry.author}/${entry.permlink}`);
+    if (!lane) return entry;
+    const withRank: RankedEntry = {
+      ...entry,
+      _rank: { lane: lane.source, score: lane.score, rank: lane.rank, engagers: lane.engagers }
+    };
+    return withRank;
+  });
+}
+
 function feedJson(
-  body: Record<string, unknown> & { entries: Entry[] },
+  body: Record<string, unknown> & { entries: Entry[]; lanes?: FeedLane[] | null },
   viewer: string,
   init?: { status?: number }
 ): NextResponse {
+  // `lanes` is consumed here and must never be echoed as a top-level array: it
+  // would double the payload this function exists to keep small.
+  const { lanes, ...rest } = body;
   if (!TRACE_FILE) {
-    return NextResponse.json({ ...body, entries: trimFeedEntries(body.entries, viewer) }, init);
+    return NextResponse.json(
+      { ...rest, entries: attachLanes(trimFeedEntries(body.entries, viewer), lanes) },
+      init
+    );
   }
   const t0 = performance.now();
-  const trimmed = trimFeedEntries(body.entries, viewer);
+  const trimmed = attachLanes(trimFeedEntries(body.entries, viewer), lanes);
   const t1 = performance.now();
-  const res = NextResponse.json({ ...body, entries: trimmed }, init);
+  const res = NextResponse.json({ ...rest, entries: trimmed }, init);
   mark('trim', t1 - t0);
   mark('serialise', performance.now() - t1);
   return res;
@@ -989,6 +1045,7 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
 
     return feedJson({
       entries,
+      lanes: stored.lanes,
       source: 'recsys',
       ranked: stored.ranked,
       served: entries.length,
@@ -1096,7 +1153,7 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // branch that hands a page to a person.
     if (!probe) recordFeedServe(viewer, served, outcome.value.lanes);
     return feedJson({
-      entries: served, source: 'recsys', ranked: outcome.value.ranked,
+      entries: served, lanes: outcome.value.lanes, source: 'recsys', ranked: outcome.value.ranked,
       served: served.length, cache: 'miss',
       // This branch never set `personalised` and relied on the client inferring
       // it from `source === 'recsys'`. It is stated now because the swap offer

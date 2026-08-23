@@ -30,7 +30,6 @@ hiveio
 splinterlands
 leofinance
 peakd
-ecency
 magi.network
 
 # ── Individuals from the GHOST oracle list ──────────────────────────────────
@@ -95,6 +94,8 @@ davidpena21
 avdesing
 oadissin
 roswelborges
-worldmappin
-qurator
 hivewatchers
+# ecency, qurator and worldmappin were REMOVED 2026-08-23: they are now on
+# banned_authors.txt (owner: they kept taking feed spots). A banned account's
+# edges are dropped in both directions, so as a seed it would receive teleport
+# mass and propagate none of it, diluting the anchor for every other seed.

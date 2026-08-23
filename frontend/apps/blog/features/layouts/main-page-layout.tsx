@@ -7,7 +7,6 @@ import { CommunitiesSelect } from '@/blog/features/layouts/communities-select';
 import PostSelectFilter from '@/blog/features/layouts/post-select-filter';
 import { useTranslation } from '@/blog/i18n/client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
-import { StreakCardNarrow } from '@/blog/features/retention/components/streak-card';
 
 /**
  * ★ THE LUMEN SHELL, NOT THE INHERITED DENSE GRID (owner report, 2026-08-08).
@@ -84,7 +83,6 @@ const MainPageLayout = ({
       </aside>
 
       <main className="min-w-0">
-        <StreakCardNarrow />
         {hidePostsHeader ? null : (
           <div className="mb-5 flex w-full items-center justify-between" translate="no">
             <div className="mr-2 flex w-[320px] flex-col">

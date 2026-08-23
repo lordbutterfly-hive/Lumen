@@ -3,6 +3,8 @@
 import { FC } from 'react';
 import { Link, Skeleton } from '@hive/ui';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useTokenAccounts } from '../live/use-token-accounts';
 import { useTokenPriceChip } from '../live/use-token-price-chip';
 import { usdPrice } from '../market/format';
 import { CreatorTokenRocket } from './creator-token-rocket';
@@ -10,7 +12,12 @@ import { CreatorTokenRocket } from './creator-token-rocket';
 // TODO i18n — staged copy, same precedent as the rest of this feature.
 // ★ "Meritum tokens" is the product name as of 2026-08-16 (owner) — the left
 // rail says the same. Singular here only because a creator launches exactly one.
-const COPY = { launch: 'Launch your Meritum token' };
+// ★ ONE LABEL FOR ONE ACTION (2026-08-23). This read 'Launch your Meritum token' while the profile card read
+// 'Launch your token' and the /creators rail read a third thing — three names for the same button.
+// `Launch your Meritum` is the phrase the studio's own <h1> and creators-view's
+// launchTitle already use, and it is SHORTER than what was here, so no layout risk.
+// A Meritum is a token; saying both was redundant.
+const COPY = { launch: 'Launch your Meritum' };
 
 /**
  * The header's creator-token entry point (design brief §1) — owner ruling:
@@ -43,10 +50,30 @@ const COPY = { launch: 'Launch your Meritum token' };
  */
 const HeaderTokenPill: FC = () => {
   const identity = useSessionIdentity();
+  /**
+   * ★★★ THE FOURTH SITE OF THE SAME IDENTITY DRIFT (2026-08-23).
+   *
+   * `useSessionIdentity()` carries {isLoggedIn, username} and NO wallet DID, so this read
+   * asked for the price under `toDid(<lumen display name>)` — an account the contract has
+   * never keyed anything by. A wallet-backed creator with a live, publicly tradeable market
+   * therefore saw the "Launch your Meritum" CTA in their own header while strangers could
+   * buy the token. Live-confirmed as evm4 by a decorrelated session.
+   *
+   * The same wrong-key-returns-zero bug has now been fixed in four places: holdings
+   * (`use-live-token-market.ts` positionAccount), the public profile, the Studio
+   * (`use-live-studio.ts` creatorAccount) and here. The expression is deliberately
+   * IDENTICAL at all of them — one greppable shape is what makes the next instance
+   * findable, and three variants of the same idea is how this class survived four rounds.
+   */
+  const { user } = useUserClient();
+  const isLite = user.account_tier === 'lite';
+  const tokenAccounts = useTokenAccounts();
+  const signingAccount = tokenAccounts.accounts.find((a) => a.canSign) ?? null;
+  const priceAccount = (isLite ? signingAccount?.id : identity.username) ?? identity.username;
   // Hooks cannot be conditional — always called, with an empty handle while
   // signed out (use-token-price-chip.ts treats that as 'unknown' and this
   // component never renders on 'unknown' anyway).
-  const chip = useTokenPriceChip(identity.isLoggedIn ? identity.username : '');
+  const chip = useTokenPriceChip(identity.isLoggedIn ? priceAccount : '');
 
   if (!identity.isLoggedIn) return null;
   if (chip.status === 'unknown') return null;

@@ -15,7 +15,8 @@ const COPY = {
   buy: 'Buy',
   launchTitle: 'No Meritum yet',
   launchBody: 'Let people hold your token and pay you for your time.',
-  launchCta: 'Launch your token'
+  // Unified 2026-08-23 with header-token-pill and the studio h1 — see that file's note.
+  launchCta: 'Launch your Meritum'
 };
 
 /**

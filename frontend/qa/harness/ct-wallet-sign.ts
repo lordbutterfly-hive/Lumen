@@ -53,11 +53,19 @@ import {
   createOfferingPayload,
   askPayload
 } from '../../apps/blog/features/creator-tokens/lib/vsc/op-builders';
+import { rcLimitForAction } from '../../apps/blog/features/creator-tokens/lib/vsc/rc-budget';
 
 const GQL = 'https://magi-test.techcoderx.com/api/v1/graphql';
 const CONTRACT = 'vsc1BcaD8JrwJPAAN5cU1cHKCBdZrd7jz2WGt8';
 const NET_ID = 'vsc-testnet';
-const RC_LIMIT = 30_000;
+// ★ NOT A STATIC 30,000 (fixed 2026-08-23). `rc_limit` is RESERVED against the same
+// HBD the call spends from, so a flat 30,000 reserves 30 HBD for every action and made
+// this harness warn "balance below rc_limit" — and refuse to submit — for any wallet
+// under 30 HBD that could comfortably afford the actual call. That is the exact static
+// limit the client dropped in favour of `rcLimitForAction`; the harness kept it and so
+// stopped matching what the app really sends. A harness that declares a different
+// rc_limit than the client is not testing the client.
+const rcLimitFor = (action: string) => rcLimitForAction(action);
 
 const argv = process.argv.slice(2);
 const arg = (name: string, fallback?: string): string => {
@@ -122,8 +130,24 @@ function payloadFor(action: string): Record<string, unknown> {
       return registerPayload(Number(arg('face', '25000')), Number(arg('cap', '30')));
     case 'createOffering':
       return createOfferingPayload(arg('title'), Number(arg('price', '15000')));
-    case 'ask':
-      return askPayload(arg('creator'), Number(arg('offering', '1')), arg('hash', ''.padEnd(64, 'a')));
+    case 'ask': {
+      // ★ THE ARGUMENT ORDER WAS STALE AND THIS HANDLER COULD NEVER HAVE WORKED
+      // (fixed 2026-08-23, found by a decorrelated session trying to seed an ask).
+      // `askPayload(creator, contentHash, deadlineBlocks, maxCreditsBaseUnits, offeringId?)`.
+      // This passed the OFFERING as `contentHash` (a number, which
+      // `assertHashField` refuses outright), the HASH as `deadlineBlocks`, and
+      // omitted `maxCredits` entirely — which `core.Ask` requires and refuses when
+      // absent, precisely so a creator cannot spike `face` between signing and
+      // execution. Every field after the first was wrong.
+      const offering = arg('offering', '');
+      return askPayload(
+        arg('creator'),
+        arg('hash', ''.padEnd(64, 'a')),
+        Number(arg('deadlineBlocks', String(28_800))),
+        Number(arg('maxCredits', '50000')),
+        offering === '' ? undefined : Number(offering)
+      );
+    }
     default:
       throw new Error(`ct-wallet-sign: unsupported --action ${action}. Add it here if a charter needs it.`);
   }
@@ -144,6 +168,7 @@ function payloadFor(action: string): Record<string, unknown> {
   const hbd = state.data?.getAccountBalance?.hbd ?? 0;
   console.log(`identity : ${did}`);
   console.log(`balance  : ${hbd} base units  |  nonce: ${nonce}`);
+  const RC_LIMIT = rcLimitFor(action);
   if (hbd < RC_LIMIT) {
     // RC IS the HBD balance for a did:pkh account — there is no free tier, so a
     // thin balance fails at ingest with "not enough RCS available" and nothing

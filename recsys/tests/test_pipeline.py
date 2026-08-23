@@ -3310,7 +3310,19 @@ def test_curator_engagement_is_invisible_but_their_posts_still_rank() -> None:
     # HALF TWO — a curator's own post is still eligible. This is what makes the
     # rule different from a ban, and it is the half most likely to be broken by
     # someone 'tidying up' by reusing `is_banned`.
-    curator_post = make_attributed_post(author="qurator", permlink="a-real-compilation")
+    # ★ MUST BE A CURATOR THAT IS NOT ALSO BANNED (2026-08-23). This read `qurator`
+    # until ecency/qurator/worldmappin were moved onto the ranker ban list (owner: they
+    # kept taking feed spots). A banned account's post is correctly dropped by
+    # `filter_eligible`, so the assertion below started failing for the RIGHT reason
+    # while still describing the right RULE. Pick the example from the accounts the rule
+    # actually applies to, and assert that it does, so this cannot rot silently again.
+    from recsys.core.banned import is_banned
+
+    plain_curators = sorted(c for c in curators if not is_banned(c))
+    assert plain_curators, "every curator is banned — the curator/ban distinction is gone"
+    curator_author = plain_curators[0]
+    assert not is_banned(curator_author)
+    curator_post = make_attributed_post(author=curator_author, permlink="a-real-compilation")
     out = filter_eligible(
         [Candidate(post=curator_post, source=CandidateSource.IN_NETWORK)],
         ViewerProfile(account="reader"),
@@ -3323,7 +3335,7 @@ def test_curator_engagement_is_invisible_but_their_posts_still_rank() -> None:
         "a curator's own post was hidden — that is a BAN, not the engagement "
         "exclusion the owner asked for"
     )
-    assert is_curator("QURATOR"), "matching must be case-insensitive"
+    assert is_curator(curator_author.upper()), "matching must be case-insensitive"
 
 
 def test_the_pipeline_actually_excludes_curators_from_every_engagement_signal() -> None:

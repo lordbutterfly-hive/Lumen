@@ -93,7 +93,7 @@ export default function MeritumIntro() {
      * only wrong as a full-bleed page surface.
      */
     <section
-      className={`${styles.card} border border-line-warn-3 border-l-[3px] border-l-line-brand-10 bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)]`}
+      className={`${styles.card} border border-line-warn-3 accent-rail bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)]`}
     >
       {/* `mt-rise` is the 620ms entrance, transform + opacity only, and it is
           on the CONTENT rather than the card so the card's own border does not
@@ -124,8 +124,20 @@ export default function MeritumIntro() {
             LIVE badge added here — `MeritumTicker` renders its own behind
             `showLive` (default on), so adding one would double it. The label
             goes through `t()` because the badge is chrome; the 13 items inside
-            the tape are owner-locked verbatim copy and stay in the component. */}
-        <MeritumTicker className="mt-[30px]" liveLabel={t('meritum.intro.live')} />
+            the tape are owner-locked verbatim copy and stay in the component.
+
+            ★★★ THE BADGE SAYS "EXAMPLE", NOT "LIVE" (2026-08-23, P0 carried across
+            three audit runs). The 13 items are FICTIONAL and fixed — @biggusdickus,
+            @pontiuspilate, @naughtiusmaximus and their dollar figures are invented
+            example copy, and the real Meritum data source returns nothing on this
+            build. A `● LIVE` badge above them asserted that a reader was watching
+            real creators earn real money in real time. That is not a wording nit; it
+            is a fabricated activity feed, and it sat directly above a "Meritum isn't
+            available on this build yet" notice one section down on the same screen.
+            The items themselves are owner-locked verbatim and are NOT touched. The
+            label is the one string here that is chrome rather than owner copy, and it
+            is a prop precisely so it can tell the truth. */}
+        <MeritumTicker className="mt-[30px]" liveLabel={t('meritum.intro.example')} />
 
         <p className="mt-6 max-w-[44ch] font-serif text-18 text-meritum-ink-3">{t('meritum.intro.subhead')}</p>
 

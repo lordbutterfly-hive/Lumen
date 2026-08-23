@@ -2,6 +2,7 @@
 
 import { ReactNode } from 'react';
 import LeftRail from '@/blog/features/layouts/left-rail';
+import BasePathLink from '@/blog/components/base-path-link';
 
 /**
  * Shared three-column shell for the creator-token screens — identical grid to
@@ -23,7 +24,27 @@ import LeftRail from '@/blog/features/layouts/left-rail';
  * key off the SAME `rightRail` truthiness, so a caller that passes one is unchanged
  * and a caller that never did simply stops paying for it.
  */
-export default function TokenShell({ children, rightRail }: { children: ReactNode; rightRail?: ReactNode }) {
+/**
+ * ★ THE BACK SLOT (A5, 2026-08-23). Every creator-token route rendered this shell with no
+ * way out except the logo, which drops the reader on the home feed and costs them their
+ * place — the same trap `/security` had. One slot here gives the token page, the studio and
+ * the launch wizard a consistent exit instead of three bespoke ones.
+ *
+ * Optional, and absent by default, so no existing caller changes shape. Verified before
+ * adding: none of the three routes carries a `PageMasthead` or any other shell-level back,
+ * so this produces exactly ONE back affordance per route and never a second one beside an
+ * existing control. The launch wizard's in-wizard Back moves between STEPS; this leaves the
+ * feature, and the two do not collide.
+ */
+export default function TokenShell({
+  children,
+  rightRail,
+  back
+}: {
+  children: ReactNode;
+  rightRail?: ReactNode;
+  back?: { href: string; label: string };
+}) {
   return (
     <div
       className={`relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 ${
@@ -37,7 +58,18 @@ export default function TokenShell({ children, rightRail }: { children: ReactNod
       <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
-      <main className="min-w-0">{children}</main>
+      <main className="min-w-0">
+        {back ? (
+          <BasePathLink
+            href={back.href}
+            className="mb-4 inline-block font-sans text-[14px] leading-[22px] font-semibold text-ink-brand-6 transition-colors hover:text-ink-brand-4"
+            data-testid="creator-back"
+          >
+            {back.label}
+          </BasePathLink>
+        ) : null}
+        {children}
+      </main>
       {rightRail ? (
         <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">{rightRail}</aside>
       ) : null}

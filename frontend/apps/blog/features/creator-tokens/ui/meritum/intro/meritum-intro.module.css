@@ -31,7 +31,21 @@
  * does not round the border the card draws, so dropping it leaves a square
  * 1px outline around a rounded fill.
  */
+/**
+ * ★ `position: relative` IS FOR THE ACCENT RAIL (2026-08-23), and it is required.
+ *
+ * This card is the one `.accent-rail` call site that was `position: static`. An
+ * absolutely-positioned `::before` resolves against the nearest POSITIONED
+ * ancestor, so without this the rail would hang off whatever shell happens to be
+ * relative and land somewhere else on the page entirely — a silent
+ * mispositioning, not an error.
+ *
+ * Verified safe before adding: this module declares no other `position`, the JSX
+ * has no absolute/sticky/fixed descendants to recapture, and `mt-rise` (the 620ms
+ * entrance) sits on the inner content div, not on this box.
+ */
 .card {
+  position: relative;
   border-radius: 18px;
   clip-path: inset(0 round 18px);
 }

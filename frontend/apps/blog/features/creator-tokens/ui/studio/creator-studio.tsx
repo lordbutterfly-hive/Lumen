@@ -1,6 +1,7 @@
 'use client';
 
-import { displayHandle } from '../../live/adapt';
+import { cn } from '@ui/lib/utils';
+import { displayHandle, dueLabelFor } from '../../live/adapt';
 import { FC, useState, useEffect, useRef } from 'react';
 import { useLiveStudio, type LiveStudio } from '../../live/use-live-studio';
 import { MarketLoading, MarketReadFailed, MarketSessionUnavailable, MarketUnavailable } from '../../live/market-states';
@@ -166,6 +167,8 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
   // is packed as a pipe-delimited string (core/ask.go:157), so one stray
   // pipe would re-partition it. maxLength handles the length bound; this
   // handles the character the browser cannot.
+  const dueLabel = dueLabelFor(ask);
+  const urgent = ask.status === 'awaiting' && ask.deadlineAt - Date.now() < 24 * 3600 * 1000;
   const answerHasPipe = text.includes('|');
   const answerValid = text.trim().length > 0 && text.trim().length <= MAX_HASH_LEN && !answerHasPipe;
   return (
@@ -178,6 +181,37 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
       <div className="mb-3 rounded-control border border-line-9 bg-surface-16 px-3.5 py-3 text-caption text-ink-8">
         Reference <strong className="font-mono">{ask.contentHash || '—'}</strong> · from @{displayHandle(ask.asker)}
       </div>
+      {/* ★ THE DEADLINE, ON THE SCREEN WHERE IT IS DECIDED (A14, 2026-08-23).
+          This modal asks a creator to commit to a job and showed them no clock at all,
+          while `ask.deadlineBlock` was already on the object it hands to `studio.answer()`
+          and `ask.deadlineAt` was already being formatted for the portfolio row. Missing
+          the deadline is not free: the buyer reclaims and the contract records a miss
+          against this creator. Same formatter as the portfolio (`dueLabelFor`), so the two
+          surfaces cannot drift.
+
+          `dueLabelFor` returns undefined once the deadline has passed, which is the case
+          worth saying out loud rather than rendering nothing — a creator looking at a job
+          they can no longer bank should be told so before they do the work. */}
+      {dueLabel ? (
+        <div
+          className={cn(
+            'mb-3 rounded-control px-3.5 py-2.5 text-caption font-semibold',
+            urgent ? 'bg-surface-warn-4 text-ink-warn-3' : 'bg-surface-16 text-ink-8'
+          )}
+          data-testid="answer-modal-deadline"
+        >
+          {dueLabel}
+          {urgent ? ' — under a day left' : null}
+        </div>
+      ) : (
+        <div
+          className="mb-3 rounded-control bg-surface-warn-4 px-3.5 py-2.5 text-caption font-semibold text-ink-warn-3"
+          data-testid="answer-modal-deadline"
+        >
+          The deadline has passed. The buyer can reclaim their tokens, and marking this
+          delivered may no longer release the escrow.
+        </div>
+      )}
       <p className="mb-3 text-caption text-ink-10">
         Arrange and deliver the work with @{displayHandle(ask.asker)} however you normally would. Marking it delivered
         releases the escrow to you — and the buyer then rates it, which is what your token’s reputation is
@@ -491,7 +525,7 @@ const CreatorStudio: FC = () => {
   // `isLite` only says which KIND of account it is.
   if (studio.isLite && !studio.canSign) {
     return (
-      <TokenShell>
+      <TokenShell back={{ href: '/creators', label: '← All creators' }}>
         <div className="mx-auto max-w-[560px] pt-16 text-center">
           <h1 className="font-serif text-3xl font-semibold text-ink-2">Creator Studio</h1>
           <p className="mt-3 font-serif text-[15px] leading-[24px] text-ink-10">
@@ -534,12 +568,19 @@ const CreatorStudio: FC = () => {
   // wizard is the whole studio in that state.
   if (!market) {
     return (
-      <TokenShell>
+      <TokenShell back={{ href: '/creators', label: '← All creators' }}>
         <div className="mx-auto max-w-[560px] pt-16 text-center">
           <h1 className="font-serif text-3xl font-semibold text-ink-2">Launch your Meritum</h1>
+          {/* ★ "FREE TO LAUNCH" ALONE READ AS A BAIT (2026-08-23, journey run). It is true,
+              and so is "About $10 a month" at step 1 of the wizard and "~$10/month" in the
+              Subscription card below - the reader met the free claim first and the cost
+              second, on a different screen. Both facts now sit in the same breath, which
+              costs one sentence and removes the reveal. Figures match `term_listed_value`
+              ("About $10 a month.") and the Subscription card verbatim; if either moves,
+              move all three. */}
           <p className="mt-3 font-serif text-[15px] leading-[24px] text-ink-10">
             One token, bound to your account, that trades on a live market and is spent on your services. Free
-            to launch.
+            to launch, then about $10 a month to stay listed. First month’s on the house.
           </p>
           <a
             href="/creators/launch"
@@ -596,7 +637,7 @@ const CreatorStudio: FC = () => {
   ) : null;
 
   return (
-    <TokenShell>
+    <TokenShell back={{ href: '/creators', label: '← All creators' }}>
       <div className="pt-[26px]">
         <div className="mb-1 flex items-center gap-3">
           <span className="h-11 w-11 rounded-card bg-surface-28" />
