@@ -55,6 +55,7 @@ from recsys.core.exploration import (
 from recsys.core.flooding import cap_oon_flooding
 from recsys.core.graph_cred import compute_graph_cred
 from recsys.core.popular import insert_popular, select_popular
+from recsys.core.freshness import promote_fresh
 from recsys.core.rerank import _FeedCounters, rerank
 from recsys.core.ring import detect_rings, ring_member_set
 from recsys.core.scoring import (
@@ -2415,6 +2416,34 @@ def rank_feed(
     # which is the correct charge (none) either way — there is nothing sourced
     # EXPLORATION in the feed for the charging step below to find.
     spliced_ranked: list[ScoredCandidate] = []
+    # ★★★ THE FRESHNESS SEAT (2026-08-23). An audit measured a median served
+    # post age of 50.6 hours, with one post under six hours old in thirty.
+    #
+    # ★★ IT RUNS BEFORE THE TWO SPLICING LANES, AND THAT ORDER IS A BUG FIX.
+    # It was written to run AFTER them, on the reasoning that the last lane to
+    # touch the feed cannot have its own seat stolen. That broke
+    # `test_exploration_pool_larger_than_top_k_loses_no_picks` and two others:
+    # promoting a post from index 22 to index 6 shifts everything between them
+    # down by one, so the exploration seat's newcomer moved from 13 to 14. My
+    # "length-preserving permutation" property was true and NOT ENOUGH --
+    # exploration's and popular's guarantees are POSITIONAL, and a permutation
+    # can still move somebody else's fixed index.
+    #
+    # So this runs first and takes the softer guarantee. `insert_exploration`
+    # and `insert_popular` splice afterwards onto their exact reserved indices,
+    # which is what their tests assert; a later `insert_popular` promotion into
+    # 0-indexed 5 can push this seat from 6 to 7, and that is fine. This lane
+    # promises "a recent post appears early on page one", not a fixed index.
+    # Their promises are older, narrower and tested; mine yields.
+    #
+    # ★ IT CANNOT UNDO ANY FILTER, which is what makes it safe anywhere in this
+    # sequence: `promote_fresh` returns a permutation, never adding or dropping
+    # a post, so moderation, the vouch gate, the seen split and the ban list all
+    # survive it. Contrast `insert_exploration`, which ADMITS candidates the
+    # ranker set aside and therefore needs its own gate exemptions and its own
+    # anti-farm budget.
+    ranked = promote_fresh(ranked, settings.freshness, now)
+
     if explore_pool:
         # ★ The scored list is RE-ORDERED back into `explore_pool` order before
         # it is spliced (fixed 2026-08-04). `_score` sorts by score, and letting

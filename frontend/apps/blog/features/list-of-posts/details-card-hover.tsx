@@ -9,11 +9,26 @@ import PayoutHoverContent from './payout-hover-content';
 type DetailsCardHoverProps = {
   post: Entry;
   children: ReactNode;
+  /**
+   * ★ THE CALLER'S LAYOUT, CARRIED THROUGH THE EARLY RETURNS (2026-08-23).
+   *
+   * The two branches below (`decline`, and `payout <= 0`) render their OWN div and
+   * discard `children` — so any positioning the caller put on its child element was
+   * silently thrown away in exactly the two most common cases: every Lumen lite post
+   * declines by design, and most comments sit at $0.00. That is how the comment
+   * payout kept rendering inline after being given `order-last ml-auto`: the classes
+   * were on a node that never reached the DOM.
+   *
+   * Passing layout in explicitly is what makes the three payout surfaces agree. This
+   * file already carries a note about an early return discarding the caller's styling
+   * for COLOUR; this is the same defect for POSITION.
+   */
+  className?: string;
   decline?: boolean;
   post_page?: boolean;
 };
 
-export default function DetailsCardHover({ post, children, decline, post_page }: DetailsCardHoverProps) {
+export default function DetailsCardHover({ post, children, decline, post_page, className }: DetailsCardHoverProps) {
   const [open, setOpen] = useState(false);
   const isHovering = useRef(false);
 
@@ -47,7 +62,7 @@ export default function DetailsCardHover({ post, children, decline, post_page }:
   if (decline) {
     return (
       <div
-        className={cn(`flex items-center line-through opacity-50`, { 'text-ink-10': post_page })}
+        className={cn(`flex items-center line-through opacity-50`, { 'text-ink-10': post_page }, className)}
         data-testid="post-payout-decline"
         title="Payout Declined"
       >
@@ -74,7 +89,7 @@ export default function DetailsCardHover({ post, children, decline, post_page }:
          `post-card.module.css` intends with `--pc-payout-zero` — "deliberately not
          text you read". That treatment is not reachable from here, and green at least
          makes money one colour. If the owner wants zero muted, this is the line.) */
-      <div className="flex items-center text-[color:rgb(var(--ink-payout))]" data-testid="post-payout">
+        <div className={cn('flex items-center text-[color:rgb(var(--ink-payout))]', className)} data-testid="post-payout">
         {'$'}
         {post.payout.toFixed(2)}
       </div>

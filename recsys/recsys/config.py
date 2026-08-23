@@ -1334,6 +1334,132 @@ class DiversityConfig:
 
 
 @dataclass(frozen=True)
+class FreshnessConfig:
+    """The reserved RECENT-POST seat (2026-08-23).
+
+    ★ THE MEASUREMENT THIS EXISTS FOR. An audit of the live feed found a median
+    served post age of **50.6 hours** with exactly ONE post under six hours old
+    in thirty. For the primary "what is happening" surface of a social product
+    that is the wrong shape: a reader opening Lumen at any hour is mostly shown
+    the day before yesterday.
+
+    ★ WHY THIS IS A SEAT AND NOT A WEIGHT, WHICH IS THE WHOLE DESIGN DECISION.
+    The obvious fix is to raise :attr:`ScoreWeights.organic_recency`. It cannot
+    work, and this codebase already measured why:
+    :class:`ExplorationConfig`'s own docstring records that a debut post scores
+    ``organic_recency`` (0.10) against a ~0.46 window median and lands in the
+    3rd-4th percentile BY CONSTRUCTION, so "no weight tuning reaches page 1;
+    only a reserved slot does". A two-hour-old post has the identical problem
+    for the identical reason: the score is dominated by ``pooled_author_base``,
+    a log of ACCUMULATED engagement, and accumulation is exactly what a fresh
+    post has not had time to do. Adding to a term that is capped at 0.10 on a
+    scale that runs 1-3 moves ties and nothing else.
+
+    ★ AND IT IS NOT A RECALL PROBLEM, WHICH WAS MY FIRST DIAGNOSIS AND WAS
+    WRONG. Four of the five SQL-backed lanes order by ``created DESC``
+    (:data:`recsys.io.hafsql._SQL_IN_NETWORK_POSTS`, ``_SQL_TAG_POSTS``,
+    ``_SQL_ENGAGED_OON_POSTS``, and the ALS reuse), so their ``LIMIT`` drops the
+    OLDEST rows and a fresh post sorts to the FRONT. Only ``_SQL_POPULAR_POSTS``
+    orders by ``engagement DESC`` and truncates young posts out of recall. So a
+    followee's two-hour-old post reaches scoring reliably and then loses there.
+    Measured corroboration already in the tree
+    (:class:`recsys.contracts.CandidateSource`, 2026-08-03): ``OON_ENGAGED`` —
+    an engagement-SELECTED lane by construction — took 75% of top-20 slots at 20
+    follows against ``IN_NETWORK``'s 25%, while supplying only 33% of the pool.
+
+    ★ SO THIS LANE SOURCES NOTHING. It filters the pool the pipeline has
+    already built, exactly as :func:`recsys.core.exploration.eligible_for_freshness`'s
+    sibling does, and adds no query, no gateway method and no database cost.
+    If the merged pool holds no post younger than :attr:`max_age_hours` the lane
+    forfeits its seat rather than reaching for one.
+
+    ★ WHY THE SEAT IS SHALLOWER THAN EXPLORATION'S. Exploration sits at index 13
+    because a newcomer's post is a RISK the reader did not ask for. A recent post
+    from someone they follow is not a risk, it is the thing they came for, and
+    burying it at 13 reproduces the defect. :attr:`position` defaults to 3.
+
+    ★ `max_age_hours` IS CROSS-VALIDATED AGAINST THE SOURCING WINDOW, unlike
+    :attr:`ExplorationConfig.max_age_days`, which is DEAD CONFIG: it is 7 days
+    while every OON query applies the 3-day `sourcing_freshness_days` in SQL, so
+    its effective value is 3 and nothing anywhere notices. ``__post_init__``
+    below refuses a value that cannot be reached, so this config cannot acquire
+    the same silent uselessness.
+    """
+
+    #: Seats per page. ``0`` disables the lane entirely and restores the
+    #: pre-2026-08-23 behaviour byte for byte.
+    slots_per_page: int = 1
+    #: Page length the splice arithmetic is based on. Matches
+    #: :attr:`ExplorationConfig.page_size` so the two lanes reason in the same
+    #: units; they are kept separate so tuning one cannot silently move the other.
+    page_size: int = 20
+    #: Where in the page the seat lands, ZERO-indexed (the same convention as
+    #: :attr:`ExplorationConfig.position`, which produces ranked indices 13, 33,
+    #: 53 -- and deliberately NOT :attr:`PopularConfig.reserved_position`, which
+    #: is one-indexed. The two conventions already disagree in this file; this
+    #: one states which it uses rather than adding a third silent variant).
+    #:
+    #: ★★★ 6, NOT 3, AND THE REASON IS AN OWNER RULE THIS ALMOST BROKE. The
+    #: first draft put the seat at 3 on the reasoning that a recent post from a
+    #: followed author is what the reader came for and burying it reproduces the
+    #: defect. That reasoning is sound and it is still wrong, because
+    #: :func:`recsys.core.popular.insert_popular` records a rule this lane is
+    #: equally bound by: "``reserved_position`` is 1-indexed and validated to be
+    #: 0 or greater than 5, so positions 1-5 are whatever the reader EARNED. The
+    #: reservation is visible, not dominant." A seat at 0-indexed 3 is 1-indexed
+    #: 4 -- inside the protected head. So the head stays earned, and this seat
+    #: takes the first index outside it that the popularity lane has not already
+    #: claimed (it reserves 1-indexed 6, i.e. 0-indexed 5).
+    position: int = 6
+    #: How young a post must be to hold the seat. Six hours is the audit's own
+    #: band ("exactly one post under six hours old in thirty").
+    max_age_hours: float = 6.0
+    #: Per-FEED ceiling, the same shape and the same reason as
+    #: :attr:`ExplorationConfig.max_slots_per_feed`: without it the bound is
+    #: ``slots_per_page * pages``, which lets a prolific fresh poster convert
+    #: post COUNT into seats.
+    max_slots_per_feed: int = 3
+    #: Posts one author may hold across the whole feed's freshness seats. Stops
+    #: one account posting three times in an hour from taking every seat.
+    max_posts_per_author: int = 1
+
+    def __post_init__(self) -> None:
+        if self.slots_per_page < 0:
+            raise ValueError(
+                f"slots_per_page must be >= 0, got {self.slots_per_page}"
+            )
+        if self.page_size <= 0:
+            raise ValueError(f"page_size must be > 0, got {self.page_size}")
+        if not 0 <= self.position < self.page_size:
+            raise ValueError(
+                f"position must be in [0, {self.page_size}), got {self.position}"
+            )
+        # ★ THE HEAD IS NEVER DISPLACED. Enforced structurally here rather than
+        # left to convention, exactly as `PopularConfig.__post_init__` enforces
+        # it for its own lane -- an owner rule that lives in only one lane's
+        # validator is an owner rule the next lane breaks. Zero-indexed 5 is
+        # one-indexed 6, the first seat outside the protected head.
+        if self.slots_per_page > 0 and self.position < 5:
+            raise ValueError(
+                "freshness position must be >= 5 (zero-indexed) -- positions 1-5 "
+                "one-indexed are whatever the reader earned and are never "
+                f"displaced by a reserved lane, got {self.position}"
+            )
+        if self.max_age_hours <= 0:
+            raise ValueError(
+                f"max_age_hours must be > 0, got {self.max_age_hours}"
+            )
+        if self.max_slots_per_feed < 0:
+            raise ValueError(
+                f"max_slots_per_feed must be >= 0, got {self.max_slots_per_feed}"
+            )
+        if self.max_posts_per_author <= 0:
+            raise ValueError(
+                f"max_posts_per_author must be > 0, got {self.max_posts_per_author}"
+            )
+
+
+@dataclass(frozen=True)
 class ExplorationConfig:
     """The reserved new-author slot (cold-start spec §4.3, item B12).
 
@@ -3139,6 +3265,7 @@ class Settings:
     diversity: DiversityConfig = field(default_factory=DiversityConfig)
     cold_start: ColdStartConfig = field(default_factory=ColdStartConfig)
     exploration: ExplorationConfig = field(default_factory=ExplorationConfig)
+    freshness: FreshnessConfig = field(default_factory=FreshnessConfig)
     popular: PopularConfig = field(default_factory=PopularConfig)
     fallback: FallbackConfig = field(default_factory=FallbackConfig)
     real_graph: RealGraphWeights = field(default_factory=RealGraphWeights)

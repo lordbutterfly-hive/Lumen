@@ -182,7 +182,10 @@ const hydrationCache = new Map<string, { entry: Entry; at: number }>();
  */
 const TOPIC_CACHE_MS = 300_000;
 const TOPIC_CACHE_MAX = 200;
-const topicFeedCache = new Map<string, { entries: Entry[]; ranked: number; at: number }>();
+const topicFeedCache = new Map<
+  string,
+  { entries: Entry[]; ranked: number; lanes: FeedLane[]; at: number }
+>();
 /** When the ranker last failed to serve a `viewer|topic`. See the branch that writes it. */
 const topicFailedAt = new Map<string, number>();
 /**
@@ -209,14 +212,14 @@ const topicFailedAt = new Map<string, number>();
 const TOPIC_FAIL_MS = 300_000;
 const topicInflight = new Map<string, Promise<BuiltFeed | null>>();
 
-function rememberTopicFeed(key: string, entries: Entry[], ranked: number): void {
+function rememberTopicFeed(key: string, entries: Entry[], ranked: number, lanes: FeedLane[]): void {
   // Bounded so a crawler walking every tag cannot grow this without limit.
   // Map preserves insertion order, so the oldest key is the first one.
   if (topicFeedCache.size >= TOPIC_CACHE_MAX) {
     const oldest = topicFeedCache.keys().next().value;
     if (oldest !== undefined) topicFeedCache.delete(oldest);
   }
-  topicFeedCache.set(key, { entries, ranked, at: Date.now() });
+  topicFeedCache.set(key, { entries, ranked, lanes, at: Date.now() });
 }
 
 /**
@@ -807,7 +810,7 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     const cached = topicForceRefresh ? undefined : topicFeedCache.get(topicKey);
     if (cached && Date.now() - cached.at < TOPIC_CACHE_MS) {
       return feedJson({
-        entries: cached.entries, source: 'recsys', ranked: cached.ranked,
+        entries: cached.entries, lanes: cached.lanes, source: 'recsys', ranked: cached.ranked,
         served: cached.entries.length, cache: 'topic-cached', nextCursor: cursorOf(cached.entries)
       }, viewer);
     }
@@ -854,7 +857,7 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
       return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed', topic, viewer);
     }
     topicFailedAt.delete(topicKey);
-    rememberTopicFeed(topicKey, built.entries, built.ranked);
+    rememberTopicFeed(topicKey, built.entries, built.ranked, built.lanes);
     // ★ NOT RECORDED IN THE SERVED LOG, DELIBERATELY. The log's domain is the
     // PERSONAL ranked page — the thing the demotion will act on and the thing
     // §7's slot budgets are written about. `lumen_feed_served` has no topic
@@ -865,7 +868,7 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // log's boundary rather than discovering it as a gap. Same reason the
     // trending fallback and the chain continuation pages are not recorded.
     return feedJson({
-      entries: built.entries, source: 'recsys', ranked: built.ranked,
+      entries: built.entries, lanes: built.lanes, source: 'recsys', ranked: built.ranked,
       served: built.entries.length, cache: 'topic', nextCursor: cursorOf(built.entries)
     }, viewer);
   }

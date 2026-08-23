@@ -951,6 +951,7 @@ const CommentListItem = memo(function CommentListItem({
                             <DetailsCardHover
                               post={comment}
                               decline={parseFloat(comment.max_accepted_payout) === 0}
+                              className="order-last ml-auto flex h-5 min-w-[72px] items-center justify-end font-medium tabular-nums text-[color:rgb(var(--ink-payout))]"
                             >
                               <div
                                 data-testid="comment-card-footer-payout"
@@ -974,7 +975,7 @@ const CommentListItem = memo(function CommentListItem({
                                      `order-last ml-auto` puts it at the row's right edge,
                                      `font-medium` is the requested Lora weight, and the payout ink
                                      stops it inheriting near-black and hovering to --destructive. */
-                                  'order-last ml-auto flex items-center font-medium text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
+                                  'order-last ml-auto flex h-5 min-w-[72px] items-center justify-end font-medium tabular-nums text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
                                   {
                                     'line-through opacity-50': parseFloat(comment.max_accepted_payout) === 0
                                   }
@@ -1083,7 +1084,8 @@ const CommentListItem = memo(function CommentListItem({
                           <DetailsCardHover
                             post={comment}
                             decline={parseFloat(comment.max_accepted_payout) === 0}
-                          >
+                            className="order-last ml-auto flex h-5 min-w-[72px] items-center justify-end font-medium tabular-nums text-[color:rgb(var(--ink-payout))]"
+>
                             <div
                               data-testid="comment-card-footer-payout"
                               className={clsx(
@@ -1104,7 +1106,7 @@ const CommentListItem = memo(function CommentListItem({
                                 
                                    ★ MEDIUM, NOT NORMAL (same report): "the payouts need to be medium, not
                                    normal to give them a little bit of Lora font boldness." 400 -> 500. */
-                                'order-last ml-auto flex items-center font-medium text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
+                                'order-last ml-auto flex h-5 min-w-[72px] items-center justify-end font-medium tabular-nums text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
                                 {
                                   'line-through opacity-50': parseFloat(comment.max_accepted_payout) === 0
                                 }
