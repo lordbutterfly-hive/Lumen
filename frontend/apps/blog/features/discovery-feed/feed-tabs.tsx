@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
-import { fetchAccountPosts } from '@/blog/lib/lite/client/account-posts-fetch';
+import { fetchAccountPostsPage } from '@/blog/lib/lite/client/account-posts-fetch';
 import {
   FEED_AUTO_PAGE_CAP,
   useInfiniteScrollSentinel
@@ -817,26 +817,38 @@ async function fetchLiteFollowing(limit: number): Promise<Entry[]> {
 
 const LITE_FOLLOWING_LIMIT = 30;
 
+/** One page of the Following tab. See `AccountEntriesPage` — same reason, same shape. */
+interface FollowingFeedPage {
+  entries: Entry[];
+  nextCursor: { author: string; permlink: string } | null;
+  hasMore: boolean;
+}
+
 function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: string; lite?: boolean }) {
   const { t } = useTranslation('common_blog');
   const { data, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage, isError, isLoading } =
     useInfiniteQuery({
       queryKey: ['discoveryFeedEntries', sort, observer, lite],
-      queryFn: async ({ pageParam }) => {
-        if (lite) return await fetchLiteFollowing(LITE_FOLLOWING_LIMIT);
+      // ★ PAGES ON THE SERVER'S ANSWER, NOT ON `length` (2026-08-23). This tab is a
+      // MIXED-author feed, so the viewer's own block list can empty a page outright while
+      // the follow feed still has plenty behind it — and keying on `lastPage.length === 0`
+      // read that as the end of the feed. `/api/account-posts` reports `hasMore` and
+      // `nextCursor` from the page the NODE returned, before any filter.
+      queryFn: async ({ pageParam }): Promise<FollowingFeedPage> => {
+        if (lite) {
+          const liteEntries = (await fetchLiteFollowing(LITE_FOLLOWING_LIMIT)) ?? [];
+          return { entries: liteEntries, nextCursor: null, hasMore: false };
+        }
         const { author, permlink } = (pageParam as { author?: string; permlink?: string }) || {};
-        const postsData = await fetchAccountPosts(sort, observer, observer, author ?? '', permlink ?? '');
-        return postsData ?? [];
+        return await fetchAccountPostsPage(sort, observer, observer, author ?? '', permlink ?? '');
       },
-      getNextPageParam: (lastPage: Entry[]) => {
+      getNextPageParam: (lastPage: FollowingFeedPage) => {
         // The lite route returns one merged page today; paging it would have to
         // page two stores at once, and offering a "load more" that silently
         // repeats the same page is worse than not offering one.
         if (lite) return undefined;
-        if (!Array.isArray(lastPage) || lastPage.length === 0) return undefined;
-        const last = lastPage[lastPage.length - 1] as { author?: string; permlink?: string };
-        if (!last?.author || !last?.permlink) return undefined;
-        return { author: last.author, permlink: last.permlink };
+        if (!lastPage?.hasMore || !lastPage.nextCursor) return undefined;
+        return { author: lastPage.nextCursor.author, permlink: lastPage.nextCursor.permlink };
       },
       // ★★★ THE FEED NEVER CHANGES UNDER A READER (2026-08-12) — the same defect
       // ForYouFeed was fixed for on 2026-08-10 (see its comment above), never
@@ -888,9 +900,10 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   // Hook must run unconditionally, above every early return (see lib/nsfw.ts).
   const nsfwPreference = useNsfwPreference();
 
-  // ★ EFFECT (A) ON THE FOLLOWING TAB. The Hive branch of this query goes straight
-  // from the browser to a chain node, so the reader's own block list can only be
-  // applied here — no Lumen server sees that response. (The lite branch reads
+  // ★ EFFECT (A) ON THE FOLLOWING TAB. Kept as a SECOND pass, not the only one: the
+  // Hive branch now goes through `/api/account-posts`, which applies the viewer's list
+  // server-side too (2026-08-23). This stays because the lite branch does not, and because
+  // a reader's own preference failing open on a server hiccup should still be caught here. (The lite branch reads
   // `/api/lite/feed/following`, a Lumen route; one query key serves both, so the
   // filter lives at the shared end.) Reader-side only: the owner-side half of
   // blocking is never enforced in a browser, for the reason spelled out in
@@ -901,13 +914,13 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   // in the same order — calling it after `if (isError) return` breaks that the moment the
   // query flips state. Derived from the raw pages rather than the NSFW-filtered list
   // below: hiding a post is a display decision and must not change hook behaviour.
-  const marks = useRankMarks((data?.pages.flat() ?? []).map((e) => e.author));
+  const marks = useRankMarks((data?.pages.flatMap((pg) => pg?.entries ?? []) ?? []).map((e) => e.author));
   /* One market read for the whole page (3 state keys per creator, chunked at 33
      inside the data source). Threaded to the cards exactly like `useRankMarks`
      beside it — a per-card fetch is the N+1 that cost this feed 30s a load. */
-  const { prices } = useTokenPriceChips((data?.pages.flat() ?? []).map((e) => e.author));
+  const { prices } = useTokenPriceChips((data?.pages.flatMap((pg) => pg?.entries ?? []) ?? []).map((e) => e.author));
   /* §2 rank luminosity for the avatar glow — shares `useRankMarks`' request. */
-  const luminosity = useRankLuminosity((data?.pages.flat() ?? []).map((e) => e.author));
+  const luminosity = useRankLuminosity((data?.pages.flatMap((pg) => pg?.entries ?? []) ?? []).map((e) => e.author));
 
   // ★ EVERY DERIVED LIST IS BUILT ABOVE THE GUARDS, same reason as ForYouFeed:
   // the empty-answer guard right below reads it, and a hook may never run
@@ -915,7 +928,7 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   //
   // Same NSFW list-level filter as the ranked feed above (see lib/nsfw.ts).
   const entries = filterVisiblePosts(
-    (data?.pages.flat() ?? []).filter((entry) => !isBlockedEntry(entry, blockList)),
+    (data?.pages.flatMap((pg) => pg?.entries ?? []) ?? []).filter((entry) => !isBlockedEntry(entry, blockList)),
     nsfwPreference
   );
 
@@ -931,7 +944,7 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   if (entries.length > 0) lastRendered.current = entries;
   const shown = entries.length > 0 ? entries : lastRendered.current;
 
-  if (isLoading || (isFetching && !data?.pages?.[0]?.length)) {
+  if (isLoading || (isFetching && !data?.pages?.[0]?.entries?.length)) {
     return <LumenLoader size="lg" label={t('global.loading_posts')} />;
   }
   // ★ `isError` ALONE IS NO LONGER THE GUARD, same fix as ForYouFeed: it is true

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardRead } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { liveViewerId } from '@/blog/lib/lite/http/actor';
 import { getEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { liteTargetServable } from '@/blog/lib/lite/content/engagement-target';
 
@@ -31,9 +32,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'author_and_permlink_required' }, { status: 400 });
   }
 
+  // ★ A REVOKED COOKIE IS NOT THIS VIEWER (2026-08-23). Read the cookie directly before,
+  // so `logout-all` did not stop it returning this account's own engagement state.
+  // Degrades to anonymous rather than 401 — the callers already handle a null viewer.
   const session = await getLiteSession();
   const user = session.user;
-  const userId = user?.account_tier === 'lite' && user.userId ? user.userId : null;
+  const liveId = await liveViewerId(user, session);
+  const userId = liveId && user?.account_tier === 'lite' ? liveId : null;
 
   try {
     // ★ B5 — a taken-down post must not keep reporting live counts. QA found

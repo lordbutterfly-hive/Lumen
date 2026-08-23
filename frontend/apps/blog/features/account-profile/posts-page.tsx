@@ -6,6 +6,8 @@ import { getLogger } from '@ui/lib/logging';
 import { ObserverProvider, InitialPostsProvider } from '@/blog/components/observer-provider';
 import { extractUsernameFromParam } from '@/blog/utils/validate-links';
 import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
+import { filterBlockedForViewer, viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
+import { getLiteSession } from '@/blog/lib/lite/http/session';
 
 const logger = getLogger('app');
 
@@ -26,6 +28,32 @@ const PostsPage = async ({
       // Resolve Lumen identities before this reaches the browser, so a lite post
       // never renders under the shared publishing account and then corrects itself.
       if (initialPosts) await attachLiteIdentities(initialPosts);
+    // ★ THE READER'S OWN BLOCK LIST, SERVER-SIDE (2026-08-23).
+    //
+    // This is the half that actually closes the leak. This component is a SERVER
+    // component: it fetches here and seeds `InitialPostsProvider` below, so a blocked
+    // author's posts were already in the server-rendered HTML before any JavaScript ran.
+    // A client-side filter cannot retract that — it only removes them a round trip later,
+    // and never at all for a reader with JS disabled or for anything reading the raw
+    // document. The matching client filter still belongs downstream so the two agree and
+    // there is no flash; this one is what makes the HTML honest.
+    //
+    // `filterBlockedForViewer` returns a NEW array (unlike `attachLiteIdentities`, which
+    // mutates in place), so the result must be assigned.
+    //
+    // Anonymous readers are unaffected: no session means no block list means an empty key
+    // set and an untouched array. Degrades OPEN on failure, matching `feed/for-you` and
+    // `/api/account-posts` — the reader's own preference must not blank a profile over a
+    // database hiccup.
+    if (initialPosts) {
+      const viewerSession = await getLiteSession();
+      const blockedKeys = await viewerBlockedKeySet(viewerSession.user).catch(
+        () => new Set<string>()
+      );
+      if (blockedKeys.size > 0) {
+        initialPosts = await filterBlockedForViewer(initialPosts, blockedKeys);
+      }
+    }
   } catch (error) {
     logger.error(error, 'Error in PostsPage:');
   }

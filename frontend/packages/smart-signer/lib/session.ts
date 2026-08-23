@@ -104,6 +104,8 @@ export const sessionOptions: SessionOptions = {
     // through `getAppSession()` (`packages/smart-signer/lib/get-session.ts`),
     // which enforces this same stamp, and `login.ts` now WRITES it at issue
     // instead of relying solely on `getLiteSession()`'s read-side backfill.
+    // (The OAuth/consent/chat-token handlers named above were deleted
+    // outright with Rocket.Chat on 2026-08-23; this paragraph is history.)
     // See `get-session.ts`'s doc comment for the full history and for why
     // its enforcement logic is a deliberate, hand-synced COPY of
     // `getLiteSession()`'s — not a shared call — since this package cannot

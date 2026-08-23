@@ -6,7 +6,7 @@ import {
   useInfiniteScrollSentinel,
   type InfiniteScrollSentinel
 } from '@/blog/features/discovery-feed/hooks/use-infinite-scroll-sentinel';
-import { fetchAccountPosts } from '@/blog/lib/lite/client/account-posts-fetch';
+import { fetchAccountPostsPage } from '@/blog/lib/lite/client/account-posts-fetch';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { StaleTime } from '@/blog/lib/react-query';
 import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
@@ -31,6 +31,21 @@ const BRIDGE_SORT_FOR_QUERY: Record<AccountEntryQuery, string> = {
   posts: 'posts',
   comments: 'comments'
 };
+
+/**
+ * One page as this hook stores it.
+ *
+ * It is an object rather than a bare `Entry[]` because the entries alone can no longer
+ * answer "is there another page". `/api/account-posts` filters the node's page three
+ * times (operator ban list, profile owner's blocks, viewer's own list), so a page that
+ * arrives empty or short is not necessarily the end of the account. The server's own
+ * `hasMore`/`nextCursor` travel with the entries and decide paging.
+ */
+export interface AccountEntriesPage {
+  entries: Entry[];
+  nextCursor: { author: string; permlink: string } | null;
+  hasMore: boolean;
+}
 
 interface PageParam {
   author?: string;
@@ -95,12 +110,13 @@ export function useAccountEntries(
   observer: string,
   initialEntries?: Entry[] | null,
   lite = false
-): UseInfiniteQueryResult<Entry[]> & {
+): UseInfiniteQueryResult<AccountEntriesPage> & {
   entries: Entry[];
   loadMoreRef: (node?: Element | null) => void;
   sentinel: InfiniteScrollSentinel;
 } {
   const seed = lite ? undefined : initialEntries;
+  const seedLast = seed && seed.length > 0 ? seed[seed.length - 1] : null;
 
   const result = useInfiniteQuery({
     queryKey: ['profileRedesignEntries', username, query, observer, lite],
@@ -114,35 +130,61 @@ export function useAccountEntries(
     // constrain. The Posts tab query carries no `parent_author` (root posts
     // have no parent), so routing it through the same call is a no-op there
     // and keeps the two tabs on one code path.
-    queryFn: async ({ pageParam }: { pageParam?: PageParam }) =>
-      lite
-        ? await fetchLiteAuthorEntries(username, query, pageParam?.permlink)
-        : (await fetchAccountPosts(
-            BRIDGE_SORT_FOR_QUERY[query],
-            username,
-            observer,
-            pageParam?.author ?? '',
-            pageParam?.permlink ?? ''
-          )) ?? [],
+    // ★ THE CHAIN BRANCH PAGES ON THE SERVER'S ANSWER, NOT ON `length` (2026-08-23).
+    // `/api/account-posts` filters three times over (operator ban list, the profile
+    // owner's blocks, then the viewer's own), so the array that arrives here is not the
+    // page the node returned. Keying "is there more" on its length stopped paging on any
+    // page the filters emptied, with the rest of the account still behind it. The route
+    // now reports `hasMore` and `nextCursor` from the RAW page and this follows them.
+    queryFn: async ({ pageParam }: { pageParam?: PageParam }): Promise<AccountEntriesPage> => {
+      if (lite) {
+        const liteEntries = (await fetchLiteAuthorEntries(username, query, pageParam?.permlink)) ?? [];
+        return { entries: liteEntries, nextCursor: null, hasMore: liteEntries.length > 0 };
+      }
+      return await fetchAccountPostsPage(
+        BRIDGE_SORT_FOR_QUERY[query],
+        username,
+        observer,
+        pageParam?.author ?? '',
+        pageParam?.permlink ?? ''
+      );
+    },
     getNextPageParam: (lastPage) => {
-      if (!Array.isArray(lastPage) || lastPage.length === 0) return undefined;
-      const last = lastPage[lastPage.length - 1];
-      if (!last?.author || !last?.permlink) return undefined;
+      if (!lastPage) return undefined;
       // The lite route pages on OUR post id (`before=`), which is embedded in the
       // permlink as `lite-<id>` pre-publish and `lumen-<id>` once on chain. Send
-      // the id itself, not the permlink, or the cursor never matches a row.
+      // the id itself, not the permlink, or the cursor never matches a row. It has no
+      // server-side cursor, so it still reads its own last VISIBLE entry — correct
+      // there, because that route applies no filter this hook cannot see.
       if (lite) {
+        const last = lastPage.entries[lastPage.entries.length - 1];
+        if (!last?.permlink) return undefined;
         const id = /^(?:lite|lumen)-(.+)$/i.exec(last.permlink)?.[1];
         return id ? { permlink: id.toUpperCase() } : undefined;
       }
-      return { author: last.author, permlink: last.permlink };
+      if (!lastPage.hasMore || !lastPage.nextCursor) return undefined;
+      return { author: lastPage.nextCursor.author, permlink: lastPage.nextCursor.permlink };
     },
     enabled: Boolean(username),
     // ★ Never seed a lite profile from the SSR prefetch. That prefetch is the
     //   bridge call, which for a lite handle returns nothing — and because an
     //   empty array is truthy, seeding it would install "no posts" as fresh data
     //   for the whole 2-minute staleTime and suppress the fetch that works.
-    initialData: seed ? { pages: [seed], pageParams: [undefined] } : undefined,
+    initialData: seed
+      ? {
+          // The SSR seed is a raw bridge read, so it carries no server cursor. Rebuild one
+          // from its own last entry, and let `hasMore` stay true while it looks full — a
+          // seed that stopped paging outright would strand every page after the first.
+          pages: [
+            {
+              entries: seed,
+              nextCursor: seedLast ? { author: seedLast.author, permlink: seedLast.permlink } : null,
+              hasMore: seed.length > 0
+            }
+          ],
+          pageParams: [undefined]
+        }
+      : undefined,
     // ★ SEED IT STALE, NOT FRESH (2026-08-13). `Date.now()` here told React Query the
     // server-rendered page was freshly fetched, so the `staleTime` window blocked the
     // `queryFn` — and the queryFn is where Lumen's own engagement (a lite reader's
@@ -211,7 +253,7 @@ export function useAccountEntries(
   // enforced on the server this hook fetches from (`applyOwnerBlocksToAuthoredEntries`
   // in `lib/lite/social/block-filter.ts`), never here.
   const blockList = useLumenBlockList(Boolean(username));
-  const raw = result.data?.pages.flat() ?? [];
+  const raw = result.data?.pages.flatMap((pg) => pg?.entries ?? []) ?? [];
   const entries = blockList.loaded ? raw.filter((entry) => !isBlockedEntry(entry, blockList)) : raw;
   return { ...result, entries, loadMoreRef: sentinel.ref, sentinel };
 }

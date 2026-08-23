@@ -35,8 +35,6 @@ export type User = {
     loginType: LoginType;
     keyType: KeyType;
     authenticateOnBackend: boolean;
-    chatAuthToken: string;
-    oauthConsent: { [key: string]: boolean } // `key` is oauth client_id
     strict: boolean;
     /**
      * Lite-account fields. Optional and absent on legacy full-Hive sessions
@@ -89,8 +87,9 @@ export interface IronSessionData {
      *
      * ★ WHY IT IS NOT STAMPED AT ISSUE, unlike `sessionIssuedAt`. The one place
      * a full-Hive session is actually created —
-     * `packages/smart-signer/lib/api-handlers/auth/login.ts` (plus the OAuth
-     * consent/token and chat-token handlers) — calls
+     * `packages/smart-signer/lib/api-handlers/auth/login.ts` (the OAuth
+     * consent/token and chat-token handlers that also did so were removed
+     * with Rocket.Chat, 2026-08-23) — calls
      * `getIronSession(req, res, sessionOptions)` DIRECTLY, never through
      * `getLiteSession()`, and none of those files were in scope for this fix.
      * `getLiteSession()` instead backfills this field the first time it reads a

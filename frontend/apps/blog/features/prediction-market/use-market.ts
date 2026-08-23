@@ -45,7 +45,12 @@ export function useMarket() {
   const identity = useSessionIdentity();
   const loggedIn = identity.isLoggedIn;
   // A keyless Lumen account: it can read the market but cannot sign anything.
-  const isLite = user.account_tier === 'lite';
+  // ★ GATED ON `clientAnswered` (2026-08-23). `loggedIn` above answers off the session
+  // cookie immediately; `account_tier` waits on `/api/users/me`. In that window the tier is
+  // `undefined`, so this was false and the bet/claim/reclaim controls rendered ENABLED for a
+  // lite account — on the one surface in the app that moves money. Unknown is treated as
+  // lite: a briefly-disabled button beats a signed transaction that cannot succeed.
+  const isLite = loggedIn && (!identity.clientAnswered || user.account_tier === 'lite');
   const dataSource = getMarketDataSource();
   // null data source ⇒ the market is not provisioned. Surface this as a distinct
   // state so the UI renders "not available yet", never a bettable fake round.

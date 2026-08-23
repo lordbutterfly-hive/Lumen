@@ -112,7 +112,7 @@ const configuration: Configuration = {
     },
     pkce: {
         required: (ctx, client) => {
-            if (['foo', 'openhive_chat'].includes(client.clientId)) {
+            if (client.clientId === 'foo') {
                 return false;
             }
             return true;

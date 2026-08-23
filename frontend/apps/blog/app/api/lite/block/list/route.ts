@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardRead } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { liveViewerId } from '@/blog/lib/lite/http/actor';
 import { sessionActor } from '@/blog/lib/lite/social/follow-actor';
 import { chainMutedKeysOfActor } from '@/blog/lib/lite/social/chain-mute';
 import * as blocks from '@/blog/lib/lite/repositories/block-repository';
@@ -103,8 +104,13 @@ export async function GET(): Promise<NextResponse> {
 
   const empty: BlockListResponse = { ok: true, keys: [], userIds: [], names: [], peers: [] };
   try {
+    // ★ A REVOKED COOKIE IS NOT THIS VIEWER (2026-08-23). This returns the viewer's own
+    // private list, and it read the cookie directly — so `logout-all` did not stop it.
+    // Degrades to anonymous rather than 401: the shape callers expect is an empty list,
+    // and a hard refusal on a read would be a worse failure than a missing personalisation.
     const session = await getLiteSession();
-    const actor = await sessionActor(session.user);
+    const liveId = await liveViewerId(session.user, session);
+    const actor = liveId ? await sessionActor(session.user) : null;
     if (!actor) return NextResponse.json(empty);
 
     const [peers, chainMutes] = await Promise.all([

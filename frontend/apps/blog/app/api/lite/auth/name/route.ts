@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardWrite } from '@/blog/lib/lite/http/guard';
+import { guardBodySize, guardWrite, payloadTooLarge, readBoundedJson } from '@/blog/lib/lite/http/guard';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { assertLiteEnabled } from '@/blog/lib/lite/config';
@@ -17,6 +17,10 @@ const logger = getLogger('app');
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
+
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
   // F-L8: assertLiteEnabled had ZERO callers — the real bug. It refuses to run signup in
   // production without the Turnstile secret (captcha must not fail open). Wrapped so a
   // misconfig is a clean 503, not an uncaught 500.
@@ -26,7 +30,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'lite_accounts_disabled' }, { status: 503 });
   }
 
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  // ★ STREAM-BOUNDED, not header-bounded (2026-08-23). This route is reachable with no
+  // token and no session, so the caller chooses whether to send `content-length` — and
+  // `guardBodySize` trusts it. `readBoundedJson` counts bytes as it reads and cancels past
+  // the limit, so an oversized body is never fully buffered.
+  const parsed = await readBoundedJson<Record<string, unknown>>(req);
+  if (!parsed) return payloadTooLarge();
+  const body = parsed.body;
   const displayName = body?.displayName;
   if (typeof displayName !== 'string') {
     return NextResponse.json({ error: 'displayName_required' }, { status: 400 });

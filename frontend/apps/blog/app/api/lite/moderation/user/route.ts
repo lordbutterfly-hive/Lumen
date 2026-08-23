@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardModerator } from '@/blog/lib/lite/http/guard';
+import { guardModerator, guardBodySize } from '@/blog/lib/lite/http/guard';
 import { moderateUser, UserAction } from '@/blog/lib/lite/moderation/moderation-service';
 import { findUserByDisplayName } from '@/blog/lib/lite/repositories/user-repository';
 
@@ -23,6 +23,10 @@ const ACTIONS: UserAction[] = ['suspend', 'ban', 'reinstate'];
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardModerator(req);
   if (blocked) return blocked;
+
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const action = body?.action;
@@ -51,7 +55,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       userId,
       action: action as UserAction,
       reason: reason || null,
-      hideContent: body?.hideContent === true
+      // ★ A BAN THAT LEAVES THE CONTENT UP IS NOT A BAN (2026-08-23). `=== true` defaulted
+      // every action to "leave their posts visible", so the strongest sanction available did
+      // nothing to what the account wrote unless the operator remembered a flag that appears
+      // in neither the error messages nor the response.
+      //
+      // PER-ACTION, never a blanket `!== false`, and that distinction is load-bearing:
+      //  * `ban`       — hides by default. Pass `hideContent: false` for a name-only ban.
+      //  * `suspend`   — opt-in. A suspension is temporary and stops the account ACTING;
+      //                  erasing its back catalogue is a heavier, separate decision.
+      //  * `reinstate` — opt-in, and this one matters most. `moderation-service` routes a
+      //                  truthy `hideContent` on a reinstate into
+      //                  `setFeedVisibilityForUser(userId, 'visible')`, which restores EVERY
+      //                  post by that author — including ones hidden individually via
+      //                  /moderation/post for unrelated reasons. Defaulting it true would
+      //                  silently undo those takedowns.
+      hideContent: typeof body?.hideContent === 'boolean' ? body.hideContent : action === 'ban'
     });
     if (!result) return NextResponse.json({ error: 'user_not_found' }, { status: 404 });
 

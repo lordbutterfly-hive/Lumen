@@ -1,3 +1,4 @@
+import { stripInvisibleAndBidi } from '@ui/lib/text-safety';
 import { LumenProfile } from '../types';
 
 /**
@@ -49,16 +50,22 @@ const LIMITS = {
  *   U+2066-U+2069  LRI/RLI/FSI/PDI       bidi isolates (modern equivalents)
  *   U+FEFF         zero-width no-break space / BOM
  */
-const INVISIBLE_OR_BIDI = /[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g;
+// ★ NOW THE SHARED DEFINITION (2026-08-23). This was a local regex, and it was BOTH
+// over- and under-inclusive: it swallowed U+200C ZWNJ (required in Persian/Farsi
+// orthography) and U+200D ZWJ (which builds emoji sequences — `👩‍💻` came out as two
+// glyphs), while missing U+061C ARABIC LETTER MARK and U+2060 WORD JOINER, which are real
+// invisibles. The shared version in `@ui/lib/text-safety` fixes both directions and is the
+// SAME definition the chain read path now uses (`packages/transaction/lib/hive-api.ts`), so
+// the two cannot drift. The C0/C1 replacement and the truncation below are unchanged —
+// those are write-side field policy and stay local.
 
 function text(value: unknown, max: number): string {
   if (typeof value !== 'string') return '';
   // Strip control characters (including the line separators that let a one-line
   // field impersonate several) and collapse the rest.
-  const cleaned = value
-    .replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' ')
-    .replace(INVISIBLE_OR_BIDI, '')
-    .trim();
+  const cleaned = stripInvisibleAndBidi(
+    value.replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' ')
+  ).trim();
   return cleaned.slice(0, max);
 }
 

@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
-import { getAccountPosts } from '@transaction/lib/bridge-api';
+import { getAccountPostsPage, DATA_LIMIT } from '@transaction/lib/bridge-api';
 import { withRetry } from '@transaction/lib/retry';
 import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
-import { applyOwnerBlocksToAuthoredEntries } from '@/blog/lib/lite/social/block-filter';
+import {
+  applyOwnerBlocksToAuthoredEntries,
+  filterBlockedForViewer,
+  viewerBlockedKeySet
+} from '@/blog/lib/lite/social/block-filter';
+import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 
 const logger = getLogger('app');
@@ -124,10 +129,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // ★ A6 retry rollout (2026-08-18): wired here, not inside `getAccountPosts`
     // itself — that function's other caller (`streak/[user]/route.ts`) already
     // wraps it in its own wall-clock budget; see `getAccountPosts`'s own comment.
-    let entries: Entry[] | null = await withRetry(
-      () => getAccountPosts(sort, account, observer, startAuthor, startPermlink, limit),
+    // ★ `getAccountPostsPage`, NOT `getAccountPosts` (2026-08-23). The plain function
+    // returns only the FILTERED array, and `dropBannedEntries` has already run inside it
+    // — so the page size and the cursor computed from that array are both post-filter,
+    // which is exactly what breaks paging (see the long note further down). This variant
+    // reports the node's own count and last entry alongside the filtered entries.
+    const page = await withRetry(
+      () => getAccountPostsPage(sort, account, observer, startAuthor, startPermlink, limit),
       { label: `getAccountPosts(${sort},${account})` }
     ).catch(() => null);
+    let entries: Entry[] | null = page?.entries ?? null;
     // ★ THE READ FAILED -- SAY SO. See the doc comment above: this used to be
     // indistinguishable from "this account genuinely has nothing posted".
     if (!entries) return NextResponse.json({ entries: [], degraded: 'upstream_empty' });
@@ -165,13 +176,75 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       );
       return NextResponse.json({ entries: [], degraded: 'block_filter_unresolved' });
     }
-    // Lumen-local vote/reblog counts -- see `mergeLumenEngagement`'s own doc for
+    // ★ EFFECT A — THE VIEWER'S OWN BLOCK LIST (2026-08-23).
+  //
+  // Everything above is effect (B): the PROFILE OWNER's blocks, which hide a blocked
+  // stranger's replies from everyone. Effect (A) is the opposite direction — what the
+  // READER chose not to see — and this route never applied it. `/@user/feed` and
+  // `/@user/comments` both fetch here, so a reader met an account they had blocked on the
+  // one surface where they had gone looking for that person's posts.
+  //
+  // ★ IT MUST RUN AFTER THE `withheldUnresolvable` CHECK ABOVE, not before. That check
+  // distinguishes "we could not resolve the parents" from "this account has nothing".
+  // A page that is empty because the READER blocked everyone on it is a real empty page,
+  // not a database outage, and must never be reported as `block_filter_unresolved`.
+  //
+  // ★ DEGRADE OPEN, matching `feed/for-you`. Effect (A) is the reader's own preference,
+  // not a safety control — the operator ban list is enforced separately and upstream. A
+  // Lumen DB hiccup must not blank somebody's profile feed.
+  //
+  // Cache-safe: this route sets no `Cache-Control` and is covered by the middleware
+  // matcher, which gives it `private, no-store`. DO NOT add a shared cache here — the
+  // response is now viewer-dependent.
+  // ★ THE CURSOR IS TAKEN FROM THE RAW PAGE, BEFORE FILTERING (2026-08-23).
+  //
+  // The client pages with `start_author`/`start_permlink` taken from the last entry it
+  // received, and stops when a page comes back shorter than the limit. Filtering here
+  // breaks BOTH halves of that: a page of 20 with one blocked author arrives as 19 and
+  // looks like the end, and if every entry on the page is blocked there is no last entry
+  // to build a cursor from at all. Either way paging dead-ends with more content behind it.
+  //
+  // So the page's own truth travels with it: `nextCursor` is derived from the RAW last
+  // entry and is null only when the upstream page was genuinely short. The client keys on
+  // that instead of on the filtered length.
+  // `rawCount` travels too, because `limit` here is often undefined (the client omits it
+  // and the bridge applies its own page size), so the ROUTE cannot decide "was this page
+  // full". The client already knows its own PER_PAGE and keeps exactly the rule it had —
+  // it just applies it to the raw count instead of the filtered length.
+  // ★ BOTH COME FROM THE NODE'S PAGE, NOT FROM `entries` (2026-08-23).
+  // `entries` has been through THREE filters by now — `dropBannedEntries` inside the
+  // bridge call, the profile owner's blocks just above, and the viewer's own list just
+  // below. Measuring the page here counted none of them: a page of 20 with one banned
+  // author read as 19, `hasMore` went false, and the rest of the account was unreachable.
+  const rawCount = page?.rawCount ?? 0;
+  const nextCursor = page?.rawCursor ?? null;
+  // ★ THE SERVER DECIDES "WAS THE PAGE FULL", NOT THE CLIENT (2026-08-23).
+  //
+  // The first version of this returned `rawCount` and let the client compare it to its own
+  // `PER_PAGE` (20). That happened to work only because `PER_PAGE` and this route's
+  // effective page size (`DATA_LIMIT`, also 20) are equal today — two independent
+  // constants with nothing tying them together and no test asserting the relationship.
+  // Change `DATA_LIMIT` to 30 and the comparison silently never matches again, so
+  // pagination stops after page one with no error anywhere. Exactly the silent-zero this
+  // codebase keeps producing.
+  //
+  // Only this route knows the limit it actually used, so only this route can answer the
+  // question. The client follows the answer.
+  const hasMore = rawCount >= (limit ?? DATA_LIMIT);
+
+  const viewerSession = await getLiteSession();
+  const blockedKeys = await viewerBlockedKeySet(viewerSession.user).catch(() => new Set<string>());
+  if (blockedKeys.size > 0) {
+    entries = await filterBlockedForViewer(entries, blockedKeys);
+  }
+
+  // Lumen-local vote/reblog counts -- see `mergeLumenEngagement`'s own doc for
     // why this route had never applied them before 2026-08-13 (O2-votes.md item
     // 1's server half): a vote cast through Lumen on a post shown here reverted
     // to the chain-only count on every reload of this exact tab.
     entries = await mergeLumenEngagement(entries);
 
-    return NextResponse.json({ entries });
+    return NextResponse.json({ entries, nextCursor, hasMore });
   } catch (error) {
     logger.error(error, 'account posts fetch failed for %s (sort=%s)', account, sort);
     // ★ FAIL EMPTY, NEVER FAIL OPEN -- same posture as `/api/discussion`. The

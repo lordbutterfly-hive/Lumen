@@ -5,6 +5,7 @@ import type { TFunction } from 'i18next';
 import { cn } from '@ui/lib/utils';
 import { handleError } from '@ui/lib/handle-error';
 import { useTranslation } from '@/blog/i18n/client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useMarket } from './use-market';
 import BucketBars from './bucket-bars';
 import BetForm from './bet-form';
@@ -55,6 +56,21 @@ export default function MarketTab() {
     isReclaiming,
     isLite
   } = useMarket();
+
+  // ★ THE GATE STAYS SHUT, THE REASON MUST NOT LIE (2026-08-23).
+  // `isLite` is true for the whole `/api/users/me` window, and FOREVER in a tab where
+  // that call has only ever failed (`dataUpdatedAt` stays 0 on an error — see
+  // `clientAnswered` in use-user-core.ts). Keeping Claim/Reclaim disabled in that window
+  // is deliberate: "we could not check" resolves to "no". But labelling it
+  // "upgrade to a full account" tells a FULL Hive account something false about the two
+  // controls that recover their money. Same three-branch message as `bet-form.tsx`.
+  const identity = useSessionIdentity();
+  const blockedReason = (upgradeText: string): string =>
+    identity.sessionUnavailable
+      ? t('prediction_market.session_unavailable')
+      : !identity.clientAnswered
+        ? t('global.loading')
+        : upgradeText;
 
   const onReclaim = async () => {
     if (!round) return;
@@ -252,10 +268,10 @@ export default function MarketTab() {
                 type="button"
                 onClick={() => void onClaim()}
                 disabled={isClaiming || isLite}
-                title={isLite ? t('prediction_market.upgrade_to_claim') : undefined}
+                title={isLite ? blockedReason(t('prediction_market.upgrade_to_claim')) : undefined}
                 className="mt-3 w-full rounded-card bg-surface-42 py-3 font-sans text-sm font-semibold text-ink-27 transition-colors hover:bg-surface-44 disabled:opacity-50"
               >
-                {isLite ? t('prediction_market.upgrade_to_claim') : t('prediction_market.claim')}
+                {isLite ? blockedReason(t('prediction_market.upgrade_to_claim')) : t('prediction_market.claim')}
               </button>
             ) : (
               // F-P9: a SETTLED round where this position won nothing has no payout —
@@ -278,10 +294,10 @@ export default function MarketTab() {
                 type="button"
                 onClick={() => void onReclaim()}
                 disabled={isReclaiming || isLite}
-                title={isLite ? t('prediction_market.upgrade_to_reclaim') : undefined}
+                title={isLite ? blockedReason(t('prediction_market.upgrade_to_reclaim')) : undefined}
                 className="mt-2.5 w-full rounded-control bg-surface-warn-11 py-2.5 font-sans text-sm font-semibold text-ink-27 transition-colors hover:bg-surface-warn-12 disabled:opacity-50"
               >
-                {isLite ? t('prediction_market.upgrade_to_reclaim') : t('prediction_market.reclaim')}
+                {isLite ? blockedReason(t('prediction_market.upgrade_to_reclaim')) : t('prediction_market.reclaim')}
               </button>
             </div>
           )}

@@ -14,6 +14,7 @@ import { getChain } from './chain';
 import { withHiveRetry } from '@smart-signer/lib/hive-network-error';
 import { withRetry } from './retry';
 import { bannedAuthorList, hasBannedAuthors } from '@ui/config/lists/banned-authors';
+import { stripInvisibleAndBidi } from '@ui/lib/text-safety';
 import { ApiAccount, IManabarData } from '@hiveio/wax';
 import { DATA_LIMIT } from './bridge-api';
 import { isBannedAuthor, withoutBannedAuthors } from '@ui/config/lists/banned-authors';
@@ -244,6 +245,49 @@ export const getAccounts = async (usernames: string[]): Promise<FullAccount[]> =
         website: ''
       };
     }
+
+    // ★ CHAIN PROFILE TEXT IS UNTRUSTED (2026-08-23).
+    //
+    // A display name containing U+202E RIGHT-TO-LEFT OVERRIDE renders as somebody else's
+    // name — the Trojan-Source username-spoofing shape, already closed on the LITE write
+    // path. It CANNOT be closed on the chain write path: any Hive client can set these
+    // bytes and Lumen never sees that transaction. So it is closed HERE, at the one place
+    // every `account.profile` in the app is parsed.
+    //
+    // One edit instead of seven render sites (profile masthead, profile identity, the
+    // author hover card, the `<meta>` description, page metadata, the witness description,
+    // and the smart-signer profile helper) — and the eighth added next month is covered
+    // without anyone remembering.
+    //
+    // Strips ONLY the invisible/direction-control class. Deliberately does not port the
+    // write-path's truncation or C0/C1 handling: those are field-length policy, and
+    // truncating on read would silently shorten a legitimate chain bio. U+200C and U+200D
+    // are preserved, so Persian orthography and emoji ZWJ sequences survive intact.
+    //
+    // Safe against the block filter: `isBlockedEntry` matches on `entry.author`, the
+    // ACCOUNT name, never on these display fields — so this cannot desynchronise a
+    // comparison key.
+    // ★ PRESERVE ABSENCE (2026-08-23). The three `*_description` fields are OPTIONAL and
+    // are read back by `account-settings/form.tsx` to re-submit the profile unchanged.
+    // Coercing an absent field to `''` would send an empty string on the next settings
+    // save and WIPE a witness's description. Strip only what is actually there.
+    const stripIfPresent = <T,>(value: T): T | string =>
+      typeof value === 'string' ? stripInvisibleAndBidi(value) : value;
+
+    profile = {
+      ...profile,
+      name: stripInvisibleAndBidi(profile.name),
+      about: stripInvisibleAndBidi(profile.about),
+      location: stripInvisibleAndBidi(profile.location),
+      // Rendered by the witnesses table (`build-witness-rows.ts`, fed by the
+      // UNAUTHENTICATED `/api/witnesses-page` for the top 100) and by the blacklist /
+      // muted-list headers (`account-lists/list-item.tsx`, `list-variant.tsx`).
+      // `stripMarkdown` does not touch U+202E, so these three were the gap this
+      // chokepoint's own comment already claimed to have closed.
+      witness_description: stripIfPresent(profile.witness_description),
+      blacklist_description: stripIfPresent(profile.blacklist_description),
+      muted_list_description: stripIfPresent(profile.muted_list_description)
+    };
 
     return { ...account, profile };
   });

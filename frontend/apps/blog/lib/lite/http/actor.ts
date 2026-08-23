@@ -95,3 +95,68 @@ export async function requireLiteUser(
   }
   return { ok: true, user };
 }
+
+/**
+ * ★ 2026-08-23 — WITHDRAWAL BY A LUMEN SESSION, WITHOUT THE LITE-TIER REQUIREMENT.
+ *
+ * Identical to {@link requireLiteUser} except that it does NOT require
+ * `account_tier === 'lite'`. That one condition is why `requireLiteUser` cannot be used on
+ * `posts/[id]` or `account/upgrade`, and dropping it in there would reintroduce a defect
+ * this codebase already fixed once: an UPGRADED user's pre-upgrade posts were signed by the
+ * shared publishing account, so they hold no key that could remove them. Gating their
+ * withdrawal on the lite tier made their own back catalogue permanently unwithdrawable
+ * (see the comment on the DELETE handler in `app/api/lite/posts/[id]/route.ts`).
+ *
+ * Status stays exempt for exactly the reason the block comment above gives: a suspended
+ * account must still be able to take back what it did. Revocation is NOT exempt, and that
+ * is the whole point of this helper. Before it existed these routes read `session.user`
+ * straight off the cookie, so `logout-all` did not stop them.
+ *
+ * Takes the whole `SessionRef` rather than a loose field, so a forgotten argument is a type
+ * error rather than a silently unchecked session.
+ */
+export async function requireSessionOwner(
+  sessionUser: User | undefined,
+  session: SessionRef
+): Promise<ActorResult> {
+  if (!sessionUser?.userId) {
+    return { ok: false, response: NextResponse.json({ error: 'unauthorized' }, { status: 401 }) };
+  }
+  const user = await findUserById(sessionUser.userId);
+  if (!user) {
+    return { ok: false, response: NextResponse.json({ error: 'unauthorized' }, { status: 401 }) };
+  }
+  const revoked = await checkSessionValidity(user, session);
+  if (revoked) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: revoked.code, message: 'This session has been signed out.' },
+        { status: revoked.status }
+      )
+    };
+  }
+  return { ok: true, user };
+}
+
+/**
+ * ★ THE VIEWER'S id, BUT ONLY WHILE THE SESSION IS STILL LIVE (2026-08-23).
+ *
+ * For READ routes that serve a viewer their own data, or personalise public data for them.
+ * A revoked cookie must stop being that viewer — but it must NOT become a 401 on a route
+ * that anonymous readers legitimately reach, because a 401 there is a far worse outcome
+ * than a stale personalisation (see the GET on `lite/posts/[id]`, where a 401 makes the
+ * byline fall back to the shared publishing account across nine components).
+ *
+ * So this answers the narrow question and nothing else: is there a session, and is it
+ * still valid? A revoked or unknown session reads as `undefined`, i.e. anonymous. Callers
+ * that must REFUSE rather than degrade should use `requireSessionOwner` instead.
+ */
+export async function liveViewerId(
+  sessionUser: User | undefined,
+  session: SessionRef
+): Promise<string | undefined> {
+  if (!sessionUser?.userId) return undefined;
+  const actor = await requireSessionOwner(sessionUser, session);
+  return actor.ok ? sessionUser.userId : undefined;
+}

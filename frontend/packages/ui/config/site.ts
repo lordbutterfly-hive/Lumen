@@ -49,22 +49,6 @@ export const siteConfig = {
     : [],
   oidcClients: process.env[`${SERVER_VAR_PREFIX}OIDC_CLIENTS`] || '[]',
   oidcJwksKeys: process.env[`${SERVER_VAR_PREFIX}OIDC_JWKS_KEYS`] || '[]',
-
-  // Rocket Chat Widget
-  openhiveChatClientId: env('OPENHIVE_CHAT_CLIENT_ID') || 'openhive_chat',
-  openhiveChatApiUri: env('OPENHIVE_CHAT_API_URI') || 'https://openhive.chat',
-  openhiveChatUri: env('OPENHIVE_CHAT_URI') || 'https://openhive.chat',
-  openhiveChatIframeIntegrationEnable: env('OPENHIVE_CHAT_IFRAME_INTEGRATION_ENABLE') || 'no',
-  openhiveChatIframeVisible: env('OPENHIVE_CHAT_IFRAME_VISIBLE') || 'yes',
-  openhiveChatAllowNonStrictLogin: env('OPENHIVE_CHAT_ALLOW_NON_STRICT_LOGIN')
-    && env('OPENHIVE_CHAT_ALLOW_NON_STRICT_LOGIN') === 'yes' ? true : false,
-  openhiveChatIframeCreateUsers: process.env[`${SERVER_VAR_PREFIX}OPENHIVE_CHAT_IFRAME_CREATE_USERS`] || 'no',
-  openhiveChatAdminUserId: process.env[`${SERVER_VAR_PREFIX}OPENHIVE_CHAT_ADMIN_USER_ID`] || 'your-admin-user-id',
-  openhiveChatAdminUserToken: process.env[`${SERVER_VAR_PREFIX}OPENHIVE_CHAT_ADMIN_USER_TOKEN`] || 'your-admin-user-token',
-  // Secret for users.createToken API (required for RC 8.0.0+)
-  openhiveChatCreateTokenSecret: process.env[`${SERVER_VAR_PREFIX}OPENHIVE_CHAT_CREATE_TOKEN_SECRET`] || '',
-  // Comma-separated list of usernames allowed to see the chat widget (empty = all users)
-  openhiveChatAllowedUsers: (env('OPENHIVE_CHAT_ALLOWED_USERS') || '').split(',').filter(Boolean),
 };
 
 export type SiteConfig = typeof siteConfig;

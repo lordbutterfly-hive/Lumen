@@ -14,3 +14,24 @@
 
 # 2026-08-08 — owner: persistent troll, banned from Lumen entirely.
 kgakakillerg
+
+# 2026-08-23 — RECONCILED WITH THE APP'S `REACT_APP_BANNED_AUTHORS`.
+# The two lists had diverged: the Lumen app refused to render six accounts while this
+# ranker still counted five of them, so their votes kept shaping every reader's feed. An
+# account that cannot be SEEN but can still PROMOTE is a stronger position than it held
+# before the ban, which is exactly what `banned.py` says a ban must not leave open.
+#
+# ONE DIRECTION ONLY: app-ban -> ranker-ban. The reverse merge would be a serious mistake,
+# because `curator_accounts.txt` is a different concept ("their engagement mints nothing,
+# their own posts rank normally") and folding it into the app's ban list would delete
+# curie, ecency, hivebuzz, worldmappin and 17 others from the site.
+#
+# ★ THE BARE `bpcvoter` IS DELIBERATELY NOT HERE — OWNER DECISION.
+# `.env.blog.example` flags it: reputation 38.4 (positive) and it is bpcvoter1's on-chain
+# `recovery_account`, "the one entry worth a second opinion before shipping". Not rendering
+# it is reversible; excising it from the trust graph also zeroes its own graph-cred and its
+# vouches for third parties. Add it here only if the owner confirms.
+bpcvoter1
+bpcvoter2
+bpcvoter3
+bpcvoter4

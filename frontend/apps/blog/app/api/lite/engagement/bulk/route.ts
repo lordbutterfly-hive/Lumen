@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardRead } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { liveViewerId } from '@/blog/lib/lite/http/actor';
 import { getEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { liteTargetServable } from '@/blog/lib/lite/content/engagement-target';
 
@@ -81,9 +82,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
   if (targets.length === 0) return NextResponse.json({ engagement: {} });
 
+  // ★ A REVOKED COOKIE IS NOT THIS VIEWER (2026-08-23). Same shape as the single-item
+  // engagement route: this read the cookie directly, so `logout-all` did not stop it
+  // returning this account's own engagement state. Degrades to anonymous, not 401.
   const session = await getLiteSession();
   const user = session.user;
-  const userId = user?.account_tier === 'lite' && user.userId ? user.userId : null;
+  const liveId = await liveViewerId(user, session);
+  const userId = liveId && user?.account_tier === 'lite' ? liveId : null;
 
   const entries = await Promise.all(
     targets.map(async ({ author, permlink }) => {

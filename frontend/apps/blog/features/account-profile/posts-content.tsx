@@ -2,14 +2,13 @@
 
 import NoDataError from '@/blog/components/no-data-error';
 import PostList from '@/blog/features/list-of-posts/posts-loader';
-import { PER_PAGE } from '@/blog/features/search/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import { DEFAULT_OBSERVER, DEFAULT_PREFERENCES, Preferences, chainObserver } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useSSRObserver, useInitialPosts } from '@/blog/components/observer-provider';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { fetchAccountPosts } from '@/blog/lib/lite/client/account-posts-fetch';
+import { fetchAccountPostsPage } from '@/blog/lib/lite/client/account-posts-fetch';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { LumenLoader } from '@hive/ui';
 import userIllegalContent from '@ui/config/lists/user-illegal-content';
@@ -61,20 +60,48 @@ const PostsContent = ({
     // `lib/lite/social/block-filter.ts`). The Posts/Feed tabs never carry a
     // reply (a root post has no parent to block against), so routing them
     // through the same call costs nothing and keeps this component simple.
-    queryFn: async ({ pageParam }: { pageParam?: Entry }) => {
-      return await fetchAccountPosts(query, username, observer, pageParam?.author, pageParam?.permlink);
+    queryFn: async ({ pageParam }: { pageParam?: { author: string; permlink: string } }) => {
+      return await fetchAccountPostsPage(query, username, observer, pageParam?.author, pageParam?.permlink);
     },
+    // ★ PAGES ON THE RAW COUNT AND THE SERVER'S CURSOR, NOT ON `entries.length` (2026-08-23).
+    //
+    // `/api/account-posts` now removes the viewer's blocked authors, so the returned length
+    // is no longer "was the upstream page full", and the last VISIBLE entry is no longer a
+    // safe cursor — a page where every entry is blocked has no visible entry to page from.
+    // Keying on the filtered length dead-ended `/@user/feed` the moment a reader blocked
+    // one prolific account, which is the same defect the search sentinel had.
+    //
+    // The client no longer owns the rule at all: only the route knows the page size it
+    // actually used, so only the route can say whether the page was full.
     getNextPageParam: (lastPage) => {
-      if (lastPage && lastPage.length === PER_PAGE) {
-        return {
-          author: lastPage[lastPage.length - 1].author,
-          permlink: lastPage[lastPage.length - 1].permlink
-        };
+      if (lastPage?.hasMore && lastPage.nextCursor) {
+        return lastPage.nextCursor;
       }
     },
     enabled: Boolean(username),
     // Server-fetched data passed directly via context, bypassing Hydrate/dehydrate
-    initialData: initialPosts ? { pages: [initialPosts], pageParams: [undefined] } : undefined,
+    // ★ The SSR seed is already block-filtered, so its length cannot be trusted as the raw
+    // page size either. A non-empty seed is treated as possibly-full: worst case that costs
+    // ONE extra fetch, which then reports the real `rawCount` and stops. An EMPTY seed
+    // deliberately falls through to a normal client fetch rather than seeding `[]` — an
+    // empty seed can mean "this reader blocked everyone on page 1", and seeding it would
+    // freeze the list at zero with more content behind it.
+    initialData:
+      initialPosts && initialPosts.length > 0
+        ? {
+            pages: [
+              {
+                entries: initialPosts,
+                hasMore: true,
+                nextCursor: {
+                  author: initialPosts[initialPosts.length - 1].author,
+                  permlink: initialPosts[initialPosts.length - 1].permlink
+                }
+              }
+            ],
+            pageParams: [undefined]
+          }
+        : undefined,
     // ★ SEED IT STALE, NOT FRESH (2026-08-13). `Date.now()` here told React Query the
     // server-rendered page was freshly fetched, so the `staleTime` window blocked the
     // `queryFn` — and the queryFn is where Lumen's own engagement (a lite reader's
@@ -87,7 +114,7 @@ const PostsContent = ({
     // loading flash, it just no longer suppresses the merge. Same two-token change
     // already applied to the post page's `postData` query for the same reason; this
     // surface was its twin and was missed.
-    initialDataUpdatedAt: initialPosts ? 0 : undefined,
+    initialDataUpdatedAt: initialPosts && initialPosts.length > 0 ? 0 : undefined,
     // ★ A FAILED READ MUST SURFACE FAST (2026-08-13). `/api/account-posts` now
     // THROWS on a degraded upstream read instead of answering `{entries: null}`,
     // which is correct — but this query never overrode React Query's default
@@ -150,9 +177,9 @@ const PostsContent = ({
   // `feed-tabs`) already guard on `entries.length === 0` for exactly this reason;
   // this file got the retry half of the change and not the guard half. Show the
   // error only when the reader would otherwise be left with a blank page.
-  if (isError && !data?.pages?.some((page) => (page?.length ?? 0) > 0)) return <NoDataError />;
+  if (isError && !data?.pages?.some((page) => (page?.entries?.length ?? 0) > 0)) return <NoDataError />;
 
-  if (isLoading || (isFetching && !data?.pages?.[0]?.length)) {
+  if (isLoading || (isFetching && !data?.pages?.[0]?.entries?.length)) {
     return <LumenLoader size="lg" label={t('global.loading_posts')} />;
   }
 
@@ -160,13 +187,18 @@ const PostsContent = ({
     <>
       {data && data.pages ? (
         <>
-          {data.pages[0]?.length !== 0 ? (
+          {/* ★ ASK EVERY PAGE, NOT PAGE 0 (2026-08-23). Before the route applied the
+              viewer's block list, an empty page 0 could only mean an empty account. It
+              can now also mean "the reader blocked everyone on this page", and page 1
+              may be full — the sentinel will happily fetch it. Keying the empty state on
+              page 0 alone rendered "nothing here" over up to five loaded pages. */}
+          {data.pages.some((pg) => (pg?.entries?.length ?? 0) > 0) ? (
             data.pages.map((page, pageIndex) => {
               return page ? (
                 <div key={`page-${pageIndex}`}>
                   <PostList
               variant={variant}
-                    data={page}
+                    data={page.entries}
                     key={`x-${pageIndex}`}
                     nsfwPreferences={preferences.nsfw}
                     testFilter="profile-blog-list"
@@ -200,7 +232,7 @@ const PostsContent = ({
                 t('cards.comment_card.load_more')
               ) : hasNextPage ? (
                 t('user_profile.load_newer')
-              ) : data.pages[0] && data.pages[0].length > 0 ? (
+              ) : data.pages[0] && data.pages[0].entries.length > 0 ? (
                 t('user_profile.nothing_more_to_load')
               ) : null}
             </button>

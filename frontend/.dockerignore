@@ -10,9 +10,26 @@
 *.swo
 
 # Environment files (secrets)
-.env.local
-.env*.local
-**/.env.local
+#
+# ★ 2026-08-23 — WIDENED FROM `*.local` ONLY. The previous three lines let four real
+# secrets files into the build context: `.env.blog` (7,896 bytes, carries the session
+# cookie key, the email encryption key and the DB URL), `docker/.env`,
+# `apps/blog/.env.testing` and `apps/blog/.env.mirrornet-testing`. `Dockerfile:20` is
+# `COPY . .` into the BUILDER stage, and `docker-bake.hcl` exports builder layers to a
+# registry cache with `mode=max` — so anything left here travels off-box even though the
+# final runner image is clean.
+#
+# Verified before widening: NO stage reads an env file from the context. The builder takes
+# build-time values from ARG/ENV, and the runner copies only the entrypoint, next.config.js,
+# package.json, .next/standalone, .next/static, public and lib/markdowns. `react-env`
+# supplies runtime values from the container environment at start, not from a context file.
+#
+# No `!*.example` negation: no stage needs the examples either, and a negation is one more
+# thing to get wrong.
+.env
+.env.*
+**/.env
+**/.env.*
 
 # Build caches (rebuilt in Docker)
 .turbo

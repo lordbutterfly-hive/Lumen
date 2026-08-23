@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardModerator } from '@/blog/lib/lite/http/guard';
+import { guardModerator, guardBodySize } from '@/blog/lib/lite/http/guard';
 import { moderatePost } from '@/blog/lib/lite/moderation/moderation-service';
 import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
 import { FeedVisibility } from '@/blog/lib/lite/types';
@@ -26,6 +26,10 @@ const VISIBILITIES: FeedVisibility[] = ['visible', 'author_only', 'hidden'];
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardModerator(req);
   if (blocked) return blocked;
+
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
 

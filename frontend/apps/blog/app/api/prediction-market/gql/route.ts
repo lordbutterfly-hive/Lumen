@@ -5,6 +5,7 @@ import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceMagiGqlRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { consumeLocalGlobal, consumeLocalPerIp } from '@/blog/lib/lite/antispam/local-rate-limit';
 import { withRetry } from '@transaction/lib/retry';
+import { guardBodySize, payloadTooLarge, readBoundedBody } from '@/blog/lib/lite/http/guard';
 
 const logger = getLogger('app');
 
@@ -95,9 +96,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ errors: [{ message: 'prediction market GQL endpoint not configured' }] }, { status: 503 });
   }
 
+
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  // A 512 KiB OUTER bound only. This route keeps its own, tighter post-parse cap; the
+  // point here is that the tighter cap runs AFTER the body is already in memory, which
+  // is the ordering defect guardBodySize exists to close.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
+
+  // ★ STREAM-BOUNDED, not header-bounded (2026-08-23). Unauthenticated route: the caller
+  // chooses whether to send `content-length`, and `guardBodySize` trusts it. Reading
+  // through `readBoundedBody` counts bytes and cancels past the limit, and parsing from
+  // the returned string keeps this route's existing behaviour on malformed input exactly.
+  const raw = await readBoundedBody(req);
+  if (raw === null) return payloadTooLarge();
   let body: unknown;
   try {
-    body = await req.json();
+    body = JSON.parse(raw);
   } catch {
     return NextResponse.json({ errors: [{ message: 'invalid JSON body' }] }, { status: 400 });
   }

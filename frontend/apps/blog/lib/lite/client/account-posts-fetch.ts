@@ -39,14 +39,28 @@ import { Entry } from '@hive/common-hiveio-packages/wax';
  * already wired and reachable; none of them checked for a literal `null`).
  * A true empty account is unaffected: the route never sets `degraded` for it.
  */
-export async function fetchAccountPosts(
+/**
+ * The same request as `fetchAccountPosts`, the array-returning form this replaced,, but returning the page's own paging
+ * truth alongside the entries.
+ *
+ * ★ WHY A SECOND ENTRY POINT (2026-08-23). `/api/account-posts` now applies the viewer's
+ * block list, so `entries.length` is no longer a safe proxy for "was the upstream page
+ * full", and the last VISIBLE entry is no longer a safe cursor — if every entry on a page
+ * is blocked there is no visible entry at all. Callers that page must key on `hasMore`
+ * and follow `nextCursor`, both decided by the server.
+ *
+ * There is deliberately NO array-returning sibling any more. One existed and every
+ * pagination bug above came from callers keying on its length; leaving it exported was an
+ * invitation to reintroduce them.
+ */
+export async function fetchAccountPostsPage(
   sort: string,
   account: string,
   observer: string,
   startAuthor = '',
   startPermlink = '',
   limit?: number
-): Promise<Entry[] | null> {
+): Promise<{ entries: Entry[]; nextCursor: { author: string; permlink: string } | null; hasMore: boolean }> {
   const params = new URLSearchParams({ sort, account });
   if (observer) params.set('observer', observer);
   if (startAuthor) params.set('start_author', startAuthor);
@@ -55,9 +69,20 @@ export async function fetchAccountPosts(
 
   const res = await fetch(`/api/account-posts?${params.toString()}`);
   if (!res.ok) throw new Error(`account posts ${res.status}`);
-  const body = (await res.json().catch(() => null)) as
-    | { entries?: Entry[] | null; degraded?: string | boolean }
-    | null;
+  const body = (await res.json().catch(() => null)) as {
+    entries?: Entry[] | null;
+    nextCursor?: { author: string; permlink: string } | null;
+    hasMore?: boolean;
+    degraded?: string | boolean;
+  } | null;
   if (body?.degraded) throw new Error(`account posts degraded: ${body.degraded}`);
-  return body?.entries ?? null;
+  const entries = body?.entries ?? [];
+  return {
+    entries,
+    nextCursor: body?.nextCursor ?? null,
+    // A response without `hasMore` is an older server. Inferring "more exist if we got
+    // anything" keeps paging alive rather than silently stopping it; the next response
+    // settles it either way.
+    hasMore: typeof body?.hasMore === 'boolean' ? body.hasMore : entries.length > 0
+  };
 }

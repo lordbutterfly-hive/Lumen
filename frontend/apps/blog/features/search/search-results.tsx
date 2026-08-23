@@ -1,8 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { useInView } from 'react-intersection-observer';
 import { Link, LumenLoader } from '@hive/ui';
 import { fetchSearch } from '@/blog/lib/chain-fetch';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -14,7 +12,12 @@ import { useSSRObserver } from '@/blog/components/observer-provider';
 import { chainObserver } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
+import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
 import MediumPostCard from '@/blog/features/discovery-feed/medium-post-card';
+import {
+  FEED_AUTO_PAGE_CAP,
+  useInfiniteScrollSentinel
+} from '@/blog/features/discovery-feed/hooks/use-infinite-scroll-sentinel';
 // ONE batched request per list, never one per card — see use-rank-marks.ts.
 import { useRankLuminosity, useRankMarks } from '@/blog/features/retention/hooks/use-rank-marks';
 import NoDataError from '@/blog/components/no-data-error';
@@ -60,7 +63,6 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
   const { t } = useTranslation('common_blog');
   const ssrObserver = useSSRObserver();
   const { user, isHydrated } = useUserClient();
-  const { ref, inView } = useInView();
 
   // Use the SSR observer (from cookie) before hydration so a logged-in reader's
   // first request is not sent as the default observer.
@@ -132,11 +134,24 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
     staleTime: StaleTime.MEDIUM
   });
 
-  useEffect(() => {
-    if (inView && hasNextPage && !isFetchingNextPage) {
-      fetchNextPage();
-    }
-  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
+  // ★ USES THE SHARED SENTINEL (2026-08-23, second review). This surface had its own
+  // `autoPagesRef` counter, and that counter was MONOTONIC — it only ever counted up, and
+  // reset solely when the query or sort changed. Its comment claimed "past the cap the
+  // reader pages by scrolling again"; scrolling refires the effect but the guard is a
+  // counter, not a scroll test, so past five pages the sentinel rendered an empty div and
+  // NOTHING could ever fetch again. `hasNextPage` stayed true, which also suppressed the
+  // "That's every match" line, so the reader got no list, no control and no explanation.
+  // The shared hook is the same bound with a way out: `atPageCap` says so, `loadMore()`
+  // grants another window, `backToTop()` is offered alongside it. Every sibling feed
+  // already uses it; search was the one surface that reimplemented it and got it wrong.
+  const sentinel = useInfiniteScrollSentinel({
+    hasNextPage,
+    isFetching: isFetchingNextPage,
+    isError,
+    fetchNextPage,
+    pagesLoaded: data?.pages?.length ?? 0,
+    autoPageCap: FEED_AUTO_PAGE_CAP
+  });
 
   // Both hooks must run on every render, above every early return below — a hook
   // after a conditional return corrupts hook order for the next render of this
@@ -151,9 +166,21 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
   /* §2 rank luminosity for the avatar glow — shares `useRankMarks`' request. */
   const luminosity = useRankLuminosity(rawEntries.map((entry) => entry.author));
 
+  // ★ THE READER'S OWN BLOCK LIST (2026-08-23). Every other list surface filters here —
+  // the feed, the profile, post comments, the discussion — and search did not, so an
+  // account you had blocked came back on the one surface where you go looking for people.
+  //
+  // `enabled` is gated on being signed in, deliberately. Passing `true` fires
+  // `/api/lite/block/list` for anonymous visitors on a public page; with lite accounts
+  // disabled that route answers 503, the hook throws, React Query retries, and the SHARED
+  // `['lumenBlockList']` key degrades for every other consumer on the page.
+  const blockList = useLumenBlockList(Boolean(user?.isLoggedIn));
+
   // Filter at the LIST, so the count below means "matches you will actually
   // see" and the scroll sentinel is not sitting in a zero-height list.
-  const entries = filterVisiblePosts(rawEntries, nsfwPreference);
+  const entries = filterVisiblePosts(rawEntries, nsfwPreference).filter(
+    (entry) => !isBlockedEntry(entry, blockList)
+  );
   const total = entries.length;
 
   // ★ THE COUNT (owner item R-7). The results list had no count, no
@@ -254,10 +281,33 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
         </div>
       )}
 
-      {/* The sentinel: scrolling it into view fetches the next page. */}
-      {total > 0 && hasNextPage ? (
-        <div ref={ref} className="py-6 text-center font-sans text-caption text-muted-foreground">
-          {isFetchingNextPage ? t('search_page.loading_more', { defaultValue: 'Loading more…' }) : ''}
+      {/* The sentinel: scrolling it into view fetches the next page.
+          ★ KEYED ON `hasNextPage` ALONE, NOT ON `total > 0` (2026-08-23). With the block
+          filter above, a page whose every result was authored by someone the reader
+          blocked collapses `total` to 0 while the server still has more. Gating the
+          sentinel on `total` then meant it never mounted, `inView` never fired, and the
+          reader hit a confident dead end with more content one page away. This is the
+          identical defect already found and fixed in `feed-tabs.tsx` — see its comment.
+          Not a request loop: the effect above is guarded by `!isFetchingNextPage`. */}
+      {hasNextPage ? (
+        <div ref={sentinel.ref} className="py-6 text-center font-sans text-caption text-muted-foreground">
+          {isFetchingNextPage ? (
+            t('search_page.loading_more', { defaultValue: 'Loading more…' })
+          ) : sentinel.atPageCap ? (
+            /* No "back to top" alongside it: the siblings render that label as a hardcoded
+               English string, and this project's rule is that user-facing text goes through
+               `t()`. There is no key for it yet, so search offers the control that has one
+               rather than adding a tenth untranslated string. */
+            <button
+              type="button"
+              onClick={sentinel.loadMore}
+              className="font-sans text-sm text-muted-foreground hover:text-foreground"
+            >
+              {t('cards.comment_card.load_more')}
+            </button>
+          ) : (
+            ''
+          )}
         </div>
       ) : null}
       {total > 0 && !hasNextPage ? (

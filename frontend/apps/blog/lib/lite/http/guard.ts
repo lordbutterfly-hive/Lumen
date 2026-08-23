@@ -132,3 +132,84 @@ export function guardBodySize(req: NextRequest, maxBytes = MAX_JSON_BODY_BYTES):
   }
   return null;
 }
+
+/**
+ * ★ THE STREAM-BOUNDED READ (2026-08-23). Use this instead of `guardBodySize` wherever an
+ * UNAUTHENTICATED caller can reach the route.
+ *
+ * `guardBodySize` above trusts `content-length`, and an attacker chooses whether to send
+ * one. A `Transfer-Encoding: chunked` request with no `content-length` yields
+ * `Number('') === 0`, which is not `> maxBytes`, so the header check passes and
+ * `req.json()` then buffers the whole stream. Next's App Router imposes no body limit of
+ * its own (there is no `bodyParser.sizeLimit` for route handlers), so the bound has to be
+ * enforced while reading.
+ *
+ * This reads the stream itself, counting bytes, and cancels the moment the limit is
+ * exceeded, so an oversized body is never fully buffered. Returns `null` for "too large";
+ * the caller answers 413. An absent body reads as an empty string, matching what
+ * `req.text()` would have produced.
+ *
+ * `guardBodySize` is kept for token- and session-guarded routes: there an attacker must
+ * already hold a valid credential, and the cheap header check runs before any work.
+ */
+export async function readBoundedBody(
+  req: NextRequest,
+  maxBytes = MAX_JSON_BODY_BYTES
+): Promise<string | null> {
+  const body = req.body;
+  if (!body) return '';
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    // A transport failure mid-read is not an oversized body; treat it as an empty one and
+    // let the caller's own parse-failure path answer.
+    return '';
+  }
+  const joined = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    joined.set(c, offset);
+    offset += c.byteLength;
+  }
+  return new TextDecoder().decode(joined);
+}
+
+/** The 413 every bounded-read caller returns, so the shape cannot drift between them. */
+export function payloadTooLarge(): NextResponse {
+  return NextResponse.json({ error: 'payload_too_large' }, { status: 413 });
+}
+
+/**
+ * `readBoundedBody` plus a JSON parse, which is what every caller actually wants.
+ *
+ * Returns `null` when the body was too large, so the caller answers 413. Returns
+ * `{ body: null }` for an absent or unparseable body, exactly matching the
+ * `req.json().catch(() => null)` shape these routes used before, so no route changes its
+ * behaviour on malformed input.
+ */
+export async function readBoundedJson<T = Record<string, unknown>>(
+  req: NextRequest,
+  maxBytes = MAX_JSON_BODY_BYTES
+): Promise<{ body: T | null } | null> {
+  const raw = await readBoundedBody(req, maxBytes);
+  if (raw === null) return null;
+  if (raw.length === 0) return { body: null };
+  try {
+    return { body: JSON.parse(raw) as T };
+  } catch {
+    return { body: null };
+  }
+}

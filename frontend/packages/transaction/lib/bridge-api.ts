@@ -259,6 +259,65 @@ export const getPost = async (
  * have no such budget and get `withRetry` wired at their own route level
  * instead, around this same function.
  */
+export interface AccountPostsPage {
+  entries: Entry[] | null;
+  /**
+   * How many entries the NODE returned, before `dropBannedEntries` ran.
+   *
+   * ★ THIS IS WHAT "WAS THE PAGE FULL" MUST BE ANSWERED FROM (2026-08-23). A caller
+   * that pages until a short page arrives cannot use `entries.length`, because every
+   * filter between the node and the caller shrinks it: `dropBannedEntries` here, the
+   * profile owner's blocks in `/api/account-posts`, then the viewer's own list. A page
+   * of 20 carrying one banned author arrives as 19 and reads as the end of the account,
+   * with the rest of its posts unreachable. This count never passes through a filter.
+   */
+  rawCount: number;
+  /**
+   * The cursor for the next page, taken from the RAW page's last entry.
+   *
+   * Same reason as `rawCount`: if every entry on a page is filtered out there is no
+   * surviving entry to build a cursor from, and paging stops dead with content behind
+   * it. Null only when the node genuinely returned nothing.
+   */
+  rawCursor: { author: string; permlink: string } | null;
+}
+
+/**
+ * `getAccountPosts` plus the pre-filter page size. Same call, same filtering; it just
+ * also reports what the node actually returned, which the filtered array can no longer
+ * tell you. Use this wherever a cursor or a "load more" decision is being made.
+ */
+export const getAccountPostsPage = async (
+  sort: string,
+  account: string,
+  observer: string,
+  start_author: string = '',
+  start_permlink: string = '',
+  limit: number = DATA_LIMIT
+): Promise<AccountPostsPage> => {
+  // The whole account is banned: its Posts, Comments, Feed and Replies tabs are
+  // all this one call, so answering "nothing here" once covers every one of them.
+  // `rawCount: 0` is the truth here — there is no next page to walk to.
+  if (isBannedAuthor(account)) return { entries: [], rawCount: 0, rawCursor: null };
+  const resp = await (await getChain()).api.bridge.get_account_posts({
+    sort,
+    account,
+    start_author,
+    start_permlink,
+    limit,
+    observer
+  });
+  if (!resp) return { entries: resp ?? null, rawCount: 0, rawCursor: null };
+  // `sort: 'feed'` mixes in the reblogs of everyone this account follows,
+  // so even a clean account's page can carry a banned author's post.
+  const rawLast = resp.length > 0 ? resp[resp.length - 1] : null;
+  return {
+    entries: await resolvePosts(dropBannedEntries(resp), observer),
+    rawCount: resp.length,
+    rawCursor: rawLast ? { author: rawLast.author, permlink: rawLast.permlink } : null
+  };
+};
+
 export const getAccountPosts = async (
   sort: string,
   account: string,
@@ -266,29 +325,8 @@ export const getAccountPosts = async (
   start_author: string = '',
   start_permlink: string = '',
   limit: number = DATA_LIMIT
-): Promise<Entry[] | null> => {
-  // The whole account is banned: its Posts, Comments, Feed and Replies tabs are
-  // all this one call, so answering "nothing here" once covers every one of them.
-  if (isBannedAuthor(account)) return [];
-  return (await getChain()).api.bridge
-    .get_account_posts({
-      sort,
-      account,
-      start_author,
-      start_permlink,
-      limit,
-      observer
-    })
-    .then((resp) => {
-      if (resp) {
-        // `sort: 'feed'` mixes in the reblogs of everyone this account follows,
-        // so even a clean account's page can carry a banned author's post.
-        return resolvePosts(dropBannedEntries(resp), observer);
-      }
-
-      return resp;
-    });
-};
+): Promise<Entry[] | null> =>
+  (await getAccountPostsPage(sort, account, observer, start_author, start_permlink, limit)).entries;
 
 export const getFollowList = async (
   observer: string,

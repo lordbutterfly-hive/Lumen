@@ -8,7 +8,12 @@ services:
       REACT_APP_API_ENDPOINT: "https://${PUBLIC_HOSTNAME}:${API_HTTPS_PORT}"
       REACT_APP_IMAGES_ENDPOINT:
       REACT_APP_SITE_DOMAIN: "https://${PUBLIC_HOSTNAME}:${BLOG_PORT}"
-      REACT_APP_WALLET_ENDPOINT: "https://${PUBLIC_HOSTNAME}:${WALLET_PORT}"
+      # REACT_APP_WALLET_ENDPOINT deliberately UNSET here (2026-08-23). It used to point
+      # at the local apps/wallet instance, which was deleted in 56cfc9e — so this aimed
+      # every wallet link in the blog at a port nothing listens on. The consumers
+      # (`features/wallet/lib/wallet-endpoint.ts`, `api/resolve-post`, the fuel gauge)
+      # all fall back cleanly on an empty value; a dead URL is worse than no URL.
+      # Set it to a real wallet host if this stack should link to one.
       REACT_APP_CHAIN_ID:
       REACT_APP_LOGGING_BROWSER_ENABLED: "true"
       TURBO_APP_SCOPE: '@hive/blog'

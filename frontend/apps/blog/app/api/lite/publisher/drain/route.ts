@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardPublisher } from '@/blog/lib/lite/http/guard';
+import { guardPublisher, guardBodySize } from '@/blog/lib/lite/http/guard';
 import { reconcileOrphans } from '@/blog/lib/lite/content/post-service';
 import { runPublisherOnce, lastPauseReason, ProcessOutcome } from '@/blog/lib/lite/publisher/worker';
 import { countPending } from '@/blog/lib/lite/repositories/publish-job-repository';
@@ -31,6 +31,10 @@ const MAX_BATCH = 25;
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardPublisher(req);
   if (blocked) return blocked;
+
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
 
   // Dev convenience: wire the env-var signer if one is configured. In production
   // this throws unless a KMS-backed broadcaster was already injected at boot.

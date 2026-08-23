@@ -3,7 +3,10 @@ include:
   - path: compose.stack.yml
   - path: compose.auth.yml 
   - path: compose.blog.yml
-  - path: compose.wallet.yml
+  # ★ `compose.wallet.yml` REMOVED 2026-08-23. `apps/wallet` was deleted in 56cfc9e
+  # (2026-08-13) and that file has never existed in this tree, so Compose failed to
+  # parse this whole stack — `docker compose -f stack/compose.yml config` errors on a
+  # missing include. No stack-level deploy or validation was possible.
   - path: compose.caddy.yml
 volumes:
   docker-certs-ca:

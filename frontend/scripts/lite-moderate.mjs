@@ -103,7 +103,12 @@ switch (command) {
       ...userTarget(),
       action: command,
       reason: requireReason(),
-      hideContent: flags['hide-content'] === true
+      // Omitted when the operator gave no flag, so the ROUTE's per-action default governs
+      // (ban hides, suspend does not). `--hide-content` / `--no-hide-content` still win
+      // explicitly. Sending a bare `false` here, as this did, meant a ban from the CLI
+      // never hid anything even once the route learned to. JSON.stringify drops undefined.
+      hideContent:
+        flags['hide-content'] === true ? true : flags['no-hide-content'] === true ? false : undefined
     });
     break;
 

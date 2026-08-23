@@ -34,8 +34,6 @@ export function buildLiteSessionUser(u: LumenUser): User {
     loginType: LITE_PLACEHOLDER_LOGIN_TYPE,
     keyType: KeyType.posting,
     authenticateOnBackend: false,
-    chatAuthToken: '',
-    oauthConsent: {},
     strict: false
   };
 }

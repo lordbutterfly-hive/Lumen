@@ -2,6 +2,8 @@ import { Entry } from '@hive/common-hiveio-packages/wax';
 import { useState } from 'react';
 import SuggestionsCard from './card';
 import { Button } from '@ui/components';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
 
 export type SuggestionsVariant = 'rail' | 'horizontal';
 
@@ -23,6 +25,12 @@ const SuggestionsList = ({ suggestions, variant = 'rail', limit }: SuggestionsLi
     Array.isArray(suggestions) ? filteredPosts : []
   );
 
+  // ★ THE READER'S OWN BLOCK LIST (2026-08-23). Declared HERE, above the early return
+  // below — a hook after a conditional return corrupts hook order on the next render
+  // (React #310), which this codebase has already been bitten by.
+  const { user } = useUserClient();
+  const blockList = useLumenBlockList(Boolean(user?.isLoggedIn));
+
   if (!Array.isArray(suggestions)) {
     return null;
   }
@@ -30,7 +38,12 @@ const SuggestionsList = ({ suggestions, variant = 'rail', limit }: SuggestionsLi
   // ★ THE CAP IS APPLIED AFTER THE LOW-RATING FILTER, ON PURPOSE (2026-08-13).
   // Capping first would let five gray posts consume the whole rail and render an
   // empty panel while good suggestions sat unshown behind the cap.
-  const shown = typeof limit === 'number' ? filteredSuggestions.slice(0, limit) : filteredSuggestions;
+  // ★ FILTERED AT `shown`, THE SINGLE RENDER POINT, AND THAT PLACEMENT IS THE POINT.
+  // The "Show All" button below sets `filteredSuggestions` to the RAW `suggestions`
+  // array, so filtering only where `filteredPosts` is built would let one click put a
+  // blocked author straight back on screen.
+  const visible = filteredSuggestions.filter((entry) => !isBlockedEntry(entry, blockList));
+  const shown = typeof limit === 'number' ? visible.slice(0, limit) : visible;
 
   return (
     <div
@@ -47,7 +60,7 @@ const SuggestionsList = ({ suggestions, variant = 'rail', limit }: SuggestionsLi
       ) : (
         <div className="flex flex-col items-center gap-2 p-4 text-center text-caption text-ink-10">
           <p>Sorry</p>
-          <p>All suggested posts were hidden due to low ratings.</p>
+          <p>All suggested posts were hidden.</p>
         </div>
       )}
       {filteredPosts.length === 0 ? (

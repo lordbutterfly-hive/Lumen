@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@hive/ui/lib/logging';
+import { guardBodySize, payloadTooLarge, readBoundedBody } from '@/blog/lib/lite/http/guard';
 
 const logger = getLogger('csp');
 
@@ -51,10 +52,22 @@ function isValidCspReport(payload: unknown): payload is CspViolationReport {
  * Reports are logged for monitoring and CSP policy refinement.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
+
   try {
     // CSP reports may be sent with content-type: application/csp-report
     // or application/json depending on the browser
-    const body = await req.json().catch(() => null);
+    // ★ STREAM-BOUNDED, not header-bounded (2026-08-23). Unauthenticated route: the caller
+    // chooses whether to send `content-length`, and `guardBodySize` trusts it. Reading
+    // through `readBoundedBody` counts bytes and cancels past the limit, and parsing from
+    // the returned string keeps this route's existing behaviour on malformed input exactly.
+    const raw = await readBoundedBody(req);
+    if (raw === null) return payloadTooLarge();
+    let body: unknown = null;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      body = null;
+    }
 
     if (!isValidCspReport(body)) {
       logger.debug('Received invalid CSP report format');

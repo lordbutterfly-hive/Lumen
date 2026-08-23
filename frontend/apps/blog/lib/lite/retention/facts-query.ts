@@ -1,3 +1,18 @@
+/**
+ * ★ ACT-DAYS READ `first_created_at`, NOT `created_at` (2026-08-23, migration 0039).
+ *
+ * `lumen_follow` and `lumen_reblog` rewrite `created_at` to now() on every reactivation
+ * (`ON CONFLICT ... DO UPDATE`), so unfollow-then-refollow minted a fresh activity day
+ * from a single click, repeatable daily, with nobody else involved. `lumen_vote` was
+ * already immune because 0025 pinned `first_cast_at` for exactly this reason; the two
+ * neighbouring sources were never swept.
+ *
+ * BOTH unions below are changed — the viewer's own `my_days` AND the `giver_days`
+ * LATERAL. Changing only one would score givers on a different clock from the viewer.
+ *
+ * `created_at` keeps its meaning ("last became active") and its other consumers,
+ * including the recsys delta feed which reads it alongside `seq`.
+ */
 import { query } from '../db/pool';
 import {
   GIVER_SCAN_LIMIT,
@@ -146,8 +161,8 @@ mine AS (
 my_days AS (
           SELECT (created_at    AT TIME ZONE 'UTC')::date AS d FROM lumen_post   WHERE user_id           = $1
   UNION   SELECT (first_cast_at AT TIME ZONE 'UTC')::date      FROM lumen_vote   WHERE voter_user_id     = $1
-  UNION   SELECT (created_at    AT TIME ZONE 'UTC')::date      FROM lumen_reblog WHERE reblogger_user_id = $1
-  UNION   SELECT (created_at    AT TIME ZONE 'UTC')::date      FROM lumen_follow WHERE follower_user_id  = $1
+  UNION   SELECT (first_created_at AT TIME ZONE 'UTC')::date    FROM lumen_reblog WHERE reblogger_user_id = $1
+  UNION   SELECT (first_created_at AT TIME ZONE 'UTC')::date    FROM lumen_follow WHERE follower_user_id  = $1
 ),
 -- Distinct OTHER users who engaged my posts. UNION (not UNION ALL) is what makes this
 -- a DISTINCT-GIVER count: one person voting on ten of my posts is one giver, exactly as
@@ -179,8 +194,8 @@ giver_days AS (
     CROSS JOIN LATERAL (
               SELECT (created_at    AT TIME ZONE 'UTC')::date AS d FROM lumen_post   WHERE user_id           = g.giver
       UNION   SELECT (first_cast_at AT TIME ZONE 'UTC')::date      FROM lumen_vote   WHERE voter_user_id     = g.giver
-      UNION   SELECT (created_at    AT TIME ZONE 'UTC')::date      FROM lumen_reblog WHERE reblogger_user_id = g.giver
-      UNION   SELECT (created_at    AT TIME ZONE 'UTC')::date      FROM lumen_follow WHERE follower_user_id  = g.giver
+      UNION   SELECT (first_created_at AT TIME ZONE 'UTC')::date    FROM lumen_reblog WHERE reblogger_user_id = g.giver
+      UNION   SELECT (first_created_at AT TIME ZONE 'UTC')::date    FROM lumen_follow WHERE follower_user_id  = g.giver
     ) x
    GROUP BY g.giver
 ),

@@ -4,6 +4,7 @@ import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceHivesenseRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { cachedRead } from '@/blog/lib/server-read-cache';
 import { withRetry } from '@transaction/lib/retry';
+import { guardBodySize, payloadTooLarge, readBoundedBody } from '@/blog/lib/lite/http/guard';
 
 const logger = getLogger('app');
 
@@ -209,9 +210,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+
+  // ★ STREAM-BOUNDED, not header-bounded (2026-08-23). Unauthenticated route: the caller
+  // chooses whether to send `content-length`, and `guardBodySize` trusts it. Reading
+  // through `readBoundedBody` counts bytes and cancels past the limit; parsing from the
+  // returned string keeps this route's behaviour on malformed input exactly.
+  const raw = await readBoundedBody(req);
+  if (raw === null) return payloadTooLarge();
   let body: unknown;
   try {
-    body = await req.json();
+    body = JSON.parse(raw);
   } catch {
     return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 });
   }

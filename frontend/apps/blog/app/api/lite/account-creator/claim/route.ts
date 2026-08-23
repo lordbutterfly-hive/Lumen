@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardAccountCreator } from '@/blog/lib/lite/http/guard';
+import { guardAccountCreator, guardBodySize } from '@/blog/lib/lite/http/guard';
 import { liteConfig } from '@/blog/lib/lite/config';
 import { withAdvisoryLock } from '@/blog/lib/lite/db/pool';
 import { runActClaimOnce } from '@/blog/lib/lite/upgrade/act-claim';
@@ -40,6 +40,10 @@ const MAX_CLAIMS = 10;
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardAccountCreator(req);
   if (blocked) return blocked;
+
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
 
   ensureAccountCreator();
   if (!hasAccountCreator()) {

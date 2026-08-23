@@ -4,6 +4,7 @@ import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceMagiGqlRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { consumeLocalGlobal, consumeLocalPerIp } from '@/blog/lib/lite/antispam/local-rate-limit';
 import { NONCE_OPERATION, SUBMIT_OPERATION, TX_STATUS_OPERATION } from './operations';
+import { guardBodySize } from '@/blog/lib/lite/http/guard';
 
 const logger = getLogger('app');
 
@@ -67,6 +68,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { status: 503 }
     );
   }
+
+
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  // A 512 KiB OUTER bound only. This route keeps its own, tighter post-parse cap; the
+  // point here is that the tighter cap runs AFTER the body is already in memory, which
+  // is the ordering defect guardBodySize exists to close.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
 
   const raw = await req.text();
   if (Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) {

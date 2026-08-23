@@ -656,6 +656,34 @@ const PostContent = () => {
   // Lumen does not collapse.
   const viewerBlocks = useLumenBlockList(user.isLoggedIn);
 
+  // ★ A CROSS-POST MUST NOT REINTRODUCE A BLOCKED AUTHOR (2026-08-23).
+  //
+  // A cross-post RELABELS this page to the original author: the byline, reputation,
+  // community and body below all switch to `crossPostData` when it exists. So a reader who
+  // blocked that author met them here anyway, with their name, their reputation and their
+  // text — on a page reached from a resharer they had not blocked.
+  //
+  // ★ THE RENDER IS SUPPRESSED, NOT THE FETCHED OBJECT. `postFollowTarget` above reads
+  // `crossPostData?.author` to decide whose Follow button the byline offers; nulling the
+  // query result would silently repoint that control at a different account. So the object
+  // stays, and only the presentation falls back to the post as it actually exists on
+  // chain — which is the resharer's post. That is the honest fallback, and it is the same
+  // shape as `liteName={crossPostData ? undefined : ...}` already on the byline.
+  const visibleCrossPost =
+    crossPostData && isBlockedEntry(crossPostData, viewerBlocks) ? undefined : crossPostData;
+
+  // ★ THE SECOND IDENTITY SOURCE. `visibleCrossPost` above only covers the FETCHED
+  // cross-post object. A cross-post also carries its origin synchronously in
+  // `json_metadata.original_author`, and three render sites read that field directly,
+  // gated only on `crossedPost` — so suppressing the fetched object alone still printed
+  // the blocked account's handle in a button label, mounted their profile popover, and
+  // linked to their post. Everything that names or navigates to the original author is
+  // gated on this instead. Same doctrine as above: fall back to the post as it exists on
+  // chain (the resharer's), never to a blank.
+  const originalAuthor = postData?.json_metadata?.original_author;
+  const originalAuthorBlocked = isBlockedEntry({ author: originalAuthor }, viewerBlocks);
+  const visibleOriginalAuthor = originalAuthorBlocked ? undefined : originalAuthor;
+
   const discussionState = useMemo(() => {
     if (!discussionData) return undefined;
     const list = [...Object.keys(discussionData).map((key) => discussionData[key])]
@@ -1321,12 +1349,16 @@ const PostContent = () => {
                     {postData?.author}{' '}
                   </BasePathLink>
                   cross-posted{' '}
-                  <Link
-                    href={`/@${postData?.json_metadata.original_author}/${postData?.json_metadata.original_permlink}`}
-                    className="font-bold hover:text-destructive"
-                  >
-                    this post{' '}
-                  </Link>
+                  {originalAuthorBlocked ? (
+                    <span className="font-bold">{'this post '}</span>
+                  ) : (
+                    <Link
+                      href={`/@${postData?.json_metadata.original_author}/${postData?.json_metadata.original_permlink}`}
+                      className="font-bold hover:text-destructive"
+                    >
+                      this post{' '}
+                    </Link>
+                  )}
                   in{' '}
                   <Link href={`/topics/${postData?.community}`} className="font-bold hover:text-destructive">
                     {postData?.community_title ?? postData?.community}
@@ -1626,10 +1658,10 @@ const PostContent = () => {
                     <UserInfo
                       permlink={permlink}
                       moderateEnabled={!!userCanModerate}
-                      author={crossPostData?.author || litePost?.chainAuthor || postData.author}
-                      liteName={crossPostData ? undefined : litePost?.author}
+                      author={visibleCrossPost?.author || litePost?.chainAuthor || postData.author}
+                      liteName={visibleCrossPost ? undefined : litePost?.author}
                       author_reputation={
-                        crossPostData?.author_reputation ?? postData.author_reputation
+                        visibleCrossPost?.author_reputation ?? postData.author_reputation
                       }
                       author_title={authorTitleOf(postData)}
                       authored={postData.json_metadata?.author}
@@ -1643,12 +1675,12 @@ const PostContent = () => {
                         //   the same post. `communityData` is a separate request
                         //   that need not have resolved; the post itself always
                         //   carries this.
-                        crossPostData?.community_title ??
+                        visibleCrossPost?.community_title ??
                         postData.community_title ??
                         communityData?.title ??
                         ''
                       }
-                      community={crossPostData?.community ?? category}
+                      community={visibleCrossPost?.community ?? category}
                       category={postData.category}
                       created={postData.created}
                       blacklist={
@@ -1775,7 +1807,7 @@ const PostContent = () => {
                     author={postData.author}
                     permlink={postData.permlink}
                     mainPost={postData.depth === 0}
-                    crossPostBody={crossPostData?.body}
+                    crossPostBody={visibleCrossPost?.body}
                     mutedPost={mutedPost}
                     mutedReasons={postData.stats?.muted_reasons}
                     onShowMutedContent={handleShowMutedContent}
@@ -1834,11 +1866,11 @@ const PostContent = () => {
                       <span className="font-semibold text-destructive">
                         {postData.community_title ? (
                           <Link
-                            href={`/topics/${crossPostData?.community ?? postData.community}`}
+                            href={`/topics/${visibleCrossPost?.community ?? postData.community}`}
                             className="hover:underline"
                             data-testid="footer-comment-community-category-link"
                           >
-                            {crossPostData?.community_title ?? postData.community_title}
+                            {visibleCrossPost?.community_title ?? postData.community_title}
                           </Link>
                         ) : (
                           <Link
@@ -1854,11 +1886,9 @@ const PostContent = () => {
                       <span>{t('post_content.footer.by')}</span>
                       <div className="flex items-center">
                         <UserPopoverCard
-                          author={
-                            postData.json_metadata.original_author || litePost?.chainAuthor || postData.author
-                          }
-                          liteName={postData.json_metadata.original_author ? undefined : litePost?.author}
-                          author_reputation={crossPostData?.author_reputation ?? postData.author_reputation}
+                          author={visibleOriginalAuthor || litePost?.chainAuthor || postData.author}
+                          liteName={visibleOriginalAuthor ? undefined : litePost?.author}
+                          author_reputation={visibleCrossPost?.author_reputation ?? postData.author_reputation}
                           blacklist={
                             firstPost
                               ? firstPost.blacklists
@@ -2243,7 +2273,7 @@ const PostContent = () => {
                     />
                   </div>
                 ) : null}
-                {crossedPost ? (
+                {crossedPost && !originalAuthorBlocked ? (
                   <div className="mb-12 flex w-full justify-center">
                     <Link
                       href={`/@${postData.json_metadata.original_author}/${postData.json_metadata.original_permlink}`}

@@ -25,6 +25,10 @@ import { IronSessionData } from '@smart-signer/types/common';
  * gate — while the same cookie got a 401 from `/api/retention/goal`, which
  * reads through `getLiteSession()` and does enforce the stamp.
  *
+ * (Historical note: the OAuth/consent/chat-token handlers quoted above no
+ * longer exist — they were deleted with Rocket.Chat on 2026-08-23. The quote
+ * is preserved because it records why this accessor exists.)
+ *
  * This function is the fix: one accessor, used everywhere in this package,
  * so the check can never again be "out of scope" for whoever adds the next
  * route.

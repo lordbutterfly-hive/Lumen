@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardWrite } from '@/blog/lib/lite/http/guard';
+import { guardBodySize, guardWrite, payloadTooLarge, readBoundedJson } from '@/blog/lib/lite/http/guard';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceChallengeRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { verifyGoogleIdToken } from '@/blog/lib/lite/auth/google-verify';
@@ -18,13 +18,23 @@ const logger = getLogger('app');
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
+
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
   // This endpoint had NO per-source cap while both wallet paths did, so it was the
   // open door: unlimited Google sign-in/sign-up attempts from one source.
   if (!(await enforceChallengeRate(getClientIp(req), 'google'))) {
     return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
 
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  // ★ STREAM-BOUNDED, not header-bounded (2026-08-23). This route is reachable with no
+  // token and no session, so the caller chooses whether to send `content-length` — and
+  // `guardBodySize` trusts it. `readBoundedJson` counts bytes as it reads and cancels past
+  // the limit, so an oversized body is never fully buffered.
+  const parsed = await readBoundedJson<Record<string, unknown>>(req);
+  if (!parsed) return payloadTooLarge();
+  const body = parsed.body;
   const idToken = body?.idToken;
   const nonce = body?.nonce;
   if (typeof idToken !== 'string' || typeof nonce !== 'string') {

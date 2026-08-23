@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardRecsys } from '@/blog/lib/lite/http/guard';
+import { guardRecsys, guardBodySize } from '@/blog/lib/lite/http/guard';
 import { resolveAuthors, resolveHiveAccounts } from '@/blog/lib/lite/recsys/resolver';
 
 const logger = getLogger('app');
@@ -37,6 +37,14 @@ function parseNames(v: unknown): string[] {
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardRecsys(req);
   if (blocked) return blocked;
+
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  // ★ 2 MiB, NOT the 512 KiB default. This route legitimately accepts MAX_BATCH (1000)
+  // post pairs AND 1000 account names in one call; an honest worst case is roughly
+  // 300 KB, and the default would leave under 2x headroom on real ingestion traffic.
+  // If MAX_BATCH is ever raised, raise this with it.
+  const tooBig = guardBodySize(req, 2 * 1024 * 1024);
+  if (tooBig) return tooBig;
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const pairs = parsePairs(body?.posts);

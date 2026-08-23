@@ -343,6 +343,49 @@ def build_trust_snapshot(
     # wide window is itself the Sybil defence. The caller passes now - trust_days
     # here, NOT the short sourcing window that rank_feed uses for candidates.
     edges = gateway.engagement_edges(since)
+
+    # ★ THE TRUST GRAPH ITSELF WAS NEVER FILTERED (2026-08-23).
+    #
+    # `banned.py` names two effects a ban must have: the account cannot be SEEN
+    # (`second_degree.filter_eligible`) and it cannot AFFECT (`VoteExclusions` at rank
+    # time). Neither reached THIS graph. `detect_rings`, `compute_graph_cred` and
+    # `train_als` below are all trained on these raw edges, and `accounts`/`follows` are
+    # derived from them — so a banned account's vouches still moved PageRank and its
+    # co-engagement still shaped every viewer's collaborative filtering. That is the
+    # strongest promoter position of the three, sitting underneath every other signal.
+    #
+    # ★★★ THE CURATOR RULE IS ASYMMETRIC ON PURPOSE. DO NOT COLLAPSE THESE INTO ONE SET.
+    # A ban is symmetric: a banned account mints no trust and receives none (its own posts
+    # are already dropped from every pool). A curator gets only the outgoing half — their
+    # engagement mints nothing, but their own compilations are real posts that people
+    # genuinely read, so their INCOMING edges must keep earning them graph-cred.
+    # `norm_builder.py` unions the two sets because at rank time both mean the same thing;
+    # here they do not, and a `banned | curators` union would silently zero every
+    # curator's own standing.
+    # ★ KNOWN INTERACTION, LEFT FOR THE OWNER (2026-08-23, adversarial review note 13).
+    # THREE accounts sit on BOTH `trusted_seeds.txt` (57 entries) and
+    # `curator_accounts.txt` (21): ecency, qurator, worldmappin. Dropping their OUTGOING
+    # edges makes them dangling nodes, and `graph_cred.py`'s dangling handling
+    # redistributes that mass UNIFORMLY across all n accounts rather than back to the
+    # seed set — so those three still receive seed teleport mass but anchor nothing with
+    # it. That is 3 of 57 seeds propagating no trust.
+    #
+    # NOT changed here, because it is a ranking-semantics call, not a bug fix: it turns on
+    # whether a curation account's upvote is manufactured signal (the reason the curator
+    # rule exists) or genuine endorsement (the reason it is a trusted seed). Both readings
+    # are defensible and the answer belongs to whoever owns the two lists. The options are
+    # to drop the three from one list or to exempt seeds from the curator filter.
+    # `detect_rings` below also now sees this pre-filtered graph; removing a banned
+    # account's edges can drop a ring under `min_group=2`, which is unmeasured.
+    _banned = banned_authors()
+    _curators = curator_accounts()
+    if _banned or _curators:
+        edges = [
+            e
+            for e in edges
+            if e.src not in _banned and e.dst not in _banned and e.src not in _curators
+        ]
+
     accounts = frozenset({e.src for e in edges} | {e.dst for e in edges})
     follows = gateway.follow_graph(accounts)
     # Ring knobs come from Settings now, not from function defaults nobody could
@@ -910,7 +953,22 @@ def gather_candidates(
             # (`_lineage_for`). Self plus ring co-members is the whole set.
             if snapshot is None:
                 return frozenset({author})
-            return frozenset({author}) | _ring_exclusion(author, snapshot) | curator_accounts()
+            # ★ `banned_authors()` ADDED 2026-08-23. It was missing, and `core/popular.py`
+            # promises the opposite in writing: "the author, their ring, and banned accounts
+            # contribute nothing, a banned troll cannot promote anyone into the lane every
+            # viewer sees." The sibling call site below unions it under a 2026-08-08 comment
+            # explaining exactly why ("an invisible promoter, which is a stronger position
+            # than they had before the ban"); this function was written the next day, picked
+            # up `curator_accounts()` and did not pick up the ban set.
+            #
+            # This is the Across-Hive Popularity lane, which is served to EVERY viewer, so it
+            # was the widest-reach place the omission could sit.
+            return (
+                frozenset({author})
+                | _ring_exclusion(author, snapshot)
+                | curator_accounts()
+                | banned_authors()
+            )
 
         popular_pool = gateway.popular_posts(since, settings.popular.source_limit)
         # ★ 2026-08-09: the lane weights each commenter/reblogger by on-chain

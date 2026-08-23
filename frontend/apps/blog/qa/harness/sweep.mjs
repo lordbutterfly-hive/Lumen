@@ -100,8 +100,6 @@ async function seedSession(context, username) {
     loginType: 'keychain',
     keyType: 'posting',
     authenticateOnBackend: false,
-    chatAuthToken: '',
-    oauthConsent: {},
     strict: false
   };
   const sealed = await sealData({ user, hiveSessionIssuedAt: Date.now() }, { password, ttl: 0 });

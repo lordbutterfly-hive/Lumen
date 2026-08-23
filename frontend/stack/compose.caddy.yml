@@ -8,7 +8,6 @@ services:
       PUBLIC_HOSTNAME:
       AUTH_PORT:
       BLOG_PORT:
-      WALLET_PORT:
       API_HTTP_PORT:
       API_HTTPS_PORT:
     volumes:
@@ -19,7 +18,10 @@ services:
     ports:
       - '${AUTH_PORT}:${AUTH_PORT}'
       - '${BLOG_PORT}:${BLOG_PORT}'
-      - '${WALLET_PORT}:${WALLET_PORT}'
+      # WALLET_PORT removed 2026-08-23: apps/wallet was deleted in 56cfc9e, the
+      # Caddyfile has no wallet vhost, and nothing listens on it — so this published
+      # 4000 on the host and routed it nowhere. It was also the third V18 defect: with
+      # WALLET_PORT unset the mapping degenerates to a bare ':' and the file stops parsing.
       - '${API_HTTP_PORT}:${API_HTTP_PORT}'
       - '${API_HTTPS_PORT}:${API_HTTPS_PORT}'
     extra_hosts:
@@ -33,5 +35,9 @@ services:
       denser-auth:
         condition: service_healthy
       denser-blog:
-        condition: service_healthy  
-         condition: service_healthy
+        condition: service_healthy
+      # An orphaned second `condition:` sat here until 2026-08-23 — the leftover of a
+      # `denser-wallet:` key removed when apps/wallet was deleted (56cfc9e). Two
+      # conditions under one service is invalid YAML, so this file could not parse. It
+      # went unnoticed because stack/compose.yml failed earlier still, on an include of
+      # a compose.wallet.yml that does not exist.

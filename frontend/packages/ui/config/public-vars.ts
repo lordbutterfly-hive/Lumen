@@ -30,4 +30,36 @@ export const configuredBlogDomain = (env('BLOG_DOMAIN') ?? 'https://hive.blog/')
 export function blogUrl(path: string): string {
   return `${configuredBlogDomain}${path.startsWith('/') ? path : `/${path}`}`;
 }
-export const configuredSessionTime = env('APP_SESSION_TIME') ?? configuredSiteDomain.includes('wallet') ? 900 : 64800;
+/**
+ * ★ OPERATOR-PRECEDENCE BUG FIXED (2026-08-23). This read:
+ *
+ *   env('APP_SESSION_TIME') ?? configuredSiteDomain.includes('wallet') ? 900 : 64800
+ *
+ * `??` binds TIGHTER than the conditional operator, so it parsed as
+ * `(env(...) ?? includes(...)) ? 900 : 64800` — the configured value was used only as a
+ * truthiness test and its NUMBER was thrown away. The knob could only ever yield 900 or
+ * 64800, and setting it to ANY non-empty value forced 900.
+ *
+ * ★★ THIS CHANGES A LIVE VALUE, AND THE OWNER SHOULD KNOW WHICH WAY.
+ * `.env.blog.example` sets `REACT_APP_APP_SESSION_TIME=64800` (18 hours). Under the bug the
+ * blog actually got 900 seconds (15 minutes) — 72x shorter than configured. With the
+ * precedence fixed, the configured 64800 now applies, so hb-auth sessions become LONGER,
+ * not shorter. That is the configured intent, but a longer session is more exposure: if 15
+ * minutes was in fact preferred, change the env value rather than reverting this.
+ *
+ * Practical reach is small — the only consumer is the hb-auth worker
+ * (`packages/common-hiveio-packages/src/hb-auth/hbauth-service.ts`), and Lumen's /login
+ * offers Keychain and Google only.
+ *
+ * Parsed to a NUMBER here rather than left as a string, so the exported value matches its
+ * name; a non-numeric or non-positive setting falls back to the per-domain default instead
+ * of propagating NaN.
+ */
+const rawSessionTime = env('APP_SESSION_TIME');
+const parsedSessionTime = rawSessionTime ? Number(rawSessionTime) : Number.NaN;
+export const configuredSessionTime =
+  Number.isFinite(parsedSessionTime) && parsedSessionTime > 0
+    ? parsedSessionTime
+    : configuredSiteDomain.includes('wallet')
+      ? 900
+      : 64800;

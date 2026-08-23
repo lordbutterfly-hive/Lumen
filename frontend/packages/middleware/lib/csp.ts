@@ -11,7 +11,7 @@
 export interface CspConfig {
   /**
    * Additional frame-src sources beyond 'self'
-   * Blog needs: twitter, instagram, vimeo, youtube, soundcloud, twitch, spotify, 3speak, odysee, openhive.chat
+   * Blog needs: twitter, instagram, vimeo, youtube, soundcloud, twitch, spotify, 3speak, odysee
    * Wallet needs: accounts.google.com (for OAuth)
    */
   frameSrc?: string[];

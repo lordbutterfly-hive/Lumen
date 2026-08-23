@@ -5,6 +5,8 @@ import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { requireActiveLiteUser } from '@/blog/lib/lite/http/actor';
 import { listRecentFollowersWithTime } from '@/blog/lib/lite/repositories/follow-repository';
 import { findUsersByIds } from '@/blog/lib/lite/repositories/user-repository';
+import { viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
+import { actorKey } from '@/blog/lib/lite/social/follow-actor';
 
 const logger = getLogger('app');
 
@@ -42,8 +44,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const hiveParam = (req.nextUrl.searchParams.get('hive') ?? '').trim().replace(/^@/, '');
 
   let actor: { userId?: string; hive?: string } | null = null;
+  // Hoisted so the block-list lookup below can key on the SAME session that
+  // established the actor, rather than re-reading the cookie.
+  let sessionUser: Awaited<ReturnType<typeof getLiteSession>>['user'] | undefined;
   try {
     const session = await getLiteSession();
+    sessionUser = session.user;
     const checked = await requireActiveLiteUser(session.user, session);
     if (checked.ok) actor = { userId: checked.user.userId };
     else if (hiveParam && session.user?.username === hiveParam) actor = { hive: hiveParam };
@@ -54,6 +60,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!actor && hiveParam) {
     try {
       const session = await getLiteSession();
+      sessionUser = session.user;
       if (session.user?.username === hiveParam) actor = { hive: hiveParam };
     } catch {
       /* fall through to 401 */
@@ -62,7 +69,33 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!actor) return NextResponse.json({ error: 'not_signed_in' }, { status: 401 });
 
   try {
-    const followers = await listRecentFollowersWithTime(actor as never, { limit: 30 });
+    const rawFollowers = await listRecentFollowersWithTime(actor as never, { limit: 30 });
+
+    // ★ THE READER'S OWN BLOCK LIST (2026-08-23). `listRecentFollowersWithTime` already
+    // drops operator-banned accounts, but not the accounts THIS reader blocked — so
+    // blocking someone silenced them everywhere except the one place that announces them
+    // by name, with a working link to their profile.
+    //
+    // ★ THE KEY IS BUILT WITH `actorKey`, NOT A HAND-WRITTEN TEMPLATE. The block set is
+    // keyed `u:<userId>` / `h:<hive>`; reimplementing that here would fail SILENTLY the
+    // day either side changes, because a key that never matches filters nothing and throws
+    // nothing. Importing the same function the writer uses makes drift impossible.
+    //
+    // Degrades OPEN, like every other effect-A site: a Lumen DB hiccup must not empty
+    // somebody's notification bell.
+    const blockedKeys = await viewerBlockedKeySet(sessionUser).catch(() => new Set<string>());
+    const followers =
+      blockedKeys.size === 0
+        ? rawFollowers
+        : rawFollowers.filter((f) => {
+            const key = f.userId
+              ? actorKey({ userId: f.userId })
+              : f.hive
+                ? actorKey({ hive: f.hive })
+                : null;
+            return !key || !blockedKeys.has(key);
+          });
+
     if (followers.length === 0) return NextResponse.json({ notifications: [] });
 
     // Resolve Lumen ids to the names those people use TODAY, so a renamed

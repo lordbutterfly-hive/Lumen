@@ -30,6 +30,16 @@ services:
     image: recsys:${RECSYS_IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
+      # ★ ADDED 2026-08-23. `recsys/core/banned.py` reads this and unions it with the
+      # shipped `data/banned_authors.txt`, but it was declared in NO service here — so no
+      # container could ever supply it, and the operator's only lever for an urgent ban
+      # was a rebuild. That is the fifth instance of the defect this file already names
+      # four times: config that exists in code and not in the artifact is config that
+      # does not exist. Declared on all three services because `banned_authors()` is read
+      # on BOTH paths — request-time scoring and the trust-snapshot build — and each
+      # process holds its own `@lru_cache`, so setting it on one would just relocate the
+      # divergence.
+      RECSYS_BANNED_AUTHORS:
       # Public, read-only HAFSQL mirror (recsys/config.py:HafsqlConfig
       # defaults — override only to point at a different mirror/replica).
       HAFSQL_HOST:
@@ -213,6 +223,16 @@ services:
     image: recsys:${RECSYS_IMAGE_TAG:-latest}
     command: ["python", "-m", "recsys.jobs.trust_batch"]
     environment:
+      # ★ ADDED 2026-08-23. `recsys/core/banned.py` reads this and unions it with the
+      # shipped `data/banned_authors.txt`, but it was declared in NO service here — so no
+      # container could ever supply it, and the operator's only lever for an urgent ban
+      # was a rebuild. That is the fifth instance of the defect this file already names
+      # four times: config that exists in code and not in the artifact is config that
+      # does not exist. Declared on all three services because `banned_authors()` is read
+      # on BOTH paths — request-time scoring and the trust-snapshot build — and each
+      # process holds its own `@lru_cache`, so setting it on one would just relocate the
+      # divergence.
+      RECSYS_BANNED_AUTHORS:
       HAFSQL_HOST:
       HAFSQL_PORT:
       HAFSQL_DB:
@@ -367,6 +387,16 @@ services:
           fi
         done
     environment:
+      # ★ ADDED 2026-08-23. `recsys/core/banned.py` reads this and unions it with the
+      # shipped `data/banned_authors.txt`, but it was declared in NO service here — so no
+      # container could ever supply it, and the operator's only lever for an urgent ban
+      # was a rebuild. That is the fifth instance of the defect this file already names
+      # four times: config that exists in code and not in the artifact is config that
+      # does not exist. Declared on all three services because `banned_authors()` is read
+      # on BOTH paths — request-time scoring and the trust-snapshot build — and each
+      # process holds its own `@lru_cache`, so setting it on one would just relocate the
+      # divergence.
+      RECSYS_BANNED_AUTHORS:
       HAFSQL_HOST:
       HAFSQL_PORT:
       HAFSQL_DB:

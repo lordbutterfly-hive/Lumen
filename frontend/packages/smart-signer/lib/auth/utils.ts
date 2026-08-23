@@ -26,12 +26,6 @@ export const username = z.string()
         return true;
     });
 
-export const postConsentSchema = z.object({
-  oauthClientId: z.string(),
-  consent: z.boolean(),
-});
-export type PostConsentSchema = z.infer<typeof postConsentSchema>;
-
 export const defaultUser: User = {
     isLoggedIn: false,
     username: '',
@@ -39,7 +33,5 @@ export const defaultUser: User = {
     loginType: LoginType.hbauth,
     keyType: KeyType.posting,
     authenticateOnBackend: true,
-    chatAuthToken: '',
-    oauthConsent: {},
     strict: false,
 };

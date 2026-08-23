@@ -1674,6 +1674,7 @@
       "proxy_cleared": "Your witness proxy was cleared."
     },
     "lite_cannot_vote": "Voting for witnesses needs a full Hive account. Upgrade to vote.",
+    "session_unavailable": "We couldn’t check your account just now, so this is unavailable. Reload to try again.",
     "apr_stale": "Not signing",
     "showing_count": "Showing {{shown}} of {{total}}",
     "stale_marker": "Feed stale",
@@ -1871,7 +1872,8 @@
     "reclaim": "Get my stake back",
     "reclaim_explain": "This round is past its deadline and was never settled. You can void it yourself and take your full stake back. No one else needs to act.",
     "upgrade_to_claim": "Upgrade to a full account to claim",
-    "upgrade_to_reclaim": "Upgrade to a full account to reclaim"
+    "upgrade_to_reclaim": "Upgrade to a full account to reclaim",
+    "session_unavailable": "We couldn’t check your account just now. Reload to try again."
   },
   "login_dialog": {
     "new_here": "New to Lumen?",

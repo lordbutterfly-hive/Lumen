@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardWrite } from '@/blog/lib/lite/http/guard';
+import { guardWrite, guardBodySize } from '@/blog/lib/lite/http/guard';
 import { hasCsrfHeader } from '@/blog/lib/lite/http/csrf';
 import { enforceUpgradeRate } from '@/blog/lib/lite/antispam/rate-limit';
 import * as upgradeEvents from '@/blog/lib/lite/repositories/upgrade-event-repository';
@@ -19,6 +19,7 @@ async function allowUpgradeRequest(userId: string | undefined, inFlight: boolean
   return enforceUpgradeRate(userId);
 }
 import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { requireSessionOwner } from '@/blog/lib/lite/http/actor';
 import { upgradeStatus, upgradeToFullAccount } from '@/blog/lib/lite/upgrade/upgrade-service';
 import { ensureAccountCreator } from '@/blog/lib/lite/upgrade/hive-account-creator';
 
@@ -46,6 +47,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const session = await getLiteSession();
   const userId = session.user?.userId;
+  // ★ REVOCATION GATE (2026-08-23). This route read the cookie directly, so a session the
+  // account holder had explicitly signed out — `logout-all`, or an admin invalidating
+  // sessions — could still reach the creator. That matters more here than almost anywhere
+  // else in the app: as the comment below says, each attempt that reaches the creator can
+  // trigger an on-chain token claim which spends the CREATOR ACCOUNT's resource credits,
+  // and a successful run creates a permanent Hive account. So a revoked cookie could spend
+  // the operator's resources and mint chain state.
+  //
+  // Anonymous requests are unchanged: the check only runs when the cookie actually carries
+  // a userId, and the handler's existing behaviour for a missing one is left alone.
+  if (userId) {
+    const actor = await requireSessionOwner(session.user, session);
+    if (!actor.ok) return actor.response;
+  }
   // An attempt already in flight is a RECONCILIATION, not a new creation: it spends
   // no token and creates nothing. Both gates below let it through for the same
   // reason — refusing it would strand a user whose Hive account exists but is not
@@ -61,6 +76,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { status: 429 }
     );
   }
+
+  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
+  const tooBig = guardBodySize(req);
+  if (tooBig) return tooBig;
+
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const newName = body?.newName;
   if (typeof newName !== 'string') {

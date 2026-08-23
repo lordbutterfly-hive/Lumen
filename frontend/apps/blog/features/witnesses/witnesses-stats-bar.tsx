@@ -3,6 +3,7 @@
 import { useTranslation } from '@/blog/i18n/client';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 
 interface WitnessesStatsBarProps {
   hpAprPercent: number | null;
@@ -71,7 +72,25 @@ export default function WitnessesStatsBar({
    * `hasProxy`/`votesLeft` below, same ordering `WitnessesProxyCard` uses,
    * because a lite account can have neither a proxy nor a vote allowance.
    */
-  const isLite = isLoggedIn && user.account_tier === 'lite';
+  // ★ MIXED SOURCES ARE THE BUG (2026-08-23). `isLoggedIn` is cookie-fast via
+  // `useSessionIdentity()`; `account_tier` waits on `/api/users/me`. In that window the
+  // tier is `undefined`, so this computed false and a lite account saw an enabled control.
+  // Blocked until the client genuinely answers. And the copy must not lie: `clientAnswered`
+  // never flips true if that request fails terminally, so a full Hive account would be told
+  // "lite cannot vote" forever. Gate stays shut either way; only the sentence changes.
+  const identity = useSessionIdentity();
+  const isLite = isLoggedIn && (!identity.clientAnswered || user.account_tier === 'lite');
+  // ★ THREE BRANCHES, NOT TWO (corrected 2026-08-23). `sessionUnavailable` is
+  // `isError && dataUpdatedAt === 0 && fetchStatus === 'idle'` — it is FALSE while the
+  // request is still in flight. So a two-branch version told a full Hive account "voting
+  // needs a full Hive account" for the entire ~10s cold window, which is precisely the
+  // window this gate exists to cover. Loading is neither "you are lite" nor "we failed";
+  // it gets its own, true sentence.
+  const liteBlockedText = identity.sessionUnavailable
+    ? t('witnesses.session_unavailable')
+    : !identity.clientAnswered
+      ? t('global.loading')
+      : t('witnesses.lite_cannot_vote');
 
   return (
     <div
@@ -116,7 +135,7 @@ export default function WitnessesStatsBar({
         // `votesLeft`/`proxy_active` treatment below, which is reserved for
         // things the viewer can actually act on.
         <span className="ml-auto font-sans text-caption text-ink-10" data-testid="witnesses-stats-lite">
-          {t('witnesses.lite_cannot_vote')}
+          {liteBlockedText}
         </span>
       ) : hasProxy ? (
         <span className="ml-auto font-semibold text-ink-brand-6" data-testid="witnesses-stats-proxy-active">

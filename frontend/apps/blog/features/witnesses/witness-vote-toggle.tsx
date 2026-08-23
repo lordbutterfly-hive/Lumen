@@ -5,6 +5,7 @@ import TooltipContainer from '@ui/components/tooltip-container';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useWitnessVoteMutation } from './hooks/use-witness-vote-mutation';
 
 interface WitnessVoteToggleProps {
@@ -40,6 +41,14 @@ export default function WitnessVoteToggle({
 }: WitnessVoteToggleProps) {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
+  // ★ MIXED SOURCES ARE THE BUG (2026-08-23). `isLoggedIn` arrives as a prop derived from
+  // `useSessionIdentity()`, which answers instantly off the server cookie; `account_tier`
+  // comes from `useUserClient()`, which waits on `/api/users/me` — measured at ~10s cold on
+  // this box. In that window the tier is `undefined`, so `=== 'lite'` was false and a lite
+  // account saw a fully enabled Vote button. Treat the account as blocked until the client
+  // genuinely answers: a briefly-disabled button beats a lite user clicking a vote they
+  // cannot sign. Same shape as `proposal-support-footer.tsx`, which fixed this first.
+  const identity = useSessionIdentity();
   const voteMutation = useWitnessVoteMutation();
   const isPending = voteMutation.isLoading && voteMutation.variables?.witness === witness;
 
@@ -76,13 +85,29 @@ export default function WitnessVoteToggle({
   // A lite account has no Hive keys — the mutation backstop already refuses this
   // (use-witness-vote-mutation.ts -> refuseIfLite), but the button used to render
   // fully enabled until clicked. Gate it here too, same pattern as `hasProxy` below.
-  if (user.account_tier === 'lite') {
+  // ★ AND THE TOOLTIP MUST NOT LIE. `clientAnswered` never flips true if `/api/users/me`
+  // fails terminally, so a bare gate would tell a full Hive account "voting needs a full
+  // Hive account" — a false statement about them — permanently. The gate stays shut either
+  // way; only the sentence changes. `proposal-support-footer.tsx` does exactly this.
+  const isLiteBlocked = isLoggedIn && (!identity.clientAnswered || user.account_tier === 'lite');
+  // ★ THREE BRANCHES, NOT TWO (corrected 2026-08-23). `sessionUnavailable` is
+  // `isError && dataUpdatedAt === 0 && fetchStatus === 'idle'` — it is FALSE while the
+  // request is still in flight. So a two-branch version told a full Hive account "voting
+  // needs a full Hive account" for the entire ~10s cold window, which is precisely the
+  // window this gate exists to cover. Loading is neither "you are lite" nor "we failed";
+  // it gets its own, true sentence.
+  const blockedTitle = identity.sessionUnavailable
+    ? t('witnesses.session_unavailable')
+    : !identity.clientAnswered
+      ? t('global.loading')
+      : t('witnesses.lite_cannot_vote');
+  if (isLiteBlocked) {
     return (
-      <TooltipContainer title={t('witnesses.lite_cannot_vote')}>
+      <TooltipContainer title={blockedTitle}>
         <button
           type="button"
           data-testid={`witness-vote-${witness}`}
-          aria-label={t('witnesses.lite_cannot_vote')}
+          aria-label={blockedTitle}
           disabled
           className={`${BASE_CLASS} ${UNVOTED_CLASS}`}
         >

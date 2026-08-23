@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardRead, guardWrite, guardBodySize } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { requireSessionOwner } from '@/blog/lib/lite/http/actor';
 import { deleteLitePost, getLitePost } from '@/blog/lib/lite/content/post-service';
 import { liteEntryForPost } from '@/blog/lib/lite/render/lite-entry';
 
@@ -20,8 +21,17 @@ export async function GET(
     // `author_only` is a real moderation level, not a label: everyone except the author
     // must be told the post is gone. Gating on 'hidden' alone left a sanctioned post
     // fully readable at its own URL.
-    const session = await getLiteSession();
-    const isAuthor = Boolean(session.user?.userId && post && session.user.userId === post.userId);
+      const session = await getLiteSession();
+    // ★ A REVOKED COOKIE IS NOT AN AUTHOR (2026-08-23). This read is PUBLIC — anonymous
+    // and full-Hive readers both reach it, and every feed card calls it once per lite
+    // post. So a dead session must degrade to ANONYMOUS here, never 401: a 401 makes
+    // `use-lite-overlay.ts` return null, and the byline then falls back to the chain
+    // author, which for a Lumen post is the SHARED PUBLISHING ACCOUNT — the exact
+    // impersonation this file's forgery gate exists to prevent, arriving from the other
+    // side. Anonymous readers pay nothing; the ternary short-circuits.
+    const owner = session.user?.userId ? await requireSessionOwner(session.user, session) : null;
+    const viewerId = owner?.ok ? session.user?.userId : undefined;
+    const isAuthor = Boolean(viewerId && post && viewerId === post.userId);
     const moderated =
       post?.feedVisibility === 'hidden' || (post?.feedVisibility !== 'visible' && !isAuthor);
     if (!post || post.deletedLocally || moderated) {
@@ -38,7 +48,7 @@ export async function GET(
     // caches the result per post id. Batching it would mean a second endpoint shape
     // for a few hundred microseconds.
     // Viewer passed through so the author still sees their own limited post.
-    const entry = await liteEntryForPost(post, '', session.user?.userId);
+    const entry = await liteEntryForPost(post, '', viewerId);
     if (!entry) return NextResponse.json({ error: 'not_found' }, { status: 404 });
     return NextResponse.json({ entry, post });
   } catch (error) {
@@ -75,12 +85,18 @@ export async function DELETE(
   // hold no key that could remove them. Gating on `account_tier === 'lite'` meant that
   // once their lite cookie expired — and lite login is refused for an upgraded account —
   // their own back catalogue became permanently unwithdrawable.
-  if (!user?.userId) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  //
+  // ★ REVOCATION IS NOT EXEMPT (2026-08-23). The tier exemption above is deliberate and
+  // stays; what was missing is that this read the cookie DIRECTLY, so `logout-all` did not
+  // stop it — a signed-out session could still delete the account's posts, which is the one
+  // control a person reaches for when they believe a session was stolen.
+  // `requireSessionOwner` is `requireLiteUser` minus the tier gate, so it adds revocation
+  // without re-breaking withdrawal for upgraded accounts.
+  const actor = await requireSessionOwner(user, session);
+  if (!actor.ok) return actor.response;
 
   try {
-    const result = await deleteLitePost(user.userId, params.id);
+    const result = await deleteLitePost(actor.user.userId, params.id);
     if (result.status === 'error') {
       return NextResponse.json(
         { error: result.code, message: result.message },

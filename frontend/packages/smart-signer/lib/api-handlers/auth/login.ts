@@ -12,7 +12,6 @@ import { verifyLogin } from '@smart-signer/lib/verify-login';
 import { getLoginChallengeFromTransactionForLogin } from '@smart-signer/lib/login-operation';
 import { getLogger } from '@hive/ui/lib/logging';
 import { siteConfig } from '@hive/ui/config/site';
-import { getChatAuthToken } from '@smart-signer/lib/rocket-chat';
 import { logLoginEvent, getClientIpFromApiRequest } from '@smart-signer/lib/event-logging';
 import { isHiveNetworkError, withHiveRetry } from '@smart-signer/lib/hive-network-error';
 
@@ -125,25 +124,6 @@ export const loginUser: NextApiHandler<User> = async (req, res) => {
     throw new createHttpError.Unauthorized('Invalid username or password');
   }
 
-  let chatAuthToken = '';
-  const oauthConsent: { [key: string]: boolean } = {};
-  logger.info('Chat integration check: iframeEnable=%s, strict=%s, allowNonStrict=%s',
-    siteConfig.openhiveChatIframeIntegrationEnable,
-    verifiedUser?.strict,
-    siteConfig.openhiveChatAllowNonStrictLogin
-  );
-  if (
-    siteConfig.openhiveChatIframeIntegrationEnable &&
-    (verifiedUser?.strict || siteConfig.openhiveChatAllowNonStrictLogin)
-  ) {
-    const result = await getChatAuthToken(username);
-    logger.info('getChatAuthToken result: success=%s, hasToken=%s', result.success, !!result.data?.authToken);
-    if (result.success) {
-      chatAuthToken = result.data.authToken;
-      oauthConsent[siteConfig.openhiveChatClientId] = true;
-    }
-  }
-
   const user: User = {
     isLoggedIn: true,
     username,
@@ -151,16 +131,15 @@ export const loginUser: NextApiHandler<User> = async (req, res) => {
     loginType,
     keyType,
     authenticateOnBackend,
-    chatAuthToken,
-    oauthConsent,
     strict: verifiedUser?.strict ? true : false
   };
   const session = await getAppSession(req, res);
   session.user = user;
   // F-L39 (2026-08-12): stamp the Hive TTL clock AT ISSUE, here, rather than
   // relying solely on `getAppSession()`'s read-side backfill. This is the
-  // ACTUAL issuance point for every full-Hive session (the OAuth/consent/
-  // chat-token handlers only ever read one login.ts already created) — the
+  // ACTUAL issuance point for every full-Hive session — and, since the
+  // Rocket.Chat/OAuth-consent handlers were removed (2026-08-23), the ONLY
+  // one; nothing else creates a full-Hive session — the
   // "real, stated gap" F-L38 left open (see the long comment on
   // `hiveSessionIssuedAt` in packages/smart-signer/types/common.ts: "a Hive
   // user whose browsing never reaches a route that calls getLiteSession()

@@ -15,8 +15,6 @@ const DEFAULT_USER: User = {
   loginType: LoginType.wif,
   keyType: KeyType.posting,
   authenticateOnBackend: false,
-  chatAuthToken: '',
-  oauthConsent: {},
   strict: false
 };
 

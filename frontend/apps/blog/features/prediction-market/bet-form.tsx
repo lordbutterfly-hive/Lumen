@@ -6,6 +6,7 @@ import { Icons } from '@ui/components/icons';
 import { handleError } from '@ui/lib/handle-error';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useMarket } from './use-market';
 import { estimateBetPayout } from './lib/estimate-payout';
 import { buildOutcomeColorMap } from './outcome-colors';
@@ -29,7 +30,10 @@ export default function BetForm({ round }: { round: RoundState }) {
   const { user } = useUserClient();
   // A lite account has no Hive keys or on-chain funds, so it cannot sign or fund a
   // bet — gate the CTA behind an upgrade instead of letting it error on click.
-  const isLite = user.account_tier === 'lite';
+  // ★ Same gate as the hook (2026-08-23): this file keeps its OWN copy of `isLite`, so
+  // fixing only `use-market.ts` would leave this button enabled during the same window.
+  const identity = useSessionIdentity();
+  const isLite = !identity.clientAnswered || user.account_tier === 'lite';
   const colors = useMemo(() => buildOutcomeColorMap(round.buckets), [round.buckets]);
 
   const [selectedId, setSelectedId] = useState<string | null>(round.buckets[0]?.id ?? null);
@@ -201,7 +205,11 @@ export default function BetForm({ round }: { round: RoundState }) {
         {!loggedIn
           ? t('prediction_market.login_to_bet')
           : isLite
-            ? t('prediction_market.upgrade_to_bet')
+            ? identity.sessionUnavailable
+              ? t('prediction_market.session_unavailable')
+              : !identity.clientAnswered
+                ? t('global.loading')
+                : t('prediction_market.upgrade_to_bet')
             : isPlacingBet
               ? t('prediction_market.placing')
               : t('prediction_market.place_bet')}
