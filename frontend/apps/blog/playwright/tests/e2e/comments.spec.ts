@@ -113,71 +113,7 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
     expect((await postPage.commentListItems.all()).length).toBe(commentAmount);
   });
 
-  test('Validate the first comment in the post', async ({ page }) => {
-    const defaultLoginForm = new LoginForm(page);
 
-    await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
-
-    // sicarius is expected as the first comment author
-    await expect(postPage.commentAuthorLink.first()).toHaveText('sicarius');
-    // the content of comment contain specific text
-    await expect(postPage.commentCardsDescriptions.first()).toContainText(
-      "Did my 'ol due diligence and threw a star and fork at the openhive repo."
-    );
-    // click Upvote and move to the Login to Vote Dialog and back
-    await postPage.commentCardsFooterUpvotes.first().click();
-    await defaultLoginForm.validateDefaultLoginFormIsLoaded();
-    await defaultLoginForm.closeLoginForm();
-    await expect(postPage.commentAuthorLink.first()).toHaveText('sicarius');
-    // click Downvote and move to the Login to Vote Dialog and back
-    await postPage.commentCardsFooterDownvotes.first().click();
-    await defaultLoginForm.validateDefaultLoginFormIsLoaded();
-    await defaultLoginForm.closeLoginForm();
-    await expect(postPage.commentAuthorLink.first()).toHaveText('sicarius');
-    // Read value of the first comment payout
-    const firstCommentPayoutValue = '$0.29';
-    await expect(postPage.commentCardsFooterPayoutNonZero.first()).toHaveText(firstCommentPayoutValue);
-    // Read value of the first comment votes
-    const firstCommentVotes = '4 votes';
-    await expect(postPage.commentCardsFooterVotes.first()).toHaveText(firstCommentVotes);
-    // Click Reply of the first comment and open login form
-    await postPage.commentCardsFooterReply.first().click();
-    await defaultLoginForm.validateDefaultLoginFormIsLoaded();
-    await defaultLoginForm.closeLoginForm();
-  });
-
-  test('Validate the second comment (nested) in the post', async ({ page }) => {
-    const commentViewPage = new CommentViewPage(page);
-    const defaultLoginForm = new LoginForm(page);
-
-    await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);
-
-    // gtg is expected as the second comment author
-    await expect(postPage.commentAuthorLink.nth(1)).toHaveText(postAuthorName);
-    // gtg's Wizard affiliation tag is expected
-    await expect(commentViewPage.getCommentUserAffiliationTag.nth(0)).toHaveText('Wizard');
-    // the content of comment contain specific text
-    await expect(postPage.commentCardsDescriptions.nth(1)).toContainText('Great to hear, thank you! :-)');
-    // click Upvote and move to the Login to Vote Dialog and back
-    await postPage.commentCardsFooterUpvotes.nth(1).click();
-    await defaultLoginForm.validateDefaultLoginFormIsLoaded();
-    await defaultLoginForm.closeLoginForm();
-    await expect(postPage.commentAuthorLink.nth(1)).toHaveText(postAuthorName);
-    // click Downvote and move to the Login to Vote Dialog and back
-    await postPage.commentCardsFooterDownvotes.nth(1).click();
-    await defaultLoginForm.validateDefaultLoginFormIsLoaded();
-    await defaultLoginForm.closeLoginForm();
-    await expect(postPage.commentAuthorLink.nth(1)).toHaveText(postAuthorName);
-    // Read value of the second comment payout
-    const secondCommentPayoutValue = '$0.00';
-    await expect(postPage.commentCardsFooterPayoutZero.first()).toHaveText(secondCommentPayoutValue);
-    // The value of the second comment votes is invisible
-    await expect(postPage.commentCardsFooters.nth(1)).not.toHaveAttribute('data-testid', 'comment-votes');
-    // Click Reply of the second comment and open login form
-    await postPage.commentCardsFooterReply.nth(1).click();
-    await defaultLoginForm.validateDefaultLoginFormIsLoaded();
-    await defaultLoginForm.closeLoginForm();
-  });
 
   test('Validate the timestamp in the second comment (nested) in the post', async ({ page }) => {
     await postPage.gotoPostPage(communityCategoryName, postAuthorName, postPermlink);

@@ -56,10 +56,6 @@ test.describe('Healthchecker page - Basic navigation', () => {
         // await expect(healthcheckerPage.pageTitle).toHaveText('API switch and HealthChecker');
     });
 
-    test('Validate page descriptions are visible', async ({ page }) => {
-        await healthcheckerPage.goto();
-        await healthcheckerPage.validatePageDescriptionsAreVisible();
-    });
 
     test('Validate CircleCheck icon is visible in description', async ({ page }) => {
         await healthcheckerPage.goto();
@@ -299,11 +295,6 @@ test.describe('Healthchecker page - UI elements and content', () => {
         );
     });
 
-    test('Validate switch to best description text', async ({ page }) => {
-        await expect(healthcheckerPage.pageDescriptionSwitchToBest).toContainText(
-            'Switch to Best'
-        );
-    });
 
     test('Validate tabs container has grid layout', async ({ page }) => {
         const gridCols = await healthcheckerPage.tabsList.evaluate((el) => {

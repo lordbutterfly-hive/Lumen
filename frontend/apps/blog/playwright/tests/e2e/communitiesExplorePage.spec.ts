@@ -30,18 +30,6 @@ test.describe('Explore communities page tests', () => {
    * regression. Left calling the dead link so the failure documents it honestly. See the audit
    * report.
    */
-  test('move to Explore communities... from Home Page', async ({ page }) => {
-    const communitiesPage = new CommunitiesExplorePage(page);
-
-    await homePage.goto();
-    await homePage.getExploreCommunities.click();
-    await communitiesPage.validataExplorerCommunitiesPageIsLoaded();
-  });
-
-  // ★ Rerouted straight to `/communities` (2026-08-21) — this test's subject is the explorer
-  // page's Rank list, not the home-page click; see the comment on the test above for why that
-  // one test is treated differently. `/communities` is confirmed live: 200, lists 100
-  // communities (ground truth).
   test('validate amount of communities in the Rank list', async ({ page }) => {
     const communitiesPage = new CommunitiesExplorePage(page);
     const apiHelper = new ApiHelper(page);

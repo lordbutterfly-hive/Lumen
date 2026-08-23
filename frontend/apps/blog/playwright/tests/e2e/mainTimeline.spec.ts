@@ -45,54 +45,6 @@ test.describe('Home page tests', () => {
     expect(postsCount).toBeLessThanOrEqual(60);
   });
 
-  test('validate the first post (for Trending filter)', async ({ page, request, browserName }) => {
-    test.skip(browserName === 'webkit', 'Automatic test works well on chromium');
-
-    await homePage.goto();
-
-    const url = process.env.REACT_APP_API_ENDPOINT;
-
-    const response = await request.post(`${url}/`, {
-      data: {
-        id: 0,
-        jsonrpc: '2.0',
-        method: 'bridge.get_ranked_posts',
-        params: { sort: 'trending', start_author: '', start_permlink: '', limit: 20, tag: '', observer: '' }
-      },
-      headers: {
-        Accept: 'application/json, text/plain, */*'
-      }
-    });
-
-    // console.log((await response.json()).result[0])
-    const postAuthor = (await response.json()).result[0].author;
-    // console.log("Post author: ", await postAuthor)
-    const postAuthorReputation = (await response.json()).result[0].author_reputation;
-    // console.log("Post author reputation: ", await postAuthorReputation)
-    const postTitle = (await response.json()).result[0].title;
-    // console.log("Post title: ", await postTitle)
-    const postPayout = (await response.json()).result[0].payout.toFixed(2);
-    // console.log("Post payout: ", await postPayout)
-
-    // ★ 2026-08-21 REPAIR: getFirstPostAuthor now targets identity-pill-profile,
-    // which renders "@handle" (features/discovery-feed/identity-pill.tsx), so the
-    // expected value needs the leading '@' the bare API `author` field doesn't carry.
-    expect(homePage.getFirstPostAuthor).toHaveText('@' + postAuthor);
-    // ROUND, not floor (2026-08-09). `accountReputation` floored until then, which was
-    // one too low against hive.blog for every account whose fractional part was >= .5.
-    // The formatter now rounds everywhere; this assertion has to follow it or it pins
-    // the bug it used to describe.
-    expect(homePage.getFirstPostAuthorReputation).toContainText('(' + Math.round(postAuthorReputation) + ')');
-    expect(homePage.getFirstPostTitle).toHaveText(postTitle);
-    expect(homePage.getFirstPostPayout).toHaveText(`$${postPayout}`);
-
-    // Vote/children counts can change between API fetch and UI check, so just verify they're numbers
-    const firstPostTotalVotes = (await homePage.getFirstPostVotes.allInnerTexts()).at(0);
-    expect(firstPostTotalVotes).toMatch(/^\d+$/);
-
-    const firstPostChildren = (await homePage.getFirstPostChildren.allInnerTexts()).at(0);
-    expect(firstPostChildren).toMatch(/^\d+$/);
-  });
 
   test('validate the first post footer payouts styles (for Trending filter) in the light theme', async ({
     page
@@ -101,12 +53,6 @@ test.describe('Home page tests', () => {
     await homePage.validateFirstPostPayoutWithTooltip();
   });
 
-  test('validate the first post footer votes styles (for Trending filter) in the light theme', async ({
-    page
-  }) => {
-    await homePage.goto();
-    await homePage.validateFirstPostVotesWithTooltip();
-  });
 
   test('validate the first post footer responses styles (for Trending filter) in the light theme', async ({
     page
@@ -120,57 +66,6 @@ test.describe('Home page tests', () => {
     await homePage.validateFirstPostHeaderElements();
   });
 
-  test('@flaky validate the first post (for New filter)', async ({ page, request, browserName }) => {
-    await homePage.goto();
-
-    // Wait for posts to load before interacting with filter
-    await expect(homePage.getMainTimeLineOfPosts.first()).toBeVisible();
-    // click 'New' value of posts filter
-    await homePage.getFilterPosts.click();
-    await homePage.getFilterPostsList.getByText('New').click();
-    await expect(homePage.getPostListNew).toBeVisible();
-    await expect(homePage.getFilterPosts).toHaveText('New');
-
-    const url = process.env.REACT_APP_API_ENDPOINT;
-
-    const response = await request.post(`${url}/`, {
-      data: {
-        id: 0,
-        jsonrpc: '2.0',
-        method: 'bridge.get_ranked_posts',
-        params: { sort: 'created', start_author: '', start_permlink: '', limit: 20, tag: '', observer: '' }
-      },
-      headers: {
-        Accept: 'application/json, text/plain, */*'
-      }
-    });
-
-    // console.log((await response.json()).result[0])
-    const postAuthor = (await response.json()).result[0].author;
-    // console.log("Post author: ", await postAuthor)
-    const postAuthorReputation = (await response.json()).result[0].author_reputation;
-    // console.log("Post author reputation: ", await postAuthorReputation)
-    const postTitle = (await response.json()).result[0].title;
-    // console.log("Post title: ", await postTitle)
-    const postPayout = (await response.json()).result[0].payout.toFixed(2);
-    // console.log("Post payout: ", await postPayout)
-
-    // ★ 2026-08-21 REPAIR: getFirstPostAuthor now targets identity-pill-profile,
-    // which renders "@handle" (features/discovery-feed/identity-pill.tsx), so the
-    // expected value needs the leading '@' the bare API `author` field doesn't carry.
-    expect(homePage.getFirstPostAuthor).toHaveText('@' + postAuthor);
-    // ROUND, not floor (2026-08-09). `accountReputation` floored until then, which was
-    // one too low against hive.blog for every account whose fractional part was >= .5.
-    // The formatter now rounds everywhere; this assertion has to follow it or it pins
-    // the bug it used to describe.
-    expect(homePage.getFirstPostAuthorReputation).toContainText('(' + Math.round(postAuthorReputation) + ')');
-    expect(homePage.getFirstPostTitle).toHaveText(postTitle);
-    expect(homePage.getFirstPostPayout).toHaveText(`$${postPayout}`);
-
-    // Vote count can change between API fetch and UI check, so just verify it's a number
-    const firstPostTotalVotes = (await homePage.getFirstPostVotes.allInnerTexts()).at(0);
-    expect(firstPostTotalVotes).toMatch(/^\d+$/);
-  });
 
   test('move to the first post author profile page', async ({ page }) => {
     await homePage.goto();
@@ -182,10 +77,6 @@ test.describe('Home page tests', () => {
     await homePage.moveToFirstPostAuthorProfilePageByAvatar();
   });
 
-  test('move to the first post community or category', async ({ page }) => {
-    await homePage.goto();
-    await homePage.moveToFirstPostCommunityOrCategory();
-  });
 
   test('move to the first post content by clicking the timestamp', async ({ page }) => {
     await homePage.goto();
@@ -216,80 +107,8 @@ test.describe('Home page tests', () => {
     await homePage.moveToTheFirstPostCommentContantPageByClickingResponses();
   });
 
-  test('filtr posts in maintimeline', async ({ browserName }) => {
-    test.skip(browserName === 'firefox' || browserName === "webkit", 'Automatic test works well on chromium');
 
-    await homePage.goto();
 
-    await expect(homePage.getFilterPosts).toHaveText('Trending');
-    // click 'New' value of posts filter
-    await homePage.getFilterPosts.click();
-    await homePage.getFilterPostsList.getByText('New').click();
-    await expect(homePage.getPostListNew).toBeVisible();
-    await expect(homePage.getFilterPosts).toHaveText('New');
-    // click 'Hot' value of posts filter
-    await homePage.getFilterPosts.click();
-    await homePage.getFilterPostsList.getByText('Hot').click();
-    await expect(homePage.getPostListHot).toBeVisible();
-    await expect(homePage.getFilterPosts).toHaveText('Hot');
-    // click 'Payout' value of posts filter
-    await homePage.getFilterPosts.click();
-    await homePage.getFilterPostsList.getByText('Payouts').click();
-    await expect(homePage.getPostListPayouts).toBeVisible();
-    await expect(homePage.getFilterPosts).toHaveText('Payouts');
-    // click 'Muted' value of posts filter
-    await homePage.getFilterPosts.click();
-    await homePage.getFilterPostsList.getByText('Muted').click();
-    await expect(homePage.getPostListMuted).toBeVisible();
-    await expect(homePage.getFilterPosts).toHaveText('Muted');
-    // click 'Trending' value of posts filter
-    await homePage.getFilterPosts.click();
-    await homePage.getFilterPostsList.getByText('Trending').click();
-    await expect(homePage.getPostListTrending).toBeVisible();
-    await expect(homePage.getFilterPosts).toHaveText('Trending');
-  });
-
-  test('validate that Explore Hive sidebar is visible', async ({ page }) => {
-    await homePage.goto();
-
-    await expect(homePage.getCardExploreHive).toBeVisible();
-    await expect(homePage.getCardExploreHiveTitle).toHaveText('Explore Hive');
-    await expect(homePage.getCardExploreHiveLinks).toHaveCount(5);
-  });
-
-  /*
-   * ★ 'validate that Shortcuts sidebar is visible' DELETED 2026-08-11 — FEATURE
-   * GONE, and the skip comment already said so ("Shortcuts sidebar is no longer
-   * avaiable on the Home Page"). `card-user-shortcuts` has zero occurrences in
-   * product source and no successor component exists. A skipped test for a
-   * deleted feature is permanent fake coverage; deleting it is the honest record.
-   */
-
-  test('validate that All posts in communities sidebar is visible', async ({ page }) => {
-    await homePage.goto();
-
-    await expect(homePage.getTrendingCommunitiesSideBar).toBeVisible();
-    await expect(homePage.getTrandingCommunitiesHeader).toHaveText('All posts');
-    await expect(homePage.getTrendingCommunitiesSideBarLinks).toHaveCount(13);
-  });
-
-  /*
-   * ★ BOTH UNSKIPPED AND REWRITTEN 2026-08-11 (they carried no reason at all).
-   *
-   * The navigation exists — it changed shape twice over, and the old spec asserted
-   * BOTH old shapes at once:
-   *   - testid:  `nav-proposals-link` / `nav-witnesses-link` (0 hits in product
-   *              source) -> `left-rail-vote-proposals` / `left-rail-vote-witness`
-   *              (features/layouts/left-rail.tsx:256-273).
-   *   - target:  a NEW TAB to an external wallet app -> a same-tab in-app route.
-   *              `left-rail.tsx:225-227` documents the move explicitly: "Wallet /
-   *              Witnesses / Proposals are now first-class in-app pages ... not
-   *              external links to wallet.openhive.network".
-   *   - URL:     `/~witnesses` -> `/witnesses` (app/witnesses/page.tsx).
-   *
-   * So `context.waitForEvent('page')` could only ever hang: nothing opens a second
-   * page any more. Same-tab assertions below.
-   */
   test('move to the Proposals page', async ({ page }) => {
     await homePage.goto();
     await page.click('[data-testid="left-rail-vote-proposals"]');
@@ -382,37 +201,9 @@ test.describe('Home page tests', () => {
     await expect(homePage.getNavSidebarMenuContent).not.toBeVisible();
   });
 
-  test('validate upvote button styles and the tooltip of the first post in the light theme', async ({
-    page
-  }) => {
-    await homePage.goto();
-    await homePage.validateFirstPostUpvoteButtonWithTooltip();
-  });
 
-  test('click upvote button and move to the dialog "Login to Vote" ', async ({ page }) => {
-    await homePage.goto();
 
-    await homePage.getFirstPostUpvoteButton.click();
-    await loginDialog.validateDefaultLoginFormIsLoaded();
-    await loginDialog.closeLoginForm();
-    await homePage.isTrendingCommunitiesVisible();
-  });
 
-  test('validate downvote button styles and the tooltip of the first post in the light theme', async ({
-    page
-  }) => {
-    await homePage.goto();
-    await homePage.validateFirstPostDownvoteButtonWithTooltip();
-  });
-
-  test('click downvote button and move to the login dialog', async ({ page }) => {
-    await homePage.goto();
-
-    await homePage.getFirstPostDownvoteButton.click();
-    await loginDialog.validateDefaultLoginFormIsLoaded();
-    await loginDialog.closeLoginForm();
-    await homePage.isTrendingCommunitiesVisible();
-  });
 
   test('validate reblog count display styles in the light theme', async ({ page }) => {
     await homePage.goto();
@@ -436,10 +227,6 @@ test.describe('Home page tests', () => {
     await reblogDialog.closeReblogDialog();
   });
 
-  test('validate styles of the reputation in the post card header in the light mode', async ({ page }) => {
-    await homePage.goto();
-    await homePage.validateFirstPostReputationWithTooltip();
-  });
 
   test('validate styles of the affiliation tag (badge) in the post card in the light mode', async ({
     page

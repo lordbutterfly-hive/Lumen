@@ -767,7 +767,28 @@ export class ProfilePage {
     await this.page.waitForTimeout(1000);
   }
 
+  /*
+   * ★★ WAIT FOR THE PROFILE BEFORE READING ITS NAME (2026-08-21).
+   *
+   * `profileName` is `page.locator('h1')` — the profile's display name is the only
+   * `<h1>` on a profile page. But a POST page has an `<h1>` too: the article title.
+   * Every caller of this reaches the profile by CLICKING (a popover name, an author
+   * link) and then waiting only for `domcontentloaded`, which fires for the page
+   * they are leaving. Lose that race and this read returns the post's title.
+   *
+   * Measured: three `comments.spec.ts` tests failed with
+   * expected "Sicarius" / received "Hive HardFork 25 Jump Starter Kit" — the
+   * fixture post's own title. Not a wrong value, a wrong page.
+   *
+   * Waiting for the URL to actually be a profile removes the race without
+   * loosening what is asserted: the name comparison below is unchanged.
+   */
   async profileNameIsEqual(authorName: string) {
+    // ★ Wait for something ONLY a profile has, not a URL shape. A first attempt
+    // used `waitForURL(/\/@[^/]+/)` and matched instantly on the page it was
+    // leaving — a post URL is `/<community>/@<author>/<permlink>`, which contains
+    // `/@author`. `profile-identity-block` renders on the profile and nowhere else.
+    await this.page.locator('[data-testid="profile-identity-block"]').waitFor({ timeout: 30000 });
     expect(await this.profileName.textContent()).toMatch(authorName);
   }
 

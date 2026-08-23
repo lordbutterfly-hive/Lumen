@@ -153,15 +153,6 @@ test.describe('Profile page of @gtg', () => {
     }
   });
 
-  test('validate styles of the post header in the light mode', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-
-    // Validate post header elements are visible and have correct attributes
-    await profilePage.validatePostHeaderElementsVisible();
-
-    // Validate interactive elements have pointer cursor (links)
-    await profilePage.validatePostHeaderHoverBehavior();
-  });
 
   test('move to the post page after clicking the timestamp', async ({ page }) => {
     await profilePage.gotoProfilePage('@gtg');

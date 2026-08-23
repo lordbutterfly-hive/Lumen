@@ -45,6 +45,8 @@ rsync -rlic $MODE --delete \
   --exclude='.next-prod*/' \
   --exclude='.next-qa/' \
   --exclude='.next*/' \
+  --exclude='.hive-api-cache/' \
+  --exclude='.tls/' \
   --exclude='*.tmp.mjs' \
   --exclude='*.tmp.ts' \
   --exclude='test-results/' \

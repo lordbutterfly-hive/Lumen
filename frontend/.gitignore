@@ -93,3 +93,7 @@ playwright-report/
 /*.jpeg
 /*.webm
 /*.har
+
+# Local Hive-API response cache used by the e2e suite (scripts/hive-api-cache.mjs).
+# Real upstream responses, re-fetchable at any time — never committed.
+.hive-api-cache/

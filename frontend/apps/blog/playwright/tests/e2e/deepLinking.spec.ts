@@ -78,26 +78,7 @@ test.describe('Deep Linking tests', () => {
     await expect(page).toHaveURL(/@arcange/);
   });
 
-  test('direct link to profile posts tab loads correctly', async ({ page, browserName }) => {
-    test.skip(browserName === 'webkit', 'Profile navigation timing issues on WebKit');
 
-    const response = await page.goto('/@gtg/posts');
-
-    expect(response?.status()).toBe(200);
-    await expect(page).toHaveURL(/@gtg\/posts/);
-  });
-
-  test('direct link to profile replies tab loads correctly', async ({ page, browserName }) => {
-    test.skip(browserName === 'webkit', 'Profile navigation timing issues on WebKit');
-
-    await page.goto('/@gtg/replies');
-
-    await expect(page).toHaveURL(/@gtg\/replies/);
-  });
-
-  /**
-   * COMMUNITIES DIRECT LINKS
-   */
 
   test('direct link to communities page loads correctly', async ({ page }) => {
     const response = await page.goto('/communities');

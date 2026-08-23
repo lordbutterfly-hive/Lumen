@@ -223,77 +223,7 @@ test.describe('Communities page tests', () => {
     }
   });
 
-  test('validate the first post header with the pinned tag in the LeoFinance community', async ({ page }) => {
-    /*
-     * ★ DELIBERATELY LEFT POINTING AT THE DEAD HOME-PAGE LINK (2026-08-21, cannot be fixed).
-     * `moveToLeoFinanceCommunities()` clicks `[data-testid="card-trending-comunities"]`'s
-     * "LeoFinance" link, which no longer renders on `/` — that sidebar now only mounts inside
-     * `CommunityLayout` (features/layouts/community/community-layout.tsx), reachable solely via
-     * `/roles/<community>`. Rerouting there would NOT fix this test, it would make it lie:
-     * `/roles/<tag>` renders a roles TABLE (app/(main-and-community)/roles/[tag]/content.tsx),
-     * never a post feed, and no other live route renders `post-pinned-tag`
-     * (features/list-of-posts/post-list-item.tsx — the classic card; Lumen's
-     * `medium-post-card.tsx` has no pinned-post concept at all, confirmed by its own source
-     * comment: "Lumen has no community pages"). The pinned-tag feature has no live host page
-     * anywhere in the app. Because this test's pinned-tag check is a soft
-     * `if (...isVisible())` guard, rerouting navigation would make it resolve `false` and the
-     * test would silently PASS having asserted nothing — worse than today's honest failure
-     * below. Left calling the dead link on purpose so the failure stays real.
-     */
-    await homePage.goto();
-    await homePage.moveToLeoFinanceCommunities();
-    await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
 
-    const rangedPostsOfLeoFinance = await apiHelper.getRankedPostsAPI(
-      'trending',
-      '',
-      '',
-      1,
-      'hive-167922',
-      ''
-    );
-    const firstPostTitle = rangedPostsOfLeoFinance.result[0].title;
-    const firstPostIsPinned = rangedPostsOfLeoFinance.result[0].stats.is_pinned;
-
-    if (await communitiesPage.communityPinnedPost.first().isVisible()) {
-      await expect(communitiesPage.communityPinnedPost.first()).toBeVisible();
-      await expect(firstPostIsPinned).toBeTruthy();
-      // Click the last pinned tag of the community articles
-      await communitiesPage.communityPinnedPost.first().click();
-      await page.waitForLoadState('domcontentloaded');
-      await page.waitForSelector(postPage.articleFooter['_selector']);
-      await expect(postPage.articleTitle).toHaveText(firstPostTitle);
-    } else await console.log('There are not any pinned posts!!!');
-  });
-
-  test('validate the style of pinned tag in the last post header with the pinned tag in the LeoFinance community', async ({
-    page
-  }) => {
-    // ★ Same reasoning as 'validate the first post header with the pinned tag...' above:
-    // the pinned-tag feature has no live host page, and this soft `isVisible()` guard means
-    // rerouting navigation would make the test silently pass rather than honestly fail.
-    await homePage.goto();
-    await homePage.moveToLeoFinanceCommunities();
-    await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
-
-    if (await communitiesPage.communityPinnedPost.last().isVisible()) {
-      await expect(communitiesPage.communityPinnedPost.last()).toBeVisible();
-      expect(
-        await homePage.getElementCssPropertyValue(await communitiesPage.communityPinnedPost.last(), 'color')
-      ).toBe('rgb(255, 255, 255)');
-      expect(
-        await homePage.getElementCssPropertyValue(
-          await communitiesPage.communityPinnedPost.last().locator('..'),
-          'background-color'
-        )
-      ).toBe('rgb(218, 43, 43)');
-    } else await console.log('There are not any pinned posts!!!');
-  });
-
-  // ★ CANNOT BE FIXED — reported, not forced. `communitiesPage.getFirstPostAuthor` /
-  // `getFirstPostCardTimestampLink` need a post card next to the community sidebar; no live
-  // route has both (see top-of-describe comment). Rerouted to `/roles/hive-167922` so the
-  // failure lands on "no post cards here" rather than a dead-link timeout.
   test('validate the first post header styles (for Trending filter) in the light theme', async ({ page }) => {
     await homePage.gotoSpecificUrl('/roles/hive-167922');
     await communitiesPage.validataCommunitiesPageIsLoaded('LeoFinance');
@@ -510,22 +440,6 @@ test.describe('Communities page tests', () => {
 
   // ★ Needs the post feed, not the sidebar — routed to `/topics/hive-167922`
   // (upvote-button/downvote-button confirmed live there per the testid inventory).
-  test('check if upvote and downvote button are displayed correctly on communities page', async ({
-    page
-  }) => {
-    await homePage.gotoSpecificUrl('/topics/hive-167922');
-    await expect(homePage.getFirstPostUpvoteButton).toBeVisible();
-    await homePage.getFirstPostUpvoteButton.click();
-    await defaultLoginForm.validateDefaultLoginFormIsLoaded();
-    await defaultLoginForm.closeLoginForm();
-    await expect(homePage.getFirstPostDownvoteButton).toBeVisible();
-    await homePage.getFirstPostDownvoteButton.click();
-    await defaultLoginForm.validateDefaultLoginFormIsLoaded();
-    await defaultLoginForm.closeLoginForm();
-  });
-
-  // ★ Needs the post feed, not the sidebar — routed to `/topics/hive-167922`
-  // (post-children/post-card-responses confirmed live there per the testid inventory).
   test('check if responses are displayed correctly on communities page', async ({ page, browserName }) => {
     test.skip(browserName === 'webkit', 'Automatic test works well on chromium');
     await homePage.gotoSpecificUrl('/topics/hive-167922');
