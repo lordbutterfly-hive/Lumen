@@ -2253,6 +2253,89 @@ class RealGraphWeights:
     revisit: float = 0.0
     dwell_per_minute: float = 0.0
     half_life_days: float = 30.0  # time-decay of the edge's last interaction
+    #: ★★★ THE RELATIONSHIP FLOOR (2026-08-24, owner: "affinity is based off of
+    #: the long term graph... if i talked to that retard igormuba a bunch of
+    #: times and argued he should show up in my feed almost always unless i
+    #: block him").
+    #:
+    #: THE CATEGORY ERROR THIS FIXES. `viewer_affinity._decayed` copied the
+    #: TRUST layer's clock — its own comment said "the same half-life decay
+    #: graph-cred uses, so 'recent' means the same thing everywhere". That
+    #: uniformity is exactly wrong, because the two layers answer opposite
+    #: questions. TRUST must decay fast and be expensive to keep: a wide window
+    #: with a fast clock IS the sybil defence. A RELATIONSHIP must decay slowly
+    #: and be cheap to keep, because only the viewer can build it and the owner
+    #: has named its one legitimate destructor — block.
+    #:
+    #: WHY IT WAS A BUG, MEASURED ON THE OWNER'S OWN GRAPH (2026-08-24). At a
+    #: bare 30-day half-life a year of collected history is 98% gone by month
+    #: six (1mo 50%, 3mo 12.5%, 6mo 1.56%, 12mo 0.02%). `igormuba` — 11 replies,
+    #: raw weight 55, the owner's #2 correspondent — decayed to 9.7 and ranked
+    #: BELOW `jocieprosza` (6 replies, raw 30, effective 27.4) purely because
+    #: she was more recent. Hive is not a high-frequency network: 74-77% of
+    #: posts finish with 0-2 commenters and the median top outgoing edge is ~10
+    #: replies across a YEAR. A 75-day gap is an ordinary cadence, not the end
+    #: of a relationship. The system was reading "hasn't spoken this month" as
+    #: "no longer matters" — attention arithmetic applied to a correspondence
+    #: network.
+    #:
+    #: THE RULE. ``w = raw * (floor + (1 - floor) * 0.5 ** (age / half_life))``.
+    #: A relationship permanently retains at least ``floor`` of its accumulated
+    #: 365-day weight; recency is demoted to modulating the remaining band, a
+    #: tiebreak rather than a driver. At 0.7 on the owner's table: igormuba
+    #: 9.7 -> 41.4 (rank 5 -> 2), thefed 6.2 -> 29.8, asgarth 13.8 -> 32.1, and
+    #: the jocieprosza inversion is gone.
+    #:
+    #: THE GUARANTEE, exactly: recency can only reorder relationships whose
+    #: accumulated histories are within ``1 / floor`` (~1.43x at 0.7) of each
+    #: other. The 1.83x gap that produced the reported bug can never invert.
+    #:
+    #: SCOPE. Applied ONLY inside `viewer_affinity._decayed`. `half_life_days`
+    #: above is shared with graph-cred, ring detection and ALS and is
+    #: deliberately NOT touched — those are the trust layer and their fast clock
+    #: is correct. 0.0 reproduces the previous behaviour byte-for-byte.
+    #:
+    #: HONEST LIMIT. The durable term cannot outlive `trust_days = 365`: the
+    #: batch drops older interactions at the window edge, and no floor holds
+    #: what the window discards. Multi-year memory needs a wider edge window,
+    #: which is a batch-cost decision, not this field.
+    affinity_decay_floor: float = 0.7
+    #: ★★★ AN EVIDENCE FLOOR WAS TRIED AND REJECTED ON MEASUREMENT (2026-08-24).
+    #:
+    #: An adversarial review proposed refusing any edge below ~3 acts, to
+    #: implement the owner's "1 reply should never poison the feed" literally
+    #: and to raise the price of BROADCAST HARVEST: a "comment to enter"
+    #: contest collects one reply from every entrant off a SINGLE post, at
+    #: ~zero marginal cost per viewer, harvested in parallel across hundreds of
+    #: them. At `reply = 5.0`, eleven entries reach raw 55 — the weight of the
+    #: owner's own #2 correspondent. The viewer's acts are genuine and
+    #: self-initiated, so `src == viewer` does not filter them, and magnitude
+    #: weighting cannot tell a contest from a friendship.
+    #:
+    #: WHY IT WAS BACKED OUT. Implemented, it broke `test_engagement_drift`'s
+    #: three sustained-engagement tests, and inspection showed those tests were
+    #: RIGHT: they model a viewer upvoting THIRTY different authors once each —
+    #: thirty genuine acts, spread broad rather than deep. A per-edge act floor
+    #: erases all of it and declares a broad, shallow engager to have no
+    #: interaction graph. That is a real usage pattern and the owner never asked
+    #: to exclude it.
+    #:
+    #: WHAT ACTUALLY ANSWERS THE OWNER'S SENTENCE is `affinity_decay_floor`
+    #: above plus the existing percentile ranking: MEASURED, a single bait reply
+    #: (weight 5) against real correspondents percentiles to 0.000 — it already
+    #: cannot poison a populated graph. The one place a lone act ever mattered
+    #: is an EMPTY graph, where any first edge is the maximum; that is a
+    #: cold-start property, not a poisoning vector, since the only person who
+    #: can create it is the viewer.
+    #:
+    #: IF BROADCAST HARVEST IS EVER OBSERVED, the durable separator is
+    #: RECIPROCITY, not an act floor — a contest host does not reply back to 500
+    #: entrants. `reply_backs` is populated (462,442 edges live). It MUST enter
+    #: as a bounded MULTIPLIER on viewer-built weight, never as an addend: as a
+    #: multiplier it scales zero for a viewer who never engaged, which is
+    #: exactly why the additive 15.0 form was removed. Build it only against a
+    #: measured fan-in alarm, never speculatively.
+
 @dataclass(frozen=True)
 class HafsqlConfig:
     """Public read-only HAFSQL Postgres (Appendix B). The documented public

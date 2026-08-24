@@ -320,3 +320,83 @@ def test_a_viewer_whose_only_affinity_is_banned_falls_through_quietly() -> None:
         else:
             os.environ["RECSYS_BANNED_AUTHORS"] = prev
         banned_mod.banned_authors.cache_clear()
+
+
+# ── ★ the relationship floor: a long-term graph, not an attention model ──────
+
+
+def _aged(dst, *, replies, days_ago):
+    return EngagementEdge(
+        src="me", dst=dst, replies=replies,
+        last_interaction=EPOCH - timedelta(days=days_ago),
+    )
+
+
+def test_a_sustained_relationship_outranks_a_recent_acquaintance() -> None:
+    """★ THE OWNER'S OWN CASE, 2026-08-24, with his real numbers.
+
+    "if i talked to that retard igormuba a bunch of times and argued he should
+    show up in my feed almost always unless i block him."
+
+    MEASURED BEFORE THIS FIX: `igormuba` — 11 replies, raw weight 55, the
+    owner's #2 correspondent — decayed to 9.7 and ranked BELOW `jocieprosza`
+    (6 replies, raw 30, effective 27.4), purely because she was more recent.
+    A bare 30-day half-life against a 365-day collection window throws away 98%
+    of the history by month six.
+
+    Hive is not a high-frequency network — 74-77% of posts finish with 0-2
+    commenters, and the median top outgoing edge is ~10 replies across a YEAR.
+    A 75-day gap is an ordinary cadence, not the end of a relationship. The
+    system was reading "hasn't spoken this month" as "no longer matters".
+    """
+    aff = viewer_author_affinity(
+        "me",
+        [_aged("igormuba", replies=11, days_ago=75), _aged("jocieprosza", replies=6, days_ago=4)],
+        W,
+        EPOCH,
+    )
+    assert aff["igormuba"] > aff["jocieprosza"], (
+        f"igormuba {aff['igormuba']:.1f} vs jocieprosza {aff['jocieprosza']:.1f} — "
+        "a relationship the viewer built over 11 exchanges is again ranked "
+        "below a 6-exchange one on recency alone"
+    )
+
+
+def test_recency_can_only_reorder_relationships_of_similar_weight() -> None:
+    """The guarantee stated exactly: recency reorders only histories within
+    1/floor of each other (~1.43x at floor 0.7). Near-equals may still be
+    tipped by recency — that is correct — but a substantially deeper
+    relationship can never be inverted by a fresher shallow one."""
+    ratio = 1.0 / W.affinity_decay_floor
+    deep, shallow = 20, 20 / (ratio * 1.2)  # comfortably beyond the tipping band
+    aff = viewer_author_affinity(
+        "me",
+        [_aged("deep", replies=deep, days_ago=3650), _aged("shallow", replies=max(1, int(shallow)), days_ago=0)],
+        W,
+        EPOCH,
+    )
+    assert aff["deep"] > aff["shallow"], (
+        "a decade-idle deep relationship lost to a fresh shallow one — the "
+        "floor is not holding the accumulated history"
+    )
+
+
+def test_the_floor_at_zero_reproduces_the_old_pure_decay() -> None:
+    """The off-switch invariant this config demands of every new field: at 0.0
+    the behaviour is byte-identical to the previous pure exponential, so the
+    change is reversible without a code edit."""
+    from dataclasses import replace as _replace
+
+    off = _replace(W, affinity_decay_floor=0.0)
+    e = [_aged("x", replies=10, days_ago=30)]
+    got = viewer_author_affinity("me", e, off, EPOCH)["x"]
+    assert abs(got - (10 * W.reply) * 0.5) < 1e-9, got
+
+
+def test_the_floor_still_lets_recency_break_ties_between_equals() -> None:
+    """The recency term must survive as a tiebreak, not be deleted — two
+    identical histories should still order by who spoke last."""
+    aff = viewer_author_affinity(
+        "me", [_aged("fresh", replies=8, days_ago=1), _aged("stale", replies=8, days_ago=200)], W, EPOCH
+    )
+    assert aff["fresh"] > aff["stale"]

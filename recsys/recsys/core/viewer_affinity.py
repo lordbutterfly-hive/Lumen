@@ -116,7 +116,13 @@ def _decayed(edge: EngagementEdge, weights: RealGraphWeights, now: datetime) -> 
     if edge.last_interaction is None or weights.half_life_days <= 0:
         return raw
     age_days = max((now - edge.last_interaction).days, 0)
-    return raw * (0.5 ** (age_days / weights.half_life_days))
+    # ★ THE RELATIONSHIP FLOOR (2026-08-24) — see `RealGraphWeights.
+    # affinity_decay_floor` for why a relationship must not decay on the trust
+    # layer's clock. `floor = 0.0` is byte-identical to the previous pure
+    # exponential; at 0.7 a relationship keeps >=70% of its accumulated weight
+    # permanently and recency only modulates the remaining band.
+    floor = weights.affinity_decay_floor
+    return raw * (floor + (1.0 - floor) * (0.5 ** (age_days / weights.half_life_days)))
 
 
 def viewer_author_affinity(
