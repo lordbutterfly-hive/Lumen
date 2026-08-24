@@ -2300,6 +2300,18 @@ class RealGraphWeights:
     #: what the window discards. Multi-year memory needs a wider edge window,
     #: which is a batch-cost decision, not this field.
     affinity_decay_floor: float = 0.7
+
+    def __post_init__(self) -> None:
+        # ★ Every other numeric field in this file enforces its range
+        # structurally; this one did not (noted by audit 2026-08-24). Outside
+        # [0, 1] the formula stops being a floor: above 1 it AMPLIFIES an aged
+        # relationship beyond its accumulated weight, and below 0 it inverts the
+        # sign so older edges outrank newer ones. Both would be silent.
+        if not 0.0 <= self.affinity_decay_floor <= 1.0:
+            raise ValueError(
+                "affinity_decay_floor must be in [0.0, 1.0] (0 = the old pure "
+                f"exponential, 1 = no decay at all); got {self.affinity_decay_floor}"
+            )
     #: ★★★ AN EVIDENCE FLOOR WAS TRIED AND REJECTED ON MEASUREMENT (2026-08-24).
     #:
     #: An adversarial review proposed refusing any edge below ~3 acts, to

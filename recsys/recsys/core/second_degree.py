@@ -196,6 +196,15 @@ def filter_eligible(
         if post.author == viewer.account:
             continue
         if candidate.source.requires_second_degree:
+            # ★ CALLER CONTRACT (documented 2026-08-24 by audit). This
+            # intersects the FULL follow set, and is correct only because the
+            # sole live caller builds `engager_index` from
+            # `viewer.follows - viewer.mutes` (pipeline.py). A muted follow can
+            # therefore never appear here. If a future caller reuses a
+            # precomputed index built WITHOUT that subtraction — exactly the
+            # kind of reuse this package does for performance elsewhere — the
+            # mute bypass reopens silently. Subtract at the source, or state it
+            # here again.
             engagers = engager_index.get(post.key, frozenset()) & viewer.follows
             engagers = qualifying_engagers(engagers, graph_creds, thresholds.vouch_graph_cred_floor)
             if not passes_second_degree(candidate, engagers, thresholds.second_degree_min_engagers):

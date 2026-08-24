@@ -146,6 +146,7 @@ from datetime import datetime, timedelta
 
 from recsys.config import ExplorationConfig
 from recsys.core.banned import is_banned
+from recsys.core.popular import is_container_post
 from recsys.contracts import (
     Candidate,
     CandidateSource,
@@ -652,6 +653,8 @@ def eligible_for_exploration(
     suppressed: frozenset[str],
     show_nsfw: bool,
     config: ExplorationConfig,
+    popular: PopularConfig | None = None,
+    lite_publishers: frozenset[str] = frozenset(),
     bucket: int = 0,
     need_bands: tuple[int, ...] = DEFAULT_NEED_BANDS,
     serves: Mapping[str, int] | None = None,
@@ -871,6 +874,25 @@ def eligible_for_exploration(
         # list is maintained for.
         if is_banned(post.author):
             drops["banned"] += 1
+            continue
+        # ★★★ CONTAINER ROOTS (2026-08-24) — the THIRD guard of this class this
+        # lane has needed, and the third time the same lesson has been learned
+        # here. `filter_eligible` excludes container roots
+        # (second_degree.py:172) and so does `select_popular` (popular.py:236),
+        # but this lane sources from the RAW pool and passes through neither —
+        # the same reason the mute check and the ban check above both had to be
+        # re-implemented locally. A container root is a rolling bucket that
+        # holds other people's lite posts, not something anyone wrote to be
+        # read; handing one the reserved seat would serve plumbing as content.
+        #
+        # Real-world exposure is probably small — container-owning publishers
+        # are established accounts and the lane's own `max_author_age_days`
+        # newness gate likely excludes them — but "probably excluded by another
+        # gate" is exactly the reasoning that left the ban hole open, and this
+        # file documents every other known gap in its own docstring while this
+        # one appeared nowhere.
+        if popular is not None and is_container_post(post, popular, lite_publishers):
+            drops["container"] += 1
             continue
         # ★★ P1 (2026-08-05) — and the SELF-POST exclusion belongs here for
         # exactly the reason the mute check above does: this lane sources from

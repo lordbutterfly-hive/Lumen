@@ -203,3 +203,49 @@ def test_a_banned_author_cannot_take_the_exploration_seat() -> None:
         else:
             os.environ["RECSYS_BANNED_AUTHORS"] = prev
         banned_mod.banned_authors.cache_clear()
+
+
+def test_a_container_root_cannot_take_the_exploration_seat() -> None:
+    """★ THE THIRD GUARD OF THIS CLASS THE EXPLORATION LANE HAS NEEDED.
+
+    `filter_eligible` excludes container roots (second_degree.py) and so does
+    `select_popular` (popular.py) — but this lane sources from the RAW pool and
+    passes through neither, which is exactly why the mute check and the ban
+    check both had to be re-implemented inside it. A container root is a rolling
+    bucket holding other people's lite posts, not something written to be read;
+    handing one the most prominent reserved slot on the page would serve
+    plumbing as content.
+
+    Found by audit, 2026-08-24 — and notably it appeared nowhere in this file's
+    otherwise unusually thorough list of its own known gaps.
+    """
+    from recsys.config import DEFAULT_SETTINGS
+    from recsys.contracts import Candidate, CandidateSource
+    from recsys.core.exploration import eligible_for_exploration
+    from tests.fakes import EPOCH, make_post, make_viewer
+
+    # A real shipped marker pair, not an invented one: author AND prefix must
+    # both match, which is the point of `container_markers`.
+    pub, prefix = DEFAULT_SETTINGS.popular.container_markers[0]
+    container = make_post(pub, f"{prefix}0001")
+    normal = make_post("newcomer", "p1")
+    cands = [
+        Candidate(post=container, source=CandidateSource.OON_INTEREST),
+        Candidate(post=normal, source=CandidateSource.OON_INTEREST),
+    ]
+    pool = eligible_for_exploration(
+        cands,
+        make_viewer("me"),
+        now=EPOCH,
+        graph_creds={},
+        suppressed=frozenset(),
+        show_nsfw=False,
+        config=DEFAULT_SETTINGS.exploration,
+        popular=DEFAULT_SETTINGS.popular,
+        lite_publishers=frozenset(),
+        author_first_post={pub: EPOCH, "newcomer": EPOCH},
+    )
+    authors = {c.post.author for c in pool}
+    assert pub not in authors, "a container ROOT is eligible for the reserved seat"
+    # Non-vacuous: a genuine newcomer must still get through.
+    assert "newcomer" in authors, "the lane produced nothing — test is vacuous"

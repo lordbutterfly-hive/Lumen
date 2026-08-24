@@ -2469,6 +2469,11 @@ def rank_feed(
         suppressed=suppressed,
         show_nsfw=show_nsfw,
         config=settings.exploration,
+        # ★ Wired live 2026-08-24, not left dormant: without these the container
+        # check inside the lane can never fire, and a guard that is switched off
+        # is the same as a guard that was never written.
+        popular=settings.popular,
+        lite_publishers=settings.lite.publisher_accounts,
         bucket=explore_bucket,
         serves=serve_counts,
     )
