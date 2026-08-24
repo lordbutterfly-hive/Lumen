@@ -828,12 +828,34 @@ def _enforce_protected_head(
     (a configuration the validators already refuse), or when the feed is shorter
     than the seat.
     """
-    if not promoted or seat <= _PROTECTED_HEAD or seat >= len(ranked):
+    # ★ `<`, NOT `<=` (corrected 2026-08-24 by scrutiny). `_PROTECTED_HEAD` is an
+    # EXCLUSIVE 0-indexed bound, so index 5 is the first seat OUTSIDE the head —
+    # and `FreshnessConfig.__post_init__` explicitly ACCEPTS `position = 5`,
+    # documenting it as exactly that. The original `seat <= _PROTECTED_HEAD`
+    # treated a legal, validator-approved configuration as "already inside the
+    # head, nothing to do" and returned unchanged, silently disabling this guard
+    # and reintroducing the very bug it exists to close — no error, no log line,
+    # and no test would have caught it, because every test hardcoded seat=6.
+    if not promoted or seat < _PROTECTED_HEAD or seat >= len(ranked):
         return ranked
-    for i in range(min(_PROTECTED_HEAD, len(ranked))):
-        if ranked[i].post.key in promoted:
-            ranked[i], ranked[seat] = ranked[seat], ranked[i]
+
+    # ★ EVERY INTRUDER, NOT JUST THE FIRST (corrected 2026-08-24 by scrutiny).
+    # `FreshnessConfig.max_slots_per_feed` is 3, so `promote_fresh` can record
+    # several keys and more than one can drift into the head; the original
+    # `break` left the second sitting there. Each intruder is exchanged with the
+    # first position at or past the seat that is NOT itself a placed post, so no
+    # swap can park one placed post on top of another.
+    head = min(_PROTECTED_HEAD, len(ranked))
+    donor = seat
+    for i in range(head):
+        if ranked[i].post.key not in promoted:
+            continue
+        while donor < len(ranked) and ranked[donor].post.key in promoted:
+            donor += 1
+        if donor >= len(ranked):
             break
+        ranked[i], ranked[donor] = ranked[donor], ranked[i]
+        donor += 1
     return ranked
 
 

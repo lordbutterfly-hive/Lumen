@@ -263,3 +263,48 @@ def test_the_head_guard_tolerates_a_feed_shorter_than_the_seat() -> None:
     feed = _feed(4)
     before = [c.post.key for c in feed]
     assert [c.post.key for c in _enforce_protected_head(list(feed), {feed[1].post.key}, seat=6)] == before
+
+
+def test_the_head_guard_works_at_the_lowest_LEGAL_seat() -> None:
+    """★ FOUND BY SCRUTINY — a legal config silently disabled the guard.
+
+    `_PROTECTED_HEAD` is an EXCLUSIVE 0-indexed bound, so index 5 is the first
+    seat OUTSIDE the head, and `FreshnessConfig.__post_init__` explicitly
+    ACCEPTS `position = 5` as exactly that. The guard's entry test was
+    `seat <= _PROTECTED_HEAD`, which treated that validator-approved value as
+    "already inside the head, nothing to do" and returned unchanged. No error,
+    no log line, and no test would have caught it — every other test here
+    hardcodes seat=6.
+    """
+    from recsys.config import FreshnessConfig
+    from recsys.pipeline import _enforce_protected_head
+
+    FreshnessConfig(position=5)  # must not raise — that is the whole point
+
+    feed = _feed(10)
+    # Snapshot BEFORE the call: the guard swaps IN PLACE, so reading `feed`
+    # afterwards reads the already-swapped list and compares a value to itself.
+    intruder = feed[2].post.key
+    out = _enforce_protected_head(feed, {intruder}, seat=5)
+    assert out[2].post.key != intruder, (
+        "at the lowest LEGAL seat the guard did nothing — a placed post is "
+        "still sitting inside the reader's earned positions"
+    )
+    assert out[5].post.key == intruder
+
+
+def test_the_head_guard_evicts_EVERY_intruder_not_just_the_first() -> None:
+    """★ ALSO FOUND BY SCRUTINY. `max_slots_per_feed` is 3, so `promote_fresh`
+    can record several keys and more than one can drift into the head. The
+    original loop broke after the first swap, leaving the second placed post in
+    the reader's earned positions."""
+    from recsys.pipeline import _enforce_protected_head
+
+    feed = _feed(12)
+    promoted = {feed[1].post.key, feed[3].post.key}
+    out = _enforce_protected_head(feed, promoted, seat=6)
+    head_keys = {c.post.key for c in out[:5]}
+    assert not (head_keys & promoted), f"still in the head: {head_keys & promoted}"
+    tail_keys = [c.post.key for c in out[5:]]
+    assert all(k in tail_keys for k in promoted), "an intruder vanished"
+    assert len({c.post.key for c in out}) == len(out), "a post was duplicated"

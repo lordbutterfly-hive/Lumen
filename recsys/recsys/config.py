@@ -2391,6 +2391,14 @@ class HafsqlConfig:
             user=os.environ.get("HAFSQL_USER", cls.user),
             password=os.environ.get("HAFSQL_PASSWORD", cls.password),
             connect_timeout=int(os.environ.get("HAFSQL_TIMEOUT", cls.connect_timeout)),
+            # ★ The only field in this class with no env knob (added 2026-08-24
+            # by scrutiny) — and the one whose own docstring insists it be
+            # re-measured per deployment. Without this it was pinned to the
+            # dataclass default in every real deploy, since `trust_batch`
+            # constructs via `from_env()` and nothing else sets it.
+            edge_slice_days=int(
+                os.environ.get("HAFSQL_EDGE_SLICE_DAYS", cls.edge_slice_days)
+            ),
         )
 
 
