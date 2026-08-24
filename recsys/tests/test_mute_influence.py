@@ -144,3 +144,62 @@ def test_a_muted_account_does_not_weight_the_popular_seat() -> None:
     assert "| viewer.mutes" in block, (
         "a muted account still weights which popular post this viewer is shown"
     )
+
+
+def test_a_banned_author_cannot_take_the_exploration_seat() -> None:
+    """★★★ A BAN A LANE CAN ROUTE AROUND IS NOT A BAN (2026-08-24).
+
+    `filter_eligible` refuses banned authors, but the exploration lane is built
+    from the RAW gathered pool and never passes through it — the P1 note beside
+    this guard states that hazard exactly, and it had been applied to mutes and
+    self-posts but NOT to bans. A full `rank_feed` simulation served a banned
+    author at position 14.
+
+    Live exposure was bounded by the lane's own `max_author_age_days` newness
+    gate, so it reached banned accounts YOUNGER than that horizon — precisely
+    the freshly-banned troll the list is maintained for, handed the most
+    prominent reserved slot on the page.
+    """
+    import os
+
+    import recsys.core.banned as banned_mod
+    from recsys.config import DEFAULT_SETTINGS
+    from recsys.contracts import Candidate, CandidateSource
+    from recsys.core.exploration import eligible_for_exploration
+    from tests.fakes import EPOCH, make_post, make_viewer
+
+    prev = os.environ.get("RECSYS_BANNED_AUTHORS")
+    os.environ["RECSYS_BANNED_AUTHORS"] = "troll"
+    try:
+        banned_mod.banned_authors.cache_clear()
+        cands = [
+            Candidate(post=make_post("troll", "p1"), source=CandidateSource.OON_INTEREST),
+            Candidate(post=make_post("honest", "p2"), source=CandidateSource.OON_INTEREST),
+        ]
+        pool = eligible_for_exploration(
+            cands,
+            make_viewer("me"),
+            now=EPOCH,
+            graph_creds={},
+            suppressed=frozenset(),
+            show_nsfw=False,
+            config=DEFAULT_SETTINGS.exploration,
+            # Both authors must clear the lane's NEWNESS gate, or they drop as
+            # `newness_unavailable` and the test passes for the wrong reason —
+            # which is exactly what happened on the first writing.
+            author_first_post={"troll": EPOCH, "honest": EPOCH},
+        )
+        authors = {c.post.author for c in pool}
+        assert "troll" not in authors, (
+            "a BANNED author is eligible for the reserved exploration seat — "
+            "the lane routes around the ban filter by construction"
+        )
+        # Non-vacuous: the honest newcomer must still be eligible, or this test
+        # would also pass if the lane simply stopped producing anything.
+        assert "honest" in authors, "the lane produced nothing — test is vacuous"
+    finally:
+        if prev is None:
+            os.environ.pop("RECSYS_BANNED_AUTHORS", None)
+        else:
+            os.environ["RECSYS_BANNED_AUTHORS"] = prev
+        banned_mod.banned_authors.cache_clear()

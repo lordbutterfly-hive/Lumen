@@ -100,6 +100,7 @@ def promote_fresh(
     ranked: Sequence[ScoredCandidate],
     config: FreshnessConfig,
     now: datetime,
+    promoted_out: set[str] | None = None,
 ) -> list[ScoredCandidate]:
     """Move recent posts up to their reserved seats. Length-preserving.
 
@@ -168,6 +169,12 @@ def promote_fresh(
         if incumbent is not None and cutoff <= incumbent <= now:
             promoted += 1
             continue
-        out.insert(seat, out.pop(current))
+        moved = out.pop(current)
+        out.insert(seat, moved)
+        # ★ Report the ACTUAL promotion (2026-08-24). Only a post this line
+        # moved is "placed"; one that was already at or ahead of the seat got
+        # there on merit and must not be treated as placed by the head guard.
+        if promoted_out is not None:
+            promoted_out.add(moved.post.key)
         promoted += 1
     return out

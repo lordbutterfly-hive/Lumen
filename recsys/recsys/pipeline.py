@@ -83,6 +83,11 @@ from recsys.serve_log import ExplorationServeLog
 
 logger = logging.getLogger("recsys.pipeline")
 
+#: Positions 1-5 (1-indexed) are the reader's own — owner ruling, enforced in
+#: `PopularConfig`/`FreshnessConfig` validators and on the served feed by
+#: `insert_popular`. As a 0-indexed exclusive bound that is 5.
+_PROTECTED_HEAD = 5
+
 
 class TrustPolicy(StrEnum):
     """What :func:`rank_feed` does when it has no FRESH trust snapshot (H01).
@@ -794,6 +799,43 @@ def _cf_source_authors(
         return frozenset()
     ranked = sorted(pcts.items(), key=lambda kv: (-kv[1], kv[0]))
     return frozenset(a for a, _ in ranked[:count])
+
+def _enforce_protected_head(
+    ranked: list[ScoredCandidate],
+    promoted: set[str],
+    seat: int,
+) -> list[ScoredCandidate]:
+    """Return `ranked` with no freshness-PLACED post inside the protected head.
+
+    Positions 1-5 (1-indexed) are whatever the reader EARNED — the owner's rule,
+    enforced in `PopularConfig`/`FreshnessConfig`'s validators for the SETTING
+    and by `insert_popular` for the SERVED FEED. This closes the one remaining
+    way a placed post reaches there: drift.
+
+    ★ HOW A PLACED POST DRIFTS INTO THE HEAD (measured 2026-08-24). A freshness
+    promotion seats a recent post at `seat`. `insert_popular` runs afterwards and
+    may BOTH demote a head-ranked popular post to its own reserved index AND
+    evict surplus popular posts to the tail; every removal above `seat` shifts
+    what is below it UP by one. A simulation served a placed post whose merit
+    rank was 10-13 at position 4, reproducibly, in two independent worlds.
+
+    ★ SWAP, NEVER MOVE. Popping and re-inserting would shift the popular seat
+    off its own reserved index — the very class of bug being fixed here.
+    Exchanging the intruder with the occupant of the freshness seat leaves every
+    other index untouched, popular's included.
+
+    A no-op when nothing was promoted, when the seat is itself inside the head
+    (a configuration the validators already refuse), or when the feed is shorter
+    than the seat.
+    """
+    if not promoted or seat <= _PROTECTED_HEAD or seat >= len(ranked):
+        return ranked
+    for i in range(min(_PROTECTED_HEAD, len(ranked))):
+        if ranked[i].post.key in promoted:
+            ranked[i], ranked[seat] = ranked[seat], ranked[i]
+            break
+    return ranked
+
 
 def gather_candidates(
     viewer: ViewerProfile,
@@ -2548,7 +2590,8 @@ def rank_feed(
     # survive it. Contrast `insert_exploration`, which ADMITS candidates the
     # ranker set aside and therefore needs its own gate exemptions and its own
     # anti-farm budget.
-    ranked = promote_fresh(ranked, settings.freshness, now)
+    _fresh_promoted: set[str] = set()
+    ranked = promote_fresh(ranked, settings.freshness, now, _fresh_promoted)
 
     if explore_pool:
         # ★ The scored list is RE-ORDERED back into `explore_pool` order before
@@ -2682,6 +2725,33 @@ def rank_feed(
     # It runs after exploration (so the two never claim the same index) and
     # before truncation (so the promoted post is inside the served window).
     ranked = insert_popular(ranked, settings.popular)
+
+    # ★★★ THE PROTECTED HEAD, ENFORCED ON THE SERVED FEED (2026-08-24).
+    #
+    # MEASURED in a full `rank_feed` simulation: a freshness-PLACED post whose
+    # own merit rank was 10-13 was SERVED at position 4. Nothing to do with
+    # affinity; it reproduced in two independent worlds.
+    #
+    # THE MECHANISM. `promote_fresh` runs first and seats a recent post at
+    # index 6. `insert_popular` then runs last and can BOTH demote a head-ranked
+    # popular post down to index 5 AND evict surplus popular posts to the tail —
+    # each removal above the fresh seat shifts everything below it UP one. The
+    # ordering note at `promote_fresh`'s call site anticipated the DOWNWARD
+    # direction ("can push this seat from 6 to 7, and that is fine"); the upward
+    # direction was not considered, and it lands a placed post inside 1-5.
+    #
+    # The owner's rule is that positions 1-5 are whatever the reader EARNED —
+    # `PopularConfig.__post_init__` and `FreshnessConfig.__post_init__` both
+    # refuse a reserved position there, and `insert_popular` already enforces it
+    # on the SERVED feed for its own lane rather than only on the setting. This
+    # does the same for the freshness lane, which is the one that could still
+    # arrive there by drift.
+    #
+    # ★ A SWAP, NOT A MOVE. Popping the post and re-inserting would shift the
+    # popular seat off its own reserved index — the exact class of bug this is
+    # fixing. Exchanging it with the occupant of the freshness seat leaves every
+    # other index, including popular's, untouched.
+    ranked = _enforce_protected_head(ranked, _fresh_promoted, settings.freshness.position)
 
     # ★★★★ THE STARVATION VALVE — SUPPRESSION YIELDS BEFORE A FEED GOES BELOW
     # ONE SCREEN. ALWAYS. NO FLAG TURNS THIS FLOOR OFF (2026-08-15).

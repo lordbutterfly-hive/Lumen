@@ -145,6 +145,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timedelta
 
 from recsys.config import ExplorationConfig
+from recsys.core.banned import is_banned
 from recsys.contracts import (
     Candidate,
     CandidateSource,
@@ -851,6 +852,25 @@ def eligible_for_exploration(
             continue
         if post.author in viewer.mutes:
             drops["muted"] += 1
+            continue
+        # ★★★ GLOBAL BAN (2026-08-24) — the third guard this lane needed for the
+        # SAME reason the two around it exist, and the one that was missed.
+        #
+        # `filter_eligible` refuses banned authors (second_degree.py, `is_banned`),
+        # but this lane is built from the RAW gathered pool and never passes
+        # through it — the P1 note below states that exact hazard for the
+        # self-post case. So a banned account could take the reserved seat: the
+        # most prominent slot on the page, handed to the one account class the
+        # operator has explicitly refused. MEASURED in a full `rank_feed`
+        # simulation on 2026-08-24: a banned author was SERVED at position 14.
+        #
+        # `second_degree.py` already names the principle — a ban that a lane can
+        # route around is not a ban. Live exposure was bounded by the lane's own
+        # `max_author_age_days` newness gate, so it reached banned accounts
+        # YOUNGER than that horizon — precisely the freshly-banned troll the
+        # list is maintained for.
+        if is_banned(post.author):
+            drops["banned"] += 1
             continue
         # ★★ P1 (2026-08-05) — and the SELF-POST exclusion belongs here for
         # exactly the reason the mute check above does: this lane sources from

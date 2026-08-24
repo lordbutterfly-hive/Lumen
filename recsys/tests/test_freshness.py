@@ -205,3 +205,61 @@ def test_the_protected_head_cannot_be_configured_away(bad):
     """1-5 one-indexed are whatever the reader earned. Enforced structurally."""
     with pytest.raises(ValueError, match="reader earned"):
         FreshnessConfig(position=bad)
+
+
+# ── ★ the protected head, enforced on the SERVED feed (2026-08-24) ───────────
+
+
+def test_a_placed_post_is_swapped_out_of_the_protected_head() -> None:
+    """★ MEASURED DEFECT, 2026-08-24.
+
+    `promote_fresh` seats a recent post at index 6. `insert_popular` then runs
+    LAST and can both demote a head-ranked popular post to its own index AND
+    evict surplus popular posts to the tail — each removal above the fresh seat
+    shifts everything below it UP one. A full `rank_feed` simulation served a
+    freshness-PLACED post, whose merit rank was 10-13, at position 4.
+
+    The ordering note at `promote_fresh`'s call site anticipated only the
+    DOWNWARD drift ("can push this seat from 6 to 7, and that is fine").
+    Positions 1-5 are the reader's own, and this closes the upward direction.
+    """
+    from recsys.pipeline import _enforce_protected_head
+
+    feed = _feed(10)
+    # the placed post has drifted up to index 3, inside the protected head
+    out = _enforce_protected_head(feed, {feed[3].post.key}, seat=6)
+    assert out[3].post.key == "@a6/p6", "the placed post is still inside the head"
+    assert out[6].post.key == "@a3/p3", "the placed post did not land on its seat"
+
+
+def test_the_head_guard_is_a_swap_so_every_other_index_survives() -> None:
+    """★ SWAP, NEVER MOVE. Popping and re-inserting would shift the POPULAR seat
+    off its own reserved index — the exact class of bug this fixes. Only the two
+    exchanged positions may differ."""
+    from recsys.pipeline import _enforce_protected_head
+
+    feed = _feed(10)
+    before = [c.post.key for c in feed]
+    out = [c.post.key for c in _enforce_protected_head(list(feed), {feed[2].post.key}, seat=6)]
+    moved = [i for i, (a, b) in enumerate(zip(before, out)) if a != b]
+    assert moved == [2, 6], f"indices other than the swapped pair changed: {moved}"
+
+
+def test_the_head_guard_is_a_no_op_when_nothing_was_placed() -> None:
+    """An earned head must never be reordered — the guard acts only on posts
+    `promote_fresh` actually moved."""
+    from recsys.pipeline import _enforce_protected_head
+
+    feed = _feed(10)
+    before = [c.post.key for c in feed]
+    assert [c.post.key for c in _enforce_protected_head(list(feed), set(), seat=6)] == before
+    # ...and a placed post already OUTSIDE the head is left where it is.
+    assert [c.post.key for c in _enforce_protected_head(list(feed), {feed[8].post.key}, seat=6)] == before
+
+
+def test_the_head_guard_tolerates_a_feed_shorter_than_the_seat() -> None:
+    from recsys.pipeline import _enforce_protected_head
+
+    feed = _feed(4)
+    before = [c.post.key for c in feed]
+    assert [c.post.key for c in _enforce_protected_head(list(feed), {feed[1].post.key}, seat=6)] == before
