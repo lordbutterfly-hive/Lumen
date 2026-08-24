@@ -458,13 +458,20 @@ WHERE {_top_level_or_lite("c")}
   AND {_identity("c")} <> ALL(%(follows)s)
   AND c.created >= %(since)s
   AND (
+    -- ★★★ THE VOTE BRANCH IS GONE (2026-08-24, owner ruling: "VOTES ARE BOTED,
+    -- ONLY COMMENTS AND REBLOGS" / "PEOPLE BOT VOTING, VOTING MEANS BASICALLY
+    -- NOTHING"). It let a botted vote from one of the viewer's follows pull an
+    -- arbitrary out-of-network post into their feed — the same manipulated
+    -- signal the ruling removed from the trust graph, still choosing what the
+    -- reader sees, one layer over.
+    --
+    -- It was also the whole cost of this query. Three correlated EXISTS run per
+    -- candidate row; the vote one probes 17,234,136 vote events against 605,389
+    -- replies and 80,743 reblogs. MEASURED before removal: 4.69s at 5 follows,
+    -- 10.41s at 25 — and the query scales with FOLLOW COUNT, so a viewer with
+    -- 247 follows paid it worst. This single lane was the largest term in a
+    -- ~6.65s feed request.
     EXISTS (
-        SELECT 1 FROM hafsql.operation_effective_comment_vote_view v
-        WHERE v.author = c.author AND v.permlink = c.permlink
-          AND v.voter = ANY(%(follows)s)
-          AND v.rshares > 0  -- a DOWNVOTE must not vouch an OON post into the feed
-    )
-    OR EXISTS (
         SELECT 1 FROM hafsql.reblogs r
         WHERE r.author = c.author AND r.permlink = c.permlink
           AND r.account_name = ANY(%(follows)s)

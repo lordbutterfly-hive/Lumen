@@ -256,7 +256,13 @@ def test_vote_vouch_queries_ignore_downvotes() -> None:
     the second-degree engager index — must keep only positive-rshares votes,
     matching ``independent_vote_signal``'s ``vote.rshares > 0`` filter. Without
     this, a followed account's downvote surfaces the downvoted post."""
-    assert "v.rshares > 0" in hafsql._SQL_ENGAGED_OON_POSTS
+    # ★ The engaged-OON pool no longer has a vote path AT ALL (2026-08-24,
+    # owner ruling "VOTES ARE BOTED, ONLY COMMENTS AND REBLOGS"), so there is no
+    # downvote to guard against there — a stronger property than the filter, and
+    # asserted as such so nobody "restores" the branch to satisfy this test.
+    assert "operation_effective_comment_vote_view" not in hafsql._SQL_ENGAGED_OON_POSTS
+    # The second-degree engager index still consults votes; its downvote guard
+    # therefore still has to be there.
     assert "v.rshares > 0" in hafsql._SQL_SECOND_DEGREE_ENGAGERS
 
 
