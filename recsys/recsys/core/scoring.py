@@ -807,8 +807,11 @@ def score_candidate(
     byte-identity invariant in ``tests/test_scoring.py`` pins.
 
     The viewer-own-affinity blend consequently now runs BEFORE the declared
-    -interest blend rather than after. That is a real ordering change and it is
-    a no-op at the shipped ``organic_viewer = 0.0``; the two channels answer
+    -interest blend rather than after. That is a real ordering change. It WAS a
+    no-op at the then-shipped ``organic_viewer = 0.0``; ★ CORRECTED 2026-08-24 —
+    the weight was raised to 0.3 on 2026-08-08 ("wire the fucking social graph
+    right now", config.py) and VERIFIED 0.3 in the running process, so the
+    ordering change is LIVE and no longer a no-op. The two channels answer
     different questions (one is per-author/topic engagement, one is a per-topic
     signup declaration) and the composite-level blend is the right home for the
     one that is constant across a topic.

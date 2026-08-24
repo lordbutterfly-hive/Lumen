@@ -1880,3 +1880,97 @@ def test_repeated_forwarded_for_header_lines_are_joined_not_truncated() -> None:
         "two clients differing only in a SECOND X-Forwarded-For line shared one "
         "rate-limit budget — the header lines are not being joined"
     )
+
+
+# ── ★ A13: `Settings` is the single source for the gateway's LiteConfig ──────
+#
+# BUILDMAP-A-LAUNCH-2026-08-04 §A13 specified: "have the service construct
+# `HafsqlClient(hafsql_config, settings.lite)` so `Settings` is the single
+# source. Assert at startup that `settings.lite` and the client's `_lite` are
+# the same object." The 2026-08-05 work added `LiteConfig.from_env` and threaded
+# it into `Settings.from_env`, but `ServiceState.build` kept passing its own
+# `lite_config` (None for every real caller), so `HafsqlClient` fell through to
+# an INDEPENDENT `_lite_config_from_env()`. Two doors onto one env var.
+#
+# In the live service both doors agree because `main()` builds settings from the
+# same environment — so this was LATENT, not an active production divergence. It
+# bites any caller that supplies an explicit `Settings` without matching env:
+# `settings.lite` says one thing, the gateway says another. These pin the fix.
+
+
+def _lite_cfg(*publishers: str):
+    from recsys.config import LiteConfig
+
+    return LiteConfig(publisher_accounts=frozenset(publishers))
+
+
+def _build_with(settings, *, lite_config=None):
+    cfg = service_app.ServiceConfig(
+        host="127.0.0.1", port=0, norm_refresh_s=9999, snapshot_refresh_s=9999
+    )
+    return service_app.ServiceState.build(
+        config=cfg, settings=settings, lite_config=lite_config, recsys_dsn=_RECSYS_DSN
+    )
+
+
+def test_gateway_lite_comes_from_settings_not_a_second_env_read(monkeypatch) -> None:
+    """★ The A13 assert, as a test rather than a runtime check.
+
+    With the lite env CLEARED, a `Settings` that carries a publisher must still
+    reach the gateway. Before the fix the gateway env-resolved to empty here and
+    silently disagreed with `settings.lite`.
+    """
+    from dataclasses import replace
+
+    from recsys.config import DEFAULT_SETTINGS
+
+    for var in (
+        "LITE_PUBLISHER_ACCOUNTS",
+        "LITE_FRONTEND_ACCOUNT_MAINNET",
+        "LITE_FRONTEND_ACCOUNT_MIRRORNET",
+        "LITE_FRONTEND_ACCOUNT_TESTNET",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+    settings = replace(DEFAULT_SETTINGS, lite=_lite_cfg("pubtest"))
+    state = _build_with(settings)
+
+    assert state.gateway._lite is state.settings.lite, (
+        "the gateway resolved its own LiteConfig instead of taking the one on "
+        "Settings — A13's single-source requirement is broken"
+    )
+    # Non-vacuous: two empty configs would satisfy identity alone.
+    assert state.gateway._lite.enabled is True
+    assert "pubtest" in state.gateway._lite.publisher_accounts
+
+
+def test_settings_lite_wins_over_a_conflicting_environment(monkeypatch) -> None:
+    """Priority, not just identity: when env and Settings disagree, the explicit
+    Settings object is authoritative. This is the case that would silently pick
+    the wrong publisher set before the fix."""
+    from dataclasses import replace
+
+    from recsys.config import DEFAULT_SETTINGS
+
+    monkeypatch.setenv("LITE_PUBLISHER_ACCOUNTS", "envpub")
+    settings = replace(DEFAULT_SETTINGS, lite=_lite_cfg("pubtest"))
+    state = _build_with(settings)
+
+    assert "pubtest" in state.gateway._lite.publisher_accounts
+    assert "envpub" not in state.gateway._lite.publisher_accounts
+
+
+def test_an_explicit_lite_config_argument_still_wins(monkeypatch) -> None:
+    """The over-fix guard. `HafsqlClient`'s kwarg semantics promise that an
+    explicitly supplied LiteConfig beats everything; this passed before the fix
+    and must keep passing after it."""
+    from dataclasses import replace
+
+    from recsys.config import DEFAULT_SETTINGS
+
+    monkeypatch.setenv("LITE_PUBLISHER_ACCOUNTS", "envpub")
+    settings = replace(DEFAULT_SETTINGS, lite=_lite_cfg("pubtest"))
+    state = _build_with(settings, lite_config=_lite_cfg("kwargpub"))
+
+    assert "kwargpub" in state.gateway._lite.publisher_accounts
+    assert "pubtest" not in state.gateway._lite.publisher_accounts

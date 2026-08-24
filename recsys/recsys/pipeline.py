@@ -891,10 +891,26 @@ def gather_candidates(
         groups.append(
             [
                 Candidate(post=p, source=CandidateSource.IN_NETWORK)
-                for p in gateway.in_network_posts(viewer.follows, in_network_since, limit)
+                # ★ Muted follows do not spend the recall budget (2026-08-24).
+                # Their posts were fetched and then discarded by
+                # `filter_eligible`, so every muted follow's post displaced a
+                # wanted follow's post from the `limit` before scoring ever ran.
+                # Dropping them at the source is behaviour-neutral for what is
+                # SERVED and strictly frees budget for follows the viewer wants.
+                for p in gateway.in_network_posts(
+                    viewer.follows - viewer.mutes, in_network_since, limit
+                )
             ]
         )
-        groups.append(list(gateway.engaged_oon_posts(viewer.follows, since, limit)))
+        # ★★★ MUTED FOLLOWS DO NOT CURATE THIS FEED (2026-08-24). This lane is
+        # "posts my follows engaged with" — so an account the viewer muted was
+        # still choosing what entered their pool. Hiding a muted account's own
+        # posts never touched their power to pull OTHER posts in. Muting is a
+        # request to stop hearing from someone, and their curation IS hearing
+        # from them.
+        groups.append(
+            list(gateway.engaged_oon_posts(viewer.follows - viewer.mutes, since, limit))
+        )
 
     # ★ OON_ALS PRODUCER (2026-08-01). This source was declared, prioritised and
     # gated but emitted by NOTHING, so collaborative filtering could only
@@ -969,6 +985,21 @@ def gather_candidates(
                 | _ring_exclusion(author, snapshot)
                 | curator_accounts()
                 | banned_authors()
+                # ★★★ MUTES TOO (2026-08-24, owner ruling). The popularity lane
+                # is deliberately IMPERSONAL — it shows what Hive is talking
+                # about, not what this viewer chose. That exclusion and the
+                # owner's "who i mute or block needs to disappear regardless"
+                # collide precisely here, and the owner ruled the MUTE wins.
+                #
+                # What this changes and what it does not: the SEAT stays
+                # impersonal — membership is still decided by chain-wide
+                # engagement, not by the viewer. Only the WEIGHTING drops a
+                # muted account's comments and reblogs from the breadth that
+                # decides which post wins the seat. A muted account no longer
+                # gets to pick the one popular post this viewer is shown.
+                # Marginal in magnitude (one trust-weighted voice in a 150-post
+                # pool) and absolute in principle, which is the owner's point.
+                | viewer.mutes
             )
 
         popular_pool = gateway.popular_posts(since, settings.popular.source_limit)
@@ -1487,17 +1518,46 @@ def _score(
             # compilation is a real post people read. This half — "your
             # engagement mints no breadth for anyone" — is the only half a
             # curator gets. See recsys/core/curators.py.
+            # ★★★ MUTES TOO — THE PER-VIEWER HALF (2026-08-24, owner: "who i
+            # mute or block needs to disappear regardless of me talking to them,
+            # a lot of commenting on their posts").
+            #
+            # The ban got its "second half" above; the MUTE never got the
+            # per-viewer equivalent. Muting an account hid their POSTS
+            # (`filter_eligible`) and nothing else — their upvotes, comments and
+            # reblogs went on raising the organic and vote signal of every post
+            # this viewer WAS shown. Exactly the "invisible promoter" position
+            # the ban note describes, held by someone the viewer explicitly
+            # asked never to see again.
+            #
+            # HONEST LIMIT, stated rather than hidden: the norm sample and the
+            # author-prior cache are SHARED, viewer-independent caches built
+            # without anyone's mute list, so a heavy muter's percentile scale
+            # drifts very slightly against them. That is the same batch-vs-
+            # request inconsistency the ban subtraction already accepted; a
+            # per-viewer mute cannot enter a global cache without becoming a
+            # cross-viewer write, which is the channel class this package
+            # forbids (see recsys/core/viewer_affinity.py's invariant).
             ring_members=(
                 _ring_exclusion(candidate.post.author, snap)
                 | banned_authors()
                 | curator_accounts()
+                | viewer.mutes
             ),
         )
         excluded = exclusions.excluded()
         # ★ Personal payout: the viewer's own follows decide whose rshares
         # count in full. See `_PERSONAL_STRANGER_SCALE`.
+        # ★ `personal_for` minus mutes (2026-08-24). A muted account that the
+        # viewer ALSO follows was getting the FULL personal rshares weight —
+        # the premium rate reserved for "people this viewer chose" — while
+        # being someone the viewer chose to stop seeing. The mute is the later
+        # and more specific act; it wins.
         vote_signal_raw = independent_vote_signal(
-            candidate.post, exclusions, trust=trust, personal_for=viewer.follows
+            candidate.post,
+            exclusions,
+            trust=trust,
+            personal_for=viewer.follows - viewer.mutes,
         )
         organic_raw = _organic_signal(
             candidate.post,
@@ -1658,6 +1718,44 @@ def _viewer_affinity_lookup(
         return None
 
     author_aff = viewer_author_affinity(viewer.account, snap.edges, settings.real_graph, now)
+
+    # ★★★ SUBTRACT BANNED AND MUTED AUTHORS BEFORE RANKING (2026-08-24).
+    #
+    # `affinity_percentiles` ranks over DISTINCT VALUES, so whoever holds the
+    # viewer's top weight takes exactly 1.0000 and every genuine correspondent
+    # is pushed down a rank. If that top slot is spent on an author
+    # `filter_eligible` will drop anyway, the viewer's real correspondents are
+    # silently under-ranked for nothing.
+    #
+    # MEASURED on the owner's real edge set the day this was written: his top
+    # affinity edge is `ecency` (weight 85) and `ecency` is in the live
+    # RECSYS_BANNED_AUTHORS. With it present his actual top correspondent
+    # `igormuba` scores 0.8000; with it removed, 1.0000. blanchy 0.60 -> 0.75,
+    # asgarth 0.40 -> 0.50. Every real relationship he has was demoted one rank
+    # by a name that can never be served to him.
+    #
+    # WHY THE SNAPSHOT DOES NOT ALREADY HANDLE IT. `build_trust_snapshot` DOES
+    # strip banned edges (see `_banned` above), but that runs in the 3-day trust
+    # batch: the live snapshot at the time of writing was built 17:48:54Z, hours
+    # BEFORE the image carrying that filter existed, and the next batch was ~2.9
+    # days out. So the graph carried 3,807 `ecency` edges regardless. This is
+    # the request-time belt to the batch's braces.
+    #
+    # MUTES ARE THE PERMANENT HALF. The batch is global and cannot know any
+    # viewer's mute list, so a muted author's weight would sit in that viewer's
+    # affinity distribution forever. Mutes are already honoured at SERVE time by
+    # `filter_eligible`, which is precisely why the distortion is invisible: the
+    # post never appears, but it still moved everyone else's rank. Subtracting
+    # here also stops a muted author's topics leaking into `viewer_topic_affinity`,
+    # which is derived from this same map.
+    if author_aff:
+        _excluded = banned_authors() | viewer.mutes
+        if _excluded:
+            author_aff = {a: w for a, w in author_aff.items() if a not in _excluded}
+
+    # Checked AFTER the subtraction on purpose: a viewer whose only affinity was
+    # to banned or muted authors has no usable signal, and must fall through to
+    # the viewer-blind path rather than rank a pool against an empty map.
     if not author_aff:
         return None
     pool_authors = [c.post.author for c in candidates]
@@ -1676,6 +1774,9 @@ def _viewer_affinity_lookup(
         settings.real_graph,
         now,
         {a: tuple(t) for a, t in author_topics.items()},
+        # ★ 2026-08-24: reuse the map computed at the top of this function
+        # instead of letting it rescan the whole edge list a second time.
+        per_author=author_aff,
     )
     pool_topics = sorted({k for ks in author_topics.values() for k in ks})
     topic_pct = affinity_percentiles(topic_aff, pool_topics)
@@ -2022,7 +2123,12 @@ def rank_feed(
     chain_authors = chain_author_map(c.post for c in candidates)
     chain_author_kwargs = {"chain_authors": chain_authors} if chain_authors else {}
     engager_index = (
-        gateway.second_degree_engagers(gated_keys, viewer.follows, **chain_author_kwargs)
+        # ★ Muted follows are not vouchers (2026-08-24). The vouch gate asks
+        # "has someone this viewer trusts already engaged this"; a muted account
+        # is the explicit statement that they are not.
+        gateway.second_degree_engagers(
+            gated_keys, viewer.follows - viewer.mutes, **chain_author_kwargs
+        )
         if gated_keys
         else {}
     )

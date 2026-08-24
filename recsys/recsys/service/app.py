@@ -715,7 +715,31 @@ class ServiceState:
         cfg = config or ServiceConfig.from_env()
         resolved_dsn = recsys_dsn if recsys_dsn is not None else os.environ.get(_RECSYS_DSN_ENV)
         resolved_hafsql_config = hafsql_config or HafsqlConfig.from_env()
-        gateway = HafsqlClient(resolved_hafsql_config, lite_config, recsys_dsn=resolved_dsn)
+        # ★★★ A13 COMPLETED 2026-08-24 — `Settings` is the single source for lite.
+        #
+        # BUILDMAP-A-LAUNCH-2026-08-04 §A13 specified: "have the service construct
+        # `HafsqlClient(hafsql_config, settings.lite)` so `Settings` is the single
+        # source. Assert at startup that `settings.lite` and the client's `_lite`
+        # are the same object." The 2026-08-05 implementation added
+        # `LiteConfig.from_env` and threaded it into `Settings.from_env`, but THIS
+        # line was left passing `lite_config` — which is `None` for every real
+        # caller — so `HafsqlClient` fell through to its OWN independent
+        # `_lite_config_from_env()`. Two doors onto the same env var.
+        #
+        # In the live service both doors happen to agree, because `main()` builds
+        # settings with `Settings.from_env()` and both read the same environment.
+        # The divergence is LATENT, not active: it appears the moment anyone
+        # constructs `ServiceState.build()` without env (tests, probes, a future
+        # caller passing an explicit `Settings`), where `settings.lite` says OFF
+        # while the gateway says ON. That mismatch is unobservable at the served
+        # output today only because there are ZERO lite posts inside the sourcing
+        # window (newest 2026-08-16; 99 all-time), so nothing it would gate on
+        # exists to be gated.
+        #
+        # An explicit `lite_config=` argument still wins, which is what
+        # `HafsqlClient`'s own kwarg semantics promise and what its tests pin.
+        resolved_lite = lite_config if lite_config is not None else settings.lite
+        gateway = HafsqlClient(resolved_hafsql_config, resolved_lite, recsys_dsn=resolved_dsn)
         snapshot_cache: _TimerCache[TrustSnapshot | None] = _TimerCache(
             "trust_snapshot",
             lambda: _load_snapshot_fixed(resolved_dsn),

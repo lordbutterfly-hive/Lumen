@@ -29,6 +29,30 @@ feed is that viewer. That is what this module adds.
                              -> the worst an attacker can do by moving it is
                                 change their own feed. Self-harm, not an attack.
 
+MEASUREMENTS PRESERVED FROM A REVERTED BUILD (2026-08-24)
+=========================================================
+A SELECTION lane built on this channel was designed, scrutinised, and then
+REVERTED on the owner's ruling: "i dont want another affinity lane. i need
+everything thats just follower based to be affinity based as well." Two findings
+are kept here because anyone who later proposes selection-by-affinity will need
+them, and because the code that carried them is gone:
+
+  * MEANINGFUL EDGES vs BARE UPVOTES. Ranking tolerates upvote-only edges
+    because `upvote = 1.0` barely moves a score. SELECTION is a threshold, and
+    on the live mirror curation/autovote trails reach 1,936-2,233 distinct
+    upvote partners — "any outgoing edge" would flood a pool with authors the
+    viewer never meaningfully chose. Population-wide: only 5.2% of 2,618,664
+    edges carry a reply or reblog, and of upvote-only edges with >=10 upvotes
+    just 6.2% have ANY reciprocal edge.
+  * THE SNAPSHOT-SOURCING INVARIANT. Any selection built on these edges must
+    read `snapshot.edges` — the same banned/curator-filtered list
+    `compute_graph_cred` consumed — never a fresher query. The edge that admits
+    an author is itself received engagement, placing them in the engaged band
+    (>= `min_vouched_score` 0.10) and so above `graph_cred_floor` (0.05);
+    verified live, 0 of 51 floored accounts had any inbound edge from a
+    non-ring-flagged source. Sourcing from live edges reopens the 2-star
+    flooring bug inside the trust batch's lag window.
+
 THE INVARIANT — read this before touching anything here
 =======================================================
 A viewer-own score may reorder THAT VIEWER'S pool and nothing else. It must never
@@ -194,6 +218,7 @@ def viewer_topic_affinity(
     weights: RealGraphWeights,
     now: datetime,
     author_topics: Mapping[str, Sequence[str]],
+    per_author: Mapping[str, float] | None = None,
 ) -> dict[str, float]:
     """Decayed viewer engagement attributed to topics, via the authors engaged.
 
@@ -201,8 +226,32 @@ def viewer_topic_affinity(
     Engagement is spread evenly across an author's topics rather than counted
     once per topic, so a prolific multi-topic author cannot dominate the
     viewer's topic profile purely by breadth.
+
+    ★ ``per_author`` (2026-08-24) — PASS THE CALLER'S ALREADY-COMPUTED MAP.
+    This function used to ALWAYS recompute ``viewer_author_affinity`` here, a
+    full linear scan of the snapshot's entire edge list. Its only production
+    caller (``pipeline._viewer_affinity_lookup``) computes that exact map, with
+    these exact four arguments, immediately before calling this — so every feed
+    build scanned the edge list TWICE for one identical result. Measured on the
+    live container: **79 ms per scan at 2,618,664 edges**, and ``_score`` runs
+    at up to four sites per build, so the duplicate cost was ~80-320 ms of
+    GIL-serialised CPU per feed.
+
+    Omitting the argument preserves the old behaviour exactly, so no existing
+    caller changes meaning.
+
+    ★ CORRECTED 2026-08-24 — this paragraph used to end "supplying it is a pure
+    computation reuse and CANNOT alter the result, because the map passed in is
+    by construction the map this line would have rebuilt." **That is false as
+    wired.** The production caller (`pipeline._viewer_affinity_lookup`) subtracts
+    banned and muted authors from the map BEFORE passing it, so topic affinity
+    now also excludes their topics. That is deliberate and desirable — engaging
+    a muted author should not leak their topics onto other authors — but it IS a
+    behaviour change, and the two files must not contradict each other about it.
+    The equivalence claim holds only for a caller that passes the unmodified map.
     """
-    per_author = viewer_author_affinity(viewer_account, edges, weights, now)
+    if per_author is None:
+        per_author = viewer_author_affinity(viewer_account, edges, weights, now)
     out: dict[str, float] = {}
     for author, w in per_author.items():
         topics = [t for t in author_topics.get(author, ()) if t]

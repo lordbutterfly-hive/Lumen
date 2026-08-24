@@ -121,10 +121,16 @@ def test_in_network_window_is_widened_and_only_for_in_network() -> None:
     gw = _SinceRecordingGateway(in_network=[make_post("a", "p1")])
     viewer = make_viewer("me", follows=frozenset({"a"}))
     since = EPOCH + timedelta(days=30)
-    gather_candidates(viewer, gw, since, 50, _windows(in_network_freshness_days=7))
+    # Derived from the live default, never hardcoded: these literals used to be
+    # `7` and `7 - 3 = 4`, and both went stale the moment `sourcing` was halved
+    # to 1.5 (2026-08-23). The invariant under test is the SUBTRACTION, so state
+    # it in terms of the config rather than in terms of the day it was written.
+    sourcing = HistoryWindows().sourcing_freshness_days
+    wider = sourcing + 4
+    gather_candidates(viewer, gw, since, 50, _windows(in_network_freshness_days=wider))
 
-    # widened by exactly (in_network - sourcing) = 7 - 3 = 4 days
-    assert gw.in_network_since == since - timedelta(days=4)
+    # widened by exactly (in_network - sourcing)
+    assert gw.in_network_since == since - timedelta(days=wider - sourcing)
     # every other lane keeps the short window
     assert gw.other_since, "no discovery lane was asked for"
     assert all(s == since for s in gw.other_since)
@@ -140,13 +146,14 @@ def test_in_network_window_zero_is_an_exact_no_op() -> None:
 
 def test_in_network_window_never_ends_up_narrower_than_discovery() -> None:
     # config forbids a narrower setting outright...
+    sourcing = HistoryWindows().sourcing_freshness_days
     with pytest.raises(ValueError, match="in_network_freshness_days"):
-        _windows(in_network_freshness_days=1)
+        _windows(in_network_freshness_days=sourcing / 2)
     # ...and equal-to-sourcing is a no-op rather than a negative shift.
     gw = _SinceRecordingGateway(in_network=[make_post("a", "p1")])
     viewer = make_viewer("me", follows=frozenset({"a"}))
     since = EPOCH + timedelta(days=30)
-    gather_candidates(viewer, gw, since, 50, _windows(in_network_freshness_days=3))
+    gather_candidates(viewer, gw, since, 50, _windows(in_network_freshness_days=sourcing))
     assert gw.in_network_since == since
 
 
@@ -269,3 +276,25 @@ def test_settings_from_env_does_not_disturb_default_settings(
     change the already-constructed `DEFAULT_SETTINGS` singleton."""
     monkeypatch.setenv("LUMEN_EXPLORE_SEAT_SECRET", "99" * 32)
     assert DEFAULT_SETTINGS.exploration.seat_secret is None
+
+
+def test_the_halved_freshness_windows_are_pinned_to_their_instructed_values() -> None:
+    """★ NOTHING PINNED THESE UNTIL NOW (found by a scrutinizer, 2026-08-24).
+
+    The windows were halved on 2026-08-23 by explicit owner instruction —
+    `sourcing_freshness_days` 3.0 -> 1.5 (36h) and `in_network_freshness_days`
+    7.0 -> 3.5 (84h) — and the tests around them were rewritten to derive from
+    `HistoryWindows()` precisely so they could not go stale again. The
+    side-effect of deriving everything is that NOTHING asserted the values
+    themselves: a silent revert to 3 and 7 would have passed the entire suite.
+
+    This is the one place the literals belong. If a later measurement justifies
+    changing them, change them HERE, deliberately, with the reason.
+    """
+    h = HistoryWindows()
+    assert h.sourcing_freshness_days == 1.5, "sourcing window moved off 36h"
+    assert h.in_network_freshness_days == 3.5, "own-follows window moved off 84h"
+    # Float, not int: "half of three days" has no integer representation, and a
+    # silent re-typing to int would floor 1.5 to 1 and change the feed.
+    assert isinstance(h.sourcing_freshness_days, float)
+    assert isinstance(h.in_network_freshness_days, float)

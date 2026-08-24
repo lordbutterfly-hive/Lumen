@@ -70,7 +70,7 @@ silent default.
 
 WARM-SET SCOPE, live-measured 2026-08-04 (this builder) — see the build
 report for the full sweep table. Every candidate author must have posted
-within ``settings.history.in_network_freshness_days`` (7d default — the
+within ``settings.history.in_network_freshness_days`` (3.5d default — the
 WIDEST candidate-sourcing horizon any lane uses: ``IN_NETWORK`` widens to it,
 every other lane stays on the shorter ``sourcing_freshness_days``), so that
 recency window bounds the full universe of authors that could ever reach

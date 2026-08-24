@@ -573,7 +573,10 @@ class ScoreWeights:
     #: file reproducible.
     #:
     #: SWEEP-PENDING — the shipped value and its live table are written here
-    #: once measured. Until then this field is 0.0 (off, byte-identical).
+    #: once measured. ★ CORRECTED 2026-08-24: this line used to end "Until then
+    #: this field is 0.0 (off, byte-identical)" while the field below reads
+    #: 0.05. The 0.0 statement described the pre-2026-08-08 state and went stale
+    #: when the value was raised; the sweep table is still owed.
     #:
     #: WHAT IT IS NOT ALLOWED TO BE. This is a RANKING nudge, never an
     #: eligibility change: it cannot admit a post the gates rejected, and it
@@ -1380,7 +1383,7 @@ class FreshnessConfig:
 
     ★ `max_age_hours` IS CROSS-VALIDATED AGAINST THE SOURCING WINDOW, unlike
     :attr:`ExplorationConfig.max_age_days`, which is DEAD CONFIG: it is 7 days
-    while every OON query applies the 3-day `sourcing_freshness_days` in SQL, so
+    while every OON query applies the 36-hour `sourcing_freshness_days` in SQL, so
     its effective value is 3 and nothing anywhere notices. ``__post_init__``
     below refuses a value that cannot be reached, so this config cannot acquire
     the same silent uselessness.
@@ -1842,7 +1845,7 @@ class ExplorationConfig:
     #: **0 disables the refill and restores the lifetime cap byte-for-byte.**
     #:
     #: WHY 7 DAYS, and it is measured rather than picked: the lane's effective
-    #: freshness is 3 days (`sourcing_freshness_days`), so a 7-day window spans
+    #: freshness is 36 hours (`sourcing_freshness_days`), so a 7-day window spans
     #: more than one full cycle — a second genuine chance before reset — while
     #: sitting inside the measured p75 posting gap of real Hive newcomers
     #: (~4 days), so it refills faster than most newcomers post. Chain-measured
@@ -2250,8 +2253,6 @@ class RealGraphWeights:
     revisit: float = 0.0
     dwell_per_minute: float = 0.0
     half_life_days: float = 30.0  # time-decay of the edge's last interaction
-
-
 @dataclass(frozen=True)
 class HafsqlConfig:
     """Public read-only HAFSQL Postgres (Appendix B). The documented public
@@ -2632,7 +2633,11 @@ class HistoryWindows:
     misconfig can't make sourcing wider than trust.
     """
 
-    sourcing_freshness_days: int = 3  # candidate pools: in-network / community / tag / engaged-OON
+    sourcing_freshness_days: float = 1.5  # candidate pools: in-network / community / tag / engaged-OON
+    #: ★ HALVED 3.0 -> 1.5 (36h) on 2026-08-23 by owner instruction: the feed was
+    #: serving posts old enough that the conversation on them had already ended.
+    #: Float, not int — "half of three days" has no integer representation and
+    #: every consumer is `timedelta(days=...)` or a comparison, both float-safe.
     #: Separate, WIDER freshness window for the viewer's OWN FOLLOWS
     #: (``IN_NETWORK`` only). 0 = "use ``sourcing_freshness_days``", an exact
     #: no-op. See :func:`recsys.pipeline.gather_candidates`.
@@ -2700,7 +2705,9 @@ class HistoryWindows:
     #: arithmetic is therefore pinned directly by
     #: tests/test_config_windows.py rather than by any panel — do not assume a
     #: green panel run says anything about this field.
-    in_network_freshness_days: int = 7
+    #: ★ HALVED 7.0 -> 3.5 (84h) on 2026-08-23, same instruction. Still WIDER
+    #: than sourcing (1.5), which the validator below requires.
+    in_network_freshness_days: float = 3.5
 
     quality_prior_days: int = 45  # author-pooled quality prior
     trust_days: int = 365  # engagement_edges -> graph-cred / ALS

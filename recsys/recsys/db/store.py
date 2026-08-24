@@ -46,11 +46,14 @@ WHAT IS PERSISTED, FIELD BY FIELD (``TrustSnapshot`` has 6 fields):
   ``outside_engagers`` trap above describes, just for CF instead of the vouch
   gate. It is also small (factor matrices, not raw edges), so there is no
   operational-cost reason to skip it the way there is for ``edges`` below.
-* ``edges`` — new ``trust_snapshot_edge`` table. UNLIKE ``als``, this one
-  genuinely IS inert at serving time today: its only consumer,
-  ``pipeline._viewer_affinity_lookup``, short-circuits on
-  ``settings.weights.organic_viewer <= 0.0``, and that weight defaults to
-  ``0.0``. Persisted anyway, in full, because A6's acceptance bar is
+* ``edges`` — new ``trust_snapshot_edge`` table. ★ CORRECTED 2026-08-24 — this
+  paragraph used to say edges were "genuinely inert at serving time" because
+  ``organic_viewer`` defaulted to ``0.0``. THAT IS NO LONGER TRUE and had not
+  been since 2026-08-08: the weight is ``0.3`` (VERIFIED in the running
+  process), its consumer ``pipeline._viewer_affinity_lookup`` does NOT
+  short-circuit, and production carries 2,618,664 rows in this table. The
+  viewer-own affinity channel is LIVE and this table feeds it. Persisted in
+  full, because A6's acceptance bar is
   round-trip fidelity of the dataclass, not "whatever happens to be live
   right now" — see the ``trust_snapshot_edge`` table comment in schema.sql
   for the storage-cost caveat this decision creates (a full ``trust_days``
