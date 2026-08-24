@@ -2347,6 +2347,40 @@ class HafsqlConfig:
     user: str = "hafsql_public"
     password: str = "hafsql_public"
     connect_timeout: int = 10
+    #: ★★★ DAYS PER EDGE-QUERY SLICE (2026-08-24). 0 disables slicing.
+    #:
+    #: THE 90-DAY WALL IS A QUERY PLAN, NOT A LIMIT.
+    #: `deploy/trust-batch-defaults.env`, measured 2026-08-14: a 365-day edge
+    #: window "cannot complete at all (cancelled at 900s, and again at 3600s) —
+    #: the planner flips from a per-block Nested Loop to a Merge Join that
+    #: index-scans every comment operation ever made. 90 days completed in
+    #: 29.7s." Production therefore runs `--since-days 90`, and MEASURED
+    #: 2026-08-24 the live graph reaches back exactly 90 days: the oldest
+    #: `last_interaction` across all 2,618,664 edges is 90 days old, and there
+    #: are ZERO beyond 120. A relationship older than that is not decayed, it is
+    #: ABSENT — which is why `RealGraphWeights.affinity_decay_floor` could only
+    #: ever protect a 90-day slice of the history it was written to preserve.
+    #:
+    #: Slicing keeps every query on the good plan. Measured live, reply edges:
+    #: 0-90d 655,908 rows / 24.2s | 90-180d 983,069 / 30.8s | 180-270d
+    #: 1,609,930 / 21.0s — against one query for the same span that never
+    #: finished at all.
+    #:
+    #: ★ THIS IS A DECOMPOSITION, NOT A SEMANTIC CHANGE. `COUNT(*)` and
+    #: `MAX(timestamp)` are both decomposable over a partition, so summing
+    #: counts and taking the max timestamp across contiguous half-open slices is
+    #: EXACTLY what one grouped query over the whole span computes. At a window
+    #: of one slice or less it collapses to a single query — byte-for-byte
+    #: today's behaviour.
+    #:
+    #: ★ WHY NOT AN ACCUMULATOR (the pattern X uses). Specced and killed by
+    #: three independent reviews: it stores PRE-DECAYED counts into fields four
+    #: consumers still decay at read time (halving the effective half-life
+    #: forever), it erodes the integer self-dealing SCALE gate purely by aging
+    #: (making trust cheaper to keep), and its own recovery path reuses the
+    #: windowed query so every rebuild resets to 90 days regardless. Chunking
+    #: keeps the graph a pure function of the chain. See ACCUMULATOR-SPEC.md.
+    edge_slice_days: int = 90
 
     @classmethod
     def from_env(cls) -> HafsqlConfig:

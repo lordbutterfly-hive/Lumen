@@ -702,7 +702,15 @@ def test_edge_counts_coerces_naive_last_interaction_to_aware(
         return [("alice", "bob", 3, datetime(2026, 1, 1, 12, 0, 0))]
 
     monkeypatch.setattr(hafsql.HafsqlClient, "_fetch", fake_fetch)
-    counts = CLIENT._edge_counts(hafsql._SQL_UPVOTE_EDGES, datetime(2026, 1, 1, tzinfo=UTC))
+    # ★ `_edge_counts_slice`, not `_edge_counts` (2026-08-24). This test is
+    # about coercing a NAIVE timestamp off one fetch, which is the single-query
+    # path's job. `_edge_counts` now slices a long window and merges, so with a
+    # stubbed `_fetch` returning the same row every call it would return the row
+    # once per slice — this window spans three, and the assertion read 9 == 3.
+    # That was the merge summing correctly, not a defect.
+    counts = CLIENT._edge_counts_slice(
+        hafsql._SQL_UPVOTE_EDGES, datetime(2026, 1, 1, tzinfo=UTC)
+    )
     count, ts = counts[("alice", "bob")]
     assert count == 3
     assert ts is not None
@@ -2042,6 +2050,7 @@ def test_only_a_publishers_post_may_redirect_its_engagement(monkeypatch) -> None
             sql,
             {
                 "since": datetime(2020, 1, 1, tzinfo=UTC),
+                "until": datetime(2099, 1, 1, tzinfo=UTC),
                 "lite_publishers": ["lumen.pub"],
                 "lite_app": "lumen/1.0",
             },
@@ -2134,6 +2143,7 @@ def test_every_lite_edge_query_enforces_the_publisher_boundary(
             sql,
             {
                 "since": datetime(2020, 1, 1, tzinfo=UTC),
+                "until": datetime(2099, 1, 1, tzinfo=UTC),
                 "lite_publishers": ["lumen.pub"],
                 "lite_app": "lumen/1.0",
             },
@@ -2456,3 +2466,88 @@ def test_sim_recall_matches_production_weights() -> None:
     assert "p.votes" not in scorer, "votes must not decide popularity recall"
     assert "_ORGANIC_VOTER_WEIGHT" not in scorer
     assert "rshares" not in scorer
+
+
+# ── ★ the edge-window slicing (2026-08-24) ──────────────────────────────────
+
+
+def test_edge_counts_slices_a_long_window_and_merges_exactly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """★ THE 90-DAY WALL IS A QUERY PLAN, NOT A LIMIT.
+
+    Measured 2026-08-14 (`deploy/trust-batch-defaults.env`): a 365-day edge
+    window "cannot complete at all (cancelled at 900s, and again at 3600s)",
+    while 90 days finishes in 29.7s. So production runs `--since-days 90`, and
+    MEASURED 2026-08-24 the live graph reaches back exactly 90 days — oldest
+    `last_interaction` across 2,618,664 edges is 90 days, ZERO beyond 120. A
+    relationship older than that is not decayed, it is ABSENT.
+
+    Slicing keeps each query on the good plan. This pins the property that makes
+    it safe: `COUNT(*)` and `MAX(timestamp)` are both decomposable over a
+    partition, so slice-and-merge must equal one grouped query over the span.
+    """
+    calls: list[tuple[datetime, datetime]] = []
+
+    def fake_fetch(self, sql, params, *, timeout_ms=None):
+        calls.append((params["since"], params["until"]))
+        return [("alice", "bob", 2, datetime(2026, 1, 1, 12, 0, 0))]
+
+    monkeypatch.setattr(hafsql.HafsqlClient, "_fetch", fake_fetch)
+    since = datetime.now(UTC) - timedelta(days=200)
+    counts = CLIENT._edge_counts(hafsql._SQL_UPVOTE_EDGES, since)
+
+    assert len(calls) == 3, f"expected 3 slices over 200 days at 90/slice, got {len(calls)}"
+    # Counts SUM across slices — this is the merge doing its job.
+    assert counts[("alice", "bob")][0] == 6
+
+    # ★ The slices must be CONTIGUOUS and HALF-OPEN, or interactions are counted
+    # twice or silently dropped — both permanent and both invisible.
+    for (_, prev_until), (next_since, _) in zip(calls, calls[1:]):
+        assert prev_until == next_since, "slice boundaries do not meet exactly"
+    assert calls[0][0] == since, "the first slice must start at the requested since"
+
+
+def test_a_window_within_one_slice_makes_exactly_one_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """At or under one slice this must collapse to a single query — byte-for-byte
+    the behaviour before slicing existed, which is what makes the change safe to
+    ship at today's 90-day production window."""
+    calls: list[object] = []
+
+    def fake_fetch(self, sql, params, *, timeout_ms=None):
+        calls.append(params)
+        return []
+
+    monkeypatch.setattr(hafsql.HafsqlClient, "_fetch", fake_fetch)
+    CLIENT._edge_counts(hafsql._SQL_UPVOTE_EDGES, datetime.now(UTC) - timedelta(days=30))
+    assert len(calls) == 1
+
+
+def test_the_slice_loop_always_advances(monkeypatch: pytest.MonkeyPatch) -> None:
+    """★ FOUND BY MUTATION, 2026-08-24 — and it did not fail an assertion, it HUNG.
+
+    An edit making the slices overlap sent `_edge_counts` into an infinite loop:
+    once `hi` clamps to the upper bound and `lo` sits just below it, a
+    non-advancing step spins forever. That would run inside the weekly trust
+    batch holding a mirror connection, and nothing at this layer times out — the
+    cron's own retry never fires because the process never exits. A batch that
+    never returns is worse than one that returns wrong.
+
+    This pins the guard by driving the loop with a degenerate slice size.
+    """
+    calls: list[object] = []
+
+    def fake_fetch(self, sql, params, *, timeout_ms=None):
+        calls.append(params)
+        if len(calls) > 50:  # a real infinite loop would blow past this
+            raise AssertionError("slice loop did not advance")
+        return []
+
+    monkeypatch.setattr(hafsql.HafsqlClient, "_fetch", fake_fetch)
+    from dataclasses import replace as _replace
+
+    client = hafsql.HafsqlClient(_replace(CLIENT._config, edge_slice_days=1))
+    client._edge_counts(hafsql._SQL_UPVOTE_EDGES, datetime.now(UTC) - timedelta(days=10))
+    assert len(calls) <= 12, f"expected ~11 one-day slices, got {len(calls)}"

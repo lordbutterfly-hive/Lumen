@@ -558,6 +558,7 @@ WHERE parent_author <> ''
   -- `hafsql.operation_comment_view` has no `created` column at all — it is
   -- `timestamp` (`timestamp WITHOUT time zone`; naive, hence _as_aware below).
   AND timestamp >= %(since)s
+    AND timestamp < %(until)s
 GROUP BY author, parent_author
 """
 
@@ -567,6 +568,7 @@ FROM hafsql.operation_effective_comment_vote_view
 WHERE rshares > 0
   AND voter <> author
   AND timestamp >= %(since)s
+    AND timestamp < %(until)s
 GROUP BY voter, author
 """
 
@@ -639,6 +641,7 @@ SELECT voter, dst, COUNT(*), MAX(ts) FROM (
     WHERE v.rshares > 0
       AND v.voter <> v.author
       AND v.timestamp >= %(since)s
+    AND v.timestamp < %(until)s
       AND NOT (v.author = ANY(%(lite_publishers)s))
     UNION ALL
     SELECT v.voter AS voter, COALESCE(l.uid, v.author) AS dst, v.timestamp AS ts
@@ -647,6 +650,7 @@ SELECT voter, dst, COUNT(*), MAX(ts) FROM (
     WHERE v.rshares > 0
       AND v.voter <> v.author
       AND v.timestamp >= %(since)s
+    AND v.timestamp < %(until)s
 ) e
 GROUP BY voter, dst
 """
@@ -674,6 +678,7 @@ SELECT src, dst, COUNT(*), MAX(ts) FROM (
     WHERE r.parent_author <> ''
       AND r.author <> r.parent_author
       AND r.timestamp >= %(since)s
+    AND r.timestamp < %(until)s
       AND NOT (r.parent_author = ANY(%(lite_publishers)s))
     UNION ALL
     SELECT r.author AS src, COALESCE(l.uid, r.parent_author) AS dst, r.timestamp AS ts
@@ -682,6 +687,7 @@ SELECT src, dst, COUNT(*), MAX(ts) FROM (
     WHERE r.parent_author <> ''
       AND r.author <> r.parent_author
       AND r.timestamp >= %(since)s
+    AND r.timestamp < %(until)s
 ) e
 GROUP BY src, dst
 """
@@ -708,6 +714,7 @@ SELECT src, dst, COUNT(*), MAX(ts) FROM (
     FROM hafsql.reblogs b
     WHERE b.account_name <> b.author
       AND b.created_at >= %(since)s
+    AND b.created_at < %(until)s
       AND NOT (b.author = ANY(%(lite_publishers)s))
     UNION ALL
     SELECT b.account_name AS src, COALESCE(l.uid, b.author) AS dst, b.created_at AS ts
@@ -715,6 +722,7 @@ SELECT src, dst, COUNT(*), MAX(ts) FROM (
     JOIN lite l ON l.author = b.author AND l.permlink = b.permlink
     WHERE b.account_name <> b.author
       AND b.created_at >= %(since)s
+    AND b.created_at < %(until)s
 ) e
 GROUP BY src, dst
 """
@@ -724,6 +732,7 @@ SELECT account_name, author, COUNT(*), MAX(created_at)
 FROM hafsql.reblogs
 WHERE account_name <> author
   AND created_at >= %(since)s
+    AND created_at < %(until)s
 GROUP BY account_name, author
 """
 
@@ -2432,9 +2441,99 @@ class HafsqlClient:
         return edges
 
     def _edge_counts(
-        self, sql: str, since: datetime, extra: Mapping[str, object] | None = None
+        self,
+        sql: str,
+        since: datetime,
+        extra: Mapping[str, object] | None = None,
     ) -> dict[tuple[str, str], tuple[int, datetime | None]]:
-        params: dict[str, object] = {"since": since}
+        """`_edge_counts` over a window split into slices, results merged.
+
+        ★★★ WHY THIS EXISTS — THE 90-DAY WALL IS A QUERY PLAN, NOT A LIMIT.
+        `deploy/trust-batch-defaults.env`, measured 2026-08-14: a 365-day edge
+        window "cannot complete at all (cancelled at 900s, and again at 3600s)
+        — the planner flips from a per-block Nested Loop to a Merge Join that
+        index-scans every comment operation ever made. 90 days completed in
+        29.7s." So production runs `--since-days 90`, and the LIVE interaction
+        graph reaches back exactly 90 days: measured 2026-08-24, the oldest
+        `last_interaction` across all 2,618,664 edges is 90 days, and there are
+        ZERO edges beyond 120. A relationship older than that is not decayed,
+        it is ABSENT.
+        
+        Each slice is small enough to keep the good plan. Measured on the live
+        mirror, reply edges: 0-90d 655,908 rows / 24.2s, 90-180d 983,069 /
+        30.8s, 180-270d 1,609,930 / 21.0s — where the single unchunked query
+        never finished at all.
+
+        ★ WHY NOT AN ACCUMULATOR. A running decayed total (the pattern X uses)
+        was specced and killed by three independent reviews. It would store
+        PRE-DECAYED counts into fields that four consumers still decay at read
+        time (`graph_cred`, `ring`, `als`, `viewer_affinity`), halving the
+        effective half-life forever; it would erode the integer self-dealing
+        SCALE gate (`min_ring_self_dealing_events`) purely by aging, making
+        trust cheaper to keep; and its own recovery path reuses the windowed
+        query, so every rebuild would reset to 90 days anyway. Chunking keeps
+        the graph a PURE FUNCTION OF THE CHAIN — no watermark, no fold, no
+        drift, no concurrent-run race, integers stay integers, and bans stay
+        retroactive. See ACCUMULATOR-SPEC.md for the full verdict.
+
+        ★ IDENTICAL RESULTS, NOT MERELY SIMILAR. Counts sum and timestamps take
+        the max, which is exactly what one grouped query over the whole span
+        computes — `COUNT(*)` and `MAX(timestamp)` are both decomposable over a
+        partition. The slices are half-open and contiguous, so no interaction is
+        counted twice or missed. With a window at or under one slice this makes
+        exactly one query with an effectively-unbounded upper bound, which is
+        byte-for-byte today's behaviour.
+        """
+        slice_days = self._config.edge_slice_days
+        now_ts = datetime.now(UTC)
+        # ★ THE NEWEST SLICE KEEPS AN OPEN TOP. The queries had no upper bound
+        # before this change, so rows written while the query runs were included;
+        # a far horizon on the final slice preserves that exactly. Slice
+        # BOUNDARIES are measured against `now_ts`, not the horizon — using the
+        # horizon made a 90-day window span 91 days and issue TWO queries, which
+        # silently broke the property that today's production window is a single
+        # query byte-for-byte.
+        horizon = now_ts + timedelta(days=1)
+        # ★ WHOLE DAYS, not a raw timedelta. `now_ts` is sampled here while the
+        # caller sampled its own `now` moments earlier, so a nominally 90-day
+        # window is 90 days plus microseconds — enough to tip a `<=` comparison
+        # and issue two queries where production expects one.
+        if slice_days <= 0 or (now_ts - since).days <= slice_days:
+            return self._edge_counts_slice(sql, since, extra, horizon)
+
+        merged: dict[tuple[str, str], tuple[int, datetime | None]] = {}
+        lo = since
+        while lo < now_ts:
+            hi = min(lo + timedelta(days=slice_days), now_ts)
+            # ★ NEVER LOOP WITHOUT ADVANCING (2026-08-24). Found by mutation:
+            # an edit that made the slices overlap did not fail an assertion, it
+            # HUNG — once `hi` clamps to `top` and `lo` sits below it, a
+            # non-advancing step spins forever, inside the weekly trust batch,
+            # holding a mirror connection. A batch that never returns is worse
+            # than one that returns wrong: nothing times out at this layer and
+            # the cron's own retry never fires because the process never exits.
+            if hi <= lo:
+                break
+            # The final slice takes the open horizon, every earlier one its own
+            # exact upper bound, so the slices stay contiguous and half-open.
+            until = horizon if hi >= now_ts else hi
+            for key, (count, ts) in self._edge_counts_slice(sql, lo, extra, until).items():
+                prev_count, prev_ts = merged.get(key, (0, None))
+                merged[key] = (prev_count + count, _latest(prev_ts, ts))
+            lo = hi
+        return merged
+
+    def _edge_counts_slice(
+        self,
+        sql: str,
+        since: datetime,
+        extra: Mapping[str, object] | None = None,
+        until: datetime | None = None,
+    ) -> dict[tuple[str, str], tuple[int, datetime | None]]:
+        params: dict[str, object] = {
+            "since": since,
+            "until": until if until is not None else datetime.now(UTC) + timedelta(days=1),
+        }
         if extra:
             params.update(extra)
         rows = self._fetch(sql, params)
