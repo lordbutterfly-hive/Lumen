@@ -2242,7 +2242,15 @@ class RealGraphWeights:
     # so cheap actions can't rival reciprocated conversation.
     reply: float = 5.0
     reply_back: float = 15.0
-    upvote: float = 1.0
+    #: ★★★ 0.0 BY OWNER RULING (2026-08-24): "VOTES ARE BOTED, ONLY COMMENTS
+    #: AND REBLOGS". Votes are no longer pulled into the graph at all
+    #: (`HafsqlClient.engagement_edges`), so this weight is now belt to that
+    #: brace: even if a vote count reached an edge by some other path, it earns
+    #: nothing. Measured the day of the ruling: votes were 17,234,136 of the
+    #: interaction volume vs 605,389 replies, and 94.8% of edges were
+    #: upvote-only — of the heavy ones (>=10 upvotes) only 6.2% had any
+    #: reciprocal edge, i.e. trails, not relationships.
+    upvote: float = 0.0
     reblog: float = 2.0
     # Phase-1 telemetry signals: no HAFSQL/data source AND no server-side
     # bot-defense yet (§8.9), so held at 0.0 until plausibility checks exist —

@@ -65,11 +65,25 @@ def qualifying_engagers(
     """
     if not graph_creds:
         return in_network_engagers
+    # ★★★ A MISSING ENTRY IS "NOBODY HAS ENGAGED THEM", NOT "SELF-DEALER"
+    # (2026-08-24). This used to fail SHUT on absence, which was invisible while
+    # the graph contained a vote edge for almost everyone. The moment votes were
+    # dropped from the graph (owner: "VOTES ARE BOTED, ONLY COMMENTS AND
+    # REBLOGS"), 8,714 of 17,213 scored accounts — 50.6%, measured — left the
+    # edge universe entirely and would have silently lost the ability to vouch.
+    #
+    # This function's own docstring already rules on the case: an account nobody
+    # has engaged yet "scores `min_vouched_score` (0.10) and vouches normally",
+    # and it records that an earlier revision scoring them 0.0 "silently
+    # disqualified 35 of 180 accounts (19.4%) ... buying nothing: the same
+    # population produced ZERO extra dropped candidates". Absence and
+    # never-engaged are the same condition; only presence-with-a-0.0-score is
+    # positive evidence of self-dealing, and that still fails shut below.
     return frozenset(
         account
         for account in in_network_engagers
-        if (cred := graph_creds.get(account)) is not None
-        and cred.score >= vouch_graph_cred_floor
+        if (cred := graph_creds.get(account)) is None
+        or cred.score >= vouch_graph_cred_floor
     )
 
 

@@ -269,9 +269,9 @@ def _cf_edges() -> list[EngagementEdge]:
     # "me" and "peer" both heavily engage author "liked"; ALS learns me->liked
     # affinity. "other" is engaged once, "stranger" never.
     return [
-        EngagementEdge(src="me", dst="liked", upvotes=10, replies=10),
-        EngagementEdge(src="peer", dst="liked", upvotes=10, replies=10),
-        EngagementEdge(src="me", dst="other", upvotes=1),
+        EngagementEdge(src="me", dst="liked", replies=10),
+        EngagementEdge(src="peer", dst="liked", replies=10),
+        EngagementEdge(src="me", dst="other", replies=1),
     ]
 
 
@@ -643,8 +643,8 @@ def test_author_pooled_prior_outranks_one_lucky_post() -> None:
 
 def test_build_trust_snapshot_produces_graph_cred() -> None:
     edges = [
-        EngagementEdge(src="a", dst="b", upvotes=5),
-        EngagementEdge(src="b", dst="a", upvotes=5),
+        EngagementEdge(src="a", dst="b", replies=5),
+        EngagementEdge(src="b", dst="a", replies=5),
     ]
     gateway = FakeGateway(
         edges=edges, follow_graph={"a": frozenset({"b"}), "b": frozenset({"a"})}
@@ -675,8 +675,8 @@ def test_build_trust_snapshot_refuses_empty_seeds_in_production() -> None:
     # which is the entire point of the ruling ("a wiring requirement every
     # caller must remember is the defect, not the fix").
     edges = [
-        EngagementEdge(src="a", dst="b", upvotes=5),
-        EngagementEdge(src="b", dst="a", upvotes=5),
+        EngagementEdge(src="a", dst="b", replies=5),
+        EngagementEdge(src="b", dst="a", replies=5),
     ]
     gateway = FakeGateway(
         edges=edges, follow_graph={"a": frozenset({"b"}), "b": frozenset({"a"})}
@@ -1200,8 +1200,8 @@ def _laundered_pairs(n_socks: int) -> tuple[list[EngagementEdge], dict[str, froz
     follows: dict[str, frozenset[str]] = {}
     for i in range(0, n_socks, 2):
         a, b = f"sock{i}", f"sock{i + 1}"
-        edges.append(EngagementEdge(src=a, dst=b, upvotes=1))
-        edges.append(EngagementEdge(src=b, dst=a, upvotes=1))
+        edges.append(EngagementEdge(src=a, dst=b, replies=1))
+        edges.append(EngagementEdge(src=b, dst=a, replies=1))
         follows[a] = frozenset({b})
         follows[b] = frozenset({a})
     return edges, follows
@@ -1258,8 +1258,8 @@ def test_h02_genuine_newcomer_pair_is_unknown_but_not_blocked_and_flips_on_outsi
     # It is only UNKNOWN-tier (outside_engaged False -> not vouched), so its first
     # vote still credits via unknown_free -- not zeroed, not vouched.
     edges = [
-        EngagementEdge(src="newa", dst="newb", upvotes=1),
-        EngagementEdge(src="newb", dst="newa", upvotes=1),
+        EngagementEdge(src="newa", dst="newb", replies=1),
+        EngagementEdge(src="newb", dst="newa", replies=1),
     ]
     follows = {"newa": frozenset({"newb"}), "newb": frozenset({"newa"})}
     # production=False (C5/R2): synthetic newcomer-pair world, no real seed lands.
@@ -1279,7 +1279,7 @@ def test_h02_genuine_newcomer_pair_is_unknown_but_not_blocked_and_flips_on_outsi
     # The instant newa receives ONE genuine OUTSIDE upvote (peer is not in the
     # pair, forms no reciprocal edge -> not ring-flagged), newa flips to vouched
     # -- the newcomer earns real breadth by being engaged from outside.
-    edges2 = [*edges, EngagementEdge(src="peer", dst="newa", upvotes=1)]
+    edges2 = [*edges, EngagementEdge(src="peer", dst="newa", replies=1)]
     follows2 = {**follows, "peer": frozenset({"newa"})}
     snap2 = build_trust_snapshot(
         FakeGateway(edges=edges2, follow_graph=follows2), DEFAULT_SETTINGS, since=EPOCH, now=EPOCH,
@@ -1481,16 +1481,16 @@ def _h11_honest_edges() -> tuple[list[EngagementEdge], dict[str, frozenset[str]]
     accounts are outside-engaged (vouched) and graph-cred is meaningful — the
     baseline both the poisoned and the honest-growth week extend."""
     edges = [
-        EngagementEdge(src="cohort1", dst="author_a", upvotes=20),
-        EngagementEdge(src="cohort2", dst="author_a", upvotes=18),
-        EngagementEdge(src="cohort3", dst="author_a", upvotes=22),
-        EngagementEdge(src="cohort1", dst="author_b", upvotes=15),
-        EngagementEdge(src="cohort2", dst="author_b", upvotes=17),
-        EngagementEdge(src="cohort3", dst="author_b", upvotes=13),
-        EngagementEdge(src="author_a", dst="cohort1", upvotes=5),
-        EngagementEdge(src="author_b", dst="cohort2", upvotes=6),
-        EngagementEdge(src="cohort2", dst="cohort1", upvotes=4),
-        EngagementEdge(src="cohort3", dst="cohort2", upvotes=4),
+        EngagementEdge(src="cohort1", dst="author_a", replies=20),
+        EngagementEdge(src="cohort2", dst="author_a", replies=18),
+        EngagementEdge(src="cohort3", dst="author_a", replies=22),
+        EngagementEdge(src="cohort1", dst="author_b", replies=15),
+        EngagementEdge(src="cohort2", dst="author_b", replies=17),
+        EngagementEdge(src="cohort3", dst="author_b", replies=13),
+        EngagementEdge(src="author_a", dst="cohort1", replies=5),
+        EngagementEdge(src="author_b", dst="cohort2", replies=6),
+        EngagementEdge(src="cohort2", dst="cohort1", replies=4),
+        EngagementEdge(src="cohort3", dst="cohort2", replies=4),
     ]
     follows = {
         "cohort1": frozenset({"author_a", "author_b"}),
@@ -1541,9 +1541,9 @@ def test_h11_poisoned_batch_degrades_snapshot_and_disables_cf() -> None:
     # on directly-comparable (cohort, author) pairs.
     poison = [
         *honest_edges,
-        *[EngagementEdge(src=f"sock{i}", dst="author_a", upvotes=200, reblogs=50)
+        *[EngagementEdge(src=f"sock{i}", dst="author_a", replies=200, reblogs=50)
           for i in range(30)],
-        *[EngagementEdge(src=f"sock{i}", dst="author_b", upvotes=200, reblogs=50)
+        *[EngagementEdge(src=f"sock{i}", dst="author_b", replies=200, reblogs=50)
           for i in range(30)],
     ]
     week2 = _h11_snap(poison, follows, settings, previous=week1)
@@ -1572,8 +1572,8 @@ def test_h11_normal_week_is_not_degraded() -> None:
     # week-over-week drift stays well under the threshold, so CF is kept live.
     growth = [
         *honest_edges,
-        EngagementEdge(src="cohort1", dst="author_a", upvotes=3),
-        EngagementEdge(src="cohort4", dst="author_b", upvotes=6),
+        EngagementEdge(src="cohort1", dst="author_a", replies=3),
+        EngagementEdge(src="cohort4", dst="author_b", replies=6),
     ]
     growth_follows = {**follows, "cohort4": frozenset({"author_b"})}
     week2 = _h11_snap(growth, growth_follows, settings, previous=week1)
@@ -1590,7 +1590,7 @@ def test_h11_first_batch_or_no_prior_model_never_degrades() -> None:
     honest_edges, follows = _h11_honest_edges()
     poison = [
         *honest_edges,
-        *[EngagementEdge(src=f"sock{i}", dst="author_a", upvotes=200, reblogs=50)
+        *[EngagementEdge(src=f"sock{i}", dst="author_a", replies=200, reblogs=50)
           for i in range(30)],
     ]
 
@@ -1611,9 +1611,9 @@ def test_h11_drift_gate_fires_metric_and_log(caplog: pytest.LogCaptureFixture) -
     week1 = _h11_snap(honest_edges, follows, settings)
     poison = [
         *honest_edges,
-        *[EngagementEdge(src=f"sock{i}", dst="author_a", upvotes=200, reblogs=50)
+        *[EngagementEdge(src=f"sock{i}", dst="author_a", replies=200, reblogs=50)
           for i in range(30)],
-        *[EngagementEdge(src=f"sock{i}", dst="author_b", upvotes=200, reblogs=50)
+        *[EngagementEdge(src=f"sock{i}", dst="author_b", replies=200, reblogs=50)
           for i in range(30)],
     ]
     before = ALS_DRIFT_REJECTIONS.count
@@ -1636,9 +1636,9 @@ def test_h11_default_threshold_is_conservative_backstop() -> None:
     week1 = _h11_snap(honest_edges, follows, DEFAULT_SETTINGS)
     poison = [
         *honest_edges,
-        *[EngagementEdge(src=f"sock{i}", dst="author_a", upvotes=200, reblogs=50)
+        *[EngagementEdge(src=f"sock{i}", dst="author_a", replies=200, reblogs=50)
           for i in range(30)],
-        *[EngagementEdge(src=f"sock{i}", dst="author_b", upvotes=200, reblogs=50)
+        *[EngagementEdge(src=f"sock{i}", dst="author_b", replies=200, reblogs=50)
           for i in range(30)],
     ]
     week2 = _h11_snap(poison, follows, DEFAULT_SETTINGS, previous=week1)
@@ -2316,7 +2316,7 @@ def test_build_viewer_profile_is_new_true_skips_derivation_and_is_still_a_passth
 
 
 def test_build_trust_snapshot_stamps_built_at_with_its_own_now() -> None:
-    edges = [EngagementEdge(src="a", dst="b", upvotes=5)]
+    edges = [EngagementEdge(src="a", dst="b", replies=5)]
     gateway = FakeGateway(edges=edges, follow_graph={"a": frozenset({"b"})})
     snap = build_trust_snapshot(
         gateway, DEFAULT_SETTINGS, since=EPOCH, now=NOW, production=False

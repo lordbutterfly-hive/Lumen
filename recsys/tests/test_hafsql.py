@@ -1933,7 +1933,10 @@ def test_engagement_edges_resolves_destinations_when_lite_publishers_are_configu
     finally:
         hafsql.HafsqlClient._edge_counts = original  # type: ignore[method-assign]
 
-    assert len(captured) == 3
+    # ★ TWO, not three (2026-08-24): votes are no longer pulled into the graph
+    # — owner ruling "VOTES ARE BOTED, ONLY COMMENTS AND REBLOGS". This count IS
+    # the pin: if a third query reappears, votes are being fetched again.
+    assert len(captured) == 2
     for sql, extra in captured:
         # ★ ROUND-3 COUNCIL (Seat 2): this used to assert only
         # `"lumen_user_id" in sql`, a substring check blind to a WEAKENED
@@ -1974,11 +1977,14 @@ def test_engagement_edges_keeps_the_plain_queries_when_lite_is_not_configured() 
     finally:
         hafsql.HafsqlClient._edge_counts = original  # type: ignore[method-assign]
 
+    # ★ NO VOTE QUERY (2026-08-24) — owner ruling "WE WONT PULL VOTES FOR THE
+    # GRAPH, VOTES ARE BOTED, ONLY COMMENTS AND REBLOGS". This list IS the pin:
+    # if `_SQL_UPVOTE_EDGES` reappears here, votes are being fetched again.
     assert [sql for sql, _ in captured] == [
         hafsql._SQL_REPLY_EDGES,
-        hafsql._SQL_UPVOTE_EDGES,
         hafsql._SQL_REBLOG_EDGES,
     ]
+    assert hafsql._SQL_UPVOTE_EDGES not in [sql for sql, _ in captured]
     assert all(extra is None for _, extra in captured)
 
 

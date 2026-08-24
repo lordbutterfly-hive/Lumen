@@ -49,7 +49,7 @@ def _world():
 def _beta_share(weight: float, rounds: int) -> float:
     viewer, gateway = _world()
     edges = [
-        EngagementEdge(src="me", dst=f"b{i % 30}", upvotes=1, last_interaction=EPOCH)
+        EngagementEdge(src="me", dst=f"b{i % 30}", replies=1, last_interaction=EPOCH)
         for i in range(rounds)
     ]
     settings = replace(

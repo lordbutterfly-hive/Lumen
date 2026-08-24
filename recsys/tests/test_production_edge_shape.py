@@ -45,12 +45,20 @@ THEN = datetime(2024, 1, 1, tzinfo=UTC)
 
 
 def _hafsql_edges(
-    pairs: list[tuple[str, str]], *, upvotes: int = 1, replies: int = 0
+    pairs: list[tuple[str, str]], *, upvotes: int = 0, replies: int = 1
 ) -> list[EngagementEdge]:
-    """Emit both directions of each pair exactly as `io/hafsql.py:605-621` does.
+    """Emit both directions of each pair exactly as `io/hafsql.py` does.
 
     The load-bearing line is ``reply_backs=reply_count[(dst, src)]`` — the
     reverse pair's replies, not a separate signal.
+
+    ★ DEFAULTS FLIPPED 2026-08-24. This helper exists to model the shape
+    PRODUCTION actually emits, and production changed: votes are no longer
+    pulled into the graph at all (owner: "WE WONT PULL VOTES FOR THE GRAPH,
+    VOTES ARE BOTED, ONLY COMMENTS AND REBLOGS"). A synthesised `upvotes=1` on
+    every edge is now a shape production can never produce, and leaving it would
+    make every assertion in this file measure a fiction. `upvotes` stays a
+    parameter so the votes-earn-nothing property can still be asserted directly.
     """
     reply_count: dict[tuple[str, str], int] = {}
     for a, b in pairs:
@@ -101,7 +109,7 @@ def test_one_mutual_reply_is_ONE_event_not_two() -> None:
     It is the reverse edge's `replies`, and that edge counts them itself. Summing
     it here double-counts every mutual exchange.
     """
-    edge = _hafsql_edges([("a", "b")], upvotes=0, replies=1)[0]
+    edge = _hafsql_edges([("a", "b")], replies=1)[0]
     assert edge.replies == 1 and edge.reply_backs == 1, "not the production shape"
     assert _raw_event_count(edge) == 1
 
@@ -112,18 +120,31 @@ def test_two_newcomers_having_one_conversation_are_not_self_dealers() -> None:
     Two brand-new accounts reply to each other once. That is a conversation, not
     a ring, and condemning it is the "blackout" the carve-out exists to prevent.
     """
-    condemned, total = _condemned(_hafsql_edges([("n1", "n2")], upvotes=0, replies=1))
+    condemned, total = _condemned(_hafsql_edges([("n1", "n2")], replies=1))
     assert condemned == 0, f"{condemned}/{total} newcomers condemned for one conversation"
 
 
-def test_one_mutual_upvote_and_one_mutual_reply_are_treated_alike() -> None:
-    """Neither is evidence of self-dealing; they must not diverge by field name."""
-    up = _condemned(_hafsql_edges([("n1", "n2")], upvotes=1, replies=0))
-    reply = _condemned(_hafsql_edges([("n1", "n2")], upvotes=0, replies=1))
-    assert up == reply == (0, 2)
+def test_a_mutual_upvote_no_longer_counts_at_all_only_replies_and_reblogs() -> None:
+    """★ REPLACED 2026-08-24 by owner ruling: "WE WONT PULL VOTES FOR THE GRAPH,
+    VOTES ARE BOTED, ONLY COMMENTS AND REBLOGS".
 
+    This asserted that one mutual UPVOTE and one mutual REPLY were treated
+    alike. That equivalence was the point when votes were a signal; it is
+    exactly what the ruling rejects — a botted signal in a trust graph is worse
+    than no signal, because it is attacker-supplied volume wearing the costume
+    of evidence.
 
-# ── the protection that must NOT have been weakened ──────────────────────────
+    Measured the day of the ruling: votes were 17,234,136 of interaction volume
+    against 605,389 replies and 80,743 reblogs; 94.8% of all 2,618,664 live
+    edges were UPVOTE-ONLY; and of upvote-only edges with >=10 upvotes only 6.2%
+    had any reciprocal edge — curation trails, not relationships.
+    """
+    assert S.real_graph.upvote == 0.0
+    vote_only = _hafsql_edges([("a", "b")], upvotes=5, replies=0)
+    assert all(_raw_event_count(e) > 0 for e in vote_only), "still counted as events"
+    condemned, total = _condemned(vote_only)
+    assert condemned == 0, "a vote-only pair was condemned — votes should carry no weight"
+
 
 def test_collusion_topologies_are_still_fully_condemned() -> None:
     """★ The regression check on the fix above.
@@ -145,5 +166,5 @@ def test_collusion_topologies_are_still_fully_condemned() -> None:
 
 def test_sustained_mutual_volume_is_still_condemned() -> None:
     """The repeated-pattern arm: a single pair, but at self-dealing volume."""
-    condemned, total = _condemned(_hafsql_edges([("a", "b")], upvotes=20, replies=5))
+    condemned, total = _condemned(_hafsql_edges([("a", "b")], replies=5))
     assert condemned == total == 2

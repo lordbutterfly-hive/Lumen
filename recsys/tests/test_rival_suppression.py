@@ -100,12 +100,12 @@ def test_a_genuine_closed_ring_of_the_same_size_is_still_condemned() -> None:
     triangle every member chose. Shape, not size, is what separates them.
     """
     edges = [
-        _e("a", "b", upvotes=1),
-        _e("b", "a", upvotes=1),
-        _e("b", "c", upvotes=1),
-        _e("c", "b", upvotes=1),
-        _e("a", "c", upvotes=1),
-        _e("c", "a", upvotes=1),
+        _e("a", "b", replies=1),
+        _e("b", "a", replies=1),
+        _e("b", "c", replies=1),
+        _e("c", "b", replies=1),
+        _e("a", "c", replies=1),
+        _e("c", "a", replies=1),
     ]
     follows = {
         "a": frozenset({"b", "c"}),

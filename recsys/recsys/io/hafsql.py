@@ -2415,8 +2415,30 @@ class HafsqlClient:
         upvote_sql = _SQL_UPVOTE_EDGES_WITH_LITE if lite_params else _SQL_UPVOTE_EDGES
         reblog_sql = _SQL_REBLOG_EDGES_WITH_LITE if lite_params else _SQL_REBLOG_EDGES
         replies = self._edge_counts(reply_sql, since, lite_params)
-        upvotes = self._edge_counts(upvote_sql, since, lite_params)
         reblogs = self._edge_counts(reblog_sql, since, lite_params)
+        # ★★★ VOTES ARE NOT PULLED INTO THE GRAPH (2026-08-24, owner ruling:
+        # "WE WONT PULL VOTES FOR THE GRAPH, VOTES ARE BOTED, ONLY COMMENTS AND
+        # REBLOGS").
+        #
+        # WHY IT IS THE RIGHT CALL. A botted signal in a TRUST graph is worse
+        # than no signal: it is attacker-supplied volume wearing the costume of
+        # evidence. Measured on the live graph the day of the ruling: votes were
+        # 17,234,136 of the interaction volume against 605,389 replies and
+        # 80,743 reblogs, and 94.8% of all 2,618,664 edges were UPVOTE-ONLY.
+        # Of upvote-only edges with >=10 upvotes, only 6.2% had ANY reciprocal
+        # edge — overwhelmingly one-directional curation/autovote trails rather
+        # than relationships.
+        #
+        # ★ IT ALSO REMOVES THE DEPTH WALL. `deploy/trust-cron-host.sh` records
+        # that vote edges cost by DEPTH, not width — "7d SLICE A YEAR BACK
+        # >280s, cancelled" — so votes, not replies, were what pinned the whole
+        # graph to a 90-day memory. Replies slice cleanly to ~270 days
+        # (measured 24.2s / 30.8s / 21.0s per 90-day slice).
+        #
+        # `upvote_sql` is deliberately still selected above and left unused:
+        # the query and its lite variant stay tested and ready, so restoring
+        # votes is a one-line change rather than an archaeology exercise.
+        upvotes: dict[tuple[str, str], tuple[int, datetime | None]] = {}
         keys = sorted(set(replies) | set(upvotes) | set(reblogs))
         edges = []
         for src, dst in keys:

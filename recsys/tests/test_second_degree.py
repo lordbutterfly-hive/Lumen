@@ -117,11 +117,31 @@ def test_qualifying_engagers_drops_below_vouch_floor_when_graph_creds_present() 
     assert qualifying_engagers(engagers, graph_creds, floor) == frozenset({"bob"})
 
 
-def test_qualifying_engagers_drops_engager_missing_from_graph_creds() -> None:
+def test_qualifying_engagers_treats_a_missing_entry_as_never_engaged() -> None:
+    """★ REVERSED 2026-08-24 — this pinned fail-SHUT on a missing entry, and the
+    function it pins argues the opposite in its own docstring.
+
+    The original assertion carried no docstring and no reason. `qualifying_engagers`
+    does: an account nobody has engaged yet "scores `min_vouched_score` (0.10) and
+    vouches normally", and it records that an earlier revision scoring those
+    accounts 0.0 "silently disqualified 35 of 180 accounts (19.4%) ... buying
+    nothing: the same population produced ZERO extra dropped candidates."
+
+    Fail-shut was harmless while a missing entry was rare — before the
+    votes-are-out ruling nearly every account had at least a vote edge and so a
+    graph-cred row. With votes gone from the graph, 8,714 of 17,213 scored
+    accounts (50.6%, measured) leave the edge universe entirely, and fail-shut
+    would silently strip HALF the platform of the ability to vouch: the same
+    regression the docstring describes, at 50% instead of 19.4%.
+
+    Absence and never-engaged are the same condition. Only PRESENCE with a 0.0
+    score is positive evidence of self-dealing, and that still fails shut —
+    pinned by the test above this one.
+    """
     engagers = frozenset({"bob"})
     graph_creds = {"carol": GraphCred(account="carol", score=0.5, follow_follower_ratio=1.0)}
     floor = THRESHOLDS.vouch_graph_cred_floor
-    assert qualifying_engagers(engagers, graph_creds, floor) == frozenset()
+    assert qualifying_engagers(engagers, graph_creds, floor) == frozenset({"bob"})
 
 
 def test_filter_eligible_below_vouch_floor_engager_does_not_vouch() -> None:
@@ -191,12 +211,12 @@ def _real_creds() -> dict[str, GraphCred]:
     (caught self-dealing). Both used to score 0.0 — telling them apart is the
     whole point of the band split (§8.3)."""
     edges = [
-        EngagementEdge(src="alice", dst="bob", upvotes=5, replies=3),
-        EngagementEdge(src="bob", dst="alice", upvotes=5, replies=3),
-        EngagementEdge(src="lurker", dst="alice", upvotes=4),
-        EngagementEdge(src="bob", dst="stranger", upvotes=1),
-        EngagementEdge(src="sock1", dst="sock2", upvotes=5, replies=3),
-        EngagementEdge(src="sock2", dst="sock1", upvotes=5, replies=3),
+        EngagementEdge(src="alice", dst="bob", replies=3),
+        EngagementEdge(src="bob", dst="alice", replies=3),
+        EngagementEdge(src="lurker", dst="alice", replies=4),
+        EngagementEdge(src="bob", dst="stranger", replies=1),
+        EngagementEdge(src="sock1", dst="sock2", replies=3),
+        EngagementEdge(src="sock2", dst="sock1", replies=3),
     ]
     follows = {
         "alice": frozenset({"bob"}),
@@ -274,13 +294,13 @@ def test_author_floor_keeps_a_freshly_onboarded_mutual_pair() -> None:
     # from the proven sock1/sock2 ring in _real_creds(). Both must now clear
     # the author floor.
     edges = [
-        EngagementEdge(src="alice", dst="bob", upvotes=5, replies=3),
-        EngagementEdge(src="bob", dst="alice", upvotes=5, replies=3),
-        EngagementEdge(src="lurker", dst="alice", upvotes=4),
-        EngagementEdge(src="sock1", dst="sock2", upvotes=5, replies=3),
-        EngagementEdge(src="sock2", dst="sock1", upvotes=5, replies=3),
-        EngagementEdge(src="newa", dst="newb", upvotes=1),
-        EngagementEdge(src="newb", dst="newa", upvotes=1),
+        EngagementEdge(src="alice", dst="bob", replies=3),
+        EngagementEdge(src="bob", dst="alice", replies=3),
+        EngagementEdge(src="lurker", dst="alice", replies=4),
+        EngagementEdge(src="sock1", dst="sock2", replies=3),
+        EngagementEdge(src="sock2", dst="sock1", replies=3),
+        EngagementEdge(src="newa", dst="newb", replies=1),
+        EngagementEdge(src="newb", dst="newa", replies=1),
     ]
     follows = {
         "alice": frozenset({"bob"}),

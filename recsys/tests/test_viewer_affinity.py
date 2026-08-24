@@ -45,7 +45,7 @@ def _edge(src: str, dst: str, *, upvotes: int = 0, replies: int = 0, days_ago: i
 # ── the channel works ────────────────────────────────────────────────────────
 
 def test_engaging_an_author_creates_affinity_for_them() -> None:
-    edges = [_edge("me", "alice", upvotes=5), _edge("me", "bob", upvotes=1)]
+    edges = [_edge("me", "alice", replies=5), _edge("me", "bob", replies=1)]
     aff = viewer_author_affinity("me", edges, W, EPOCH)
     assert aff["alice"] > aff["bob"] > 0.0
 
@@ -69,7 +69,7 @@ def test_more_engagement_moves_the_blended_score() -> None:
 
 def test_topic_affinity_carries_to_authors_never_read() -> None:
     """Discovery, not just repeats: interest in a topic reaches new authors."""
-    edges = [_edge("me", "alice", upvotes=5)]
+    edges = [_edge("me", "alice", replies=5)]
     topics = viewer_topic_affinity("me", edges, W, EPOCH, {"alice": ("photography",)})
     pct = affinity_percentiles({**topics, "_floor": 0.0001})
     stranger = make_post(author="never-read", category="photography", tags=("photography",))
@@ -77,8 +77,8 @@ def test_topic_affinity_carries_to_authors_never_read() -> None:
 
 
 def test_decay_makes_recent_engagement_count_for_more() -> None:
-    recent = viewer_author_affinity("me", [_edge("me", "a", upvotes=1, days_ago=0)], W, EPOCH)
-    old = viewer_author_affinity("me", [_edge("me", "a", upvotes=1, days_ago=365)], W, EPOCH)
+    recent = viewer_author_affinity("me", [_edge("me", "a", replies=1, days_ago=0)], W, EPOCH)
+    old = viewer_author_affinity("me", [_edge("me", "a", replies=1, days_ago=365)], W, EPOCH)
     assert recent["a"] > old["a"]
 
 
@@ -109,7 +109,7 @@ def test_engagement_aimed_AT_the_viewer_does_not_move_their_affinity() -> None:
     victim's feed by engaging them — turning a self-harm-only channel into a
     poisonable one carrying far more weight than CF is permitted.
     """
-    inbound = [_edge("stranger", "me", upvotes=50, replies=50)]
+    inbound = [_edge("stranger", "me", replies=50)]
     assert viewer_author_affinity("me", inbound, W, EPOCH) == {}
 
 
@@ -143,12 +143,18 @@ def test_reply_backs_must_never_enter_the_affinity_weight_sum() -> None:
     exactly 1.0000 regardless of margin.
     """
     edges = [
+        # ★ REBUILT 2026-08-24 for the votes-are-out ruling. The original used
+        # `upvotes` to make up the correspondent's weight and to give the
+        # attacker their single courtesy act; with `upvote = 0.0` neither counts
+        # for anything, so the case is expressed in the acts the graph now
+        # carries. The ATTACK is unchanged: 4 inbound reply_backs at weight 15
+        # would be 60, against a genuine correspondent's 10 replies at 50.
         EngagementEdge(
-            src="me", dst="alice", replies=10, upvotes=2,
+            src="me", dst="alice", replies=10,
             last_interaction=EPOCH,
         ),
         EngagementEdge(
-            src="me", dst="attacker", upvotes=1, reply_backs=4,
+            src="me", dst="attacker", replies=1, reply_backs=4,
             last_interaction=EPOCH,
         ),
     ]
@@ -161,9 +167,9 @@ def test_reply_backs_must_never_enter_the_affinity_weight_sum() -> None:
     )
     # And the attacker must be worth EXACTLY their one courtesy upvote — pinning
     # the value, not just the order, so a partial weight cannot slip through.
-    assert aff["attacker"] == W.upvote, (
-        f"attacker scored {aff['attacker']}, expected exactly W.upvote="
-        f"{W.upvote}; anything larger means an inbound term is being counted"
+    assert aff["attacker"] == W.reply, (
+        f"attacker scored {aff['attacker']}, expected exactly one reply "
+        f"({W.reply}); anything larger means an inbound term is being counted"
     )
     # The top slot must belong to alice once ranked.
     pct = affinity_percentiles(aff, ["alice", "attacker"])
@@ -171,25 +177,25 @@ def test_reply_backs_must_never_enter_the_affinity_weight_sum() -> None:
 
 
 def test_third_parties_engaging_each_other_do_not_move_the_viewer() -> None:
-    edges = [_edge("x", "y", upvotes=99), _edge("y", "x", upvotes=99)]
+    edges = [_edge("x", "y", replies=99), _edge("y", "x", replies=99)]
     assert viewer_author_affinity("me", edges, W, EPOCH) == {}
 
 
 def test_an_attacker_cannot_change_another_viewers_affinity_by_any_combination() -> None:
     """Sweep every direction an attacker could act in; the viewer's map is fixed."""
-    baseline = viewer_author_affinity("me", [_edge("me", "alice", upvotes=3)], W, EPOCH)
+    baseline = viewer_author_affinity("me", [_edge("me", "alice", replies=3)], W, EPOCH)
     hostile = [
-        _edge("me", "alice", upvotes=3),          # the viewer's own, unchanged
-        _edge("att", "me", upvotes=99),           # attacker -> viewer
-        _edge("att", "alice", upvotes=99),        # attacker -> the author
-        _edge("att", "att2", upvotes=99),         # attacker -> their own alt
-        _edge("alice", "me", upvotes=99),         # author -> viewer
+        _edge("me", "alice", replies=3),          # the viewer's own, unchanged
+        _edge("att", "me", replies=99),           # attacker -> viewer
+        _edge("att", "alice", replies=99),        # attacker -> the author
+        _edge("att", "att2", replies=99),         # attacker -> their own alt
+        _edge("alice", "me", replies=99),         # author -> viewer
     ]
     assert viewer_author_affinity("me", hostile, W, EPOCH) == baseline
 
 
 def test_self_engagement_is_ignored() -> None:
-    assert viewer_author_affinity("me", [_edge("me", "me", upvotes=99)], W, EPOCH) == {}
+    assert viewer_author_affinity("me", [_edge("me", "me", replies=99)], W, EPOCH) == {}
 
 
 # ── ★ pipeline-level: banned and muted authors must not occupy the scale ─────
