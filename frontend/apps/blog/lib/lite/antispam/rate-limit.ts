@@ -355,6 +355,24 @@ export async function enforceBlockRate(userId: string): Promise<boolean> {
 }
 
 /** As above, for a full Hive account: no Lumen row to score, so a flat cap. */
+/**
+ * Daily upload cap for a FULL (keyed) Hive account using the server-side upload
+ * proxy. Same allowance as the lite cap — the resource being protected is the
+ * publishing account's identity and Hive's image host, which do not care which
+ * tier spent it — but a SEPARATE key space, so a lite user and a Hive user can
+ * never consume or unlock each other's quota. Mirrors the `hive:` prefix
+ * `enforceHiveBlockRate`/`enforceHiveFollowRate` below already establish.
+ */
+export async function enforceHiveUploadRate(hiveName: string): Promise<RateResult> {
+  const allowed = await rateRepo.checkAndConsume(
+    `hive:${hiveName}`,
+    'upload',
+    liteConfig.uploadsPerDay,
+    dayKey()
+  );
+  return allowed ? { ok: true } : { ok: false, reason: 'daily_upload_cap' };
+}
+
 export async function enforceHiveBlockRate(hiveName: string): Promise<boolean> {
   return rateRepo.checkAndConsume(`hive:${hiveName}`, 'block', liteConfig.hiveFollowsPerDay, dayKey());
 }

@@ -21,6 +21,7 @@
  */
 import { openApp, BASE } from './qa-harness.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { openCardDrawer } from './qa/lib/open-drawer.mjs';
 
 const OUT = process.env.VIS_OUT ?? '/tmp/lumen-visual';
 const VIEWPORTS = [
@@ -97,7 +98,9 @@ for (const loggedIn of [true, false]) {
       await page.waitForTimeout(400);
       const b = await card.boundingBox();
       if (!b) continue;
-      await page.mouse.move(b.x + b.width / 2, b.y + 40);
+      /* ★ CLICK, NOT HOVER (2026-08-25): the drawer opens on an empty-space click;
+         hovering does nothing. */
+      await openCardDrawer(page, card);
       let open = false;
       for (let w = 0; w < 80; w++) {
         if ((await dl.evaluate((el) => el.getBoundingClientRect().height).catch(() => 0)) > 10) { open = true; break; }

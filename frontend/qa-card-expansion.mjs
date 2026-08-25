@@ -6,12 +6,14 @@
  * exact failure this file exists to catch — and it is the likely one, because the
  * shipped drawer missed the total by 70px through spacing AND type together.
  *
- * ★ WHY THE OPEN IS TIMED RATHER THAN ASSUMED. §1 makes the dwell the headline
+ * ★ THE DWELL IS GONE (2026-08-25) — see the trigger block below.
+ * ★ WHY THE OPEN WAS TIMED RATHER THAN ASSUMED. §1 made the dwell the headline
  * change ("Dwell replaces instant fire. 350ms"). A drawer that opens instantly
  * still looks correct in a screenshot and still measures 113px. The only way to
  * see the difference is to hold a pointer on the card and watch the clock.
  */
 import { openApp, BASE, report } from './qa-harness.mjs';
+import { closeCardDrawer, openCardDrawer } from './qa/lib/open-drawer.mjs';
 
 const CEIL = 125; // §4 "125px is the acceptance ceiling"
 const rows = {};
@@ -44,9 +46,12 @@ await page.waitForTimeout(2500);
 await page.evaluate(() => document.fonts.ready);
 
 /* ── find a card near the TOP of the page whose post has a comment ──────────
-   Near the top matters: §8's bottom guard refuses to open a card within 120px
-   of the viewport bottom, so a card chosen at random can legitimately never
-   open and every measurement below would read 0. */
+   ★ The 120px BOTTOM GUARD that used to make this necessary is gone (deleted
+   2026-08-25 with the hover trigger — a card the reader deliberately CLICKED is
+   never an unrequested expansion, which is the only thing that guard protected
+   against). Choosing a card near the top is kept anyway, for a plainer reason:
+   the drawer has to be fully on screen for the geometry below to be measurable
+   at all. */
 const cardCount = await page.locator('[data-testid="medium-card"]').count();
 let idx = -1;
 for (let i = 0; i < Math.min(cardCount, 8); i++) {
@@ -56,11 +61,17 @@ for (let i = 0; i < Math.min(cardCount, 8); i++) {
   await page.waitForTimeout(400);
   const box = await card.boundingBox();
   if (!box) continue;
-  await page.mouse.move(box.x + box.width / 2, box.y + 40);
   const dl = card.locator('[data-testid="post-card-drawer"]');
   // A post with no comments renders NO drawer at all (§2), so this is the
   // common case walking down a feed, not an error.
   if ((await dl.count()) === 0) continue;
+  /* ★ CLICK to open while SEARCHING too (2026-08-25). This loop used to hover
+     each candidate; with click-to-open it found nothing and the whole file
+     aborted with "no card opened a drawer" before measuring anything. Hover
+     first anyway — `engage()` still warms the discussion prefetch on pointer
+     entry, so the click lands on data that is already in flight. */
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await openCardDrawer(page, card, 2000);
   /* ★ POLL, DO NOT FIXED-WAIT. `/api/discussion` is a live chain read and was
      measured at 4.5-6.4s cold on this machine (warm React Query hits are ~0ms,
      which is why an earlier fixed 1400ms wait passed for weeks and then started
@@ -124,16 +135,33 @@ await page.evaluate((i) => {
   }).observe(d, { attributes: true, attributeFilter: ['data-open'] });
 }, idx);
 
-await page.mouse.move(box.x + box.width / 2, box.y + 40);
-await page.waitForTimeout(1800);
-const motion = await page.evaluate(() => ({ opened: window.__opened, samples: window.__samples }));
-const dwell = motion.opened;
+/* ★★★ THE TRIGGER CHANGED (owner ruling 2026-08-25): the drawer opens on a
+   CLICK on the card's empty space, and hover does nothing at all. The 350ms
+   dwell, the scroll suppression and the 120px bottom guard were deleted with it
+   — they existed only to stop hover misfiring. So the dwell assertion that used
+   to live here is gone, replaced by the two facts that now define the trigger.
 
-checkTrue(
-  '§1 dwell is 350ms, not instant',
-  dwell !== null && dwell >= 280 && dwell <= 600,
-  dwell === null ? 'never opened' : `opened after ${Math.round(dwell)}ms`
+   The geometry checks below are UNCHANGED and still the point of this file; all
+   that differs is how the drawer is opened before measuring it. */
+
+// The search loop above left this card OPEN. Close it first, or the hover check
+// below reads a drawer that was already open and reports a false regression.
+await closeCardDrawer(page, card);
+// Hover must NOT open it. Park the pointer on the card and wait out three times
+// the old dwell — anything opening here is a regression to the old behaviour.
+await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+await page.waitForTimeout(1100);
+const openedOnHover = await page.evaluate(
+  (i) => document.querySelectorAll('[data-testid="medium-card"]')[i]
+    ?.querySelector('[data-testid="post-card-drawer"]')?.getAttribute('data-open'),
+  idx
 );
+checkTrue('§1 hover does NOT open the drawer', openedOnHover === 'false', `data-open=${openedOnHover}`);
+
+const clicked = await openCardDrawer(page, card);
+checkTrue('§1 a click on empty space OPENS the drawer', clicked, clicked ? 'opened' : 'never opened');
+await page.waitForTimeout(900);
+const motion = await page.evaluate(() => ({ opened: window.__opened, samples: window.__samples }));
 const peak = Math.max(...(motion.samples.length ? motion.samples : [0]));
 const mid = motion.samples.filter((h) => h > 4 && h < peak - 4).length;
 checkTrue(

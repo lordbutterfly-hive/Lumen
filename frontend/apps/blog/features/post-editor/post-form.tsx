@@ -13,6 +13,7 @@ import { Entry } from "@hive/common-hiveio-packages/wax";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { getCommunity } from "@transaction/lib/bridge-api";
+import { getChain } from "@transaction/lib/chain";
 import { DEFAULT_OBSERVER } from "@/blog/lib/utils";
 import { getLogger } from "@ui/lib/logging";
 import { configuredImagesEndpoint } from "@ui/config/public-vars";
@@ -106,6 +107,35 @@ export default function PostForm({
   const categoryParam = searchParams?.get("category") ?? undefined;
   const { t } = useTranslation("common_blog");
   const { reputation } = useLoggedUserContext();
+
+  /* ★★★ THE 2.34 MB OF WASM COMES OFF THE SUBMIT PATH (2026-08-25, owner: "its
+     slow").
+
+     `createAsset` on submit calls `getChain()`, and constructing the chain client
+     is what fetches `wax.common.wasm` — 2,451,314 bytes in the built output, as
+     an earlier perf audit measured. So the first post of a session paid for a
+     2.34 MB download AFTER the reader pressed Post, while a spinner ran.
+
+     Nothing about that download depends on what they wrote, so it does not
+     belong on the critical path. Warming it here starts it the moment the editor
+     opens and lets it finish while they type. `getChain` memoises its instance,
+     so submit reuses this one and the cost is paid once, off-clock.
+
+     Deliberately fire-and-forget: this is an optimisation, not a dependency. If
+     it fails, submit calls `getChain()` again and takes the old slow path, which
+     is exactly the behaviour before this effect existed. Swallowing the
+     rejection is the point — surfacing it would turn a missed optimisation into
+     an error the writer has to read. */
+  /* ★ NOT FOR LITE USERS (adversarial review, 2026-08-25). The lite submit
+     branch never calls `createAsset`/`getChain()` at all — it posts through
+     `createLitePost`. Warming unconditionally made the keyless tier, the exact
+     audience this tier exists to spare bandwidth for, download 2.34 MB of wax
+     WASM on every editor open for something it will never use. */
+  const isLiteAuthor = user?.account_tier === 'lite';
+  useEffect(() => {
+    if (isLiteAuthor) return;
+    void getChain().catch(() => undefined);
+  }, [isLiteAuthor]);
 
   const [preview, setPreview] = useState(true);
   const [selectedImg, setSelectedImg] = useState(

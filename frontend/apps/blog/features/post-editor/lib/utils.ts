@@ -1,12 +1,12 @@
 import { getRenderer, getPreviewRenderer } from '@/blog/features/post-rendering/lib/renderer';
 import { Signer } from '@smart-signer/lib/signer/signer';
-import { configuredImagesEndpoint } from '@ui/config/public-vars';
 import { handleError } from '@ui/lib/handle-error';
 import { getLogger } from '@ui/lib/logging';
 import { isCommunity } from '@ui/lib/utils';
 import { TFunction } from 'i18next';
 import { Dispatch, SetStateAction } from 'react';
-import { uploadLiteImage } from '@/blog/lib/lite/client/lite-profile';
+import { ServerUploadUnavailable, uploadKeyedImage, uploadLiteImage } from '@/blog/lib/lite/client/lite-profile';
+import { configuredImagesEndpoint } from '@ui/config/public-vars';
 import { processImageForUpload } from './image-processing';
 import type { BatchFileItem, FileProcessingStatus, ProcessingOptions } from './image-processing-types';
 import {
@@ -179,6 +179,37 @@ export const uploadImg = async (file: File, username: string, signer: Signer): P
     // (toolbar, drag-drop, paste, profile pictures) is covered by one branch.
     if (!signer) return await uploadLiteImage(file);
 
+    /* ★★★ SERVER FIRST, THE USER'S OWN KEY AS THE FALLBACK (owner, 2026-08-25:
+       "it requires me to sign with posting key just to upload an image").
+
+       Hive's image host signs over the FILE'S BYTES, so a signature can never be
+       issued once and reused — that is why every attachment raised a wallet
+       prompt. `/api/upload` performs the identical challenge server-side with the
+       publishing account, which removes the prompt. The trade, put to the owner
+       before it was built: images become attributed to the publisher rather than
+       the uploader.
+
+       ★★ BUT IT CANNOT BE THE ONLY PATH, and only running it proved that.
+       `hive-image-uploader.ts` REFUSES to install a WIF-backed uploader when
+       NODE_ENV=production — "must not be used in production, inject a KMS-backed
+       uploader" — so on a production build with no KMS wired the route is 503 by
+       design. Routing every keyed upload through it unconditionally replaced a
+       working feature with a broken one; the first real attempt returned
+       `{"status":503,"error":"uploader_unavailable"}`.
+
+       So: ask the server, and if the server says it cannot sign, sign it here
+       exactly as before. A keyed account always has the means to do it — the key
+       is in the wallet — so this can degrade to "works, with a prompt" but never
+       to "does not work". Only `ServerUploadUnavailable` falls through; a 429 or
+       a rejected file is a real answer and must surface, not be retried under a
+       different identity. */
+    try {
+      return await uploadKeyedImage(file);
+    } catch (error) {
+      if (!(error instanceof ServerUploadUnavailable)) throw error;
+      logger.info('Server-side upload unavailable; signing this upload in the browser instead');
+    }
+
     const fileData = await new Promise<Uint8Array>((resolve) => {
       const reader = new FileReader();
       reader.addEventListener('load', () => {
@@ -191,25 +222,14 @@ export const uploadImg = async (file: File, username: string, signer: Signer): P
     const formData = new FormData();
     formData.append('file', file);
 
-    // 3. Create prefix using TextEncoder (Native alternative to Buffer.from)
     const encoder = new TextEncoder();
     const prefix = encoder.encode('ImageSigningChallenge');
-
-    // 4. Standardized Concatenation
-    // Create a container of the total size
     const buf = new Uint8Array(prefix.length + fileData.length);
-
-    // Copy prefix to the start, and fileData right after it
     buf.set(prefix, 0);
     buf.set(fileData, prefix.length);
 
-    const sig = await signer.signChallenge({
-      message: buf,
-      password: ''
-    });
-
+    const sig = await signer.signChallenge({ message: buf, password: '' });
     const imageOwner = signer.authorityUsername || signer.username;
-
     const postUrl = `${configuredImagesEndpoint}/${imageOwner}/${sig}`;
 
     const response = await fetch(postUrl, { method: 'POST', body: formData });

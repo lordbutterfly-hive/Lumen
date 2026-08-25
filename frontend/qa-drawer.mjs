@@ -14,6 +14,7 @@
  * plus 5: the same thing via KEYBOARD focus, which `:focus-within` must cover.
  */
 import { openApp, BASE } from './qa-harness.mjs';
+import { openCardDrawer } from './qa/lib/open-drawer.mjs';
 
 const { browser, page } = await openApp({ loggedIn: true });
 
@@ -60,7 +61,9 @@ for (let i = 0; i < Math.min(cardCount, 10); i++) {
   await page.waitForTimeout(400);
   const b = await c.boundingBox();
   if (!b) continue;
-  await page.mouse.move(b.x + b.width / 2, b.y + 40);
+  /* ★ CLICK, NOT HOVER (2026-08-25): the drawer opens on an empty-space click;
+     hovering does nothing. */
+  if (!(await openCardDrawer(page, card))) continue;
   await page.waitForTimeout(1600);
   // Re-check once: §8 closes an open card on any scroll event, including the
   // browser's own scroll-anchoring adjustments as feed images load. It re-arms
@@ -89,8 +92,12 @@ const drawer = card.locator('[data-testid="post-card-drawer"]');
 const closedH = await drawer.evaluate((el) => el.getBoundingClientRect().height);
 console.log(`3. drawer height, closed .............. ${closedH}px`);
 
+/* ★ CLICK, NOT HOVER (2026-08-25): the drawer opens on an empty-space click;
+   hovering does nothing. */
+// The 140ms prefetch still warms on pointer entry, so warm it, then click.
 await card.hover();
-await page.waitForTimeout(2600); // 140ms intent + fetch + 340ms animation
+await openCardDrawer(page, card);
+await page.waitForTimeout(1200); // fetch tail + 340ms animation
 
 const afterHover = discussionCalls.length - onPaint;
 const openH = await drawer.evaluate((el) => el.getBoundingClientRect().height);
@@ -120,7 +127,7 @@ const stillThere = await drawer.count();
 console.log(`10. drawer still in DOM when closed ... ${stillThere > 0 ? 'yes (a11y tree intact)' : '*** REMOVED ***'}`);
 
 await page.screenshot({ path: '/mnt/o/LUMEN-DOCS/lora-spec/shots/drawer-open.png' });
-await card.hover();
+await openCardDrawer(page, card);
 await page.waitForTimeout(1500);
 await page.screenshot({ path: '/mnt/o/LUMEN-DOCS/lora-spec/shots/drawer-open.png' });
 await browser.close();

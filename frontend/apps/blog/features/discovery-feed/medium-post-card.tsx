@@ -49,14 +49,7 @@ import TopCommentDrawer from './top-comment-drawer';
 import IdentityPill from './identity-pill';
 import type { MarketPrice } from '@/blog/features/creator-tokens/types';
 import { useVisibleDiscussion } from './lib/use-visible-discussion';
-import {
-  DWELL_MS,
-  claimOpen,
-  isScrollSuppressed,
-  releaseOpen,
-  subscribeToScroll,
-  withinBottomGuard
-} from './lib/card-expansion';
+import { claimOpen, lastInputWasKeyboard, releaseOpen } from './lib/card-expansion';
 
 // TODO: move to i18n
 const LABELS = {
@@ -233,8 +226,6 @@ export default function MediumPostCard({
 
   const [open, setOpen] = useState(false);
   const cardRef = useRef<HTMLElement | null>(null);
-  const dwellTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /*
    * ★ ONE STABLE IDENTITY FOR THE WHOLE MOUNT. `claimOpen`/`releaseOpen` hold
@@ -246,25 +237,17 @@ export default function MediumPostCard({
   const closeSelf = useRef<() => void>();
   if (!closeSelf.current) {
     closeSelf.current = () => {
-      if (dwellTimer.current) {
-        clearTimeout(dwellTimer.current);
-        dwellTimer.current = null;
-      }
       setOpen(false);
       releaseOpen(closeSelf.current!);
     };
   }
 
-  const cancelDwell = () => {
-    if (!dwellTimer.current) return;
-    clearTimeout(dwellTimer.current);
-    dwellTimer.current = null;
-  };
-  const cancelClose = () => {
-    if (!closeTimer.current) return;
-    clearTimeout(closeTimer.current);
-    closeTimer.current = null;
-  };
+  /* ★ THE DWELL AND CLOSE TIMERS ARE GONE (2026-08-25). Their refs survived the
+     hover-to-click rewrite as write-only leftovers — assigned `null` in four
+     places and never once armed with a `setTimeout` — which reads to the next
+     person as if timing still exists here. It does not: a click opens, a second
+     click closes, and nothing is scheduled. Removed rather than left as
+     defensive noise. */
 
   const openNow = () => {
     // §8 "One at a time. Opening a card closes any other."
@@ -273,77 +256,36 @@ export default function MediumPostCard({
   };
 
   /*
-   * ★ THE POINTER'S PRESENCE IS STATE, not just an event. Needed because a
-   * pointer that entered during a scroll must be able to arm LATER, when
-   * scrolling settles, without any further pointer event — see the `onSettle`
-   * note in `lib/card-expansion.ts`. `onPointerEnter` alone cannot express
-   * that: it has already fired and will not fire again.
-   */
-  const pointerInside = useRef(false);
-  /*
-   * ★ `open` MIRRORED INTO A REF because `tryArm` is reached from a listener
-   * registered once, on mount. That listener holds the FIRST render's closure,
-   * where `open` is permanently false, so reading the state variable there would
-   * let a settle re-arm a card that is already open — claiming it a second time
-   * and re-running its dwell under a reader who is already reading it.
+   * ★ `open` MIRRORED INTO A REF so handlers registered once on mount do not
+   * read the first render's permanently-false closure.
    */
   const openRef = useRef(false);
   openRef.current = open;
 
-  /** Every reason not to arm, in one place, so entry and settle cannot drift. */
-  const tryArm = () => {
-    if (openRef.current) return;
-    // §8 "Never restart a running timer. A pointer moving within an
-    // already-armed card must not reset its dwell."
-    if (dwellTimer.current) return;
-    // §8 "Pointer entry returns early while [the scroll flag] is set."
-    if (isScrollSuppressed()) return;
-    // §8 "If its bottom edge is within 120px of the viewport bottom, the dwell
-    // timer never starts. An expansion that opens offscreen pushes what nobody
-    // can see." Re-measured here rather than cached, because on the settle path
-    // the card has just moved.
-    if (withinBottomGuard(cardRef.current)) return;
-    dwellTimer.current = setTimeout(() => {
-      dwellTimer.current = null;
-      openNow();
-    }, DWELL_MS);
-  };
-
+  /*
+   * ★★★ HOVER NO LONGER OPENS ANYTHING (owner, 2026-08-25: "the hover over
+   * doesnt work well its annoying. only on clicking empty card it should show
+   * drop down").
+   *
+   * Pointer entry is now nothing but an INTENT HINT. `engage()` still arms the
+   * 140ms discussion prefetch, which is why the click feels instant rather than
+   * starting a fetch — the data is usually already in flight by the time the
+   * reader decides. It no longer arms a dwell and it no longer opens.
+   */
   const onCardEnter = () => {
-    pointerInside.current = true;
-    cancelClose();
     engage();
-    if (open) return;
-    // §8 "Never restart a running timer. A pointer moving within an already-armed
-    // card must not reset its dwell." `onPointerEnter` does not fire on internal
-    // movement, but it DOES fire again when the pointer crosses out of the card
-    // and back inside the close grace, and re-arming there would make a reader
-    // who wobbled at the edge wait 350ms twice.
-    tryArm();
   };
 
   /*
-   * §8: "The expansion stays open while the pointer is over the card or the
-   * drawer. The close timer starts only when the pointer leaves both. The drawer
-   * is a child of the card, so containment gives this for free. Do not
-   * reimplement the trigger as a sub-region of the card: the reader moves DOWN
-   * into the comment to read it, and a zone-based keep-open would start closing
-   * the moment they move toward the thing it just revealed."
-   *
-   * `onPointerLeave` on the card root is exactly that containment — it does not
-   * fire while the pointer is anywhere inside, drawer included. The 200ms is
-   * grace for the border and the internal gap, nothing more.
+   * ★ LEAVING NO LONGER CLOSES. Under hover-to-open, the pointer leaving meant
+   * the reader had stopped reading, so a 200ms grace then close was right. Under
+   * click-to-open the drawer is there because the reader ASKED for it, and
+   * taking it away because the mouse wandered is the same class of mistake the
+   * hover trigger was. It closes on a second click, on another card opening, or
+   * on focus leaving — never on the pointer moving.
    */
   const onCardLeave = () => {
-    pointerInside.current = false;
-    cancelDwell();
     cancelEngage();
-    if (!open) return;
-    cancelClose();
-    closeTimer.current = setTimeout(() => {
-      closeTimer.current = null;
-      closeSelf.current!();
-    }, 200);
   };
 
   /*
@@ -357,15 +299,107 @@ export default function MediumPostCard({
    * with nothing visible. A dwell makes no sense here either; focus has no
    * pointer travel to disambiguate.
    */
-  const onCardFocus = () => {
-    cancelClose();
+  const onCardFocus = (e: React.FocusEvent<HTMLElement>) => {
     engage();
-    if (!open) openNow();
+    if (open) return;
+    /* ★★★ THE PORTAL GUARD AGAIN — FOCUS EDITION (measured 2026-08-25).
+       The click handler already rejects events whose target is not a DOM
+       descendant of the card, because React bubbles synthetic events along the
+       COMPONENT tree. FOCUS is the same story and I missed it first time round:
+       opening the overflow menu makes Radix programmatically focus its portaled
+       content, that content is a React child of this card, so `onFocus` fired
+       here with a target sitting on `document.body`.
+
+       Instrumented proof, not a theory — a document-level `focusin` probe logged
+       `{tag:'DIV', inCard:false, focusVisible:true}` at the moment the drawer
+       opened. `:focus-visible` was TRUE for it (programmatic focus on a freshly
+       opened menu qualifies), so the keyboard test below could never have caught
+       it. Every portaled overlay this card owns — menu, popover, hover card,
+       dialog — would have opened the drawer behind itself. */
+    const focusCard = cardRef.current;
+    if (!focusCard || !focusCard.contains(e.target as Node)) return;
+    /* ★★★ KEYBOARD FOCUS ONLY — NOT THE FOCUS A CLICK LEAVES BEHIND.
+       (Found by testing this change, 2026-08-25, not by reading it.)
+
+       Clicking ANY control in the card focuses it, and focus bubbles, so this
+       handler fired on every click of the upvote button, the title, the menu —
+       and opened the drawer. Measured before the guard: clicking upvote took the
+       drawer false -> true. That is precisely the "clicking other stuff must not
+       open it" the owner asked for, and the old hover trigger hid it completely,
+       because hover had already opened the card before any click landed.
+
+       `:focus-visible` is the browser's own answer to "did this focus come from
+       the keyboard": it is set for tab/arrow focus and NOT for a plain mouse
+       click on a button. Using it keeps the keyboard path — a reader tabbing to
+       the comment link still gets the drawer opened rather than landing in a
+       clipped box — while a pointer user gets nothing they did not ask for.
+
+       Wrapped because `:focus-visible` throws on very old engines rather than
+       returning false; a browser that cannot answer must not open the drawer. */
+    /* ★ MODALITY, NOT `:focus-visible` — see `lastInputWasKeyboard`'s doc. The
+       deciding case is focus RESTORATION: closing the overflow menu hands focus
+       back to its trigger inside this card, and that restoration is
+       focus-visible, so the element-level test opened the drawer on the way out
+       of every menu. What actually distinguishes the two is whether the reader's
+       last input was a key or a pointer, which only the event stream knows. */
+    if (!lastInputWasKeyboard()) return;
+    openNow();
   };
   const onCardBlur = (e: React.FocusEvent<HTMLElement>) => {
     // Focus moving BETWEEN children of the card is not a blur of the card.
     if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
     closeSelf.current!();
+  };
+
+  /**
+   * ★★★ THE ONLY POINTER WAY IN: A CLICK ON THE CARD'S EMPTY SPACE
+   * (owner, 2026-08-25).
+   *
+   * Four guards, and the FIRST is the one that is not obvious:
+   *
+   * 1. ★★ NOT-IN-CARD. React dispatches synthetic events along the COMPONENT
+   *    tree, not the DOM tree. Every Radix overlay this card mounts — the
+   *    overflow dropdown, the downvote popover, the payout hover card, the
+   *    reblog dialog, the tooltips — portals its content to `document.body`,
+   *    and a click inside ANY of them still arrives here. Without this line,
+   *    "Copy link", "Block" and the downvote confirm would each toggle the
+   *    drawer behind them. The portaled node is not a DOM descendant of the
+   *    card, so one `contains` check rejects the whole class at once.
+   *
+   * 2. Any real control keeps its own behaviour. A link navigates, a button
+   *    fires, and neither also opens the drawer.
+   *
+   * 3. Clicks inside the drawer belong to the drawer — it has its own stretched
+   *    link to the comment and its own vote control. Toggling shut underneath
+   *    someone reaching for those is exactly the "nothing broken" this must not
+   *    do.
+   *
+   * 4. A click that ends a text selection is not a click on empty space.
+   *    Without this, selecting the excerpt and releasing toggles the card.
+   */
+  const onCardClick = (e: React.MouseEvent<HTMLElement>) => {
+    const card = cardRef.current;
+    const target = e.target as HTMLElement | null;
+    if (!card || !target) return;
+    if (!card.contains(target)) return;
+    if (
+      target.closest(
+        'a, button, input, select, textarea, label, summary, [role="button"], [role="link"], [role="menuitem"], [role="dialog"], [contenteditable="true"]'
+      )
+    ) {
+      return;
+    }
+    if (target.closest('[data-testid="post-card-drawer"]')) return;
+    if (window.getSelection()?.toString()) return;
+    /* ★ ONLY THE FIRST CLICK OF A MULTI-CLICK COUNTS. A double-click near the
+       excerpt opens on click 1, then the browser's own word-selection runs
+       before click 2, so the selection guard above blocks the close and the card
+       is left open with a stray highlighted word. Ignoring `detail > 1` makes a
+       double-click deterministic — it opens, once — instead of depending on
+       whether the second click happened to land on selectable text. */
+    if (e.detail > 1) return;
+    if (openRef.current) closeSelf.current!();
+    else openNow();
   };
 
   // A card unmounted mid-intent (infinite feed recycling a row) must not leave a
@@ -375,25 +409,10 @@ export default function MediumPostCard({
   useEffect(
     () => () => {
       cancelEngage();
-      cancelDwell();
-      cancelClose();
       releaseOpen(closeSelf.current!);
     },
     []
   );
-
-  /*
-   * §8's scroll listener is shared and reference-counted; this mount is one
-   * reference. See `lib/card-expansion.ts` for why it is capture-phase.
-   *
-   * The callback is what makes the suppression END rather than LATCH: when the
-   * feed stops moving, a card still under the pointer arms its dwell, with no
-   * further pointer event required. Without it, "scroll, stop, rest the pointer"
-   * — the ordinary way a feed is read — never opens anything.
-   */
-  useEffect(() => subscribeToScroll(() => {
-    if (pointerInside.current) tryArm();
-  }), []);
 
   const [moderationRevealed, setModerationRevealed] = useState(false);
   // ★ OWNER RULING 2026-08-12 — the post overflow menu's ONE moderation control is
@@ -819,6 +838,7 @@ export default function MediumPostCard({
       onPointerLeave={onCardLeave}
       onFocus={onCardFocus}
       onBlur={onCardBlur}
+      onClick={onCardClick}
       // ★ THE ROOT TESTID THE TEST SUITE NEEDS (2026-08-09). The card had testids on
       // every child and none on itself, so nothing could count posts or scope a
       // locator to "the first post". `playwright/tests/support/pages/homePage.ts`

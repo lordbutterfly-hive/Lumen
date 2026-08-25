@@ -3,7 +3,7 @@ import { TFunction } from 'i18next';
 import { configuredImagesEndpoint } from '@hive/ui/config/public-vars';
 import { getLogger } from '@ui/lib/logging';
 import { processImageForUpload } from '@/blog/features/post-editor/lib/image-processing';
-import { uploadLiteImage } from '@/blog/lib/lite/client/lite-profile';
+import { ServerUploadUnavailable, uploadKeyedImage, uploadLiteImage } from '@/blog/lib/lite/client/lite-profile';
 
 const logger = getLogger('account-settings/utils');
 
@@ -78,6 +78,21 @@ export const uploadImg = async (file: File, username: string, signer: Signer): P
     // signed server-side by the publishing account via /api/lite/upload. Same branch
     // as the post editor's uploader.
     if (!signer) return await uploadLiteImage(file);
+
+    /* ★ AVATAR AND COVER GET THE SERVER-FIRST PATH TOO (adversarial review,
+       2026-08-25). The owner's complaint — "it requires me to sign with posting
+       key just to upload an image" — was not scoped to the post editor, but the
+       first cut of this change only touched `features/post-editor/lib/utils.ts`.
+       This file is a SEPARATE `uploadImg`, called from
+       `features/account-settings/form.tsx` for the profile picture and cover, so
+       a keyed account still got a wallet prompt on every one of those.
+       Same contract as the editor's: ask the server, and if the server cannot
+       sign, sign it here. See `app/api/upload/route.ts` for the trade. */
+    try {
+      return await uploadKeyedImage(file);
+    } catch (error) {
+      if (!(error instanceof ServerUploadUnavailable)) throw error;
+    }
 
     const data = await new Promise<Uint8Array>((resolve) => {
       const reader = new FileReader();

@@ -1,49 +1,34 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════
  * WHEN A POST CARD IS ALLOWED TO EXPAND.
- * Built to the 2026-08-20 card-expansion SPEC.md §8 ("Suppression").
  *
- * Three of the four suppression rules are CROSS-CARD — they are statements about
- * the feed, not about one card — so they cannot live in the card component:
+ * ★★★ REWRITTEN 2026-08-25. THE DRAWER NO LONGER OPENS ON HOVER.
  *
- *   • "One at a time. Opening a card closes any other."
- *   • "A capture-phase scroll listener sets a flag ... any open card closes on
- *     the first scroll event."
- *   • the 150ms tail after the last scroll event, which is one timer for the
- *     whole feed rather than one per card.
+ * Owner ruling: "only on clicking empty card it should show drop down ... the
+ * hover over doesnt work well its annoying." The drawer is now opened by a
+ * CLICK on the card's empty space and by keyboard focus, and by nothing else.
  *
- * The fourth ("bottom guard") is per-card geometry and lives with the card, but
- * `withinBottomGuard` is here so the 120px is written once.
+ * That deleted most of this file, and the deletions are the point rather than a
+ * casualty. Everything removed existed ONLY to stop hover from misfiring:
  *
- * ★★ WHY A CAPTURE-PHASE LISTENER AND NOT A BUBBLING ONE. `scroll` does not
- * bubble from an arbitrary scrolling element — only from the document. A feed
- * inside its own overflow container would therefore never reach a bubbling
- * document listener, and the suppression would silently do nothing on exactly
- * the layouts that scroll. Capture on `document` sees every scroll event in the
- * tree regardless of which element produced it.
+ *   • the 350ms dwell (`DWELL_MS`) — a click states intent on its own; there is
+ *     no travel to disambiguate and nothing to wait out
+ *   • the capture-phase scroll listener, the 150ms tail and the settle
+ *     subscription — all of it compensated for the fact that `pointerenter`
+ *     fires during a scroll and never fires again. A click cannot be triggered
+ *     by the feed moving underneath a stationary pointer, so none of it applies
+ *   • closing every open card on the first scroll event — actively WRONG now.
+ *     A reader who clicked to open a comment then scrolls to read it must not
+ *     have it shut underneath them; the old rule only made sense when the card
+ *     had opened itself without being asked
+ *   • the 120px bottom guard — it refused to open a card near the viewport
+ *     bottom because an unrequested expansion pushing unseen content is rude.
+ *     A card the reader deliberately clicked is not unrequested
  *
- * ★ WHY THE FLAG IS NOT "isScrolling" IN A REF PER CARD. Twenty cards each
- * running their own listener and their own 150ms timer is twenty timers doing
- * identical work, and they would disagree at the edges. One module-level flag is
- * both cheaper and the only version that can be correct.
- *
- * ★ THE LISTENER IS LAZY AND REFERENCE-COUNTED. It attaches when the first card
- * subscribes and detaches when the last unsubscribes, so a page with no feed on
- * it carries no listener at all.
+ * What survives is the one rule that is still a statement about the FEED rather
+ * than about one card, and is still wanted: only one card open at a time.
  * ═══════════════════════════════════════════════════════════════════════════
  */
-
-/** §8: "If its bottom edge is within 120px of the viewport bottom." */
-export const BOTTOM_GUARD_PX = 120;
-
-/** §8: "clears it 150ms after the last event." */
-const SCROLL_TAIL_MS = 150;
-
-/** §1: "350ms, hover anywhere on the card." */
-export const DWELL_MS = 350;
-
-let scrolling = false;
-let scrollTail: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Every card that is currently OPEN, by its own close function. A Set rather
@@ -54,83 +39,8 @@ let scrollTail: ReturnType<typeof setTimeout> | null = null;
 const open = new Set<() => void>();
 
 /**
- * Cards that want to know when scrolling has SETTLED.
- *
- * ★★★ WHY THIS EXISTS, because it is not in the spec and it fixes a real defect.
- * §8 says "Pointer entry returns early while [the scroll flag] is set". Taken
- * literally and no further, that strands the single most common way anyone reads
- * a feed: scroll down, stop, leave the pointer where it landed. `pointerenter`
- * fired DURING the scroll, so it returned early — and it never fires again,
- * because the pointer never moves. The card then cannot open at all until the
- * reader moves out and back in, which they have no reason to do.
- *
- * Measured 2026-08-20: `qa-drawer.mjs` and `qa-animations.mjs` both reported
- * "drawer did not open on hover" against a drawer whose keyboard path opened
- * fine, and this was why.
- *
- * So the flag clearing is an EVENT, not just a state change: when scrolling
- * settles, every card still under the pointer re-arms. The spec's intent —
- * "do not open cards while the feed is moving" — is preserved exactly; what
- * changes is that the suppression ends properly instead of latching.
- */
-const subscribers = new Set<() => void>();
-
-function closeAllOpen(): void {
-  // Copy first: a close function removes itself from `open` via `releaseOpen`,
-  // and mutating a Set while iterating it is how the last card stays open.
-  for (const close of [...open]) close();
-}
-
-function onScroll(): void {
-  scrolling = true;
-  if (scrollTail) clearTimeout(scrollTail);
-  scrollTail = setTimeout(() => {
-    scrolling = false;
-    scrollTail = null;
-    // Scrolling has settled. Anything still under the pointer may now arm.
-    for (const settled of [...subscribers]) settled();
-  }, SCROLL_TAIL_MS);
-  // §8: "any open card closes on the first scroll event."
-  closeAllOpen();
-}
-
-function attach(): void {
-  // `capture` for the reason in the header; `passive` because this listener
-  // never calls preventDefault and a non-passive scroll listener on the busiest
-  // screen in the app is a measurable scroll-jank source.
-  document.addEventListener('scroll', onScroll, { capture: true, passive: true });
-}
-
-function detach(): void {
-  document.removeEventListener('scroll', onScroll, { capture: true } as EventListenerOptions);
-  if (scrollTail) {
-    clearTimeout(scrollTail);
-    scrollTail = null;
-  }
-  scrolling = false;
-}
-
-/**
- * Subscribe a card for the lifetime of its mount. Returns the unsubscribe.
- * Called from an effect, so `document` is always defined by the time it runs.
- */
-export function subscribeToScroll(onSettle: () => void): () => void {
-  if (subscribers.size === 0) attach();
-  subscribers.add(onSettle);
-  return () => {
-    subscribers.delete(onSettle);
-    if (subscribers.size === 0) detach();
-  };
-}
-
-/** §8: "Pointer entry returns early while it is set." */
-export function isScrollSuppressed(): boolean {
-  return scrolling;
-}
-
-/**
- * §8: "One at a time. Opening a card closes any other." The caller passes its
- * own close function and MUST call `releaseOpen` when it closes by any route.
+ * "One at a time. Opening a card closes any other." The caller passes its own
+ * close function and MUST call `releaseOpen` when it closes by any route.
  */
 export function claimOpen(close: () => void): void {
   for (const other of [...open]) if (other !== close) other();
@@ -141,22 +51,92 @@ export function releaseOpen(close: () => void): void {
   open.delete(close);
 }
 
-/**
- * §8: "On entry the card measures its own rect. If its bottom edge is within
- * 120px of the viewport bottom, the dwell timer never starts. An expansion that
- * opens offscreen pushes what nobody can see."
- */
-export function withinBottomGuard(el: HTMLElement | null): boolean {
-  if (!el) return false;
-  const { bottom } = el.getBoundingClientRect();
-  return window.innerHeight - bottom < BOTTOM_GUARD_PX;
-}
-
 /** Test seam. Resets every module-level bit of state. */
 export function __resetCardExpansion(): void {
-  if (scrollTail) clearTimeout(scrollTail);
-  scrollTail = null;
-  scrolling = false;
   open.clear();
-  subscribers.clear();
+}
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WAS THE LAST INPUT A KEYBOARD?
+ *
+ * ★★★ WHY `:focus-visible` IS NOT ENOUGH, measured 2026-08-25.
+ *
+ * The drawer opens on focus so a keyboard reader is not stranded in a
+ * `height: 0` box. The card therefore has to answer "did this focus come from a
+ * keyboard?", and `:focus-visible` looks like exactly that answer. It is not.
+ *
+ * When a Radix overlay closes — the overflow menu, the downvote popover — it
+ * RESTORES FOCUS TO ITS TRIGGER, and that trigger is inside the card.
+ * Programmatic restoration qualifies as focus-visible, so the card saw
+ * "keyboard focus on one of my children" and opened. Observed directly: click
+ * the ··· menu, click "Downvote", and the drawer opens behind the popover, with
+ * `matches(':focus-visible')` returning true throughout.
+ *
+ * Input MODALITY is the thing actually being asked about, and it cannot be read
+ * off an element — only off the event stream. `keydown` means the reader is on
+ * the keyboard; `pointerdown` means they are not. A focus that follows a
+ * pointerdown is the residue of a click, whoever moved it and however.
+ *
+ * One pair of listeners for the whole feed, attached once at module scope, for
+ * the same reason the scroll flag used to be module-level: twenty cards each
+ * tracking this would be twenty copies that disagree at the edges.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+let keyboardModality = false;
+
+/**
+ * ★★★ ONLY *NAVIGATION* KEYS ARM IT — NOT EVERY KEYDOWN (2026-08-25, found by
+ * adversarial review and reproduced 3/3).
+ *
+ * The first version set this on ANY keydown, and that reopened the drawer every
+ * time a reader dismissed a menu:
+ *
+ *   click "···" with the mouse   -> pointerdown, modality = pointer, menu opens,
+ *                                   drawer correctly stays shut
+ *   press Escape                 -> keydown, modality flipped to KEYBOARD
+ *   Radix restores focus to the trigger, which is INSIDE the card
+ *   `onCardFocus` sees in-card focus + "keyboard" -> opens the drawer
+ *
+ * The reader asked to close a menu and got a drawer. Escape, Enter and Space are
+ * not navigation — they act on the thing already focused. Only Tab (and the
+ * arrow keys, which move focus inside a menu or a radio group) mean "I am moving
+ * focus around with the keyboard", which is the only thing `onCardFocus` is
+ * entitled to treat as a request to open.
+ *
+ * Note this is deliberately NOT symmetric: a pointerdown always disarms, because
+ * any pointer press means the reader has picked up the mouse. Arming is the
+ * narrow case; disarming is the safe one.
+ */
+const NAVIGATION_KEYS = new Set([
+  'Tab',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'Home',
+  'End'
+]);
+
+if (typeof document !== 'undefined') {
+  // Capture, so a component that stops propagation cannot blind the flag.
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (NAVIGATION_KEYS.has((e as KeyboardEvent).key)) keyboardModality = true;
+    },
+    true
+  );
+  document.addEventListener(
+    'pointerdown',
+    () => {
+      keyboardModality = false;
+    },
+    true
+  );
+}
+
+/** True when the reader's most recent input was keyboard NAVIGATION, not a pointer. */
+export function lastInputWasKeyboard(): boolean {
+  return keyboardModality;
 }

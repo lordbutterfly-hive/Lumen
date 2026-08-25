@@ -15,9 +15,16 @@ import { usePostMutation } from "@/blog/features/post-editor/hooks/use-post-muta
 import { AccountFormValues } from "@/blog/features/post-editor/types";
 import { useUserClient } from "@smart-signer/lib/auth/use-user-client";
 import { createLitePost } from "@/blog/lib/lite/client/lite-write";
+/* ★ ONE PATIENCE FOR BOTH COMPOSERS. Imported rather than re-declared so the
+   long-form editor and the short-form note box can never drift to different
+   timeouts — the drift is what left this editor with none at all. */
+import { SIGN_TIMEOUT_MS } from "@/blog/features/discovery-feed/composer/use-note-publish";
 import { litePostIdOf } from "@/blog/lib/lite/render/lite-post-id";
 
 const logger = getLogger("app");
+
+/** Marker for "we stopped waiting", so the catch can tell it from a real failure. */
+class PostSignTimeout extends Error {}
 
 interface UsePostFormActionsParams {
   form: UseFormReturn<AccountFormValues>;
@@ -314,8 +321,14 @@ export function usePostFormActions({
       return;
     }
 
-    const maxAcceptedPayout = await createAsset((data.maxAcceptedPayout * 1000).toString(), "HBD");
-    const postPermlink = await createPermlink(data?.title ?? "", username);
+    /* ★ CONCURRENT, NOT SEQUENTIAL (2026-08-25). These two are independent:
+       `createAsset` only needs the chain instance, `createPermlink` makes a
+       bridge-API round trip to check the permlink is unused. They were awaited
+       one after the other, so the reader paid for both end to end. */
+    const [maxAcceptedPayout, postPermlink] = await Promise.all([
+      createAsset((data.maxAcceptedPayout * 1000).toString(), "HBD"),
+      createPermlink(data?.title ?? "", username),
+    ]);
     const permlinInEditMode = post_s?.permlink;
 
     let newPercentHbd = data.payoutType ? (data.payoutType === "100%" ? 0 : 10000) : 10000;
@@ -366,10 +379,77 @@ export function usePostFormActions({
           : [],
         rewardOptionsChanged,
       };
+      /* ★★★ THE EDITOR MUST ALWAYS BE ESCAPABLE (owner, 2026-08-25: "its slow and
+         doesnt exit the editor").
+
+         This was a bare `await postMutation.mutateAsync(postParams)` with no
+         timeout and no abort. Everything below it — `hasSubmittedRef`,
+         `stopAutoSave()`, `removePost()`, `form.reset()`, `router.push()` — is
+         unreachable until it settles, and it bottoms out waiting on the Keychain
+         extension popup, which has no timeout anywhere in the chain. Miss that
+         popup and the button reads "Posting…" forever; the only escape was a
+         reload, which threw the draft away.
+
+         ★ THIS EXACT BUG WAS FOUND AND FIXED ONCE ALREADY, in the SHORT-FORM
+         composer, and never ported here. `use-note-publish.ts:16-34` carries the
+         measurement: "the button read 'Posting…', disabled, at 37,202ms and was
+         still stuck — a Keychain approval window nobody had answered." It races
+         the work against `SIGN_TIMEOUT_MS`; this now does the same, importing
+         that same constant so the two composers cannot drift to different
+         patience.
+
+         Nothing is broadcast by giving up — the timeout only stops US waiting.
+         If the user approves the popup afterwards the transaction may still
+         land, which is why the message says the post may still appear rather
+         than claiming it failed. */
       try {
-        await postMutation.mutateAsync(postParams);
+        const work = postMutation.mutateAsync(postParams);
+        // Losing the race leaves `work` to reject with nothing awaiting it;
+        // without a terminal handler the browser logs an unhandled rejection for
+        // a failure that has already been reported to the user.
+        work.catch(() => undefined);
+        let signTimer: ReturnType<typeof setTimeout> | null = null;
+        try {
+          await Promise.race([
+            work,
+            new Promise<never>((_resolve, reject) => {
+              signTimer = setTimeout(() => reject(new PostSignTimeout()), SIGN_TIMEOUT_MS);
+            }),
+          ]);
+        } finally {
+          if (signTimer) clearTimeout(signTimer);
+        }
       } catch (error) {
         setIsSubmitting(false);
+        if (btnRef.current) btnRef.current.disabled = false;
+        if (error instanceof PostSignTimeout) {
+          /* ★★★ WITHOUT THIS THE TIMEOUT IS A LIE (found by adversarial review,
+             2026-08-25, and confirmed against the code before fixing).
+
+             `post-form.tsx` gates the Submit button, its spinner and the
+             "Discard draft" button on `postMutation.isPending` (:533, :537,
+             :538, :553, :582) — React Query's own flag, which tracks whether
+             `mutationFn`'s promise has SETTLED. Losing the race does not cancel
+             that promise (Keychain offers no abort), so `isPending` stayed true
+             forever and every one of those controls stayed dead with a spinner
+             on it. The overlay cleared and a toast said "we stopped waiting"
+             over a UI that had not: the original bug, now wearing a message that
+             contradicts it, which is worse than not fixing it at all.
+
+             `reset()` returns the mutation to idle so the UI is genuinely
+             released. The abandoned attempt is still out there — see the toast
+             copy, which says so rather than claiming the post failed. */
+          postMutation.reset();
+          // Deliberately NOT `handleError`: this is not a failure we can explain
+          // as one, and the draft must survive it.
+          toast({
+            title: "Still waiting on your wallet",
+            description:
+              "We stopped waiting after 60 seconds. Your draft is safe — nothing was thrown away. If you approved the request after that, the post may still appear.",
+            variant: "destructive"
+          });
+          return;
+        }
         handleError(error, { method: "post", params: postParams });
         throw error;
       }

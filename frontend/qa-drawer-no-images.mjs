@@ -17,6 +17,7 @@
  * reporting a green.
  */
 import { openApp, BASE, report } from './qa-harness.mjs';
+import { openCardDrawer } from './qa/lib/open-drawer.mjs';
 
 const rows = {};
 let fails = 0;
@@ -41,7 +42,13 @@ for (let i = 0; i < Math.min(n, 14) && opened < 8; i++) {
   await page.waitForTimeout(350);
   const b = await card.boundingBox();
   if (!b) continue;
-  await page.mouse.move(b.x + b.width / 2, b.y + 40);
+  /* ★ CLICK, NOT HOVER (2026-08-25). The drawer opens on an empty-space click
+     now; hovering does nothing at all, so this line used to open it and no
+     longer would. `b.y + 40` was also fine as a hover target and is NOT fine as
+     a click target — it is the byline row, where a click lands on the identity
+     pill or the community tag and navigates instead. `openCardDrawer` probes for
+     a point that is genuinely empty. */
+  if (!(await openCardDrawer(page, card))) continue;
   let ok = false;
   for (let w = 0; w < 80; w++) {
     if ((await dl.evaluate((el) => el.getBoundingClientRect().height).catch(() => 0)) > 10) { ok = true; break; }

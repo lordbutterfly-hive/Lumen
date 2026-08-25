@@ -29,6 +29,7 @@
  * cache does not survive an ordinary remount, nothing after it means anything.
  */
 import { openApp, BASE } from './qa-harness.mjs';
+import { openCardDrawer } from './qa/lib/open-drawer.mjs';
 
 const { browser, page } = await openApp({ loggedIn: true });
 const HOME = '/';
@@ -61,7 +62,10 @@ async function readPicks() {
     const card = cards.nth(i);
     try {
       await card.scrollIntoViewIfNeeded({ timeout: 5000 });
+      /* ★ CLICK, NOT HOVER (2026-08-25) — hovering no longer opens the drawer.
+         `engage()` still warms on pointer entry, so hover first, then click. */
       await card.hover({ timeout: 5000 });
+      await openCardDrawer(page, card);
     } catch { continue; }
     await page.waitForTimeout(700);
     const p = await page.evaluate((idx) => {
