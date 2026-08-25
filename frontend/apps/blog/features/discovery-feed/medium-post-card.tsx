@@ -861,16 +861,27 @@ export default function MediumPostCard({
         </div>
       ) : null}
 
-      {/* Byline row */}
-      <div className="flex flex-wrap items-center gap-2 text-body-sm text-ink-action">
-        {/* ★★★ THE IDENTITY CLUSTER (handoff_identity_pill/SPEC.md, option N1, the
-            owner's choice). Face, handle, price and Buy are ONE object now — this
-            replaces the separate 26px avatar and handle link that sat here AND the
-            `TokenAuthorChip` further along this row. Two components each deciding
-            "does this author have a token" was the real duplication; the visual
-            doubling was only the symptom. See `identity-pill.tsx` for the click
-            model, the 16px overlap arithmetic and the tab-stop ruling. */}
-        <IdentityPill handle={displayAuthor} price={price} luminosity={luminosity} />
+      {/* Byline row.
+
+          ★★★ NO-WRAP, AND THE COMMUNITY IS THE PART THAT GIVES (2026-08-25, owner:
+          "adjust it so all fit nice").
+
+          This row was `flex-wrap`. With the identity pill moved to the right it has
+          two rigid objects in it — the pill (up to 271px on a creator, because it
+          carries handle + price + Buy) and the 24px overflow button — and on a
+          narrow card there is not enough left for a long community name. Measured
+          at 390px: 11 of 30 feed cards broke the byline onto TWO rows, 66-72px tall
+          against a normal 40px, dropping the pill below the community. Nothing
+          overflowed, so an overflow-only check would have called it clean; it just
+          looked loose and unfinished, which is exactly what was reported.
+
+          `flex-nowrap` plus a truncating community is the fix: one row at every
+          width, the pill and the menu always intact and always at the right edge,
+          and the only thing that degrades is the one element that can degrade
+          legibly — a community name shortened with an ellipsis. The right-hand
+          group carries `shrink-0` so flex takes the space from the community and
+          never from the pill. */}
+      <div className="flex flex-nowrap items-center gap-2 text-body-sm text-ink-action">
         {/*
           ★★★ THE QUILL BELONGS IN THE BYLINE (2026-08-18, owner-reported: "no
           feather quill on my profile feed").
@@ -946,7 +957,6 @@ export default function MediumPostCard({
             `mark` is undefined for an author nobody has looked up yet, and
             `LeagueByline` renders nothing below Torch, so this is silent by default
             rather than noisy. */}
-        {mark ? <LeagueByline tier={mark.tier} rankNumber={mark.rankNumber} /> : null}
         {/* ★ THE RUBRIC. Spec: the community name, and where a post has no community
             "the rubric slot shows the post's first tag instead, capitalized, no `#`
             prefix. If there is no tag either, the rubric is omitted (do not leave an
@@ -960,7 +970,14 @@ export default function MediumPostCard({
             ★ THE DATE HAS LEFT THIS ROW. It now sits inline after the title, which is
             where the spec puts it and why it is not here any more. */}
         {rubric ? (
-          <Link href={`/topics/${rubric.tag}`} className={cardStyles.rubric} data-testid="medium-card-rubric">
+          <Link
+            href={`/topics/${rubric.tag}`}
+            /* `min-w-0` is what actually allows the shrink — a flex item defaults to
+               `min-width:auto`, so without it the name refuses to go below its
+               intrinsic width and the row would overflow instead of truncating. */
+            className={cn(cardStyles.rubric, 'min-w-0 truncate')}
+            data-testid="medium-card-rubric"
+          >
             {rubric.label}
           </Link>
         ) : null}
@@ -969,6 +986,38 @@ export default function MediumPostCard({
             indicator belongs next to every post and every name. Renders
             nothing when the author has no token, or the answer isn't known
             yet; see the component's own doc. */}
+
+        {/* ★★★ THE AUTHOR SIDE SITS RIGHT, THE COMMUNITY SITS LEFT (owner ruling,
+            2026-08-25, with a marked-up screenshot: "the pill and the profile pic
+            on the side").
+
+            This row used to open with the identity cluster and put the community
+            after it — measured on the live card, the pill sat at x=309 against a
+            card starting at x=288, i.e. hard left, with the community to its
+            RIGHT and 618px of empty row between the pill and the card's right
+            edge. The design inverts that: the community label is the first thing
+            read, and the author cluster is an object anchored to the opposite
+            edge.
+
+            `ml-auto` on this group is what pushes it; the overflow menu that
+            follows no longer carries its own `ml-auto`, because two auto margins
+            in one flex row would strand the menu away from the pill with a gap
+            between them instead of keeping the two together at the edge.
+
+            The rank mark travels WITH the author, not with the community — it is
+            a fact about the person, and leaving it behind next to the community
+            name would read as a property of the community. */}
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          {mark ? <LeagueByline tier={mark.tier} rankNumber={mark.rankNumber} /> : null}
+        {/* ★★★ THE IDENTITY CLUSTER (handoff_identity_pill/SPEC.md, option N1, the
+            owner's choice). Face, handle, price and Buy are ONE object now — this
+            replaces the separate 26px avatar and handle link that sat here AND the
+            `TokenAuthorChip` further along this row. Two components each deciding
+            "does this author have a token" was the real duplication; the visual
+            doubling was only the symptom. See `identity-pill.tsx` for the click
+            model, the 16px overlap arithmetic and the tab-stop ruling. */}
+        <IdentityPill handle={displayAuthor} price={price} luminosity={luminosity} />
+        </span>
 
         {/* ★ E2, REVISED 2026-08-12 (owner ruling) — THE POST OVERFLOW MENU'S ONE
             MODERATION CONTROL IS BLOCK. Before this pass there was no way to
@@ -1002,7 +1051,7 @@ export default function MediumPostCard({
           // through it either — so `open` changes only when
           // `handleDownvoteSelect` or the Popover's own dismiss handling
           // (outside click / Escape) call `setDownvotePopoverOpen`.
-          <div className="relative ml-auto flex shrink-0">
+          <div className="relative flex shrink-0">
             <Popover open={downvotePopoverOpen} onOpenChange={setDownvotePopoverOpen}>
               <PopoverTrigger asChild>
                 <span aria-hidden="true" tabIndex={-1} className="pointer-events-none absolute inset-0" />
@@ -1178,6 +1227,11 @@ export default function MediumPostCard({
           </div>
         ) : null}
       </div>
+
+      {/* The header rule — see `.bylineRule`. Decorative: the community name and
+          the headline carry the structure, so this is hidden from assistive tech
+          rather than announced as a separator between them. */}
+      <span className={cardStyles.bylineRule} aria-hidden="true" />
 
       {/* Body grid — text column, plus a fixed thumbnail column ONLY when there
           is something to put in it.

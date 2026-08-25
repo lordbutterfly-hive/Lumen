@@ -547,6 +547,32 @@
   padding-top: 12px; /* §4 "Gap above divider 12px", from the action row box */
 }
 
+/* ★★★ THE HEADER RULE (owner ruling 2026-08-25, from a marked-up reference:
+   "only the pill and the tag underline matter").
+
+   A 1px full-content-width hairline closing the byline row, so the community
+   tag on the left and the identity pill on the right read as one header band
+   separated from the headline beneath it. Measured off the owner's reference at
+   874px wide: the rule sits 2px under the pill and 19px above the first line of
+   the title.
+
+   It uses `--pc-line`, the SAME token and the same 1px weight as `.seam` (the
+   drawer's divider) rather than a second hairline value, so the card has one
+   hairline treatment and a change to the token moves both. Unlike `.seam` it
+   does not animate — the seam scales from the left because the drawer's space
+   is appearing underneath it; this rule is always present and would only
+   flicker if it swept on every render.
+
+   `aria-hidden` at the call site: it is a visual separator and announcing it
+   would put a meaningless node between the community name and the headline. */
+.bylineRule {
+  display: block;
+  height: 1px;
+  background: var(--pc-line);
+  margin-top: 2px;
+  margin-bottom: 19px;
+}
+
 /* the hairline draws itself from the left as the space appears */
 .seam {
   display: block;
@@ -646,6 +672,10 @@
   align-items: center;
   gap: 6px;
   min-height: 20px; /* §4 "Meta row 20px" */
+  /* ★ The label stays right-aligned (§4) — but right-aligned to the edge of the
+     text column, not to the edge of the counts. See the block comment above
+     `.commentText` for why this is horizontal and not a min-height. */
+  max-width: calc(100% - var(--pc-counts-reserve));
 }
 
 /* ── §5 TYPE ──────────────────────────────────────────────────────────────
@@ -703,6 +733,34 @@
    numbers. `calc(100% - 112px)` reserves the gutter at every width; the min()
    keeps 64ch winning wherever it is the tighter of the two, so the measure does
    not change on wide cards. */
+/* ★★★ THE COUNTS COLUMN IS RESERVED BY BOTH ROWS, NOT JUST THE BODY
+   (2026-08-25, owner-reported: TOP COMMENT printed on top of the reply count).
+
+   `.counts` is `position:absolute; right:6px; bottom:6px` — out of flow, so
+   nothing in the block reserves room for it automatically. `.commentText` did
+   reserve it, via a hardcoded 112px. `.commentMeta` did not, and its label
+   carries `margin-left:auto`, so the label ran to the SAME right edge as the
+   counts (both at 1013px, measured).
+
+   With a two-line body the block is tall enough that the counts sit BELOW the
+   meta row — 6px clear — so it looked fine and shipped. Collapse the body and
+   the counts, anchored to the BOTTOM, ride up into the meta row: measured
+   -18px, i.e. a real overlap. That happens whenever `extractBodySummary`
+   returns little or nothing, which is exactly the case the owner screenshotted.
+
+   A `min-height` on `.cbox` was the other candidate and is NOT enough: it fixes
+   the empty-body case but breaks again the moment `.commentMeta` wraps to two
+   lines, because the meta row then grows back down into the pinned counts. A
+   HORIZONTAL reservation cannot be defeated by any height, so the label and the
+   counts can never share a column whatever the block does.
+
+   One custom property, referenced by both rows, so a future change to the
+   counts' width cannot fix one guard and leave the other behind — which is the
+   mistake this comment exists to prevent recurring. */
+.cbox {
+  --pc-counts-reserve: 112px;
+}
+
 .commentText {
   font-size: 16px;
   line-height: 24px;
@@ -713,7 +771,7 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
-  max-width: min(64ch, calc(100% - 112px));
+  max-width: min(64ch, calc(100% - var(--pc-counts-reserve)));
 }
 
 /* ── §7 THE TWO COUNTS ────────────────────────────────────────────────────
