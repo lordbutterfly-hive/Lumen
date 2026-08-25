@@ -8,6 +8,29 @@ import { chainMutedKeysOfActor } from '@/blog/lib/lite/social/chain-mute';
 import * as blocks from '@/blog/lib/lite/repositories/block-repository';
 import * as users from '@/blog/lib/lite/repositories/user-repository';
 
+/**
+ * ★★★ EXPLICIT, BECAUSE THIS ROUTE WAS ONE UNDOCUMENTED INTERNAL AWAY FROM
+ * SHIPPING A FROZEN, WRONG ANSWER (found 2026-08-25).
+ *
+ * `getLiteSession()` reads `cookies()`, which is what should force this route
+ * dynamic. But that call sits inside a broad `try/catch` that swallows the
+ * `DynamicServerError` Next throws to signal exactly that, and returns a normal
+ * 200 instead. At build time the swallow won: the build EXECUTED this handler
+ * and wrote a session-less snapshot to `.next-qa/server/app/api/lite/block/
+ * list.body`. It stayed out of the active prerender manifest only because Next
+ * flags its dynamic store the instant `cookies()` is invoked, independently of
+ * whether the resulting error is later swallowed — an implementation detail of
+ * the framework, not a property of this code.
+ *
+ * A per-viewer session route must never be cacheable by accident, and must
+ * never depend on an internal to stay that way. Sibling routes that get this
+ * right by construction (`lite/auth/methods`, `lite/profile`, `lite/retention`)
+ * call `getLiteSession()` OUTSIDE any try/catch, so the throw propagates and
+ * static generation aborts cleanly. This route needs its broad catch for its
+ * own reasons, so it states the requirement directly instead.
+ */
+export const dynamic = 'force-dynamic';
+
 const logger = getLogger('app');
 
 /**

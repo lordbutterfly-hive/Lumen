@@ -596,6 +596,49 @@ export interface Offering {
  * never price, never market cap, never volume — and the ordering is applied in
  * SQL precisely so a client cannot quietly re-rank it on something else.
  */
+/**
+ * How far behind the Magi indexer is — the answer to "is what this screen is
+ * showing me actually current?".
+ *
+ * ★★★ WHY THIS TYPE EXISTS (2026-08-25). The indexer was found ~17 hours and
+ * ~20,100 blocks behind the node on a running build, and `/creators` rendered
+ * its `lumen_ct_discovery` rows as if they were current — nothing anywhere in
+ * this feature read `indexer_health`. The existing doctrine covered the wrong
+ * case: `readDiscovery` REJECTS when the indexer is unreachable, so "we could
+ * not look" is honest, and `unavailable ≠ empty` is enforced throughout. But a
+ * LAGGING indexer answers successfully. It returns real, well-formed, stale
+ * rows, and every honest-degradation path in this feature is built to trigger
+ * on failure — so a lag is the one outage shape that renders as health.
+ *
+ * ★★ THE LAG IS MEASURED IN BLOCKS, NOT SECONDS, ON PURPOSE. The obvious
+ * implementation compares `last_update` against `Date.now()` — and that makes
+ * the claim depend on the VIEWER'S clock. A reader whose laptop clock is a day
+ * out would be told the indexer is broken when it is fine, or told it is fine
+ * when it is a day behind. Block heights are two numbers from the same chain
+ * with no clock anywhere between them, so `blocksBehind` means the same thing
+ * on every machine. `lastUpdate` is carried for DISPLAY only and must never be
+ * the basis of the decision.
+ */
+export interface IndexerHealth {
+  /**
+   * false = no indexer is configured in this build, or the health read itself
+   * failed. It does NOT mean "up to date" and must never render as such — the
+   * same unavailable ≠ empty rule this file states for every other read.
+   */
+  available: boolean;
+  /** `indexer_health.last_update`, verbatim, for display. Never the lag decision. */
+  lastUpdate: string | null;
+  /** Highest block the indexer has ingested (`indexer_health.latest_block_height`). */
+  indexerBlock: number | null;
+  /** The Magi node's own head at the same moment (`localNodeInfo.last_processed_block`). */
+  nodeBlock: number | null;
+  /**
+   * `nodeBlock - indexerBlock`, clamped at 0. null when either side is
+   * unreadable — null is "we don't know how far behind", never "not behind".
+   */
+  blocksBehind: number | null;
+}
+
 export interface CreatorSummary {
   creator: string;
   /** null when nothing has resolved yet. NOT 0 — a creator nobody has asked has no completion rate, and 0% reads as "fails everything". */

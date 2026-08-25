@@ -5,6 +5,7 @@ import type {
   DeclineInput,
   DeleteOfferingInput,
   CreatorSummary,
+  IndexerHealth,
   Offering,
   PricePoint,
   RateInput,
@@ -175,6 +176,17 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
   // be exactly the fabrication this feature already shipped once. Both reject,
   // which the screens render as "not available" — the same thing a real build
   // shows when the indexer is unreachable.
+  /**
+   * The mock has no indexer, so it cannot be behind one. `available: false`
+   * is the honest answer and renders as "cannot tell" — deliberately NOT
+   * `blocksBehind: 0`, which would be the mock asserting freshness about a
+   * system it is not connected to.
+   */
+  async readIndexerHealth(): Promise<IndexerHealth> {
+    await delay(50);
+    return { available: false, lastUpdate: null, indexerBlock: null, nodeBlock: null, blocksBehind: null };
+  }
+
   async readDiscovery(): Promise<CreatorSummary[]> {
     await delay(200);
     throw new Error('MockCreatorTokensDataSource: discovery needs a real indexer');

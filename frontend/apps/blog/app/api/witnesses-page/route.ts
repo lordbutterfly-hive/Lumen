@@ -33,6 +33,27 @@ const logger = getLogger('app');
  * `rows[].isVoted` afterwards — a pure, chain-free `Set.has()` check, so it
  * costs nothing to keep that step client-side.
  */
+/**
+ * ★★★ FROZEN AT BUILD TIME until 2026-08-25 — same defect as
+ * `/api/dynamic-global-properties`, see that route's note for the mechanism.
+ * The 2026-08-23 build served `last_confirmed_block_num=109,285,066` and vote
+ * totals ~41h old; a witness vote cast after the build could never appear.
+ *
+ * 60s rather than `force-dynamic` because of exactly what the comment above
+ * describes: this route is FOUR upstream calls (`getDynamicGlobalProperties`,
+ * `getWitnessesByVote(100)`, `getAccounts` over all 100 owners, `getChain`),
+ * and `/witnesses` has no sign-in wall, so every anonymous visitor would
+ * trigger the set. This route exists to stop that work happening per-VIEWER in
+ * the browser; making it per-REQUEST on the server would hand most of the cost
+ * straight back. Witness votes move on the scale of minutes at the very
+ * fastest, so one refresh a minute is live for every practical purpose.
+ *
+ * The per-viewer half is unaffected: `isVoted` is overlaid client-side from
+ * `fetchWitnessVotes` (its own per-viewer route), so caching this shared
+ * payload cannot leak or stale one viewer's votes into another's.
+ */
+export const revalidate = 60;
+
 export async function GET(): Promise<NextResponse> {
   try {
     const [dgp, witnesses] = await Promise.all([getDynamicGlobalProperties(), getWitnessesByVote(WITNESS_FETCH_LIMIT)]);

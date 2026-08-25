@@ -212,6 +212,36 @@ export class MagiIndexerClient {
     }));
   }
 
+  /**
+   * The indexer's own ingest position. Hasura exposes `indexer_health` from the
+   * upstream magi-mongo-indexer deployment (confirmed live against
+   * https://indexer.testnet.magi.milohpr.com/v1/graphql, 2026-08-25).
+   *
+   * Takes no variables — see `query()`'s note: this instance rejects any
+   * variable the document does not declare, so the object stays empty rather
+   * than carrying an unused `contractId`.
+   *
+   * Returns nulls rather than throwing on an empty result set. A missing health
+   * row means "cannot tell", which the caller renders as unknown; it must not
+   * take down a discovery read that otherwise succeeded.
+   */
+  async health(): Promise<{ lastUpdate: string | null; latestBlockHeight: number | null }> {
+    const data = await this.query(
+      `query IndexerHealth {
+         indexer_health { last_update latest_block_height }
+       }`,
+      {}
+    );
+    const rows = rowsOf(data, 'indexer_health');
+    if (rows.length === 0) return { lastUpdate: null, latestBlockHeight: null };
+    const r = rows[0];
+    const ts = field(r, 'last_update');
+    return {
+      lastUpdate: typeof ts === 'string' && ts.length > 0 ? ts : null,
+      latestBlockHeight: numOrNull(field(r, 'latest_block_height'))
+    };
+  }
+
   /** The ranked creator list. Ordering lives in the VIEW, deliberately — so a client cannot quietly re-rank on price or volume. */
   async discovery(limit = 60): Promise<HasuraDeliveryRow[]> {
     const data = await this.query(

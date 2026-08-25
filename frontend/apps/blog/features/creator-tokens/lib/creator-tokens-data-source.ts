@@ -33,7 +33,10 @@ import type {
   SetFaceInput,
   TransferTokensInput,
   WalletPositionsResult,
-  WithdrawTreasuryInput, MarketPrice } from '../types';
+  WithdrawTreasuryInput,
+  MarketPrice,
+  IndexerHealth,
+} from '../types';
 import { MockCreatorTokensDataSource } from './mock/mock-data-source';
 import { hiveTransactionBroadcaster } from './vsc/broadcaster';
 import { routingBroadcaster } from './vsc/wallet-broadcaster';
@@ -115,6 +118,14 @@ export interface CreatorTokensDataSource {
    * claim from "we couldn't look".
    */
   readDiscovery(limit?: number): Promise<CreatorSummary[]>;
+  /**
+   * How far the indexer is behind the node. NEVER rejects: a lag read that
+   * throws would take down the screen it exists to annotate, so an unreachable
+   * or unconfigured indexer resolves `{ available: false }` and the UI says
+   * "cannot tell" rather than "up to date". See `IndexerHealth` for why the lag
+   * is measured in blocks and not against the viewer's clock.
+   */
+  readIndexerHealth(): Promise<IndexerHealth>;
   /** A token's price history (indexer view `lumen_ct_price_history`). Rejects when unavailable — a flat or empty chart would be a claim about the price. */
   readPriceHistory(creator: string, limit?: number): Promise<PricePoint[]>;
 

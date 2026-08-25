@@ -22,6 +22,33 @@ import { withRetry } from '@transaction/lib/retry';
  * Same one-day life as the sibling, for the same reason and by the same
  * argument, so the two routes cannot drift apart again.
  */
+/**
+ * ★★ AND IT WAS FROZEN AT BUILD TIME (found 2026-08-25). Caching this response
+ * is right — the note above is correct and stands — but Next was doing
+ * something stronger and permanent: it PRERENDERED the whole route into the
+ * build and served those bytes forever, with `initialRevalidateSeconds: false`.
+ *
+ * ★ THE TRAP WORTH REMEMBERING: this route DOES declare `GET(req: NextRequest)`.
+ * A declared Request parameter does not save a route — `req` is never
+ * referenced in the body, and Next tracks actual dynamic USAGE, not the
+ * signature. Of all 95 route handlers in this app, this was the only one where
+ * the parameter is declared and unused, which is exactly why it was the only
+ * one to freeze despite having it.
+ *
+ * The frozen BODY is harmless: the URL is one hardcoded IPFS CID, and a CID is
+ * content-addressed, so those bytes cannot go stale. The frozen ENDPOINT is
+ * not. `configuredImagesEndpoint` is `env('IMAGES_ENDPOINT')` — resolved at
+ * RUNTIME by react-env — so a build-time evaluation bakes whichever host was
+ * configured on the BUILD machine into the artifact permanently. Deploy this
+ * build anywhere with a different `IMAGES_ENDPOINT` and the universal
+ * broken-image fallback keeps fetching from the old host, forever, silently.
+ *
+ * 86400 matches the `Cache-Control: max-age=86400` below exactly, so the
+ * serving behaviour and the perf argument above are unchanged — the endpoint
+ * is simply re-resolved once a day instead of never.
+ */
+export const revalidate = 86400;
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const defaultUrl = `${configuredImagesEndpoint}/DQmb2HNSGKN3pakguJ4ChCRjgkVuDN9WniFRPmrxoJ4sjR4`;

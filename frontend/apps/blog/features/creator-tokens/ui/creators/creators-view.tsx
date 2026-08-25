@@ -5,6 +5,7 @@ import { FC, ReactNode, useMemo, useState } from 'react';
 import { Link, LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { useLiveDiscovery } from '../../live/use-live-discovery';
+import { describeLag, useIndexerHealth } from '../../live/use-indexer-health';
 import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
 import type { CreatorSummary } from '../../types';
 import { pctLabel, usdCompact, usdPrice, usdWhole } from '../../market/format';
@@ -41,6 +42,25 @@ const COPY = {
   // Three market states a visitor can act on. ACTIVE deliberately has no copy: a badge on
   // every healthy card is noise, and absence-means-healthy is only ambiguous when the
   // failure case is silent too — which is what `stateUnavailable` exists to prevent.
+  /**
+   * ★★★ THE ONE OUTAGE SHAPE THAT RENDERED AS HEALTH (2026-08-25).
+   *
+   * Everything on this page comes from the Magi indexer's `lumen_ct_discovery`
+   * view. When that indexer is UNREACHABLE the read rejects and the `failed`
+   * branch below says so plainly. When it is merely BEHIND, it answers happily
+   * with real, well-formed, old rows — and this page had no signal for that at
+   * all. Found ~17 hours / ~20,100 blocks behind on a live build, presented as
+   * current: completion rates, ratings and response times all describing a
+   * yesterday that had already moved on.
+   *
+   * The wording says what is actually known — the list is real but old — rather
+   * than implying the page is broken, because it isn't.
+   */
+  lagTitle: 'This list is behind',
+  lagBody: (ago: string | null) =>
+    ago
+      ? `The creator index is about ${ago} behind the chain, so delivery records, ratings and response times here may be out of date. Prices and market status are read straight from the chain and are current.`
+      : 'The creator index is behind the chain, so delivery records, ratings and response times here may be out of date. Prices and market status are read straight from the chain and are current.',
   stateUnavailable: 'Market status unavailable',
   stateOverdue: 'Listing lapsed — may freeze soon',
   stateClosed: 'Market closed — you cannot buy this token',
@@ -200,6 +220,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
   const [showNew, setShowNew] = useState(true);
   const [answersOnly, setAnswersOnly] = useState(false);
   const discovery = useLiveDiscovery();
+  const indexer = useIndexerHealth();
 
   const creators = useMemo(() => {
     // The INDEXER already ordered this (lumen_ct_discovery, ranked on delivery
@@ -268,6 +289,23 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
       <PageMasthead title={COPY.title} headingLevel={intro ? 'h2' : 'h1'}>
         <p className="max-w-[660px] text-caption text-ink-10">{COPY.sub}</p>
       </PageMasthead>
+
+      {/* ★ PLACED ABOVE EVERY INDEXER-DERIVED ELEMENT ON THE PAGE, not just above
+          the grid. First position put it after the "New here" shelf — and that
+          shelf is built from the same `lumen_ct_discovery` rows, so a reader met
+          stale data before the notice telling them it was stale. A disclosure
+          that appears below the thing it disclaims has already failed.
+
+          It renders only on a KNOWN lag: `stale` is false when the health read
+          could not be made at all, so an unreadable indexer never produces a
+          confident claim in either direction. */}
+      {indexer.stale ? (
+        <div className="mb-[22px] rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5 text-[14px] leading-[22px] text-ink-warn-3">
+          <span className="font-semibold">{COPY.lagTitle}</span>{' '}
+          <span>{COPY.lagBody(describeLag(indexer.behindMs))}</span>
+        </div>
+      ) : null}
+
 
       <div className="my-5 flex flex-wrap items-center justify-between gap-4">
         {/* ★ WARM TAB TREATMENT (illumination SPEC.md §1, owner 2026-08-21: "fill the

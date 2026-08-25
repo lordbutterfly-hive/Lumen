@@ -19,6 +19,33 @@ import {
   sanitizeInterestIds
 } from '@/blog/lib/lite/interests/taxonomy';
 
+/**
+ * ★★★ EXPLICIT, BECAUSE NOTHING IN THIS FILE ACTUALLY GUARANTEES IT
+ * (found 2026-08-25).
+ *
+ * `getLiteSession()` reads `cookies()`, which is what should force this route
+ * dynamic. But `resolveReader()` calls it as
+ * `try { session = await getLiteSession(); } catch { return SIGNED_OUT; }` —
+ * swallowing the `DynamicServerError` Next throws to signal exactly that, and
+ * returning a normal signed-out answer instead.
+ *
+ * This build produced no frozen artifact for this route, so nothing is or was
+ * wrong in production here. `/api/lite/block/list` has the identical shape and
+ * was NOT so lucky: its build-time execution wrote a session-less snapshot to
+ * `.next-qa/server/app/api/lite/block/list.body`. Both escaped the active
+ * prerender manifest only because Next flags its dynamic store the instant
+ * `cookies()` is invoked, independently of whether the resulting error is later
+ * swallowed — an implementation detail of the framework, not a property of this
+ * code, and not something a per-viewer session route should be relying on.
+ *
+ * Sibling routes that get this right by construction (`lite/auth/methods`,
+ * `lite/profile`, `lite/retention`) call `getLiteSession()` OUTSIDE any
+ * try/catch, so the throw propagates and static generation aborts cleanly. The
+ * swallow here is deliberate — signed-out is a real, serveable answer for this
+ * route — so it states the requirement directly instead of inheriting it.
+ */
+export const dynamic = 'force-dynamic';
+
 const logger = getLogger('app');
 
 /**

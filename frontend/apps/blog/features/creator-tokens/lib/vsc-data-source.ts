@@ -32,7 +32,10 @@ import type {
   SetFaceInput,
   TransferTokensInput,
   WalletPositionsResult,
-  WithdrawTreasuryInput, MarketPrice } from '../types';
+  WithdrawTreasuryInput,
+  MarketPrice,
+  IndexerHealth,
+} from '../types';
 import type { CreatorTokensConfig, CreatorTokensDataSource } from './creator-tokens-data-source';
 import {
   MAX_ASK_DEADLINE_BLOCKS,
@@ -1213,6 +1216,44 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
    * client batches internally — so this is two round trips regardless of how
    * many creators come back, not two per creator.
    */
+  /**
+   * The indexer's ingest position versus the node's. Both sides are read in
+   * ONE round of parallel calls, so the two heights are as close to the same
+   * instant as two network reads can be — comparing an indexer height fetched
+   * now against a node height cached from earlier would manufacture lag that
+   * is not there.
+   *
+   * ★ NEVER REJECTS, unlike every other indexer-backed read on this class.
+   * That is deliberate and is the opposite of `readDiscovery`'s contract right
+   * above. `readDiscovery` must reject, because resolving [] would be a false
+   * claim that nobody has launched a token. This method's whole job is to
+   * annotate a screen that has ALREADY loaded, so a throw here would blank a
+   * working page over a diagnostic. `available: false` says "cannot tell",
+   * which the UI is required to render as unknown and never as healthy.
+   */
+  async readIndexerHealth(): Promise<IndexerHealth> {
+    const unknown: IndexerHealth = {
+      available: false,
+      lastUpdate: null,
+      indexerBlock: null,
+      nodeBlock: null,
+      blocksBehind: null
+    };
+    if (!this.indexer) return unknown;
+    try {
+      const [health, nodeBlock] = await Promise.all([this.indexer.health(), this.gql.getHeadBlock()]);
+      const indexerBlock = health.latestBlockHeight;
+      // Both heights, or no lag number at all. A one-sided read cannot produce
+      // a difference, and defaulting the missing side to 0 would report the
+      // entire chain height as the lag.
+      const blocksBehind =
+        indexerBlock !== null && nodeBlock !== null ? Math.max(0, nodeBlock - indexerBlock) : null;
+      return { available: true, lastUpdate: health.lastUpdate, indexerBlock, nodeBlock, blocksBehind };
+    } catch {
+      return unknown;
+    }
+  }
+
   async readDiscovery(limit = 60): Promise<CreatorSummary[]> {
     if (!this.indexer) throw new Error('VscCreatorTokensDataSource: discovery needs the Magi indexer (CREATOR_TOKENS_INDEXER_URL)');
     const rows = await this.indexer.discovery(limit);
