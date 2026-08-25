@@ -68,6 +68,11 @@
   --pc-surface: rgb(var(--surface-1));
   --pc-surface-hover: rgb(var(--surface-3));
   --pc-line: rgb(var(--line-9)); /* handoff --hairline #EDE9E2 vs #ebebeb; 99 uses */
+  /* The header rule under the byline. Owner ruling 2026-08-25: this one is BRAND,
+     not the neutral hairline. `--line-brand-10` (#c0392b) is the app's own brand
+     BORDER token — 71 uses — so this is the same red the community tag above it
+     is drawn in, by token rather than by a matching literal. */
+  --pc-line-brand: rgb(var(--line-brand-10));
   /* Card-expansion spec §5 adds a FOURTH ink step, --ink-4 #968C82, one below
      the --ink-3 this file already maps to --pc-ink-quiet. The app's --ink-N
      scale is a deduplicated inventory of colours found in the codebase, not a
@@ -568,7 +573,13 @@
 .bylineRule {
   display: block;
   height: 1px;
-  background: var(--pc-line);
+  /* ★ BRAND, NOT THE NEUTRAL HAIRLINE (owner, 2026-08-25: "the underline isnt red
+     like we chose under tag").
+     ★ NOTE FOR WHOEVER CHECKS THIS AGAINST THE REFERENCE: the owner's reference
+     screenshot draws this rule in warm grey — sampled (234, 230, 223) — not red.
+     The red is a later, explicit instruction that supersedes the image. Do not
+     "correct" it back to grey on the strength of that screenshot. */
+  background: var(--pc-line-brand);
   margin-top: 2px;
   margin-bottom: 19px;
 }
@@ -1063,30 +1074,35 @@
   margin-left: -16px;
   /* Left end cut flat and hidden by the face; right end fully rounded. */
   border-radius: 0 999px 999px 0;
-  /* ★★★ NO CHROME UNTIL THERE IS SOMETHING TO BUY (owner, 2026-08-20: "we would
-     need to have an option without the pill that's positioned the same, and the
-     option with the pill show up once there's a token. so pill outlines not
-     existing").
+  /* ★★★ THE PILL IS ALWAYS DRAWN; ONLY THE TOKEN HALF IS CONDITIONAL
+     (owner, 2026-08-25: "the pill is supposed to be there but the creator token
+     aspect empty. i just see the profile and written name").
 
-     The fill and the border move to `.idPillSplit` below, which is applied only
-     when the author has a market. Everything that decides POSITION — the 38px
-     height, the -16px underlap, the 24px left padding that clears the face —
-     stays here, on both states. That is the point: the handle must not move when
-     a token appears. A pill outline around a name with nothing to sell is chrome
-     drawn for its own sake, and it made every author look like a market.
+     ★ THIS REVERSES THE 2026-08-20 RULING, DELIBERATELY — DO NOT "FIX" IT BACK.
+     That ruling said the opposite ("pill outlines not existing" until a token
+     exists) and this rule used to implement it by moving the fill and the border
+     to `.idPillSplit`, applied only to authors with a market. The consequence, as
+     reported: since almost nobody has launched a token, almost every byline
+     rendered as a bare avatar and a name with no pill at all. The owner has now
+     asked for the container on every author, with the price/Buy half simply
+     absent until there is something to buy. If you are reading this because the
+     pills look "wrong", check with the owner before reverting — both states have
+     been asked for, four days apart.
 
-     ★ A TRANSPARENT BORDER, NOT `border: 0` — measured. With no border at all the
-     content box is 38px; with a 1px border it is 36px, and `.idHandle`'s
-     `height: 100%` resolves against that, so the handle's top edge dropped
-     exactly 1px the moment a token appeared. Caught by the probe's
-     position-identity check (y 313 -> 314), which is the whole reason that check
-     forces both states rather than trusting the two to match.
+     Everything that decides POSITION still lives here and applies identically in
+     both states — the 38px height, the -16px underlap, the 24px left padding that
+     clears the face — because the original constraint has NOT changed: the handle
+     must not move when a token appears.
 
-     Keeping the border present and merely COLOURLESS makes the box model
-     identical in both states, so `.idPillSplit` below only has to change the
-     colour. */
-  background: transparent;
-  border: 1px solid transparent;
+     ★ THE BORDER STAYS 1px IN BOTH STATES — measured, and still load-bearing.
+     With no border the content box is 38px; with a 1px border it is 36px, and
+     `.idHandle`'s `height: 100%` resolves against that, so the handle's top edge
+     dropped exactly 1px the moment a token appeared (probe caught y 313 -> 314).
+     Now that the border is present AND coloured in both states, that failure mode
+     is gone entirely rather than merely compensated for. */
+  --id-pill-line: #ebd3ce;
+  background: #faeeeb;
+  border: 1px solid var(--id-pill-line);
   border-left: 0;
   /* The face's own left half sits over the pill, so the pill's content has to
      start clear of it: 16px of overlap plus the padding the handle wants. */
@@ -1096,15 +1112,22 @@
     background-color var(--pc-t-fast) var(--pc-ease),
     border-color var(--pc-t-fast) var(--pc-ease);
 }
-/* The pill proper: only for an author with a live market. Adds the fill and the
-   hairline, changes nothing about where anything sits. The left border stays off
-   even here — the face covers where it would be, and drawing it would put a
-   hairline through the middle of the circle. */
+/* Marks the two-target state: an author who actually has a market, so the pill
+   carries a seam and a price/Buy half beside the handle.
+
+   The fill and the border moved to `.idPill` above (2026-08-25 ruling), so this
+   no longer changes the pill's own chrome — what it still does is tie the pill's
+   border to the SAME hairline the seam uses, through one custom property, so the
+   two can never drift to different greys.
+
+   ★ KEEP THIS RULE EVEN IF IT LOOKS REDUNDANT. `qa-identity-pill.mjs` resolves
+   this class name out of the stylesheet (falling back to a `.cssRules` scan) and
+   toggles it to prove the handle and face do not move between states. An empty
+   rule can be dropped by the minifier, which would take the class out of the CSS
+   module's exports and break that probe with "could not resolve the idPillSplit
+   class" — a failure that would look like a component bug and is not one. */
 .idPillSplit {
-  background: #faeeeb;
-  /* Colour only — the border's WIDTH is already there in both states, so nothing
-     reflows when a market appears. See the note above. */
-  border-color: #ebd3ce;
+  border-color: var(--id-pill-line);
 }
 .idHandle {
   display: inline-flex;
@@ -1127,7 +1150,8 @@
   width: 1px;
   align-self: stretch;
   margin: 7px 0;
-  background: #ebd3ce;
+  /* Same hairline as the pill's border — one value, see `.idPillSplit`. */
+  background: var(--id-pill-line);
   flex: none;
 }
 .idMarket {

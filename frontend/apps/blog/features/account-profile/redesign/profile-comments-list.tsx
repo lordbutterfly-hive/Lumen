@@ -4,6 +4,8 @@ import { LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import NoDataError from '@/blog/components/no-data-error';
 import ProfileCommentCard from './profile-comment-card';
+import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
+import { useRankLuminosity } from '@/blog/features/retention/hooks/use-rank-marks';
 import { useAccountEntries } from './hooks/use-account-entries';
 import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 
@@ -52,6 +54,14 @@ export default function ProfileCommentsList({
   // HTTP 200 carrying twenty real comments: both were true. The first page had
   // loaded; a later one had not.
   //
+  /* ★ ONE market read and ONE rank read for the WHOLE tab, never per card — the
+     same contract `profile-posts-list` uses. A pill that fetched its own price
+     turns this back into one GraphQL POST per card; that cost 5+ concurrent 4.2s
+     requests on a single load last time (see `IdentityPill`'s doc). Declared above
+     the early returns below so the hook order is stable across loading states. */
+  const { prices } = useTokenPriceChips(entries.map((e) => e.author));
+  const luminosity = useRankLuminosity(entries.map((e) => e.author));
+
   // Show what we have. Only surrender the whole surface when there is genuinely
   // nothing to show.
   if (isError && entries.length === 0) return <NoDataError />;
@@ -69,7 +79,12 @@ export default function ProfileCommentsList({
   return (
     <div className="flex flex-col gap-4 pt-2">
       {entries.map((entry) => (
-        <ProfileCommentCard key={`${entry.author}-${entry.permlink}`} post={entry} />
+        <ProfileCommentCard
+          key={`${entry.author}-${entry.permlink}`}
+          post={entry}
+          price={prices.get(entry.author)}
+          luminosity={luminosity.get((entry.author ?? '').toLowerCase())}
+        />
       ))}
       {/* ★ THE PAGE CAP (2026-08-13). The sentinel below stops paging by itself
           once FEED_AUTO_PAGE_CAP pages are held, so passive scrolling can no

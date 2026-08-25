@@ -580,8 +580,21 @@ export default function MediumPostCard({
     } catch {
       // A post with unparseable metadata still gets a rubric from its category.
     }
+    /* ★★★ THE FIRST TAG, NOT THE SECOND (owner, 2026-08-25: "you used the second
+       tg instead of first tag").
+
+       This read `t !== post.category`, which throws away any tag equal to the
+       category. On an ordinary non-community post the category IS the first tag,
+       so that filter skipped tags[0] every time and printed tags[1] — the second
+       tag — as the post's rubric.
+
+       The guard it was there to provide is narrower than that: a post carrying a
+       `community` id but no `community_title` never reaches the branch above, and
+       its category is a raw id like `hive-100067`, which must not be printed as a
+       "tag". Testing for that SHAPE keeps the protection and stops discarding a
+       legitimate first tag that merely happens to match the category. */
     const first = Array.isArray(tags)
-      ? tags.find((t) => typeof t === 'string' && t.trim() && t !== post.category)
+      ? tags.find((t) => typeof t === 'string' && t.trim() && !/^hive-\d+$/.test(t.trim()))
       : undefined;
     const raw = (typeof first === 'string' ? first : post.category || '').trim().replace(/^#/, '');
     if (!raw) return null;
@@ -1639,7 +1652,18 @@ export default function MediumPostCard({
         ) : null}
 
         {/* Payout chip */}
-        <DetailsCardHover post={post} decline={payoutDeclined}>
+        {/* ★★★ `ml-auto` ALSO GOES ON THE COMPONENT, NOT ONLY ON THE CHILD
+            (2026-08-25). `DetailsCardHover` has two branches — `decline` and
+            `payout <= 0` — that return their OWN div and DISCARD `children`, which
+            its own header comment warns about. Both accept `className`. So the
+            `ml-auto` on the span below is applied ONLY on the normal path, and a
+            card whose payout is exactly $0.00, or whose rewards are declined,
+            silently lost the auto margin and printed its payout hard against the
+            reblog count instead of on the card's right edge.
+            ★ THE DECLINE BRANCH IS NOT AN EDGE CASE: every Lumen lite post
+            declines rewards by design, so this was the normal rendering for the
+            product's own posts. Passing it here fixes all three paths at once. */}
+        <DetailsCardHover post={post} decline={payoutDeclined} className="ml-auto">
           <span
             className={cn(
               // Plain green figure, no chip — same reasoning as the vote group above.
