@@ -50,6 +50,7 @@ import IdentityPill from './identity-pill';
 import type { MarketPrice } from '@/blog/features/creator-tokens/types';
 import { useVisibleDiscussion } from './lib/use-visible-discussion';
 import { claimOpen, lastInputWasKeyboard, releaseOpen } from './lib/card-expansion';
+import { getPostRubric } from './lib/post-rubric';
 
 // TODO: move to i18n
 const LABELS = {
@@ -60,6 +61,30 @@ const LABELS = {
   nsfwReveal: 'Show anyway',
   nsfwHide: 'Hide again'
 };
+
+/**
+ * ★ THE FEED CARD'S "···" IS HIDDEN (owner, 2026-08-26): *"remove the ... for now.
+ * they already exist on the post page. remove for now. hide it. dont delete the
+ * code, just hide it."*
+ *
+ * The card's overflow menu duplicated actions the post page already offers, and it
+ * cost the byline: the identity pill had to stop 32px short of the header rule's
+ * right edge to leave the trigger room, while the owner's reference draws the pill
+ * flush — and the profile COMMENT cards, which never had a menu, already sat flush.
+ * Hiding the trigger closes that mismatch as a side effect.
+ *
+ * HIDDEN, NOT DELETED, and deliberately behind one flag rather than a `display:none`:
+ * a CSS-hidden trigger is still a real button that focus, `closest()` guards and the
+ * QA probes all have to keep reasoning about. Not rendering it removes the question.
+ * Everything the menu owns below — the Block item, the downvote popover and its
+ * sibling-anchor ruling, `overflowTriggerRef`, the focus-restoration handling — is
+ * untouched and comes back exactly as it was by flipping this to `true`.
+ *
+ * Typed `boolean`, not left to infer `false`: the literal type would mark every
+ * guarded branch unreachable and invite a "dead code" cleanup of the very code this
+ * flag exists to preserve.
+ */
+const SHOW_CARD_OVERFLOW_MENU: boolean = false;
 
 /**
  * Medium-style feed card for a single Hive post: a roomy text column with a
@@ -570,55 +595,11 @@ export default function MediumPostCard({
 
   const href = `/${post.category}/@${displayAuthor}/${post.permlink}`;
 
-  /*
-   * ★ THE RUBRIC SLOT (handoff_identity_pill/SPEC.md, "Rubric fallback").
-   *
-   * "If a post has no community, the rubric slot shows the post's first tag
-   * instead, capitalized, no `#` prefix. If there is no tag either, the rubric is
-   * omitted (do not leave an empty styled slot)."
-   *
-   * ★ THE FALLBACK TAG IS NOT ALLOWED TO BE THE COMMUNITY. On a community post
-   * `category` IS the community id (`hive-100067`), so a naive
-   * `tags[0] ?? category` would print a raw community id as a "tag" on exactly
-   * the posts that already have a proper community name — and it looks like a
-   * bug, because it is one. The community branch wins first, and the fallback
-   * skips any tag matching the category for the same reason.
-   *
-   * `label` is what a reader sees, `tag` is what the URL uses; keeping them
-   * apart is the same split `routeHandle`/`displayHandle` makes in creator-tokens,
-   * and for the same reason — one of them is capitalized and the other must not be.
-   */
-  const rubric = ((): { label: string; tag: string } | null => {
-    if (post.community && post.community_title) {
-      return { label: post.community_title, tag: post.community };
-    }
-    let tags: unknown = undefined;
-    try {
-      const meta = typeof post.json_metadata === 'string' ? JSON.parse(post.json_metadata) : post.json_metadata;
-      tags = (meta as { tags?: unknown } | null)?.tags;
-    } catch {
-      // A post with unparseable metadata still gets a rubric from its category.
-    }
-    /* ★★★ THE FIRST TAG, NOT THE SECOND (owner, 2026-08-25: "you used the second
-       tg instead of first tag").
-
-       This read `t !== post.category`, which throws away any tag equal to the
-       category. On an ordinary non-community post the category IS the first tag,
-       so that filter skipped tags[0] every time and printed tags[1] — the second
-       tag — as the post's rubric.
-
-       The guard it was there to provide is narrower than that: a post carrying a
-       `community` id but no `community_title` never reaches the branch above, and
-       its category is a raw id like `hive-100067`, which must not be printed as a
-       "tag". Testing for that SHAPE keeps the protection and stops discarding a
-       legitimate first tag that merely happens to match the category. */
-    const first = Array.isArray(tags)
-      ? tags.find((t) => typeof t === 'string' && t.trim() && !/^hive-\d+$/.test(t.trim()))
-      : undefined;
-    const raw = (typeof first === 'string' ? first : post.category || '').trim().replace(/^#/, '');
-    if (!raw) return null;
-    return { label: raw.charAt(0).toUpperCase() + raw.slice(1), tag: raw };
-  })();
+  /* ★ MOVED OUT (2026-08-26) to `./lib/post-rubric`, so the profile COMMENT card
+     can use the identical rule instead of having no fallback at all. The spec,
+     both owner rulings and the reason for the `hive-\d+` shape test all moved
+     with it — read them there, not here. */
+  const rubric = getPostRubric(post);
   const dek = getPostSummary(post.json_metadata, post.body);
   /**
    * ★ A NOTE IS NOT AN ARTICLE (2026-08-14, composer audit finding 7 / §9.6).
@@ -1062,7 +1043,7 @@ export default function MediumPostCard({
             when either side cannot hold a Lumen block record — same "hidden, not
             disabled" rule `useModerationStatus` used, now enforced by
             `useLumenBlock`'s own `available` answer instead. */}
-        {block.available || block.unknown ? (
+        {SHOW_CARD_OVERFLOW_MENU && (block.available || block.unknown) ? (
           // ★ THE POPOVER'S ANCHOR IS AN INVISIBLE SIBLING, NOT THE REAL
           // BUTTON (2026-08-16). The obvious composition — wrap the same
           // button in both `PopoverTrigger asChild` and `DropdownMenuTrigger

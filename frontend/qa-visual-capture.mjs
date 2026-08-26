@@ -11,10 +11,11 @@
  * ★ FULL-PAGE, NOT VIEWPORT. A clipped element three screens down is exactly the
  * class of defect numeric probes miss and a viewport screenshot also misses.
  *
- * ★ THE HOVER STATES ARE CAPTURED SEPARATELY because they cannot be seen any
- * other way: the post card's drawer is `height: 0` until a 350ms dwell elapses,
- * and the identity pill's two halves only light under a real pointer. A static
- * crawl of the site would photograph none of it.
+ * ★ THE INTERACTION STATES ARE CAPTURED SEPARATELY because they cannot be seen
+ * any other way: the post card's drawer is `height: 0` until it is OPENED BY A
+ * CLICK on the card's empty space (2026-08-25 — it used to be a 350ms hover
+ * dwell, and this note said so), and the identity pill's two halves only light
+ * under a real pointer. A static crawl of the site would photograph none of it.
  *
  * Usage:  node qa-visual-capture.mjs            (all surfaces)
  *         node qa-visual-capture.mjs feed post  (only matching slugs)

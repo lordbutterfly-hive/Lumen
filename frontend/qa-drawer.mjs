@@ -14,7 +14,7 @@
  * plus 5: the same thing via KEYBOARD focus, which `:focus-within` must cover.
  */
 import { openApp, BASE } from './qa-harness.mjs';
-import { openCardDrawer } from './qa/lib/open-drawer.mjs';
+import { closeCardDrawer, openCardDrawer } from './qa/lib/open-drawer.mjs';
 
 const { browser, page } = await openApp({ loggedIn: true });
 
@@ -63,12 +63,14 @@ for (let i = 0; i < Math.min(cardCount, 10); i++) {
   if (!b) continue;
   /* ★ CLICK, NOT HOVER (2026-08-25): the drawer opens on an empty-space click;
      hovering does nothing. */
-  if (!(await openCardDrawer(page, card))) continue;
-  await page.waitForTimeout(1600);
-  // Re-check once: §8 closes an open card on any scroll event, including the
-  // browser's own scroll-anchoring adjustments as feed images load. It re-arms
-  // itself 150ms later because the pointer is still inside, so a single reading
-  // can catch the gap. See the same note in qa-animations.mjs.
+  if (!(await openCardDrawer(page, c))) continue;
+  await page.waitForTimeout(1200);
+  /* ★ THE SCROLL RE-CHECK IS NO LONGER ABOUT SCROLL (2026-08-25). It used to
+     exist because §8 closed any open card on the first scroll event — including
+     the browser's own scroll-anchoring as feed images loaded — and re-armed
+     150ms later. Scroll no longer closes anything, so that race is gone. The
+     second read is kept only because `/api/discussion` is a live chain read and
+     the drawer can still be measuring 0 while it is in flight. */
   let h = await d.evaluate((el) => el.getBoundingClientRect().height);
   if (h <= 10) {
     await page.waitForTimeout(1200);
@@ -89,13 +91,25 @@ console.log(`   first card with a COMMENT .......... index ${idx}`);
 const card = page.locator('article').nth(idx);
 const drawer = card.locator('[data-testid="post-card-drawer"]');
 
-const closedH = await drawer.evaluate((el) => el.getBoundingClientRect().height);
-console.log(`3. drawer height, closed .............. ${closedH}px`);
+/* ★★★ STEPS 3-9 REWRITTEN FOR THE CLICK CONTRACT (2026-08-25). They asserted
+   the HOVER contract: hover to open, mouse-out to close, programmatic `.focus()`
+   to prove `:focus-within`. All three are now wrong in a way that would read as a
+   product failure — the run before this rewrite printed "DID NOT OPEN" and
+   "KEYBOARD CANNOT OPEN IT" against a drawer that works correctly. */
 
-/* ★ CLICK, NOT HOVER (2026-08-25): the drawer opens on an empty-space click;
-   hovering does nothing. */
-// The 140ms prefetch still warms on pointer entry, so warm it, then click.
+// The search loop above left this card OPEN. Close it before measuring "closed".
+await closeCardDrawer(page, card);
+await page.waitForTimeout(400);
+const closedH = await drawer.evaluate((el) => el.getBoundingClientRect().height);
+console.log(`3. drawer height, closed .............. ${closedH}px ${closedH < 10 ? '' : '*** SHOULD BE 0 ***'}`);
+
+// HOVER MUST DO NOTHING. The 140ms prefetch still warms on pointer entry, which
+// is why the click below feels instant, but no dwell and no open.
 await card.hover();
+await page.waitForTimeout(1100);
+const hoverH = await drawer.evaluate((el) => el.getBoundingClientRect().height);
+console.log(`4. hover for 1100ms ................... ${hoverH}px ${hoverH < 10 ? '(correctly did NOT open)' : '*** HOVER STILL OPENS IT ***'}`);
+
 await openCardDrawer(page, card);
 await page.waitForTimeout(1200); // fetch tail + 340ms animation
 
@@ -104,27 +118,40 @@ const openH = await drawer.evaluate((el) => el.getBoundingClientRect().height);
 const text = (await drawer.innerText().catch(() => '')).trim().replace(/\s+/g, ' ').slice(0, 150);
 const label = await drawer.locator('text=/top comment/i').count();
 
-console.log(`4. /api/discussion calls after hover .. ${afterHover}  ${afterHover === 1 ? '(exactly one)' : ''}`);
-console.log(`5. drawer height, hovered ............. ${openH}px  ${openH > closedH + 10 ? 'OPENED' : '*** DID NOT OPEN ***'}`);
-console.log(`6. TOP COMMENT label present ......... ${label > 0 ? 'yes' : 'no'}`);
-console.log(`7. drawer text ........................ ${text || '(empty)'}`);
+console.log(`5. /api/discussion calls .............. ${afterHover}  ${afterHover === 1 ? '(exactly one)' : ''}`);
+console.log(`6. drawer height after CLICK .......... ${openH}px  ${openH > closedH + 10 ? 'OPENED' : '*** DID NOT OPEN ***'}`);
+console.log(`7. TOP COMMENT label present ......... ${label > 0 ? 'yes' : 'no'}`);
+console.log(`8. drawer text ........................ ${text || '(empty)'}`);
 
-// hover away, then prove KEYBOARD focus opens it too (:focus-within)
+/* ★ MOVING THE POINTER AWAY MUST NOT CLOSE IT ANY MORE. Under hover-to-open a
+   mouse-out meant "done reading"; under click-to-open the reader ASKED for this,
+   and taking it away because the mouse wandered is the same mistake hover was. */
 await page.mouse.move(0, 0);
 await page.waitForTimeout(900);
-const reclosedH = await drawer.evaluate((el) => el.getBoundingClientRect().height);
-console.log(`8. drawer height after mouse-out ...... ${reclosedH}px ${reclosedH < 10 ? '(closed again)' : ''}`);
+const afterOutH = await drawer.evaluate((el) => el.getBoundingClientRect().height);
+console.log(`9. height after mouse-out ............. ${afterOutH}px ${afterOutH > 10 ? '(correctly STAYS open)' : '*** CLOSED ON MOUSE-OUT ***'}`);
 
-await card.locator('a,button').first().focus();
-await page.waitForTimeout(1800);
+/* ★ KEYBOARD, WITH A REAL TAB. The old check called `.focus()` directly, which is
+   programmatic focus — indistinguishable from the focus Radix restores when a
+   menu closes, and deliberately NOT treated as "the reader navigated here". Only
+   a genuine navigation key arms the modality flag, so the probe has to press one. */
+await closeCardDrawer(page, card);
+await page.waitForTimeout(400);
+await page.evaluate(() => document.body.focus());
+let landed = false;
+for (let i = 0; i < 30 && !landed; i++) {
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(110);
+  landed = await card.evaluate((el) => el.contains(document.activeElement));
+}
+await page.waitForTimeout(700);
 const focusH = await drawer.evaluate((el) => el.getBoundingClientRect().height);
-console.log(`9. drawer height on keyboard focus .... ${focusH}px ${focusH > 10 ? 'OPENED (:focus-within works)' : '*** KEYBOARD CANNOT OPEN IT ***'}`);
+console.log(`10. height after real Tab into card ... ${focusH}px ${focusH > 10 ? 'OPENED (keyboard path intact)' : '*** KEYBOARD CANNOT OPEN IT ***'}`);
 
-// the drawer must stay in the DOM while closed, for the a11y tree / tab order
 await page.mouse.move(0, 0);
 await page.waitForTimeout(700);
 const stillThere = await drawer.count();
-console.log(`10. drawer still in DOM when closed ... ${stillThere > 0 ? 'yes (a11y tree intact)' : '*** REMOVED ***'}`);
+console.log(`11. drawer still in DOM when closed ... ${stillThere > 0 ? 'yes (a11y tree intact)' : '*** REMOVED ***'}`);
 
 await page.screenshot({ path: '/mnt/o/LUMEN-DOCS/lora-spec/shots/drawer-open.png' });
 await openCardDrawer(page, card);

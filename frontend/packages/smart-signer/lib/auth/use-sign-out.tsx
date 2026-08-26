@@ -54,17 +54,45 @@ async function signOutLite(everywhere: boolean): Promise<User> {
 }
 
 async function signOut(user: User, everywhere: boolean): Promise<User> {
-  const { authenticateOnBackend } = user;
-  // Checked BEFORE authenticateOnBackend: a lite session must always reach its
-  // own destroy route, whatever else is configured.
+  // Checked FIRST: a lite session must always reach its own destroy route,
+  // whatever else is configured.
   if (user.account_tier === 'lite') {
     return signOutLite(everywhere);
   }
-  if (authenticateOnBackend) {
-    return signOutBackend();
-  } else {
-    return defaultUser;
-  }
+  /*
+   * ★★★ ALWAYS DESTROY THE SERVER SESSION — DO NOT ASK `authenticateOnBackend`
+   * FIRST (2026-08-25).
+   *
+   * This used to be `if (authenticateOnBackend) signOutBackend(); else return
+   * defaultUser;`, and that `else` is a silent, one-way failure: the user is
+   * shown as signed out, their local state is cleared, and the `app_session`
+   * cookie STAYS VALID. Anything reading it server-side still sees them signed
+   * in. "I logged out" is a promise; a branch that quietly does not keep it is
+   * the worst shape a session bug can take.
+   *
+   * The flag is the wrong question anyway. It records how the user SIGNED IN —
+   * whether the login round-tripped through `/api/auth/login`. Signing out is
+   * about what exists NOW, and a cookie can be present for reasons this flag
+   * never saw: a login path that defaults it to false (both
+   * `components/auth/form.tsx` and `google-oauth-redirect-handler.tsx` default
+   * to `false`, fed by `LOGIN_AUTHENTICATE_ON_BACKEND`, which is ABSENT from
+   * `.env.local` — so the value is false), a cookie issued by an older build, or
+   * a session restored from a device where the flag was set differently.
+   *
+   * Calling the route unconditionally is safe in the direction that matters:
+   * `logout.ts` "unconditionally destroys whatever is here" (its own comment) and
+   * clears `account_info` besides, so destroying a session that does not exist
+   * costs one request and changes nothing. Not destroying one that DOES exist
+   * leaves a live credential behind. Fail towards ending the session.
+   *
+   * ★ Found while switching test accounts: the UI reported a clean sign-out and
+   * the very next request was still authenticated. That instance was a forged
+   * QA cookie carrying `authenticateOnBackend: false`, NOT a real login — the
+   * Keychain path hardcodes `true` (`keychain-signin.tsx:87`) and does log out
+   * correctly. So this is a latent footgun rather than a live regression; it is
+   * fixed because the branch cannot justify existing, not because users hit it.
+   */
+  return signOutBackend();
 }
 
 /**

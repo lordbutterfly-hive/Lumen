@@ -13,6 +13,7 @@ import PostCardCommentTooltip from '@/blog/features/list-of-posts/post-card-comm
 import DetailsCardHover from '@/blog/features/list-of-posts/details-card-hover';
 import IdentityPill from '@/blog/features/discovery-feed/identity-pill';
 import cardStyles from '@/blog/features/discovery-feed/post-card.module.css';
+import { getPostRubric } from '@/blog/features/discovery-feed/lib/post-rubric';
 import type { MarketPrice } from '@/blog/features/creator-tokens/types';
 
 /**
@@ -43,6 +44,21 @@ export default function ProfileCommentCard({
   const body = getPostSummary(post.json_metadata, post.body);
   const payoutDeclined = parseFloat(post.max_accepted_payout) === 0;
 
+  /* ★★ THE TAG FALLBACK (owner, 2026-08-26). This card printed the rubric ONLY
+     when `community && community_title`, so a reply under a post with no
+     community rendered an EMPTY styled slot — 5 of @gtg's 20 most recent
+     comments, raised twice before it was actioned. The feed card has had a
+     fallback all along; the two just never shared it. Now they do:
+     `getPostRubric` is the single implementation of the rule, including the
+     `hive-\d+` shape test that stops a raw community id printing as a tag.
+
+     A reply carries no `tags` of its own, so this resolves through `category` —
+     which on a comment is the ROOT post's, i.e. exactly "the topic this reply
+     sits under". Measured before building it: all 5 of those comments have a
+     real category (`pypt`, `v4vapp`, `blog`, `polish`, `v4vapp`), none a
+     `hive-\d+` id, so every previously-empty slot fills and nothing is invented. */
+  const rubric = getPostRubric(post);
+
   return (
     /* ★ THE POST CARD'S OWN SHELL (owner ruling 2026-08-25: the profile cards
        "have to be the same as feed"). This was `rounded-panel border p-[22px]`,
@@ -59,13 +75,13 @@ export default function ProfileCommentCard({
           The pill names the COMMENT'S AUTHOR, which is what the posts tab beside
           this one already does — the pill is "who made this", on every surface. */}
       <div className="flex flex-nowrap items-center gap-2 text-body-sm text-ink-action">
-        {post.community && post.community_title ? (
+        {rubric ? (
           <Link
-            href={`/topics/${post.community}`}
+            href={`/topics/${rubric.tag}`}
             className={cn(cardStyles.rubric, 'min-w-0 truncate')}
             data-testid="profile-comment-rubric"
           >
-            {post.community_title}
+            {rubric.label}
           </Link>
         ) : null}
         <span className="ml-auto flex shrink-0 items-center gap-2">

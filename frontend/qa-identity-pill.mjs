@@ -93,23 +93,34 @@ check('§N1 pill left edge is flat', g.radiusTopLeft, 0, 0.5);
 checkTrue('§N1 pill right edge is fully rounded', (g.radiusTopRight ?? 0) >= 19,
   `${px(g.radiusTopRight)} on a 38px pill`);
 check('§N1 no left border (the face covers it)', g.borderLeft, 0, 0.5);
-/* ★★ THE PILL'S CHROME IS CONDITIONAL (owner, 2026-08-20): no outline until the
-   author has a token. So the fill/border assertions depend on which state this
-   card is in, and the handle-only state asserts their ABSENCE rather than
-   skipping — "no pill outline" is the requirement, not the default. */
-if (g.hasMarketHalf) {
-  checkTrue('§ colours — pill fill #FAEEEB', g.pillBg === 'rgb(250, 238, 235)', g.pillBg);
-  checkTrue('§ colours — pill border #EBD3CE', g.pillBorderColor === 'rgb(235, 211, 206)', g.pillBorderColor);
-} else {
-  checkTrue('§ no market: pill has NO fill', /rgba\(0, 0, 0, 0\)|transparent/.test(g.pillBg || ''), g.pillBg);
-  /* ★ THE REQUIREMENT IS "no outline VISIBLE", not "no border box". The border
-     keeps its 1px WIDTH in both states deliberately — dropping the width shrinks
-     the content box and drags the handle down 1px when a token appears, which is
-     the position shift this file caught. So what must be absent is the COLOUR. */
-  checkTrue('§ no market: pill outline is invisible',
-    /rgba\(0, 0, 0, 0\)|transparent/.test(g.pillBorderColor || ''),
-    `${g.pillBorderColor} at ${g.pillBorderWidth}px`);
-}
+/* ★★★ THE PILL'S CHROME IS UNCONDITIONAL — AND THIS FILE USED TO ASSERT THE
+   OPPOSITE.
+
+   It encoded the owner ruling of 2026-08-20 ("pill outlines not existing" until
+   the author has a token) and asserted the ABSENCE of fill and border on a
+   handle-only pill. That ruling was REVERSED on 2026-08-25, after the owner saw
+   what it actually looked like on a network where only 13 accounts have a
+   market: *"the pill is missing from everyone... i just see the profile and
+   written name."* The chrome moved from `.idPillSplit` to `.idPill`, and
+   `post-card.module.css` (~line 1078) carries both quotes and both dates so the
+   reversal is not "corrected" back by someone reading only the older one.
+
+   ★ This probe was left behind by that move and had been failing 2/2 ever since,
+   reporting the NEW, CORRECT colours as defects. A red probe that contradicts a
+   recorded ruling is worse than no probe: the obvious way to make it green is to
+   revert the CSS, which is exactly what the CSS comment begs nobody to do.
+
+   So both states now assert the SAME chrome. What legitimately still differs
+   between them is the market half and the focusable count, which are checked on
+   their own below. The 1px border WIDTH is present in both states for the reason
+   the old comment gave and that reason still holds: `.idHandle`'s `height:100%`
+   resolves against the content box, so dropping the width would drag the handle
+   1px when a token appears. */
+checkTrue('§ colours — pill fill #FAEEEB (both states)', g.pillBg === 'rgb(250, 238, 235)', g.pillBg);
+checkTrue('§ colours — pill border #EBD3CE (both states)', g.pillBorderColor === 'rgb(235, 211, 206)',
+  `${g.pillBorderColor} at ${g.pillBorderWidth}px`);
+console.log(`  chrome state               ${g.hasMarketHalf ? 'split pill (author HAS a market)' : 'handle-only pill (no market) — chrome still drawn, per the 2026-08-25 reversal'}`);
+
 checkTrue('§ type — handle 14.5px / 600', g.handleSize === '14.5px' && g.handleWeight === '600',
   `${g.handleSize}/${g.handleWeight}`);
 

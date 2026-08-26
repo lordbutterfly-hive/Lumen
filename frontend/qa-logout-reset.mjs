@@ -25,6 +25,18 @@
  * ripped out — and (c) reports how many of the compared posts can actually re-roll,
  * so the result is never read as stronger than the evidence.
  *
+ * ★★★ READ THIS BEFORE TREATING "NOT PROVEN" AS A FAILURE (2026-08-25).
+ *
+ * This file's thesis — that a pick RE-ROLLS once the session cache is cleared —
+ * is largely obsolete, and the product is what changed, not this probe. The pick
+ * used to be random among ties; `lib/top-comment.ts` now SCORES it and breaks
+ * ties on raw votes, and that file says so in its own words: "THIS MAKES THE PICK
+ * DETERMINISTIC ... with a formula there is nothing to re-roll." So a healthy run
+ * reaches "NOT PROVEN — nothing re-rolled", and that is the expected result.
+ *
+ * What still has value here is the CONTROL: the cache must survive a remount
+ * while signed in. That half is a real assertion and it passes.
+ *
  * It also runs the same remount WITHOUT signing out first, as a control: if the
  * cache does not survive an ordinary remount, nothing after it means anything.
  */
@@ -67,7 +79,26 @@ async function readPicks() {
       await card.hover({ timeout: 5000 });
       await openCardDrawer(page, card);
     } catch { continue; }
-    await page.waitForTimeout(700);
+    /* ★★★ WAIT FOR CONTENT, NOT JUST FOR OPEN (2026-08-25). `data-open` flips the
+       moment the drawer starts expanding; the comment inside arrives later,
+       because `/api/discussion` is a live chain read (4.5-6.4s cold, per the same
+       note in qa-comment-jump). A fixed 700ms sampled some cards before the
+       comment existed, so `[class*="commentMeta"]` was null, the meta line was NOT
+       stripped, and the captured "body" silently kept the RELATIVE TIMESTAMP —
+       which then differed between two reads minutes apart and was scored as the
+       pick having changed. That is what produced `body-only` diffs on tie=1
+       cards, where the pick is fully deterministic and cannot change.
+       Poll for the meta element instead, then sample. */
+    let ready = false;
+    for (let w = 0; w < 60 && !ready; w++) {
+      ready = await page.evaluate((idx) => {
+        const c = document.querySelectorAll('article')[idx];
+        const d = c && c.querySelector('[data-testid="post-card-drawer"]');
+        return !!(d && d.getBoundingClientRect().height > 10 && d.querySelector('[class*="commentMeta"]'));
+      }, i);
+      if (!ready) await page.waitForTimeout(200);
+    }
+    if (!ready) continue;
     const p = await page.evaluate((idx) => {
       const c = document.querySelectorAll('article')[idx];
       if (!c) return null;
@@ -126,9 +157,29 @@ async function threadState(permalinks) {
         const comments = Object.keys(disc).filter((k) => k !== rootKey);
         if (!comments.length) { out[href] = { tie: 0, sig: '' }; continue; }
         const max = Math.max(...comments.map((k) => counts.get(k) ?? 0));
+        /* ★★★ THE SIGNATURE MUST INCLUDE VOTES (2026-08-25). It was
+           `comments.sort().join('|')` — the SET of comment permalinks and nothing
+           else — so a card only counted as "drifted" when a comment was ADDED or
+           REMOVED.
+
+           But the pick is no longer random-among-ties: `lib/top-comment.ts`
+           scores it and states "TIES BREAK ON RAW VOTES". A single vote landing
+           between the two reads can therefore change the winner while this
+           signature stays byte-identical, so the card is NOT filtered as drift
+           and its legitimate change is scored as a CONTROL FAILURE. That is what
+           made this file report `VERDICT: INVALID — the cache did not even
+           survive the control remount` on a live chain, twice, against a product
+           that was behaving correctly.
+
+           Including each comment's net vote count makes the filter match what the
+           pick actually depends on. */
+        const netVotes = (e) =>
+          Array.isArray(e?.active_votes)
+            ? e.active_votes.reduce((n, v) => n + (Number(v?.rshares) > 0 ? 1 : 0), 0)
+            : 0;
         out[href] = {
           tie: comments.filter((k) => (counts.get(k) ?? 0) === max).length,
-          sig: comments.sort().join('|')
+          sig: comments.sort().map((k) => `${k}:${netVotes(disc[k])}`).join('|')
         };
       } catch { out[href] = { tie: 0, sig: 'ERROR' }; }
     }

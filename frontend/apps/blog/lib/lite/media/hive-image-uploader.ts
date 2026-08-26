@@ -82,8 +82,41 @@ export const hiveImageUploader: ImageUploader = {
 export function installDevImageUploader(): boolean {
   if (!liteConfig.publisherPostingWif) return false;
   if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'LITE_PUBLISHER_POSTING_WIF must not be used in production — inject a KMS-backed uploader via setImageUploader'
+    /* ★★★ HONOURS THE SAME OPT-IN AS THE PUBLISHER (2026-08-25, owner-reported:
+       lite image uploads were 503 on every production build).
+
+       This used to throw unconditionally in production — "inject a KMS-backed
+       uploader" — with no escape hatch at all. Nothing in this repo injects one,
+       so the practical effect was that `/api/lite/upload` answered 503 forever
+       and **keyless accounts could not attach an image at all**. The keyed
+       accounts' new `/api/upload` proxy hit the same wall.
+
+       That was an INCONSISTENCY, not a policy. `installWifBroadcaster`
+       (`lib/lite/publisher/hive-broadcaster.ts:306-324`) faces the identical
+       question about the identical key and answers it with an explicit,
+       loudly-warned opt-in: `LITE_PUBLISHER_ALLOW_WIF_IN_PROD=yes`. The operator
+       has already set that flag. Uploading an image is also strictly LESS
+       consequential than what that flag already permits — the publisher writes
+       permanent posts to a public ledger with this key; this puts a picture on
+       Hive's free, shared image CDN.
+
+       So: same flag, same refusal when it is absent, same warning when it is
+       present. One decision about one key, not two subsystems disagreeing. */
+    if (process.env.LITE_PUBLISHER_ALLOW_WIF_IN_PROD !== 'yes') {
+      throw new Error(
+        'Refusing to arm the WIF image uploader in production. Nothing in this repo ' +
+          'injects a KMS-backed uploader, so leaving this unset means every image upload ' +
+          'answers 503 and no account — lite or keyed — can attach a picture. Set ' +
+          'LITE_PUBLISHER_ALLOW_WIF_IN_PROD=yes to run on the raw posting key (the same ' +
+          'flag the publisher uses, revocable on Hive with one account_update), or inject ' +
+          'a real signer via setImageUploader.'
+      );
+    }
+    logger.warn(
+      'lite image uploader: ARMED IN PRODUCTION WITH A RAW POSTING WIF ' +
+        '(LITE_PUBLISHER_ALLOW_WIF_IN_PROD=yes). Images are signed by, and attributed to, ' +
+        'the publishing account. Replace with a KMS-backed uploader via setImageUploader, ' +
+        'and rotate the publisher posting authority if this key is ever exposed.'
     );
   }
   setImageUploader(hiveImageUploader);

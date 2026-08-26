@@ -5,13 +5,14 @@ import { UseFormReturn } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { createAsset, createPermlink } from "@transaction/lib/utils";
+import { getPostHeader } from "@transaction/lib/bridge-api";
 import { withBasePath } from "@ui/lib/path-utils";
 import { getLogger } from "@ui/lib/logging";
 import { handleError } from "@ui/lib/handle-error";
 import { toast } from "@ui/components/hooks/use-toast";
 import { Entry } from "@hive/common-hiveio-packages/wax";
 import { parseTags } from "@/blog/features/post-editor/lib/utils";
-import { usePostMutation } from "@/blog/features/post-editor/hooks/use-post-mutation";
+import { markAttemptAbandoned, usePostMutation } from "@/blog/features/post-editor/hooks/use-post-mutation";
 import { AccountFormValues } from "@/blog/features/post-editor/types";
 import { useUserClient } from "@smart-signer/lib/auth/use-user-client";
 import { createLitePost } from "@/blog/lib/lite/client/lite-write";
@@ -105,6 +106,24 @@ export function usePostFormActions({
     },
     [form, setPreviewContent]
   );
+
+  /**
+   * ★★★ THE ATTEMPT WE STOPPED WAITING FOR (2026-08-25).
+   *
+   * Giving up on the wallet after 60s does not cancel anything — Keychain has no
+   * abort, so the signature may still be approved minutes later and the post may
+   * still land. The draft is deliberately kept so nothing is lost, which means
+   * the reader's natural next move is to press Submit again.
+   *
+   * That was a duplicate-post generator. `createPermlink`
+   * (packages/transaction/lib/utils.ts:38-46) asks the chain whether the slug is
+   * taken and, if it is, prefixes random noise to make a NEW one — so a second
+   * submit after a late-landing first attempt does not collide and get rejected,
+   * it cheerfully publishes the same article twice under two permlinks.
+   *
+   * So we remember what we abandoned, and check it before broadcasting again.
+   */
+  const abandonedAttemptRef = useRef<{ author: string; permlink: string; category: string } | null>(null);
 
   // Auto-save debounce
   useEffect(() => {
@@ -321,6 +340,44 @@ export function usePostFormActions({
       return;
     }
 
+    /* ★★★ DID THE ONE WE GAVE UP ON ACTUALLY LAND? (2026-08-25)
+       If a previous submit timed out and its transaction was approved late, the
+       post is already on chain. Publishing again would not overwrite it — see
+       `abandonedAttemptRef` — it would make a second copy. One chain read is a
+       cheap price for never doing that. A read that FAILS is treated as "no",
+       deliberately: the network being unavailable must not block a legitimate
+       retry, and the worst case then is the behaviour that existed before. */
+    const abandoned = abandonedAttemptRef.current;
+    if (abandoned && !editMode) {
+      let landed = false;
+      try {
+        const head = await getPostHeader(abandoned.author, abandoned.permlink);
+        landed = !!head && !!head.category;
+      } catch {
+        landed = false;
+      }
+      if (landed) {
+        abandonedAttemptRef.current = null;
+        hasSubmittedRef.current = true;
+        stopAutoSave();
+        removePost();
+        form.reset(defaultValues);
+        setPreviewContent(undefined);
+        setIsSubmitting(false);
+        if (btnRef.current) btnRef.current.disabled = false;
+        toast({
+          title: "That post already published",
+          description:
+            "The attempt we stopped waiting for went through after all, so we have not posted it a second time. Taking you to it now.",
+          variant: "success"
+        });
+        await router.push(withBasePath(`/${abandoned.category}/@${abandoned.author}/${abandoned.permlink}`), undefined);
+        return;
+      }
+      // It never landed, so this really is a fresh attempt.
+      abandonedAttemptRef.current = null;
+    }
+
     /* ★ CONCURRENT, NOT SEQUENTIAL (2026-08-25). These two are independent:
        `createAsset` only needs the chain instance, `createPermlink` makes a
        bridge-API round trip to check the permlink is unused. They were awaited
@@ -440,6 +497,21 @@ export function usePostFormActions({
              released. The abandoned attempt is still out there — see the toast
              copy, which says so rather than claiming the post failed. */
           postMutation.reset();
+          /* ★ TELL THE MUTATION'S OWN HANDLERS TOO (2026-08-26). `reset()` frees
+             the UI, and `abandonedAttemptRef` below stops a retry duplicating the
+             post — but the in-flight mutation is still alive and its global
+             `onSuccess`/`onError` will fire whenever the wallet is finally
+             answered. Unregistered, that surfaced a "Post submitted successfully"
+             toast, minutes later, to someone we had told we stopped waiting.
+             Registering the attempt lets those handlers keep doing the cache work
+             (which is correct — the post really did land) while saying something
+             that matches what the reader was last told. */
+          markAttemptAbandoned(username, postParams.permlink);
+          abandonedAttemptRef.current = {
+            author: username,
+            permlink: postParams.permlink,
+            category: postParams.category
+          };
           // Deliberately NOT `handleError`: this is not a failure we can explain
           // as one, and the draft must survive it.
           toast({

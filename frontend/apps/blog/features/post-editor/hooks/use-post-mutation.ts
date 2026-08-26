@@ -24,6 +24,47 @@ const logger = getLogger('app');
  * @export
  * @return {*}
  */
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ATTEMPTS THE EDITOR STOPPED WAITING FOR.
+ *
+ * ★★★ WHY THIS EXISTS (2026-08-26). The long-form editor gives up on the wallet
+ * after `SIGN_TIMEOUT_MS` and hands the reader their draft back. Giving up does
+ * NOT cancel anything — Keychain has no abort — so the signature can be approved
+ * minutes later and this mutation settles long after the editor moved on.
+ *
+ * When that happened, the handlers below fired in full: a haptic buzz and a
+ * "Post submitted successfully" toast, out of nowhere, to someone who had been
+ * told we stopped waiting and might be halfway through retyping. The CACHE work
+ * was right — the post genuinely landed — but the announcement was not, because
+ * it is worded for someone who just pressed the button.
+ *
+ * So the editor registers what it abandoned, and the handlers below check the
+ * registry before they speak. They still do every cache invalidation, because
+ * those are true whoever is watching; only the user-facing half changes.
+ *
+ * Keyed by `author/permlink` rather than by mutation identity on purpose: the
+ * registering code and the settling callback are separated by minutes and a
+ * `reset()`, and the permlink is the one thing that survives both.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+const abandonedAttempts = new Set<string>();
+
+const attemptKey = (author: string, permlink: string) => `${author}/${permlink}`;
+
+/** Called by the editor when it stops waiting for the wallet. */
+export function markAttemptAbandoned(author: string, permlink: string): void {
+  abandonedAttempts.add(attemptKey(author, permlink));
+}
+
+/** True once, then forgotten — a late settle is reported at most one time. */
+function claimAbandoned(author: string, permlink: string): boolean {
+  const key = attemptKey(author, permlink);
+  if (!abandonedAttempts.has(key)) return false;
+  abandonedAttempts.delete(key);
+  return true;
+}
+
 export function usePostMutation() {
   const queryClient = useQueryClient();
   const { user } = useUserClient();
@@ -230,15 +271,30 @@ export function usePostMutation() {
     },
 
     onSuccess: (data) => {
-      // Two taps around a pause: the "it left the device" shape.
-      haptic('publish');
       const { permlink } = data;
       const { username } = user;
-      toast({
-        title: 'Post submitted successfully',
-        description: 'Your post has been submitted',
-        variant: 'success'
-      });
+      /* ★ AN ATTEMPT THE EDITOR GAVE UP ON IS NOT A BUTTON PRESS. See
+         `abandonedAttempts` above. The cache work below still runs — the post
+         really did land — but the reader hears something that matches what they
+         were last told, instead of a success toast for an action they finished
+         with minutes ago. */
+      const wasAbandoned = claimAbandoned(username ?? '', permlink);
+      if (wasAbandoned) {
+        toast({
+          title: 'That post published after all',
+          description:
+            'The attempt we stopped waiting for went through. It is live now — the draft still in your editor is a copy, so discard it rather than posting it again.',
+          variant: 'success'
+        });
+      } else {
+        // Two taps around a pause: the "it left the device" shape.
+        haptic('publish');
+        toast({
+          title: 'Post submitted successfully',
+          description: 'Your post has been submitted',
+          variant: 'success'
+        });
+      }
       // ★ THE RETENTION LEDGER, FOR CHAIN ACCOUNTS. `recordRetentionAct` used to be
       // called from `lib/lite/client/lite-write.ts` and nowhere else, so the streak
       // toasts and the weekly recap were dark for every Hive user. Guarded on the tier
@@ -307,6 +363,21 @@ export function usePostMutation() {
       if (context && !variables.editMode) {
         queryClient.removeQueries({ queryKey: ['postData', context.username, context.permlink, context.username] });
         removeStorageItem(`shadow-post-${context.username}-${context.permlink}`);
+      }
+      /* ★ AN ABANDONED ATTEMPT HAS ALREADY BEEN REPORTED, ONCE, HONESTLY. The
+         editor showed "we stopped waiting" at the 60s mark and handed the draft
+         back. If that same attempt now fails, surfacing a second error for it
+         tells the reader something broke that they already dealt with — and
+         `handleError` is a toast, so it would land on whatever they are doing
+         now. The cleanup above still runs; only the second announcement is
+         dropped. */
+      const abandoned = claimAbandoned(
+        (context?.username as string | undefined) ?? user?.username ?? '',
+        (context?.permlink as string | undefined) ?? variables.permlink
+      );
+      if (abandoned) {
+        logger.info('post mutation failed after the editor stopped waiting — already reported to the user');
+        return;
       }
       handleError(error, {
         method: 'usePostMutation',
