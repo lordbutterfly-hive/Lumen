@@ -151,6 +151,13 @@ export interface LiveTokenMarket {
 
 export interface LiveHolderPosition {
   tokens: number;
+  /**
+   * The maturing half of `tokens` — the only half a curve sell owes exit tax on
+   * (core/matured.go:6-13). Optional; omitted means "treat it all as maturing",
+   * which overstates the tax rather than understating it. See
+   * `HolderPosition.tokensMaturing`.
+   */
+  maturingTokens?: number;
   valueUsd: number;
   /** NET of this position's own hold-time exit tax — "the least you're guaranteed back". The gross overstates a fresh holder by up to 20%. */
   floorValueUsd: number;
@@ -258,6 +265,11 @@ export function adaptPosition(pos: ChainHolderPosition | null, spotPriceUsd: num
   if (!pos || pos.tokensHeld <= 0) return null;
   return {
     tokens: pos.tokensHeld,
+    // ★ 2026-08-27: without this the LOCAL sell preview taxes the whole position
+    // and understates a mixed holder's payout by up to 17.1% (measured: 100
+    // tokens from 40 maturing / 60 matured at supply 1000, h=0). `quoteSell` on
+    // the chain path was fixed the same day; this is the preview half.
+    maturingTokens: pos.tokensMaturing,
     valueUsd: pos.tokensHeld * spotPriceUsd,
     floorValueUsd: usdFromHbd(pos.floorValueHbd),
     // heldBlocks is already the hold clock as of the read's block — an UNSET

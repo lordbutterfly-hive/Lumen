@@ -198,8 +198,29 @@ export interface Market {
 export interface HolderPosition {
   creator: string;
   holder: string;
-  /** core/keys.go kBal — INTEGER tokens held (escrowed tokens excluded — I3, they left the balance until the escrow resolves). Never baseUnitsToHuman'd. */
+  /**
+   * The WHOLE position — core/matured.go:145 `totalBalance`, i.e. the maturing
+   * (`kBal`) plus the matured (`kMatured`) bucket. INTEGER tokens; escrowed
+   * tokens excluded (I3 — they leave the balance until the escrow resolves).
+   * Never baseUnitsToHuman'd.
+   *
+   * ★ DOC CORRECTED 2026-08-27: this said "core/keys.go kBal" and had done since
+   * before the F-C5 fix made `readHolderPosition` read both buckets. A reader
+   * trusting the old text would conclude the matured half was missing here — it
+   * is not, and `quoteSell` was fixed the same day to match.
+   */
   tokensHeld: number;
+  /**
+   * The MATURING half of `tokensHeld` (core/matured.go's `kBal` bucket) — the
+   * only half a curve sell owes exit tax on, because a matured token's rate is
+   * 0 by definition (core/matured.go:6-13).
+   *
+   * OPTIONAL, and omitting it is the CONSERVATIVE reading: every consumer then
+   * treats the whole position as maturing, which overstates the tax rather than
+   * understating it. The mock data source does not model the two buckets at all,
+   * so it correctly omits this.
+   */
+  tokensMaturing?: number;
   /**
    * The TAXED NET refund value in HBD — refund.go's refundPayout (the exact
    * pro-rata GROSS slice, floor(reserve*tokensHeld/supply)) MINUS the K2

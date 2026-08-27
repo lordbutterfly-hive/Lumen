@@ -7,7 +7,7 @@ import { useLiveStudio, type LiveStudio } from '../../live/use-live-studio';
 import { MarketLoading, MarketReadFailed, MarketSessionUnavailable, MarketUnavailable } from '../../live/market-states';
 import type { Ask } from '../../types';
 import { pctLabel, pctValue, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
-import { sellQuote, serviceQuote, MIN_NET_DEFAULT_TOLERANCE_BPS } from '../../market/curve';
+import { sellQuote, serviceQuote, serviceSupplyShareProblem, MIN_NET_DEFAULT_TOLERANCE_BPS } from '../../market/curve';
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
 import { MAX_HASH_LEN } from '../../lib/vsc/payload-contract';
@@ -58,13 +58,22 @@ const Stat: FC<{ label: string; value: string; sub?: string; green?: boolean }> 
 // field back with NO message, so a creator who typed a legitimate new price saw
 // it silently undone and could not tell that apart from a broken control.
 // `onFailure` lets the parent say why in the banner it already renders.
+// ★ THE CREATE-TIME SUPPLY-CAP GUARD IS WORTHLESS WITHOUT THIS ONE (2026-08-27).
+// NewOfferingRow refuses a service priced at an unreachable share of total
+// supply, and this control edits the price of an offering that already exists —
+// so post at $5, come back, type $500, and the guard is behind you. The chain
+// does not backstop it (nothing on chain relates an offering price to kCap), so
+// an unguarded edit path IS the whole vulnerability. `problemOf` is checked
+// before the broadcast and reverts exactly like a locally-invalid amount.
 const PriceInput: FC<{
   value: number;
   onCommit: (usd: number) => Promise<void>;
   /** F7 fix: this type carried no way to disable the input at all — see the callers below, which now pass studio.isBusy. */
   disabled?: boolean;
   onFailure?: (message: string) => void;
-}> = ({ value, onCommit, disabled, onFailure }) => {
+  /** Returns a refusal sentence for a candidate price, or null to allow it. Never fires on a value it cannot judge. */
+  problemOf?: (usd: number) => string | null;
+}> = ({ value, onCommit, disabled, onFailure, problemOf }) => {
   const [txt, setTxt] = useState(String(value));
   useEffect(() => setTxt(String(value)), [value]);
   return (
@@ -79,6 +88,13 @@ const PriceInput: FC<{
         if (!Number.isFinite(n) || n <= 0) {
           setTxt(String(value));
           onFailure?.('Enter a price in dollars, greater than zero.');
+          return;
+        }
+        // Refused locally, so nothing is signed and no RC is spent finding out.
+        const problem = problemOf?.(n) ?? null;
+        if (problem !== null) {
+          setTxt(String(value));
+          onFailure?.(problem);
           return;
         }
         onFailure?.('');
@@ -96,7 +112,7 @@ const PriceInput: FC<{
           onFailure?.(`The price stayed at $${value}. ${writeFailureMessage(error, 'The chain refused the change. A price may only move 2x per 7 days.')}`);
         }
       }}
-      className="ml-1 w-[70px] border-0 text-[15px] leading-[24px] font-bold tabular-nums text-ink-2 outline-none disabled:opacity-60"
+      className="ml-1 w-[70px] border-0 text-[15px] leading-[24px] font-bold tabular-nums text-ink-2 outline-none focus-visible:outline-none disabled:opacity-60"
     />
   );
 };
@@ -148,7 +164,7 @@ const TitleInput: FC<{
           onFailure?.(`The name stayed "${value}". ${writeFailureMessage(error, 'The chain refused the rename.')}`);
         }
       }}
-      className="w-full truncate border-0 bg-transparent text-[14px] leading-[22px] font-semibold text-ink-2 outline-none focus:underline disabled:opacity-60"
+      className="w-full truncate border-0 bg-transparent text-[14px] leading-[22px] font-semibold text-ink-2 outline-none focus-visible:outline-none focus:underline disabled:opacity-60"
     />
   );
 };
@@ -231,7 +247,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
           setFailure(null);
         }}
         placeholder="Where did you deliver it? A link, a ticket number, “sent by email”…"
-        className="h-[130px] w-full resize-y rounded-xl border border-line-11 px-4 py-3 font-serif text-[15px] leading-[24px] text-ink-2 outline-none focus:border-line-brand-10"
+        className="h-[130px] w-full resize-y rounded-xl border border-line-11 px-4 py-3 font-serif text-[15px] leading-[24px] text-ink-2 outline-none focus-visible:outline-none focus:border-line-brand-10"
       />
       <div className="mt-1 flex justify-between text-caption text-ink-14">
         <span className={answerHasPipe ? 'font-semibold text-ink-brand-6' : ''}>
@@ -351,7 +367,7 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
         value={confirm}
         onChange={(e) => setConfirm(e.target.value)}
         placeholder={`@${handle}`}
-        className="mb-4 w-full rounded-xl border border-line-11 px-4 py-3 text-[15px] leading-[24px] font-semibold outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
+        className="mb-4 w-full rounded-xl border border-line-11 px-4 py-3 text-[15px] leading-[24px] font-semibold outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
       />
       <div className="flex gap-3">
         <button
@@ -414,7 +430,25 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
   // an empty result, so the broadcast genuinely succeeded and nothing surfaced.
   // The creator's RC was spent and their offering did not exist.
   const titleProblem = title.trim() === '' ? null : offerTitleProblem(title);
-  const valid = title.trim().length > 0 && titleProblem === null && Number.isFinite(usd) && usd > 0;
+  /**
+   * ★ AND VALIDATE THE PRICE AGAINST THE CREATOR'S OWN SUPPLY CAP (2026-08-27).
+   *
+   * Same failure shape as the title rule above — a value this form accepted
+   * without ever looking at it — except the chain does NOT refuse this one, so
+   * there is no on-chain backstop at all. The offering is created, posted, and
+   * priced at a fraction of total supply no buyer can reach. Measured live:
+   * a 30-cap market listing a $15 service at 14 tokens, 47% of every token that
+   * will ever exist.
+   *
+   * `studio.market` is nullable and the guard returns null on anything it
+   * cannot judge, so a failed market read blocks nothing — see
+   * serviceSupplyShareProblem's own note on why a guard that fires on a
+   * missing number is worse than no guard.
+   */
+  const supplyProblem =
+    studio.market === null ? null : serviceSupplyShareProblem(usd, studio.market.priceUsd, studio.market.cap);
+  const valid =
+    title.trim().length > 0 && titleProblem === null && Number.isFinite(usd) && usd > 0 && supplyProblem === null;
   return (
     <div className="mt-4 border-t border-line-2 pt-4">
       <div className="mb-2 text-caption font-semibold text-ink-10">Add a service</div>
@@ -427,7 +461,7 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
           }}
           placeholder="e.g. Review my code"
           aria-invalid={titleProblem !== null}
-          className={`min-w-[200px] flex-1 rounded-control border px-3 py-2 text-[14px] leading-[22px] outline-none focus:ring-1 ${
+          className={`min-w-[200px] flex-1 rounded-control border px-3 py-2 text-[14px] leading-[22px] outline-none focus-visible:outline-none focus:ring-1 ${
             titleProblem !== null
               ? 'border-line-warn-2 focus:border-line-warn-2 focus:ring-line-warn-2'
               : 'border-line-11 focus:border-line-brand-10 focus:ring-line-brand-10'
@@ -443,7 +477,7 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
             }}
             inputMode="decimal"
             placeholder="0"
-            className="ml-1 w-[80px] border-0 text-[14px] leading-[22px] font-bold tabular-nums outline-none"
+            className="ml-1 w-[80px] border-0 text-[14px] leading-[22px] font-bold tabular-nums outline-none focus-visible:outline-none"
           />
         </div>
         <button
@@ -469,6 +503,10 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
           whereas `failure` is the outcome of an attempt already made. */}
       {titleProblem ? (
         <div className="mt-2 text-caption font-semibold text-ink-warn-3">{titleProblem}</div>
+      ) : supplyProblem ? (
+        // Same precedence rule as the title: actionable-right-now beats the
+        // outcome of an attempt already made.
+        <div className="mt-2 text-caption font-semibold text-ink-warn-3">{supplyProblem}</div>
       ) : failure ? (
         <div className="mt-2 text-caption font-semibold text-ink-brand-6">{failure}</div>
       ) : null}
@@ -819,6 +857,18 @@ const CreatorStudio: FC = () => {
                   // revert the field when the chain refuses — same contract the
                   // named-offering rows below use.
                   onCommit={(usd) => studio.setFace(usd)}
+                  // ★ THE GUARD WAS ON THE SECOND PRICE BUYERS SEE AND NOT THE
+                  // FIRST (found 2026-08-27 by an adversarial pass over the same
+                  // day's work). `serviceSupplyShareProblem` was wired to the
+                  // named-offering rows below but not here — yet `faceAsService`
+                  // (live/adapt.ts:252) turns THIS price into a real, buyable
+                  // "Ask a question" service, and adapt.ts:291 falls back to it
+                  // whenever the creator has no named offering. The copy three
+                  // lines above says so itself: "the only price buyers see until
+                  // you add a named service." So on a fresh market the one price
+                  // that existed was the one price nothing checked, which is the
+                  // exact 30-cap case the guard was written for.
+                  problemOf={(usd) => serviceSupplyShareProblem(usd, market.priceUsd, market.cap)}
                   disabled={studio.isBusy}
                   onFailure={(m) => setActionFailure(m || null)}
                 />
@@ -883,6 +933,7 @@ const CreatorStudio: FC = () => {
                           onCommit={(usd) =>
                             studio.setOfferingPrice({ offeringId: o.offeringId, priceUsd: usd })
                           }
+                          problemOf={(usd) => serviceSupplyShareProblem(usd, market.priceUsd, market.cap)}
                           disabled={studio.isBusy}
                           onFailure={(m) => setActionFailure(m || null)}
                         />
@@ -937,7 +988,7 @@ const CreatorStudio: FC = () => {
                 value={capInput}
                 onChange={(e) => setCapInput(e.target.value)}
                 inputMode="numeric"
-                className="w-[110px] rounded-control border border-line-11 px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
+                className="w-[110px] rounded-control border border-line-11 px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
               />
               <button
                 onClick={async () => {
@@ -1116,7 +1167,7 @@ const CreatorStudio: FC = () => {
                   }}
                   placeholder="tokens"
                   inputMode="decimal"
-                  className="w-[110px] rounded-control border border-line-11 px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
+                  className="w-[110px] rounded-control border border-line-11 px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
                 />
                 <button
                   onClick={async () => {
@@ -1160,7 +1211,7 @@ const CreatorStudio: FC = () => {
                       }}
                       inputMode="decimal"
                       placeholder="optional"
-                      className="w-[70px] border-0 text-[13px] leading-[20px] font-semibold tabular-nums text-ink-2 outline-none"
+                      className="w-[70px] border-0 text-[13px] leading-[20px] font-semibold tabular-nums text-ink-2 outline-none focus-visible:outline-none"
                     />
                     <span className="text-caption font-semibold text-ink-14">HBD</span>
                   </div>

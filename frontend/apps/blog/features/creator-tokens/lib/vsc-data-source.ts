@@ -68,6 +68,7 @@ import {
   reserveCoverageRatio,
   settlementRateBaseUnits,
   BLOCKS_PER_DAY,
+  EXIT_TAX_DECAY_BLOCKS,
   displayPricePerTokenBaseUnits,
   splitFaceBaseUnits,
   type AskRateEstimate
@@ -195,9 +196,37 @@ function assertPositiveTokenCount(n: number, label: string): void {
   }
 }
 
-/** holdclock.go heldBlocksAt, replicated client-side: unset (0) OR >= block both read as 0 held — MAXIMALLY FRESH, i.e. MAXIMUM exit tax, never as ancient. See holdclock.go's own "zero-value convention" doc — getting this backwards would preview a 0% tax on a position the chain taxes at 20%. */
-function heldBlocksFromAcq(acqBlock: number, block: number): number {
-  return acqBlock === 0 || acqBlock >= block ? 0 : block - acqBlock;
+/**
+ * holdclock.go heldBlocksAt, replicated client-side: unset (0) OR >= block both
+ * read as 0 held — MAXIMALLY FRESH, i.e. MAXIMUM exit tax, never as ancient. See
+ * holdclock.go's own "zero-value convention" doc — getting this backwards would
+ * preview a 0% tax on a position the chain taxes at 20%.
+ *
+ * ★ THE ONE EXCEPTION IS A GRADUATED POSITION (holdclock.go:205-232, dated
+ * 2026-07-30, ported here 2026-08-27 with the F1 both-buckets fix). graduate()
+ * DELETES kAcqBlock together with kBal (core/matured.go:406-407), so a holder who
+ * held for the whole window and then matured has no clock left at all — and the
+ * zero-value convention above then reports them at the FULL 20% rate.
+ * holdclock.go:208-224 names that inversion and names its victims: "the tax gate,
+ * the permissionless-push consent gate, the emitted event, and the quote UI that
+ * RULING F makes mandatory before signing". This IS that quote UI.
+ *
+ * "If nothing is maturing but a matured balance exists, the honest answer is the
+ * full window — that is precisely what 'matured' means." Fixed in the one helper
+ * rather than at each reader, for holdclock.go's own stated reason: "the
+ * alternative is a shortcut at every call site, and the one that gets forgotten
+ * reports the maximum tax on a holder who owes nothing."
+ *
+ * NOT ported: holdclock.go:228-230's cap of a live clock at ExitTaxDecayBlocks.
+ * It changes no money here (exitTaxBpsAt already returns 0 at and past the
+ * window) and it would change the `heldBlocks` figure types.ts documents as the
+ * holding time; left alone deliberately rather than folded into a funds fix.
+ */
+function heldBlocksFromAcq(acqBlock: number, block: number, maturingTokens: number, maturedTokens: number): number {
+  if (acqBlock === 0 || acqBlock >= block) {
+    return maturingTokens === 0 && maturedTokens > 0 ? EXIT_TAX_DECAY_BLOCKS : 0;
+  }
+  return block - acqBlock;
 }
 
 interface BuildMarketState {
@@ -464,7 +493,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     const supplyTokens = toU64(state[kSupply(creator)]);
     const reserveBaseUnits = toU64(state[kReserve(creator)]);
     const acqBlock = toU64(state[kAcqBlock(creator, holder)]);
-    const heldBlocks = heldBlocksFromAcq(acqBlock, head);
+    const heldBlocks = heldBlocksFromAcq(acqBlock, head, tokensMaturing, tokensMatured);
 
     // refund.go refundPayout + the K2 exit tax carve (contract-math.ts
     // refundNetBaseUnits): the TAXED NET, not the untaxed gross — see
@@ -481,6 +510,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       creator,
       holder,
       tokensHeld,
+      tokensMaturing,
       floorValueHbd: baseUnitsToHuman(netBaseUnits),
       heldBlocks,
       exitTaxBps: taxBps
@@ -755,7 +785,22 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async quoteSell(creator: string, seller: string, tokens: number): Promise<SellQuote> {
     assertPositiveTokenCount(tokens, 'tokens');
-    const [state, head] = await Promise.all([
+    // F1 — BOTH BUCKETS (2026-08-27). sell.go:189 gates on
+    // `totalBalance(s, creator, caller)`, which core/matured.go:145 defines as
+    // maturing + matured. This read used to ask for kBal only, and kBal is the
+    // MATURING bucket alone: graduate() DELETES it when a position matures
+    // (core/matured.go:406), toU64 returns 0 for a missing key, so a
+    // fully-graduated holder read back as owning nothing and EVERY sell was
+    // refused — including through sell(), which calls this first and lets the
+    // throw propagate, so the broadcast never happened. core/matured.go:143 is
+    // the rule this restores: "EVERY guard that used to read kBal alone must
+    // read this instead, or a holder is refused access to tokens they
+    // demonstrably own."
+    //
+    // The matured half is a separate key family AND a separate wire encoding, so
+    // it needs its own hex-encoded read — the identical shape readHolderPosition
+    // above already uses (see decodeMaturedLeHex).
+    const [state, maturedState, head] = await Promise.all([
       this.gql.getStateByKeys(this.config.contractId, [
         kRegisteredAt(creator),
         kSupply(creator),
@@ -765,6 +810,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         kState(creator),
         kRetiredAt(creator)
       ]),
+      this.gql.getStateByKeysHex(this.config.contractId, [kMatured(creator, seller)]),
       this.gql.getHeadBlock()
     ]);
     if (toU64(state[kRegisteredAt(creator)]) === 0) {
@@ -773,9 +819,20 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (head === null) {
       throw new Error('VscCreatorTokensDataSource: cannot price this sell (chain head unavailable)');
     }
+    const tokensMatured = decodeMaturedLeHex(maturedState[kMatured(creator, seller)]);
+    if (tokensMatured === null) {
+      // Undecodable ≠ zero — the same choice readHolderPosition makes, for the
+      // same reason, and it matters MORE here: defaulting to 0 on this path does
+      // not merely understate a displayed value, it re-creates F1 exactly (the
+      // gate below would refuse the sell) and would understate the payout of any
+      // sell that did get through. Refuse the quote instead.
+      throw new Error('VscCreatorTokensDataSource: matured balance unreadable (unexpected wire encoding)');
+    }
     // sell.go sellCompute: balance checked first ("clearer error than the
-    // rail for the common mistake").
-    const bal = toU64(state[kBal(creator, seller)]);
+    // rail for the common mistake") — and against the WHOLE position, not the
+    // maturing bucket.
+    const tokensMaturing = toU64(state[kBal(creator, seller)]);
+    const bal = tokensMaturing + tokensMatured;
     if (bal < tokens) {
       throw new Error('VscCreatorTokensDataSource: insufficient tokens');
     }
@@ -793,8 +850,12 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     }
     const supplyTokens = toU64(state[kSupply(creator)]);
     const acqBlock = toU64(state[kAcqBlock(creator, seller)]);
-    const heldBlocks = heldBlocksFromAcq(acqBlock, head);
-    const q = quoteSellBaseUnits(supplyTokens, tokens, heldBlocks);
+    const heldBlocks = heldBlocksFromAcq(acqBlock, head, tokensMaturing, tokensMatured);
+    // F2 — sell.go:234-236 taxes ONLY the maturing share of the draw
+    // (splitDraw MATURING-FIRST, then maturingGrossShare pro rata). The maturing
+    // BALANCE is what goes in: quoteSellBaseUnits performs splitDraw itself,
+    // the same shape refundNetBaseUnits already takes.
+    const q = quoteSellBaseUnits(supplyTokens, tokens, heldBlocks, tokensMaturing);
     if (q === null) {
       // curve.go SellProceeds errors when k > S — unreachable given the
       // balance check above (bal <= supply, I3), kept as the same

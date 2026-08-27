@@ -50,6 +50,24 @@ already seen the post (`CandidateSource.requires_author_floor`, see
 test_follow_cliff). This file exists so that trade-off is visible in the suite
 instead of being rediscovered by someone raising the knob because the newcomer
 numbers look bad.
+
+★★★ THIS FILE MEASURES AT k = 1 ON PURPOSE (2026-08-27)
+=======================================================
+`GraphCredConfig.vouch_min_vouchers` (k) shipped at 2 on 2026-08-27 as the
+compensating control for disabling ring detection. Every fixture below is a
+SINGLE-VOUCHER tree or star — each account has exactly one engager — so at k = 2
+they all vouch ZERO accounts, and every assertion in this file
+(`vouched < width`, `with_cap == without_cap`, `sparse_share < 0.1`) would then
+pass on an empty set while measuring nothing. Two of them did exactly that when
+k flipped, which is the vacuous-pass failure mode.
+
+So `_vouched` pins k = 1 explicitly. That is not a stale default: this file is
+the analysis of the OTHER TWO bounds — `vouch_max_rounds` and
+`vouch_max_fanout` — and the single-voucher topology is what isolates them.
+The shipped k = 2 behaviour on these same structures is asserted separately in
+`test_the_shipped_k_closes_what_the_two_bounds_only_bounded`, and every
+assertion here that could be satisfied by an empty result now also asserts
+non-emptiness.
 """
 
 from __future__ import annotations
@@ -107,10 +125,17 @@ def _tree(
     return creds
 
 
-def _vouched(creds: dict[str, GraphCred], rounds: int, prefix: str) -> int:
+def _vouched(creds: dict[str, GraphCred], rounds: int, prefix: str, *, k: int = 1) -> int:
+    """Vouched accounts under `prefix`, at `rounds` hops and `k` required vouchers.
+
+    `k` defaults to 1 — the value every fixture in this file is BUILT for; see
+    the module docstring. Pass it explicitly to measure the shipped default.
+    """
     settings = replace(
         DEFAULT_SETTINGS,
-        graph_cred=replace(DEFAULT_SETTINGS.graph_cred, vouch_max_rounds=rounds),
+        graph_cred=replace(
+            DEFAULT_SETTINGS.graph_cred, vouch_max_rounds=rounds, vouch_min_vouchers=k
+        ),
     )
     trust = _voter_trust_from_creds(creds, settings, frozenset({"seed"}))
     assert trust is not None
@@ -188,6 +213,10 @@ def test_a_sparse_account_is_barely_reached_at_the_shipped_bound() -> None:
     # ceiling — a well-connected neighbourhood is reached almost entirely, a
     # sparse one barely at all.
     assert dense_share > 0.8, "a well-connected neighbourhood should be mostly reached"
+    # ★ NON-VACUITY (2026-08-27): `sparse_share < 0.1` is satisfied by 0.0, so the
+    # sparse side must be shown to have reached SOMETHING for the contrast to mean
+    # anything.
+    assert sparse_share > 0.0, "the sparse neighbourhood reached nobody — vacuous"
     assert sparse_share < 0.1, (
         f"sparse reach {sparse_share:.1%} — if this improved, re-measure the "
         "hostile side before claiming the newcomer gap is closed"
@@ -216,6 +245,16 @@ def test_one_endorsement_cannot_vouch_an_unbounded_sock_list() -> None:
     """
     for width in (500, 5_000, 50_000):
         vouched = _vouched(_star(width), DEFAULT_SETTINGS.graph_cred.vouch_max_rounds, "k")
+        # ★ NON-VACUITY (2026-08-27): `vouched < width` and the cap bound below are
+        # both satisfied by ZERO, which is what this test silently started
+        # returning the moment `vouch_min_vouchers` defaulted to 2 (every sock in
+        # `_star` has exactly one engager). A cap test that measures an empty set
+        # proves the cap does nothing. The fan-out cap is only being exercised if
+        # something actually propagates.
+        assert vouched > 0, (
+            "nothing propagated at all — this fixture is not exercising the "
+            "fan-out cap and every bound below it is vacuous"
+        )
         assert vouched < width, f"{vouched}/{width} socks vouched from one endorsement"
         assert vouched <= DEFAULT_SETTINGS.graph_cred.vouch_max_fanout * 3, (
             f"{vouched} socks vouched — the per-voucher fan-out cap is not binding"
@@ -234,12 +273,24 @@ def test_the_cap_does_not_shrink_an_honest_graph_within_its_reach() -> None:
 
     uncapped_settings = replace(
         DEFAULT_SETTINGS,
-        graph_cred=replace(DEFAULT_SETTINGS.graph_cred, vouch_max_fanout=0, vouch_max_rounds=3),
+        graph_cred=replace(
+            DEFAULT_SETTINGS.graph_cred,
+            vouch_max_fanout=0,
+            vouch_max_rounds=3,
+            # ★ k=1 to match `_vouched`'s default above — this comparison is
+            # between CAPPED and UNCAPPED, so every other knob must be held
+            # equal or it measures the wrong difference (it silently measured
+            # k=1 vs k=2 for one commit).
+            vouch_min_vouchers=1,
+        ),
     )
     trust = _voter_trust_from_creds(honest, uncapped_settings, frozenset({"seed"}))
     assert trust is not None
     without_cap = len({a for a in trust.vouched if a.startswith("h")})
 
+    # ★ NON-VACUITY (2026-08-27): `with_cap == without_cap` is trivially true at
+    # 0 == 0, which is what this returned when k defaulted to 2.
+    assert with_cap > 0, "the honest graph vouched nobody — the comparison is vacuous"
     assert with_cap == without_cap, (
         f"the cap cost an honest fan-out-3 graph {without_cap - with_cap} accounts "
         f"despite a cap of {cap}"
@@ -279,4 +330,61 @@ def test_the_residual_bound_is_stated_honestly_not_assumed_closed() -> None:
     assert vouched > cap, (
         "the residual is smaller than documented — re-measure and tighten the "
         "docstring rather than leaving an over-pessimistic bound in the suite"
+    )
+
+
+def test_the_shipped_k_closes_what_the_two_bounds_only_bounded() -> None:
+    """★ THE 2026-08-27 RESULT, on this file's own fixtures.
+
+    Everything above measures at k = 1, where `vouch_max_rounds` and
+    `vouch_max_fanout` are the only things between one purchased endorsement and
+    a vouched sock farm — and the honest conclusion recorded above is that they
+    BOUND it (~cap^(rounds-1)) rather than close it.
+
+    `GraphCredConfig.vouch_min_vouchers` = 2 closes it on these same structures,
+    because every sock in a star or a tree has exactly ONE engager and therefore
+    can never present a second vouched one. Pinned here so that if k is ever
+    lowered back to 1, the residual this file documents comes back into the suite
+    as a failure rather than as a silent regression.
+
+    The honest cost is asserted in the same breath: the identical honest tree
+    also collapses, which is why k is a real trade and not a free tightening. On
+    the LIVE graph that cost is 7,395 -> 4,913 vouched accounts; see
+    `GraphCredConfig.vouch_min_vouchers` for who pays.
+    """
+    rounds = DEFAULT_SETTINGS.graph_cred.vouch_max_rounds
+    cap = DEFAULT_SETTINGS.graph_cred.vouch_max_fanout
+    shipped_k = DEFAULT_SETTINGS.graph_cred.vouch_min_vouchers
+    assert shipped_k >= 2, "this test describes the k >= 2 contract"
+
+    # flat star: the fan-out cap's own fixture
+    star = _star(5_000)
+    assert _vouched(star, rounds, "k", k=1) > cap, "k=1 baseline is not exercising the cap"
+    assert _vouched(star, rounds, "k", k=shipped_k) == 0, (
+        "a single endorsement into a hub still vouches socks at the shipped k"
+    )
+
+    # star-of-stars: the documented cap^(rounds-1) residual
+    creds = {"seed": _cred("seed", set()), "hub": _cred("hub", {"seed"})}
+    n, layer = 0, ["hub"]
+    for _ in range(2):
+        nxt = []
+        for parent in layer:
+            for _ in range(cap):
+                creds[f"k{n}"] = _cred(f"k{n}", {parent})
+                nxt.append(f"k{n}")
+                n += 1
+        layer = nxt
+    assert _vouched(creds, rounds, "k", k=1) > cap, "k=1 residual baseline is vacuous"
+    assert _vouched(creds, rounds, "k", k=shipped_k) == 0, (
+        "the cap^(rounds-1) residual survives at the shipped k"
+    )
+
+    # ★ THE COST, not hidden: the honest single-voucher tree collapses identically.
+    honest = {"seed": _cred("seed", set()), **_tree("h", 3, 8, {"seed"}, population=3000)}
+    honest_k1 = _vouched(honest, rounds, "h", k=1)
+    assert honest_k1 > 0
+    assert _vouched(honest, rounds, "h", k=shipped_k) == 0, (
+        "if this stops being 0, the fixture gained a second voucher and the cost "
+        "statement below no longer describes it"
     )

@@ -16,60 +16,63 @@ test.describe('Privacy Policy page tests', () => {
     await homePage.moveToPrivacyPolicyPage();
   });
 
-  test('validate amount of subtitles in the Privacy Policy', async ({ page }) => {
-    await homePage.goto();
+  /*
+   * ★ REWRITTEN 2026-08-27. These two tests asserted the policy's 12 section
+   * headings and the styling of its first paragraph. That document was REMOVED on
+   * the owner's instruction because it claimed Lumen collects IP addresses and
+   * telephone numbers, which it does not. Counting headings that were deliberately
+   * deleted would be a test defending the wrong thing, so the assertion has been
+   * inverted: the page must exist, and it must make NO collection claim.
+   *
+   * ★ AND THE `homePage.goto()` PREAMBLE IS GONE FROM THESE TWO. It loaded the
+   * signed-out HOME FEED first, which `homePage.ts:503` itself documents as taking
+   * ~38-55s cold against a 60s test timeout — and it bought nothing, because
+   * `moveToPrivacyPolicyPage()` opens `/login` with its own `page.goto` and never
+   * looks at whatever was on screen before it. Measured: with the preamble both
+   * tests died on the home feed's post cards, an assertion about neither the
+   * privacy page nor this spec's subject. Dropping it removes a failure mode that
+   * was never about privacy; it does not weaken a single assertion below. The
+   * navigation test above keeps its preamble, because the journey IS its subject.
+   */
+  test('the Privacy Policy page still exists and is reachable', async ({ page }) => {
     await homePage.moveToPrivacyPolicyPage();
-
-    /*
-     * ★ 11 -> 12 (2026-08-21). This counts `h3[class="mb-4 text-3xl"]`, the policy's
-     * section headings, and the document gained one since the number was written.
-     * Counted three ways to be sure the locator and the content agree: the selector
-     * resolves to 12, the page has exactly 12 `<h3>` in total, and the 12 headings
-     * are WHAT WE COLLECT ... NOTICE TO EU DATA SUBJECTS. (A raw grep for the class
-     * STRING in the HTML returns 19, but that class is also on `<h2>`, `<ul>` and
-     * `<span>` elements — it is not the count this locator makes.)
-     */
-    const subtitlesAmount = await (await privacyPolicyPage.subtitles.all()).length;
-    expect(subtitlesAmount).toBe(12);
+    await expect(privacyPolicyPage.heading).toBeVisible();
+    await expect(privacyPolicyPage.firstParagraf).toBeVisible();
   });
 
-  test('validate styles in the Privacy Policy in the light mode', async ({ page }) => {
-    await homePage.goto();
+  test('the page makes NO data-collection claim', async ({ page }) => {
     await homePage.moveToPrivacyPolicyPage();
 
-    // Validate subtitle styles of the privacy policy page
-    const subtitleColor = await privacyPolicyPage.getElementCssPropertyValue(
-      privacyPolicyPage.firstSubtitle,
-      'color'
-    );
-    expect(subtitleColor).toBe('rgb(0, 0, 0)');
-    const subtitleFontSize = await privacyPolicyPage.getElementCssPropertyValue(
-      privacyPolicyPage.firstSubtitle,
-      'font-size'
-    );
-    expect(subtitleFontSize).toBe('30px');
-    const backgroundColorPage = await privacyPolicyPage.getElementCssPropertyValue(
-      privacyPolicyPage.mainElement,
-      'background-color'
-    );
-    expect(backgroundColorPage).toBe('rgba(0, 0, 0, 0)');
-    const paragrafColor = await privacyPolicyPage.getElementCssPropertyValue(
-      privacyPolicyPage.firstParagraf,
-      'color'
-    );
-    expect(paragrafColor).toBe('rgb(0, 0, 0)');
-    const paragrafFontSize = await privacyPolicyPage.getElementCssPropertyValue(
-      privacyPolicyPage.firstParagraf,
-      'font-size'
-    );
-    /*
-     * ★ 14px -> 15px (2026-08-21). Not drift and not a regression: this page's copy
-     * is wrapped in `text-body-sm` (app/privacy.html/page.tsx:4), and the type scale
-     * deliberately moved that token — `packages/tailwindcss/tailwind.config.js:188`
-     * reads `'body-sm': ['15px', '22px'], // was 14`. Measured on the live page: the
-     * targeted element computes to 15px, colour unchanged at rgb(0, 0, 0).
-     */
-    expect(paragrafFontSize).toBe('15px');
+    // ★ NON-VACUITY FIRST. Every assertion below is a NEGATIVE, and negatives all
+    // pass against a page that rendered nothing at all — a 500, an empty shell or a
+    // route that stopped resolving would score a clean sweep here. So prove the
+    // page's OWN content is on screen before trusting anything the scan does not
+    // find. `body` length alone is not enough for this: the header, nav and
+    // "Log in" chrome clear any character threshold on their own, so the guard is
+    // anchored to the copy this page is uniquely responsible for.
+    await expect(privacyPolicyPage.heading).toBeVisible();
+    await expect(privacyPolicyPage.firstParagraf).toBeVisible();
+    const ownText = await privacyPolicyPage.mainElement.innerText();
+    expect(ownText.length).toBeGreaterThan(80);
+
+    // The old document's own words. If any of these come back, the page is once
+    // again telling users something the product does not do. Scanned over the whole
+    // body, not just the copy block: it must not reappear in a footer or a banner
+    // either.
+    //
+    // ★ MEASURED against the pre-removal page (2026-08-27, build c1HRQ185dAkWlurXjDBxB
+    // still serving the old text): 'ip address', 'telephone', 'phone number' and
+    // 'what we collect' were ALL present in it, so those four are proven
+    // discriminators — they fail on the exact document that had to go. 'geolocation'
+    // was NOT in it; it is kept deliberately as a forward guard on the rewrite, not
+    // as a claim about what was removed. Do not read it as a fifth proof.
+    const body = (await page.locator('body').innerText()).toLowerCase();
+    for (const claim of ['ip address', 'telephone', 'phone number', 'what we collect', 'geolocation']) {
+      expect(body, `privacy page must not claim: ${claim}`).not.toContain(claim);
+    }
+
+    // and the deleted sections must really be gone, not merely restyled
+    expect(await privacyPolicyPage.subtitles.count()).toBe(0);
   });
 
 });

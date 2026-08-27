@@ -2517,6 +2517,102 @@ class GraphCredConfig:
     #: the same low score, cannot arrange to be preferred.
     vouch_max_fanout: int = 50
 
+    #: ★★★ HOW MANY DISTINCT ALREADY-VOUCHED ENGAGERS AN ACCOUNT NEEDS BEFORE
+    #: VOUCH PROPAGATES TO IT (2026-08-27). Read by
+    #: :func:`recsys.pipeline._voter_trust_from_creds`; env
+    #: ``RECSYS_VOUCH_MIN_VOUCHERS`` via :meth:`from_env`.
+    #:
+    #: ★ WHY THIS EXISTS — IT REPLACES A CONTROL THAT WAS REMOVED, NOT ADDED ONE.
+    #: The propagation test used to be ``k = 1``
+    #: (``not gc.outside_engagers.isdisjoint(vouched_set)``), and it was safe
+    #: only because ``core/graph_cred.py`` recorded an ``outside_engager`` ONLY
+    #: when the edge was not ring-flagged. Disabling ring detection
+    #: (``RingConfig.enabled = False``, ``RECSYS_RING_DETECTION=0``, deployed
+    #: 2026-08-27) empties ``ring_members``, so ``not ring_flagged`` is
+    #: vacuously true and EVERY member of a reciprocal sock clique is now every
+    #: other member's "outside" engager. Vouch then propagates along the
+    #: attacker's OWN edges: one inbound engagement from one already-vouched
+    #: account carries the whole clique in.
+    #:
+    #: ★ MEASURED ON THE LIVE 18,246-ACCOUNT ``graph_cred`` (snapshot
+    #: 2026-08-27 18:23Z, 49 of 54 trusted seeds landed, ``ring_members`` empty,
+    #: ``degraded=f``). A 60-account reciprocal clique whose ONLY contact with
+    #: the honest world is one engagement into ``sock0``, swept over all 49
+    #: landed seeds, sock graph-cred pinned at the live engaged-band p90 (0.91 —
+    #: a 60-clique at 4 replies/pair sits at the 92.0th percentile of received
+    #: events and the 89.6th of distinct engagers, so p90 is the realistic
+    #: value, not a favourable one):
+    #:
+    #:     k   whole clique vouched   median socks vouched   ceiling per touch
+    #:     1        45 of 49 seeds           60 of 60              101
+    #:     2         0 of 49 seeds            0 of 60                0
+    #:
+    #: k=2 holds against the ONE-ENDORSEMENT attack at every sock score measured
+    #: (engaged median 0.7426 through p99 0.9910: k=1 carries the full clique for
+    #: 35..48 of 49 seeds, k=2 for 0 of 49) and at every clique size measured
+    #: (60, 101, 150, 500, 2000 — k=1 tops out at the 101 fan-out ceiling, k=2 at
+    #: 0). That one-touch case is exactly the regression disabling ring detection
+    #: opened, and k=2 closes it.
+    #:
+    #: ★★★ k DOES NOT CLOSE THE CLIQUE ATTACK. IT PRICES IT. Say this plainly,
+    #: because the first draft of this comment claimed a close and was wrong.
+    #: To start the cascade an attacker needs k socks vouched, and each of those
+    #: needs k distinct already-vouched engagers — so ~k^2 purchased
+    #: endorsements, after which every remaining sock sees k vouched socks and
+    #: the whole clique falls (up to the fan-out/round ceiling). Measured live
+    #: against a 60-clique, endorsements spread k-per-sock and bought from
+    #: ZERO-CONTENTION vouched seeds (the ones an attacker would actually pick —
+    #: a high-out-degree seed like `acidyo`, 2,394 engagees, loses its sock to
+    #: the fan-out cap until round 3 and looks far safer than it is):
+    #:
+    #:     k   vouched tier (live)   endorsements to break a 60-clique   k^2
+    #:     1      7,395  (40.53%)              1  -> 60/60                 1
+    #:     2      4,913  (26.93%)              4  -> 60/60                 4
+    #:     3      4,007  (21.96%)              9  -> 60/60                 9
+    #:     4      3,265  (17.89%)             13  -> 54/60                16
+    #:     5      2,798  (15.33%)             21  -> 55/60                25
+    #:
+    #: So k=2 is a 4x price increase on a clique takeover and a full close of the
+    #: one-touch case; k=3 is 9x for a further 906 accounts demoted (26.93% ->
+    #: 21.96%), and notably takes the THIN share of the vouched tier from 4.2% to
+    #: 0.7%. Choosing between them is a product call about how much of the small-
+    #: account tier to credit, and the knob exists so it can be made without a
+    #: code change. Nothing here makes a clique cost-free to defend against; the
+    #: lever is the PRICE, and buying k distinct endorsements from already-
+    #: vouched accounts is the price.
+    #:
+    #: ★ THE COST, STATED HONESTLY. On the same live snapshot the vouched tier
+    #: goes 7,395 (40.53%) -> 4,913 (26.93%): 2,600 accounts lose vouched status
+    #: and 118 gain it (the fan-out cap frees slots when fewer candidates
+    #: compete). No trusted seed is affected. The loss is NOT uniform — it falls
+    #: on thin accounts:
+    #:
+    #:     population         n       median outside_engagers   median recv events
+    #:     vouched @ k=1    7,395              6                       14
+    #:     vouched @ k=2    4,913             14                       41
+    #:     LOST k=1->k=2    2,600              1                        2
+    #:
+    #: 54.2% of the accounts that lose vouched status have exactly ONE outside
+    #: engager in the whole window, so no value of k above 1 can keep them;
+    #: 65.8% received <=3 engagement events, against 25.6% of the k=1 vouched
+    #: tier. This is a real cost to small and new accounts and should be read as
+    #: such. (All figures produced by running the SHIPPED
+    #: ``_voter_trust_from_creds`` over the live ``graph_cred`` rows, not by a
+    #: re-implementation of the walk.) It is NOT a ban: they land in the BUDGETED unknown tier
+    #: (``VoteSignalConfig.unknown_free`` + ``unknown_per_vouched`` per vouched
+    #: voter), the same tier a genuine newcomer starts in, and their first
+    #: engagement from a second vouched account promotes them.
+    #:
+    #: 1 restores the deployed-and-vulnerable behaviour (one endorsement, whole
+    #: clique) and is kept legal so the regression can be reproduced on demand.
+    #:
+    #: ★ THIS DOES NOT COVER ``POPULAR_FALLBACK``. That lane's only author-side
+    #: defence is ``pipeline._fallback_filler``'s drop of the ``score <= 0.0``
+    #: band, which is a DIFFERENT mechanism that ``VoterTrust`` does not feed,
+    #: and that band is now structurally unreachable (live: 0 of 18,246 rows at
+    #: or below 0.0, min score 0.1000). See ``_fallback_filler``.
+    vouch_min_vouchers: int = 2
+
     # Relocated-newcomer-blackout fix (§8.3): a reciprocal pair flagged by
     # ring.py's insularity test is only treated as PROVEN self-dealing --
     # zeroed weight, eligible for the 0.0 band -- if it shows SCALE (the
@@ -2544,6 +2640,47 @@ class GraphCredConfig:
                 f"single-reciprocal-interaction protection a no-op), got "
                 f"{self.min_ring_self_dealing_events}"
             )
+        if self.vouch_min_vouchers < 1:
+            raise ValueError(
+                "vouch_min_vouchers must be >= 1 (0 would vouch every account "
+                "with any score above the floor, seed anchoring and all), got "
+                f"{self.vouch_min_vouchers}"
+            )
+
+    @classmethod
+    def from_env(cls, base: GraphCredConfig | None = None) -> GraphCredConfig:
+        """Resolve the one knob an operator turns from the environment.
+
+        ★ SAME DOOR AS :meth:`RingConfig.from_env` (``RECSYS_RING_DETECTION``)
+        and :meth:`SeenConfig.from_env` (``RECSYS_SEEN_SUPPRESSION``), and
+        threaded from :meth:`Settings.from_env` for the reason that method
+        records four times over: a ``from_env`` this package forgets to thread
+        is a setting permanently pinned at its dataclass default, and the
+        control it carries is then unreachable in production while every test
+        passes.
+
+        ★ POLARITY IS ``RingConfig``'s, NOT ``SeenConfig``'s: the SAFE value is
+        the default, and the environment can only be used to WEAKEN it
+        deliberately. Empty/unset returns ``base`` untouched, so this method
+        never changes anything by itself. A non-integer or negative value is
+        REFUSED (``ValueError``) rather than silently falling back to the
+        default — a typo in the one knob that decides how expensive a Sybil
+        vouch is must fail loudly at start-up, not quietly ship k=2 while the
+        operator believes they set k=3. (``RECSYS_VOUCH_MIN_VOUCHERS=1`` is a
+        legal, documented, measured-vulnerable setting; see
+        ``vouch_min_vouchers``.)
+        """
+        source = base if base is not None else cls()
+        raw = os.environ.get("RECSYS_VOUCH_MIN_VOUCHERS", "").strip()
+        if not raw:
+            return source
+        try:
+            value = int(raw)
+        except ValueError:
+            raise ValueError(
+                f"RECSYS_VOUCH_MIN_VOUCHERS must be an integer >= 1, got {raw!r}"
+            ) from None
+        return replace(source, vouch_min_vouchers=value)
 
 
 @dataclass(frozen=True)
@@ -2565,6 +2702,48 @@ class RingConfig:
     #: Smallest connected component treated as a ring. 2 = a mutual pair.
     min_group: int = 2
 
+    #: ★★★ MASTER SWITCH (2026-08-27). ``False`` skips :func:`detect_rings`
+    #: entirely in :func:`recsys.pipeline.build_trust_snapshot` and leaves
+    #: ``TrustSnapshot.ring_members`` at its declared empty default — a
+    #: first-class state every consumer already handles (``author_prior_cache``
+    #: constructs a bare ``TrustSnapshot()`` on the no-snapshot path).
+    #: Env: ``RECSYS_RING_DETECTION``.
+    #:
+    #: ★★★ WHY IT IS TURNED OFF IN DEPLOYMENT. Measured 2026-08-27 against
+    #: Hive's own abuse verdict (reputation < 25, n=17,488): base rate 18.56%,
+    #: detector precision **5.84%** — **0.31x random** — while the accounts it
+    #: did NOT flag were **24.98%** downvoted. It is ANTI-CORRELATED with abuse.
+    #: 5,977 of 18,336 accounts were flagged (32.6%), including 28 of the 54
+    #: trusted seeds and Hive's own anti-abuse accounts ``hivewatchers`` and
+    #: ``guiltyparties`` — i.e. the detector's verdict pointed at the curators.
+    #:
+    #: ★★★ THE CAUSE IS `54df75a`, AND NO THRESHOLD CAN FIX IT. That commit took
+    #: votes out of the interaction graph (``RealGraphWeights.upvote = 0.0``,
+    #: owner ruling, see ``io/hafsql.py``), so the ``outside_received`` term in
+    #: ``core/ring.py``'s insularity denominator collapsed to a median of
+    #: exactly 0.0 and ``ring_score`` degenerated into "what fraction of the
+    #: people you interact with do you reply back to" — a measure of
+    #: CONVERSATION, not of collusion. A threshold cannot correct a metric whose
+    #: SIGN is wrong. Nor can it be switched off by raising
+    #: ``Thresholds.ring_discount_threshold`` (0.6 today) to 1.0: ``ring_score``
+    #: is CAPPED at 1.0 by ``min()`` in ``core/ring.py`` and membership tests
+    #: ``>=``, so at 1.0 every perfectly-insular account is still flagged and it
+    #: would have to be set strictly ABOVE 1.0 — a value meaning "never" dressed
+    #: up as a score. An explicit flag is the honest shape; pinned by
+    #: ``tests/test_ring.py::test_the_ring_discount_threshold_is_not_an_off_switch``.
+    #:
+    #: ★ ``core/ring.py`` IS DELIBERATELY NOT TOUCHED. The small-group shape it
+    #: isolates is real signal (1.78x lift on the same abuse measure; it is the
+    #: only layer that finds the Waivio bot fleet), so it stays a pure, tested
+    #: primitive and a candidate generator for review. What this flag removes is
+    #: its AUTHORITY to discount anyone's content, not the code.
+    #:
+    #: ★ DO NOT RE-ENABLE WITHOUT A POSITIVE CONTROL: a measured precision ABOVE
+    #: the base rate on a labelled set, and
+    #: ``tests/test_ring.py::test_a_population_with_no_planted_ring_is_not_mass_flagged``
+    #: turning from xfail to pass on its own.
+    enabled: bool = True
+
     def __post_init__(self) -> None:
         if not (0.0 <= self.reciprocity_min <= 1.0):
             raise ValueError(f"reciprocity_min must be in [0, 1], got {self.reciprocity_min}")
@@ -2573,6 +2752,33 @@ class RingConfig:
                 "min_group must be >= 2 (a ring needs two accounts), got "
                 f"{self.min_group}"
             )
+
+    @classmethod
+    def from_env(cls, base: RingConfig | None = None) -> RingConfig:
+        """Resolve the one switch an operator turns from the environment.
+
+        ★ SAME DOOR AS :meth:`SeenConfig.from_env` (``RECSYS_SEEN_SUPPRESSION``),
+        and threaded from :meth:`Settings.from_env` for the reason that method
+        already records three times over: this package has shipped a ``from_env``
+        whose only reference was inside its own error message, so the setting
+        could never receive a real value in production. A flag with no path from
+        the environment is a flag permanently at its default.
+
+        ★ THE POLARITY IS THE MIRROR OF ``SeenConfig``'s, DELIBERATELY. Seen
+        suppression defaults OFF and is opted INTO, so an unrecognised value
+        leaves it off. Ring detection defaults ON and is opted OUT OF, so an
+        unrecognised value leaves it ON: ``0``, ``false``, ``no`` and ``off``
+        disable it and nothing else does. A misspelling (``disbaled``) therefore
+        fails SAFE — it keeps the Sybil control armed rather than silently
+        dropping it on a typo. Empty/unset returns
+        ``base`` untouched, so this method can never switch anything on or off
+        by itself.
+        """
+        source = base if base is not None else cls()
+        raw = os.environ.get("RECSYS_RING_DETECTION", "").strip().lower()
+        if not raw:
+            return source
+        return replace(source, enabled=raw not in {"0", "false", "no", "off"})
 
 
 @dataclass(frozen=True)
@@ -3506,10 +3712,39 @@ class Settings:
         # `RECSYS_SEEN_SUPPRESSION` held, and the feature would be un-armable in
         # production while passing every test — this package's most-repeated
         # failure, recorded twice already in the paragraphs above.
+        # ★★★ `ring` comes through the SAME door, for the SAME reason
+        # (2026-08-27). `RingConfig.enabled` is the whole kill switch for the
+        # reciprocity/insularity ring detector, which measurement showed is
+        # ANTI-correlated with abuse since `54df75a` removed votes from the
+        # graph (5.84% precision on an 18.56% base rate, 0.31x random, 32.6% of
+        # all accounts flagged including 28 of 54 trusted seeds — see
+        # `RingConfig.enabled`). Left unwired it would sit at its `True` default
+        # no matter what `RECSYS_RING_DETECTION` held, and the trust batch would
+        # keep re-flagging a third of the network every run while every test
+        # passed. That is this package's most-repeated failure, recorded three
+        # times in the paragraphs above; this is the fourth time it would have
+        # bitten, and the reason the wiring is asserted directly by
+        # `tests/test_ring.py::test_settings_from_env_threads_the_ring_switch`.
+        # ★★★ `graph_cred` comes through the SAME door, for the SAME reason
+        # (2026-08-27, the FIFTH time). `GraphCredConfig.vouch_min_vouchers` is
+        # the compensating control for turning `ring` off in the line above:
+        # ring detection was what made `outside_engagers` mean "engaged me from
+        # OUTSIDE my own clique", and with it disabled every member of a
+        # reciprocal sock clique is every other member's outside engager, so a
+        # single purchased endorsement propagates vouch through the attacker's
+        # own edges (measured live: 60 of 60 socks vouched, ceiling 101 per
+        # touch, for 45 of the 49 landed trusted seeds). Left unwired, the knob
+        # would sit at its default no matter what `RECSYS_VOUCH_MIN_VOUCHERS`
+        # held and an operator could not weaken OR verify it from the
+        # environment — the exact shape of the four failures recorded above.
+        # Asserted directly by
+        # `tests/test_vouch_min_vouchers.py::test_settings_from_env_threads_the_k_knob`.
         return cls(
             exploration=ExplorationConfig.from_env(production=production),
             lite=LiteConfig.from_env(),
             seen=SeenConfig.from_env(),
+            ring=RingConfig.from_env(),
+            graph_cred=GraphCredConfig.from_env(),
         )
 
 

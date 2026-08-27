@@ -189,7 +189,7 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
               autoComplete="username"
               spellCheck={false}
               data-testid="keychain-username"
-              className="h-11 w-full bg-transparent px-1.5 text-[15px] leading-[24px] text-ink-2 outline-none placeholder:text-ink-14"
+              className="h-11 w-full bg-transparent px-1.5 text-[15px] leading-[24px] text-ink-2 outline-none focus-visible:outline-none placeholder:text-ink-14"
             />
           </div>
           <button

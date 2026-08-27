@@ -2007,7 +2007,25 @@ const PostContent = () => {
                           // Measured: this figure #ef4444, the feed card #2a6b44 — same number, two
                           // opposite colours. `--ink-payout` is the feed card's own green, promoted to a
                           // global token so these two cannot drift again.
-                          className={`text-sm font-bold text-[color:rgb(var(--ink-payout))] hover:cursor-pointer ${
+                          // ★★ 14px -> 15px + tabular-nums (2026-08-27, owner: "on the post
+                          // itself the payout is too small compared to the numbers next to
+                          // it"). THIS IS A REGRESSION FROM THE SAME DAY, not a reversal of
+                          // the 2026-08-16 ruling above. That ruling chose `text-sm` so the
+                          // payout would MATCH the tally and keep the row to two type sizes.
+                          // The tally was 14px then. On 2026-08-27 `.sm .tally` went 14px ->
+                          // 15px (vote-control.module.css, aligning the blade count with the
+                          // comment and reblog counts), which silently broke the pairing the
+                          // 08-16 note exists to protect and left the money the SMALLEST
+                          // number on its own row. Measured on the live post page before this
+                          // change: payout 14px/700, vote tally beside it 15px/500, every
+                          // comment payout below it 15px/700.
+                          // So this RESTORES that ruling's intent at the tally's new size —
+                          // still no third step (row meta stays 14px, tally and payout are
+                          // both 15px), still the heaviest thing in the row.
+                          // `tabular-nums` added to match the comment payouts, which have
+                          // always had it; without it the post's own figure was the only
+                          // money on the page with proportional digits.
+                          className={`text-[15px] font-bold tabular-nums text-[color:rgb(var(--ink-payout))] hover:cursor-pointer ${
                             parseFloat(postData.max_accepted_payout) === 0
                               ? '!text-ink-8 line-through'
                               : ''

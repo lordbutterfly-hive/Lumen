@@ -21,4 +21,4 @@ export const SETTINGS_LABEL = 'mb-1.5 block text-caption font-semibold text-ink-
 
 /** Text input / select trigger. */
 export const SETTINGS_INPUT =
-  'h-10 w-full rounded-control border border-line-11 bg-surface-1 px-3 font-sans text-[14px] leading-[22px] text-ink-2 outline-none transition-colors placeholder:text-ink-14 focus-visible:border-line-brand-10 focus-visible:ring-0';
+  'h-10 w-full rounded-control border border-line-11 bg-surface-1 px-3 font-sans text-[14px] leading-[22px] text-ink-2 outline-none focus-visible:outline-none transition-colors placeholder:text-ink-14 focus-visible:border-line-brand-10 focus-visible:ring-0';

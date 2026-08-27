@@ -10,6 +10,7 @@ import GoogleSignIn, { googleConfigured } from './google-signin';
 import KeychainSignin from './keychain-signin';
 import { Link } from '@hive/ui';
 import { isInternalPath } from '@ui/lib/sanitize-url';
+import { SHOW_HELP_LINKS } from '@/blog/lib/help-visibility';
 
 // TODO i18n — staged copy while the redesign lands (mirrors app-header's LABELS
 // precedent); move to locales/*/common_blog.json once final.
@@ -581,6 +582,15 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                 // the browser now enforces the upper bound (typed AND pasted) instead
                 // of only the copy claiming it.
                 maxLength={16}
+                // ★ NOT `focus-visible:outline-none` (2026-08-27). Every other input
+                // suppressed today sits in a wrapper whose focus affordance is
+                // UNCONDITIONAL. This one's is not: `nameBorder`'s `!nameTouched`
+                // branch is bare `border-line-11`, because the dated M1 ruling
+                // (2026-08-16) forbids brand-red before the reader has typed — it read
+                // as a validation error on an autoFocused field. No `line-*` token
+                // reaches the 3:1 WCAG 1.4.11 bar (darkest is line-19 at 1.48:1), so
+                // suppressing the global ring here left the FIRST field of signup with
+                // no focus indicator at all. The global ring stays.
                 className="min-w-0 flex-1 border-0 font-sans text-base font-semibold text-ink-2 outline-none"
               />
               {nameStatus.state === 'checking' ? (
@@ -626,16 +636,27 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
       {/* v8: this footer belongs to the standalone PAGE. Rendered inside the dialog it
           became a single orphaned "Help" link under the card, with no context and no
           sibling. The page keeps it; the dialog does not. */}
-      <div className={`my-9 flex gap-5 text-caption text-ink-14 ${embedded ? 'hidden' : ''}`}>
-        {/* ★ HELP FOR THE PERSON ACTUALLY ON THIS SCREEN (2026-08-08, UX tester).
-            This pointed at /faq.html — the inherited "Hive.blog FAQ", which opens
-            on master passwords, owner keys, Resource Credits and MVESTs and refers
-            the reader to a third-party account-creation service. Handing that to
-            someone who was just promised "without keys, wallets or setup" is worse
-            than offering no help at all. /help.html is Lumen's own, and links on to
-            the Hive FAQ at the bottom for anyone who wants it. */}
-        <Link href="/help.html" className="text-ink-14">Help</Link>
-      </div>
+      {/* ★ HIDDEN 2026-08-27 (owner): *"theres help on login hide it."* The whole
+          ROW is skipped, not just the link inside it: after C8 above stripped Terms
+          and Privacy from this row, Help is its ONLY child, so keeping the row would
+          leave an empty 72px `my-9` gap under the card. Not rendered rather than
+          `display:none`d, following `SHOW_CARD_OVERFLOW_MENU` in
+          `features/discovery-feed/medium-post-card.tsx` — a hidden-but-present link
+          is one more thing focus handling and the QA probes have to keep reasoning
+          about, and not rendering it removes the question. Comes back exactly as it
+          was by flipping `SHOW_HELP_LINKS`. */}
+      {SHOW_HELP_LINKS ? (
+        <div className={`my-9 flex gap-5 text-caption text-ink-14 ${embedded ? 'hidden' : ''}`}>
+          {/* ★ HELP FOR THE PERSON ACTUALLY ON THIS SCREEN (2026-08-08, UX tester).
+              This pointed at /faq.html — the inherited "Hive.blog FAQ", which opens
+              on master passwords, owner keys, Resource Credits and MVESTs and refers
+              the reader to a third-party account-creation service. Handing that to
+              someone who was just promised "without keys, wallets or setup" is worse
+              than offering no help at all. /help.html is Lumen's own, and links on to
+              the Hive FAQ at the bottom for anyone who wants it. */}
+          <Link href="/help.html" className="text-ink-14">Help</Link>
+        </div>
+      ) : null}
 
       {walletOpen ? (
         <WalletConnectDialog

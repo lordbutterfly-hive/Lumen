@@ -88,7 +88,24 @@ function baseUnitsToUsd(baseUnits: number): number {
 export interface CurveMarketInput {
   supply: number;
   cap: number;
-  position: { tokens: number } | null;
+  position: {
+    /** The holder's WHOLE position — core/matured.go:145 totalBalance, i.e. maturing + matured. */
+    tokens: number;
+    /**
+     * The MATURING half of that position (core/matured.go's kBal bucket) — the
+     * only half a curve sell owes exit tax on, because a matured token's rate is
+     * 0 by definition (core/matured.go:6-13).
+     *
+     * OPTIONAL, and omitting it is the CONSERVATIVE reading: `sellQuote` then
+     * treats the whole position as maturing, which is bit-for-bit what this file
+     * computed before and overstates the tax rather than understating it. Supply
+     * it wherever the split is actually known — until then a holder with matured
+     * tokens sees an exit that looks worse than the one the chain will give them
+     * (measured: 17.1% understated payout on 100 tokens sold from 40 maturing /
+     * 60 matured at supply 1000, h=0).
+     */
+    maturingTokens?: number;
+  } | null;
 }
 
 function supplyTokens(m: CurveMarketInput): number {
@@ -163,10 +180,32 @@ export function floorValueUsdNet(tokens: number, floorUsd: number, holdDays: num
 export interface BuyQuote {
   /** WHOLE tokens received — the curve mints integers only. */
   tokens: number;
-  /** Average $/token actually paid across the curve move. */
+  /**
+   * Average $/token actually paid across the curve move — `totalUsd / tokens`,
+   * so it INCLUDES the 10% trade fee, while `priceAfter` below is a bare curve
+   * price with no fee in it at all.
+   *
+   * ★ THE TWO ARE ON DIFFERENT BASES AND MUST NEVER BE SHOWN AS IF THEY WERE
+   * THE SAME KIND OF NUMBER (2026-08-27). On a rising curve the average paid
+   * must lie BELOW the price you end at; measured at $10 on a supply-50 market
+   * the modal showed "Average price ~$1.57" above "Price after your buy ~$1.46",
+   * an ordering the curve makes impossible, because the fee is in one figure and
+   * not the other (ex-fee the average is $1.43, correctly below $1.46). The
+   * arithmetic is right in both; the pairing was unlabelled. Any surface showing
+   * both must name the basis — token-modals.tsx reads "Average price (incl.
+   * fees)" and "Curve price after your buy", and itemises `tradeFeeUsd`.
+   */
   avgPrice: number;
-  /** $/token after your buy (the curve moves up). */
+  /** $/token after your buy (the curve moves up). NO fee in this — see `avgPrice`. */
   priceAfter: number;
+  /**
+   * The curve's own cost for the quoted tokens, BEFORE the trade fee — buy.go's
+   * `cost`. `curveCostUsd + tradeFeeUsd === totalUsd` by construction
+   * (quoteBuyBaseUnits: totalDue = cost + fee), which is what lets a modal
+   * itemise the fee the way the sell side already does instead of leaving it
+   * folded invisibly into one figure.
+   */
+  curveCostUsd: number;
   tradeFeeUsd: number;
   /** What the buy really costs, cost + fee — may be LESS than the requested budget, since tokens are integers. */
   totalUsd: number;
@@ -202,7 +241,14 @@ export function buyQuote(usdGross: number, m: CurveMarketInput): BuyQuote {
     // At any other supply it understated the real price by about 1%, which also
     // made the max-price slippage guard below (token-modals.tsx) that much too
     // lenient. contract-math.ts's own doc forbids conflating the two.
-    return { tokens: 0, avgPrice: 0, priceAfter: baseUnitsToUsd(displayPricePerTokenBaseUnits(supply)), tradeFeeUsd: 0, totalUsd: 0 };
+    return {
+      tokens: 0,
+      avgPrice: 0,
+      priceAfter: baseUnitsToUsd(displayPricePerTokenBaseUnits(supply)),
+      curveCostUsd: 0,
+      tradeFeeUsd: 0,
+      totalUsd: 0
+    };
   }
   const q = quoteBuyBaseUnits(supply, tokens);
   const totalUsd = baseUnitsToUsd(q.totalDueBaseUnits);
@@ -215,9 +261,45 @@ export function buyQuote(usdGross: number, m: CurveMarketInput): BuyQuote {
     // stay one. What belongs above a Buy button is what the NEXT token will
     // actually cost, so the conversion to a shown price happens here instead.
     priceAfter: baseUnitsToUsd(displayPricePerTokenBaseUnits(supply + tokens)),
+    curveCostUsd: baseUnitsToUsd(q.costBaseUnits),
     tradeFeeUsd: baseUnitsToUsd(q.feeBaseUnits),
     totalUsd
   };
+}
+
+/**
+ * THE SMALLEST BUDGET THAT BUYS ANYTHING AT THIS MARKET'S CURRENT SUPPLY — the
+ * fee-inclusive TotalDue of exactly one token, rounded UP to the cent.
+ *
+ * `buyQuote` returns `tokens: 0` for every budget below this, and
+ * `tokensAffordableForBudget`'s own doc says a caller "must surface rather than
+ * rounding up into a transaction that reverts". This is the figure that
+ * surfaces it: measured on the live supply-50 market, $0.50 and $1.00 both
+ * quoted zero tokens under an ENABLED Buy button, with no statement anywhere on
+ * screen of what a buy would actually take.
+ *
+ * IT MOVES. The curve rises with supply, so the threshold is only true of the
+ * supply it was read at — never cache it, never hardcode it, always derive it
+ * from the same market object the quote beside it came from.
+ *
+ * CEIL TO THE CENT, IN BASE UNITS. TotalDue is a 3-decimal HBD integer (1548 =
+ * $1.548) and the modal has two decimals to print it in. Rounding to the nearest
+ * cent would print "$1.54" — a budget that still buys nothing, because
+ * usdToBaseUnits(1.54) is 1540 and 1540 < 1548. Only rounding UP keeps the
+ * printed number a budget that actually works, which is what lets the modal
+ * state it flatly rather than hedging it. The ceiling is taken on the INTEGER
+ * base units (÷10 = milli-units to cents, ASSET_DECIMALS 3 → 2), never on the
+ * divided float, so no representation error can push it a whole cent high.
+ *
+ * Returns 0 when there is no headroom left under the cap — buy.go's ErrCap
+ * refuses a sold-out market outright, so it has no minimum, it has no buy at all
+ * (the modal's own `soldOut` branch says so in those words).
+ */
+export function minBuyUsd(m: CurveMarketInput): number {
+  const supply = supplyTokens(m);
+  if (Math.max(0, Math.floor(m.cap) - supply) < 1) return 0;
+  const cents = Math.ceil(quoteBuyBaseUnits(supply, 1).totalDueBaseUnits / 10);
+  return cents / 100;
 }
 
 export interface SellQuote {
@@ -249,7 +331,13 @@ export function sellQuote(tokens: number, m: CurveMarketInput, holdDays: number)
   const held = Math.max(0, Math.floor(m.position?.tokens ?? 0));
   const n = Math.max(0, Math.floor(Math.min(tokens, supply, held)));
   const heldBlocks = Math.max(0, Math.round(holdDays * BLOCKS_PER_DAY));
-  const q = n > 0 ? quoteSellBaseUnits(supply, n, heldBlocks) : null;
+  // TWO BUCKETS (F2). sell.go:234-236 taxes only the MATURING share of the draw.
+  // Pass the maturing BALANCE — quoteSellBaseUnits runs splitDraw (maturing
+  // FIRST, core/matured.go:149-195) itself. Unknown ⇒ the whole position, which
+  // reproduces this file's previous number exactly.
+  const maturingHeld =
+    m.position?.maturingTokens === undefined ? held : Math.max(0, Math.min(held, Math.floor(m.position.maturingTokens)));
+  const q = n > 0 ? quoteSellBaseUnits(supply, n, heldBlocks, maturingHeld) : null;
   if (!q) return { curveProceedsUsd: 0, exitFeePct: exitFeeFraction(holdDays), exitFeeUsd: 0, tradeFeeUsd: 0, receiveUsd: 0 };
   return {
     curveProceedsUsd: baseUnitsToUsd(q.grossBaseUnits),
@@ -301,6 +389,155 @@ export function serviceQuote(usd: number, priceUsd: number): ServiceQuote {
     commissionUsd: baseUnitsToUsd(commissionBaseUnits),
     totalUsd: baseUnitsToUsd(tokenLegBaseUnits + commissionBaseUnits)
   };
+}
+
+/**
+ * ★★★ THE SUPPLY CAP IS PER-CREATOR AND A SERVICE PRICE WAS NEVER CHECKED
+ * AGAINST IT (2026-08-27).
+ *
+ * `serviceQuote` above answers "how many tokens does this service cost", and
+ * every screen that renders a price calls it. Nothing anywhere asked the next
+ * question: how many tokens are there? Caps vary by three orders of magnitude
+ * between live markets — 30 on `did:pkh:…0xB41f…980B`, 500 on `…0xc965…Cb6a`,
+ * 100,000 on every `lumen.*` — and the creation forms accept a price with no
+ * reference to the creator's own cap at all.
+ *
+ * Measured on the live testnet build: the 30-cap market's single posted
+ * offering ("Q&A session <live> & more", $15) rendered `≈ 14.00 tokens` on its
+ * own token page. Fourteen of the thirty tokens that will ever exist — 47% of
+ * total supply — for one job. An ask ESCROWS those tokens for the duration of
+ * the work (ask.go holds them until answer/reclaim), so the fraction is a hard
+ * ceiling on how many customers the creator can serve at once, set by their own
+ * pricing and invisible to them at the moment they set it.
+ *
+ * TWO SEPARATE FAULTS, deliberately reported as two:
+ *
+ *   1. UNFILLABLE — the service costs more tokens than the cap allows to exist.
+ *      No buyer can ever hold enough, at any supply, so the offering is
+ *      advertised and cannot be transacted. This needs no policy judgement: it
+ *      is not "risky pricing", it is a listing with no reachable buyer.
+ *
+ *   2. OVER-SHARE — fillable, but it consumes more of total supply than
+ *      `maxShareBps`. See that constant for the threshold's justification.
+ *
+ * WHY THE CHECK IS A CLIENT ONE. The contract does not refuse either case:
+ * offerings.go validates the title and the price band, and ask.go prices the
+ * escrow, but nothing on chain relates an offering's price to `kCap`. So this
+ * is not a mirror of a core rule — it is a creation-time guard against the
+ * creator posting a shop nobody can buy from, and the message says how to fix
+ * it rather than merely refusing.
+ *
+ * NEVER GUESSES. A cap or price we do not have returns `null` — "cannot judge"
+ * — never a refusal. Blocking a creator's own pricing on a value that failed to
+ * read is the same fault class this feature has been burned by repeatedly
+ * (unavailable ≠ empty); a guard that fires on a missing number is worse than
+ * no guard.
+ */
+
+/**
+ * The most of a creator's total supply one service may cost: 10%.
+ *
+ * ★ REASONED, NOT ROUND-BY-FEEL — and the reasoning is the escrow, not
+ * aesthetics. A service costing fraction f of max supply can be in flight for
+ * at most floor(1/f) customers simultaneously, because ask.go locks the
+ * buyer's tokens until the job is answered or reclaimed. f IS the creator's
+ * concurrency limit. At 10% a creator can carry ten jobs at once; at the 47%
+ * measured live they can carry two, and the third customer cannot transact at
+ * any price.
+ *
+ * Ten is also what the product's own central claim needs. `/creators` ranks
+ * creators "by how reliably they deliver", computed from answered/missed
+ * COUNTS — a record that accumulates one job at a time is not a record anyone
+ * can rank on, so a pricing rule that throttles delivery to single figures
+ * quietly disables the ranking the feature exists to provide.
+ *
+ * And it is two orders of magnitude LOOSER than the regime the owner's own cap
+ * ruling implies: every token launches at `STANDARD_CAP` = 5,000
+ * (ui/launch-money.ts, owner 2026-08-08), where a $50 service is 44 tokens =
+ * 0.88% of supply. So 10% refuses only pricing far outside anything the design
+ * anticipates — it is a backstop against the pathological case, not a
+ * constraint on ordinary pricing.
+ *
+ * ★ THE EXACT FRACTION IS THE ONE PART OF THIS AN OWNER MAY WANT TO SET. The
+ * SHAPE of the rule (cost as a share of cap, checked at creation) follows from
+ * the escrow; the number 10% is the loosest bound consistent with the argument
+ * above. Tightening it to 5% or 2% is defensible and needs no code change
+ * beyond this constant.
+ */
+export const MAX_SERVICE_SUPPLY_SHARE_BPS = 1_000; // 10%
+
+export interface ServiceSupplyShare {
+  /** Whole tokens the service costs at `priceUsd` — `serviceQuote(...).tokens`, never a second formula. */
+  tokens: number;
+  /** Share of `capTokens`, in basis points. Uncapped: an unfillable service exceeds 10,000. */
+  shareBps: number;
+  /** More tokens than can ever exist. No buyer, at any supply. */
+  unfillable: boolean;
+  /** Fillable, but above `maxShareBps` of total supply. */
+  overShare: boolean;
+}
+
+/**
+ * How much of a creator's whole supply one service costs, or `null` when the
+ * inputs do not support an answer (no cap, no price, no price on the service).
+ *
+ * The token figure comes from `serviceQuote`, the same call the token page and
+ * the Studio already render — a second cost formula here is exactly the
+ * "third, wrong way to quote the same offering" this feature has already been
+ * bitten by (creator-studio.tsx's own note, 2026-08-21).
+ */
+export function serviceSupplyShare(
+  usd: number,
+  priceUsd: number,
+  capTokens: number,
+  maxShareBps: number = MAX_SERVICE_SUPPLY_SHARE_BPS
+): ServiceSupplyShare | null {
+  if (!Number.isFinite(usd) || usd <= 0) return null;
+  if (!Number.isFinite(priceUsd) || priceUsd <= 0) return null;
+  if (!Number.isFinite(capTokens) || capTokens <= 0) return null;
+
+  const { tokens } = serviceQuote(usd, priceUsd);
+  // serviceQuote returns 0 when it cannot price. That is "unknown", not "free",
+  // and it must not be reported as a 0% share of supply.
+  if (tokens <= 0) return null;
+
+  const cap = Math.floor(capTokens);
+  return {
+    tokens,
+    shareBps: Math.round((tokens / cap) * 10_000),
+    unfillable: tokens > cap,
+    overShare: tokens * 10_000 > cap * maxShareBps
+  };
+}
+
+/**
+ * The creation-time refusal sentence, or `null` when the price is fine or
+ * cannot be judged.
+ *
+ * Wording follows the rule the rest of this feature's refusals follow: name the
+ * fault in the creator's own numbers, then the way out. Both remedies are real
+ * — the cap can be RAISED from the Studio at any time (ui/launch-money.ts's own
+ * note on why a low start is safe), so this is never a dead end.
+ */
+export function serviceSupplyShareProblem(
+  usd: number,
+  priceUsd: number,
+  capTokens: number,
+  maxShareBps: number = MAX_SERVICE_SUPPLY_SHARE_BPS
+): string | null {
+  const share = serviceSupplyShare(usd, priceUsd, capTokens, maxShareBps);
+  if (share === null) return null;
+
+  const cap = Math.floor(capTokens).toLocaleString('en-US');
+  const tokens = share.tokens.toLocaleString('en-US');
+  if (share.unfillable) {
+    return `At this price the service costs ${tokens} tokens, and only ${cap} can ever exist. Nobody could buy it. Lower the price, or raise your supply cap first.`;
+  }
+  if (share.overShare) {
+    const pct = Math.max(1, Math.round(share.shareBps / 100));
+    return `At this price the service costs ${tokens} tokens — ${pct}% of your whole supply of ${cap}. Only a few buyers could hold enough at once, and their tokens stay locked until you deliver. Lower the price, or raise your supply cap first.`;
+  }
+  return null;
 }
 
 /**

@@ -6,6 +6,7 @@ import TooltipContainer from '@ui/components/tooltip-container';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import NewProposalDialog from './new-proposal-dialog';
+import { SHOW_HELP_LINKS } from '@/blog/lib/help-visibility';
 
 /** "Decentralized Hive Fund" heading + intro + the real New proposal dialog trigger. */
 export default function ProposalsMainHeader() {
@@ -62,12 +63,28 @@ export default function ProposalsMainHeader() {
         )
       }
     >
+      {/* ★ THE THIRD ROUTE INTO /help.html, HIDDEN 2026-08-27 (owner, "get rid of
+          help as well"). It is labelled "FAQ" rather than "Help", which is why a
+          grep for the word Help misses it — the destination is what matters, not
+          the label.
+
+          The SENTENCE has to change with it, not just the anchor. `intro` ends
+          "...Read more in the", with the link and the full stop supplied by this
+          JSX, so hiding only the `<a>` would render "Read more in the ." on the
+          page. `intro_no_faq` is the same sentence without that trailing clause;
+          flipping `SHOW_HELP_LINKS` restores both halves together. */}
       <p className="max-w-[620px] font-serif text-caption text-ink-10">
-        {t('proposals.header.intro')}{' '}
-        <a href="/help.html" className="text-ink-brand-6 hover:underline">
-          {t('proposals.header.faq_link')}
-        </a>
-        .
+        {SHOW_HELP_LINKS ? (
+          <>
+            {t('proposals.header.intro')}{' '}
+            <a href="/help.html" className="text-ink-brand-6 hover:underline">
+              {t('proposals.header.faq_link')}
+            </a>
+            .
+          </>
+        ) : (
+          t('proposals.header.intro_no_faq')
+        )}
       </p>
     </PageMasthead>
   );

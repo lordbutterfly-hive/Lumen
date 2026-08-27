@@ -54,7 +54,7 @@ export const PAGER_BUTTON =
 
 /** The toolbar search field. */
 export const SEARCH_INPUT =
-  'h-9 w-full rounded-control border border-[#ebebeb] bg-white pl-9 pr-3 font-sans text-caption text-[#161511] outline-none transition-colors placeholder:text-ink-14 focus:border-line-brand-10';
+  'h-9 w-full rounded-control border border-[#ebebeb] bg-white pl-9 pr-3 font-sans text-caption text-[#161511] outline-none focus-visible:outline-none transition-colors placeholder:text-ink-14 focus:border-line-brand-10';
 
 /** Muted meta text: the toolbar count, the pager label, empty-state body copy. */
 export const META_TEXT = 'font-sans text-caption font-medium text-[#6b7280]';

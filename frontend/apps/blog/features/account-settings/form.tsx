@@ -25,6 +25,7 @@ import { CircleSpinner } from 'react-spinners-kit';
 import { Signer } from '@smart-signer/lib/signer/signer';
 import { useSignerContext } from '@smart-signer/components/signer-provider';
 import BasePathLink from '@/blog/components/base-path-link';
+import { SHOW_HELP_LINKS } from '@/blog/lib/help-visibility';
 import {
   SETTINGS_CARD,
   SETTINGS_CARD_HINT,
@@ -683,7 +684,14 @@ const SettingsForm = ({ username }: { username: string }) => {
           not a scrolling one. Does not help a signed-out reader on a post
           page — that gap stays open until the footer ships. */}
       <section className={SETTINGS_CARD} data-testid="settings-legal">
-        <h2 className={SETTINGS_CARD_TITLE}>{t('settings_page.legal_title')}</h2>
+        {/* ★ THE HEADING TRACKS THE FLAG (2026-08-27). `legal_title` is
+            "Legal & Help"; with the Help link below hidden on the owner's
+            instruction, that heading would name a link the card no longer has.
+            A heading that promises a row which is not there is the same defect
+            as the link itself, one level up. */}
+        <h2 className={SETTINGS_CARD_TITLE}>
+          {t(SHOW_HELP_LINKS ? 'settings_page.legal_title' : 'settings_page.legal_title_no_help')}
+        </h2>
         <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-[14px] leading-[22px]">
           <BasePathLink href="/privacy.html" className="font-semibold text-ink-brand-6 hover:text-ink-brand-4">
             {t('navigation.sidebar.privacy_policy')}
@@ -691,13 +699,19 @@ const SettingsForm = ({ username }: { username: string }) => {
           <BasePathLink href="/tos.html" className="font-semibold text-ink-brand-6 hover:text-ink-brand-4">
             {t('navigation.sidebar.terms_of_service')}
           </BasePathLink>
-          {/* Not special-cased by `base-path-link.tsx`'s `isStaticPage` reload
-              list (only `/privacy.html`/`/tos.html` are) — fine here, since
-              that special case exists to work around a basePath deployment
-              quirk on the OTHER two, not something `/help.html` needs. */}
-          <BasePathLink href="/help.html" className="font-semibold text-ink-brand-6 hover:text-ink-brand-4">
-            {t('settings_page.help_link')}
-          </BasePathLink>
+          {/* ★ HIDDEN 2026-08-27 (owner, "get rid of help as well"). Not deleted:
+              Privacy and Terms above are the two links this card exists for, and
+              Help slots back beside them by flipping `SHOW_HELP_LINKS`. The card
+              itself stays — it is still the "what did I agree to" surface. */}
+          {SHOW_HELP_LINKS ? (
+            /* Not special-cased by `base-path-link.tsx`'s `isStaticPage` reload
+               list (only `/privacy.html`/`/tos.html` are) — fine here, since
+               that special case exists to work around a basePath deployment
+               quirk on the OTHER two, not something `/help.html` needs. */
+            <BasePathLink href="/help.html" className="font-semibold text-ink-brand-6 hover:text-ink-brand-4">
+              {t('settings_page.help_link')}
+            </BasePathLink>
+          ) : null}
         </div>
       </section>
     </>

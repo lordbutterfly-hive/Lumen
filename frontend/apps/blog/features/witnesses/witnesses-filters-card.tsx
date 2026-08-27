@@ -64,7 +64,7 @@ export default function WitnessesFiltersCard({
       <div className="mb-2.5 font-sans text-label font-bold uppercase tracking-label text-ink-14">
         {t('witnesses.filters.name_group')}
       </div>
-      <div className="mb-4 flex items-center gap-[9px] rounded-control border border-line-11 px-3 py-[9px]">
+      <div className="mb-4 flex items-center gap-[9px] rounded-control border border-line-11 px-3 py-[9px] focus-within:border-line-brand-10">
         <Icons.search className="h-[15px] w-[15px] text-ink-14" />
         <input
           type="text"
@@ -73,7 +73,7 @@ export default function WitnessesFiltersCard({
           placeholder={t('witnesses.filters.search_placeholder')}
           aria-label={t('witnesses.filters.search_placeholder')}
           data-testid="witnesses-filter-search"
-          className="w-full bg-transparent font-sans text-[14px] leading-[22px] text-ink-2 outline-none placeholder:text-ink-14"
+          className="w-full bg-transparent font-sans text-[14px] leading-[22px] text-ink-2 outline-none focus-visible:outline-none placeholder:text-ink-14"
         />
       </div>
 
@@ -89,7 +89,7 @@ export default function WitnessesFiltersCard({
            control on the page not drawn in the house style. `appearance-none` plus an
            inline chevron gives it the same border, radius and focus behaviour as
            every other control, without pulling in the Radix select for one field. */
-        className="w-full appearance-none rounded-control border border-line-11 bg-surface-1 bg-[length:11px] bg-[right_12px_center] bg-no-repeat px-3 py-[9px] pr-9 font-sans text-[14px] leading-[22px] text-ink-2 outline-none focus-visible:border-line-brand-10"
+        className="w-full appearance-none rounded-control border border-line-11 bg-surface-1 bg-[length:11px] bg-[right_12px_center] bg-no-repeat px-3 py-[9px] pr-9 font-sans text-[14px] leading-[22px] text-ink-2 outline-none focus-visible:outline-none focus-visible:border-line-brand-10"
         style={{
           backgroundImage:
             "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%236b7280' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")"

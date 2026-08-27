@@ -8,10 +8,31 @@ import { displayHandle } from '../../live/adapt';
 import { useLiveTokenMarket } from '../../live/use-live-token-market';
 import { useCreatorFollow } from '../../live/use-creator-follow';
 import { MarketLoading, MarketMissing, MarketReadFailed, MarketUnavailable } from '../../live/market-states';
-import { pctLabel, pctValue, usdPrice, usdWhole } from '../../market/format';
+import { pctLabel, pctValue, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
 import TokenShell from '../token-shell';
 import PriceChart from './price-chart';
 import TokenModals, { type TokenDialog } from './token-modals';
+// ★★★ EVERY SENTENCE ON THIS PAGE THAT MAKES A CLAIM ABOUT MONEY (2026-08-27).
+// Extracted so a self-test can read it: this is a `'use client'` tree, so copy
+// written inline here is copy no test can assert on. See disclosure-copy.ts's
+// own header for the four defects each string was rewritten to fix, with the
+// live figures they were reproduced against.
+import {
+  BACKING_PER_TOKEN_ARIA,
+  BACKING_PER_TOKEN_LABEL,
+  BACKING_PER_TOKEN_NOTE,
+  BACKING_TOTAL_LABEL,
+  BACKING_TOTAL_NOTE,
+  HONEST_NOTE,
+  HOW_IT_WORKS_RESERVE_LINE,
+  MARKET_CAP_LABEL,
+  MARKET_CAP_NOTE,
+  WIND_DOWN_BANNER,
+  backingPerTokenValue,
+  overdueBanner,
+  overdueFigures,
+  positionSegments
+} from './disclosure-copy';
 import { MeritumEligibilityNotice, useMeritumEligibility } from '../meritum-eligibility';
 
 const tok = (n: number) => n.toFixed(2);
@@ -291,6 +312,42 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
     await live.refund(tokens, minNetUsd); // H-FE-7: optional net-refund floor (undefined = no floor)
   };
 
+  /**
+   * ★★★ DEMOTED IS NOT DELETED, AND BELOW 1280px THIS WAS DELETED (2026-08-27).
+   *
+   * The disclosure pass moved Market cap out of the headline row and into the
+   * right rail, which was right: it is spot × supply, a number no holder can
+   * realise, and the reserve belongs in the headline instead. But
+   * `../token-shell.tsx:74` renders that rail `hidden … xl:block`, and `xl` is
+   * stock 1280px (the only `screens` override in
+   * packages/tailwindcss/tailwind.config.js:15 is scoped inside `container`).
+   * Verified live: `body.innerText.includes('Market cap')` is FALSE at 1279px and
+   * TRUE at 1400px. Every phone, tablet and sub-1280 desktop window lost the
+   * figure outright.
+   *
+   * ★ THE DECISION, STATED: the figure is KEPT and made visible at every width,
+   * not removed. It is a number readers arrive expecting, and the honest thing to
+   * do with it is show it WITH the sentence saying what it is not — which is
+   * exactly what MARKET_CAP_NOTE is for. Silently dropping it on the majority of
+   * viewports is neither demotion nor deletion; it is the page saying different
+   * things to different readers about the same market.
+   *
+   * One definition, rendered twice: in the rail from `xl` up, and inline in the
+   * body BELOW the market panel (so it stays secondary to the reserve) whenever
+   * the rail is not there. `xl:hidden` on the body copy and the rail's own
+   * `xl:block` are complements, so it appears exactly once at every width.
+   *
+   * token-shell.tsx is outside this pass's ownership and is deliberately NOT
+   * touched: the rail's breakpoint is shared by every page that uses the shell.
+   */
+  const marketCapCard = (
+    <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
+      <div className="mb-1.5 text-caption text-ink-10">{MARKET_CAP_LABEL}</div>
+      <div className="mb-0.5 text-[20px] font-bold tabular-nums text-ink-2">{usdWholeNonZero(market.marketCapUsd)}</div>
+      <p className="font-serif text-caption text-ink-14">{MARKET_CAP_NOTE}</p>
+    </div>
+  );
+
   const rightRail = (
     <div className="flex flex-col gap-5 pt-[26px]">
       <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
@@ -299,7 +356,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           {[
             'Buy the creator’s token. The price rises as more is bought.',
             'Spend tokens on their work. A question, a code review, a day of building — priced in dollars.',
-            'As more people buy in, the token can appreciate. The floor is what the reserve would pay out per token if the market wound down. Selling on the curve is a separate thing, at the curve’s price.'
+            HOW_IT_WORKS_RESERVE_LINE
           ].map((line, i) => (
             <div key={i} className="flex gap-3">
               <span className="font-serif font-bold text-ink-brand-6">{i + 1}</span>
@@ -308,11 +365,21 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           ))}
         </div>
       </div>
-      <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
-        <div className="mb-1.5 text-caption text-ink-10">Reserve backing</div>
-        <div className="mb-0.5 text-[20px] font-bold tabular-nums text-ink-2">{usdWhole(market.reserveUsd)}</div>
-        <p className="font-serif text-caption text-ink-14">Held in reserve behind every token: the source of the floor.</p>
-      </div>
+      {/* ★★★ THE FICTION MOVED TO THE ASIDE AND THE FACT TOOK THE HEADLINE
+          (2026-08-27). This card used to hold "Reserve backing $60" while
+          "Market cap $70" sat beside the price as a headline stat. Market cap on
+          a bonding curve is spot × supply: a number NO holder can realise,
+          because selling walks the price back down the whole way. Measured on
+          this market: all 50 tokens sold out gross $60.15 and net $54.14 against
+          a $70 cap. Reserve backing is the money that is actually there.
+
+          This was the central, repeated criticism of friend.tech and pump.fun,
+          and the page was making the same presentation. The two have swapped
+          places, and the cap now carries the sentence saying what it is not.
+
+          The card itself is `marketCapCard` above — one definition, shown here
+          from `xl` up and inline in the body below that. See its own note. */}
+      {marketCapCard}
     </div>
   );
 
@@ -351,8 +418,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           button to speak for itself. */}
       {market.windingDown ? (
         <div className="mb-4 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-warn-3">
-          This creator’s market is winding down — buying and new asks are closed. Selling on the curve is closed too;
-          use Redeem to take your pro-rata share of the reserve at the floor.
+          {WIND_DOWN_BANNER}
         </div>
       ) : market.phase === 'OVERDUE' ? (
         // ★ OVERDUE WAS COMPLETELY SILENT TO A BUYER.
@@ -368,9 +434,12 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         // was shown. This page already discloses wind-down and delinquency
         // plainly; overdue is the state that most needs it.
         <div className="mb-4 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-warn-3">
-          This creator’s listing has lapsed. If it isn’t renewed the market freezes: buying and selling on the curve
-          close, and the only way out becomes Redeem at the floor
-          {market.floorUsd ? ` (currently ${usdPrice(market.floorUsd)} a token, against ${usdPrice(market.priceUsd)} now)` : ''}.
+          {/* ★ The quoted figure is the GROSS pro-rata share (2026-08-27): it is
+              what the reserve holds per token, before the holder's own
+              early-exit fee, so the clause says so. `overdueFigures` returns ''
+              when there is no number to quote, which is how the sentence avoids
+              ending "(currently  a token)" on an untraded market. */}
+          {overdueBanner(overdueFigures(backingPerTokenValue(market.floorUsd, market.supply), market.priceUsd))}
         </div>
       ) : market.delinquentUntilBlock !== null ? (
         // delivery.go: RequireInflowOpen also refuses while a creator is
@@ -415,28 +484,62 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               ) : null}
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-[18px]">
-              <div>
-                <div className="mb-0.5 text-caption text-ink-10">Market cap</div>
-                <div className="text-[20px] leading-[30px] font-bold tabular-nums text-ink-2">{usdWhole(market.marketCapUsd)}</div>
-              </div>
-              <div className="h-[34px] w-px bg-surface-26" />
+              {/* ★★★ THE HEADLINE STAT IS THE RESERVE NOW, NOT THE MARKET CAP
+                  (2026-08-27). Market cap is spot × supply and no holder can
+                  realise it; it has moved to the right rail with a sentence
+                  saying so. This slot holds the money that is actually behind
+                  the token. `usdWholeNonZero`, not `usdWhole`: a real reserve
+                  under fifty cents rounded to "$0" beside a live market, which
+                  is the same false claim `usdWholeNonZero` was written for. */}
               <div>
                 <div className="mb-0.5 flex items-center gap-1.5 text-caption text-ink-10">
-                  Floor
-                  {/* Reachable and announced (2026-08-07): this explainer was a bare
-                      <span title>, so it existed for a mouse and for nobody else. */}
+                  {BACKING_TOTAL_LABEL}
+                  {/* The sentence the right-rail card used to carry under this
+                      figure. It kept the explanation when the number moved, in
+                      the same reachable-and-announced form the note beside
+                      "Backing per token" already uses. */}
                   <span
                     role="note"
                     tabIndex={0}
-                    aria-label="What the floor means: what the reserve would pay out per token if the market wound down. It is not a price you can sell at on demand."
-                    title="What the reserve would pay out per token if the market wound down. Not a price you can sell at on demand."
+                    aria-label={`What reserve backing means: ${BACKING_TOTAL_NOTE}`}
+                    title={BACKING_TOTAL_NOTE}
                     className="flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full bg-surface-23 text-caption text-ink-14"
                   >
                     ?
                   </span>
                 </div>
-                {/* Floor beside price, equal size, muted — never colored. */}
-                <div className="text-[20px] leading-[30px] font-bold tabular-nums text-ink-10">{usdPrice(market.floorUsd)}</div>
+                <div className="text-[20px] leading-[30px] font-bold tabular-nums text-ink-2">{usdWholeNonZero(market.reserveUsd)}</div>
+              </div>
+              <div className="h-[34px] w-px bg-surface-26" />
+              <div>
+                <div className="mb-0.5 flex items-center gap-1.5 text-caption text-ink-10">
+                  {/* ★★★ "FLOOR" WAS A WORD THE NUMBER COULD NOT SUPPORT (2026-08-27).
+                      A floor is a minimum. This quantity is reserve ÷ supply, and it
+                      FALLS as holders leave: $1.2031 at supply 50 on this market,
+                      $1.0070 at supply 1 (exact, from areaBaseUnits). A reader seeing
+                      "price $1.41 / floor $1.20" reads about 15% of downside; the last
+                      holder out of the curve nets $0.907, which is 36% down. Renamed
+                      to what it is. The maths is untouched. */}
+                  {BACKING_PER_TOKEN_LABEL}
+                  {/* Reachable and announced (2026-08-07): this explainer was a bare
+                      <span title>, so it existed for a mouse and for nobody else. */}
+                  <span
+                    role="note"
+                    tabIndex={0}
+                    aria-label={BACKING_PER_TOKEN_ARIA}
+                    title={BACKING_PER_TOKEN_NOTE}
+                    className="flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full bg-surface-23 text-caption text-ink-14"
+                  >
+                    ?
+                  </span>
+                </div>
+                {/* Beside the price, equal size, muted — never colored. */}
+                {/* ★ AND "$0.00" ON AN UNTRADED MARKET WAS A 0 ÷ 0 (2026-08-27,
+                    reproduced in the browser on the cap-30 market at supply 0,
+                    which read "Floor ? $0.00"). See backingPerTokenValue. */}
+                <div className="text-[20px] leading-[30px] font-bold tabular-nums text-ink-10">
+                  {backingPerTokenValue(market.floorUsd, market.supply)}
+                </div>
               </div>
             </div>
             <div className="mt-[18px]">
@@ -517,6 +620,14 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         </div>
       </div>
 
+      {/* 2b. The market cap, for every viewport the right rail does not reach.
+          `xl:hidden` is the exact complement of token-shell.tsx's `xl:block` on
+          the rail, so this renders precisely when the rail does not and the
+          figure appears exactly once at every width. Below the market panel, so
+          it stays secondary to the reserve. See `marketCapCard` for the
+          measurement and the decision. */}
+      <div className="mb-4 xl:hidden">{marketCapCard}</div>
+
       {/* 3. Trust record */}
       <div className="mb-4 rounded-panel border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
         <div className="mb-3.5 font-serif text-[20px] leading-[30px] font-semibold text-ink-2">Delivery record</div>
@@ -582,8 +693,28 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                     cannot price — so when the token price was briefly wrong,
                     a real $25 service advertised itself as free-ish. A price we
                     do not have must read as absent, never as zero. */}
+                {/* ★ AND WHAT THAT TOKEN COUNT IS A SHARE OF (2026-08-27). The count
+                    alone is unreadable without the cap, and the cap is PER-CREATOR
+                    and varies by three orders of magnitude between live markets
+                    (30 / 500 / 100,000). "≈ 14.00 tokens" is a rounding error on a
+                    100,000-token market and 47% of everything that will ever exist
+                    on a 30-token one, and this line read identically in both.
+
+                    The supply figure IS already on this page — "0 of 30 tokens
+                    issued", up in the market panel — so this is not a missing
+                    number, it is a number sitting away from the only place it
+                    changes a decision. Stated here, unconditionally, rather than
+                    as a warning above some threshold: a share is a fact about the
+                    price, and `pctLabel` reads "<1%" rather than a false "0%" for
+                    the ordinary case, so a healthy market says something honest
+                    and quiet instead of nothing. */}
                 {market.priceUsd > 0 ? (
-                  <div className="text-caption tabular-nums text-ink-14">≈ {tok(serviceQuote(sv.usd, market.priceUsd).tokens)} tokens</div>
+                  <div className="text-caption tabular-nums text-ink-14">
+                    ≈ {tok(serviceQuote(sv.usd, market.priceUsd).tokens)} tokens
+                    {market.cap > 0
+                      ? ` · ${pctLabel(serviceQuote(sv.usd, market.priceUsd).tokens, market.cap) ?? '0%'} of all ${market.cap.toLocaleString('en-US')}`
+                      : ''}
+                  </div>
                 ) : (
                   <div className="text-caption text-ink-14">token cost unavailable</div>
                 )}
@@ -623,10 +754,24 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
       {market.position ? (
         <div className="mb-4 rounded-panel border border-line-9 bg-surface-12 px-6 py-[22px]">
           <div className="flex flex-wrap items-center justify-between gap-4">
+            {/* ★ "WORTH" WAS THE FICTION WORD (2026-08-27). `valueUsd` is the
+                holder's tokens × the spot price: the same unrealisable mark as
+                the market cap one panel up, and it was the only one of the two
+                figures given an approving label. `floorValueUsd` is the
+                opposite: readHolderPosition computes it through
+                refundNetBaseUnits, so it is already NET of this holder's own
+                exit tax and is the one number here they could actually receive.
+                Both are now named by what they are. See positionLine. */}
             <div className="text-[15px] leading-[24px] tabular-nums text-ink-7">
-              You hold <strong className="text-ink-2">{tok(market.position.tokens)} tokens</strong> · worth{' '}
-              <strong className="text-ink-2">{usdPrice(market.position.valueUsd)}</strong> · floor value{' '}
-              <strong className="text-ink-2">{usdPrice(market.position.floorValueUsd)}</strong>
+              {positionSegments(tok(market.position.tokens), market.position.valueUsd, market.position.floorValueUsd).map((seg, i) =>
+                seg.strong ? (
+                  <strong key={i} className="text-ink-2">
+                    {seg.text}
+                  </strong>
+                ) : (
+                  <span key={i}>{seg.text}</span>
+                )
+              )}
             </div>
             <div className="flex gap-2.5">
               <button
@@ -655,17 +800,16 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
       ) : null}
 
       {/* 6. Honest note */}
-      <p className="font-serif text-caption text-ink-14">
-        This token’s price floats — it can go up or down, and you can lose money. Every trade pays a 10% fee (5% to the
-        creator, 5% to Lumen), and selling soon after buying adds an early-exit fee on top, which fades to zero over 6
-        weeks. The floor above is what the reserve would pay out per token if the market wound down — it is not a price
-        you can sell at on demand.
-      </p>
+      {/* ★ The one paragraph where all four fee and price behaviours are stated
+          together, so it is the one that must be exactly right. Every clause is
+          a measured fact; see HONEST_NOTE for what each was checked against. */}
+      <p className="font-serif text-caption text-ink-14">{HONEST_NOTE}</p>
 
       <TokenModals
         dialog={dialog}
         market={market}
         service={service}
+        positionUnavailable={live.positionUnavailable}
         onBuy={handleBuy}
         onSell={handleSell}
         onRedeem={handleRedeem}

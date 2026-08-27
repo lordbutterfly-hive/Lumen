@@ -1,0 +1,306 @@
+/**
+ * WHAT THE TOKEN PAGE IS ALLOWED TO CLAIM ABOUT MONEY (2026-08-27).
+ *
+ * Every sentence here was rewritten after a browser audit of the live build
+ * (`9k0sWWUqu7AcgaakLJfwI`) read four disclosure defects off the running page
+ * at /creators/lumen.beat, supply 50, reserve 60.153 HBD. The numbers quoted in
+ * these notes were reproduced against the deployed contract state, not reasoned
+ * about: see the four sections below.
+ *
+ * ★★★ 1. "YOU CAN ALWAYS EXIT" WAS AN UNCONDITIONAL GUARANTEE. The Sell dialog
+ * closed with "You can always exit. While this market is open by selling, and
+ * once it winds down by redeeming at the floor." — a promise the product's own
+ * copy contradicts two panels away ("not a price you can sell at on demand").
+ * A bonding curve offers a QUOTED buyback contingent on the reserve being there
+ * and the market being open; it cannot promise "always". `exitRoutesNote` now
+ * names the two routes and says plainly that neither is a fixed price.
+ *
+ * ★★★ 2. THE HEADLINE "FLOOR" IS GROSS OF THE EARLY-EXIT FEE. It reads $1.20 on
+ * lumen.beat. A holder redeeming inside the first six weeks receives less:
+ * $0.96 on day 0, $1.08 on day 21, and only at day 42+ the full $1.20
+ * (`refundNetBaseUnits`, reserve 60153, supply 50, verified). The old tooltip
+ * said the number was "what the reserve would pay out per token if the market
+ * wound down"; for most holders it is not.
+ *
+ *   ★ AND THE 10% TRADE FEE IS NOT THE REASON. The audit attributed the gap to
+ *   the sell fee. It is not: `refundNetBaseUnits`'s own doc says "Unlike Sell
+ *   there is NO trade fee here (charging a fee to exit a dying market is
+ *   holder-hostile)", and token-modals.tsx has gated the fee row out of redeem
+ *   mode since that rail was written. The gap is the exit tax, which happens to
+ *   be exactly 10% at day 21 — which is where the audit's $1.08 came from. The
+ *   copy names the real cause, because a disclosure that blames the wrong fee
+ *   is a second false statement, not a fix.
+ *
+ * ★★★ 3. "FLOOR" IS NOT A FLOOR, AND THE WORD WAS DOING WORK THE NUMBER CANNOT
+ * SUPPORT. It is reserve ÷ supply, and it FALLS as holders leave: at supply 50
+ * it is $1.2031, at supply 1 it is $1.0070 (`areaBaseUnits`, exact). A reader
+ * seeing "price $1.41 / floor $1.20" infers about 15% of downside; selling into
+ * the curve the last holder out nets $0.907, which is 36% down. Renamed to
+ * "Backing per token", which is what the quantity IS, and the notes below state
+ * the curve behaviour instead of implying a minimum.
+ *
+ * ★★★ 4. THE FICTION LED AND THE FACT WAS AN ASIDE. "Market cap" (spot × supply,
+ * $70) was a headline stat beside the price; "Reserve backing" ($60, the money
+ * actually there) was a right-rail card. Nobody can realise a market cap on a
+ * bonding curve: selling walks the price back down, and all 50 tokens sold out
+ * gross $60.15 and net $54.14. The two have swapped places.
+ *
+ * WHY A MODULE AND NOT INLINE JSX. Same reason `sell-empty-state.ts` gives:
+ * token-market-view.tsx and token-modals.tsx are `'use client'` component trees,
+ * so a sentence written inside them is a sentence no test can read. Everything
+ * that makes a claim about money lives here, where `disclosure-copy.selftest.ts`
+ * can assert on it. This module imports only `market/format`, which is pure.
+ *
+ * HOUSE STYLE. No em or en dashes in any string in this file. The rule is
+ * enforced, not just stated: the self-test scans every exported string for
+ * U+2014 and U+2013 and fails on either.
+ */
+
+import { usdPrice } from '../../market/format';
+
+/** The right-rail card: the whole reserve, in dollars. */
+export const BACKING_TOTAL_LABEL = 'Reserve backing';
+
+/**
+ * The headline stat that used to read "Floor".
+ *
+ * The quantity is unchanged (`floorPricePerTokenBaseUnits`, i.e. reserve ÷
+ * supply); only the name is. "Floor" asserts a minimum. This number has none of
+ * a minimum's properties: it moves down when holders sell, it is gross of the
+ * seller's own early-exit fee, and it is not obtainable by selling at all.
+ */
+export const BACKING_PER_TOKEN_LABEL = 'Backing per token';
+
+/** Demoted from the headline to the right rail. See note 4 in the file header. */
+export const MARKET_CAP_LABEL = 'Market cap';
+
+/**
+ * The `?` explainer beside `BACKING_PER_TOKEN_LABEL`.
+ *
+ * Three claims, each one checked: the definition, the one route that actually
+ * pays it and the deduction that route takes first, and the two things it is
+ * NOT (a stable number, and a sale price).
+ */
+export const BACKING_PER_TOKEN_NOTE =
+  'The reserve divided by the tokens issued. If this market wound down, that is what a token would pay out before your early-exit fee. It drops as holders sell, and it is not a price you can sell at.';
+
+/** The same sentence for a screen reader, which gets no label from a `?` glyph. */
+export const BACKING_PER_TOKEN_ARIA = `What backing per token means: ${BACKING_PER_TOKEN_NOTE}`;
+
+/**
+ * The right-rail caption under the demoted market cap.
+ *
+ * States the arithmetic and then refuses it, in that order. "The token price
+ * times every token issued" rather than naming the figure above, because the
+ * headline shows the marginal buy price (`displayPricePerTokenBaseUnits`) and
+ * the cap is computed off the oracle spot rate; they agree to the cent at every
+ * realistic supply but they are not the same function, and copy should not
+ * invite a reader to multiply one by the other.
+ */
+export const MARKET_CAP_NOTE =
+  'The token price times every token issued. No holder can take that out: selling walks the price back down the curve.';
+
+/** The right-rail caption under the reserve total. */
+export const BACKING_TOTAL_NOTE = 'The money actually held behind this token. A wind-down pays out of this.';
+
+/**
+ * THE VALUE SHOWN FOR `BACKING_PER_TOKEN_LABEL`.
+ *
+ * ★ A 0 ÷ 0 RENDERED AS "$0.00" ON EVERY UNTRADED MARKET (reproduced 2026-08-27
+ * in the browser at /creators/did%3Apkh%3Aeip155%3A1%3A0xB41f…980B, cap 30,
+ * supply 0: the page read "Floor ? $0.00"). There is no per-token backing on a
+ * market with no tokens, and "$0.00" is not that statement. It is a price, and
+ * it reads as one: a token whose backing is worth nothing.
+ *
+ * The three cases are genuinely different and stay different, the same way
+ * `pctLabel` refuses to call a missing total 0% and `usdWholeNonZero` refuses to
+ * call 40 cents "$0":
+ *
+ *     supply <= 0                -> 'None yet'     (nothing issued, nothing backing it)
+ *     supply > 0, finite figure  -> '$1.20'        (a real number, including a real $0.00)
+ *     supply > 0, no figure      -> 'Unavailable'  (the read failed; a zero would be a lie)
+ *
+ * A genuine $0.00 with tokens outstanding is a drained reserve, which is
+ * alarming and true, so it is still printed.
+ */
+export function backingPerTokenValue(floorUsd: number, supply: number): string {
+  if (!Number.isFinite(supply) || supply <= 0) return 'None yet';
+  if (!Number.isFinite(floorUsd)) return 'Unavailable';
+  return usdPrice(Math.max(0, floorUsd));
+}
+
+/**
+ * THE SELL/REDEEM DIALOG'S CLOSING LINE. Replaces "You can always exit."
+ *
+ * What is actually true: exactly ONE of the two routes is open at a time, the
+ * curve one closes when the market winds down (sell.go throws once retired,
+ * frozen or closed, which is why the redeem rail exists at all), and neither
+ * pays a number anyone has promised in advance. The old line asserted the
+ * opposite of the third point and glossed the first.
+ */
+export function exitRoutesNote(redeem: boolean): string {
+  return redeem
+    ? 'Redeeming pays your share of the reserve, less your early-exit fee. This route stays open while the market winds down.'
+    : 'While this market is open you sell on the curve. Once it winds down, selling closes and you redeem your share of the reserve instead. Neither is a fixed price: what you get depends on the curve and on what the reserve holds.';
+}
+
+/**
+ * The Buy dialog's risk paragraph. Takes the already-formatted figure so this
+ * module never has to know how a market is shaped.
+ *
+ * ★ The parenthetical is DROPPED when there is no figure to put in it. The very
+ * first buy on a market happens at supply 0, where `backingPerTokenValue`
+ * returns 'None yet', and "Backing per token (None yet) is the reserve divided
+ * by..." is the kind of sentence that reads as a bug on the one screen where a
+ * reader is about to spend money.
+ */
+export function buyRiskNote(backingPerToken: string): string {
+  const quoted =
+    backingPerToken === 'None yet' || backingPerToken === 'Unavailable' ? '' : ` (${backingPerToken})`;
+  return `This token’s price floats and you can lose money. Backing per token${quoted} is the reserve divided by the tokens issued: what a wind-down would pay before your early-exit fee, not a price you can sell at. Sell soon after buying and an early-exit fee applies on top of the trade fee.`;
+}
+
+/**
+ * THE PAGE'S CLOSING DISCLOSURE, and the only place all four fee and price
+ * behaviours are stated together.
+ *
+ * Every clause is a measured fact, not a hedge:
+ *   10% on the curve      tradeFeeOn, both directions (buy and sell)
+ *   no fee on a wind-down refundNetBaseUnits, "Unlike Sell there is NO trade fee here"
+ *   6 weeks               EXIT_FEE_DAYS = 42, decaying from 20%
+ *   the price falls       $1.401 for the first token out at supply 50, $1.007 for the last
+ */
+export const HONEST_NOTE =
+  'This token’s price floats. It can go up or down, and you can lose money. Every trade on the curve pays a 10% fee (5% to the creator, 5% to Lumen), and selling soon after buying adds an early-exit fee on top, which fades to zero over 6 weeks. Backing per token, shown above, is the reserve divided by the tokens issued: what a wind-down would pay before your early-exit fee, with no trade fee on that route. It is not a price you can sell at. Selling into the curve pays the curve’s price, and that price falls as you sell, so the last holder out gets less than the first.';
+
+/**
+ * The third line of the "How this works" rail, and the only one of the three
+ * that makes a claim about money.
+ *
+ * It used to end "The floor is what the reserve would pay out per token if the
+ * market wound down", which both used the retired word and stated the gross as
+ * if it were the payout.
+ *
+ * ★ ONLY THIS LINE MOVED. Lines 1 and 2 stay inline in token-market-view.tsx,
+ * untouched. Line 2 carries an em dash, and it is PRE-EXISTING microcopy that
+ * this pass has no business rewriting: the house rule was applied to copy added
+ * or changed today, and lifting an unchanged sentence into a module that
+ * enforces the rule would have forced a rewrite nobody asked for.
+ */
+export const HOW_IT_WORKS_RESERVE_LINE =
+  'As more people buy in, the token can appreciate. Every buy adds to a reserve, and that reserve is what a wind-down pays out. Selling on the curve is a separate thing, at the curve’s price.';
+
+/**
+ * The "Before you trade this token" interstitial, shown once per viewer per
+ * market before their first trade.
+ *
+ * Line 2 used to read "If you buy from the market above the floor, you can get
+ * back less than you paid", which is true and understates it: the buy price is
+ * ALWAYS above backing per token (a rising convex curve puts the marginal price
+ * above the average at every supply), so the condition it appears to warn about
+ * is the only condition there is. Line 3 dropped "always" from "not a price you
+ * can always sell at": the qualifier invited the reading that there is some
+ * other time when you can.
+ */
+export const INTERSTITIAL_LINES: readonly string[] = [
+  'This is a real token whose price goes up and down.',
+  'You can get back less than you paid. The price you sell at falls as you sell, and the buy price is always above what the reserve holds per token.',
+  'Backing per token, shown next to the price, is the reserve divided by the tokens issued. It is what a wind-down would pay before your early-exit fee, not a price you can sell at.',
+  'Selling soon after buying has an early-exit fee that fades to zero over 6 weeks.'
+];
+
+/** The wind-down banner. Sell is closed here; Redeem is the only door. */
+export const WIND_DOWN_BANNER =
+  'This creator’s market is winding down, so buying and new asks are closed. Selling on the curve is closed too; use Redeem to take your pro-rata share of the reserve, less your early-exit fee.';
+
+/**
+ * The OVERDUE banner, which is the state where the downside is about to change
+ * shape. `figures` is the already-formatted "(currently X a token ...)" clause,
+ * or an empty string when the market has no backing figure to quote.
+ */
+export function overdueBanner(figures: string): string {
+  return `This creator’s listing has lapsed. If it isn’t renewed the market freezes: buying and selling on the curve close, and the only way out becomes Redeem against the reserve${figures}.`;
+}
+
+/**
+ * The parenthetical inside `overdueBanner`. Empty when there is nothing to
+ * quote, so the sentence never ends "(currently  a token)".
+ */
+export function overdueFigures(backingPerToken: string, priceUsd: number): string {
+  if (backingPerToken === 'None yet' || backingPerToken === 'Unavailable') return '';
+  return ` (currently ${backingPerToken} a token before your early-exit fee, against ${usdPrice(priceUsd)} now)`;
+}
+
+/**
+ * The holder's own position line.
+ *
+ * ★ "worth" WAS THE FICTION WORD. `valueUsd` is tokens × spot price: the same
+ * unrealisable mark as the market cap, one row down and called "worth".
+ * `floorValueUsd` is the opposite: `readHolderPosition` computes it through
+ * `refundNetBaseUnits`, so it is already NET of this holder's own exit tax and
+ * is the one figure on the page that a holder could actually receive today.
+ * Both are now labelled by what they are.
+ */
+export interface CopySegment {
+  text: string;
+  /** Rendered inside a <strong>. The three figures, exactly as before. */
+  strong: boolean;
+}
+
+/**
+ * Segments rather than one string so the row keeps the emphasis it already had
+ * on the three numbers. A plain string would have been easier to test and would
+ * have silently dropped the <strong> wrappers, which is a presentation
+ * regression smuggled in under a copy fix.
+ */
+export function positionSegments(tokens: string, valueUsd: number, windDownUsd: number): CopySegment[] {
+  return [
+    { text: 'You hold ', strong: false },
+    { text: `${tokens} tokens`, strong: true },
+    { text: ' · ', strong: false },
+    { text: usdPrice(valueUsd), strong: true },
+    { text: ' at today’s price · ', strong: false },
+    { text: usdPrice(windDownUsd), strong: true },
+    { text: ' if this market wound down', strong: false }
+  ];
+}
+
+/** The same row as one string, for the dash sweep and for assertions. */
+export function positionLine(tokens: string, valueUsd: number, windDownUsd: number): string {
+  return positionSegments(tokens, valueUsd, windDownUsd)
+    .map((s) => s.text)
+    .join('');
+}
+
+/**
+ * Every string this module publishes, for the self-test's dash sweep.
+ *
+ * ★ ENUMERATED FROM THE MODULE, NOT FROM A LIST SOMEONE MAINTAINS BY HAND. A
+ * hand-kept list is the failure mode `verify_the_artifact_contains_the_code`
+ * describes: it certifies the description instead of the thing. The functions
+ * are called with representative arguments so their templates are swept too.
+ */
+export function allPublishedCopy(): string[] {
+  return [
+    BACKING_TOTAL_LABEL,
+    BACKING_PER_TOKEN_LABEL,
+    MARKET_CAP_LABEL,
+    BACKING_PER_TOKEN_NOTE,
+    BACKING_PER_TOKEN_ARIA,
+    MARKET_CAP_NOTE,
+    BACKING_TOTAL_NOTE,
+    HONEST_NOTE,
+    WIND_DOWN_BANNER,
+    HOW_IT_WORKS_RESERVE_LINE,
+    ...INTERSTITIAL_LINES,
+    exitRoutesNote(true),
+    exitRoutesNote(false),
+    buyRiskNote('$1.20'),
+    overdueBanner(overdueFigures('$1.20', 1.408)),
+    overdueBanner(overdueFigures('None yet', 1.007)),
+    positionLine('12.00', 16.9, 14.44),
+    backingPerTokenValue(1.203, 50),
+    backingPerTokenValue(0, 0),
+    backingPerTokenValue(Number.NaN, 50)
+  ];
+}

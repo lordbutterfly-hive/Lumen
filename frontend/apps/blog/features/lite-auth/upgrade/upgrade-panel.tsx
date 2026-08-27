@@ -732,6 +732,15 @@ const UpgradePanel: FC = () => {
           onBlur={() => setNameTouched(true)}
           spellCheck={false}
           data-testid="upgrade-name"
+          // ★ NOT `focus-visible:outline-none` (2026-08-27). Every other input
+          // suppressed today sits in a wrapper whose focus affordance is
+          // UNCONDITIONAL. This one's is not: `nameBorder`'s `!nameTouched`
+          // branch is bare `border-line-11`, because the dated M1 ruling
+          // (2026-08-16) forbids brand-red before the reader has typed — it read
+          // as a validation error on an autoFocused field. No `line-*` token
+          // reaches the 3:1 WCAG 1.4.11 bar (darkest is line-19 at 1.48:1), so
+          // suppressing the global ring here left the FIRST field of signup with
+          // no focus indicator at all. The global ring stays.
           className="min-w-0 flex-1 border-0 font-sans text-base font-semibold text-ink-2 outline-none"
         />
       </div>

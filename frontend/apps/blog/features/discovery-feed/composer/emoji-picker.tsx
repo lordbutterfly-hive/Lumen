@@ -97,7 +97,7 @@ export default function EmojiPicker({
         onChange={(event) => setQuery(event.target.value)}
         onMouseDown={(event) => event.stopPropagation()}
         data-testid="short-form-composer-emoji-search"
-        className="mb-2 w-full rounded-control border border-[#ebebeb] bg-white px-3 py-2 font-sans text-[14px] leading-[22px] text-[#333] outline-none placeholder:text-ink-14 focus:border-[#d5d5d5]"
+        className="mb-2 w-full rounded-control border border-[#ebebeb] bg-white px-3 py-2 font-sans text-[14px] leading-[22px] text-[#333] outline-none focus-visible:outline-none placeholder:text-ink-14 focus:border-[#d5d5d5]"
       />
 
       {!query.trim() && recent.length > 0 ? (

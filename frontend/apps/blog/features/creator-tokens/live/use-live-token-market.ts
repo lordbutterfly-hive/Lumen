@@ -77,6 +77,14 @@ export interface LiveTokenMarketResult {
   status: LiveMarketStatus;
   /** Non-null only when status === 'ready'. */
   market: LiveTokenMarket | null;
+  /**
+   * TRUE when the holder-balance read FAILED — distinct from `market.position
+   * === null`, which is the same value a genuinely empty balance produces.
+   * Anything that renders a sentence about what the viewer holds must check
+   * this first: "you hold none of this" and "we could not look" are different
+   * claims, and only one of them is safe to make during an outage.
+   */
+  positionUnavailable: boolean;
   /** The signed-in viewer, or null. Actions all require one. */
   viewer: string | null;
   loggedIn: boolean;
@@ -223,6 +231,26 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
           ? 'missing'
           : 'ready';
 
+  /**
+   * ★ "HOLDS NOTHING" AND "WE COULD NOT READ YOUR BALANCE" ARE NOT THE SAME
+   * ANSWER, and `market.position` cannot tell them apart (2026-08-27).
+   *
+   * `readHolderPosition` REJECTS on a genuine read failure precisely so that a
+   * zero can never be mistaken for a fact (see its doc in
+   * creator-tokens-data-source.ts) — and then `positionQuery.data ?? null`
+   * below flattens the rejection back into the same `null` a real empty balance
+   * produces, discarding the distinction the data source went out of its way to
+   * preserve. Harmless while nothing rendered a sentence about it; the moment a
+   * screen says "you hold none of this token", an outage makes that a lie about
+   * someone's money.
+   *
+   * Exposed rather than fixed in `adaptMarket`: `LiveHolderPosition` is the
+   * shape of a position that EXISTS, and inventing an "unavailable position"
+   * variant would push the ambiguity into every reader of it instead of
+   * removing it.
+   */
+  const positionUnavailable = positionQuery.isError;
+
   const market =
     status === 'ready' && marketQuery.data
       ? adaptMarket({
@@ -367,6 +395,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   return {
     status,
     market,
+    positionUnavailable,
     viewer,
     loggedIn,
     sessionUnavailable,

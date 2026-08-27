@@ -489,7 +489,7 @@
   "user_profile": {
     "reputation": "Reputation",
     "edit_profile_button": "Edit profile",
-    "add_bio_prompt": "Add a bio",
+    "add_about_prompt": "Add your About",
     "mute_button": "Mute",
     "block_button": "Block",
     "unblock_button": "Unblock",
@@ -1069,6 +1069,7 @@
     "preferences_device_scope": "These apply to this browser only. They are not saved to your account, and other devices keep their own.",
     "saved_on_this_browser": "Saved. This browser only.",
     "legal_title": "Legal & Help",
+    "legal_title_no_help": "Legal",
     "help_link": "Help"
   },
   "four_oh_four": {
@@ -1686,6 +1687,7 @@
     "header": {
       "title": "Proposals",
       "intro": "An on-chain system where anyone can submit funding proposals and stakeholders vote on which get funded. Read more in the",
+      "intro_no_faq": "An on-chain system where anyone can submit funding proposals and stakeholders vote on which get funded.",
       "faq_link": "FAQ",
       "new_proposal": "New proposal",
       "subtitle": "Decentralized Hive Fund"

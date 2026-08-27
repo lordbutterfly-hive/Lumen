@@ -216,6 +216,13 @@ const MeritumLaunchFlow: FC = () => {
           flow.offers.map((o) => offerTitleProblem(o.name)).find((m) => m !== null) ??
           t('meritum_launch.error_offer_needs_name')
         );
+      case 'offer-supply-share':
+        // The validator's OWN sentence, for the same reason 'offer-bad-title'
+        // uses one: it names the creator's actual numbers (this price, this
+        // token count, this cap) and it is produced by the code that decides
+        // the block, so shown and enforced cannot drift. Untranslated for that
+        // reason; a translated variant must come from the validator too.
+        return flow.offerSupplyShareMessage;
       case 'price-band':
         // Bounds come from the contract's own params, never from copy. They
         // used to be formatted two different ways: the max through `usdWhole`,

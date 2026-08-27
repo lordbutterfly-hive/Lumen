@@ -203,14 +203,32 @@ export default function ProfileIdentity({
       ) : isOwnProfile ? (
         // ★ DEFECT FIX (2026-08-17): an empty bio on your own profile rendered
         // nothing at all — no cue that a bio exists as a field, let alone that
-        // it's empty. Same settings destination as the Edit-profile CTA in
-        // `profile-actions.tsx`.
+        // it's empty.
+        //
+        // ★★★ ONE FIELD, ONE NAME (2026-08-27, owner: "on profile page says add
+        // bio but in settings theres only about, no bio"). There is only ever one
+        // field: `profile.about`, Hive's own `posting_json_metadata.profile.about`
+        // key, rendered two lines up and edited by the single `id="about"` input in
+        // `account-settings/form.tsx` under the label `settings_page.profile_about`
+        // ("About"). This prompt was the ONLY surface in the product calling it a
+        // bio — grep for "bio" in `locales/en/common_blog.json` and this string was
+        // the sole hit — so the reader was sent to look for a control that, by that
+        // name, is not there. The chain metadata key is `about` and both other
+        // labels already say About, so the prompt is what moves.
+        //
+        // ★ AND IT NOW LANDS ON THE CONTROL, not merely on the page. `#about` is the
+        // input's own id; `SettingsContent`'s `useHashLanding` re-applies the jump
+        // for 4s while the form mounts and rings the target on arrival, which is
+        // exactly the case it was built for (the same mechanism `/lists/*` uses to
+        // land on `#blocked-accounts`). The Edit-profile CTA in `profile-actions.tsx`
+        // deliberately keeps the bare `/settings` destination — it opens the whole
+        // form, this one asks for a named field.
         <Link
-          href={`/@${username}/settings`}
+          href={`/@${username}/settings#about`}
           className="mt-3 inline-block max-w-[520px] font-serif text-[17px] leading-[26px] text-ink-14 underline-offset-2 hover:text-ink-10 hover:underline"
-          data-testid="profile-add-bio-prompt"
+          data-testid="profile-add-about-prompt"
         >
-          {t('user_profile.add_bio_prompt')}
+          {t('user_profile.add_about_prompt')}
         </Link>
       ) : null}
 

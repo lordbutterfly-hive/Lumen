@@ -9,6 +9,7 @@ import { describeLag, useIndexerHealth } from '../../live/use-indexer-health';
 import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
 import type { CreatorSummary } from '../../types';
 import { pctLabel, usdCompact, usdPrice, usdWhole } from '../../market/format';
+import { resolveDiscoveryControls, type DiscoverySort } from '../../market/discovery-ranking';
 import TokenShell from '../token-shell';
 
 // TODO i18n — staged copy; move to locales/*/common_blog.json once final.
@@ -94,7 +95,11 @@ const COPY = {
   how3: 'A token is redeemable against the creator’s reserve, and the redemption value moves with it. It is not a price you can sell at on demand, and it is not an investment return.'
 };
 
-type Sort = 'reliable' | 'fastest' | 'new';
+// The ordering union and the rule about which controls may be OFFERED both live
+// in market/discovery-ranking.ts — see that module's header for why the rule
+// cannot stay in this file (nothing can import a 'use client' view outside a
+// bundler, so a rule kept here is a rule no test can reach).
+type Sort = DiscoverySort;
 const SORTS: { id: Sort; label: string }[] = [
   { id: 'reliable', label: 'Most reliable' },
   { id: 'fastest', label: 'Fastest' },
@@ -222,6 +227,26 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
   const discovery = useLiveDiscovery();
   const indexer = useIndexerHealth();
 
+  /**
+   * ★★★ THREE CONTROLS THAT RANK AND FILTER ON AN EMPTY CORPUS (2026-08-27).
+   *
+   * Verified against the live view rather than inferred: `lumen_ct_discovery`
+   * answers 200 with 13 rows, every one of them `completion_pct: null,
+   * answered_count: 0, missed_count: 0, median_response_blocks: null,
+   * avg_rating: null` — which is why all 13 cards render "No deliveries yet".
+   * The default tab is "Most reliable", so a reader lands on an ordering that
+   * ranks nothing, and "Answers" filters to zero creators and blanks the grid.
+   *
+   * The rule itself lives in market/discovery-ranking.ts (with the full
+   * reasoning, and a note on why it is NOT a substitute for the staleness
+   * banner, which is correct and untouched) so that it is reachable by a test.
+   */
+  const controls = useMemo(
+    () => resolveDiscoveryControls(discovery.creators, sort, answersOnly),
+    [discovery.creators, sort, answersOnly]
+  );
+  const { rankingAvailable, sort: effectiveSort, answersOnly: effectiveAnswersOnly } = controls;
+
   const creators = useMemo(() => {
     // The INDEXER already ordered this (lumen_ct_discovery, ranked on delivery
     // in SQL), and the default view preserves that order verbatim — re-sorting
@@ -232,14 +257,14 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
     // of price or market cap. There is deliberately no "top gainers".
     const list = [...discovery.creators];
     const proven = (c: CreatorSummary) => Number(c.completionPct !== null);
-    if (sort === 'fastest') {
+    if (effectiveSort === 'fastest') {
       // Missing still sorts last: unproven is not fast.
       list.sort((a, b) => proven(b) - proven(a) || (a.medianResponseBlocks ?? Infinity) - (b.medianResponseBlocks ?? Infinity));
-    } else if (sort === 'new') {
+    } else if (effectiveSort === 'new') {
       list.sort((a, b) => Number(b.isNew) - Number(a.isNew));
     }
-    return answersOnly ? list.filter((c) => c.completionPct !== null) : list;
-  }, [sort, discovery.creators, answersOnly]);
+    return effectiveAnswersOnly ? list.filter((c) => c.completionPct !== null) : list;
+  }, [effectiveSort, discovery.creators, effectiveAnswersOnly]);
 
   const newCreators = useMemo(() => discovery.creators.filter((c) => c.isNew), [discovery.creators]);
 
@@ -307,6 +332,17 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
       ) : null}
 
 
+      {/* ★ THE WHOLE ROW GOES, not just the tabs — the "Answers" pill selects on the
+          same empty signal, so leaving it would keep one control that can only
+          produce a blank page. It returns automatically with the corpus
+          (`rankingAvailable`); there is no flag to remember to flip.
+
+          NO REPLACEMENT COPY, deliberately. Absence is only ambiguous when the
+          reason is invisible, and here it is on every card in the grid: all of
+          them read "No deliveries yet". Same rule the ACTIVE market state
+          follows a few lines down — a notice on a page that already states the
+          fact is noise. */}
+      {rankingAvailable ? (
       <div className="my-5 flex flex-wrap items-center justify-between gap-4">
         {/* ★ WARM TAB TREATMENT (illumination SPEC.md §1, owner 2026-08-21: "fill the
            creators, wallet tokens and proposals tab bar gap"). Track on --amb-1 so it
@@ -321,7 +357,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
            until it was caught. */}
         <div className="flex gap-1.5 rounded-xl border border-line-6 bg-[var(--amb-1)] p-[5px]">
           {SORTS.map((s) => {
-            const on = sort === s.id;
+            const on = effectiveSort === s.id;
             return (
               <button
                 key={s.id}
@@ -339,11 +375,12 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
         </div>
         <button
           onClick={() => setAnswersOnly((v) => !v)}
-          className={`rounded-full border px-[15px] py-2 text-caption font-semibold ${answersOnly ? 'border-line-brand-10 bg-surface-brand-6 text-ink-brand-6' : 'border-line-11 bg-surface-1 text-ink-10 hover:border-line-brand-10'}`}
+          className={`rounded-full border px-[15px] py-2 text-caption font-semibold ${effectiveAnswersOnly ? 'border-line-brand-10 bg-surface-brand-6 text-ink-brand-6' : 'border-line-11 bg-surface-1 text-ink-10 hover:border-line-brand-10'}`}
         >
           {COPY.answers}
         </button>
       </div>
+      ) : null}
 
       {showNew && newCreators.length > 0 ? (
         <div className="mb-[22px] rounded-2xl border border-line-9 bg-surface-12 px-5 py-[18px]">

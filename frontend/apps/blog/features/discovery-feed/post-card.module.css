@@ -1209,10 +1209,23 @@
 
 /* ── RUBRIC ───────────────────────────────────────────────────────────────
    Community name, or the post's first tag when there is no community. The spec
-   gives it its own type: 13px, 700, .12em, uppercase, brand. */
+   gave it 13px, 700, .12em, uppercase, brand.
+
+   ★ 13px -> 15px, 18px -> 22px line-height (2026-08-27, owner: "the tag title
+   on feed card needs to be bigger theres too much dead space under it"). The
+   SPEC's 13px is recorded above rather than deleted, the same way the pill's two
+   dated rulings are, so nobody "restores" it from the spec later.
+
+   Measured before the change: the tag box was 18px tall sitting in a 38px byline
+   row, centred, so 10px of the reported dead space is the row's own centring and
+   only ~3px is the rule's margin. The row's height is set by the identity pill
+   (38px, with its -16px underlap), which is geometry that took several rounds to
+   settle — so this raises the type rather than shortening the row. A taller box
+   in a centred row also closes the gap from both sides: 22px of line box leaves
+   8px below instead of 10px. */
 .rubric {
-  font-size: 13px;
-  line-height: 18px;
+  font-size: 15px;
+  line-height: 22px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;

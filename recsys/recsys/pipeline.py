@@ -398,23 +398,52 @@ def build_trust_snapshot(
     # reach (see RingConfig). `ring_days` bounds the window the detector sees:
     # a cycle must persist across it, which makes persistence a cost multiplier
     # on the attack rather than a one-off purchase.
-    ring_since = resolved_now - timedelta(days=settings.history.ring_days)
-    ring_edges = [
-        e for e in edges if e.last_interaction is None or e.last_interaction >= ring_since
-    ]
-    ring_signals = detect_rings(
-        ring_edges,
-        settings.real_graph,
-        now=now,
-        reciprocity_min=settings.ring.reciprocity_min,
-        min_group=settings.ring.min_group,
-        # The SAME threshold the membership set below applies, so the detector's
-        # internal second pass (which discards outside credit coming from an
-        # already-flagged account) agrees with what actually counts as flagged
-        # downstream. Passing it explicitly keeps the two from drifting apart.
-        self_credit_threshold=settings.thresholds.ring_discount_threshold,
-    )
-    ring_members = ring_member_set(ring_signals, settings.thresholds.ring_discount_threshold)
+    #
+    # ★★★ GATED ON `settings.ring.enabled` (2026-08-27), AND IT IS OFF IN
+    # DEPLOYMENT. Since `54df75a` removed votes from the interaction graph the
+    # `outside_received` term in `core/ring.py`'s insularity denominator sits at
+    # a median of exactly 0.0, and `ring_score` degenerated into "what fraction
+    # of the people you interact with do you reply back to". Measured against
+    # Hive's own abuse verdict (reputation < 25, n=17,488): 5.84% precision on
+    # an 18.56% base rate — 0.31x random — with the UNFLAGGED accounts 24.98%
+    # downvoted. It is anti-correlated with abuse, and it flagged 5,977 of
+    # 18,336 accounts (32.6%) including 28 of the 54 trusted seeds and
+    # `hivewatchers`/`guiltyparties`. See `RingConfig.enabled` for the full
+    # record and for why no threshold change fixes it.
+    #
+    # OFF means `ring_members` stays the empty frozenset — the SAME value a
+    # no-snapshot `TrustSnapshot()` carries, so every consumer below
+    # (`compute_graph_cred`, `train_als`, the snapshot itself) takes a path it
+    # already takes today; nothing new is reachable. `core/ring.py` is not
+    # touched: only its authority to discount is withdrawn, not the primitive.
+    ring_members: frozenset[str] = frozenset()
+    if settings.ring.enabled:
+        ring_since = resolved_now - timedelta(days=settings.history.ring_days)
+        ring_edges = [
+            e for e in edges if e.last_interaction is None or e.last_interaction >= ring_since
+        ]
+        ring_signals = detect_rings(
+            ring_edges,
+            settings.real_graph,
+            now=now,
+            reciprocity_min=settings.ring.reciprocity_min,
+            min_group=settings.ring.min_group,
+            # The SAME threshold the membership set below applies, so the detector's
+            # internal second pass (which discards outside credit coming from an
+            # already-flagged account) agrees with what actually counts as flagged
+            # downstream. Passing it explicitly keeps the two from drifting apart.
+            self_credit_threshold=settings.thresholds.ring_discount_threshold,
+        )
+        ring_members = ring_member_set(ring_signals, settings.thresholds.ring_discount_threshold)
+    else:
+        logger.warning(
+            "build_trust_snapshot: ring detection is DISABLED "
+            "(RECSYS_RING_DETECTION=0) — ring_members is empty, so no account "
+            "is discounted on ring grounds in this snapshot. Deliberate: the "
+            "detector measured 5.84% precision against an 18.56% abuse base "
+            "rate (0.31x random) and flagged 32.6% of all accounts. See "
+            "RingConfig.enabled."
+        )
     # ★ B2 (2026-08-05) — stake delegation is no longer an input. This used to be
     # `{account: gateway.stake_lineage(account) for account in accounts}`, one
     # query per account against `hafsql.delegations`. See `_lineage_for` for why
@@ -1231,6 +1260,47 @@ def _fallback_filler(
     # rule a ring evasion lets an attacker GAIN while suppression only griefs,
     # and padding is the lane a victim least depends on — their own pool and
     # every non-fallback lane are untouched.
+    # ★★★ THIS GUARD IS DEAD CODE AS OF 2026-08-27 AND NOTHING HAS REPLACED IT.
+    # STATED, NOT FIXED — read this before assuming the lane is defended.
+    #
+    # The `score <= 0.0` band is now structurally unreachable.
+    # `core/graph_cred.py`'s `self_dealt = lineage_dealt or ring_at_scale` needs
+    # one of two terms and BOTH are permanently false: `ring_at_scale` requires
+    # a non-empty `ring_members`, which `build_trust_snapshot` no longer
+    # produces (`RingConfig.enabled = False`, `RECSYS_RING_DETECTION=0`), and
+    # `lineage_dealt` requires a non-empty lineage, which nothing builds since
+    # stake delegation was retired (2026-08-05 — `lineage` in
+    # `build_trust_snapshot` is `{account: frozenset()}` for every account). So
+    # `discounted_received` is always empty, and `_normalize_scores`'s
+    # `received == 0 and discounted > 0 => 0.0` band can never be entered.
+    #
+    # MEASURED on the live snapshot (2026-08-27 18:23Z, 18,246 accounts):
+    # `count(*) filter (where score <= 0.0)` = **0**, `min(score)` = 0.1000.
+    # 51 of 15,855 rows sat at 0.0 before ring detection was turned off.
+    #
+    # WHAT THAT LEAVES: `POPULAR_FALLBACK` is exempt from the second-degree
+    # vouch gate AND from the author floor (`contracts.py`,
+    # `requires_second_degree` / `requires_author_floor`), and that second
+    # exemption is justified in `contracts.py` by the very drop below. The lane
+    # now has NO author-credibility test at all. It is not a small lane:
+    # measured 2026-08-04, 60 of 60 viewers received padding, mean 38.7% of the
+    # served feed, max 56.0%.
+    #
+    # WHY NOTHING IS PATCHED IN HERE. The two mechanical repairs are both
+    # cosmetic on today's data and were rejected for that reason:
+    #   * removing POPULAR_FALLBACK from `requires_author_floor` — the floor is
+    #     `thresholds.graph_cred_floor` = 0.05 and the live MINIMUM score is
+    #     0.10, so it refuses 0 of 18,246 accounts. (The same measurement makes
+    #     `graph_cred_floor` and `vouch_graph_cred_floor` no-ops for EVERY gated
+    #     lane, not just this one.)
+    #   * raising the bar here to the unknown band (0.10) would drop every
+    #     never-engaged account — exactly the genuine newcomer that band exists
+    #     to protect.
+    # A real replacement changes who gets distribution (gate the lane on
+    # `outside_engaged`, or re-base the floor above the unknown band) and is an
+    # owner decision, not a silent edit. `GraphCredConfig.vouch_min_vouchers`
+    # does NOT cover this lane: it hardens `VoterTrust`, which this filter does
+    # not consult.
     self_dealt = {
         account for account, cred in snap.graph_creds.items() if cred.score <= 0.0
     }
@@ -1368,7 +1438,13 @@ def _voter_trust_from_creds(
     is kept as a defensive belt (``outside_engaged`` already implies received > 0
     ⇒ engaged band ⇒ score > floor, so it never changes the set on real
     graph-cred output — only guards a hand-built cred that sets the flag but not
-    the score)."""
+    the score).
+
+    ★ As of 2026-08-27 the seed-anchored walk below requires
+    ``GraphCredConfig.vouch_min_vouchers`` (k, default 2) DISTINCT already-
+    vouched engagers, not one. That is the compensating control for disabling
+    ring detection, which is what previously made ``outside_engagers`` mean
+    "engaged me from outside my own clique". See the comment at the walk."""
     if not graph_creds:
         return None
     floor = settings.graph_cred.min_vouched_score
@@ -1403,6 +1479,17 @@ def _voter_trust_from_creds(
         # trusted_seeds outside dev (F-R2, see its `production` guard). So this
         # branch is the dev/test path, and it keeps the pre-anchoring local rule
         # rather than silently collapsing the tier.
+        #
+        # ★ `vouch_min_vouchers` (2026-08-27) IS DELIBERATELY NOT APPLIED HERE,
+        # and that is a stated gap rather than an oversight. k counts already-
+        # VOUCHED engagers, and on this branch nothing is vouched yet — there is
+        # no seed to anchor from — so the only k-like test available would be a
+        # raw count of `outside_engagers`, which is a different and much weaker
+        # predicate (a sock clique satisfies it trivially). This branch is
+        # unreachable in production by the guard named above and is measured
+        # nowhere; hardening it would mean changing what the documented dev
+        # fallback IS. Anything that reaches this branch has already lost the
+        # directed-cycle property, which is the louder problem.
         logger.warning(
             "vouch propagation has no usable trusted seed in this graph-cred set — "
             "falling back to the LOCAL outside_engaged rule; the directed-cycle "
@@ -1423,6 +1510,34 @@ def _voter_trust_from_creds(
     # depth: a 500-sock star one hop from a single endorsement vouched 500/500.
     # See GraphCredConfig.vouch_max_fanout for the measurements.
     fanout_cap = max(0, settings.graph_cred.vouch_max_fanout)
+    # ★★★ k DISTINCT ALREADY-VOUCHED ENGAGERS, NOT ONE (2026-08-27). This test
+    # was `not gc.outside_engagers.isdisjoint(vouched_set)` — k = 1 — and that
+    # was only ever safe because `core/graph_cred.py` recorded an
+    # `outside_engager` under `if weight > 0.0 and not ring_flagged`. Ring
+    # detection was disabled the same day (`RingConfig.enabled`,
+    # `RECSYS_RING_DETECTION=0`), which empties `ring_members`, makes
+    # `not ring_flagged` vacuously true, and therefore makes every member of a
+    # reciprocal sock clique every other member's "outside" engager. Vouch then
+    # propagates along the ATTACKER'S OWN EDGES: measured on the live
+    # 18,246-account snapshot, ONE engagement from ONE trusted seed into a
+    # 60-account clique vouched 60 of 60 socks for 45 of the 49 landed seeds,
+    # with a ceiling of 101 socks per touch (rounds=3, fanout=50). At k = 2 the
+    # same ONE-ENDORSEMENT attack vouches 0 of 60 for all 49 seeds, at every
+    # clique size (60 to 2000) and every sock score (engaged median to p99).
+    #
+    # ★★★ k PRICES THE CLIQUE ATTACK, IT DOES NOT CLOSE IT. An attacker who buys
+    # ~k^2 endorsements from distinct already-vouched accounts (k socks x k
+    # vouchers each) still takes the clique: measured live, 1 endorsement at
+    # k=1, 4 at k=2, 9 at k=3. What k=2 closes is the specific regression that
+    # disabling ring detection opened — one touch buying the whole clique. See
+    # `GraphCredConfig.vouch_min_vouchers` for the full k table, the cost side
+    # (7,395 -> 4,913 vouched, and WHO pays), and the env knob.
+    #
+    # The seed anchor is NOT redundant with this: with no seed contact at all a
+    # clique is unvouched at k = 1 too (measured, 0 of 500). What k closes is
+    # the amplification — that one touch buys the whole clique instead of one
+    # account.
+    min_vouchers = max(1, settings.graph_cred.vouch_min_vouchers)
     vouched_set: set[str] = set(seeds)
     for _ in range(max(0, settings.graph_cred.vouch_max_rounds)):
         candidates = [
@@ -1430,7 +1545,7 @@ def _voter_trust_from_creds(
             for account, gc in graph_creds.items()
             if account not in vouched_set
             and gc.score > floor
-            and not gc.outside_engagers.isdisjoint(vouched_set)
+            and len(gc.outside_engagers & vouched_set) >= min_vouchers
         ]
         if fanout_cap:
             # Charge each newly-vouchable account to ONE voucher (its highest-

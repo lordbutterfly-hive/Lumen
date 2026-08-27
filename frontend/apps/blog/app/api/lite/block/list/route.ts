@@ -131,9 +131,36 @@ export async function GET(): Promise<NextResponse> {
     // private list, and it read the cookie directly — so `logout-all` did not stop it.
     // Degrades to anonymous rather than 401: the shape callers expect is an empty list,
     // and a hard refusal on a read would be a worse failure than a missing personalisation.
+    //
+    // ★★★ BUT IT MUST ONLY GATE THE SESSIONS IT CAN ACTUALLY JUDGE (2026-08-27).
+    //
+    // `liveViewerId` opens with `if (!sessionUser?.userId) return undefined`, and
+    // `userId` is a LUMEN field — "absent on legacy full-Hive sessions"
+    // (`smart-signer/types/common.ts`). The ONE issuance point for a full-Hive
+    // session builds its `User` without one (`api-handlers/auth/login.ts`), so a
+    // Keychain/HiveAuth login answers `undefined` here every single time — and
+    // `liveId ? … : null` read that as "not signed in" and returned `empty`.
+    //
+    // That is this card's ORIGINAL bug back again from the other side: a Hive
+    // reader with real `lumen_block` rows AND a real chain ignore list was told, on
+    // the one screen whose job is to say who they have blocked, that they had
+    // blocked nobody. Proven live for @lordbutterfly on the shipped build —
+    // `/api/lite/block/state` answered `blocking: true` for two accounts whose rows
+    // are right there in `lumen_block` (`blocker_hive = 'lordbutterfly'`, exactly
+    // the key `sessionActor` resolves for this session) while this route answered
+    // `peers: []`. With the gate passed, the same session reads 24 peers (2 Lumen
+    // blocks + 22 chain mutes).
+    //
+    // Revocation still applies wherever it CAN: both mechanisms — `session_epoch`
+    // and `lumen_revoked_session` — are keyed on `lumen_user.user_id`
+    // (`auth/account-status.ts`), so a session carrying no `userId` has nothing to
+    // revoke and must not be voided for the lack of it. A session that DOES carry
+    // one is checked exactly as before.
     const session = await getLiteSession();
-    const liveId = await liveViewerId(session.user, session);
-    const actor = liveId ? await sessionActor(session.user) : null;
+    if (session.user?.userId && !(await liveViewerId(session.user, session))) {
+      return NextResponse.json(empty);
+    }
+    const actor = await sessionActor(session.user);
     if (!actor) return NextResponse.json(empty);
 
     const [peers, chainMutes] = await Promise.all([

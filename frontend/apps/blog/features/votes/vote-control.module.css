@@ -287,23 +287,45 @@
      rule the old note was really defending still holds and is worth keeping:
      the card's own face wins, the control is a guest on it. */
   font-family: var(--font-lora), Georgia, Cambria, serif;
-  font-weight: 700;
+  /* ★ MATCHED TO THE CARD'S OWN COUNTS (2026-08-27, owner: "the blade icon on
+     feed and the numbers are not the same font as comment icon and comment
+     number. its obvious").
+     Measured on the live feed card before this change: the tally read 14px/700,
+     #161511, letter-spacing -0.14px, baseline y=622; the comment count read
+     15px/500, #6e645a, normal tracking, baseline y=626; the reblog count sat at
+     y=633. Same family, everything else different, and THREE different baselines
+     in one row.
+     This is the 2026-08-19 note directly above finishing its own job: that pass
+     fixed the FAMILY and left size, weight, colour and tracking behind. Its rule
+     stands and is what this change obeys — "the card's own face wins, the
+     control is a guest on it". The card's counts row is `text-ink-action`
+     (medium-post-card.tsx), which is the same value `--lm-vote-muted` already
+     resolves to, so this is adopting a token the control already had rather
+     than inventing one. */
+  font-weight: 500;
   font-size: 18px;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
-  line-height: 1;
+  letter-spacing: normal;
+  line-height: 22px;
   transition: color 180ms ease;
 }
 
 .sm .tally {
-  /* 14px, not 14.5: whole pixels only (the 2026-08-13 type pass removed every
-     fractional size in the app), and one step BELOW the payout so the money is
-     the largest figure on the row. */
-  font-size: 14px;
+  /* ★ 14px -> 15px (2026-08-27): 15px is what the comment and reblog counts on
+     the same row use, so the three counts now share one size. The 2026-08-13
+     whole-pixels rule still holds, and so does the reason this rule exists —
+     the payout is 17px, so the money is STILL the largest figure on the row. */
+  font-size: 15px;
 }
 
 .tallyUp {
-  color: var(--lm-vote-ink);
+  /* ★ `--lm-vote-ink` -> `--lm-vote-muted` (2026-08-27). `--lm-vote-muted` is
+     `rgb(var(--ink-action))`, and globals.css calls `--ink-action` "the resting
+     colour of every neutral action icon" — it is exactly what the comment and
+     reblog counts beside this one use. `.mine` below still overrides to brand,
+     so a vote the reader actually cast is as loud as it ever was; only the
+     RESTING count stops shouting over its neighbours. */
+  color: var(--lm-vote-muted);
 }
 
 .tallyUp.mine {

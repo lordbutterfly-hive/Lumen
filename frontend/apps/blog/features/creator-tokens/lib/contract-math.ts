@@ -410,15 +410,43 @@ export interface SellQuoteBaseUnits {
  * sell.go's own arithmetic: p = SellProceeds(S,ΔS); tax = ceil(p·τ/1e4) to the
  * TREASURY; fee = floor(p·TradeFeeBps/1e4); Net = p − tax − fee. Returns null
  * when the sell exceeds supply (core refuses rather than guessing).
+ *
+ * TWO BUCKETS (F2, and the same carve refundNetBaseUnits already makes). The
+ * tax base is NOT the whole gross — sell.go:234-236 is
+ *
+ *     fromMatured, fromMaturing := splitDraw(s, creator, caller, deltaS)
+ *     taxableGross := maturingGrossShare(p, fromMaturing, deltaS)
+ *     tax          := ExitTaxOn(taxableGross, taxBps)
+ *
+ * so a matured token contributes nothing to the base (its rate is 0 by
+ * definition, core/matured.go:6-13) and the maturing part is apportioned PRO
+ * RATA by token count, never by letting the matured tokens take the dearest
+ * price slice off the top (core/matured.go:197-219 measured that pairing at
+ * −39% of collections, up to −88% on a skewed position).
+ *
+ * `maturingTokens` is the seller's maturing BALANCE, not a pre-computed draw —
+ * splitDraw happens below, MATURING FIRST, because core/matured.go:149-195 says
+ * that order is load-bearing (the matured-first alternative measured up to
+ * 99.98% tax avoidance). Omitted ⇒ treat the whole position as maturing, which
+ * is exactly what this function computed before and what every caller that has
+ * no split to give still means; the whole-gross path is preserved bit-for-bit by
+ * maturingGrossShareBaseUnits' fromMaturing === total shortcut.
  */
-export function quoteSellBaseUnits(supplyTokens: number, tokens: number, heldBlocks: number): SellQuoteBaseUnits | null {
+export function quoteSellBaseUnits(supplyTokens: number, tokens: number, heldBlocks: number, maturingTokens?: number): SellQuoteBaseUnits | null {
   const grossBaseUnits = sellProceedsBaseUnits(supplyTokens, tokens);
   if (grossBaseUnits === null) return null;
   const taxBps = exitTaxBpsAt(heldBlocks);
-  const taxBaseUnits = exitTaxOnBaseUnits(grossBaseUnits, taxBps);
+  // The same integer count the gross was priced on — sellProceedsBaseUnits
+  // truncates internally, so the split must truncate identically or the pro-rata
+  // denominator and the numerator would be measured on different lattices.
+  const soldTokens = Math.trunc(tokens);
+  const maturing = maturingTokens === undefined ? soldTokens : Math.trunc(maturingTokens);
+  const fromMaturing = Math.min(soldTokens, Math.max(0, maturing)); // splitDraw, maturing-first
+  const taxableBaseUnits = maturingGrossShareBaseUnits(grossBaseUnits, fromMaturing, soldTokens);
+  const taxBaseUnits = exitTaxOnBaseUnits(taxableBaseUnits, taxBps);
   const { feeBaseUnits } = tradeFeeOn(grossBaseUnits);
   return {
-    tokens: Math.trunc(tokens),
+    tokens: soldTokens,
     grossBaseUnits,
     taxBaseUnits,
     feeBaseUnits,

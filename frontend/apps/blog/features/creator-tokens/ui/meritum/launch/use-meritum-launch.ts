@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useTranslation } from '@/blog/i18n/client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useLiveStudio } from '../../../live/use-live-studio';
-import { buyQuote, displayPriceUsd } from '../../../market/curve';
+import { buyQuote, displayPriceUsd, serviceSupplyShareProblem } from '../../../market/curve';
 import { COMMISSION_BPS, MAX_CAP_CREDITS_BASE_UNITS, MIN_CAP_CREDITS_BASE_UNITS } from '../../../lib/contract-math';
 import { usdPrice } from '../../../market/format';
 import { writeFailureMessage } from '../../write-failure';
@@ -80,6 +80,18 @@ export type MeritumLaunchBlock =
    * not exist. Proven live on 2026-08-19 with "Copy edit, 1k words".
    */
   | 'offer-bad-title'
+  /**
+   * A priced offer costs an unreachable share of the token's whole supply.
+   *
+   * The chain does NOT refuse this — nothing on chain relates an offering's
+   * price to `kCap` — so unlike 'offer-bad-title' there is no on-chain backstop
+   * behind it at all. Every token launches at `STANDARD_CAP`, which is known
+   * here before anything is signed, and the opening price is fixed at supply 0,
+   * so the whole check is available at exactly the moment the creator types the
+   * price. See market/curve.ts's serviceSupplyShareProblem for the threshold
+   * and why it is the escrow, not taste, that sets it.
+   */
+  | 'offer-supply-share'
   | 'price-band'
   | 'first-buy-max';
 
@@ -250,6 +262,15 @@ export interface MeritumLaunchApi {
   cap: number;
   /** The curve's price at supply 0, formatted. */
   openingPrice: string;
+
+  /**
+   * The supply-cap refusal sentence for the first offending priced offer, or
+   * null. Surfaced from the hook rather than recomputed in the view for the
+   * same reason 'offer-bad-title' uses the validator's own sentence: the reason
+   * SHOWN and the reason ENFORCED must come from one place, and rebuilding it
+   * in the view would need a second copy of the parse/sanitise chain too.
+   */
+  offerSupplyShareMessage: string | null;
 
   /** Why the strike is refused, or null when it may proceed. */
   block: MeritumLaunchBlock | null;
@@ -497,6 +518,15 @@ export function useMeritumLaunch(): MeritumLaunchApi {
     }
     return false;
   })();
+  /**
+   * ★ A PRICE THE MARKET CANNOT CARRY (2026-08-27). Checked against
+   * `STANDARD_CAP` and the supply-0 opening price — both fixed and both known
+   * on this screen — so a creator learns it while typing rather than posting a
+   * shop whose services no buyer can afford a share of.
+   */
+  const offerSupplyShareProblem =
+    pricedOffers.map((o) => serviceSupplyShareProblem(o.usd, openingPriceUsd, STANDARD_CAP)).find((m) => m != null) ??
+    null;
   const capBroken = STANDARD_CAP < MIN_CAP_CREDITS_BASE_UNITS || STANDARD_CAP > MAX_CAP_CREDITS_BASE_UNITS;
   const firstBuyTooBig = firstBuyUsd > MAX_PRICE_USD;
 
@@ -514,9 +544,11 @@ export function useMeritumLaunch(): MeritumLaunchApi {
         ? 'offer-bad-title'
         : offerNamesDuplicated
           ? 'offer-duplicate-name'
-          : offersPriced === 0
-            ? 'no-offer'
-            : null;
+          : offerSupplyShareProblem !== null
+            ? 'offer-supply-share'
+            : offersPriced === 0
+              ? 'no-offer'
+              : null;
 
   /**
    * A failed market read is NOT "no market". `register` enforces one market per
@@ -707,6 +739,7 @@ export function useMeritumLaunch(): MeritumLaunchApi {
     handle,
     cap: STANDARD_CAP,
     openingPrice: usdPrice(openingPriceUsd),
+    offerSupplyShareMessage: offerSupplyShareProblem,
     block,
     stepBlock,
     canRetryRead,

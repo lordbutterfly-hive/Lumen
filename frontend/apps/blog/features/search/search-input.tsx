@@ -59,7 +59,7 @@ export function SearchInput({ className }: { className?: string }) {
 
   return (
     <div className={cn('w-full', className)}>
-      <div className="relative flex w-full items-center rounded-full border border-line-9 bg-surface-1 ring-offset-background focus-within:border-line-19">
+      <div className="relative flex w-full items-center rounded-full border border-line-9 bg-surface-1 ring-offset-background focus-within:border-line-brand-10">
         <input
           type="search"
           placeholder={placeholder}
