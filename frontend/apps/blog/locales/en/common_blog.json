@@ -1537,11 +1537,12 @@
       },
       "claim_account": {
         "title": "Claim account token",
-        "description": "Use a claimed-account token to create a new Hive account.",
+        "description": "Burn Resource Credits to claim a free account-creation token.",
+        "submit": "Claim token",
         "pending": "{{count}} claimed account token(s) available",
         "pending_none": "No claimed account tokens available yet.",
         "new_account": "New account name",
-        "todo_notice": "Claiming a new account here isn't available yet. It needs generating and safely backing up a fresh keypair for the new account, which Lumen doesn't support yet. Your claimed-account tokens aren't going anywhere in the meantime."
+        "todo_notice": "Creating a new account with a claimed token isn't available here yet. It needs generating and safely backing up a fresh keypair for the new account, which Lumen doesn't support yet. Your claimed-account tokens aren't going anywhere in the meantime."
       }
     },
     "lite_title": "No wallet yet",

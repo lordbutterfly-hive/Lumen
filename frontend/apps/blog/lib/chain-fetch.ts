@@ -407,3 +407,14 @@ export async function fetchVestsToHp(
   const hpString = await fetchJson<string>(`/api/vests-to-hp?${params.toString()}`, 'vests to HP');
   return Big(hpString);
 }
+
+export interface ProposalVotersResponse {
+  /** Real, uncapped voter count — for the dialog's title, independent of how many `voters` rows came back. */
+  total: number;
+  /** Sorted descending by HP, capped server-side — see `app/api/proposal-votes/route.ts`. */
+  voters: { voter: string; hp: number }[];
+}
+
+export function fetchProposalVoters(proposalId: number): Promise<ProposalVotersResponse> {
+  return fetchJson(`/api/proposal-votes?proposalId=${proposalId}`, 'proposal voters');
+}

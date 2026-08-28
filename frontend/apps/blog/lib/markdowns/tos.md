@@ -343,7 +343,8 @@ to the DMCA. A DMCA request can be sent to us via the contact information below:
 
 Copyright Agent
 
-[CONTACT ADDRESS - NOT YET SET]
+Until a dedicated address is published here, notices may be sent to our Hive
+account, **@lordbutterfly**.
 
 Please send our Copyright Agent the following information:
 
@@ -513,4 +514,5 @@ Services after a change to this agreement, you agree to those changes.
 
 ## 25. Contact Information
 
-Notices to Lumen should be directed to [CONTACT ADDRESS - NOT YET SET].
+Until a postal and email address are published here, notices to Lumen should be
+directed to our Hive account, **@lordbutterfly**.

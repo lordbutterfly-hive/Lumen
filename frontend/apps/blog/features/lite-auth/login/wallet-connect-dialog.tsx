@@ -44,15 +44,11 @@ import {
 const COPY = {
   btc: {
     title: 'Continue with a Bitcoin wallet',
-    connect: 'Connect a Bitcoin wallet',
-    symbol: '₿',
-    symbolBg: '#f7931a'
+    connect: 'Connect a Bitcoin wallet'
   },
   evm: {
     title: 'Continue with an Ethereum wallet',
-    connect: 'Connect an Ethereum wallet',
-    symbol: '◈',
-    symbolBg: '#627eea'
+    connect: 'Connect an Ethereum wallet'
   },
   shared: {
     connectHelp: 'You’ll approve a signature. It’s free, moves no funds and authorizes no transaction.',
@@ -76,6 +72,43 @@ interface Props {
   onAuthenticated: () => void;
   onNeedsName: () => void;
 }
+
+/**
+ * SAME MARK AS THE LOGIN ROW (2026-08-28). This dialog used to draw its own
+ * icon: a plain circle with a unicode glyph on it (₿ / ◈), coloured with its
+ * own hex values (`#f7931a`, `#627eea`). That made the EVM one in particular
+ * read as an unfamiliar "weird blue icon" next to the real Ethereum diamond
+ * the row uses one screen away. There is no reason for the two surfaces to
+ * disagree about what a Bitcoin or Ethereum mark looks like, so this renders
+ * the exact same artwork as `lumen-login.tsx`'s wallet rows — same asset for
+ * BTC, same inline Ethereum diamond SVG for EVM — in the same shared 34px /
+ * 10px-radius box (`rounded-control`) documented there.
+ */
+const Icon: FC<{ chain: WalletChain }> = ({ chain }) =>
+  chain === 'btc' ? (
+    <img
+      src="/logos/bitcoin.png"
+      alt=""
+      aria-hidden
+      width={34}
+      height={34}
+      className="h-[34px] w-[34px] flex-shrink-0 rounded-control"
+    />
+  ) : (
+    <span
+      aria-hidden
+      className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-control bg-surface-info-3"
+    >
+      <svg width="20" height="20" viewBox="0 0 256 417" aria-hidden>
+        <path fill="#343434" d="M127.96 0l-2.8 9.5v275.7l2.8 2.8 127.96-75.6z" />
+        <path fill="#8C8C8C" d="M127.96 0L0 212.4l127.96 75.6V154.2z" />
+        <path fill="#3C3C3B" d="M127.96 312.19l-1.58 1.92v98.2l1.58 4.6L256 236.59z" />
+        <path fill="#8C8C8C" d="M127.96 416.9v-104.7L0 236.6z" />
+        <path fill="#141414" d="M127.96 287.96l127.96-75.6-127.96-58.16z" />
+        <path fill="#393939" d="M0 212.36l127.96 75.6V154.2z" />
+      </svg>
+    </span>
+  );
 
 const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNeedsName }) => {
   const { walletChallenge, walletVerify } = useLiteLogin();
@@ -156,12 +189,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
               disabled={connecting || !connectorReady}
               className="flex h-12 w-full cursor-pointer items-center justify-center gap-2.5 rounded-xl bg-surface-43 text-[15px] leading-[24px] font-semibold text-ink-27 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <span
-                className="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full text-caption font-bold text-ink-27"
-                style={{ backgroundColor: copy.symbolBg }}
-              >
-                {copy.symbol}
-              </span>
+              <Icon chain={chain} />
               {connecting ? S.connecting : copy.connect}
             </button>
             {!connectorReady ? (

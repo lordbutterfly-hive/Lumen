@@ -151,4 +151,5 @@ site where the change materially affects your rights.
 
 ## Contact
 
-[CONTACT ADDRESS - NOT YET SET]
+Until dedicated support addresses are published here, you can reach us on Hive at
+**@lordbutterfly**.

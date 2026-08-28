@@ -42,7 +42,16 @@ const COPY = {
   placeholder: 'yourname',
   submit: 'Sign in with Keychain',
   working: 'Waiting for Keychain…',
-  notDetected: 'Not detected. Install the Hive Keychain extension, then reload.',
+  // ★ THE OLD COPY TOLD EVERY PHONE VISITOR TO DO SOMETHING IMPOSSIBLE
+  // (2026-08-28, owner report: "none of the login options work on mobile").
+  // "Install the Hive Keychain extension, then reload" presumes a desktop
+  // browser with an extension store. Keychain is a browser extension; iOS
+  // and Android browsers run no extensions at all, so that instruction can
+  // never be followed there — it just reads as broken. This wording is true
+  // on every platform (desktop with the extension missing, or a phone where
+  // it can never exist) and, unlike the old copy, points at the methods that
+  // DO work on whatever device the reader is actually on.
+  notDetected: 'Not detected. Hive Keychain is a browser extension for desktop Chrome, Firefox, Edge or Brave. On this device, use Google or a wallet above instead.',
   needUsername: 'Enter your Hive username.',
   failed: 'That sign-in did not complete. Please try again.',
   cancelled: 'You cancelled. Nothing was signed.',

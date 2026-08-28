@@ -1218,6 +1218,28 @@ export class TransactionService {
     }
   }
 
+  /**
+   * Burn Resource Credits to mint one Account Creation Token
+   * (`claim_account_operation`, "Claim account tokens" in the Advanced
+   * wallet rail). `fee` must be a zero-amount HIVE asset to pay with RC
+   * instead of HIVE — see `useClaimAccountMutation`, the only caller. This is
+   * the MINT side and needs no new keys. It is a different chain operation
+   * from `createClaimedAccount` below (`create_claimed_account_operation`),
+   * which SPENDS an already-claimed token to create a new account and does
+   * need a fresh keypair for that new account.
+   */
+  async claimAccount(creator: string, fee: IAsset, transactionOptions: TransactionOptions = {}) {
+    return await this.processHiveAppOperation((builder) => {
+      builder.pushOperation({
+        claim_account_operation: {
+          creator,
+          fee,
+          extensions: []
+        }
+      });
+    }, transactionOptions);
+  }
+
   async createClaimedAccount(
     creator: string,
     memoKey: string,

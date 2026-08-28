@@ -3,7 +3,11 @@ import { getLogger } from '@ui/lib/logging';
 import { guardBodySize, guardWrite, payloadTooLarge, readBoundedJson } from '@/blog/lib/lite/http/guard';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceChallengeRate } from '@/blog/lib/lite/antispam/rate-limit';
-import { verifyGoogleIdToken } from '@/blog/lib/lite/auth/google-verify';
+import {
+  googleCodeFlowConfigured,
+  verifyGoogleAuthCode,
+  verifyGoogleIdToken
+} from '@/blog/lib/lite/auth/google-verify';
 import { encryptEmail, emailHash } from '@/blog/lib/lite/auth/email-crypto';
 import { resolveLogin } from '@/blog/lib/lite/auth/auth-service';
 import { consumeChallenge } from '@/blog/lib/lite/repositories/challenge-repository';
@@ -36,9 +40,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!parsed) return payloadTooLarge();
   const body = parsed.body;
   const idToken = body?.idToken;
+  /**
+   * ★ TWO WAYS IN, ONE VERIFICATION (2026-08-28).
+   *
+   * `idToken` comes from GIS's own rendered button. `code` comes from
+   * `initCodeClient`, which is what lets Lumen draw its OWN button — GIS refuses to
+   * act on a click when its rendered button is transparent, transformed or clipped,
+   * so a Lumen-styled row can never be an overlay over it.
+   *
+   * Both paths end at `verifyGoogleIdToken`, so the audience check, the signature
+   * check and — the one that matters — the `nonce` echo binding below are identical.
+   * The code path is NOT a weaker door; it is the same door reached differently.
+   */
+  const code = body?.code;
   const nonce = body?.nonce;
-  if (typeof idToken !== 'string' || typeof nonce !== 'string') {
-    return NextResponse.json({ error: 'idToken_and_nonce_required' }, { status: 400 });
+  if (typeof nonce !== 'string' || (typeof idToken !== 'string' && typeof code !== 'string')) {
+    return NextResponse.json({ error: 'idToken_or_code_and_nonce_required' }, { status: 400 });
+  }
+  if (typeof code === 'string' && !googleCodeFlowConfigured()) {
+    // Absence of the secret is a CONFIGURATION state, not a client error: the browser
+    // should fall back to the rendered button rather than show the reader a failure.
+    return NextResponse.json({ error: 'code_flow_not_configured' }, { status: 501 });
   }
 
   // F-L11: consume the server-issued single-use `login` nonce FIRST. A captured Google
@@ -53,7 +75,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   let identity;
   try {
-    identity = await verifyGoogleIdToken(idToken);
+    identity =
+      typeof code === 'string'
+        ? await verifyGoogleAuthCode(code)
+        : await verifyGoogleIdToken(idToken as string);
   } catch (error) {
     logger.error(error, 'Google ID token verification failed');
     return NextResponse.json({ error: 'invalid_token' }, { status: 401 });

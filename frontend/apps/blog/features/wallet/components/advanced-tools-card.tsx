@@ -27,9 +27,10 @@ function RowLabel({ label, sub }: { label: string; sub: string }) {
 
 /**
  * Power-user tools rail card. Every row opens a real dialog wired to a real
- * op (Delegate HP / Convert / Recurring transfers) or jumps to the on-page
- * Savings Vault section — except "Claim account tokens", whose dialog is
- * real but whose submit is a labelled TODO (see claim-account-dialog.tsx).
+ * op (Delegate HP / Convert / Recurring transfers / Claim account tokens) or
+ * jumps to the on-page Savings Vault section. "Claim account tokens" mints a
+ * token (`claim_account_operation`, burns RC); spending a token to create a
+ * new account is a separate, still-unbuilt op — see claim-account-dialog.tsx.
  */
 export default function AdvancedToolsCard({
   username,
@@ -86,6 +87,7 @@ export default function AdvancedToolsCard({
         />
 
         <ClaimAccountDialog
+          username={username}
           pendingClaimedAccounts={pendingClaimedAccounts}
           trigger={
             <button type="button" className={ROW_CLASS} data-testid="wallet-advanced-claim-account">

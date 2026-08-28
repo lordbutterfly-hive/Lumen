@@ -98,11 +98,7 @@ export default function ProfileMain() {
   const canComputeHp = Boolean(
     profileData?.delegated_vesting_shares && profileData?.received_vesting_shares && profileData?.vesting_shares
   );
-  const {
-    data: hpFigures,
-    isError: isChainError,
-    isLoading: isChainPending
-  } = useQuery({
+  const { data: hpFigures, isError: isChainError } = useQuery({
     queryKey: ['profileHpFigures', username, dynamicGlobalData?.total_vesting_shares],
     queryFn: async () => {
       const totalVestingShares = dynamicGlobalData!.total_vesting_shares;
@@ -178,21 +174,36 @@ export default function ProfileMain() {
     return notFound();
   }
 
-  if (!dynamicGlobalData || !canComputeHp) {
+  if (!dynamicGlobalData) {
     return <NoDataError />;
   }
 
-  // Only reachable once `canComputeHp` is true, which is exactly `hpFigures`'s
-  // own `enabled` condition — so a pending/error state here means the fetch
-  // genuinely hasn't resolved yet, not that it was never going to run.
-  if (isChainError) {
-    return <NoDataError />;
-  }
-  if (isChainPending || !hpFigures) {
-    return <LumenLoader size="lg" className="min-h-[70vh]" label={t('global.loading_profile')} />;
-  }
-
-  const { delegatedHive, vestingHive } = hpFigures;
+  // ★★★ HP NO LONGER GATES THE PAGE (2026-08-28, owner: "profile always loads
+  // a bit too slow... it is janky"). `hpFigures` is a THIRD, independent round
+  // trip (`/api/vests-to-hp`, client-only — never part of the layout's server
+  // prefetch/hydration) layered on top of `profileData`/`dynamicGlobalData`,
+  // which are already on the page from SSR hydration by the time this
+  // component mounts. This used to gate the ENTIRE page — cover, identity,
+  // bio, tabs, and the Posts tab's own fetch inside `ProfileTabs` below — behind
+  // a full-viewport `LumenLoader`, invisible until this one extra fetch
+  // resolved, then all popping in at once. Measured live: the rest of the page
+  // is ready by `domContentLoaded` (~700ms warm), but `hpFigures` only STARTS
+  // fetching once hydration finishes and doesn't land for another ~100-200ms —
+  // during which nothing rendered, including the Posts tab's own
+  // `account-posts`/`streak`/creator-token fetches, which mount inside
+  // `ProfileTabs` and therefore waited on HP too, for a number two lines of
+  // the page use.
+  //
+  // HP is genuinely optional: `ProfileIdentity` already renders its stats line
+  // without an HP entry when `hp` is undefined (`profile-identity.tsx`, the
+  // `{hp ? (...) : null}` branch) — that fallback existed and was simply never
+  // reached because this component refused to render anything until HP was
+  // ready. Wiring it through as optional instead of gating on it means the
+  // rest of the page appears the moment the data it actually needs is ready,
+  // and the HP figure fills in a beat later as one more entry on an existing
+  // line — not a full-page reflow. Same trade for `isChainError`: a failed HP
+  // read is no longer a reason to blank the whole profile, just to omit HP.
+  //
   // ★ HP HEADLINE = OWN STAKE, matching how Hive's own wallet presents it
   // (2026-08-06, owner ruling). Hive shows the account's OWN staked HIVE as the
   // prominent figure and the delegation-adjusted total underneath as "Tot:":
@@ -204,8 +215,9 @@ export default function ProfileMain() {
   // as a wrong balance next to every other Hive frontend. Both are correct —
   // they answer different questions (what you own vs what you can vote with) —
   // and the fix is to show them the way a Hive user already expects.
-  const hp = vestingHive;
-  const hpEffective = vestingHive.minus(delegatedHive);
+  const hp = canComputeHp && !isChainError && hpFigures ? hpFigures.vestingHive : undefined;
+  const hpEffective =
+    canComputeHp && !isChainError && hpFigures ? hpFigures.vestingHive.minus(hpFigures.delegatedHive) : undefined;
 
   const isOwnProfile = identity.isLoggedIn && username === identity.username;
   const followingCount =
@@ -276,8 +288,8 @@ export default function ProfileMain() {
               followerCount={profileData.follow_stats?.follower_count}
               postCount={profileData.post_count}
               followingCount={followingCount}
-              hp={hp.toFixed(3)}
-              hpEffective={hpEffective.toFixed(3)}
+              hp={hp?.toFixed(3)}
+              hpEffective={hpEffective?.toFixed(3)}
             />
             {/* `_temporary` is how a Lumen lite account's stand-in profile is marked:
                 no Hive account exists behind it, so a follow of this person can only

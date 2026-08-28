@@ -185,14 +185,18 @@ export function useLiteLogin() {
   );
 
   const google = useCallback(
-    async (idToken: string, nonce: string): Promise<ResolveOutcome> => {
+    async (credential: string, nonce: string, kind: 'idToken' | 'code' = 'idToken'): Promise<ResolveOutcome> => {
       const res = await fetch('/api/lite/auth/google', {
         method: 'POST',
         headers: JSON_POST,
         // F-L11: the server now requires the single-use `login` nonce this token was
         // minted with (echoed as the OIDC `nonce` claim) — a captured token is no
         // longer replayable.
-        body: JSON.stringify({ idToken, nonce })
+        // ★ 2026-08-28: `idToken` OR `code`. The code path is what lets Lumen draw
+        // its own button (GIS refuses clicks on a transparent/transformed/clipped
+        // rendered button). Server exchanges the code and runs the SAME id-token
+        // verification, so the nonce binding above is unchanged either way.
+        body: JSON.stringify(kind === 'code' ? { code: credential, nonce } : { idToken: credential, nonce })
       });
       return resolveFrom(res);
     },

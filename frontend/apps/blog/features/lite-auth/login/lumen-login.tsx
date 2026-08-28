@@ -1,6 +1,7 @@
 'use client';
 
 import { FC, useCallback, useEffect, useState } from 'react';
+import env from '@beam-australia/react-env';
 import { useRouter } from 'next/navigation';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useLiteLogin, type WalletChain } from './use-lite-login';
@@ -59,7 +60,13 @@ const COPY = {
   // it says what you do here instead. The rule the old comment set still stands:
   // sell the place first, keep the custody reassurance one line down.
   welcome: 'Read first. Write when you are ready.',
-  welcomeSub: 'Nothing to chase, nothing to install. Lumen never sees a private key.',
+  // ★ REMOVED 2026-08-28, owner: the "Nothing to chase, nothing to install. Lumen
+  // never sees a private key." line is gone from every surface. `welcomeSub` no
+  // longer exists; when Google IS ready the headline stands on its own with no
+  // subtitle. `welcomeSubWalletsOnly` below is deliberately KEPT: it is different
+  // copy doing a different job, explaining why the walletless door is missing when
+  // Google is unavailable, and dropping it would put four key-requiring options
+  // under a headline that promises none are needed.
   /**
    * ★★★ THE PROMISE HAS TO DEGRADE WITH THE THING THAT KEEPS IT (2026-08-08, UX
    * tester on the new-user path).
@@ -274,6 +281,22 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   };
 
   /** Google returned an ID token — hand it to the (already built) backend. */
+  /** ★ 2026-08-28: same handler for both doors — `kind` selects idToken vs code. */
+  const handleGoogleCredential = async (credential: string, kind: 'idToken' | 'code') => {
+    if (!googleNonce) {
+      setError('Google sign-in is not ready yet. Please try again in a moment.');
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    const outcome = await google(credential, googleNonce, kind);
+    setBusy(false);
+    refreshGoogleNonce();
+    if (outcome.status === 'authenticated') goHome();
+    else if (outcome.status === 'needs_name') setView('name');
+    else setError(outcome.message);
+  };
+
   const handleGoogleToken = async (idToken: string) => {
     if (!googleNonce) {
       setError('Google sign-in is not ready yet. Please try again in a moment.');
@@ -392,9 +415,11 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     it shows the conservative sentence and the browser corrects
                     it. Erring that way round is deliberate — over-promising is
                     the failure this fixes. */}
-                <p className={`mt-2 text-[15px] leading-[24px] text-ink-8 ${embedded ? '' : 'text-center'}`}>
-                  {googleReady ? COPY.welcomeSub : COPY.welcomeSubWalletsOnly}
-                </p>
+                {!googleReady && (
+                  <p className={`mt-2 text-[15px] leading-[24px] text-ink-8 ${embedded ? '' : 'text-center'}`}>
+                    {COPY.welcomeSubWalletsOnly}
+                  </p>
+                )}
               </div>
 
               <div className={embedded ? 'py-5' : 'p-6'}>
@@ -405,12 +430,41 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                   googleNonce ? (
                     // key + nonce: GIS captures the nonce at init, so a fresh nonce
                     // remounts the button (F-L11).
-                    <GoogleSignIn
-                      key={googleNonce}
-                      nonce={googleNonce}
-                      onIdToken={handleGoogleToken}
-                      onError={setError}
-                    />
+                    //
+                    /* ★ THE SLOT IS 64px, THE BUTTON ISN'T (2026-08-28, measured live on
+                       lumensocial.net/login). GSI's own `size: 'large'` iframe measures
+                       40px tall (`[data-testid="google-signin-row"]` rect height 40,
+                       iframe 44); the Bitcoin/Ethereum rows next to it run 70-90px (34px
+                       icon or a wrapped two-line subtitle, inside `px-4 py-3`). Google
+                       owns that iframe's height, border and corner radius; none of the
+                       three are ours to set, and google-signin.tsx documents why growing
+                       or framing the iframe itself is off the table (its own ancestors
+                       must never carry opacity, a transform, overflow-hidden or
+                       pointer-events-none, or GSI silently drops the click — proven, not
+                       theoretical, see that file's header). A border around it was tried
+                       and reverted for a different reason (google-signin.tsx:403-441,
+                       "one row, not a pill inside a pill"): Google already draws its own
+                       border, so a second one around it reads as a layout bug, not a fix.
+                       So this wrapper reserves HEIGHT, not paint. `min-h-[64px]` matches
+                       the two disabled placeholders below (loading, not-configured), so
+                       nothing on the page jumps when the nonce lands and the real button
+                       swaps in; `items-center` centres the shorter iframe in that slot
+                       rather than stretching it, so GSI is never asked to be a size it
+                       didn't choose. It narrows the 40-vs-90px gap without touching the
+                       iframe or anything that wraps it in a forbidden way. */
+                    <div className="flex min-h-[64px] w-full items-center justify-center">
+                      <GoogleSignIn
+                        key={googleNonce}
+                        nonce={googleNonce}
+                        onIdToken={handleGoogleToken}
+                        /* ★ Lumen's own button, behind a flag until the server has a
+                           client secret to exchange the code with. Off = GIS's own
+                           rendered button, which works today. */
+                        codeFlow={env('LITE_GOOGLE_CODE_FLOW') === 'yes'}
+                        onCode={(c) => handleGoogleCredential(c, 'code')}
+                        onError={setError}
+                      />
+                    </div>
                   ) : (
                     <button
                       type="button"
@@ -440,7 +494,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       </svg>
                       {COPY.google}
                     </button>
-                    <p className="mt-2 text-center text-caption text-ink-10">{COPY.googleSeam}</p>
+                    <p className={`mt-2 ${embedded ? '' : 'text-center'} text-caption text-ink-10`}>{COPY.googleSeam}</p>
                   </div>
                 )}
 
@@ -552,9 +606,9 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
 
                 <KeychainSignin />
 
-                {error ? <p className="mt-4 text-center text-caption text-ink-warn-3">{error}</p> : null}
+                {error ? <p className={`mt-4 ${embedded ? '' : 'text-center'} text-caption text-ink-warn-3`}>{error}</p> : null}
 
-                <p className="mt-[18px] text-center text-caption text-ink-14">
+                <p className={`mt-[18px] ${embedded ? '' : 'text-center'} text-caption text-ink-14`}>
                   By continuing you agree to Lumen’s <Link href="/tos.html">Terms</Link> and{' '}
                   <Link href="/privacy.html">Privacy Policy</Link>.
                 </p>
@@ -636,8 +690,8 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
             >
               {busy ? COPY.checking : COPY.create}
             </button>
-            {error ? <p className="mt-3 text-center text-caption text-ink-warn-3">{error}</p> : null}
-            <p className="mt-3 text-center text-caption text-ink-10">{COPY.createReassure}</p>
+            {error ? <p className="mt-3 text-left text-caption text-ink-warn-3">{error}</p> : null}
+            <p className="mt-3 text-left text-caption text-ink-10">{COPY.createReassure}</p>
           </div>
         )}
       </div>

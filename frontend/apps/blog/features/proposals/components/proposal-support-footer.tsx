@@ -8,8 +8,10 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '@/blog/components/dialog-login';
 import { formatHp, formatHpCompact } from '../lib/proposals-format';
+import ProposalVotersDialog from './proposal-voters-dialog';
 
 interface Props {
+  proposalId: number;
   isLoggedIn: boolean;
   /**
    * ★ AN EXPIRED PROPOSAL CANNOT BE SUPPORTED (2026-08-10, v8 section 5). The toggle
@@ -34,6 +36,7 @@ interface Props {
  * dead button — clicking Support always goes somewhere.
  */
 export default function ProposalSupportFooter({
+  proposalId,
   isLoggedIn,
   isExpired,
   isSupported,
@@ -144,27 +147,42 @@ export default function ProposalSupportFooter({
 
   return (
     <div className="mt-4 flex items-center justify-between gap-4 border-t border-line-2 pt-3.5">
-      <span className="flex items-center gap-2 font-sans text-caption text-ink-10">
-        {/* ★ A HEART MISLABELS A STAKE FIGURE (2026-08-17). This is governance
-            vote WEIGHT (HP behind the proposal), not a "like" — a heart reads
-            as the wrong verb. `arrowBigUp` is already this app's icon for
-            voting (left-rail's "Vote Witness" row uses the same glyph), so
-            swapping to it is consistent with the app's own vocabulary instead
-            of inventing new SVG art. Colour still carries the supported/not
-            distinction the heart used to via `fill`. */}
-        <Icons.arrowBigUp
-          className={cn('h-[15px] w-[15px]', !showIndeterminate && isSupported ? 'text-ink-brand-6' : 'text-ink-14')}
-          aria-hidden="true"
-        />
-        {t('proposals.card.vote_value')}{' '}
-        {/* ★ FULL PRECISION WAS UNREADABLE (2026-08-17) — "64,790,469.25 HP"
-            on a card meant to be skimmed. `formatHpCompact` (already built
-            for return-threshold-card.tsx) renders "64.8M HP"; the exact
-            figure moves to `title` for a reader who actually needs it. */}
-        <strong className="tabular-nums text-ink-4" title={formatHp(voteValueHp)}>
-          {formatHpCompact(voteValueHp)}
-        </strong>
-      </span>
+      {/* ★ CLICKABLE — "WHO VOTED FOR THIS" (2026-08-28). Was a plain `<span>`;
+          PeakD/hive.blog/Ecency all make this figure open a roster of every
+          voter and their own HP. A real `<button>` (not a `<div onClick>`) so
+          it's keyboard-reachable, with `ProposalVotersDialog` as the real
+          Radix dialog underneath — see that file for the data/HP-conversion
+          side of this. */}
+      <ProposalVotersDialog proposalId={proposalId}>
+        <button
+          type="button"
+          className="group flex items-center gap-2 rounded-control font-sans text-caption text-ink-10 transition-colors hover:text-ink-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10 focus-visible:ring-offset-2"
+          data-testid="proposal-vote-value-trigger"
+        >
+          {/* ★ A HEART MISLABELS A STAKE FIGURE (2026-08-17). This is governance
+              vote WEIGHT (HP behind the proposal), not a "like" — a heart reads
+              as the wrong verb. `arrowBigUp` is already this app's icon for
+              voting (left-rail's "Vote Witness" row uses the same glyph), so
+              swapping to it is consistent with the app's own vocabulary instead
+              of inventing new SVG art. Colour still carries the supported/not
+              distinction the heart used to via `fill`. */}
+          <Icons.arrowBigUp
+            className={cn('h-[15px] w-[15px]', !showIndeterminate && isSupported ? 'text-ink-brand-6' : 'text-ink-14')}
+            aria-hidden="true"
+          />
+          {t('proposals.card.vote_value')}{' '}
+          {/* ★ FULL PRECISION WAS UNREADABLE (2026-08-17) — "64,790,469.25 HP"
+              on a card meant to be skimmed. `formatHpCompact` (already built
+              for return-threshold-card.tsx) renders "64.8M HP"; the exact
+              figure moves to `title` for a reader who actually needs it. */}
+          <strong
+            className="tabular-nums text-ink-4 group-hover:underline"
+            title={formatHp(voteValueHp)}
+          >
+            {formatHpCompact(voteValueHp)}
+          </strong>
+        </button>
+      </ProposalVotersDialog>
       {showIndeterminate ? (
         <span
           className="font-sans text-caption text-ink-14"

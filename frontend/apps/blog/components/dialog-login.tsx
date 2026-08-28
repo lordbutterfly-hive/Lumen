@@ -50,6 +50,20 @@ const DialogLogin = forwardRef<HTMLButtonElement, DialogLoginProps>(function Dia
     // like `<a id="google-gsi-script">` could shadow a legitimate script element
     const existingElement = document.getElementById(GOOGLE_GSI_SCRIPT_ID);
     if (existingElement instanceof HTMLScriptElement) return;
+    // ★ ALSO check for the SIGN-IN script, which is a different element (2026-08-28).
+    // `features/lite-auth/login/google-signin.tsx:66,77` loads the same gsi/client
+    // library under id `google-gsi-client` and, critically, with `?hl=en` — the
+    // locale pin added after the Turnstile/GSI widget rendered in Croatian for a
+    // reader who had not asked for it. This id-only guard could not see that script,
+    // so enabling Google Drive backup would have appended a SECOND copy of the same
+    // library WITHOUT the locale pin, racing the first and silently undoing the fix.
+    // Dormant today (`siteConfig.googleDrive.clientId` is unset in production, so
+    // this function returns above), which is exactly why it would have been found
+    // the hard way later. Match on the library URL, not on our own id.
+    const alreadyLoaded = Array.from(document.querySelectorAll('script[src]')).some(
+      (el) => el instanceof HTMLScriptElement && el.src.startsWith(GOOGLE_GSI_SCRIPT_SRC)
+    );
+    if (alreadyLoaded) return;
 
     const script = document.createElement('script');
     script.id = GOOGLE_GSI_SCRIPT_ID;
@@ -107,8 +121,16 @@ const DialogLogin = forwardRef<HTMLButtonElement, DialogLoginProps>(function Dia
             and both wallet options behind a text link. */}
         {/* v8: this had its own `overflow-y-auto` inside a dialog that also scrolls,
             so a long card produced TWO scrollbars side by side. One scroll container,
-            and it is the dialog. */}
-        <div className="max-h-[76vh] px-5 pb-2 pt-5">
+            and it is the dialog (DialogContent's wrapper carries `overflow-y-auto`,
+            packages/ui/components/dialog.tsx:90).
+            ★ 2026-08-28: the `max-h-[76vh]` was left behind when that `overflow-y-auto`
+            was removed, and a max-height with the default `overflow: visible` does not
+            scroll or clip — it lets the content spill OUT of the box and paint on top of
+            whatever follows. On a viewport where the four sign-in methods plus the Hive
+            username field exceed 76vh, the "Sign in with Keychain" button rendered over
+            the "New to Lumen?" footer below it. Reported from a real browser. The cap is
+            gone: the dialog scrolls, the content takes the height it needs. */}
+        <div className="px-5 pb-2 pt-5">
           <LumenLogin embedded />
         </div>
         {/* THE SIGNUP DOOR. This dialog is opened from ~24 places — the home

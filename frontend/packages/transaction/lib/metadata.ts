@@ -5,7 +5,7 @@ import { MetadataProps } from '@hive/common-hiveio-packages/wax';
 // Re-export MetadataProps type for consumers
 export type { MetadataProps } from '@hive/common-hiveio-packages/wax';
 
-const DEFAULT_IMAGE = 'https://hive.blog/images/hive-blog-share.png';
+const DEFAULT_IMAGE = '/lumen/og-plain.png';
 
 /**
  * Get metadata for a user account page
@@ -40,10 +40,10 @@ export const getAccountMetadata = async (
         image: data.profile?.profile_image || DEFAULT_IMAGE,
         tabTitle:
           displayName === username
-            ? `${descriptionText} ${displayName} - Hive`
-            : `${descriptionText} ${displayName} (${firstParam}) - Hive`,
+            ? `${descriptionText} ${displayName} - Lumen`
+            : `${descriptionText} ${displayName} (${firstParam}) - Lumen`,
         description:
-          data.profile?.about || `${descriptionText} ${firstParam}. Hive: Communities Without Borders.`
+          data.profile?.about || `${descriptionText} ${firstParam}. A calmer place to read and write.`
       };
     } catch (error) {
       console.error('Error fetching account:', error);
@@ -89,9 +89,9 @@ export const getCommunityMetadata = async (
     }
 
     const communityName = data?.title ?? data.name;
-    metadata.tabTitle = `${communityName} / ${firstParam} - Hive`;
+    metadata.tabTitle = `${communityName} / ${firstParam} - Lumen`;
     metadata.description =
-      data?.description || `${descriptionText} ${secondParam}. Hive: Communities Without Borders.`;
+      data?.description || `${descriptionText} ${secondParam}. A calmer place to read and write.`;
     metadata.image = data?.avatar_url || DEFAULT_IMAGE;
     metadata.title = communityName;
   } catch (error) {

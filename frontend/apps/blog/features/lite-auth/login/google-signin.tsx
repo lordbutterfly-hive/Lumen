@@ -1,6 +1,6 @@
 'use client';
 
-import { FC, useEffect, useRef, useState } from 'react';
+import { FC, useEffect, useRef, useState, useCallback} from 'react';
 import env from '@beam-australia/react-env';
 import { useTranslation } from '@/blog/i18n/client';
 
@@ -24,6 +24,15 @@ import { useTranslation } from '@/blog/i18n/client';
  * browser settings with no feedback, which is indistinguishable from "broken" for a
  * first-time visitor.
  */
+
+interface GsiOauth2Api {
+  initCodeClient: (opts: {
+    client_id: string;
+    scope: string;
+    ux_mode: 'popup' | 'redirect';
+    callback: (res: { code?: string; error?: string }) => void;
+  }) => { requestCode: () => void };
+}
 
 interface GoogleCredentialResponse {
   credential?: string;
@@ -52,6 +61,7 @@ interface GsiIdApi {
       text?: 'signin_with' | 'signup_with' | 'continue_with';
       shape?: 'rectangular' | 'pill';
       width?: number;
+      locale?: string;
       logo_alignment?: 'left' | 'center';
     }
   ) => void;
@@ -111,6 +121,25 @@ let initializedFor: string | null = null;
 /** GIS clamps rendered width to 200..400 CSS px; outside that it silently ignores it. */
 const GSI_MIN_WIDTH = 200;
 const GSI_MAX_WIDTH = 400;
+
+/**
+ * ★ GIS DRAWS 20px WIDER THAN YOU ASK (measured live 2026-08-28).
+ *
+ * Ask for `width: 270` and the iframe comes back 290 CSS px. Measured on
+ * lumensocial.net/login in a real browser: `width=270` in the iframe's own src,
+ * `getBoundingClientRect().width` 290, container 270 — so the button overhung its
+ * row by 10px on each side, starting at x=50 while every wallet row starts at
+ * x=60. That misalignment, not Google's internal styling, is what made the row
+ * look wrong next to the others: it was a different WIDTH and a different LEFT EDGE.
+ *
+ * The overhead is GIS's own outer box (border + shadow gutter), constant and
+ * independent of the requested width. Subtracting it means the RENDERED button
+ * measures what the container measures, and the left edges line up.
+ *
+ * If a GIS update changes this, the symptom is a button slightly narrower or wider
+ * than the wallet rows; re-measure `iframe rect width - src width=` and adjust.
+ */
+const GSI_RENDER_OVERHEAD = 20;
 
 /**
  * ★★★ A RENDERED BUTTON IS NOT A WORKING BUTTON (2026-08-16, defect B3).
@@ -188,6 +217,10 @@ export function googleConfigured(): boolean {
 interface Props {
   /** Receives the Google ID token; hand it to /api/lite/auth/google. */
   onIdToken: (idToken: string) => void;
+  /** Auth CODE from initCodeClient — the path that lets Lumen draw its own button. */
+  onCode?: (code: string) => void;
+  /** When true, render Lumen's own row and drive the flow ourselves. */
+  codeFlow?: boolean;
   onError: (message: string) => void;
   /**
    * Step-up nonce for LINKING Google to an existing account. `/api/lite/auth/bind`
@@ -201,7 +234,7 @@ interface Props {
   nonce?: string;
 }
 
-const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
+const GoogleSignIn: FC<Props> = ({ onIdToken, onCode, codeFlow, onError, nonce }) => {
   const holder = useRef<HTMLDivElement | null>(null);
   const shell = useRef<HTMLDivElement | null>(null);
   const rendered = useRef(false);
@@ -220,11 +253,13 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
    * an effect, so the mount effect below can depend on nothing but the nonce.
    */
   const onIdTokenRef = useRef(onIdToken);
+  const onCodeRef = useRef(onCode);
   const onErrorRef = useRef(onError);
   useEffect(() => {
     onIdTokenRef.current = onIdToken;
+    onCodeRef.current = onCode;
     onErrorRef.current = onError;
-  }, [onIdToken, onError]);
+  }, [onIdToken, onCode, onError]);
 
   useEffect(() => {
     if (!googleConfigured() || !holder.current) return;
@@ -335,7 +370,10 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
         // the range GIS honours, so the rendered button fills the box that was
         // already reserved for it.
         const measured = Math.round(shell.current?.getBoundingClientRect().width ?? 0);
-        const width = Math.min(GSI_MAX_WIDTH, Math.max(GSI_MIN_WIDTH, measured || GSI_MAX_WIDTH));
+        // Ask for the container width MINUS the overhead above, so the button GIS
+        // actually draws is the width of the row it sits in.
+        const target = (measured || GSI_MAX_WIDTH) - GSI_RENDER_OVERHEAD;
+        const width = Math.min(GSI_MAX_WIDTH, Math.max(GSI_MIN_WIDTH, target));
         api.renderButton(holder.current, {
           type: 'standard',
           theme: 'outline',
@@ -343,7 +381,15 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
           text: 'continue_with',
           shape: 'rectangular',
           logo_alignment: 'left',
-          width
+          width,
+          /* ★ `locale` MUST be passed HERE too, not just as `?hl=en` on the script
+             (2026-08-28, owner screenshot). The script-level pin governs the library,
+             but `renderButton` re-resolves the button's own language, and with it
+             absent GIS falls back to the BROWSER's locale. Live evidence: a Croatian
+             browser rendered "Nastavite kao Damir" inside an English page, on the very
+             widget the 2026-08-10 `?hl=en` fix was added to keep in English. Same class
+             of defect as that one, a layer lower down. */
+          locale: 'en'
         });
         rendered.current = true;
         watchAvailability();
@@ -430,9 +476,8 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
    * mark, their wording, unmodified logo), and the row is painted before the script
    * lands, so there is still nothing to shift (B1).
    *
-   * `scale(1.8)` on the holder: GIS renders at most 400x44 and the row is 412x65, so
-   * an unscaled overlay would leave the top and bottom strips dead to the mouse. The
-   * parent clips the overflow, so the hit area is exactly the row.
+   * (The old invisible-overlay geometry notes were removed on 2026-08-28 when the
+   * overlay itself was deleted — see the comment in the returned JSX.)
    *
    * ★ B3: the `holder` div below stays mounted in BOTH states, unavailable or not.
    * It is the exact DOM node GSI's `renderButton` call was pointed at, and it's what
@@ -440,6 +485,65 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
    * would destroy the node GSI is using and make the self-heal described above
    * impossible. Only the surrounding paint and interactivity change.
    */
+  /**
+   * ★ LUMEN'S OWN BUTTON (2026-08-28, owner: "put back the lumen styling").
+   *
+   * This is the ORIGINAL row design, restored — but as a REAL button, not a
+   * decorative one. The previous version painted this same row with
+   * `pointer-events-none` and hid GIS's real iframe on top of it under
+   * `opacity-0` + `transform: scale()`; GIS refuses to act on a click when its
+   * button is transparent, transformed or clipped, so that could never work.
+   * Driving the flow ourselves with `initCodeClient` is the only way to have
+   * Lumen's styling AND a working button.
+   */
+  const startCodeFlow = useCallback(() => {
+    const api = (window as unknown as { google?: { accounts?: { oauth2?: GsiOauth2Api } } })
+      .google?.accounts?.oauth2;
+    if (!api) {
+      onErrorRef.current('Google sign-in is still loading. Try again in a moment.');
+      return;
+    }
+    try {
+      api
+        .initCodeClient({
+          client_id: googleClientId(),
+          scope: 'openid email profile',
+          ux_mode: 'popup',
+          callback: (res) => {
+            if (res.code) onCodeRef.current?.(res.code);
+            else onErrorRef.current('Google sign-in was cancelled.');
+          }
+        })
+        .requestCode();
+    } catch {
+      onErrorRef.current('Google sign-in couldn’t start. Please try another method.');
+    }
+  }, []);
+
+  if (codeFlow) {
+    return (
+      <button
+        type="button"
+        data-testid="google-signin-row"
+        onClick={startCodeFlow}
+        className="mb-1 flex w-full cursor-pointer items-center gap-3 rounded-card border border-line-11 bg-surface-1 px-4 py-3 text-left hover:border-line-warn-5 hover:bg-surface-warn-1"
+      >
+        <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-control bg-surface-1">
+          <svg width="22" height="22" viewBox="0 0 48 48" aria-hidden>
+            <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z" />
+            <path fill="#34A853" d="M24 46c5.9 0 10.9-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9H4.5v5.7C8.1 41.1 15.4 46 24 46z" />
+            <path fill="#FBBC05" d="M11.8 27.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.5C3 16.1 2.1 19.9 2.1 23s.9 6.9 2.4 9.9l7.3-5.7z" />
+            <path fill="#EA4335" d="M24 9.9c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 3.3 29.9 1 24 1 15.4 1 8.1 5.9 4.5 13.1l7.3 5.7c1.7-5.2 6.5-8.9 12.2-8.9z" />
+          </svg>
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-sans text-[15px] leading-[24px] font-semibold text-ink-2">Continue with Google</span>
+          <span className="block font-sans text-caption text-ink-10">No wallet, no extension, nothing to install.</span>
+        </span>
+      </button>
+    );
+  }
+
   return (
     <div
       ref={shell}
@@ -457,45 +561,53 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
          reader was told to "sign in with Hive bel" — the instruction was the
          part that got cut. The row now grows to fit its own message; 64px stays
          as the floor so the normal state is pixel-identical. */
-      className="relative mb-1 min-h-[64px] w-full overflow-hidden rounded-card border border-line-11 bg-surface-1 focus-within:border-line-brand-10"
+      /* ★ THE ORANGE OUTLINE (2026-08-28, owner reported it on the live site).
+         globals.css:1231 sets `:focus-visible:not([contenteditable]) { outline: 2px
+         solid rgb(var(--line-brand-10)) }` on EVERYTHING. That token is #c0392b, and
+         thin + antialiased it reads orange, not red — the same complaint that was
+         fixed across 24 input sites on 2026-08-27. Google's button is an IFRAME
+         injected by gsi/client after those fixes shipped, so it never got one.
+         Focusing the row painted a 2px orange rectangle around an element that is
+         deliberately invisible, which looks like a rendering fault rather than focus.
+         `[&_iframe]:focus-visible:outline-none` is (0,2,1) and beats the global
+         (0,2,0). The affordance is NOT lost: `focus-within:border-line-brand-10`
+         below already turns the row's own border brand red, which is the visible,
+         intended treatment. Suppressing the outline without that border would have
+         removed the only focus indicator, which is the trap the 08-27 pass called
+         out at witnesses-filters-card.tsx:67. */
+      className="mb-1 w-full"
     >
-      <div
-        aria-hidden="true"
-        className="pointer-events-none flex min-h-[64px] w-full items-center gap-3 px-4 py-2 text-left"
-      >
-        <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-control bg-surface-1">
-          <svg width="22" height="22" viewBox="0 0 48 48" aria-hidden>
-            <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z" />
-            <path fill="#34A853" d="M24 46c5.9 0 10.9-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9H4.5v5.7C8.1 41.1 15.4 46 24 46z" />
-            <path fill="#FBBC05" d="M11.8 27.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.5C3 16.1 2.1 19.9 2.1 23s.9 6.9 2.4 9.9l7.3-5.7z" />
-            <path fill="#EA4335" d="M24 9.9c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 3.3 29.9 1 24 1 15.4 1 8.1 5.9 4.5 13.1l7.3 5.7c1.7-5.2 6.5-8.9 12.2-8.9z" />
-          </svg>
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block font-sans text-[15px] leading-[24px] font-semibold text-ink-2">Continue with Google</span>
-          {/* B3: swaps to the detected-failure message in place of the normal
-              subtitle, right on the row the reader was about to click, rather
-              than only in a banner elsewhere on the page. */}
-          <span
-            className={`block font-sans text-caption ${unavailable ? 'text-ink-warn-3' : 'text-ink-10'}`}
-          >
-            {unavailable ? t('lite_auth.google_signin.unavailable') : 'No wallet, no extension, nothing to install.'}
-          </span>
-        </span>
-      </div>
-
-      {/* Google's real button: invisible, on top, and the only thing that is
-          actually clickable or focusable in this row. `pointer-events-none`
-          while `unavailable` so a near-miss (tiny but nonzero) iframe can't
-          eat a click the row is now telling the reader not to make. */}
-      {/* ★ NEVER `pointer-events-none`. The old code disabled clicks once the probe
-          reported zero size - so on the exact failure it was meant to explain, it also
-          removed the user's ability to try. If the iframe really is 0x0 the click lands
-          on nothing and costs the reader a second; if the probe was wrong, the button
-          works. Only one of those two outcomes is recoverable. */}
-      <div className="absolute inset-0 z-10 flex items-center justify-center opacity-0">
-        <div ref={holder} style={{ transform: 'scale(1.8)' }} />
-      </div>
+      {/* ★★★ GOOGLE'S BUTTON IS NOW THE REAL, VISIBLE BUTTON (2026-08-28).
+          THE BUG THIS REPLACES, and why the previous design could never work:
+          this row used to be a Lumen-styled fake with `pointer-events-none`, and
+          GSI's real iframe was stretched over it inside
+          `absolute inset-0 z-10 opacity-0` with `transform: scale(...)`, all
+          clipped by `overflow-hidden` on the card.
+          Google Identity Services REFUSES TO ACT ON A CLICK when its button is
+          transparent, transformed or clipped. It is anti-clickjacking protection,
+          and it is silent: the iframe loads 200, hit-testing lands on it, focus
+          even moves into it, and the click is simply swallowed. No popup, no
+          network call, no console error.
+          PROVEN, not guessed: neutralising the wrapper in the live DOM
+          (`transform:none; opacity:1; overflow:visible`) and clicking the exact
+          same pixel fired the flow immediately and opened
+          accounts.google.com/o/oauth2/v2/auth. Nothing else was changed.
+          ★ Note for whoever is tempted to restore the overlay: making the scale
+          LARGER makes it worse, not better. That was tried the same day.
+          So: no opacity trick, no transform, no clipping ancestor. Google draws
+          its own button, at its own size, and we style around it. The tradeoff is
+          that this row no longer matches the wallet rows pixel for pixel; a
+          working sign-in beats a consistent one. `renderButton` is still used
+          rather than One Tap for the reasons at the top of this file. */}
+      <div ref={holder} className="flex w-full justify-center" />
+      {/* The availability message stays BELOW the button rather than inside it:
+          the row is Google's now, and injecting our own text into its box is what
+          started the whole overlay problem. */}
+      {unavailable && (
+        <p className="mt-2 text-center font-sans text-caption text-ink-warn-3">
+          {t('lite_auth.google_signin.unavailable')}
+        </p>
+      )}
     </div>
   );
 };
