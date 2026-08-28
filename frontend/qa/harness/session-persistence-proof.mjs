@@ -33,7 +33,12 @@ const loginMessage = (nonce) =>
 
 async function run({ label, base }) {
   const account = privateKeyToAccount(
-    // distinct key per origin so the two runs never share an identity
+    // distinct key per origin so the two runs never share an identity.
+    // ★ Both are PUBLIC Hardhat test keys (accounts #1 and #5 of the standard
+    // "test test ... junk" mnemonic), published in Hardhat's own docs. They are
+    // written out rather than generated so a run is reproducible, and they are
+    // deliberately well-known ones so nobody reading this committed file has to
+    // work out whether a 64-hex string here is a real secret.
     base.startsWith('https')
       ? '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d'
       : '0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba'

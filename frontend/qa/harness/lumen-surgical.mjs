@@ -147,8 +147,13 @@ export async function openLumen({
   if (loggedIn) {
     process.env.QA_BASE = origin; // liteSession reads this to know where to sign up
     const { liteSession } = await import('/home/clauderfly/hive-blog-rebuild/qa-harness.mjs');
+    // ★ A PUBLIC HARDHAT TEST KEY, not a secret (2026-08-28). This used to be a
+    // privately generated throwaway, which is indistinguishable from a real key
+    // to anyone reading the repo, and this file is committed. Hardhat account #2
+    // from the standard "test test ... junk" mnemonic is published in Hardhat's
+    // own docs and controls nothing. QA identities only ever hold a lite account.
     const s = await liteSession(
-      privateKey || '0x7c19a3f04b8e21d6590af7c3e8b1d24f6a05e93b7c48d1f206a5e83b91c47d0e',
+      privateKey || '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a',
       label
     );
     username = s.username;
