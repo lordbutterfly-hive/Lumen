@@ -1,3 +1,4 @@
+import { createHmac } from 'crypto';
 import { NextRequest } from 'next/server';
 import { liteConfig } from '../config';
 
@@ -98,4 +99,74 @@ export function getClientIp(req: NextRequest): string {
   // a single bucket rather than minting a new one per request.
   const realIp = req.headers.get('x-real-ip');
   return realIp ? ipBucket(realIp) : UNATTRIBUTED;
+}
+
+/**
+ * The rate-limiting KEY for a client address: a keyed hash, never the address.
+ *
+ * WHY (owner decision, 2026-08-28). Rate limiting needs to tell two callers apart.
+ * It does NOT need to know who they are. Until now `rate_counter.subject` stored
+ * `ip:<address>` in cleartext, which meant the one thing the product genuinely had
+ * to disclose in a privacy policy was also the one thing it did not need to keep.
+ * PeakD reached the same conclusion: "IP addresses are hashed (one-way,
+ * irreversible) before storage. We cannot identify you from view records."
+ *
+ * HMAC, not a bare hash. The address space is small enough to enumerate — all of
+ * IPv4 is 2^32, which a plain SHA-256 rainbow table reverses in minutes. Keying it
+ * with a server-held secret makes that impossible for anyone without the secret,
+ * which is the whole point.
+ *
+ * THE SECRET IS RESOLVED AT MODULE LOAD, ON PURPOSE. Every caller of this sits
+ * inside a `catch { proceed }` fail-open (see local-rate-limit.ts for why that
+ * fail-open exists), so a throw raised per-request would not fail CLOSED — it would
+ * silently disable the limiter, which is worse than the thing being fixed. Failing
+ * at import time instead means a production server missing the secret does not boot
+ * quietly with rate limiting off; it refuses, loudly, before serving anyone.
+ *
+ * `DENSER_SERVER_SECRET_COOKIE_PASSWORD` is reused rather than adding a new required
+ * variable: it is already mandatory (without it every login 500s), already checked by
+ * `scripts/lumen-preflight.sh`, and already at least 32 characters. A new variable is
+ * a new way for a deploy to be silently wrong.
+ *
+ * Changing the secret re-keys every bucket, which resets counters once. That is
+ * acceptable and is not a reason to weaken the derivation.
+ */
+const IP_KEY_INFO = 'lumen-ip-key-v1';
+
+const ipKeySecret: Buffer = (() => {
+  const raw = process.env.DENSER_SERVER_SECRET_COOKIE_PASSWORD || '';
+  if (raw.length < 32) {
+    // `next build` runs with NODE_ENV=production and evaluates this module while
+    // collecting page data, on a machine that has no business holding the runtime
+    // secret. Throwing there would fail the BUILD, not the boot, and the natural
+    // "fix" for that is to put the secret on the build host — which is the opposite
+    // of what this is for. The build gets the development salt; nothing it produces
+    // depends on the value, because no counter is written during a build.
+    const building = process.env.NEXT_PHASE === 'phase-production-build';
+    if (process.env.NODE_ENV === 'production' && !building) {
+      throw new Error(
+        'DENSER_SERVER_SECRET_COOKIE_PASSWORD is missing or under 32 chars — refusing to start. ' +
+          'It keys the rate-limiter address hash; without it the choice is storing raw IP ' +
+          'addresses or running with no rate limiting, and neither is acceptable in production.'
+      );
+    }
+    // Development only. Deterministic so local counters survive a restart, and
+    // deliberately a constant nobody could mistake for a secret.
+    return createHmac('sha256', 'lumen-development-only-not-a-secret').update(IP_KEY_INFO).digest();
+  }
+  return createHmac('sha256', raw).update(IP_KEY_INFO).digest();
+})();
+
+/**
+ * `ip:<32 hex chars>` — stable for a given address, irreversible without the secret.
+ *
+ * Takes the already-bucketed value `getClientIp` returns (IPv6 collapsed to /64), so
+ * the privacy and the limiter semantics are unchanged: the same client still lands in
+ * the same bucket, and an IPv6 allocation still cannot mint fresh buckets per address.
+ *
+ * 128 bits of the digest is kept. Collisions at that width are not reachable, and a
+ * collision would only ever merge two buckets, never split one.
+ */
+export function ipKey(address: string): string {
+  return `ip:${createHmac('sha256', ipKeySecret).update(address).digest('hex').slice(0, 32)}`;
 }

@@ -31,6 +31,8 @@
  * unbounded map keyed on attacker-controlled input is its own vulnerability.
  */
 
+import { ipKey } from '../http/ip';
+
 interface Window {
   count: number;
   resetAt: number;
@@ -80,7 +82,7 @@ export function consumeLocalPerIp(
   limit = 600,
   windowMs = 60_000
 ): boolean {
-  return consume(`ip:${scope}:${ip}`, limit, windowMs, Date.now());
+  return consume(`${ipKey(ip)}:${scope}`, limit, windowMs, Date.now());
 }
 
 /**

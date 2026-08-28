@@ -165,8 +165,8 @@ publish, vote on, follow or mute is signed by you and broadcast to the Hive
 blockchain under your own account. Lumen never holds your keys and cannot act for
 you.
 
-If you sign in without a Hive account — for example with a wallet address or a
-Google account — Lumen operates an account on your behalf. Your posts and comments
+If you sign in without a Hive account, for example with a wallet address or a
+Google account, Lumen operates an account on your behalf. Your posts and comments
 are published to the Hive blockchain under an account controlled by Lumen, not by
 you, and they decline all rewards, so they earn nothing. Your votes and reblogs are
 recorded by Lumen only and are not broadcast. You may later obtain your own Hive
@@ -184,27 +184,37 @@ provide software that facilitates the submission of Hive blockchain transaction
 data to the Hive blockchain without requiring you to access the Hive blockchain
 command line interface.
 
-9.2. Account and Private Keys. Should you agree to create an Account through
-our Service, we generate a cryptographic private and public key pair that
-are provided solely to you and completely owned by you; provided however that
-we not store passwords or Private Keys for our you. We never have access to
-your Private Key and do not custody any Private Keys on your behalf, and
-therefore, assume no responsibility for the management of the Private Key
-tied to your Account. The Private Key uniquely match the Account name and
-must be used in connection with the Account to authorize the transfer of
-HIVE and Hive Dollars from that Account. You are solely responsible for
-maintaining the security of your Private Keys. You must keep your Private
-Key access information secure. Failure to do so may result in the loss of
-control of HIVE, Hive Power and Hive Dollars associated with your Account.
+9.2. Account and Private Keys. What this section means depends on which kind
+of account you have, as described in section 8.1.
 
-9.3. No Password Retrieval. We do not receive or store your Account password
-or Private Keys. Your Private Key is your own and you are solely responsible
-for their safekeeping. We cannot assist you with Account password retrieval,
-reset, or recovery. You are solely responsible for remembering your Account
-password. If you have not safely stored a backup of any Account and password
-pairs maintained in your Account, you accept and acknowledge that any HIVE,
-Hive Dollars and Hive Power you have associated with such Account will become
-permanently inaccessible if you do not have your Account password.
+If you use your own Hive account, we do not generate, receive, store or custody
+your private keys, and we cannot act for you. We never have access to your
+Private Key and therefore assume no responsibility for its management. The
+Private Key uniquely matches the Account name and must be used in connection
+with the Account to authorize the transfer of HIVE and Hive Dollars from that
+Account. You are solely responsible for maintaining its security. Failure to do
+so may result in the loss of control of the HIVE, Hive Power and Hive Dollars
+associated with your Account.
+
+If you use a Lumen account without your own Hive key, there is no Private Key
+that belongs to you. Your content is published to the Hive blockchain under an
+account that Lumen operates and whose keys Lumen holds. That account declines
+all rewards and holds no balance on your behalf, so there are no funds in it
+that are yours. You do not control it and cannot sign with it. If you later
+obtain your own Hive account, you hold that account's keys and the paragraph
+above applies to it from that point on.
+
+9.3. No Password Retrieval. We do not receive or store the password or Private
+Keys of a Hive account that you control, and we cannot assist you with
+retrieving, resetting or recovering them. If you have not safely stored your own
+backup, you accept and acknowledge that any HIVE, Hive Dollars and Hive Power
+associated with that Account will become permanently inaccessible. This is a
+property of the blockchain and applies equally to every interface to it.
+
+If you sign in to a Lumen account with a wallet, a passkey or a Google account,
+access is restored by signing in again with that same method. If you lose access
+to the method itself, we may be unable to restore your account, because it is
+the only thing that proves the account is yours.
 
 9.4. Transactions. All proposed Hive blockchain transactions must be
 confirmed and recorded in the Hive blockchain via the Hive distributed
@@ -275,7 +285,7 @@ storing, outside of the Services, a backup of any Account and Private Key that
 you maintain in your Account.
 
 12.2. If you do not maintain a backup of your Account data outside of the
-Services, you will be may not be able to access HIVE, Hive Dollars and
+Services, you may not be able to access HIVE, Hive Dollars and
 Hive Power associated with any Account maintained in your Account if we
 discontinue or deprecate the Services.
 
@@ -333,7 +343,7 @@ to the DMCA. A DMCA request can be sent to us via the contact information below:
 
 Copyright Agent
 
-[LEGAL CONTACT ADDRESS — NOT YET SET]
+[CONTACT ADDRESS - NOT YET SET]
 
 Please send our Copyright Agent the following information:
 
@@ -503,4 +513,4 @@ Services after a change to this agreement, you agree to those changes.
 
 ## 25. Contact Information
 
-Notices to Lumen should be directed to [LEGAL CONTACT ADDRESS — NOT YET SET].
+Notices to Lumen should be directed to [CONTACT ADDRESS - NOT YET SET].

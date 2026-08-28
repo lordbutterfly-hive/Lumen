@@ -4,6 +4,7 @@ import * as rateRepo from '../repositories/rate-limit-repository';
 import * as posts from '../repositories/post-repository';
 import { getUserCaps } from './trust';
 import { ageDays, dayKey, hourKey } from './windows';
+import { ipKey } from '../http/ip';
 
 /**
  * High-level rate enforcement (spec §H). Per-account intake caps are the bot-farm
@@ -90,7 +91,7 @@ export async function enforceUpgradeRate(userId: string): Promise<boolean> {
  * allowed to run — see the streak-route incident recorded there.
  */
 export async function enforceLookupRate(ip: string): Promise<boolean> {
-  return rateRepo.checkAndConsume(`ip:${ip}`, 'lookup', liteConfig.lookupPerIpPerDay, dayKey());
+  return rateRepo.checkAndConsume(ipKey(ip), 'lookup', liteConfig.lookupPerIpPerDay, dayKey());
 }
 
 /**
@@ -122,7 +123,7 @@ export async function enforceLookupRate(ip: string): Promise<boolean> {
 const STREAK_PER_IP_PER_DAY = envPositiveInt('LITE_STREAK_PER_IP_PER_DAY', 1000);
 
 export async function enforceStreakRate(ip: string): Promise<boolean> {
-  return rateRepo.checkAndConsume(`ip:${ip}`, 'streak', STREAK_PER_IP_PER_DAY, dayKey());
+  return rateRepo.checkAndConsume(ipKey(ip), 'streak', STREAK_PER_IP_PER_DAY, dayKey());
 }
 
 /**
@@ -187,7 +188,7 @@ export type MagiGqlScope = 'creator_tokens' | 'prediction_market' | 'creator_tok
 
 export async function enforceMagiGqlRate(ip: string, scope: MagiGqlScope): Promise<boolean> {
   const limit = scope === 'creator_tokens_submit' ? MAGI_SUBMIT_PER_IP_PER_DAY : MAGI_GQL_PER_IP_PER_DAY;
-  return rateRepo.checkAndConsume(`ip:${ip}`, `${scope}_gql`, limit, dayKey());
+  return rateRepo.checkAndConsume(ipKey(ip), `${scope}_gql`, limit, dayKey());
 }
 
 /**
@@ -213,7 +214,7 @@ export async function enforceMagiGqlRate(ip: string, scope: MagiGqlScope): Promi
 const HIVESENSE_PER_IP_PER_DAY = envPositiveInt('LITE_HIVESENSE_PER_IP_PER_DAY', 10_000);
 
 export async function enforceHivesenseRate(ip: string): Promise<boolean> {
-  return rateRepo.checkAndConsume(`ip:${ip}`, 'hivesense', HIVESENSE_PER_IP_PER_DAY, dayKey());
+  return rateRepo.checkAndConsume(ipKey(ip), 'hivesense', HIVESENSE_PER_IP_PER_DAY, dayKey());
 }
 
 /**
@@ -231,11 +232,11 @@ function envPositiveInt(name: string, fallback: number): number {
 
 /** Per-IP signup cap — an independent limiter from the per-account caps (§H). */
 export async function enforceSignupRate(ip: string): Promise<boolean> {
-  if (!(await rateRepo.checkAndConsume(`ip:${ip}`, 'signup', liteConfig.signupPerIpPerDay, dayKey()))) {
+  if (!(await rateRepo.checkAndConsume(ipKey(ip), 'signup', liteConfig.signupPerIpPerDay, dayKey()))) {
     return false;
   }
   // F-L33: hourly sub-cap blunts the 00:00-UTC boundary burst the daily fixed window allows.
-  return rateRepo.checkAndConsume(`ip:${ip}`, 'signup', hourlySubCap(liteConfig.signupPerIpPerDay), hourKey());
+  return rateRepo.checkAndConsume(ipKey(ip), 'signup', hourlySubCap(liteConfig.signupPerIpPerDay), hourKey());
 }
 
 /**
@@ -255,7 +256,7 @@ export async function enforceChallengeRate(
   // Also given its own budget, an order of magnitude above signup: proving you own
   // a wallet is cheap and repeatable, creating an account is not.
   return rateRepo.checkAndConsume(
-    `ip:${ip}`,
+    ipKey(ip),
     `${scope}_challenge`,
     liteConfig.challengePerIpPerDay,
     dayKey()
@@ -430,7 +431,7 @@ export async function enforcePublisherGlobalRate(): Promise<boolean> {
 /** Feed refresh fans out to Hive (up to MAX_CHAIN_AUTHORS bridge calls). Costly, user-initiated. */
 export async function enforceFeedRefreshRate(ip: string): Promise<boolean> {
   return rateRepo.checkAndConsume(
-    `ip:${ip}`,
+    ipKey(ip),
     'feed_refresh',
     envPositiveInt('LITE_FEED_REFRESH_PER_IP_PER_DAY', 1_000),
     dayKey()
@@ -440,7 +441,7 @@ export async function enforceFeedRefreshRate(ip: string): Promise<boolean> {
 /** Public follower/following browsing. Cheap per call, but unbounded scraping is the concern. */
 export async function enforceFollowListRate(ip: string): Promise<boolean> {
   return rateRepo.checkAndConsume(
-    `ip:${ip}`,
+    ipKey(ip),
     'follow_list',
     envPositiveInt('LITE_FOLLOW_LIST_PER_IP_PER_DAY', 3_000),
     dayKey()
