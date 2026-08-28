@@ -49,13 +49,44 @@
  * token-market-view.tsx and token-modals.tsx are `'use client'` component trees,
  * so a sentence written inside them is a sentence no test can read. Everything
  * that makes a claim about money lives here, where `disclosure-copy.selftest.ts`
- * can assert on it. This module imports only `market/format`, which is pure.
+ * can assert on it. This module imports only `market/format` and the launch
+ * visibility flag, both pure.
  *
  * HOUSE STYLE. No em or en dashes in any string in this file. The rule is
  * enforced, not just stated: the self-test scans every exported string for
  * U+2014 and U+2013 and fails on either.
+ *
+ * ★★★ 5. AND THEN THE FIGURE ITSELF WAS HIDDEN FOR LAUNCH (owner, 2026-08-27):
+ * *"get rid of the backing figure, dont show it, hide it we will activate it
+ * some time in the future ... i dont want too much shit people wont
+ * understand."* See ../../backing-visibility.ts.
+ *
+ * THAT IS A COPY PROBLEM BEFORE IT IS A LAYOUT ONE. Four sentences in this file
+ * POINT at the figure: "Backing per token, shown above ...", "Backing per token,
+ * shown next to the price ...", the buy dialog's parenthetical, and the overdue
+ * banner's quoted number. Hide the stat and leave those, and the page directs a
+ * reader to something that is not on it, which is worse than either showing the
+ * number or hiding it cleanly.
+ *
+ * ★ EVERY ORIGINAL SENTENCE IS KEPT, VERBATIM AND STILL EXPORTED. The four
+ * affected strings became functions that select between the original and a
+ * standalone variant, defaulting to the flag. Nothing is rewritten in place, so
+ * flipping `SHOW_BACKING_FIGURES` restores the audited copy exactly as it was
+ * rather than whatever a future rewrite would have left behind, and the
+ * self-test still asserts on BOTH branches (a hidden branch that nothing checks
+ * is a branch that rots).
+ *
+ * ★ WHAT DELIBERATELY DID NOT CHANGE. `exitRoutesNote`, `WIND_DOWN_BANNER` and
+ * `HOW_IT_WORKS_RESERVE_LINE` all talk about "the reserve" as a MECHANISM
+ * ("redeem your share of the reserve", "that reserve is what a wind-down pays
+ * out"). None of them points at a displayed figure, all of them stay true with
+ * the stat gone, and a buyer still needs to know a wind-down pays out of
+ * something. `positionSegments` also stays: "$14.44 if this market wound down"
+ * is this reader's own money on their own tokens, net of their own exit fee, and
+ * it is the one number on the page they could actually receive today.
  */
 
+import { SHOW_BACKING_FIGURES } from '../../backing-visibility';
 import { usdPrice } from '../../market/format';
 
 /** The right-rail card: the whole reserve, in dollars. */
@@ -154,7 +185,16 @@ export function exitRoutesNote(redeem: boolean): string {
  * by..." is the kind of sentence that reads as a bug on the one screen where a
  * reader is about to spend money.
  */
-export function buyRiskNote(backingPerToken: string): string {
+export function buyRiskNote(backingPerToken: string, showBacking: boolean = SHOW_BACKING_FIGURES): string {
+  // ★ WITH THE STAT HIDDEN, THE WHOLE CLAUSE GOES, not just the parenthetical.
+  // "Backing per token is the reserve divided by the tokens issued" defines a
+  // term this dialog no longer shows anywhere; leaving it would teach a reader
+  // a word, on the screen where they are about to spend money, and then never
+  // use it. The two risks that are actually actionable on this screen survive
+  // untouched: the price floats, and selling soon costs an extra fee.
+  if (!showBacking) {
+    return 'This token’s price floats and you can lose money. Sell soon after buying and an early-exit fee applies on top of the trade fee.';
+  }
   const quoted =
     backingPerToken === 'None yet' || backingPerToken === 'Unavailable' ? '' : ` (${backingPerToken})`;
   return `This token’s price floats and you can lose money. Backing per token${quoted} is the reserve divided by the tokens issued: what a wind-down would pay before your early-exit fee, not a price you can sell at. Sell soon after buying and an early-exit fee applies on top of the trade fee.`;
@@ -172,6 +212,25 @@ export function buyRiskNote(backingPerToken: string): string {
  */
 export const HONEST_NOTE =
   'This token’s price floats. It can go up or down, and you can lose money. Every trade on the curve pays a 10% fee (5% to the creator, 5% to Lumen), and selling soon after buying adds an early-exit fee on top, which fades to zero over 6 weeks. Backing per token, shown above, is the reserve divided by the tokens issued: what a wind-down would pay before your early-exit fee, with no trade fee on that route. It is not a price you can sell at. Selling into the curve pays the curve’s price, and that price falls as you sell, so the last holder out gets less than the first.';
+
+/**
+ * The same paragraph with the two sentences about the hidden stat removed, and
+ * NOTHING else touched.
+ *
+ * "shown above" is the whole problem: with the stat gone it points at nothing.
+ * The sentences it introduced went with it rather than being reworded to
+ * describe an invisible number, which is what the owner's "shit people won't
+ * understand" is about. Every fee fact survives, in the same words, in the same
+ * order: the 10% and its split, the 6-week decay, and the cascade that the price
+ * falls as you sell.
+ */
+export const HONEST_NOTE_BACKING_HIDDEN =
+  'This token’s price floats. It can go up or down, and you can lose money. Every trade on the curve pays a 10% fee (5% to the creator, 5% to Lumen), and selling soon after buying adds an early-exit fee on top, which fades to zero over 6 weeks. Selling into the curve pays the curve’s price, and that price falls as you sell, so the last holder out gets less than the first.';
+
+/** The closing disclosure the page actually renders. */
+export function honestNote(showBacking: boolean = SHOW_BACKING_FIGURES): string {
+  return showBacking ? HONEST_NOTE : HONEST_NOTE_BACKING_HIDDEN;
+}
 
 /**
  * The third line of the "How this works" rail, and the only one of the three
@@ -209,6 +268,34 @@ export const INTERSTITIAL_LINES: readonly string[] = [
   'Selling soon after buying has an early-exit fee that fades to zero over 6 weeks.'
 ];
 
+/**
+ * The interstitial with the stat hidden. THREE lines, not four.
+ *
+ * Line 3 is dropped outright: "shown next to the price" is a direction to a
+ * place on the screen where nothing now is, and it is the only line of the four
+ * whose entire subject is the hidden figure.
+ *
+ * ★ AND LINE 2 LOST ITS TAIL, which is a judgement call worth stating. "the buy
+ * price is always above what the reserve holds per token" is TRUE and it was
+ * added deliberately (a rising convex curve puts the marginal price above the
+ * average at every supply). But it is only meaningful to a reader who knows what
+ * the reserve holds per token, and line 3 was where they learned that. Kept
+ * without line 3 it is a comparison against an undefined, unshown quantity: the
+ * exact "shit people won't understand" the owner asked to remove. The half that
+ * a reader can act on, and the half that actually costs them money, is that the
+ * price they sell at falls as they sell, and that survives verbatim.
+ */
+export const INTERSTITIAL_LINES_BACKING_HIDDEN: readonly string[] = [
+  'This is a real token whose price goes up and down.',
+  'You can get back less than you paid. The price you sell at falls as you sell.',
+  'Selling soon after buying has an early-exit fee that fades to zero over 6 weeks.'
+];
+
+/** The interstitial the dialog actually renders. */
+export function interstitialLines(showBacking: boolean = SHOW_BACKING_FIGURES): readonly string[] {
+  return showBacking ? INTERSTITIAL_LINES : INTERSTITIAL_LINES_BACKING_HIDDEN;
+}
+
 /** The wind-down banner. Sell is closed here; Redeem is the only door. */
 export const WIND_DOWN_BANNER =
   'This creator’s market is winding down, so buying and new asks are closed. Selling on the curve is closed too; use Redeem to take your pro-rata share of the reserve, less your early-exit fee.';
@@ -226,7 +313,17 @@ export function overdueBanner(figures: string): string {
  * The parenthetical inside `overdueBanner`. Empty when there is nothing to
  * quote, so the sentence never ends "(currently  a token)".
  */
-export function overdueFigures(backingPerToken: string, priceUsd: number): string {
+export function overdueFigures(
+  backingPerToken: string,
+  priceUsd: number,
+  showBacking: boolean = SHOW_BACKING_FIGURES
+): string {
+  // ★ The banner is the one place the backing figure appeared OUTSIDE the stats
+  // row, so hiding the stat and not this would have left the number on the page
+  // in the single state where it is most alarming. The banner itself stays: the
+  // lapse, the freeze and "Redeem is the only way out" are the warning, and none
+  // of the three needs the figure to land.
+  if (!showBacking) return '';
   if (backingPerToken === 'None yet' || backingPerToken === 'Unavailable') return '';
   return ` (currently ${backingPerToken} a token before your early-exit fee, against ${usdPrice(priceUsd)} now)`;
 }
@@ -290,14 +387,22 @@ export function allPublishedCopy(): string[] {
     MARKET_CAP_NOTE,
     BACKING_TOTAL_NOTE,
     HONEST_NOTE,
+    HONEST_NOTE_BACKING_HIDDEN,
     WIND_DOWN_BANNER,
     HOW_IT_WORKS_RESERVE_LINE,
     ...INTERSTITIAL_LINES,
+    ...INTERSTITIAL_LINES_BACKING_HIDDEN,
     exitRoutesNote(true),
     exitRoutesNote(false),
-    buyRiskNote('$1.20'),
-    overdueBanner(overdueFigures('$1.20', 1.408)),
-    overdueBanner(overdueFigures('None yet', 1.007)),
+    // ★ BOTH BRANCHES OF EVERY FLAGGED STRING. The sweep exists to prove no
+    // published sentence carries a dash or the retired word; a variant that only
+    // ships when the flag flips is still published, and a sweep that only saw
+    // today's branch would certify half the module.
+    buyRiskNote('$1.20', true),
+    buyRiskNote('$1.20', false),
+    overdueBanner(overdueFigures('$1.20', 1.408, true)),
+    overdueBanner(overdueFigures('None yet', 1.007, true)),
+    overdueBanner(overdueFigures('$1.20', 1.408, false)),
     positionLine('12.00', 16.9, 14.44),
     backingPerTokenValue(1.203, 50),
     backingPerTokenValue(0, 0),

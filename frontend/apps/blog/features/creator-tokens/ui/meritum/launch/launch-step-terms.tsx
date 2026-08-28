@@ -185,8 +185,8 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
             <div className="mt-3">
               <p className="mb-2 text-caption">
                 {firstBuy.trim() !== ''
-                  ? `Your first buy costs ${firstBuy} HBD. Send that to your Magi account plus a little extra — on Magi, HBD also pays the resource credits every action needs, so deposit a bit more than the buy itself.`
-                  : 'Send HBD to your Magi account before launching — on Magi, HBD also pays the resource credits that every action needs.'}
+                  ? `Your first buy costs ${firstBuy} HBD. Send that to your Magi account plus a little extra. On Magi, HBD also pays the resource credits every action needs, so deposit a bit more than the buy itself.`
+                  : 'Send HBD to your Magi account before launching. On Magi, HBD also pays the resource credits that every action needs.'}
               </p>
               <MagiFundingHelp kind="hive" />
             </div>

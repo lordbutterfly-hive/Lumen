@@ -17,7 +17,7 @@ import { sellEmptyStateMessage } from './sell-empty-state';
 // sell-empty-state.ts exists: this is a `'use client'` tree, so a sentence
 // written inline is a sentence no test can read. disclosure-copy.ts's header
 // carries the live figures each rewrite was reproduced against.
-import { INTERSTITIAL_LINES, backingPerTokenValue, buyRiskNote, exitRoutesNote } from './disclosure-copy';
+import { backingPerTokenValue, buyRiskNote, exitRoutesNote, interstitialLines } from './disclosure-copy';
 // ★★★ THE DIALOGS' ARITHMETIC, FOR THE SAME REASON (2026-08-27). A number
 // computed inline in a `'use client'` tree is a number no test can read, and
 // every defect this module was extracted for was a number: a partial redeem
@@ -309,6 +309,12 @@ const BuyModal: FC<{
         <div className="mb-3 rounded-control bg-surface-16 px-3.5 py-3 text-caption text-ink-10">
           Includes a 10% trade fee (5% to @{displayHandle(m.handle)}, 5% to Lumen).
         </div>
+        {/* ★★ HIDDEN FOR LAUNCH: `buyRiskNote` defaults to SHOW_BACKING_FIGURES
+            and returns the standalone variant while it is false, so this
+            paragraph carries no backing clause and no parenthetical today. The
+            argument is still computed and still passed, unchanged, so nothing has
+            to be rewired when the flag flips. The note below describes the copy
+            that returns with it. */}
         {/* ★ THE FIGURE QUOTED HERE IS GROSS OF THE EARLY-EXIT FEE (2026-08-27).
             It read "The floor ($1.20) is what the reserve would pay out per token
             if the market wound down", and on this market a holder redeeming
@@ -377,7 +383,7 @@ const BuyModal: FC<{
           {busy
             ? 'Confirm in your wallet…'
             : soldOut
-              ? 'Sold out — every token is issued'
+              ? 'Sold out. Every token is issued'
               : affordability === 'no_resource_credits'
               ? 'Add HBD on Magi first'
               : affordability === 'insufficient_hbd'
@@ -692,7 +698,7 @@ const SellModal: FC<{
         {advOpen ? (
           <div className="mb-3.5">
             <label className="mb-1.5 block text-caption text-ink-10">
-              Minimum {redeem ? 'refund' : 'net'} (HBD) — protects you if the price moves
+              Minimum {redeem ? 'refund' : 'net'} (HBD): protects you if the price moves
             </label>
             <div className="flex items-center rounded-xl border border-line-11 px-4 py-2.5 focus-within:border-line-brand-10">
               <input
@@ -710,8 +716,8 @@ const SellModal: FC<{
             </div>
             <p className="mt-1.5 text-caption text-ink-14">
               Pre-filled just under what you’re shown above, so the {redeem ? 'redeem' : 'sell'} reverts (nothing
-              spent) if the net comes in lower — a price move or a same-block front-run, not you. Clear it to exit
-              at the going rate with no floor, or lower it to allow more slippage.
+              spent) if the net comes in lower: a price move or a same-block front-run, not you. Clear it to exit
+              at the going rate with no minimum, or lower it to allow more slippage.
             </p>
           </div>
         ) : null}
@@ -742,8 +748,8 @@ const SellModal: FC<{
             : tokens > held
               ? 'More than you hold'
               : redeem
-                ? `Redeem — get ~${usdPrice(redeemUsd)}`
-                : `Sell — get ~${usdPrice(q.receiveUsd)}`}
+                ? `Redeem · get ~${usdPrice(redeemUsd)}`
+                : `Sell · get ~${usdPrice(q.receiveUsd)}`}
         </button>
         {failure ? (
           <div className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
@@ -841,7 +847,7 @@ const AskModal: FC<{
           className="h-[120px] w-full resize-y rounded-xl border border-line-11 px-4 py-3.5 font-serif text-[15px] leading-[24px] text-ink-2 outline-none focus-visible:outline-none focus:border-line-brand-10"
         />
         <div className="my-2 mb-3.5 text-caption text-ink-14">
-          Private — stored on Lumen, only its fingerprint goes on-chain.
+          Private. Stored on Lumen, only its fingerprint goes on-chain.
         </div>
         <div className="mb-4 rounded-xl border border-line-9 px-4 py-3.5 text-[14px] leading-[22px] text-ink-7">
           {/* ★★★ THE SENTENCE IS ASSEMBLED IN trade-preview.ts, NOT HERE (F-D).
@@ -1035,8 +1041,14 @@ const InterstitialModal: FC<{ handle: string; onClose: () => void }> = ({ onClos
       <div className="mb-[18px] font-serif text-[22px] leading-[34px] font-semibold text-ink-2">
         Before you trade this token
       </div>
+      {/* ★ `interstitialLines()`, not the constant (2026-08-27): with the backing
+          stat hidden for launch, the line reading "Backing per token, shown next
+          to the price ..." directed the reader to a place on the screen where
+          nothing is. The selector drops that line and trims the clause in line 2
+          that depended on it; the original four lines are still exported and come
+          back with the flag. See disclosure-copy.ts. */}
       <div className="mb-[22px] flex flex-col gap-3.5">
-        {INTERSTITIAL_LINES.map((line, i) => (
+        {interstitialLines().map((line, i) => (
           <p key={i} className="font-serif text-[14px] leading-[22px] text-ink-7">
             {line}
           </p>
@@ -1047,7 +1059,7 @@ const InterstitialModal: FC<{ handle: string; onClose: () => void }> = ({ onClos
           onClick={onClose}
           className="flex-1 rounded-xl bg-surface-42 py-3.5 text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-44"
         >
-          I understand — show the market
+          I understand. Show the market
         </button>
       </div>
     </div>

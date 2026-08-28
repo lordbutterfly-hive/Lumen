@@ -15,7 +15,17 @@ import TokenShell from '../token-shell';
 // TODO i18n — staged copy; move to locales/*/common_blog.json once final.
 const COPY = {
   title: 'Discover creators',
-  sub: 'People who offer their time and expertise. Hold their token, spend it on their work: a question, a review, a day of building. Ranked by how reliably they deliver.',
+  sub: 'People who offer their time and expertise. Hold their token, spend it on their work: a question, a review, a day of building.',
+  /**
+   * ★ THE MASTHEAD ADVERTISED A RANKING THE PAGE WAS NOT DOING (2026-08-28,
+   * false-text audit F5). "Ranked by how reliably they deliver" was rendered
+   * unconditionally, including on the corpus where `rankingAvailable` is false
+   * and the sort row a few hundred lines down is REMOVED for exactly that
+   * reason — every card reading "No deliveries yet" under a sentence promising
+   * they were ordered by delivery. Gated on the same signal as the tabs, so it
+   * returns with the corpus and there is no second flag to remember.
+   */
+  subRanked: ' Ranked by how reliably they deliver.',
   answers: 'Answers',
   newHere: 'New here',
   newHereSub: 'Just launched, so not ranked by reliability yet.',
@@ -63,8 +73,8 @@ const COPY = {
       ? `The creator index is about ${ago} behind the chain, so delivery records, ratings and response times here may be out of date. Prices and market status are read straight from the chain and are current.`
       : 'The creator index is behind the chain, so delivery records, ratings and response times here may be out of date. Prices and market status are read straight from the chain and are current.',
   stateUnavailable: 'Market status unavailable',
-  stateOverdue: 'Listing lapsed — may freeze soon',
-  stateClosed: 'Market closed — you cannot buy this token',
+  stateOverdue: 'Listing lapsed, may freeze soon',
+  stateClosed: 'Market closed. You cannot buy this token',
   launchTitle: 'Launch your Meritum',
   launchSub: 'Let people hold your token and pay you for your time.',
   /**
@@ -312,7 +322,10 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
         (any other caller) it stays the h1 it has always been.
       */}
       <PageMasthead title={COPY.title} headingLevel={intro ? 'h2' : 'h1'}>
-        <p className="max-w-[660px] text-caption text-ink-10">{COPY.sub}</p>
+        <p className="max-w-[660px] text-caption text-ink-10">
+          {COPY.sub}
+          {rankingAvailable ? COPY.subRanked : ''}
+        </p>
       </PageMasthead>
 
       {/* ★ PLACED ABOVE EVERY INDEXER-DERIVED ELEMENT ON THE PAGE, not just above
@@ -473,7 +486,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
             </>
           ) : (
             <>
-              No creators to list yet. The index that ranks creators by their delivery record has nothing in it — that
+              No creators to list yet. The index that ranks creators by their delivery record has nothing in it. That
               may mean nobody has launched, or simply that no one has been indexed. If you already know a creator, their
               token page still works: /creators/their-name.
             </>

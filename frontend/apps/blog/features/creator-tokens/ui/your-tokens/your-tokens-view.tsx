@@ -17,6 +17,17 @@
  * history IS available now (lumen_ct_price_history), but this list makes no
  * per-market read, so drawing one here would mean a query per row for a
  * decoration. The token page is where the chart belongs.
+ *
+ * ★ AND THAT IS ALSO WHY THE NEW PRICE-MOVEMENT INDICATOR IS NOT ON THESE ROWS
+ * (2026-08-27). It is derived from the price history the chart already fetches
+ * (../../market/price-change.ts), so putting it here would cost exactly the
+ * per-row query this file has refused twice. The token page carries it, beside
+ * the chart a reader can check it against.
+ *
+ * ★★ THE FLOOR FIGURES ON THIS SCREEN ARE HIDDEN FOR LAUNCH (owner, 2026-08-27),
+ * behind ../../backing-visibility.ts: the headline total, the per-row figure and
+ * the closing paragraph that defined it. Nothing is deleted and nothing about
+ * what a redeem pays out changes.
  */
 
 import { FC, useState } from 'react';
@@ -26,6 +37,10 @@ import { useLivePortfolio } from '../../live/use-live-portfolio';
 import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
 import type { Ask, HolderPosition } from '../../types';
 import { usdPrice } from '../../market/format';
+// ★★ THE FLOOR FIGURES ARE HIDDEN FOR LAUNCH (owner, 2026-08-27), on every
+// surface at once, from one flag. This screen led with one, carried one per row
+// and explained it in a closing paragraph; all three are behind the flag below.
+import { SHOW_BACKING_FIGURES } from '../../backing-visibility';
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
 import { MeritumEligibilityNotice, useMeritumEligibility } from '../meritum-eligibility';
@@ -34,6 +49,36 @@ import { MeritumEligibilityNotice, useMeritumEligibility } from '../meritum-elig
 // This file alone printed 30.0 where the other three print 30.00 for the same balance,
 // so the same holding read as two different numbers depending on which screen you were on.
 const tok = (n: number) => n.toFixed(2);
+
+/**
+ * THE CLOSING EXIT DISCLOSURE, in both branches of the launch flag.
+ *
+ * ★ WHY IT IS UP HERE AND NOT INLINE. It is the only sentence on this screen
+ * that both makes a claim about money and had to CHANGE when the figure was
+ * hidden: it ended "redeem at the floor. The floor value is what the reserve
+ * would pay out then", which points at a number this page no longer shows. A
+ * string written inside the component is a string no test can read (the reason
+ * ../token-page/disclosure-copy.ts exists); naming it here gives the self-test
+ * something to assert on without moving wallet copy into a token-page module.
+ *
+ * ★ The shown branch is the ORIGINAL, verbatim, em dash included, because it is
+ * pre-existing copy that returns unchanged when the flag flips. The house
+ * no-dash rule binds copy written or changed today, which is the hidden branch,
+ * and that one carries none.
+ */
+const EXIT_NOTE_WITH_BACKING =
+  'Token prices float and you can lose money. You can exit two ways: sell on the curve while the market is open, at the curve’s price, after a 10% trade fee and any early-exit fee; or, once a market winds down, redeem at the floor. The floor value is what the reserve would pay out then; it is not a price you can sell at while the market is running.';
+
+/**
+ * The same disclosure with every reference to the hidden figure gone.
+ *
+ * Both exit routes survive, both fees survive, and the sentence that mattered
+ * most survives in the audited form `exitRoutesNote` already uses: neither route
+ * is a fixed price. What goes is the definition of a number that is not on the
+ * screen to be defined.
+ */
+const EXIT_NOTE_BACKING_HIDDEN =
+  'Token prices float and you can lose money. You can exit two ways: sell on the curve while the market is open, at the curve’s price, after a 10% trade fee and any early-exit fee; or, once a market winds down, redeem your share of the reserve, less any early-exit fee. Neither is a fixed price.';
 
 const Unavailable: FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="rounded-card border border-dashed border-line-11 px-5 py-6 text-center text-[14px] leading-[22px] text-ink-14">{children}</div>
@@ -54,7 +99,12 @@ const HoldingRow: FC<{ h: HolderPosition }> = ({ h }) => (
           guaranteed back. There is deliberately no "current value" line: that
           needs the creator's live curve price, which is a per-market read this
           list does not make. The token page shows it. */}
-      <div className="text-caption text-ink-14">floor {usdPrice(usdFromHbd(h.floorValueHbd))}</div>
+      {/* ★ Hidden for launch (owner, 2026-08-27). The row keeps the token count,
+          which is the fact this list exists to state, and the three actions. The
+          figure returns here with the flag; nothing about it is deleted. */}
+      {SHOW_BACKING_FIGURES ? (
+        <div className="text-caption text-ink-14">floor {usdPrice(usdFromHbd(h.floorValueHbd))}</div>
+      ) : null}
     </div>
     <div className="flex gap-2">
       {['Buy', 'Sell', 'Send'].map((label) => (
@@ -153,7 +203,7 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
       {a.status === 'answered' ? <RateStrip onRate={onRate} busy={rating} /> : null}
       {reclaimable ? (
         <div className="mt-3 flex items-center justify-between gap-3">
-          <div className="text-caption text-ink-warn-2">You get {a.tokensEscrowed.toFixed(2)} tokens back to your balance — in full.</div>
+          <div className="text-caption text-ink-warn-2">You get {a.tokensEscrowed.toFixed(2)} tokens back to your balance, in full.</div>
           <button
             onClick={async () => {
               if (busy) return;
@@ -235,7 +285,7 @@ const YourTokensView: FC = () => {
         <div className="mt-5">
           <Unavailable>
             We couldn’t check which wallets are linked to this account, so we can’t show what you hold. Nothing is
-            wrong with your tokens — reload in a moment.
+            wrong with your tokens. Reload in a moment.
           </Unavailable>
         </div>
       ) : p.accountsLoading ? (
@@ -278,10 +328,24 @@ const YourTokensView: FC = () => {
               needs each creator's live curve price and this list makes no
               per-market read. The floor is a number we actually have — and it is
               the honest one to lead with anyway. */}
-          <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-1">
-            <div className="text-display font-bold tabular-nums text-ink-2">{p.holdingsUnavailable ? '—' : usdPrice(floorTotalUsd)}</div>
-            <div className="pb-1.5 text-[15px] leading-[24px] tabular-nums text-ink-10">Floor value: what the reserve would pay out if the market wound down</div>
-          </div>
+          {/* ★★ HIDDEN FOR LAUNCH (owner, 2026-08-27) — the figure AND its label
+              together. The label is a definition of the number beside it, so
+              hiding one without the other leaves a sentence describing a blank.
+
+              ★ AND NOTHING REPLACES IT, deliberately. The obvious substitute is a
+              total at today's price, and this list cannot compute one: it makes
+              no per-market read, which is the whole reason the floor led here in
+              the first place (see the note above, and the file header's refusal
+              to query per row). Inventing a headline would be worse than having
+              none. The count line below still leads the page, and the
+              holdings-unavailable case still says so in words rather than through
+              a placeholder dash. */}
+          {SHOW_BACKING_FIGURES ? (
+            <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-1">
+              <div className="text-display font-bold tabular-nums text-ink-2">{p.holdingsUnavailable ? '—' : usdPrice(floorTotalUsd)}</div>
+              <div className="pb-1.5 text-[15px] leading-[24px] tabular-nums text-ink-10">Floor value: what the reserve would pay out if the market wound down</div>
+            </div>
+          ) : null}
           <p className="mt-1 text-[14px] leading-[22px] text-ink-10">
             {p.holdingsUnavailable ? 'Your holdings can’t be loaded right now.' : `You hold tokens from ${p.holdings.length} ${p.holdings.length === 1 ? 'creator' : 'creators'}.`}
           </p>
@@ -333,7 +397,7 @@ const YourTokensView: FC = () => {
                   // NOT "you hold nothing" — this is exactly the distinction the
                   // discriminated read exists to preserve.
                   <Unavailable>
-                    We can’t load your holdings right now — the index that lists every market you’re in is
+                    We can’t load your holdings right now. The index that lists every market you’re in is
                     unreachable. Your tokens are safe on-chain; each creator’s own token page still shows your balance.
                   </Unavailable>
                 ) : p.holdings.length === 0 ? (
@@ -344,11 +408,12 @@ const YourTokensView: FC = () => {
                   p.holdings.map((h) => <HoldingRow key={`${h.holder}:${h.creator}`} h={h} />)
                 )}
               </div>
+              {/* ★ The one sentence on this screen that had to change with the
+                  figure, not just disappear: it ended by DEFINING the floor
+                  value. Both branches are named constants at the top of this
+                  file so a self-test can read them. */}
               <p className="mt-4 font-serif text-caption text-ink-14">
-                Token prices float and you can lose money. You can exit two ways: sell on the curve while the market is
-                open — at the curve’s price, after a 10% trade fee and any early-exit fee — or, once a market winds down,
-                redeem at the floor. The floor value is what the reserve would pay out then; it is not a price you can
-                sell at while the market is running.
+                {SHOW_BACKING_FIGURES ? EXIT_NOTE_WITH_BACKING : EXIT_NOTE_BACKING_HIDDEN}
               </p>
             </>
           ) : (
@@ -357,7 +422,7 @@ const YourTokensView: FC = () => {
                 <Unavailable>Loading…</Unavailable>
               ) : p.asksUnavailable ? (
                 <Unavailable>
-                  We can’t load your asks right now — the index that lists them is unreachable. Nothing is lost; a
+                  We can’t load your asks right now. The index that lists them is unreachable. Nothing is lost; a
                   creator’s own page still shows the asks made to them.
                 </Unavailable>
               ) : p.asks.length === 0 ? (

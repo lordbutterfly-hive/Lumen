@@ -52,7 +52,7 @@
     "term_supply_label": "Supply",
     "term_supply_value": "Starts capped at {{cap}} tokens. Raise it later in Creator Studio.",
     "term_stop_label": "If you stop paying",
-    "term_stop_value": "The market winds down. Everyone holding is refunded. Your delivery record goes with it.",
+    "term_stop_value": "The market winds down. Everyone holding is refunded their share of the reserve, less any early-exit fee. Your delivery record goes with it.",
     "first_buy_title": "Take the first tokens yourself",
     "first_buy_body": "Optional. Buying at full price stops a bot taking the cheapest tokens first.",
     "first_buy_aria": "Your own first buy, in dollars",
@@ -110,7 +110,7 @@
     "draft_restored": "Picked up your saved draft at step {{step}} of 3.",
     "draft_start_over": "Start over",
     "term_final_label": "One way",
-    "term_final_value": "Launching is permanent · the market cannot be closed, renamed, or moved to another account.",
+    "term_final_value": "Launching cannot be undone · the token is bound to your account and can never be renamed or moved to another one.",
     "error_launch_in_another_tab": "A launch is already running in another tab. Finish there. Launching twice would spend a second signature on a token you already have."
   },
   "global": {
@@ -184,7 +184,7 @@
       "years": " years",
       "a_year": " a year"
     },
-    "publish_queued": "Saved and visible on Lumen. It will appear on Hive shortly."
+    "indexing_pending": "Published to Hive. It is still being indexed, so it may not show in feeds yet."
   },
   "navigation": {
     "skip_to_content": "Skip to content",
@@ -262,6 +262,8 @@
     "profile_notifications_tab_navbar": {
       "unclaimed_rewards": "Unclaimed rewards: ",
       "no_notifications_yet": "No notifications yet",
+      "notifications_unavailable": "Couldn’t load notifications just now. This is not a list of none.",
+      "notifications_loading": "Loading notifications…",
       "redeem": "Redeem",
       "mark_all": "Mark all as read",
       "all": "All",
@@ -624,7 +626,9 @@
       "badges_and_achievements_title": "Badges and achievements",
       "these_are_badges_received_by_the_author": "These are badges received by the author via the third-party apps ",
       "view_badges_on": "View badges on",
-      "you_dont_have_any_subscriptions": "Welcome! You don't have any subscriptions yet."
+      "you_dont_have_any_subscriptions": "Welcome! You don't have any subscriptions yet.",
+      "subscriptions_loading": "Loading community subscriptions…",
+      "subscriptions_unavailable": "Couldn’t load community subscriptions just now. This is not a list of none."
     },
     "notifications_tab": {
       "voted_on_your_post": "@{{username}} voted on your post {{amount}}",
@@ -636,7 +640,7 @@
       "subscribed_to": "@{{username}} subscribed to {{community}}"
     },
     "load_failed_retry": "Couldn't load more. Tap to try again",
-    "reputation_title": "Reputation {{value}}. A stake-weighted total of the votes @{{username}} has received. Lumen does not use it for anything.",
+    "reputation_title": "Reputation {{value}}. A stake-weighted total of the votes @{{username}} has received. Lumen does not rank by it, but Hive marks very low reputation, and Lumen collapses those posts and comments behind a Reveal.",
     "reputation_label": "Hive reputation",
     "reputation_short": "rep",
     "stats_line": {
@@ -693,6 +697,7 @@
     "search": "Search...",
     "search_aria_label": "Search communities",
     "no_results": "No results for your search",
+    "load_failed": "Couldn’t load the community list just now. This is not an empty directory.",
     "latest_subscribers": "Latest {{username}} Subscribers",
     "unmoderated_tag": "Unmoderated tag",
     "buttons": {
@@ -1376,6 +1381,8 @@
       "out": "Delegated out",
       "accounts_count": "Delegated to {{count}} accounts",
       "none": "You have no active delegations out.",
+      "loading": "Loading your delegations…",
+      "error": "Couldn’t load your delegations. This is not a list of none.",
       "manage": "Manage delegations →"
     },
     "history": {

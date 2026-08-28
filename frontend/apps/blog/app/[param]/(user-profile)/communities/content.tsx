@@ -15,7 +15,17 @@ const CommunityContent = ({ username }: { username: string }) => {
 
   // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). Unconditional
   // (no `enabled` gate). See `apps/blog/app/api/subscriptions/route.ts`.
-  const { data } = useQuery({
+  // ★★★ A FAILED READ IS NOT "NO SUBSCRIPTIONS" (2026-08-28, false-text audit,
+  // Cluster A sweep — the twin of the delegations panel, found by grepping for
+  // the same shape rather than by being reported).
+  //
+  // This destructured `data` alone, so a failed `/api/subscriptions` left it
+  // undefined and the empty branch below greeted the reader with "Welcome! You
+  // don't have any subscriptions yet." on a profile that may well be subscribed
+  // to a dozen communities. Error first, then loading, then empty — the ordering
+  // `features/account-settings/blocked-list.tsx` and
+  // `features/wallet/components/account-history-list.tsx` already use.
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['listAllSubscription', username],
     queryFn: () => fetchSubscriptions(username)
   });
@@ -46,7 +56,23 @@ const CommunityContent = ({ username }: { username: string }) => {
       <p data-testid="community-subscriptions-description">
         {t('user_profile.social_tab.the_author_has_subscribed_to_the_following')}
       </p>
-      {data && data.length > 0 ? (
+      {isError ? (
+        <div
+          key="unavailable"
+          className="border-card-empty-border my-12 border-2 border-solid bg-card-noContent px-4 py-6 text-sm text-destructive"
+          data-testid="community-subscriptions-error"
+        >
+          {t('user_profile.social_tab.subscriptions_unavailable')}
+        </div>
+      ) : isLoading ? (
+        <div
+          key="loading"
+          className="border-card-empty-border my-12 border-2 border-solid bg-card-noContent px-4 py-6 text-sm"
+          data-testid="community-subscriptions-loading"
+        >
+          {t('user_profile.social_tab.subscriptions_loading')}
+        </div>
+      ) : data && data.length > 0 ? (
         <SubscriptionList data={data} />
       ) : (
         <div

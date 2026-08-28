@@ -7,6 +7,10 @@ import { useLiveStudio, type LiveStudio } from '../../live/use-live-studio';
 import { MarketLoading, MarketReadFailed, MarketSessionUnavailable, MarketUnavailable } from '../../live/market-states';
 import type { Ask } from '../../types';
 import { pctLabel, pctValue, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
+// ★★ THE FLOOR / RESERVE FIGURES ARE HIDDEN FOR LAUNCH (owner, 2026-08-27), on
+// every surface at once, from one flag. The creator's dashboard is one of the
+// four; nothing here is deleted, and every expression returns with the flag.
+import { SHOW_BACKING_FIGURES } from '../../backing-visibility';
 import { sellQuote, serviceQuote, serviceSupplyShareProblem, MIN_NET_DEFAULT_TOLERANCE_BPS } from '../../market/curve';
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
@@ -217,7 +221,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
           data-testid="answer-modal-deadline"
         >
           {dueLabel}
-          {urgent ? ' — under a day left' : null}
+          {urgent ? ', under a day left' : null}
         </div>
       ) : (
         <div
@@ -230,7 +234,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
       )}
       <p className="mb-3 text-caption text-ink-10">
         Arrange and deliver the work with @{displayHandle(ask.asker)} however you normally would. Marking it delivered
-        releases the escrow to you — and the buyer then rates it, which is what your token’s reputation is
+        releases the escrow to you, and the buyer then rates it, which is what your token’s reputation is
         built from.
       </p>
       {/* BOUNDED to exactly what core/ask.go:515-523 accepts. This box invites
@@ -260,8 +264,8 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
         </span>
       </div>
       <div className="mt-3 rounded-control bg-surface-18 px-3.5 py-2.5 text-caption text-ink-ok-2">
-        This pays you <strong className="tabular-nums">{tok(ask.tokensEscrowed)} tokens</strong> and closes the job. It can’t be undone
-        — and the buyer rates it afterwards.
+        This pays you <strong className="tabular-nums">{tok(ask.tokensEscrowed)} tokens</strong> and closes the job. It can’t be undone,
+        and the buyer rates it afterwards.
       </div>
       <div className="mt-4 flex gap-3">
         {/* DECLINE, given equal weight to Cancel. It is the creator's free,
@@ -355,7 +359,13 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
       <ul className="mb-4 space-y-1.5 font-serif text-[14px] leading-[22px] text-ink-8">
         <li>· The market freezes now. No new buys or asks.</li>
         <li>· You’re removed from discovery.</li>
-        <li>· Every holder is refunded at the floor.</li>
+        {/* ★ "refunded at the floor" until 2026-08-27. With the figure hidden
+            (../../backing-visibility.ts) that phrase pointed at a number no
+            longer anywhere in Studio. The MECHANISM is what a creator needs
+            here, and it is the wording WIND_DOWN_BANNER already uses on the
+            buyer side, so the two screens now describe one event the same way.
+            Unguarded on purpose: it is true whether or not the stat is shown. */}
+        <li>· Every holder is refunded their share of the reserve, less any early-exit fee.</li>
         <li>· Asks you’ve received still resolve. Answer them to get paid.</li>
         <li>· Your delivery record is lost. Coming back means a new token.</li>
         <li>· This can’t be undone.</li>
@@ -516,7 +526,8 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
 
 const CreatorStudio: FC = () => {
   const studio = useLiveStudio();
-  const { market, inbox, rawInbox, subDaysLeft, tradeFeeClaimableUsd, commissionEarnedUsd, status } = studio;
+  const { market, inbox, rawInbox, inboxUnavailable, subDaysLeft, tradeFeeClaimableUsd, commissionEarnedUsd, status } =
+    studio;
   const [section, setSection] = useState<Section>('overview');
   const [answering, setAnswering] = useState<Ask | null>(null);
   const [retireOpen, setRetireOpen] = useState(false);
@@ -571,7 +582,7 @@ const CreatorStudio: FC = () => {
             <a href="/upgrade" className="font-semibold text-ink-brand-6 hover:underline">
               Upgrade to a full account
             </a>{' '}
-            to launch one — you can look through the steps first.
+            to launch one. You can look through the steps first.
           </p>
           {/* ★ A signed-in lite account used to be worse off here than an anonymous
               visitor: the signed-out branch below offers a working link to the
@@ -662,7 +673,7 @@ const CreatorStudio: FC = () => {
   const banner = overdue ? (
     <div className="mb-5 flex items-center justify-between gap-3 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5">
       <span className="text-[14px] leading-[22px] font-semibold text-ink-warn-3">
-        Your listing has lapsed — renew to stay in discovery. Answering and cashing out still work.
+        Your listing has lapsed. Renew to stay in discovery. Answering and cashing out still work.
       </span>
       <button
         onClick={() => void runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.')}
@@ -725,7 +736,15 @@ const CreatorStudio: FC = () => {
               <Stat
                 label="Token price"
                 value={usdPrice(market.priceUsd)}
-                sub={`Floor ${usdPrice(market.floorUsd)} · cap ${supplyPctLabel} used`}
+                /* ★ Hidden for launch. The cap half of this line is the half a
+                   creator acts on, so it survives on its own with a capital
+                   rather than being dropped with the floor. The original string
+                   is the other branch, unchanged. */
+                sub={
+                  SHOW_BACKING_FIGURES
+                    ? `Floor ${usdPrice(market.floorUsd)} · cap ${supplyPctLabel} used`
+                    : `Cap ${supplyPctLabel} used`
+                }
               />
             </Card>
             <Card>
@@ -774,17 +793,40 @@ const CreatorStudio: FC = () => {
               />
             </Card>
             <Card>
-              <Stat label="Requests waiting" value={String(inbox.length)} sub="In your Inbox" />
+              {/* ★ Same rule as the trade-fee Stat above: a read that has not
+                  succeeded is UNKNOWN, not zero (2026-08-28, F2). "0 requests
+                  waiting" is a claim, and it was being made off a failed read. */}
+              <Stat
+                label="Requests waiting"
+                value={inboxUnavailable ? '—' : String(inbox.length)}
+                sub={inboxUnavailable ? 'Could not be read just now' : 'In your Inbox'}
+              />
             </Card>
           </div>
         ) : null}
 
         {section === 'inbox' ? (
           <div className="flex flex-col gap-2.5">
-            {inbox.length === 0 ? (
+            {/* ★ "you’re all caught up" was shown to creators whose escrows
+                exist and simply could not be read (2026-08-28, F2). Retry, do
+                not reassure — the same shape the Offerings tab already uses. */}
+            {inboxUnavailable ? (
+              <Card>
+                <div className="py-6 text-center text-caption text-ink-brand-2">
+                  <p>Your requests couldn’t be loaded just now. This is not an empty inbox.</p>
+                  <button
+                    type="button"
+                    onClick={() => studio.retry()}
+                    className="mt-2 rounded-control border border-line-12 bg-surface-1 px-3 py-1.5 text-caption font-semibold text-ink-2 hover:border-line-28"
+                  >
+                    Try again
+                  </button>
+                </div>
+              </Card>
+            ) : inbox.length === 0 ? (
               <Card>
                 <p className="py-6 text-center font-serif text-sm italic text-ink-14">
-                  No requests waiting. Nice — you’re all caught up.
+                  No requests waiting. Nice, you’re all caught up.
                 </p>
               </Card>
             ) : (
@@ -826,7 +868,7 @@ const CreatorStudio: FC = () => {
               Your services &amp; prices
             </div>
             <p className="mb-4 text-caption text-ink-10">
-              Buyers pay these in your token at the live price. Set the dollar price — the token amount
+              Buyers pay these in your token at the live price. Set the dollar price: the token amount
               follows the market. A price can move at most 2× in any 7 days, and that limit follows the
               SERVICE NAME, so renaming or re-creating one won’t reset it.
             </p>
@@ -966,10 +1008,19 @@ const CreatorStudio: FC = () => {
               <Stat
                 label="Price"
                 value={usdPrice(market.priceUsd)}
-                sub={`Floor ${usdPrice(market.floorUsd)}`}
+                /* ★ Hidden for launch: the whole sub-line was the floor, so there
+                   is nothing left to say under the price and `sub` goes away
+                   rather than rendering an empty row. */
+                sub={SHOW_BACKING_FIGURES ? `Floor ${usdPrice(market.floorUsd)}` : undefined}
               />
               <Stat label="Market cap" value={usdWhole(market.marketCapUsd)} />
-              <Stat label="Reserve" value={usdWhole(market.reserveUsd)} sub="Backs the floor" />
+              {/* ★ Hidden for launch, stat and caption together: "Backs the
+                  floor" is a caption about a figure that is no longer anywhere
+                  on this screen, so hiding the number and keeping the sentence
+                  would leave it pointing at nothing. */}
+              {SHOW_BACKING_FIGURES ? (
+                <Stat label="Reserve" value={usdWhole(market.reserveUsd)} sub="Backs the floor" />
+              ) : null}
             </div>
             <div className="mt-5">
               <div className="mb-1 flex justify-between text-caption text-ink-10">
@@ -1050,7 +1101,7 @@ const CreatorStudio: FC = () => {
               </span>
             </div>
             <p className="mt-4 rounded-control bg-surface-16 px-3.5 py-3 text-caption text-ink-10">
-              Your token’s price is set by the market — buys raise it, sells lower it. You don’t set the
+              Your token’s price is set by the market: buys raise it, sells lower it. You don’t set the
               price; you set your <strong>service prices</strong> in dollars.
             </p>
           </Card>
@@ -1071,14 +1122,16 @@ const CreatorStudio: FC = () => {
               Renew ~$10
             </button>
             <p className="mt-4 text-caption text-ink-14">
-              If you stop paying, your token’s market winds down, holders are refunded at the floor, and your
-              delivery record resets — coming back means a new token. Answering and cashing out are never
+              If you stop paying, your token’s market winds down, holders are refunded their share of the reserve
+              less any early-exit fee, and your
+              delivery record resets, and coming back means a new token. Answering and cashing out are never
               blocked by billing.
             </p>
             <div className="mt-5 border-t border-line-2 pt-4">
               {market.windingDown ? (
                 <div className="text-caption font-semibold text-ink-warn-3">
-                  This token is winding down — holders are being refunded at the floor. Answering and cashing
+                  This token is winding down. Holders are being refunded their share of the reserve, less any
+                  early-exit fee. Answering and cashing
                   out still work.
                 </div>
               ) : (
@@ -1155,7 +1208,14 @@ const CreatorStudio: FC = () => {
               <Stat
                 label="Your own holdings"
                 value={`${tok(held)} tokens`}
-                sub={`worth ${usdPrice(held * market.priceUsd)} · floor ${usdPrice(held * market.floorUsd)}`}
+                /* ★ Hidden for launch. The mark-to-price half stays: it is this
+                   creator's own holding at the live curve price, and it is the
+                   figure the Cash out control below is denominated against. */
+                sub={
+                  SHOW_BACKING_FIGURES
+                    ? `worth ${usdPrice(held * market.priceUsd)} · floor ${usdPrice(held * market.floorUsd)}`
+                    : `worth ${usdPrice(held * market.priceUsd)}`
+                }
               />
               <div className="mt-4 flex items-center gap-2">
                 <span className="text-caption text-ink-10">Cash out</span>
@@ -1221,10 +1281,9 @@ const CreatorStudio: FC = () => {
                 <div className="mt-2 text-caption font-semibold text-ink-brand-6">{sellFailure}</div>
               ) : null}
               <p className="mt-3 text-caption text-ink-14">
-                Selling your own tokens returns them to dollars at the market price — it doesn’t affect anyone
-                else’s floor. Never blocked by billing. The minimum above is pre-filled just under what you’d get
-                right now, so the sell reverts (nothing spent) rather than fill lower — clear it for no floor, or
-                lower it to allow more slippage.
+                Selling your own tokens returns them to dollars at the market price. Never blocked by billing. The
+                minimum above is pre-filled just under what you’d get right now, so the sell reverts (nothing
+                spent) rather than fill lower. Clear it for no minimum, or lower it to allow more slippage.
               </p>
             </Card>
           </div>

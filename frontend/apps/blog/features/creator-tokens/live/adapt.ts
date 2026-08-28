@@ -12,8 +12,9 @@
  * THE RULE THIS FILE OBEYS: never invent a number. Anything the chain cannot
  * answer is `null`/empty here and must render as absent or unavailable
  * upstream — NOT as a zero, a flat line, or a plausible-looking default. Price
- * history, weekly change, creator bios and avatars are all in that category
- * today (see LiveTokenMarket's own field docs). A demo that lies is a bug we
+ * history, price movement, creator bios and avatars are all in that category
+ * today (see LiveTokenMarket's own field docs) — `priceChange` is null unless
+ * the indexer actually served two or more points. A demo that lies is a bug we
  * have already shipped once in this feature; a screen that says "not available
  * yet" is not.
  */
@@ -22,6 +23,7 @@ import type { Ask, DeliveryRecord as ChainDeliveryRecord, HolderPosition as Chai
 import type { DeliveryRecord as UiDeliveryRecord } from '../market/types';
 import type { PortfolioAsk } from '../market/portfolio';
 import type { Service } from '../market/token-detail';
+import { type PriceChange, priceChangeOf } from '../market/price-change';
 import { BLOCKS_PER_DAY } from '../lib/contract-math';
 
 /**
@@ -124,8 +126,14 @@ export interface LiveTokenMarket {
    * both are claims about how this token has moved.
    */
   chart: number[] | null;
-  /** Derived from the chart when there is enough of it, else null. Never invented from a single current price. */
-  changePctWeek: number | null;
+  /**
+   * How far the price has moved across the series `chart` holds, or NULL when
+   * that cannot be stated. Derived from the SAME array, so the number and the
+   * picture can never disagree; see ../market/price-change.ts for the window and
+   * why it is a trade count rather than a clock. Never invented from a single
+   * current price.
+   */
+  priceChange: PriceChange | null;
   delivery: UiDeliveryRecord;
   services: Service[];
   position: LiveHolderPosition | null;
@@ -192,20 +200,6 @@ export function adaptDelivery(rec: ChainDeliveryRecord | null | undefined): UiDe
     marks: [...Array(rec.answeredCount).fill(true), ...Array(rec.missedCount).fill(false)].slice(-18) as boolean[],
     available: true
   };
-}
-
-/**
- * Percentage change across the available history. Deliberately NOT windowed to
- * exactly seven days: the indexer returns trades, not a time series, so the
- * honest statement is "change over the history we have". Null below two points,
- * because a change needs something to change from.
- */
-function weekChangePct(history: number[] | null): number | null {
-  if (!history || history.length < 2) return null;
-  const first = history[0];
-  const last = history[history.length - 1];
-  if (!(first > 0)) return null;
-  return Math.round(((last - first) / first) * 1000) / 10;
 }
 
 /** Median response time as a human label, or '' when there is nothing to summarise. Median, not mean: one abandoned ask must not move it. */
@@ -302,7 +296,13 @@ export function adaptMarket(input: {
     // A single point is not a chart — it would render as a flat line, implying
     // a price that held steady when in fact we only know one moment.
     chart: priceHistory && priceHistory.length >= 2 ? priceHistory : null,
-    changePctWeek: weekChangePct(priceHistory ?? null),
+    // ★ THE CHANGE IS DERIVED FROM THE CHART'S OWN ARRAY, and it is the SAME
+    // array, not a second read: whatever the chart draws rising by a third, the
+    // indicator says rose by a third. `priceChangeOf` applies the identical
+    // two-point floor, so the figure and the chart appear and disappear
+    // together — a percentage beside an empty chart slot would be unverifiable
+    // by the only reader who can check it.
+    priceChange: priceChangeOf(priceHistory ?? null),
     delivery: adaptDelivery(delivery),
     services,
     position: adaptPosition(position, usdFromHbd(market.spotPriceHbd)),

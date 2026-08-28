@@ -140,7 +140,7 @@ const Content = ({ community }: { community: string }) => {
           {rolesLevels.map((role) => (
             <div key={role.name} className="text-14 text-ink-10">
               <span className="font-semibold text-ink-2">{t(`communities.${role.name}`)}</span>
-              <span> — {t(`communities.description_${role.name}`)}</span>
+              <span>: {t(`communities.description_${role.name}`)}</span>
             </div>
           ))}
         </div>

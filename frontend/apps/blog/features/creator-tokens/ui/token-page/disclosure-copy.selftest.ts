@@ -35,6 +35,7 @@
  * section.
  */
 
+import { SHOW_BACKING_FIGURES } from '../../backing-visibility';
 import {
   BACKING_PER_TOKEN_ARIA,
   BACKING_PER_TOKEN_LABEL,
@@ -42,8 +43,10 @@ import {
   BACKING_TOTAL_LABEL,
   BACKING_TOTAL_NOTE,
   HONEST_NOTE,
+  HONEST_NOTE_BACKING_HIDDEN,
   HOW_IT_WORKS_RESERVE_LINE,
   INTERSTITIAL_LINES,
+  INTERSTITIAL_LINES_BACKING_HIDDEN,
   MARKET_CAP_LABEL,
   MARKET_CAP_NOTE,
   WIND_DOWN_BANNER,
@@ -51,6 +54,8 @@ import {
   backingPerTokenValue,
   buyRiskNote,
   exitRoutesNote,
+  honestNote,
+  interstitialLines,
   overdueBanner,
   overdueFigures,
   positionLine,
@@ -143,7 +148,11 @@ console.log('\n── 3. THE GROSS FIGURE IS LABELLED AS GROSS (defect 2).\n');
   // the reader is told a number they will not receive.
   const quoting: [string, string][] = [
     ['the ? explainer', BACKING_PER_TOKEN_NOTE],
-    ['the buy dialog', buyRiskNote('$1.20')],
+    // ★ `true` EXPLICITLY. These four assertions are about the copy that quotes
+    //   the figure, and since 2026-08-27 that branch is not the default (the
+    //   stat is hidden for launch). Without the argument they would silently
+    //   start testing the OTHER string and pass or fail for the wrong reason.
+    ['the buy dialog', buyRiskNote('$1.20', true)],
     ['the interstitial', INTERSTITIAL_LINES[2]],
     ['the closing note', HONEST_NOTE]
   ];
@@ -245,24 +254,24 @@ console.log('\n── 6. THE 0 ÷ 0, AND THE THREE STATES IT WAS COLLAPSING.\n')
   check('the placeholder carries no dash of its own', !DASHES.test(backingPerTokenValue(0, 0)));
   check(
     '★ the buy dialog drops its parenthetical rather than printing "(None yet)" on the first buy of a market',
-    buyRiskNote(backingPerTokenValue(0, 0)).includes('Backing per token is the reserve divided') &&
-      !buyRiskNote(backingPerTokenValue(0, 0)).includes('('),
-    `got: ${buyRiskNote(backingPerTokenValue(0, 0))}`
+    buyRiskNote(backingPerTokenValue(0, 0), true).includes('Backing per token is the reserve divided') &&
+      !buyRiskNote(backingPerTokenValue(0, 0), true).includes('('),
+    `got: ${buyRiskNote(backingPerTokenValue(0, 0), true)}`
   );
   check(
     '…and still quotes it when there is one',
-    buyRiskNote(backingPerTokenValue(1.203, 50)).includes('Backing per token ($1.20) is')
+    buyRiskNote(backingPerTokenValue(1.203, 50), true).includes('Backing per token ($1.20) is')
   );
 
   // The overdue banner interpolates that value, so it must not end "(currently  a token)".
-  check('the overdue banner quotes the figure when there is one', overdueBanner(overdueFigures('$1.20', 1.408)).includes('(currently $1.20 a token before your early-exit fee, against $1.41 now)'));
+  check('the overdue banner quotes the figure when there is one', overdueBanner(overdueFigures('$1.20', 1.408, true)).includes('(currently $1.20 a token before your early-exit fee, against $1.41 now)'));
   check(
     '★ …and quotes nothing at all when there is not, rather than an empty parenthesis',
-    overdueBanner(overdueFigures('None yet', 1.007)).endsWith('Redeem against the reserve.') &&
-      !overdueBanner(overdueFigures('None yet', 1.007)).includes('('),
-    `got: ${overdueBanner(overdueFigures('None yet', 1.007))}`
+    overdueBanner(overdueFigures('None yet', 1.007, true)).endsWith('Redeem against the reserve.') &&
+      !overdueBanner(overdueFigures('None yet', 1.007, true)).includes('('),
+    `got: ${overdueBanner(overdueFigures('None yet', 1.007, true))}`
   );
-  check('…same for an unreadable one', overdueFigures('Unavailable', 1.4) === '');
+  check('…same for an unreadable one', overdueFigures('Unavailable', 1.4, true) === '');
 }
 
 console.log('\n── 6b. THE POSITION ROW NAMES BOTH FIGURES FOR WHAT THEY ARE.\n');
@@ -303,7 +312,14 @@ console.log('\n── 7. WIRING. The components really render this, and no longe
   );
   check(
     '★ the stripper did not eat live code (a negative control that must stay TRUE)',
-    modal.includes('`Sell — get ~${usdPrice(q.receiveUsd)}`'),
+    // ★ THE LANDMARK MOVED, AND THAT IS THE LESSON (2026-08-28). This negative
+    // control anchored on a piece of USER-FACING COPY, so a copy edit (the em
+    // dash sweep) broke a check about the STRIPPER. A landmark should be code
+    // that changes for structural reasons, not a sentence a reader sees. Kept
+    // pointing at the same expression, now with its current separator; the
+    // assertion below is deliberately the `usdPrice(q.receiveUsd)` CALL, which
+    // is the part that cannot change without the feature changing.
+    modal.includes('usdPrice(q.receiveUsd)'),
     'the Sell CTA is pre-existing copy this pass deliberately left alone; if this line fails, the stripper is broken, not the copy'
   );
 
@@ -362,7 +378,7 @@ console.log('\n── 7. WIRING. The components really render this, and no longe
   check('the reserve total kept an explainer too', body.includes('title={BACKING_TOTAL_NOTE}'));
 
   // ── Defect 2 + the banners + the position row.
-  check('the closing note is the shared one', body.includes('{HONEST_NOTE}'));
+  check('the closing note is the shared one', body.includes('{honestNote()}'));
   check('…and the old paragraph is gone', !view.includes('The floor above is what the reserve would pay out'));
   check('the wind-down banner is the shared one', body.includes('{WIND_DOWN_BANNER}'));
   check('the overdue banner is built from the guarded figure', body.includes('overdueBanner(overdueFigures(backingPerTokenValue(market.floorUsd, market.supply), market.priceUsd))'));
@@ -371,8 +387,13 @@ console.log('\n── 7. WIRING. The components really render this, and no longe
   check('the how-it-works rail uses the rewritten line', view.includes('HOW_IT_WORKS_RESERVE_LINE'));
   check(
     '…and lines 1 and 2 are still inline and untouched, which is the point of moving only line 3',
+    // ★ ASSERTED ON A STABLE FRAGMENT, NOT THE WHOLE SENTENCE (2026-08-28). This
+    // pinned line 2 including its trailing punctuation, so the em dash sweep
+    // broke a check whose actual claim is "lines 1 and 2 are still INLINE rather
+    // than moved into the shared copy module". Punctuation is not what that
+    // claim is about; the distinctive wording is.
     view.includes('Buy the creator’s token. The price rises as more is bought.') &&
-      view.includes('A question, a code review, a day of building — priced in dollars.')
+      view.includes('A question, a code review, a day of building')
   );
 
   // ── Defect 1 + the modals.
@@ -385,7 +406,7 @@ console.log('\n── 7. WIRING. The components really render this, and no longe
   check('the removed promise survives only inside a comment', modalSrc.includes('You can always exit.'));
   check('★ the Sell dialog no longer renders "You can always exit"', !modal.includes('You can always exit.'));
   check('★ …and renders the shared, promise-free line', modal.includes('{exitRoutesNote(redeem)}'));
-  check('the interstitial renders the shared lines', modal.includes('INTERSTITIAL_LINES.map'));
+  check('the interstitial renders the shared lines', modal.includes('interstitialLines().map'));
   check('…and its old literals are gone', !view.includes('If you buy from the market above the floor') && !modal.includes('If you buy from the market above the floor'));
   check('the buy dialog renders the shared risk note', modal.includes('buyRiskNote(backingPerTokenValue(m.floorUsd, m.supply))'));
   check('…and its old paragraph is gone', !modal.includes('is what the reserve would'));
@@ -411,6 +432,72 @@ console.log('\n── 7. WIRING. The components really render this, and no longe
     'the unreadable-balance sentence lost its dash too',
     !readFileSync(join(__dirname, 'sell-empty-state.ts'), 'utf8').includes('safe on-chain —')
   );
+}
+
+console.log('\n── 8. THE LAUNCH HIDE (owner 2026-08-27). No sentence points at a figure that is not on the screen.\n');
+{
+  /**
+   * ★ THE DANGLING POINTER IS THE DEFECT, not the missing number. Hiding the
+   * stat and leaving "Backing per token, shown above ..." in the closing
+   * paragraph would send a reader looking for something that is not there, which
+   * is worse than either showing it or hiding it cleanly. These phrases are the
+   * exact directions the copy used to give.
+   */
+  const POINTERS = ['shown above', 'shown next to the price', 'Backing per token', 'backing per token'];
+  const hiddenCopy = [
+    HONEST_NOTE_BACKING_HIDDEN,
+    ...INTERSTITIAL_LINES_BACKING_HIDDEN,
+    buyRiskNote('$1.20', false),
+    buyRiskNote(backingPerTokenValue(0, 0), false),
+    overdueBanner(overdueFigures('$1.20', 1.408, false))
+  ];
+
+  // ── Non-vacuity. A sweep of nothing must FAIL, and a detector that cannot
+  //    fire proves nothing about the strings it passed over.
+  check('the hidden-branch sweep collected copy to inspect', hiddenCopy.length >= 7 && hiddenCopy.join('').length > 700, `${hiddenCopy.join('').length} bytes across ${hiddenCopy.length} strings`);
+  check('★ the pointer detector fires on the copy it was written for', POINTERS.some((ph) => HONEST_NOTE.includes(ph)) && POINTERS.some((ph) => INTERSTITIAL_LINES[2].includes(ph)));
+
+  const dangling = hiddenCopy.filter((t) => POINTERS.some((ph) => t.includes(ph)));
+  check('★ no hidden-branch sentence points at the hidden figure', dangling.length === 0, dangling.join('\n      '));
+  check('…nor names it by its retired word', !hiddenCopy.some((t) => /floor/i.test(t)), hiddenCopy.filter((t) => /floor/i.test(t)).join('\n      '));
+
+  // ── What must SURVIVE the hide. Removing a disclosure is the failure mode on
+  //    the other side, and it is the one that costs someone money.
+  check('★ the closing note keeps the 10% fee and its split', HONEST_NOTE_BACKING_HIDDEN.includes('Every trade on the curve pays a 10% fee (5% to the creator, 5% to Lumen)'));
+  check('★ …and the 6-week early-exit decay', HONEST_NOTE_BACKING_HIDDEN.includes('fades to zero over 6 weeks'));
+  check('★ …and the cascade, which is the real downside a price alone hides', HONEST_NOTE_BACKING_HIDDEN.includes('that price falls as you sell, so the last holder out gets less than the first'));
+  check('★ …and it still opens by saying you can lose money', HONEST_NOTE_BACKING_HIDDEN.startsWith('This token’s price floats. It can go up or down, and you can lose money.'));
+  check('★ the buy dialog still warns about both fees and the float', buyRiskNote('$1.20', false).includes('price floats and you can lose money') && buyRiskNote('$1.20', false).includes('early-exit fee applies on top of the trade fee'));
+  check('★ the interstitial keeps the loss warning and the fee', INTERSTITIAL_LINES_BACKING_HIDDEN.some((l) => l.includes('You can get back less than you paid')) && INTERSTITIAL_LINES_BACKING_HIDDEN.some((l) => l.includes('fades to zero over 6 weeks')));
+  check('…and its first line is untouched', INTERSTITIAL_LINES_BACKING_HIDDEN[0] === INTERSTITIAL_LINES[0]);
+  check('★ exactly one line was dropped, not a rewrite of the set', INTERSTITIAL_LINES_BACKING_HIDDEN.length === INTERSTITIAL_LINES.length - 1);
+
+  // ── The overdue banner. The warning must survive; only the figure goes.
+  const overdueHidden = overdueBanner(overdueFigures('$1.20', 1.408, false));
+  check('★ the overdue banner still warns about the freeze with no figure in it', overdueHidden.includes('the market freezes') && overdueHidden.includes('Redeem against the reserve') && !overdueHidden.includes('$1.20'));
+
+  // ── The selectors follow the flag, in both directions. A selector that
+  //    ignored its argument would pass every assertion above by accident.
+  check('★ honestNote(true) is the original paragraph, verbatim', honestNote(true) === HONEST_NOTE);
+  check('★ honestNote(false) is the standalone one', honestNote(false) === HONEST_NOTE_BACKING_HIDDEN);
+  // Length and content, not `!==`: both are string LITERAL types here and tsc
+  // rejects an inequality between two literals it can already prove differ
+  // (TS2367). Same workaround, same reason, as the ARIA check in section 4.
+  check(
+    '★ …and they genuinely differ, by exactly the two sentences about the hidden stat',
+    HONEST_NOTE.length > HONEST_NOTE_BACKING_HIDDEN.length &&
+      HONEST_NOTE.includes('Backing per token, shown above') &&
+      !HONEST_NOTE_BACKING_HIDDEN.includes('Backing per token')
+  );
+  check('★ interstitialLines follows its argument too', interstitialLines(true) === INTERSTITIAL_LINES && interstitialLines(false) === INTERSTITIAL_LINES_BACKING_HIDDEN);
+  check('★ buyRiskNote follows its argument', buyRiskNote('$1.20', true) !== buyRiskNote('$1.20', false));
+  check('★ overdueFigures follows its argument', overdueFigures('$1.20', 1.408, true) !== '' && overdueFigures('$1.20', 1.408, false) === '');
+
+  // ── And the DEFAULT is the flag, which is what actually ships. Written
+  //    against the flag rather than against `false` so this keeps testing the
+  //    real wiring after the owner flips it back on.
+  check('★ every selector defaults to SHOW_BACKING_FIGURES, so the page renders what the flag says', honestNote() === honestNote(SHOW_BACKING_FIGURES) && interstitialLines() === interstitialLines(SHOW_BACKING_FIGURES) && buyRiskNote('$1.20') === buyRiskNote('$1.20', SHOW_BACKING_FIGURES) && overdueFigures('$1.20', 1.408) === overdueFigures('$1.20', 1.408, SHOW_BACKING_FIGURES));
+  check('the flag is off for launch, which is the state being shipped', SHOW_BACKING_FIGURES === false);
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed`);

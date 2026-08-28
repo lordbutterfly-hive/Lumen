@@ -60,7 +60,9 @@ Earning starts when you **upgrade to your own Hive account** (see below).
 Upgrading gives you a real Hive account of your own, with your own keys. From then
 on you post directly to Hive under your own name, and your posts can earn.
 
-Your Lumen history comes with you — the posts you already wrote stay yours.
+On Lumen, your posts, your history and your profile all move to your new name.
+Posts you wrote before upgrading stay published through Lumen's account on
+chain, so other Hive sites will not list them under your new name.
 
 Upgrading is optional, and nothing pushes you into it.
 
@@ -73,11 +75,13 @@ to manage**:
   commenting and voting. It refills by itself. You do not need any to write on
   Lumen; the allowance used to publish your posts is ours.
   Buying and selling creator tokens is different, because that happens on Magi
-  rather than on Hive. There it is your own HBD balance that pays, and there is
-  still no fee: holding 1 HBD gives you 1,000 credits, spending them sets aside
-  part of your balance for a while, and it comes back on its own over about five
-  days. Adding HBD raises it again straight away. One purchase needs roughly
-  2 HBD of credit.
+  rather than on Hive. There it is your own HBD balance that pays, and sending
+  the transaction still costs nothing: holding 1 HBD gives you 1,000 credits,
+  spending them sets aside part of your balance for a while, and it comes back
+  on its own over about five days. Adding HBD raises it again straight away. One
+  purchase needs roughly 2 HBD of credit. The trade itself is not free: every
+  buy and sell on the curve pays a 10% fee, and selling soon after buying adds
+  an early-exit fee on top, which fades to zero over 6 weeks.
 * **Keys / master password / owner key** — how a Hive account proves itself. A
   Lumen account has none: you sign in with Google or a wallet instead.
 * **HP, VESTS, MVEST** — Hive's stake and voting-weight units. They belong to Hive

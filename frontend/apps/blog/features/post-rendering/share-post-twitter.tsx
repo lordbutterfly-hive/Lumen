@@ -5,7 +5,7 @@ import { blogUrl } from '@ui/config/public-vars';
 export default function TwitterShare({ title, url }: { title: string; url: string }) {
   const { t } = useTranslation('common_blog');
   const href = blogUrl(url);
-  const postTitle = title + ' — ' + 'Hive';
+  const postTitle = title + ' | ' + 'Hive';
   const winWidth = 640;
   const winHeight = 320;
   const winTop = 0;

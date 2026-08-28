@@ -72,7 +72,7 @@ export function generateMetadata({ params }: { params: { handle: string } }): Me
   const shown = displayHandle(handle);
   return {
     title: `@${shown} token`,
-    description: `The live Meritum market for @${shown} on Lumen — price, market cap, floor, delivery record, and the services you spend the token on.`
+    description: `The live Meritum market for @${shown} on Lumen: price, market cap, delivery record, and the services you spend the token on.`
   };
 }
 

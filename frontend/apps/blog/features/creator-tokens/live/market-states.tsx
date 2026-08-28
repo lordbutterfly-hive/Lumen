@@ -67,7 +67,7 @@ const LaunchEscape: FC<{ href?: string }> = ({ href }) =>
 export const MarketUnavailable: FC<{ launchHref?: string }> = ({ launchHref }) => (
   <Panel title="Meritum isn’t available yet">
     Nothing is deployed on this build, so there are no real markets to show. This page will fill in once a contract is
-    connected — until then it deliberately shows nothing rather than example numbers.
+    connected. Until then it deliberately shows nothing rather than example numbers.
     <LaunchEscape href={launchHref} />
   </Panel>
 );
@@ -75,8 +75,14 @@ export const MarketUnavailable: FC<{ launchHref?: string }> = ({ launchHref }) =
 /** The chain read failed. Explicitly NOT "this creator has nothing". */
 export const MarketReadFailed: FC<{ onRetry?: () => void; launchHref?: string }> = ({ onRetry, launchHref }) => (
   <Panel title="Couldn’t load this market">
-    We couldn’t reach the chain just now, so we can’t show this token’s price, floor or your balance. Nothing is wrong
-    with your position — we simply can’t read it at the moment.
+    {/* ★ "price, floor or your balance" until 2026-08-27. The floor is hidden
+        for launch (../backing-visibility.ts), so naming it here told a reader
+        we could not show them something they were never going to be shown, and
+        it is the one sentence about the figure that lives outside the four
+        screens. The two things this state IS about, the price and the balance,
+        are unchanged. */}
+    We couldn’t reach the chain just now, so we can’t show this token’s price or your balance. Nothing is wrong
+    with your position. We simply can’t read it at the moment.
     {onRetry ? (
       <>
         {' '}
@@ -105,7 +111,7 @@ export const MarketReadFailed: FC<{ onRetry?: () => void; launchHref?: string }>
 export const MarketSessionUnavailable: FC<{ onRetry?: () => void }> = ({ onRetry }) => (
   <Panel title="Couldn’t check your account">
     We couldn’t verify you’re signed in just now, so we can’t show your Studio. This is not the same as having no
-    token — reload, or try again in a moment.
+    token. Reload, or try again in a moment.
     {onRetry ? (
       <>
         {' '}

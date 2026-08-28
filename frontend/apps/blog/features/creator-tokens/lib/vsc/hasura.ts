@@ -199,13 +199,24 @@ export class MagiIndexerClient {
   async priceHistoryOf(creator: string, limit = 200): Promise<HasuraPricePoint[]> {
     const data = await this.query(
       `query PriceHistory($creator: String!, $limit: Int!) {
-         lumen_ct_price_history(where: {creator: {_eq: $creator}}, order_by: {block: asc}, limit: $limit) {
+         lumen_ct_price_history(where: {creator: {_eq: $creator}}, order_by: {block: desc}, limit: $limit) {
            block supply_after side
          }
        }`,
       { creator, limit }
     );
-    return rowsOf(data, 'lumen_ct_price_history').map((r) => ({
+    // ★★ `desc` + reverse, NOT `asc` (2026-08-28). `asc` with a LIMIT takes the
+    // OLDEST `limit` rows, so the moment a market passes 200 trades its chart
+    // silently froze on ancient history: the newest trades were never fetched,
+    // the last plotted point stopped being the current price, and the price
+    // change derived from the same array inherited the same staleness. It fails
+    // exactly when a creator succeeds, and it fails quietly — a full-looking
+    // chart of real points, none of them recent.
+    // `desc` fetches the newest `limit`; the reverse below restores the
+    // oldest -> newest order every caller expects (`readPriceHistory` maps
+    // straight through, and both the chart and `priceChangeOf` read [0] as the
+    // start and [n-1] as now).
+    return rowsOf(data, 'lumen_ct_price_history').reverse().map((r) => ({
       block: num(field(r, 'block')),
       supplyAfter: num(field(r, 'supply_after')),
       side: field(r, 'side') === 'sell' ? 'sell' : 'buy'

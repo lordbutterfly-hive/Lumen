@@ -1627,7 +1627,15 @@ const PostContent = () => {
                     />
                   )}
                   {postData._optimistic && (
-                    <OptimisticStatusBanner createdAt={postData.created} lite={!isOnChain} />
+                    // ★ `_publishFailed` PASSED THROUGH (2026-08-28, false-text audit
+                    //   F10). Absent means unknown, never "fine"; when a caller has
+                    //   actually checked, the banner must stop promising the post is
+                    //   about to land.
+                    <OptimisticStatusBanner
+                      createdAt={postData.created}
+                      lite={!isOnChain}
+                      publishFailed={!!postData._publishFailed}
+                    />
                   )}
                   {/*
                    * ★ items-CENTER, NOT items-start (2026-08-16, owner: "follow and

@@ -9,6 +9,11 @@ import { useLiveTokenMarket } from '../../live/use-live-token-market';
 import { useCreatorFollow } from '../../live/use-creator-follow';
 import { MarketLoading, MarketMissing, MarketReadFailed, MarketUnavailable } from '../../live/market-states';
 import { pctLabel, pctValue, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
+import { priceChangeLabel } from '../../market/price-change';
+// ★★ THE RESERVE / BACKING FIGURES ARE HIDDEN FOR LAUNCH (owner, 2026-08-27).
+// One flag, every surface, JSX preserved and not rendered. See the module for
+// what it covers, what it deliberately does not, and why it is not display:none.
+import { SHOW_BACKING_FIGURES } from '../../backing-visibility';
 import TokenShell from '../token-shell';
 import PriceChart from './price-chart';
 import TokenModals, { type TokenDialog } from './token-modals';
@@ -23,12 +28,12 @@ import {
   BACKING_PER_TOKEN_NOTE,
   BACKING_TOTAL_LABEL,
   BACKING_TOTAL_NOTE,
-  HONEST_NOTE,
   HOW_IT_WORKS_RESERVE_LINE,
   MARKET_CAP_LABEL,
   MARKET_CAP_NOTE,
   WIND_DOWN_BANNER,
   backingPerTokenValue,
+  honestNote,
   overdueBanner,
   overdueFigures,
   positionSegments
@@ -239,6 +244,10 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
    * money. Anything above zero but below half a percent now reads "<1%".
    */
   const supplyPctLabel = pctLabel(market.supply, market.cap) ?? '0%';
+  // Null whenever the move cannot be stated: no history, one point, an
+  // unreadable point, or no positive base to measure from. The indicator then
+  // renders nothing at all, on the same bound the chart uses.
+  const change = priceChangeLabel(market.priceChange);
   const avatarColor = avatarFill(handle);
 
   const openAsk = (sv: Service) => {
@@ -355,7 +364,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         <div className="flex flex-col gap-3.5">
           {[
             'Buy the creator’s token. The price rises as more is bought.',
-            'Spend tokens on their work. A question, a code review, a day of building — priced in dollars.',
+            'Spend tokens on their work. A question, a code review, a day of building, priced in dollars.',
             HOW_IT_WORKS_RESERVE_LINE
           ].map((line, i) => (
             <div key={i} className="flex gap-3">
@@ -471,18 +480,58 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           <div>
             <div className="flex flex-wrap items-baseline gap-3">
               <span className="text-[44px] font-bold tabular-nums tracking-hero text-ink-2">{usdPrice(market.priceUsd)}</span>
-              {/* Weekly change needs price HISTORY, which only the indexer can
-                  serve — the client method now exists (MagiIndexerClient
-                  .priceHistoryOf) but this view is not wired to it yet, and
-                  live/adapt.ts keeps
-                  changePctWeek null for exactly this reason). An arrow computed
-                  from a single current price would be invented. */}
-              {market.changePctWeek !== null ? (
-                <span className={`inline-flex items-center gap-1 text-[15px] leading-[24px] font-bold tabular-nums ${market.changePctWeek >= 0 ? 'text-ink-ok-2' : 'text-ink-brand-6'}`}>
-                  {market.changePctWeek >= 0 ? '▲' : '▼'} {Math.abs(market.changePctWeek)}%
+              {/* ★★ HOW FAR THE PRICE HAS COME. Owner, 2026-08-27: *"people
+                  mostly care what the price is. and how much it pumped and that
+                  they can see the chart going up or down."* With the backing
+                  figures hidden for launch this is the ONLY other number beside
+                  the price, so it has to be checkable rather than decorative.
+
+                  ★ SAME ARRAY AS THE CHART, NOT A SECOND READ. `priceChange` is
+                  computed in live/adapt.ts from `chart` itself, so this figure
+                  and the line below it can never disagree, and the basis it
+                  states ("over 12 trades") counts exactly the points the chart's
+                  own caption counts one panel down. See market/price-change.ts
+                  for why the window is a trade count and not a clock: the
+                  indexer row carries a block and a supply, no timestamp, and a
+                  "24h" window would be empty for almost every market here.
+
+                  ★ WHAT WAS HERE BEFORE. A bare `▲ 6.2%` off `changePctWeek`,
+                  which was not weekly (its own derivation admitted it), stated no
+                  window at all, and put an UP arrow on a market that had not
+                  moved, because the test was `>= 0`.
+
+                  ★ COLOUR IS NOT THE ONLY SIGNAL: up and down carry a glyph and
+                  flat carries a word, so this survives greyscale and colour
+                  blindness. The glyph is `aria-hidden` and the sentence beside it
+                  is the accessible name, because "▲" announces as "black
+                  up-pointing triangle". */}
+              {change ? (
+                <span
+                  className={`inline-flex items-baseline gap-1.5 text-[15px] leading-[24px] font-bold tabular-nums ${
+                    change.direction === 'up'
+                      ? 'text-ink-ok-2'
+                      : change.direction === 'down'
+                        ? 'text-ink-brand-6'
+                        : 'text-ink-10'
+                  }`}
+                >
+                  <span aria-hidden="true">
+                    {change.mark ? `${change.mark} ` : ''}
+                    {change.text}
+                  </span>
+                  <span className="sr-only">{change.aria}</span>
                 </span>
               ) : null}
             </div>
+            {/* ★★ HIDDEN FOR LAUNCH (owner, 2026-08-27) — the WHOLE row, both
+                stats and the rule between them, not the two figures separately.
+                Guarding each stat on its own would leave the flex container and
+                the 34px divider rendering into empty space; guarding the row
+                removes it. `SHOW_BACKING_FIGURES` is one flag for every surface,
+                so this cannot come back here while staying gone in the wallet.
+                Everything inside is untouched and returns exactly as it was.
+                See ../../backing-visibility.ts. */}
+            {SHOW_BACKING_FIGURES ? (
             <div className="mt-3 flex flex-wrap items-center gap-[18px]">
               {/* ★★★ THE HEADLINE STAT IS THE RESERVE NOW, NOT THE MARKET CAP
                   (2026-08-27). Market cap is spot × supply and no holder can
@@ -542,6 +591,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 </div>
               </div>
             </div>
+            ) : null}
             <div className="mt-[18px]">
               <div className="mb-1.5 flex justify-between text-caption tabular-nums text-ink-10">
                 <span>
@@ -645,7 +695,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 <strong>No deliveries yet</strong>
               ) : (
                 <>
-                  <strong>{pctLabel(d.answered, d.total) ?? '0%'} completion rate</strong> — completed {d.answered} of {d.total}
+                  <strong>{pctLabel(d.answered, d.total) ?? '0%'} completion rate</strong>: completed {d.answered} of {d.total}
                   {/* Guarded: an empty median left the sentence ending "usually within ." */}
                   {d.typicalResponse ? (
                     <>
@@ -745,7 +795,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           <p className="text-caption font-semibold text-ink-10">{blockedNotice}</p>
         ) : null}
         <p className="font-serif text-caption text-ink-10">
-          Prices are set in dollars — the total you’ll pay. 12% goes to Lumen as a separate platform commission, paid in
+          Prices are set in dollars: the total you’ll pay. 12% goes to Lumen as a separate platform commission, paid in
           HBD; the rest is spent in tokens, and as the token’s price rises a service costs fewer of them.
         </p>
       </div>
@@ -802,8 +852,13 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
       {/* 6. Honest note */}
       {/* ★ The one paragraph where all four fee and price behaviours are stated
           together, so it is the one that must be exactly right. Every clause is
-          a measured fact; see HONEST_NOTE for what each was checked against. */}
-      <p className="font-serif text-caption text-ink-14">{HONEST_NOTE}</p>
+          a measured fact; see HONEST_NOTE for what each was checked against.
+
+          ★ `honestNote()`, not the constant: with the backing stat hidden the
+          paragraph's "Backing per token, shown above" pointed at nothing, so the
+          selector drops those two sentences and keeps every fee fact verbatim.
+          The original paragraph is still exported and comes back with the flag. */}
+      <p className="font-serif text-caption text-ink-14">{honestNote()}</p>
 
       <TokenModals
         dialog={dialog}

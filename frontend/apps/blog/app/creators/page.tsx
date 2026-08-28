@@ -7,8 +7,18 @@ export const metadata: Metadata = {
   // rather than only the directory below it. Kept short: the browser tab and the
   // share card both truncate, and "Meritum" is the word that has to survive.
   title: 'Meritum',
+  // ★ THE RANKING CLAUSE NAMED AN ORDER THAT RANKS NOTHING (2026-08-28,
+  // false-text audit F5). This said "Browse creators ranked by how reliably they
+  // deliver". `features/creator-tokens/market/discovery-ranking.ts` recorded on
+  // 2026-08-27 that every delivery column is null for every creator on the live
+  // index (answered_count 0, missed_count 0, completion_pct null), that the
+  // default "Most reliable" tab "ranks nothing", and it HID the ordering tabs and
+  // the Answers filter for that reason. The controls went; this sentence, and the
+  // masthead line it mirrors, did not. A static `Metadata` export cannot be gated
+  // on `rankingAvailable` the way the masthead can, so the clause is simply gone
+  // rather than made conditional.
   description:
-    'Launch a Meritum token in seconds. Browse creators ranked by how reliably they deliver · hold a creator’s token and spend it on their work.'
+    'Launch a Meritum token in seconds. Browse creators, hold a creator’s token, and spend it on their work.'
 };
 
 /**

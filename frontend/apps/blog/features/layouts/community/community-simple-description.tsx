@@ -19,12 +19,18 @@ const CommunitySimpleDescription = ({
   data,
   subs,
   notificationData,
+  notificationsUnavailable,
+  notificationsPending,
   username,
   userSubscriptions
 }: {
   data: Community;
   subs: string[][];
   notificationData: IAccountNotification[] | null | undefined;
+  /** The read FAILED. Distinct from "there are none" — see community-layout.tsx. */
+  notificationsUnavailable?: boolean;
+  /** The read has not answered yet. Also distinct from "there are none". */
+  notificationsPending?: boolean;
   username: string;
   userSubscriptions?: string[][] | null;
 }) => {
@@ -98,7 +104,12 @@ const CommunitySimpleDescription = ({
           <strong>{data.num_authors}</strong> {t('communities.titles.active_posters')}
         </span>
         <span className="text-muted-foreground">•</span>
-        <ActivityLogDialog username={username} data={notificationData}>
+        <ActivityLogDialog
+                username={username}
+                data={notificationData}
+                unavailable={notificationsUnavailable}
+                pending={notificationsPending}
+              >
           <span className="text-destructive">{t('communities.buttons.activity_log')}</span>
         </ActivityLogDialog>
         {userRole ? (

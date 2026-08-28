@@ -22,12 +22,18 @@ const CommunityDescription = ({
   data,
   subs,
   notificationData,
+  notificationsUnavailable,
+  notificationsPending,
   username,
   userSubscriptions
 }: {
   data: Community;
   subs: string[][];
   notificationData: IAccountNotification[] | null | undefined;
+  /** The read FAILED. Distinct from "there are none" — see community-layout.tsx. */
+  notificationsUnavailable?: boolean;
+  /** The read has not answered yet. Also distinct from "there are none". */
+  notificationsPending?: boolean;
   username: string;
   userSubscriptions?: string[][] | null;
 }) => {
@@ -140,7 +146,12 @@ const CommunityDescription = ({
               ))}
             </ul>
             <div className="self-end text-sm">
-              <ActivityLogDialog username={username} data={notificationData}>
+              <ActivityLogDialog
+                username={username}
+                data={notificationData}
+                unavailable={notificationsUnavailable}
+                pending={notificationsPending}
+              >
                 {t('communities.buttons.activity_log')}
               </ActivityLogDialog>
             </div>

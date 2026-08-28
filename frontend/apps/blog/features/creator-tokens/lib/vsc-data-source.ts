@@ -1419,7 +1419,19 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
    */
   async readPriceHistory(creator: string, limit = 200): Promise<PricePoint[]> {
     if (!this.indexer) throw new Error('VscCreatorTokensDataSource: price history needs the Magi indexer (CREATOR_TOKENS_INDEXER_URL)');
-    const points = await this.indexer.priceHistoryOf(creator, limit);
+    // ★★★ toDid() WAS MISSING HERE, AND ONLY HERE (2026-08-28). The indexer
+    // stores the creator as a DID (`hive:lumen.beat`), and reads.ts calls
+    // toDid() "the ONE conversion point" for exactly this reason. Its three
+    // sibling indexer reads on this class remember it — balancesOf(toDid(...)),
+    // asksOf(toDid(...)), deliveryOf(toDid(...)) — and this one did not, so it
+    // queried the bare handle the page routes on.
+    //
+    // Hasura answers a no-match with an empty array, never an error, so the
+    // chart and the price-change indicator both rendered "no history yet" on
+    // EVERY market that has ever traded. Measured against the live testnet
+    // indexer on 2026-08-28: creator "lumen.beat" returns 0 rows, creator
+    // "hive:lumen.beat" returns its real trades from the same query.
+    const points = await this.indexer.priceHistoryOf(toDid(creator), limit);
     // ★ Same function the headline price uses (2026-08-07) — a chart drawn from
     // the ORACLE rate would print 0 for a market that has been fully sold back
     // to supply 0, while the header showed the real 1.000 HBD reset price.

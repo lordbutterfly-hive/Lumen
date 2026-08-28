@@ -100,8 +100,23 @@ const COPY = {
   namePickSub: 'This is how you’ll appear across Lumen. You can’t change it later, so choose well.',
   nameRules: 'Lowercase letters, numbers and dashes. 3 to 16 characters.',
   create: 'Create my Lumen account',
+  /**
+   * ★★★ THE SAME CLAUSE H8 CUT FROM THE UPGRADE SCREEN, STILL STANDING ON THE
+   * SIGNUP SCREEN (2026-08-28, false-text audit F13).
+   *
+   * This ended "and your posting history comes with you". `upgrade-panel.tsx:72`
+   * removed exactly that promise on 2026-08-16 because it contradicts
+   * `COPY.historyLimit` — posts written before an upgrade stay signed by Lumen's
+   * publishing account, and a Hive post cannot change author, so every other Hive
+   * front end shows the back catalogue under Lumen forever. The edit was applied
+   * where the promise was noticed and not where it actually lands: this is the
+   * signup screen, the highest-leverage moment in the product to make a promise
+   * about who owns your writing.
+   *
+   * Scoped rather than cut, because the Lumen half is true and worth saying.
+   */
   createReassure:
-    'Free. No keys to save. Your posts publish through Lumen with a small “via Lumen” mark and do not collect rewards. Upgrade to a full Hive account whenever you want, and your posting history comes with you.',
+    'Free. No keys to save. Your posts publish through Lumen with a small “via Lumen” mark and do not collect rewards. Upgrade to a full Hive account whenever you want. On Lumen your history follows your new name; on other Hive sites, posts written before the upgrade stay under Lumen’s account.',
   back: 'Back',
   checking: 'Checking…',
   googleSeam:

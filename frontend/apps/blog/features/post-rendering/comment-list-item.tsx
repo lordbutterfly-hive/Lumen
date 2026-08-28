@@ -75,6 +75,11 @@ import { useVoteMutation } from '@/blog/features/votes/hooks/use-vote-mutation';
 import { useLoggedUserContext } from '@/blog/features/votes/hooks/use-logged-user';
 import { BladeGlyph } from '@/blog/features/votes/blade';
 import { authorTitleOf } from '@/blog/lib/author-title';
+import {
+  getPublishBadgeState,
+  PUBLISH_BADGE_COPY_KEY,
+  publishBadgeShowsSpinner
+} from '@/blog/lib/publish-badge-state';
 
 interface CommentListProps {
   permissionToMute: Boolean;
@@ -180,67 +185,14 @@ export const commentClassName =
   'font-lora text-[14px] leading-[24px] prose-h1:text-[20px] prose-h1:leading-[22px] prose-h2:text-[18px] prose-h2:leading-[24px] prose-h3:text-[15px] prose-h3:leading-[24px] prose-h4:text-[14px] prose-h4:leading-[22px] sm:text-[15px] sm:leading-[24px] sm:prose-h1:text-[22px] sm:prose-h1:leading-[24px] sm:prose-h2:text-[20px] sm:prose-h2:leading-[26px] sm:prose-h3:text-[16px] sm:prose-h3:leading-[26px] sm:prose-h4:text-[15px] sm:prose-h4:leading-[22px] lg:text-body lg:prose-h1:text-[24px] lg:prose-h1:leading-[26px] lg:prose-h2:text-[20px] lg:prose-h2:leading-[28px] lg:prose-h3:text-[18px] lg:prose-h3:leading-[28px] lg:prose-h4:text-[16px] lg:prose-h4:leading-[24px] prose-p:mb-[10px] prose-p:mt-[2px] last:prose-p:mb-[4px] prose-img:max-w-full prose-img:h-auto prose-img:max-h-[400px]';
 
 /**
- * ★★★ FOUR HONEST PUBLISH STATES, ONLY THE FIRST WITH A SPINNER (O7 F2a,
- * 2026-08-13). A real comment (`01KZW0GB585D9GQMWVHM7NNC3Q`) spun on
- * "Publishing..." for ~24 hours with no timeout, no error branch and no
- * terminal state — because `comment._optimistic` used to mean two different
- * things (see `db-post-to-entry.ts`'s own doc): "just broadcast, resolving in
- * seconds" on the CHAIN path (`use-comment-mutations.ts`), and "has never
- * been broadcast at all, possibly ever" on the LITE path (this component's
- * server-sourced comments, before `db-post-to-entry.ts`'s flag fix). One flag,
- * one spinner, two truths — a spinner is what reads as a hang, so every state
- * below the first loses it.
- *
- * `liteOverlay` (already computed above, for the byline) is the discriminator:
- * it is non-null ONLY for an entry that passed through the lite pipeline
- * (`isLumenProxiedEntry` — matches the `lumen-`/`lite-` permlink shapes or a
- * `lumen_post_id`/`lumen/1.0` marker in `json_metadata`), so a plain chain
- * comment's fresh client-side optimistic stub (`use-comment-mutations.ts`,
- * temp `re-<author>-<ts>` permlink, no lite marker) never matches it — that
- * path keeps its existing sub-30s "Publishing…" behaviour byte-identical, as
- * the Phase-2 adjudication's sequencing note requires.
- *
- * Thresholds (15 min / 6 h) are judgement, not measurement — O7's own build
- * map names them as such and recommends re-deriving them from real drain
- * timings once the publisher has actually run for a week.
+ * ★★★ THE PUBLISH LADDER MOVED TO `lib/publish-badge-state.ts` (2026-08-28,
+ * false-text audit F10). It was correct here and wrong in the post page's
+ * `components/optimistic-status-banner.tsx`, which had grown its own copy of the
+ * same idea with no terminal state and no failure input. One module now, imported
+ * by both, so a third renderer cannot drift again. The full reasoning behind each
+ * threshold and each precedence travelled with it.
  */
-const PUBLISH_QUEUED_WINDOW_MS = 15 * 60 * 1000;
-const PUBLISH_WAITING_WINDOW_MS = 6 * 60 * 60 * 1000;
 
-type PublishBadgeState = 'publishing' | 'queued' | 'waiting' | 'delayed' | 'failed' | null;
-
-function getPublishBadgeState(
-  isOptimistic: boolean,
-  isLitePipeline: boolean,
-  createdIso: string,
-  publishFailed = false
-): PublishBadgeState {
-  if (!isOptimistic) return null;
-  // ★ FAILED OUTRANKS EVERY AGE-BASED STATE. The ladder below is a function of
-  // how OLD the post is, so a publish that permanently failed simply aged into
-  // "delayed" and sat there — a word that promises it will still land. It will
-  // not: its publish generations are exhausted and it needs a human. Saying so
-  // is the difference between a wait and a lie.
-  if (publishFailed) return 'failed';
-  // Chain path: a fresh client-side optimistic comment, not from the lite
-  // pipeline at all. Unchanged from before this fix — still spinning, still
-  // "Publishing...", still expected to resolve in seconds via
-  // `scheduleValidatedRefetch`.
-  if (!isLitePipeline) return 'publishing';
-
-  const ageMs = Date.now() - new Date(createdIso).getTime();
-  if (!Number.isFinite(ageMs) || ageMs < PUBLISH_QUEUED_WINDOW_MS) return 'queued';
-  if (ageMs < PUBLISH_WAITING_WINDOW_MS) return 'waiting';
-  return 'delayed';
-}
-
-const PUBLISH_BADGE_COPY_KEY: Record<Exclude<PublishBadgeState, null>, string> = {
-  publishing: 'global.publishing',
-  queued: 'cards.comment_card.publish_queued',
-  waiting: 'cards.comment_card.publish_waiting',
-  delayed: 'cards.comment_card.publish_delayed',
-  failed: 'cards.comment_card.publish_failed'
-};
 
 // ★ SAME localStorage KEY, SHAPE AND STABLE-REFERENCE REQUIREMENT as
 // votes-component.tsx's own `DEFAULT_VOTES_VALUES` (module-scope there too,
@@ -754,7 +706,7 @@ const CommentListItem = memo(function CommentListItem({
                                     {/* Spinner on the FIRST state only — a spinner is what
                                         reads as a hang, and everything past "just broadcast,
                                         resolving in seconds" is a calm, static sentence. */}
-                                    {publishBadgeState === 'publishing' && (
+                                    {publishBadgeShowsSpinner(publishBadgeState) && (
                                       <CircleSpinner size={10} color="#3b82f6" loading />
                                     )}
                                     {t(PUBLISH_BADGE_COPY_KEY[publishBadgeState])}

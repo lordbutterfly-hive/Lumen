@@ -76,7 +76,15 @@ const DialogLogin = forwardRef<HTMLButtonElement, DialogLoginProps>(function Dia
           <DialogTitle>Sign In</DialogTitle>
         </VisuallyHidden>
         <VisuallyHidden>
-          <DialogDescription>Sign in to your account using your posting key.</DialogDescription>
+          {/* ★ NAMED A KEY TYPE NO DOOR HERE USES (2026-08-28, false-text audit F17).
+              This read "Sign in to your account using your posting key", a leftover from
+              the smart-signer SignInForm this dialog replaced. It is announced to screen
+              readers on every login dialog and is invisible to everyone else, so it was
+              the one description nobody could see was wrong. It now names the four doors
+              the operator ruling below actually ships. */}
+          <DialogDescription>
+            Sign in with Google, a Bitcoin or Ethereum wallet, or Hive Keychain.
+          </DialogDescription>
         </VisuallyHidden>
         {/* ★ OPERATOR RULING 2026-08-01 — Lumen has FOUR ways in: Google, a
             Bitcoin wallet and an EVM wallet (all Lumen Lite, via Reown for the

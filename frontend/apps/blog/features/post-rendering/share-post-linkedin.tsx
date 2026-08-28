@@ -8,7 +8,7 @@ export default function LinkedInShare({ title, url }: { title: string; url: stri
   const winHeight = 480;
   const winTop = 0;
   const winLeft = 0;
-  const postTitle = title + ' — ' + 'Hive';
+  const postTitle = title + ' | ' + 'Hive';
   const href = blogUrl(url);
 
   const q =

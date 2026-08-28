@@ -52,11 +52,25 @@ const CommunityLayout = ({ children, community }: { children: ReactNode; communi
     queryFn: () => fetchCommunitySubscribers(community ?? ''),
     enabled: isCommunity
   });
-  const { data: notificationData } = useQuery({
+  // ★★★ THE FAILURE HAS TO TRAVEL WITH THE DATA (2026-08-28, false-text audit,
+  // Cluster A sweep). Only `data` was destructured, so a failed
+  // `AccountNotification` read arrived at the activity dialog as `undefined` and
+  // every one of its six tabs stated "No notifications yet". The header bell
+  // (`site-header/notifications-menu.tsx`) fixed exactly this for its own copy of
+  // the same query on 2026-08-18; this one, three hops away, was not swept.
+  const {
+    data: notificationData,
+    isError: notificationsUnavailable,
+    isFetching: notificationsFetching
+  } = useQuery({
     queryKey: ['AccountNotification', community],
     queryFn: () => fetchAccountNotifications(community ?? ''),
     enabled: isCommunity
   });
+  // `isFetching` (not `isLoading`) because a DISABLED react-query v4 query
+  // reports `isLoading: true` forever, which would pin every non-community
+  // layout on a loading state that never resolves.
+  const notificationsPending = notificationsFetching && !notificationData;
 
   const { data: mySubsData } = useQuery({
     queryKey: ['subscriptions', observer],
@@ -97,6 +111,8 @@ const CommunityLayout = ({ children, community }: { children: ReactNode; communi
                 subs={subsData}
                 username={community}
                 notificationData={notificationData}
+                notificationsUnavailable={notificationsUnavailable}
+                notificationsPending={notificationsPending}
                 userSubscriptions={mySubsData}
               />
             ) : null}
@@ -167,6 +183,8 @@ const CommunityLayout = ({ children, community }: { children: ReactNode; communi
               data={communityData}
               subs={subsData}
               notificationData={notificationData}
+              notificationsUnavailable={notificationsUnavailable}
+              notificationsPending={notificationsPending}
               username={community ?? ''}
               userSubscriptions={mySubsData}
             />

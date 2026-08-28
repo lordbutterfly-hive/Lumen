@@ -6,7 +6,7 @@ import { getServerSessionUser, loginRedirectFor } from '@/blog/lib/server-sessio
 export const metadata: Metadata = {
   title: 'Creator Studio',
   description:
-    'Launch and manage your Meritum on Lumen — set service prices, answer requests, manage your market, subscription, and earnings.'
+    'Launch and manage your Meritum on Lumen: set service prices, answer requests, manage your market, subscription, and earnings.'
 };
 
 // A static segment, so it takes precedence over the /creators/[handle] dynamic

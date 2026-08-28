@@ -178,7 +178,7 @@ const SettingsContent = ({ username }: { username: string }) => {
         <section className={`${SETTINGS_CARD} text-center`} data-testid="settings-owner-gate-error">
           <h2 className={SETTINGS_CARD_TITLE}>We couldn’t check your account</h2>
           <p className={`${SETTINGS_CARD_HINT} mx-auto max-w-[46ch]`}>
-            Your settings are safe — we just couldn’t confirm who you are, so we can’t open the form yet.
+            Your settings are safe. We just couldn’t confirm who you are, so we can’t open the form yet.
           </p>
           <button
             type="button"

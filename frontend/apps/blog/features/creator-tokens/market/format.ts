@@ -61,3 +61,29 @@ export const usdWholeNonZero = (n: number): string => {
   if (!Number.isFinite(n) || n <= 0) return usdWhole(0);
   return Math.round(n) === 0 ? '<$1' : usdWhole(n);
 };
+
+/**
+ * THE MAGNITUDE OF A PRICE MOVE, as a label. Direction is NOT encoded here — the
+ * caller carries it (an arrow, a word), so this never has to decide whether a
+ * fall should read "-3.1%" or "3.1% down".
+ *
+ * ★ WHY NOT `pctLabel`. That one answers "what share of a total is this", clamps
+ * to 0-100 and cannot express a sign. A price on a bonding curve can double or
+ * halve, so a change of +140% or -60% is ordinary and both would be mangled by
+ * the clamp. Same house rule though, and for the same reason `pctLabel` has it:
+ * a REAL move that rounds below the printed precision must not announce itself
+ * as no move at all. 0.04% is not "0%".
+ *
+ *     not a number      -> null      (the caller renders nothing)
+ *     exactly zero      -> '0%'      (a real, measured absence of movement)
+ *     0 < |pct| < 0.05  -> '<0.1%'   (moved, below what one decimal can show)
+ *     anything else     -> '3.1%'    (one decimal, always)
+ */
+export const pctMoveLabel = (pct: number): string | null => {
+  if (!Number.isFinite(pct)) return null;
+  const magnitude = Math.abs(pct);
+  if (magnitude === 0) return '0%';
+  const rounded = Math.round(magnitude * 10) / 10;
+  if (rounded === 0) return '<0.1%';
+  return `${rounded.toFixed(1)}%`;
+};

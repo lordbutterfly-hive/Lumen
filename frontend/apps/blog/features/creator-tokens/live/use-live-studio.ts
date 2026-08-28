@@ -70,6 +70,8 @@ export interface LiveStudio {
   inbox: PortfolioAsk[];
   /** The raw escrows behind `inbox` — answer/decline need seq + deadlineBlock, which the portfolio row does not carry. */
   rawInbox: Ask[];
+  /** The asks read has not succeeded, so `inbox`/`rawInbox` being empty means UNKNOWN, not zero. */
+  inboxUnavailable: boolean;
   /**
    * NULL when the shop could not be read — NOT an empty shop.
    *
@@ -257,7 +259,15 @@ export function useLiveStudio(): LiveStudio {
   // Awaiting-only, and NOT filtered by asker: a creator's own self-dealt ask is
   // still an escrow they must resolve. (It just does not count toward their
   // delivery record — that exclusion lives in the contract, not here.)
-  const rawInbox = (asksQuery.data ?? []).filter((a) => a.status === 'awaiting' || a.status === 'expired');
+  // ★ A FAILED ASKS READ IS NOT AN EMPTY INBOX (2026-08-28, false-text audit
+  // F2). `asksQuery.data ?? []` collapsed a rejected read into zero requests, so
+  // one node blip told a creator "No requests waiting. Nice — you’re all caught
+  // up." while a real escrow sat unanswered against its deadline. That is the
+  // exact defect ./collapse-read.ts was written for, and the fee and offerings
+  // reads beside this one already route through it; the asks read was missed.
+  const asksRead = collapseRead(asksQuery);
+  const inboxUnavailable = asksRead === null;
+  const rawInbox = (asksRead ?? []).filter((a) => a.status === 'awaiting' || a.status === 'expired');
   const inbox = market ? rawInbox.map((a) => adaptAsk(a, market.priceUsd)) : [];
 
   const subDaysLeft = chainMarket ? blocksToDays(Math.max(0, chainMarket.paidUntilBlock - headOf(chainMarket))) : 0;
@@ -339,6 +349,7 @@ export function useLiveStudio(): LiveStudio {
     market,
     inbox,
     rawInbox,
+    inboxUnavailable,
     offerings: collapseRead(offeringsQuery),
     subDaysLeft,
     tradeFeeClaimableUsd: ((hbd) => (hbd === null ? null : usdFromHbd(hbd)))(collapseRead(feeQuery)),

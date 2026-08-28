@@ -12,7 +12,7 @@ import { getLogger } from '@ui/lib/logging';
 
 export const metadata: Metadata = {
   title: 'Proposals',
-  description: 'Hive Decentralized Hub proposals — what is funded and who is voting.'
+  description: 'Hive Decentralized Hub proposals: what is funded and who is voting.'
 };
 
 const logger = getLogger('app');

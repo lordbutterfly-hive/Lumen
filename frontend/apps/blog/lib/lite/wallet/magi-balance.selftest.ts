@@ -108,18 +108,47 @@ async function main(): Promise<void> {
     restore();
   }
   {
-    // The subtle one: the query succeeds and the record is null. That is "unknown",
-    // not "zero", and conflating them would tell someone their funds are gone.
+    // ★ THIS CHECK WAS ASSERTING A CONTRACT THE CODE NO LONGER HAS (fixed
+    // 2026-08-28, found by a full-suite sweep).
+    //
+    // It required both-null to THROW, on the reasoning that a null record is
+    // "unknown" and must never render as "you have no money". `magi-balance.ts`
+    // deliberately reversed that on 2026-08-23, and its ★★★ note carries the
+    // measurement: every way the node can fail to answer has already thrown by
+    // that line (no endpoint, no account, non-2xx, GraphQL `errors`), so
+    // reaching it means the node answered HTTP 200 with a clean body and said it
+    // holds no record. Routing that through the unknown path made
+    // `affordability()` return 'unknown', which FAILS OPEN — a brand-new lite
+    // account with no Magi account at all got an ENABLED Buy button and never
+    // saw the funding panel written for exactly that person.
+    //
+    // So the test was left pinning the defect. The contract to assert is the new
+    // one, and it is stricter than "it throws": a definite zero, and
+    // `cannotTransact` set, which is the flag that disables Buy and renders the
+    // funding help instead.
     stubFetch({ data: { getAccountBalance: null, getAccountRC: null } });
+    const noAccount = await readMagiSpendingPower('http://x', 'hive:a');
+    check(
+      'a node that answers "no record at all" reports a definite zero, not a throw',
+      noAccount.balance.hbdBaseUnits === 0 && noAccount.rc.amount === 0,
+      JSON.stringify(noAccount)
+    );
+    check(
+      '★ …and flags it cannotTransact, which is what disables Buy and shows the funding panel',
+      noAccount.cannotTransact === true,
+      `cannotTransact = ${JSON.stringify(noAccount.cannotTransact)}`
+    );
+    restore();
+  }
+  {
+    // The distinction the branch above rests on: a read that genuinely FAILED
+    // must still throw, so the fail-open stays available to someone who may well
+    // be able to pay. If this ever stops throwing, the reasoning above collapses.
+    stubFetch({ data: { getAccountBalance: { hbd: 1, block_height: 1 }, getAccountRC: null } });
     await throws(
-      'a null balance record throws rather than reading as 0',
+      '★ a missing RC record alone still throws (the fail-open is intact)',
       () => readMagiSpendingPower('http://x', 'hive:a'),
-      // ★ Matched to the message the code ACTUALLY throws. This expected
-      // 'no balance record' while `readMagiSpendingPower` says "no record at
-      // all", so the assertion never matched and the check has been failing —
-      // i.e. inert — since the both-null branch was reworded. Pre-existing;
-      // found while sweeping the suite on 2026-08-20.
-      'no record at all'
+      'no resource-credit record'
     );
     restore();
   }

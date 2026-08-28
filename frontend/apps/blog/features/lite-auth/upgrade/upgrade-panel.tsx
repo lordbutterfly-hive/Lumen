@@ -570,7 +570,7 @@ const UpgradePanel: FC = () => {
       <div className="mx-auto max-w-[560px] p-6" data-testid="upgrade-not-linked">
         <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.notLinkedTitle}</h1>
         <p className="mt-2 text-[15px] leading-[24px] text-ink-8">
-          <strong>@{hiveName}</strong> — {COPY.notLinkedBody}
+          <strong>@{hiveName}</strong>: {COPY.notLinkedBody}
         </p>
       </div>
     );
@@ -582,7 +582,7 @@ const UpgradePanel: FC = () => {
       <div className="mx-auto max-w-[560px] p-6" data-testid="upgrade-done">
         <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.doneTitle}</h1>
         <p className="mt-2 text-[15px] leading-[24px] text-ink-8">
-          <strong>@{hiveName}</strong> — {COPY.doneBody}
+          <strong>@{hiveName}</strong>: {COPY.doneBody}
         </p>
         {verifying ? <p className="mt-2 text-caption text-ink-14">{COPY.verifying}</p> : null}
         {notice ? <p className="mt-2 text-caption text-ink-warn-3">{notice}</p> : null}

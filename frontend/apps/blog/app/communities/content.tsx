@@ -55,7 +55,13 @@ const CommunitiesContent = () => {
   // directory — every visitor, signed in or not. See
   // `apps/blog/app/api/communities/route.ts` and
   // `.../api/subscriptions/route.ts`.
-  const { data: communitiesData, isFetching } = useQuery({
+  // ★★★ A FAILED READ IS NOT "NO RESULTS" (2026-08-28, false-text audit, Cluster A
+  // sweep). `isError` was discarded, so a failed `/api/communities` left
+  // `communitiesData` undefined with `isFetching` false, and the whole directory
+  // rendered "No results for your search" — including on the very first load,
+  // where nobody had searched for anything. Error branch first, ahead of the
+  // skeleton and the empty state, the ordering `blocked-list.tsx` documents.
+  const { data: communitiesData, isFetching, isError } = useQuery({
     queryKey: ['communitiesList', sort, query, observer],
     queryFn: async () => await fetchCommunities(sort, query, observer),
     initialData: useInitialData ? initialCommunities : undefined,
@@ -122,7 +128,11 @@ const CommunitiesContent = () => {
         <CommunitiesSelectFilter filter={sort} handleChangeFilter={handleChangeFilter} />
       </div>
       <Separator className="my-4" />
-      {!communitiesData && isFetching ? (
+      {isError && !communitiesData ? (
+        <div className="w-full py-4 text-destructive" data-testid="communities-list-error">
+          {t('communities.load_failed')}
+        </div>
+      ) : !communitiesData && isFetching ? (
         <CommunitiesListSkeleton />
       ) : communitiesData && communitiesData.length > 0 ? (
         <CommunitiesList data={communitiesData} userSubscriptions={userSubscriptions} />

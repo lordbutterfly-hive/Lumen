@@ -324,7 +324,14 @@ console.log('\n── WIRING — the modal really renders these, and no longer r
   );
   check(
     'comment stripping did not eat the code (the sell CTA below still scans intact)',
-    code.includes('`Sell — get ~${usdPrice(q.receiveUsd)}`')
+    // ★ THE LANDMARK MOVED, AND THAT IS THE LESSON (2026-08-28). This negative
+    // control anchored on a piece of USER-FACING COPY, so a copy edit (the em
+    // dash sweep) broke a check about the STRIPPER. A landmark should be code
+    // that changes for structural reasons, not a sentence a reader sees. Kept
+    // pointing at the same expression, now with its current separator; the
+    // assertion below is deliberately the `usdPrice(q.receiveUsd)` CALL, which
+    // is the part that cannot change without the feature changing.
+    code.includes('usdPrice(q.receiveUsd)')
   );
   check(
     'the negative controls are live: usdWhole and tok DO still appear elsewhere in this file',

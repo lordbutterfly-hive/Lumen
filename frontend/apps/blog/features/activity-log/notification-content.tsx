@@ -43,12 +43,85 @@ function EndOfNotificationsNotice({ t }: { t: (key: string) => string }) {
   );
 }
 
+/**
+ * The footer under every one of the six notification tabs.
+ *
+ * ★ It was copied out SIX TIMES, which is exactly why the missing failure branch
+ * had to be added in six places or in none. One component now, so the ordering —
+ * unavailable, then pending, then empty — lives in one spot and cannot drift
+ * between tabs.
+ */
+const NotificationsTabFooter = ({
+  unavailable,
+  pending,
+  noNotifications,
+  showButton,
+  isFetching,
+  onLoadMore,
+  t
+}: {
+  unavailable: boolean;
+  pending: boolean;
+  noNotifications: boolean;
+  showButton: boolean;
+  isFetching: boolean;
+  onLoadMore: () => void;
+  t: (key: string) => string;
+}) => {
+  if (noNotifications && unavailable) {
+    return (
+      <div
+        className="flex h-64 flex-col items-center justify-center gap-4 px-6 text-center text-destructive"
+        data-testid="notifications-unavailable"
+      >
+        <span>{t('navigation.profile_notifications_tab_navbar.notifications_unavailable')}</span>
+      </div>
+    );
+  }
+  if (noNotifications && pending) {
+    return (
+      <div
+        className="flex h-64 flex-col items-center justify-center gap-4 px-6 text-center"
+        data-testid="notifications-loading"
+      >
+        <span>{t('navigation.profile_notifications_tab_navbar.notifications_loading')}</span>
+      </div>
+    );
+  }
+  if (noNotifications) {
+    return (
+      <div className="flex h-64 flex-col items-center justify-center gap-4" data-testid="notifications-empty">
+        {/* ★ Drawn empty state (2026-08-18) — this was a bare grey sentence. */}
+        <EmptyStateIllustration name="empty-notifications" size={112} />
+        <span>{t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}</span>
+      </div>
+    );
+  }
+  return showButton ? <LoadMoreButton isFetching={isFetching} onClick={onLoadMore} /> : <EndOfNotificationsNotice t={t} />;
+};
+
 const NotificationActivities = ({
   data,
-  username
+  username,
+  unavailable = false,
+  pending = false
 }: {
   data: IAccountNotification[] | null | undefined;
   username: string;
+  /**
+   * ★★★ THE READ FAILED, WHICH IS NOT "YOU HAVE NONE" (2026-08-28, false-text
+   * audit, Cluster A sweep). `data` arrives `undefined` both when the community
+   * genuinely has no notifications and when `AccountNotification` errored, and
+   * `noNotifications` below could not tell the two apart — so an outage rendered
+   * "No notifications yet" in all six tabs, positively, as a fact.
+   *
+   * The header bell already made this distinction for its own copy of the same
+   * query on 2026-08-18 ("the panel may never contradict its own badge"); this
+   * dialog reads a different query instance and never got the sweep.
+   */
+  unavailable?: boolean;
+  /** The read has not answered yet. Also not "you have none". */
+  pending?: boolean;
 }) => {
   const { t } = useTranslation('common_blog');
   const [state, setState] = useState(data);
@@ -119,6 +192,7 @@ const NotificationActivities = ({
   const noNotifications = !state || state.length === 0;
   // Show button if loading OR if we have more data available
   const showButton = isFetching || (hasMoreData && state && state.length > 0);
+
 
   // Sync initial data from props
   useEffect(() => {
@@ -271,17 +345,15 @@ const NotificationActivities = ({
       </TabsList>
       <TabsContent value="all" data-testid="notifications-content-all">
         <NotificationList data={state} lastRead={lastRead} />
-        {noNotifications ? (
-          <div className="flex h-64 flex-col items-center justify-center gap-4">
-            {/* ★ Drawn empty state (2026-08-18) — this was a bare grey sentence. */}
-            <EmptyStateIllustration name="empty-notifications" size={112} />
-            <span>{t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}</span>
-          </div>
-        ) : showButton ? (
-          <LoadMoreButton isFetching={isFetching} onClick={handleLoadMore} />
-        ) : (
-          <EndOfNotificationsNotice t={t} />
-        )}
+        <NotificationsTabFooter
+          unavailable={unavailable}
+          pending={pending}
+          noNotifications={noNotifications}
+          showButton={!!showButton}
+          isFetching={isFetching}
+          onLoadMore={handleLoadMore}
+          t={t}
+        />
       </TabsContent>
       <TabsContent value="replies" data-testid="notifications-content-replies">
         <NotificationList
@@ -290,85 +362,75 @@ const NotificationActivities = ({
           )}
           lastRead={lastRead}
         />
-        {noNotifications ? (
-          <div className="flex h-64 flex-col items-center justify-center gap-4">
-            {/* ★ Drawn empty state (2026-08-18) — this was a bare grey sentence. */}
-            <EmptyStateIllustration name="empty-notifications" size={112} />
-            <span>{t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}</span>
-          </div>
-        ) : showButton ? (
-          <LoadMoreButton isFetching={isFetching} onClick={handleLoadMore} />
-        ) : (
-          <EndOfNotificationsNotice t={t} />
-        )}
+        <NotificationsTabFooter
+          unavailable={unavailable}
+          pending={pending}
+          noNotifications={noNotifications}
+          showButton={!!showButton}
+          isFetching={isFetching}
+          onLoadMore={handleLoadMore}
+          t={t}
+        />
       </TabsContent>
       <TabsContent value="mentions" data-testid="notifications-content-mentions">
         <NotificationList
           data={state?.filter((row: IAccountNotification) => row.type === 'mention')}
           lastRead={lastRead}
         />
-        {noNotifications ? (
-          <div className="flex h-64 flex-col items-center justify-center gap-4">
-            {/* ★ Drawn empty state (2026-08-18) — this was a bare grey sentence. */}
-            <EmptyStateIllustration name="empty-notifications" size={112} />
-            <span>{t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}</span>
-          </div>
-        ) : showButton ? (
-          <LoadMoreButton isFetching={isFetching} onClick={handleLoadMore} />
-        ) : (
-          <EndOfNotificationsNotice t={t} />
-        )}
+        <NotificationsTabFooter
+          unavailable={unavailable}
+          pending={pending}
+          noNotifications={noNotifications}
+          showButton={!!showButton}
+          isFetching={isFetching}
+          onLoadMore={handleLoadMore}
+          t={t}
+        />
       </TabsContent>
       <TabsContent value="follows" data-testid="notifications-content-follows">
         <NotificationList
           data={state?.filter((row: IAccountNotification) => row.type === 'follow')}
           lastRead={lastRead}
         />
-        {noNotifications ? (
-          <div className="flex h-64 flex-col items-center justify-center gap-4">
-            {/* ★ Drawn empty state (2026-08-18) — this was a bare grey sentence. */}
-            <EmptyStateIllustration name="empty-notifications" size={112} />
-            <span>{t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}</span>
-          </div>
-        ) : showButton ? (
-          <LoadMoreButton isFetching={isFetching} onClick={handleLoadMore} />
-        ) : (
-          <EndOfNotificationsNotice t={t} />
-        )}
+        <NotificationsTabFooter
+          unavailable={unavailable}
+          pending={pending}
+          noNotifications={noNotifications}
+          showButton={!!showButton}
+          isFetching={isFetching}
+          onLoadMore={handleLoadMore}
+          t={t}
+        />
       </TabsContent>
       <TabsContent value="upvotes" data-testid="notifications-content-upvotes">
         <NotificationList
           data={state?.filter((row: IAccountNotification) => row.type === 'vote')}
           lastRead={lastRead}
         />
-        {noNotifications ? (
-          <div className="flex h-64 flex-col items-center justify-center gap-4">
-            {/* ★ Drawn empty state (2026-08-18) — this was a bare grey sentence. */}
-            <EmptyStateIllustration name="empty-notifications" size={112} />
-            <span>{t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}</span>
-          </div>
-        ) : showButton ? (
-          <LoadMoreButton isFetching={isFetching} onClick={handleLoadMore} />
-        ) : (
-          <EndOfNotificationsNotice t={t} />
-        )}
+        <NotificationsTabFooter
+          unavailable={unavailable}
+          pending={pending}
+          noNotifications={noNotifications}
+          showButton={!!showButton}
+          isFetching={isFetching}
+          onLoadMore={handleLoadMore}
+          t={t}
+        />
       </TabsContent>
       <TabsContent value="reblogs" data-testid="notifications-content-reblogs">
         <NotificationList
           data={state?.filter((row: IAccountNotification) => row.type === 'reblog')}
           lastRead={lastRead}
         />
-        {noNotifications ? (
-          <div className="flex h-64 flex-col items-center justify-center gap-4">
-            {/* ★ Drawn empty state (2026-08-18) — this was a bare grey sentence. */}
-            <EmptyStateIllustration name="empty-notifications" size={112} />
-            <span>{t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}</span>
-          </div>
-        ) : showButton ? (
-          <LoadMoreButton isFetching={isFetching} onClick={handleLoadMore} />
-        ) : (
-          <EndOfNotificationsNotice t={t} />
-        )}
+        <NotificationsTabFooter
+          unavailable={unavailable}
+          pending={pending}
+          noNotifications={noNotifications}
+          showButton={!!showButton}
+          isFetching={isFetching}
+          onLoadMore={handleLoadMore}
+          t={t}
+        />
       </TabsContent>
     </Tabs>
   );

@@ -6,7 +6,7 @@ import { getServerSessionUser, loginRedirectFor } from '@/blog/lib/server-sessio
 export const metadata: Metadata = {
   title: 'Your Meritum tokens',
   description:
-    'Your portfolio of Meritum tokens on Lumen: value, floor value, buy/sell/spend, and the services you’ve spent tokens on.'
+    'Your portfolio of Meritum tokens on Lumen: value, buy/sell/spend, and the services you’ve spent tokens on.'
 };
 
 // "Your tokens" is a portfolio: there is nothing to render for somebody with no

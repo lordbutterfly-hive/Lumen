@@ -29,7 +29,8 @@
     "../../packages/ui/components/card-skeleton.tsx",
     ".next*/types/**/*.ts",
     ".next-qa/types/**/*.ts",
-    ".next-probe/types/**/*.ts"
+    ".next-probe/types/**/*.ts",
+    ".next-qa-build/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

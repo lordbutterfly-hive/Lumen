@@ -111,9 +111,19 @@ export function MagiFuelGauge({
                 not a penalty, or that topping up works INSTANTLY rather than
                 after a wait. All three facts are needed before the sentence
                 becomes an instruction instead of a rejection. The figure is the
-                measured cost of a real buy, not a guess — see rc-budget.ts. */}
+                measured cost of a real buy, not a guess — see rc-budget.ts.
+
+                ★ "and no fee" REMOVED 2026-08-28 (false-text audit, sibling of
+                F1). The clause was true of SENDING and false of what the reader
+                is here to do: this gauge appears when someone cannot afford
+                their first PURCHASE, and that purchase pays a 10% trade fee
+                (core/params.go TradeFeeBps) plus an early-exit fee if sold
+                soon. "No separate gas token" carries the whole point of the
+                sentence — HBD is the gas — without the reader concluding the
+                trade is free. The fee itself is disclosed where it is charged,
+                in ../ui/token-page/disclosure-copy.ts. */}
             {kind === 'btc' || kind === 'evm'
-              ? `On Magi, the HBD you hold is also what pays for sending. There is no separate gas token and no fee. A wallet account starts with none, so add at least ${hbd(MAGI_MIN_RC_FOR_A_CALL)} HBD to make your first purchase. Every 1 HBD gives you 1,000 credits, and it counts the moment it arrives.`
+              ? `On Magi, the HBD you hold is also what pays for sending. There is no separate gas token. A wallet account starts with none, so add at least ${hbd(MAGI_MIN_RC_FOR_A_CALL)} HBD to make your first purchase. Every 1 HBD gives you 1,000 credits, and it counts the moment it arrives.`
               : `You hold ${hbd(balance.hbdBaseUnits)} HBD. On Magi that balance is also what pays for sending, and about ${hbd(MAGI_MIN_RC_FOR_A_CALL)} HBD is what one purchase needs. Credit you have already spent comes back on its own over about five days, or you can add HBD to top it up straight away.`}
           </div>
         </div>

@@ -3,7 +3,7 @@ import { blogUrl } from '@ui/config/public-vars';
 
 export default function RedditShare({ title, url }: { title: string; url: string }) {
   const { t } = useTranslation('common_blog');
-  const postTitle = title + ' — ' + 'Hive';
+  const postTitle = title + ' | ' + 'Hive';
   const fullUrl = blogUrl(url);
   const q = 'title=' + encodeURIComponent(postTitle) + '&url=' + encodeURIComponent(fullUrl);
 
