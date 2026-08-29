@@ -130,6 +130,7 @@
     "loading_proposals": "Loading proposals",
     "home_feed": "Home feed",
     "close": "Close",
+    "try_again": "Try again",
     "cancel": "Cancel",
     "ok": "OK",
     "publishing": "Publishing...",
@@ -1759,6 +1760,16 @@
       "starts": "Starts {{date}}",
       "ended": "Ended {{date}}"
     },
+    "voters_dialog": {
+      "title": "Voters",
+      "title_with_count": "{{value}} voters",
+      "description": "Every account voting for this proposal, sorted by Hive Power, highest first.",
+      "loading": "Loading voters…",
+      "error": "We couldn't load the voters for this proposal. This is a connection problem.",
+      "retry": "Retry",
+      "retrying": "Retrying…",
+      "empty": "No votes yet"
+    },
     "vote_toast": {
       "supported_title": "Proposal supported",
       "supported_description": "Your vote has been broadcast.",
@@ -1948,6 +1959,8 @@
     "posting_button": "Posting…",
     "login_prompt": "Start writing. Log in to post.",
     "cancel": "Cancel",
+    "bold": "Bold",
+    "italic": "Italic",
     "add_image": "Add image or GIF",
     "add_emoji": "Add emoji",
     "remove_image": "Remove image",
@@ -1973,7 +1986,8 @@
   },
   "discovery_feed": {
     "ready_pill": "Show your feed",
-    "ranking_aging": "Your feed is refreshing. This is your ranking from a few hours ago."
+    "ranking_aging": "Your feed is refreshing. This is your ranking from a few hours ago.",
+    "feed_error": "We couldn't load the feed just now."
   },
   "meritum": {
     "intro": {
@@ -2028,7 +2042,8 @@
       "format_invalid": "That name doesn't meet Hive's naming rules."
     },
     "google_signin": {
-      "unavailable": "Google sign-in is unavailable right now. Use a Bitcoin or Ethereum wallet, or sign in with Hive below."
+      "unavailable": "Google sign-in is unavailable right now. Use a Bitcoin or Ethereum wallet, or sign in with Hive below.",
+      "subtitle": "No wallet, no extension, nothing to install."
     },
     "security": {
       "google_already_linked": "Google is already linked above as your Primary method. There is nothing more to add here."

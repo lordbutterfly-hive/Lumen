@@ -120,6 +120,35 @@ export const InitialDiscussionProvider = ({
 
 export const useInitialDiscussion = () => useContext(InitialDiscussionContext);
 
+/**
+ * Server-fetched home feed (For You tab) passed to ForYouFeed's useInfiniteQuery
+ * as initialData. Same pattern as InitialPostsProvider — bypasses Hydrate/dehydrate.
+ */
+export interface InitialFeedPage {
+  entries: Entry[];
+  source: string;
+  degraded?: string | null;
+  personalised?: boolean;
+  nextCursor?: { author: string; permlink: string } | null;
+}
+
+export interface InitialFeedSeed {
+  page: InitialFeedPage;
+  at: number;
+}
+
+const InitialFeedContext = createContext<InitialFeedSeed | null>(null);
+
+export const InitialFeedProvider = ({
+  value,
+  children
+}: {
+  value: InitialFeedSeed | null;
+  children: ReactNode;
+}) => <InitialFeedContext.Provider value={value}>{children}</InitialFeedContext.Provider>;
+
+export const useInitialFeed = () => useContext(InitialFeedContext);
+
 const InitialFollowListContext = createContext<IFollowList[] | null>(null);
 
 /**

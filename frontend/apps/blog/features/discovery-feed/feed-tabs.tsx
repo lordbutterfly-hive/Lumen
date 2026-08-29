@@ -15,7 +15,6 @@ import { Entry } from '@hive/common-hiveio-packages/wax';
 import { LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { cn } from '@ui/lib/utils';
-import NoDataError from '@/blog/components/no-data-error';
 import { getMarketDataSource } from '@/blog/features/prediction-market/lib/market-data-source';
 import MarketTab from '@/blog/features/prediction-market/market-tab';
 import MediumPostCard from './medium-post-card';
@@ -27,6 +26,7 @@ import DialogLogin from '@/blog/components/dialog-login';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useOffline } from '@/blog/components/offline-guard';
 import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
+import { useInitialFeed } from '@/blog/components/observer-provider';
 
 // TODO: move to i18n
 const LABELS = {
@@ -241,10 +241,8 @@ async function fetchForYou(
 
 function ForYouFeed() {
   const { t } = useTranslation('common_blog');
-  // Hook, so it runs unconditionally above every early return. Used only by the
-  // swap handler below, which writes page 1 through instead of refetching the
-  // list — see `acceptRanking` for why the key must stay static.
   const queryClient = useQueryClient();
+  const initialFeed = useInitialFeed();
 
   // ★ INFINITE SCROLL (2026-08-07). This was a single `useQuery` for one page of
   // 30, on the reasoning that a ranked feed is one scored ORDER with no cursor —
@@ -255,7 +253,7 @@ function ForYouFeed() {
   // feed from the last post of the previous page, using the `nextCursor` the API
   // now returns. Hive caps a single request at 20, so the server pages
   // underneath as well — the cursor is the only thing the client has to know.
-  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
+  const { data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useInfiniteQuery<ForYouResponse>({
       // ★ NOT keyed on `enabled` (2026-08-08). `enabled` is `loggedIn`, which is
       // false before hydration and true after — so the key changed mid-load and
@@ -296,8 +294,11 @@ function ForYouFeed() {
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
       refetchOnMount: false,
-      // The route is expensive; one retry, not react-query's default three.
-      retry: 1
+      retry: 3,
+      initialData: initialFeed
+        ? { pages: [initialFeed.page as ForYouResponse], pageParams: [undefined] }
+        : undefined,
+      initialDataUpdatedAt: initialFeed ? initialFeed.at : undefined
     });
 
   /**
@@ -585,11 +586,24 @@ function ForYouFeed() {
   };
 
   if (isLoading) return <LumenLoader size="lg" label={t('global.loading_posts')} />;
-  // ★ `isError` IS NO LONGER PART OF THIS GUARD. It is true for a failed REFETCH as
-  // well as a failed first load, so an error on the poll-driven path used to throw
-  // away a perfectly good page. Only "we have nothing at all to show" is an error
-  // state; with data in hand, a failure is something to ride out silently.
-  if (!data && shown.length === 0) return <NoDataError />;
+  if (!data && shown.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+        <p className="font-sans text-sm text-[#6b7280]">
+          {isError ? t('discovery_feed.feed_error') : LABELS.empty}
+        </p>
+        {isError ? (
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="rounded-card border border-[#e4e6e9] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8]"
+          >
+            {t('global.try_again')}
+          </button>
+        ) : null}
+      </div>
+    );
+  }
 
   // ★ BUG FOUND 2026-08-06 (owner report: "for you isnt populated... seems it
   // has mock posts"). Live-verified against the running dev server: an
@@ -826,7 +840,7 @@ interface FollowingFeedPage {
 
 function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: string; lite?: boolean }) {
   const { t } = useTranslation('common_blog');
-  const { data, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage, isError, isLoading } =
+  const { data, isFetching, isFetchingNextPage, refetch, fetchNextPage, hasNextPage, isError, isLoading } =
     useInfiniteQuery({
       queryKey: ['discoveryFeedEntries', sort, observer, lite],
       // ★ PAGES ON THE SERVER'S ANSWER, NOT ON `length` (2026-08-23). This tab is a
@@ -870,16 +884,7 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
       // trigger is off for the same reason ForYouFeed's are; new posts surface
       // through the existing "Load more" control instead of a silent swap.
       staleTime: Infinity,
-      // ★ ONE RETRY, NOT THREE (2026-08-13). Every other option here exists to stop
-      // this feed refreshing itself under the reader; `retry` is the one that
-      // governs how long a GENUINE failure stays silent. React Query's default of 3
-      // plus backoff means roughly seven seconds of an unlabelled loading state
-      // before the reader is told anything went wrong — and the sibling read paths
-      // now throw honestly on a degraded upstream instead of returning an empty
-      // list, so that delay would be the only thing standing between a failure and
-      // the reader hearing about it. One attempt absorbs a transient blip; three
-      // only postpone bad news.
-      retry: 1,
+      retry: 3,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
       refetchOnMount: false
@@ -952,7 +957,18 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   // `shown` already holding the last good page, only "we have nothing at all
   // to show, and nothing more coming" is an actual dead end.
   if (isError && shown.length === 0 && !hasNextPage) {
-    return <NoDataError />;
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+        <p className="font-sans text-sm text-[#6b7280]">{t('discovery_feed.feed_error')}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="rounded-card border border-[#e4e6e9] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8]"
+        >
+          {t('global.try_again')}
+        </button>
+      </div>
+    );
   }
 
   // ★ BUG 2 FIX (2026-08-12, FX3) — "infinite scroll can dead-end with a

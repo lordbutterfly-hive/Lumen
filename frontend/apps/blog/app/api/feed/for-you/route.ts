@@ -2317,6 +2317,11 @@ async function warmViewerFeed(candidate: WarmCandidate, limit: number): Promise<
  */
 startViewerWarmer(warmViewerFeed);
 
+// Warm the home trending feed at boot so the first anonymous visitor never waits
+// on a cold Hive node. Fire-and-forget; a failed warm just means the first visitor
+// pays the cost, same as before this line existed.
+void loadFallbackPage('trending', '', DEFAULT_OBSERVER).catch(() => undefined);
+
 async function fallback(
   chainObserver: string,
   limit: number,
