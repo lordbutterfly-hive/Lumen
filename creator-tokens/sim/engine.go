@@ -718,12 +718,10 @@ func (e *Engine) creatorWindingDown(creator string) bool {
 	if _, retired := core.RetiredAt(e.Store, creator); retired {
 		return true
 	}
-	switch core.Phase(e.Store, creator, e.Block) {
-	case core.StateFrozen, core.StateClosed:
-		return true
-	default:
-		return false
-	}
+	// A1 (owner ruling 2026-08-30): a natural FROZEN is an inflow stop, not a
+	// wind-down — Sell stays on the curve and R === Area(S) must still hold
+	// there. Mirrors core/market.go inWindDown exactly (retired OR CLOSED).
+	return core.Phase(e.Store, creator, e.Block) == core.StateClosed
 }
 
 // checkDelinquencyGuardrail is the LIVE proof of delivery.go's standing

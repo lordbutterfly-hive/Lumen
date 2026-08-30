@@ -35,7 +35,9 @@ import { Link } from '@hive/ui';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useLivePortfolio } from '../../live/use-live-portfolio';
 import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
-import type { Ask, HolderPosition } from '../../types';
+import type { Ask, HolderPosition, MarketPrice } from '../../types';
+import { useTokenPriceChips } from '../../live/use-token-price-chips';
+import { healthWordFor } from '../../market/market-health';
 import { usdPrice } from '../../market/format';
 // ★★ THE FLOOR FIGURES ARE HIDDEN FOR LAUNCH (owner, 2026-08-27), on every
 // surface at once, from one flag. This screen led with one, carried one per row
@@ -77,14 +79,40 @@ const EXIT_NOTE_WITH_BACKING =
  * is a fixed price. What goes is the definition of a number that is not on the
  * screen to be defined.
  */
+// ★ 2026-08-30 (B3, copy set A): "redeem your share of the reserve" -> a pro-rata
+// slice of whatever it holds then, less the fee, and below what you paid.
 const EXIT_NOTE_BACKING_HIDDEN =
-  'Token prices float and you can lose money. You can exit two ways: sell on the curve while the market is open, at the curve’s price, after a 10% trade fee and any early-exit fee; or, once a market winds down, redeem your share of the reserve, less any early-exit fee. Neither is a fixed price.';
+  'Token prices float and you can lose money. You can exit two ways: sell on the curve while the market is open, at the curve’s price, after a 10% trade fee and any early-exit fee; or, if a market winds down, redeem a pro-rata slice of whatever the reserve holds then, less any early-exit fee, which will be less than you paid. Neither is a fixed price.';
 
 const Unavailable: FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="rounded-card border border-dashed border-line-11 px-5 py-6 text-center text-[14px] leading-[22px] text-ink-14">{children}</div>
 );
 
-const HoldingRow: FC<{ h: HolderPosition }> = ({ h }) => (
+/**
+ * ★★ THE SIXTH MARKET-HEALTH SURFACE (2026-08-30, B4; found by 57's UI sweep).
+ * This row drew three hard-coded links, Buy / Sell / Send, for every holding,
+ * with no phase check anywhere in this file: a holder of a frozen, retired,
+ * paused, delinquent or sold-out market saw a live-looking Buy on their OWN
+ * portfolio, clicked it, and the token page (token-market-view.tsx:174-191,
+ * which only opens the dialog when `market.canBuy`) silently opened nothing.
+ * A dead control with no explanation, on the one screen that is about the
+ * holder's own money.
+ *
+ * It could not consult health as it stood: `HolderPosition` (types.ts) carries
+ * no phase, no canBuy, no cap. Rather than widen the wallet read, the view
+ * makes ONE batched `useTokenPriceChips` read over every creator it holds (the
+ * same request the feed makes; six state keys per creator plus the head, one
+ * POST for the whole list) and threads the answer in as `price`. That is one
+ * extra chain read per /wallet/tokens visit; the alternative, one readMarket
+ * per row, is N. Stated rather than absorbed: 57 asked to be told.
+ *
+ * `price` undefined or not 'ready' (loading, failed read) keeps the three links
+ * exactly as before: the destination defends itself, and a failed read must
+ * not read as a closed market. Sell becomes Redeem only when the market is
+ * winding down (retired today; under the A1 shape, Retire only), the same
+ * switch token-market-view.tsx:702 makes.
+ */
+const HoldingRow: FC<{ h: HolderPosition; price?: MarketPrice }> = ({ h, price }) => (
   <div className="flex flex-wrap items-center gap-4 rounded-card border border-line-9 bg-surface-1 px-5 py-4">
     <span className="h-11 w-11 flex-shrink-0 rounded-control bg-surface-28" />
     <div className="min-w-0 flex-1">
@@ -106,16 +134,36 @@ const HoldingRow: FC<{ h: HolderPosition }> = ({ h }) => (
         <div className="text-caption text-ink-14">floor {usdPrice(usdFromHbd(h.floorValueHbd))}</div>
       ) : null}
     </div>
-    <div className="flex gap-2">
-      {['Buy', 'Sell', 'Send'].map((label) => (
+    <div className="flex items-center gap-2">
+      {price && price.status === 'ready' && price.health !== null && price.health !== 'open' ? (
+        // The state word in the Buy slot, same words as every other surface
+        // (market/market-health.ts). Not a link: there is nothing to buy.
+        <span
+          className="rounded-control border border-line-warn-4 bg-surface-warn-2 px-3 py-2 text-caption font-semibold text-ink-warn-3"
+          data-testid="holding-health"
+        >
+          {healthWordFor(price.health)}
+        </span>
+      ) : (
         <Link
-          key={label}
-          href={`/creators/${routeHandle(h.creator)}?a=${label.toLowerCase()}`}
+          href={`/creators/${routeHandle(h.creator)}?a=buy`}
           className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-semibold text-ink-7 hover:bg-surface-23"
         >
-          {label}
+          Buy
         </Link>
-      ))}
+      )}
+      <Link
+        href={`/creators/${routeHandle(h.creator)}?a=${price?.health === 'closed' ? 'redeem' : 'sell'}`}
+        className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-semibold text-ink-7 hover:bg-surface-23"
+      >
+        {price?.health === 'closed' ? 'Redeem' : 'Sell'}
+      </Link>
+      <Link
+        href={`/creators/${routeHandle(h.creator)}?a=send`}
+        className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-semibold text-ink-7 hover:bg-surface-23"
+      >
+        Send
+      </Link>
     </div>
   </div>
 );
@@ -233,6 +281,9 @@ const YourTokensView: FC = () => {
   const eligibility = useMeritumEligibility();
   const [tab, setTab] = useState<'holdings' | 'asks'>('holdings');
   const p = useLivePortfolio();
+  // One batched health+price read for every creator held (see HoldingRow's
+  // doc). Empty list -> the query is disabled and costs nothing.
+  const { prices } = useTokenPriceChips(p.holdings.map((h) => h.creator));
   // F14 fix: the retry affordance for p.sessionUnavailable below — re-fires
   // /api/users/me itself, matching feed-tabs.tsx's established
   // identity.retrySession pattern for the identical third state.
@@ -405,7 +456,7 @@ const YourTokensView: FC = () => {
                     You don’t hold any Meritum yet. Browse creators and buy in to start.
                   </p>
                 ) : (
-                  p.holdings.map((h) => <HoldingRow key={`${h.holder}:${h.creator}`} h={h} />)
+                  p.holdings.map((h) => <HoldingRow key={`${h.holder}:${h.creator}`} h={h} price={prices.get(h.creator)} />)
                 )}
               </div>
               {/* ★ The one sentence on this screen that had to change with the

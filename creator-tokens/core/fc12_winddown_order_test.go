@@ -221,7 +221,7 @@ func TestWindDown_RefundGrossMatchesSimulation(t *testing.T) {
 		// exit tax is carved from the holder's NET only; the reserve is debited
 		// the full GROSS either way, so the reserve delta is tax-independent and
 		// equals refundPayout exactly (refund.go:313).
-		forceFrozen(s, creator)
+		forceWindDown(s, creator) // A1: wind-down is reached by Retire, not by lapse
 		const wdBlock = 50 + GraceBlocks + 1
 
 		// Simulate the SAME order with the pure function.

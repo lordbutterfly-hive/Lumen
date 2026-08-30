@@ -70,6 +70,9 @@ const login = load('features', 'lite-auth', 'login', 'lumen-login.tsx');
 const loginDialog = load('components', 'dialog-login.tsx');
 const creatorsPage = load('app', 'creators', 'page.tsx');
 const helpMd = load('lib', 'markdowns', 'lumen-help.md');
+// The Meritum terms ledger — F7 below now asserts which rows are ABSENT from it,
+// so the file itself has to be read rather than inferred from the locale alone.
+const launchTerms = load('features', 'creator-tokens', 'ui', 'meritum', 'launch', 'launch-step-terms.tsx');
 
 const locale = JSON.parse(readFileSync(join(ROOT, 'locales', 'en', 'common_blog.json'), 'utf8'));
 const s = (dotted: string): string => {
@@ -285,14 +288,40 @@ console.log('\n── 4. F5 / F6 / F7 / F15 / F17: the remaining claims.\n');
     'refund.go:286-291, ratified policy: "do NOT fix it by adding tradeFeeOn here"'
   );
 
-  // F7 — market.go Retire() exists and creator-studio.tsx exposes it.
-  check('★ F7: the launch terms no longer say the market cannot be closed', !s('meritum_launch.term_final_value').includes('cannot be closed'));
+  /*
+    F7 — market.go Retire() exists and creator-studio.tsx exposes it. This used to
+    police the WORDING of the `term_final` row ("no longer say the market cannot be
+    closed"). That row no longer exists: the owner deleted it on 2026-08-30 —
+    "delete the line below that says you cannot send the tokens to anyone bla bla.
+    thats confusing" — along with the `term_supply` row, which the same ruling's
+    cap change had made false.
+
+    REWRITTEN TO ASSERT ABSENCE AT BOTH ENDS, not left as it was. `s()` returns ''
+    for a missing key, so the old first check would have gone on PASSING against a
+    row that had been deleted — a check with nothing to inspect must fail, not pass.
+    The two remaining rows are asserted present in the same breath, so an absence
+    check can never be satisfied by a file that simply failed to load.
+  */
+  const launchLocale = (locale as Record<string, Record<string, unknown>>).meritum_launch ?? {};
   check(
-    '…and the 2026-08-15 intent behind that row is preserved: the launch cannot be undone',
-    s('meritum_launch.term_final_value').includes('cannot be undone'),
-    'launch-step-terms.tsx:80-89 exists to say exactly this'
+    '★ F7: the term_final row is gone from the locale (owner, 2026-08-30)',
+    !('term_final_value' in launchLocale) && !('term_final_label' in launchLocale)
   );
-  check('…the parts that really are permanent are still stated', /can never be renamed or moved/.test(s('meritum_launch.term_final_value')));
+  check(
+    '…and gone from the renderer too, not merely left untranslated',
+    !launchTerms.code.includes('term_final_value') && !launchTerms.code.includes("id: 'final'")
+  );
+  check(
+    '…the same ruling removed the Supply row, which the cap change had made false',
+    !('term_supply_value' in launchLocale) && !('term_supply_label' in launchLocale) && !launchTerms.code.includes('term_supply_value')
+  );
+  check(
+    '…VACUOUS-PASS GUARD: the rows that STAY are still rendered and still say something',
+    launchTerms.code.includes('term_stop_value') &&
+      launchTerms.code.includes('term_cut_value') &&
+      s('meritum_launch.term_stop_value').length > 50,
+    `stop row is ${s('meritum_launch.term_stop_value').length} chars`
+  );
 
   // F15 — muted-reasons.ts LOW_REPUTATION = 3, consumed by comment-list-item and medium-post-card.
   check('★ F15: the profile tooltip no longer says reputation is unused', !s('user_profile.reputation_title').includes('does not use it for anything'));
@@ -327,7 +356,9 @@ console.log('\n── 5. HOUSE STYLE. No em dashes in copy written by this pass.
     ['navigation.profile_notifications_tab_navbar.notifications_loading', s('navigation.profile_notifications_tab_navbar.notifications_loading')],
     ['global.indexing_pending', s('global.indexing_pending')],
     ['meritum_launch.term_stop_value', s('meritum_launch.term_stop_value')],
-    ['meritum_launch.term_final_value', s('meritum_launch.term_final_value')],
+    /* term_final_value was scanned here until 2026-08-30; the row it belonged to was
+       deleted by owner ruling, and a dash scan on a key that no longer exists is a
+       check with nothing to inspect. F7 above now asserts its absence instead. */
     ['user_profile.reputation_title', s('user_profile.reputation_title')]
   ];
   for (const [key, value] of written) {

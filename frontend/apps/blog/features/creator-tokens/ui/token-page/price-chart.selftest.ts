@@ -205,7 +205,12 @@ console.log('\n── 6. WIRING. The component computes nothing of its own any m
   // The token page must still be the thing that renders it.
   const viewSrc = readFileSync(join(__dirname, 'token-market-view.tsx'), 'utf8');
   check('the scan read token-market-view.tsx', viewSrc.length > 20_000, `${viewSrc.length} bytes`);
-  check('★ the page renders the chart from the same array the change indicator uses', viewSrc.includes('<PriceChart points={market.chart} />') && viewSrc.includes('{market.chart.length} trades'));
+  // ★ 2026-08-30: the caption's number moved from `chart.length` to
+  // `chartTrades` when `readPriceHistory` began prepending the market's OPENING
+  // price. The chart still draws the same array the indicator reads; only the
+  // BASIS the caption states changed, because points and trades stopped being
+  // the same count. See ../../lib/vsc-data-source.ts's readPriceHistory.
+  check('★ the page renders the chart from the same array the change indicator uses', viewSrc.includes('<PriceChart points={market.chart} />') && viewSrc.includes('market.chartTrades ?? market.chart.length'));
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed`);

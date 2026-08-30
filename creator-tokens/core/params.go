@@ -368,7 +368,7 @@ const MaxStaleBlocks uint64 = 42 * BlocksPerDay
 const (
 	StateActive  = "ACTIVE"  // subscription current, everything works
 	StateOverdue = "OVERDUE" // lapsed, inside grace — still fully functional
-	StateFrozen  = "FROZEN"  // inflows blocked, wind-down open, escrows resolve
+	StateFrozen  = "FROZEN"  // inflows blocked (Buy/Ask), curve Sell open, Renew open; NOT a wind-down since A1 2026-08-30 unless retired
 	StateClosed  = "CLOSED"  // wind-down complete
 )
 

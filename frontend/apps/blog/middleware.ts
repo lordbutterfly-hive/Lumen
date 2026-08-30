@@ -176,7 +176,14 @@ export const config = {
   // ★★ THE STANDING RULE, since this is now the third instance: a route that
   // sets `cache-control: public` MUST be excluded here, or it must not be
   // public. Per-viewer routes stay on the middleware and use `private, no-store`.
+  // ★ `api/creator-profile` added 2026-08-30 (WORK-LINK spec B2). Same
+  // reasoning as the three routes above it: it reads no cookie and no
+  // session, resolves identically for every viewer, and is deliberately
+  // served `public, s-maxage=300, stale-while-revalidate=3600` so a shared
+  // cache can hold it — attaching this middleware would put a 400-day
+  // `session_uid` Set-Cookie on that same cacheable response, replaying one
+  // visitor's session to the next for up to five minutes.
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|api/avatar|api/trending-tags|api/streak/marks).*)'
+    '/((?!_next/static|_next/image|favicon\\.ico|api/avatar|api/trending-tags|api/streak/marks|api/creator-profile).*)'
   ]
 };

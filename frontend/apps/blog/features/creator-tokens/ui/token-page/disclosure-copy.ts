@@ -170,9 +170,18 @@ export function backingPerTokenValue(floorUsd: number, supply: number): string {
  * opposite of the third point and glossed the first.
  */
 export function exitRoutesNote(redeem: boolean): string {
+  // ★ REWRITTEN 2026-08-30 (studio checklist B3, copy set A). "Your share of
+  // the reserve" read as a fixed entitlement and, on the sell line, as if the
+  // pool were waiting for the holder. What the contract does (refund.go): the
+  // holder must call Redeem themselves, it pays floor(reserve x held / supply)
+  // minus the early-exit tax, that is below what they paid at every supply,
+  // and the slice shrinks as other holders redeem first. Both sentences now
+  // say that, and neither says WHY a market winds down, so they are true on
+  // the deployed contract (lapse or Retire) and on the A1 contract (Retire
+  // only) alike. The lapse-specific strings ship with the contract release.
   return redeem
-    ? 'Redeeming pays your share of the reserve, less your early-exit fee. This route stays open while the market winds down.'
-    : 'While this market is open you sell on the curve. Once it winds down, selling closes and you redeem your share of the reserve instead. Neither is a fixed price: what you get depends on the curve and on what the reserve holds.';
+    ? 'Redeem pays a pro-rata slice of whatever the reserve holds right now, less your early-exit fee. It is not a refund of what you paid, and the slice shrinks as other holders redeem first. Nothing is paid out unless you do this yourself.'
+    : 'While this market is open you sell on the curve. If it winds down, selling closes and the only exit is Redeem: a pro-rata slice of what the reserve holds at that moment, less your early-exit fee, claimed by you. Neither is a fixed price: what you get depends on the curve and on what the reserve holds, and neither is a refund of what you paid.';
 }
 
 /**
@@ -246,8 +255,12 @@ export function honestNote(showBacking: boolean = SHOW_BACKING_FIGURES): string 
  * or changed today, and lifting an unchanged sentence into a module that
  * enforces the rule would have forced a rewrite nobody asked for.
  */
+// ★ 2026-08-30 (B3, copy set A): "that reserve is what a wind-down pays out"
+// implied a payout that arrives. It is a pool each holder may CLAIM a pro-rata
+// slice of, by acting, less their fee. Mechanism-neutral on purpose (see
+// exitRoutesNote's note): true before and after the A1 contract.
 export const HOW_IT_WORKS_RESERVE_LINE =
-  'As more people buy in, the token can appreciate. Every buy adds to a reserve, and that reserve is what a wind-down pays out. Selling on the curve is a separate thing, at the curve’s price.';
+  'As more people buy in, the token can appreciate. Every buy adds to a reserve. If the market ever winds down, that reserve is all there is to redeem against, and each holder can claim a pro-rata slice of it, less their early-exit fee. Selling on the curve is a separate thing, at the curve’s price.';
 
 /**
  * The "Before you trade this token" interstitial, shown once per viewer per
@@ -297,8 +310,11 @@ export function interstitialLines(showBacking: boolean = SHOW_BACKING_FIGURES): 
 }
 
 /** The wind-down banner. Sell is closed here; Redeem is the only door. */
+// ★ 2026-08-30 (B3, copy set A): "take your pro-rata share" named a share as if
+// it were fixed and waiting. It is a slice of what the reserve holds when you
+// act, and nobody is paid out unless they act.
 export const WIND_DOWN_BANNER =
-  'This creator’s market is winding down, so buying and new asks are closed. Selling on the curve is closed too; use Redeem to take your pro-rata share of the reserve, less your early-exit fee.';
+  'This creator’s market is winding down, so buying and new asks are closed. Selling on the curve is closed too. You can Redeem for a pro-rata slice of what the reserve holds, less your early-exit fee; nothing is paid out unless you do.';
 
 /**
  * The OVERDUE banner, which is the state where the downside is about to change
@@ -358,7 +374,10 @@ export function positionSegments(tokens: string, valueUsd: number, windDownUsd: 
     { text: usdPrice(valueUsd), strong: true },
     { text: ' at today’s price · ', strong: false },
     { text: usdPrice(windDownUsd), strong: true },
-    { text: ' if this market wound down', strong: false }
+    // 2026-08-30 (B3, copy set A): the figure is what a Redeem would pay THIS
+    // holder today, net of their fee; "if this market wound down" read as an
+    // automatic payout. Same number, honest verb.
+    { text: ' if you redeemed at a wind-down today', strong: false }
   ];
 }
 

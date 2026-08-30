@@ -52,7 +52,13 @@ export const QUOTE_ORACLE_STATUS_LABEL_KEY: Record<QuoteOracleStatus, string> = 
   insufficient_span: `${NS}.quote_oracle.insufficient_span`,
   stale: `${NS}.quote_oracle.stale`,
   deviation_capped: `${NS}.quote_oracle.deviation_capped`,
-  unavailable: `${NS}.quote_oracle.unavailable`
+  unavailable: `${NS}.quote_oracle.unavailable`,
+  // H2 + H1 (2026-08-31): no posted price, and settleSpend's four guards.
+  no_price_set: `${NS}.quote_oracle.no_price_set`,
+  market_too_small: `${NS}.quote_oracle.market_too_small`,
+  price_below_floor: `${NS}.quote_oracle.price_below_floor`,
+  price_above_ceiling: `${NS}.quote_oracle.price_above_ceiling`,
+  spend_cap: `${NS}.quote_oracle.spend_cap`
 };
 
 // Banned-word list from SPEC §2.3, kept here (not enforced at runtime — no

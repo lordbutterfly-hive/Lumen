@@ -1,14 +1,20 @@
 'use client';
 
-import { FC, useEffect, useRef, useState } from 'react';
+import { FC, ReactNode, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { Service } from '../../market/token-detail';
 import { buyQuote, serviceQuote } from '../../market/curve';
 import { displayHandle } from '../../live/adapt';
 import { useLiveTokenMarket } from '../../live/use-live-token-market';
 import { useCreatorFollow } from '../../live/use-creator-follow';
+// WORK-LINK spec B3 (2026-08-30): the one profile fact this page fetches.
+// See the hook's own header for why it goes through /api/creator-profile
+// rather than a direct chain/lite read, and safe-external-link.tsx's own
+// header for why a fetched `website` can never be rendered raw.
+import { useCreatorProfileLink } from '../../live/use-creator-profile-link';
+import { SafeExternalLink, safeHostname } from '@/blog/components/safe-external-link';
 import { MarketLoading, MarketMissing, MarketReadFailed, MarketUnavailable } from '../../live/market-states';
-import { pctLabel, pctValue, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
+import { pctLabel, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
 import { priceChangeLabel } from '../../market/price-change';
 // ★★ THE RESERVE / BACKING FIGURES ARE HIDDEN FOR LAUNCH (owner, 2026-08-27).
 // One flag, every surface, JSX preserved and not rendered. See the module for
@@ -17,6 +23,9 @@ import { SHOW_BACKING_FIGURES } from '../../backing-visibility';
 import TokenShell from '../token-shell';
 import PriceChart from './price-chart';
 import TokenModals, { type TokenDialog } from './token-modals';
+import LapseBanner from './lapse-banner';
+import { lapseStateOf, DELISTED_READER_NOTICE } from '../../market/lapse';
+import { marketHealthOf, healthWordFor } from '../../market/market-health';
 // ★★★ EVERY SENTENCE ON THIS PAGE THAT MAKES A CLAIM ABOUT MONEY (2026-08-27).
 // Extracted so a self-test can read it: this is a `'use client'` tree, so copy
 // written inline here is copy no test can assert on. See disclosure-copy.ts's
@@ -88,6 +97,22 @@ function avatarFill(handle: string): string {
   return `linear-gradient(135deg,hsl(${h} 42% 42%),hsl(${(h + 40) % 360} 38% 48%))`;
 }
 
+/**
+ * WORK-LINK spec B3: "keep the loading state invisible... render nothing
+ * until it resolves, then fade the link in." The link only MOUNTS once
+ * `profileLink` has resolved (the caller gates on `!isLoading`), so a plain
+ * className toggle on an already-mounted element would never animate —
+ * this starts at `opacity-0` on first paint and flips to `opacity-100` one
+ * tick later, which is what actually produces a fade rather than a pop-in.
+ */
+function FadeIn({ children }: { children: ReactNode }) {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    setShown(true);
+  }, []);
+  return <span className={`transition-opacity duration-300 ${shown ? 'opacity-100' : 'opacity-0'}`}>{children}</span>;
+}
+
 const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   const live = useLiveTokenMarket(handle);
   const { market, status } = live;
@@ -99,6 +124,13 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   // complex expression React cannot statically check.
   const hasMarket = market !== null;
   const eligibility = useMeritumEligibility();
+  // WORK-LINK spec B3. Called unconditionally, alongside every other hook on
+  // this page, ABOVE the status-based early returns below — react-query's
+  // own cache means a visitor who already saw this creator's chip/page this
+  // session gets an instant answer, and a first-time visitor sees nothing
+  // extra render while it resolves (see the "no skeleton in a header row"
+  // note at the render site).
+  const profileLink = useCreatorProfileLink(handle);
 
   // ★ GATED ON CAPABILITY, NOT TIER (2026-08-20). This used to refuse every
   // lite account outright — correct while no wallet could sign, and wrong the
@@ -232,21 +264,19 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   if (status === 'error' || !market) return <MarketReadFailed onRetry={live.retry} />;
 
   const d = market.delivery;
-  const supplyPct = pctValue(market.supply, market.cap);
-  /**
-   * What the reader sees next to the bar. `supplyPct` drives the BAR width and
-   * must stay a number; this is the LABEL.
-   *
-   * ★ "0%" IS NOT THE SAME CLAIM AS "NONE" (QA, 2026-08-20). 31 of 100,000
-   * rounds to 0, so a market that has genuinely issued tokens announced itself
-   * as untouched. The rounding was arithmetically right and the sentence it
-   * produced was wrong, which is the worse kind of wrong on a number about
-   * money. Anything above zero but below half a percent now reads "<1%".
-   */
-  const supplyPctLabel = pctLabel(market.supply, market.cap) ?? '0%';
+  // `supplyPct` / `supplyPctLabel` (the 2026-08-20 "<1%" fix) were deleted with
+  // the supply bar they drove (owner, 2026-08-30: "get rid of it"; see the
+  // issued-count line below). Nothing on this page divides by the cap now
+  // except `soldOut`, which is a comparison, not a display.
   // Null whenever the move cannot be stated: no history, one point, an
   // unreadable point, or no positive base to measure from. The indicator then
   // renders nothing at all, on the same bound the chart uses.
+  // ★ ONE VOCABULARY FOR THIS STATE (2026-08-30). `market-health.ts` is the
+  // module that decides what a market's condition is CALLED, and it gained
+  // 'delisted' with the A1 rules. This page used to answer the same question
+  // twice with its own inline words; deriving from that module is what keeps the
+  // page, the feed chips and the profile card saying one thing.
+  const health = marketHealthOf({ phase: market.phase, canBuy: market.canBuy, windingDown: market.windingDown });
   const change = priceChangeLabel(market.priceChange);
   const avatarColor = avatarFill(handle);
 
@@ -392,6 +422,46 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
     </div>
   );
 
+  // WORK-LINK spec B3.
+  //
+  // "isOwner": is the signed-in viewer the creator THIS page belongs to.
+  // `live.signingIdentity` (use-live-token-market.ts) is already the exact
+  // vocabulary `handle` is written in — a bare `hive:` username for a full
+  // account, or a raw `did:pkh:...` for a wallet identity (see that hook's
+  // own note on why `signingIdentity`, not `viewer`, is the one that matches
+  // a wallet's URL) — so a plain equality check is correct for both account
+  // kinds with no new auth path: this reuses the exact hook the page
+  // already calls for its own write gating above.
+  const isOwner = live.signingIdentity === handle;
+  // Absent OR unsafe both render as "nothing to show" — see SafeExternalLink
+  // (B1) and /api/creator-profile (B2), which already sanitised this before
+  // it ever reached the client; recomputing the hostname here re-checks
+  // independently rather than trusting that upstream sanitisation happened.
+  const website: string = profileLink.website ?? '';
+  const workLinkHostname = website ? safeHostname(website) : null;
+  const workLink =
+    profileLink.isLoading ? null : workLinkHostname ? (
+      <FadeIn>
+        <SafeExternalLink
+          href={website}
+          className="mt-1 inline-flex max-w-full items-center gap-1 truncate text-[13px] font-medium text-ink-brand-6 hover:underline"
+        >
+          {workLinkHostname}
+        </SafeExternalLink>
+      </FadeIn>
+    ) : isOwner ? (
+      // Only the creator whose page this is sees this, and only once they
+      // have launched (this component never renders before `status ===
+      // 'ready'`) — so Studio, not the launch wizard, is always the right
+      // destination. B4 puts the actual input control there.
+      <a
+        href="/creators/studio"
+        className="mt-1 inline-flex text-[13px] font-medium text-ink-10 underline-offset-2 hover:text-ink-7 hover:underline"
+      >
+        Add a link to your work
+      </a>
+    ) : null;
+
   return (
     <TokenShell rightRail={rightRail} back={{ href: '/creators', label: '← All creators' }}>
       {/* 1. Creator header */}
@@ -405,6 +475,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               the Hive profile is not read on this route yet. The demo showed
               both from a fixture. Rendering a made-up one-liner under someone's
               name is the worst kind of fabrication — it reads as their words. */}
+          {workLink}
         </div>
         {/* Only offered to someone who can actually follow, and disabled while the
             real state is unknown — this button used to be pure browser memory and
@@ -420,6 +491,31 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           </button>
         ) : null}
       </div>
+
+      {/* ★★★ THE CREATOR'S OWN LAPSE NOTICE (2026-08-30). Above the reader-facing
+          banners below on purpose: when a market has stopped taking buyers, the
+          person who can DO something about it is the owner, and their instruction
+          should not sit under a paragraph addressed to somebody else. Renders for
+          nobody else — every sentence in it says "your market".
+          `lapseStateOf` returns `unknown` for a failed or unanswered read and the
+          banner draws nothing for it: a creator must never be told their market is
+          delisted because one read failed. */}
+      {isOwner ? (
+        <LapseBanner
+          state={lapseStateOf({
+            phase: market.phase,
+            paidUntilBlock: market.paidUntilBlock,
+            graceExpiresAtBlock: market.graceExpiresAtBlock,
+            headBlock: market.headBlock,
+            windingDown: market.windingDown
+          })}
+          renewRefusal={market.renewRefusal}
+          creator={handle}
+          paidUntilBlock={market.paidUntilBlock}
+          onRenew={() => live.renew(1)}
+          busy={live.isRenewing}
+        />
+      ) : null}
 
       {/* Wind-down banner (design brief ui-prompts/tokens/1-TOKEN-PAGE.md,
           WIND-DOWN/FROZEN state): tells a visitor WHY buying/asking is closed
@@ -449,6 +545,37 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               when there is no number to quote, which is how the sentence avoids
               ending "(currently  a token)" on an untraded market. */}
           {overdueBanner(overdueFigures(backingPerTokenValue(market.floorUsd, market.supply), market.priceUsd))}
+        </div>
+      ) : health === 'delisted' && !isOwner ? (
+        // ★ NOT FOR THE OWNER. Measured on the demo build: with both mounted, a
+        // creator on their own delisted page got two stacked amber blocks saying
+        // the same thing in two voices — theirs ("Your market is not taking
+        // buyers. Renew to reactivate it.", with the pay button) and this one,
+        // addressed to a visitor. The owner's is the actionable one, so this
+        // yields to it. They cannot both be absent: `marketHealthOf` and
+        // `lapseStateOf` agree on this state by construction (both key
+        // 'delisted' off a natural FROZEN), which is the agreement 59's
+        // 24-cell check pins.
+        // ★★★ THE BUYER HALF OF DELISTING (2026-08-30). We built the creator's
+        // notice and left the reader with nothing: a disabled Buy, a state badge,
+        // and no sentence anywhere saying why — observed on the running demo
+        // build, where the word "Delisted" appeared nowhere on the page and the
+        // nearest explanation was "Sign in to trade", which masks the real reason
+        // with a different one. That is the dead-control fault this feature has
+        // already fixed on six other surfaces.
+        //
+        // Reachable ONLY under the A1 rules, which is what makes the sentence
+        // safe: `health === 'delisted'` is market-health.ts's natural-FROZEN case,
+        // and a natural FROZEN is a wind-down under v1 — so under v1 the
+        // wind-down banner above fires instead and this never renders. That is
+        // also why it can say selling is unaffected: on the only rules where this
+        // is reachable, the curve sell rail is open.
+        //
+        // It says NOTHING about what a lapse does to money already held. See
+        // DELISTED_READER_NOTICE's own doc: that answer differs between the two
+        // contracts, so a sentence would be wrong in one direction or the other.
+        <div className="mb-4 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-warn-3">
+          {DELISTED_READER_NOTICE}
         </div>
       ) : market.delinquentUntilBlock !== null ? (
         // delivery.go: RequireInflowOpen also refuses while a creator is
@@ -592,16 +719,21 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               </div>
             </div>
             ) : null}
-            <div className="mt-[18px]">
-              <div className="mb-1.5 flex justify-between text-caption tabular-nums text-ink-10">
-                <span>
-                  {market.supply.toLocaleString('en-US')} of {market.cap.toLocaleString('en-US')} tokens issued
-                </span>
-                <span>{supplyPctLabel}</span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-md bg-surface-23">
-                <div className="h-full bg-surface-info-9" style={{ width: `${supplyPct}%` }} />
-              </div>
+            {/* ★★ THE CAP IS GONE FROM THIS LINE AND THE BAR UNDER IT IS DELETED
+                (owner, 2026-08-30: "get rid of it"; studio checklist B1, extended
+                to this page by the lead session). Every market launched since
+                `STANDARD_CAP` became the contract's MaxCap read "0 of
+                1,000,000,000 tokens issued" over a bar at a permanent 0%, and a
+                ceiling nobody reaches is not information. The ISSUED count is
+                real and stays. The one market where "of 30" carried a fact,
+                `hbd-temp` at 30 of 30, keeps that fact through `soldOut`
+                (:146, `supply >= cap`, a comparison that never read this
+                string): the Buy button below reads "Sold out" on its own.
+                The words "tokens issued" are kept verbatim because two
+                selftests slice this file on them (price-change.selftest.ts,
+                disclosure-copy.selftest.ts). */}
+            <div className="mt-[18px] text-caption tabular-nums text-ink-10">
+              {market.supply.toLocaleString('en-US')} tokens issued
             </div>
             <div className="mt-5 flex gap-3">
               {/* ★★★ THE SOLD-OUT REASON BELONGS HERE, NOT IN THE MODAL (corrected 2026-08-23).
@@ -645,25 +777,61 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
             {/* REAL history, from the Magi indexer's lumen_ct_price_history view
                 (supply per trade -> price through the same ported curve the buy
                 button uses, never a second copy of the formula).
-                `chart` is null when the history could not be read OR when there
-                is only one point — one point would draw a flat line, which
-                claims the price held steady when we only know one moment. There
-                are no range buttons: the view returns trades, not a time series,
-                so "1D / 1W / 1M" would be filters over data we cannot honestly
-                bucket by time yet. */}
+                `chart` is null when the history could not be read OR when the
+                market has never traded — a lone point would draw a flat line,
+                which claims the price held steady when we only know one moment.
+                There are no range buttons: the view returns trades, not a time
+                series, so "1D / 1W / 1M" would be filters over data we cannot
+                honestly bucket by time yet.
+
+                ★★★ THE CAPTION COUNTS TRADES, NOT POINTS (2026-08-30). It read
+                `market.chart.length`, which was the same number until
+                `readPriceHistory` began prepending the market's OPENING price —
+                the fix for the owner's "theres no chart in the market",
+                reproduced on @hbd-temp: 30 of 30 tokens issued, SOLD OUT, and
+                the panel below said the market had not traded more than once.
+                With the opening point in the array, `chart.length` would print
+                "2 trades" under a market that traded once. `chartTrades` is the
+                count of points that are actually trades. */}
             {market.chart ? (
               <>
                 <PriceChart points={market.chart} />
                 <div className="mt-2 text-center text-caption tabular-nums text-ink-14">
-                  {market.chart.length} trades · price is set by the curve, not by a last-traded quote
+                  {market.chartTrades ?? market.chart.length} {(market.chartTrades ?? market.chart.length) === 1 ? 'trade' : 'trades'} · price is
+                  set by the curve, not by a last-traded quote
                 </div>
               </>
             ) : (
               <div className="flex h-full min-h-[160px] flex-col justify-center rounded-card border border-dashed border-line-11 px-5 py-6 text-center">
-                <div className="text-[14px] leading-[22px] font-semibold text-ink-10">No price history yet</div>
-                <p className="mt-1 text-caption italic text-ink-14">
-                  The price above is live from the curve. A chart appears once this market has traded more than once.
-                </p>
+                {/* ★★★ TWO DIFFERENT CLAIMS, AND ONLY ONE IS SAFE TO MAKE DURING AN
+                    OUTAGE (2026-08-30). The comment that used to sit here asserted
+                    "this panel is reached only by a market that has never traded".
+                    That invariant did not hold: an adversarial sweep aborted the
+                    indexer at the network layer and reloaded /creators/@hbd-temp,
+                    a market that has traded and is 100% sold out, and this panel
+                    told the reader it had never traded. `historyUnavailable` is
+                    the same distinction the position card and the delivery card
+                    already make on this very screen — which is why "Delivery
+                    record unavailable" rendered correctly during the same outage
+                    while this one lied. */}
+                {live.historyUnavailable ? (
+                  <>
+                    <div className="text-[14px] leading-[22px] font-semibold text-ink-10">
+                      Price history unavailable
+                    </div>
+                    <p className="mt-1 text-caption italic text-ink-14">
+                      We could not load this market&apos;s trade history just now. The price above is live from
+                      the curve. This says nothing about whether the market has traded.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-[14px] leading-[22px] font-semibold text-ink-10">No price history yet</div>
+                    <p className="mt-1 text-caption italic text-ink-14">
+                      The price above is live from the curve. A chart appears as soon as this market has traded.
+                    </p>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -758,12 +926,14 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                     price, and `pctLabel` reads "<1%" rather than a false "0%" for
                     the ordinary case, so a healthy market says something honest
                     and quiet instead of nothing. */}
+                {/* ★ The "· <1% of all 1,000,000,000" share clause that followed the
+                    token count is DELETED (owner, 2026-08-30, same ruling as the
+                    supply line above). It was added 2026-08-27 for a world of
+                    30 / 500 / 100,000 caps; at MaxCap it read "<1%" on every
+                    service of every new market, which is noise beside a price. */}
                 {market.priceUsd > 0 ? (
                   <div className="text-caption tabular-nums text-ink-14">
                     ≈ {tok(serviceQuote(sv.usd, market.priceUsd).tokens)} tokens
-                    {market.cap > 0
-                      ? ` · ${pctLabel(serviceQuote(sv.usd, market.priceUsd).tokens, market.cap) ?? '0%'} of all ${market.cap.toLocaleString('en-US')}`
-                      : ''}
                   </div>
                 ) : (
                   <div className="text-caption text-ink-14">token cost unavailable</div>
@@ -773,7 +943,18 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 // ask.go Ask -> RequireInflowOpen: closed for the whole wind-down, the same gate Buy is behind.
                 <span className="flex-shrink-0 rounded-full bg-surface-warn-4 px-3 py-1.5 text-caption font-semibold text-ink-warn-3">Winding down</span>
               ) : !market.canAsk ? (
-                <span className="flex-shrink-0 rounded-full bg-surface-warn-4 px-3 py-1.5 text-caption font-semibold text-ink-warn-3">Paused</span>
+                /* ★ THE WORD COMES FROM market-health.ts, NOT FROM HERE
+                   (2026-08-30). This rendered a hardcoded "Paused" for every
+                   reason a service could be unbuyable, which after A1 included a
+                   LAPSED listing — so the page said "Paused" while the feed chip
+                   and the profile card said "Delisted", two words for one state
+                   on one screen, and "paused" implies somebody switched it off
+                   rather than a bill going unpaid. `healthWordFor` is the same
+                   function those surfaces use; a new state gets a word there,
+                   never a second branch here. */
+                <span className="flex-shrink-0 rounded-full bg-surface-warn-4 px-3 py-1.5 text-caption font-semibold text-ink-warn-3">
+                  {healthWordFor(health) ?? 'Paused'}
+                </span>
               ) : (
                 <button
                   onClick={() => openAsk(sv)}
@@ -878,6 +1059,8 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           live.ask({ offeringId, contentHash: askReference(question), deadlineDays, maxCostUsd: usd })
         }
         onTransfer={(to, tokens) => live.transfer(to, tokens)}
+        // Priced when the dialog OPENS, not after the click — see AskModal's askQuote doc.
+        quoteAsk={live.quoteAsk}
         onClose={() => {
           // The risk warning counts as read only once it is dismissed — see the
           // interstitial effect above for why it is not marked on render.

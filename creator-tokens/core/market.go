@@ -99,7 +99,9 @@ import "math/big"
 // can surface "this market is retiring at block X". A NATURAL-lapse OVERDUE
 // window is different: it is recoverable (a fan can Renew it back to ACTIVE),
 // so it KEEPS the curve rail and its inflows — inWindDown fires ONLY on a
-// deliberate Retire or a genuine FROZEN/CLOSED, never on a mere late payment.
+// deliberate Retire or a stored CLOSED, never on a late payment. (A1,
+// 2026-08-30: a natural FROZEN is an inflow stop, not a wind-down; it used to
+// be listed here alongside CLOSED. See inWindDown's own doc.)
 func Phase(s Store, creator string, block uint64) string {
 	if getStr(s, kState(creator)) == StateClosed {
 		return StateClosed
@@ -215,9 +217,11 @@ func marketRetired(s Store, creator string) bool {
 //     first-mover race; K3 drops it. Retire is irreversible (Renew refuses on
 //     the mark, RequireInflowOpen refuses on the mark), so flat pro-rata here
 //     can never strand raidable excess — nothing will ever buy back in.
-//   - naturally FROZEN or CLOSED — the subscription lapsed past its grace, or
-//     the market drained (CloseIfDrained). Also terminal within an
-//     incarnation (Register requires CLOSED to start fresh).
+//   - stored CLOSED — the market drained (CloseIfDrained, retired road only
+//     since A1). Terminal within an incarnation (Register requires CLOSED to
+//     start fresh). A naturally FROZEN market used to be listed here; A1
+//     (2026-08-30) made a lapse an inflow stop the creator can lift by
+//     renewing, so it is deliberately NOT a wind-down any more.
 //
 // A NATURAL-lapse OVERDUE window is deliberately FALSE here: it is recoverable
 // (Renew lifts it back to ACTIVE), so it keeps the curve rail and its inflows.
@@ -230,12 +234,24 @@ func inWindDown(s Store, creator string, block uint64) bool {
 	if marketRetired(s, creator) {
 		return true
 	}
-	switch Phase(s, creator, block) {
-	case StateFrozen, StateClosed:
-		return true
-	default:
-		return false
-	}
+	// ★★ A1 (owner ruling 2026-08-30): NON-PAYMENT NEVER WINDS A MARKET DOWN.
+	// `StateFrozen` used to be listed here, so a lapsed subscription, after its
+	// 5-day grace, dropped every holder's curve exit (sell.go) and opened the
+	// flat pro-rata Refund rail against them (refund.go) for a bill that was
+	// the CREATOR's. The owner's words: "no wind-downs", "just delisting",
+	// "doesn't seem in line with tokens under control of community". A
+	// natural FROZEN is now an INFLOW STOP only — requireMarketAcceptsMoney
+	// still refuses Buy/Ask on it, which is the whole reason a creator ever
+	// renews — while Sell stays on the curve and Renew (its own gate,
+	// requireMarketAcceptsRenewal) can lift it back to ACTIVE at any time.
+	// Wind-down is reached by exactly two roads now: a deliberate Retire
+	// (above) or a stored CLOSED (below, written only by the wind-down
+	// completing in refund.go:640, which itself requires wind-down — so it
+	// is reachable only through Retire). This is also what makes reviving a
+	// FROZEN market SAFE: no holder can have been pro-rata-refunded out of it,
+	// so the trading invariant R === area(S) is intact when it resumes
+	// (refund.go's header on why a half-refunded market must never trade).
+	return Phase(s, creator, block) == StateClosed
 }
 
 // windDownOpenBlock returns the block at which the market's CURRENT continuous
@@ -281,38 +297,29 @@ func windDownOpenBlock(s Store, creator string, block uint64) (uint64, bool) {
 	if !inWindDown(s, creator, block) {
 		return 0, false
 	}
-	// natFreeze is the natural-lapse wind-down trigger: the block the
-	// subscription's grace expired, from the CURRENT paidUntil. It is a genuine
-	// continuous-wind-down anchor whenever the market HAS a subscription
-	// (paidUntil != 0), INDEPENDENT of retire status — a naturally FROZEN market
-	// can never be lifted back out (Renew refuses on a FROZEN phase,
-	// RequireInflowOpen), so from natFreeze on the wind-down is unbroken.
-	paidUntil := getU64(s, kPaidUntil(creator))
-	natFreeze := paidUntil + GraceBlocks
+	// ★★ ONE ANCHOR NOW (A1, 2026-08-30). With a natural FROZEN no longer a
+	// wind-down (inWindDown above), the only way into wind-down is Retire, so
+	// the clock starts at retiredAt and nowhere else. The WINDDOWN-RESET-1
+	// min(retiredAt, naturalFreeze) fold that used to live here — needed
+	// because a market could freeze first and be retired later, and the later
+	// retire must not re-arm RefundHolder's force-push immunity — has nothing
+	// left to fold: a lapsed market that is later retired enters wind-down AT
+	// the retire, not before, because before it nothing was winding down (its
+	// holders could still sell on the curve the whole time). The case did not
+	// get fixed, it dissolved; its test (fixround3_test.go) is replaced by one
+	// that asserts exactly this.
 	if retiredAt, retired := retiredAtBlock(s, creator); retired {
-		// A market can only continuously wind down from the EARLIER of its two
-		// triggers, so anchor to whichever fired FIRST (WINDDOWN-RESET-1, FIX
-		// ROUND 3):
-		//   - retire-before-freeze (retiredAt <= natFreeze): the market entered
-		//     wind-down at Retire; the natural freeze is later (or in the
-		//     future) and never actually froze anything — min == retiredAt, the
-		//     old shortcut, UNCHANGED (no premature push introduced here).
-		//   - freeze-before-retire (natFreeze < retiredAt): the market was
-		//     ALREADY continuously winding down (FROZEN, un-renewable) BEFORE
-		//     Retire; anchoring to the later retiredAt would silently re-arm the
-		//     RefundHolder DoS backstop for (retiredAt − natFreeze) blocks. Anchor
-		//     to natFreeze — the block wind-down TRULY began.
-		// The paidUntil != 0 guard keeps a market that never carried a real
-		// subscription (natFreeze == GraceBlocks spuriously; only reachable via a
-		// direct test poke — Register always sets paidUntil, market.go) from
-		// mis-anchoring to that phantom freeze; it falls back to retiredAt.
-		if paidUntil != 0 && natFreeze < retiredAt {
-			return natFreeze, true
-		}
 		return retiredAt, true
 	}
-	// naturally FROZEN/CLOSED (not retired): the grace-expiry block.
-	return natFreeze, true
+	// Stored CLOSED with no retire mark. refund.go:640 writes CLOSED only from
+	// inside a wind-down, which now requires Retire, so this branch is
+	// unreachable on state written by this code. It is kept for state written
+	// by the PREVIOUS ladder (a market that naturally froze and fully wound
+	// down before this change shipped): anchor to the block its grace expired,
+	// which is where that old wind-down began. Nothing is pushed early — a
+	// closed market has no live supply to push.
+	paidUntil := getU64(s, kPaidUntil(creator))
+	return paidUntil + GraceBlocks, true
 }
 
 // RetiredAt is the exported read of the retire mark for the wasm wrapper,
@@ -414,6 +421,62 @@ func requireMarketAcceptsMoney(s Store, creator string, block uint64) error {
 		return nil
 	default:
 		return newErr(ErrState, "market inflow is not open (frozen or closed)")
+	}
+}
+
+// requireMarketAcceptsRenewal is Renew's own gate (A1, 2026-08-30): the global
+// pause and a retire mark refuse exactly as requireMarketAcceptsMoney does,
+// but FROZEN is ADMITTED, because a natural FROZEN is now an inflow stop the
+// subscription payment is meant to lift (inWindDown's doc). CLOSED still
+// refuses: a closed market has wound down and re-registers instead. Kept as a
+// separate function rather than a flag on requireMarketAcceptsMoney so that
+// Buy and Ask can never inherit the FROZEN admission by accident — that
+// admission is the one thing that would remove the reason anyone renews.
+func requireMarketAcceptsRenewal(s Store, creator string, block uint64) error {
+	if globalInflowPaused(s) {
+		return newErr(ErrPaused, "inflows are globally paused")
+	}
+	if marketRetired(s, creator) {
+		return newErr(ErrState, "market is retiring: new inflows are closed (exits remain open via flat pro-rata Refund)")
+	}
+	switch Phase(s, creator, block) {
+	case StateActive, StateOverdue:
+		return nil
+	case StateFrozen:
+		// ★★★ THE REVIVAL CHECK (PRUNED 2026-08-30 H16, found by clauderfly-43;
+		// placed here by clauderfly-59). Reviving a FROZEN market is the ONLY
+		// transition from "inflows closed" back to "Buy admitted": paidUntil is
+		// written by nothing but Renew and Register, and Register refuses a
+		// non-CLOSED market. So this branch, not Buy and not Phase, is where a
+		// market that froze under the PREVIOUS rules re-enters trading. Under
+		// those rules a natural FROZEN was a wind-down and flat pro-rata
+		// Refund/RefundHolder were OPEN on it; pro-rata pays the AVERAGE R/S
+		// while the curve's top slice is worth more, so a partial refund leaves
+		// R > area(S), an unallocated surplus that belonged to the remaining
+		// holders' backing. Reviving that market reopens Buy against a reserve
+		// the curve does not account for: a buyer enters at area prices and
+		// exits into the surplus (43 measured raider net +21,104 on a 500-token
+		// market with 450 refunded). The A1 argument "no holder can have been
+		// refunded out of a frozen market" is true only for markets frozen
+		// under A1; this check is what makes it true for every market.
+		// REFUSAL SHAPE, decided rather than defaulted: refuse revival, name the
+		// reason, point at the road that still exists (Retire, whose pro-rata
+		// wind-down pays the surplus to the remaining holders, the people it
+		// belongs to, then re-register). Sweeping the surplus to the treasury
+		// would take the remaining holders' backing; distributing it needs a
+		// payout mechanism the contract does not have; silently reviving hands
+		// it to a raider. Both directions are refused: a deficit (R < area)
+		// is corrupt state and sell.go already refuses to trade on it.
+		supply := getMoney(s, kSupply(creator))
+		reserve := getMoney(s, kReserve(creator))
+		if c := reserve.Cmp(Area(supply)); c > 0 {
+			return newErr(ErrState, "market cannot be revived: it carries a wind-down surplus from partial refunds under the previous rules (reserve above curve area); retire it so the surplus is paid out pro-rata to its holders, then re-register")
+		} else if c < 0 {
+			return newErr(ErrState, "market cannot be revived: reserve below curve area (equality invariant violated, state corrupt)")
+		}
+		return nil
+	default:
+		return newErr(ErrState, "market is closed; re-register instead")
 	}
 }
 
@@ -792,11 +855,16 @@ func Renew(s Store, caller, creator string, block uint64, periods uint64, paid *
 	if marketRetired(s, creator) {
 		return newErr(ErrState, "market is retiring; the wind-down is terminal and cannot be renewed back to life (re-register after it closes)")
 	}
-	// requireMarketAcceptsMoney, NOT RequireInflowOpen: a delivery penalty must
-	// never stop a creator paying their subscription (see that function's doc —
-	// doing so ran a 7-day penalty past the 5-day grace and destroyed the market
-	// permanently).
-	if err := requireMarketAcceptsMoney(s, creator, block); err != nil {
+	// requireMarketAcceptsRenewal, NOT requireMarketAcceptsMoney and NOT
+	// RequireInflowOpen (A1, 2026-08-30). Renew has its own gate because it is
+	// the ONE inflow a FROZEN market must accept: a lapse is an inflow stop
+	// that the creator lifts by paying, so refusing the payment on the phase
+	// the payment exists to cure made "pay to reactivate" a lie on the very
+	// screen that says it (the memo A1-DECISION-MEMO-2026-08-30.md has the
+	// lines). The delivery-penalty reasoning is unchanged: a delinquency must
+	// never stop a creator paying their subscription (the 7-day penalty that
+	// outlived the 5-day grace and destroyed a market permanently).
+	if err := requireMarketAcceptsRenewal(s, creator, block); err != nil {
 		return err
 	}
 

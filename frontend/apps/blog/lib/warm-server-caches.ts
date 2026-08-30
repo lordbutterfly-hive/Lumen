@@ -1,6 +1,7 @@
 import { getLogger } from '@ui/lib/logging';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
 import { getCommunitiesCached, getDynamicGlobalPropertiesCached } from '@/blog/lib/cached-api';
+import { getTrendingTagsCached } from '@/blog/lib/trending-tags';
 
 const logger = getLogger('app');
 
@@ -76,6 +77,15 @@ export function warmServerCaches(): void {
 
   void Promise.all([
     warm('communities', () => getCommunitiesCached('rank', null, DEFAULT_OBSERVER)),
-    warm('dynamic-global-properties', () => getDynamicGlobalPropertiesCached())
+    warm('dynamic-global-properties', () => getDynamicGlobalPropertiesCached()),
+    /*
+     * ★ THE RIGHT RAIL'S TOPIC LIST (2026-08-30). Global, identical for every
+     * reader, and now PREFETCHED INTO THE HTML by app/layout.tsx — which means a
+     * cold entry is no longer just a slow sidebar, it is 600ms of prefetch
+     * deadline that the first readers after a restart would each race and lose.
+     * Warming it here means they never race it at all. Same argument as the
+     * community list above, and the same swallowed failure.
+     */
+    warm('trending-tags', () => getTrendingTagsCached())
   ]);
 }

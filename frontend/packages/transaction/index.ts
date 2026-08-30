@@ -3,6 +3,7 @@
 // module on every page. `@hiveio/wax` ships exactly ONE entry point
 // (wasm/dist/bundle/web.js) that bundles that WASM module — there is no lighter
 // "just the operation-builder classes" import path, so ANY plain, non-`type`
+import { mergePostingJsonMetadata } from './lib/merge-posting-json-metadata';
 // import from '@hiveio/wax' anywhere in this file's static graph drags the whole
 // thing along. Every name below that this file only ever uses as a TYPE is
 // imported with the per-specifier `type` modifier, which TypeScript erases at
@@ -50,6 +51,10 @@ import type { Beneficiarie, Preferences } from '@hive/common-hiveio-packages/wax
 // broadcastAndObserveTransaction(), the only method that ever constructs one.
 import type { IWorkerBee } from '@hiveio/workerbee';
 import { getLogger } from '@hive/ui/lib/logging';
+// Plain string constant, no wax/runtime dependency of its own — safe as a
+// normal (non-`type`) import, it cannot reintroduce the WASM bundle the
+// split above exists to avoid.
+import { LUMEN_APP_METADATA } from './lib/attribution';
 
 const logger = getLogger('app');
 
@@ -717,7 +722,20 @@ export class TransactionService {
       parentPermlink,
       author: this.signerOptions.username,
       body,
-      permlink: `re-${parentAuthor.replaceAll('.', '-')}-${Date.now()}`
+      permlink: `re-${parentAuthor.replaceAll('.', '-')}-${Date.now()}`,
+      // ★ Without this, wax's own `extendDefaultJsonMetadata` fills the gap
+      // with its OWN identity (`app: "@hiveio/wax/<version>"`), not ours —
+      // confirmed empirically (constructing a bare `ReplyOperation` and
+      // reading back `.jsonMetadata`), since `comment()` never set this
+      // field at all. Every comment broadcast from a full Hive account
+      // therefore announced itself on chain as wax, never as Lumen — the
+      // same fork already applied to `post()` below on 2026-08-06, missed
+      // here. This is also what drives `PostedViaLumen`
+      // (`features/post-rendering/posted-via-lumen.tsx`,
+      // `isLumenProxiedEntry`): without `app: 'lumen/1.0'` here, the
+      // attribution line silently never rendered under a single full-account
+      // comment.
+      jsonMetadata: { app: LUMEN_APP_METADATA }
     };
 
     if (preferences.comment_rewards === '100%') {
@@ -754,7 +772,14 @@ export class TransactionService {
       parentPermlink,
       author: this.signerOptions.username,
       body,
-      jsonMetadata: {},
+      // ★ Was `{}` — which still means "no app of ours", since wax's own
+      // `extendDefaultJsonMetadata` only fills in ITS OWN identity when the
+      // caller supplies none of its own, and an empty object IS a supplied
+      // value (`optionalJsonMeta.app ?? '@hiveio/wax/<version>'`). Same
+      // finding and same fix as `comment()` above: every EDIT of a full
+      // account's comment was re-wiping any app identification the comment
+      // may have carried, on every single save.
+      jsonMetadata: { app: LUMEN_APP_METADATA },
       permlink
     });
 
@@ -833,7 +858,7 @@ export class TransactionService {
         // about what app the reader was using. Changed 2026-08-06 at the owner's
         // instruction, kept identical to the lite string so anything grouping by
         // `app` sees one product.
-        app: 'lumen/1.0',
+        app: LUMEN_APP_METADATA,
         ...(extraJsonMetadata ?? {})
       }
     });
@@ -867,7 +892,7 @@ export class TransactionService {
       jsonMetadata: {
         ...(summary ? { summary } : {}),
         // Same string as post() above — an edit must not relabel the post.
-        app: 'lumen/1.0',
+        app: LUMEN_APP_METADATA,
         ...(extraJsonMetadata ?? {})
       }
     });
@@ -947,17 +972,53 @@ export class TransactionService {
     blacklist_description?: string,
     muted_list_description?: string,
     version: number = 2, // signal upgrade to posting_json_metadata
-    transactionOptions: TransactionOptions = {}
+    transactionOptions: TransactionOptions = {},
+    /**
+     * ★★★ THE ACCOUNT'S CURRENT `posting_json_metadata`, VERBATIM (2026-08-30).
+     *
+     * WHY THIS PARAMETER EXISTS. This method used to serialise a FRESH object of
+     * exactly the eleven keys below and broadcast it as the account's whole
+     * `posting_json_metadata`. Anything else the account carried was destroyed on
+     * chain, irreversibly, under a success toast.
+     *
+     * That is not theoretical. Measured across 108 real Hive accounts drawn from
+     * recent posts: 66 of them, SIXTY-ONE PERCENT, carry at least one profile key
+     * outside the enumerated set — `pinned` (somebody's pinned post), `tokens`,
+     * `badges`, `reputation`, `collections`, `dtube_pub`, `portfolio`, `trail`,
+     * `maps`, `birthday`, and plain social links like `twitter` and `instagram`.
+     * Other Hive apps' state and the user's own links, gone.
+     *
+     * The defect predates the creator-token work and is shared with account
+     * settings. What changed today is WHO reaches it: a creator saving a link to
+     * their work from the Meritum launch card, who has no reason to think they are
+     * rewriting their Hive profile.
+     *
+     * Pass the account's existing `posting_json_metadata` and everything not named
+     * below survives, at both levels: unknown keys INSIDE `profile`, and unknown
+     * TOP-LEVEL keys (the old code replaced the entire document with `{profile}`).
+     * Omit it and the old destructive behaviour is preserved rather than silently
+     * changed — but every caller in this repo passes it, and a new caller that does
+     * not is the thing to catch in review.
+     */
+    existingPostingJsonMetadata?: string
   ) {
+    /*
+     * Parse defensively: this is chain data, it can be empty, malformed, or not an
+     * object at all. A parse failure must fall back to "preserve nothing extra",
+     * which is exactly the old behaviour — never to throwing, because that would
+     * turn a cosmetic profile save into a hard failure.
+     */
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation({
         account_update2_operation: {
           account: this.signerOptions.username,
           extensions: [],
+          // ★ NOT a second wipe: hived only assigns `json_metadata` when the field
+          // is non-empty, so an empty string leaves the account's own json_metadata
+          // untouched. Verified rather than assumed.
           json_metadata: '',
-          posting_json_metadata: JSON.stringify({
-            profile: {
-              profile_image,
+          posting_json_metadata: mergePostingJsonMetadata(existingPostingJsonMetadata, {
+            profile_image,
               cover_image,
               name,
               about,
@@ -966,9 +1027,8 @@ export class TransactionService {
               witness_owner,
               witness_description,
               blacklist_description,
-              muted_list_description,
-              version
-            }
+            muted_list_description,
+            version
           })
         }
       });

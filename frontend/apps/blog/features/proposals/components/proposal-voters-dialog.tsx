@@ -46,7 +46,7 @@ interface Props {
 export default function ProposalVotersDialog({ proposalId, children }: Props) {
   const { t } = useTranslation('common_blog');
   const [open, setOpen] = useState(false);
-  const { voters, total, isLoading, isError, hasData, refetch } = useProposalVoters(proposalId, open);
+  const { voters, total, isLoading, isError, hasData, isRetrying, refetch } = useProposalVoters(proposalId, open);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -90,10 +90,11 @@ export default function ProposalVotersDialog({ proposalId, children }: Props) {
             <button
               type="button"
               onClick={() => refetch()}
-              className="rounded-control border border-line-11 bg-surface-1 px-4 py-2 font-sans text-caption font-semibold text-ink-7 transition-colors hover:bg-surface-16"
+              disabled={isRetrying}
+              className="rounded-control border border-line-11 bg-surface-1 px-4 py-2 font-sans text-caption font-semibold text-ink-7 transition-colors hover:bg-surface-16 disabled:cursor-not-allowed disabled:opacity-60"
               data-testid="proposal-voters-dialog-retry"
             >
-              {t('proposals.voters_dialog.retry')}
+              {isRetrying ? t('proposals.voters_dialog.retrying') : t('proposals.voters_dialog.retry')}
             </button>
           </div>
         ) : voters.length === 0 ? (

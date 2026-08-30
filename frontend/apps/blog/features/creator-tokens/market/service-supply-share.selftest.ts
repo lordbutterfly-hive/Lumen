@@ -9,41 +9,48 @@
  * Run:
  *   cd apps/blog && npx tsx features/creator-tokens/market/service-supply-share.selftest.ts
  *
- * WHAT THIS PROVES, AND WHY IT WOULD HAVE CAUGHT THE DEFECT.
+ * WHAT THIS PROVES.
  *
- * Nothing anywhere related an offering's price to `kCap`. `serviceQuote` answers
- * "how many tokens does this cost"; no code asked "how many tokens are there".
- * The contract does not close the gap either — offerings.go validates the title
- * and the price band and never consults the cap — so there was no on-chain
- * backstop and no client check, in either the Studio's create form, its price
- * editor, or the Meritum launch wizard.
+ * Nothing on chain relates an offering's price to `kCap` (offerings.go validates
+ * the title and the price band and never consults the cap), so the client is the
+ * only place a creator can be told they have priced a service at more tokens than
+ * can ever exist. That is the one refusal left: UNFILLABLE, `tokens > cap`.
  *
- * The numbers below are not invented. They are the LIVE testnet state, read from
- * the deployed contract (vsc1BcaD8JrwJPAAN5cU1cHKCBdZrd7jz2WGt8) on 2026-08-27:
+ * ★★ WHAT THIS FILE USED TO PROVE, AND WHY IT NO LONGER DOES (2026-08-30, B2).
+ * Until today the guard also refused OVER-SHARE, a service above 10% of the cap,
+ * and this file asserted that a $15 service on the live 30-cap market (14 tokens,
+ * 47%) was refused. The owner reported that refusal as an error "that should
+ * never fire", and it was proven on the live testnet state (all 13 discovery
+ * markets through the real function) to fire on his own `hive:hbd-temp` market
+ * (cap 30, supply 30, face $25 -> 18 tokens = 60%) for every service price at or
+ * above $4.26. The 10% heuristic was removed; see market/curve.ts. The sections
+ * below are rewritten to the narrower contract. Section 1 now asserts the
+ * OPPOSITE of what it did: the 47% case is ALLOWED, and this file would fail if
+ * the heuristic ever came back unannounced.
  *
+ * The live numbers (deployed contract vsc1BcaD8JrwJPAAN5cU1cHKCBdZrd7jz2WGt8,
+ * read 2026-08-27 and re-read 2026-08-30):
+ *
+ *   hive:hbd-temp                  cap 30,      supply 30, face 25.000 HBD, no offerings
  *   did:pkh:eip155:1:0xB41f…980B   cap 30,      supply 0,  offering #1 = 15.000 HBD
  *   did:pkh:eip155:1:0xc965…Cb6a   cap 500,     supply 0,  face 20.000 HBD, no offerings
  *   hive:lumen.beat                cap 100,000, supply 50, offerings 55.000 / 12.000 HBD
  *
- * and the 30-cap figure was confirmed in the rendered DOM of
- * /creators/did%3Apkh%3Aeip155%3A1%3A0xB41f… , which printed
- * "≈ 14.00 tokens" beside "$15" under "0 of 30 tokens issued".
- *
- * VACUOUS-PASS GUARD. Section 0 asserts the fixture itself still reproduces the
- * defect — 14 tokens against a 30 cap — before anything is checked about the
- * guard. If the curve, the commission split or the opening price ever move so
- * that this input is no longer 47% of supply, this file FAILS rather than
- * quietly testing a case that no longer exists.
+ * VACUOUS-PASS GUARD. Section 0 asserts the fixture itself still costs 14 tokens
+ * against a 30 cap before anything is checked about the guard. If the curve, the
+ * commission split or the opening price ever move so that this input is no
+ * longer 47% of supply, this file FAILS rather than quietly testing a case that
+ * no longer exists.
  */
 
-import {
-  MAX_SERVICE_SUPPLY_SHARE_BPS,
-  displayPriceUsd,
-  serviceQuote,
-  serviceSupplyShare,
-  serviceSupplyShareProblem
-} from './curve';
+import { displayPriceUsd, serviceQuote, serviceSupplyShare, serviceSupplyShareProblem } from './curve';
 import { pctLabel } from './format';
+// The REAL launch cap and the REAL price ceiling, imported rather than retyped —
+// section 3b below is only honest if it moves when the owner moves them.
+// launch-money.ts is plain math + contract-math constants, no React, so a node
+// script can import it directly.
+import { MAX_PRICE_USD, STANDARD_CAP } from '../ui/launch-money';
+import { MAX_CAP_CREDITS_BASE_UNITS } from '../lib/contract-math';
 
 let failures = 0;
 let checks = 0;
@@ -62,7 +69,7 @@ function check(name: string, condition: boolean, detail?: string): void {
 // button charges for the first token. Read from the curve, never hardcoded.
 const OPENING = displayPriceUsd(0);
 
-// ── 0. THE FIXTURE STILL REPRODUCES THE DEFECT. If this section fails, every
+// ── 0. THE FIXTURE STILL COSTS WHAT IT COST. If this section fails, every
 //       assertion below is testing a case that no longer exists.
 const live30 = serviceQuote(15, OPENING).tokens;
 check(
@@ -76,91 +83,100 @@ check(
   `got ${Math.round((live30 / 30) * 100)}%`
 );
 
-// ── 1. THE DEFECT. Before the fix nothing refused this; the assertion is that
-//       something does now, and that it is the over-share fault specifically.
+// ── 1. THE OWNER'S CASE IS ALLOWED. This is the assertion that FAILED on the
+//       pre-2026-08-30 code: the 10% heuristic refused it. If it ever fails
+//       again, the heuristic is back.
 const thirtyCap = serviceSupplyShare(15, OPENING, 30);
 check('30-cap / $15 service is judged at all (not null)', thirtyCap !== null);
-check('30-cap / $15 service is flagged over-share', thirtyCap?.overShare === true);
+check('30-cap / $15 service is NOT unfillable: 14 tokens of 30 can exist', thirtyCap?.unfillable === false);
+check('30-cap / $15 share is still reported, informationally, as 4667 bps', thirtyCap?.shareBps === 4667, `got ${thirtyCap?.shareBps}`);
 check(
-  '30-cap / $15 service is NOT reported unfillable — it is buyable, just ruinous',
-  thirtyCap?.unfillable === false,
-  'conflating "consumes the market" with "cannot be bought" would misreport the fault'
-);
-check(
-  '30-cap / $15 share is reported as 4667 bps',
-  thirtyCap?.shareBps === 4667,
-  `got ${thirtyCap?.shareBps}`
-);
-check(
-  'the creation-time guard refuses it',
-  serviceSupplyShareProblem(15, OPENING, 30) !== null,
-  'THIS is the assertion that fails on the pre-fix code: the function did not exist and nothing else refused'
-);
-check(
-  'the refusal names the creator’s own numbers, not a generic rule',
-  (() => {
-    const msg = serviceSupplyShareProblem(15, OPENING, 30) ?? '';
-    return msg.includes('14') && msg.includes('30') && msg.includes('47%');
-  })(),
+  '★ the creation-time guard does NOT refuse it (this refusal is what the owner saw flashing)',
+  serviceSupplyShareProblem(15, OPENING, 30) === null,
   `got: ${serviceSupplyShareProblem(15, OPENING, 30)}`
 );
+{
+  // hbd-temp exactly as read on 2026-08-30: cap 30, supply 30 (price at supply 30), face $25.
+  const hbdTempPrice = displayPriceUsd(30);
+  const face = serviceSupplyShare(25, hbdTempPrice, 30);
+  check('hbd-temp: the $25 face costs 18 tokens of 30 at supply 30', face?.tokens === 18, `tokens=${face?.tokens}`);
+  check('hbd-temp: the $25 face is ALLOWED (it used to be refused at 60%)', serviceSupplyShareProblem(25, hbdTempPrice, 30) === null);
+  // Sweep every price a person can type on that market; only prices whose token
+  // cost exceeds the cap may be refused, and every one of those MUST be.
+  let wrongRefusal: number | null = null;
+  let missedRefusal: number | null = null;
+  for (let cents = 1; cents <= MAX_PRICE_USD * 100; cents += 1) {
+    const usd = cents / 100;
+    const tokens = serviceQuote(usd, hbdTempPrice).tokens;
+    const refused = serviceSupplyShareProblem(usd, hbdTempPrice, 30) !== null;
+    if (tokens > 0 && tokens <= 30 && refused && wrongRefusal === null) wrongRefusal = usd;
+    if (tokens > 30 && !refused && missedRefusal === null) missedRefusal = usd;
+  }
+  check('hbd-temp: NO fillable price is refused, at any price a person can type', wrongRefusal === null, `first wrong refusal at $${wrongRefusal}`);
+  check('hbd-temp: EVERY unfillable price is refused', missedRefusal === null, `first missed refusal at $${missedRefusal}`);
+}
 
-// ── 2. UNFILLABLE is a DIFFERENT fault and must be reported as one. A $100
-//       service on the same 30-token market costs 88 tokens — more than can
-//       ever exist, so no buyer can reach it at any supply.
+// ── 2. UNFILLABLE is the one fault that survives. A $100 service on the same
+//       30-token market costs 88 tokens — more than can ever exist, so no buyer
+//       can reach it at any supply, and buy.go will not mint past the cap.
 const unfillable = serviceSupplyShare(100, OPENING, 30);
 check('$100 on a 30-cap market is unfillable', unfillable?.unfillable === true, `tokens=${unfillable?.tokens}`);
-check('an unfillable service is over-share too (it exceeds every threshold)', unfillable?.overShare === true);
 check(
-  'the unfillable refusal says nobody could buy it, not merely that it is large',
-  (serviceSupplyShareProblem(100, OPENING, 30) ?? '').includes('Nobody could buy it'),
+  'the unfillable refusal says nobody could buy it, and names the creator’s own numbers',
+  (() => {
+    const msg = serviceSupplyShareProblem(100, OPENING, 30) ?? '';
+    return msg.includes('nobody could buy it') && msg.includes('88') && msg.includes('30');
+  })(),
   `got: ${serviceSupplyShareProblem(100, OPENING, 30)}`
 );
+check('the refusal carries no em dash (house rule for copy written today)', !/[–—]/.test(serviceSupplyShareProblem(100, OPENING, 30) ?? ''));
+{
+  // The boundary is the cap itself: tokens == cap is fillable, tokens == cap + 1 is not.
+  const cap = 30;
+  let lastAllowed: number | null = null;
+  let firstRefused: number | null = null;
+  for (let cents = 1; cents <= 20_000; cents += 1) {
+    const usd = cents / 100;
+    const tokens = serviceQuote(usd, OPENING).tokens;
+    if (tokens === cap && serviceSupplyShareProblem(usd, OPENING, cap) === null) lastAllowed = usd;
+    if (tokens === cap + 1 && firstRefused === null && serviceSupplyShareProblem(usd, OPENING, cap) !== null) firstRefused = usd;
+  }
+  check('a service costing exactly the cap is ALLOWED', lastAllowed !== null, 'no price costing exactly 30 tokens was allowed');
+  check('a service costing one token more than the cap is REFUSED', firstRefused !== null, 'no price costing 31 tokens was refused');
+}
 
-// ── 3. ORDINARY PRICING IS UNTOUCHED. A guard that fires on the healthy case is
-//       worse than no guard: it blocks creators from pricing their own work.
-//       lumen.beat's two real offerings, at its real supply of 50.
+// ── 3. ORDINARY PRICING IS UNTOUCHED. lumen.beat's two real offerings, at its
+//       real supply of 50, and the two other legacy caps.
 const beatPrice = displayPriceUsd(50);
 check('lumen.beat $55 service is allowed', serviceSupplyShareProblem(55, beatPrice, 100_000) === null);
 check('lumen.beat $12 service is allowed', serviceSupplyShareProblem(12, beatPrice, 100_000) === null);
-check(
-  'a $50 service on the wizard’s STANDARD_CAP of 5,000 is allowed',
-  serviceSupplyShareProblem(50, OPENING, 5_000) === null,
-  'this is the regime the owner’s 2026-08-08 cap ruling designs for; refusing it would be a false positive'
-);
-check(
-  'the 500-cap market’s $20 face price is allowed',
-  serviceSupplyShareProblem(20, OPENING, 500) === null,
-  `18 tokens of 500 = 3.6%, comfortably inside the bound`
-);
+check('a $50 service on the OLD launch cap of 5,000 is allowed', serviceSupplyShareProblem(50, OPENING, 5_000) === null);
+check('the 500-cap market’s $20 face price is allowed', serviceSupplyShareProblem(20, OPENING, 500) === null);
 
-// ── 4. THE THRESHOLD IS A BOUNDARY, NOT A VIBE. Exactly at the limit passes;
-//       one token past it fails. Proven by construction rather than by a
-//       hand-picked pair, so it cannot drift when the constant is retuned.
-check('the threshold constant is 10%', MAX_SERVICE_SUPPLY_SHARE_BPS === 1_000);
+// ── 3b. THE LAUNCH CAP IS MaxCap (owner, 2026-08-30) AND THIS GUARD IS SILENT
+//        THERE. Asserted, not merely noted: if an owner ever re-tightens the
+//        launch cap, these flip and say so.
+check(
+  'STANDARD_CAP is the contract’s MaxCap, imported not retyped',
+  STANDARD_CAP === MAX_CAP_CREDITS_BASE_UNITS && STANDARD_CAP === 1_000_000_000,
+  `got ${STANDARD_CAP}`
+);
 {
-  const cap = 1_000;
-  // tokens == 100 is exactly 10% of 1,000 — allowed. tokens == 101 is over.
-  const atLimit = serviceSupplyShare(100 * OPENING * 0.88, OPENING, cap);
+  let firstRefused: number | null = null;
+  for (let cents = 1; cents <= MAX_PRICE_USD * 100; cents += 1) {
+    if (serviceSupplyShareProblem(cents / 100, OPENING, STANDARD_CAP) !== null) {
+      firstRefused = cents / 100;
+      break;
+    }
+  }
   check(
-    'a service costing exactly the threshold share is ALLOWED',
-    atLimit !== null && atLimit.tokens <= 100 && atLimit.overShare === false,
-    `tokens=${atLimit?.tokens} shareBps=${atLimit?.shareBps}`
-  );
-  const overLimit = serviceSupplyShare(140 * OPENING * 0.88, OPENING, cap);
-  check(
-    'a service costing more than the threshold share is REFUSED',
-    overLimit !== null && overLimit.overShare === true,
-    `tokens=${overLimit?.tokens} shareBps=${overLimit?.shareBps}`
+    'at the launch cap the guard refuses NOTHING a creator can type ($0.01–$' + MAX_PRICE_USD + ')',
+    firstRefused === null,
+    `first refused price: $${firstRefused}`
   );
 }
-check(
-  'the threshold is a parameter, so an owner can retune it without touching logic',
-  serviceSupplyShareProblem(15, OPENING, 30, 5_000) === null && serviceSupplyShareProblem(15, OPENING, 30, 100) !== null,
-  'at a 50% bound the live case passes; at 1% it fails'
-);
 
-// ── 5. NEVER GUESSES. A guard that fires on a value it does not have would
+// ── 4. NEVER GUESSES. A guard that fires on a value it does not have would
 //       block a creator's own pricing during an ordinary failed read — the
 //       exact "unavailable is not empty" rule this feature is built on.
 check('no cap => cannot judge', serviceSupplyShare(15, OPENING, 0) === null);
@@ -172,14 +188,10 @@ check('no service price => cannot judge', serviceSupplyShare(0, OPENING, 30) ===
 check('negative service price => cannot judge', serviceSupplyShare(-15, OPENING, 30) === null);
 check(
   'every un-judgeable input produces NO refusal, not a refusal',
-  [
-    serviceSupplyShareProblem(15, OPENING, 0),
-    serviceSupplyShareProblem(15, 0, 30),
-    serviceSupplyShareProblem(0, OPENING, 30)
-  ].every((m) => m === null)
+  [serviceSupplyShareProblem(15, OPENING, 0), serviceSupplyShareProblem(15, 0, 30), serviceSupplyShareProblem(0, OPENING, 30)].every((m) => m === null)
 );
 
-// ── 6. ONE QUOTE FUNCTION. The share must be derived from `serviceQuote`, not
+// ── 5. ONE QUOTE FUNCTION. The share must be derived from `serviceQuote`, not
 //       from a second cost formula — the "third, wrong way to quote the same
 //       offering" the Studio was already bitten by (2026-08-21, an 11% gap
 //       between the creator's screen and the buyer's).
@@ -196,11 +208,10 @@ for (const [usd, price, cap] of [
   );
 }
 
-// ── 7. THE FIGURE THE TOKEN PAGE NOW PRINTS BESIDE EACH SERVICE PRICE.
-//       This is the ITEM-2 half: the cap was already on the page ("0 of 30
-//       tokens issued") but nowhere near the service prices, where the token
-//       count is meaningless without it. Asserts the VALUE the label renders —
-//       it does not mount the component, and does not claim to.
+// ── 6. THE FIGURE THE TOKEN PAGE PRINTS BESIDE EACH SERVICE PRICE. Asserts the
+//       VALUE the label renders — it does not mount the component, and does not
+//       claim to. (Whether that label should survive the cap ruling at all is a
+//       separate, open question for the token page; see the studio checklist.)
 check(
   'the 30-cap service label reads 47%',
   pctLabel(serviceQuote(15, OPENING).tokens, 30) === '47%',

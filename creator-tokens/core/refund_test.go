@@ -31,6 +31,25 @@ func forceFrozen(s Store, creator string) {
 	setU64(s, kPaidUntil(creator), 50)
 }
 
+// forceWindDown puts a market into WIND-DOWN, which since A1 (owner ruling
+// 2026-08-30, market.go inWindDown) is reachable by exactly one road: Retire.
+// A natural lapse is an inflow stop now, not a wind-down — a lapsed market
+// keeps its curve Sell and its Renew, and the pro-rata Refund rails refuse on
+// it. So every fixture in this file whose SUBJECT is the refund/pro-rata
+// arithmetic (not the ladder) enters wind-down the way a real market does,
+// with a retire mark, instead of by letting the subscription lapse. The mark
+// is kRetiredAt = block+1 (kRetiredAt's "0 means never" encoding), placed at
+// block 1 so every wdBlock these fixtures use (50+GraceBlocks+1 and later) is
+// past the retire notice and reads FROZEN via Phase's MAX fold, exactly as
+// before. forceFrozen (the paidUntil write) is kept alongside so the natural
+// ladder still reads FROZEN too; the tests that assert the ladder itself
+// (TestRefundHolder_RegressionActiveRevertsLapseRefusesRetiredPays and the
+// A1 tests in a1_lapse_test.go) use forceFrozen alone on purpose.
+func forceWindDown(s Store, creator string) {
+	forceFrozen(s, creator)
+	setU64(s, kRetiredAt(creator), 1+1)
+}
+
 // wdNet computes the NET wind-down payout a holder receives under RULING K2:
 // the gross pro-rata floor(R·c/S) MINUS the hold-time exit tax the wind-down
 // now carries (K2). It reads the PRE-refund state, so call it before the
@@ -259,7 +278,7 @@ func TestRefund_HappyPath_NoCommission(t *testing.T) {
 	setMoney(s, kSupply(creator), big.NewInt(1000))
 	setMoney(s, kReserve(creator), big.NewInt(1000))
 	setMoney(s, kBal(creator, "alice"), big.NewInt(300))
-	forceFrozen(s, creator)
+	forceWindDown(s, creator)
 
 	// WIND-DOWN BLOCK. Refund is the wind-down rail and is phase-routed to
 	// FROZEN/CLOSED (refund.go's rail reconciliation — during ACTIVE/OVERDUE
@@ -312,7 +331,7 @@ func TestRefund_FullBalanceDrainsToZero(t *testing.T) {
 	setMoney(s, kSupply(creator), big.NewInt(250))
 	setMoney(s, kReserve(creator), big.NewInt(250))
 	setMoney(s, kBal(creator, "alice"), big.NewInt(250))
-	forceFrozen(s, creator)
+	forceWindDown(s, creator)
 
 	// WIND-DOWN BLOCK. Refund is the wind-down rail and is phase-routed to
 	// FROZEN/CLOSED (refund.go's rail reconciliation — during ACTIVE/OVERDUE
@@ -355,7 +374,7 @@ func TestRefund_BulkRefundNotCrippledByPerCreditRounding(t *testing.T) {
 	setMoney(s, kSupply(creator), big.NewInt(1000))
 	setMoney(s, kReserve(creator), big.NewInt(999)) // ratio 0.999
 	setMoney(s, kBal(creator, "alice"), big.NewInt(1000))
-	forceFrozen(s, creator)
+	forceWindDown(s, creator)
 
 	if price := RefundPrice(s, creator); !mIsZero(price) {
 		t.Fatalf("test setup assumption broken: RefundPrice = %s, want 0 (floor(999/1000))", price)
@@ -390,11 +409,14 @@ func TestRefund_BulkRefundNotCrippledByPerCreditRounding(t *testing.T) {
 // Refund — must work in every phase, including FROZEN, and while paused.
 // ---------------------------------------------------------------------------
 
-func TestRefund_WorksWhileFrozenAndGloballyPaused(t *testing.T) {
+// A1 (2026-08-30): "FROZEN" here means the RETIRED wind-down (forceWindDown);
+// a natural FROZEN is no longer a wind-down and Refund refuses on it (see
+// a1_lapse_test.go). The subject, outflows never pause, is unchanged.
+func TestRefund_WorksWhileRetiredAndGloballyPaused(t *testing.T) {
 	s := NewMemStore()
 	creator := "refundcreatord"
 	setupMarket(s, creator, 100, MaxCap)
-	forceFrozen(s, creator)
+	forceWindDown(s, creator)
 	setStr(s, kState(creator), StateFrozen)
 	setStr(s, kPaused(), "1") // global inbound pause set
 
@@ -425,7 +447,7 @@ func TestRefund_WorksWhileFrozenAndGloballyPaused(t *testing.T) {
 // entire point of the supply cap as a "speculation switch" (SPEC §1.3):
 // holders were never safe from an unwanted forced exit until the market
 // itself actually wound down.
-func TestRefundHolder_RegressionActiveRevertsFrozenPays(t *testing.T) {
+func TestRefundHolder_RegressionActiveRevertsLapseRefusesRetiredPays(t *testing.T) {
 	s := NewMemStore()
 	const creator = "h3activereverts"
 	const holder = "h3holder"
@@ -496,6 +518,16 @@ func TestRefundHolder_RegressionActiveRevertsFrozenPays(t *testing.T) {
 	if got := Phase(s, creator, frozenBlock); got != StateFrozen {
 		t.Fatalf("sanity: phase = %s, want FROZEN", got)
 	}
+	// ★ A1 (2026-08-30): a NATURAL FROZEN is an inflow stop, not a wind-down.
+	// The push must REFUSE here — the holder's exit is still the curve — and
+	// only a deliberate Retire opens the pro-rata rail. This is the assertion
+	// that fails on the pre-A1 code (it paid here).
+	if _, err := RefundHolder(s, pusher, creator, holder, frozenBlock); err == nil || errSymbol(err) != ErrState {
+		t.Fatalf("A1: RefundHolder on a natural FROZEN must be refused (no wind-down on lapse), err=%v", err)
+	}
+	if err := Retire(s, creator, creator, frozenBlock); err != nil {
+		t.Fatalf("Retire on a lapsed market must be legal: %v", err)
+	}
 	remaining := getMoney(s, kBal(creator, holder))
 	// Under the curve, TOKENS and HBD are different units — the payout is
 	// the flat pro-rata floor(R·bal/S), NOT the token count (which is what
@@ -507,7 +539,7 @@ func TestRefundHolder_RegressionActiveRevertsFrozenPays(t *testing.T) {
 	wantNet, _, _ := wdNet(s, creator, holder, frozenBlock, remaining)
 	payout, err := RefundHolder(s, pusher, creator, holder, frozenBlock)
 	if err != nil {
-		t.Fatalf("RefundHolder must succeed once FROZEN: %v", err)
+		t.Fatalf("RefundHolder must succeed once RETIRED: %v", err)
 	}
 	if payout.Cmp(wantNet) != 0 {
 		t.Fatalf("payout = %s, want the net pro-rata share %s (gross − K2 tax) for the holder's %s tokens", payout, wantNet, remaining)
@@ -517,11 +549,12 @@ func TestRefundHolder_RegressionActiveRevertsFrozenPays(t *testing.T) {
 	}
 }
 
-func TestRefundHolder_WorksWhileFrozenAndGloballyPaused(t *testing.T) {
+// A1 (2026-08-30): same note as TestRefund_WorksWhileRetiredAndGloballyPaused.
+func TestRefundHolder_WorksWhileRetiredAndGloballyPaused(t *testing.T) {
 	s := NewMemStore()
 	creator := "refundcreatore"
 	setupMarket(s, creator, 100, MaxCap)
-	forceFrozen(s, creator)
+	forceWindDown(s, creator)
 	setStr(s, kState(creator), StateFrozen)
 	setStr(s, kPaused(), "1")
 
@@ -617,7 +650,7 @@ func TestRefund_CorruptStateSupplyZeroButBalancePositive(t *testing.T) {
 	setMoney(s, kBal(creator, "alice"), big.NewInt(50))
 	setMoney(s, kReserve(creator), big.NewInt(50))
 	// kSupply(creator) left completely unset => 0.
-	forceFrozen(s, creator)
+	forceWindDown(s, creator)
 
 	_, err := Refund(s, "alice", creator, 50+GraceBlocks+1, big.NewInt(10))
 	if err == nil {
@@ -637,7 +670,7 @@ func TestRefund_LargeAmountsBeyondInt64(t *testing.T) {
 	setMoney(s, kSupply(creator), big1)
 	setMoney(s, kReserve(creator), big1) // 1:1 fixture, arbitrary magnitude
 	setMoney(s, kBal(creator, "alice"), big1)
-	forceFrozen(s, creator)
+	forceWindDown(s, creator)
 
 	wantNet, gross, _ := wdNet(s, creator, "alice", 50+GraceBlocks+1, big2)
 	payout, err := Refund(s, "alice", creator, 50+GraceBlocks+1, big2)
@@ -681,6 +714,7 @@ func TestRefundHolder_PaysHolderNotCaller(t *testing.T) {
 	// orthogonal to the tax; the fresh-holder-rejected case is covered in
 	// TestRefundHolder_EXITTAX1_FreshPushRefused.
 	setU64(s, kAcqBlock(creator, "holderx"), 1)
+	forceWindDown(s, creator) // A1: wind-down is reached by Retire, not by lapse
 	pushBlock := ExitTaxDecayBlocks + GraceBlocks
 	wantNet, _, _ := wdNet(s, creator, "holderx", pushBlock, big.NewInt(400))
 	payout, err := RefundHolder(s, "callerz", creator, "holderx", pushBlock)
@@ -716,6 +750,7 @@ func TestRefundHolder_ZeroBalanceNoop(t *testing.T) {
 	// H3 defect fix: RefundHolder now gates on Phase==FROZEN/CLOSED even for
 	// the zero-balance no-op path (the phase check runs before the balance
 	// read) — see GraceBlocks note in TestRefundHolder_PaysHolderNotCaller.
+	forceWindDown(s, creator) // A1: wind-down is reached by Retire, not by lapse
 	payout, err := RefundHolder(s, "pusher1", creator, "unheldholder", GraceBlocks)
 	if err != nil {
 		t.Fatalf("RefundHolder on a zero balance should not error: %v", err)
@@ -776,7 +811,7 @@ func TestCloseIfDrained_ClosesWhenFrozenAndSupplyZero(t *testing.T) {
 	s := NewMemStore()
 	creator := "closecreatora"
 	setupMarket(s, creator, 100, MaxCap)
-	forceFrozen(s, creator)
+	forceWindDown(s, creator)
 
 	block := uint64(50 + GraceBlocks + 1)
 	if !CloseIfDrained(s, creator, block) {
@@ -804,7 +839,7 @@ func TestCloseIfDrained_FrozenButSupplyNonzeroIsNoop(t *testing.T) {
 	s := NewMemStore()
 	creator := "closecreatorc"
 	setupMarket(s, creator, 100, MaxCap)
-	forceFrozen(s, creator)
+	forceWindDown(s, creator)
 	setMoney(s, kSupply(creator), big.NewInt(1)) // still owes somebody
 
 	block := uint64(50 + GraceBlocks + 1)
@@ -820,7 +855,7 @@ func TestCloseIfDrained_Idempotent(t *testing.T) {
 	s := NewMemStore()
 	creator := "closecreatord"
 	setupMarket(s, creator, 100, MaxCap)
-	forceFrozen(s, creator)
+	forceWindDown(s, creator)
 	block := uint64(50 + GraceBlocks + 1)
 
 	if !CloseIfDrained(s, creator, block) {
@@ -833,20 +868,46 @@ func TestCloseIfDrained_Idempotent(t *testing.T) {
 
 // TestCloseIfDrained_ExactFrozenBoundary pins the precise boundary Phase()
 // documents (market.go): FROZEN begins AT block == paidUntil+GraceBlocks, not
-// strictly after it. One block earlier must still be OVERDUE (no-op); the
-// boundary block itself must already be FROZEN (closes).
+// strictly after it. One block earlier must still be OVERDUE.
+//
+// ★ A1 (owner ruling 2026-08-30) changes what the boundary DOES: a natural
+// FROZEN is an inflow stop, not a wind-down, so CloseIfDrained is a NO-OP on
+// it at every block (refund.go CloseIfDrained's marketRetired check) — a
+// lapsed market whose holders all sold on the now-open curve must stay
+// recoverable by Renew. Only a RETIRED market's FROZEN completes a wind-down,
+// and for that the retire mark is placed at the SAME block as paidUntil so the
+// retired ladder's boundary coincides with the natural one and the
+// one-block-early / at-the-block pair is pinned on both ladders at once.
 func TestCloseIfDrained_ExactFrozenBoundary(t *testing.T) {
 	s := NewMemStore()
 	creator := "closecreatore"
 	setupMarket(s, creator, 100, MaxCap)
-	forceFrozen(s, creator) // kPaidUntil = 50
+	forceFrozen(s, creator) // kPaidUntil = 50, NOT retired
 
 	boundary := uint64(50 + GraceBlocks)
+	if got := Phase(s, creator, boundary-1); got != StateOverdue {
+		t.Fatalf("one block before the boundary: phase = %s, want OVERDUE", got)
+	}
+	if got := Phase(s, creator, boundary); got != StateFrozen {
+		t.Fatalf("at the boundary: phase = %s, want FROZEN", got)
+	}
+	// A1: never closes on a natural FROZEN — not at the boundary, not ever.
+	for _, b := range []uint64{boundary - 1, boundary, boundary + 10*ExitTaxDecayBlocks} {
+		if CloseIfDrained(s, creator, b) {
+			t.Fatalf("A1: CloseIfDrained at block %d closed a lapsed (never retired) market", b)
+		}
+	}
+	if got := getStr(s, kState(creator)); got == StateClosed {
+		t.Fatal("kState was set to CLOSED on a lapsed market")
+	}
+
+	// Retired at block 50: the retired ladder freezes at 50+GraceBlocks too.
+	setU64(s, kRetiredAt(creator), 50+1)
 	if CloseIfDrained(s, creator, boundary-1) {
-		t.Fatal("one block before the boundary must still be OVERDUE, not FROZEN")
+		t.Fatal("one block before the boundary a retired market is still in its OVERDUE notice; must not close")
 	}
 	if !CloseIfDrained(s, creator, boundary) {
-		t.Fatal("exactly at paidUntil+GraceBlocks must already be FROZEN")
+		t.Fatal("exactly at retiredAt+GraceBlocks a drained retired market must close")
 	}
 }
 
@@ -925,6 +986,7 @@ func TestSolvency_FullUnwind(t *testing.T) {
 		// (kPaidUntil == 0) so it is FROZEN for any block >= GraceBlocks, and it
 		// is a full ExitTaxDecayBlocks past each holder's clock (block 1) so every
 		// permissionless push is a fully-decayed 0-tax sweep (EXITTAX-1 gate).
+		forceWindDown(s, creator) // A1: wind-down is reached by Retire, not by lapse
 		windDownBlock := ExitTaxDecayBlocks + GraceBlocks
 
 		totalPaid := big.NewInt(0)
@@ -1039,7 +1101,7 @@ func TestSolvency_NoParCap_FullUnwindDrainsTheWholeReserve(t *testing.T) {
 	s := NewMemStore()
 	creator := "strandedcreator"
 	holder := "onlyholder01"
-	forceFrozen(s, creator) // the wind-down rail (refund.go's phase routing)
+	forceWindDown(s, creator) // the wind-down rail (refund.go's phase routing)
 
 	supply := big.NewInt(10)
 	reserve := big.NewInt(35)

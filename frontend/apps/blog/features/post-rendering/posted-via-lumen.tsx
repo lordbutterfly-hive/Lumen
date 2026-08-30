@@ -1,4 +1,5 @@
 import { isLumenProxiedEntry } from '@/blog/lib/lite/render/lite-post-id';
+import { hasAttributionFooter } from '@transaction/lib/attribution';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -24,6 +25,17 @@ import { isLumenProxiedEntry } from '@/blog/lib/lite/render/lite-post-id';
  * detection is the half that matters, because a wrong answer there attributes
  * our brand to a stranger's words.
  *
+ * ★★ IT NEVER DOUBLES UP WITH THE ON-CHAIN FOOTER. Posts and comments broadcast
+ * through Lumen carry `*Posted via Lumen*` in the BODY itself, so the text
+ * travels to peakd, ecency and hive.blog, which render it as ordinary post
+ * content. Those frontends therefore show attribution exactly once. Lumen showed
+ * it TWICE — the body footer, then this byline underneath. Owner, 2026-08-28:
+ * "only make it show up once ... dont make it show twice." So when the body
+ * already carries the footer, this renders nothing and the footer is the single
+ * copy; when it does not (a lite entry rendered from our own DB, where the
+ * footer is only added at broadcast time), this byline is the single copy.
+ * Exactly one, on every surface, either way.
+ *
  * ★ IT IS NOT A BADGE. No border, no chip, no background: it is a byline, set
  * in the same italic the product uses for asides, at the quietest ink that still
  * clears AA. The lite quill in the byline already says "this account is Lumen";
@@ -34,11 +46,18 @@ export default function PostedViaLumen({
   entry,
   className
 }: {
-  /** The post or comment being rendered. Nothing renders when it is not ours. */
-  entry: Parameters<typeof isLumenProxiedEntry>[0];
+  /**
+   * The post or comment being rendered. Nothing renders when it is not ours,
+   * and nothing renders when its body already carries the attribution footer.
+   * `body` is optional so the absent case fails SAFE: an entry shape without a
+   * body falls through to rendering the byline, which is one attribution — the
+   * opposite mistake (suppressing on a missing field) would show none at all.
+   */
+  entry: Parameters<typeof isLumenProxiedEntry>[0] & { body?: string };
   className?: string;
 }) {
   if (!isLumenProxiedEntry(entry)) return null;
+  if (hasAttributionFooter(entry?.body)) return null;
 
   return (
     <p

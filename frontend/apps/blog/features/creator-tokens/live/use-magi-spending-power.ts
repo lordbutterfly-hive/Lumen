@@ -33,7 +33,7 @@ import {
   type AffordabilityReason,
   type MagiSpendingPower
 } from '@/blog/lib/lite/wallet/magi-balance';
-import { rcLimitForAction } from '../lib/vsc/rc-budget';
+import { RC_COST_BY_ACTION, checkRcBudget, describeRcBudget, rcLimitForAction } from '../lib/vsc/rc-budget';
 import { getCreatorTokensConfig } from '../lib/creator-tokens-data-source';
 
 /**
@@ -72,7 +72,14 @@ import { getCreatorTokensConfig } from '../lib/creator-tokens-data-source';
  *
  * Narrow it only by measuring again, never by guessing downward.
  */
-export const MAGI_MIN_RC_FOR_A_CALL = rcLimitForAction('buy');
+// ★ THE FLOOR IS THE CHEAPEST ACTION, NOT `buy` (H7, 2026-08-31). It used to be
+// `rcLimitForAction('buy')`, so a creator with enough RC to renew (~1,039) but
+// not to buy (~4,265) was told "no resource credits" and could not pay their
+// subscription — the same trap as blocking a debtor from paying, closed twice
+// elsewhere in this codebase. `cannotTransact` must mean "cannot send ANYTHING",
+// so it is the minimum declared cost over every action; each control is then
+// gated on its OWN action cost in `affordability`, never on this global floor.
+export const MAGI_MIN_RC_FOR_A_CALL = Math.min(...Object.keys(RC_COST_BY_ACTION).map((a) => rcLimitForAction(a)));
 
 /**
  * ★ RE-BASED ON MEASUREMENT, 2026-08-21. The 10,000 above it was the smallest
@@ -127,6 +134,13 @@ export interface MagiSpendingPowerState {
    * Defaults to 'buy', the only cost this was ever called with before.
    */
   affordability: (costBaseUnits: number, action?: string) => AffordabilityReason | 'unknown';
+  /**
+   * H6 (2026-08-31): the ACTIONABLE remedy for a spending refusal — exactly how
+   * much HBD to add and that credit refills on its own — rather than the bare
+   * category. `describeRcBudget` produced this sentence and nothing rendered it.
+   * Null when there is nothing to remedy (affordable, or power unread).
+   */
+  remedy: (hbdLegBaseUnits: number, action?: string) => string | null;
 }
 
 export function useMagiSpendingPower(account: string | null): MagiSpendingPowerState {
@@ -157,10 +171,24 @@ export function useMagiSpendingPower(account: string | null): MagiSpendingPowerS
     cannotTransact: power !== null && power.rc.amount < MAGI_MIN_RC_FOR_A_CALL,
     affordability: (costBaseUnits: number, action = 'buy') => {
       if (power === null) return 'unknown';
-      if (power.rc.amount < MAGI_MIN_RC_FOR_A_CALL) return 'no_resource_credits';
-      // The SAME ceiling `buildOp` will declare for this action — passed through
-      // so the reservation is counted against the balance alongside the purchase.
-      return checkAffordable(power, costBaseUnits, rcLimitForAction(action));
+      // H7 (2026-08-31): gate on THIS action's declared cost, not the global buy
+      // floor. The node accepts a call whose rc_limit <= available RC per action,
+      // so a renew the chain would take at ~1,039 must not be refused because a
+      // buy needs ~4,265. `actionLimit` is also the SAME ceiling `buildOp` will
+      // declare, so the reservation is counted against the balance alongside it.
+      const actionLimit = rcLimitForAction(action);
+      if (power.rc.amount < actionLimit) return 'no_resource_credits';
+      return checkAffordable(power, costBaseUnits, actionLimit);
+    },
+    remedy: (hbdLegBaseUnits: number, action = 'buy') => {
+      if (power === null) return null;
+      const budget = checkRcBudget({
+        action,
+        availableRc: power.rc.amount,
+        balanceBaseUnits: power.balance.hbdBaseUnits,
+        hbdLegBaseUnits
+      });
+      return describeRcBudget(budget, action);
     }
   };
 }

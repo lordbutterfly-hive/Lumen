@@ -74,7 +74,7 @@
  * on 2026-08-21 moved the sender from 24,011 available RC to 22,105, i.e. 1,906
  * actually charged against 1,910 simulated. The simulator is trustworthy here.
  *
- * ★ ONLY THESE SIX ARE MEASURED. Every other write falls to `RC_COST_FALLBACK`.
+ * ★ ONLY THESE SEVEN ARE MEASURED (renew added 2026-08-30). Every other write falls to `RC_COST_FALLBACK`.
  * Do not invent a row; measure it with `simulateContractCalls` and paste the
  * number, the way these were.
  *
@@ -85,12 +85,148 @@
  * failure happens. So the expensive mistake is under-declaring the ceiling, never
  * sending a call the contract will reject outright.
  */
+/**
+ * ★★ RE-MEASURED 2026-08-30 WITH A WALLET-DID CALLER (clauderfly-57, the node's
+ * own WASM dry run, same instrument as the 08-21 table). The 08-21 figures were
+ * taken with a 15-character Hive name; a `did:pkh:eip155:1:0x…` caller is 47
+ * characters and is concatenated into EVERY state key the call writes, and
+ * the node charges by bytes written. Measured on evm4's real market:
+ *
+ *   createOffering (DID)   3,332-3,345    vs the shipped limit 2,993 (2,394 x 1.25)
+ *   buy 1 token, supply 0  3,095          vs 2,253 (1,802 x 1.25)
+ *   renew                    812          (fallback was 6,000 x 1.25 = 7,500)
+ *
+ * The first two were LIVE FAILURES: an out-of-gas run burns the whole granted
+ * budget and persists nothing, so every wallet-rail offering creation charged
+ * the user and did nothing. Table entries are the DEARER reading per action so
+ * the 25% margin clears the DID case; a Hive caller simply over-declares, which
+ * only costs balance headroom. `buy` was measured against a ZERO-supply market
+ * (the first buy touches keys a later one does not): re-measure against a
+ * traded market before trusting it further, and never lower it below this.
+ * `renew` at 812 closes studio checklist S5 without a broadcast: the RC hold
+ * against the same HBD that pays the bill drops from 7,500 to 1,015, so a
+ * creator no longer needs ~17.5 HBD in hand to pay a 10 HBD subscription.
+ */
+/**
+ * ★★★ RE-MEASURED AGAIN 2026-08-30 (clauderfly-43), and THREE ROWS WERE STILL TOO
+ * LOW after the DID pass above. Same instrument (`simulateContractCalls`, the
+ * node's own WASM dry run against the deployed testnet contract), but taken at the
+ * actual worst case rather than a representative one. There are THREE cost terms,
+ * not one, and the 08-30 DID pass only found the first:
+ *
+ *   1. CALLER IDENTITY LENGTH, which the pass above found. But `did:pkh:eip155`
+ *      is NOT the longest identity — a Bitcoin one is. `did:pkh:bip122:<32 hex>:
+ *      <bech32>` is 90 characters against an EVM DID's 59 and a Hive name's 15,
+ *      and four of them already hold tokens on this contract, so it is reachable
+ *      today, not hypothetical.
+ *   2. FREE-TEXT FIELD LENGTH. `createOffering` cost scales with the TITLE, and
+ *      the contract's own bound is MaxOfferTitleLen = 64 (core/params.go:156).
+ *      Measured on one BTC identity: a 2-character title costs 3,129 and a
+ *      64-character one costs 5,693. The 3,345 entry above was a short title, so
+ *      every offering with a title longer than roughly 40 characters still failed
+ *      at gas. A user-controlled field that moves the cost must be measured AT ITS
+ *      OWN LIMIT, never at a typical value.
+ *   3. MARKET FRESHNESS, which the pass above already flagged for `buy` and which
+ *      applies to `sell` too: the first trade on a zero-supply market touches keys
+ *      a later one does not.
+ *
+ * Measured, BTC identity (90 chars), max-length titles, zero-supply market where
+ * it applies — every number below is a real `rc_used` from the node:
+ *
+ *   register + firstBuy 20   7,859   <- vs the shipped limit 4,325. FAILED AT GAS.
+ *   createOffering (64 ch)   5,693   <- vs 4,181. FAILED AT GAS.
+ *   setOfferingPrice         4,383
+ *   sell 20, fresh market    3,982   <- vs 3,164. FAILED AT GAS.
+ *   setOfferingTitle (63 ch) 3,758
+ *   register (no firstBuy)   3,607
+ *   buy 20, fresh market     3,412   (3,869 limit held, 13% headroom)
+ *   transfer                 1,997   (1,970 entry was stale; the limit still held)
+ *   setFace                  1,597
+ *   deleteOffering           1,373
+ *   renew                      831   (812 held)
+ *   setCap                     816
+ *   retire                     762
+ *   claimTradeFees             136
+ *
+ * `register + firstBuy` is the wallet LAUNCH path — the wizard's own "Take the
+ * first tokens yourself" — so at 4,325 a Bitcoin creator's launch could not
+ * complete, and an out-of-gas failure burns the whole granted budget and persists
+ * nothing. That is the dearest single call in the contract and it was carrying the
+ * third-lowest limit.
+ *
+ * EVERY ENTRY BELOW IS NOW THE WORST MEASURED CASE, so RC_SAFETY_MARGIN is
+ * headroom on the worst case rather than on a typical one. A Hive caller
+ * over-declares, which costs only balance headroom (`rc_limit` is a RESERVATION
+ * checked at ingest, not a charge — the node bills `rc_used`), while
+ * under-declaring loses the entire budget. Those two mistakes are not symmetric,
+ * so the table takes the expensive side.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ★ HOW TO MEASURE A ROW, written out in full so the next person does not have to
+ * reconstruct it. You need no key, no signature and no broadcast: the node will
+ * run the call for you and tell you what it cost.
+ *
+ * 1. POST to the contract's GraphQL endpoint (the same URL the client reads
+ *    state from):
+ *
+ *      query Sim($input: SimulateContractCallsInput!) {
+ *        simulateContractCalls(input: $input) {
+ *          success err err_msg ret rc_used gas_used logs state_diff
+ *        }
+ *      }
+ *
+ *    with
+ *
+ *      input: {
+ *        tx_id: "<any 40-char string; it is not looked up>",
+ *        required_auths: ["<the caller>"],
+ *        required_posting_auths: [],
+ *        calls: [{ contract_id, action, payload: "<JSON STRING>", rc_limit, intents }]
+ *      }
+ *
+ *    `payload` is the object our own op-builders produce, JSON-stringified.
+ *    `intents` is the same `transfer.allow` array buildOp() attaches; pass `[]`
+ *    when the call moves no HBD. `rc_used` in the response is the number this
+ *    table wants.
+ *
+ * 2. CHOOSE THE CALLER DELIBERATELY. Cost scales with the caller's identity
+ *    string because it is concatenated into every state key the call writes, so
+ *    measure with the LONGEST identity that can reach the call — today a Bitcoin
+ *    `did:pkh:bip122:…` at 90 characters, not a Hive name at 15.
+ *
+ * 3. GIVE `rc_limit` A REALISTIC VALUE, not a huge one. The limit is RESERVED
+ *    against the caller's HBD balance alongside whatever the call spends, so an
+ *    enormous limit makes the simulation fail with `insufficient balance` and
+ *    tells you nothing. If that is the error you get, lower the limit and re-run.
+ *
+ * 4. FOR A CALL THAT NEEDS A PRECONDITION, put the setup in front of it.
+ *    `calls` is a LIST and state carries from each call to the next inside one
+ *    simulated transaction, so a `sell` is measured by simulating `[buy, sell]`
+ *    and reading the second `rc_used`, and an offering edit by simulating
+ *    `[createOffering, setOfferingPrice]`. That is how the wallet-caller `sell`
+ *    below was measured with nobody on chain holding a token.
+ *
+ * 5. A FAILED CALL STILL REPORTS `rc_used`, and it is a LOWER BOUND on the real
+ *    cost rather than the cost itself — the work stopped at the refusal. Use it
+ *    to prove a limit is too low; never enter it as the row.
+ *
+ * `scratchpad/quote-oracle-proof.ts` is a worked example of the same discipline
+ * pointed at a different question (it runs the app's OWN pricing functions
+ * against live chain state rather than reimplementing them).
+ */
 export const RC_COST_BY_ACTION: Readonly<Record<string, number>> = Object.freeze({
-  buy: 1_802,
-  sell: 2_531,
-  transfer: 1_970,
-  register: 3_460,
-  createOffering: 2_394,
+  buy: 3_412,
+  sell: 3_982,
+  transfer: 1_997,
+  register: 7_859,
+  createOffering: 5_693,
+  setOfferingPrice: 4_383,
+  setOfferingTitle: 3_758,
+  setFace: 1_597,
+  deleteOffering: 1_373,
+  renew: 831,
+  setCap: 816,
+  retire: 762,
   claimTradeFees: 142
 });
 

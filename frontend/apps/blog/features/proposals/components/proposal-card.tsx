@@ -135,6 +135,7 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable, votesP
       </div>
 
       <ProposalSupportFooter
+        proposalId={id}
         isExpired={proposal.status === 'expired'}
         isLoggedIn={identity.isLoggedIn}
         isSupported={isSupported}

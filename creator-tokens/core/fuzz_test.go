@@ -2022,6 +2022,10 @@ func TestFuzzBoundarySweep(t *testing.T) {
 			// This case sweeps the CREDITS bound, so it must be run at a
 			// block where the rail is actually open, or every draw would
 			// reject on the phase instead.
+			// A1 (2026-08-30): a lapse no longer opens the Refund rail; Retire does.
+			if err := Retire(s, creator, creator, uint64(100)+SubscriptionPeriod+GraceBlocks); err != nil {
+				t.Fatalf("setup: Retire: %v", err)
+			}
 			wdBlock := uint64(100) + SubscriptionPeriod + GraceBlocks + 1
 			amt := fzAmount(rng)
 			_, err := Refund(s, "fzbrfholder", creator, wdBlock, amt)

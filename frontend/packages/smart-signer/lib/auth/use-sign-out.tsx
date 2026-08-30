@@ -112,6 +112,45 @@ export function useSignOut() {
       // Clear observer cookie immediately — SSR stops personalizing
       document.cookie = 'observer=; path=/; max-age=0';
 
+      /**
+       * ★ TELL GOOGLE IDENTITY SERVICES ABOUT THE SIGN-OUT (2026-08-29).
+       *
+       * Google's JS reference (developers.google.com/identity/gsi/web/reference/
+       * js-reference#google.accounts.id.disableAutoSelect): "When the user signs
+       * out of your website, you need to call the method
+       * google.accounts.id.disableAutoSelect to record the status in cookies.
+       * This prevents a UX dead loop." Nothing in the product called it, so as
+       * far as GIS's own cookies (`g_state`) were concerned, no sign-out ever
+       * happened.
+       *
+       * Scope, honestly stated:
+       *  - It governs One Tap AUTO-SELECT (silent re-login), not the button's
+       *    personalized "Continue as <name>" rendering — Google documents no
+       *    link between this call and button personalization. The personalized
+       *    button reflects the BROWSER's Google session and is a separate issue.
+       *  - It only does anything when the GIS script happens to be loaded on the
+       *    page the sign-out runs on (`/login` loads it; most pages don't).
+       *    Guarded call, never a script injection: pulling Google's script onto
+       *    every page just to write a cookie is not a trade this hook may make.
+       *  - `google-signin.tsx` already passes `auto_select: false`, so this is
+       *    doc-prescribed hygiene plus defense in depth, not a live-bug fix.
+       *
+       * Narrow cast, NOT `declare global`: the Google Drive key-backup feature
+       * already declares `window.google` with a different shape, and two
+       * declarations conflict (same pattern as `gsi()` in google-signin.tsx).
+       */
+      try {
+        const gsiId = (
+          window as unknown as {
+            google?: { accounts?: { id?: { disableAutoSelect?: () => void } } };
+          }
+        ).google?.accounts?.id;
+        gsiId?.disableAutoSelect?.();
+      } catch (error) {
+        // GIS not loaded or refused the call — sign-out must never fail on it.
+        logger.warn('disableAutoSelect failed during sign-out: %o', error);
+      }
+
       // Optimistically update user to logged-out state immediately for instant UI feedback
       const previousUser = queryClient.getQueryData<User>([QUERY_KEY.user]);
       queryClient.setQueryData([QUERY_KEY.user], defaultUser);

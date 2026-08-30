@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
 import { cn } from '@ui/lib/utils';
 import { EMOJI_CATEGORIES, searchEmoji, type EmojiEntry } from './emoji-data';
@@ -8,6 +8,26 @@ import { EMOJI_CATEGORIES, searchEmoji, type EmojiEntry } from './emoji-data';
 /** One key, user preference, never expires — same class as `votesValues`. */
 const RECENT_KEY = 'lumen-composer-recent-emoji';
 const RECENT_MAX = 16;
+
+/** Gap kept between the picker and whatever it is clear of (button, header, viewport edge). */
+const SAFE_GAP = 8;
+/**
+ * Fallback for the sticky site header's height, used only if it cannot be found live.
+ * Mirrors the QA harness's own empirical figure for this exact bar
+ * (`qa/harness/detectors/page-checks.mjs:286`, `app-header.tsx:219`'s `sticky top-0 z-40`).
+ */
+const HEADER_HEIGHT_FALLBACK = 90;
+
+interface PickerGeometry {
+  /** Open above the button (original layout) vs. below it. */
+  openUpward: boolean;
+  /** Pixel shift off the natural `left: 0` (flush with the button cluster), to stay on screen. */
+  leftOffset: number;
+  /** Set only when NEITHER side has room for the picker's natural height. */
+  maxHeight: number | null;
+}
+
+const INITIAL_GEOMETRY: PickerGeometry = { openUpward: true, leftOffset: 0, maxHeight: null };
 
 function readRecent(): string[] {
   const stored = getStorageItem<string[]>(RECENT_KEY);
@@ -33,6 +53,20 @@ export interface EmojiPickerLabels {
  * ★ Loaded through `next/dynamic({ ssr: false })` by the composer, so neither
  * this component nor `emoji-data.ts` is in the Home bundle until the button is
  * pressed.
+ *
+ * ★★ POSITION IS COMPUTED, NOT FIXED (2026-08-28 clipping fix). This used to
+ * open upward unconditionally (`bottom-[calc(100%+8px)]`, no other case), so
+ * whenever the toolbar sat within one picker-height of the top of the page its
+ * own top rows painted behind `app-header.tsx`'s `sticky top-0 z-40` bar — the
+ * owner's screenshot. `useLayoutEffect` below measures the real space above vs.
+ * below the button (excluding whatever the sticky header currently covers) and
+ * flips to open below when there isn't room above; if NEITHER side fully fits
+ * (a short viewport), it opens on whichever side has more room and caps its own
+ * height to that, so it is always entirely on screen. Horizontally, the picker
+ * stays flush with the button cluster unless its fixed 360px width would run
+ * past the right edge of the viewport (the 390px-phone case), in which case it
+ * shifts left just enough to stay on screen. Recomputed on resize and scroll so
+ * a picker left open while the page moves stays correctly placed.
  */
 export default function EmojiPicker({
   onSelect,
@@ -46,11 +80,74 @@ export default function EmojiPicker({
   const [query, setQuery] = useState('');
   const [categoryId, setCategoryId] = useState(EMOJI_CATEGORIES[0].id);
   const [recent, setRecent] = useState<string[]>([]);
+  const [geometry, setGeometry] = useState<PickerGeometry>(INITIAL_GEOMETRY);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setRecent(readRecent());
   }, []);
+
+  // ★ `useLayoutEffect`, not `useEffect`: it must run and commit BEFORE the
+  // browser paints, or the picker would flash at its old position for one frame
+  // every time the search/category/recent content resizes it.
+  useLayoutEffect(() => {
+    const node = rootRef.current;
+    if (!node) return;
+
+    const recompute = () => {
+      // The nearest positioned ancestor IS the anchor the picker is positioned
+      // against (the footer's `relative` container, which starts flush with the
+      // button cluster) — no extra ref needs to be threaded down for this.
+      const anchor = node.offsetParent as HTMLElement | null;
+      if (!anchor) return;
+
+      const anchorRect = anchor.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const viewportWidth = window.innerWidth;
+      // `scrollHeight`, not `offsetHeight`: once a previous pass has capped
+      // `maxHeight`, `offsetHeight` would only report the CLAMPED box, and a
+      // later resize (viewport growing taller) could never re-expand it.
+      const pickerHeight = node.scrollHeight;
+      const pickerWidth = node.offsetWidth;
+
+      const header = document.querySelector('header.sticky.top-0.z-40');
+      const headerBottom = header ? header.getBoundingClientRect().bottom : HEADER_HEIGHT_FALLBACK;
+
+      const spaceAbove = Math.max(0, anchorRect.top - headerBottom);
+      const spaceBelow = Math.max(0, viewportHeight - anchorRect.bottom);
+      const fitsAbove = spaceAbove >= pickerHeight + SAFE_GAP;
+      const fitsBelow = spaceBelow >= pickerHeight + SAFE_GAP;
+
+      const openUpward = fitsAbove || (!fitsBelow && spaceAbove >= spaceBelow);
+      const chosenSpace = openUpward ? spaceAbove : spaceBelow;
+      const chosenFits = openUpward ? fitsAbove : fitsBelow;
+      const maxHeight = chosenFits ? null : Math.max(160, chosenSpace - SAFE_GAP);
+
+      // Horizontal: keep the picker's left edge flush with the button cluster
+      // (the original `left: 0`) unless the fixed-width box would run past the
+      // right edge of the viewport, in which case shift left just enough to
+      // stay fully on screen (never past the left edge either).
+      const naturalLeft = anchorRect.left;
+      const maxLeft = viewportWidth - pickerWidth - SAFE_GAP;
+      const clampedLeft = Math.min(naturalLeft, Math.max(SAFE_GAP, maxLeft));
+
+      setGeometry({ openUpward, leftOffset: clampedLeft - naturalLeft, maxHeight });
+    };
+
+    recompute();
+    window.addEventListener('resize', recompute);
+    // `capture: true` so scrolling inside ANY ancestor scroll container is
+    // observed (`scroll` does not bubble on its own, unlike most DOM events).
+    window.addEventListener('scroll', recompute, { passive: true, capture: true });
+    return () => {
+      window.removeEventListener('resize', recompute);
+      window.removeEventListener('scroll', recompute, { capture: true });
+    };
+    // Re-measure whenever the picker's own content can change its natural
+    // height (query/category swap the grid, a first-ever pick adds the
+    // "Recent" section) — the flip/clamp decision above depends on it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, categoryId, recent.length]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -87,7 +184,13 @@ export default function EmojiPicker({
           onClose();
         }
       }}
-      className="absolute bottom-[calc(100%+8px)] left-0 z-30 w-[360px] rounded-card border border-[#ebebeb] bg-white p-3 shadow-[0_8px_24px_rgba(20,18,10,0.10)]"
+      style={{ left: geometry.leftOffset, maxHeight: geometry.maxHeight ?? undefined }}
+      className={cn(
+        'absolute z-30 w-[360px] overflow-y-auto rounded-card border border-[#ebebeb] bg-white p-3 shadow-[0_8px_24px_rgba(20,18,10,0.10)]',
+        // ★ 2026-08-28: was `bottom-[calc(100%+8px)]` unconditionally — see the
+        // component doc comment above for why this is now computed.
+        geometry.openUpward ? 'bottom-[calc(100%+8px)]' : 'top-[calc(100%+8px)]'
+      )}
     >
       <input
         type="text"

@@ -20,7 +20,9 @@ import { MagiFundingHelp } from '@/blog/features/creator-tokens/live/magi-fuel-g
  */
 
 export interface LaunchStepTermsProps {
-  cap: number;
+  /* `cap` used to be threaded in for the Supply row. That row is gone (owner,
+     2026-08-30) and so is the prop — a market now launches at the contract's
+     MaxCap, which is not a number worth putting in front of a creator. */
   commission: string;
   firstBuy: string;
   onFirstBuy: (value: string) => void;
@@ -51,7 +53,6 @@ function isFundingFailure(message: string): boolean {
 }
 
 const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
-  cap,
   commission,
   firstBuy,
   onFirstBuy,
@@ -72,23 +73,31 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
     { id: 'launch', label: t('meritum_launch.term_launch_label'), value: t('meritum_launch.term_launch_value') },
     { id: 'listed', label: t('meritum_launch.term_listed_label'), value: t('meritum_launch.term_listed_value') },
     { id: 'cut', label: t('meritum_launch.term_cut_label'), value: t('meritum_launch.term_cut_value', { pct: commission }) },
-    {
-      id: 'supply',
-      label: t('meritum_launch.term_supply_label'),
-      value: t('meritum_launch.term_supply_value', { cap: cap.toLocaleString('en-US') })
-    },
-    { id: 'stop', label: t('meritum_launch.term_stop_label'), value: t('meritum_launch.term_stop_value') },
     /*
-      ★ SAY THE IRREVERSIBLE PART OUT LOUD (2026-08-15, money council).
-      The wizard this replaced required a second confirmation reading "This
-      launches your token on the chain. It can't be undone." Replacing that
-      click with the 1100ms hold was deliberate and is better — but the
-      substitution silently dropped the WORDS as well as the dialog. A hold
-      guards against an ACCIDENTAL press; it does not tell anyone what pressing
-      it commits them to. The terms list explained billing, supply and wind-down
-      and never once said the launch cannot be undone.
+      ★ TWO ROWS DELETED 2026-08-30, both on the owner's word. Recorded here
+      because both were added deliberately and neither should be re-added by
+      someone reading the old rationale in git history.
+
+      SUPPLY ("Starts capped at {{cap}} tokens. Raise it later in Creator
+      Studio.") — deleted because it had become FALSE. The same ruling turned
+      the launch cap off (launch-money.ts: `STANDARD_CAP` is now the contract's
+      MaxCap, 1e9), so there is no meaningful cap to start at and nothing to
+      raise later. Owner: "Then fix the text, just delete the line there saying
+      it."
+
+      ONE WAY ("Launching cannot be undone · the token is bound to your account
+      and can never be renamed or moved to another one.") — added 2026-08-15 by
+      the money council, on the reasoning that swapping the wizard's second
+      confirmation click for the 1100ms hold dropped the WORDS as well as the
+      dialog. Owner overruled that on 2026-08-30: "delete the line below that
+      says you cannot send the tokens to anyone bla bla. thats confusing, i know
+      what you mean but delete that as well." The bind-to-account half read as
+      "your BUYERS cannot send these tokens", which is not what it meant and is
+      not true. The irreversibility is still gated — by the hold itself, which
+      is the confirmation (see this file's header) — it is just no longer
+      narrated in a sentence that misleads about transferability.
     */
-    { id: 'final', label: t('meritum_launch.term_final_label'), value: t('meritum_launch.term_final_value') }
+    { id: 'stop', label: t('meritum_launch.term_stop_label'), value: t('meritum_launch.term_stop_value') }
   ];
 
   return (

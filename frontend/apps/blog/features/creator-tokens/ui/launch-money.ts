@@ -12,7 +12,7 @@
  * byte-identical to before the extraction.
  */
 
-import { MAX_FACE_BASE_UNITS, MIN_FACE_BASE_UNITS } from '../lib/contract-math';
+import { MAX_CAP_CREDITS_BASE_UNITS, MAX_FACE_BASE_UNITS, MIN_FACE_BASE_UNITS } from '../lib/contract-math';
 
 /**
  * ★ ONE SUPPLY FOR EVERY TOKEN (owner ruling, 2026-08-08).
@@ -23,8 +23,37 @@ import { MAX_FACE_BASE_UNITS, MIN_FACE_BASE_UNITS } from '../lib/contract-math';
  * sold anything, and it bought nothing: the cap can be RAISED at any time from the
  * Studio, so a low start is strictly the safer default. The step is gone and every
  * token launches at the smallest of the three.
+ *
+ * ★★ SUPERSEDED 2026-08-30 (owner): "if the cap doesnt affect anything with the
+ * math, i dont think it should, the cap might actually hurt them math once cap is
+ * hit, turn it off."
+ *
+ * IT DOES NOT AFFECT THE MATH — verified against the deployed contract source,
+ * not assumed. The cap appears NOWHERE in a price or a payout:
+ *   - core/curve.go:223-244  Area / BuyCost / SellProceeds / SpotRate — no cap read
+ *   - core/refund.go:164-183 refundPayout (the wind-down share) — no cap read
+ * Every single appearance of `cap` in the contract is the same shape, a REFUSAL:
+ *   - core/buy.go:114-121      supply + n > cap  -> reject the buy
+ *   - core/launch.go:234-237   the register-time bounds check
+ *   - core/market.go:1056-1075 setCap's own bounds check
+ * So the cap is a pure gate. It never makes anyone a cent, and the only thing it
+ * can ever do is turn a paying buyer away at the door — which is exactly the
+ * "hurt them once cap is hit" the ruling names: the day a creator's market is
+ * working best, the curve stops selling and the price stops discovering.
+ *
+ * ★ WHY THIS IS A CEILING AND NOT A DELETION. "Off" cannot mean "no cap": the
+ * contract REQUIRES one in [MinCap=1, MaxCap=1_000_000_000] (core/params.go:178-179)
+ * and it is already deployed to Magi mainnet AND testnet, so a contract change is
+ * off the table. Launching at the contract's own maximum is the closest reachable
+ * thing to off — the gate still exists on chain, it just cannot bind in practice.
+ * For scale: the largest first buy the flow will even accept ($10,000, MAX_PRICE_USD)
+ * affords 1,248 tokens at supply 0, and reaching 1e9 tokens on this curve costs on
+ * the order of 10^15 dollars. Nobody hits this.
+ *
+ * IMPORTED, NEVER RETYPED. The bound is contract-math.ts's mirror of params.go, so
+ * a literal here can never drift from the chain's own MaxCap.
  */
-export const STANDARD_CAP = 5000;
+export const STANDARD_CAP = MAX_CAP_CREDITS_BASE_UNITS;
 
 /**
  * ★ A PRICE FIELD THAT ACCEPTS "banana".

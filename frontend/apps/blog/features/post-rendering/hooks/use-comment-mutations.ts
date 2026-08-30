@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { transactionService } from '@transaction/index';
+import { appendAttributionFooter } from '@transaction/lib/attribution';
 // ★ THE THREAD IS READ THROUGH OUR OWN SERVER, NEVER STRAIGHT FROM A HIVE NODE.
 // A post owner's block removes a commenter's replies for EVERY reader (effect B),
 // and only the server can apply that. These post-mutation refetches write straight
@@ -156,12 +157,19 @@ export function useCommentMutation() {
     }) => {
       const { parentAuthor, parentPermlink, body, preferences, discussionPermlink } = params;
 
+      // ★ MANDATORY on-chain attribution for every full-Hive-account comment
+      // (owner instruction, 2026-08-28). This mutation is only ever reached
+      // for a non-lite author — reply-textbox.tsx forks a lite reply to
+      // `createLitePost` before calling `commentMutation.mutateAsync` at all,
+      // so there is no tier check to make here.
+      const attributedBody = appendAttributionFooter(body);
+
       // Broadcast without waiting for blockchain confirmation
       // A successful broadcast guarantees inclusion in the blockchain
       const broadcastResult = await transactionService.comment(
         parentAuthor,
         parentPermlink,
-        body,
+        attributedBody,
         preferences,
         { observe: false }
       );
@@ -312,18 +320,35 @@ export function useUpdateCommentMutation() {
         return { ...params, broadcastResult: undefined };
       }
 
+      // ★ MANDATORY on-chain attribution for every full-Hive-account comment
+      // edit (owner instruction, 2026-08-28). Reached only past the lite fork
+      // above, so this is always a real Hive-keyed author.
+      //
+      // Strips any existing footer first: `body` here is whatever the editor
+      // round-tripped from `comment.body` (reply-textbox.tsx's `commentBody`),
+      // which for an already-published comment already carries the footer
+      // this same call appended on the PREVIOUS save. Without the strip,
+      // editing a comment twice would stack two attributions.
+      const attributedBody = appendAttributionFooter(body);
+
       const broadcastResult = await transactionService.updateComment(
         parentAuthor,
         parentPermlink,
         permlink,
-        body,
+        attributedBody,
         {
           observe: false
         }
       );
 
       logger.info('Done update comment transaction: %o', { discussionPermlink, broadcastResult });
-      return { ...params, broadcastResult };
+      // ★ `body` OVERRIDDEN, NOT THE ORIGINAL `params.body`. `onSuccess` below
+      // destructures `body` from this return value and uses it to validate the
+      // post-edit refetch (`comment.body === body`) — that has to be checked
+      // against what was ACTUALLY broadcast, or the comparison can never be
+      // true and the validated refetch runs out its retries every single time,
+      // leaving the optimistic (footer-less) text in the cache indefinitely.
+      return { ...params, body: attributedBody, broadcastResult };
     },
 
     onSuccess: (data) => {

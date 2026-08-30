@@ -3,6 +3,7 @@ import { haptic } from '@/blog/lib/haptics';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { transactionService } from '@transaction/index';
+import { appendAttributionFooter } from '@transaction/lib/attribution';
 import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
 import { deleteLitePost } from '@/blog/lib/lite/client/lite-write';
 import { Beneficiarie } from '@hive/common-hiveio-packages/wax';
@@ -217,13 +218,27 @@ export function usePostMutation() {
         editMode
       } = params;
 
+      // ★ MANDATORY on-chain attribution for every full-Hive-account post
+      // (owner instruction, 2026-08-28). Lite accounts carry their own,
+      // separate "by {name}" footer (lib/lite/publisher/footer.ts) and never
+      // reach this mutation — see the tier fork in use-post-form-actions.ts
+      // and use-note-publish.ts, both of which return before calling
+      // `usePostMutation` at all for a lite account.
+      //
+      // `appendAttributionFooter` STRIPS any existing footer before adding
+      // one back, on every call — including this `editMode` branch, where
+      // `body` is whatever the editor round-tripped from the on-chain post
+      // (already carrying a footer from the original publish). Without the
+      // strip, editing a post would double the attribution on every save.
+      const attributedBody = appendAttributionFooter(body);
+
       // Use observe: true - wait for block inclusion (~1.5s avg) before resolving.
       // This ensures the draft is not deleted until the transaction is confirmed on-chain.
       if (!editMode && !!maxAcceptedPayout) {
         const broadcastResult = await transactionService.post(
           permlink,
           title,
-          body,
+          attributedBody,
           beneficiaries,
           maxAcceptedPayout,
           tags,
@@ -242,7 +257,7 @@ export function usePostMutation() {
         const broadcastResult = await transactionService.updatePost(
           permlink,
           title,
-          body,
+          attributedBody,
           tags,
           category,
           summary,

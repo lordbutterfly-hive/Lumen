@@ -172,7 +172,21 @@ function loginDestination(): string {
  * Lumen account. Reusing this component means the dialog can never drift from
  * the page again.
  */
-const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
+interface LumenLoginProps {
+  embedded?: boolean;
+  /**
+   * The SAME `googleReady` boolean `app/login/page.tsx` already computes server-side
+   * for its `<meta>` description, handed down so the FIRST render (the one hydration
+   * diffs against) already shows the true state instead of a hardcoded `false`. See
+   * the flicker-fix comment on that file for why this replaced the old
+   * effect-only correction. Omitted by callers that mount this outside that server
+   * component (the sign-in dialog, `dialog-login.tsx`) — those fall back to the
+   * client-only correction below, exactly as before.
+   */
+  googleConfiguredInitially?: boolean;
+}
+
+const LumenLogin: FC<LumenLoginProps> = ({ embedded = false, googleConfiguredInitially = false }) => {
 
   const router = useRouter();
 
@@ -237,7 +251,27 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   //
   // Evaluating it in an effect makes the browser the authority: the server
   // renders the safe "not available" state, and the client corrects it on mount.
-  const [googleReady, setGoogleReady] = useState(false);
+  //
+  // ★★★ SEEDED FROM THE BEST ANSWER AVAILABLE AT FIRST PAINT, NOT HARDCODED
+  // FALSE (2026-08-28, flicker root-cause fix). Each call site supplies it the
+  // only way that is safe for ITS rendering context, which is why the prop is
+  // named for what it means rather than for where it came from:
+  //   • `app/login/page.tsx` (server-rendered) passes the value it ALREADY
+  //     computes for its `<meta>` description — proof the server could see the
+  //     client id all along.
+  //   • `components/dialog-login.tsx` (client-only; Radix mounts DialogContent
+  //     on open, so nothing here is ever server-rendered) passes
+  //     `googleConfigured()` directly.
+  // The login page's computation is the same one `app/login/page.tsx` runs for
+  // its `<meta>` description —
+  // proof the server COULD see the client id all along. Starting from THAT value
+  // instead of a literal `false` means a correctly-configured deploy shows the
+  // real state from the very first paint: no "being set up" flash, and still no
+  // hydration risk, because this is a plain serialized prop, not a render-time
+  // `env()` call that could disagree between server and client. The effect below
+  // still runs and still re-derives `googleReady` from `googleConfigured()` on the
+  // client — now as a confirmation/safety net rather than the sole source of truth.
+  const [googleReady, setGoogleReady] = useState(googleConfiguredInitially);
   const refreshGoogleNonce = useCallback(() => {
     void googleChallenge().then((n) => setGoogleNonce(n));
   }, [googleChallenge]);
@@ -257,7 +291,16 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
    * The first nonce is also wasted: it is single-use and nothing ever redeems it.
    */
   useEffect(() => {
-    if (!googleConfigured()) return;
+    // ★ THE CORRECTIVE ELSE MATTERS NOW THAT `googleReady` CAN START TRUE
+    // (2026-08-28). Seeding from `googleConfiguredInitially` (above) is only safe
+    // if a disagreement can still self-heal: if the server's env and the
+    // client's `window.__ENV` ever genuinely differ, this pulls `googleReady`
+    // back down instead of leaving the page stuck showing a button that the
+    // client side believes isn't configured.
+    if (!googleConfigured()) {
+      setGoogleReady(false);
+      return;
+    }
     let cancelled = false;
     setGoogleReady(true);
     void googleChallenge().then((n) => {
@@ -460,17 +503,53 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                         /* ★ Lumen's own button, behind a flag until the server has a
                            client secret to exchange the code with. Off = GIS's own
                            rendered button, which works today. */
+                        /* ★★★ LUMEN'S OWN BUTTON, AND THE ONLY FLOW THAT DELIVERS IT
+                           WITHOUT A CLIENT SECRET (2026-08-29). Straight to Google's
+                           OIDC authorize endpoint for `response_type=id_token`; the
+                           JWT it returns is verified exactly like the rendered
+                           button's. Needs `<origin>/auth/google/return` registered as
+                           an Authorized redirect URI, so it stays behind a flag until
+                           that is done — a wrong redirect URI is a hard
+                           `redirect_uri_mismatch`, not a graceful degrade. */
+                        idTokenFlow={env('LITE_GOOGLE_ID_TOKEN_FLOW') === 'yes'}
                         codeFlow={env('LITE_GOOGLE_CODE_FLOW') === 'yes'}
                         onCode={(c) => handleGoogleCredential(c, 'code')}
+                        /* ★ THE NO-SECRET PATH TO LUMEN'S OWN BUTTON (2026-08-28).
+                           `codeFlow` needs `LITE_GOOGLE_CLIENT_SECRET`, which nobody has
+                           pasted into prod yet, so it stays off there. `promptFlow` gets
+                           the same Lumen-styled row from One Tap / FedCM instead (see
+                           `google-signin.tsx` `startPrompt`) — no secret required, because
+                           it never leaves the browser's own Google session for a code to
+                           exchange. Same flag shape as `codeFlow`, same off-by-default
+                           safety: unset envs mean both are false and nothing changes for
+                           today's deploy. `codeFlow` wins if a future deploy somehow sets
+                           both, since it is the more complete OAuth flow once a secret
+                           exists. */
+                        promptFlow={env('LITE_GOOGLE_CODE_FLOW') !== 'yes' && env('LITE_GOOGLE_PROMPT_FLOW') === 'yes'}
                         onError={setError}
                       />
                     </div>
                   ) : (
+                    // ★ THE ICON STAYS (2026-08-28, flicker fix, second half). This
+                    // placeholder used to drop the Google mark entirely while waiting
+                    // on the nonce round trip, so a reader who got here via the
+                    // now-seeded-true `googleReady` (see the state declaration above)
+                    // watched the row go from "a Google button" to "a blank grey bar
+                    // with no icon and no explanation" for the ~100-800ms that fetch
+                    // takes — measured live on lumensocial.net across repeated loads.
+                    // Keeping the same mark in both disabled states means the row
+                    // never looks like it broke; it just looks like it's loading.
                     <button
                       type="button"
                       disabled
                       className="flex h-[64px] w-full items-center justify-center gap-[11px] rounded-card border border-line-11 bg-surface-1 text-[16px] font-semibold text-ink-2 opacity-60"
                     >
+                      <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden>
+                        <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z" />
+                        <path fill="#34A853" d="M24 46c5.9 0 10.9-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9H4.5v5.7C8.1 41.1 15.4 46 24 46z" />
+                        <path fill="#FBBC05" d="M11.8 27.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.5C3 16.1 2.1 19.9 2.1 23s.9 6.9 2.4 9.9l7.3-5.7z" />
+                        <path fill="#EA4335" d="M24 9.9c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 3.3 29.9 1 24 1 15.4 1 8.1 5.9 4.5 13.1l7.3 5.7c1.7-5.2 6.5-8.9 12.2-8.9z" />
+                      </svg>
                       {COPY.google}
                     </button>
                   )

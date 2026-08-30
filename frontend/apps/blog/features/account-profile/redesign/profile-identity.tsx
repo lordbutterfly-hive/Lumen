@@ -12,6 +12,12 @@ import { useTranslation } from '@/blog/i18n/client';
 import { compareDates } from '@/blog/lib/utils';
 import { ProfileLeagueChip } from '@/blog/features/retention/components/profile-league-chip';
 import type { AccountProfile } from '@hive/common-hiveio-packages/wax';
+// WORK-LINK spec B5 (2026-08-30): the `website` field has persisted since
+// Settings existed (`account-settings/form.tsx:417-431`) but nothing in the
+// app ever rendered it — see safe-external-link.tsx's own header for why a
+// chain account's `website` is attacker-controlled and must never reach the
+// DOM unsanitised.
+import { SafeExternalLink, safeHostname } from '@/blog/components/safe-external-link';
 
 interface ProfileIdentityProps {
   username: string;
@@ -238,6 +244,31 @@ export default function ProfileIdentity({
             <Icons.mapPin className="h-[15px] w-[15px] text-ink-14" />
             {profile.location}
           </span>
+        ) : null}
+        {/*
+          ★ WORK-LINK spec B5 (2026-08-30, owner: "People check your profile
+          before they hold anything... I dont see it in Settings" — the field
+          was never dead, nothing rendered it). `profile.website` is
+          attacker-controlled on the chain path (see the import header) and
+          already validated on the lite path, but SafeExternalLink runs the
+          same gate on both regardless of source — see its own doc.
+
+          HOSTNAME ONLY, matching the Meritum token page (B3): a full URL
+          in a 14px meta row wraps and dwarfs the reputation pill above it.
+          Absent or unsafe both render nothing, same as an absent location —
+          no placeholder, nothing fabricated.
+        */}
+        {profile?.website && safeHostname(profile.website) ? (
+          <SafeExternalLink href={profile.website} className="flex items-center gap-1.5 hover:underline">
+            <Icons.link2 className="h-[15px] w-[15px] text-ink-14" />
+            {/* Icon + bare hostname reads as location-shaped to a sighted
+                reader (same row, same treatment as the pin above); a screen
+                reader gets no such visual cue, so the accessible name states
+                what this actually is. Reuses the Settings label rather than
+                a new string — same field, same name, everywhere it appears. */}
+            <span className="sr-only">{t('settings_page.profile_website')}: </span>
+            {safeHostname(profile.website)}
+          </SafeExternalLink>
         ) : null}
         {created ? (
           <span className="flex items-center gap-1.5">

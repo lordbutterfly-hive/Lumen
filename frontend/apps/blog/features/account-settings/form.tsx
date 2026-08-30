@@ -233,7 +233,15 @@ const SettingsForm = ({ username }: { username: string }) => {
       blacklist_description:
         settings.blacklist_description !== '' ? settings.blacklist_description : undefined,
       muted_list_description:
-        settings.muted_list_description !== '' ? settings.muted_list_description : undefined
+        settings.muted_list_description !== '' ? settings.muted_list_description : undefined,
+      /*
+       * ★ MERGE, DO NOT REPLACE (2026-08-30). See `updateProfile` in
+       * packages/transaction. This form enumerates ten profile keys; a real Hive
+       * account frequently carries more (other apps' state, pinned posts, social
+       * links), and broadcasting only these ten destroyed the rest. Passing the
+       * account's current document preserves everything not named here.
+       */
+      existingPostingJsonMetadata: data?.posting_json_metadata
     };
 
     try {

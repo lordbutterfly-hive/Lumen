@@ -154,7 +154,12 @@ console.log('\n── 5. WIRING. The adapter really computes this, and the page 
     viewSrc.includes("`▲ 6.2%`") && !view.includes("`▲ 6.2%`")
   );
 
-  check('★ the adapter derives the change from the SAME array the chart gets, not a second read', adapt.includes('priceChange: priceChangeOf(priceHistory ?? null)') && adapt.includes('chart: priceHistory && priceHistory.length >= 2 ? priceHistory : null'));
+  check('★ the adapter derives the change from the SAME array the chart gets, not a second read', adapt.includes('priceChange: priceChangeOf(priceHistory ?? null, priceTrades ?? null)') && adapt.includes('chart: priceHistory && priceHistory.length >= 2 ? priceHistory : null'));
+  // ★ 2026-08-30: the series can now open with the market's OPENING price
+  // (readPriceHistory), so the basis this label states must come from the trade
+  // count and not from the array's length in either place.
+  check('★ the basis is a TRADE count, carried alongside the array', adapt.includes('chartTrades: priceHistory && priceHistory.length >= 2 ? (priceTrades ?? priceHistory.length) : null'));
+  check('★ …and the page states it from chartTrades, never from chart.length', view.includes('market.chartTrades ?? market.chart.length') && !view.includes('{market.chart.length} trades'));
   check('★ the misnamed weekly field is gone from the adapter', !adapt.includes('changePctWeek') && !adapt.includes('weekChangePct'));
   check('…and from the token page', !view.includes('changePctWeek'));
   check('★ the old "up arrow on zero" expression is gone', !view.includes("'▲' : '▼'"));

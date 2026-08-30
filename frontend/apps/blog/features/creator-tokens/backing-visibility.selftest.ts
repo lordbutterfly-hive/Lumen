@@ -131,10 +131,25 @@ console.log('\n── 3. EVERY SITE IS BEHIND IT. Enumerated, and counted.\n');
   check('★ it is not rendered and then hidden with CSS', !guarded.includes('display:none') && !guarded.includes('hidden ') && !view.code.includes('SHOW_BACKING_FIGURES ? "" :'));
 
   // ── STUDIO. Four sites, three inline ternaries and one whole stat.
-  check('★ studio: the Token price sub-line', studio.code.includes('sub={ SHOW_BACKING_FIGURES ? `Floor ${usdPrice(market.floorUsd)} · cap ${supplyPctLabel} used` : `Cap ${supplyPctLabel} used` }'));
+  // 2026-08-30: the cap half of this line was deleted on the owner's instruction
+  // ("get rid of it"; creator-studio.tsx's own note at the Token price stat), so
+  // the guarded sub-line is now the floor alone, the same shape as the Price
+  // sub-line below. The guard itself is unchanged and still counted below.
+  check('★ studio: the Token price sub-line', studio.code.includes('sub={SHOW_BACKING_FIGURES ? `Floor ${usdPrice(market.floorUsd)}` : undefined}'));
   check('★ studio: the Price sub-line', studio.code.includes('sub={SHOW_BACKING_FIGURES ? `Floor ${usdPrice(market.floorUsd)}` : undefined}'));
   check('★ studio: the whole Reserve stat, caption included', studio.code.includes('{SHOW_BACKING_FIGURES ? ( <Stat label="Reserve" value={usdWhole(market.reserveUsd)} sub="Backs the floor" /> ) : null}'));
-  check('★ studio: the creator\'s own holdings sub-line', studio.code.includes('sub={ SHOW_BACKING_FIGURES ? `worth ${usdPrice(held * market.priceUsd)} · floor ${usdPrice(held * market.floorUsd)}` : `worth ${usdPrice(held * market.priceUsd)}` }'));
+  // 2026-08-30 (clauderfly-43): the sub-line gained an OUTER `positionUnavailable`
+  // branch, because the Studio now reads the creator's own holding for real (it
+  // used to pass `position: null` and render 0 for everybody) and a failed read
+  // must not print as a balance. The FLAG GUARD this check exists for is
+  // unchanged — the floor figure still appears only in SHOW_BACKING_FIGURES's
+  // true branch — so the landmark moves with the structure and the property does
+  // not. The count assertion on the next line is what actually pins it.
+  check('★ studio: the creator\'s own holdings sub-line', studio.code.includes("sub={ positionUnavailable ? 'Could not be read just now' : SHOW_BACKING_FIGURES ? `worth ${usdPrice(held * market.priceUsd)} · floor ${usdPrice(held * market.floorUsd)}` : `worth ${usdPrice(held * market.priceUsd)}` }"));
+  check(
+    '★ …and the floor figure it carries appears NOWHERE else in the studio',
+    count(studio.code, 'usdPrice(held * market.floorUsd)') === 1
+  );
   check('★ studio: those four are ALL of them, and every one is guarded', count(studio.code, 'market.floorUsd') === 3 && count(studio.code, 'market.reserveUsd') === 1 && count(studio.code, 'SHOW_BACKING_FIGURES') === 5);
 
   // ── WALLET. Headline total, per-row figure, and the sentence that defined it.
@@ -210,14 +225,18 @@ console.log('\n── 4. NO SENTENCE POINTS AT A FIGURE THAT IS NOT THERE.\n');
   const hiddenNote = /const EXIT_NOTE_BACKING_HIDDEN =\s*'([^']*)'/.exec(strip(wallet.raw))?.[1] ?? '';
   check('the hidden exit note was extracted', hiddenNote.length > 150, `${hiddenNote.length} bytes`);
   check('★ …it names neither the floor nor the backing', !/floor/i.test(hiddenNote) && !/backing/i.test(hiddenNote), hiddenNote);
-  check('★ …it still names BOTH exit routes and BOTH fees, which is the disclosure that had to survive', hiddenNote.includes('sell on the curve') && hiddenNote.includes('redeem your share of the reserve') && hiddenNote.includes('10% trade fee') && hiddenNote.includes('early-exit fee'));
+  check('★ …it still names BOTH exit routes and BOTH fees, which is the disclosure that had to survive', hiddenNote.includes('sell on the curve') && hiddenNote.includes('redeem a pro-rata slice') && hiddenNote.includes('10% trade fee') && hiddenNote.includes('early-exit fee'));
   check('★ …and it keeps the audited "neither is a fixed price" claim', hiddenNote.includes('Neither is a fixed price'));
   check('★ …with no em or en dash, since it is copy written today', !/[—–]/.test(hiddenNote), hiddenNote);
 
   // Studio's wind-down sentences named the figure by its retired word; they now
   // name the mechanism, in the wording WIND_DOWN_BANNER already uses.
-  check('★ studio describes a wind-down by its mechanism now, in all three places it used the retired word', count(studio.code, 'refunded their share of the reserve') === 3);
-  check('★ …on the retire modal too', studio.code.includes('Every holder is refunded their share of the reserve, less any early-exit fee.'));
+  // 2026-08-30 (B3, copy set A): "refunded their share of the reserve" is itself a
+  // false promise (nothing is refunded; holders redeem a slice). The two Retire-path
+  // sites say so now; the third, the billing paragraph (a LAPSE sentence), waits for
+  // the A1 contract release and keeps the old wording until then, so the count is 1.
+  check('★ studio names the wind-down mechanism honestly on the two Retire-path sites', count(studio.code, 'redeem a pro-rata slice of the reserve') === 1 && count(studio.code, 'redeem a slice of the reserve') === 1);
+  check('★ …and the billing (lapse) sentence is the one place the old wording remains, pending the contract release', count(studio.code, 'refunded their share of the reserve') === 1);
   // ★ AND THE MECHANISM SENTENCE HAD TO GROW A SECOND HALF (2026-08-28, false-text
   // audit F6). "Refunded their share of the reserve" is only two thirds of what
   // core/refund.go does: K2 carves the same hold-time exit tax the curve charges
@@ -225,8 +244,11 @@ console.log('\n── 4. NO SENTENCE POINTS AT A FIGURE THAT IS NOT THERE.\n');
   // trade fee. Stating the reserve share alone overstates what a holder who
   // retires early actually receives. All three studio sites and the launch-terms
   // locale string now name the fee, so one event reads the same way everywhere.
+  // 2026-08-30 (B3, copy set A): two of the three sites no longer use the retired
+  // phrase (see the two checks above); the scan now confirms exactly the one
+  // remaining lapse-path site, and the fee count below still covers all three.
   const windDownSites = studio.code.match(/refunded their share of the reserve/g) ?? [];
-  check('the wind-down scan found its sites', windDownSites.length === 3, `${windDownSites.length} sites`);
+  check('the wind-down scan found its sites', windDownSites.length === 1, `${windDownSites.length} sites`);
   check(
     '★ …and every one of them names the early-exit fee',
     count(studio.code, 'early-exit fee') === 3,

@@ -102,7 +102,10 @@ const COPY = {
    * What is left describes only what the contract does. No projection, no floor, and
    * the illiquidity said plainly rather than as an aside after a dash.
    */
-  how3: 'A token is redeemable against the creator’s reserve, and the redemption value moves with it. It is not a price you can sell at on demand, and it is not an investment return.'
+  // 2026-08-30 (B3, copy set A): "redeemable against the reserve" read as an
+  // always-open door; Redeem exists only once a market winds down, pays a slice
+  // of what is left less a fee, and is claimed by the holder.
+  how3: 'If a market winds down, a token can be redeemed for a pro-rata slice of what the creator’s reserve holds then, less an early-exit fee. That is not a price you can sell at on demand, and it is not an investment return.'
 };
 
 // The ordering union and the rule about which controls may be OFFERED both live

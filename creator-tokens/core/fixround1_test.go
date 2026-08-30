@@ -473,6 +473,7 @@ func TestRefundHolder_EXITTAX1_FreshPushRefused(t *testing.T) {
 
 	// Never Registered => kPaidUntil == 0 => FROZEN for any block >= GraceBlocks,
 	// so this is inWindDown. heldBlocks == 2 at the push block => full 20% tax.
+	forceWindDown(s, creator) // A1: wind-down is reached by Retire, not by lapse (refund_test.go)
 	pushBlock := uint64(200002)
 	if got := Phase(s, creator, pushBlock); got != StateFrozen {
 		t.Fatalf("fixture: phase = %s, want FROZEN", got)
@@ -540,6 +541,7 @@ func TestRefundHolder_EXITTAX1_AgedPushAllowedAndDodgeClosed(t *testing.T) {
 	setU64(s, kAcqBlock(creator, whale), 1_000_000)     // fresh at the wind-down
 
 	// (4) DODGE CLOSED — the whale's ally cannot push the fresh whale out at 0 tax.
+	forceWindDown(s, creator)       // A1: wind-down is reached by Retire, not by lapse (refund_test.go)
 	freshBlock := uint64(1_000_005) // FROZEN (unregistered), whale held 5 blocks
 	if got := Phase(s, creator, freshBlock); got != StateFrozen {
 		t.Fatalf("fixture: phase = %s, want FROZEN", got)

@@ -19,6 +19,7 @@ import { cn } from '@ui/lib/utils';
 import { useTokenPriceChip } from '@/blog/features/creator-tokens/live/use-token-price-chip';
 import { useLivePortfolio } from '@/blog/features/creator-tokens/live/use-live-portfolio';
 import { usdPrice } from '@/blog/features/creator-tokens/market/format';
+import { healthWordFor } from '@/blog/features/creator-tokens/market/market-health';
 
 // TODO i18n — staged copy for the rows added in the creator-token-prominence
 // pass (2026-08-11); same precedent as app-header.tsx's own LABELS one
@@ -143,6 +144,10 @@ const AccountMenuContent = ({ user }: { user: User }) => {
             // replacement: `#7a7268` measures 4.74:1 on white.
             <div className="truncate font-sans text-caption text-ink-11">
               ◈ @{user.username} · {usdPrice(chip.priceUsd)}
+              {/* State word after the price when the market cannot take
+                  money (2026-08-30, B4; market/market-health.ts). Same rule
+                  as the header pill, which this line mirrors. */}
+              {chip.health !== null && healthWordFor(chip.health) !== null ? ` · ${healthWordFor(chip.health)}` : null}
             </div>
           ) : null}
         </div>

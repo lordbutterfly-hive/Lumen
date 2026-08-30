@@ -112,7 +112,18 @@ func TestKeeperAbsentFailSafesHold(t *testing.T) {
 
 	// Confirm the keeper genuinely never acted: RefundHolder and CloseIfDrained
 	// are keeper-only in this simulator, so there must be zero of them.
-	refunds := 0
+	//
+	// ★ A1 (owner ruling 2026-08-30) re-shapes the fail-safe this proves. It
+	// used to be "holders self-REFUND without a keeper", because a lapsed
+	// market froze into wind-down and the pull rail was the only exit. A lapse
+	// is an inflow stop now: the holder's exit on a naturally FROZEN market is
+	// the curve Sell, and the pro-rata Refund exists only after a Retire. So
+	// the fail-safe is "holders still EXIT without a keeper", counted on the
+	// rail core actually has open in the phase the exit ran in (the wrappers
+	// record `phase` for exactly this): curve sells on FROZEN markets, plus
+	// refunds on retired ones. Sells in ACTIVE are not counted — they would
+	// make the assertion vacuous.
+	refunds, frozenSells := 0, 0
 	for _, ev := range eng.Trace.Events {
 		switch ev.Action {
 		case "refundHolder", "closeIfDrained":
@@ -121,10 +132,15 @@ func TestKeeperAbsentFailSafesHold(t *testing.T) {
 			if ev.OK {
 				refunds++
 			}
+		case "sell":
+			if ev.OK && ev.Args["phase"] == core.StateFrozen {
+				frozenSells++
+			}
 		}
 	}
-	if refunds == 0 {
-		t.Error("expected holders to still self-refund without a keeper — the pull fail-safe")
+	t.Logf("keeper-absent exits: %d curve sells on FROZEN markets, %d pro-rata refunds on retired ones", frozenSells, refunds)
+	if refunds+frozenSells == 0 {
+		t.Error("expected holders to still exit without a keeper (sell on a lapsed market, or refund on a retired one) — the fail-safe")
 	}
 
 	path := filepath.Join(t.TempDir(), "trace.json")

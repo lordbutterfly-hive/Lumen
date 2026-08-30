@@ -5,11 +5,11 @@ import { Link } from '@hive/ui';
 import { useTokenPriceChip } from '../live/use-token-price-chip';
 import { useLiveDiscovery } from '../live/use-live-discovery';
 import { usdPrice } from '../market/format';
+import { SOLD_OUT_WORD, buyWordFor } from '../market/market-health';
 
-// TODO i18n — staged copy, same precedent as the rest of this feature's UI
-// strings (labels.ts's own doc explains why: the visual design track owns
-// this feature's copy right now).
-const COPY = { buy: 'Buy' };
+// The "Buy" word moved to market/market-health.ts's `buyWordFor` (2026-08-30,
+// B4), where it is one of four words, so every small surface that has a Buy
+// slot draws the same state word for the same market.
 
 /**
  * The small "this author has a creator token" chip for a byline row — feed
@@ -111,8 +111,10 @@ const TokenAuthorChip: FC<{ handle: string }> = ({ handle }) => {
   // branches until a real row settles it.
   const isKnownCreator =
     !unavailable && creators.some((c) => c.creator === handle || c.creator === `hive:${handle}`);
-  const { status, priceUsd } = useTokenPriceChip(isKnownCreator ? handle : '');
-  if (status !== 'ready' || priceUsd === null) return null;
+  const { status, priceUsd, health, soldOut } = useTokenPriceChip(isKnownCreator ? handle : '');
+  // ★ 'ready' is "has a market", not "can be bought" (2026-08-30, B4): this
+  // chip drew Buy on frozen markets. `health` is what the Buy slot draws now.
+  if (status !== 'ready' || priceUsd === null || health === null) return null;
 
   return (
     <Link
@@ -127,7 +129,10 @@ const TokenAuthorChip: FC<{ handle: string }> = ({ handle }) => {
         {usdPrice(priceUsd)}
       </span>
       <span className="rounded-full border border-line-warn-4 bg-surface-1 px-[9px] py-[2px] font-sans text-caption font-bold leading-none text-ink-brand-6">
-        {COPY.buy}
+        {/* Sold out replaces the ACTION word only when the market is healthy
+            and every buy would revert; it is not a health (owner, 2026-08-30,
+            market-health.ts soldOutOf). A state word wins when there is one. */}
+        {health === 'open' && soldOut ? SOLD_OUT_WORD : buyWordFor(health)}
       </span>
     </Link>
   );

@@ -58,6 +58,23 @@ export interface HasuraPricePoint {
   block: number;
   supplyAfter: number;
   side: 'buy' | 'sell';
+  /**
+   * The SIGNED supply change this trade made: `+minted` for a buy, `-sold` for
+   * a sell (the view's own `delta` column, creator_tokens_views.yaml:115-119).
+   *
+   * ★★★ SELECTED SINCE 2026-08-30, AND IT IS WHY A ONE-TRADE MARKET NOW HAS A
+   * CHART. Without it, a row says only where supply LANDED, so a market that
+   * has traded once yields one point, `live/adapt.ts` refuses fewer than two,
+   * and the page says "No price history yet" about a market that is SOLD OUT.
+   * Reproduced live on `hive:hbd-temp` (30 of 30 issued, one buy of 30).
+   *
+   * `supplyAfter - delta` is the supply the market held immediately BEFORE this
+   * trade — a real recorded state at a real moment, not an interpolation — so
+   * every traded market has at least two knowable prices. See
+   * `VscCreatorTokensDataSource.readPriceHistory` for where that is used and
+   * why only the OLDEST row's is prepended.
+   */
+  delta: number;
 }
 
 function num(v: unknown): number {
@@ -200,7 +217,7 @@ export class MagiIndexerClient {
     const data = await this.query(
       `query PriceHistory($creator: String!, $limit: Int!) {
          lumen_ct_price_history(where: {creator: {_eq: $creator}}, order_by: {block: desc}, limit: $limit) {
-           block supply_after side
+           block supply_after side delta
          }
        }`,
       { creator, limit }
@@ -219,7 +236,8 @@ export class MagiIndexerClient {
     return rowsOf(data, 'lumen_ct_price_history').reverse().map((r) => ({
       block: num(field(r, 'block')),
       supplyAfter: num(field(r, 'supply_after')),
-      side: field(r, 'side') === 'sell' ? 'sell' : 'buy'
+      side: field(r, 'side') === 'sell' ? 'sell' : 'buy',
+      delta: num(field(r, 'delta'))
     }));
   }
 

@@ -18,8 +18,14 @@
  * ★★ THE WINDOW IS THE WHOLE AVAILABLE SERIES, AND IT IS NOT A TIME WINDOW.
  * That is forced by the data, not chosen for convenience:
  *
- *   - `HasuraPricePoint` (../lib/vsc/hasura.ts:57-61) is `{ block, supplyAfter,
- *     side }`. There is no timestamp anywhere in the row.
+ *   - `HasuraPricePoint` is `{ block, supplyAfter, side, delta }`. The client
+ *     fetches no timestamp. ★ CORRECTED 2026-08-30: this used to assert "there
+ *     is no timestamp anywhere in the row", and that was wrong about the VIEW —
+ *     `lumen_ct_price_history` does publish `ts` (creator_tokens_views.yaml:122,
+ *     confirmed by live introspection). Nothing here selects it, so the argument
+ *     below is unchanged in force; but the reason is "we do not fetch a clock",
+ *     not "no clock exists", and a future time window is a query change rather
+ *     than an indexer change.
  *   - `use-live-token-market.ts` passes `historyQuery.data.map((p) => p.priceHbd)`
  *     into the adapter, so by the time the number is computed even the block
  *     height is gone. The array is an ordered list of TRADES, not samples on a
@@ -65,7 +71,14 @@ export interface PriceChange {
    * `pctMoveLabel` can tell a real sub-0.1% move from a genuine zero.
    */
   pct: number;
-  /** How many recorded trades the series spans. Always >= 2. The basis the label must state. */
+  /**
+   * How many recorded TRADES the series spans — the basis the label must state.
+   *
+   * ★ It can be 1 (2026-08-30). It used to be the point count, which was always
+   * >= 2 because the series was nothing but trades. The series now also carries
+   * the market's opening supply, so a market that has traded once has two
+   * points and ONE trade, and this says one.
+   */
   trades: number;
   /** 'flat' ONLY for an exactly equal first and last. A move too small to print is still a move. */
   direction: 'up' | 'down' | 'flat';
@@ -92,7 +105,7 @@ export interface PriceChange {
  *                              emptied by a sell records a genuine zero, and
  *                              "up 400% from nothing" is a fabrication.
  */
-export function priceChangeOf(series: readonly number[] | null | undefined): PriceChange | null {
+export function priceChangeOf(series: readonly number[] | null | undefined, tradeCount?: number | null): PriceChange | null {
   if (!series || series.length < 2) return null;
   if (!series.every((p) => Number.isFinite(p))) return null;
   const first = series[0];
@@ -102,7 +115,21 @@ export function priceChangeOf(series: readonly number[] | null | undefined): Pri
   if (!Number.isFinite(pct)) return null;
   return {
     pct,
-    trades: series.length,
+    // ★★ THE BASIS IS A TRADE COUNT, AND SINCE 2026-08-30 THE SERIES CAN CARRY
+    // A POINT THAT IS NOT A TRADE. `readPriceHistory` now prepends the market's
+    // OPENING supply — recovered from the oldest row's signed `delta`, which is
+    // what gives a one-trade market a chart at all (see its own note). That
+    // point is a real price at a real moment and belongs on the line; it is not
+    // a trade, and counting it would make this label say "2 trades" about a
+    // market that traded once. So the count is passed IN by whoever knows which
+    // points are trades, and `series.length` is only the fallback for a caller
+    // with no opening point to exclude.
+    //
+    // Deliberately NOT clamped up to 2: a market with one trade and an opening
+    // point states "over 1 trade" — see `priceChangeLabel`, which now says
+    // "trade"/"trades" correctly. Claiming two would be the exact off-by-one
+    // this parameter exists to remove.
+    trades: typeof tradeCount === 'number' && Number.isFinite(tradeCount) && tradeCount > 0 ? Math.floor(tradeCount) : series.length,
     direction: last > first ? 'up' : last < first ? 'down' : 'flat'
   };
 }
@@ -133,15 +160,20 @@ export function priceChangeLabel(change: PriceChange | null): PriceChangeLabel |
   if (!change) return null;
   const magnitude = pctMoveLabel(change.pct);
   if (magnitude === null) return null;
-  const basis = `over ${change.trades} trades`;
+  // ★ SINGULAR IS NOT COSMETIC HERE (2026-08-30). `trades` can now be 1 (see
+  // the field's own note), and "over 1 trades" beside a real price move is the
+  // kind of sentence that makes a reader distrust the number next to it.
+  const noun = change.trades === 1 ? 'trade' : 'trades';
+  const basis = `over ${change.trades} ${noun}`;
+  const spanned = `the ${change.trades} recorded ${noun} in this market`;
   if (change.direction === 'flat') {
-    return { mark: '', text: `Unchanged ${basis}`, aria: `Price unchanged across the ${change.trades} recorded trades in this market.`, direction: 'flat' };
+    return { mark: '', text: `Unchanged ${basis}`, aria: `Price unchanged across ${spanned}.`, direction: 'flat' };
   }
   const word = change.direction === 'up' ? 'up' : 'down';
   return {
     mark: change.direction === 'up' ? '▲' : '▼',
     text: `${magnitude} ${basis}`,
-    aria: `Price ${word} ${magnitude} across the ${change.trades} recorded trades in this market.`,
+    aria: `Price ${word} ${magnitude} across ${spanned}.`,
     direction: change.direction
   };
 }

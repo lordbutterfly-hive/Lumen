@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import { appendAttributionFooter } from '@transaction/lib/attribution';
 
 const FIXTURE_PROXY_PORT = 8200;
 
@@ -291,7 +292,20 @@ export function expectCommentOperation(
   );
   expect(value?.author, 'comment.author').toBe(expected.author);
   if (expected.body !== undefined) {
-    expect(value?.body, 'comment.body').toBe(expected.body);
+    /**
+     * Every chain broadcast from a full Hive account carries the mandatory
+     * Lumen attribution footer, appended in the mutation hooks at broadcast
+     * time (`appendAttributionFooter`, packages/transaction/lib/attribution.ts).
+     * Specs state the body the AUTHOR typed, so run the same transform on the
+     * expectation rather than hard-coding the footer into a dozen spec files.
+     *
+     * This is deliberately stricter than stripping the footer off the actual
+     * body would be: if attribution ever silently stops being applied, this
+     * assertion FAILS instead of passing by absence.
+     */
+    expect(value?.body, 'comment.body (with Lumen attribution)').toBe(
+      appendAttributionFooter(expected.body)
+    );
   }
   if (expected.permlink !== undefined) {
     expect(value?.permlink, 'comment.permlink').toBe(expected.permlink);

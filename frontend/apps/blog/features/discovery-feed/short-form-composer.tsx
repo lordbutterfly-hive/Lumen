@@ -37,6 +37,75 @@ const ISSUE_KEYS: Record<ImageIssue, string> = {
 };
 
 /**
+ * True when `text` has exactly `marker` ending at `index` — i.e.
+ * `text.slice(index - marker.length, index) === marker` — AND it is not part
+ * of a LONGER run of the same character. Without that second check, selecting
+ * the word inside an existing **bold** span and pressing Italic (marker `*`)
+ * would read the second `*` of `**` as a lone italic marker and strip it,
+ * quietly weakening the bold instead of nesting italic inside it.
+ */
+function markerEndsAt(text: string, index: number, marker: string): boolean {
+  const start = index - marker.length;
+  if (start < 0 || text.slice(start, index) !== marker) return false;
+  return text[start - 1] !== marker[0];
+}
+
+/** Mirror of `markerEndsAt`, checked forward from `index`. */
+function markerStartsAt(text: string, index: number, marker: string): boolean {
+  const end = index + marker.length;
+  if (end > text.length || text.slice(index, end) !== marker) return false;
+  return text[end] !== marker[0];
+}
+
+/**
+ * Wraps `text[start, end)` in `marker` (`**` for bold, `*` for italic) for the
+ * bold/italic toolbar buttons — or UNWRAPS it if it is already wrapped, so
+ * pressing the same button twice toggles rather than double-wrapping
+ * (`**bold**` -> `**bold**bold**`). "Already wrapped" covers both shapes: the
+ * selection itself includes the markers (`**bold**` selected whole), or the
+ * markers sit immediately outside a selection that excludes them (`bold`
+ * selected inside `**bold**`). With no selection, the markers are inserted
+ * with the caret left between them, ready to type.
+ */
+function toggleMarkerWrap(
+  text: string,
+  start: number,
+  end: number,
+  marker: string
+): { text: string; selectionStart: number; selectionEnd: number } {
+  const markerLen = marker.length;
+  const selected = text.slice(start, end);
+
+  const wrappedInside =
+    selected.length >= markerLen * 2 &&
+    markerStartsAt(selected, 0, marker) &&
+    markerEndsAt(selected, selected.length, marker);
+  if (wrappedInside) {
+    const inner = selected.slice(markerLen, selected.length - markerLen);
+    return {
+      text: text.slice(0, start) + inner + text.slice(end),
+      selectionStart: start,
+      selectionEnd: start + inner.length
+    };
+  }
+
+  const wrappedOutside = markerEndsAt(text, start, marker) && markerStartsAt(text, end, marker);
+  if (wrappedOutside) {
+    return {
+      text: text.slice(0, start - markerLen) + selected + text.slice(end + markerLen),
+      selectionStart: start - markerLen,
+      selectionEnd: start - markerLen + selected.length
+    };
+  }
+
+  const nextText = text.slice(0, start) + marker + selected + marker + text.slice(end);
+  // No selection: land the caret BETWEEN the markers rather than after them.
+  return selected.length === 0
+    ? { text: nextText, selectionStart: start + markerLen, selectionEnd: start + markerLen }
+    : { text: nextText, selectionStart: start + markerLen, selectionEnd: end + markerLen };
+}
+
+/**
  * "What's on your mind?" compose box near the top of the home feed. At rest it is
  * a single-line card (avatar + placeholder + ink Post button, all Lora — the
  * product's only typeface since 2026-08-19; this used to read "all Open Sans per
@@ -131,6 +200,32 @@ export default function ShortFormComposer() {
           textarea.setSelectionRange(caret, caret);
         });
         return current.slice(0, start) + snippet + current.slice(end);
+      });
+      markDirty();
+    },
+    [markDirty]
+  );
+
+  /**
+   * Bold/italic toolbar buttons (owner ask, 2026-08-28). Wraps the current
+   * selection in `marker`, or unwraps it if already wrapped — see
+   * `toggleMarkerWrap` above for the exact rule, verified against a dozen
+   * selection shapes (empty, whole-word, markers-included, markers-outside,
+   * nested bold+italic) before wiring it up here.
+   */
+  const wrapSelection = useCallback(
+    (marker: string) => {
+      const textarea = textareaRef.current;
+      setText((current) => {
+        const start = textarea?.selectionStart ?? current.length;
+        const end = textarea?.selectionEnd ?? current.length;
+        const result = toggleMarkerWrap(current, start, end, marker);
+        requestAnimationFrame(() => {
+          if (!textarea) return;
+          textarea.focus();
+          textarea.setSelectionRange(result.selectionStart, result.selectionEnd);
+        });
+        return result.text;
       });
       markDirty();
     },
@@ -380,6 +475,8 @@ export default function ShortFormComposer() {
 
       <ComposerFooter
         labels={{
+          bold: t('short_form_composer.bold'),
+          italic: t('short_form_composer.italic'),
           addImage: t('short_form_composer.add_image'),
           addEmoji: t('short_form_composer.add_emoji'),
           post: t('short_form_composer.post_button'),
@@ -393,6 +490,8 @@ export default function ShortFormComposer() {
         canSubmit={text.trim() !== ''}
         uploading={images.uploading}
         emojiOpen={emojiOpen}
+        onToggleBold={() => wrapSelection('**')}
+        onToggleItalic={() => wrapSelection('*')}
         onOpenFilePicker={() => fileRef.current?.click()}
         onToggleEmoji={() => setEmojiOpen((open) => !open)}
         onSubmit={() => void submit()}

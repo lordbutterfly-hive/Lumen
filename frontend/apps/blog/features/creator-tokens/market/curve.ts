@@ -402,30 +402,38 @@ export function serviceQuote(usd: number, priceUsd: number): ServiceQuote {
  * 100,000 on every `lumen.*` — and the creation forms accept a price with no
  * reference to the creator's own cap at all.
  *
- * Measured on the live testnet build: the 30-cap market's single posted
- * offering ("Q&A session <live> & more", $15) rendered `≈ 14.00 tokens` on its
- * own token page. Fourteen of the thirty tokens that will ever exist — 47% of
- * total supply — for one job. An ask ESCROWS those tokens for the duration of
- * the work (ask.go holds them until answer/reclaim), so the fraction is a hard
- * ceiling on how many customers the creator can serve at once, set by their own
- * pricing and invisible to them at the moment they set it.
+ * WHY THE CHECK IS A CLIENT ONE. The contract does not refuse it: offerings.go
+ * validates the title and the price band, and ask.go prices the escrow, but
+ * nothing on chain relates an offering's price to `kCap`. So this is not a
+ * mirror of a core rule — it is a creation-time guard against the creator
+ * posting a service nobody can buy, and the message says how to fix it rather
+ * than merely refusing.
  *
- * TWO SEPARATE FAULTS, deliberately reported as two:
+ * ★★ ONE FAULT NOW, NOT TWO (2026-08-30, studio checklist B2; decision by the
+ * lead session, evidence by this one). Until today this reported a second,
+ * softer fault, OVER-SHARE: fillable, but more than 10% of the cap. That 10%
+ * was reasoned against a cap a creator had chosen from a 5k / 20k / 100k menu
+ * (the escrow makes the share a concurrency limit: ten jobs at once at 10%).
+ * The menu is gone and every market launches at the contract's MaxCap
+ * (launch-money.ts), so on a new market the share test was dead code, and on
+ * the three legacy markets it was punitive about a number nobody picked on
+ * purpose. PROVEN on the live testnet state before it was removed (all 13
+ * discovery markets, real cap / supply / face / offerings through this very
+ * function): the owner's own `hive:hbd-temp` (cap 30, supply 30, face $25)
+ * tripped it at 18 tokens = 60%, and ANY service price at or above $4.26 did
+ * — every price a person types — while the Studio's create form re-evaluates
+ * it on every keystroke (creator-studio.tsx NewOfferingRow). That is the
+ * "offerings flashing an error because price set is too high" the owner
+ * reported, and his ruling was that it should never fire. The launch path
+ * could not fire at all (nothing up to MAX_PRICE_USD trips a 1e9 cap).
  *
- *   1. UNFILLABLE — the service costs more tokens than the cap allows to exist.
- *      No buyer can ever hold enough, at any supply, so the offering is
- *      advertised and cannot be transacted. This needs no policy judgement: it
- *      is not "risky pricing", it is a listing with no reachable buyer.
- *
- *   2. OVER-SHARE — fillable, but it consumes more of total supply than
- *      `maxShareBps`. See that constant for the threshold's justification.
- *
- * WHY THE CHECK IS A CLIENT ONE. The contract does not refuse either case:
- * offerings.go validates the title and the price band, and ask.go prices the
- * escrow, but nothing on chain relates an offering's price to `kCap`. So this
- * is not a mirror of a core rule — it is a creation-time guard against the
- * creator posting a shop nobody can buy from, and the message says how to fix
- * it rather than merely refusing.
+ * UNFILLABLE SURVIVES because it is not a heuristic. `tokens > cap` means no
+ * holder can ever own enough tokens to place the ask, at any supply — buy.go
+ * refuses to mint past the cap — so the listing has no reachable buyer. That
+ * is a fact about the chain, and refusing to post it is still the honest
+ * thing. On a MaxCap market it needs a service priced in the trillions, so it
+ * is silent there too; it exists for the legacy caps until their creators
+ * raise them (the Studio keeps the Raise-cap control on the live cap).
  *
  * NEVER GUESSES. A cap or price we do not have returns `null` — "cannot judge"
  * — never a refusal. Blocking a creator's own pricing on a value that failed to
@@ -434,47 +442,13 @@ export function serviceQuote(usd: number, priceUsd: number): ServiceQuote {
  * no guard.
  */
 
-/**
- * The most of a creator's total supply one service may cost: 10%.
- *
- * ★ REASONED, NOT ROUND-BY-FEEL — and the reasoning is the escrow, not
- * aesthetics. A service costing fraction f of max supply can be in flight for
- * at most floor(1/f) customers simultaneously, because ask.go locks the
- * buyer's tokens until the job is answered or reclaimed. f IS the creator's
- * concurrency limit. At 10% a creator can carry ten jobs at once; at the 47%
- * measured live they can carry two, and the third customer cannot transact at
- * any price.
- *
- * Ten is also what the product's own central claim needs. `/creators` ranks
- * creators "by how reliably they deliver", computed from answered/missed
- * COUNTS — a record that accumulates one job at a time is not a record anyone
- * can rank on, so a pricing rule that throttles delivery to single figures
- * quietly disables the ranking the feature exists to provide.
- *
- * And it is two orders of magnitude LOOSER than the regime the owner's own cap
- * ruling implies: every token launches at `STANDARD_CAP` = 5,000
- * (ui/launch-money.ts, owner 2026-08-08), where a $50 service is 44 tokens =
- * 0.88% of supply. So 10% refuses only pricing far outside anything the design
- * anticipates — it is a backstop against the pathological case, not a
- * constraint on ordinary pricing.
- *
- * ★ THE EXACT FRACTION IS THE ONE PART OF THIS AN OWNER MAY WANT TO SET. The
- * SHAPE of the rule (cost as a share of cap, checked at creation) follows from
- * the escrow; the number 10% is the loosest bound consistent with the argument
- * above. Tightening it to 5% or 2% is defensible and needs no code change
- * beyond this constant.
- */
-export const MAX_SERVICE_SUPPLY_SHARE_BPS = 1_000; // 10%
-
 export interface ServiceSupplyShare {
   /** Whole tokens the service costs at `priceUsd` — `serviceQuote(...).tokens`, never a second formula. */
   tokens: number;
-  /** Share of `capTokens`, in basis points. Uncapped: an unfillable service exceeds 10,000. */
+  /** Share of `capTokens`, in basis points. Uncapped: an unfillable service exceeds 10,000. Informational; nothing refuses on it since 2026-08-30. */
   shareBps: number;
-  /** More tokens than can ever exist. No buyer, at any supply. */
+  /** More tokens than can ever exist. No buyer, at any supply. The only refusal. */
   unfillable: boolean;
-  /** Fillable, but above `maxShareBps` of total supply. */
-  overShare: boolean;
 }
 
 /**
@@ -486,12 +460,7 @@ export interface ServiceSupplyShare {
  * "third, wrong way to quote the same offering" this feature has already been
  * bitten by (creator-studio.tsx's own note, 2026-08-21).
  */
-export function serviceSupplyShare(
-  usd: number,
-  priceUsd: number,
-  capTokens: number,
-  maxShareBps: number = MAX_SERVICE_SUPPLY_SHARE_BPS
-): ServiceSupplyShare | null {
+export function serviceSupplyShare(usd: number, priceUsd: number, capTokens: number): ServiceSupplyShare | null {
   if (!Number.isFinite(usd) || usd <= 0) return null;
   if (!Number.isFinite(priceUsd) || priceUsd <= 0) return null;
   if (!Number.isFinite(capTokens) || capTokens <= 0) return null;
@@ -505,39 +474,27 @@ export function serviceSupplyShare(
   return {
     tokens,
     shareBps: Math.round((tokens / cap) * 10_000),
-    unfillable: tokens > cap,
-    overShare: tokens * 10_000 > cap * maxShareBps
+    unfillable: tokens > cap
   };
 }
 
 /**
  * The creation-time refusal sentence, or `null` when the price is fine or
- * cannot be judged.
+ * cannot be judged. Since 2026-08-30 the only refusal is UNFILLABLE (see the
+ * block above for what was removed and why).
  *
  * Wording follows the rule the rest of this feature's refusals follow: name the
- * fault in the creator's own numbers, then the way out. Both remedies are real
- * — the cap can be RAISED from the Studio at any time (ui/launch-money.ts's own
- * note on why a low start is safe), so this is never a dead end.
+ * fault in the creator's own numbers, then the way out. Both remedies are real:
+ * the cap can be RAISED from the Studio at any time on a market below MaxCap,
+ * so this is never a dead end.
  */
-export function serviceSupplyShareProblem(
-  usd: number,
-  priceUsd: number,
-  capTokens: number,
-  maxShareBps: number = MAX_SERVICE_SUPPLY_SHARE_BPS
-): string | null {
-  const share = serviceSupplyShare(usd, priceUsd, capTokens, maxShareBps);
-  if (share === null) return null;
+export function serviceSupplyShareProblem(usd: number, priceUsd: number, capTokens: number): string | null {
+  const share = serviceSupplyShare(usd, priceUsd, capTokens);
+  if (share === null || !share.unfillable) return null;
 
   const cap = Math.floor(capTokens).toLocaleString('en-US');
   const tokens = share.tokens.toLocaleString('en-US');
-  if (share.unfillable) {
-    return `At this price the service costs ${tokens} tokens, and only ${cap} can ever exist. Nobody could buy it. Lower the price, or raise your supply cap first.`;
-  }
-  if (share.overShare) {
-    const pct = Math.max(1, Math.round(share.shareBps / 100));
-    return `At this price the service costs ${tokens} tokens — ${pct}% of your whole supply of ${cap}. Only a few buyers could hold enough at once, and their tokens stay locked until you deliver. Lower the price, or raise your supply cap first.`;
-  }
-  return null;
+  return `At this price the service costs ${tokens} tokens, and only ${cap} can ever exist, so nobody could buy it. Lower the price, or raise your supply cap first.`;
 }
 
 /**

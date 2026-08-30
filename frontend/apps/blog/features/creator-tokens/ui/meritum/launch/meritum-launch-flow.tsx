@@ -418,7 +418,6 @@ const MeritumLaunchFlow: FC = () => {
               />
             ) : (
               <LaunchStepTerms
-                cap={flow.cap}
                 commission={commission}
                 firstBuy={flow.firstBuy}
                 onFirstBuy={flow.setFirstBuy}

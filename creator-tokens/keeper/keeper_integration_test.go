@@ -147,6 +147,15 @@ func TestIntegration_DoubleSubmitRefundHolderIsHarmless(t *testing.T) {
 	// full ExitTaxDecayBlocks past the buy clears the holder's OWN clock, so
 	// the ordinary (non-backstop) branch fires -- the realistic case for a
 	// buy-and-hold holder who simply never rushed to self-refund.
+	// A1 (owner ruling 2026-08-30): a natural lapse is an inflow stop, not a
+	// wind-down, so the keeper has nothing to sweep on it (core.RefundHolder
+	// refuses; Plan skips non-retired markets). The wind-down these tests
+	// exercise is entered the one way that still leads there: the creator
+	// retires at the freeze. The subject of each test (double-submit
+	// harmlessness, resume-mid-sweep, close-waits-for-escrow) is unchanged.
+	if err := core.Retire(store, creator, creator, freezeBlock); err != nil {
+		t.Fatalf("Retire: %v", err)
+	}
 	refundBlock := registeredBlock + 1 + core.ExitTaxDecayBlocks + 1000
 	if phase := core.Phase(store, creator, refundBlock); phase != core.StateFrozen {
 		t.Fatalf("phase at refundBlock = %s, want still FROZEN", phase)
@@ -155,6 +164,7 @@ func TestIntegration_DoubleSubmitRefundHolderIsHarmless(t *testing.T) {
 	mv := MarketView{
 		Creator: creator,
 		Phase:   core.StateFrozen,
+		Retired: true, // A1: Plan sweeps retired markets only
 		Supply:  core.Supply(store, creator),
 		Holders: []HolderBalance{{Holder: holder, Balance: core.BalanceOf(store, creator, holder)}},
 	}
@@ -247,6 +257,15 @@ func TestIntegration_ResumeMidSweepNoDoublePayNoSkip(t *testing.T) {
 	// FROZEN -- core.RefundHolder's EXITTAX-1 gate refuses a still-taxed
 	// holder's push outright, and a naturally-lapsed market can never clear
 	// that gate right at its own freeze point (35-day grace < 42-day decay).
+	// A1 (owner ruling 2026-08-30): a natural lapse is an inflow stop, not a
+	// wind-down, so the keeper has nothing to sweep on it (core.RefundHolder
+	// refuses; Plan skips non-retired markets). The wind-down these tests
+	// exercise is entered the one way that still leads there: the creator
+	// retires at the freeze. The subject of each test (double-submit
+	// harmlessness, resume-mid-sweep, close-waits-for-escrow) is unchanged.
+	if err := core.Retire(store, creator, creator, freezeBlock); err != nil {
+		t.Fatalf("Retire: %v", err)
+	}
 	refundBlock := registeredBlock + 1 + core.ExitTaxDecayBlocks + 1000
 
 	snapshot := func() MarketView {
@@ -254,7 +273,8 @@ func TestIntegration_ResumeMidSweepNoDoublePayNoSkip(t *testing.T) {
 		for _, h := range holders {
 			hb = append(hb, HolderBalance{Holder: h.name, Balance: core.BalanceOf(store, creator, h.name)})
 		}
-		return MarketView{Creator: creator, Phase: core.Phase(store, creator, refundBlock), Supply: core.Supply(store, creator), Holders: hb}
+		_, retired := core.RetiredAt(store, creator)
+		return MarketView{Creator: creator, Phase: core.Phase(store, creator, refundBlock), Retired: retired, Supply: core.Supply(store, creator), Holders: hb}
 	}
 
 	sub := &coreSubmitter{store: store, caller: "hive:keeper-bot", block: refundBlock}
@@ -472,13 +492,22 @@ func TestIntegration_CloseIfDrainedWaitsForOutstandingEscrow(t *testing.T) {
 	// ExitTaxDecayBlocks past the buy (registeredBlock+1) -- core.RefundHolder's
 	// EXITTAX-1 gate refuses a still-taxed holder's push outright, and this
 	// naturally-lapsed market cannot clear that gate right at freezeBlock.
+	// A1 (owner ruling 2026-08-30): a natural lapse is an inflow stop, not a
+	// wind-down, so the keeper has nothing to sweep on it (core.RefundHolder
+	// refuses; Plan skips non-retired markets). The wind-down these tests
+	// exercise is entered the one way that still leads there: the creator
+	// retires at the freeze. The subject of each test (double-submit
+	// harmlessness, resume-mid-sweep, close-waits-for-escrow) is unchanged.
+	if err := core.Retire(store, creator, creator, freezeBlock); err != nil {
+		t.Fatalf("Retire: %v", err)
+	}
 	refundBlock := registeredBlock + 1 + core.ExitTaxDecayBlocks + 1000
 	if phase := core.Phase(store, creator, refundBlock); phase != core.StateFrozen {
 		t.Fatalf("phase at refundBlock = %s, want still FROZEN", phase)
 	}
 
 	mv1 := MarketView{
-		Creator: creator, Phase: core.StateFrozen,
+		Creator: creator, Phase: core.StateFrozen, Retired: true, // A1: Plan sweeps retired markets only
 		Supply:  core.Supply(store, creator),
 		Holders: []HolderBalance{{Holder: holder, Balance: core.BalanceOf(store, creator, holder)}},
 	}
@@ -527,8 +556,9 @@ func TestIntegration_CloseIfDrainedWaitsForOutstandingEscrow(t *testing.T) {
 	// Next scheduled sweep (a fresh snapshot -- exactly how a real
 	// deployment would notice the reclaim): the reclaimed credits are
 	// refunded, and THIS time closeIfDrained actually closes the market.
+	_, retired2 := core.RetiredAt(store, creator)
 	mv2 := MarketView{
-		Creator: creator, Phase: core.Phase(store, creator, reclaimBlock),
+		Creator: creator, Phase: core.Phase(store, creator, reclaimBlock), Retired: retired2,
 		Supply:  core.Supply(store, creator),
 		Holders: []HolderBalance{{Holder: holder, Balance: core.BalanceOf(store, creator, holder)}},
 	}

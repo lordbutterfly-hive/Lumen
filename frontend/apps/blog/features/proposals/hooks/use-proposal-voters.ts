@@ -38,6 +38,8 @@ export function useProposalVoters(proposalId: number, enabled: boolean) {
     isError: query.isError,
     /** Real data is present — distinguishes a genuinely empty roster from "haven't heard back yet". */
     hasData: query.data !== undefined,
+    /** A retry is in flight — `isLoading` alone stays false for a refetch of an already-errored query (react-query v4 reserves it for the FIRST fetch), so the retry button needs its own pending signal. */
+    isRetrying: query.isFetching,
     refetch: query.refetch
   };
 }

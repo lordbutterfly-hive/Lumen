@@ -107,7 +107,33 @@ function todaySeed(): number {
 function activeTopicFrom(pathname: string | null): string | null {
   if (!pathname) return null;
   const m = /^\/topics\/([^/?#]+)/.exec(pathname);
-  return m ? decodeURIComponent(m[1]).toLowerCase() : null;
+  if (!m) return null;
+  /*
+   * ★★ decodeURIComponent THROWS ON A LONE `%`, AND THIS RUNS DURING RENDER
+   * (2026-08-30, found by audit hypothesis H20 and reproduced in a real browser).
+   * `/topics/100%` raised URIError and took the whole page with it: topic links
+   * 29 -> 0, body text down to 173 characters. React contains it, so there is no
+   * crash dialog — just a blank page, which is the worst way to fail.
+   *
+   * The vector is author-controlled: post tag chips render `/topics/${tag}` from
+   * `json_metadata.tags` with no encoding, and a tag is whatever the author typed.
+   * A sweep of 600 live posts found 51 tags outside [a-z0-9-] — spaces, newlines,
+   * leading `#` — and none containing `%`, so the mechanism is proven and the
+   * trigger is not in the wild. That is a reason to fix it cheaply now, not a
+   * reason to wait for someone to publish one.
+   *
+   * ★ THE PATTERN, worth more than this instance: `normalizeHandle` in
+   * app/api/creator-profile/route.ts makes the IDENTICAL call and already wraps it,
+   * falling back to the raw value. Same risk, same codebase, one guarded and one
+   * not. Where a decode is unguarded is where to look next.
+   */
+  try {
+    return decodeURIComponent(m[1]).toLowerCase();
+  } catch {
+    // Undecodable is not an error worth a blank page: it simply is not a topic we
+    // can match against, which is the same answer as "no topic in this path".
+    return m[1].toLowerCase();
+  }
 }
 
 const Topics = () => {

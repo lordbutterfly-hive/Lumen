@@ -251,6 +251,7 @@ func TestOffPegRefundRounding(t *testing.T) {
 			// ExitTaxDecayBlocks is added so every holder (clocked at block 1
 			// above) is fully decayed to τ = 0 and every push is allowed
 			// (EXITTAX-1 gate) as a 0-tax sweep.
+			forceWindDown(s, creator) // A1: wind-down is reached by Retire, not by lapse (refund_test.go)
 			block := ExitTaxDecayBlocks + GraceBlocks
 			live := append([]string{}, holderNames...)
 

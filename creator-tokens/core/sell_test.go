@@ -559,11 +559,26 @@ func TestSell_Guards(t *testing.T) {
 			t.Fatalf("stranger err = %v, want %s", err, ErrBalance)
 		}
 	})
-	t.Run("frozen-rail-closed", func(t *testing.T) {
+	// A1 (owner ruling 2026-08-30): a natural FROZEN no longer closes the curve
+	// rail — non-payment is an inflow stop, not a wind-down, so the holder's
+	// exit stays exactly where it was. Retire is what closes it (next case).
+	t.Run("frozen-rail-open", func(t *testing.T) {
 		s, c := slSetupCurveMarket(t)
 		setU64(s, kPaidUntil(c), 2000)
-		if _, err := Sell(s, "hodler", c, 2000+GraceBlocks, big.NewInt(1)); errSymbol(err) != ErrState {
-			t.Fatalf("err = %v, want %s (curve rail closes at FROZEN; Refund opens)", err, ErrState)
+		if Phase(s, c, 2000+GraceBlocks) != StateFrozen {
+			t.Fatal("fixture: want FROZEN")
+		}
+		if _, err := Sell(s, "hodler", c, 2000+GraceBlocks, big.NewInt(1)); err != nil {
+			t.Fatalf("A1: Sell on a naturally FROZEN market must work (curve rail open): %v", err)
+		}
+	})
+	t.Run("retired-rail-closed", func(t *testing.T) {
+		s, c := slSetupCurveMarket(t)
+		if err := Retire(s, c, c, 1999); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Sell(s, "hodler", c, 2000, big.NewInt(1)); errSymbol(err) != ErrState {
+			t.Fatalf("err = %v, want %s (curve rail closes on Retire; Refund opens)", err, ErrState)
 		}
 	})
 	t.Run("closed-rail-closed", func(t *testing.T) {

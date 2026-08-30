@@ -63,17 +63,19 @@ import "math/big"
 // buys could then raid it). So the exit ROUTES on inWindDown (market.go), and
 // every state has exactly one open rail:
 //
-//	NOT winding down (ACTIVE, natural-lapse OVERDUE)
+//	NOT winding down (ACTIVE, natural-lapse OVERDUE, and since A1 2026-08-30
+//	                  natural-lapse FROZEN too: a lapse is an inflow stop)
 //	              → Sell (curve proceeds; tax + fee apply)         [sell.go]
-//	WINDING DOWN (RETIRED at any point, or naturally FROZEN/CLOSED)
+//	WINDING DOWN (RETIRED at any point, or stored CLOSED)
 //	              → Refund (pull) + RefundHolder (push): flat pro-rata,
 //	                TAXED (K2), no fee, no commission              [this file]
 //
 // Confining flat pro-rata to inWindDown states is what keeps the stranded
 // excess UN-raidable: RETIRED is irreversible (Renew refuses on the mark) and
-// FROZEN/CLOSED is terminal, so no fresh buyer can ever re-enter to dilute the
-// pot. A natural-lapse OVERDUE window is NOT inWindDown — it is recoverable, so
-// it keeps the curve rail (RULING K3 leaves it exactly where it was).
+// CLOSED is terminal, so no fresh buyer can ever re-enter to dilute the pot. A
+// natural-lapse OVERDUE or FROZEN window is NOT inWindDown — it is recoverable
+// (Renew lifts it, A1 2026-08-30), so it keeps the curve rail (RULING K3 leaves
+// it exactly where it was) and no pro-rata ever touches R === area(S) there.
 //
 // NO STATE LEAVES A HOLDER TRAPPED, proven by cases: inWindDown is total and
 // partitions every (creator, block) into exactly one rail; Sell covers
@@ -186,7 +188,7 @@ func RefundPrice(s Store, creator string) *big.Int {
 // Refund burns `credits` out of the CALLER's own balance (the pull half —
 // API.md rule 2) and pays them flat pro-rata out of the reserve, LESS the K2
 // exit tax. Wind-down rail: inWindDown only (RETIRED including its notice, or
-// naturally FROZEN/CLOSED) — the rail switch this file's header reconciles
+// stored CLOSED; never a natural lapse, A1) — the rail switch this file's header reconciles
 // (while the market trades the holder's exit is Sell; the gate ROUTES, it
 // never removes). Reads inWindDown() ONLY — never RequireInflowOpen, never
 // kPaused: outflows never pause, and the wind-down rail must survive kPaused
@@ -251,10 +253,10 @@ func Refund(s Store, caller, creator string, block uint64, credits *big.Int, min
 	// The rail switch — inWindDown ONLY, never the pause; see the file header
 	// for the full reconciliation and the trapped-holder impossibility proof.
 	// The wind-down rail is open exactly when the curve rail is closed: a
-	// RETIRED market (including its notice, RULING K3) or a naturally
-	// FROZEN/CLOSED one.
+	// RETIRED market (including its notice, RULING K3) or a stored CLOSED one.
+	// A natural FROZEN is neither (A1, 2026-08-30): the holder sells.
 	if !inWindDown(s, creator, block) {
-		return nil, newErr(ErrState, "pro-rata refund opens only at wind-down (retired/frozen/closed); while the market trades, exit via Sell — the curve rail is open in exactly those states")
+		return nil, newErr(ErrState, "pro-rata refund opens only at wind-down (retired/closed); while the market trades — including a lapsed, FROZEN one — exit via Sell, the curve rail is open in exactly those states")
 	}
 
 	supply := getMoney(s, kSupply(creator))
@@ -425,7 +427,7 @@ func RefundHolder(s Store, caller, creator, holder string, block uint64) (*big.I
 		return nil, newErr(ErrInput, "invalid holder")
 	}
 	if !inWindDown(s, creator, block) {
-		return nil, newErr(ErrState, "refundHolder is only available once wind-down opens (retired/frozen/closed); the holder may still exit via Sell on the live curve")
+		return nil, newErr(ErrState, "refundHolder is only available once wind-down opens (retired/closed); the holder may still exit via Sell on the live curve, lapsed or not")
 	}
 
 	// BOTH BUCKETS — the push sweeps the holder's WHOLE position, or an
@@ -630,7 +632,19 @@ func CloseIfDrained(s Store, creator string, block uint64) bool {
 	case StateClosed:
 		return true
 	case StateFrozen:
-		// fall through to the supply check below
+		// ★★ A1 (owner ruling 2026-08-30): a NATURAL FROZEN is an inflow stop,
+		// not a wind-down, so it must never CLOSE. This gate used to read bare
+		// FROZEN, which was correct while every FROZEN was a wind-down; now
+		// that Sell stays open on a lapsed market, its supply can genuinely
+		// reach zero (every holder sold on the curve) with the creator still
+		// able to Renew — and closing it there would make a recoverable lapse
+		// terminal by accident, erasing the delivery record and forcing a
+		// re-register. Only a RETIRED market's FROZEN completes a wind-down.
+		// (Found while re-proving the boundary test, not by the sweep of
+		// inWindDown callers: this function switches on Phase directly.)
+		if !marketRetired(s, creator) {
+			return false
+		}
 	default:
 		return false
 	}

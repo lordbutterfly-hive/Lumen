@@ -5,6 +5,7 @@ import { Link } from '@hive/ui';
 import { useLiveTokenMarket } from '../live/use-live-token-market';
 import { useTokenAccounts } from '../live/use-token-accounts';
 import { pctLabel, usdPrice } from '../market/format';
+import { SOLD_OUT_WORD, marketHealthOf, soldOutOf } from '../market/market-health';
 
 // TODO i18n — staged copy, same precedent as the rest of this feature.
 const COPY = {
@@ -13,6 +14,24 @@ const COPY = {
   completionRate: 'Completion rate',
   medianReply: 'Median reply',
   buy: 'Buy',
+  /**
+   * ★ THE CARD HAD NO PHASE CHECK AT ALL (2026-08-30, B4): price + Buy on a
+   * FROZEN, retired or delinquent market, identical to a healthy one, and the
+   * only warning in the product was on the token page this card sits in
+   * front of. One line per state, worded to make NO money claim: what a
+   * wind-down pays out is the open A1 contract question, so these say only
+   * what the contract does to BUYING today. The lapsed line keeps Buy, as the
+   * token page does under its banner (the contract accepts the buy); the
+   * other two drop it, as the token page disables it.
+   */
+  lapsed: 'This creator’s listing has lapsed. If it isn’t renewed, the market freezes and buying closes.',
+  // Reader-facing only (2026-08-31, A5): the fact, and no claim about anyone's
+  // money. What the creator can do about it is market/lapse.ts's sentence, on
+  // the creator's own surfaces. Reachable only under the v2 contract rules.
+  delisted: 'This creator’s listing has lapsed and the market is delisted. Buying is closed until the creator relists it.',
+  closed: 'This market is winding down. Buying is closed.',
+  pausedDelinquent: 'This creator has left too many paid asks unanswered, so buying is paused for now.',
+  paused: 'Buying is paused for now.',
   launchTitle: 'No Meritum yet',
   launchBody: 'Let people hold your token and pay you for your time.',
   // Unified 2026-08-23 with header-token-pill and the studio h1 — see that file's note.
@@ -100,6 +119,25 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
 
   if (status === 'ready' && market) {
     const d = market.delivery;
+    // The token page's own rules as one word (market/market-health.ts);
+    // LiveTokenMarket already carries the three inputs.
+    const health = marketHealthOf(market);
+    const healthLine =
+      health === 'lapsed'
+        ? COPY.lapsed
+        : health === 'delisted'
+          ? COPY.delisted
+        : health === 'closed'
+          ? COPY.closed
+          : health === 'paused'
+            ? market.delinquentUntilBlock !== null
+              ? COPY.pausedDelinquent
+              : COPY.paused
+            : null;
+    // Not a health and not a warning (owner, 2026-08-30; market-health.ts
+    // soldOutOf): a paid-up creator whose legacy cap is full. It only decides
+    // what sits in the Buy slot.
+    const soldOut = soldOutOf(market);
     return (
       <div
         className="mt-4 flex flex-wrap items-start justify-between gap-6 rounded-panel border border-line-warn-1 bg-surface-warn-2 px-6 py-[22px]"
@@ -144,14 +182,39 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
               ) : null}
             </div>
           ) : null}
+          {healthLine ? (
+            <p
+              className="mt-3 max-w-[52ch] font-sans text-caption font-semibold text-ink-warn-3"
+              data-testid="profile-token-health"
+            >
+              {healthLine}
+            </p>
+          ) : null}
         </div>
-        <Link
-          href={`/creators/${username}?a=buy`}
-          className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-sans text-[15px] leading-[24px] font-bold text-ink-27 transition-colors hover:bg-surface-brand-16"
-          data-testid="profile-token-buy"
-        >
-          {COPY.buy}
-        </Link>
+        {/* Buy only when buy.go would take it (`canBuy` is RequireInflowOpen,
+            the same gate the token page disables its own button on). A lapsed
+            market keeps it, under the line above. */}
+        {market.canBuy && !soldOut ? (
+          <Link
+            href={`/creators/${username}?a=buy`}
+            className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-sans text-[15px] leading-[24px] font-bold text-ink-27 transition-colors hover:bg-surface-brand-16"
+            data-testid="profile-token-buy"
+          >
+            {COPY.buy}
+          </Link>
+        ) : market.canBuy && soldOut ? (
+          // The token page's own disabled-button word, in the Buy slot, with no
+          // warning styling: every buy would revert (buy.go refuses past the
+          // cap), so the control is not offered, and nothing is said about the
+          // creator, who is fine.
+          <span
+            className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-sans text-[15px] leading-[24px] font-bold text-ink-27 opacity-50"
+            aria-disabled="true"
+            data-testid="profile-token-sold-out"
+          >
+            {SOLD_OUT_WORD}
+          </span>
+        ) : null}
       </div>
     );
   }

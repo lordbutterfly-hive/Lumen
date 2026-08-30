@@ -7,6 +7,7 @@ import { routeHandle } from '@/blog/features/creator-tokens/live/adapt';
 import type { MarketPrice } from '@/blog/features/creator-tokens/types';
 import { usdPrice } from '@/blog/features/creator-tokens/market/format';
 import styles from './post-card.module.css';
+import { buyWordFor } from '@/blog/features/creator-tokens/market/market-health';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -105,9 +106,22 @@ export default function IdentityPill({ handle, price, luminosity }: IdentityPill
    */
   const priceLabel =
     price && price.status === 'ready' && price.priceUsd !== null ? usdPrice(price.priceUsd) : null;
+  /*
+   * ★★ THE BUY SLOT IS NOT HARD-WIRED TO "Buy" ANY MORE (2026-08-30, B4). This
+   * pill drew "$1.41 · Buy" on every card for a FROZEN, retired or delinquent
+   * market, because `readMarketPrices` priced a market without ever reading
+   * its phase. It now carries `health` (market/market-health.ts, the token
+   * page's own canBuy + wind-down rules as one word), and the slot draws the
+   * STATE when the market cannot take money: Lapsed / Closed / Paused. Same
+   * width, same place, no sentence — a reader scanning a feed sees the
+   * difference without stopping. `health` is null only when `status` is not
+   * 'ready', so a ready price without a word cannot happen; the guard is
+   * there so the type says so too.
+   */
+  const buyWord = price && price.status === 'ready' && price.health !== null ? buyWordFor(price.health) : null;
 
   const profileHref = `/@${handle}`;
-  const hasMarket = priceLabel !== null;
+  const hasMarket = priceLabel !== null && buyWord !== null;
 
   return (
     <span className={styles.idCluster} data-testid="identity-pill">
@@ -152,7 +166,7 @@ export default function IdentityPill({ handle, price, luminosity }: IdentityPill
                 ◈
               </span>
               <span className={styles.idPriceFigure}>{priceLabel}</span>
-              <span className={styles.idBuy}>Buy</span>
+              <span className={styles.idBuy}>{buyWord}</span>
             </Link>
           </>
         ) : null}

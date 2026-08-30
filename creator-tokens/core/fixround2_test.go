@@ -212,14 +212,18 @@ func TestRefundHolder_EXITTAXDOS1_TwoAccountBounceBounded(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// NOTICE-1 (FIX ROUND 2) — the SAME liveness DoS reached on a NATURAL lapse
-// (no Retire) via a single-token bounce, which exercises the
-// paidUntil+GraceBlocks branch of windDownOpenBlock. Also pins that the
-// fresh-holder protection is preserved INSIDE the window (a genuinely fresh fan
-// cannot be force-pushed there — the fix-round-1 property).
+// NOTICE-1 (FIX ROUND 2), RE-SHAPED BY A1 (owner ruling 2026-08-30). This used
+// to reach the liveness DoS on a NATURAL lapse, exercising the
+// paidUntil+GraceBlocks branch of windDownOpenBlock. That branch is gone: a
+// lapse is an inflow stop now, never a wind-down, so there is no push to bound
+// on a lapsed market at all — the first assertions below pin exactly that. The
+// DoS bound is then proven on the road that still leads to wind-down, a Retire
+// AFTER the lapse, with the window measured from the retire block. The
+// fresh-holder protection INSIDE the window (a genuinely fresh fan cannot be
+// force-pushed) is preserved as before.
 // ---------------------------------------------------------------------------
 
-func TestRefundHolder_NOTICE1DoS_NaturalFreezeRefreshBounded(t *testing.T) {
+func TestRefundHolder_NOTICE1DoS_LapseThenRetireRefreshBounded(t *testing.T) {
 	s := NewMemStore()
 	const c, g, sybil = "lapsecreator", "griefer", "sybil"
 	if err := Register(s, c, c, 1000, 1000, MaxCap); err != nil {
@@ -239,6 +243,37 @@ func TestRefundHolder_NOTICE1DoS_NaturalFreezeRefreshBounded(t *testing.T) {
 		t.Fatalf("fixture: phase at freezeAt = %s, want FROZEN", Phase(s, c, freezeAt))
 	}
 
+	// ★ A1: a natural FROZEN is NOT a wind-down. No push fires on it, however
+	// long it lasts, and the holder's curve exit is untouched.
+	longLapsed := freezeAt + 2*ExitTaxDecayBlocks
+	if _, ok := windDownOpenBlock(s, c, longLapsed); ok {
+		t.Fatal("A1: a lapsed (never retired) market must report not-in-wind-down")
+	}
+	if _, err := RefundHolder(s, "keeper", c, g, longLapsed); errSymbol(err) != ErrState {
+		t.Fatalf("A1: push on a lapsed market must be refused (no wind-down on lapse), got %v", err)
+	}
+	if _, err := Sell(s, sybil, c, longLapsed, big.NewInt(1)); err != nil {
+		t.Fatalf("A1: a holder of a lapsed market keeps the curve exit: %v", err)
+	}
+	if _, err := Buy(s, sybil, c, longLapsed, big.NewInt(1)); err != nil {
+		// put the token back so the drain arithmetic below is unchanged: Buy is
+		// refused while FROZEN (inflow stop), so re-issue via a raw balance write
+		setMoney(s, kBal(c, sybil), big.NewInt(1))
+		setMoney(s, kSupply(c), new(big.Int).Add(getMoney(s, kSupply(c)), big.NewInt(1)))
+		setMoney(s, kReserve(c), Area(getMoney(s, kSupply(c))))
+	}
+
+	// The road that still leads to wind-down: Retire, after the lapse. The DoS
+	// window is measured from the RETIRE block (windDownOpenBlock's one anchor).
+	retireAt := longLapsed + 1
+	if err := Retire(s, c, c, retireAt); err != nil {
+		t.Fatalf("Retire on a lapsed market must be legal: %v", err)
+	}
+	if open, ok := windDownOpenBlock(s, c, retireAt+1); !ok || open != retireAt {
+		t.Fatalf("windDownOpen after retire = (%d,%v), want (%d,true)", open, ok, retireAt)
+	}
+	freezeAt = retireAt
+
 	// Inside the window: the griefer bounces 1 token to keep its clock fresh, and
 	// a still-taxed (fresh-clock) holder cannot be force-pushed there — the
 	// fix-round-1 EXITTAX-1/NOTICE-1 fresh-holder protection is preserved.
@@ -252,7 +287,7 @@ func TestRefundHolder_NOTICE1DoS_NaturalFreezeRefreshBounded(t *testing.T) {
 		t.Fatalf("inside window: a refreshed (fresh-clock) holder push must be REFUSED, got %v", err)
 	}
 
-	// AT the window (measured from the natural freeze block, NOT the holder's
+	// AT the window (measured from the RETIRE block, NOT the holder's
 	// refreshable clock): the sweep fires despite the refresh. Drain and close.
 	at := freezeAt + ExitTaxDecayBlocks
 	bounceAssertInert(t, s, c, sybil, g, at, 1)
@@ -269,7 +304,7 @@ func TestRefundHolder_NOTICE1DoS_NaturalFreezeRefreshBounded(t *testing.T) {
 		t.Fatalf("reserve after complete wind-down = %s, want 0 (C-24)", res)
 	}
 	if !CloseIfDrained(s, c, at) {
-		t.Fatal("NOTICE-1 (r2): natural-lapse market must CLOSE once drained")
+		t.Fatal("NOTICE-1 (r2, A1): lapsed-then-retired market must CLOSE once drained")
 	}
 }
 
@@ -516,7 +551,19 @@ func TestWindDownOpenBlock_Sources(t *testing.T) {
 	if _, ok := windDownOpenBlock(s2, c2, paidUntil+1); ok {
 		t.Fatal("natural-lapse OVERDUE must report not-in-wind-down (recoverable)")
 	}
-	if open, ok := windDownOpenBlock(s2, c2, freezeAt); !ok || open != freezeAt {
-		t.Fatalf("natural-freeze windDownOpen = (%d,%v), want (%d,true)", open, ok, freezeAt)
+	// A1 (2026-08-30): and neither is a natural FROZEN — at the freeze block,
+	// and however far past it. The natural-freeze source is GONE; Retire is the
+	// one source, so a retire AFTER the freeze anchors at the retire block.
+	if _, ok := windDownOpenBlock(s2, c2, freezeAt); ok {
+		t.Fatal("A1: natural FROZEN must report not-in-wind-down (inflow stop only)")
+	}
+	if _, ok := windDownOpenBlock(s2, c2, freezeAt+10*ExitTaxDecayBlocks); ok {
+		t.Fatal("A1: a long-lapsed market must still report not-in-wind-down")
+	}
+	if err := Retire(s2, c2, c2, freezeAt+5); err != nil {
+		t.Fatal(err)
+	}
+	if open, ok := windDownOpenBlock(s2, c2, freezeAt+6); !ok || open != freezeAt+5 {
+		t.Fatalf("lapse-then-retire windDownOpen = (%d,%v), want (%d,true)", open, ok, freezeAt+5)
 	}
 }

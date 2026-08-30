@@ -116,7 +116,8 @@ console.log('\n── 2. THE UNCONDITIONAL GUARANTEE IS GONE (defect 1).\n');
     sell.includes('sell on the curve') && sell.includes('selling closes'),
     `got: ${sell}`
   );
-  check('…it names the redeem route as the other door', sell.includes('redeem your share of the reserve'));
+  // 2026-08-30 (B3, copy set A): the door is named without "your share".
+  check('…it names the redeem route as the other door', sell.includes('the only exit is Redeem'));
   check(
     '★ …and it states the thing the old line denied: neither route is a fixed price',
     sell.includes('Neither is a fixed price'),
@@ -230,9 +231,15 @@ console.log('\n── 5. THE HONEST NUMBER LEADS AND THE FICTION IS THE ASIDE (d
   );
   check('the market-cap note also states the arithmetic it is refusing', MARKET_CAP_NOTE.startsWith('The token price times every token issued.'));
   check('the reserve keeps the explanation the rail card used to carry', BACKING_TOTAL_NOTE.includes('actually held') && BACKING_TOTAL_NOTE.includes('wind-down pays out of this'));
+  // 2026-08-30 (B3, copy set A): "that reserve is what a wind-down pays out" was
+  // itself the promise being removed (a payout that arrives). The property this
+  // check guards, "not the gross as the payout", survives; the positive half now
+  // pins the claim-a-slice-less-fee wording.
   check(
     'the how-it-works line no longer states the gross as the payout',
-    !HOW_IT_WORKS_RESERVE_LINE.includes('would pay out per token') && HOW_IT_WORKS_RESERVE_LINE.includes('that reserve is what a wind-down pays out')
+    !HOW_IT_WORKS_RESERVE_LINE.includes('would pay out per token') &&
+      !HOW_IT_WORKS_RESERVE_LINE.includes('pays out') &&
+      HOW_IT_WORKS_RESERVE_LINE.includes('claim a pro-rata slice of it, less their early-exit fee')
   );
   check('the wind-down banner names the deduction on the only open door', WIND_DOWN_BANNER.includes('less your early-exit fee'));
 }
@@ -278,7 +285,8 @@ console.log('\n── 6b. THE POSITION ROW NAMES BOTH FIGURES FOR WHAT THEY ARE.
 {
   const line = positionLine('12.00', 16.9, 14.44);
   check('the mark is labelled as a mark, not as "worth"', line.includes('$16.90 at today’s price') && !line.includes('worth'));
-  check('the redeemable figure says what it is', line.includes('$14.44 if this market wound down'));
+  // 2026-08-30 (B3, copy set A): the verb is the holder's, not the market's.
+  check('the redeemable figure says what it is', line.includes('$14.44 if you redeemed at a wind-down today'));
   check('…and no longer calls itself a "floor value"', !/floor/i.test(line));
   check('the token count still leads', line.startsWith('You hold 12.00 tokens'));
 

@@ -177,11 +177,22 @@ func TestPopulationRoleMix(t *testing.T) {
 }
 
 // TestQuarterRunHasFullLapseLadder is a slower, larger run whose purpose is
-// specifically to prove the abandoner/flaky-turned-abandoner creators'
-// markets actually complete the FULL SPEC §1.7.5 lapse ladder within a
-// quarter (ACTIVE -> OVERDUE -> FROZEN -> CLOSED) and that the keeper's real
-// keeper.Plan decisions actually fire refundHolder/closeIfDrained against
-// them -- not just that the simulator runs without crashing.
+// specifically to prove the abandoner creators' markets actually complete the
+// FULL ladder within a quarter and that the keeper's real keeper.Plan
+// decisions fire refundHolder/closeIfDrained against them -- not just that
+// the simulator runs without crashing.
+//
+// ★ A1 (owner ruling 2026-08-30) split the ladder in two, and this test now
+// proves BOTH halves:
+//   - a creator who abandons AND retires (RetireOnAbandon): ACTIVE -> OVERDUE
+//     -> FROZEN -> Retire -> CLOSED, swept by the keeper (the three positive
+//     assertions below, unchanged);
+//   - a creator who simply goes dark (abandons, never retires): ACTIVE ->
+//     OVERDUE -> FROZEN and STAYS there, never CLOSED, never swept, its
+//     holders exiting on the curve. Before A1 the keeper closed these too;
+//     now that would be a bug (a lapse is an inflow stop the creator can lift
+//     by renewing). The negative assertion below is what fails on the
+//     pre-A1 ladder.
 func TestQuarterRunHasFullLapseLadder(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping quarter-length run in -short mode")
@@ -219,5 +230,62 @@ func TestQuarterRunHasFullLapseLadder(t *testing.T) {
 	}
 	if !sawCloseIfDrainedOK {
 		t.Error("expected at least one successful closeIfDrained over a 90-day run")
+	}
+}
+
+// TestHalfYearRunGhostsStayFrozenUnderA1 is the second half of the A1 ladder
+// (see TestQuarterRunHasFullLapseLadder's doc): a creator who abandons and
+// never retires lapses to FROZEN and STAYS there — never CLOSED, never swept
+// by the keeper — with holders exiting on the curve.
+//
+// A separate, longer run on purpose. Measured on seed 123 at 90 days: the
+// non-retiring abandoner (creator-abandoner-1) goes dark at block 1,130,946
+// but has renewed ahead to paidUntil 2,629,163, past the quarter's end block
+// 2,600,466, so at 90 days no ghost has even lapsed and a "ghost is FROZEN"
+// assertion would pass vacuously. Half a year (5.18M blocks) is well past its
+// grace (2,773,163). The count of ghosts past grace is REQUIRED to be >= 1:
+// if the population tuning ever drifts so that none exists, this fails loudly
+// rather than testing nothing.
+func TestHalfYearRunGhostsStayFrozenUnderA1(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping half-year run in -short mode")
+	}
+	cfg := Config{Seed: 123, Days: 180, NumCreators: 8, NumActors: 24}
+	eng := NewEngine(cfg)
+	if err := eng.Run(cfg.Days); err != nil {
+		t.Fatalf("half-year run hit an invariant violation: %v", err)
+	}
+	ghosts := 0
+	for _, name := range eng.creatorNames {
+		cs := eng.creators[name]
+		if cs.AbandonBlock == 0 || cs.RetireOnAbandon || cs.VoluntaryRetireBlock != 0 {
+			continue
+		}
+		if _, retired := core.RetiredAt(eng.Store, name); retired {
+			continue
+		}
+		if eng.Block < core.PaidUntil(eng.Store, name)+core.GraceBlocks {
+			continue // not past grace yet; says nothing either way
+		}
+		ghosts++
+		if got := core.Phase(eng.Store, name, eng.Block); got != core.StateFrozen {
+			t.Errorf("A1: ghost creator %s ended the run %s, want FROZEN (a lapse must never close a market)", name, got)
+		}
+		sells := 0
+		for _, ev := range eng.Trace.Events {
+			if ev.Creator != name {
+				continue
+			}
+			if ev.OK && (ev.Action == "refundHolder" || ev.Action == "refund" || (ev.Action == "closeIfDrained" && ev.Args["closed"] == "true")) {
+				t.Errorf("A1: %s succeeded on ghost %s at block %d — a lapsed market has no pro-rata rail", ev.Action, name, ev.Block)
+			}
+			if ev.OK && ev.Action == "sell" && ev.Args["phase"] == core.StateFrozen {
+				sells++
+			}
+		}
+		t.Logf("ghost %s: FROZEN at run end, %d curve sells while FROZEN, never swept", name, sells)
+	}
+	if ghosts == 0 {
+		t.Fatal("expected at least one abandoned-but-never-retired creator past its grace by run end (population tuning drifted; the A1 half of the ladder went untested)")
 	}
 }

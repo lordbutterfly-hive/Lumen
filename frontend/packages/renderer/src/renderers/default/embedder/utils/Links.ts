@@ -21,8 +21,13 @@ const urlSet = ({domain = domainPath, path = ''} = {}) => {
  */
 export const any = (flags = 'i') => new RegExp(urlSet(), flags);
 // TODO verify if we should pass baseUrl here
-export const local = (flags = 'i') => new RegExp(urlSet({domain: '(?:localhost|(?:.*\\.)?hive.blog)'}), flags);
-export const remote = (flags = 'i') => new RegExp(urlSet({domain: `(?!localhost|(?:.*\\.)?hive.blog)${domainPath}`}), flags);
+// ★ Was `hive.blog` (inherited from the upstream condenser source this file is
+// ported from, see the header comment) — Lumen's own domain is lumensocial.net,
+// not hive.blog. Currently unused anywhere in this codebase (dead export, no
+// callers, no tests), so this was never live-wrong; fixed for whenever it is
+// wired up so "local" actually means this site.
+export const local = (flags = 'i') => new RegExp(urlSet({domain: '(?:localhost|(?:.*\\.)?lumensocial.net)'}), flags);
+export const remote = (flags = 'i') => new RegExp(urlSet({domain: `(?!localhost|(?:.*\\.)?lumensocial.net)${domainPath}`}), flags);
 export const image = (flags = 'i') => new RegExp(urlSet({path: imagePath}), flags);
 export const imageFile = (flags = 'i') => new RegExp(imagePath, flags);
 // Matches a URL that has already been through an image-resize proxy of the

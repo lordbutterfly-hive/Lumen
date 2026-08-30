@@ -67,9 +67,9 @@ import "math/big"
 // rails partition the lifecycle with NO gap and NO overlap (inWindDown,
 // market.go, is the single predicate that switches them):
 //
-//	NOT winding down (ACTIVE, natural-lapse OVERDUE)
+//	NOT winding down (ACTIVE, natural-lapse OVERDUE, natural-lapse FROZEN)
 //	                → Sell (this file): exact curve proceeds for the slice.
-//	WINDING DOWN (RETIRED at any point, or naturally FROZEN/CLOSED)
+//	WINDING DOWN (RETIRED at any point, or stored CLOSED)
 //	                → Refund/RefundHolder (refund.go): flat pro-rata, taxed.
 //
 // The two rails MUST be state-disjoint, in both directions, and this is
@@ -82,8 +82,11 @@ import "math/big"
 //     marginal), breaking the equality invariant and re-opening the
 //     drainable-pot class in the one state where buying in is possible. So
 //     flat pro-rata is confined to states where NO inflow can ever re-enter:
-//     RETIRED is irreversible (Renew refuses on the mark) and FROZEN/CLOSED
-//     is terminal, so the stranded excess is never raidable.
+//     RETIRED is irreversible (Renew refuses on the mark) and CLOSED is
+//     terminal, so the stranded excess is never raidable. (A natural FROZEN
+//     is recoverable by Renew since A1, 2026-08-30 — which is exactly why it
+//     must NOT open pro-rata: a revived half-refunded market would trade
+//     against a reserve that no longer matches its curve.)
 //   - curve-sell AT WIND-DOWN is a bank run (first-out takes the marginal
 //     top, later holders strand below it); flat pro-rata is order-fair
 //     (refund.go C-22/C-23: going later weakly HELPS). RULING K3 drops the
@@ -194,12 +197,13 @@ func sellCompute(s Store, caller, creator string, block uint64, deltaS *big.Int)
 	// The rail switch — inWindDown ONLY, never the pause. See the file-level
 	// doc; this is a routing decision between two complementary always-open
 	// exits, not a gate on the seller's funds. The curve rail is OPEN exactly
-	// when the market is NOT winding down (ACTIVE, and natural-lapse OVERDUE);
-	// it is DROPPED the instant the market retires or freezes (RULING K3 —
-	// during a wind-down every holder takes the order-fair flat pro-rata
-	// Refund, not the racy curve top).
+	// when the market is NOT winding down (ACTIVE, natural-lapse OVERDUE, and
+	// — since A1, 2026-08-30 — natural-lapse FROZEN too: a lapse is an inflow
+	// stop, never a wind-down, so the holder's exit stays here); it is DROPPED
+	// the instant the market retires (RULING K3 — during a wind-down every
+	// holder takes the order-fair flat pro-rata Refund, not the racy curve top).
 	if inWindDown(s, creator, block) {
-		return nil, newErr(ErrState, "curve sell is closed while the market winds down (retired/frozen/closed); exit via Refund, which is open in exactly those states")
+		return nil, newErr(ErrState, "curve sell is closed while the market winds down (retired/closed); exit via Refund, which is open in exactly those states")
 	}
 
 	supply := getMoney(s, kSupply(creator))

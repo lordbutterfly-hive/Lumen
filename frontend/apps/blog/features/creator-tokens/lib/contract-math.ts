@@ -81,7 +81,43 @@ export const MIN_OBS_BLOCKS = 1_200;
 export const MIN_OBS_COUNT = 8;
 export const MAX_RATE_DEVIATION_BPS = 2_000; // 20%, measured against the window MEDIAN (shared by both rings)
 export const MAX_OBS_WEIGHT_BLOCKS = 2_400; // ~2h dwell clamp per observation
-export const MAX_STALE_BLOCKS = 3 * BLOCKS_PER_DAY;
+/**
+ * ★★★ 3 DAYS -> 42 DAYS, 2026-08-30 (clauderfly-43). THIS MIRROR HAD DRIFTED 14x
+ * AND WAS THE STRICTER SIDE, so the client refused asks the chain would have
+ * priced.
+ *
+ *   core/params.go:342   MaxStaleBlocks   = 42 * BlocksPerDay = 1,209,600
+ *   here, until today    MAX_STALE_BLOCKS =  3 * BLOCKS_PER_DAY =  86,400
+ *
+ * BLOCKS_PER_DAY is 28,800 on both sides, so units were never the explanation —
+ * it was a real divergence. params.go carries the history this file missed: the
+ * 3-day horizon was DISABLED on 2026-08-12 (owner ruling, adversarial finding
+ * S-2) because it fired on ordinary conditions and closed a quiet creator's shop
+ * for as long as nobody happened to trade, then RE-WIRED at 42 days on
+ * 2026-08-19 — reusing ExitTaxDecayBlocks' six-week scale — so that data of
+ * genuinely unbounded age is still bounded. This constant was written in the
+ * three-day era and never followed either move.
+ *
+ * MEASURED, not argued: `lumen.beat`'s newest observation is ~185,111 blocks
+ * (about 6.4 days) old — inside the contract's window, outside the old one here.
+ * The client reported that market `stale` while the contract's short arm passed
+ * staleness and refused on the LONG arm's observation COUNT instead. So the fix
+ * changes the REASON the screen gives, not the outcome, on every market that
+ * exists today (all 13 still cannot price a service). See
+ * `scratchpad/quote-oracle-proof.ts`, which runs this file's own
+ * decodeObservationRing / askRateFromObservations / settlementRateBaseUnits
+ * against live rings and needs no key and no server.
+ *
+ * ONE BOUND, ONE SOURCE: `LONG_MAX_STALE_BLOCKS` below derives from this, exactly
+ * as core's `LongMaxStaleBlocks = MaxStaleBlocks + LongObsSpacing` does, so both
+ * arms move together and cannot drift apart again independently.
+ *
+ * The rule this file already states for MIN_FACE_BASE_UNITS applies here word for
+ * word: the point of a mirror is to AGREE with core, and disagreeing in either
+ * direction is a defect. Too tight refuses what the chain allows; too loose signs
+ * what the chain will revert.
+ */
+export const MAX_STALE_BLOCKS = 42 * BLOCKS_PER_DAY;
 
 // F-C3: LONG (7-day) ring constants — mirror core/params.go EXACTLY. The long arm is
 // coarser-sampled with a longer required span; it is the second arm of settlement's
@@ -92,7 +128,7 @@ export const LONG_OBS_SPACING = 6_300;
 export const LONG_MIN_OBS_COUNT = 8;
 export const LONG_MIN_OBS_BLOCKS = 2 * BLOCKS_PER_DAY; // 57_600
 export const LONG_MAX_OBS_WEIGHT_BLOCKS = 2 * LONG_OBS_SPACING; // 12_600
-export const LONG_MAX_STALE_BLOCKS = MAX_STALE_BLOCKS + LONG_OBS_SPACING; // 92_700
+export const LONG_MAX_STALE_BLOCKS = MAX_STALE_BLOCKS + LONG_OBS_SPACING; // 1_215_900
 
 /** The per-ring parameters twapWindowRead (Go) reads with — mirrors core/twap.go's
  *  twapRingCfg so the client's short/long arms are byte-parameterised the same way. */
@@ -269,6 +305,17 @@ function areaBig(s: bigint): bigint {
  */
 export function areaBaseUnits(supplyTokens: number): number {
   return Number(areaBig(BigInt(Math.trunc(supplyTokens))));
+}
+
+/**
+ * The same Area(S) as a BigInt, for the ONE comparison that must be exact at
+ * any scale: market/contract-rules.ts reserveVersusCurve, the client mirror
+ * of v2 Renew's revival check (reserve == Area(supply)). `areaBaseUnits`
+ * above rounds through Number, which is fine for display and for the buy/sell
+ * steps whose inputs are bounded, and not fine for an equality on a reserve.
+ */
+export function areaBaseUnitsBig(supplyTokens: number): bigint {
+  return areaBig(BigInt(Math.trunc(supplyTokens)));
 }
 
 /** curve.go BuyCost(S,n) = Area(S+n) − Area(S) — the EXACT integer area step (L1). */
@@ -1019,4 +1066,53 @@ export function settlementRateBaseUnits(
     return { rateBaseUnits: null, status: 'insufficient_observations' };
   }
   return { rateBaseUnits: Math.min(short.rateBaseUnits, long.rateBaseUnits, spot), status: 'ok' };
+}
+
+/** core/params.go MaxServiceFaceAreaBps — a service's token leg may not exceed 50% of the curve area (RULING C2 depth ceiling). */
+export const MAX_SERVICE_FACE_AREA_BPS = 5000;
+/** core/params.go MaxSpendSupplyBps — one settlement may consume at most 5% of supply (RULING C2 spend cap). */
+export const MAX_SPEND_SUPPLY_BPS = 500;
+/** core/params.go MaxOfferings — a creator may keep at most this many LIVE named offerings (M5, 2026-08-31: mirrored so the app disables the 21st rather than broadcasting a doomed createOffering). */
+export const MAX_OFFERINGS = 20;
+
+/**
+ * core/settlement.go settleSpend's four post-rate guards, ported so a quote can
+ * REFUSE before the signature instead of after it (H1, 2026-08-31). The rate
+ * derivation (settlementRateBaseUnits, above) already mirrors twap.go and the
+ * no-supply case; these are the guards it does NOT run, and they fire on
+ * perfectly healthy markets when the posted face drifts outside the window that
+ * moves with supply — which is exactly when a green quote led to a signed ask
+ * the chain then refused at settlement.
+ *
+ * On the TOKEN LEG (what settleSpend prices), against the CURRENT rate and
+ * supply, in the contract's own integers (BigInt: area(S) is cubic and exceeds
+ * 2^53 for large S):
+ *   lo = ceil(rate/2)                        (RULING C4 minimum-price guard)
+ *   hi = floor(area(S)·MaxServiceFaceAreaBps/10000)  (RULING C2 depth ceiling)
+ *   lo > hi                                  -> market_too_small (S == 1 at the curve)
+ *   leg < lo                                 -> price_below_floor
+ *   leg > hi                                 -> price_above_ceiling
+ *   credits > 1 && credits·10000 > S·MaxSpendSupplyBps -> spend_cap
+ * The credits > 1 skip is settlement.go's SET-3 fix (a 1-credit spend is the
+ * minimum possible at any rate and is not a manipulation lever), reproduced so
+ * a market with 1-19 tokens is not falsely refused as a 5%-of-supply violation.
+ */
+export function settleSpendStatus(
+  tokenLegBaseUnits: number,
+  rateBaseUnits: number,
+  supplyTokens: number,
+  credits: number
+): QuoteOracleStatus {
+  const lo = BigInt(Math.ceil(rateBaseUnits / 2));
+  const hi = (areaBaseUnitsBig(supplyTokens) * BigInt(MAX_SERVICE_FACE_AREA_BPS)) / 10000n;
+  const leg = BigInt(Math.trunc(tokenLegBaseUnits));
+  if (lo > hi) return 'market_too_small';
+  if (leg < lo) return 'price_below_floor';
+  if (leg > hi) return 'price_above_ceiling';
+  if (credits > 1) {
+    const lhs = BigInt(Math.trunc(credits)) * 10000n;
+    const rhs = BigInt(Math.trunc(supplyTokens)) * BigInt(MAX_SPEND_SUPPLY_BPS);
+    if (lhs > rhs) return 'spend_cap';
+  }
+  return 'ok';
 }

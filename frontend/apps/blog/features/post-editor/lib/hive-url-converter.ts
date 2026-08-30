@@ -8,8 +8,18 @@
  * on any frontend.
  */
 
-/** Hive blog frontend domains */
+/**
+ * Hive blog frontend domains.
+ *
+ * ★ `lumensocial.net` ADDED (2026-08-28). This list is what decides whether a
+ * pasted URL gets converted to an agnostic relative path in the editor —
+ * without our own domain here, pasting a link to a Lumen post (this site's
+ * OWN content) left it as a dead-weight absolute URL while the same link on
+ * hive.blog, peakd.com etc. got converted. Lumen is a Hive frontend like the
+ * others in this list and belongs in it for the same reason they are.
+ */
 const HIVE_BLOG_DOMAINS = new Set([
+  'lumensocial.net',
   'hive.blog',
   'peakd.com',
   'ecency.com',

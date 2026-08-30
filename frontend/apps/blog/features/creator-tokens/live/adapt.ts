@@ -19,12 +19,14 @@
  * yet" is not.
  */
 
-import type { Ask, DeliveryRecord as ChainDeliveryRecord, HolderPosition as ChainHolderPosition, Market, Offering } from '../types';
+import type { Ask, DeliveryRecord as ChainDeliveryRecord, HolderPosition as ChainHolderPosition, Market, Offering, RenewRefusal } from '../types';
+
 import type { DeliveryRecord as UiDeliveryRecord } from '../market/types';
 import type { PortfolioAsk } from '../market/portfolio';
 import type { Service } from '../market/token-detail';
 import { type PriceChange, priceChangeOf } from '../market/price-change';
 import { BLOCKS_PER_DAY } from '../lib/contract-math';
+
 
 /**
  * HBD -> USD. Deliberately 1:1, and deliberately in ONE place.
@@ -124,8 +126,22 @@ export interface LiveTokenMarket {
    * or NULL when it could not be read. NULL must draw NOTHING — the demo drew a
    * 12-point line from a fixture, and an empty array would draw a flat line;
    * both are claims about how this token has moved.
+   *
+   * ★ THE FIRST ELEMENT MAY BE THE MARKET'S OPENING PRICE RATHER THAN A TRADE
+   * (2026-08-30) — see `readPriceHistory`. Every element is a real price at a
+   * real moment either way; what changed is that `chart.length` is no longer a
+   * trade count. Anything that states a basis must read `chartTrades`.
    */
   chart: number[] | null;
+  /**
+   * How many of `chart`'s points are recorded TRADES, or NULL when there is no
+   * chart. Never `chart.length`: the series can open with the market's opening
+   * supply, which is a price and not a trade. The page's caption and the change
+   * indicator both state this number, so a market that has traded once reads
+   * "1 trade" beside a two-point line instead of claiming a second trade that
+   * never happened.
+   */
+  chartTrades: number | null;
   /**
    * How far the price has moved across the series `chart` holds, or NULL when
    * that cannot be stated. Derived from the SAME array, so the number and the
@@ -141,6 +157,26 @@ export interface LiveTokenMarket {
   windingDown: boolean;
   /** RequireInflowOpen — false when paused, winding down, OR the creator is delinquent. */
   canBuy: boolean;
+  /**
+   * The chain head this market was read against, or NULL when it is not known.
+   *
+   * ★ THE ONLY HONEST SOURCE FOR "how long until this lapses". `paidUntilAt` and
+   * `graceExpiresAt` are milliseconds and comparing them needs a local clock, and
+   * `use-live-studio`'s `headOf()` recovers a head from `Date.now()`, which is the
+   * same thing wearing a block's clothes. A browser clock must not decide whether
+   * someone's market is dying, so the countdown reports UNKNOWN rather than guess.
+   *
+   * NULL until `Market.headBlock` exists (clauderfly-59 is landing it); the
+   * countdown is silent in the meantime and every other lapse state is unaffected,
+   * because the chain's own `phase` decides those.
+   */
+  headBlock: number | null;
+  /** market.go kPaidUntil — the block the subscription runs to. Also keys the warning's dismissal, so paying dismisses it. */
+  paidUntilBlock: number;
+  /** paidUntilBlock + GraceBlocks — the block a lapsed market stops taking buyers. */
+  graceExpiresAtBlock: number;
+  /** NULL when the chain would accept a subscription payment; otherwise why it would not. See market/lapse.ts. */
+  renewRefusal: RenewRefusal | null;
   canAsk: boolean;
   /** Non-null = inflows are shut because the creator ignored too many asks. The UI must say so; a dead button with no reason reads as a broken page. */
   delinquentUntilBlock: number | null;
@@ -278,12 +314,22 @@ export function adaptMarket(input: {
   position: ChainHolderPosition | null;
   offerings: Offering[];
   delivery: ChainDeliveryRecord | null;
-  /** Oldest-first prices, or null when unavailable. */
+  /** Oldest-first prices, or null when unavailable. May open with the market's opening price — see `priceTrades`. */
   priceHistory?: number[] | null;
+  /**
+   * How many of `priceHistory`'s points are recorded TRADES. Omit only when
+   * every point is one. The caller knows this because it holds the `PricePoint`
+   * rows, which flag the opening point; by the time the array of bare numbers
+   * gets here that information is gone, so it has to be carried alongside.
+   */
+  priceTrades?: number | null;
 }): LiveTokenMarket {
-  const { creator, market, position, offerings, delivery, priceHistory } = input;
+  const { creator, market, position, offerings, delivery, priceHistory, priceTrades } = input;
   const services = offerings.length > 0 ? adaptOfferings(offerings) : faceAsService(market.faceHbd);
-  const windingDown = market.retiredAtBlock !== null || market.phase === 'FROZEN' || market.phase === 'CLOSED';
+  // Derived ONCE in the data source under the contract rules the chain
+  // reports (types.ts Market.windingDown, 2026-08-31 A5); this line used to
+  // restate the v1 predicate inline, then call market-health's copy of it.
+  const windingDown = market.windingDown;
   return {
     handle: creator,
     priceUsd: usdFromHbd(market.spotPriceHbd),
@@ -295,20 +341,34 @@ export function adaptMarket(input: {
     cap: market.capTokens,
     // A single point is not a chart — it would render as a flat line, implying
     // a price that held steady when in fact we only know one moment.
+    //
+    // ★ THE FLOOR IS UNCHANGED, AND THAT IS THE POINT (2026-08-30). The bug the
+    // owner reported ("theres no chart in the market", reproduced on a SOLD-OUT
+    // market) was never this guard being too strict: it was the series arriving
+    // one point short, because a trade row records only where supply LANDED.
+    // `readPriceHistory` now supplies the state it started FROM as well, so a
+    // one-trade market clears this floor with two real prices rather than by
+    // the floor being lowered to draw a line through one.
     chart: priceHistory && priceHistory.length >= 2 ? priceHistory : null,
+    chartTrades: priceHistory && priceHistory.length >= 2 ? (priceTrades ?? priceHistory.length) : null,
     // ★ THE CHANGE IS DERIVED FROM THE CHART'S OWN ARRAY, and it is the SAME
     // array, not a second read: whatever the chart draws rising by a third, the
     // indicator says rose by a third. `priceChangeOf` applies the identical
     // two-point floor, so the figure and the chart appear and disappear
     // together — a percentage beside an empty chart slot would be unverifiable
-    // by the only reader who can check it.
-    priceChange: priceChangeOf(priceHistory ?? null),
+    // by the only reader who can check it. The trade count rides along so the
+    // BASIS it states ("over 1 trade") counts trades and not points.
+    priceChange: priceChangeOf(priceHistory ?? null, priceTrades ?? null),
     delivery: adaptDelivery(delivery),
     services,
     position: adaptPosition(position, usdFromHbd(market.spotPriceHbd)),
     windingDown,
     canBuy: market.canBuy,
     canAsk: market.canAsk,
+    headBlock: market.headBlock,
+    paidUntilBlock: market.paidUntilBlock,
+    graceExpiresAtBlock: market.graceExpiresAtBlock,
+    renewRefusal: market.renewRefusal,
     delinquentUntilBlock: market.delinquentUntilBlock,
     phase: market.phase
   };

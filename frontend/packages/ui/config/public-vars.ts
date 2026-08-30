@@ -3,7 +3,21 @@ import env from '@beam-australia/react-env';
 /// Contains list of public variables which can have safely set defaults and allow application build without explicit env. definition
 
 export const configuredAIDomain = env('AI_DOMAIN') ?? 'https://api.syncad.com';
-export const configuredSiteDomain = env('SITE_DOMAIN') ?? 'https://hive.blog/';
+/**
+ * ★ FALLBACK FIXED (2026-08-28). This is `siteConfig.url` — the renderer's
+ * `baseUrl` (`features/post-rendering/lib/renderer.ts`) AND the trusted-origin
+ * set for `isLinkSafe` there, AND the OIDC same-origin check
+ * (`packages/smart-signer/lib/redirect-validation.ts`, `lib/oidc.ts`). An unset
+ * `REACT_APP_SITE_DOMAIN` used to default here to hive.blog — inherited from
+ * the upstream Denser/hive.blog fork — which would have classified hive.blog
+ * links as "internal" to THIS site and lumensocial.net's own links as
+ * external, and pointed the OIDC issuer/redirect allowlist at the wrong
+ * origin. Production already sets `REACT_APP_SITE_DOMAIN=https://lumensocial.net`,
+ * so this default only bites an env without that var set (a preview/staging
+ * build), but the fallback should still name the site it is actually
+ * falling back for.
+ */
+export const configuredSiteDomain = env('SITE_DOMAIN') ?? 'https://lumensocial.net/';
 export const configuredImagesEndpoint = (env('IMAGES_ENDPOINT') ?? 'https://images.hive.blog').replace(/\/+$/, '');
 export const configuredApiEndpoint = (env('API_ENDPOINT') ?? 'https://api.hive.blog').replace(/\/+$/, '');
 export const configuredBlogDomain = (env('BLOG_DOMAIN') ?? 'https://hive.blog/').replace(/\/+$/, '');

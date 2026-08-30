@@ -1,42 +1,5 @@
 import env from '@beam-australia/react-env';
-import type {
-  Ask,
-  AskInput,
-  AnswerInput,
-  BuyInput,
-  BuyQuote,
-  ClaimTradeFeesInput,
-  CloseIfDrainedInput,
-  CreateOfferingInput,
-  DeclineInput,
-  DeleteOfferingInput,
-  CreatorSummary,
-  Offering,
-  PricePoint,
-  RateInput,
-  SetOfferingPriceInput,
-  SetOfferingTitleInput,
-  DeliveryRecord,
-  HolderPosition,
-  Market,
-  MyAsksResult,
-  Quote,
-  ReclaimInput,
-  RefundHolderInput,
-  RefundInput,
-  RegisterMarketInput,
-  RenewSubscriptionInput,
-  RetireInput,
-  SellInput,
-  SellQuote,
-  SetCapInput,
-  SetFaceInput,
-  TransferTokensInput,
-  WalletPositionsResult,
-  WithdrawTreasuryInput,
-  MarketPrice,
-  IndexerHealth,
-} from '../types';
+import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RenewSubscriptionInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../types';
 import { MockCreatorTokensDataSource } from './mock/mock-data-source';
 import { hiveTransactionBroadcaster } from './vsc/broadcaster';
 import { routingBroadcaster } from './vsc/wallet-broadcaster';
@@ -82,7 +45,7 @@ export interface CreatorTokensDataSource {
   /** Cross-creator wallet view (UI-BRIEF Page 4). Indexer-backed; resolves { positions, unavailable } so the UI can tell "couldn't load" from "holds nothing". */
   readWallet(holder: string): Promise<WalletPositionsResult>;
   /** A creator's own escrow inbox (UI-BRIEF Page 6), directly chain-readable via kSeq + e|creator|i. Rejects on a genuine read failure. */
-  readCreatorAsks(creator: string, opts?: { limit?: number }): Promise<Ask[]>;
+  readCreatorAsks(creator: string): Promise<CreatorAsksResult>;
   /** An asker's asks across every creator (UI-BRIEF Page 3). Indexer-backed; resolves { asks, unavailable } (same unavailable-vs-empty discriminator as readWallet). */
   readMyAsks(asker: string): Promise<MyAsksResult>;
   /** Answered-vs-missed history + response time. Not contract state (SPEC §1.7.1) — always indexer-backed; degrades to source:'unavailable'. */

@@ -71,7 +71,53 @@ export interface FaceBand {
 export interface MarketPrice {
   status: 'ready' | 'none' | 'unknown';
   priceUsd: number | null;
+  /**
+   * Non-null only when status === 'ready'. A price with no health is exactly
+   * how five surfaces came to draw "Buy" on frozen markets (2026-08-30, B4);
+   * see market/market-health.ts. Required, not optional, so no producer can
+   * forget it.
+   */
+  health: MarketHealth | null;
 }
+
+/**
+ * Whether a market can take a buyer's money right now, as one word. Derived by
+ * market/market-health.ts's `marketHealthOf` from phase + canBuy + wind-down;
+ * defined here beside MarketPrice so types.ts does not import from market/.
+ *   open      buy and ask work
+ *   lapsed    OVERDUE and still buyable (the token page shows a warning banner)
+ *   delisted  a natural FROZEN under the v2 rules (A1, 2026-08-30): buying is
+ *             closed, the creator can pay to relist, holders are not winding
+ *             down. Cannot occur under v1, where the same phase is `closed`.
+ *   closed    winding down: retired or CLOSED, and under v1 a natural FROZEN
+ *             too (sell.go refuses there; see ContractRules)
+ *   paused    delinquent creator or the global inflow pause
+ * ★ Sold-out is deliberately NOT a health (owner, 2026-08-30: "on hbd temp
+ * pill says sold out. thats stupid and wrong"). Health answers "is something
+ * wrong with this creator"; a sold-out market is a healthy, paid-up creator
+ * whose legacy supply cap was reached. It is a fact about the BUY ACTION only
+ * (market/market-health.ts soldOutOf + SOLD_OUT_WORD), never a warning.
+ */
+export type MarketHealth = 'open' | 'lapsed' | 'delisted' | 'closed' | 'paused';
+
+/**
+ * Which contract rules the app believes are DEPLOYED, derived from the chain
+ * (market/contract-rules.ts has the whole story and the deploy order). 'v1' is
+ * the contract live on both networks on 2026-08-31; 'v2' is the A1 lapse
+ * change (a natural FROZEN is an inflow stop, not a wind-down; Renew admits
+ * it behind a reserve check). Every default and every failed read is 'v1'.
+ */
+export type ContractRules = 'v1' | 'v2';
+
+/**
+ * Why `Market.canRenew` is false, in the contract's own terms, so the Studio
+ * can say the true sentence instead of a generic one. `lapsed-terminal` is a
+ * v1 FROZEN (the chain refuses the payment forever); `surplus` and `deficit`
+ * are v2's revival check (reserve above / below the curve's area, so the
+ * market cannot be revived: Retire, then re-register). Named here, worded in
+ * market/lapse.ts.
+ */
+export type RenewRefusal = 'paused' | 'retired' | 'closed' | 'lapsed-terminal' | 'surplus' | 'deficit';
 
 export interface Market {
   creator: string;
@@ -107,6 +153,22 @@ export interface Market {
   /** kPaused (keys.go) — global inbound pause, independent of this market's own phase. */
   globalInflowPaused: boolean;
   /**
+   * The rule set this Market was derived under (ContractRules). Set by the
+   * data source from the chain's own report of the deployed bytecode, never
+   * by the UI. `windingDown`, `canRenew`, `renewRefusal` and the health word
+   * all depend on it; a consumer that needs to branch on the contract should
+   * branch on those derived fields, and on this only to explain them.
+   */
+  rules: ContractRules;
+  /**
+   * The chain head this Market was derived at, or null on an UNKNOWN read.
+   * Added 2026-08-31 for the delisting timing (market/lapse.ts): "runs out in
+   * N days" must be block arithmetic against the head the phase was computed
+   * from, never the browser clock dressed as a block. Every other block field
+   * on this object is compared against THIS number.
+   */
+  headBlock: number | null;
+  /**
    * market.go RequireInflowOpen(s, creator, block): phase in {ACTIVE,
    * OVERDUE}, !globalInflowPaused, AND NOT marketRetired. Gates Buy (buy.go)
    * and Ask (ask.go) identically.
@@ -125,6 +187,38 @@ export interface Market {
   canBuy: boolean;
   /** Same RequireInflowOpen gate as canBuy — ask.go's Ask() calls the identical chokepoint. See canBuy's own doc for the RULING K3 retired-notice caveat, which applies here too. */
   canAsk: boolean;
+  /**
+   * ★★★ RENEW HAS ITS OWN GATE, AND IT IS NOT canBuy (2026-08-30, adversarial review).
+   *
+   * `core.Renew` calls `requireMarketAcceptsMoney`, NOT `RequireInflowOpen`
+   * (market.go:795-800). The difference is the DELIVERY gate: paused, retired
+   * and phase only, with no delinquency term. That difference is deliberate and
+   * the contract records why, at market.go's own doc for that function — a
+   * defect found 2026-07-27 and called fatal there:
+   *
+   *   the delivery penalty runs 7 days (DelinquencyBlocks) while the
+   *   subscription grace runs 5 (GraceBlocks), so a penalty landing near a
+   *   renewal date outlives the grace. The market crosses into FROZEN, where
+   *   Renew is illegal forever, and a self-clearing 7-day penalty becomes
+   *   PERMANENT destruction of the market, taking every holder onto the flat
+   *   pro-rata wind-down rail. "An attacker only had to time three junk asks."
+   *
+   * The contract fixed that. This client had put it back: `renewSubscription`
+   * threw on `!canBuy`, and canBuy carries the delinquency term, so our own UI
+   * refused to let exactly those creators pay their bill. Blocking a debtor
+   * from paying you is not a penalty, it is a trap.
+   *
+   * So: `canRenew` is `canBuy` WITHOUT the delivery gate. Never collapse the
+   * two back into one boolean, however tempting the symmetry looks.
+   */
+  canRenew: boolean;
+  /**
+   * Why canRenew is false (null when it is true). Under v2 this is what turns
+   * "cannot renew" into the true sentence: a FROZEN market carrying a v1
+   * pro-rata surplus is refused as `surplus`, and the road is Retire then
+   * re-register, not "try again". market/contract-rules.ts renewGateUnder.
+   */
+  renewRefusal: RenewRefusal | null;
   /**
    * delivery.go DeliveryStanding — the block the creator's delivery penalty
    * ends, or null when their standing is clear. Non-null means canBuy/canAsk
@@ -148,6 +242,16 @@ export interface Market {
    * not wait for phase to reach FROZEN.
    */
   retiredAtBlock: number | null;
+  /**
+   * core/market.go inWindDown under `rules` (market/contract-rules.ts
+   * windingDownUnder): retired or CLOSED, and under v1 a natural FROZEN too.
+   * THE RAIL SWITCH. True: the holder's exit is refund() and sell() throws.
+   * False: the exit is sell() and refund() throws. Derived ONCE here (both
+   * data sources) so no consumer restates the predicate inline; the four
+   * inline copies that used to exist in vsc-data-source.ts's write guards are
+   * exactly how the v1 shape would have survived the v2 contract.
+   */
+  windingDown: boolean;
   /**
    * contract-math.ts floorPricePerTokenBaseUnits (refund.go RefundPrice,
    * PAR-cap removed): floor(reserve/supply) HBD per token — the wind-down
@@ -411,11 +515,51 @@ export interface MyAsksResult {
 }
 
 /**
+ * A creator's own inbox read (readCreatorAsks). Returns the asks the creator
+ * can still act on plus the dead-zone, ACROSS THE FULL escrow range — never a
+ * newest-N page. See the data source's readCreatorAsks for the scan and the
+ * bound; the point is that no answerable ask can be hidden by a flood of newer
+ * asks (H12, 2026-08-31), because that is the only way a creator prevents a
+ * grief-miss: an ask they cannot SEE they cannot decline, and an undeclined ask
+ * becomes a miss on its reclaim (core/delivery.go recordMiss).
+ */
+export interface CreatorAsksResult {
+  /** Every `awaiting` (still answerable/declinable) and `expired` (dead-zone) ask, soonest-deadline first. Resolved asks are omitted — the delivery record carries history. */
+  asks: Ask[];
+  /**
+   * false ONLY when the creator has more lifetime asks than the scan cap AND
+   * the scan hit that cap before it could prove no older ask is still
+   * actionable. Then `olderNotScanned` older escrows were not read. Practically
+   * unreachable — an `awaiting` ask was opened at most MaxAskDeadline (30d) ago
+   * and seqs rise with open block, so hiding one needs thousands of asks inside
+   * 30 days — but it is surfaced honestly rather than silently dropped.
+   */
+  scannedAll: boolean;
+  /** Older escrows not read when `scannedAll` is false; 0 otherwise. */
+  olderNotScanned: number;
+}
+
+/**
  * Why an ask-rate preview could not be produced — mirrors twap.go's AskRate
  * ErrOracle branches exactly, so the UI can render an honest reason rather
  * than a generic failure (spec §1.3b mitigation 1).
  */
-export type QuoteOracleStatus = 'ok' | 'insufficient_observations' | 'insufficient_span' | 'stale' | 'deviation_capped' | 'unavailable';
+export type QuoteOracleStatus =
+  | 'ok'
+  | 'insufficient_observations'
+  | 'insufficient_span'
+  | 'stale'
+  | 'deviation_capped'
+  | 'unavailable'
+  // H2 (2026-08-31): the creator has posted NO price — a fact about their own
+  // market, distinct from 'unavailable' (our read failing).
+  | 'no_price_set'
+  // H1 (2026-08-31): core/settlement.go settleSpend's guards, surfaced before
+  // the signature. The posted face is outside the window that moves with supply.
+  | 'market_too_small'
+  | 'price_below_floor'
+  | 'price_above_ceiling'
+  | 'spend_cap';
 
 export interface Quote {
   creator: string;
@@ -710,6 +854,20 @@ export interface CreatorSummary {
 export interface PricePoint {
   block: number;
   priceHbd: number;
+  /**
+   * TRUE only for the market's OPENING state — the supply it held immediately
+   * before the oldest trade in the series, recovered from that row's signed
+   * `delta` (see `HasuraPricePoint.delta`). It is a real recorded state at a
+   * real moment, and it is a real price on the same curve; it is NOT a trade.
+   *
+   * ★ THE FLAG EXISTS SO NOTHING COUNTS IT AS ONE. `priceChangeOf` and the
+   * chart caption both state a BASIS ("over 8 trades"), and both used to take
+   * that basis from the array's length. With an opening point in the array
+   * that basis is off by one, and a page that says "2 trades" about a market
+   * that traded once is exactly the kind of small false claim the rest of this
+   * feature is written to avoid. Consumers filter on this to count trades.
+   */
+  opening?: boolean;
 }
 
 export interface CreateOfferingInput {
@@ -795,8 +953,8 @@ export interface ReclaimInput {
 
 /**
  * refund.go Refund — the WIND-DOWN exit (open only once the market is
- * winding down: RETIRED, or naturally FROZEN/CLOSED — Market.retiredAtBlock
- * non-null or phase FROZEN/CLOSED). While the market trades, the exit is
+ * winding down: Market.windingDown, which is retired or CLOSED, plus a natural
+ * FROZEN under the v1 rules only). While the market trades, the exit is
  * SellInput/sell() instead — the two rails are state-disjoint (sell.go's
  * rail-switch doc). Flat pro-rata, TAXED (K2), no trade fee.
  */

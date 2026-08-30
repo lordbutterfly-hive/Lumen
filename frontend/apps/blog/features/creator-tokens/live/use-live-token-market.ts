@@ -25,7 +25,7 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useTokenAccounts } from './use-token-accounts';
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
 import { resolveAskMaxCreditsBaseUnits } from '../market/curve';
-import type { BuyQuote, SellQuote } from '../types';
+import type { BuyQuote, Quote, SellQuote } from '../types';
 import { adaptMarket, type LiveTokenMarket } from './adapt';
 import { magiSpendingPowerKey } from './use-magi-spending-power';
 
@@ -85,6 +85,13 @@ export interface LiveTokenMarketResult {
    * claims, and only one of them is safe to make during an outage.
    */
   positionUnavailable: boolean;
+  /**
+   * The price-history read FAILED, as opposed to a market that has genuinely
+   * never traded. Same distinction as `positionUnavailable` and for the same
+   * reason: the chart panel must not tell a reader "this market has never
+   * traded" because an indexer was down. See the derivation for the repro.
+   */
+  historyUnavailable: boolean;
   /** The signed-in viewer, or null. Actions all require one. */
   viewer: string | null;
   loggedIn: boolean;
@@ -109,6 +116,32 @@ export interface LiveTokenMarketResult {
   quoteBuy: (tokens: number) => Promise<BuyQuote>;
   /** sell.go QuoteSell for the viewer — the exit-tax rate is the seller's own hold clock, so this is viewer-specific. */
   quoteSell: (tokens: number) => Promise<SellQuote>;
+
+  /**
+   * ask.go's settlement preview for ONE posted service — the same read `ask()`
+   * already performs immediately before broadcasting.
+   *
+   * ★ ADDED 2026-08-30 (clauderfly-43) so the Ask dialog can ask the question
+   * BEFORE the reader acts instead of after. `AskModal` priced off spot and
+   * enabled its button unconditionally, so a buyer met a live price, a Request
+   * button and a signature prompt, and only then the refusal — on markets where
+   * the chain cannot price a service at all (measured 2026-08-30: 13 of 13
+   * registered markets). No money was ever at risk (vsc-data-source.ts's ask()
+   * throws before any broadcast); being told after you act is what this fixes.
+   *
+   * Per OFFERING, not per market: the oracle arms are market-wide but the depth
+   * and minimum-price guards are priced against THAT offering's own face, so a
+   * market-wide quote could say ok for a service that will still refuse.
+   *
+   * Resolves with `oracleStatus` on a refusal and only REJECTS on a genuine read
+   * failure, so a caller can tell "cannot be priced" from "could not be read".
+   */
+  quoteAsk: (offeringId: number) => Promise<Quote>;
+
+  /** market.go Renew — pays `periods` months of the subscription. Resolves only once the chain has recorded it. */
+  renew: (periods: number) => Promise<void>;
+  /** True while a renewal is in flight, including the confirmation wait. */
+  isRenewing: boolean;
 
   /** Buys `tokens` whole tokens. `maxTotalUsd` becomes the signed transfer.allow cap — the buyer's ONLY slippage protection. */
   buy: (tokens: number, maxTotalUsd?: number) => Promise<void>;
@@ -251,6 +284,26 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
    */
   const positionUnavailable = positionQuery.isError;
 
+  /*
+   * ★★★ AN OUTAGE IS NOT "NEVER TRADED" (2026-08-30, adversarial sweep).
+   *
+   * Proven by aborting the indexer at the network layer and reloading: with the
+   * indexer down, /creators/@hbd-temp rendered "No price history yet. A chart
+   * appears as soon as this market has traded" on a market that HAS traded and
+   * is 100% sold out. That sentence is a claim about the market, and it was
+   * false. `token-market-view` even asserts the invariant in a comment: "this
+   * panel is reached only by a market that has never traded". It did not hold,
+   * because `historyQuery.isError` was collapsed into the same `null` as a
+   * genuinely empty result, and `adapt.ts` folded both into "no chart".
+   *
+   * This is the exact failure class the trending-tags work was written to avoid
+   * — a 200-with-no-entries rendering as an answer — and the cure already exists
+   * two lines up: `positionUnavailable`, and the delivery card's own `available`
+   * flag, which is why the same screen correctly says "Delivery record
+   * unavailable" during the same outage. Same treatment here.
+   */
+  const historyUnavailable = historyQuery.isError;
+
   const market =
     status === 'ready' && marketQuery.data
       ? adaptMarket({
@@ -266,7 +319,14 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
           // null (not []) when the history could not be read — adapt.ts turns
           // that into "no chart", and an empty array would draw a flat line,
           // which is a claim about the price rather than an absence of one.
-          priceHistory: historyQuery.isSuccess ? historyQuery.data.map((p) => p.priceHbd) : null
+          priceHistory: historyQuery.isSuccess ? historyQuery.data.map((p) => p.priceHbd) : null,
+          // ★ THE TRADE COUNT, SEPARATELY (2026-08-30). The map above throws the
+          // rows away and keeps bare numbers, and since `readPriceHistory` began
+          // prepending the market's opening price — which is what gives a
+          // one-trade market a chart at all — the array's length stopped being a
+          // trade count. `PricePoint.opening` marks the one point that is not a
+          // trade, and this is the last place that still knows.
+          priceTrades: historyQuery.isSuccess ? historyQuery.data.filter((p) => !p.opening).length : null
         })
       : null;
 
@@ -344,6 +404,30 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
     onSuccess: invalidate
   });
 
+  /**
+   * market.go Renew — the creator paying their own subscription, from their own
+   * token page.
+   *
+   * ★ THE SAME WRITE CREATOR STUDIO ALREADY USES, deliberately not a second one.
+   * `renewSubscription` carries the confirmation poll that resolves only once
+   * `kPaidUntil` has actually MOVED on chain (vsc-data-source.ts), rather than
+   * when a node accepted the envelope — which is the difference between "paid"
+   * and "we sent something". Rewriting it here would have meant two payment
+   * paths with one of them missing that.
+   *
+   * `caller` is the signer and `creator` is this page's market. They are the same
+   * account whenever the owner presses the button, which is the only way it is
+   * reachable — the contract itself allows any caller, so the two are kept as
+   * separate arguments rather than collapsed.
+   */
+  const renewMutation = useMutation({
+    mutationFn: async ({ periods }: { periods: number }) => {
+      const { source, signer } = requireSigner();
+      await source.renewSubscription({ creator, caller: signer, periods });
+    },
+    onSuccess: invalidate
+  });
+
   const askMutation = useMutation({
     mutationFn: async (input: { offeringId: number; contentHash: string; deadlineDays: number; maxCostUsd: number }) => {
       const { source, signer } = requireSigner();
@@ -396,6 +480,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
     status,
     market,
     positionUnavailable,
+    historyUnavailable,
     viewer,
     loggedIn,
     sessionUnavailable,
@@ -411,6 +496,13 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
       (tokens: number) => {
         if (!dataSource) return Promise.reject(new Error('CREATOR_TOKENS_UNAVAILABLE'));
         return dataSource.quoteBuy(creator, tokens);
+      },
+      [dataSource, creator]
+    ),
+    quoteAsk: useCallback(
+      (offeringId: number) => {
+        if (!dataSource) return Promise.reject(new Error('CREATOR_TOKENS_UNAVAILABLE'));
+        return dataSource.readQuote(creator, offeringId);
       },
       [dataSource, creator]
     ),
@@ -433,6 +525,9 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
     ),
     ask: useCallback((input: { offeringId: number; contentHash: string; deadlineDays: number; maxCostUsd: number }) => askMutation.mutateAsync(input), [askMutation]),
     transfer: useCallback((to: string, tokens: number) => transferMutation.mutateAsync({ to, tokens }), [transferMutation]),
+
+    renew: useCallback((periods: number) => renewMutation.mutateAsync({ periods }).then(() => undefined), [renewMutation]),
+    isRenewing: renewMutation.isLoading,
 
     isBuying: buyMutation.isLoading,
     retry: () => {

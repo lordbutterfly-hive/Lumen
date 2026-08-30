@@ -49,7 +49,7 @@ import {
 } from '@/blog/lib/chain-fetch';
 import { fetchDiscussion } from '@/blog/lib/lite/client/discussion-fetch';
 import { isBlockedEntry, useLumenBlock, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
-import { litePostIdOf, isLumenProxiedEntry } from '@/blog/lib/lite/render/lite-post-id';
+import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
 import { fetchLiteEntryByPermlink } from '@/blog/lib/lite/client/lite-post-fetch';
 import { fetchLiteEngagement } from '@/blog/lib/lite/client/lite-engagement';
 import { Entry } from '@hive/common-hiveio-packages/wax';
@@ -988,19 +988,35 @@ const PostContent = () => {
    * reader, with no `<h1>` on the page at all (the banner's own `<h1>` was
    * the only one).
    *
-   * `isLumenProxiedEntry` (shared with the lite badge/overlay logic —
-   * `lib/lite/render/lite-post-id.ts`) covers the first two conditions from
-   * the QA writeup: `json_metadata.app === "lumen/1.0"` and a
-   * `lumen_post_id` marker, plus the `lumen-`/`lite-` permlink shape as a
-   * third, stronger signal. The `parent_permlink` check below is the QA
-   * writeup's third, independent condition — depth-1 directly under a
+   * `litePostIdOf` (`lib/lite/render/lite-post-id.ts`) is the narrow test:
+   * true only for Lumen's own permlink shapes (`lumen-`/`lite-<ulid>`) or a
+   * `lumen_post_id` marker — fields ONLY a lite post ever carries. The
+   * `parent_permlink` check below is independent — depth-1 directly under a
    * `lumen-c-` container — so a Lumen post is still recognised even if its
    * `json_metadata` were ever stripped or unparsed somewhere upstream. The
    * container namespace is exclusive to the gateway; no ordinary Hive
    * comment can carry it.
+   *
+   * ★★★ NOT `isLumenProxiedEntry` (2026-08-28, attribution audit). That
+   * function ALSO matches on a bare `json_metadata.app === "lumen/1.0"` —
+   * right for the "posted via lumen" byline below, which is meant to render
+   * under ANY Lumen-published content regardless of tier, but wrong here.
+   * Once full-account posts and comments carry `app: "lumen/1.0"` too
+   * (packages/transaction/index.ts — `post`/`updatePost` since 2026-08-06,
+   * `comment`/`updateComment` from the same change that added this note),
+   * `isLumenProxiedEntry` would match a full account's ORDINARY reply, this
+   * flag would go true, and `commentSite` below would go false for it —
+   * misrendering a genuine Hive comment as a root post (full title header,
+   * Reblog button, tags row) the moment its author happened to be a Lumen
+   * user. `litePostIdOf` cannot false-positive that way: a full account's
+   * comment never carries `lumen_post_id` or a `lumen-`/`lite-` permlink,
+   * only lite's own publisher (`lib/lite/publisher/footer.ts`) ever writes
+   * those. Every genuine lite post already satisfies `litePostIdOf` too — it
+   * unconditionally carries `lumen_post_id` — so this is strictly narrower,
+   * never a regression for lite.
    */
   const isLumenNativePost =
-    isLumenProxiedEntry(postData) ||
+    Boolean(litePostIdOf(postData)) ||
     (postDepth === 1 && (thisPost?.parent_permlink ?? postData?.parent_permlink ?? '').startsWith('lumen-c-'));
   // `postDepth !== 0` on its own, kept under its own name for the ONE place
   // below that must still ask it directly: which EDITOR to open. A Lumen post
@@ -1838,7 +1854,7 @@ const PostContent = () => {
                         .map((tag: string) => (
                           <li key={tag}>
                             <Link
-                              href={`/topics/${tag}`}
+                              href={`/topics/${encodeURIComponent(tag)}`}
                               className="inline-block rounded-full border border-border bg-background-secondary px-3 py-1 text-sm font-medium text-muted-foreground transition-all hover:border-destructive hover:bg-destructive/10 hover:text-destructive"
                             >
                               #{tag}

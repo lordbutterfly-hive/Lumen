@@ -8,6 +8,7 @@ import { useTokenAccounts } from '../live/use-token-accounts';
 import { useTokenPriceChip } from '../live/use-token-price-chip';
 import { usdPrice } from '../market/format';
 import { CreatorTokenRocket } from './creator-token-rocket';
+import { healthWordFor } from '../market/market-health';
 
 // TODO i18n — staged copy, same precedent as the rest of this feature.
 // ★ "Meritum tokens" is the product name as of 2026-08-16 (owner) — the left
@@ -113,6 +114,18 @@ const HeaderTokenPill: FC = () => {
         <span className="pr-1.5 font-sans text-[14px] leading-[22px] font-bold leading-none tabular-nums text-ink-2">
           {usdPrice(chip.priceUsd)}
         </span>
+        {/* ★ The creator's OWN header said nothing while their market was
+            lapsed or frozen (2026-08-30, B4): a price, and no hint that the
+            Studio behind this link reads "Lapsed · Renew to stay listed". One
+            state word, only when there is one (market/market-health.ts). */}
+        {chip.health !== null && healthWordFor(chip.health) !== null ? (
+          <span
+            className="pr-1.5 font-sans text-[12px] leading-[22px] font-bold uppercase tracking-label text-ink-warn-3"
+            data-testid="header-token-pill-health"
+          >
+            {healthWordFor(chip.health)}
+          </span>
+        ) : null}
       </Link>
     );
   }

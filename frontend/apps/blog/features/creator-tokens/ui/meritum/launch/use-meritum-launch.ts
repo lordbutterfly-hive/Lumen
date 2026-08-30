@@ -90,6 +90,27 @@ export type MeritumLaunchBlock =
    * so the whole check is available at exactly the moment the creator types the
    * price. See market/curve.ts's serviceSupplyShareProblem for the threshold
    * and why it is the escrow, not taste, that sets it.
+   *
+   * ★★ NON-BINDING ON THIS SCREEN SINCE 2026-08-30, and said out loud rather
+   * than left for someone to discover. `STANDARD_CAP` is now the contract's
+   * MaxCap (1e9, see launch-money.ts's ruling note), so the guard is measured
+   * against a supply nobody will ever mint. Proven on the live curve: no price
+   * up to MAX_PRICE_USD ($10,000) trips it at a 1e9 cap (the selftest sweeps
+   * every cent). On the LAUNCH path this block can therefore never fire.
+   *
+   * ★★ AND THE GUARD ITSELF IS NARROWER THAN IT WAS (2026-08-30, B2). It used
+   * to also refuse a service above 10% of the cap; that half was removed after
+   * it was proven to fire on the owner's own legacy 30-cap Studio market for
+   * every price a person types. What remains is UNFILLABLE only, `tokens >
+   * cap`, a chain fact (buy.go will not mint past the cap). market/curve.ts,
+   * serviceSupplyShareProblem's block, has the numbers.
+   *
+   * IT IS KEPT, NOT DELETED: the same function still guards the Studio
+   * (creator-studio.tsx NewOfferingRow and both PriceInput sites), which reads
+   * each market's REAL cap, and the three legacy markets (30 / 30 / 500) can
+   * still post an unfillable price until their creators raise the cap. If an
+   * owner ever re-tightens the launch cap, this block comes back to life with
+   * it rather than having to be rebuilt.
    */
   | 'offer-supply-share'
   | 'price-band'
@@ -258,8 +279,10 @@ export interface MeritumLaunchApi {
 
   /** `@name`, or an empty string until the session answers. */
   handle: string;
-  /** The supply cap every token launches at. */
-  cap: number;
+  /* `cap` was published here for the terms ledger's Supply row. Both are gone
+     (owner, 2026-08-30) — a market now launches at the contract's MaxCap, which
+     is not a fact any screen should recite. STANDARD_CAP is still what `launch`
+     puts on chain; it is just no longer part of this hook's public surface. */
   /** The curve's price at supply 0, formatted. */
   openingPrice: string;
 
@@ -523,6 +546,13 @@ export function useMeritumLaunch(): MeritumLaunchApi {
    * `STANDARD_CAP` and the supply-0 opening price — both fixed and both known
    * on this screen — so a creator learns it while typing rather than posting a
    * shop whose services no buyer can afford a share of.
+   *
+   * ★ SINCE 2026-08-30 THIS IS EFFECTIVELY ALWAYS `null` — `STANDARD_CAP` is
+   * MaxCap. Proven monotone before the change shipped: raising the cap can only
+   * SHRINK `tokens / cap`, so no price this used to allow is newly refused (swept
+   * $0.01–$2,000 at the supply-0 opening price, zero new refusals). It is a
+   * silent check, never a false one. Full reasoning on the 'offer-supply-share'
+   * block above.
    */
   const offerSupplyShareProblem =
     pricedOffers.map((o) => serviceSupplyShareProblem(o.usd, openingPriceUsd, STANDARD_CAP)).find((m) => m != null) ??
@@ -737,7 +767,10 @@ export function useMeritumLaunch(): MeritumLaunchApi {
     firstBuy,
     setFirstBuy,
     handle,
-    cap: STANDARD_CAP,
+    /* `cap` was returned here for the Supply row of the terms ledger only. That
+       row is gone (owner, 2026-08-30 — a cap of 1e9 is not a fact worth telling
+       anyone), and with its single reader gone the field would be dead surface.
+       STANDARD_CAP is still what `launch` sends on chain, one screen below. */
     openingPrice: usdPrice(openingPriceUsd),
     offerSupplyShareMessage: offerSupplyShareProblem,
     block,

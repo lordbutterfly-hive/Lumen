@@ -785,6 +785,11 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 	// moves WHEN the frozen-phase assertions and the sweep run, not whether.
 	frozenBlock := alicePaidUntil + GraceBlocks + ExitTaxDecayBlocks
 	hzAssertPhase(t, s, alice, frozenBlock, StateFrozen, "freeze")
+	// A1 (2026-08-30): the wind-down sweep below needs the Refund rails OPEN,
+	// and a lapse alone no longer opens them — the creator retires. Every
+	// FROZEN-phase assertion around this block is unchanged (retired phase folds
+	// to FROZEN here too); only the ROAD into wind-down moved.
+	hzMustOK(t, Retire(s, alice, alice, frozenBlock-1), "Retire (A1: wind-down is reached only by Retire)")
 
 	// A NEW buy is now rejected (inflows blocked) — and nothing is mutated.
 	beforeRejBuy := hzReserves(s, creators)
@@ -1009,24 +1014,39 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 		}
 	})
 
-	// THE OUTFLOW HALF OF THE SAME GUARDRAIL, curve edition: the FROZEN
-	// market's exit rail is Refund (proved below), and Sell — the ACTIVE
-	// rail — is correctly ROUTED away rather than being a funds gate. This
-	// is the pairing sell.go/refund.go prove structurally; assert it here
-	// so "FROZEN never gates funds" is not read as "Sell must work while
-	// FROZEN", which would re-open the tax-and-fee bypass.
-	t.Run("Sell_isRoutedToRefund_notGated", func(t *testing.T) {
+	// THE OUTFLOW HALF OF THE SAME GUARDRAIL, A1 edition (owner ruling
+	// 2026-08-30): a natural FROZEN is an INFLOW stop, not a wind-down, so the
+	// holder's exit is the curve Sell, exactly as in ACTIVE — and the pro-rata
+	// Refund rails REFUSE, because nothing is winding down. This is the
+	// inverse of the pre-A1 pairing ("Sell routed to Refund"), and it is the
+	// assertion that fails on the pre-A1 code.
+	t.Run("Sell_isOpen_onNaturalFrozen", func(t *testing.T) {
 		hzAssertPhase(t, s, creator, frozenTestBlock, StateFrozen, "precondition")
 		bal := BalanceOf(s, creator, "holdera")
 		if bal.Sign() <= 0 {
 			t.Fatal("test setup: holdera must still hold tokens here")
 		}
-		before := hzSnapshotAll(s)
 		_, err := Sell(s, "holdera", creator, frozenTestBlock, big.NewInt(1))
-		hzMustErr(t, err, ErrState, "Sell while FROZEN routes to Refund")
-		if changed := hzChangedKeys(before, hzSnapshotAll(s)); len(changed) != 0 {
-			t.Fatalf("rejected Sell mutated state: %v", changed)
+		hzMustOK(t, err, "Sell while naturally FROZEN (A1: curve exit intact)")
+		if got := BalanceOf(s, creator, "holdera"); new(big.Int).Sub(bal, got).Cmp(big.NewInt(1)) != 0 {
+			t.Fatalf("holdera balance moved by %s, want -1", new(big.Int).Sub(got, bal))
 		}
+	})
+	t.Run("Refund_refused_onNaturalFrozen", func(t *testing.T) {
+		hzAssertPhase(t, s, creator, frozenTestBlock, StateFrozen, "precondition")
+		before := hzSnapshotAll(s)
+		_, err := Refund(s, "holderc", creator, frozenTestBlock, big.NewInt(1))
+		hzMustErr(t, err, ErrState, "Refund while naturally FROZEN (A1: no wind-down on lapse)")
+		if changed := hzChangedKeys(before, hzSnapshotAll(s)); len(changed) != 0 {
+			t.Fatalf("rejected Refund mutated state: %v", changed)
+		}
+	})
+	// From here the guardrail's wind-down half needs a wind-down: the creator
+	// retires. Phase at frozenTestBlock still reads FROZEN (the retired ladder
+	// folds to it), so every sibling precondition below is unchanged.
+	t.Run("Retire_opensWindDown", func(t *testing.T) {
+		hzMustOK(t, Retire(s, creator, creator, frozenTestBlock-1), "Retire (A1: wind-down is reached only by Retire)")
+		hzAssertPhase(t, s, creator, frozenTestBlock, StateFrozen, "post-retire")
 	})
 
 	t.Run("NewAsk_isBlocked", func(t *testing.T) {
@@ -1123,7 +1143,7 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 	})
 
 	hzAssertI3(t, s, creator, "guardrail final")
-	t.Logf("GUARDRAIL PROVEN: Refund, RefundHolder, Reclaim, TransferCredits and Answer all succeeded while Phase()==FROZEN; new Buy and new Ask were both rejected with zero state mutation, and Sell was ROUTED to Refund (not gated).")
+	t.Logf("GUARDRAIL PROVEN (A1): on a natural FROZEN, Sell worked and Refund refused (inflow stop, not wind-down); after Retire, Refund, RefundHolder, Reclaim, TransferCredits and Answer all succeeded while Phase()==FROZEN; new Buy and new Ask were both rejected with zero state mutation.")
 }
 
 // ===========================================================================
@@ -1188,6 +1208,7 @@ func TestHarness_FullWindDown_RandomOrderMixedRefundStyles(t *testing.T) {
 	// (Σgross drained == Σcurve costs, zero dust) is on the GROSS and so is
 	// tax-independent.
 	refundBlock := regBlock + SubscriptionPeriod + GraceBlocks + ExitTaxDecayBlocks
+	hzMustOK(t, Retire(s, creator, creator, refundBlock-1), "Retire (A1: wind-down is reached only by Retire)")
 	hzAssertPhase(t, s, creator, refundBlock, StateFrozen, "wind-down precondition")
 
 	// RULING K2: the wind-down is taxed, so a holder receives net (gross − tax)
@@ -1300,6 +1321,7 @@ func TestHarness_RefundHolder_PaysHolderNeverCaller(t *testing.T) {
 	// keys the push touches; the fresh-holder-rejected case is
 	// TestRefundHolder_EXITTAX1_FreshPushRefused (refund_test.go).
 	pushBlock := regBlock + SubscriptionPeriod + GraceBlocks + 100 + ExitTaxDecayBlocks
+	hzMustOK(t, Retire(s, creator, creator, pushBlock-1), "Retire (A1: wind-down is reached only by Retire)")
 	hzAssertPhase(t, s, creator, pushBlock, StateFrozen, "precondition")
 	reserve := Reserve(s, creator)
 	supply := Supply(s, creator)
@@ -1442,6 +1464,7 @@ func TestHarness_ReRegistration_AfterClosed(t *testing.T) {
 	// freeze) are both fully decayed to τ = 0 there. The old-life obs history and
 	// asks above still sit near frozenStart (unchanged); only the sweep moves.
 	closeBlock := frozenStart + ExitTaxDecayBlocks
+	hzMustOK(t, Retire(s, creator, creator, closeBlock-1), "Retire (A1: wind-down is reached only by Retire)")
 	hzAssertPhase(t, s, creator, closeBlock, StateFrozen, "old life, precondition")
 	_, err = RefundHolder(s, "hzkeeper", creator, oldHolder, closeBlock)
 	hzMustOK(t, err, "wind-down RefundHolder(oldHolder)")

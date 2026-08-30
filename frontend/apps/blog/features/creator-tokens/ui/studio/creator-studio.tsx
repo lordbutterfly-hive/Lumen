@@ -1,12 +1,13 @@
 'use client';
 
 import { cn } from '@ui/lib/utils';
+import { useTranslation } from '@/blog/i18n/client';
 import { displayHandle, dueLabelFor } from '../../live/adapt';
 import { FC, useState, useEffect, useRef } from 'react';
 import { useLiveStudio, type LiveStudio } from '../../live/use-live-studio';
 import { MarketLoading, MarketReadFailed, MarketSessionUnavailable, MarketUnavailable } from '../../live/market-states';
 import type { Ask } from '../../types';
-import { pctLabel, pctValue, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
+import { pctLabel, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
 // ★★ THE FLOOR / RESERVE FIGURES ARE HIDDEN FOR LAUNCH (owner, 2026-08-27), on
 // every surface at once, from one flag. The creator's dashboard is one of the
 // four; nothing here is deleted, and every expression returns with the flag.
@@ -15,8 +16,11 @@ import { sellQuote, serviceQuote, serviceSupplyShareProblem, MIN_NET_DEFAULT_TOL
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
 import { MAX_HASH_LEN } from '../../lib/vsc/payload-contract';
+import { MAX_CAP_CREDITS_BASE_UNITS, MAX_OFFERINGS } from '../../lib/contract-math';
 import ModalShell from '../modal-shell';
 import { offerTitleProblem } from '../../lib/vsc/op-builders';
+import WorkLinkField from '../work-link-field';
+import { creatorOracleNotice } from '../../market/oracle-copy';
 
 type Section = 'overview' | 'inbox' | 'offerings' | 'market' | 'billing' | 'earnings';
 const SECTIONS: { id: Section; label: string }[] = [
@@ -191,6 +195,14 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
   const urgent = ask.status === 'awaiting' && ask.deadlineAt - Date.now() < 24 * 3600 * 1000;
   const answerHasPipe = text.includes('|');
   const answerValid = text.trim().length > 0 && text.trim().length <= MAX_HASH_LEN && !answerHasPipe;
+  // ★ THE WINDOW CAN CLOSE WHILE THIS MODAL IS OPEN (2026-08-30, clauderfly-43).
+  // Expired escrows no longer reach the Inbox's action button at all (see
+  // use-live-studio's inbox/expiredInbox split), but a creator can sit on an open
+  // modal past the deadline, and BOTH writes are refused from that moment:
+  // core/ask.go:615 (Answer) and core/ask.go:830 (Decline), each
+  // ErrState "answer window closed". `dueLabelFor` returns undefined exactly then,
+  // which is the same boundary, so the two cannot disagree.
+  const windowClosed = dueLabel === undefined;
   return (
     <ModalShell width={500} onClose={onClose} title="Mark this job delivered" className="p-6">
       <div className="mb-2 font-serif text-xl font-semibold text-ink-2">Mark this job delivered</div>
@@ -228,8 +240,13 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
           className="mb-3 rounded-control bg-surface-warn-4 px-3.5 py-2.5 text-caption font-semibold text-ink-warn-3"
           data-testid="answer-modal-deadline"
         >
-          The deadline has passed. The buyer can reclaim their tokens, and marking this
-          delivered may no longer release the escrow.
+          {/* ★ "MAY NO LONGER RELEASE" WAS A HEDGE ON A CERTAINTY (2026-08-30,
+              clauderfly-43). Past the deadline the contract refuses both writes
+              outright — ask.go:615 and ask.go:830. Both buttons below are disabled
+              in this state, so the sentence has to say why rather than imply the
+              creator might get lucky. */}
+          The answer window has closed, so this can no longer be answered or declined. The buyer
+          reclaims their tokens, and the chain records a miss against your delivery record.
         </div>
       )}
       <p className="mb-3 text-caption text-ink-10">
@@ -291,7 +308,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
               setBusy(false);
             }
           }}
-          disabled={busy}
+          disabled={busy || windowClosed}
           className="flex-1 rounded-xl border border-line-11 py-3 text-[14px] leading-[22px] font-semibold text-ink-10 disabled:opacity-50"
         >
           Decline &amp; refund
@@ -322,7 +339,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
               setBusy(false);
             }
           }}
-          disabled={busy || !answerValid}
+          disabled={busy || !answerValid || windowClosed}
           className="flex-1 rounded-xl bg-surface-brand-12 py-3 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-brand-17 disabled:opacity-50"
         >
           {busy ? 'Confirm in your wallet…' : 'Mark as delivered'}
@@ -365,7 +382,10 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
             here, and it is the wording WIND_DOWN_BANNER already uses on the
             buyer side, so the two screens now describe one event the same way.
             Unguarded on purpose: it is true whether or not the stat is shown. */}
-        <li>· Every holder is refunded their share of the reserve, less any early-exit fee.</li>
+        {/* ★ 2026-08-30 (B3, copy set A): "refunded" promised principal back,
+            automatically. Holders must Redeem themselves and get a slice of
+            what the reserve holds, less their fee (refund.go). */}
+        <li>· Holders can redeem a pro-rata slice of the reserve, less any early-exit fee. Nobody is refunded automatically.</li>
         <li>· Asks you’ve received still resolve. Answer them to get paid.</li>
         <li>· Your delivery record is lost. Coming back means a new token.</li>
         <li>· This can’t be undone.</li>
@@ -446,9 +466,15 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
    * Same failure shape as the title rule above — a value this form accepted
    * without ever looking at it — except the chain does NOT refuse this one, so
    * there is no on-chain backstop at all. The offering is created, posted, and
-   * priced at a fraction of total supply no buyer can reach. Measured live:
-   * a 30-cap market listing a $15 service at 14 tokens, 47% of every token that
-   * will ever exist.
+   * priced at more tokens than the cap lets exist, so no buyer can reach it.
+   *
+   * ★★ NARROWED 2026-08-30 (owner: this error "should never fire"; B2). The
+   * guard used to also refuse a service above 10% of the cap, and on the
+   * owner's own 30-cap `hbd-temp` market that fired for every price a person
+   * types ($4.26 and up, re-evaluated on every keystroke below = the "flashing"
+   * he reported). It now refuses only the UNFILLABLE case, `tokens > cap`,
+   * which is a chain fact rather than a heuristic. Reasoning and the live
+   * numbers: market/curve.ts, serviceSupplyShareProblem's block.
    *
    * `studio.market` is nullable and the guard returns null on anything it
    * cannot judge, so a failed market read blocks nothing — see
@@ -457,11 +483,21 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
    */
   const supplyProblem =
     studio.market === null ? null : serviceSupplyShareProblem(usd, studio.market.priceUsd, studio.market.cap);
+  // M5 (2026-08-31): the contract keeps at most MAX_OFFERINGS live offerings, so
+  // the 21st createOffering is refused AFTER the signature. Disable the form at
+  // the cap rather than broadcast a doomed call. `offerings === null` is an
+  // unread market, not a full one, so it does not gate.
+  const atOfferingCap = (studio.offerings?.length ?? 0) >= MAX_OFFERINGS;
   const valid =
-    title.trim().length > 0 && titleProblem === null && Number.isFinite(usd) && usd > 0 && supplyProblem === null;
+    title.trim().length > 0 && titleProblem === null && Number.isFinite(usd) && usd > 0 && supplyProblem === null && !atOfferingCap;
   return (
     <div className="mt-4 border-t border-line-2 pt-4">
       <div className="mb-2 text-caption font-semibold text-ink-10">Add a service</div>
+      {atOfferingCap ? (
+        <p className="mb-2 text-caption text-ink-warn-3">
+          You’ve reached the limit of {MAX_OFFERINGS} services. Delete one to add another.
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <input
           value={title}
@@ -525,9 +561,29 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
 };
 
 const CreatorStudio: FC = () => {
+  // ★ THE ONLY `useTranslation` CALL IN THIS FILE (2026-08-30). Every other
+  // string here is written inline — an existing convention this component did
+  // not invent — but the repo's own rule is "never use inline strings for
+  // user-facing text", and `WorkLinkField`'s copy below already lives in
+  // `meritum_launch.*`, so the label next to it reuses that same namespace
+  // rather than adding a second, untranslated one beside a translated one.
+  const { t } = useTranslation('common_blog');
   const studio = useLiveStudio();
-  const { market, inbox, rawInbox, inboxUnavailable, subDaysLeft, tradeFeeClaimableUsd, commissionEarnedUsd, status } =
-    studio;
+  const {
+    market,
+    inbox,
+    rawInbox,
+    expiredInbox,
+    inboxUnavailable,
+    inboxTruncated,
+    inboxOlderNotScanned,
+    positionUnavailable,
+    servicesOracleStatus,
+    subDaysLeft,
+    tradeFeeClaimableUsd,
+    commissionEarnedUsd,
+    status
+  } = studio;
   const [section, setSection] = useState<Section>('overview');
   const [answering, setAnswering] = useState<Ask | null>(null);
   const [retireOpen, setRetireOpen] = useState(false);
@@ -546,11 +602,15 @@ const CreatorStudio: FC = () => {
   // used `void studio.X()`, silently swallowing a rejected write — the user clicked and
   // nothing happened, with no reason shown. Route them through here so a failure surfaces
   // via the same write-failure.ts messaging the modals already use.
+  // S4 (2026-08-30): set only by a renew whose payment Hive accepted but Magi
+  // has not yet recorded; renders the read-only "Check again" beside the banner.
+  const [renewUnconfirmed, setRenewUnconfirmed] = useState(false);
   const runStudioAction = async (fn: () => Promise<unknown>, fallback: string): Promise<void> => {
     setActionFailure(null);
     try {
       await fn();
     } catch (err) {
+      if (err instanceof Error && err.message.startsWith('CREATOR_TOKENS_RENEW_UNCONFIRMED:')) setRenewUnconfirmed(true);
       setActionFailure(writeFailureMessage(err, fallback));
     }
   };
@@ -642,14 +702,9 @@ const CreatorStudio: FC = () => {
     );
   }
 
-  // ★ TWIN OF THE "0%" BUG, FOUND 2026-08-21. This is the same
-  // `Math.round(supply / cap * 100)` that was fixed in
-  // `ui/token-page/token-market-view.tsx` — and the fix never reached this copy,
-  // so the creator's OWN dashboard kept reporting "cap 0% used" about a market
-  // that had genuinely issued tokens. `pctValue` drives the bar geometry (where
-  // rounding to 0 is correct); `supplyPctLabel` is what a person reads.
-  const supplyPct = pctValue(market.supply, market.cap);
-  const supplyPctLabel = pctLabel(market.supply, market.cap) ?? '0%';
+  // `supplyPct` / `supplyPctLabel` (the 2026-08-21 "0%" twin fix) were deleted
+  // with the cap displays they fed (owner, 2026-08-30); nothing on this screen
+  // divides by the cap any more.
   const overdue = subDaysLeft <= 0;
   const held = market.position?.tokens ?? 0;
 
@@ -736,22 +791,28 @@ const CreatorStudio: FC = () => {
               <Stat
                 label="Token price"
                 value={usdPrice(market.priceUsd)}
-                /* ★ Hidden for launch. The cap half of this line is the half a
-                   creator acts on, so it survives on its own with a capital
-                   rather than being dropped with the floor. The original string
-                   is the other branch, unchanged. */
-                sub={
-                  SHOW_BACKING_FIGURES
-                    ? `Floor ${usdPrice(market.floorUsd)} · cap ${supplyPctLabel} used`
-                    : `Cap ${supplyPctLabel} used`
-                }
+                /* ★★ THE CAP IS GONE FROM THIS SCREEN (owner, 2026-08-30: "theres
+                   cap in creator studio. get rid of it"). This line read "Cap <1%
+                   used" for every market launched from today, because
+                   `STANDARD_CAP` is now the contract's MaxCap (launch-money.ts
+                   carries the ruling) and 1e9 tokens is a number no market
+                   reaches. A percentage of a ceiling nobody can touch is not
+                   information, so the cap half is DELETED, not flagged: the
+                   2026-08-27 note that kept it ("the half a creator acts on") is
+                   superseded, there is nothing left to act on. The floor half
+                   keeps its own flag, exactly like the Price sub-line on the
+                   Market tab, and returns unchanged when SHOW_BACKING_FIGURES
+                   flips. */
+                sub={SHOW_BACKING_FIGURES ? `Floor ${usdPrice(market.floorUsd)}` : undefined}
               />
             </Card>
             <Card>
               <Stat
                 label="Market cap"
                 value={usdWhole(market.marketCapUsd)}
-                sub={`${market.supply.toLocaleString('en-US')} of ${market.cap.toLocaleString('en-US')} tokens`}
+                /* Same ruling: "0 of 1,000,000,000 tokens" is the cap again, in
+                   a different coat. The issued count is real and stays. */
+                sub={`${market.supply.toLocaleString('en-US')} tokens issued`}
               />
             </Card>
             <Card>
@@ -760,11 +821,27 @@ const CreatorStudio: FC = () => {
                 /* The creator's own dashboard read "0%" and "0/0 answered · " on
                    the day they launched. Nothing has been asked of them yet; say
                    that, rather than scoring them zero for it. */
-                value={market.delivery.completionPct === null ? '—' : (pctLabel(market.delivery.answered, market.delivery.total) ?? '0%')}
+                /* ★★★ AND AN UNREACHABLE INDEXER IS NOT AN EMPTY HISTORY
+                   (2026-08-30, clauderfly-43). This branched on `completionPct`
+                   alone, and `adaptDelivery` (live/adapt.ts) returns
+                   `{completionPct: null, available: false}` for BOTH "nothing has
+                   been asked yet" and "the read failed" — so a failed read rendered
+                   as the flat statement "No deliveries yet". That is the same
+                   defect the "Requests waiting" card two cards down was fixed for
+                   on 2026-08-28, and the same one the buyer-facing surfaces already
+                   get right (token-market-view.tsx and profile-token-card.tsx both
+                   test `d.available` FIRST).
+                   It is live, not hypothetical: production ships
+                   REACT_APP_CREATOR_TOKENS_INDEXER_URL as an empty string, so
+                   `readDeliveryRecord` returns source:'unavailable' unconditionally
+                   there and EVERY creator was told they had no deliveries. */
+                value={!market.delivery.available || market.delivery.completionPct === null ? '—' : (pctLabel(market.delivery.answered, market.delivery.total) ?? '0%')}
                 sub={
-                  market.delivery.completionPct === null
-                    ? 'No deliveries yet'
-                    : `${market.delivery.answered}/${market.delivery.total} answered${market.delivery.typicalResponse ? ` · ${market.delivery.typicalResponse}` : ''}`
+                  !market.delivery.available
+                    ? 'Could not be read just now'
+                    : market.delivery.completionPct === null
+                      ? 'No deliveries yet'
+                      : `${market.delivery.answered}/${market.delivery.total} answered${market.delivery.typicalResponse ? ` · ${market.delivery.typicalResponse}` : ''}`
                 }
               />
             </Card>
@@ -807,6 +884,14 @@ const CreatorStudio: FC = () => {
 
         {section === 'inbox' ? (
           <div className="flex flex-col gap-2.5">
+            {inboxTruncated ? (
+              <Card>
+                <p className="py-3 text-center text-caption text-ink-warn-3">
+                  You have a very large number of requests. Showing the most recent; {inboxOlderNotScanned} older
+                  {inboxOlderNotScanned === 1 ? ' request is' : ' requests are'} not listed here. Answer or decline the ones below first.
+                </p>
+              </Card>
+            ) : null}
             {/* ★ "you’re all caught up" was shown to creators whose escrows
                 exist and simply could not be read (2026-08-28, F2). Retry, do
                 not reassure — the same shape the Offerings tab already uses. */}
@@ -823,10 +908,18 @@ const CreatorStudio: FC = () => {
                   </button>
                 </div>
               </Card>
-            ) : inbox.length === 0 ? (
+            ) : inbox.length === 0 && expiredInbox.length === 0 ? (
               <Card>
                 <p className="py-6 text-center font-serif text-sm italic text-ink-14">
                   No requests waiting. Nice, you’re all caught up.
+                </p>
+              </Card>
+            ) : inbox.length === 0 ? (
+              /* Nothing ACTIONABLE, but missed jobs below. "All caught up" would
+                 be the wrong sentence to put above a job they let expire. */
+              <Card>
+                <p className="py-6 text-center font-serif text-sm italic text-ink-14">
+                  Nothing waiting on you right now.
                 </p>
               </Card>
             ) : (
@@ -859,6 +952,39 @@ const CreatorStudio: FC = () => {
                 </Card>
               ))
             )}
+
+            {/* ★★★ MISSED JOBS, SHOWN WITHOUT A CONTROL (2026-08-30, clauderfly-43).
+                These used to sit in the list above with a live "Answer or decline"
+                button and be counted by the Overview's "Requests waiting". The chain
+                refuses both resolutions once the deadline is past — core/ask.go:615
+                (Answer) and core/ask.go:830 (Decline), both "answer window closed" —
+                so the button could only ever cost the creator a signature and their
+                resource credits to be told no.
+                They are still SHOWN, because this is the job the contract is about to
+                count as a miss against the delivery record, and a creator who cannot
+                see it cannot learn from it. */}
+            {!inboxUnavailable && expiredInbox.length > 0 ? (
+              <div className="mt-1.5 flex flex-col gap-2.5">
+                <div className="text-label font-semibold uppercase tracking-wide text-ink-14">
+                  Past their deadline
+                </div>
+                {expiredInbox.map((a) => (
+                  <Card key={a.id} className="border-dashed">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-[15px] leading-[24px] font-semibold text-ink-10">{a.service}</div>
+                      <div className="text-caption font-semibold text-ink-14">Deadline passed</div>
+                    </div>
+                    <div className="mt-1 text-caption tabular-nums text-ink-14">
+                      {usdWhole(a.costUsd)} · {tok(a.tokens)} tokens escrowed
+                    </div>
+                    <p className="mt-2 text-caption text-ink-14">
+                      The answer window has closed, so this can no longer be answered or declined. The buyer
+                      reclaims their tokens, and the chain records a miss against your delivery record.
+                    </p>
+                  </Card>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -867,6 +993,24 @@ const CreatorStudio: FC = () => {
             <div className="mb-3 font-serif text-lg font-semibold text-ink-2">
               Your services &amp; prices
             </div>
+            {/* ★★★ SAY IT BEFORE THEY PRICE IT (2026-08-30, clauderfly-43).
+                A service is priced from the token's own trading history, and that
+                derivation REFUSES rather than guessing when the history will not
+                carry it (core/settlement.go SettlementRate, both TWAP arms).
+                Measured against the live contract on 2026-08-30: 13 of 13
+                registered markets could not price a service, and this tab invited
+                every one of those creators to name and price three of them without
+                a word about it.
+                The sentence comes from the ACTUAL refusal the quote returned, not
+                one line for all of them — `stale` is a history that is too old and
+                is the opposite complaint to one that is too thin. `null` status
+                means the quote has not answered, and renders nothing rather than
+                claiming the shop works. */}
+            {servicesOracleStatus && servicesOracleStatus !== 'ok' ? (
+              <div className="mb-4 rounded-card border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-caption font-semibold text-ink-warn-3">
+                {creatorOracleNotice(servicesOracleStatus)}
+              </div>
+            ) : null}
             <p className="mb-4 text-caption text-ink-10">
               Buyers pay these in your token at the live price. Set the dollar price: the token amount
               follows the market. A price can move at most 2× in any 7 days, and that limit follows the
@@ -1022,88 +1166,126 @@ const CreatorStudio: FC = () => {
                 <Stat label="Reserve" value={usdWhole(market.reserveUsd)} sub="Backs the floor" />
               ) : null}
             </div>
-            <div className="mt-5">
-              <div className="mb-1 flex justify-between text-caption text-ink-10">
-                <span>Supply</span>
-                <span className="tabular-nums">
-                  {market.supply.toLocaleString('en-US')} / {market.cap.toLocaleString('en-US')}
+            {/*
+              ★★ THE SUPPLY BAR IS DELETED (owner, 2026-08-30: "theres cap in
+              creator studio. get rid of it"). It drew "0 / 1,000,000,000" at a
+              permanent 0% for every market launched since `STANDARD_CAP` became
+              the contract's MaxCap, and a bar whose right end is a number no
+              market reaches says nothing true about the market. Deleted, not
+              hidden behind a flag, on the owner's words. The issued count
+              survives in the Overview's "Market cap" sub-line.
+              The raise-cap control below is untouched: it hides itself on the
+              live cap, so the older 30 / 500 / 5,000 / 100,000 markets keep it.
+            */}
+            {/*
+              ★ NOTHING LEFT TO RAISE (owner, 2026-08-30: "turn it off").
+              `STANDARD_CAP` is now the contract's MaxCap (1e9 — launch-money.ts
+              carries the ruling and the evidence), so every market registered
+              from today lands already at the ceiling. `setCap` on a market at
+              MaxCap cannot succeed: core/market.go:1056-1075 rejects anything
+              above MaxCap, and the guard below rejects `v === market.cap` — so
+              the control would be a button that errors on 100% of inputs, which
+              is the exact "dead control" fault this screen was already burned by
+              (2026-08-09, the 100%-silent setCap).
+              HIDDEN, NOT DISABLED, and hidden on the LIVE cap rather than on a
+              flag: the older markets (30 / 500 / 5,000 / 100,000) still have real
+              headroom and still get the full control, and if an owner ever
+              re-tightens the launch cap it returns on its own.
+            */}
+            {market.cap < MAX_CAP_CREDITS_BASE_UNITS ? (
+              <div className="mt-5 flex items-center gap-2">
+                <span className="text-caption text-ink-10">Raise cap to</span>
+                <input
+                  value={capInput}
+                  onChange={(e) => setCapInput(e.target.value)}
+                  inputMode="numeric"
+                  className="w-[110px] rounded-control border border-line-11 px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
+                />
+                <button
+                  onClick={async () => {
+                    // ★ THIS FAILED 100% SILENTLY (2026-08-09). Every refusal —
+                    // and every SUCCESS-that-wasn't — reverted the field with no
+                    // toast, no inline text, no console error. A tester probed 8
+                    // values including a perfectly valid one and could not tell
+                    // any of them apart from a dead button. The `catch {}` below
+                    // was swallowing the chain's actual reason.
+                    //
+                    // The reverting field stays (it must never show a cap the
+                    // contract did not accept) — what changes is that the reader
+                    // is now told WHY, using the same `actionFailure` banner the
+                    // rest of this screen already uses.
+                    setActionFailure(null);
+                    const digits = capInput.replace(/[^\d]/g, '');
+                    const v = parseInt(digits, 10);
+                    const issued = Math.ceil(market.supply);
+                    if (!digits || !Number.isFinite(v)) {
+                      setCapInput(String(market.cap));
+                      setActionFailure('Enter a whole number of tokens for the new cap.');
+                      return;
+                    }
+                    if (v < issued) {
+                      setCapInput(String(market.cap));
+                      setActionFailure(
+                        `The cap cannot go below the ${issued.toLocaleString('en-US')} tokens already issued.`
+                      );
+                      return;
+                    }
+                    if (v === market.cap) {
+                      setActionFailure(`The cap is already ${market.cap.toLocaleString('en-US')}.`);
+                      return;
+                    }
+                    try {
+                      await studio.setCap(v);
+                    } catch (error) {
+                      setCapInput(String(market.cap));
+                      // Routed through writeFailureMessage (F7 note): the correctness
+                      // fix now lives centrally in use-live-studio.ts's `call()`, which
+                      // can throw a machine-coded CREATOR_TOKENS_BUSY on a same-tick
+                      // double-submit — this strips that prefix instead of painting it
+                      // raw into the banner.
+                      setActionFailure(`The cap was not changed. ${writeFailureMessage(error, 'The chain refused the change.')}`);
+                    }
+                  }}
+                  // F7 fix: this button had NO disabled attribute at all — the
+                  // correctness guard against a double-submit now lives centrally in
+                  // use-live-studio.ts's `call()` (every studio write funnels through
+                  // it), but this still visually disables the button while busy so a
+                  // reader is not left double-clicking into a caught CREATOR_TOKENS_BUSY.
+                  disabled={studio.isBusy}
+                  className="rounded-control bg-surface-43 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
+                >
+                  Raise cap
+                </button>
+                <span className="text-caption tabular-nums text-ink-14">
+                  lower only down to {market.supply.toLocaleString('en-US')} issued
                 </span>
               </div>
-              <div className="h-2 overflow-hidden rounded-full bg-surface-23">
-                <div className="h-full bg-surface-brand-12" style={{ width: `${supplyPct}%` }} />
-              </div>
-            </div>
-            <div className="mt-5 flex items-center gap-2">
-              <span className="text-caption text-ink-10">Raise cap to</span>
-              <input
-                value={capInput}
-                onChange={(e) => setCapInput(e.target.value)}
-                inputMode="numeric"
-                className="w-[110px] rounded-control border border-line-11 px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
-              />
-              <button
-                onClick={async () => {
-                  // ★ THIS FAILED 100% SILENTLY (2026-08-09). Every refusal —
-                  // and every SUCCESS-that-wasn't — reverted the field with no
-                  // toast, no inline text, no console error. A tester probed 8
-                  // values including a perfectly valid one and could not tell
-                  // any of them apart from a dead button. The `catch {}` below
-                  // was swallowing the chain's actual reason.
-                  //
-                  // The reverting field stays (it must never show a cap the
-                  // contract did not accept) — what changes is that the reader
-                  // is now told WHY, using the same `actionFailure` banner the
-                  // rest of this screen already uses.
-                  setActionFailure(null);
-                  const digits = capInput.replace(/[^\d]/g, '');
-                  const v = parseInt(digits, 10);
-                  const issued = Math.ceil(market.supply);
-                  if (!digits || !Number.isFinite(v)) {
-                    setCapInput(String(market.cap));
-                    setActionFailure('Enter a whole number of tokens for the new cap.');
-                    return;
-                  }
-                  if (v < issued) {
-                    setCapInput(String(market.cap));
-                    setActionFailure(
-                      `The cap cannot go below the ${issued.toLocaleString('en-US')} tokens already issued.`
-                    );
-                    return;
-                  }
-                  if (v === market.cap) {
-                    setActionFailure(`The cap is already ${market.cap.toLocaleString('en-US')}.`);
-                    return;
-                  }
-                  try {
-                    await studio.setCap(v);
-                  } catch (error) {
-                    setCapInput(String(market.cap));
-                    // Routed through writeFailureMessage (F7 note): the correctness
-                    // fix now lives centrally in use-live-studio.ts's `call()`, which
-                    // can throw a machine-coded CREATOR_TOKENS_BUSY on a same-tick
-                    // double-submit — this strips that prefix instead of painting it
-                    // raw into the banner.
-                    setActionFailure(`The cap was not changed. ${writeFailureMessage(error, 'The chain refused the change.')}`);
-                  }
-                }}
-                // F7 fix: this button had NO disabled attribute at all — the
-                // correctness guard against a double-submit now lives centrally in
-                // use-live-studio.ts's `call()` (every studio write funnels through
-                // it), but this still visually disables the button while busy so a
-                // reader is not left double-clicking into a caught CREATOR_TOKENS_BUSY.
-                disabled={studio.isBusy}
-                className="rounded-control bg-surface-43 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
-              >
-                Raise cap
-              </button>
-              <span className="text-caption tabular-nums text-ink-14">
-                lower only down to {market.supply.toLocaleString('en-US')} issued
-              </span>
-            </div>
+            ) : null}
             <p className="mt-4 rounded-control bg-surface-16 px-3.5 py-3 text-caption text-ink-10">
               Your token’s price is set by the market: buys raise it, sells lower it. You don’t set the
               price; you set your <strong>service prices</strong> in dollars.
             </p>
+            {/*
+              ★ SAME CONTROL AS THE LAUNCH CARD, REUSED NOT COPIED (owner,
+              2026-08-30): "THEY NEED TO ADD THE LINK HERE... NOT SETTINGS."
+              covers editing it after launch too, not only the moment of
+              launch — this is the same `WorkLinkField` from
+              `meritum/launch/launch-step-offers.tsx`, writing to the same
+              profile store, so a change here and a change there can never
+              drift out of sync with each other or with Settings.
+            */}
+            <div className="mt-5 border-t border-line-9 pt-5">
+              <span className="text-caption text-ink-10">{t('meritum_launch.work_link')}</span>
+              <div className="mt-2">
+                <WorkLinkField
+                  account={studio.creator ?? ''}
+                  inputClassName="min-w-[min(100%,220px)] flex-1 rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-[14px] leading-[22px] text-ink-2 outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10 disabled:opacity-60"
+                  buttonClassName="rounded-control bg-surface-43 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
+                  errorClassName="mt-1.5 text-caption font-semibold text-ink-brand-6"
+                  statusClassName="mt-1.5 text-caption text-ink-10"
+                />
+              </div>
+            </div>
           </Card>
         ) : null}
 
@@ -1115,12 +1297,36 @@ const CreatorStudio: FC = () => {
               listed is ~$10/month. First month’s on the house.
             </div>
             <button
-              onClick={() => void runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.')}
+              onClick={() =>
+                void (async () => {
+                  setRenewUnconfirmed(false);
+                  await runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.');
+                })()
+              }
               disabled={studio.isBusy}
               className="rounded-control bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-brand-17 disabled:opacity-50"
             >
               Renew ~$10
             </button>
+            {/* ★ S4 (2026-08-30): when Hive accepted the payment but Magi has not
+                recorded it inside the window (vsc-data-source renewSubscription
+                throws CREATOR_TOKENS_RENEW_UNCONFIRMED), the way out is a
+                READ-ONLY re-read of the market, never a second broadcast:
+                Renew stacks from max(paidUntil, block), so "Try again" here
+                would buy a second month. `studio.retry` only refetches. */}
+            {renewUnconfirmed ? (
+              <button
+                onClick={() => {
+                  setActionFailure(null);
+                  setRenewUnconfirmed(false);
+                  studio.retry();
+                }}
+                className="ml-2 rounded-control border border-line-11 px-4 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-7 hover:bg-surface-16"
+                data-testid="renew-check-again"
+              >
+                Check again
+              </button>
+            ) : null}
             <p className="mt-4 text-caption text-ink-14">
               If you stop paying, your token’s market winds down, holders are refunded their share of the reserve
               less any early-exit fee, and your
@@ -1130,8 +1336,8 @@ const CreatorStudio: FC = () => {
             <div className="mt-5 border-t border-line-2 pt-4">
               {market.windingDown ? (
                 <div className="text-caption font-semibold text-ink-warn-3">
-                  This token is winding down. Holders are being refunded their share of the reserve, less any
-                  early-exit fee. Answering and cashing
+                  This token is winding down. Holders can redeem a slice of the reserve, less any early-exit fee;
+                  nobody is refunded automatically. Answering and cashing
                   out still work.
                 </div>
               ) : (
@@ -1207,14 +1413,21 @@ const CreatorStudio: FC = () => {
             <Card>
               <Stat
                 label="Your own holdings"
-                value={`${tok(held)} tokens`}
+                /* ★★★ A FAILED POSITION READ IS NOT A ZERO BALANCE (2026-08-30,
+                   clauderfly-43), the same rule the two cards above already follow.
+                   Until today this could not even be reached: use-live-studio passed
+                   `position: null` unconditionally, so `held` was 0 for every
+                   creator, on every market, forever. */
+                value={positionUnavailable ? '—' : `${tok(held)} tokens`}
                 /* ★ Hidden for launch. The mark-to-price half stays: it is this
                    creator's own holding at the live curve price, and it is the
                    figure the Cash out control below is denominated against. */
                 sub={
-                  SHOW_BACKING_FIGURES
-                    ? `worth ${usdPrice(held * market.priceUsd)} · floor ${usdPrice(held * market.floorUsd)}`
-                    : `worth ${usdPrice(held * market.priceUsd)}`
+                  positionUnavailable
+                    ? 'Could not be read just now'
+                    : SHOW_BACKING_FIGURES
+                      ? `worth ${usdPrice(held * market.priceUsd)} · floor ${usdPrice(held * market.floorUsd)}`
+                      : `worth ${usdPrice(held * market.priceUsd)}`
                 }
               />
               <div className="mt-4 flex items-center gap-2">
@@ -1252,7 +1465,25 @@ const CreatorStudio: FC = () => {
                       setSellFailure(writeFailureMessage(err, 'That sell didn’t go through.'));
                     }
                   }}
-                  disabled={!Number.isFinite(sellTokens) || sellTokens <= 0 || studio.isBusy}
+                  /* ★★★ GATED ON THE BALANCE (2026-08-30, clauderfly-43). This
+                     checked only that a positive number had been typed, so it would
+                     broadcast a sell for more tokens than the creator holds —
+                     sell.go refuses that with "insufficient credits" after the
+                     signature and the resource credits are spent. It was worse than
+                     it looked while `held` was structurally 0: the sell preview
+                     clamps to the position, so every figure under this control read
+                     zero and `sellMinNetUsd` came out undefined, i.e. the sale went
+                     out with NO minimum-net floor at all, on the exit screen.
+                     `positionUnavailable` blocks it too: signing a sell against a
+                     balance we could not read is the same bet with the reason
+                     hidden. */
+                  disabled={
+                    !Number.isFinite(sellTokens) ||
+                    sellTokens <= 0 ||
+                    positionUnavailable ||
+                    sellTokens > held ||
+                    studio.isBusy
+                  }
                   className="rounded-control bg-surface-43 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
                 >
                   Sell
@@ -1275,6 +1506,22 @@ const CreatorStudio: FC = () => {
                     />
                     <span className="text-caption font-semibold text-ink-14">HBD</span>
                   </div>
+                </div>
+              ) : null}
+              {/* ★ A DISABLED CONTROL MUST SAY WHY (2026-08-30, clauderfly-43).
+                  The Sell button now refuses an amount above the balance and a
+                  balance we could not read, and this file has already been burned
+                  once by a control that refused silently (the 2026-08-09 setCap,
+                  which a tester probed eight times and could not tell apart from a
+                  dead button). Same `sellFailure` slot, so there is one place a
+                  reader looks. */}
+              {positionUnavailable && sellTokens > 0 ? (
+                <div className="mt-2 text-caption font-semibold text-ink-brand-6">
+                  We couldn’t read your token balance just now, so this can’t be sold safely. Try again in a moment.
+                </div>
+              ) : sellTokens > held ? (
+                <div className="mt-2 text-caption font-semibold text-ink-brand-6">
+                  You hold {tok(held)} tokens. Lower the amount to sell.
                 </div>
               ) : null}
               {sellFailure ? (

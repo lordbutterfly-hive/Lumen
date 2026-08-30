@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { getTrendingTags } from '@transaction/lib/hive';
+import { getTrendingTagsCached } from '@/blog/lib/trending-tags';
 
 const logger = getLogger('app');
 
@@ -62,16 +62,17 @@ const logger = getLogger('app');
  */
 export const revalidate = 3600;
 
-/** What the widget asks for. Deliberately fixed rather than a query parameter:
- *  the only caller wants this exact number, and a browser-controlled limit
- *  would be a free way to make us hammer the chain with large requests. The
+/** ★ THE LIMIT AND THE CACHE NOW LIVE IN `lib/trending-tags.ts` (2026-08-30), so
+ *  this route and `app/layout.tsx`'s prefetch read ONE entry and can never
+ *  disagree or double-fetch. Still deliberately fixed rather than a query
+ *  parameter: the only callers want this exact number, and a browser-controlled
+ *  limit would be a free way to make us hammer the chain with large requests. The
  *  widget over-fetches on purpose (community ids and tribe tags occupy most of
  *  the head of the list, so a request for 12 yielded 0 usable topics). */
-const TAG_LIMIT = 120;
 
 export async function GET(): Promise<NextResponse> {
   try {
-    const tags = await getTrendingTags(TAG_LIMIT);
+    const tags = await getTrendingTagsCached();
     return NextResponse.json(
       { tags },
       { headers: { 'cache-control': 'public, s-maxage=3600, stale-while-revalidate=86400' } }

@@ -11,6 +11,9 @@ import ScrollReset from '../features/layouts/scroll-reset';
 import { ServerSessionProvider } from '../features/layouts/server-session';
 import { Providers } from '../features/layouts/providers';
 import { getServerSessionUser } from '../lib/server-session';
+import { Hydrate, dehydrate } from '@tanstack/react-query';
+import { getQueryClient } from '../lib/react-query';
+import { trendingTagsForPrefetch, TRENDING_TAGS_QUERY_KEY } from '../lib/trending-tags';
 import { StorageCleanup } from '@hive/ui';
 import CondenserMigration from '../components/condenser-migration';
 import OfflineGuard from '../components/offline-guard';
@@ -214,6 +217,38 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   // request already carries the session cookie; read it once here and hand the
   // answer down. See features/layouts/server-session.tsx.
   const serverSession = await getServerSessionUser();
+
+  /*
+   * ★★★ THE RIGHT RAIL'S TOPICS, IN THE HTML (2026-08-30).
+   *
+   * `features/layouts/right-rail/topics.tsx` is a client widget with no prefetch,
+   * so its nine chips could not exist until the entire 983 KB client bundle had
+   * downloaded, parsed and hydrated. Measured on the production build in a real
+   * browser: the request did not even START until 1746 ms (warm) / 1429 ms (cold
+   * cache), which was 321 ms / 267 ms AFTER the last script finished downloading.
+   * The request itself was 50 ms and 1 ms. The wait was hydration, not data.
+   *
+   * Dehydrating the query here puts the answer in the server-rendered markup, so
+   * the chips are painted with the first paint and the browser makes no request
+   * at all. See `lib/trending-tags.ts` for the numbers and the cache.
+   *
+   * ★ IT CANNOT SLOW THE PAGE DOWN. `trendingTagsForPrefetch()` races a short
+   * deadline and returns null rather than making every route on the site wait
+   * behind a sick Hive node. Null means we simply do not seed the key, and the
+   * widget fetches for itself exactly as it does today. Never worse.
+   *
+   * ★ ONLY ON A HIT. Seeding the key with an empty array would be worse than not
+   * seeding it: react-query would treat `[]` as a fresh answer for the whole
+   * `StaleTime.LONG` window and the card would render its empty state instead of
+   * fetching. So a miss must leave the key ABSENT, not present-and-empty.
+   */
+  const trendingTags = await trendingTagsForPrefetch();
+  const queryClient = getQueryClient();
+  if (trendingTags) {
+    queryClient.setQueryData([...TRENDING_TAGS_QUERY_KEY], trendingTags);
+  }
+  const dehydratedState = dehydrate(queryClient);
+  queryClient.clear();
 
   return (
     <html lang={locale} dir={isRTL ? 'rtl' : 'ltr'} className={lora.variable}>
@@ -592,6 +627,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body className="bg-background-secondary font-sans">
         <div className="min-h-screen">
           <Providers>
+            {/* Inside Providers because Hydrate must sit under the QueryClientProvider
+                Providers creates; outside OfflineGuard because it renders no UI of its
+                own and must wrap every route's tree, not just the guarded children. */}
+            <Hydrate state={dehydratedState}>
             {/* ★ EVERY client navigation is inside this (2026-08-13). Offline, a
                 failed RSC fetch makes Next hard-navigate the document, which then
                 fails at the network layer and replaces the entire app with
@@ -621,6 +660,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 </div>
               </ServerSessionProvider>
             </OfflineGuard>
+            </Hydrate>
           </Providers>
         </div>
         <ClientEffects />

@@ -9,6 +9,8 @@ import { BLOCKS_PER_DAY, EXIT_TAX_DECAY_BLOCKS, MS_PER_BLOCK, RECLAIM_GRACE_BLOC
 // prediction-market/lib/market-data-source.ts's MockMarketDataSource.
 export const MOCK_ACTIVE = 'mock-active';
 export const MOCK_OVERDUE = 'mock-overdue';
+/** ACTIVE with 3 days of subscription left: inside market/lapse.ts's 7-day LAPSE_WARNING_BLOCKS window, so the creator-facing "expiring" warning (and its dismiss, keyed on paidUntilBlock) can be put on a screen. Added 2026-08-31 for 43's screen proof. */
+export const MOCK_EXPIRING = 'mock-expiring';
 export const MOCK_FROZEN = 'mock-frozen';
 export const MOCK_EMPTY = 'mock-empty';
 export const MOCK_CLOSED = 'mock-closed';
@@ -94,6 +96,23 @@ export const MARKET_SEEDS: Record<string, MarketSeed> = {
   // UI-BRIEF's "grace ends in 20h" example almost exactly. A NATURAL lapse,
   // not a Retire() — the curve rail (buy/sell) stays open throughout OVERDUE
   // (market.go: only a deliberate Retire closes it early, RULING K3).
+  // A healthy, paid-up market whose period ends in 3 days: still ACTIVE (phase
+  // is decided by paidUntil vs head), still buyable, but inside the 7-day
+  // warning window market/lapse.ts uses, so `lapseStateOf` answers `expiring`
+  // here and `healthy` on MOCK_ACTIVE (20 days out). Otherwise a copy of
+  // MOCK_ACTIVE, so the only thing that differs on screen is the warning.
+  [MOCK_EXPIRING]: {
+    faceBaseUnits: 2_000,
+    capTokens: 5_000,
+    supplyTokens: 310,
+    reserveBaseUnits: areaBaseUnits(310), // R === Area(S), exactly, at seed time
+    paidUntilDeltaBlocks: 3 * BLOCKS_PER_DAY,
+    registeredAtDeltaBlocks: -57 * BLOCKS_PER_DAY,
+    faceSetAtDeltaBlocks: -2 * BLOCKS_PER_DAY,
+    closedStored: false,
+    globalInflowPaused: false,
+    retiredAtBlock: null
+  },
   [MOCK_OVERDUE]: {
     faceBaseUnits: 1_500,
     capTokens: 2_000,
@@ -285,6 +304,7 @@ export function buildDeliveryWindows(headMs: number, pattern: Array<'answered' |
 
 export const DELIVERY_PATTERNS: Record<string, Array<'answered' | 'missed' | 'pending'>> = {
   [MOCK_ACTIVE]: ['answered', 'answered', 'missed', 'answered', 'answered', 'answered', 'missed', 'answered', 'answered', 'answered', 'answered', 'pending'],
+  [MOCK_EXPIRING]: ['answered', 'answered', 'missed', 'answered', 'answered', 'answered', 'missed', 'answered', 'answered', 'answered', 'answered', 'pending'],
   [MOCK_OVERDUE]: ['answered', 'answered', 'answered', 'answered', 'answered', 'missed', 'answered', 'answered', 'answered', 'missed', 'pending', 'pending'],
   [MOCK_FROZEN]: ['answered', 'answered', 'answered', 'missed', 'missed', 'missed', 'missed', 'pending', 'pending', 'pending', 'pending', 'pending']
 };

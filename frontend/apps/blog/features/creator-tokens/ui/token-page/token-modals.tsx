@@ -1,6 +1,7 @@
 'use client';
 
 import { FC, useState, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { Service } from '../../market/token-detail';
 import { displayHandle, type LiveTokenMarket } from '../../live/adapt';
 import { buyQuote, minBuyUsd, sellQuote, serviceQuote, EXIT_FEE_MAX, MIN_NET_DEFAULT_TOLERANCE_BPS } from '../../market/curve';
@@ -13,6 +14,8 @@ import { useMagiSpendingPower } from '../../live/use-magi-spending-power';
 import { MagiFuelGauge, MagiFundingHelp } from '../../live/magi-fuel-gauge';
 import ModalShell from '../modal-shell';
 import { sellEmptyStateMessage } from './sell-empty-state';
+import { buyerOracleNotice } from '../../market/oracle-copy';
+import type { Quote } from '../../types';
 // ★★★ THE DIALOGS' CLAIMS ABOUT MONEY (2026-08-27). Same reason
 // sell-empty-state.ts exists: this is a `'use client'` tree, so a sentence
 // written inline is a sentence no test can read. disclosure-copy.ts's header
@@ -306,6 +309,14 @@ const BuyModal: FC<{
         {/* What you can actually spend, and whether you can send anything at all. */}
         <MagiFuelGauge state={spending} costBaseUnits={costBaseUnits} kind={payer?.kind} className="mb-3" />
         {blockedBySpending && payer ? <MagiFundingHelp kind={payer.kind} className="mb-3" /> : null}
+        {/* H6 (2026-08-31): the exact remedy — how much HBD to add and that credit
+            refills on its own — which describeRcBudget produced and nothing rendered. */}
+        {blockedBySpending
+          ? (() => {
+              const msg = spending.remedy(costBaseUnits, 'buy');
+              return msg ? <p className="mb-3 text-caption text-ink-warn-3">{msg}</p> : null;
+            })()
+          : null}
         <div className="mb-3 rounded-control bg-surface-16 px-3.5 py-3 text-caption text-ink-10">
           Includes a 10% trade fee (5% to @{displayHandle(m.handle)}, 5% to Lumen).
         </div>
@@ -782,6 +793,11 @@ const SellModal: FC<{
 const AskModal: FC<{
   m: LiveTokenMarket;
   service: Service | null;
+  /**
+   * ask.go's settlement preview for this offering, run WHEN THE DIALOG OPENS.
+   * See use-live-token-market's `quoteAsk` doc for why it exists.
+   */
+  quoteAsk: (offeringId: number) => Promise<Quote>;
   /** offeringId is Service.key — the creator's named service, or '0' for their legacy face price. Passing it is what makes the shop actually buyable. */
   onSpend: (input: {
     offeringId: number;
@@ -790,7 +806,7 @@ const AskModal: FC<{
     question: string;
   }) => Promise<void>;
   onClose: () => void;
-}> = ({ m, service, onSpend, onClose }) => {
+}> = ({ m, service, quoteAsk, onSpend, onClose }) => {
   const [busy, setBusy] = useState(false);
   // F7 fix: see BuyModal's `inFlight` doc.
   const inFlight = useRef(false);
@@ -798,6 +814,40 @@ const AskModal: FC<{
   const [question, setQuestion] = useState('');
   const [failure, setFailure] = useState<string | null>(null);
   const usd = service?.usd ?? 10;
+  const offeringId = Number(service?.key ?? 0);
+  /**
+   * ★★★ ASK THE CHAIN BEFORE THE READER COMMITS, NOT AFTER (2026-08-30,
+   * clauderfly-43).
+   *
+   * This dialog priced everything off spot (`serviceQuote` below) and enabled its
+   * button unconditionally, so a buyer met a plausible price, pressed Send, got a
+   * signature prompt and only THEN the refusal — on markets where the chain
+   * cannot price a service at all. Measured against the live contract on
+   * 2026-08-30, that was 13 of 13 registered markets.
+   *
+   * Nothing was ever at risk: `vsc-data-source.ts`'s ask() re-reads this same
+   * quote and throws before any broadcast, so no resource credits were burned.
+   * What was wrong is the ORDER — a price shown, a decision invited, and the
+   * "actually, no" arriving after the click.
+   *
+   * The same read, run on open. It resolves with a REASON on a refusal and only
+   * rejects when the read itself failed, so the two are told apart below: a
+   * refusal names why, a failed read says we could not check, and neither is
+   * allowed to look like a working price.
+   */
+  const askQuote = useQuery({
+    queryKey: ['creatorTokens', 'live', 'askQuote', m.handle, offeringId],
+    queryFn: () => quoteAsk(offeringId),
+    // The settlement rate moves with the head block; a quote read once and held
+    // is the same staleness problem one layer up.
+    staleTime: 15_000,
+    retry: 1
+  });
+  const oracleStatus = askQuote.data?.oracleStatus ?? null;
+  const priceRefused = oracleStatus !== null && oracleStatus !== 'ok';
+  const quoteUnreadable = askQuote.isError;
+  /** Never offer to send something we could not price, or that the chain has said it will refuse. */
+  const priceBlocked = priceRefused || quoteUnreadable || askQuote.isLoading;
   // USER RULING 2026-07-27: the posted USD price is the buyer's TOTAL — 12%
   // is a SEPARATE HBD platform commission, never tokens (ask.go splitFace).
   const q = serviceQuote(usd, m.priceUsd);
@@ -835,7 +885,7 @@ const AskModal: FC<{
   const commissionAffordability = askSpending.affordability(commissionBaseUnits, 'ask');
   const blockedByCommission =
     commissionAffordability === 'no_resource_credits' || commissionAffordability === 'insufficient_hbd';
-  const canAsk = canAffordTokens && !blockedByCommission;
+  const canAsk = canAffordTokens && !blockedByCommission && !priceBlocked;
   return (
     <ModalShell width={500} onClose={onClose} title={`Ask @${displayHandle(m.handle)}`}>
       <ModalHead title={`Ask @${displayHandle(m.handle)}`} onClose={onClose} />
@@ -849,6 +899,31 @@ const AskModal: FC<{
         <div className="my-2 mb-3.5 text-caption text-ink-14">
           Private. Stored on Lumen, only its fingerprint goes on-chain.
         </div>
+        {/* ★ THE REFUSAL REPLACES THE PRICE, it does not sit under one. Leaving a
+            cost sentence on screen beside "this cannot be bought" is the same
+            mixed message as a live price on a dead market — see the askQuote doc
+            above. `unavailable` here is OUR read failing, which is a different
+            sentence from the chain refusing, and both are different from a price. */}
+        {priceRefused && oracleStatus ? (
+          <div
+            className="mb-4 rounded-xl border border-line-warn-2 bg-surface-warn-4 px-4 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-warn-3"
+            data-testid="ask-modal-price-refused"
+          >
+            {buyerOracleNotice(oracleStatus, displayHandle(m.handle))}
+          </div>
+        ) : quoteUnreadable ? (
+          <div
+            className="mb-4 rounded-xl border border-line-warn-2 bg-surface-warn-4 px-4 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-warn-3"
+            data-testid="ask-modal-price-unreadable"
+          >
+            We couldn&rsquo;t work out what this would cost just now, so it can&rsquo;t be sent yet. Try again in a
+            moment.
+          </div>
+        ) : askQuote.isLoading ? (
+          <div className="mb-4 rounded-xl border border-line-9 px-4 py-3.5 text-[14px] leading-[22px] text-ink-10">
+            Checking what this costs&hellip;
+          </div>
+        ) : (
         <div className="mb-4 rounded-xl border border-line-9 px-4 py-3.5 text-[14px] leading-[22px] text-ink-7">
           {/* ★★★ THE SENTENCE IS ASSEMBLED IN trade-preview.ts, NOT HERE (F-D).
               Two reasons, one of which bit this pass on its first draft:
@@ -885,6 +960,7 @@ const AskModal: FC<{
             If it&rsquo;s unanswered by your deadline you can reclaim your tokens in full and 75% of the
             commission &mdash; the platform keeps 25% so a missed deadline cannot be manufactured for free.
         </div>
+        )}
         <label className="mb-2 block text-caption font-semibold text-ink-10">Answer due within</label>
         <div className="mb-4 flex items-center gap-3.5">
           <input
@@ -927,7 +1003,13 @@ const AskModal: FC<{
         >
           {busy
             ? 'Confirm in your wallet…'
-            : !canAffordTokens
+            : askQuote.isLoading
+              ? 'Checking the price…'
+              : priceRefused
+                ? 'Not available yet'
+                : quoteUnreadable
+                  ? 'Price unavailable'
+                  : !canAffordTokens
               ? `You need ${cost.tokens} @${displayHandle(m.handle)} tokens. Buy some first`
               : blockedByCommission
                 ? `You need ${usdPrice(q.commissionUsd)} in HBD for the commission`
@@ -1089,10 +1171,12 @@ const TokenModals: FC<{
     question: string;
   }) => Promise<void>;
   onTransfer: (to: string, tokens: number) => Promise<void>;
+  /** Forwarded to the ask dialog so it can price the service BEFORE the reader commits to it. */
+  quoteAsk: (offeringId: number) => Promise<Quote>;
   onClose: () => void;
   /** Forwarded to the sell/redeem dialog so its empty state cannot claim a zero it never read. */
   positionUnavailable?: boolean;
-}> = ({ dialog, market, service, onBuy, onSell, onRedeem, onSpend, onTransfer, onClose, positionUnavailable }) => {
+}> = ({ dialog, market, service, onBuy, onSell, onRedeem, onSpend, onTransfer, quoteAsk, onClose, positionUnavailable }) => {
   if (dialog === 'buy') return <BuyModal m={market} onBuy={onBuy} onClose={onClose} />;
   if (dialog === 'sell')
     return <SellModal m={market} onSell={onSell} onClose={onClose} positionUnavailable={positionUnavailable} />;
@@ -1101,7 +1185,8 @@ const TokenModals: FC<{
     return (
       <SellModal m={market} onSell={onRedeem} onClose={onClose} mode="redeem" positionUnavailable={positionUnavailable} />
     );
-  if (dialog === 'ask') return <AskModal m={market} service={service} onSpend={onSpend} onClose={onClose} />;
+  if (dialog === 'ask')
+    return <AskModal m={market} service={service} quoteAsk={quoteAsk} onSpend={onSpend} onClose={onClose} />;
   if (dialog === 'send') return <SendModal m={market} onTransfer={onTransfer} onClose={onClose} />;
   if (dialog === 'inter') return <InterstitialModal handle={market.handle} onClose={onClose} />;
   return null;

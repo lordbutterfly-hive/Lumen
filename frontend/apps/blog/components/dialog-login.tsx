@@ -6,6 +6,7 @@ import { forwardRef, ReactNode, useCallback } from 'react';
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from '@ui/components/dialog';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import LumenLogin from '@/blog/features/lite-auth/login/lumen-login';
+import { googleConfigured } from '@/blog/features/lite-auth/login/google-signin';
 import { siteConfig } from '@ui/config/site';
 import { useTranslation } from '@/blog/i18n/client';
 
@@ -130,8 +131,20 @@ const DialogLogin = forwardRef<HTMLButtonElement, DialogLoginProps>(function Dia
             username field exceed 76vh, the "Sign in with Keychain" button rendered over
             the "New to Lumen?" footer below it. Reported from a real browser. The cap is
             gone: the dialog scrolls, the content takes the height it needs. */}
+        {/* ★★★ THE DIALOG NEEDS THE FLICKER FIX TOO (2026-08-28). The login PAGE
+            got it by handing down the value its own server render already knew;
+            this surface would have kept the old behaviour — start at "Google
+            sign-in is being set up...", then correct itself a beat later — and
+            this is the surface that matters most, because it is the one opened
+            from ~24 places in the app.
+            Reading the answer directly is safe HERE and only here: this file is
+            `'use client'`, and Radix mounts `DialogContent` only once the dialog
+            is open, so nothing inside it is ever server-rendered and there is no
+            hydration pass that could disagree. `window.__ENV` is long since
+            loaded by the time a user clicks. If it somehow is not, the effect
+            inside LumenLogin still re-derives the same answer and corrects. */}
         <div className="px-5 pb-2 pt-5">
-          <LumenLogin embedded />
+          <LumenLogin embedded googleConfiguredInitially={googleConfigured()} />
         </div>
         {/* THE SIGNUP DOOR. This dialog is opened from ~24 places — the home
             composer, every upvote and reply button, the left rail — and it asks

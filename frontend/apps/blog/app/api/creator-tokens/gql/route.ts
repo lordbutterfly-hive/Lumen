@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { STATE_QUERY, STATE_QUERY_HEX, HEAD_QUERY } from '@/blog/features/creator-tokens/lib/vsc/reads';
+import { CONTRACT_QUERY, HEAD_QUERY, STATE_QUERY, STATE_QUERY_HEX } from '@/blog/features/creator-tokens/lib/vsc/reads';
 import { BALANCE_QUERY } from '@/blog/lib/lite/wallet/magi-balance';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceMagiGqlRate } from '@/blog/lib/lite/antispam/rate-limit';
@@ -68,7 +68,10 @@ const logger = getLogger('app');
 // CSP both refuse — see that file's own doc for why the failure was silent and
 // left the Buy button enabled for someone who could not pay. It is imported by
 // identity, like the three above, so the proxy and the caller cannot drift.
-const ALLOWED_QUERIES = new Set<string>([STATE_QUERY, STATE_QUERY_HEX, HEAD_QUERY, BALANCE_QUERY]);
+// CONTRACT_QUERY added 2026-08-31 (A5 lockstep): the read that tells the app
+// which contract rules are deployed (market/contract-rules.ts). Same identity
+// import as the four above, so the proxy and the client cannot drift.
+const ALLOWED_QUERIES = new Set<string>([STATE_QUERY, STATE_QUERY_HEX, HEAD_QUERY, BALANCE_QUERY, CONTRACT_QUERY]);
 
 /**
  * Bounds how long this server will hold a connection open for a wedged upstream node.

@@ -419,6 +419,18 @@ export const STATE_QUERY_HEX = `query CreatorTokensStateHex($contractId: String!
 export const HEAD_QUERY = `query CreatorTokensHead {
   localNodeInfo { last_processed_block }
 }`;
+/**
+ * Which bytecode is deployed under the contract id (schema.graphql
+ * findContract / FindContractFilter.byId; `code` is the wasm CID). The ONE
+ * read that decides ContractRules (market/contract-rules.ts, which also has
+ * the deploy order). Sent through the same-origin proxy like every other
+ * query here, so it must stay in the proxy's exact-match allowlist
+ * (app/api/creator-tokens/gql/route.ts ALLOWED_QUERIES) or it fails and the
+ * app pins itself to v1 rules, silently and safely.
+ */
+export const CONTRACT_QUERY = `query CreatorTokensContract($id: String!) {
+  findContract(filterOptions: { byId: $id }) { id code }
+}`;
 
 export class CreatorTokensGqlClient {
   // No longer picks the network target (see postGql's own doc — every call now
@@ -457,6 +469,24 @@ export class CreatorTokensGqlClient {
       }
     }
     return out;
+  }
+
+  /**
+   * The CID of the wasm deployed under `contractId`, or null when the node
+   * answered without one (no such contract, or an unshaped row). THROWS on a
+   * transport or GraphQL error, unlike getHeadBlock: the caller
+   * (vsc-data-source.ts readRules) turns both outcomes into 'v1' but remembers
+   * a failure for a shorter time than an answer, so the two must be told apart.
+   * Measured live 2026-08-31: testnet and mainnet both answer one row whose
+   * `code` is market/contract-rules.ts V1_CODE_CID.
+   */
+  async getContractCode(contractId: string): Promise<string | null> {
+    const data = await postGql(CONTRACT_QUERY, { id: contractId });
+    const rows = getJsonProp(data, 'findContract');
+    if (!Array.isArray(rows)) return null;
+    const row = rows.find((r) => getJsonProp(r, 'id') === contractId) ?? rows[0];
+    const code = getJsonProp(row, 'code');
+    return typeof code === 'string' && code.length > 0 ? code : null;
   }
 
   async getHeadBlock(): Promise<number | null> {
@@ -514,11 +544,22 @@ export function unknownMarket(creator: string): Market {
     paidUntilAt: Date.now(),
     registeredAtBlock: 0,
     phase: 'UNKNOWN',
+    // The contract-rules defaults, exactly as for a failed code read: v1, no
+    // head, not winding down, no refusal named (there is no phase to refuse
+    // on). A consumer must gate on phase === 'UNKNOWN' before any of these.
+    rules: 'v1',
+    headBlock: null,
+    windingDown: false,
+    renewRefusal: null,
     graceExpiresAtBlock: 0,
     graceExpiresAt: Date.now(),
     globalInflowPaused: false,
     canBuy: false,
     canAsk: false,
+    // ★ false on an UNKNOWN market, like the other two: a failed read is not
+    // evidence that a subscription payment would be accepted. The caller must
+    // treat this as "cannot tell", never as "renew is open".
+    canRenew: false,
     // null, not 0: on an UNKNOWN market we make no claim about delivery
     // standing either. The actions are disabled by canBuy/canAsk being false,
     // and the UI must attribute that to the failed read, never to the creator.

@@ -27,6 +27,15 @@ export function useUpdateProfileMutation() {
       blacklist_description?: string;
       muted_list_description?: string;
       version?: number;
+      /**
+       * ★ THE ACCOUNT'S CURRENT `posting_json_metadata`, so the broadcast MERGES
+       * instead of replacing (2026-08-30). Without it the write destroys every
+       * profile key this form does not enumerate — measured at 61% of 108 real
+       * accounts: pinned posts, other apps' state, the user's own social links,
+       * gone on chain under a success toast. Optional only so an existing caller
+       * cannot be silently broken; every caller in this repo passes it.
+       */
+      existingPostingJsonMetadata?: string;
     }) => {
       const {
         profile_image,
@@ -39,7 +48,8 @@ export function useUpdateProfileMutation() {
         witness_description,
         blacklist_description,
         muted_list_description,
-        version
+        version,
+        existingPostingJsonMetadata
       } = params;
       const broadcastResult = await transactionService.updateProfile(
         profile_image,
@@ -53,7 +63,8 @@ export function useUpdateProfileMutation() {
         blacklist_description,
         muted_list_description,
         version,
-        { observe: true }
+        { observe: true },
+        existingPostingJsonMetadata
       );
       const prevProfileData: FullAccount | undefined = queryClient.getQueryData([
         'profileData',

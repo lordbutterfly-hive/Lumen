@@ -59,8 +59,10 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
         All three figures duplicated something already on this same screen:
         "1 · token market per account" restated `bound_sub` above ("Signed in ·
         one market per account"); "0 · ways to rename or move it" restated what
-        `term_final_value` already says on step 3 ("cannot be closed, renamed,
-        or moved to another account"); and the account-name tile just repeated
+        `term_final_value` said on step 3 ("cannot be closed, renamed, or moved
+        to another account") — that row has since been deleted outright (owner,
+        2026-08-30, see launch-step-terms.tsx), which retires the duplication
+        argument but not the conclusion; and the account-name tile just repeated
         the handle already shown, full-width, in the card above it — except
         `truncate` with no `title` clipped it (`testera…`) where the card above
         does not. A tile that only repeats a neighbour, worse, is not

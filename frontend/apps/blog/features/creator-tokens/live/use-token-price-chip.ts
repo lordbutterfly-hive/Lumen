@@ -33,7 +33,8 @@ import { useQuery } from '@tanstack/react-query';
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
 import { usdFromHbd } from './adapt';
 import { creatorMarketKey } from './use-live-token-market';
-import type { Market } from '../types';
+import { marketHealthOf, soldOutOf } from '../market/market-health';
+import type { Market, MarketHealth } from '../types';
 
 const STALE_MS = 15_000;
 const REFETCH_MS = 30_000;
@@ -44,6 +45,20 @@ export interface TokenPriceChip {
   status: TokenPriceChipStatus;
   /** Non-null only when status === 'ready'. */
   priceUsd: number | null;
+  /**
+   * Non-null only when status === 'ready'. ★ 'ready' means "there is a market
+   * and a price", NOT "you can buy it" (2026-08-30, B4): this hook collapsed
+   * only UNKNOWN, so FROZEN and CLOSED markets came back 'ready' with a normal
+   * price and every caller drew Buy. The word is what a caller draws in the
+   * Buy slot instead; see market/market-health.ts.
+   */
+  health: MarketHealth | null;
+  /**
+   * `supply >= cap`, judged here because this read holds both. NOT a health
+   * (owner, 2026-08-30; market/market-health.ts soldOutOf): it governs only
+   * whether a Buy control may be offered. False unless status === 'ready'.
+   */
+  soldOut: boolean;
 }
 
 export function useTokenPriceChip(handle: string): TokenPriceChip {
@@ -91,17 +106,24 @@ export function useTokenPriceChip(handle: string): TokenPriceChip {
     retry: 1
   });
 
-  if (!enabled) return { status: 'unknown', priceUsd: null };
+  if (!enabled) return { status: 'unknown', priceUsd: null, health: null, soldOut: false };
 
   // `data === undefined` — not `isLoading` — is the robust "no confident
   // answer yet" check: it is true for a first fetch in flight AND doesn't
   // depend on react-query's `isLoading`/`isPending` semantics matching a
   // particular major version's exact definition when a query is disabled.
   if (query.data === undefined) {
-    return { status: query.isError ? 'unknown' : 'loading', priceUsd: null };
+    return { status: query.isError ? 'unknown' : 'loading', priceUsd: null, health: null, soldOut: false };
   }
-  if (query.data === null) return { status: 'none', priceUsd: null };
-  if (query.data.phase === 'UNKNOWN') return { status: 'unknown', priceUsd: null };
+  if (query.data === null) return { status: 'none', priceUsd: null, health: null, soldOut: false };
+  if (query.data.phase === 'UNKNOWN') return { status: 'unknown', priceUsd: null, health: null, soldOut: false };
 
-  return { status: 'ready', priceUsd: usdFromHbd(query.data.spotPriceHbd) };
+  const m = query.data;
+  return {
+    status: 'ready',
+    priceUsd: usdFromHbd(m.spotPriceHbd),
+    health: marketHealthOf({ phase: m.phase, canBuy: m.canBuy, windingDown: m.windingDown }),
+    // supply and cap are already in this read; the batched feed read has no cap and does not judge this.
+    soldOut: soldOutOf({ supply: m.supplyTokens, cap: m.capTokens })
+  };
 }

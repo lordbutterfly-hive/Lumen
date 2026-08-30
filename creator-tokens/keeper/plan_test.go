@@ -9,18 +9,23 @@ import (
 
 func bi(n int64) *big.Int { return big.NewInt(n) }
 
-func TestPlan_OnlyFrozenMarketsProduceOps(t *testing.T) {
+// A1 (owner ruling 2026-08-30): Plan sweeps RETIRED markets only. A naturally
+// FROZEN market is an inflow stop the creator can lift by renewing, not a
+// wind-down — core.RefundHolder refuses on it — so `frozen1` below (lapsed,
+// never retired) must produce NO ops, and only `retired1` produces the pair.
+func TestPlan_OnlyRetiredMarketsProduceOps(t *testing.T) {
 	markets := []MarketView{
 		{Creator: "active1", Phase: core.StateActive, Holders: []HolderBalance{{Holder: "h1", Balance: bi(100)}}},
 		{Creator: "overdue1", Phase: core.StateOverdue, Holders: []HolderBalance{{Holder: "h1", Balance: bi(100)}}},
-		{Creator: "closed1", Phase: core.StateClosed, Holders: []HolderBalance{{Holder: "h1", Balance: bi(100)}}},
+		{Creator: "closed1", Phase: core.StateClosed, Retired: true, Holders: []HolderBalance{{Holder: "h1", Balance: bi(100)}}},
 		{Creator: "frozen1", Phase: core.StateFrozen, Holders: []HolderBalance{{Holder: "h1", Balance: bi(100)}}},
+		{Creator: "retired1", Phase: core.StateFrozen, Retired: true, Holders: []HolderBalance{{Holder: "h1", Balance: bi(100)}}},
 	}
 	ops := Plan(markets)
 
 	for _, op := range ops {
-		if op.Creator != "frozen1" {
-			t.Fatalf("expected ops only for the FROZEN market, got op for %s: %v", op.Creator, op)
+		if op.Creator != "retired1" {
+			t.Fatalf("expected ops only for the RETIRED market, got op for %s: %v", op.Creator, op)
 		}
 	}
 	if len(ops) != 2 { // 1 refundHolder + 1 closeIfDrained
@@ -39,7 +44,7 @@ func TestPlan_CloseIfDrainedAppendedEvenWithNoHolders(t *testing.T) {
 	// left. Plan must still attempt closeIfDrained -- see Plan's own doc on
 	// why this is unconditional.
 	markets := []MarketView{
-		{Creator: "frozen1", Phase: core.StateFrozen, Holders: nil},
+		{Creator: "frozen1", Phase: core.StateFrozen, Retired: true, Holders: nil},
 	}
 	ops := Plan(markets)
 	if len(ops) != 1 || ops[0].Kind != OpCloseIfDrained {
@@ -55,6 +60,7 @@ func TestPlan_VerifiesRatherThanTrustsBalances(t *testing.T) {
 	markets := []MarketView{{
 		Creator: "frozen1",
 		Phase:   core.StateFrozen,
+		Retired: true,
 		Holders: []HolderBalance{
 			{Holder: "zero", Balance: bi(0)},
 			{Holder: "negative", Balance: bi(-5)},
@@ -77,9 +83,9 @@ func TestPlan_VerifiesRatherThanTrustsBalances(t *testing.T) {
 
 func TestPlan_MarketOrderingIsAlphabeticalByCreator(t *testing.T) {
 	markets := []MarketView{
-		{Creator: "zebra", Phase: core.StateFrozen, Holders: []HolderBalance{{Holder: "h", Balance: bi(1)}}},
-		{Creator: "apple", Phase: core.StateFrozen, Holders: []HolderBalance{{Holder: "h", Balance: bi(1)}}},
-		{Creator: "mango", Phase: core.StateFrozen, Holders: []HolderBalance{{Holder: "h", Balance: bi(1)}}},
+		{Creator: "zebra", Phase: core.StateFrozen, Retired: true, Holders: []HolderBalance{{Holder: "h", Balance: bi(1)}}},
+		{Creator: "apple", Phase: core.StateFrozen, Retired: true, Holders: []HolderBalance{{Holder: "h", Balance: bi(1)}}},
+		{Creator: "mango", Phase: core.StateFrozen, Retired: true, Holders: []HolderBalance{{Holder: "h", Balance: bi(1)}}},
 	}
 	ops := Plan(markets)
 
@@ -104,6 +110,7 @@ func TestPlan_HoldersOrderedByBalanceDescendingThenName(t *testing.T) {
 	markets := []MarketView{{
 		Creator: "c1",
 		Phase:   core.StateFrozen,
+		Retired: true, // A1 (2026-08-30): Plan sweeps retired markets only
 		Holders: []HolderBalance{
 			{Holder: "small", Balance: bi(10)},
 			{Holder: "tieB", Balance: bi(50)},
@@ -136,8 +143,8 @@ func TestPlan_HoldersOrderedByBalanceDescendingThenName(t *testing.T) {
 
 func TestPlan_IsDeterministicAndDoesNotMutateInput(t *testing.T) {
 	markets := []MarketView{
-		{Creator: "c2", Phase: core.StateFrozen, Holders: []HolderBalance{{Holder: "h1", Balance: bi(5)}}},
-		{Creator: "c1", Phase: core.StateFrozen, Holders: []HolderBalance{{Holder: "h2", Balance: bi(7)}}},
+		{Creator: "c2", Phase: core.StateFrozen, Retired: true, Holders: []HolderBalance{{Holder: "h1", Balance: bi(5)}}},
+		{Creator: "c1", Phase: core.StateFrozen, Retired: true, Holders: []HolderBalance{{Holder: "h2", Balance: bi(7)}}},
 	}
 	inputCopy := append([]MarketView(nil), markets...)
 
@@ -255,6 +262,7 @@ func TestPlan_RefundBlockedHolderProducesNoRefundHolderOp(t *testing.T) {
 	markets := []MarketView{{
 		Creator: "frozen1",
 		Phase:   core.StateFrozen,
+		Retired: true,
 		Holders: []HolderBalance{
 			{Holder: "fresh", Balance: bi(400), RefundBlocked: true}, // still inside the exit-tax window
 			{Holder: "aged", Balance: bi(100), RefundBlocked: false}, // clock decayed / backstop open
@@ -307,6 +315,15 @@ func TestPlan_RealCore_NoRefundHolderOpInsideExitTaxWindow(t *testing.T) {
 		}
 		if _, err := core.Buy(s, holder, creator, registeredBlock+1, big.NewInt(400)); err != nil {
 			t.Fatalf("Buy: %v", err)
+		}
+		// A1 (owner ruling 2026-08-30): a natural lapse no longer opens the
+		// wind-down, so the D1 window is reproduced on the one road that still
+		// leads there — the creator retires at the freeze. The exit-tax window
+		// (the subject) is then measured from the retire block, which is the
+		// same block the natural freeze used to anchor to, so every timing in
+		// this test is unchanged.
+		if err := core.Retire(s, creator, creator, registeredBlock+core.SubscriptionPeriod+core.GraceBlocks); err != nil {
+			t.Fatalf("Retire: %v", err)
 		}
 		return s
 	}

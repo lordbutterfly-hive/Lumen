@@ -38,7 +38,7 @@ export interface TokenPriceChips {
 const STALE_MS = 60_000;
 
 /** The state every handle starts in: asked for, not yet answered. */
-const PENDING: MarketPrice = { status: 'unknown', priceUsd: null };
+const PENDING: MarketPrice = { status: 'unknown', priceUsd: null, health: null };
 
 export function useTokenPriceChips(handles: readonly string[]): TokenPriceChips {
   const dataSource = getCreatorTokensDataSource();

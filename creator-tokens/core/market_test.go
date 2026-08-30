@@ -349,6 +349,12 @@ func TestRegister_ReRegisterAfterAbandonedEscrowResolvedByThirdParty(t *testing.
 	if got := Phase(s, creator, frozenBlock); got != StateFrozen {
 		t.Fatalf("sanity: phase = %s, want FROZEN", got)
 	}
+	// A1 (2026-08-30): the wind-down (and its Refund rail) opens on Retire, not
+	// on the lapse. The escrow time-bomb under test is unchanged by which road
+	// opened the wind-down.
+	if err := Retire(s, creator, creator, frozenBlock-1); err != nil {
+		t.Fatalf("fixture: Retire: %v", err)
+	}
 	if got := Supply(s, creator); got.Cmp(big.NewInt(5000)) != 0 {
 		t.Fatalf("sanity: supply = %s, want 5000 (still pinned by the PENDING escrow)", got)
 	}
@@ -522,31 +528,58 @@ func TestRenew_FromLapsedOverdueResumesFromNow(t *testing.T) {
 	}
 }
 
-// TestRenew_RefusedWhenFrozen is the CRITICAL case named in the task: legal
-// in ACTIVE/OVERDUE, illegal in FROZEN/CLOSED, because wind-down is terminal
-// and a returning creator re-registers instead (SPEC §1.7.5).
-func TestRenew_RefusedWhenFrozen(t *testing.T) {
+// TestRenew_AcceptedWhenFrozen — A1 (owner ruling 2026-08-30) INVERTS the
+// former TestRenew_RefusedWhenFrozen. A natural FROZEN is an inflow stop that
+// the subscription payment exists to lift, so Renew has its own gate
+// (requireMarketAcceptsRenewal) that admits FROZEN. "Pay to reactivate" is
+// true on the screen that says it. Retired and CLOSED still refuse (the two
+// tests below, unchanged).
+func TestRenew_AcceptedWhenFrozen(t *testing.T) {
 	s := NewMemStore()
 	mustRegister(t, s, "frozenrenew", 100, 1000, 1000)
 	paidUntil0 := getU64(s, kPaidUntil("frozenrenew"))
-	block := paidUntil0 + GraceBlocks // exactly FROZEN (see the Phase table test for why)
+	block := paidUntil0 + GraceBlocks + 3*SubscriptionPeriod // long frozen
 	if got := Phase(s, "frozenrenew", block); got != StateFrozen {
 		t.Fatalf("test setup: Phase = %q, want FROZEN", got)
 	}
-	treasuryBefore := getMoney(s, kTreasury()) // already holds the registration fee
+	// Frozen means no new money: Buy refuses on the same block Renew accepts.
+	if _, err := Buy(s, "wouldbuy", "frozenrenew", block, big.NewInt(1)); errSymbol(err) != ErrState {
+		t.Fatalf("Buy while FROZEN must stay refused (inflow stop), got %v", err)
+	}
+	treasuryBefore := getMoney(s, kTreasury())
 
-	err := Renew(s, "afan", "frozenrenew", block, 1, subFee(1))
-	if err == nil {
-		t.Fatal("Renew while FROZEN must be rejected")
+	if err := Renew(s, "afan", "frozenrenew", block, 1, subFee(1)); err != nil {
+		t.Fatalf("A1: Renew while FROZEN must be accepted: %v", err)
 	}
-	if sym := errSymbol(err); sym != ErrState {
-		t.Fatalf("want ErrState, got %v", err)
+	if got, want := getU64(s, kPaidUntil("frozenrenew")), block+SubscriptionPeriod; got != want {
+		t.Fatalf("paidUntil = %d, want %d (resumes from now, not from the stale paid_until)", got, want)
 	}
-	if got := getU64(s, kPaidUntil("frozenrenew")); got != paidUntil0 {
-		t.Fatalf("paidUntil mutated by a rejected FROZEN renewal: %d != %d", got, paidUntil0)
+	if got := Phase(s, "frozenrenew", block); got != StateActive {
+		t.Fatalf("Phase after renewal = %q, want ACTIVE (reactivated)", got)
 	}
-	if got := getMoney(s, kTreasury()); got.Cmp(treasuryBefore) != 0 {
-		t.Fatalf("treasury changed by a rejected FROZEN renewal: %s != %s (CEI violation)", got, treasuryBefore)
+	if got := new(big.Int).Sub(getMoney(s, kTreasury()), treasuryBefore); got.Cmp(subFee(1)) != 0 {
+		t.Fatalf("treasury gained %s, want the fee %s", got, subFee(1))
+	}
+	// And the inflow stop lifts with it.
+	if _, err := Buy(s, "wouldbuy", "frozenrenew", block+1, big.NewInt(1)); err != nil {
+		t.Fatalf("Buy after reactivation must work: %v", err)
+	}
+}
+
+// TestRenew_RefusedWhenRetired — the retire mark is terminal for Renew (RULING
+// D), unchanged by A1: a retired market is winding down and re-registers.
+func TestRenew_RefusedWhenRetired(t *testing.T) {
+	s := NewMemStore()
+	mustRegister(t, s, "retiredrenew", 100, 1000, 1000)
+	if err := Retire(s, "retiredrenew", "retiredrenew", 200); err != nil {
+		t.Fatal(err)
+	}
+	paidUntil0 := getU64(s, kPaidUntil("retiredrenew"))
+	if err := Renew(s, "afan", "retiredrenew", 201, 1, subFee(1)); err == nil || errSymbol(err) != ErrState {
+		t.Fatalf("Renew on a retired market must be refused with ErrState, got %v", err)
+	}
+	if got := getU64(s, kPaidUntil("retiredrenew")); got != paidUntil0 {
+		t.Fatalf("paidUntil moved on a refused Renew: %d -> %d", paidUntil0, got)
 	}
 }
 

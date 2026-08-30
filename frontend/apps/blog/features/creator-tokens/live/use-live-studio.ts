@@ -21,7 +21,7 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useTokenAccounts } from './use-token-accounts';
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
 import { BLOCKS_PER_DAY } from '../lib/contract-math';
-import type { Ask, Market, Offering } from '../types';
+import type { Ask, Market, Offering, QuoteOracleStatus } from '../types';
 import { adaptAsk, adaptMarket, blocksToDays, usdFromHbd, type LiveTokenMarket } from './adapt';
 import type { PortfolioAsk } from '../market/portfolio';
 import type { LiveMarketStatus } from './use-live-token-market';
@@ -32,6 +32,13 @@ const asksKey = (creator: string) => ['creatorTokens', 'live', 'creatorAsks', cr
 const offeringsKey = (creator: string) => ['creatorTokens', 'live', 'offerings', creator];
 const deliveryKey = (creator: string) => ['creatorTokens', 'live', 'delivery', creator];
 const feeKey = (account: string) => ['creatorTokens', 'live', 'feeBalance', account];
+// The creator's own holding in their own market. Same key SHAPE as
+// use-live-token-market's positionKey (creator + holder), because it is the same
+// read — here the two are the same account.
+const positionKey = (creator: string) => ['creatorTokens', 'live', 'position', creator, creator];
+// "Can anything in this shop be bought right now" — the market-wide settlement
+// refusal, read at the creator's own posted face rather than per offering.
+const quoteKey = (creator: string) => ['creatorTokens', 'live', 'studioQuote', creator];
 
 const REFETCH_MS = 30_000;
 const STALE_MS = 15_000;
@@ -66,12 +73,53 @@ export interface LiveStudio {
   retrySession: () => void;
 
   market: LiveTokenMarket | null;
-  /** Escrows awaiting this creator's answer. Chain-read, no indexer. */
+  /**
+   * Escrows this creator can STILL act on — `awaiting` only.
+   *
+   * ★ `expired` USED TO BE IN HERE AND IT IS NOT ACTIONABLE (2026-08-30,
+   * clauderfly-43). The contract refuses BOTH resolutions once the deadline has
+   * passed: `Answer` at core/ask.go:615 and `Decline` at core/ask.go:830, both
+   * `ErrState "answer window closed"`. So every expired row rendered an "Answer or
+   * decline" button that could only ever revert, and was counted by the Overview's
+   * "Requests waiting" stat when nothing was waiting — the buyer's next move is
+   * Reclaim, and the creator has no move at all.
+   */
   inbox: PortfolioAsk[];
-  /** The raw escrows behind `inbox` — answer/decline need seq + deadlineBlock, which the portfolio row does not carry. */
+  /** The raw escrows behind `inbox` — answer/decline need seq + deadlineBlock, which the portfolio row does not carry. Index-aligned with `inbox`. */
   rawInbox: Ask[];
-  /** The asks read has not succeeded, so `inbox`/`rawInbox` being empty means UNKNOWN, not zero. */
+  /**
+   * Past their deadline: shown, never actionable. Kept visible rather than
+   * dropped because a creator needs to see the job they missed — it is what the
+   * chain is about to count against their delivery record.
+   */
+  expiredInbox: PortfolioAsk[];
+  /** The asks read has not succeeded, so `inbox`/`rawInbox`/`expiredInbox` being empty means UNKNOWN, not zero. */
   inboxUnavailable: boolean;
+  /**
+   * H12: a flood of asks exceeded the inbox scan cap, so some older escrows
+   * were not read and an answerable ask could be among them. Practically
+   * unreachable (thousands of asks inside 30 days), surfaced honestly when it
+   * happens rather than silently hiding an obligation.
+   */
+  inboxTruncated: boolean;
+  /** Older escrows left unread when `inboxTruncated`; 0 otherwise. */
+  inboxOlderNotScanned: number;
+  /**
+   * The creator's own holding could not be read — NOT a zero balance. Mirrors
+   * use-live-token-market's flag of the same name; `readHolderPosition` rejects on
+   * a genuine failure so that this stays distinguishable from holding nothing.
+   */
+  positionUnavailable: boolean;
+  /**
+   * Whether this creator's services can be bought AT ALL right now, and why not.
+   *
+   * `null` while the quote has not answered — which is NOT the same as `'ok'`, so
+   * a caller must not treat the absence of a refusal as permission to promise the
+   * shop works. `'ok'` means the chain would price a service today; every other
+   * value is the contract's own reason for refusing, ready for
+   * `creatorOracleNotice` (market/oracle-copy.ts).
+   */
+  servicesOracleStatus: QuoteOracleStatus | null;
   /**
    * NULL when the shop could not be read — NOT an empty shop.
    *
@@ -211,6 +259,59 @@ export function useLiveStudio(): LiveStudio {
     staleTime: STALE_MS
   });
 
+  // ★★★ THE STUDIO RENDERS THE CREATOR'S OWN HOLDING AND USED TO READ IT AS ZERO
+  // (2026-08-30, clauderfly-43). `position: null` was passed into adaptMarket below
+  // with a comment saying this screen does not render a position. It does, twice, on
+  // the Earnings tab: "Your own holdings" (`market.position?.tokens ?? 0`) and the
+  // "Cash out" control beneath it. So `held` was permanently 0 for every creator.
+  //
+  // PROVEN ON CHAIN, not inferred: `mb|hive:hbd-temp|hive:hbd-temp` = 30 against a
+  // supply of 30, i.e. that creator holds 100% of their own market, and their Studio
+  // said "0.00 tokens, worth $0.00".
+  //
+  // It was a MONEY bug, not a display one. `sellQuote` (market/curve.ts) clamps the
+  // sale to `m.position?.tokens ?? 0`, so every figure it returned was 0, so
+  // `defaultSellMinNetUsd` was 0, so `sellMinNetUsd` was undefined — the F5
+  // minimum-net floor was structurally unreachable from the ONE control it was added
+  // for, on the exit screen, while the Sell button was not gated on the balance at
+  // all. Same silent-zero class as the August `toDid` chart bug.
+  //
+  // Creator and holder are the same account here, and it is `creatorAccount` on both
+  // sides for the same reason every other read on this hook uses it: a wallet-backed
+  // creator's market is keyed by their `did:pkh`, never their Lumen display name.
+  const positionQuery = useQuery({
+    queryKey: positionKey(creatorAccount ?? ''),
+    queryFn: () => dataSource!.readHolderPosition(creatorAccount as string, creatorAccount as string),
+    enabled: enabled && !readFailed,
+    staleTime: STALE_MS,
+    refetchInterval: REFETCH_MS
+  });
+
+  // ★★★ CAN ANY OF THIS SHOP ACTUALLY BE BOUGHT (2026-08-30, clauderfly-43).
+  //
+  // A service is priced from the token's own trading history, and that derivation
+  // REFUSES rather than guessing when the history will not carry it
+  // (core/settlement.go SettlementRate, both TWAP arms). Measured against the live
+  // testnet contract on 2026-08-30: 13 of 13 registered markets could not price a
+  // service. The Offerings tab invited a creator to name and price three of them
+  // and said nothing.
+  //
+  // `readQuote` is the honest instrument for this and not an approximation of one:
+  // it reads BOTH arms with the epoch filter and mirrors the contract's own
+  // refusal, which is why the ask() path already gates on it. Read at the posted
+  // FACE (no offeringId) on purpose — this asks the market-wide question the notice
+  // answers, "can anything here be sold", not "what does offering 3 cost".
+  //
+  // It resolves rather than rejecting on a refusal, so an error here means the READ
+  // failed, which is a different thing from a refusal and is reported as such.
+  const quoteQuery = useQuery({
+    queryKey: quoteKey(creatorAccount ?? ''),
+    queryFn: () => dataSource!.readQuote(creatorAccount as string),
+    enabled: enabled && !readFailed,
+    staleTime: STALE_MS,
+    refetchInterval: REFETCH_MS
+  });
+
   const feeQuery = useQuery({
     queryKey: feeKey(creatorAccount ?? ''),
     queryFn: () => dataSource!.readFeeBalance(creatorAccount as string),
@@ -245,10 +346,12 @@ export function useLiveStudio(): LiveStudio {
       ? adaptMarket({
           creator,
           market: chainMarket,
-          // A creator's own holding is read on the market page, not here — the
-          // studio's own-token panel uses supply/reserve, and fetching a
-          // position we do not render would be a read for nothing.
-          position: null,
+          // The creator's own holding — see positionQuery above for why this is
+          // no longer `null`. `?? null` on a failed read, exactly as
+          // use-live-token-market does it: `readHolderPosition` REJECTS rather
+          // than resolving zero, so `positionUnavailable` below is what says
+          // "we could not read it", never a 0 balance.
+          position: positionQuery.data ?? null,
           // The market VIEW still needs a concrete list; a failed read shows no
           // rows there, and the studio's own shop section reports the failure.
           offerings: offeringsQuery.data ?? [],
@@ -267,8 +370,21 @@ export function useLiveStudio(): LiveStudio {
   // reads beside this one already route through it; the asks read was missed.
   const asksRead = collapseRead(asksQuery);
   const inboxUnavailable = asksRead === null;
-  const rawInbox = (asksRead ?? []).filter((a) => a.status === 'awaiting' || a.status === 'expired');
+  const asksList = asksRead?.asks ?? [];
+  // H12 (2026-08-31): true only when a pathological flood of asks exceeded the
+  // inbox scan cap, so `inboxOlderNotScanned` older escrows were not read and an
+  // answerable ask COULD be among them. The Studio surfaces this rather than
+  // letting a hidden obligation become a silent miss.
+  const inboxTruncated = asksRead !== null && !asksRead.scannedAll;
+  const inboxOlderNotScanned = asksRead?.olderNotScanned ?? 0;
+  // ★ THE SPLIT (2026-08-30, clauderfly-43) — see `inbox`/`expiredInbox` on the
+  // interface for why `expired` is no longer actionable. `rawInbox` stays aligned
+  // with `inbox` BY INDEX, which is what creator-studio.tsx zips them on, so only
+  // actionable rows can ever reach the answer modal.
+  const rawInbox = asksList.filter((a) => a.status === 'awaiting');
+  const rawExpired = asksList.filter((a) => a.status === 'expired');
   const inbox = market ? rawInbox.map((a) => adaptAsk(a, market.priceUsd)) : [];
+  const expiredInbox = market ? rawExpired.map((a) => adaptAsk(a, market.priceUsd)) : [];
 
   const subDaysLeft = chainMarket ? blocksToDays(Math.max(0, chainMarket.paidUntilBlock - headOf(chainMarket))) : 0;
 
@@ -281,6 +397,15 @@ export function useLiveStudio(): LiveStudio {
     queryClient.invalidateQueries({ queryKey: asksKey(creatorAccount) });
     queryClient.invalidateQueries({ queryKey: offeringsKey(creatorAccount) });
     queryClient.invalidateQueries({ queryKey: feeKey(creatorAccount) });
+    // Sell, answer and register all move the creator's own balance, so the
+    // holding this hook now reads has to be invalidated with the rest of them —
+    // a stale position is what makes the Cash out control quote a sale the
+    // creator can no longer make.
+    queryClient.invalidateQueries({ queryKey: positionKey(creatorAccount) });
+    // A trade moves the observation rings, which is exactly what decides whether
+    // a service can be priced — so the shop's own availability is invalidated with
+    // everything else a write touches.
+    queryClient.invalidateQueries({ queryKey: quoteKey(creatorAccount) });
   }, [queryClient, creatorAccount]);
 
   const requireSigner = useCallback((): { source: NonNullable<typeof dataSource>; signer: string } => {
@@ -349,7 +474,22 @@ export function useLiveStudio(): LiveStudio {
     market,
     inbox,
     rawInbox,
+    expiredInbox,
     inboxUnavailable,
+    inboxTruncated,
+    inboxOlderNotScanned,
+    // ★ H9 / SD-1 (2026-08-31): `data === undefined`, NOT `isError`. isError is
+    // false WHILE the read is still in flight, so a three-state read (loading /
+    // failed / answered) rendered its loading state through the answered branch:
+    // held fell to 0 and the Studio said "You hold 0.00 tokens" during a normal
+    // first load. `data === undefined` is true for BOTH loading and error (the
+    // two states where we have no confident holding) and false only once a real
+    // position — including a real zero — has resolved. Same robust check
+    // use-token-price-chip uses.
+    positionUnavailable: positionQuery.data === undefined,
+    // Deliberately null, never 'ok', when the read has not succeeded: see the
+    // interface doc. A quote that failed to load must not read as a working shop.
+    servicesOracleStatus: quoteQuery.data?.oracleStatus ?? null,
     offerings: collapseRead(offeringsQuery),
     subDaysLeft,
     tradeFeeClaimableUsd: ((hbd) => (hbd === null ? null : usdFromHbd(hbd)))(collapseRead(feeQuery)),
@@ -450,7 +590,16 @@ export function useLiveStudio(): LiveStudio {
     ),
 
     retry: () => {
-      for (const key of [marketKey(creatorAccount ?? ''), asksKey(creatorAccount ?? ''), offeringsKey(creatorAccount ?? ''), deliveryKey(creatorAccount ?? '')]) {
+      for (const key of [
+        marketKey(creatorAccount ?? ''),
+        asksKey(creatorAccount ?? ''),
+        offeringsKey(creatorAccount ?? ''),
+        deliveryKey(creatorAccount ?? ''),
+        // "Try again" must retry the holding too, or a creator whose position
+        // read is the one that failed presses it and nothing changes.
+        positionKey(creatorAccount ?? ''),
+        quoteKey(creatorAccount ?? '')
+      ]) {
         queryClient.invalidateQueries({ queryKey: key });
       }
     },

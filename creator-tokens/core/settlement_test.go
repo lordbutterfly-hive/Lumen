@@ -586,6 +586,11 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 	// freeze — holder1 (bought regBlock+1, clock untouched by its transfers/asks)
 	// is fully decayed to τ = 0 there, so the push is an allowed 0-tax sweep. Still
 	// FROZEN and the oracle still refusing at this block (both proven below).
+	// A1 (2026-08-30): the wind-down rails open on Retire, not on the lapse.
+	// The oracle is still refusing and the phase still FROZEN at `frozen`.
+	if err := Retire(s, creator, creator, regBlock+SubscriptionPeriod+GraceBlocks+10); err != nil {
+		t.Fatalf("fixture: Retire: %v", err)
+	}
 	frozen := regBlock + SubscriptionPeriod + GraceBlocks + 10 + ExitTaxDecayBlocks
 	if got := Phase(s, creator, frozen); got != StateFrozen {
 		t.Fatalf("fixture: phase = %s, want FROZEN", got)

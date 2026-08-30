@@ -779,6 +779,8 @@ func (e *Engine) doSell(caller, creator string, deltaS *big.Int) {
 	ev := e.newEvent("sell", caller, creator)
 	ev.Args["tokens"] = bigStr(deltaS)
 	e.captureDelinquent(ev, creator) // standing guardrail: Sell must never be blocked by delinquency (sell.go reads inWindDown only, never RequireInflowOpen)
+	// A1 (2026-08-30): the trace must show exits on a natural FROZEN go through the CURVE.
+	ev.Args["phase"] = core.Phase(e.Store, creator, e.Block)
 
 	beforeReserve := core.Reserve(e.Store, creator)
 	beforeSupply := core.Supply(e.Store, creator)
@@ -831,6 +833,8 @@ func (e *Engine) doRefund(caller, creator string, credits *big.Int) {
 	ev := e.newEvent("refund", caller, creator)
 	ev.Args["credits"] = bigStr(credits)
 	e.captureDelinquent(ev, creator) // standing guardrail: Refund must never be blocked by delinquency (refund.go gates on inWindDown only)
+	// A1 (2026-08-30): paired with doSell's, see TestKeeperAbsentFailSafesHold.
+	ev.Args["phase"] = core.Phase(e.Store, creator, e.Block)
 
 	beforeReserve := core.Reserve(e.Store, creator)
 	beforeSupply := core.Supply(e.Store, creator)
@@ -1489,10 +1493,18 @@ func (e *Engine) fanTick(name string) {
 			e.doRenew(name, target, 1)
 		}
 	case roll < 0.85: // notices the market froze; redeems what they can
+		// A1 (2026-08-30): on a natural FROZEN the open exit is the curve Sell,
+		// not Refund (which refuses outside wind-down). The holder takes
+		// whichever rail core has open, the same predicate the invariant
+		// sweep uses.
 		if core.Phase(e.Store, target, e.Block) == core.StateFrozen {
 			bal := core.BalanceOf(e.Store, target, name)
 			if bal.Sign() > 0 {
-				e.doRefund(name, target, bal)
+				if e.creatorWindingDown(target) {
+					e.doRefund(name, target, bal)
+				} else {
+					e.doSell(name, target, bal)
+				}
 			}
 		}
 	}
@@ -1696,8 +1708,9 @@ func (e *Engine) speculatorTick(name string) {
 		// out.
 		bal := core.BalanceOf(e.Store, target, name)
 		if bal.Sign() > 0 {
-			phase := core.Phase(e.Store, target, e.Block)
-			windingDown := phase == core.StateFrozen || phase == core.StateClosed
+			// A1 (2026-08-30): wind-down is retired-or-CLOSED, never a bare
+			// FROZEN — one predicate (creatorWindingDown), same as core.
+			windingDown := e.creatorWindingDown(target)
 			frac := int64(4)
 			if windingDown {
 				frac = 1
@@ -1848,8 +1861,11 @@ func (e *Engine) keeperTick() {
 				RefundBlocked: core.RefundHolderTaxGateBlocked(e.Store, cname, h, e.Block),
 			})
 		}
+		_, retiredMark := core.RetiredAt(e.Store, cname)
 		views = append(views, keeper.MarketView{
-			Creator: cname, Phase: phase, Supply: core.Supply(e.Store, cname), Holders: holders,
+			// A1 (2026-08-30): keeper.Plan sweeps retired markets only; the
+			// view carries the retire mark exactly as keeper.go's reader does.
+			Creator: cname, Phase: phase, Retired: retiredMark, Supply: core.Supply(e.Store, cname), Holders: holders,
 		})
 	}
 

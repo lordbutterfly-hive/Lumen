@@ -36,6 +36,7 @@ import type {
   MarketPrice,
   IndexerHealth,
 } from '../types';
+import type { ContractRules, CreatorAsksResult, RenewRefusal } from '../types';
 import type { CreatorTokensConfig, CreatorTokensDataSource } from './creator-tokens-data-source';
 import {
   MAX_ASK_DEADLINE_BLOCKS,
@@ -67,6 +68,7 @@ import {
   refundNetBaseUnits,
   reserveCoverageRatio,
   settlementRateBaseUnits,
+  settleSpendStatus,
   BLOCKS_PER_DAY,
   EXIT_TAX_DECAY_BLOCKS,
   displayPricePerTokenBaseUnits,
@@ -150,6 +152,8 @@ import {
   unknownMarket,
   STATE_CLOSED, assertTransferDestination } from './vsc/reads';
 import { displayPriceUsd } from '../market/curve';
+import { marketHealthOf, windingDownOf } from '../market/market-health';
+import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, renewGateUnder, rulesForCode } from '../market/contract-rules';
 
 // Real, on-chain implementation. Reads live contract state via GraphQL
 // getStateByKeys (plumbing + decoding in ./vsc/reads.ts); builds custom_json
@@ -246,6 +250,30 @@ interface BuildMarketState {
   delinquentUntilBlock: number;
 }
 
+/**
+ * The pre-signature refusal for renewSubscription, one sentence per reason
+ * (types.ts RenewRefusal), each carrying a stable code the Studio can match
+ * on the way CREATOR_TOKENS_RENEW_UNCONFIRMED is matched. The creator-facing
+ * wording lives in market/lapse.ts; these are the data source's own errors.
+ */
+function renewRefusalMessage(reason: RenewRefusal | null): string {
+  switch (reason) {
+    case 'lapsed-terminal':
+      return 'CREATOR_TOKENS_RENEW_REFUSED_LAPSED: this market lapsed past its grace, and the deployed contract does not accept a renewal for it';
+    case 'surplus':
+      return 'CREATOR_TOKENS_RENEW_REFUSED_SURPLUS: this market cannot be relisted; it carries a surplus from refunds made under the previous rules. Retire it, then register again';
+    case 'deficit':
+      return 'CREATOR_TOKENS_RENEW_REFUSED_DEFICIT: this market cannot be relisted; its reserve is below the curve';
+    case 'retired':
+      return 'CREATOR_TOKENS_RENEW_REFUSED_RETIRED: this market is retiring and cannot be renewed';
+    case 'paused':
+      return 'CREATOR_TOKENS_RENEW_REFUSED_PAUSED: payments into markets are paused right now';
+    case 'closed':
+    default:
+      return 'CREATOR_TOKENS_RENEW_REFUSED_CLOSED: this market is closed; register again instead';
+  }
+}
+
 export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   private readonly config: CreatorTokensConfig;
   private readonly gql: CreatorTokensGqlClient;
@@ -264,6 +292,38 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   }
 
   // ---- reads ----
+
+  /**
+   * ★★★ WHICH CONTRACT RULES ARE DEPLOYED, from the chain (A5, 2026-08-31).
+   * market/contract-rules.ts has the deploy order and the reason this is a
+   * chain read and not a build flag. One `findContract` per RULES_TTL_MS per
+   * data source, shared by every market read in flight; a failed read is
+   * 'v1' for RULES_RETRY_MS and then asked again. NEVER REJECTS: a market read
+   * must not fail because the code read did, and 'v1' is the safe answer.
+   * Date.now() here is a cache TTL, not chain timing; no phase or block is
+   * ever derived from it.
+   */
+  private rulesCache: { rules: ContractRules; until: number } | null = null;
+  private rulesInFlight: Promise<ContractRules> | null = null;
+
+  async readRules(): Promise<ContractRules> {
+    if (this.rulesCache && Date.now() < this.rulesCache.until) return this.rulesCache.rules;
+    if (this.rulesInFlight) return this.rulesInFlight;
+    this.rulesInFlight = (async (): Promise<ContractRules> => {
+      try {
+        const code = await this.gql.getContractCode(this.config.contractId);
+        const rules = rulesForCode(code);
+        this.rulesCache = { rules, until: Date.now() + RULES_TTL_MS };
+        return rules;
+      } catch {
+        this.rulesCache = { rules: 'v1', until: Date.now() + RULES_RETRY_MS };
+        return 'v1';
+      } finally {
+        this.rulesInFlight = null;
+      }
+    })();
+    return this.rulesInFlight;
+  }
 
   /**
    * The spot price for MANY creators in as few requests as possible.
@@ -297,44 +357,94 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     const unique = [...new Set(creators.map((c) => c.trim()).filter((c) => c.length > 0))];
     if (unique.length === 0) return out;
 
-    const KEYS_PER_CREATOR = 3;
-    const perRequest = Math.floor(VscCreatorTokensDataSource.MAX_STATE_KEYS_PER_REQUEST / KEYS_PER_CREATOR);
+    // ★★ SIX KEYS, NOT THREE (2026-08-30, B4). This read used to fetch supply,
+    // state and registeredAt only, so it could price a market but could not
+    // tell whether that market was FROZEN, retired or delinquent, and every
+    // feed card drew "$1.41 · Buy" on markets buy.go would refuse. The three
+    // extra keys are exactly the inputs readMarket()/buildMarket() below use
+    // for `phase` and `canBuy`, plus the one global kPaused key per request,
+    // and the head block for the same reason readMarket needs it: phase is
+    // paidUntil COMPARED TO NOW, and a head we do not have is a phase we must
+    // not guess. 100 keys per call (schema.graphql:813) / 6 = 16 creators per
+    // request, and the 1 global key on top keeps it at 97.
+    const KEYS_PER_CREATOR = 6;
+    const perRequest = Math.floor((VscCreatorTokensDataSource.MAX_STATE_KEYS_PER_REQUEST - 1) / KEYS_PER_CREATOR);
 
-    for (let i = 0; i < unique.length; i += perRequest) {
-      const batch = unique.slice(i, i + perRequest);
-      const keys = batch.flatMap((c) => [kSupply(toDid(c)), kState(toDid(c)), kRegisteredAt(toDid(c))]);
+    // ★ BATCHES IN PARALLEL, not one after another. The old loop awaited each
+    // batch in turn, which was free while a feed page fit in ONE batch (33
+    // creators at 3 keys). At 16 per batch a 30-author feed is two batches,
+    // and two sequential round trips against a testnet node measured at
+    // 4.2-4.5s each (token-author-chip.tsx's own doc) would have doubled the
+    // feed's wait. `Promise.all` keeps the wall clock at one round trip; the
+    // node sees the same number of requests either way.
+    const batches: string[][] = [];
+    for (let i = 0; i < unique.length; i += perRequest) batches.push(unique.slice(i, i + perRequest));
+    await Promise.all(batches.map((batch) => this.readMarketPricesBatch(batch, out)));
+    return out;
+  }
+
+  /** One batch of readMarketPrices: at most `perRequest` creators, one state read + one head read, results written into `out`. */
+  private async readMarketPricesBatch(batch: readonly string[], out: Map<string, MarketPrice>): Promise<void> {
+    {
+      const keys = [
+        kPaused(),
+        ...batch.flatMap((c) => {
+          const did = toDid(c);
+          return [kSupply(did), kState(did), kRegisteredAt(did), kPaidUntil(did), kRetiredAt(did), kDelinquentUntil(did)];
+        })
+      ];
       let state: Record<string, string | null>;
+      let head: number | null;
+      let rules: ContractRules;
       try {
-        state = await this.gql.getStateByKeys(this.config.contractId, keys);
+        [state, head, rules] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock(), this.readRules()]);
       } catch {
         // A failed read is NOT "no market" — saying so would tell a creator with
         // a live market that they have none. Report it as unanswered.
-        for (const c of batch) out.set(c, { status: 'unknown', priceUsd: null });
-        continue;
+        for (const c of batch) out.set(c, { status: 'unknown', priceUsd: null, health: null });
+        return;
       }
+      const globalInflowPaused = state[kPaused()] === '1';
 
       for (const c of batch) {
         const did = toDid(c);
         const registered = state[kRegisteredAt(did)];
         const marketState = state[kState(did)];
         if (!registered && !marketState) {
-          out.set(c, { status: 'none', priceUsd: null });
+          out.set(c, { status: 'none', priceUsd: null, health: null });
           continue;
         }
         const supply = Number(state[kSupply(did)] ?? '0');
         if (!Number.isFinite(supply) || supply < 0) {
-          out.set(c, { status: 'unknown', priceUsd: null });
+          out.set(c, { status: 'unknown', priceUsd: null, health: null });
           continue;
         }
+        // Same rule as readMarket(): a market whose phase cannot be judged is
+        // an unanswered read, not a healthy one. Without this a head-block
+        // outage would put the Buy word back on frozen markets, which is the
+        // exact fault this read was widened to remove.
+        if (head === null) {
+          out.set(c, { status: 'unknown', priceUsd: null, health: null });
+          continue;
+        }
+        // The SAME derivation buildMarket() uses, term for term: market.go
+        // Phase() via derivePhase (retired folded in), then RequireInflowOpen =
+        // canInflowOpen AND not retired AND not delinquent. Do not simplify
+        // either AND away; see Market.canBuy's doc in types.ts for which race
+        // each one closes.
+        const retiredAtBlock = decodeRetiredAt(state[kRetiredAt(did)]);
+        const phase = derivePhase(marketState === STATE_CLOSED, toU64(state[kPaidUntil(did)]), head, retiredAtBlock);
+        const delinquent = toU64(state[kDelinquentUntil(did)]) > head;
+        const canBuy = canInflowOpen(phase, globalInflowPaused) && retiredAtBlock === null && !delinquent;
+        const health = marketHealthOf({ phase, canBuy, windingDown: windingDownOf({ phase, retiredAtBlock, rules }) });
         // ★ displayPriceUsd, NOT spotPriceUsd. `spotRateBaseUnits` is the contract's
         // ORACLE rate and is 0 by design at supply 0, so a brand-new market would
         // render "$0.00" — the token advertised as free on the screen that sells it.
         // The display price is Area(S+1) - Area(S): what the next buyer is charged,
         // which is what a price next to a Buy control has to mean.
-        out.set(c, { status: 'ready', priceUsd: displayPriceUsd(supply) });
+        out.set(c, { status: 'ready', priceUsd: displayPriceUsd(supply), health });
       }
     }
-    return out;
   }
 
   async readMarket(creator: string): Promise<Market | null> {
@@ -355,8 +465,9 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     ];
     let state: Record<string, string | null>;
     let head: number | null;
+    let rules: ContractRules;
     try {
-      [state, head] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock()]);
+      [state, head, rules] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock(), this.readRules()]);
     } catch {
       return unknownMarket(creator);
     }
@@ -389,7 +500,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         retiredAtBlock: decodeRetiredAt(state[kRetiredAt(creator)]),
         delinquentUntilBlock: toU64(state[kDelinquentUntil(creator)])
       },
-      head
+      head,
+      rules
     );
   }
 
@@ -398,7 +510,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   // the caller's inputs) so the two can never derive Market fields
   // differently. Pure — no I/O; every argument is already a resolved
   // base-unit/token value + a real head.
-  private buildMarket(creator: string, s: BuildMarketState, head: number): Market {
+  private buildMarket(creator: string, s: BuildMarketState, head: number, rules: ContractRules): Market {
     // market.go Phase(): MAX(naturalPhase, retiredPhase). contract-math.ts's
     // derivePhase takes retiredAtBlock as its 4th arg and reproduces the fold
     // exactly — a retired market can never display as ACTIVE even during its
@@ -426,7 +538,31 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // single attempt, and the buyer pays RC to find out. INFLOWS ONLY: sell,
     // refund, reclaim and claim all stay open while delinquent, by design.
     const delinquent = s.delinquentUntilBlock > head;
-    const canFlow = canInflowOpen(phase, s.globalInflowPaused) && s.retiredAtBlock === null && !delinquent;
+    // ★★★ TWO GATES, NOT ONE (2026-08-30, adversarial review).
+    // `acceptsMoney` mirrors core's requireMarketAcceptsMoney (market.go:402-419):
+    // paused, retired, phase — and NO delivery term. `canFlow` adds the delivery
+    // gate on top, which is core's RequireInflowOpen (market.go:361-379) and is
+    // right for PURCHASES only. Renew has a THIRD gate (below); see canRenew's
+    // doc in types.ts for the permanent-market-destruction path that gating
+    // renew on canBuy re-opened after the contract had already fixed it.
+    const acceptsMoney = canInflowOpen(phase, s.globalInflowPaused) && s.retiredAtBlock === null;
+    const canFlow = acceptsMoney && !delinquent;
+    // ★★★ THE LOCKSTEP (A5, 2026-08-31). Three derivations depend on WHICH
+    // contract is deployed, and the PRUNED phase-ladder twin measured all
+    // three disagreeing with the v2 contract on a natural FROZEN market:
+    // wind-down (the Sell/Redeem rail switch), the renew gate (v2 admits
+    // FROZEN behind the reserve check) and, downstream, the health word. All
+    // three come from market/contract-rules.ts under `rules`, which readRules
+    // took from the chain's own report of the deployed bytecode. Under 'v1'
+    // every one of these is byte-for-byte what this function computed before.
+    const windingDown = windingDownOf({ phase, retiredAtBlock: s.retiredAtBlock, rules });
+    const renewGate = renewGateUnder(rules, {
+      phase,
+      retiredAtBlock: s.retiredAtBlock,
+      globalInflowPaused: s.globalInflowPaused,
+      supplyTokens: s.supplyTokens,
+      reserveBaseUnits: s.reserveBaseUnits
+    });
 
     return {
       creator,
@@ -449,10 +585,15 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       graceExpiresAtBlock,
       graceExpiresAt: blockToEpochMs(graceExpiresAtBlock, head),
       globalInflowPaused: s.globalInflowPaused,
+      rules,
+      headBlock: head,
       canBuy: canFlow,
       canAsk: canFlow,
+      canRenew: renewGate.canRenew,
+      renewRefusal: renewGate.renewRefusal,
       delinquentUntilBlock: delinquent ? s.delinquentUntilBlock : null,
       retiredAtBlock: s.retiredAtBlock,
+      windingDown,
       floorPriceHbd: baseUnitsToHuman(floorPricePerTokenBaseUnits(s.reserveBaseUnits, s.supplyTokens)),
       spotPriceHbd: baseUnitsToHuman(displayPricePerTokenBaseUnits(s.supplyTokens)),
       reserveCoverage: reserveCoverageRatio(s.reserveBaseUnits, s.supplyTokens)
@@ -542,27 +683,77 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     }
   }
 
-  async readCreatorAsks(creator: string, opts?: { limit?: number }): Promise<Ask[]> {
-    const limit = opts?.limit ?? 50;
+  // The inbox is scanned in chunks from the NEWEST seq downward, not as one
+  // newest-50 page (H12, 2026-08-31). INBOX_CHUNK is the getStateByKeys bound;
+  // MAX_INBOX_SCAN is the pathological-flood backstop.
+  private static readonly INBOX_CHUNK = 100;
+  private static readonly MAX_INBOX_SCAN = 3000;
+
+  /**
+   * Every ask the creator can still act on, across the FULL escrow range —
+   * never just the newest page (H12). This is the creator's ONLY defence
+   * against a grief-miss: an undeclined ask becomes a miss on its reclaim
+   * (core/delivery.go recordMiss), so an ask that never appears here because 50
+   * newer asks buried it is a miss the creator could not have prevented.
+   *
+   * BOUNDED YET COMPLETE. An `awaiting` ask was opened at most
+   * MAX_ASK_DEADLINE_BLOCKS (30 days) ago (ask.go MaxAskDeadline), and seqs rise
+   * with the open block, and an escrow's deadline is always AFTER its open. So
+   * scanning newest->oldest, the first ask whose deadline is older than
+   * head - MAX_ASK_DEADLINE_BLOCKS proves every OLDER ask is past its own
+   * deadline too and cannot be `awaiting`: we stop there. The MAX_INBOX_SCAN cap
+   * is only a backstop for a flood large enough to make even that unbounded
+   * (thousands of asks inside 30 days); if it trips, `scannedAll` is false and
+   * the UI says so rather than hiding the gap.
+   *
+   * Resolved asks (answered/reclaimed/declined) are dropped — the inbox shows
+   * only `awaiting` and the dead-zone `expired`; the delivery record carries
+   * history.
+   */
+  async readCreatorAsks(creator: string): Promise<CreatorAsksResult> {
     const seqState = await this.gql.getStateByKeys(this.config.contractId, [kSeq(creator)]);
     const seqCount = toU64(seqState[kSeq(creator)]);
-    if (seqCount === 0) return [];
+    if (seqCount === 0) return { asks: [], scannedAll: true, olderNotScanned: 0 };
 
-    const start = Math.max(0, seqCount - limit);
-    const seqs: number[] = [];
-    for (let s = start; s < seqCount; s++) seqs.push(s);
-
-    const [state, head] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, seqs.map((s) => kEscrow(creator, s))), this.gql.getHeadBlock()]);
+    const head = await this.gql.getHeadBlock();
+    const CHUNK = VscCreatorTokensDataSource.INBOX_CHUNK;
+    const cap = VscCreatorTokensDataSource.MAX_INBOX_SCAN;
+    // The stop line: an ask whose deadline is older than this was opened over
+    // MaxAskDeadline ago, so it and everything older cannot be awaiting. Null
+    // head disables the early stop (status derivation is already degraded), so
+    // the cap alone bounds the scan.
+    const staleBefore = head === null ? null : head - MAX_ASK_DEADLINE_BLOCKS;
 
     const asks: Ask[] = [];
-    for (const s of seqs) {
-      const raw = state[kEscrow(creator, s)];
-      if (!raw) continue;
-      const parsed = parseEscrow(raw);
-      if (!parsed) continue;
-      asks.push(buildAskFromParsed(creator, s, parsed, head));
+    let hi = seqCount; // exclusive: newest ask is seqCount - 1
+    let scanned = 0;
+    let earlyStopped = false;
+    while (hi > 0 && scanned < cap && !earlyStopped) {
+      const lo = Math.max(0, hi - CHUNK);
+      const seqs: number[] = [];
+      for (let sq = lo; sq < hi; sq++) seqs.push(sq);
+      const state = await this.gql.getStateByKeys(this.config.contractId, seqs.map((sq) => kEscrow(creator, sq)));
+      for (const sq of seqs) {
+        const raw = state[kEscrow(creator, sq)];
+        if (!raw) continue;
+        const parsed = parseEscrow(raw);
+        if (!parsed) continue;
+        const ask = buildAskFromParsed(creator, sq, parsed, head);
+        if (ask.status === 'awaiting' || ask.status === 'expired') asks.push(ask);
+        if (staleBefore !== null && ask.deadlineBlock < staleBefore) earlyStopped = true;
+      }
+      scanned += seqs.length;
+      hi = lo;
     }
-    return asks.sort((a, b) => a.deadlineBlock - b.deadlineBlock);
+    // scannedAll is true when we reached seq 0 OR proved no older ask is
+    // actionable (earlyStopped). It is false only when the cap cut the scan off
+    // first, leaving `hi` older escrows unread.
+    const scannedAll = hi === 0 || earlyStopped;
+    return {
+      asks: asks.sort((a, b) => a.deadlineBlock - b.deadlineBlock),
+      scannedAll,
+      olderNotScanned: scannedAll ? 0 : hi
+    };
   }
 
   async readMyAsks(asker: string): Promise<MyAsksResult> {
@@ -691,7 +882,9 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // ask.go: core.Ask (and this preview's real counterpart, core.SettleSpend's
     // wrapper `quote`) both check `face > 0` BEFORE ever computing a
     // settlement rate ("creator has no face price set").
-    if (faceBaseUnits <= 0) return unpriced('unavailable', head);
+    // H2 (2026-08-31): a creator with no posted price is told exactly that,
+    // not "we couldn't check" (which blames our read for their own market fact).
+    if (faceBaseUnits <= 0) return unpriced('no_price_set', head);
 
     const supplyTokens = toU64(state[kSupply(creator)]);
     const obsIdxCount = toU64(state[kObsIdx(creator)]);
@@ -725,6 +918,13 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       return unpriced(settlement.status, head);
     }
     const creditsRequiredBaseUnits = creditsForAskBaseUnits(tokenLegBaseUnits, settlement.rateBaseUnits);
+    // ★ H1 (2026-08-31): the rate passed above; now run settleSpend's OWN guards
+    // (min-price, depth ceiling, spend cap, market-too-small). These fire on
+    // healthy markets when the posted face is outside the window that moves with
+    // supply, and without this a green quote led to a signed ask the chain
+    // refused only at settlement. Same order the contract enforces.
+    const spend = settleSpendStatus(tokenLegBaseUnits, settlement.rateBaseUnits, supplyTokens, creditsRequiredBaseUnits);
+    if (spend !== 'ok') return unpriced(spend, head);
     return {
       ...base,
       rate: baseUnitsToHuman(settlement.rateBaseUnits),
@@ -800,7 +1000,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // The matured half is a separate key family AND a separate wire encoding, so
     // it needs its own hex-encoded read — the identical shape readHolderPosition
     // above already uses (see decodeMaturedLeHex).
-    const [state, maturedState, head] = await Promise.all([
+    const [state, maturedState, head, rules] = await Promise.all([
       this.gql.getStateByKeys(this.config.contractId, [
         kRegisteredAt(creator),
         kSupply(creator),
@@ -811,7 +1011,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         kRetiredAt(creator)
       ]),
       this.gql.getStateByKeysHex(this.config.contractId, [kMatured(creator, seller)]),
-      this.gql.getHeadBlock()
+      this.gql.getHeadBlock(),
+      this.readRules()
     ]);
     if (toU64(state[kRegisteredAt(creator)]) === 0) {
       throw new Error(`VscCreatorTokensDataSource: no such market ${creator}`);
@@ -837,16 +1038,18 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       throw new Error('VscCreatorTokensDataSource: insufficient tokens');
     }
     // sell.go's rail switch (market.go inWindDown): the curve rail is CLOSED
-    // exactly when the market is retired OR naturally FROZEN/CLOSED. Retired
-    // closes the rail from the retire block on — INCLUDING the still-OVERDUE
-    // notice window (RULING K3) — so this checks retiredAtBlock directly,
-    // never only `phase`.
+    // exactly when the market is winding down. Retired closes the rail from
+    // the retire block on — INCLUDING the still-OVERDUE notice window (RULING
+    // K3) — so this checks retiredAtBlock directly, never only `phase`. Whether
+    // a natural FROZEN closes it depends on the deployed contract (v1 yes, v2
+    // no: A1 made a lapse an inflow stop), which is why the predicate is the
+    // shared rules-aware one and not the inline v1 shape that used to be here.
     const closedStored = state[kState(creator)] === STATE_CLOSED;
     const paidUntilBlock = toU64(state[kPaidUntil(creator)]);
     const retiredAtBlock = decodeRetiredAt(state[kRetiredAt(creator)]);
     const phase = derivePhase(closedStored, paidUntilBlock, head, retiredAtBlock);
-    if (retiredAtBlock !== null || phase === 'FROZEN' || phase === 'CLOSED') {
-      throw new Error('VscCreatorTokensDataSource: curve sell is closed while the market winds down (retired/frozen/closed); exit via refund() instead');
+    if (windingDownOf({ phase, retiredAtBlock, rules })) {
+      throw new Error('VscCreatorTokensDataSource: curve sell is closed while the market winds down; exit via refund() instead');
     }
     const supplyTokens = toU64(state[kSupply(creator)]);
     const acqBlock = toU64(state[kAcqBlock(creator, seller)]);
@@ -927,7 +1130,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // it as the outcome. Return the EXPECTED post-state, flagged `pending`, and
     // let useCreatorToken's poll reconcile it against real chain state (mirrors
     // ask()'s `:pending` Ask and prediction-market's optimistic placeBet).
-    const head = await this.gql.getHeadBlock();
+    const [head, rules] = await Promise.all([this.gql.getHeadBlock(), this.readRules()]);
     if (head === null) return { ...unknownMarket(input.creator), pending: true };
     return {
       ...this.buildMarket(
@@ -956,7 +1159,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
           registeredAtBlock: head,
           retiredAtBlock: null
         },
-        head
+        head,
+        rules
       ),
       pending: true
     };
@@ -978,14 +1182,24 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // a genuine lapse through Register instead). Skipped — never blocked —
     // when the market can't be read or was never registered, same "band
     // check only, not an existence check" reasoning as every other guard in
-    // this file that reads a fresh Market. market.canBuy/canAsk are the exact
-    // same RequireInflowOpen boolean (buildMarket computes one `canFlow` and
-    // assigns it to both), so reusing canBuy here rather than re-deriving it
-    // keeps this in lockstep with those two guards by construction.
+    // this file that reads a fresh Market.
+    //
+    // ★★★ CORRECTED 2026-08-30 — THIS COMMENT AND THIS GUARD WERE BOTH WRONG.
+    // The claim above that "Renew -> RequireInflowOpen" is false. core.Renew
+    // calls requireMarketAcceptsMoney (market.go:795-800), and the contract
+    // says why in its own words, having found this exact defect on 2026-07-27
+    // and called it fatal: the delivery penalty runs 7 days while the grace
+    // runs 5, so a penalty near a renewal date outlives the grace, the market
+    // hits FROZEN where Renew is illegal forever, and a self-clearing penalty
+    // becomes PERMANENT destruction of the market with every holder dumped on
+    // the pro-rata rail. "An attacker only had to time three junk asks."
+    // The contract fixed it; this client had re-introduced it by gating on
+    // canBuy, which carries the delivery term. Blocking a debtor from paying
+    // you is not a penalty, it is a trap. Gate on canRenew, never canBuy.
     const [market, head] = await Promise.all([this.readMarket(input.creator), this.gql.getHeadBlock()]);
     if (market && market.phase !== 'UNKNOWN') {
-      if (!market.canBuy) {
-        throw new Error('VscCreatorTokensDataSource: market inflow is not open (frozen, closed, retiring, or globally paused)');
+      if (!market.canRenew) {
+        throw new Error(renewRefusalMessage(market.renewRefusal));
       }
       if (head !== null) {
         const base = Math.max(market.paidUntilBlock, head);
@@ -1007,6 +1221,39 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       rcLimit: this.config.rcLimit
     });
     await this.broadcast(op);
+    // ★★★ S4 (studio checklist, 2026-08-30): "PAID" MUST MEAN THE CHAIN MOVED.
+    // The Hive rail (lib/vsc/broadcaster.ts) resolves the moment Hive accepts
+    // the custom_json ENVELOPE, before Magi has executed it, so this used to
+    // return "paid" for a payment the contract had not yet seen and might
+    // still refuse (paused, retired, a stale nonce) — which is literally the
+    // "they pay and get delisted anyway" case. The wallet rail never had the
+    // hole: it awaits `waitForInclusion` (lib/lite/wallet/vsc-tx/submit.ts).
+    // Both rails now converge on ONE proof that does not need a tx id at all:
+    // the state itself. kPaidUntil is the single key Renew writes
+    // (market.go:843 setU64(kPaidUntil)), so polling it until it moves past
+    // the pre-broadcast value is exactly "Magi executed our renew", on either
+    // rail. MEASURED, not assumed (57, 2026-08-30, a real signed setCap on a
+    // wallet-DID market through this same proxy): INCLUDED at +0 s, state
+    // still the OLD value at +6 s, the new value at +21 s. Inclusion is not
+    // execution and execution is not immediately readable, which is why the
+    // cadence below is 3 s over 90 s and not one read after the receipt.
+    // Bounded (same window the wallet rail uses); on timeout this THROWS
+    // rather than returning a pending market, because a "paid" that is not
+    // paid is the fault being fixed — the message tells the creator to CHECK,
+    // never to pay again (Renew stacks from max(paidUntil, block), so a blind
+    // retry buys a second month).
+    const before = market && market.phase !== 'UNKNOWN' ? market.paidUntilBlock : null;
+    const confirmed = await this.awaitPaidUntilAdvance(input.creator, before);
+    if (!confirmed) {
+      throw new Error(
+        'CREATOR_TOKENS_RENEW_UNCONFIRMED: Hive accepted the payment, but Magi has not recorded it yet. It may still land in a moment. Check again rather than paying again, or you could pay for a second month.'
+      );
+    }
+    // Confirmed on chain: return the REAL post-execution market, not a
+    // projection. A failed re-read falls through to the projection below with
+    // pending: true, which the UI shows as unconfirmed — never a fabricated value.
+    const fresh = await this.readMarket(input.creator);
+    if (fresh && fresh.phase !== 'UNKNOWN') return fresh;
     // Optimistic PENDING result (see registerMarket): project the extended
     // paidUntil locally from the pre-broadcast read rather than re-reading
     // PRE-execution state. If the pre-read was unusable (null/UNKNOWN/no head)
@@ -1018,7 +1265,20 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     const newPaidUntilBlock = Math.max(market.paidUntilBlock, head) + input.periods * SUBSCRIPTION_PERIOD_BLOCKS;
     const renewedPhase = derivePhase(false, newPaidUntilBlock, head, market.retiredAtBlock);
     const graceExpiresAtBlock = deriveGraceExpiresAtBlock(newPaidUntilBlock);
-    const canFlow = canInflowOpen(renewedPhase, market.globalInflowPaused) && market.retiredAtBlock === null;
+    // ★ The same two-gate split as buildMarket (2026-08-30). This projection had
+    // silently DROPPED the delivery term from canBuy, so an optimistic renew
+    // re-opened the Buy button for a delinquent creator until the next refetch.
+    // canRenew correctly ignores delivery; canBuy correctly keeps it.
+    const acceptsMoney = canInflowOpen(renewedPhase, market.globalInflowPaused) && market.retiredAtBlock === null;
+    const canFlow = acceptsMoney && market.delinquentUntilBlock === null;
+    // Same lockstep as buildMarket, under the rules this market was read with.
+    const renewGate = renewGateUnder(market.rules, {
+      phase: renewedPhase,
+      retiredAtBlock: market.retiredAtBlock,
+      globalInflowPaused: market.globalInflowPaused,
+      supplyTokens: market.supplyTokens,
+      reserveBaseUnits: humanToBaseUnits(market.reserveHbd)
+    });
     return {
       ...market,
       paidUntilBlock: newPaidUntilBlock,
@@ -1026,8 +1286,12 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       graceExpiresAtBlock,
       graceExpiresAt: blockToEpochMs(graceExpiresAtBlock, head),
       phase: renewedPhase,
+      headBlock: head,
+      windingDown: windingDownOf({ phase: renewedPhase, retiredAtBlock: market.retiredAtBlock, rules: market.rules }),
       canBuy: canFlow,
       canAsk: canFlow,
+      canRenew: renewGate.canRenew,
+      renewRefusal: renewGate.renewRefusal,
       pending: true
     };
   }
@@ -1232,6 +1496,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       phase: retiredPhase,
       canBuy: false,
       canAsk: false,
+      // requireMarketAcceptsMoney refuses a retired market too (market.go:408).
+      canRenew: false,
       pending: true
     };
   }
@@ -1436,7 +1702,80 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // the ORACLE rate would print 0 for a market that has been fully sold back
     // to supply 0, while the header showed the real 1.000 HBD reset price.
     // Identical for every supply >= 1; this only fixes that one point.
-    return points.map((p) => ({ block: p.block, priceHbd: baseUnitsToHuman(displayPricePerTokenBaseUnits(p.supplyAfter)) }));
+    const priceAt = (supply: number): number => baseUnitsToHuman(displayPricePerTokenBaseUnits(supply));
+
+    /*
+     * ★★★ A SUPPLY THAT CANNOT EXIST IS NOT A DATA POINT (2026-08-30).
+     *
+     * Found by an adversarial sweep hours after the opening point below shipped,
+     * and it is OUR regression, not a pre-existing one. `hive:magi.contracts` has
+     * exactly one row on the live testnet indexer: `{supply_after: -2, delta: -2,
+     * side: sell}`. A negative supply is impossible on chain; the view computes
+     * `supply_after` as a window sum over bought and sold events only
+     * (`magi-indexer/creator_tokens_views.yaml:113-124`), so any event class it
+     * does not sum can drive it below zero.
+     *
+     * Before the opening point existed, a one-row market fell under `adapt.ts`'s
+     * two-point floor and drew nothing, so the bad row was invisible. Adding the
+     * opening point lifted it OVER that floor, and the page then rendered a line
+     * falling to the axis captioned "Price down 100.0% across the 1 recorded
+     * trade in this market" — on a page whose own header said the market holds 8
+     * tokens at $1.07. We made a latent bad row into a false statement about
+     * someone's money.
+     *
+     * `priceAt(-2)` returns 0 rather than throwing, which is exactly why this
+     * had to be caught by looking rather than by an exception. Drop the row: a
+     * missing point is honest, a fabricated 100% crash is not. The guard the
+     * opening point already applied to its DERIVED supply now applies to every
+     * row's own.
+     */
+    const usable = points.filter((p) => Number.isFinite(p.supplyAfter) && p.supplyAfter >= 0);
+    const trades: PricePoint[] = usable.map((p) => ({ block: p.block, priceHbd: priceAt(p.supplyAfter) }));
+
+    // ★★★ THE OPENING POINT (2026-08-30). Owner: *"theres no chart in the
+    // market."* Reproduced at /creators/@hbd-temp on the running build: a market
+    // reading "30 of 30 tokens issued — Sold out" rendered "No price history
+    // yet. A chart appears once this market has traded more than once."
+    //
+    // It is not the toDid defect above coming back — that fix holds, and the
+    // same page draws 17 points for `hive:lumen.beat`. It is an OFF-BY-ONE IN
+    // WHAT A ROW MEANS. A `lumen_ct_price_history` row records where supply
+    // LANDED, so one trade is one point, and `live/adapt.ts` (rightly) refuses
+    // to draw a line through one point. But a trade has two ends: the row's own
+    // `delta` is the signed change, so `supplyAfter - delta` is the supply the
+    // market held immediately BEFORE the oldest trade we fetched. That is a
+    // recorded state at a real moment, and its price comes from the SAME curve
+    // function as every other point here — not an interpolation, not a guess.
+    //
+    // hbd-temp: one row {supply_after 30, delta +30} -> opening supply 0, whose
+    // price is 1.007 HBD (buyCost(0,1), NOT the oracle's zero at supply 0), and
+    // the chart draws 1.007 -> 1.247. Both ends true, both checkable.
+    //
+    // ONLY THE OLDEST ROW'S. Every later row's "before" is the previous row's
+    // `supplyAfter` and is already plotted; prepending each would double every
+    // point. And when the series is capped at `limit`, the oldest fetched row's
+    // predecessor is still a genuine past supply, so this stays honest for a
+    // market past 200 trades as well.
+    //
+    // GUARDED, because a wrong extra point would be worse than a missing chart:
+    // no rows means no market history to open (0 stays 0, never a fabricated
+    // line); a non-finite or negative derived supply means the `delta` column
+    // could not be read, and the series is returned exactly as it was.
+    const oldest = usable[0];
+    if (!oldest) return trades;
+    const openingSupply = oldest.supplyAfter - oldest.delta;
+    if (!Number.isFinite(openingSupply) || openingSupply < 0) return trades;
+    return [
+      {
+        // The opening state held from registration until the trade that ended
+        // it, so the block BEFORE that trade is a block at which it was true.
+        block: Math.max(0, oldest.block - 1),
+        priceHbd: priceAt(openingSupply),
+        // Not a trade. Everything that states a basis counts on this flag.
+        opening: true
+      },
+      ...trades
+    ];
   }
 
   async listOfferings(creator: string): Promise<Offering[]> {
@@ -1692,9 +2031,9 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       throw new Error('VscCreatorTokensDataSource: insufficient tokens');
     }
     if (market && market.phase !== 'UNKNOWN') {
-      const windingDown = market.retiredAtBlock !== null || market.phase === 'FROZEN' || market.phase === 'CLOSED';
+      const windingDown = market.windingDown;
       if (!windingDown) {
-        throw new Error('VscCreatorTokensDataSource: pro-rata refund opens only at wind-down (retired/frozen/closed); while the market trades, exit via sell() instead');
+        throw new Error('VscCreatorTokensDataSource: pro-rata refund opens only at wind-down; while the market trades, exit via sell() instead');
       }
     }
     const minNetBaseUnits = input.minNetHbd !== undefined ? humanToBaseUnits(input.minNetHbd) : undefined;
@@ -1748,9 +2087,9 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     const [priorPosition, market] = await Promise.all([this.readHolderPosition(input.creator, input.holder), this.readMarket(input.creator)]);
     if (!priorPosition) throw new Error(`VscCreatorTokensDataSource: no such market ${input.creator}`);
     if (market && market.phase !== 'UNKNOWN') {
-      const windingDown = market.retiredAtBlock !== null || market.phase === 'FROZEN' || market.phase === 'CLOSED';
+      const windingDown = market.windingDown;
       if (!windingDown) {
-        throw new Error('VscCreatorTokensDataSource: refundHolder is only available once wind-down opens (retired/frozen/closed); the holder may still exit via sell()');
+        throw new Error('VscCreatorTokensDataSource: refundHolder is only available once wind-down opens; the holder may still exit via sell()');
       }
     }
     const op = buildOp({
@@ -1849,7 +2188,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // result directly — this is the same PRE-broadcast optimistic projection
     // every other write in this file makes; re-readMarket() to confirm.
     if (!priorMarket || priorMarket.phase === 'UNKNOWN') return false;
-    return priorMarket.phase === 'CLOSED' || (priorMarket.phase === 'FROZEN' && priorMarket.supplyTokens === 0);
+    // Under v2 only a RETIRED frozen market closes (market/contract-rules.ts).
+    return closesIfDrainedUnder(priorMarket.rules, priorMarket);
   }
 
   // ---- the offerings shop. The caller IS the creator on all four writes, so
@@ -1943,6 +2283,33 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   private async broadcast(op: CustomJsonOp): Promise<string> {
     if (!this.broadcaster) throw new Error(NO_BROADCASTER_MSG);
     return this.broadcaster(op);
+  }
+
+  /**
+   * S4 (2026-08-30): poll kPaidUntil until it advances past `before`, or give
+   * up. `before === null` (the pre-read was unusable) still polls, but for ANY
+   * non-zero value change across the window rather than a strict advance, and
+   * a read failure inside the window counts as "not yet", never as confirmed.
+   * Same 90 s / 3 s cadence as the wallet rail's waitForInclusion.
+   */
+  private async awaitPaidUntilAdvance(creator: string, before: number | null): Promise<boolean> {
+    const TIMEOUT_MS = 90_000;
+    const POLL_MS = 3_000;
+    const key = kPaidUntil(toDid(creator));
+    const deadline = Date.now() + TIMEOUT_MS;
+    let first: number | null = null;
+    for (;;) {
+      try {
+        const state = await this.gql.getStateByKeys(this.config.contractId, [key]);
+        const now = toU64(state[key]);
+        if (before !== null ? now > before : first !== null && now !== first) return true;
+        if (first === null) first = now;
+      } catch {
+        // not yet; a read failure is not a confirmation
+      }
+      if (Date.now() + POLL_MS >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    }
   }
 
   private async readOneAsk(creator: string, seq: number): Promise<Ask> {

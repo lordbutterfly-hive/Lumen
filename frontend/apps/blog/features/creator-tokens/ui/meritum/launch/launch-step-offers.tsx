@@ -7,6 +7,7 @@ import { usdPrice } from '../../../market/format';
 import { BackAction, PrimaryAction } from './launch-controls';
 import type { MeritumLaunchBlock, MeritumOffer } from './use-meritum-launch';
 import { MAX_OFFER_TITLE_LEN, offerTitleProblem } from '@/blog/features/creator-tokens/lib/vsc/op-builders';
+import WorkLinkField from '@/blog/features/creator-tokens/ui/work-link-field';
 
 /**
  * STEP 2 — the three open offers.
@@ -31,9 +32,10 @@ const CREATOR_SHARE_PCT = `${100 - COMMISSION_BPS / 100}%`;
 
 export interface LaunchStepOffersProps {
   /**
-   * Bare account name, no leading '@'. Only used to build the settings link —
-   * there is no bare `/settings` route in this app, the real one is nested under
-   * the profile as `/@<account>/settings`.
+   * Bare account name, no leading '@' — the signed-in creator launching this
+   * market. Passed straight through to `WorkLinkField` below, which uses it to
+   * key its own profile read/write (see that file for why it is never used to
+   * target the write itself — both write paths are session-scoped).
    */
   account: string;
   offers: MeritumOffer[];
@@ -203,32 +205,38 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
       </div>
 
       {/*
-        ★ SHOW THEM THE WORK — A LINK, NOT A FIELD.
-        The reference puts a work-link input on this card. Nothing in the launch
-        write carries it: `register` takes a price and a cap, `createOffering`
-        takes a title and a price. An input that quietly discards what is typed
-        into it, on the screen where a creator is being asked to trust the
-        numbers, is worse than no input. The profile link is real, it persists,
-        and it is one click away, so this points at it instead.
+        ★ SHOW THEM THE WORK — REWRITTEN 2026-08-30 (owner: "THEY NEED TO ADD
+        THE LINK HERE... NOT SETTINGS. AND I DONT SEE IT IN SETTINGS.").
+        The 2026-08 note this replaces argued an input is worse than no input
+        because nothing in the launch write can carry it: `register` takes a
+        price and a cap, `createOffering` takes a title and a price, neither
+        has room for a link. That premise was correct and the conclusion was
+        wrong — the link was never supposed to ride inside the launch
+        transaction at all. It goes to the profile store instead, the same one
+        `features/account-settings/form.tsx` already writes for both account
+        tiers (`website` on `posting_json_metadata.profile` for a Hive account,
+        `lumen_user.profile` for a lite one), which already persists and, once
+        B3/B5 land, already renders on the token page and the profile. So
+        `WorkLinkField` writes straight there and never touches this screen's
+        launch write at all — see that component for the two write paths and
+        why the Hive one is its own signature, independent of the hold-to-strike
+        below. Kept and corrected rather than deleted: this codebase records why
+        a decision reversed.
       */}
       <div className="mt-[26px] border-t border-meritum-line-card pt-[22px]">
         <div className="text-label font-bold uppercase tracking-label text-meritum-ink-3">
           {t('meritum_launch.work_heading')}
         </div>
         <p className="mt-2 max-w-[48ch] font-serif text-caption text-meritum-ink-muted">{t('meritum_launch.work_body')}</p>
-        {/*
-          ★ THERE IS NO BARE `/settings` ROUTE. It 404s. The settings page lives
-          under the profile — `app/[param]/(user-profile)/settings/page.tsx` —
-          so the only correct href is `/@<account>/settings`. Sending a creator
-          to a 404 from the screen that asks them to trust the numbers is the
-          worst possible place for a dead link.
-        */}
-        <a
-          href={`/@${account}/settings`}
-          className="mt-3 inline-flex text-14 font-semibold text-meritum-ink-link hover:underline"
-        >
-          {t('meritum_launch.work_link')}
-        </a>
+        <div className="mt-3">
+          <WorkLinkField
+            account={account}
+            inputClassName="min-w-[min(100%,220px)] flex-1 rounded-lg border border-meritum-line-input bg-meritum-card px-3 py-2 font-serif text-14 text-meritum-ink outline-none placeholder:text-meritum-ink-faint focus-visible:outline-none focus:border-meritum-line-brand disabled:opacity-60"
+            buttonClassName="inline-flex h-[38px] flex-none items-center rounded-lg bg-meritum-surface-brand px-4 text-caption font-bold text-meritum-ink-on-brand transition-colors hover:bg-meritum-surface-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
+            errorClassName="mt-1.5 text-caption font-semibold text-meritum-ink-brand"
+            statusClassName="mt-1.5 text-caption text-meritum-ink-faint"
+          />
+        </div>
       </div>
 
       {touched && blockMessage ? (

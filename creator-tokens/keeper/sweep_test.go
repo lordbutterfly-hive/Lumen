@@ -38,8 +38,12 @@ func recordingSleep(log *[]time.Duration) func(time.Duration) {
 	return func(d time.Duration) { *log = append(*log, d) }
 }
 
+// A1 (owner ruling 2026-08-30): every view in this file carries Retired: true
+// because keeper.Plan now sweeps RETIRED markets only — a natural FROZEN is an
+// inflow stop the creator can lift, not a wind-down (core/market.go inWindDown).
+// The transport/backoff behaviour under test is unchanged.
 func TestSweep_SucceedsFirstTryNeedsNoBackoff(t *testing.T) {
-	markets := []MarketView{{Creator: "c1", Phase: "FROZEN", Holders: []HolderBalance{{Holder: "h1", Balance: bi(10)}}}}
+	markets := []MarketView{{Creator: "c1", Phase: "FROZEN", Retired: true, Holders: []HolderBalance{{Holder: "h1", Balance: bi(10)}}}}
 	sub := newScriptedSubmitter()
 	var sleeps []time.Duration
 
@@ -59,7 +63,7 @@ func TestSweep_SucceedsFirstTryNeedsNoBackoff(t *testing.T) {
 }
 
 func TestSweep_RetriesWithGrowingBackoffThenSucceeds(t *testing.T) {
-	markets := []MarketView{{Creator: "c1", Phase: "FROZEN", Holders: []HolderBalance{{Holder: "h1", Balance: bi(10)}}}}
+	markets := []MarketView{{Creator: "c1", Phase: "FROZEN", Retired: true, Holders: []HolderBalance{{Holder: "h1", Balance: bi(10)}}}}
 	sub := newScriptedSubmitter()
 	rhKey := Op{Kind: OpRefundHolder, Creator: "c1", Holder: "h1"}.String()
 	sub.FailCount[rhKey] = 2 // fails twice, succeeds on the 3rd attempt
@@ -88,8 +92,8 @@ func TestSweep_ExhaustsRetriesThenContinuesToNextOp(t *testing.T) {
 	// the second market's ops must still be attempted and succeed -- one
 	// op's permanent failure must never abort the rest of the sweep.
 	markets := []MarketView{
-		{Creator: "doomed", Phase: "FROZEN", Holders: []HolderBalance{{Holder: "h1", Balance: bi(10)}}},
-		{Creator: "fine", Phase: "FROZEN", Holders: []HolderBalance{{Holder: "h2", Balance: bi(20)}}},
+		{Creator: "doomed", Phase: "FROZEN", Retired: true, Holders: []HolderBalance{{Holder: "h1", Balance: bi(10)}}},
+		{Creator: "fine", Phase: "FROZEN", Retired: true, Holders: []HolderBalance{{Holder: "h2", Balance: bi(20)}}},
 	}
 	sub := newScriptedSubmitter()
 	doomedKey := Op{Kind: OpRefundHolder, Creator: "doomed", Holder: "h1"}.String()
@@ -140,7 +144,7 @@ func TestSweep_ExhaustsRetriesThenContinuesToNextOp(t *testing.T) {
 }
 
 func TestSweep_MaxAttemptsLessThanOneTreatedAsOne(t *testing.T) {
-	markets := []MarketView{{Creator: "c1", Phase: "FROZEN", Holders: nil}} // just closeIfDrained
+	markets := []MarketView{{Creator: "c1", Phase: "FROZEN", Retired: true, Holders: nil}} // just closeIfDrained
 	sub := newScriptedSubmitter()
 	key := Op{Kind: OpCloseIfDrained, Creator: "c1"}.String()
 	sub.AlwaysFail[key] = true
@@ -152,7 +156,7 @@ func TestSweep_MaxAttemptsLessThanOneTreatedAsOne(t *testing.T) {
 }
 
 func TestSweep_NilSleepNeverPanics(t *testing.T) {
-	markets := []MarketView{{Creator: "c1", Phase: "FROZEN", Holders: []HolderBalance{{Holder: "h1", Balance: bi(1)}}}}
+	markets := []MarketView{{Creator: "c1", Phase: "FROZEN", Retired: true, Holders: []HolderBalance{{Holder: "h1", Balance: bi(1)}}}}
 	sub := newScriptedSubmitter()
 	rhKey := Op{Kind: OpRefundHolder, Creator: "c1", Holder: "h1"}.String()
 	sub.FailCount[rhKey] = 2
@@ -215,7 +219,7 @@ func (v *verifyingSubmitter) VerifyExecution(op Op, receipt string) (executed bo
 // report.Succeeded -- the exact mistake F9 found sweep.go making (Succeeded
 // set purely from Submit's err == nil, with no way to observe a revert).
 func TestSweep_ConfirmedRevertIsRecordedFailedNeverSucceeded(t *testing.T) {
-	markets := []MarketView{{Creator: "c1", Phase: "FROZEN", Holders: []HolderBalance{{Holder: "h1", Balance: bi(10)}}}}
+	markets := []MarketView{{Creator: "c1", Phase: "FROZEN", Retired: true, Holders: []HolderBalance{{Holder: "h1", Balance: bi(10)}}}}
 	rhKey := Op{Kind: OpRefundHolder, Creator: "c1", Holder: "h1"}.String()
 	cdKey := Op{Kind: OpCloseIfDrained, Creator: "c1"}.String()
 
@@ -259,7 +263,7 @@ func TestSweep_ConfirmedRevertIsRecordedFailedNeverSucceeded(t *testing.T) {
 // ExecutionVerifier at all (scriptedSubmitter) -- Sweep must never guess
 // StatusSucceeded when nothing confirmed execution either way.
 func TestSweep_NoExecutionVerifierIsUnverifiedNotSucceeded(t *testing.T) {
-	markets := []MarketView{{Creator: "c1", Phase: "FROZEN", Holders: []HolderBalance{{Holder: "h1", Balance: bi(10)}}}}
+	markets := []MarketView{{Creator: "c1", Phase: "FROZEN", Retired: true, Holders: []HolderBalance{{Holder: "h1", Balance: bi(10)}}}}
 	sub := newScriptedSubmitter()
 	report := Sweep(markets, sub, DefaultBackoffPolicy(), nil)
 	if report.Succeeded != 0 {

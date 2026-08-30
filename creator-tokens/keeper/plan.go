@@ -157,12 +157,16 @@ func Plan(markets []MarketView) []Op {
 
 	var ops []Op
 	for _, m := range sorted {
-		// Mirrors core's inWindDown, which is (retired OR frozen) — NOT frozen
-		// alone. A retired market is in wind-down from the retire block, while
-		// Phase still reads OVERDUE for the whole notice window; filtering on
-		// Frozen alone made Plan blind to it. See MarketView.Retired's doc.
-		// CLOSED is deliberately excluded: nothing is left to sweep.
-		if m.Phase == core.StateClosed || (m.Phase != core.StateFrozen && !m.Retired) {
+		// Mirrors core's inWindDown, which since A1 (owner ruling 2026-08-30,
+		// core/market.go inWindDown) is (retired OR stored CLOSED) — a natural
+		// FROZEN is an inflow stop, NOT a wind-down, and core.RefundHolder
+		// refuses on it, so a keeper that still swept lapsed markets would burn
+		// a submit per holder per round on a guaranteed STATE refusal. A
+		// retired market is in wind-down from the retire block, while Phase
+		// still reads OVERDUE for the whole notice window; see
+		// MarketView.Retired's doc. CLOSED is deliberately excluded: nothing
+		// is left to sweep. (Before A1 this read `Phase != Frozen && !Retired`.)
+		if m.Phase == core.StateClosed || !m.Retired {
 			continue
 		}
 

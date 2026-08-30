@@ -1,40 +1,5 @@
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
-import type {
-  Ask,
-  CreateOfferingInput,
-  DeclineInput,
-  DeleteOfferingInput,
-  CreatorSummary,
-  IndexerHealth,
-  Offering,
-  PricePoint,
-  RateInput,
-  SetOfferingPriceInput,
-  SetOfferingTitleInput,
-  AskInput,
-  AnswerInput,
-  BuyInput,
-  BuyQuote,
-  ClaimTradeFeesInput,
-  CloseIfDrainedInput,
-  DeliveryRecord,
-  HolderPosition,
-  MyAsksResult,
-  WalletPositionsResult,
-  Market,
-  Quote,
-  ReclaimInput,
-  RefundHolderInput,
-  RefundInput,
-  RegisterMarketInput,
-  RenewSubscriptionInput,
-  RetireInput,
-  SellInput,
-  SellQuote,
-  SetCapInput,
-  SetFaceInput,
-  TransferTokensInput,
-  WithdrawTreasuryInput, MarketPrice } from '../../types';
+import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RenewSubscriptionInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../../types';
 import type { CreatorTokensDataSource } from '../creator-tokens-data-source';
 import {
   BLOCKS_PER_DAY,
@@ -77,11 +42,24 @@ import {
   type AskSeed,
   type MarketSeed
 } from './fixtures';
+import { marketHealthOf, windingDownOf } from '../../market/market-health';
+import { closesIfDrainedUnder, renewGateUnder } from '../../market/contract-rules';
+import type { ContractRules } from '../../types';
+
+/**
+ * The contract rules the DEMO simulates (market/contract-rules.ts). 'v2' is
+ * the product the owner decided on 2026-08-30 (a lapse is an inflow stop the
+ * creator lifts by paying), and it is the only way to put a `delisted` market
+ * on a screen before the contract is on a chain: every testnet market is
+ * ACTIVE for weeks. Set to 'v1' to demo the contract deployed before A1. The
+ * live data source never reads this; it asks the chain.
+ */
+export const MOCK_CONTRACT_RULES: ContractRules = 'v2';
 
 // Behaviour half of the mock split — the creator/holder/ask/delivery FIXTURES
 // themselves live in ./fixtures.ts (the pure "creator states" data), this file
 // owns only how reads/writes are simulated against them. See fixtures.ts for
-// the seeded scenarios (MOCK_ACTIVE/OVERDUE/FROZEN/EMPTY/CLOSED/UNKNOWN).
+// the seeded scenarios (MOCK_ACTIVE/EXPIRING/OVERDUE/FROZEN/EMPTY/CLOSED/UNKNOWN).
 //
 // ★ CURVE-PIVOT REWRITE (2026-07-24): see types.ts's / contract-math.ts's own
 // "THE 1000x UNIT TRAP" doc. Every *tokens quantity below is a whole INTEGER;
@@ -273,8 +251,23 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     // stated here rather than left implicit, because "the mock can't reach this
     // state" is the reason a delinquency bug would never show up in demo mode.
     const canFlow = canInflowOpen(phase, globalInflowPaused) && seed.retiredAtBlock === null;
+    // The same lockstep as vsc-data-source.ts buildMarket (A5, 2026-08-31),
+    // under MOCK_CONTRACT_RULES instead of a chain read.
+    const rules = MOCK_CONTRACT_RULES;
+    const windingDown = windingDownOf({ phase, retiredAtBlock: seed.retiredAtBlock, rules });
+    const renewGate = renewGateUnder(rules, {
+      phase,
+      retiredAtBlock: seed.retiredAtBlock,
+      globalInflowPaused,
+      supplyTokens: seed.supplyTokens,
+      reserveBaseUnits: seed.reserveBaseUnits
+    });
     return {
       creator,
+      rules,
+      headBlock: head,
+      windingDown,
+      renewRefusal: renewGate.renewRefusal,
       delinquentUntilBlock: null,
       faceHbd: baseUnitsToHuman(seed.faceBaseUnits),
       faceSetAtBlock,
@@ -297,6 +290,10 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       globalInflowPaused,
       canBuy: canFlow,
       canAsk: canFlow,
+      // The mock has no delivery gate, so canBuy and the renew gate differ
+      // only where the contract rules make them differ (a v2 FROZEN market:
+      // no buying, renew admitted). See canRenew's doc in types.ts.
+      canRenew: renewGate.canRenew,
       retiredAtBlock: seed.retiredAtBlock,
       floorPriceHbd: baseUnitsToHuman(floorPricePerTokenBaseUnits(seed.reserveBaseUnits, seed.supplyTokens)),
       spotPriceHbd: baseUnitsToHuman(displayPricePerTokenBaseUnits(seed.supplyTokens)),
@@ -315,14 +312,20 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     for (const creator of creators) {
       const market = await this.readMarket(creator).catch(() => null);
       if (market === null) {
-        out.set(creator, { status: 'none', priceUsd: null });
+        out.set(creator, { status: 'none', priceUsd: null, health: null });
         continue;
       }
       if (market.phase === 'UNKNOWN') {
-        out.set(creator, { status: 'unknown', priceUsd: null });
+        out.set(creator, { status: 'unknown', priceUsd: null, health: null });
         continue;
       }
-      out.set(creator, { status: 'ready', priceUsd: market.spotPriceHbd /* usdFromHbd is identity; see live/adapt */ });
+      out.set(creator, {
+        status: 'ready',
+        priceUsd: market.spotPriceHbd /* usdFromHbd is identity; see live/adapt */,
+        // Same one-word derivation the live read uses (2026-08-30, B4), off the
+        // same Market fields, so a mock frozen market renders exactly as a real one.
+        health: marketHealthOf({ phase: market.phase, canBuy: market.canBuy, windingDown: market.windingDown })
+      });
     }
     return out;
   }
@@ -399,7 +402,7 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     };
   }
 
-  async readCreatorAsks(creator: string, opts?: { limit?: number }): Promise<Ask[]> {
+  async readCreatorAsks(creator: string): Promise<CreatorAsksResult> {
     await delay(150);
     if (creator === MOCK_UNKNOWN) {
       throw new Error('MockCreatorTokensDataSource: simulated read failure');
@@ -407,8 +410,13 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     const head = mockHeadBlock();
     const persisted = getStorageItem<AskSeed[]>(asksKey(creator));
     const seeds = persisted ?? ASK_SEEDS[creator] ?? [];
-    const asks = seeds.map((s) => this.buildAsk(creator, s, head)).sort((a, b) => a.deadlineBlock - b.deadlineBlock);
-    return opts?.limit ? asks.slice(0, opts.limit) : asks;
+    // The mock holds a handful of seeds, so the whole set is always scanned;
+    // only awaiting/expired reach the inbox, matching the live source.
+    const asks = seeds
+      .map((s) => this.buildAsk(creator, s, head))
+      .filter((a) => a.status === 'awaiting' || a.status === 'expired')
+      .sort((a, b) => a.deadlineBlock - b.deadlineBlock);
+    return { asks, scannedAll: true, olderNotScanned: 0 };
   }
 
   async readMyAsks(asker: string): Promise<MyAsksResult> {
@@ -565,8 +573,8 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       throw new Error('MockCreatorTokensDataSource: tokens must be a positive whole number');
     }
     const market = this.buildMarket(creator, seed);
-    if (market.retiredAtBlock !== null || market.phase === 'FROZEN' || market.phase === 'CLOSED') {
-      throw new Error('MockCreatorTokensDataSource: curve sell is closed while the market winds down (retired/frozen/closed); exit via refund() instead');
+    if (market.windingDown) {
+      throw new Error('MockCreatorTokensDataSource: curve sell is closed while the market winds down; exit via refund() instead');
     }
     const { tokens: tokensHeld, heldBlocks } = readWalletEntry(creator, seller);
     if (tokens > tokensHeld) {
@@ -707,8 +715,8 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     const market = this.buildMarket(input.creator, seed);
     // sell.go's rail switch: the curve rail is CLOSED while the market winds
     // down (retired, or naturally FROZEN/CLOSED).
-    if (market.retiredAtBlock !== null || market.phase === 'FROZEN' || market.phase === 'CLOSED') {
-      throw new Error('MockCreatorTokensDataSource: curve sell is closed while the market winds down (retired/frozen/closed); exit via refund() instead');
+    if (market.windingDown) {
+      throw new Error('MockCreatorTokensDataSource: curve sell is closed while the market winds down; exit via refund() instead');
     }
     const prior = readWalletEntry(input.creator, input.seller);
     if (input.tokens > prior.tokens) {
@@ -837,8 +845,8 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     const market = this.buildMarket(input.creator, seed);
     // refund.go Refund: the WIND-DOWN rail — inWindDown ONLY (retired, or
     // naturally FROZEN/CLOSED). While the market trades, the exit is sell().
-    if (!(market.retiredAtBlock !== null || market.phase === 'FROZEN' || market.phase === 'CLOSED')) {
-      throw new Error('MockCreatorTokensDataSource: pro-rata refund opens only at wind-down (retired/frozen/closed); while the market trades, exit via sell() instead');
+    if (!market.windingDown) {
+      throw new Error('MockCreatorTokensDataSource: pro-rata refund opens only at wind-down; while the market trades, exit via sell() instead');
     }
     const prior = readWalletEntry(input.creator, input.holder);
     if (input.tokens > prior.tokens) {
@@ -918,8 +926,8 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     const seed = this.seed(input.creator);
     if (!seed) return false;
     const market = this.buildMarket(input.creator, seed);
-    if (market.phase === 'CLOSED') return true;
-    if (market.phase === 'FROZEN' && seed.supplyTokens === 0) {
+    if (closesIfDrainedUnder(market.rules, { phase: market.phase, retiredAtBlock: market.retiredAtBlock, supplyTokens: seed.supplyTokens })) {
+      if (market.phase === 'CLOSED') return true;
       const next: MarketSeed = { ...seed, closedStored: true };
       setStorageItem(marketKey(input.creator), next, StorageTTL.SESSION);
       return true;
