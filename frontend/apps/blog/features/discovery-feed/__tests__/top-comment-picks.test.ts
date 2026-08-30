@@ -244,5 +244,21 @@ const w10 = selectTopComment(rootKey, deletable);
 check('a cached comment deleted from the thread re-picks rather than returning null',
   w10 !== null && w10.key === survivor, `got: ${w10 ? w10.key : 'null'}`);
 
+// ── 11. the post author's own comment is excluded from selection ────────────
+resetTopCommentPicks();
+const authorThread = newThread();
+addCandidate(authorThread, ROOT_AUTHOR, 200, ['fan1', 'fan2']); // author's own reply, high score
+const communityKey = addCandidate(authorThread, 'community', 3, []);
+const w11 = selectTopComment(rootKey, authorThread);
+check('the post author\'s own comment is excluded — community comment wins',
+  w11 !== null && w11.key === communityKey, `won: ${w11 ? w11.key : 'null'}`);
+
+// Author's comment as the ONLY comment = null (no community voice to show)
+resetTopCommentPicks();
+const soloAuthor = newThread();
+addCandidate(soloAuthor, ROOT_AUTHOR, 50, []);
+check('a thread with only the author\'s own comments returns null',
+  selectTopComment(rootKey, soloAuthor) === null);
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

@@ -140,11 +140,19 @@ export function selectTopComment(rootKey: string, discussion: Record<string, Ent
   if (!discussion) return null;
 
   const counts = directResponseCounts(discussion);
+  const rootAuthor = rootKey.split('/')[0];
 
-  // Every node EXCEPT the root post. `bridge.get_discussion` always includes the
-  // root, so filtering it out here is not optional — without it a post with no
-  // comments would "open onto itself".
-  const comments = Object.entries(discussion).filter(([key]) => key !== rootKey);
+  // Every node EXCEPT the root post and the post author's own replies. The root
+  // is excluded because without it a post with no comments would "open onto
+  // itself". The author's replies are excluded because the "top comment" is the
+  // community's voice, not the author's — an author reply with decent engagement
+  // easily outscores community comments on a post with few replies, and showing
+  // the author's own words as the hook defeats the purpose of the feature. The
+  // author's engagement is still reflected through the 2x multiplier on comments
+  // they replied to.
+  const comments = Object.entries(discussion).filter(
+    ([key, entry]) => key !== rootKey && entry.author !== rootAuthor
+  );
   if (comments.length === 0) return null; // rule 4
 
   // A pick already made this session wins, as long as the comment still exists.
@@ -188,7 +196,6 @@ export function selectTopComment(rootKey: string, discussion: Record<string, Ent
    * text under the pointer mid-hover is worse than a stale winner, and the cache
    * is what prevents it.
    */
-  const rootAuthor = rootKey.split('/')[0];
   const authorRepliedTo = new Set<string>();
   for (const entry of Object.values(discussion)) {
     if (entry?.author !== rootAuthor) continue;

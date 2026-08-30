@@ -10,6 +10,8 @@ import ComposerAction from './composer-action';
 const ICON_CLASS = 'h-5 w-5';
 
 export interface ComposerFooterLabels {
+  bold: string;
+  italic: string;
   addImage: string;
   addEmoji: string;
   post: string;
@@ -38,6 +40,8 @@ export default function ComposerFooter({
   canSubmit,
   uploading,
   emojiOpen,
+  onToggleBold,
+  onToggleItalic,
   onOpenFilePicker,
   onToggleEmoji,
   onSubmit,
@@ -52,6 +56,8 @@ export default function ComposerFooter({
   canSubmit: boolean;
   uploading: boolean;
   emojiOpen: boolean;
+  onToggleBold: () => void;
+  onToggleItalic: () => void;
   onOpenFilePicker: () => void;
   onToggleEmoji: () => void;
   onSubmit: () => void;
@@ -60,8 +66,31 @@ export default function ComposerFooter({
   picker: ReactNode;
 }) {
   return (
-    <div className="relative mt-3 flex items-center justify-between gap-3 border-t border-[#ebebeb] pl-[56px] pt-3">
+    <div className="relative mt-3 flex items-center justify-between gap-3 border-t border-[#ebebeb] pt-3">
       <div className="flex items-center gap-1">
+        {/* ★ Bold/italic, added at the FRONT of the cluster (owner ask,
+            2026-08-28) — the toolbar previously had only image/emoji and empty
+            space to their left. Same `Icons.*` house set and `ICON_CLASS` as
+            every other button here, and the same house icons the long-form
+            editor's toolbar uses for bold/italic (`toolbar-config.tsx`), so the
+            two editors keep matching the way the comment above already
+            requires for the image glyph. */}
+        <ComposerAction
+          label={labels.bold}
+          onClick={onToggleBold}
+          disabled={submitting}
+          testId="short-form-composer-bold-button"
+        >
+          <Icons.bold className={ICON_CLASS} aria-hidden="true" />
+        </ComposerAction>
+        <ComposerAction
+          label={labels.italic}
+          onClick={onToggleItalic}
+          disabled={submitting}
+          testId="short-form-composer-italic-button"
+        >
+          <Icons.italic className={ICON_CLASS} aria-hidden="true" />
+        </ComposerAction>
         <ComposerAction
           label={labels.addImage}
           onClick={onOpenFilePicker}
