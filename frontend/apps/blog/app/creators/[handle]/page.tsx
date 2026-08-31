@@ -31,7 +31,12 @@ function normalizeHandle(raw: string): string {
     if (next === out) break;
     out = next;
   }
-  return decodePercentEscapes(out);
+  const decoded = decodePercentEscapes(out);
+  // ★ Hive usernames are ALWAYS lowercase, so a mistyped /creators/HBD-TEMP must
+  // still resolve to hbd-temp rather than falsely reading "hasn't launched a
+  // token" (UX review 2026-08-31). A did:pkh: id carries a ':' and is
+  // case-significant (EVM checksum), so lowercase ONLY when there is no ':'.
+  return decoded.includes(':') ? decoded : decoded.toLowerCase();
 }
 
 /**

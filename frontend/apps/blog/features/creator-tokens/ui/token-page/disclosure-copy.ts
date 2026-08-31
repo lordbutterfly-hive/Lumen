@@ -164,8 +164,9 @@ export function backingPerTokenValue(floorUsd: number, supply: number): string {
  * THE SELL/REDEEM DIALOG'S CLOSING LINE. Replaces "You can always exit."
  *
  * What is actually true: exactly ONE of the two routes is open at a time, the
- * curve one closes when the market winds down (sell.go throws once retired,
- * frozen or closed, which is why the redeem rail exists at all), and neither
+ * curve one closes when the market winds down (sell.go throws once retired or
+ * closed; since A1 a natural FROZEN is an inflow stop, NOT a wind-down, so the
+ * curve stays open there — see market/lapse.ts), and neither
  * pays a number anyone has promised in advance. The old line asserted the
  * opposite of the third point and glossed the first.
  */
@@ -322,7 +323,7 @@ export const WIND_DOWN_BANNER =
  * or an empty string when the market has no backing figure to quote.
  */
 export function overdueBanner(figures: string): string {
-  return `This creator’s listing has lapsed. If it isn’t renewed the market freezes: buying and selling on the curve close, and the only way out becomes Redeem against the reserve${figures}.`;
+  return `This creator’s listing has lapsed. If it isn’t renewed the market stops taking new buyers, but you can still sell on the curve, and the creator can renew any time to reopen buying.${figures}`;
 }
 
 /**

@@ -8,7 +8,7 @@ import { useLiveDiscovery } from '../../live/use-live-discovery';
 import { describeLag, useIndexerHealth } from '../../live/use-indexer-health';
 import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
 import type { CreatorSummary } from '../../types';
-import { pctLabel, usdCompact, usdPrice, usdWhole } from '../../market/format';
+import { avatarGradient, pctLabel, usdCompact, usdPrice, usdWhole } from '../../market/format';
 import { resolveDiscoveryControls, type DiscoverySort } from '../../market/discovery-ranking';
 import TokenShell from '../token-shell';
 
@@ -140,11 +140,6 @@ function responseLabel(blocks: number | null): string {
 }
 
 /** Decoration derived from the handle — not identity, and not implied to be theirs. */
-function avatarFill(handle: string): string {
-  let h = 0;
-  for (let i = 0; i < handle.length; i++) h = (h * 31 + handle.charCodeAt(i)) % 360;
-  return `linear-gradient(135deg,hsl(${h} 42% 42%),hsl(${(h + 40) % 360} 38% 48%))`;
-}
 
 const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
   // The view gives COUNTS, not an ordered pass/fail history, so the strip is
@@ -156,7 +151,7 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
       className="block rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)] transition-colors hover:bg-surface-12"
     >
       <div className="mb-3.5 flex items-center gap-3">
-        <span className="h-[46px] w-[46px] flex-shrink-0 rounded-card" style={{ background: avatarFill(c.creator) }} />
+        <span className="h-[46px] w-[46px] flex-shrink-0 rounded-card" style={{ background: avatarGradient(c.creator) }} />
         <div className="min-w-0 flex-1">
           <div className="text-[16px] font-bold text-ink-2">@{displayHandle(c.creator)}</div>
           {/* No bio: not contract state, not indexed, and inventing one under
@@ -211,7 +206,7 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
       <div className="mt-3.5 flex items-center justify-between gap-3 border-t border-line-2 pt-3.5">
         <span className="text-caption tabular-nums text-ink-10">From {usdWhole(usdFromHbd(c.fromPriceHbd))} per task</span>
         <span className="text-caption tabular-nums text-ink-14">
-          Token {usdPrice(usdFromHbd(c.priceHbd))} · cap {usdCompact(usdFromHbd(c.marketCapHbd))}
+          Token {usdPrice(usdFromHbd(c.priceHbd))} {c.marketCapHbd > 0 ? `· cap ${usdCompact(usdFromHbd(c.marketCapHbd))}` : '· not traded yet'}
         </span>
       </div>
     </Link>
@@ -425,7 +420,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
                 className="block min-w-[240px] rounded-2xl border border-line-9 bg-surface-1 p-4 transition-colors hover:border-line-17"
               >
                 <div className="mb-3 flex items-center gap-3">
-                  <span className="h-10 w-10 rounded-control" style={{ background: avatarFill(c.creator) }} />
+                  <span className="h-10 w-10 rounded-control" style={{ background: avatarGradient(c.creator) }} />
                   <div>
                     <div className="text-[15px] leading-[24px] font-bold text-ink-2">@{displayHandle(c.creator)}</div>
                   </div>

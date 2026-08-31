@@ -13,8 +13,9 @@ import { useCreatorFollow } from '../../live/use-creator-follow';
 // header for why a fetched `website` can never be rendered raw.
 import { useCreatorProfileLink } from '../../live/use-creator-profile-link';
 import { SafeExternalLink, safeHostname } from '@/blog/components/safe-external-link';
+import { Link } from '@hive/ui';
 import { MarketLoading, MarketMissing, MarketReadFailed, MarketUnavailable } from '../../live/market-states';
-import { pctLabel, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
+import { avatarGradient, pctLabel, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
 import { priceChangeLabel } from '../../market/price-change';
 // ★★ THE RESERVE / BACKING FIGURES ARE HIDDEN FOR LAUNCH (owner, 2026-08-27).
 // One flag, every surface, JSX preserved and not rendered. See the module for
@@ -91,11 +92,6 @@ function interstitialKey(handle: string, viewer: string | null): string {
   return `lumen-token-inter-${viewer ?? 'anon'}-${handle}`;
 }
 
-function avatarFill(handle: string): string {
-  let h = 0;
-  for (let i = 0; i < handle.length; i++) h = (h * 31 + handle.charCodeAt(i)) % 360;
-  return `linear-gradient(135deg,hsl(${h} 42% 42%),hsl(${(h + 40) % 360} 38% 48%))`;
-}
 
 /**
  * WORK-LINK spec B3: "keep the loading state invisible... render nothing
@@ -278,7 +274,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   // page, the feed chips and the profile card saying one thing.
   const health = marketHealthOf({ phase: market.phase, canBuy: market.canBuy, windingDown: market.windingDown });
   const change = priceChangeLabel(market.priceChange);
-  const avatarColor = avatarFill(handle);
+  const avatarColor = avatarGradient(handle);
 
   const openAsk = (sv: Service) => {
     setService(sv);
@@ -387,8 +383,10 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
     </div>
   );
 
-  const rightRail = (
-    <div className="flex flex-col gap-5 pt-[26px]">
+  // ★ Extracted so the mechanics render on MOBILE too, not only in the xl-only
+  // right rail (UX review 2026-08-31: phone users got the sales pitch and never
+  // the 3-step explanation). Rendered in the rail AND in the xl:hidden body below.
+  const howThisWorks = (
       <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
         <div className="mb-3 text-[15px] leading-[24px] font-bold text-ink-2">How this works</div>
         <div className="flex flex-col gap-3.5">
@@ -404,6 +402,11 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           ))}
         </div>
       </div>
+  );
+
+  const rightRail = (
+    <div className="flex flex-col gap-5 pt-[26px]">
+      {howThisWorks}
       {/* ★★★ THE FICTION MOVED TO THE ASIDE AND THE FACT TOOK THE HEADLINE
           (2026-08-27). This card used to hold "Reserve backing $60" while
           "Market cap $70" sat beside the price as a headline stat. Market cap on
@@ -469,7 +472,17 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         <span className="h-[60px] w-[60px] flex-shrink-0 rounded-2xl" style={{ background: avatarColor }} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
-            <span className="text-xl font-bold text-ink-2">@{displayHandle(handle)}</span>
+            {/* ★ Link to the creator's profile so a buyer can see who they're
+                buying from (UX review 2026-08-31). Only a Hive handle has a
+                /@ profile; a did:pkh: creator (has ':') has none, so it stays
+                plain text rather than linking to a 404. */}
+            {handle.includes(':') ? (
+              <span className="text-xl font-bold text-ink-2">@{displayHandle(handle)}</span>
+            ) : (
+              <Link href={`/@${handle}`} className="text-xl font-bold text-ink-2 hover:underline">
+                @{displayHandle(handle)}
+              </Link>
+            )}
           </div>
           {/* No bio and no reputation score here: neither is contract state, and
               the Hive profile is not read on this route yet. The demo showed
@@ -844,6 +857,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           figure appears exactly once at every width. Below the market panel, so
           it stays secondary to the reserve. See `marketCapCard` for the
           measurement and the decision. */}
+      <div className="mb-4 xl:hidden">{howThisWorks}</div>
       <div className="mb-4 xl:hidden">{marketCapCard}</div>
 
       {/* 3. Trust record */}
@@ -875,7 +889,13 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 </>
               )}
             </div>
-            <div className="mt-1.5 text-caption text-ink-14">Why the token is worth holding. This is what you’re really buying.</div>
+            {d.completionPct !== null ? (
+              /* Only under a REAL record — under "No deliveries yet" this pointed at
+                 nothing and read as a self-own (UX review 2026-08-31). */
+              <div className="mt-1.5 text-caption text-ink-14">Why the token is worth holding. This is what you’re really buying.</div>
+            ) : (
+              <div className="mt-1.5 text-caption text-ink-14">A delivery record builds here once this creator completes their first paid ask.</div>
+            )}
           </>
         ) : (
           <div className="rounded-control border border-dashed border-line-11 px-4 py-3 text-caption text-ink-14">Delivery record unavailable</div>

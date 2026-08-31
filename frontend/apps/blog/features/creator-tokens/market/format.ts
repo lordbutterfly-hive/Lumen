@@ -87,3 +87,17 @@ export const pctMoveLabel = (pct: number): string | null => {
   if (rounded === 0) return '<0.1%';
   return `${rounded.toFixed(1)}%`;
 };
+
+/**
+ * A stable decorative gradient per creator (NOT identity, NOT data). Normalises
+ * a leading `hive:` prefix FIRST so the same creator gets the SAME color on the
+ * browse card (which has `hive:name`) and their token page (which has the bare
+ * route handle) — the two used to hash different strings and reshuffle colors
+ * per page (UX review 2026-08-31, the id-string-drift class). One copy, greppable.
+ */
+export function avatarGradient(handle: string): string {
+  const key = handle.startsWith('hive:') ? handle.slice('hive:'.length) : handle;
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) % 360;
+  return `linear-gradient(135deg,hsl(${h} 42% 42%),hsl(${(h + 40) % 360} 38% 48%))`;
+}

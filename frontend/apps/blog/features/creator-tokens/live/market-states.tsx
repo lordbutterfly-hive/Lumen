@@ -81,8 +81,8 @@ export const MarketReadFailed: FC<{ onRetry?: () => void; launchHref?: string }>
         it is the one sentence about the figure that lives outside the four
         screens. The two things this state IS about, the price and the balance,
         are unchanged. */}
-    We couldn’t reach the chain just now, so we can’t show this token’s price or your balance. Nothing is wrong
-    with your position. We simply can’t read it at the moment.
+    We couldn’t load this market just now, so we can’t show its price or your balance. Nothing is wrong with
+    your position, we simply can’t read it this moment. If you’ve been browsing quickly, give it a few seconds.
     {onRetry ? (
       <>
         {' '}
