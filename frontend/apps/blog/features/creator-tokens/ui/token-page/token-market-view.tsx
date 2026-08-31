@@ -15,7 +15,7 @@ import { useCreatorProfileLink } from '../../live/use-creator-profile-link';
 import { SafeExternalLink, safeHostname } from '@/blog/components/safe-external-link';
 import { Link } from '@hive/ui';
 import { MarketLoading, MarketMissing, MarketReadFailed, MarketUnavailable } from '../../live/market-states';
-import { avatarGradient, pctLabel, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
+import { avatarGradient, pctLabel, usdMoney, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
 import { priceChangeLabel } from '../../market/price-change';
 // ★★ THE RESERVE / BACKING FIGURES ARE HIDDEN FOR LAUNCH (owner, 2026-08-27).
 // One flag, every surface, JSX preserved and not rendered. See the module for
@@ -188,7 +188,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
       // the buttons do, including delinquency — canBuy/canAsk already fold in
       // pause, wind-down and delivery standing.
       if (market.canBuy) setDialog('buy');
-    } else if (a === 'sell') {
+    } else if (a === 'sell' || a === 'redeem') {
       // ★ THE SAME RAIL THE BUTTON WOULD PICK, NOT ALWAYS THE CURVE.
       //
       // The visible Sell button is `market.windingDown ? 'redeem' : 'sell'`,
@@ -557,7 +557,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               early-exit fee, so the clause says so. `overdueFigures` returns ''
               when there is no number to quote, which is how the sentence avoids
               ending "(currently  a token)" on an untraded market. */}
-          {overdueBanner(overdueFigures(backingPerTokenValue(market.floorUsd, market.supply), market.priceUsd))}
+          {overdueBanner(overdueFigures(backingPerTokenValue(market.floorUsd, market.supply), market.priceUsd), market.rules)}
         </div>
       ) : health === 'delisted' && !isOwner ? (
         // ★ NOT FOR THE OWNER. Measured on the demo build: with both mounted, a
@@ -889,6 +889,14 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 </>
               )}
             </div>
+            {d.ratingCount > 0 && d.avgRating !== null ? (
+              /* The buyer's protection made visible at the buy point (feedback audit
+                 2026-08-31): the rating rail was fully wired but shown only on the grid. */
+              <div className="mt-1.5 text-caption text-ink-4">
+                Rated <strong>{d.avgRating.toFixed(1)}/5</strong> by {d.ratingCount} {d.ratingCount === 1 ? 'buyer' : 'buyers'}
+                {d.declinedCount > 0 ? <> · declined {d.declinedCount}</> : null}
+              </div>
+            ) : null}
             {d.completionPct !== null ? (
               /* Only under a REAL record — under "No deliveries yet" this pointed at
                  nothing and read as a self-own (UX review 2026-08-31). */
@@ -922,7 +930,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 <div className="text-caption text-ink-10">{sv.desc}</div>
               </div>
               <div className="flex-shrink-0 text-left sm:text-right">
-                <div className="text-[15px] leading-[24px] font-bold tabular-nums text-ink-2">{usdWhole(sv.usd)}</div>
+                <div className="text-[15px] leading-[24px] font-bold tabular-nums text-ink-2">{usdMoney(sv.usd)}</div>
                 {/* The TOKEN LEG only (88% of the posted price) — the other 12% is a
                     separate HBD commission (serviceQuote/ask.go splitFace, USER RULING
                     2026-07-27), never itself paid in tokens. */}
@@ -1026,7 +1034,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
             </div>
             <div className="flex gap-2.5">
               <button
-                onClick={() => setDialog('sell')}
+                onClick={() => setDialog(market.windingDown ? 'redeem' : 'sell')}
                 disabled={writesBlocked}
                 title={writeBlockedReason ?? undefined}
                 className="rounded-control border border-line-11 bg-surface-1 px-4 py-2.5 text-caption font-semibold text-ink-7 hover:bg-surface-23 disabled:opacity-50"

@@ -48,8 +48,14 @@ export interface DeliveryRecord {
   completionPct: number | null;
   /** Human "usually within ~6h". Empty string when there is nothing to summarise — callers MUST NOT render it unguarded, or the sentence ends "usually within .". */
   typicalResponse: string;
-  /** ~12 recent marks, newest last. true = answered, false = missed. */
+  /** A proportional filled(answered)/hollow(missed) strip of the ratio, capped ~18. NOT a chronology — the chain carries counts, not order. */
   marks: boolean[];
+  /** Mean buyer rating (1-5), or null when nobody has rated yet. NEVER 0 — unrated is not "rated zero". */
+  avgRating: number | null;
+  /** How many buyers rated. A 5.0 from one rater is not a 5.0 from forty. */
+  ratingCount: number;
+  /** Asks the creator declined (neutral, not a miss) — a "declines everything" signal a buyer can weigh. */
+  declinedCount: number;
   /** false → render "Delivery record unavailable" (NOT rank-boosted — missing ≠ perfect). */
   available: boolean;
 }

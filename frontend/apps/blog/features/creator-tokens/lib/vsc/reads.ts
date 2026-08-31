@@ -294,15 +294,33 @@ export interface ParsedEscrow {
   status: 'PENDING' | 'ANSWERED' | 'RECLAIMED' | 'DECLINED';
   /** The asker's hold clock, carried through the escrow so reclaiming cannot launder a fresh position into an aged, untaxed one. */
   acqBlock: number;
+  /**
+   * Which offering this ask was placed against (ask.go packEscrow field 7).
+   * 0 means "no offering" — ask.go treats offeringId 0 as absent, which is why
+   * `jsonU64Field` is used for it on the write side: escrow #0 and offering #0
+   * are both real values and a malformed one must never default into them.
+   */
+  offeringId: number;
   contentHash: string;
   answerHash: string;
 }
 
 export function parseEscrow(v: string): ParsedEscrow | null {
-  // ★ EIGHT fields as of the curve pivot (ask.go packEscrow, verified at
-  // source 2026-07-24 — Go reads it back with strings.SplitN(v, "|", 8)):
+  // ★★★ NINE fields (ask.go packEscrow:194-201; Go reads it back with
+  // strings.SplitN(v, "|", 9) and REFUSES len != 9). Re-verified against the
+  // DEPLOYED v2 contract 2026-08-31, not against this comment:
   //
-  //   asker|credits|deadline|status|commissionHbd|acqBlock|contentHash|answerHash
+  //   asker|credits|deadline|status|commissionHbd|acqBlock|offeringID|contentHash|answerHash
+  //
+  // ★ THIS PARSER READ EIGHT, AND THAT IS THE THIRD TIME THIS DRIFTED (7->8
+  // was fixed 2026-07-24; 6->7 the revision before). Against real nine-field
+  // state it put `offeringID` into `contentHash` and the pipe-joined
+  // `contentHash|answerHash` pair into `answerHash` — the same shape as both
+  // previous regressions, and it survived because the ONLY thing asserting the
+  // field count was the comment above, which was stale the moment offeringID
+  // was added on the Go side. There is now a GO-PACKED ROUND-TRIP FIXTURE
+  // (escrow-roundtrip.selftest.ts) built from a string packEscrow itself
+  // produced; a comment cannot drift a test.
   //
   // `acqBlock` was INSERTED before the two free-form fields: an escrow now
   // carries the asker's hold clock so the credits it holds keep their
@@ -317,16 +335,21 @@ export function parseEscrow(v: string): ParsedEscrow | null {
   // a literal '|', matching SplitN's own semantics.
   const parts: string[] = [];
   let rest = v;
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 8; i++) {
     const idx = rest.indexOf('|');
     if (idx < 0) return null;
     parts.push(rest.slice(0, idx));
     rest = rest.slice(idx + 1);
   }
   parts.push(rest);
-  const [asker, creditsStr, deadlineStr, status, commissionHbdStr, acqBlockStr, contentHash, answerHash] = parts;
+  const [asker, creditsStr, deadlineStr, status, commissionHbdStr, acqBlockStr, offeringIdStr, contentHash, answerHash] = parts;
   const acqBlock = parseStrictBaseUnits(acqBlockStr);
   if (acqBlock === null) return null;
+  // Integer-strict like every other numeric here: Go writes it with
+  // strconv.FormatUint and reads it with ParseUint, neither of which accepts a
+  // decimal point or a sign.
+  const offeringId = parseStrictBaseUnits(offeringIdStr);
+  if (offeringId === null) return null;
   // Integer-strict (M-f): credits/commissionHbd are unpacked in Go via
   // big.Int.SetString(s,10) (money.go parseMoney), deadline via
   // strconv.ParseUint — NEITHER accepts a decimal point, so a naive
@@ -344,7 +367,7 @@ export function parseEscrow(v: string): ParsedEscrow | null {
   // null — i.e. silently disappear from the creator's inbox and the asker's
   // list, as if the ask had never existed.
   if (status !== 'PENDING' && status !== 'ANSWERED' && status !== 'RECLAIMED' && status !== 'DECLINED') return null;
-  return { asker, tokensEscrowed: creditsBaseUnits, deadlineBlock, status, acqBlock, contentHash, answerHash };
+  return { asker, tokensEscrowed: creditsBaseUnits, deadlineBlock, status, acqBlock, offeringId, contentHash, answerHash };
 }
 
 // ── Minimal GQL client — plain fetch, scoped to this feature. Same two

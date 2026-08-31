@@ -477,8 +477,18 @@ export function assertValidOfferTitle(title: string): void {
   if (title.trim() === '') {
     throw new Error('An offering needs a title.');
   }
-  if (title.length > MAX_OFFER_TITLE_LEN) {
-    throw new Error(`An offering title can be at most ${MAX_OFFER_TITLE_LEN} characters.`);
+  // ★★ BYTES, NOT `.length` (fixed 2026-08-31, same defect as assertHashField's).
+  // `validOfferTitle` bounds `len(t)` and Go's len() on a string counts BYTES,
+  // while String.length counts UTF-16 code units. They disagree in the
+  // DANGEROUS direction for non-ASCII: a 64-character CJK title is 64 units
+  // (client: fine) and 192 bytes (chain: refused) — the creator names a service,
+  // reaches the signature, pays the RC and watches it revert. "characters" in
+  // the message would then be a lie too, so it says bytes and shows the count.
+  const titleBytes = new TextEncoder().encode(title).length;
+  if (titleBytes > MAX_OFFER_TITLE_LEN) {
+    throw new Error(
+      `An offering title can be at most ${MAX_OFFER_TITLE_LEN} bytes; this one is ${titleBytes}. (Accented and non-Latin characters take more than one byte each.)`
+    );
   }
   if (title.includes('|')) {
     throw new Error('An offering title cannot contain "|".');

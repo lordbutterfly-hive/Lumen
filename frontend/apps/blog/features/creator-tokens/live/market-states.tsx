@@ -30,7 +30,7 @@ import { useTranslation } from '@/blog/i18n/client';
  * element is.
  */
 const Panel: FC<{ title: string; children: ReactNode }> = ({ title, children }) => (
-  <TokenShell>
+  <TokenShell back={{ href: '/creators', label: '← All creators' }}>
     <div className="mt-[26px] rounded-panel border border-line-9 bg-surface-1 p-8 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
       <h1 className="mb-2 font-serif text-[20px] leading-[30px] font-semibold text-ink-2">{title}</h1>
       <p className="max-w-[52ch] text-[14px] leading-[22px] text-ink-10">{children}</p>

@@ -79,6 +79,7 @@ import {
   type CustomJsonOp,
   answerPayload,
   askPayload,
+  assertValidOfferTitle,
   buildOp,
   buyPayload,
   claimTradeFeesPayload,
@@ -106,6 +107,9 @@ import {
 // op-builders.ts — importing it FROM op-builders.ts would be circular, since
 // this file imports the payload builders FROM op-builders.ts).
 import './vsc/payload-contract.selftest';
+// ★ The ONE hash validator (see answer()): the contract's rules live here, and
+// nothing in this file re-implements them.
+import { assertHashField } from './vsc/payload-contract';
 import './vsc/price-display.selftest';
 // Same side-effect wiring, for the same reason: the spender-shape guard and
 // its tripwire (audit anomaly A5-07) must run at app startup in development,
@@ -147,6 +151,7 @@ import {
   kSupply,
   decodeRetiredAt,
   parseEscrow,
+  type ParsedEscrow,
   toDid,
   toU64,
   unknownMarket,
@@ -793,6 +798,12 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       responseBlocks: [],
       distinctAskers: 0,
       selfDealtExcluded: 0,
+      declinedCount: 0,
+      // ★ null, NEVER 0. 0 is a real rating value, so conflating "nobody has
+      // rated" with "rated zero" would libel a creator who has simply not been
+      // rated yet — the same class as the indexer's completion_pct NULL rule.
+      avgRating: null,
+      ratingCount: 0,
       source: 'unavailable'
     };
     if (!this.indexer) return empty;
@@ -813,8 +824,18 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         // shape returned every raw block delta; one median in a list keeps the
         // consumer's own median-of-list logic correct on a single element.
         responseBlocks: row.medianResponseBlocks !== null ? [row.medianResponseBlocks] : [],
+        // The view does not produce a distinct-asker count — there is no
+        // `distinct_askers` column (verified against creator_tokens_views.yaml
+        // 2026-08-31). 0 here is HONEST ("we do not know"), not a dropped
+        // field, and nothing should render it as a fact.
         distinctAskers: 0,
         selfDealtExcluded: 0,
+        // ★ CARRIED THROUGH (2026-08-31). hasura.ts parsed all three and the
+        // data source silently dropped them, so declines were invisible and the
+        // rating never reached a surface — the view served them the whole time.
+        declinedCount: row.declinedCount,
+        avgRating: row.avgRating,
+        ratingCount: row.ratingCount,
         source: 'indexer'
       };
     } catch {
@@ -1122,7 +1143,31 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.creator,
       rcLimit: this.config.rcLimit
     });
+    // ★ M-3 (2026-08-31): read the CURRENT kRegisteredAt before broadcasting, so
+    // the confirmation below can tell "it landed" from "it was already there".
+    // A relaunch of a CLOSED market (registerCheck admits stored state CLOSED)
+    // already carries the DEAD incarnation's registeredAt, so "non-zero" is not
+    // evidence of anything — only an ADVANCE past the prior value is.
+    let registeredBefore: number | null = null;
+    try {
+      const pre = await this.gql.getStateByKeys(this.config.contractId, [kRegisteredAt(input.creator)]);
+      registeredBefore = toU64(pre[kRegisteredAt(input.creator)]);
+    } catch {
+      registeredBefore = null; // unreadable: fall back to any-change below
+    }
     await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (M-3). "Your token is live" used to print at
+    // L1-accept, before the contract had run — so a registration the chain
+    // refused (a duplicate, a paused registry, an unaffordable first buy) was
+    // announced as a success and only un-announced on some later refetch. The
+    // owner's bar is that minting cannot not-work, and an unconfirmed mint is
+    // indistinguishable from a working one to the person who just paid.
+    const confirmed = await this.awaitRegisteredAdvance(input.creator, registeredBefore);
+    if (!confirmed) {
+      throw new Error(
+        'CREATOR_TOKENS_REGISTER_UNCONFIRMED: Hive accepted the launch, but Magi has not recorded your market yet. It may still land in a moment. Refresh before launching again — launching twice is refused on chain, but a second first-buy would be charged.'
+      );
+    }
     // A Hive broadcast resolves at L1-accept — BEFORE the L2 contract executes
     // — so an immediate readMarket() returns PRE-execution state, here `null`
     // ("never registered"). It is NOT true that the market "did not appear":
@@ -1901,14 +1946,14 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async answer(input: AnswerInput): Promise<Ask> {
     this.assertBroadcaster();
-    // ask.go Answer. Zero-extra-read.
-    if (input.answerHash === '') {
-      throw new Error('VscCreatorTokensDataSource: answerHash must not be empty');
-    }
-    // ask.go Answer. Zero-extra-read.
-    if (input.answerHash.includes('|')) {
-      throw new Error("VscCreatorTokensDataSource: answerHash must not contain '|'");
-    }
+    // ★ ONE VALIDATOR, NOT A THIRD HAND-WRITTEN COPY (2026-08-31). These two
+    // inline checks were the third independent transcription of ask.go's hash
+    // rules (payload-contract's assertHashField and the Studio dialog's
+    // answerValid being the other two), and all three were incomplete in
+    // different ways: none checked control characters, which ask.go's
+    // validEventHash refuses, and the length checks counted UTF-16 units where
+    // the contract counts BYTES. assertHashField is now the single source.
+    assertHashField('answerHash', input.answerHash);
     // ask.go Answer — the answer half of the I6 disjoint window (block <=
     // deadline). Needs the CURRENT chain head, fetched fresh rather than
     // trusting any cached value the caller might be holding — a stale head
@@ -1933,10 +1978,22 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       rcLimit: this.config.rcLimit
     });
     await this.broadcast(op);
-    // Optimistic: the read-back is pre-L2-execution, so project the ask to
-    // answered and flag it pending — the poll reconciles against real state.
+    // ★ CONFIRM EXECUTION, do not project it (H-A, 2026-08-31). See
+    // awaitEscrowStatus: a projected 'answered' on a call the chain refused
+    // becomes an unearned miss on a permanent, public delivery record.
+    const observed = await this.awaitEscrowStatus(input.creator, input.seq);
+    if (observed === null) {
+      throw new Error(
+        'CREATOR_TOKENS_ANSWER_UNCONFIRMED: Hive accepted your answer, but Magi has not recorded it yet. It may still land in a moment. Re-open the ask to check before answering again — the deadline still applies.'
+      );
+    }
+    if (observed !== 'ANSWERED') {
+      throw new Error(
+        `CREATOR_TOKENS_ANSWER_REFUSED: the chain resolved this ask as ${observed}, not ANSWERED. Your answer was not recorded.`
+      );
+    }
     const answered = await this.readOneAsk(input.creator, input.seq);
-    return { ...answered, status: 'answered', answerHash: input.answerHash, pending: true };
+    return { ...answered, status: 'answered', answerHash: input.answerHash };
   }
 
   /**
@@ -1967,8 +2024,17 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       rcLimit: this.config.rcLimit
     });
     await this.broadcast(op);
+    const observed = await this.awaitEscrowStatus(input.creator, input.seq);
+    if (observed === null) {
+      throw new Error(
+        'CREATOR_TOKENS_DECLINE_UNCONFIRMED: Hive accepted the decline, but Magi has not recorded it yet. Re-open the ask to check before declining again.'
+      );
+    }
+    if (observed !== 'DECLINED') {
+      throw new Error(`CREATOR_TOKENS_DECLINE_REFUSED: the chain resolved this ask as ${observed}, not DECLINED.`);
+    }
     const declined = await this.readOneAsk(input.creator, input.seq);
-    return { ...declined, status: 'declined', pending: true };
+    return { ...declined, status: 'declined' };
   }
 
   async rate(input: RateInput): Promise<void> {
@@ -2011,9 +2077,17 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       rcLimit: this.config.rcLimit
     });
     await this.broadcast(op);
-    // Optimistic: project to reclaimed and flag pending (see answer()).
+    const observed = await this.awaitEscrowStatus(input.creator, input.seq);
+    if (observed === null) {
+      throw new Error(
+        'CREATOR_TOKENS_RECLAIM_UNCONFIRMED: Hive accepted the reclaim, but Magi has not recorded it yet. Check the ask before reclaiming again — your tokens are still escrowed until it lands.'
+      );
+    }
+    if (observed !== 'RECLAIMED') {
+      throw new Error(`CREATOR_TOKENS_RECLAIM_REFUSED: the chain resolved this ask as ${observed}, not RECLAIMED. Your tokens were not returned.`);
+    }
     const reclaimed = await this.readOneAsk(input.creator, input.seq);
-    return { ...reclaimed, status: 'reclaimed', pending: true };
+    return { ...reclaimed, status: 'reclaimed' };
   }
 
   async refund(input: RefundInput): Promise<HolderPosition> {
@@ -2200,7 +2274,12 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async createOffering(input: CreateOfferingInput): Promise<void> {
     this.assertBroadcaster();
-    if (input.title.trim() === '') throw new Error('VscCreatorTokensDataSource: offering title must not be empty');
+    // ★ THE SHARED VALIDATOR, not a trim() (2026-08-31, M-2). The UI gates on
+    // offerTitleProblem while the creator types, but this layer accepted
+    // anything non-empty — so a title that is too long in BYTES, or carries a
+    // '|' / ',' / control byte, reached the chain and reverted after signing.
+    // validOfferTitle refuses all four (core/offerings.go:192-207).
+    assertValidOfferTitle(input.title);
     if (!(input.priceHbd > 0)) throw new Error('VscCreatorTokensDataSource: offering price must be > 0');
     const op = buildOp({
       netId: this.config.netId,
@@ -2229,7 +2308,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async setOfferingTitle(input: SetOfferingTitleInput): Promise<void> {
     this.assertBroadcaster();
-    if (input.title.trim() === '') throw new Error('VscCreatorTokensDataSource: offering title must not be empty');
+    assertValidOfferTitle(input.title); // see createOffering — same contract rule, same reason
     const op = buildOp({
       netId: this.config.netId,
       contractId: this.config.contractId,
@@ -2308,6 +2387,76 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         // not yet; a read failure is not a confirmation
       }
       if (Date.now() + POLL_MS >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    }
+  }
+
+  /**
+   * H-A (2026-08-31): the escrow-status half of S4's execution confirmation.
+   *
+   * ★ WHY THIS EXISTS. answer/decline/reclaim used to broadcast and then return
+   * a PROJECTED ask (`status: 'answered', pending: true`) built from a read that
+   * is necessarily PRE-execution. A silent on-chain refusal — a rejected
+   * answerHash, a window that closed between the guard and the block, a state
+   * the client did not model — was therefore indistinguishable from success:
+   * the creator saw "answered", closed the dialog, and the delivery record
+   * recorded a MISS they had no way to know about. An unearned miss is the
+   * worst outcome this feature has, because it is permanent, public, and the
+   * creator cannot tell it happened.
+   *
+   * Polls the escrow record until its status leaves PENDING, exactly as
+   * awaitPaidUntilAdvance polls kPaidUntil, and with the same discipline: a
+   * read failure inside the window counts as "not yet", NEVER as confirmed.
+   * Returns the observed terminal status, or null on timeout.
+   */
+  /**
+   * M-3's half of the execution confirmation: poll kRegisteredAt until it
+   * ADVANCES past the pre-broadcast value. Same 90s/3s cadence and the same
+   * "a read failure is not a confirmation" rule as awaitPaidUntilAdvance and
+   * awaitEscrowStatus.
+   *
+   * `before === null` means the pre-read failed, so an advance cannot be
+   * defined; it then accepts any non-zero value change, exactly as
+   * awaitPaidUntilAdvance does in the same situation.
+   */
+  private async awaitRegisteredAdvance(creator: string, before: number | null): Promise<boolean> {
+    const TIMEOUT_MS = 90_000;
+    const POLL_MS = 3_000;
+    const key = kRegisteredAt(creator);
+    const deadline = Date.now() + TIMEOUT_MS;
+    let first: number | null = null;
+    for (;;) {
+      try {
+        const state = await this.gql.getStateByKeys(this.config.contractId, [key]);
+        const now = toU64(state[key]);
+        if (before !== null ? now > before : first !== null && now !== first) return true;
+        if (first === null) first = now;
+      } catch {
+        // not yet; a read failure is not a confirmation
+      }
+      if (Date.now() + POLL_MS >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    }
+  }
+
+  private async awaitEscrowStatus(creator: string, seq: number): Promise<ParsedEscrow['status'] | null> {
+    const TIMEOUT_MS = 90_000;
+    const POLL_MS = 3_000;
+    // kEscrow routes the account through toDid() itself (reads.ts:61 — "never
+    // build a key from a raw account string directly"), so callers pass the
+    // account as they have it, exactly like readOneAsk and readCreatorAsks.
+    const key = kEscrow(creator, seq);
+    const deadline = Date.now() + TIMEOUT_MS;
+    for (;;) {
+      try {
+        const state = await this.gql.getStateByKeys(this.config.contractId, [key]);
+        const raw = state[key];
+        const parsed = raw ? parseEscrow(raw) : null;
+        if (parsed && parsed.status !== 'PENDING') return parsed.status;
+      } catch {
+        // not yet; a read failure is not a confirmation
+      }
+      if (Date.now() + POLL_MS >= deadline) return null;
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }
   }

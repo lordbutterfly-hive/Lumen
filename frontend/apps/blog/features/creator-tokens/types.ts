@@ -494,6 +494,12 @@ export interface DeliveryRecord {
   distinctAskers: number;
   /** M1: asks dropped because asker === creator (self-deal), surfaced for auditability. */
   selfDealtExcluded: number;
+  /** Asks the creator explicitly declined — a decline is an answer of sorts, distinct from a miss (silence). */
+  declinedCount: number;
+  /** Mean of submitted ratings (2dp), or null when nobody has rated yet. NEVER 0 — 0 would read as "rated badly". */
+  avgRating: number | null;
+  /** How many ratings back avgRating: a 5.00 from one rater is not a 5.00 from forty. */
+  ratingCount: number;
   source: 'indexer' | 'unavailable';
 }
 

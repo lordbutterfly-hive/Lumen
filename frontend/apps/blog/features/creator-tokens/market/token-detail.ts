@@ -81,6 +81,9 @@ export const MOCK_TOKEN_DETAIL: TokenMarketDetail = {
     completionPct: 90,
     typicalResponse: '~6 hours',
     marks: marks('AAAAmAAAAAmAAAAmAA'),
+    avgRating: 4.8,
+    ratingCount: 39,
+    declinedCount: 2,
     available: true
   },
   services: [

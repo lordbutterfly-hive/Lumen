@@ -116,6 +116,11 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
         ? byDid
         : byName;
   const { status, market } = resolved;
+  // When the market resolved via the wallet-DID fallback it lives under the DID,
+  // so a link must target /creators/<did>; the bare username resolves 'missing'
+  // and the Buy button would land on "this creator has no market". Read and
+  // write name the identity with the SAME string.
+  const resolvedHandle = resolved === byDid && ownWalletDid ? ownWalletDid : username;
 
   if (status === 'ready' && market) {
     const d = market.delivery;
@@ -196,7 +201,7 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
             market keeps it, under the line above. */}
         {market.canBuy && !soldOut ? (
           <Link
-            href={`/creators/${username}?a=buy`}
+            href={`/creators/${resolvedHandle}?a=buy`}
             className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-sans text-[15px] leading-[24px] font-bold text-ink-27 transition-colors hover:bg-surface-brand-16"
             data-testid="profile-token-buy"
           >

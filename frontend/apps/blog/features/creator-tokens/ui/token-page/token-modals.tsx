@@ -48,7 +48,11 @@ export type TokenDialog = 'buy' | 'sell' | 'redeem' | 'ask' | 'send' | 'inter' |
 const ModalHead: FC<{ title: string; onClose: () => void }> = ({ title, onClose }) => (
   <div className="flex items-center justify-between px-6 pt-[22px]">
     <div className="font-serif text-[22px] leading-[32px] font-semibold text-ink-2">{title}</div>
-    <button onClick={onClose} className="cursor-pointer border-0 bg-transparent text-[22px] leading-[34px] text-ink-14">
+    <button
+      onClick={onClose}
+      aria-label="Close"
+      className="-m-2 cursor-pointer rounded-lg border-0 bg-transparent p-2 text-[22px] leading-[34px] text-ink-14 hover:bg-surface-16"
+    >
       ×
     </button>
   </div>
@@ -609,7 +613,7 @@ const SellModal: FC<{
               setFailure(null); // a fresh amount deserves a fresh attempt, not a stale error
             }}
             inputMode="decimal"
-            className="flex-1 border-0 text-[22px] leading-[34px] font-bold tabular-nums text-ink-2 outline-none focus-visible:outline-none"
+            className="min-w-0 flex-1 border-0 text-[22px] leading-[34px] font-bold tabular-nums text-ink-2 outline-none focus-visible:outline-none"
           />
           <span className="text-caption font-semibold text-ink-14">tokens</span>
         </div>
@@ -958,7 +962,7 @@ const AskModal: FC<{
                 above that line, untouched). The slice applies only when `rec.asker != creator`,
                 so asking yourself is genuinely free — an edge case not worth a sentence here. */}{' '}
             If it&rsquo;s unanswered by your deadline you can reclaim your tokens in full and 75% of the
-            commission &mdash; the platform keeps 25% so a missed deadline cannot be manufactured for free.
+            commission. The platform keeps 25% so a missed deadline cannot be manufactured for free.
         </div>
         )}
         <label className="mb-2 block text-caption font-semibold text-ink-10">Answer due within</label>

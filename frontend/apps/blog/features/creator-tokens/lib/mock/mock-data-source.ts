@@ -435,8 +435,12 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     await delay(150);
     const pattern = DELIVERY_PATTERNS[creator];
     if (!pattern) {
-      // Mirror the VSC source's `unavailable` empty record shape exactly (M1
-      // fields included) so the two implementations stay interchangeable.
+      // A known market with no delivery history is genuinely EMPTY, not an
+      // outage: source 'indexer' + zero counts renders "No deliveries yet" (the
+      // real chain returns zero-count rows for a fresh market). Only a creator
+      // that is not a known market (the mock-unknown failed-read fixture) stays
+      // 'unavailable'. Fields mirror the VSC source shape exactly.
+      const known = creator in MARKET_SEEDS;
       return {
         creator,
         answeredCount: 0,
@@ -445,7 +449,10 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
         responseBlocks: [],
         distinctAskers: 0,
         selfDealtExcluded: 0,
-        source: 'unavailable'
+        declinedCount: 0,
+        avgRating: null,
+        ratingCount: 0,
+        source: known ? 'indexer' : 'unavailable'
       };
     }
     const windows = buildDeliveryWindows(Date.now(), pattern);
@@ -468,6 +475,11 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       // asker; no self-deals are modelled, so selfDealtExcluded is 0.
       distinctAskers: answeredCount + missedCount,
       selfDealtExcluded: 0,
+      // The mock does not model declines or ratings; a real record carries them
+      // (57 wires them through the VSC source). null avgRating = "not rated yet".
+      declinedCount: 0,
+      avgRating: null,
+      ratingCount: 0,
       source: 'indexer'
     };
   }

@@ -8,6 +8,35 @@ export const usdPrice = (n: number): string =>
 export const usdWhole = (n: number): string =>
   `$${Math.round(n).toLocaleString('en-US')}`;
 
+/**
+ * A posted MONEY amount: whole dollars when whole ("$25"), cents when not
+ * ("$1.50"). Rounds to the cent first so a stored 1.4999 never shows "$1".
+ * Use for service/offering prices, which the studio + launch accept as
+ * decimals — `usdWhole` there misstated a $1.50 service as "$2" (+33%).
+ */
+export const usdMoney = (n: number): string => {
+  const cents = Math.round(n * 100);
+  return cents % 100 === 0 ? usdWhole(cents / 100) : usdPrice(cents / 100);
+};
+
+/**
+ * The delivery marks strip: a filled/hollow summary of the answered:missed
+ * ratio, capped at `max` marks. PROPORTIONAL, not chronological — the chain
+ * carries counts, not an ordered history, so the fill tracks the completion
+ * percentage rather than front-loading all answers or all misses. The old
+ * "answers then misses, keep the last 18" drew an ALL-HOLLOW strip above a
+ * "83%" label once a creator passed 18 resolved; a second surface used a
+ * different cap and under-showed misses. One shared helper, exact below the
+ * cap, proportional above, identical on every surface.
+ */
+export function deliveryMarks(answered: number, missed: number, max = 18): boolean[] {
+  const total = answered + missed;
+  if (total <= 0) return [];
+  const n = Math.min(total, max);
+  const filled = Math.round((answered / total) * n);
+  return [...Array.from({ length: filled }, () => true), ...Array.from({ length: n - filled }, () => false)];
+}
+
 /** Compact context figure: 84000 → "$84k", 196000 → "$196k", 1_200_000 → "$1.2M". */
 export const usdCompact = (n: number): string => {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;

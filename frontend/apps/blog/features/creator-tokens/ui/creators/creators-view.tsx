@@ -8,7 +8,7 @@ import { useLiveDiscovery } from '../../live/use-live-discovery';
 import { describeLag, useIndexerHealth } from '../../live/use-indexer-health';
 import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
 import type { CreatorSummary } from '../../types';
-import { avatarGradient, pctLabel, usdCompact, usdPrice, usdWhole } from '../../market/format';
+import { avatarGradient, deliveryMarks, pctLabel, usdCompact, usdMoney, usdPrice } from '../../market/format';
 import { resolveDiscoveryControls, type DiscoverySort } from '../../market/discovery-ranking';
 import TokenShell from '../token-shell';
 
@@ -75,6 +75,7 @@ const COPY = {
   stateUnavailable: 'Market status unavailable',
   stateOverdue: 'Listing lapsed, may freeze soon',
   stateClosed: 'Market closed. You cannot buy this token',
+  stateDelisted: 'Delisted. New buyers closed',
   launchTitle: 'Launch your Meritum',
   launchSub: 'Let people hold your token and pay you for your time.',
   /**
@@ -144,7 +145,7 @@ function responseLabel(blocks: number | null): string {
 const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
   // The view gives COUNTS, not an ordered pass/fail history, so the strip is
   // drawn from the totals and is NOT a chronology. Do not label it one.
-  const marks = [...Array(Math.min(c.answeredCount, 14)).fill(true), ...Array(Math.min(c.missedCount, 4)).fill(false)] as boolean[];
+  const marks = deliveryMarks(c.answeredCount, c.missedCount);
   return (
     <Link
       href={`/creators/${routeHandle(c.creator)}`}
@@ -199,12 +200,12 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
           className="mt-3.5 rounded-control bg-surface-warn-4 px-3.5 py-2 text-caption font-semibold text-ink-warn-3"
           data-testid="creator-card-state"
         >
-          {c.phase === 'OVERDUE' ? COPY.stateOverdue : COPY.stateClosed}
+          {c.phase === 'OVERDUE' ? COPY.stateOverdue : c.phase === 'FROZEN' ? COPY.stateDelisted : COPY.stateClosed}
         </div>
       ) : null}
 
       <div className="mt-3.5 flex items-center justify-between gap-3 border-t border-line-2 pt-3.5">
-        <span className="text-caption tabular-nums text-ink-10">From {usdWhole(usdFromHbd(c.fromPriceHbd))} per task</span>
+        <span className="text-caption tabular-nums text-ink-10">From {usdMoney(usdFromHbd(c.fromPriceHbd))} per task</span>
         <span className="text-caption tabular-nums text-ink-14">
           Token {usdPrice(usdFromHbd(c.priceHbd))} {c.marketCapHbd > 0 ? `· cap ${usdCompact(usdFromHbd(c.marketCapHbd))}` : '· not traded yet'}
         </span>
@@ -426,7 +427,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
                   </div>
                 </div>
                 <div className="text-caption font-semibold text-ink-warn-3">{COPY.newNothing}</div>
-                <div className="mt-1.5 text-caption tabular-nums text-ink-10">From {usdWhole(usdFromHbd(c.fromPriceHbd))} per task</div>
+                <div className="mt-1.5 text-caption tabular-nums text-ink-10">From {usdMoney(usdFromHbd(c.fromPriceHbd))} per task</div>
               </Link>
             ))}
           </div>

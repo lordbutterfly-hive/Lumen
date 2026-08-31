@@ -1,3 +1,4 @@
+import type { ContractRules } from '../../types';
 /**
  * WHAT THE TOKEN PAGE IS ALLOWED TO CLAIM ABOUT MONEY (2026-08-27).
  *
@@ -322,8 +323,35 @@ export const WIND_DOWN_BANNER =
  * shape. `figures` is the already-formatted "(currently X a token ...)" clause,
  * or an empty string when the market has no backing figure to quote.
  */
-export function overdueBanner(figures: string): string {
-  return `This creator’s listing has lapsed. If it isn’t renewed the market stops taking new buyers, but you can still sell on the curve, and the creator can renew any time to reopen buying.${figures}`;
+/**
+ * ★★★ GATED ON THE CONTRACT THE CHAIN ACTUALLY REPORTS (2026-08-31).
+ *
+ * This sentence describes what happens to a READER'S MONEY when a creator's
+ * listing lapses, and that answer is DIFFERENT under the two rulesets:
+ *
+ *   v1  the lapse becomes a wind-down. The curve sell closes and the only exit
+ *       is the flat pro-rata redeem against the reserve.
+ *   v2  the lapse is an inflow stop. Buying closes, the curve sell stays OPEN,
+ *       and a renewal reopens buying on the SAME token.
+ *
+ * It was hard-set to the v2 text, which is the right sentence on the contract we
+ * are shipping toward and the WRONG one on the contract deployed today — so on a
+ * v1 chain it told a holder their exit was open when it was not. There is no
+ * single true wording, which is precisely why it takes `rules` and why there is
+ * NO DEFAULT: a default is how this came to state one contract's truth
+ * unconditionally in the first place, and a caller that forgets the argument
+ * should fail the build rather than quietly pick a ruleset.
+ *
+ * `rules` comes from `Market.rules`, derived in the data source from the code
+ * CID the chain reports — so the sentence follows the chain rather than a flag
+ * anyone has to remember to flip at deploy time.
+ */
+export function overdueBanner(figures: string, rules: ContractRules): string {
+  const consequence =
+    rules === 'v2'
+      ? 'If it isn’t renewed the market stops taking new buyers, but you can still sell on the curve, and the creator can renew any time to reopen buying.'
+      : 'If it isn’t renewed the market winds down: the curve closes and the only way out is redeeming your share of the reserve, less your early-exit fee.';
+  return `This creator’s listing has lapsed. ${consequence}${figures}`;
 }
 
 /**
@@ -420,9 +448,14 @@ export function allPublishedCopy(): string[] {
     // today's branch would certify half the module.
     buyRiskNote('$1.20', true),
     buyRiskNote('$1.20', false),
-    overdueBanner(overdueFigures('$1.20', 1.408, true)),
-    overdueBanner(overdueFigures('None yet', 1.007, true)),
-    overdueBanner(overdueFigures('$1.20', 1.408, false)),
+    // ★ BOTH RULESETS, for this block's own stated reason: a v1 chain publishes
+    // the v1 sentence, so a sweep that only saw v2 would certify half of it.
+    overdueBanner(overdueFigures('$1.20', 1.408, true), 'v2'),
+    overdueBanner(overdueFigures('None yet', 1.007, true), 'v2'),
+    overdueBanner(overdueFigures('$1.20', 1.408, false), 'v2'),
+    overdueBanner(overdueFigures('$1.20', 1.408, true), 'v1'),
+    overdueBanner(overdueFigures('None yet', 1.007, true), 'v1'),
+    overdueBanner(overdueFigures('$1.20', 1.408, false), 'v1'),
     positionLine('12.00', 16.9, 14.44),
     backingPerTokenValue(1.203, 50),
     backingPerTokenValue(0, 0),

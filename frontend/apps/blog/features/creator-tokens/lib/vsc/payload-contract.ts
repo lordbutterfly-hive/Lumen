@@ -268,21 +268,97 @@ export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
  */
 export const MAX_HASH_LEN = 128;
 
-/** Throws with the exact reason core/ask.go would have given, before anything is signed. */
-export function assertHashField(fieldName: 'contentHash' | 'answerHash', value: string): void {
+/**
+ * ★ ONE SOURCE FOR THE HASH RULES, because there were three and they disagreed.
+ *
+ * `assertHashField` (the op-builder's throw), the Answer dialog's `answerValid`
+ * and vsc-data-source's inline pair were separate hand-written copies; none
+ * checked control characters and all measured length in UTF-16 units where the
+ * contract measures BYTES. A UI gate more permissive than the op builder is not
+ * a gate — it lets someone press a live button and fail at signing, or on chain.
+ *
+ * TWO REGISTERS, deliberately (43's review, 2026-08-31):
+ *   · `hashFieldProblem` returns what a PERSON should read. No field names, no
+ *     file paths, no byte counts they did not ask for. It is rendered next to a
+ *     textarea by someone who is trying to answer a customer.
+ *   · `assertHashField` throws the DIAGNOSTIC — field name, rule, and the
+ *     contract citation — because it lands in a log or a developer's console,
+ *     where "this can't contain a line break" would be useless.
+ * Same rules, one implementation; only the wording differs.
+ *
+ * The rules mirror core/ask.go:379-390 and :595-606 exactly, in their order:
+ * non-empty, BYTE length <= MaxHashLen(128), no '|' (the escrow record is
+ * pipe-packed), and validEventHash (core/ask.go:276-283) — no byte < 0x20 and
+ * no 0x7f.
+ */
+type HashProblem = { human: string; diagnostic: string };
+
+/** What a person calls the thing they just typed. */
+const HASH_FIELD_NOUN: Record<'contentHash' | 'answerHash', string> = {
+  contentHash: 'Your request',
+  answerHash: 'Your answer'
+};
+
+function hashProblemOf(fieldName: 'contentHash' | 'answerHash', value: string): HashProblem | null {
+  const noun = HASH_FIELD_NOUN[fieldName];
   if (value === '') {
-    throw new Error(`payload-contract: ${fieldName} is empty — the contract refuses an empty commitment string (core/ask.go).`);
+    return {
+      human: `${noun} can't be empty.`,
+      diagnostic: `payload-contract: ${fieldName} is empty — the contract refuses an empty commitment string (core/ask.go).`
+    };
   }
-  if (value.length > MAX_HASH_LEN) {
-    throw new Error(
-      `payload-contract: ${fieldName} is ${value.length} characters — the contract accepts at most ${MAX_HASH_LEN} (core/ask.go MaxHashLen). Shorten it; a longer one is refused on chain AFTER you sign.`
-    );
+  // ★★ BYTES, NOT `value.length`. The contract's bound is `len(contentHash) >
+  // MaxHashLen` and Go's len() counts BYTES, while String.length counts UTF-16
+  // code units. They disagree in the DANGEROUS direction for non-ASCII: 100 CJK
+  // characters are 100 units (client: fine) and 300 bytes (chain: refused, after
+  // the user has signed and paid the RC). Emoji are worse.
+  const bytes = new TextEncoder().encode(value);
+  if (bytes.length > MAX_HASH_LEN) {
+    return {
+      human: `${noun} is too long. Shorten it a little and it will send. (Accented and non-Latin characters count for more than one.)`,
+      diagnostic: `payload-contract: ${fieldName} is ${bytes.length} bytes — the contract accepts at most ${MAX_HASH_LEN} (core/ask.go MaxHashLen, which counts BYTES not characters).`
+    };
   }
   if (value.includes('|')) {
-    throw new Error(
-      `payload-contract: ${fieldName} contains a "|" — the contract refuses it, because the escrow record is packed as a pipe-delimited string (core/ask.go:157). Remove the "|".`
-    );
+    return {
+      human: `${noun} can't contain the "|" character. Remove it and it will send.`,
+      diagnostic: `payload-contract: ${fieldName} contains a "|" — the escrow record is packed as a pipe-delimited string (core/ask.go:157).`
+    };
   }
+  // ★★ CONTROL CHARACTERS. core/ask.go validEventHash refuses ANY byte < 0x20
+  // or == 0x7f, and no client copy checked them. The reachable case is not
+  // exotic: the Answer dialog is a TEXTAREA, so one Enter puts a \n in the
+  // string, which passed every client check and reverted on chain after signing.
+  //
+  // Byte-wise, mirroring the contract rather than approximating it with a
+  // code-point test: every UTF-8 continuation byte is >= 0x80, so scanning bytes
+  // cannot mistake a legitimate multi-byte character for a control byte.
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    if (b < 0x20 || b === 0x7f) {
+      const humanName = b === 0x0a || b === 0x0d ? 'line breaks' : b === 0x09 ? 'tabs' : 'invisible control characters';
+      return {
+        human: `${noun} can't contain ${humanName}. Put it on one line and it will send.`,
+        diagnostic: `payload-contract: ${fieldName} contains a control character (0x${b.toString(16).padStart(2, '0')}) — the contract refuses any (core/ask.go validEventHash).`
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * The sentence to show a PERSON, or null when the value is acceptable to the
+ * contract. UI code gates on `hashFieldProblem(...) === null` rather than
+ * re-implementing any of this.
+ */
+export function hashFieldProblem(fieldName: 'contentHash' | 'answerHash', value: string): string | null {
+  return hashProblemOf(fieldName, value)?.human ?? null;
+}
+
+/** Throws the DIAGNOSTIC reason core/ask.go would have given, before anything is signed. */
+export function assertHashField(fieldName: 'contentHash' | 'answerHash', value: string): void {
+  const problem = hashProblemOf(fieldName, value);
+  if (problem) throw new Error(problem.diagnostic);
 }
 
 /**

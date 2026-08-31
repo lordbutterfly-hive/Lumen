@@ -15,7 +15,7 @@ import { SHOW_BACKING_FIGURES } from '../../backing-visibility';
 import { sellQuote, serviceQuote, serviceSupplyShareProblem, MIN_NET_DEFAULT_TOLERANCE_BPS } from '../../market/curve';
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
-import { MAX_HASH_LEN } from '../../lib/vsc/payload-contract';
+import { MAX_HASH_LEN, hashFieldProblem } from '../../lib/vsc/payload-contract';
 import { MAX_CAP_CREDITS_BASE_UNITS, MAX_OFFERINGS } from '../../lib/contract-math';
 import ModalShell from '../modal-shell';
 import { offerTitleProblem } from '../../lib/vsc/op-builders';
@@ -193,8 +193,26 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
   // handles the character the browser cannot.
   const dueLabel = dueLabelFor(ask);
   const urgent = ask.status === 'awaiting' && ask.deadlineAt - Date.now() < 24 * 3600 * 1000;
-  const answerHasPipe = text.includes('|');
-  const answerValid = text.trim().length > 0 && text.trim().length <= MAX_HASH_LEN && !answerHasPipe;
+  /**
+   * ★★★ ONE VALIDATOR, SHARED WITH THE OP-BUILDER (2026-08-31, H-A(a)).
+   *
+   * This used to be hand-written here — non-empty, `length <= MAX_HASH_LEN`,
+   * no pipe — and it DISAGREED with the contract in two ways a creator would
+   * meet by accident:
+   *
+   *   · `length` is UTF-16 units, and the contract counts BYTES. Measured
+   *     against the shared validator: 43 emoji is 86 units (passes the old
+   *     check) and 172 BYTES (refused on chain). The creator signs, pays
+   *     resource credits, the escrow does not release, and the miss is theirs.
+   *   · a line break passed entirely. Pressing Enter for a second line is the
+   *     single most ordinary thing to do in a multi-line box, and the contract
+   *     refuses every control character.
+   *
+   * `hashFieldProblem` wraps the same `assertHashField` the op-builder calls, so
+   * the two cannot drift again — the split IS what let them drift.
+   */
+  const answerProblem = text.trim().length > 0 ? hashFieldProblem('answerHash', text.trim()) : null;
+  const answerValid = text.trim().length > 0 && answerProblem === null;
   // ★ THE WINDOW CAN CLOSE WHILE THIS MODAL IS OPEN (2026-08-30, clauderfly-43).
   // Expired escrows no longer reach the Inbox's action button at all (see
   // use-live-studio's inbox/expiredInbox split), but a creator can sit on an open
@@ -270,11 +288,15 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
         placeholder="Where did you deliver it? A link, a ticket number, “sent by email”…"
         className="h-[130px] w-full resize-y rounded-xl border border-line-11 px-4 py-3 font-serif text-[15px] leading-[24px] text-ink-2 outline-none focus-visible:outline-none focus:border-line-brand-10"
       />
-      <div className="mt-1 flex justify-between text-caption text-ink-14">
-        <span className={answerHasPipe ? 'font-semibold text-ink-brand-6' : ''}>
-          {answerHasPipe
-            ? 'Remove the “|”. The chain refuses it in this field.'
-            : 'Stored on chain as a public reference.'}
+      {/* ★ THE REASON, NOT JUST A DEAD BUTTON. A disabled control with no
+          explanation reads as a broken page, and the failure it is standing in
+          for is expensive: without this the creator signs, pays resource
+          credits, the chain refuses the answer, the escrow never releases and
+          the miss lands on their delivery record. The message is the shared
+          validator's own, so it names the exact character or byte count. */}
+      <div className="mt-1 flex justify-between gap-3 text-caption text-ink-14">
+        <span className={answerProblem ? 'font-semibold text-ink-brand-6' : ''}>
+          {answerProblem ?? 'Stored on chain as a public reference.'}
         </span>
         <span className="tabular-nums">
           {text.length}/{MAX_HASH_LEN}
@@ -725,20 +747,53 @@ const CreatorStudio: FC = () => {
       : undefined;
   const sellMinNetDisplay = sellMinNetTouched ? sellMinNetText : defaultSellMinNetUsd > 0 ? defaultSellMinNetUsd.toFixed(2) : '';
 
-  const banner = overdue ? (
-    <div className="mb-5 flex items-center justify-between gap-3 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5">
-      <span className="text-[14px] leading-[22px] font-semibold text-ink-warn-3">
-        Your listing has lapsed. Renew to stay in discovery. Answering and cashing out still work.
-      </span>
-      <button
-        onClick={() => void runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.')}
-        disabled={studio.isBusy}
-        className="rounded-control bg-surface-warn-11 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
-      >
-        Renew ~$10
-      </button>
-    </div>
-  ) : null;
+  /**
+   * ★★★ ONE SENTENCE WAS DOING THREE DIFFERENT JOBS, AND WAS WRONG AT TWO OF THEM
+   * (2026-08-31, found in the browser on the demo build).
+   *
+   * The banner read "Your listing has lapsed. Renew to stay in discovery.
+   * Answering and cashing out still work." on EVERY market whose subscription
+   * had run out — and it rendered identically for three states that mean
+   * different things:
+   *
+   *   OVERDUE  still buyable inside the grace window. The sentence was RIGHT
+   *            here: discovery is the thing at stake and buying still works.
+   *   FROZEN   buying is SHUT (`canBuy` false). "stay in discovery" is the
+   *            softer, wronger truth — the token page's own banner says "not
+   *            taking buyers", so the product said two different things about
+   *            one state, and the Studio's was the one that understated it.
+   *   CLOSED   the market has WOUND DOWN. Calling that "lapsed" is simply
+   *            false, and the Renew button beside it was a dead control: the
+   *            chain refuses a renewal on a closed market (`renewRefusal` is
+   *            'closed'), so pressing it could only ever fail. That is the
+   *            fault class this feature has now fixed on six other surfaces.
+   *
+   * So the banner branches, and the CTA is gated on the chain's own answer
+   * rather than on "the subscription has run out": `renewRefusal === null` is
+   * exactly "the contract would accept a payment right now", which is the only
+   * honest precondition for offering a pay button.
+   */
+  const canRenewNow = market.renewRefusal === null;
+  const lapseHeadline = market.windingDown
+    ? 'This token is winding down. It will not take buyers again, and renewing cannot reopen it.'
+    : market.phase === 'FROZEN'
+      ? 'Your market has stopped taking buyers. Renew to start taking them again. Answering and cashing out still work.'
+      : 'Your listing has lapsed. Renew to stay in discovery. Answering and cashing out still work.';
+  const banner =
+    overdue || market.windingDown ? (
+      <div className="mb-5 flex items-center justify-between gap-3 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5">
+        <span className="text-[14px] leading-[22px] font-semibold text-ink-warn-3">{lapseHeadline}</span>
+        {canRenewNow ? (
+          <button
+            onClick={() => void runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.')}
+            disabled={studio.isBusy}
+            className="rounded-control bg-surface-warn-11 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
+          >
+            Renew ~$10
+          </button>
+        ) : null}
+      </div>
+    ) : null;
 
   return (
     <TokenShell back={{ href: '/creators', label: '← All creators' }}>
@@ -848,8 +903,19 @@ const CreatorStudio: FC = () => {
             <Card>
               <Stat
                 label="Subscription"
-                value={overdue ? 'Lapsed' : `${subDaysLeft} days left`}
-                sub={overdue ? 'Renew to stay listed' : `Renew ~$10`}
+                /* ★ A WOUND-DOWN MARKET IS NOT "LAPSED", AND RENEWING CANNOT SAVE
+                   IT (2026-08-31). This read "Lapsed / Renew to stay listed" on a
+                   CLOSED market, where the chain refuses a renewal outright — so
+                   the stat named the wrong state and prescribed a remedy that does
+                   not exist. Same fault as the banner CTA above, in a stat. */
+                value={market.windingDown ? 'Ended' : overdue ? 'Lapsed' : `${subDaysLeft} days left`}
+                sub={
+                  market.windingDown
+                    ? 'This token is winding down'
+                    : overdue
+                      ? 'Renew to stay listed'
+                      : `Renew ~$10`
+                }
               />
             </Card>
             <Card>
@@ -1293,9 +1359,21 @@ const CreatorStudio: FC = () => {
           <Card>
             <div className="mb-1 font-serif text-lg font-semibold text-ink-2">Subscription</div>
             <div className="mb-4 text-[14px] leading-[22px] text-ink-8">
-              {overdue ? 'Lapsed. Renew to stay listed.' : `Paid up · ${subDaysLeft} days left.`} Staying
+              {market.windingDown
+                ? 'This token is winding down, so the subscription no longer applies.'
+                : overdue
+                  ? 'Lapsed. Renew to stay listed.'
+                  : `Paid up · ${subDaysLeft} days left.`}{' '}
+              Staying
               listed is ~$10/month. First month’s on the house.
             </div>
+            {/* ★ THE SECOND DEAD RENEW (2026-08-31). The banner CTA above was
+                gated on `renewRefusal`; this one was not, so a CLOSED market
+                still offered "Renew ~$10" in Billing — the chain refuses it
+                ('closed'), so it could only ever fail. Gated on the same
+                condition, so there is one answer to "may this creator pay
+                right now" and both controls read it. */}
+            {canRenewNow ? (
             <button
               onClick={() =>
                 void (async () => {
@@ -1308,6 +1386,7 @@ const CreatorStudio: FC = () => {
             >
               Renew ~$10
             </button>
+            ) : null}
             {/* ★ S4 (2026-08-30): when Hive accepted the payment but Magi has not
                 recorded it inside the window (vsc-data-source renewSubscription
                 throws CREATOR_TOKENS_RENEW_UNCONFIRMED), the way out is a
@@ -1327,11 +1406,29 @@ const CreatorStudio: FC = () => {
                 Check again
               </button>
             ) : null}
+            {/* ★★★ H-D: THIS TOLD EVERY CREATOR THAT LAPSING REFUNDS THEIR HOLDERS,
+                UNCONDITIONALLY, ON THE SCREEN WHERE THEY DECIDE WHETHER TO PAY
+                (2026-08-31, found in the browser on the demo build).
+                Every clause was the v1 wind-down story: holders refunded, delivery
+                record reset, "coming back means a new token". Under v2 all four are
+                false — a lapse is an inflow stop, holders keep their tokens and can
+                still sell, the record survives, and a renewal reopens the SAME
+                token. 57's own on-chain lifecycle proved exactly that (Buy refused,
+                Sell accepted, Refund refused, Renew accepted on a natural FROZEN).
+                It also contradicted the Studio's own banner two tabs away and the
+                wind-down line immediately below it, which says "nobody is refunded
+                automatically" — two adjacent sentences, opposite claims.
+                It is the one lapse-sensitive string that never got the `rules`
+                treatment, so it flipped from true to false the moment A1 shipped.
+                Now gated on the chain's own answer like the rest.
+                ★ THE v1 BRANCH IS ALSO CORRECTED, not merely preserved: holders
+                were never refunded AUTOMATICALLY even under v1 — Refund and
+                RefundHolder are pull rails somebody has to call. "can redeem"
+                is what was always true. */}
             <p className="mt-4 text-caption text-ink-14">
-              If you stop paying, your token’s market winds down, holders are refunded their share of the reserve
-              less any early-exit fee, and your
-              delivery record resets, and coming back means a new token. Answering and cashing out are never
-              blocked by billing.
+              {market.rules === 'v2'
+                ? 'If you stop paying, your market stops taking new buyers. Holders keep their tokens and can still sell, your delivery record is unaffected, and renewing reopens buying on the same token. Answering and cashing out are never blocked by billing.'
+                : 'If you stop paying, your token’s market winds down: holders can redeem their share of the reserve, less any early-exit fee, your delivery record resets, and coming back means a new token. Answering and cashing out are never blocked by billing.'}
             </p>
             <div className="mt-5 border-t border-line-2 pt-4">
               {market.windingDown ? (
@@ -1390,7 +1487,12 @@ const CreatorStudio: FC = () => {
                     disabled={tradeFeeClaimableUsd <= 0 || studio.isBusy}
                     className="rounded-control bg-surface-ok-7 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-ok-8 disabled:opacity-50"
                   >
-                    {tradeFeeClaimableUsd <= 0 ? 'Claimed' : 'Claim'}
+                    {/* ★ "Claimed" ON A ZERO BALANCE READ AS "you already took it"
+                        (2026-08-31, browser). Nothing had been claimed — there was
+                        nothing TO claim, which is a different fact and the one a
+                        creator needs. The unknown case is handled above and never
+                        reaches this label. */}
+                    {tradeFeeClaimableUsd <= 0 ? 'Nothing to claim' : 'Claim'}
                   </button>
                 )}
               </div>
@@ -1430,6 +1532,29 @@ const CreatorStudio: FC = () => {
                       : `worth ${usdPrice(held * market.priceUsd)}`
                 }
               />
+              {/* ★★★ THE CURVE SELL IS CLOSED DURING A WIND-DOWN, AND THIS CONTROL
+                  WAS STILL WIRED TO IT (2026-08-31, D4, confirmed on `mock-closed`).
+                  `studio.sell()` calls sell.go's curve rail, which refuses for the
+                  whole wind-down and tells the caller to use the refund rail
+                  instead — while the banner above promised "cashing out still
+                  work". The token page has routed this correctly for weeks
+                  (`windingDown ? 'redeem' : 'sell'`); the Studio never did.
+                  It is masked on the fixtures only because the creator holds zero
+                  there, so the button is disabled for an unrelated reason.
+                  Rather than build a SECOND redeem path here — a money rail
+                  duplicated in two files is how the two drift — the Studio sends
+                  the creator to the one that already exists, on their own token
+                  page. No dead control, no second implementation. */}
+              {market.windingDown ? (
+                <div className="mt-4 rounded-control border border-line-11 bg-surface-5 px-4 py-3 text-caption text-ink-10">
+                  This market is winding down, so selling on the curve is closed. Your tokens are redeemed from your
+                  own token page instead.{' '}
+                  <a href={`/creators/${studio.creator ?? ''}`} className="font-semibold text-ink-brand-6 hover:underline">
+                    Open your token page
+                  </a>
+                </div>
+              ) : (
+                <>
               <div className="mt-4 flex items-center gap-2">
                 <span className="text-caption text-ink-10">Cash out</span>
                 <input
@@ -1532,6 +1657,8 @@ const CreatorStudio: FC = () => {
                 minimum above is pre-filled just under what you’d get right now, so the sell reverts (nothing
                 spent) rather than fill lower. Clear it for no minimum, or lower it to allow more slippage.
               </p>
+                </>
+              )}
             </Card>
           </div>
         ) : null}

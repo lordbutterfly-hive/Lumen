@@ -19,13 +19,14 @@
  * yet" is not.
  */
 
-import type { Ask, DeliveryRecord as ChainDeliveryRecord, HolderPosition as ChainHolderPosition, Market, Offering, RenewRefusal } from '../types';
+import type { Ask, ContractRules, DeliveryRecord as ChainDeliveryRecord, HolderPosition as ChainHolderPosition, Market, Offering, RenewRefusal } from '../types';
 
 import type { DeliveryRecord as UiDeliveryRecord } from '../market/types';
 import type { PortfolioAsk } from '../market/portfolio';
 import type { Service } from '../market/token-detail';
 import { type PriceChange, priceChangeOf } from '../market/price-change';
 import { BLOCKS_PER_DAY } from '../lib/contract-math';
+import { deliveryMarks } from '../market/format';
 
 
 /**
@@ -113,6 +114,8 @@ export function blocksToDays(blocks: number): number {
  */
 export interface LiveTokenMarket {
   handle: string;
+  /** The contract rules the chain reports (A5 lockstep): v1 vs v2 lapse semantics. */
+  rules: ContractRules;
   /** Current price per token, from the curve (spotPriceHbd). */
   priceUsd: number;
   /** Reserve-backed downside per token. Never colored, always beside the price. */
@@ -217,7 +220,7 @@ export interface LiveHolderPosition {
  */
 export function adaptDelivery(rec: ChainDeliveryRecord | null | undefined): UiDeliveryRecord {
   if (!rec || rec.source === 'unavailable') {
-    return { answered: 0, total: 0, completionPct: null, typicalResponse: '', marks: [], available: false };
+    return { answered: 0, total: 0, completionPct: null, typicalResponse: '', marks: [], avgRating: null, ratingCount: 0, declinedCount: 0, available: false };
   }
   const total = rec.answeredCount + rec.missedCount;
   // ★ null, NOT 0, when nothing has been asked of this creator yet. Zero is a
@@ -233,7 +236,10 @@ export function adaptDelivery(rec: ChainDeliveryRecord | null | undefined): UiDe
     // The chain record carries counts, not an ordered pass/fail history, so the
     // marks strip is reconstructed as "N answered then M missed" — honest about
     // the TOTALS it is drawn from, but NOT a chronology. Do not label it one.
-    marks: [...Array(rec.answeredCount).fill(true), ...Array(rec.missedCount).fill(false)].slice(-18) as boolean[],
+    marks: deliveryMarks(rec.answeredCount, rec.missedCount),
+    avgRating: rec.avgRating,
+    ratingCount: rec.ratingCount,
+    declinedCount: rec.declinedCount,
     available: true
   };
 }
@@ -281,7 +287,7 @@ export function adaptOfferings(offerings: Offering[]): Service[] {
  */
 export function faceAsService(faceHbd: number): Service[] {
   if (!(faceHbd > 0)) return [];
-  return [{ key: '0', name: 'Ask a question', desc: 'One question, answered within your deadline. If it is not, you can reclaim your tokens yourself once the deadline and a short grace period have passed. The creator marks the job delivered — your protection afterwards is the rating you leave.', usd: usdFromHbd(faceHbd), status: 'live', cta: 'Ask' }];
+  return [{ key: '0', name: 'Ask a question', desc: 'One question, answered within your deadline. If it is not, you can reclaim your tokens yourself once the deadline and a short grace period have passed. The creator marks the job delivered, and your protection afterwards is the rating you leave.', usd: usdFromHbd(faceHbd), status: 'live', cta: 'Ask' }];
 }
 
 /**
@@ -332,6 +338,7 @@ export function adaptMarket(input: {
   const windingDown = market.windingDown;
   return {
     handle: creator,
+    rules: market.rules,
     priceUsd: usdFromHbd(market.spotPriceHbd),
     basePriceUsd: usdFromHbd(market.faceHbd),
     floorUsd: usdFromHbd(market.floorPriceHbd),

@@ -587,7 +587,12 @@ export function useMeritumLaunch(): MeritumLaunchApi {
    * we could not complete is exactly the case where we do not know.
    */
   const canRetryRead = studio.status === 'error';
-  const alreadyHasMarket = Boolean(studio.market);
+  // ★ A CLOSED market can be relaunched (M-4, 2026-08-31): registerCheck
+  // (core/market.go) admits stored state "" or CLOSED, and Phase() returns
+  // CLOSED only when CloseIfDrained wrote it (closed AND drained), so this
+  // matches the contract exactly. Retire/Billing promise "coming back means a
+  // new token"; before this the client made that journey impossible.
+  const alreadyHasMarket = studio.market != null && studio.market.phase !== 'CLOSED';
 
   /**
    * ★ "STILL READING" IS ALSO "WE DO NOT KNOW" (added 2026-08-15).
@@ -696,11 +701,16 @@ export function useMeritumLaunch(): MeritumLaunchApi {
         return;
       }
 
-      // Everything past the first price is a named offering. Sequential, not
-      // parallel: they share one nonce and one signer, and being asked to sign
-      // three prompts at once is worse than three in a row.
+      // Every offer is a named offering, so each shows the name the creator
+      // typed. The on-chain `face` carries a price but NO title, so offer #0
+      // posted as the face alone was unnamed — and because named offerings
+      // exist it was never rendered (faceAsService is the zero-offerings case),
+      // making the creator's flagship promise invisible and unbuyable. `faceHbd`
+      // (set at register) keeps offer #0's price as the legacy "Ask a question"
+      // fallback. Sequential, not parallel: they share one nonce and one signer,
+      // and being asked to sign several prompts at once is worse than in a row.
       let postedAll = true;
-      for (const service of services.slice(1)) {
+      for (const service of services) {
         try {
           await studio.createOffering({ title: service.name, priceUsd: service.usd });
         } catch {

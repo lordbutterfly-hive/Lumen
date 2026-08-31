@@ -126,7 +126,7 @@ console.log('\n── 3. EVERY SITE IS BEHIND IT. Enumerated, and counted.\n');
   check(
     '★ the only OTHER use of the figure is the overdue banner, which self-guards inside overdueFigures',
     count(view.code, 'backingPerTokenValue(market.floorUsd, market.supply)') === 2 &&
-      view.code.includes('overdueBanner(overdueFigures(backingPerTokenValue(market.floorUsd, market.supply), market.priceUsd))')
+      view.code.includes('overdueBanner(overdueFigures(backingPerTokenValue(market.floorUsd, market.supply), market.priceUsd), market.rules)')
   );
   check('★ it is not rendered and then hidden with CSS', !guarded.includes('display:none') && !guarded.includes('hidden ') && !view.code.includes('SHOW_BACKING_FIGURES ? "" :'));
 
@@ -215,7 +215,7 @@ console.log('\n── 4. NO SENTENCE POINTS AT A FIGURE THAT IS NOT THERE.\n');
 
   // The read-failure banner apologised for not showing a figure a reader was
   // never going to be shown.
-  check('★ the read-failure banner no longer names the floor', !/floor/i.test(states.code) && states.code.includes('we can’t show this token’s price or your balance'));
+  check('★ the read-failure banner no longer names the floor', !/floor/i.test(states.code) && states.code.includes('we can’t show its price or your balance'));
 
   // The wallet's closing disclosure had to CHANGE, not just disappear: it ended
   // by defining the figure. Both branches live at module scope so this can read
@@ -236,7 +236,25 @@ console.log('\n── 4. NO SENTENCE POINTS AT A FIGURE THAT IS NOT THERE.\n');
   // sites say so now; the third, the billing paragraph (a LAPSE sentence), waits for
   // the A1 contract release and keeps the old wording until then, so the count is 1.
   check('★ studio names the wind-down mechanism honestly on the two Retire-path sites', count(studio.code, 'redeem a pro-rata slice of the reserve') === 1 && count(studio.code, 'redeem a slice of the reserve') === 1);
-  check('★ …and the billing (lapse) sentence is the one place the old wording remains, pending the contract release', count(studio.code, 'refunded their share of the reserve') === 1);
+  // ★★ UPDATED 2026-08-31 (clauderfly-43). This assertion PINNED THE FALSE
+  // SENTENCE. It asserted that "refunded their share of the reserve" still
+  // appeared exactly once — the v1 wind-down claim, sitting unconditionally on
+  // the Billing tab and telling every creator that lapsing refunds their
+  // holders. It is now gated on `market.rules`, and the v1 branch is corrected
+  // too: holders were never refunded AUTOMATICALLY under either ruleset
+  // (Refund/RefundHolder are pull rails somebody has to call), so "can redeem"
+  // is what was always true. The assertion now pins the GATE rather than the
+  // wording it was holding in place.
+  check(
+    '★ the billing lapse sentence is GATED on the chain rules, not hard-set to one contract',
+    studio.code.includes("market.rules === 'v2'") &&
+      count(studio.code, 'stops taking new buyers') >= 1 &&
+      count(studio.code, 'can redeem their share of the reserve') === 1
+  );
+  check(
+    '★ …and the false "holders are refunded" claim is gone from the studio entirely',
+    count(studio.code, 'refunded their share of the reserve') === 0
+  );
   // ★ AND THE MECHANISM SENTENCE HAD TO GROW A SECOND HALF (2026-08-28, false-text
   // audit F6). "Refunded their share of the reserve" is only two thirds of what
   // core/refund.go does: K2 carves the same hold-time exit tax the curve charges
@@ -247,8 +265,12 @@ console.log('\n── 4. NO SENTENCE POINTS AT A FIGURE THAT IS NOT THERE.\n');
   // 2026-08-30 (B3, copy set A): two of the three sites no longer use the retired
   // phrase (see the two checks above); the scan now confirms exactly the one
   // remaining lapse-path site, and the fee count below still covers all three.
-  const windDownSites = studio.code.match(/refunded their share of the reserve/g) ?? [];
-  check('the wind-down scan found its sites', windDownSites.length === 1, `${windDownSites.length} sites`);
+  // ★ RE-POINTED 2026-08-31: this scanned for the sentence the gate above
+  // deleted, so it found 0 sites and correctly failed as a vacuous instrument.
+  // It now scans the two wind-down sentences that DO remain, which are the ones
+  // whose early-exit-fee disclosure the next check is actually about.
+  const windDownSites = studio.code.match(/redeem a (pro-rata )?slice of the reserve/g) ?? [];
+  check('the wind-down scan found its sites', windDownSites.length === 2, `${windDownSites.length} sites`);
   check(
     '★ …and every one of them names the early-exit fee',
     count(studio.code, 'early-exit fee') === 3,
