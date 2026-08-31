@@ -2,6 +2,7 @@ import { getLogger } from '@ui/lib/logging';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
 import { getCommunitiesCached, getDynamicGlobalPropertiesCached } from '@/blog/lib/cached-api';
 import { getTrendingTagsCached } from '@/blog/lib/trending-tags';
+import { warmHomeFeedCache } from '@/blog/lib/feed/feed-prefetch';
 
 const logger = getLogger('app');
 
@@ -86,6 +87,16 @@ export function warmServerCaches(): void {
      * Warming it here means they never race it at all. Same argument as the
      * community list above, and the same swallowed failure.
      */
-    warm('trending-tags', () => getTrendingTagsCached())
+    warm('trending-tags', () => getTrendingTagsCached()),
+    /*
+     * ★ THE HOME FEED ITSELF (2026-08-31). The same argument as trending-tags
+     * directly above, on the expensive half: `prefetchHomeFeed` races a 700 ms
+     * deadline that the upstream (830-1,090 ms measured) cannot beat cold, so
+     * without this every reader after a restart loses that race until one of
+     * them happens to fill the cache. Warming it means the first one does not.
+     * Signed-out readers only — the signed-in feed is per-viewer and there is no
+     * way to know whose to warm, the same reasoning that excludes profiles.
+     */
+    warm('home-feed', () => warmHomeFeedCache())
   ]);
 }

@@ -2,18 +2,18 @@
 // safety net for the bug class fixed alongside this file (seam audit,
 // 2026-07-20): main.go's flat-JSON reader has exactly two shapes,
 //
-//   jsonU64(payload, key)  main.go:239-264 — bare, UNQUOTED decimal integer.
+//   jsonU64(payload, key)  main.go jsonU64 — bare, UNQUOTED decimal integer.
 //                          Missing/malformed/negative silently reads as 0.
-//   jsonStr(payload, key)  main.go:211-237 — a QUOTED JSON string. Anything
+//   jsonStr(payload, key)  main.go jsonStr — a QUOTED JSON string. Anything
 //                          else (absent key, unquoted value) silently reads
 //                          back as "".
 //
 // Every money amount is read via jsonStr and then handed to parseBigDecimal
-// (main.go:266-281: `new(big.Int).SetString(s, 10)`, `s == ""` and any sign
+// (main.go parseBigDecimal: `new(big.Int).SetString(s, 10)`, `s == ""` and any sign
 // or non-digit character rejected) — a *base-10 integer string*, never a
 // bare JSON number and never a value with a decimal point. Get either of
 // those two shapes wrong for any field below and the call INPUT-reverts
-// (main.go:99-105 handleErr -> sdk.Revert) every single time, at the cost of
+// (main.go handleErr handleErr -> sdk.Revert) every single time, at the cost of
 // the caller's RC, with zero on-chain trace of what the payload even looked
 // like.
 //
@@ -41,7 +41,7 @@ export type JsonFieldType =
   | 'string' // jsonStr: quoted JSON string -> JS `string`, any content.
   | 'moneyString'; // jsonStr -> parseBigDecimal: quoted JSON string that must
 // ALSO be a bare non-negative base-10 integer (no sign, no decimal point,
-// no exponent) or parseBigDecimal (main.go:272-281) rejects it even though
+// no exponent) or parseBigDecimal (main.go parseBigDecimal) rejects it even though
 // the JSON *type* was correct — the exact near-miss this feature's `refund`/
 // `transferCredits` fix could have regressed into if `.toFixed(3)` or a
 // human-decimal string had been used instead of a base-unit integer string.
@@ -99,11 +99,26 @@ function isOptional(spec: JsonFieldType | OptionalFieldSpec): boolean {
 // Ten curve/lifecycle entrypoints (buy/sell/retire/claimTradeFees/
 // closeIfDrained/withdrawTreasury/pause/unpause + the read-only quoteBuy/
 // quoteSell) had NO spec at all.
+/**
+ * ★★ CITATIONS ARE FUNCTION NAMES, NOT LINE NUMBERS (2026-08-31, found by
+ * clauderfly-43). Every `main.go:NNN` in this file had drifted — face 512->657,
+ * cap 517->662, ask.maxCredits 768->1175, buy.tokens 1010->1589. The drift was
+ * NOT constant (+145 to +579), so they could not be bulk-corrected by an offset,
+ * and a wrong pointer is worse than none: it is exactly what a future auditor
+ * follows to re-verify a money path, and it would land them in an unrelated
+ * function reading the wrong guard.
+ *
+ * Re-pinning the numbers would only reset the same clock — they drifted once and
+ * would drift on the next contract edit. A FUNCTION NAME does not drift. Every
+ * anchor below was checked to exist in the current `contract/main.go`; the TABLE
+ * itself was already proven mechanically (43 diffed all 24 actions field-by-field
+ * against main.go's three readers), so this changes documentation only.
+ */
 export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
   register: {
-    face: 'number', // main.go:512 i64FromU64(jsonU64(payload, "face"))
-    cap: 'number', // main.go:517 i64FromU64(jsonU64(payload, "cap"))
-    // main.go:527 `if raw := jsonStr(payload, "firstBuy"); raw != ""` — the
+    face: 'number', // main.go jsonU64 i64FromU64(jsonU64(payload, "face"))
+    cap: 'number', // main.go jsonU64 i64FromU64(jsonU64(payload, "cap"))
+    // main.go jsonStr `if raw := jsonStr(payload, "firstBuy"); raw != ""` — the
     // OPTIONAL atomic creator first buy. Absent/0 == plain registration. When
     // present it executes an ORDINARY core.Buy at FULL curve cost plus the
     // full 10% trade fee in the same state transition: zero premine, no
@@ -112,38 +127,38 @@ export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
     firstBuy: { type: 'moneyString', optional: true }
   },
   renew: {
-    creator: 'string', // main.go:573
-    periods: 'number', // main.go:574
-    paid: 'moneyString' // main.go:575
+    creator: 'string', // main.go Renew
+    periods: 'number', // main.go Renew
+    paid: 'moneyString' // main.go Renew
   },
   setFace: {
-    newFace: 'number' // main.go:605
+    newFace: 'number' // main.go SetFace
   },
   setCap: {
-    newCap: 'number' // main.go:632
+    newCap: 'number' // main.go SetCap
   },
   // ---- the curve rails (WAVE D) ----
   buy: {
-    creator: 'string', // main.go:1009
+    creator: 'string', // main.go Buy
     // WHOLE TOKENS, not 3-decimal base units — see contract-math.ts's unit
     // note. Slippage is the buyer's OWN signed transfer.allow on the single
     // HiveDraw of TotalDue; there is deliberately no in-payload cost cap.
-    tokens: 'moneyString' // main.go:1010
+    tokens: 'moneyString' // main.go Buy
   },
   sell: {
-    creator: 'string', // main.go:1054
-    tokens: 'moneyString', // main.go:1055
-    // main.go:1062 — OPTIONAL signed floor on Net. Absent == NO guard (the
+    creator: 'string', // main.go Sell
+    tokens: 'moneyString', // main.go Sell
+    // main.go Sell — OPTIONAL signed floor on Net. Absent == NO guard (the
     // escape hatch that keeps an exit from ever being trapped); present but
     // malformed == a hard error, never a silent zero.
     minNet: { type: 'moneyString', optional: true }
   },
   ask: {
-    creator: 'string', // main.go:765
-    contentHash: 'string', // main.go:766
-    deadlineBlocks: 'number', // main.go:767
-    maxCredits: 'moneyString', // main.go:768 — REQUIRED; core.Ask rejects nil/zero
-    // main.go:830 jsonU64Field(payload, "offeringId") — the OFFERINGS SHOP.
+    creator: 'string', // main.go Ask
+    contentHash: 'string', // main.go Ask
+    deadlineBlocks: 'number', // main.go Ask
+    maxCredits: 'moneyString', // main.go Ask — REQUIRED; core.Ask rejects nil/zero
+    // main.go jsonU64Field jsonU64Field(payload, "offeringId") — the OFFERINGS SHOP.
     // ABSENT means 0, which is the reserved alias for the creator's legacy
     // single `face` price, so leaving it off keeps the pre-shop behaviour
     // exactly. A NONZERO id names one of the creator's posted services and
@@ -162,46 +177,46 @@ export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
     offeringId: { type: 'number', optional: true }
   },
   answer: {
-    seq: 'number', // main.go:820
-    answerHash: 'string' // main.go:821
+    seq: 'number', // main.go Answer
+    answerHash: 'string' // main.go Answer
   },
   reclaim: {
-    creator: 'string', // main.go:876
-    seq: 'number' // main.go:877
+    creator: 'string', // main.go Reclaim
+    seq: 'number' // main.go Reclaim
   },
   refund: {
-    creator: 'string', // main.go:938
-    credits: 'moneyString', // main.go:939
-    minNet: { type: 'moneyString', optional: true } // main.go:966
+    creator: 'string', // main.go Refund
+    credits: 'moneyString', // main.go Refund
+    minNet: { type: 'moneyString', optional: true } // main.go Refund
   },
   // ---- the offerings shop (creator-only; caller IS the creator on all five,
   // so no `creator` field on the four writes) ----
   createOffering: {
-    title: 'string', // main.go:1683 jsonStr(payload, "title")
+    title: 'string', // main.go jsonStr jsonStr(payload, "title")
     // UNQUOTED integer base units (jsonU64 -> i64FromU64), NOT a money string:
     // the shop entrypoints read prices with the loose number reader, unlike
     // ask/buy/sell which use parseBigDecimal. Sending "500" here would parse
     // as 0 and post a free service.
-    price: 'number' // main.go:1684
+    price: 'number' // main.go CreateOffering
   },
   setOfferingPrice: {
-    offeringId: 'number', // main.go:1721 jsonU64Field — 0 is MEANINGFUL, never omit
-    newPrice: 'number' // main.go:1726
+    offeringId: 'number', // main.go jsonU64Field jsonU64Field — 0 is MEANINGFUL, never omit
+    newPrice: 'number' // main.go SetOfferingPrice
   },
   setOfferingTitle: {
-    offeringId: 'number', // main.go:1815 jsonU64Field
-    title: 'string' // main.go:1820
+    offeringId: 'number', // main.go jsonU64Field jsonU64Field
+    title: 'string' // main.go SetOfferingTitle
   },
   deleteOffering: {
-    offeringId: 'number' // main.go:1806 jsonU64Field
+    offeringId: 'number' // main.go jsonU64Field jsonU64Field
   },
   // The anti-grief rail (RULING E): the creator's free, honest "no" inside the
   // same window an Answer would be legal in. Full refund INCLUDING the
   // commission, and explicitly not a miss against the delivery record. Had no
   // client method at all until 2026-07-28.
   decline: {
-    creator: 'string', // main.go:958
-    seq: 'number' // main.go:963 jsonU64Field — 0 is a real seq
+    creator: 'string', // main.go Decline
+    seq: 'number' // main.go jsonU64Field jsonU64Field — 0 is a real seq
   },
   // The buyer's rating of a delivered job. Reputation only — the contract
   // refuses to let it touch any fund path, and no client should imply it can.
@@ -211,28 +226,28 @@ export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
     score: 'number' // jsonU64Field — 1-5, bounded in core
   },
   refundHolder: {
-    creator: 'string', // main.go:1117
-    holder: 'string' // main.go:1118
+    creator: 'string', // main.go RefundHolder
+    holder: 'string' // main.go RefundHolder
   },
   // The wasm export is `transfer` (//go:wasmexport transfer) — NOT
   // `transferCredits`. Ten of eleven action names matched; this one did not,
   // so every transfer would have dispatched to an unknown action on-chain.
   transfer: {
-    creator: 'string', // main.go:675
-    to: 'string', // main.go:676
-    amount: 'moneyString' // main.go:688
+    creator: 'string', // main.go Transfer
+    to: 'string', // main.go Transfer
+    amount: 'moneyString' // main.go Transfer
   },
   retire: {
-    creator: 'string' // main.go:1313 — creator-only, ONCE-ONLY, starts the 5-day notice
+    creator: 'string' // main.go Retire — creator-only, ONCE-ONLY, starts the 5-day notice
   },
   // No payload fields at all: the caller IS the beneficiary (core.ClaimTradeFees
   // zeroes kFeeBal(caller) and returns the debited amount to transfer back).
   claimTradeFees: {},
   closeIfDrained: {
-    creator: 'string' // main.go:1167
+    creator: 'string' // main.go CloseIfDrained
   },
   withdrawTreasury: {
-    amount: 'moneyString' // main.go:1220 — owner-gated inside core
+    amount: 'moneyString' // main.go WithdrawTreasury — owner-gated inside core
   },
   pause: {},
   unpause: {}
@@ -370,7 +385,7 @@ export function assertHashField(fieldName: 'contentHash' | 'answerHash', value: 
  */
 export const READ_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
   quote: {
-    creator: 'string', // main.go:1351
+    creator: 'string', // main.go Quote
     // Same convention and the same reason as `ask` above: a quote MUST preview
     // the price the ask will actually charge, so it takes the same optional
     // offeringId and refuses a malformed one rather than pricing the legacy
@@ -378,23 +393,23 @@ export const READ_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
     offeringId: { type: 'number', optional: true }
   },
   quoteBuy: {
-    creator: 'string', // main.go:1398
-    tokens: 'moneyString' // main.go:1399
+    creator: 'string', // main.go QuoteBuy
+    tokens: 'moneyString' // main.go QuoteBuy
   },
   quoteSell: {
-    creator: 'string', // main.go:1432
+    creator: 'string', // main.go QuoteSell
     // The exit tax is the HOLDER's own hold clock, so the holder to preview
     // is a PAYLOAD field — that is what keeps this a pure, caller-independent
     // read. The real `sell` still requires that holder's own active auth.
-    holder: 'string', // main.go:1433
-    tokens: 'moneyString' // main.go:1434
+    holder: 'string', // main.go QuoteSell
+    tokens: 'moneyString' // main.go QuoteSell
   },
   // Pure read, no auth, no mutation: returns the creator's whole posted
   // catalogue as {creator, offerings:[{offeringId,title,price}]}.
-  listOfferings: { creator: 'string' } // main.go:1826
+  listOfferings: { creator: 'string' } // main.go ListOfferings
 };
 
-// parseBigDecimal (main.go:272-281) is `new(big.Int).SetString(s, 10)` then
+// parseBigDecimal (main.go parseBigDecimal) is `new(big.Int).SetString(s, 10)` then
 // a `Sign() < 0` rejection — in practice, for every field this feature ever
 // sends, the only shapes that can ever legitimately reach the wire are bare
 // non-negative digit strings (base units are always non-negative integers
@@ -456,7 +471,7 @@ export function assertPayloadShape(action: string, payload: Record<string, unkno
       if (typeof value !== 'string') {
         problems.push(`"${key}" must be a quoted decimal string (main.go reads it via jsonStr then parseBigDecimal) — got ${typeof value} (${JSON.stringify(value)}); an unquoted number here is the exact bug this checker exists to catch`);
       } else if (!MONEY_STRING_RE.test(value)) {
-        problems.push(`"${key}" = ${JSON.stringify(value)} is not a bare non-negative base-10 integer string — parseBigDecimal (main.go:272) would reject it (no sign, no decimal point, no exponent allowed)`);
+        problems.push(`"${key}" = ${JSON.stringify(value)} is not a bare non-negative base-10 integer string — parseBigDecimal (main.go parseBigDecimal) would reject it (no sign, no decimal point, no exponent allowed)`);
       }
     }
   }
@@ -484,10 +499,10 @@ export function assertPayloadShape(action: string, payload: Record<string, unkno
 // requireActiveAuth(currentCaller()) — including the curve rails, and
 // including the ones that look permissionless in core (closeIfDrained,
 // refundHolder). The four that do NOT are all genuine pure reads: `quote`
-// (main.go:1550), `quoteBuy` (:1628), `quoteSell` (:1662), `listOfferings`
+// (main.go ListOfferings), `quoteBuy` (:1628), `quoteSell` (:1662), `listOfferings`
 // (:1861) — they are specced in READ_PAYLOAD_SPECS below and are never
 // broadcast. Of the 25 gated entrypoints, 24 are client-reachable; the 25th
-// is `init` (main.go:401), which only the deployer calls. There is no write
+// is `init` (main.go ListOfferings), which only the deployer calls. There is no write
 // on this contract that a posting key may sign. `prepay` is gone
 // (core/prepay.go deleted).
 //

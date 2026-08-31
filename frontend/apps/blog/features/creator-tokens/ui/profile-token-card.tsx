@@ -25,6 +25,12 @@ const COPY = {
    * other two drop it, as the token page disables it.
    */
   lapsed: 'This creator’s listing has lapsed. If it isn’t renewed, the market freezes and buying closes.',
+  // ★ v1 gate (2026-08-31, cross-review): under v1 a lapse winds the market DOWN
+  // — the whole curve closes, not only buying — so the buying-only line above
+  // would let a v1 holder believe their sell survives. marketHealthOf returns
+  // 'lapsed' under BOTH rulesets (OVERDUE is the grace state in each), so it needs
+  // the gate. Still no money-amount claim, matching this block's design.
+  lapsedWindDown: 'This creator’s listing has lapsed. If it isn’t renewed, the market winds down and the whole curve closes.',
   // Reader-facing only (2026-08-31, A5): the fact, and no claim about anyone's
   // money. What the creator can do about it is market/lapse.ts's sentence, on
   // the creator's own surfaces. Reachable only under the v2 contract rules.
@@ -129,7 +135,7 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
     const health = marketHealthOf(market);
     const healthLine =
       health === 'lapsed'
-        ? COPY.lapsed
+        ? (market.rules === 'v2' ? COPY.lapsed : COPY.lapsedWindDown)
         : health === 'delisted'
           ? COPY.delisted
         : health === 'closed'

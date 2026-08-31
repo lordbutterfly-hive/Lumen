@@ -274,7 +274,7 @@ console.log('\n── 6. THE 0 ÷ 0, AND THE THREE STATES IT WAS COLLAPSING.\n')
   check('the overdue banner quotes the figure when there is one', overdueBanner(overdueFigures('$1.20', 1.408, true), 'v2').includes('(currently $1.20 a token before your early-exit fee, against $1.41 now)'));
   check(
     '★ …and quotes nothing at all when there is not, rather than an empty parenthesis',
-    overdueBanner(overdueFigures('None yet', 1.007, true), 'v2').endsWith('reopen buying.') &&
+    overdueBanner(overdueFigures('None yet', 1.007, true), 'v2').endsWith('if the creator renews.') &&
       !overdueBanner(overdueFigures('None yet', 1.007, true), 'v2').includes('('),
     `got: ${overdueBanner(overdueFigures('None yet', 1.007, true), 'v2')}`
   );

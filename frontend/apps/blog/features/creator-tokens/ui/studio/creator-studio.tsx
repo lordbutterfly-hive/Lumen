@@ -21,6 +21,7 @@ import ModalShell from '../modal-shell';
 import { offerTitleProblem } from '../../lib/vsc/op-builders';
 import WorkLinkField from '../work-link-field';
 import { creatorOracleNotice } from '../../market/oracle-copy';
+import { lapseNoticeFor, lapseStateOf, shouldOfferRenewNow } from '../../market/lapse';
 
 type Section = 'overview' | 'inbox' | 'offerings' | 'market' | 'billing' | 'earnings';
 const SECTIONS: { id: Section; label: string }[] = [
@@ -727,7 +728,35 @@ const CreatorStudio: FC = () => {
   // `supplyPct` / `supplyPctLabel` (the 2026-08-21 "0%" twin fix) were deleted
   // with the cap displays they fed (owner, 2026-08-30); nothing on this screen
   // divides by the cap any more.
-  const overdue = subDaysLeft <= 0;
+  /**
+   * ★★★ THE SUBSCRIPTION STATE IS THE CHAIN'S PHASE, NOT A DAY COUNT (2026-08-31).
+   *
+   * This was `subDaysLeft <= 0`, and `subDaysLeft` FLOORS
+   * (`use-live-studio.ts:389` -> `blocksToDays`), so it read 0 in two states
+   * that are not a lapse and printed "Your listing has lapsed" in both:
+   *
+   *   - HOURS LEFT on a paid, ACTIVE listing. The creator was told their
+   *     listing had lapsed up to a full day before it had.
+   *   - A FAILED CHAIN READ. `subDaysLeft` is `chainMarket ? … : 0`, so a
+   *     broken read produced the same confident claim about the creator's
+   *     livelihood with no evidence behind it whatsoever. That is this
+   *     feature's silent-zero fault sitting on the one screen a creator acts
+   *     from, and `market/lapse.ts` exists because of it.
+   *
+   * `lapseStateOf` answers this from block comparisons against a head read
+   * from the chain, and returns `unknown` rather than inventing a state — so a
+   * failed read now says NOTHING instead of saying something false.
+   */
+  const lapse = lapseStateOf({
+    phase: market.phase,
+    paidUntilBlock: market.paidUntilBlock,
+    graceExpiresAtBlock: market.graceExpiresAtBlock,
+    headBlock: market.headBlock,
+    windingDown: market.windingDown
+  });
+  const overdue = lapse.kind === 'grace' || lapse.kind === 'delisted';
+  /** The head or the phase could not be read. Show a dash, never a number. */
+  const subUnknown = lapse.kind === 'unknown';
   const held = market.position?.tokens ?? 0;
 
   // F5 fix: "Cash out" preview + default floor, same math and same shape as
@@ -774,16 +803,43 @@ const CreatorStudio: FC = () => {
    * honest precondition for offering a pay button.
    */
   const canRenewNow = market.renewRefusal === null;
+  /**
+   * ★★★ THE CONTROL GATE, DELIBERATELY NOT `canRenewNow` (2026-08-31).
+   *
+   * `canRenewNow` means "the chain would accept a payment" and is what the COPY
+   * branches on. It is TRUE during a RENEW_UNCONFIRMED — the market is still
+   * ACTIVE and the contract would take the money — which is exactly when a pay
+   * button must NOT be on screen: `renew` STACKS from max(paidUntil, block), so
+   * a second broadcast does not retry the first, it buys a SECOND MONTH.
+   *
+   * This file already knew that: it says so in the S4 comment beside the
+   * read-only "Check again", and then left BOTH primary pay controls live next
+   * to it. Third instance of that pattern in this feature (F1's launch claim,
+   * the banner-vs-Billing renew gate, now this), so the answer is one predicate
+   * that every pay control on this screen reads.
+   */
+  const payControlAllowed = shouldOfferRenewNow({ renewRefusal: market.renewRefusal, renewUnconfirmed });
   const lapseHeadline = market.windingDown
     ? 'This token is winding down. It will not take buyers again, and renewing cannot reopen it.'
-    : market.phase === 'FROZEN'
+    : // ★★ AND IT MUST NOT SAY "RENEW" WHEN THE CHAIN WOULD REFUSE THE PAYMENT
+      // (2026-08-31). The CTA beside it was already gated on `renewRefusal`, but
+      // the SENTENCE was not — so a creator whose market the contract will not
+      // reactivate read "Renew to stay in discovery" next to no button, which is
+      // an instruction that cannot be followed and no explanation of why.
+      // `lapseNoticeFor` carries one distinct, true sentence per refusal reason,
+      // including the road out where renewal is not it. The `??` is unreachable:
+      // this banner only renders on `grace`, `delisted` or `windingDown`, and
+      // the first two always produce a sentence.
+      !canRenewNow
+      ? (lapseNoticeFor(lapse, market.renewRefusal) ?? 'Your market is not taking buyers.')
+      : market.phase === 'FROZEN'
       ? 'Your market has stopped taking buyers. Renew to start taking them again. Answering and cashing out still work.'
       : 'Your listing has lapsed. Renew to stay in discovery. Answering and cashing out still work.';
   const banner =
     overdue || market.windingDown ? (
       <div className="mb-5 flex items-center justify-between gap-3 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5">
         <span className="text-[14px] leading-[22px] font-semibold text-ink-warn-3">{lapseHeadline}</span>
-        {canRenewNow ? (
+        {payControlAllowed ? (
           <button
             onClick={() => void runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.')}
             disabled={studio.isBusy}
@@ -908,13 +964,29 @@ const CreatorStudio: FC = () => {
                    CLOSED market, where the chain refuses a renewal outright — so
                    the stat named the wrong state and prescribed a remedy that does
                    not exist. Same fault as the banner CTA above, in a stat. */
-                value={market.windingDown ? 'Ended' : overdue ? 'Lapsed' : `${subDaysLeft} days left`}
+                value={
+                  market.windingDown
+                    ? 'Ended'
+                    : overdue
+                      ? 'Lapsed'
+                      : /* A failed read reported "0 days left", which is a
+                           deadline, not a missing value. */
+                        subUnknown
+                        ? '—'
+                        : `${subDaysLeft} days left`
+                }
                 sub={
                   market.windingDown
                     ? 'This token is winding down'
                     : overdue
-                      ? 'Renew to stay listed'
-                      : `Renew ~$10`
+                      ? /* Same rule as the banner: never prescribe a payment the
+                           contract would refuse. */
+                        canRenewNow
+                        ? 'Renew to stay listed'
+                        : 'Renewing is not available'
+                      : subUnknown
+                        ? 'We couldn’t read your subscription just now'
+                        : `Renew ~$10`
                 }
               />
             </Card>
@@ -1362,8 +1434,12 @@ const CreatorStudio: FC = () => {
               {market.windingDown
                 ? 'This token is winding down, so the subscription no longer applies.'
                 : overdue
-                  ? 'Lapsed. Renew to stay listed.'
-                  : `Paid up · ${subDaysLeft} days left.`}{' '}
+                  ? canRenewNow
+                    ? 'Lapsed. Renew to stay listed.'
+                    : 'Lapsed, and it cannot be reactivated by paying right now.'
+                  : subUnknown
+                    ? 'We couldn’t read your subscription just now.'
+                    : `Paid up · ${subDaysLeft} days left.`}{' '}
               Staying
               listed is ~$10/month. First month’s on the house.
             </div>
@@ -1373,7 +1449,7 @@ const CreatorStudio: FC = () => {
                 ('closed'), so it could only ever fail. Gated on the same
                 condition, so there is one answer to "may this creator pay
                 right now" and both controls read it. */}
-            {canRenewNow ? (
+            {payControlAllowed ? (
             <button
               onClick={() =>
                 void (async () => {

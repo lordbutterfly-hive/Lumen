@@ -12,7 +12,7 @@
  * on a function that answers differently to different inputs.
  */
 import { BLOCKS_PER_DAY } from '../lib/contract-math';
-import { DELISTED_READER_NOTICE, LAPSE_WARNING_BLOCKS, lapseDismissKey, lapseNoticeFor, lapseStateOf, shouldOfferRenew, type LapseState, type RenewRefusal } from './lapse';
+import { DELISTED_READER_NOTICE, LAPSE_WARNING_BLOCKS, lapseDismissKey, lapseNoticeFor, lapseStateOf, shouldOfferRenew, shouldOfferRenewNow, type LapseState, type RenewRefusal } from './lapse';
 
 let passed = 0;
 const failures: string[] = [];
@@ -203,6 +203,42 @@ check(
   '★ no jargon leaks: no phase names, no contract vocabulary',
   !/FROZEN|OVERDUE|wind-?down|pro-rata|curve|reserve|v1|v2/i.test(DELISTED_READER_NOTICE),
   DELISTED_READER_NOTICE
+);
+
+console.log('\n── 10. A PAY CONTROL IS NOT OFFERED WHILE A RENEW IS UNCONFIRMED ──');
+// ★★★ THE THIRD INSTANCE OF "GUARDED ON THE RECOVERY CONTROL, LIVE ON THE
+// PRIMARY ONE" (2026-08-31). Creator Studio showed a read-only "Check again"
+// beside a fully live "Renew ~$10" after a renew that Hive accepted and Magi
+// had not recorded. `renew` STACKS from max(paidUntil, block), so the second
+// click buys a SECOND MONTH — it does not retry the first. The chain would
+// ACCEPT that payment, which is why `renewRefusal === null` cannot be the gate.
+check(
+  '★ unconfirmed offers NO pay control, even though the chain would accept',
+  !shouldOfferRenewNow({ renewRefusal: null, renewUnconfirmed: true })
+);
+check(
+  'settled and acceptable DOES offer one',
+  shouldOfferRenewNow({ renewRefusal: null, renewUnconfirmed: false })
+);
+check(
+  'a chain refusal still blocks it when nothing is in flight',
+  !shouldOfferRenewNow({ renewRefusal: 'paused', renewUnconfirmed: false })
+);
+for (const r of REFUSALS) {
+  check(`★ "${r}" + unconfirmed offers nothing (neither reason is overridden)`, !shouldOfferRenewNow({ renewRefusal: r, renewUnconfirmed: true }));
+}
+// Degeneracy: a predicate that always returned false would satisfy every ★
+// above. Prove it actually discriminates.
+check(
+  '★ …and the predicate is not simply always-false',
+  shouldOfferRenewNow({ renewRefusal: null, renewUnconfirmed: false }) === true &&
+    shouldOfferRenewNow({ renewRefusal: null, renewUnconfirmed: true }) === false
+);
+// The COPY must NOT follow the control: an unconfirmed renew is not a chain
+// refusal, so the creator must not be told renewal is unavailable.
+check(
+  '★ unconfirmed is not a REFUSAL — the delisted copy still reads as renewable',
+  (lapseNoticeFor(delisted, null) ?? '').includes('Renew to reactivate')
 );
 
 console.log(`\n${passed}/${passed + failures.length} checks passed`);

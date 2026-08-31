@@ -349,7 +349,14 @@ export const WIND_DOWN_BANNER =
 export function overdueBanner(figures: string, rules: ContractRules): string {
   const consequence =
     rules === 'v2'
-      ? 'If it isn’t renewed the market stops taking new buyers, but you can still sell on the curve, and the creator can renew any time to reopen buying.'
+      ? // ★ "ANY TIME" WAS A PROMISE THE CHAIN CAN REFUSE (2026-08-31). Renewal
+        // is gated on `renewRefusal`, which is non-null for a paused registry, a
+        // reserve/supply mismatch and a v1 terminal lapse — so "the creator can
+        // renew any time" is told to a HOLDER deciding whether to sit tight, in
+        // states where it is simply false. A condition, never a promise, is the
+        // rule this module's sibling already follows: `DELISTED_READER_NOTICE`
+        // says "if they renew it", and this said something stronger.
+        'If it isn’t renewed the market stops taking new buyers, but you can still sell on the curve, and buying reopens if the creator renews.'
       : 'If it isn’t renewed the market winds down: the curve closes and the only way out is redeeming your share of the reserve, less your early-exit fee.';
   return `This creator’s listing has lapsed. ${consequence}${figures}`;
 }

@@ -896,6 +896,13 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 Rated <strong>{d.avgRating.toFixed(1)}/5</strong> by {d.ratingCount} {d.ratingCount === 1 ? 'buyer' : 'buyers'}
                 {d.declinedCount > 0 ? <> · declined {d.declinedCount}</> : null}
               </div>
+            ) : d.declinedCount > 0 ? (
+              /* Declines are a reputation signal on their own — a creator who declines
+                 often but has never been rated is exactly who a buyer should see this
+                 for (build-map council 2026-08-31). Do NOT gate it behind a rating. */
+              <div className="mt-1.5 text-caption text-ink-14">
+                Declined {d.declinedCount} {d.declinedCount === 1 ? 'request' : 'requests'}
+              </div>
             ) : null}
             {d.completionPct !== null ? (
               /* Only under a REAL record — under "No deliveries yet" this pointed at

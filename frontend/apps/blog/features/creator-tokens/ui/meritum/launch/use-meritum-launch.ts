@@ -13,6 +13,7 @@ import { MAX_PRICE_USD, MIN_PRICE_USD, STANDARD_CAP, parseMoney, sanitizeMoneyIn
 import { MERITUM_STUD_COUNT } from '../coin';
 import { getStorageItem, removeStorageItem, setStorageItem } from '@ui/lib/storage-with-ttl';
 import { offerTitleProblem } from '@/blog/features/creator-tokens/lib/vsc/op-builders';
+import { REGISTER_CONFIRM_TIMEOUT_MS } from '@/blog/features/creator-tokens/lib/vsc-data-source';
 
 /**
  * THE MERITUM LAUNCH FLOW — all of its state, and the real launch write.
@@ -188,7 +189,11 @@ export function sanitizeOfferName(raw: string): string {
  * prevented. 90s comfortably covers a signature prompt plus broadcast while
  * self-healing if nobody clears it.
  */
-const LAUNCH_CLAIM_TTL_MS = 90_000;
+// ★ F1 (2026-08-31): DERIVED from the register poll, never hand-matched. Two
+// independent 90_000s that merely had to stay ordered is how the anti-double-
+// launch guard drifted: the poll consumed the whole claim, so the guard expired
+// exactly when the op gave up. The claim MUST outlive the operation.
+const LAUNCH_CLAIM_TTL_MS = REGISTER_CONFIRM_TIMEOUT_MS + 30_000;
 const launchClaimKey = (creator: string): string => `meritum:launch-inflight:${creator}`;
 
 /**
@@ -692,7 +697,17 @@ export function useMeritumLaunch(): MeritumLaunchApi {
         });
       } catch (e) {
         inFlight.current = false;
-        releaseClaim();
+        // ★ F1 (2026-08-31): register carries the first-buy HBD on the SAME
+        // broadcast, so on REGISTER_UNCONFIRMED ("Hive accepted it, Magi hasn't
+        // recorded the market yet, it may still land") releasing the claim would
+        // let a second attempt DOUBLE-CHARGE the first buy. Keep AND extend the
+        // claim there; release only on a genuine failure where nothing landed.
+        const mayStillLand = e instanceof Error && e.message.includes('REGISTER_UNCONFIRMED');
+        if (mayStillLand) {
+          if (claimKey) setStorageItem(claimKey, Date.now(), LAUNCH_CLAIM_TTL_MS);
+        } else {
+          releaseClaim();
+        }
         setWrite('failed');
         // Routed through the shared formatter so the CREATOR_TOKENS_* machine
         // code is stripped and any key-shaped text is redacted before it is

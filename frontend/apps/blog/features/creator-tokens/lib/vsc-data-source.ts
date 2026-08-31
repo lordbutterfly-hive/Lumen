@@ -160,6 +160,53 @@ import { displayPriceUsd } from '../market/curve';
 import { marketHealthOf, windingDownOf } from '../market/market-health';
 import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, renewGateUnder, rulesForCode } from '../market/contract-rules';
 
+/**
+ * ★★★ HOW LONG WE WAIT FOR THE CHAIN TO CONFIRM A REGISTER, AND WHY IT IS
+ * EXPORTED (2026-08-31, found by clauderfly-43 reviewing my own change).
+ *
+ * THE BUG THIS CLOSES. Adding execution confirmation to `registerMarket` made
+ * the call take up to its whole timeout AFTER the broadcast. The launch flow's
+ * cross-tab guard (`LAUNCH_CLAIM_TTL_MS` in use-meritum-launch.ts) was also
+ * 90 s, taken BEFORE the write — so the guard expired at the same instant the
+ * operation gave up, and the creator read "it may still land, refresh before
+ * launching again" with both tabs unguarded. The register op carries the first
+ * buy's HBD on the SAME broadcast (`hbdLegBaseUnits` below), so a second
+ * attempt moves real money whatever the contract does with the duplicate.
+ *
+ * THE ASYMMETRY THAT SETS THE NUMBER. A false UNCONFIRMED costs nothing on
+ * answer/decline/reclaim — nothing has moved, the user re-checks. On REGISTER
+ * it can cost a second first-buy. The cost of waiting longer is a spinner; the
+ * cost of giving up early is a charge. So register waits twice as long as the
+ * escrow actions, deliberately.
+ *
+ * EXPORTED so `LAUNCH_CLAIM_TTL_MS` can be DERIVED from it rather than
+ * hand-matched. Two independent 90 000s that must stay ordered is exactly how
+ * this drifted in the first place; a claim that outlives its operation is an
+ * invariant, not a coincidence.
+ */
+export const REGISTER_CONFIRM_TIMEOUT_MS = 180_000;
+
+/** The escrow actions' confirmation window. A false UNCONFIRMED here moves no money. */
+export const ESCROW_CONFIRM_TIMEOUT_MS = 90_000;
+
+/**
+ * Renew's confirmation window (S4). Named rather than inline so all three
+ * confirmation polls are visible together — an operation's duration is a
+ * contract with whatever guards it, and F1 happened because one of these was a
+ * loose literal that nothing pointed at.
+ *
+ * ★ KNOWN LIMIT, recorded not fixed: the studio's only concurrency guard is an
+ * in-memory `inFlight` ref (use-live-studio.ts:451), which is per-TAB. It holds
+ * for the whole await, so a same-tab double-click is safe for the full window —
+ * but a SECOND TAB is unguarded, and adding this poll widened that window from
+ * ~2 s (broadcast-accept) to 90 s. The cost is bounded and is NOT a loss: two
+ * renews buy two periods, so the creator gets what they paid for, unlike the
+ * launch case where a duplicate register is refused while its first-buy HBD
+ * still moves. A cross-tab claim (or a server-side lock) would close it; that is
+ * a follow-up, not a silent risk.
+ */
+export const RENEW_CONFIRM_TIMEOUT_MS = 90_000;
+
 // Real, on-chain implementation. Reads live contract state via GraphQL
 // getStateByKeys (plumbing + decoding in ./vsc/reads.ts); builds custom_json
 // ops for writes (./vsc/op-builders.ts) and signs+broadcasts them through
@@ -1984,7 +2031,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     const observed = await this.awaitEscrowStatus(input.creator, input.seq);
     if (observed === null) {
       throw new Error(
-        'CREATOR_TOKENS_ANSWER_UNCONFIRMED: Hive accepted your answer, but Magi has not recorded it yet. It may still land in a moment. Re-open the ask to check before answering again — the deadline still applies.'
+        'CREATOR_TOKENS_ANSWER_UNCONFIRMED: Hive accepted your answer, but Magi has not recorded it yet. It may still land in a moment. Check the ask now before answering again — if it did not land and you wait, the asker can reclaim.'
       );
     }
     if (observed !== 'ANSWERED') {
@@ -2372,7 +2419,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
    * Same 90 s / 3 s cadence as the wallet rail's waitForInclusion.
    */
   private async awaitPaidUntilAdvance(creator: string, before: number | null): Promise<boolean> {
-    const TIMEOUT_MS = 90_000;
+    const TIMEOUT_MS = RENEW_CONFIRM_TIMEOUT_MS;
     const POLL_MS = 3_000;
     const key = kPaidUntil(toDid(creator));
     const deadline = Date.now() + TIMEOUT_MS;
@@ -2420,7 +2467,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
    * awaitPaidUntilAdvance does in the same situation.
    */
   private async awaitRegisteredAdvance(creator: string, before: number | null): Promise<boolean> {
-    const TIMEOUT_MS = 90_000;
+    const TIMEOUT_MS = REGISTER_CONFIRM_TIMEOUT_MS;
     const POLL_MS = 3_000;
     const key = kRegisteredAt(creator);
     const deadline = Date.now() + TIMEOUT_MS;
@@ -2440,7 +2487,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   }
 
   private async awaitEscrowStatus(creator: string, seq: number): Promise<ParsedEscrow['status'] | null> {
-    const TIMEOUT_MS = 90_000;
+    const TIMEOUT_MS = ESCROW_CONFIRM_TIMEOUT_MS;
     const POLL_MS = 3_000;
     // kEscrow routes the account through toDid() itself (reads.ts:61 — "never
     // build a key from a raw account string directly"), so callers pass the

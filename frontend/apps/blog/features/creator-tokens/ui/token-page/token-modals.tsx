@@ -51,7 +51,7 @@ const ModalHead: FC<{ title: string; onClose: () => void }> = ({ title, onClose 
     <button
       onClick={onClose}
       aria-label="Close"
-      className="-m-2 cursor-pointer rounded-lg border-0 bg-transparent p-2 text-[22px] leading-[34px] text-ink-14 hover:bg-surface-16"
+      className="-my-2 -mx-4 cursor-pointer rounded-lg border-0 bg-transparent px-4 py-2 text-[22px] leading-[34px] text-ink-14 hover:bg-surface-16"
     >
       ×
     </button>

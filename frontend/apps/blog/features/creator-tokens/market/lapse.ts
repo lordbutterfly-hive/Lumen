@@ -196,6 +196,41 @@ export function shouldOfferRenew(state: LapseState, renewRefusal: RenewRefusal |
 }
 
 /**
+ * MAY A PAY CONTROL BE ON SCREEN RIGHT NOW?
+ *
+ * ★★★ THIS IS A DIFFERENT QUESTION FROM "WOULD THE CHAIN ACCEPT A RENEWAL"
+ * (2026-08-31). `renewRefusal === null` answers the second one and drives the
+ * COPY. It does NOT answer the first, because there is a state where the chain
+ * would happily accept a payment and offering one is exactly the wrong thing:
+ * a renew that Hive accepted and Magi has not recorded yet
+ * (CREATOR_TOKENS_RENEW_UNCONFIRMED). The subscription there is in superposition
+ * — it may already be paid — and `renew` STACKS from max(paidUntil, block), so a
+ * second broadcast does not retry the first, it buys a SECOND MONTH.
+ *
+ * ★★ THE GUARD MUST BE ON THE PRIMARY CONTROL, NOT ONLY ON THE RECOVERY ONE.
+ * This is the third instance of that exact pattern in this feature: the launch
+ * claim released on REGISTER_UNCONFIRMED (F1), the Billing renew ungated while
+ * the banner renew was gated, and this. Each time a hazard was correctly
+ * identified, correctly guarded on one control, and left live on the control
+ * beside it. So the answer lives in ONE function that every pay control reads.
+ *
+ * The way forward while unconfirmed is the READ-ONLY re-read ("Check again"),
+ * which clears the flag once the state is actually known — at which point the
+ * pay control returns on its own.
+ */
+export function shouldOfferRenewNow(input: {
+  /** NULL when the chain would accept a renewal. Drives the COPY, not this alone. */
+  renewRefusal: RenewRefusal | null;
+  /** True while a renew was accepted on Hive but not yet recorded on Magi. */
+  renewUnconfirmed: boolean;
+}): boolean {
+  // Order matters: unconfirmed wins even though the chain would accept, which
+  // is the whole point of the state.
+  if (input.renewUnconfirmed) return false;
+  return input.renewRefusal === null;
+}
+
+/**
  * THE READER-FACING SENTENCE for a delisted market, for the token page's own
  * banner.
  *
