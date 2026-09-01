@@ -71,7 +71,7 @@ export function useNotePublish({ isLite }: { isLite: boolean }) {
 
         const work = (async () => {
           if (isLite) {
-            const result = await createLitePost({ body });
+            const result = await createLitePost({ body, tags: [SHORT_POST_TAG] });
             if (result.status !== 'ok') throw new Error(result.message);
             return;
           }

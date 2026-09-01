@@ -307,10 +307,10 @@ export async function createLitePost(
   // convention carries no topic tags on a comment at all. Replies get none.
   const tags = isReply
     ? []
-    : req.tier === 'normal'
-      ? normalTierTags(actor.user.interests)
-      : req.tags?.length
-        ? req.tags
+    : req.tags?.length
+      ? req.tags
+      : req.tier === 'normal'
+        ? normalTierTags(actor.user.interests)
         : [NORMAL_TAG];
 
   // Edit fork — update the original row instead of creating a duplicate (§C.3).
@@ -331,10 +331,10 @@ export async function createLitePost(
         : (req.title?.trim() ?? '');
     const editTags = editIsReply
       ? []
-      : req.tier === 'normal'
-        ? normalTierTags(actor.user.interests)
-        : req.tags?.length
-          ? req.tags
+      : req.tags?.length
+        ? req.tags
+        : req.tier === 'normal'
+          ? normalTierTags(actor.user.interests)
           : [NORMAL_TAG];
     // A deleted post takes no further edits. Nothing else enforced this, so an
     // edit could have resurrected content the user had removed.
