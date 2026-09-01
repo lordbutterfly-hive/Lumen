@@ -13,6 +13,8 @@ import { useTokenAccounts } from '../../live/use-token-accounts';
 import { useMagiSpendingPower } from '../../live/use-magi-spending-power';
 import { MagiFuelGauge, MagiFundingHelp } from '../../live/magi-fuel-gauge';
 import ModalShell from '../modal-shell';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
+import { getCreatorTokensDataSource } from '../../lib/creator-tokens-data-source';
 import { sellEmptyStateMessage } from './sell-empty-state';
 import { buyerOracleNotice } from '../../market/oracle-copy';
 import type { Quote } from '../../types';
@@ -435,6 +437,17 @@ const BuyModal: FC<{
                   // trade-preview.selftest.ts so neither loses its home.
                   : `Buy for ~${usdPrice(q.totalUsd)}`}
         </button>
+        {/* ★ CONFIRMING INDICATOR (2026-09-01), the token-page twin of the Studio's
+            sticky banner. Every money write now WAITS for the chain to confirm
+            (awaitExecution, ~20-72s typical, up to 180s), and `busy` holds the
+            button greyed with a "Confirm in your wallet…" label for that whole
+            window, which reads as broken and invites a reload that drops the
+            poll. This says what is actually happening. */}
+        {busy ? (
+          <div role="status" aria-live="polite" className="mt-2.5 text-center text-caption text-ink-14">
+            Confirming on the chain. This can take a minute or two, so keep this open while it goes through.
+          </div>
+        ) : null}
         {failure ? (
           <div role="alert" ref={(n) => n?.scrollIntoView({ block: 'nearest' })} className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
         ) : null}
@@ -495,6 +508,17 @@ const SellModal: FC<{
   const [advOpen, setAdvOpen] = useState(true);
   const [minNetText, setMinNetText] = useState('');
   const [minNetTouched, setMinNetTouched] = useState(false);
+  // ★ FUNDING GATE for sell/redeem (2026-09-01). A sell/redeem RECEIVES HBD but
+  // still costs resource credits to SUBMIT, and a wallet-only signer starts with
+  // ZERO free RC, so a 0-RC holder would sign and then fail out-of-gas after the
+  // whole confirm window — worst on Redeem, the only exit once a market winds
+  // down. `cannotTransact` is the clean "cannot submit anything" signal (RC too
+  // low), kept distinct from a failed read, so blocking on it never blocks a
+  // holder who can actually pay.
+  const tokenAccounts = useTokenAccounts();
+  const payer = tokenAccounts.accounts.find((a) => a.canSign) ?? tokenAccounts.accounts[0] ?? null;
+  const sellSpending = useMagiSpendingPower(payer?.id ?? null);
+  const blockedBySpending = sellSpending.cannotTransact;
   const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
   const q = sellQuote(tokens, m, m.position?.heldDays ?? 999);
   // ★ TWIN OF THE "0%" BUG (2026-08-21). `exitFeePct` is a FRACTION, so a real
@@ -736,11 +760,6 @@ const SellModal: FC<{
               />
               <span className="text-caption font-semibold text-ink-14">HBD</span>
             </div>
-            <p className="mt-1.5 text-caption text-ink-14">
-              Pre-filled just under what you’re shown above, so the {redeem ? 'redeem' : 'sell'} reverts (nothing
-              spent) if the net comes in lower: a price move or a same-block front-run, not you. Clear it to exit
-              at the going rate with no minimum, or lower it to allow more slippage.
-            </p>
           </div>
         ) : null}
         <button
@@ -762,7 +781,7 @@ const SellModal: FC<{
               setBusy(false);
             }
           }}
-          disabled={!Number.isFinite(tokens) || tokens <= 0 || held <= 0 || tokens > held || busy}
+          disabled={!Number.isFinite(tokens) || tokens <= 0 || held <= 0 || tokens > held || busy || blockedBySpending}
           className="w-full rounded-card bg-surface-42 py-[15px] text-[15px] leading-[24px] font-bold tabular-nums text-ink-27 hover:bg-surface-44 disabled:opacity-50"
         >
           {busy
@@ -773,6 +792,18 @@ const SellModal: FC<{
                 ? `Redeem · get ~${usdPrice(redeemUsd)}`
                 : `Sell · get ~${usdPrice(q.receiveUsd)}`}
         </button>
+        {blockedBySpending && payer ? <MagiFundingHelp kind={payer.kind} account={payer.id} className="mt-3" /> : null}
+        {/* ★ CONFIRMING INDICATOR (2026-09-01), the token-page twin of the Studio's
+            sticky banner. Every money write now WAITS for the chain to confirm
+            (awaitExecution, ~20-72s typical, up to 180s), and `busy` holds the
+            button greyed with a "Confirm in your wallet…" label for that whole
+            window, which reads as broken and invites a reload that drops the
+            poll. This says what is actually happening. */}
+        {busy ? (
+          <div role="status" aria-live="polite" className="mt-2.5 text-center text-caption text-ink-14">
+            Confirming on the chain. This can take a minute or two, so keep this open while it goes through.
+          </div>
+        ) : null}
         {failure ? (
           <div role="alert" ref={(n) => n?.scrollIntoView({ block: 'nearest' })} className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
         ) : null}
@@ -795,7 +826,30 @@ const SellModal: FC<{
             The replacement makes no promise: it names the two routes, says only
             one is open at a time, and states that neither pays a fixed price.
             See exitRoutesNote. */}
-        <div className="mt-2.5 text-center text-caption text-ink-14">{exitRoutesNote(redeem)}</div>
+        {/* The slippage note and the exit-routes disclosure both moved off the
+            face of the card into this one hover (owner, 2026-09-01): keep the
+            Sell pill uncluttered, keep every word one hover away. Both strings
+            are unchanged and still true under v1 and v2 (exitRoutesNote is
+            selftested; the min-net note matches MIN_NET_DEFAULT_TOLERANCE_BPS). */}
+        <div className="mt-2.5 flex justify-center">
+          <TooltipProvider delayDuration={120}>
+            <Tooltip>
+              <TooltipTrigger
+                type="button"
+                aria-label={redeem ? 'How redeeming works' : 'How selling works'}
+                className="flex h-[18px] w-[18px] items-center justify-center rounded-full border border-line-11 text-[11px] font-bold leading-none text-ink-14 hover:text-ink-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10"
+              >
+                ?
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[280px] text-left text-caption font-normal leading-[20px]">
+                <p>
+                  Pre-filled just under what you’re shown above, so the {redeem ? 'redeem' : 'sell'} reverts (nothing spent) if the net comes in lower: a price move or a same-block front-run, not you. Clear it to exit at the going rate with no minimum, or lower it to allow more slippage.
+                </p>
+                <p className="mt-2">{exitRoutesNote(redeem)}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
       </div>
     </ModalShell>
   );
@@ -976,7 +1030,7 @@ const AskModal: FC<{
         <div className="mb-4 flex items-center gap-3.5">
           <input
             type="range"
-            min={2}
+            min={1}
             max={30}
             value={deadline}
             onChange={(e) => setDeadline(Number(e.target.value))}
@@ -1032,6 +1086,17 @@ const AskModal: FC<{
                 ? `You need ${usdPrice(q.commissionUsd)} in HBD for the commission`
                 : `Send question for ${cost.tokens} tokens + ${usdPrice(q.commissionUsd)} HBD`}
         </button>
+        {/* ★ CONFIRMING INDICATOR (2026-09-01), the token-page twin of the Studio's
+            sticky banner. Every money write now WAITS for the chain to confirm
+            (awaitExecution, ~20-72s typical, up to 180s), and `busy` holds the
+            button greyed with a "Confirm in your wallet…" label for that whole
+            window, which reads as broken and invites a reload that drops the
+            poll. This says what is actually happening. */}
+        {busy ? (
+          <div role="status" aria-live="polite" className="mt-2.5 text-center text-caption text-ink-14">
+            Confirming on the chain. This can take a minute or two, so keep this open while it goes through.
+          </div>
+        ) : null}
         {failure ? (
           <div role="alert" ref={(n) => n?.scrollIntoView({ block: 'nearest' })} className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
         ) : null}
@@ -1053,6 +1118,10 @@ const SendModal: FC<{
   const [to, setTo] = useState('');
   const [amt, setAmt] = useState('');
   const [failure, setFailure] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  // Set when a hive destination could not be verified to exist; a second Send
+  // press then goes through. Reset whenever the destination changes.
+  const [confirmAnyway, setConfirmAnyway] = useState(false);
   const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
   const valid = to.trim().length > 0 && Number.isFinite(tokens) && tokens > 0 && tokens <= held;
   return (
@@ -1067,6 +1136,7 @@ const SendModal: FC<{
           onChange={(e) => {
             setTo(e.target.value);
             setFailure(null);
+            setConfirmAnyway(false);
           }}
           placeholder="@name"
           className="mb-3.5 w-full rounded-xl border border-line-11 px-4 py-3 text-[15px] leading-[24px] font-semibold text-ink-2 outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
@@ -1095,6 +1165,31 @@ const SendModal: FC<{
             if (!valid) return;
             // F7: synchronous — see BuyModal's `inFlight` doc.
             if (inFlight.current) return;
+            const dest = to.trim().replace(/^@/, '');
+            // ★ EXISTENCE CHECK for hive destinations (2026-09-01, 57 confirmed
+            // against core). The transfer contract CREDITS a well-formed but
+            // NONEXISTENT hive account, so a typo is a permanent, unrecoverable
+            // send that a stranger could later claim by registering that name.
+            // did:pkh has no registry, so shape is all there is for those.
+            if (!dest.startsWith('did:') && !confirmAnyway) {
+              setChecking(true);
+              setFailure(null);
+              const ds = getCreatorTokensDataSource();
+              const exists = ds ? await ds.hiveAccountExists(dest) : null;
+              setChecking(false);
+              if (exists === false) {
+                setFailure(`There is no Hive account named @${dest}. Check the spelling. Sends are permanent and cannot be undone.`);
+                return;
+              }
+              if (exists === null) {
+                // Could not verify (no node, or the lookup failed). Never
+                // silent-send: ask for one explicit confirmation rather than
+                // block on a blip.
+                setConfirmAnyway(true);
+                setFailure(`Could not verify @${dest} exists right now. Sends are permanent and cannot be undone. Press Send again to send anyway.`);
+                return;
+              }
+            }
             inFlight.current = true;
             setBusy(true);
             setFailure(null);
@@ -1104,7 +1199,7 @@ const SendModal: FC<{
               // amount, so a real send would have gone nowhere or to the wrong
               // account. Strip a leading '@': the field invites one, the chain
               // account name never has one.
-              await onTransfer(to.trim().replace(/^@/, ''), tokens);
+              await onTransfer(dest, tokens);
               onClose();
             } catch (err) {
               // The REAL reason, not a guess. See ../write-failure.ts.
@@ -1114,20 +1209,35 @@ const SendModal: FC<{
               setBusy(false);
             }
           }}
-          disabled={!valid || busy}
+          disabled={!valid || busy || checking}
           className="w-full rounded-card bg-surface-42 py-[15px] text-[15px] leading-[24px] font-bold tabular-nums text-ink-27 hover:bg-surface-44 disabled:opacity-50"
         >
-          {busy
-            ? 'Confirm in your wallet…'
-            : tokens > held
-              ? 'More than you hold'
-              : `Send ${tok(tokens)} tokens`}
+          {checking
+            ? 'Checking the account…'
+            : busy
+              ? 'Confirm in your wallet…'
+              : tokens > held
+                ? 'More than you hold'
+                : confirmAnyway
+                  ? `Send ${tok(tokens)} tokens anyway`
+                  : `Send ${tok(tokens)} tokens`}
         </button>
+        {/* ★ CONFIRMING INDICATOR (2026-09-01), the token-page twin of the Studio's
+            sticky banner. Every money write now WAITS for the chain to confirm
+            (awaitExecution, ~20-72s typical, up to 180s), and `busy` holds the
+            button greyed with a "Confirm in your wallet…" label for that whole
+            window, which reads as broken and invites a reload that drops the
+            poll. This says what is actually happening. */}
+        {busy ? (
+          <div role="status" aria-live="polite" className="mt-2.5 text-center text-caption text-ink-14">
+            Confirming on the chain. This can take a minute or two, so keep this open while it goes through.
+          </div>
+        ) : null}
         {failure ? (
           <div role="alert" ref={(n) => n?.scrollIntoView({ block: 'nearest' })} className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
         ) : null}
         <div className="mt-2.5 text-center text-caption text-ink-14">
-          Transfers are free and instant on Lumen. Never blocked by billing.
+          Sends are permanent and cannot be undone. Free and instant on Lumen, never blocked by billing.
         </div>
       </div>
     </ModalShell>

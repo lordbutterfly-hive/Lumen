@@ -82,7 +82,7 @@ const EXIT_NOTE_WITH_BACKING =
 // ★ 2026-08-30 (B3, copy set A): "redeem your share of the reserve" -> a pro-rata
 // slice of whatever it holds then, less the fee, and below what you paid.
 const EXIT_NOTE_BACKING_HIDDEN =
-  'Token prices float and you can lose money. You can exit two ways: sell on the curve while the market is open, at the curve’s price, after a 10% trade fee and any early-exit fee; or, if a market winds down, redeem a pro-rata slice of whatever the reserve holds then, less any early-exit fee, which will be less than you paid. Neither is a fixed price.';
+  'Token prices float and you can lose money. You can exit two ways: sell on the curve while the market is open, at the curve’s price, after a 10% trade fee and any early-exit fee; or, if a market winds down, redeem a pro-rata slice of whatever the reserve holds then, less any early-exit fee. Neither is a fixed price, and neither is a refund of what you paid.';
 
 const Unavailable: FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="rounded-card border border-dashed border-line-11 px-5 py-6 text-center text-[14px] leading-[22px] text-ink-14">{children}</div>
@@ -135,7 +135,7 @@ const HoldingRow: FC<{ h: HolderPosition; price?: MarketPrice }> = ({ h, price }
       ) : null}
     </div>
     <div className="flex items-center gap-2">
-      {price && price.status === 'ready' && price.health !== null && price.health !== 'open' ? (
+      {price && price.status === 'ready' && price.health !== null && price.health !== 'open' && price.health !== 'lapsed' ? (
         // The state word in the Buy slot, same words as every other surface
         // (market/market-health.ts). Not a link: there is nothing to buy.
         <span
@@ -268,6 +268,11 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
           >
             {busy ? 'Confirm in your wallet…' : 'Get your tokens back'}
           </button>
+        </div>
+      ) : null}
+      {busy ? (
+        <div role="status" aria-live="polite" className="mt-2 text-caption text-ink-14">
+          Confirming on the chain. This can take a minute or two, so keep this open while it goes through.
         </div>
       ) : null}
       {failure ? (

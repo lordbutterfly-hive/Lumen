@@ -852,6 +852,14 @@ export interface CreatorSummary {
    * healthy — the rule this type's own doc states at `MarketPhase`.
    */
   phase: MarketPhase;
+  /**
+   * TRUE when this market is winding down (permanent), derived under the live
+   * contract rules the same way `readMarket` does: retired, CLOSED, or (v1) a
+   * natural FROZEN. FALSE for a v2 natural FROZEN, which is a RECOVERABLE pause.
+   * Lets the grid tell a reversible "paused" from an irreversible wind-down
+   * instead of labelling every FROZEN market with the v2-only word "Delisted".
+   */
+  windingDown: boolean;
   /** Registered within the last ~30 days, by the LATEST registration (a re-registered market is a new incarnation). */
   isNew: boolean;
 }

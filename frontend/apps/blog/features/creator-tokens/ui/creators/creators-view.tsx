@@ -76,6 +76,10 @@ const COPY = {
   stateOverdue: 'Listing lapsed, may freeze soon',
   stateClosed: 'Market closed. You cannot buy this token',
   stateDelisted: 'Delisted. New buyers closed',
+  // ★ 2026-09-01: a PERMANENT wind-down (retired, or v1 frozen) is not the same
+  // as the recoverable v2 pause "Delisted" names. CreatorSummary.windingDown now
+  // carries the chain's own answer so the two are no longer conflated here.
+  stateWindingDown: 'Winding down. Buying closed; holders can redeem their reserve share.',
   launchTitle: 'Launch your Meritum',
   launchSub: 'Let people hold your token and pay you for your time.',
   /**
@@ -200,7 +204,13 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
           className="mt-3.5 rounded-control bg-surface-warn-4 px-3.5 py-2 text-caption font-semibold text-ink-warn-3"
           data-testid="creator-card-state"
         >
-          {c.phase === 'OVERDUE' ? COPY.stateOverdue : c.phase === 'FROZEN' ? COPY.stateDelisted : COPY.stateClosed}
+          {c.phase === 'CLOSED'
+            ? COPY.stateClosed
+            : c.windingDown
+              ? COPY.stateWindingDown
+              : c.phase === 'FROZEN'
+                ? COPY.stateDelisted
+                : COPY.stateOverdue}
         </div>
       ) : null}
 

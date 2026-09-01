@@ -1,5 +1,5 @@
 import env from '@beam-australia/react-env';
-import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RenewSubscriptionInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../types';
+import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, ContractRules, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RenewSubscriptionInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../types';
 import { MockCreatorTokensDataSource } from './mock/mock-data-source';
 import { hiveTransactionBroadcaster } from './vsc/broadcaster';
 import { routingBroadcaster } from './vsc/wallet-broadcaster';
@@ -40,6 +40,26 @@ export interface CreatorTokensDataSource {
   // optimistic number to resolve a price preview or a fee balance with. ----
   /** null = creator never registered a market (kRegisteredAt == 0). A Market with phase 'UNKNOWN' = the read itself failed — never conflate the two. */
   readMarket(creator: string): Promise<Market | null>;
+
+  /**
+   * The chain's live contract rule set (v1/v2), independent of any market. The
+   * concrete source reads the deployed bytecode's CID and maps it via
+   * rulesForCode; readMarket embeds the same answer as `market.rules`, but the
+   * launch flow needs it BEFORE a market exists (to gate the wind-down copy on
+   * step 3). Defaults v1 on any failure, the safe direction (contract-rules.ts).
+   */
+  readRules(): Promise<ContractRules>;
+
+  /**
+   * Does this HIVE account exist on the configured Hive node? true / false, or
+   * null when it cannot be checked (no node configured, or the lookup failed).
+   * A send UI must verify a hive destination before signing, because the
+   * transfer contract CREDITS a well-formed but NONEXISTENT hive account
+   * (shape-only at both contract layers, deliberately), so a typo is a
+   * permanent, unrecoverable send. did:pkh has no registry, so shape is all
+   * there is for those and this is not called for them.
+   */
+  hiveAccountExists(name: string): Promise<boolean | null>;
   /** null = creator has no market at all. Rejects on a genuine read failure — a 0-balance resolve would be indistinguishable from "really holds nothing." Surfaced as isPositionError by useCreatorToken. */
   readHolderPosition(creator: string, holder: string): Promise<HolderPosition | null>;
   /** Cross-creator wallet view (UI-BRIEF Page 4). Indexer-backed; resolves { positions, unavailable } so the UI can tell "couldn't load" from "holds nothing". */

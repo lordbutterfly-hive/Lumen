@@ -5,7 +5,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { displayHandle, dueLabelFor } from '../../live/adapt';
 import { FC, useState, useEffect, useRef } from 'react';
 import { useLiveStudio, type LiveStudio } from '../../live/use-live-studio';
-import { MarketLoading, MarketReadFailed, MarketSessionUnavailable, MarketUnavailable } from '../../live/market-states';
+import { MarketLoading, MarketRateLimited, MarketReadFailed, MarketSessionUnavailable, MarketUnavailable } from '../../live/market-states';
 import type { Ask } from '../../types';
 import { pctLabel, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
 // ★★ THE FLOOR / RESERVE FIGURES ARE HIDDEN FOR LAUNCH (owner, 2026-08-27), on
@@ -687,6 +687,9 @@ const CreatorStudio: FC = () => {
   // A failed read must NOT fall through to the launch wizard: telling a creator
   // with a live market that they have no token, because the node blinked, is
   // exactly the "empty read rendered as real" failure this rewiring removes.
+  // A 429 is a limit, not a failure: no "Try again" button, because retrying
+  // just re-hits it (57, 2026-09-01) — the token page already treated it so.
+  if (status === 'rate-limited') return <MarketRateLimited launchHref="/creators/launch" />;
   if (status === 'error') return <MarketReadFailed onRetry={studio.retry} launchHref="/creators/launch" />;
   // F14 fix: OUR session check failed, not the chain read — checked before
   // `!market` below, which would otherwise render this exactly like
@@ -906,8 +909,14 @@ const CreatorStudio: FC = () => {
             per-button label would make "Retire" say "Confirming…" during a renew,
             which is worse. Failure takes precedence over it. */}
         {studio.isBusy && !actionFailure ? (
+          // ★ STICKY (57, 2026-09-01): the studio's action buttons run hundreds
+          // of lines below this point (the offerings cards), so a static banner
+          // here is off-screen for exactly the lower-half clicks it needs to
+          // explain. `sticky top-0` follows the viewport so the reason travels
+          // with whatever button the creator just greyed out, with no per-section
+          // copies and no per-action tracking.
           <div
-            className="mb-5 rounded-card border border-line-11 bg-surface-1 px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-7"
+            className="sticky top-0 z-10 mb-5 rounded-card border border-line-11 bg-surface-1 px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-7"
             role="status"
             aria-live="polite"
           >

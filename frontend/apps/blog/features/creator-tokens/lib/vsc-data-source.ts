@@ -158,7 +158,7 @@ import {
   STATE_CLOSED, assertTransferDestination } from './vsc/reads';
 import { displayPriceUsd } from '../market/curve';
 import { marketHealthOf, windingDownOf } from '../market/market-health';
-import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, renewGateUnder, rulesForCode } from '../market/contract-rules';
+import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, renewGateUnder, rulesForCode, windingDownUnder } from '../market/contract-rules';
 // ★ EXECUTION CONFIRMATION (2026-08-31, seventeen-unconfirmed-writes finding).
 // The money-moving writes confirm by polling the tx's own terminal status
 // through the SAME findTransaction query the wallet rail already runs
@@ -441,6 +441,33 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       }
     })();
     return this.rulesInFlight;
+  }
+
+  /**
+   * condenser_api.get_accounts on the configured Hive node. true if the account
+   * is registered, false if not, null when it cannot be checked (no hiveApi, or
+   * the request failed). Guards the irreversible token transfer against a typo
+   * into a well-formed but nonexistent hive account, which the contract would
+   * otherwise CREDIT and strand (57 confirmed against core, 2026-09-01).
+   */
+  async hiveAccountExists(name: string): Promise<boolean | null> {
+    const api = this.config.hiveApi;
+    const clean = name.replace(/^@/, '').replace(/^hive:/, '').trim().toLowerCase();
+    if (!api || clean === '') return null;
+    try {
+      const res = await fetch(api, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'condenser_api.get_accounts', params: [[clean]], id: 1 })
+      });
+      if (!res.ok) return null;
+      const json: unknown = await res.json();
+      const arr = (json as { result?: unknown } | null)?.result;
+      if (!Array.isArray(arr)) return null;
+      return arr.some((a) => (a as { name?: string } | null)?.name === clean);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -1841,7 +1868,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       kState(r.creator),
       kRetiredAt(r.creator)
     ]);
-    const [state, head] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock()]);
+    const [state, head, rules] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock(), this.readRules()]);
 
     const epochOf = (c: string) => toU64(state[kOfferEpoch(c)]);
     const idsState = await this.gql.getStateByKeys(
@@ -1878,6 +1905,19 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         // never reached. `contract-math.ts` warns against confusing the two.
         const priceBaseUnits = displayPricePerTokenBaseUnits(supply);
         const faceBaseUnits = toU64(state[kFace(r.creator)]);
+        const retiredAtBlock = toU64(state[kRetiredAt(r.creator)]) || null;
+        // Without a head we cannot date the lapse clock, so the phase is genuinely
+        // UNKNOWN rather than assumed healthy (the UI renders "status unavailable").
+        const phase =
+          head === null
+            ? ('UNKNOWN' as const)
+            : derivePhase(state[kState(r.creator)] === STATE_CLOSED, toU64(state[kPaidUntil(r.creator)]), head, retiredAtBlock);
+        // ★ WINDING DOWN vs a RECOVERABLE PAUSE (2026-09-01). The grid used to
+        // label every FROZEN market "Delisted", a v2-only word meaning a
+        // recoverable pause, so a RETIRED or v1-frozen (permanent) wind-down read
+        // as reversible. Derive it under the live rules the token page uses so the
+        // card can tell the two apart, rather than branching on raw phase alone.
+        const windingDown = phase === 'UNKNOWN' ? false : windingDownUnder(rules, { phase, retiredAtBlock });
         return {
           creator: r.creator,
           completionPct: r.completionPct,
@@ -1890,17 +1930,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
           marketCapHbd: baseUnitsToHuman(priceBaseUnits * supply),
           faceHbd: baseUnitsToHuman(faceBaseUnits),
           fromPriceHbd: baseUnitsToHuman(fromBaseUnitsOf(r.creator, faceBaseUnits)),
-          // Without a head we cannot date the lapse clock, so the phase is genuinely UNKNOWN
-          // rather than assumed healthy — the UI renders that as "status unavailable".
-          phase:
-            head === null
-              ? ('UNKNOWN' as const)
-              : derivePhase(
-                  state[kState(r.creator)] === STATE_CLOSED,
-                  toU64(state[kPaidUntil(r.creator)]),
-                  head,
-                  toU64(state[kRetiredAt(r.creator)]) || null
-                ),
+          phase,
+          windingDown,
           // "New" is measured from the LATEST registration, and only when we
           // actually know the head — guessing would put every creator in the
           // new shelf, or none.

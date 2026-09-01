@@ -330,6 +330,16 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     return out;
   }
 
+  /** The demo's fixed rule set. The live source asks the chain; see MOCK_CONTRACT_RULES. */
+  async readRules(): Promise<ContractRules> {
+    return MOCK_CONTRACT_RULES;
+  }
+
+  /** The demo has no Hive node; treat every destination as existing. */
+  async hiveAccountExists(): Promise<boolean | null> {
+    return true;
+  }
+
   async readMarket(creator: string): Promise<Market | null> {
     await delay(120);
     if (creator === MOCK_UNKNOWN) {

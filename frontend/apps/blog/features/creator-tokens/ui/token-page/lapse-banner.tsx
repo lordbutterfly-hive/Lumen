@@ -2,7 +2,7 @@
 
 import { FC, useState } from 'react';
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
-import { lapseDismissKey, lapseNoticeFor, shouldOfferRenew, type LapseState, type RenewRefusal } from '../../market/lapse';
+import { lapseDismissKey, lapseNoticeFor, shouldOfferRenewNow, type LapseState, type RenewRefusal } from '../../market/lapse';
 import { writeFailureMessage } from '../write-failure';
 
 /**
@@ -56,6 +56,13 @@ const LapseBanner: FC<{
     }
   });
   const [failure, setFailure] = useState<string | null>(null);
+  // ★ SAME-TAB IN-FLIGHT GUARD (the twin of the Studio's, 2026-09-01). renew
+  // STACKS periods and has no on-chain backstop, so after a
+  // CREATOR_TOKENS_RENEW_UNCONFIRMED the pay button must NOT stay live for a
+  // confused second click. The cross-tab lock (runUnderTxClaim on this page's
+  // renew write) covers OTHER tabs; this covers this one. Reset on remount, i.e.
+  // when the banner re-renders for the next period.
+  const [renewUnconfirmed, setRenewUnconfirmed] = useState(false);
 
   const notice = lapseNoticeFor(state, renewRefusal);
   if (notice === null) return null;
@@ -63,7 +70,11 @@ const LapseBanner: FC<{
   const isWarning = state.kind === 'expiring';
   if (isWarning && dismissed) return null;
 
-  const offerRenew = shouldOfferRenew(state, renewRefusal);
+  // Keep the original state gate (only expiring/grace/delisted ever offered a
+  // renew), and add the unconfirmed guard the Studio uses via shouldOfferRenewNow.
+  const offerRenew =
+    (state.kind === 'expiring' || state.kind === 'grace' || state.kind === 'delisted') &&
+    shouldOfferRenewNow({ renewRefusal, renewUnconfirmed });
   // `delisted` is the state the owner most needs to act on, so it is the loud
   // one; the two earlier states are the same warning styling the rest of this
   // page already uses for overdue and delinquency.
@@ -94,6 +105,10 @@ const LapseBanner: FC<{
                 try {
                   await onRenew();
                 } catch (err) {
+                  // ★ A RENEW that reached Hive but not yet Magi hides the pay
+                  // button (no double-charge) rather than re-enabling it; the
+                  // banner clears itself once kPaidUntil advances on the next read.
+                  if (err instanceof Error && err.message.startsWith('CREATOR_TOKENS_RENEW_UNCONFIRMED:')) setRenewUnconfirmed(true);
                   // The REAL reason, not a guess — the same messaging every
                   // other write on this page uses.
                   setFailure(writeFailureMessage(err, 'That payment didn’t go through.'));

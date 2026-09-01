@@ -84,12 +84,21 @@ const MeritumLaunchFlow: FC = () => {
    * ★ THE WRITE FAILED, SO THE COIN MUST NOT STAY STRUCK. `reset()` drops the
    * strike timer too, so a rejection that arrives mid-animation also cancels
    * the reveal that was already scheduled.
+   *
+   * ★★ DEPEND ON `stage` TOO (2026-09-01). A same-tab retry after a
+   * REGISTER_UNCONFIRMED keeps `write === 'failed'` and calls `setWrite('failed')`
+   * again — a same-value set that React bails out of, so an effect keyed on
+   * `[write]` alone never re-fired and the coin sat on "Striking" forever beside
+   * the failure banner. `onCharged` moves `stage` to 'striking' on every hold,
+   * so keying on `stage` too re-runs this and resets the coin on the retry. The
+   * guard still means it only ever acts while the write is failed, so a genuine
+   * first strike (write 'pending' during 'striking') is untouched.
    */
   useEffect(() => {
     if (write !== 'failed') return;
     strikeRef.current?.reset();
     setStage('none');
-  }, [write]);
+  }, [write, stage]);
 
   const onHoldBegin = useCallback(() => setStage('charging'), []);
   const onCharged = useCallback(() => {
@@ -421,6 +430,7 @@ const MeritumLaunchFlow: FC = () => {
               />
             ) : (
               <LaunchStepTerms
+                rules={flow.rules}
                 commission={commission}
                 firstBuy={flow.firstBuy}
                 onFirstBuy={flow.setFirstBuy}

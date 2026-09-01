@@ -237,6 +237,11 @@ export function useLiveStudio(): LiveStudio {
     refetchInterval: REFETCH_MS
   });
   const readFailed = marketQuery.isError || marketQuery.data?.phase === 'UNKNOWN';
+  // A 429 from the read proxy is a rate LIMIT, not a chain failure. The token
+  // page distinguishes these (use-live-token-market); the Studio used to fold a
+  // 429 into 'error' and show a "Try again" button that just re-hits the limit.
+  const rateLimited =
+    marketQuery.isError && marketQuery.error instanceof Error && marketQuery.error.message.startsWith('CREATOR_TOKENS_RATE_LIMITED');
 
   const asksQuery = useQuery({
     queryKey: asksKey(creatorAccount ?? ''),
@@ -336,7 +341,7 @@ export function useLiveStudio(): LiveStudio {
         : marketQuery.isLoading
           ? 'loading'
           : readFailed
-            ? 'error'
+            ? (rateLimited ? 'rate-limited' : 'error')
             : marketQuery.data === null
               ? 'missing'
               : 'ready';
@@ -520,7 +525,12 @@ export function useLiveStudio(): LiveStudio {
     renew: useCallback(
       (periods: number) =>
         call(async ({ source, signer }) => {
-          await source.renewSubscription({ creator: signer, caller: signer, periods });
+          // Cross-tab guard, same (market, signer) key as the token-page renew
+          // (here creator === signer), so a duplicate across Studio and the token
+          // page interlocks. renew STACKS periods from max(paidUntil, block), so
+          // an un-interlocked duplicate is a real second ~$10 charge, not a
+          // harmless retry — and renew has no on-chain backstop. See tx-claim.
+          await runUnderTxClaim(signer, signer, () => source.renewSubscription({ creator: signer, caller: signer, periods }));
         }),
       [call]
     ),

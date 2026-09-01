@@ -5,6 +5,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { BackAction, HoldAction, Notice } from './launch-controls';
 import type { MeritumLaunchBlock } from './use-meritum-launch';
 import { MagiFundingHelp } from '@/blog/features/creator-tokens/live/magi-fuel-gauge';
+import type { ContractRules } from '@/blog/features/creator-tokens/types';
 
 /**
  * STEP 3 — the terms ledger, the optional first buy, and the strike.
@@ -20,6 +21,10 @@ import { MagiFundingHelp } from '@/blog/features/creator-tokens/live/magi-fuel-g
  */
 
 export interface LaunchStepTermsProps {
+  /** Which contract rules are live, from the chain. Gates the wind-down
+      copy: under v2 a lapse stops inflow, holders keep tokens and can sell,
+      the delivery record survives, and renewing reopens the same token. */
+  rules: ContractRules;
   /* `cap` used to be threaded in for the Supply row. That row is gone (owner,
      2026-08-30) and so is the prop — a market now launches at the contract's
      MaxCap, which is not a number worth putting in front of a creator. */
@@ -53,6 +58,7 @@ function isFundingFailure(message: string): boolean {
 }
 
 const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
+  rules,
   commission,
   firstBuy,
   onFirstBuy,
@@ -97,7 +103,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
       is the confirmation (see this file's header) — it is just no longer
       narrated in a sentence that misleads about transferability.
     */
-    { id: 'stop', label: t('meritum_launch.term_stop_label'), value: t('meritum_launch.term_stop_value') }
+    { id: 'stop', label: t('meritum_launch.term_stop_label'), value: rules === 'v2' ? t('meritum_launch.term_stop_value_v2') : t('meritum_launch.term_stop_value') }
   ];
 
   return (

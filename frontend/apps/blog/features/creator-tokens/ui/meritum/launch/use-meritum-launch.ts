@@ -1,10 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useRouter, usePathname } from 'next/navigation';
 import { useTranslation } from '@/blog/i18n/client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useLiveStudio } from '../../../live/use-live-studio';
+import { getCreatorTokensDataSource } from '../../../lib/creator-tokens-data-source';
+import type { ContractRules } from '../../../types';
 import { buyQuote, displayPriceUsd, serviceSupplyShareProblem } from '../../../market/curve';
 import { COMMISSION_BPS, MAX_CAP_CREDITS_BASE_UNITS, MIN_CAP_CREDITS_BASE_UNITS } from '../../../lib/contract-math';
 import { usdPrice } from '../../../market/format';
@@ -284,6 +287,8 @@ export interface MeritumLaunchApi {
 
   /** `@name`, or an empty string until the session answers. */
   handle: string;
+  /** The chain's live contract rules (v1/v2), for the step-3 wind-down copy. */
+  rules: ContractRules;
   /* `cap` was published here for the terms ledger's Supply row. Both are gone
      (owner, 2026-08-30) — a market now launches at the contract's MaxCap, which
      is not a fact any screen should recite. STANDARD_CAP is still what `launch`
@@ -344,6 +349,24 @@ export function useMeritumLaunch(): MeritumLaunchApi {
    * broadcasting on the server's cookie-only guess is not.
    */
   const identity = useSessionIdentity();
+
+  /**
+   * The chain's live rule set (v1/v2), for the step-3 wind-down copy. There is
+   * no market yet at launch, so this is the CONTRACT-level answer (readRules
+   * reads the deployed bytecode's CID and caches it), not a market's `rules`.
+   * It defaults to v1 until the chain answers, the safe direction: v1 is the
+   * harsher wind-down story, and being briefly over-cautious there is
+   * recoverable, while asserting v2 against a v1 chain is the one direction
+   * contract-rules.ts warns costs someone (its header, item 4).
+   */
+  const rulesDataSource = getCreatorTokensDataSource();
+  const rulesQuery = useQuery({
+    queryKey: ['meritum', 'contract-rules'],
+    queryFn: () => rulesDataSource!.readRules(),
+    enabled: rulesDataSource !== null,
+    staleTime: 60_000
+  });
+  const rules: ContractRules = rulesQuery.data ?? 'v1';
 
   const [step, setStep] = useState<MeritumLaunchStep>(1);
   const [furthestStep, setFurthestStep] = useState<MeritumLaunchStep>(1);
@@ -840,6 +863,7 @@ export function useMeritumLaunch(): MeritumLaunchApi {
     firstBuy,
     setFirstBuy,
     handle,
+    rules,
     /* `cap` was returned here for the Supply row of the terms ledger only. That
        row is gone (owner, 2026-08-30 — a cap of 1e9 is not a fact worth telling
        anyone), and with its single reader gone the field would be dead surface.
