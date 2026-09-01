@@ -1,7 +1,7 @@
 'use client';
 
 import { FC, ReactNode } from 'react';
-import { Dialog, DialogContentBare, DialogDescription, DialogTitle } from '@ui/components/dialog';
+import { Dialog, DialogContentBare, DialogTitle } from '@ui/components/dialog';
 import { cn } from '@ui/lib/utils';
 
 /**
@@ -46,6 +46,7 @@ const ModalShell: FC<ModalShellProps> = ({ width, onClose, title, className, chi
     }}
   >
     <DialogContentBare
+      aria-describedby={undefined}
       overlayClassName="bg-[rgba(20,18,10,0.4)] backdrop-blur-[2px]"
       wrapperClassName="p-5 py-12"
       style={{ width }}
@@ -54,8 +55,11 @@ const ModalShell: FC<ModalShellProps> = ({ width, onClose, title, className, chi
         className
       )}
     >
+      {/* Minor: only DialogTitle. The DialogDescription duplicated the title
+          verbatim, so a screen reader announced the same string as both the dialog's
+          name and its description (plus the visible ModalHead). aria-describedby is
+          set undefined so Radix does not warn about the missing description. */}
       <DialogTitle className="sr-only">{title}</DialogTitle>
-      <DialogDescription className="sr-only">{title}</DialogDescription>
       {children}
     </DialogContentBare>
   </Dialog>

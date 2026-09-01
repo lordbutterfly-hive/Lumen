@@ -159,6 +159,14 @@ import {
 import { displayPriceUsd } from '../market/curve';
 import { marketHealthOf, windingDownOf } from '../market/market-health';
 import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, renewGateUnder, rulesForCode } from '../market/contract-rules';
+// ★ EXECUTION CONFIRMATION (2026-08-31, seventeen-unconfirmed-writes finding).
+// The money-moving writes confirm by polling the tx's own terminal status
+// through the SAME findTransaction query the wallet rail already runs
+// (operations.ts TX_STATUS_OPERATION) via the SAME same-origin write proxy
+// (submit.ts SUBMIT_PROXY_PATH) — so no new node surface, and the query cannot
+// drift from the wallet rail's. See awaitExecution() below.
+import { SUBMIT_PROXY_PATH } from '@/blog/lib/lite/wallet/vsc-tx/submit';
+import { TX_STATUS_OPERATION } from '@/blog/app/api/creator-tokens/submit/operations';
 
 /**
  * ★★★ HOW LONG WE WAIT FOR THE CHAIN TO CONFIRM A REGISTER, AND WHY IT IS
@@ -207,6 +215,26 @@ export const ESCROW_CONFIRM_TIMEOUT_MS = 90_000;
  */
 export const RENEW_CONFIRM_TIMEOUT_MS = 90_000;
 
+/**
+ * The money-moving writes' execution-confirmation window (2026-08-31, the
+ * seventeen-unconfirmed-writes finding, clauderfly-57).
+ *
+ * WHY 180s AND NOT THE ESCROW 90s. Broadcast -> terminal CONFIRMED was MEASURED
+ * at ~72s on testnet (57: a real setFace, with the tx reaching CONFIRMED and
+ * its state key appearing in the SAME poll sample — n=1, so treat it as "about
+ * a minute and a bit, and 90s leaves no margin", not a constant).
+ * ★ THE TWO RAILS DIFFER ~3.5x (57, 2026-09-01): hive-rail broadcast->CONFIRMED
+ * measured ~20s, wallet-rail ~72s. 180s is generous for hive and correctly
+ * sized for wallet; the WALLET rail is the binding constraint, so never
+ * re-derive this number from the faster hive rail. Block-time
+ * variance on top of ~72s would push a normal success past a 90s window and
+ * fire *_UNCONFIRMED on transactions that in fact worked — the exact bad UX
+ * this confirmation exists to prevent. So it matches REGISTER_CONFIRM_TIMEOUT_MS
+ * for the same asymmetry register faces: a false UNCONFIRMED is cheap (its copy
+ * says CHECK, never retry), an early timeout on a real success is not.
+ */
+export const EXECUTION_CONFIRM_TIMEOUT_MS = 180_000;
+
 // Real, on-chain implementation. Reads live contract state via GraphQL
 // getStateByKeys (plumbing + decoding in ./vsc/reads.ts); builds custom_json
 // ops for writes (./vsc/op-builders.ts) and signs+broadcasts them through
@@ -237,10 +265,44 @@ export const RENEW_CONFIRM_TIMEOUT_MS = 90_000;
 
 export type Broadcaster = (op: CustomJsonOp) => Promise<string>;
 
+/**
+ * Reads a transaction's status by id. Injectable (VscCreatorTokensDataSourceDeps)
+ * exactly like `broadcaster`: production leaves it unset and awaitExecution uses
+ * the browser default below; a Node caller (a selftest) injects one. That is what
+ * keeps the real money-math paths (sell/refund exit tax) end-to-end testable
+ * without a browser, AND makes the *_REFUSED branch testable at all (43 + 57,
+ * 2026-09-01, after the browser-only guard turned a real selftest red). Returns
+ * the raw status string (CONFIRMED / FAILED / INCLUDED / PENDING / node
+ * UNCONFIRMED) or null.
+ */
+export type TxStatusReader = (txId: string) => Promise<string | null>;
+
+/**
+ * The default (browser) tx-status reader: a same-origin POST to the /submit
+ * proxy's findTransaction op — the SAME query the wallet rail runs, so no new
+ * node surface and no drift. Returns the status string or null. It is
+ * relative-path and browser-only; awaitExecution guards that once, up front, and
+ * only for this default (an injected reader is exempt).
+ */
+async function defaultTxStatusReader(txId: string): Promise<string | null> {
+  const res = await fetch(SUBMIT_PROXY_PATH, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ query: TX_STATUS_OPERATION, variables: { id: txId } }),
+    cache: 'no-store'
+  });
+  const parsed = JSON.parse(await res.text()) as {
+    data?: { findTransaction?: Array<{ id: string; status: string }> | null } | null;
+  };
+  return parsed.data?.findTransaction?.[0]?.status ?? null;
+}
+
 export interface VscCreatorTokensDataSourceDeps {
   config: CreatorTokensConfig;
   gql?: CreatorTokensGqlClient;
   broadcaster?: Broadcaster;
+  /** Optional tx-status reader; unset in production (uses defaultTxStatusReader). See TxStatusReader. */
+  txStatusReader?: TxStatusReader;
 }
 
 const NO_BROADCASTER_MSG = 'VscCreatorTokensDataSource: no broadcaster wired — inject the transaction service';
@@ -330,6 +392,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   private readonly config: CreatorTokensConfig;
   private readonly gql: CreatorTokensGqlClient;
   private readonly broadcaster?: Broadcaster;
+  private readonly txStatusReader: TxStatusReader | null;
   private readonly indexer: MagiIndexerClient | null;
 
   constructor(deps: VscCreatorTokensDataSourceDeps) {
@@ -341,6 +404,9 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // `unavailable`, which is honest, rather than empty, which is a lie.
     this.indexer = deps.config.indexerUrl ? new MagiIndexerClient(deps.config.indexerUrl, deps.config.contractId) : null;
     this.broadcaster = deps.broadcaster;
+    // Unset in production -> awaitExecution uses defaultTxStatusReader (browser
+    // fetch). A Node caller injects one; see TxStatusReader.
+    this.txStatusReader = deps.txStatusReader ?? null;
   }
 
   // ---- reads ----
@@ -520,7 +586,10 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     let rules: ContractRules;
     try {
       [state, head, rules] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock(), this.readRules()]);
-    } catch {
+    } catch (e) {
+      // A rate limit is a distinct, honest UI state, not the generic UNKNOWN read
+      // failure -- re-throw the coded error so use-live-token-market can surface it.
+      if (e instanceof Error && e.message.startsWith('CREATOR_TOKENS_RATE_LIMITED')) throw e;
       return unknownMarket(creator);
     }
 
@@ -1418,8 +1487,21 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.creator,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
-    // Optimistic PENDING result (see registerMarket): overlay the new face on
+    const txId = await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). This used to return an optimistic face
+    // overlay (pending) even if the chain refused the change (outside the
+    // 2x/7-day band, market frozen). Confirm to a terminal status first.
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_SETFACE_REFUSED: the chain refused this price change, so the posted price is unchanged.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_SETFACE_UNCONFIRMED: Hive accepted the price change, but Magi has not confirmed it yet. Check the market before changing it again.'
+      );
+    }
+    // Confirmed. Return the PROJECTION, not a re-read (UI invalidates + refetches
+    // exact state; 43/57, 2026-09-01). Overlay the new face on
     // the pre-broadcast read (every OTHER field is unchanged by setFace). The
     // derived faceBand shifts with the new face, but a slightly-stale band on a
     // clearly-pending result is reconciled by the next poll.
@@ -1453,7 +1535,20 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.creator,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
+    const txId = await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). Confirm the cap change landed before
+    // returning it as done.
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_SETCAP_REFUSED: the chain refused this cap change, so the cap is unchanged.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_SETCAP_UNCONFIRMED: Hive accepted the cap change, but Magi has not confirmed it yet. Check the market before changing it again.'
+      );
+    }
+    // Confirmed. Return the PROJECTION, not a re-read (UI invalidates + refetches
+    // exact state; 43/57, 2026-09-01).
     if (!market || market.phase === 'UNKNOWN') {
       return { ...(market ?? unknownMarket(input.creator)), pending: true };
     }
@@ -1489,8 +1584,23 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.buyer,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
-    // Optimistic PENDING result: project the minted tokens onto the prior
+    const txId = await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31, seventeen-unconfirmed-writes finding).
+    // This used to return a PROJECTED balance (pending) the instant Hive
+    // accepted the op, indistinguishable from a buy the chain refused (cap,
+    // price moved, market retired). Confirm to a terminal status first.
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_BUY_REFUSED: the chain refused this purchase, so no tokens were bought and nothing was charged.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_BUY_UNCONFIRMED: Hive accepted your purchase, but Magi has not confirmed it yet. Check your balance before buying again.'
+      );
+    }
+    // Confirmed. Return the PROJECTION, not a re-read: the UI invalidates on
+    // success and refetches exact state, so a re-read here is redundant (43/57,
+    // 2026-09-01). Project the minted tokens onto the prior
     // balance. heldBlocks is projected as 0 (maximally fresh) rather than
     // carried over from priorPosition — holdclock.go's creditInflow always
     // re-averages the clock TOWARD `now` on a Buy (never away from it), so
@@ -1537,8 +1647,25 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.seller,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
-    // Optimistic PENDING result: project the sold tokens off the pre-broadcast
+    const txId = await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). This used to return a projected balance
+    // (pending) the instant Hive accepted the op — MEASURED as reporting
+    // success for a real sell the chain refused (57, main). Confirm terminal first.
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_SELL_REFUSED: the chain refused this sale, so no tokens were sold and no HBD was paid out.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_SELL_UNCONFIRMED: Hive accepted your sale, but Magi has not confirmed it yet. Check your balance before selling again.'
+      );
+    }
+    // Confirmed. Return the PROJECTION (tokens debited off the whole balance),
+    // not a re-read: the UI invalidates on success and refetches the exact
+    // post-state, so a re-read here would be redundant with that AND would leave
+    // this projection's own both-buckets debit math untested by
+    // sell-two-buckets.selftest, which exists to prove exactly that (43/57,
+    // 2026-09-01). Project the sold tokens off the pre-broadcast
     // balance. Unlike Buy, selling never re-ages the remainder (holdclock.go
     // debitBalance: wacq is untouched by a debit), so the prior
     // heldBlocks/exitTaxBps stay exactly right for what remains.
@@ -1568,7 +1695,21 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.creator,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
+    const txId = await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). Retiring winds the market down and
+    // switches the exit rail; a refusal used to return an optimistic retired
+    // market as though it had happened. Confirm to a terminal status first.
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_RETIRE_REFUSED: the chain refused this retire, so the market is unchanged.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_RETIRE_UNCONFIRMED: Hive accepted the retire, but Magi has not confirmed it yet. Check the market before retiring again.'
+      );
+    }
+    // Confirmed. Return the PROJECTION, not a re-read (UI invalidates + refetches
+    // exact state; 43/57, 2026-09-01).
     if (!priorMarket || priorMarket.phase === 'UNKNOWN' || head === null) {
       return { ...(priorMarket ?? unknownMarket(input.creator)), pending: true };
     }
@@ -1964,8 +2105,23 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.asker,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
-    // The contract assigns `seq` server-side; the frontend cannot know it
+    const txId = await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). An ask escrows the asker's tokens and
+    // charges the HBD commission; a refusal (settlement-spend cap, a closed
+    // window, the delivery gate) used to return an optimistic 'awaiting' Ask as
+    // though the escrow had opened. It is the escrow op that OPENS one, so its
+    // three siblings (answer/decline/reclaim) confirm and this did not.
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_ASK_REFUSED: the chain refused this request, so nothing was escrowed and no commission was charged.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_ASK_UNCONFIRMED: Hive accepted your request, but Magi has not confirmed it yet. Check your requests before sending it again.'
+      );
+    }
+    // Confirmed on chain (the caller still re-reads readCreatorAsks for the
+    // real seq). The contract assigns `seq` server-side; the frontend cannot know it
     // before the tx lands. Return an optimistic placeholder — the caller
     // must re-read readCreatorAsks() to get the real seq once confirmed. This
     // is the canonical PENDING pattern the Market/HolderPosition writes now
@@ -2099,7 +2255,18 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.rater,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). A rating the chain refused used to
+    // return void as though it had been recorded.
+    const txId = await this.broadcast(op);
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_RATE_REFUSED: the chain refused this rating, so it was not recorded.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_RATE_UNCONFIRMED: Hive accepted your rating, but Magi has not confirmed it yet. Check before rating again.'
+      );
+    }
   }
 
   async reclaim(input: ReclaimInput): Promise<Ask> {
@@ -2170,8 +2337,21 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.holder,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
-    // Optimistic PENDING result: project the redeemed tokens off the
+    const txId = await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). Redeeming is a money-OUT path: this used
+    // to return a projected balance (pending) as though HBD had been paid out,
+    // even if the chain refused the redemption. Confirm to terminal first.
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_REFUND_REFUSED: the chain refused this redemption. Your tokens were not redeemed and no HBD was paid out.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_REFUND_UNCONFIRMED: Hive accepted your redemption, but Magi has not confirmed it yet. Check your balance before redeeming again.'
+      );
+    }
+    // Confirmed. Return the PROJECTION, not a re-read (UI invalidates + refetches
+    // exact state; 43/57, 2026-09-01). Project the redeemed tokens off the
     // pre-broadcast balance (same best-effort floorValueHbd simplification as
     // sell() — refund.go's pro-rata floor is not a simple linear function of
     // tokens removed either).
@@ -2221,7 +2401,20 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.caller,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
+    const txId = await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). A push-refund the chain refused used to
+    // return tokensHeld: 0 (pending) as though the holder had been paid out.
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_REFUND_REFUSED: the chain refused this refund. The holder was not paid out and their tokens were not redeemed.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        "CREATOR_TOKENS_REFUND_UNCONFIRMED: Hive accepted the refund, but Magi has not confirmed it yet. Check the holder's balance before pushing it again."
+      );
+    }
+    // Confirmed. Return the PROJECTION, not a re-read (UI invalidates + refetches
+    // exact state; 43/57, 2026-09-01).
     // refund.go RefundHolder always pays out the holder's ENTIRE balance —
     // tokensHeld projects to exactly 0, not an estimate.
     return {
@@ -2268,7 +2461,19 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.from,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). A transfer Hive accepted but the
+    // contract refused (bad destination, insufficient balance) used to return
+    // void as though the tokens had moved.
+    const txId = await this.broadcast(op);
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_TRANSFER_REFUSED: the chain refused this transfer, so no tokens were moved.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_TRANSFER_UNCONFIRMED: Hive accepted the transfer, but Magi has not confirmed it yet. Check the balances before sending again.'
+      );
+    }
   }
 
   async claimTradeFees(input: ClaimTradeFeesInput): Promise<number> {
@@ -2286,7 +2491,23 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.account,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
+    // ★ CONFIRM THE PAYOUT (2026-08-31, seventeen-unconfirmed-writes finding).
+    // This used to `return owedHbd` the instant Hive accepted the op — telling
+    // the creator they had been paid, before the contract had run, and staying
+    // wrong if the chain refused the claim. Confirm to a terminal status first;
+    // only CONFIRMED means the fees actually left the fee balance.
+    const txId = await this.broadcast(op);
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error(
+        'CREATOR_TOKENS_CLAIM_REFUSED: the chain refused this claim, so no fees were paid out. Your fee balance is unchanged.'
+      );
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_CLAIM_UNCONFIRMED: Hive accepted your claim, but Magi has not confirmed the payout yet. Check your fee balance before claiming again.'
+      );
+    }
     return owedHbd;
   }
 
@@ -2301,13 +2522,21 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.caller,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). We now DO observe the outcome, via the
+    // tx's own terminal status (awaitExecution), rather than only projecting it.
+    const txId = await this.broadcast(op);
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_CLOSE_REFUSED: the chain refused this close.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_CLOSE_UNCONFIRMED: Hive accepted the close, but Magi has not confirmed it yet. Check the market before trying again.'
+      );
+    }
     // refund.go CloseIfDrained: (FROZEN AND supply===0) => CLOSED, or already
-    // CLOSED => true, else false — idempotent on the contract side. A
-    // custom_json broadcast resolves to a Hive tx id, never the L2 call's own
-    // return value, so this client cannot observe the real post-execution
-    // result directly — this is the same PRE-broadcast optimistic projection
-    // every other write in this file makes; re-readMarket() to confirm.
+    // CLOSED => true, else false — idempotent on the contract side. The tx
+    // CONFIRMED above, so the pre-broadcast projection is what the contract did.
     if (!priorMarket || priorMarket.phase === 'UNKNOWN') return false;
     // Under v2 only a RETIRED frozen market closes (market/contract-rules.ts).
     return closesIfDrainedUnder(priorMarket.rules, priorMarket);
@@ -2336,7 +2565,18 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.creator,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). A service the chain refused used to
+    // return void as though it had been created.
+    const txId = await this.broadcast(op);
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_OFFERING_REFUSED: the chain refused this service, so it was not created.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_OFFERING_UNCONFIRMED: Hive accepted the new service, but Magi has not confirmed it yet. Check your services before adding it again.'
+      );
+    }
   }
 
   async setOfferingPrice(input: SetOfferingPriceInput): Promise<void> {
@@ -2350,7 +2590,18 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.creator,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). Confirm the price change landed before
+    // returning it as done.
+    const txId = await this.broadcast(op);
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_OFFERING_PRICE_REFUSED: the chain refused this price change, so the service price is unchanged.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_OFFERING_PRICE_UNCONFIRMED: Hive accepted the price change, but Magi has not confirmed it yet. Check the service before changing it again.'
+      );
+    }
   }
 
   async setOfferingTitle(input: SetOfferingTitleInput): Promise<void> {
@@ -2364,7 +2615,18 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.creator,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). Confirm the rename landed before
+    // returning it as done.
+    const txId = await this.broadcast(op);
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_OFFERING_TITLE_REFUSED: the chain refused this rename, so the service name is unchanged.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_OFFERING_TITLE_UNCONFIRMED: Hive accepted the rename, but Magi has not confirmed it yet. Check the service before renaming it again.'
+      );
+    }
   }
 
   async deleteOffering(input: DeleteOfferingInput): Promise<void> {
@@ -2377,7 +2639,18 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.creator,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). Confirm the removal landed before
+    // returning it as done.
+    const txId = await this.broadcast(op);
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error('CREATOR_TOKENS_OFFERING_DELETE_REFUSED: the chain refused this removal, so the service is still listed.');
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_OFFERING_DELETE_UNCONFIRMED: Hive accepted the removal, but Magi has not confirmed it yet. Check your services before removing it again.'
+      );
+    }
   }
 
   async withdrawTreasury(input: WithdrawTreasuryInput): Promise<number> {
@@ -2394,11 +2667,24 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.caller,
       rcLimit: this.config.rcLimit
     });
-    await this.broadcast(op);
+    // ★ CONFIRM EXECUTION (2026-08-31). This used to `return input.amountHbd`
+    // the instant Hive accepted the op — reporting a withdrawal the contract
+    // may have refused (over the treasury balance, not the owner, paused).
+    const txId = await this.broadcast(op);
+    const outcome = await this.awaitExecution(txId);
+    if (outcome === 'failed') {
+      throw new Error(
+        'CREATOR_TOKENS_WITHDRAW_REFUSED: the chain refused this withdrawal. Nothing was withdrawn from the treasury.'
+      );
+    }
+    if (outcome === 'timeout') {
+      throw new Error(
+        'CREATOR_TOKENS_WITHDRAW_UNCONFIRMED: Hive accepted the withdrawal, but Magi has not confirmed it yet. Check the treasury balance before withdrawing again.'
+      );
+    }
     // read.go WithdrawTreasury debits EXACTLY `amount` (bounded to (0,
     // current treasury balance] — an over-withdrawal is refused outright,
-    // never clamped), so a successful call withdraws exactly what was
-    // requested.
+    // never clamped), so a confirmed call withdrew exactly what was requested.
     return input.amountHbd;
   }
 
@@ -2504,6 +2790,102 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         // not yet; a read failure is not a confirmation
       }
       if (Date.now() + POLL_MS >= deadline) return null;
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    }
+  }
+
+  /**
+   * ★★★ EXECUTION CONFIRMATION FOR THE MONEY-MOVING WRITES (2026-08-31, the
+   * seventeen-unconfirmed-writes finding, clauderfly-57).
+   *
+   * register/renew confirm a STATE ADVANCE; answer/decline/reclaim confirm an
+   * ESCROW STATUS. The remaining writes broadcast and then returned a
+   * success-shaped value WITHOUT asking whether the CONTRACT executed. A
+   * custom_json resolves at L1-accept, before L2 runs; on the HIVE-key rail the
+   * broadcaster then hands back a tx id and checks nothing more
+   * (broadcaster.ts), so a contract refusal — MEASURED as a real terminal
+   * FAILED on a sell the chain rejected (57, main, 2026-08-31) — reached the
+   * user as success. The BTC/EVM wallet rail already confirms (submit.ts
+   * waitForInclusion) but only to INCLUDED, which the same measurement showed is
+   * ~30s short of finality and can still flip to FAILED; polling here to a
+   * TERMINAL status re-checks past that hole on EITHER rail.
+   *
+   * Polls findTransaction(byId) — the SAME query the wallet rail already runs
+   * through the SAME /api/creator-tokens/submit proxy, so no new node surface is
+   * opened and the two cannot drift — until the status is TERMINAL:
+   *   CONFIRMED -> 'confirmed'  (executed AND final; 57 measured the state key
+   *                              readable in the same sample, so a caller may
+   *                              re-read the real post-state with no extra wait)
+   *   FAILED    -> 'failed'     (sequenced and rejected at execution)
+   *   otherwise -> keep polling. That "otherwise" INCLUDES the node's OWN
+   *     `UNCONFIRMED` status (reported immediately on mempool acceptance) as
+   *     well as INCLUDED / PENDING / no-row / a read failure — none is a
+   *     verdict. ★ The node's `UNCONFIRMED` is NOT this feature's
+   *     CREATOR_TOKENS_*_UNCONFIRMED error: the node means "accepted, not yet
+   *     sequenced"; our error means "we gave up waiting for a terminal status".
+   *     They must never be conflated by a reader of this code.
+   *
+   * ★★★ DOCUMENTED LIMITS (clauderfly-57 adversarial review, 2026-08-31) —
+   * chosen, not missed:
+   *  1. THE HIVE-RAIL TX ID MUST RESOLVE IN findTransaction, OR THIS IS A TOTAL
+   *     HIVE-RAIL OUTAGE, not a graceful degrade. If the id
+   *     hiveTransactionBroadcaster returns does not resolve, `status` is
+   *     undefined every poll, nothing is terminal, and EVERY hive money-out —
+   *     including the successful ones — waits the full window and returns
+   *     'timeout'. It fails safe from FALSE SUCCESS (never says "done" wrongly)
+   *     but NOT from a false UNCONFIRMED on a real success. A HARD pre-ship
+   *     verification, not an after-the-fact one.
+   *  2. IT WIDENS THE CROSS-TAB DOUBLE-SUBMIT WINDOW from ~2s (broadcast-accept)
+   *     to the full window on every money path — exactly as renew's S4 note
+   *     describes, and worse here: a duplicate BUY is a second purchase further
+   *     up the curve, a duplicate ASK is a second escrow AND a second commission.
+   *     The same-tab `inFlight` ref guards a double-click for the whole await;
+   *     the residual is a SECOND TAB (its own ref), which also needs its own
+   *     wallet signature. A cross-tab claim (like launch's LAUNCH_CLAIM_TTL_MS)
+   *     would close it — flagged as a follow-up, not built here.
+   *  3. ON THE WALLET RAIL THE CEILING IS ~270s, NOT 180s: broadcastWalletCall's
+   *     own waitForInclusion polls up to 90s, then this polls up to 180s more.
+   *     The happy path composes cleanly (~42s inclusion + ~30s to CONFIRMED); the
+   *     270s is only a genuinely stuck or dropped tx.
+   *  4. THE POLL BUDGET DEPENDS ON THE MAGI_GQL_PER_IP_PER_DAY CAP. Up to
+   *     EXECUTION_CONFIRM_TIMEOUT_MS/POLL_MS (~60) status polls per money-out,
+   *     where there were ZERO, sharing the 'ct-nonce' scope's `creator_tokens`
+   *     bucket. Comfortable at the raised 200k cap; at the OLD 10k default it
+   *     would refuse the confirmation polls themselves after ~166 money-outs/IP/
+   *     day and report UNCONFIRMED on real successes. rate-limit.ts carries the
+   *     matching note — do not restore the old default.
+   */
+  private async awaitExecution(txId: string): Promise<'confirmed' | 'failed' | 'timeout'> {
+    const injected = this.txStatusReader;
+    // The DEFAULT reader is a relative-path browser fetch, so an accidental
+    // server-side call would throw, be caught below as "no verdict", and burn the
+    // whole window. Guard that ONCE, up front, so it fails loudly (57 review #5)
+    // — but ONLY for the default reader. A Node caller injects its own reader (a
+    // selftest) and is exempt, which keeps the real sell()/refund() money math
+    // end-to-end testable without a browser and the *_REFUSED branch testable at
+    // all (43 + 57, 2026-09-01).
+    if (!injected && typeof window === 'undefined') {
+      throw new Error(
+        'VscCreatorTokensDataSource: awaitExecution needs a browser or an injected txStatusReader (SUBMIT_PROXY_PATH is a relative proxy path)'
+      );
+    }
+    const read = injected ?? defaultTxStatusReader;
+    const POLL_MS = 3_000;
+    // ★ Effective window is ~EXECUTION_CONFIRM_TIMEOUT_MS - POLL_MS: the check
+    // below returns 'timeout' when the NEXT poll would cross the deadline, so the
+    // final poll lands ~one interval early (57 review #5). Intentional, same
+    // shape as the escrow/paidUntil helpers above.
+    const deadline = Date.now() + EXECUTION_CONFIRM_TIMEOUT_MS;
+    for (;;) {
+      try {
+        const status = await read(txId);
+        if (status === 'CONFIRMED') return 'confirmed';
+        if (status === 'FAILED') return 'failed';
+        // INCLUDED / PENDING / node-UNCONFIRMED / null: not terminal.
+      } catch {
+        // a read or parse failure is not a verdict — keep waiting for one
+      }
+      if (Date.now() + POLL_MS >= deadline) return 'timeout';
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }
   }

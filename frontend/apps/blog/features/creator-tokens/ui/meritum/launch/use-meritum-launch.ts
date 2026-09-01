@@ -368,22 +368,63 @@ export function useMeritumLaunch(): MeritumLaunchApi {
   const draftKey = `lumen-meritum-launch-draft-${studio.creator ?? 'anon'}`;
 
   useEffect(() => {
+    let restoredStep: MeritumLaunchStep = 1;
+    let restoredFurthest: MeritumLaunchStep = 1;
+    let restoredOffers = emptyOffers();
+    let restoredFirstBuy = '';
+    let hadDraft = false;
     try {
       const raw = window.sessionStorage.getItem(draftKey);
       const draft = raw ? readDraft(raw) : null;
       if (draft) {
-        const restoredStep = clampStep(draft.step);
-        setStep(restoredStep);
+        restoredStep = clampStep(draft.step);
         // The draft's own high-water mark, not the step being restored.
-        setFurthestStep(clampStep(draft.furthestStep));
-        setOffers(draft.offers);
-        setFirstBuyState(draft.firstBuy);
+        restoredFurthest = clampStep(draft.furthestStep);
+        restoredOffers = draft.offers;
+        restoredFirstBuy = draft.firstBuy;
         // Only a draft with something IN it is one the reader "saved".
-        setRestoredFromDraft(draftHasContent(draft.offers, draft.firstBuy));
+        hadDraft = draftHasContent(draft.offers, draft.firstBuy);
       }
     } catch {
       // A corrupt or unreadable draft must never block a launch. Start fresh.
     }
+
+    /**
+     * ★ M-07 — AN IN-RANGE `?step` OVERRIDES THE DRAFT'S OWN STEP (2026-08-31,
+     * verified UX defect). Before this the URL was reflection-only and never
+     * read back on mount (see the sync effect below and its own comment), so
+     * `?step=2` on a step-3 draft rendered step 3 anyway, and `?step=99`
+     * rendered whatever the draft held — the address bar described a page
+     * that was not on screen.
+     *
+     * "In range" is `[1, the draft's own furthestStep]`: a reader may jump
+     * BACK to a step they already reached, by URL, the same as pressing Back,
+     * but the param cannot grant a step they never earned. `furthestStep`
+     * itself is never raised by this — only which panel renders THIS load.
+     *
+     * Absent or non-numeric leaves the draft's own step alone (an ordinary
+     * first load carries no `?step` at all). An out-of-range value is
+     * silently clamped rather than rejected, and the sync effect below then
+     * rewrites the URL to match what is actually on screen — it fires on the
+     * very next render because `restored` flips true here, so the correction
+     * is not new plumbing, it is the existing reflect-only effect doing its
+     * job on the corrected value.
+     */
+    try {
+      const rawStep = new URLSearchParams(window.location.search).get('step');
+      const parsed = rawStep !== null ? Number(rawStep) : NaN;
+      if (Number.isFinite(parsed)) {
+        restoredStep = clampStep(Math.min(parsed, restoredFurthest));
+      }
+    } catch {
+      // Malformed URL — fall back to the draft's own step.
+    }
+
+    setStep(restoredStep);
+    setFurthestStep(restoredFurthest);
+    setOffers(restoredOffers);
+    setFirstBuyState(restoredFirstBuy);
+    setRestoredFromDraft(hadDraft);
     setRestored(true);
   }, [draftKey]);
 
@@ -434,10 +475,17 @@ export function useMeritumLaunch(): MeritumLaunchApi {
   }, [restored, step, furthestStep, offers, firstBuy, draftKey]);
 
   /**
-   * ★ THE STEP IN THE URL, REFLECTION ONLY. `replace`, not `push`, so paging
-   * through three short steps does not pile up history entries, and the param
-   * is never read back on mount — the draft above stays the single thing that
-   * decides where a reader lands, so there is one place that logic can drift.
+   * ★ THE STEP IN THE URL. `replace`, not `push`, so paging through three
+   * short steps does not pile up history entries.
+   *
+   * ★ ALSO THE CORRECTION PATH FOR M-07 (2026-08-31). The restore effect
+   * above DOES read `?step` back now, but only once, clamped against the
+   * draft's `furthestStep` — an out-of-range or malformed value there is
+   * silently dropped, not rewritten. This effect is what makes the address
+   * bar honest afterwards: it fires the moment `restored` flips true and
+   * unconditionally sets `step` to whatever this render actually settled on,
+   * so `?step=99` on load becomes `?step=3` (or whatever `furthestStep`
+   * allows) without a second, purpose-built rewrite.
    */
   useEffect(() => {
     if (!restored) return;

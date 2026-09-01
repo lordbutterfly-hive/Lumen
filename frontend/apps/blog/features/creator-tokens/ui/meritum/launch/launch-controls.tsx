@@ -50,7 +50,10 @@ export const BackAction: FC<{ label: string; onClick: () => void }> = ({ label, 
   <button
     type="button"
     onClick={onClick}
-    className="border-0 bg-transparent text-caption font-semibold text-meritum-ink-muted transition-colors hover:text-meritum-ink"
+    // ★ 44x44 MINIMUM TAP TARGET (2026-08-31, verified UX defect). Text-only
+    // and borderless, so the padding below only grows the HIT area, not
+    // anything visible — it does not balloon beside the 50px primary button.
+    className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center border-0 bg-transparent px-3 text-caption font-semibold text-meritum-ink-muted transition-colors hover:text-meritum-ink"
   >
     {label}
   </button>

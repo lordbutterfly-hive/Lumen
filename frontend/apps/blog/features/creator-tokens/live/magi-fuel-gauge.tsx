@@ -23,6 +23,7 @@
  * which is the right visual language: on Magi, HBD *is* your mana.
  */
 
+import { useState } from 'react';
 import env from '@beam-australia/react-env';
 import { ManabarRing } from '@/blog/features/layouts/site-header/manabar-ring';
 import { MAGI_MIN_RC_FOR_A_CALL, type MagiSpendingPowerState } from './use-magi-spending-power';
@@ -140,8 +141,11 @@ export function MagiFuelGauge({
         <div className="font-semibold tabular-nums text-ink-2">{hbd(balance.hbdBaseUnits)} HBD on Magi</div>
         {short ? (
           <div className="text-ink-warn-3">
-            This purchase needs {hbd(costBaseUnits)} HBD, which is {hbd(costBaseUnits - balance.hbdBaseUnits)} more
-            than you hold.
+            {/* M-03: state the COST only, not a second shortfall number. The gauge used to
+                compute its own `cost - balance`, which omits the transaction-credit reserve,
+                so it disagreed with the remedy line below (which includes it). One shortfall
+                number, and it is the remedy's RC-inclusive one. */}
+            This purchase needs {hbd(costBaseUnits)} HBD, more than you hold.
           </div>
         ) : (
           <div className="text-ink-10">Available to spend on Meritum.</div>
@@ -193,75 +197,114 @@ const MAGI_GATEWAY = env('MAGI_GATEWAY_ACCOUNT') || 'vsc.gateway';
  */
 const ALTERA_URL = env('ALTERA_MARKET_URL') || '';
 
-/** A Hive wallet that can prefill a transfer, if one is configured. */
-const WALLET_HOST = env('WALLET_ENDPOINT') || '';
+/**
+ * The Magi account a deposit credits. Matches Altera's getHiveDepositOp memo,
+ * `to=<toDid.split(':').at(-1)>`: the Hive name for a `hive:` account, the wallet
+ * address for a `did:pkh:` one. A deposit to the gateway carrying this memo lands
+ * in the chosen Magi account and never needs a Magi signature.
+ */
+function depositMemoTarget(account: string | undefined): string | null {
+  if (!account) return null;
+  const seg = account.split(':').at(-1);
+  return seg && seg.trim() !== '' ? seg : null;
+}
 
+/**
+ * A labelled, copyable value: the two things a depositor must get exactly right,
+ * the gateway account and the memo. Copy is best-effort (clipboard access can be
+ * blocked); the value is always on screen to copy by hand.
+ */
+function CopyRow({ label, value, testId }: { label: string; value: string; testId?: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = () => {
+    try {
+      void navigator.clipboard?.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable; the value is visible to copy by hand */
+    }
+  };
+  return (
+    <div className="mt-2 flex items-center gap-2" data-testid={testId}>
+      <span className="w-[5.5rem] flex-none font-semibold">{label}</span>
+      <code className="min-w-0 flex-1 break-all rounded bg-surface-warn-14 px-2 py-1 text-ink-27">{value}</code>
+      <button
+        type="button"
+        onClick={onCopy}
+        aria-label={`Copy ${label.toLowerCase()}`}
+        className="lm-press flex-none rounded-control px-2.5 py-1 font-semibold text-ink-warn-1 hover:bg-surface-warn-15"
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * How to get HBD onto Magi, the SAME way Altera deposits: send HBD to the VSC
+ * gateway account with a `to=<your account>` memo. The gateway is a real Hive
+ * account run by consensus, so a deposit is an ordinary Hive transfer from any
+ * wallet or exchange and never needs a Magi signature, which is what makes a
+ * zero-balance account escapable rather than a deadlock.
+ *
+ * `account` is the payer's own identifier (`hive:<name>` or `did:pkh:...`); when
+ * known we show the exact memo, copyable, so nothing is fat-fingered. A wallet
+ * holder with no HBD yet is also pointed at Altera to swap BTC/ETH into HBD.
+ */
 export function MagiFundingHelp({
   kind,
+  account,
   className = ''
 }: {
   kind: 'hive' | 'btc' | 'evm';
+  /** The payer's Magi account id (`hive:<name>` or `did:pkh:...`), for the deposit memo. */
+  account?: string;
   className?: string;
 }) {
-  const transferUrl = WALLET_HOST
-    ? `${WALLET_HOST.replace(/\/$/, '')}/@${MAGI_GATEWAY}/transfers?to=${MAGI_GATEWAY}&asset=HBD&amount=10.000`
-    : '';
-  const chainName = kind === 'btc' ? 'Bitcoin' : 'Ethereum';
+  const memoTarget = depositMemoTarget(account);
 
   return (
     <div
       className={`rounded-control border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-caption text-ink-warn-1 ${className}`}
       data-testid="magi-funding-help"
     >
-      <div className="mb-1 font-semibold">Adding HBD to Magi</div>
+      <div className="mb-1 font-semibold">Add HBD to Magi</div>
+      <p>
+        Send HBD to <strong>@{MAGI_GATEWAY}</strong> from any Hive wallet or exchange. That is a dedicated
+        account run by the VSC consensus, so your funds stay in your own Magi wallet. Get the memo exactly
+        right, or the HBD will not reach your account.
+      </p>
 
-      {kind === 'hive' ? (
-        <>
-          <p>
-            Send HBD from your Hive wallet to <strong>@{MAGI_GATEWAY}</strong> and leave the memo{' '}
-            <strong>empty</strong>. An empty memo credits your own Magi account. It arrives as spendable
-            Magi HBD; an ordinary Hive transfer, no extra signing.
-          </p>
-          {transferUrl ? (
-            <a
-              href={transferUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="lm-press mt-2.5 inline-block rounded-control bg-surface-warn-14 px-3.5 py-2 font-semibold text-ink-27 hover:bg-surface-warn-15"
-              data-testid="magi-deposit-hive"
-            >
-              Send HBD to Magi
-            </a>
-          ) : null}
-        </>
+      <CopyRow label="Send HBD to" value={MAGI_GATEWAY} testId="magi-deposit-gateway" />
+      {memoTarget ? (
+        <CopyRow label="Memo" value={`to=${memoTarget}`} testId="magi-deposit-memo" />
+      ) : kind === 'hive' ? (
+        <p className="mt-2 italic">Leave the memo empty; an empty memo credits your own Magi account.</p>
       ) : (
-        <>
-          <p>
-            Your {chainName} wallet holds {kind === 'btc' ? 'BTC' : 'ETH'}, not HBD. Trade it for HBD on
-            Altera, the market on Magi itself, and the HBD lands in the same Magi account you are signed
-            in with here. You sign on {chainName} as normal; it never needs a Magi signature, which is why
-            an empty account can always fund itself.
-          </p>
-          {ALTERA_URL ? (
-            <a
-              href={ALTERA_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="lm-press mt-2.5 inline-block rounded-control bg-surface-warn-14 px-3.5 py-2 font-semibold text-ink-27 hover:bg-surface-warn-15"
-              data-testid="magi-deposit-altera"
-            >
-              Open the Altera market
-            </a>
-          ) : (
-            // No dead button. `ALTERA_MARKET_URL` is unset in this deployment, and
-            // a link that goes nowhere is worse than a sentence that admits it.
-            <p className="mt-2 italic">
-              The link to Altera isn’t configured in this deployment yet. Ask an admin for the market
-              address.
-            </p>
-          )}
-        </>
+        <p className="mt-2 italic">Sign in to see the memo that credits your account.</p>
       )}
+
+      {kind !== 'hive' ? (
+        <p className="mt-2.5">
+          No HBD yet? Trade your {kind === 'btc' ? 'BTC' : 'ETH'} for HBD on Altera, the market on Magi
+          itself, and it lands in this same account.
+          {ALTERA_URL ? (
+            <>
+              {' '}
+              <a
+                href={ALTERA_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold underline hover:text-ink-warn-3"
+                data-testid="magi-deposit-altera"
+              >
+                Open the Altera market
+              </a>
+            </>
+          ) : null}
+        </p>
+      ) : null}
     </div>
   );
 }

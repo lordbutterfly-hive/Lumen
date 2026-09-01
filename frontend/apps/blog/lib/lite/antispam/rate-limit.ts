@@ -171,7 +171,22 @@ export async function enforceStreakRate(ip: string): Promise<boolean> {
  * `getStateByKeys`, schema.graphql:813) is a SEPARATE control enforced directly
  * in each route — this function only bounds how often a caller may ask at all.
  */
-const MAGI_GQL_PER_IP_PER_DAY = envPositiveInt('LITE_MAGI_GQL_PER_IP_PER_DAY', 10_000);
+/**
+ * ★ ALSO FEEDS THE MONEY-OUT CONFIRMATION POLLS — do NOT lower without reading
+ * this (2026-08-31, seventeen-unconfirmed-writes fix). creator-tokens'
+ * awaitExecution() polls a transaction's terminal status through
+ * /api/creator-tokens/submit's 'status' op, whose 'ct-nonce' scope maps to THIS
+ * `creator_tokens` daily bucket (submit/route.ts:136,155) — not the smaller
+ * `creator_tokens_submit` one. That is up to ~60 polls (3s over the 180s
+ * EXECUTION_CONFIRM_TIMEOUT_MS) per buy/sell/claim/refund/ask, where there were
+ * ZERO. At the OLD 10k default an IP reached ~166 money-outs/day before the
+ * limiter began refusing the CONFIRMATION polls themselves — which then time out
+ * and report "unconfirmed" on transactions that actually SUCCEEDED. 200k clears
+ * that with headroom (and the per-minute NONCE_PER_IP_PER_MIN=120 allows ~6
+ * concurrent confirmations/IP, ample for inFlight-guarded use). Restoring 10k
+ * silently breaks money confirmation, not just reads.
+ */
+const MAGI_GQL_PER_IP_PER_DAY = envPositiveInt('LITE_MAGI_GQL_PER_IP_PER_DAY', 200_000);
 
 /**
  * ★ SUBMITS GET THEIR OWN, MUCH SMALLER BUDGET (2026-08-20). The 10,000/day

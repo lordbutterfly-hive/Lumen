@@ -14,7 +14,7 @@ import { useCreatorFollow } from '../../live/use-creator-follow';
 import { useCreatorProfileLink } from '../../live/use-creator-profile-link';
 import { SafeExternalLink, safeHostname } from '@/blog/components/safe-external-link';
 import { Link } from '@hive/ui';
-import { MarketLoading, MarketMissing, MarketReadFailed, MarketUnavailable } from '../../live/market-states';
+import { MarketLoading, MarketMissing, MarketRateLimited, MarketReadFailed, MarketUnavailable } from '../../live/market-states';
 import { avatarGradient, pctLabel, usdMoney, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
 import { priceChangeLabel } from '../../market/price-change';
 // ★★ THE RESERVE / BACKING FIGURES ARE HIDDEN FOR LAUNCH (owner, 2026-08-27).
@@ -27,6 +27,7 @@ import TokenModals, { type TokenDialog } from './token-modals';
 import LapseBanner from './lapse-banner';
 import { lapseStateOf, DELISTED_READER_NOTICE } from '../../market/lapse';
 import { marketHealthOf, healthWordFor } from '../../market/market-health';
+import { buyerOracleNotice } from '../../market/oracle-copy';
 // ★★★ EVERY SENTENCE ON THIS PAGE THAT MAKES A CLAIM ABOUT MONEY (2026-08-27).
 // Extracted so a self-test can read it: this is a `'use client'` tree, so copy
 // written inline here is copy no test can assert on. See disclosure-copy.ts's
@@ -257,6 +258,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   // testnet contract, where a correct read of an unregistered creator rendered
   // as a node outage.
   if (status === 'missing') return <MarketMissing handle={handle} />;
+  if (status === 'rate-limited') return <MarketRateLimited />;
   if (status === 'error' || !market) return <MarketReadFailed onRetry={live.retry} />;
 
   const d = market.delivery;
@@ -920,6 +922,15 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
       {/* 4. Services */}
       <div className="mb-4 rounded-panel border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
         <div className="mb-3.5 text-label font-bold uppercase tracking-label text-ink-14">What you can do with the token</div>
+        {/* ★ B-03: name the oracle refusal on the LIST, before any click. The
+            Request buttons below are disabled to a "Not priceable yet" chip on the
+            same signal, so the card no longer advertises a priced, purchasable
+            service and only refuses inside the modal. */}
+        {live.servicesOracleStatus && live.servicesOracleStatus !== 'ok' ? (
+          <div className="mb-3.5 rounded-control border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-caption text-ink-warn-1">
+            {buyerOracleNotice(live.servicesOracleStatus, displayHandle(handle))}
+          </div>
+        ) : null}
         <div className="mb-3.5 flex flex-col gap-2.5">
           {market.services.map((sv) => (
             <div
@@ -990,6 +1001,8 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 <span className="flex-shrink-0 rounded-full bg-surface-warn-4 px-3 py-1.5 text-caption font-semibold text-ink-warn-3">
                   {healthWordFor(health) ?? 'Paused'}
                 </span>
+              ) : live.servicesOracleStatus && live.servicesOracleStatus !== 'ok' ? (
+                <span className="flex-shrink-0 rounded-full bg-surface-warn-4 px-3 py-1.5 text-caption font-semibold text-ink-warn-3">Not priceable yet</span>
               ) : (
                 <button
                   onClick={() => openAsk(sv)}

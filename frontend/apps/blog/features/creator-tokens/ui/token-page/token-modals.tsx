@@ -75,7 +75,9 @@ const BuyModal: FC<{
   // this feature that was already correct. `busy` stays — it still drives
   // the disabled attribute and the "Confirm in your wallet…" label.
   const inFlight = useRef(false);
-  const [amt, setAmt] = useState('50');
+  // M-01: default to the lowest quick-pick chip ($10), not $50 — a $50 default on a
+  // small market is most of the whole market, and it matched none of the 10/25/100 chips.
+  const [amt, setAmt] = useState('10');
   const [adv, setAdv] = useState(false);
   /**
    * ★ THE CAP IS PRE-FILLED FROM THE LIVE QUOTE, NOT FROZEN AT MOUNT
@@ -312,7 +314,7 @@ const BuyModal: FC<{
         ) : null}
         {/* What you can actually spend, and whether you can send anything at all. */}
         <MagiFuelGauge state={spending} costBaseUnits={costBaseUnits} kind={payer?.kind} className="mb-3" />
-        {blockedBySpending && payer ? <MagiFundingHelp kind={payer.kind} className="mb-3" /> : null}
+        {blockedBySpending && payer ? <MagiFundingHelp kind={payer.kind} account={payer.id} className="mb-3" /> : null}
         {/* H6 (2026-08-31): the exact remedy — how much HBD to add and that credit
             refills on its own — which describeRcBudget produced and nothing rendered. */}
         {blockedBySpending
@@ -434,14 +436,19 @@ const BuyModal: FC<{
                   : `Buy for ~${usdPrice(q.totalUsd)}`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
+          <div role="alert" ref={(n) => n?.scrollIntoView({ block: 'nearest' })} className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
         ) : null}
         {/* F-E: the label above is an estimate; THIS is the number that binds.
             handleBuy refuses outright above `maxTotalUsd ?? usd`, so this is a
             guarantee rather than a hedge and is worth stating plainly. */}
-        <div className="mt-2.5 text-center text-caption text-ink-14">
-          One signature confirms your buy. {buyCeilingNote(maxTotalUsd ?? usd, maxTotalUsd !== undefined)}
-        </div>
+        {/* Minor: don't state "confirms your buy" / a $0 ceiling while the CTA reads
+            "Minimum buy is $X" for an empty or sub-minimum amount — show the binding
+            ceiling only when there is a real buy to confirm. */}
+        {q.tokens > 0 && usd > 0 ? (
+          <div className="mt-2.5 text-center text-caption text-ink-14">
+            One signature confirms your buy. {buyCeilingNote(maxTotalUsd ?? usd, maxTotalUsd !== undefined)}
+          </div>
+        ) : null}
       </div>
     </ModalShell>
   );
@@ -767,7 +774,7 @@ const SellModal: FC<{
                 : `Sell · get ~${usdPrice(q.receiveUsd)}`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
+          <div role="alert" ref={(n) => n?.scrollIntoView({ block: 'nearest' })} className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
         ) : null}
         {/* This used to read "Selling is always available — even if this market
             winds down", which is false: sell() throws once the market is
@@ -979,7 +986,13 @@ const AskModal: FC<{
             {deadline} days
           </span>
         </div>
-        {blockedByCommission && askPayer ? <MagiFundingHelp kind={askPayer.kind} className="mb-3" /> : null}
+        {/* ★ Suppress the deposit remedy when the ORACLE is the binding constraint:
+            depositing HBD does not make an unpriceable market purchasable, only more
+            trading does, so stacking it under an oracle refusal points at a fix that
+            is not one (43, 2026-08-31). Shown only when commission is the real block. */}
+        {blockedByCommission && askPayer && !priceBlocked ? (
+          <MagiFundingHelp kind={askPayer.kind} account={askPayer.id} className="mb-3" />
+        ) : null}
         <button
           onClick={async () => {
             if (!canAsk) return;
@@ -1020,7 +1033,7 @@ const AskModal: FC<{
                 : `Send question for ${cost.tokens} tokens + ${usdPrice(q.commissionUsd)} HBD`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
+          <div role="alert" ref={(n) => n?.scrollIntoView({ block: 'nearest' })} className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
         ) : null}
       </div>
     </ModalShell>
@@ -1111,7 +1124,7 @@ const SendModal: FC<{
               : `Send ${tok(tokens)} tokens`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
+          <div role="alert" ref={(n) => n?.scrollIntoView({ block: 'nearest' })} className="mt-2.5 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
         ) : null}
         <div className="mt-2.5 text-center text-caption text-ink-14">
           Transfers are free and instant on Lumen. Never blocked by billing.

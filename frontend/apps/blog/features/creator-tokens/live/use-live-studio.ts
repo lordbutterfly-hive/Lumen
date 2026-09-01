@@ -26,6 +26,7 @@ import { adaptAsk, adaptMarket, blocksToDays, usdFromHbd, type LiveTokenMarket }
 import type { PortfolioAsk } from '../market/portfolio';
 import type { LiveMarketStatus } from './use-live-token-market';
 import { collapseRead } from './collapse-read';
+import { runUnderTxClaim } from './tx-claim';
 
 const marketKey = (creator: string) => ['creatorTokens', 'live', 'market', creator];
 const asksKey = (creator: string) => ['creatorTokens', 'live', 'creatorAsks', creator];
@@ -549,7 +550,10 @@ export function useLiveStudio(): LiveStudio {
     sell: useCallback(
       (tokens: number, minNetUsd?: number) =>
         call(async ({ source, signer }) => {
-          await source.sell({ creator: signer, seller: signer, tokens, minNetHbd: minNetUsd });
+          // Cross-tab guard, same (market, signer) key as the token-page sell
+          // (here creator === signer, the creator selling their own token), so a
+          // duplicate across studio and the token page interlocks. See tx-claim.
+          await runUnderTxClaim(signer, signer, () => source.sell({ creator: signer, seller: signer, tokens, minNetHbd: minNetUsd }));
         }),
       [call]
     ),

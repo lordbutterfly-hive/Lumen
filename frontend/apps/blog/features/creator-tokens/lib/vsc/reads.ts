@@ -422,6 +422,14 @@ async function postGql(query: string, variables: Record<string, unknown>): Promi
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query, variables })
   });
+  if (res.status === 429) {
+    // A rate limit is NOT a failed read. It must never render as "Couldn't load
+    // this market" with a false "try again in a few seconds": the per-IP daily cap
+    // can hold for hours. Coded so readMarket re-throws it to a distinct UI state.
+    throw new Error(
+      'CREATOR_TOKENS_RATE_LIMITED: too many reads from your network right now. This is a temporary limit, not a problem with your account or the market.'
+    );
+  }
   if (!res.ok) throw new Error(`Creator Tokens GQL HTTP ${res.status}`);
   const json: unknown = await res.json();
   const errorMsg = collectGqlErrors(json);

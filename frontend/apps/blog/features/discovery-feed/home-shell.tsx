@@ -2,7 +2,6 @@ import LeftRail from '@/blog/features/layouts/left-rail';
 import RightRail from '@/blog/features/layouts/right-rail';
 import ShortFormComposer from '@/blog/features/discovery-feed/short-form-composer';
 import FeedTabs from '@/blog/features/discovery-feed/feed-tabs';
-import { WeeklyRecapCard } from '@/blog/features/retention/components/weekly-recap-card';
 import { RetentionNudge } from '@/blog/features/retention/components/retention-nudge';
 import HomeIntro from '@/blog/components/home-intro';
 // ★ SERVER-SIDE t(), NOT `i18n/client` (a11y item 8/O5). This file has no
@@ -66,7 +65,6 @@ export default async function HomeShell({ showIntro = false }: { showIntro?: boo
             app/page.tsx, so it is either in the first paint or not in the DOM). */}
         {showIntro ? <HomeIntro /> : null}
         <RetentionNudge className="mb-4" />
-        <WeeklyRecapCard className="mb-6" />
         <ShortFormComposer />
         <div className="mt-6">
           <FeedTabs />

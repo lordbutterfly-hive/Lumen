@@ -126,16 +126,31 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
               included in a block, and then discarded on chain with an empty
               result and no error the UI could show.
             */}
-            <input
-              type="text"
-              value={offer.name}
-              onChange={(e) => handleName(i, e.target.value)}
-              placeholder={examples[i]}
-              aria-label={t('meritum_launch.offer_name_aria', { n: i + 1 })}
-              aria-invalid={offerTitleProblem(offer.name) !== null}
-              maxLength={MAX_OFFER_TITLE_LEN}
-              className="min-w-[min(100%,180px)] flex-1 basis-60 border-0 border-b-[1.5px] border-meritum-line-input bg-transparent pb-1 font-serif text-16 font-semibold text-meritum-ink outline-none placeholder:text-meritum-ink-faint"
-            />
+            <div className="min-w-[min(100%,180px)] flex-1 basis-60">
+              <input
+                type="text"
+                value={offer.name}
+                onChange={(e) => handleName(i, e.target.value)}
+                placeholder={examples[i]}
+                aria-label={t('meritum_launch.offer_name_aria', { n: i + 1 })}
+                aria-invalid={offerTitleProblem(offer.name) !== null}
+                maxLength={MAX_OFFER_TITLE_LEN}
+                className="w-full border-0 border-b-[1.5px] border-meritum-line-input bg-transparent pb-1 font-serif text-16 font-semibold text-meritum-ink outline-none placeholder:text-meritum-ink-faint"
+              />
+              {/*
+                ★ A COUNTER, NOT JUST A CAP (2026-08-31, verified UX defect —
+                Section 03). `maxLength` stops the box silently at 64 with no
+                sign a limit exists at all — the input just stops accepting
+                keystrokes. This is a `.length` (UTF-16 code unit) count, not
+                the byte count `offerTitleProblem`/the contract enforce, so it
+                can under-count for non-Latin script; it is a soft hint next to
+                the input, never the gate — `offerTitleProblem` (below) and the
+                'offer-bad-title' block still own the real, byte-accurate rule.
+              */}
+              <div className="mt-0.5 text-right text-caption tabular-nums text-meritum-ink-faint">
+                {offer.name.length}/{MAX_OFFER_TITLE_LEN}
+              </div>
+            </div>
             <div className="flex flex-none items-baseline gap-[5px]">
               <span className="font-serif text-20 text-meritum-ink-faint" aria-hidden="true">
                 $
@@ -170,6 +185,19 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
           </div>
         ))}
       </div>
+
+      {/*
+        ★ THE BLOCK MESSAGE RENDERS HERE, RIGHT UNDER THE ROWS IT DESCRIBES
+        (2026-08-31, verified UX defect — Section 03). It used to sit below the
+        split bar AND the "Show them the work" section, ~300px under the price
+        inputs it explains. A reader who typed an out-of-band price had to
+        scroll past two unrelated blocks to learn why Continue was disabled.
+      */}
+      {touched && blockMessage ? (
+        <p className="mt-4 text-caption font-semibold text-meritum-ink-brand" role="status">
+          {blockMessage}
+        </p>
+      ) : null}
 
       <div className="mt-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2.5">
@@ -238,12 +266,6 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
           />
         </div>
       </div>
-
-      {touched && blockMessage ? (
-        <p className="mt-5 text-caption font-semibold text-meritum-ink-brand" role="status">
-          {blockMessage}
-        </p>
-      ) : null}
 
       <div className="mt-7 flex flex-wrap items-center gap-5">
         <PrimaryAction

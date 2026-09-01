@@ -96,6 +96,23 @@ export const MarketReadFailed: FC<{ onRetry?: () => void; launchHref?: string }>
 );
 
 /**
+ * The read proxy returned 429 -- a rate limit, not a chain failure. Kept separate
+ * from MarketReadFailed because the remedy differs: a failed read clears in seconds
+ * and "Try again" works, whereas a rate limit (especially the per-IP daily cap) can
+ * hold for a long time, so promising "give it a few seconds" here would be the same
+ * lie-about-recovery this feature removes everywhere else. No retry button, on
+ * purpose: an immediate retry just burns more of the same budget.
+ */
+export const MarketRateLimited: FC<{ launchHref?: string }> = ({ launchHref }) => (
+  <Panel title="Reading the chain is paused">
+    We’ve loaded market data faster than we allow from your connection right now, so reads are paused
+    until the limit resets. Nothing is wrong with your position or the market. This is a rate limit,
+    not an error. Reloading won’t clear it any sooner, so it’s better to wait than to keep refreshing.
+    <LaunchEscape href={launchHref} />
+  </Panel>
+);
+
+/**
  * F14 fix (2026-08-19). OUR OWN session check (`/api/users/me`) failed —
  * distinct from `MarketReadFailed` above, where the CHAIN read failed. Before
  * this state existed, a failed session made `creator` resolve to null in

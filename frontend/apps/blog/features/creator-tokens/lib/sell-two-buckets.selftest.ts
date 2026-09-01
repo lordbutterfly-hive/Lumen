@@ -230,7 +230,7 @@ function fixture(opts: { supply: number; maturing: number; matured: number; acqB
   return { state, hex };
 }
 
-function sourceFor(f: Fixture, head: number | null = HEAD, sent?: CustomJsonOp[]): VscCreatorTokensDataSource {
+function sourceFor(f: Fixture, head: number | null = HEAD, sent?: CustomJsonOp[], txStatus: string = 'CONFIRMED'): VscCreatorTokensDataSource {
   const gql = {
     getStateByKeys: async (_c: string, keys: string[]) => Object.fromEntries(keys.map((k) => [k, f.state[k] ?? null])),
     getStateByKeysHex: async (_c: string, keys: string[]) => Object.fromEntries(keys.map((k) => [k, f.hex[k] ?? null])),
@@ -241,7 +241,11 @@ function sourceFor(f: Fixture, head: number | null = HEAD, sent?: CustomJsonOp[]
     gql,
     // Recording broadcaster: a sell that never reaches here is a sell that never
     // happened, which is exactly what F1 did to a graduated holder.
-    broadcaster: sent === undefined ? undefined : async (op: CustomJsonOp) => { sent.push(op); return 'selftest-tx-id'; }
+    broadcaster: sent === undefined ? undefined : async (op: CustomJsonOp) => { sent.push(op); return 'selftest-tx-id'; },
+    // Injected tx-status reader (Node has no browser fetch): the real sell()
+    // confirms against THIS instead of the /submit proxy, so the exit-tax money
+    // math stays exercised end to end. Pass 'FAILED' to drive the *_REFUSED branch.
+    txStatusReader: async () => txStatus
   });
 }
 
@@ -478,6 +482,10 @@ async function main(): Promise<void> {
   //    lets its throw propagate, so before the fix a graduated holder's sell
   //    never reached the broadcaster at all — that is the "funds locked" half
   //    of F1, and a preview-only test would not have proven it.
+  //    ★ CAVEAT (57, 2026-09-01): G3/G4 assert the returned position's SHAPE, an
+  //    INTERFACE contract on public API — NOT a number any user sees. Every
+  //    caller DISCARDS this return (bare await + onSuccess: invalidate refetches),
+  //    so what protects the DISPLAYED balance is the refetch, not these two.
   // ==================================================================
   const sent: CustomJsonOp[] = [];
   const pos = await sourceFor(graduated, HEAD, sent).sell({ creator: CREATOR, seller: SELLER, tokens: 100 });
@@ -498,6 +506,21 @@ async function main(): Promise<void> {
       'below minNetHbd'
     )
   );
+
+  // G7/G8: the confirmation half this whole change adds. A chain-REFUSED sell
+  // (injected FAILED tx status) throws CREATOR_TOKENS_SELL_REFUSED — the ONLY
+  // place the *_REFUSED branch is exercised anywhere in the repo (57, 2026-09-01)
+  // — and it still reached the broadcaster first (the chain rejected it, we did
+  // not pre-empt it).
+  const g7sent: CustomJsonOp[] = [];
+  check(
+    'G7: a chain-refused sell throws SELL_REFUSED',
+    await throwsWith(
+      () => sourceFor(graduated, HEAD, g7sent, 'FAILED').sell({ creator: CREATOR, seller: SELLER, tokens: 100 }),
+      'CREATOR_TOKENS_SELL_REFUSED'
+    )
+  );
+  check('G8: the refused sell still REACHED the broadcaster before the chain rejected it', g7sent.length === 1, `ops broadcast: ${g7sent.length}`);
 
   // ==================================================================
   // F. tradeFeeOn is untouched by the fix — the fee is on GROSS, never on the

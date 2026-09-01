@@ -25,8 +25,10 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useTokenAccounts } from './use-token-accounts';
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
 import { resolveAskMaxCreditsBaseUnits } from '../market/curve';
-import type { BuyQuote, Quote, SellQuote } from '../types';
-import { adaptMarket, type LiveTokenMarket } from './adapt';
+import type { BuyQuote, Quote, QuoteOracleStatus, SellQuote } from '../types';
+import { adaptMarket, displayHandle, type LiveTokenMarket } from './adapt';
+import { buyerOracleNotice } from '../market/oracle-copy';
+import { runUnderTxClaim } from './tx-claim';
 import { magiSpendingPowerKey } from './use-magi-spending-power';
 
 export type LiveMarketStatus =
@@ -35,6 +37,10 @@ export type LiveMarketStatus =
   | 'loading'
   /** The chain read itself failed. NOT the same as "this creator has no market". */
   | 'error'
+  /** The read proxy rate-limited us (429). A LIMIT, not a failure -- kept distinct so
+   *  the UI never promises "try again in a few seconds" when the per-IP daily cap can
+   *  hold for hours. See market-states.tsx MarketRateLimited. */
+  | 'rate-limited'
   /**
    * F14 fix (2026-08-19): OUR OWN session check (`/api/users/me`) failed —
    * distinct from 'error', where the CHAIN read failed. A hook that derives
@@ -138,6 +144,16 @@ export interface LiveTokenMarketResult {
    */
   quoteAsk: (offeringId: number) => Promise<Quote>;
 
+  /**
+   * ★ B-03: the MARKET-WIDE oracle readiness, so the service list can gate its
+   * Request buttons BEFORE the click. `null` = ok or not yet read; any non-'ok'
+   * status means this market cannot price a service yet (thin / short / stale
+   * history). Ported from use-live-studio.ts, which already had this for the
+   * creator's own Offerings tab; the buyer's list was its untouched twin. The
+   * human sentence is market/oracle-copy.ts buyerOracleNotice.
+   */
+  servicesOracleStatus: QuoteOracleStatus | null;
+
   /** market.go Renew — pays `periods` months of the subscription. Resolves only once the chain has recorded it. */
   renew: (periods: number) => Promise<void>;
   /** True while a renewal is in flight, including the confirmation wait. */
@@ -220,6 +236,10 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   // query and an UNKNOWN market mean the same thing to a user, and only one of
   // them is an exception.
   const readFailed = marketQuery.isError || marketQuery.data?.phase === 'UNKNOWN';
+  // A 429 from the read proxy is a rate limit, not a chain failure. reads.ts throws a
+  // coded error and readMarket re-throws it (not swallowed to UNKNOWN), so it lands here.
+  const rateLimited =
+    marketQuery.isError && marketQuery.error instanceof Error && marketQuery.error.message.startsWith('CREATOR_TOKENS_RATE_LIMITED');
 
   const positionQuery = useQuery({
     queryKey: positionKey(creator, positionAccount ?? undefined),
@@ -254,12 +274,28 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
     retry: false
   });
 
+  // ★ B-03: market-wide oracle readiness for the service list, ported from
+  // use-live-studio.ts. readQuote WITHOUT an offeringId asks the market-wide
+  // question the notice answers, "can anything here be sold" (the oracle arms
+  // are keyed per-creator, kObs/kObsLong, with no offering dimension), so one
+  // read gates every service Request button. The card otherwise advertised a
+  // priced, enabled button for a market the chain refuses to price and named the
+  // refusal only after the click. A read FAILURE leaves the status null, so the
+  // row stays clickable rather than being falsely blocked by a transient error.
+  const servicesQuoteQuery = useQuery({
+    queryKey: ['creatorTokens', 'live', 'servicesQuote', creator],
+    queryFn: () => dataSource!.readQuote(creator),
+    enabled: enabled && !readFailed,
+    staleTime: STALE_MS,
+    refetchInterval: REFETCH_MS
+  });
+
   const status: LiveMarketStatus = unavailable
     ? 'unavailable'
     : marketQuery.isLoading
       ? 'loading'
       : readFailed
-        ? 'error'
+        ? (rateLimited ? 'rate-limited' : 'error')
         : marketQuery.data === null
           ? 'missing'
           : 'ready';
@@ -377,7 +413,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   const buyMutation = useMutation({
     mutationFn: async ({ tokens, maxTotalUsd }: { tokens: number; maxTotalUsd?: number }) => {
       const { source, signer } = requireSigner();
-      await source.buy({ creator, buyer: signer, tokens, maxTotalHbd: maxTotalUsd });
+      await runUnderTxClaim(creator, signer, () => source.buy({ creator, buyer: signer, tokens, maxTotalHbd: maxTotalUsd }));
     },
     onSuccess: invalidate
   });
@@ -385,7 +421,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   const sellMutation = useMutation({
     mutationFn: async ({ tokens, minNetUsd }: { tokens: number; minNetUsd?: number }) => {
       const { source, signer } = requireSigner();
-      await source.sell({ creator, seller: signer, tokens, minNetHbd: minNetUsd });
+      await runUnderTxClaim(creator, signer, () => source.sell({ creator, seller: signer, tokens, minNetHbd: minNetUsd }));
     },
     onSuccess: invalidate
   });
@@ -399,7 +435,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   const refundMutation = useMutation({
     mutationFn: async ({ tokens, minNetUsd }: { tokens: number; minNetUsd?: number }) => {
       const { source, signer } = requireSigner();
-      await source.refund({ creator, holder: signer, tokens, minNetHbd: minNetUsd });
+      await runUnderTxClaim(creator, signer, () => source.refund({ creator, holder: signer, tokens, minNetHbd: minNetUsd }));
     },
     onSuccess: invalidate
   });
@@ -423,7 +459,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   const renewMutation = useMutation({
     mutationFn: async ({ periods }: { periods: number }) => {
       const { source, signer } = requireSigner();
-      await source.renewSubscription({ creator, caller: signer, periods });
+      await runUnderTxClaim(creator, signer, () => source.renewSubscription({ creator, caller: signer, periods }));
     },
     onSuccess: invalidate
   });
@@ -443,9 +479,23 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
       // wrong service.
       const quote = await source.readQuote(creator, input.offeringId);
       if (quote.creditsRequiredBaseUnits === null) {
-        throw new Error(`CREATOR_TOKENS_UNPRICED: we can’t price this ask right now (${quote.oracleStatus}). Try again in a moment.`);
+        // ★ Honest copy, not a raw enum plus a false duration. The old message
+        // pasted the raw status token (insufficient_observations, spend_cap, ...) and
+        // promised "Try again in a moment" — false by up to ~36h for a cold long ring
+        // and unfixable by retrying. buyerOracleNotice is the same human sentence the
+        // ask dialog shows, per status (57's twin-hook scan, 2026-08-31).
+        const oracleNotice = quote.oracleStatus
+          ? buyerOracleNotice(quote.oracleStatus, displayHandle(creator))
+          : null;
+        throw new Error(
+          `CREATOR_TOKENS_UNPRICED: ${oracleNotice ?? 'this service cannot be priced from the market right now.'}`
+        );
       }
-      await source.ask({
+      // Capture the null-narrowed value: TS narrowing does not cross the
+      // runUnderTxClaim closure boundary, so quote.creditsRequiredBaseUnits
+      // would widen back to number|null inside the arrow.
+      const creditsRequiredBaseUnits = quote.creditsRequiredBaseUnits;
+      await runUnderTxClaim(creator, signer, () => source.ask({
         creator,
         asker: signer,
         contentHash: input.contentHash,
@@ -456,11 +506,11 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
         // which rejects a missing or zero value rather than defaulting to
         // unlimited. It is what stops a creator spiking their price between
         // this user signing and the transaction executing.
-        maxCreditsBaseUnits: resolveAskMaxCreditsBaseUnits(quote.creditsRequiredBaseUnits),
+        maxCreditsBaseUnits: resolveAskMaxCreditsBaseUnits(creditsRequiredBaseUnits),
         // 0 is the reserved alias for the creator's legacy face price, so this
         // is always safe to pass through as-is.
         offeringId: input.offeringId
-      });
+      }));
     },
     onSuccess: () => {
       invalidate();
@@ -471,7 +521,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   const transferMutation = useMutation({
     mutationFn: async ({ to, tokens }: { to: string; tokens: number }) => {
       const { source, signer } = requireSigner();
-      await source.transferTokens({ creator, from: signer, to, tokens });
+      await runUnderTxClaim(creator, signer, () => source.transferTokens({ creator, from: signer, to, tokens }));
     },
     onSuccess: invalidate
   });
@@ -479,6 +529,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   return {
     status,
     market,
+    servicesOracleStatus: servicesQuoteQuery.data?.oracleStatus ?? null,
     positionUnavailable,
     historyUnavailable,
     viewer,

@@ -333,7 +333,10 @@ const MeritumLaunchFlow: FC = () => {
             <button
               type="button"
               onClick={flow.startOver}
-              className="flex-shrink-0 text-caption font-semibold text-meritum-ink-link hover:underline"
+              // ★ 44x44 MINIMUM TAP TARGET (2026-08-31, verified UX defect).
+              // Same fix as `BackAction` in launch-controls.tsx: text-only and
+              // borderless, so the padding only grows the hit area.
+              className="inline-flex min-h-[44px] min-w-[44px] flex-shrink-0 items-center justify-center px-2 text-caption font-semibold text-meritum-ink-link hover:underline"
             >
               {t('meritum_launch.draft_start_over')}
             </button>

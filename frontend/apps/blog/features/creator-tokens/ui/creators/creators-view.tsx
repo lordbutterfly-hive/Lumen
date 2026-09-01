@@ -445,8 +445,9 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
         // empty market. It is the same unavailable-vs-empty rule the wallet and
         // delivery reads follow.
         <div className="rounded-card border border-dashed border-line-11 px-5 py-8 text-center text-[14px] leading-[22px] text-ink-14">
-          We can’t load the creator list right now. The index that ranks creators by their delivery record is
-          unreachable. If you already know a creator, their token page still works: /creators/their-name.
+          We can’t load the creator list right now. This is usually a brief hiccup reading the chain or the
+          creator index. Give it a few seconds and try again. If you already know a creator, their token page
+          still works: /creators/their-name.
         </div>
       ) : creators.length === 0 ? (
         /*

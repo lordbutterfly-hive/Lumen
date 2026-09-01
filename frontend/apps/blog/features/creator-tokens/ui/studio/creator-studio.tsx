@@ -895,6 +895,25 @@ const CreatorStudio: FC = () => {
             {actionFailure}
           </div>
         ) : null}
+        {/* ★ WHY THIS EXISTS (2026-09-01): every studio write now WAITS for the
+            chain to confirm (vsc-data-source.ts awaitExecution, ~20-72s typical,
+            up to 180s), where it used to return in ~2s. `isBusy` (run.isLoading)
+            disables every action button for that whole window, so without this a
+            button just greys with its normal label for up to three minutes and
+            reads as broken — and the user's next move is a reload, which drops
+            the in-flight poll (57, 2026-09-01). One studio-wide indicator, not a
+            per-button "Confirming…" label: `isBusy` is a single global flag, so a
+            per-button label would make "Retire" say "Confirming…" during a renew,
+            which is worse. Failure takes precedence over it. */}
+        {studio.isBusy && !actionFailure ? (
+          <div
+            className="mb-5 rounded-card border border-line-11 bg-surface-1 px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-7"
+            role="status"
+            aria-live="polite"
+          >
+            Confirming on the chain. This can take a minute or two, so keep this tab open while it goes through.
+          </div>
+        ) : null}
 
         {section === 'overview' ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
