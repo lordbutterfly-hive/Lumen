@@ -46,6 +46,15 @@ import styles from './post-card.module.css';
 // (`comment-list.tsx:14-22`: `w-4` 16px + `mr-1` 4px); this matches it.
 const INDENT_STEP = 20;
 
+// ★ BASE INDENT so the whole thread HANGS UNDER the top comment as its children
+// (owner, 2026-09-03: the connector was "far too left of the top comment it's
+// continuing"). The top comment's `.cbox` puts its body at ~42px from the drawer's
+// left edge (6px pad + 24px avatar + 12px gap); with the 20px ThreadLine in front
+// of each reply, a base of 24px lands a direct reply's avatar (24+20=44px) directly
+// under the top comment's body and the connector under the top comment's avatar, so
+// the thread reads as a continuation of it rather than a separate column.
+const BASE_INDENT = 24;
+
 /**
  * Mirror of `comment-list.tsx:24-56`'s `ThreadLine` — the vertical rule + curved
  * connector for a nested reply. Mirrored (not imported) because it is a
@@ -72,53 +81,59 @@ function TopCommentReply({ node }: { node: ThreadNode }) {
   const displayAuthor = liteOverlay?.author ?? entry.author;
 
   return (
-    <div className={styles.replyInner} data-testid="post-card-thread-reply" data-comment-key={node.key}>
-      <div className={styles.replyMeta}>
-        <span className="flex shrink-0" aria-hidden="true">
-          <UserAvatarImg username={displayAuthor} pixelSize={20} alt="" />
-        </span>
-        <span className={styles.replyAuthor}>{displayAuthor}</span>
-        <span className={styles.commentSep} aria-hidden="true">
-          ·
-        </span>
-        <span className={styles.replyTime}>
-          <TimeAgo date={entry.created} />
-        </span>
-        {/* ★ Beyond MAX_VISUAL_DEPTH the indent stops, so this is the only thing
-            left that says who a flattened reply answers (mirrors
-            `comment-list-item.tsx:772-777`). Reuses the shipped `replying_to`
-            string. */}
-        {node.replyingToAuthor && (
-          <span className={styles.replyingTo} data-testid="thread-replying-to">
-            {t('cards.comment_card.replying_to', { author: node.replyingToAuthor })}
+    // ★★ MIRRORS THE TOP COMMENT'S `.cbox` STRUCTURE so a reply reads as the SAME
+    // kind of object as the comment it hangs under (owner, 2026-09-03: "they don't
+    // seem connected to the top comment... different font sizes"). Avatar left +
+    // a body column (meta row + full body), 24px avatar and 12px gap exactly like
+    // the top comment. The meta REUSES `.commentAuthor` (Merriweather 15) and
+    // `.commentTime` (Fira 14) — the top comment's own classes — so the two cannot
+    // drift in font or size. Only the body differs: full (no clamp), one step of
+    // reading size below the featured comment.
+    <div className={styles.replyBox} data-testid="post-card-thread-reply" data-comment-key={node.key}>
+      <span className="flex shrink-0" aria-hidden="true">
+        <UserAvatarImg username={displayAuthor} pixelSize={24} alt="" />
+      </span>
+      <div className={styles.commentBody}>
+        <div className={styles.commentMeta}>
+          <span className={styles.commentAuthor}>{displayAuthor}</span>
+          <span className={styles.commentSep} aria-hidden="true">
+            ·
           </span>
-        )}
-      </div>
-      {/* FULL body — no clamp, no max-height (the drawer's JS height measure sizes
-          the drawer to fit, §2.4). This is the no-clip requirement, satisfied by
-          reusing the post page's own renderer. */}
-      <div className={styles.replyBody}>
-        <RendererContainer
-          body={entry.body}
-          author={entry.author}
-          permlink={entry.permlink}
-          className={styles.replyBodyProse}
-          dataTestid="post-card-thread-reply-body"
-        />
-      </div>
-      {/* ★ `stopPropagation` on click and keydown, exactly as the top comment's
-          vote does (`top-comment-drawer.tsx:313-318`). Clicks inside the drawer
-          already never toggle the card (`medium-post-card.tsx:405-434` returns
-          early for `[data-testid="post-card-drawer"]`), so this is belt-and-
-          braces against a future card-level handler, matching the top vote. */}
-      <div
-        className={styles.replyActions}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
-        }}
-      >
-        <VotesComponentWrapper post={entry} type="comment" size="quote" />
+          <span className={styles.commentTime}>
+            <TimeAgo date={entry.created} />
+          </span>
+          {/* ★ Beyond MAX_VISUAL_DEPTH the indent stops, so this is the only thing
+              left that says who a flattened reply answers (mirrors
+              `comment-list-item.tsx:772-777`). Reuses the shipped `replying_to`
+              string. */}
+          {node.replyingToAuthor && (
+            <span className={styles.replyingTo} data-testid="thread-replying-to">
+              {t('cards.comment_card.replying_to', { author: node.replyingToAuthor })}
+            </span>
+          )}
+        </div>
+        {/* FULL body — no clamp, no max-height (the drawer's JS height measure sizes
+            the drawer to fit, §2.4). Reuses the post page's own renderer. */}
+        <div className={styles.replyBody}>
+          <RendererContainer
+            body={entry.body}
+            author={entry.author}
+            permlink={entry.permlink}
+            className={styles.replyBodyProse}
+            dataTestid="post-card-thread-reply-body"
+          />
+        </div>
+        {/* ★ `stopPropagation` on click and keydown, exactly as the top comment's
+            vote does (`top-comment-drawer.tsx:313-318`). */}
+        <div
+          className={styles.replyActions}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+          }}
+        >
+          <VotesComponentWrapper post={entry} type="comment" size="quote" />
+        </div>
       </div>
     </div>
   );
@@ -140,12 +155,12 @@ export default function TopCommentThread({
       {thread.nodes.map((node) => {
         // Indent capped at MAX_VISUAL_DEPTH (depth 1 = a direct reply => 0 indent).
         const cappedDepth = Math.min(node.depth, MAX_VISUAL_DEPTH);
-        const indent = (cappedDepth - 1) * INDENT_STEP;
+        const indent = BASE_INDENT + (cappedDepth - 1) * INDENT_STEP;
         return (
           <div
             key={node.key}
             className={clsx('flex min-w-0 items-start', styles.threadRow)}
-            style={indent ? { marginLeft: `${indent}px` } : undefined}
+            style={{ marginLeft: `${indent}px` }}
           >
             <ThreadLine isLast={node.isLast} />
             <div className={styles.threadReply}>

@@ -1376,10 +1376,23 @@
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+/* ★ A reply is laid out like the top comment's `.cbox` (avatar left + a body
+   column), so the two read as the same kind of object (owner, 2026-09-03). Same
+   24px avatar and 12px gap; the body column REUSES `.commentBody`/`.commentMeta`/
+   `.commentAuthor`/`.commentTime`, so fonts and sizes cannot drift from the top
+   comment. No padding/background/stretched-anchor of its own (unlike `.cbox`). */
+.replyBox {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
+  flex: 1;
+}
+
 .replyBodyProse {
   font-family: var(--font-text);
-  font-size: 15px;
-  line-height: 22px;
+  font-size: 16px; /* matches the top comment's `.commentText` reading size */
+  line-height: 24px;
   color: var(--pc-ink-strong);
 }
 .replyActions {
