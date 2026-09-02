@@ -169,7 +169,8 @@ interface CommentListProps {
 // `text-body` is a paired size/leading token and splitting a pair is how this
 // file's own history says fractional line boxes get in.
 //
-// ★ WHY THE FEED CARD'S DRAWER COMMENT IS 19px AND THIS IS 16px. They are not
+// ★ WHY THE FEED CARD'S DRAWER COMMENT IS 19px AND THIS IS 17px (owner bump
+// 2026-09-03: post-page comment reading body 16px -> 17px, desktop only). They are not
 // the same object. The drawer shows ONE chosen comment as a feature — the pull
 // quote of the card, sized a step above the 18px excerpt it sits under. This is
 // the full thread, many comments in sequence, where the job is density and an
@@ -179,7 +180,7 @@ interface CommentListProps {
 // The in-body h1-h4 ramp is untouched: §5.4 gives no target for headings inside
 // a comment, and inventing one to make the string tidy is not a spec.
 export const commentClassName =
-  'font-lora text-[14px] leading-[24px] prose-h1:text-[20px] prose-h1:leading-[22px] prose-h2:text-[18px] prose-h2:leading-[24px] prose-h3:text-[15px] prose-h3:leading-[24px] prose-h4:text-[14px] prose-h4:leading-[22px] sm:text-[15px] sm:leading-[24px] sm:prose-h1:text-[22px] sm:prose-h1:leading-[24px] sm:prose-h2:text-[20px] sm:prose-h2:leading-[26px] sm:prose-h3:text-[16px] sm:prose-h3:leading-[26px] sm:prose-h4:text-[15px] sm:prose-h4:leading-[22px] lg:text-body lg:prose-h1:text-[24px] lg:prose-h1:leading-[26px] lg:prose-h2:text-[20px] lg:prose-h2:leading-[28px] lg:prose-h3:text-[18px] lg:prose-h3:leading-[28px] lg:prose-h4:text-[16px] lg:prose-h4:leading-[24px] prose-p:mb-[10px] prose-p:mt-[2px] last:prose-p:mb-[4px] prose-img:max-w-full prose-img:h-auto prose-img:max-h-[400px]';
+  'font-lora text-[14px] leading-[24px] prose-h1:text-[20px] prose-h1:leading-[22px] prose-h2:text-[18px] prose-h2:leading-[24px] prose-h3:text-[15px] prose-h3:leading-[24px] prose-h4:text-[14px] prose-h4:leading-[22px] sm:text-[15px] sm:leading-[24px] sm:prose-h1:text-[22px] sm:prose-h1:leading-[24px] sm:prose-h2:text-[20px] sm:prose-h2:leading-[26px] sm:prose-h3:text-[16px] sm:prose-h3:leading-[26px] sm:prose-h4:text-[15px] sm:prose-h4:leading-[22px] lg:text-[17px] lg:leading-[26px] lg:prose-h1:text-[24px] lg:prose-h1:leading-[26px] lg:prose-h2:text-[20px] lg:prose-h2:leading-[28px] lg:prose-h3:text-[18px] lg:prose-h3:leading-[28px] lg:prose-h4:text-[16px] lg:prose-h4:leading-[24px] prose-p:mb-[10px] prose-p:mt-[2px] last:prose-p:mb-[4px] prose-img:max-w-full prose-img:h-auto prose-img:max-h-[400px]';
 
 /**
  * ★★★ THE PUBLISH LADDER MOVED TO `lib/publish-badge-state.ts` (2026-08-28,
