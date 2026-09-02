@@ -1311,3 +1311,93 @@
   color: var(--pc-ink-quiet);
   white-space: nowrap;
 }
+
+/* ── T5 TOP-COMMENT REPLY THREAD (thread-expand spec 2026-09-02) ───────────
+   Additive below the top comment's `.cbox`, a SIBLING inside `.drawerInner`
+   (never a child of `.cbox` — the stretched `.cboxLink` anchor would swallow
+   reply clicks, spec §2.4). The drawer's JS pixel-height measure
+   (`top-comment-drawer.tsx`) sizes the drawer to whatever this needs.
+
+   ★★★ THERE IS NO `max-height`, NO `overflow` CAP AND NO `-webkit-line-clamp`
+   ANYWHERE BELOW. That absence IS the no-clip mechanism (spec §2.1, §2.4): the
+   drawer grows to the full thread. Do NOT add one. The same forbidden-list the
+   header at the top of this file carries still applies — no `grid-template-rows`,
+   no `height:auto`/`interpolate-size`. */
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+  padding-top: 12px;
+  /* One hairline treatment, same token/weight as `.seam` and the top comment. */
+  border-top: 1px solid var(--pc-line);
+}
+.threadRow {
+  min-width: 0;
+}
+.threadReply {
+  min-width: 0;
+  flex: 1;
+}
+.replyInner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.replyMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.replyAuthor {
+  font-family: var(--font-text);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pc-ink-name);
+}
+.replyTime {
+  font-family: var(--font-text);
+  font-size: 13px;
+  color: var(--pc-ink-quiet);
+}
+.replyingTo {
+  font-family: var(--font-text);
+  font-size: 12px;
+  color: var(--pc-ink-faint);
+  white-space: nowrap;
+}
+/* ★ FULL body — no clamp, no max-height (spec §2.4). Wrap long unbroken tokens
+   so a URL cannot force horizontal overflow of the drawer. */
+.replyBody {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.replyBodyProse {
+  font-family: var(--font-text);
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--pc-ink-strong);
+}
+.replyActions {
+  display: inline-flex;
+  align-items: center;
+}
+/* Link to the full thread on the post page when a very long thread is truncated
+   (spec §3.5). Reuses the top comment link's destination form. */
+.viewAll {
+  display: inline-block;
+  margin-top: 2px;
+  font-family: var(--font-text);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pc-brand);
+  text-decoration: none;
+}
+.viewAll:hover,
+.viewAll:focus-visible {
+  text-decoration: underline;
+}

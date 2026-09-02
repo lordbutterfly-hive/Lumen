@@ -209,6 +209,27 @@ export default function MediumPostCard({
   };
 
   /*
+   * ★★★ PREFETCH ON POINTERDOWN, NOT ONLY AFTER 140ms OF HOVER (thread-expand
+   * spec §3.2 lever 1). `engage()` above arms the fetch on a 140ms hover intent,
+   * which serves a mouse reader who dwells before clicking. It does NOT serve the
+   * cases the drawer's delay actually shows up in: a fast click (the click lands
+   * before 140ms elapses) and touch (no hover at all, so `pointerenter` and the
+   * tap fire almost together). `pointerdown` fires BEFORE `click` (which is
+   * `mouseup`) for both, so arming the fetch IMMEDIATELY here puts the request in
+   * flight before `openNow()` runs — the data is usually already resolving by the
+   * time the drawer opens, and the click becomes a pure height animation rather
+   * than a wait on the network (the data race diagnosed in the drawer's header).
+   *
+   * Idempotent and one-way like `engage()` — it only ever turns the fetch on, and
+   * it drops the slower hover timer since we are engaging now regardless.
+   */
+  const engageNow = () => {
+    if (engaged) return;
+    cancelEngage();
+    setEngaged(true);
+  };
+
+  /*
    * ═════════════════════════════════════════════════════════════════════════
    * THE DRAWER'S OPEN STATE, moved into JS by the 2026-08-20 card-expansion
    * spec (§1 "Dwell replaces instant fire", §8 "Motion and triggers").
@@ -816,6 +837,10 @@ export default function MediumPostCard({
       // `focus` in the DOM), so this catches focus landing on any child.
       ref={cardRef}
       onPointerEnter={onCardEnter}
+      // ★ Lever 1 (thread-expand spec §3.2): arm the discussion fetch on the
+      // press itself, so a fast click and a touch tap stop racing the network.
+      // `pointerdown` precedes `click`; `engageNow` is one-way and idempotent.
+      onPointerDown={engageNow}
       onPointerLeave={onCardLeave}
       onFocus={onCardFocus}
       onBlur={onCardBlur}

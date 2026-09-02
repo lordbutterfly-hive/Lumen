@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Link, UserAvatarImg } from '@hive/ui';
 import TimeAgo from '@ui/components/time-ago';
 import { Icons } from '@ui/components/icons';
@@ -9,6 +9,8 @@ import { extractBodySummary } from '@/blog/lib/utils';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
 import { discussionKey, selectTopComment } from './lib/top-comment';
 import { useVisibleDiscussion } from './lib/use-visible-discussion';
+import TopCommentThread from './top-comment-thread';
+import { deriveThread, EMPTY_THREAD } from './lib/top-comment-thread';
 import styles from './post-card.module.css';
 
 /**
@@ -85,6 +87,21 @@ export default function TopCommentDrawer({
   const comment = selectTopComment(rootKey, visible);
 
   /*
+   * ★★★ THE FULL REPLY THREAD BENEATH THE TOP COMMENT — DERIVED, NEVER FETCHED
+   * (thread-expand spec §2.2). `visible` already holds every descendant of the
+   * top comment (bridge.get_discussion returns the whole tree, block-filtered
+   * once by `useVisibleDiscussion`), so this is a pure walk with a fixed
+   * deterministic sort — no second request. Keyed on the top comment's stable key
+   * (not the fresh `comment` object `selectTopComment` returns each render) so the
+   * memo only recomputes when the thread or the pick actually changes.
+   */
+  const chosenKey = comment?.key;
+  const thread = useMemo(
+    () => (visible && chosenKey ? deriveThread(visible, chosenKey) : EMPTY_THREAD),
+    [visible, chosenKey]
+  );
+
+  /*
    * ★★★ THE HEIGHT IS MEASURED IN JS AND WRITTEN IN PIXELS (spec §8).
    *
    * What this replaces: `.card:hover .drawer { height: auto }`, riding on
@@ -121,42 +138,45 @@ export default function TopCommentDrawer({
    * duration to .01ms; this code is unchanged by it.
    */
   const drawerRef = useRef<HTMLDivElement | null>(null);
+  // ★ The measured element is the drawer; the observed element is its inner
+  //   content (see the ResizeObserver effect below for why the two differ).
+  const innerRef = useRef<HTMLDivElement | null>(null);
   const wasOpen = useRef(false);
 
-  useEffect(() => {
+  /*
+   * Measure the DRAWER at `height:auto` and write it back in pixels. Factored out
+   * of the effect so the ResizeObserver below can reuse it for late height
+   * changes. `reseed` runs the opening-edge `0 -> reflow -> h` dance; a remeasure
+   * of an already-open drawer passes `reseed=false` so it animates from its
+   * current height instead of collapsing and re-opening (spec §3.4).
+   *
+   * ★★★ THE TRANSITION HAS TO BE OFF WHILE MEASURING, AND THAT IS NOT
+   * BELT-AND-BRACES — WITHOUT IT THIS READS 0 EVERY TIME. Measured on the built
+   * app 2026-08-20: `scrollHeight` said 113 while `offsetHeight` at `height:auto`
+   * said 0.
+   *
+   * The cause is the very property §8 tells us not to rely on. `:root` carries
+   * `interpolate-size: allow-keywords` (globals.css:890), which makes `0px -> auto`
+   * an ANIMATABLE pair. So assigning `auto` to an element with a live
+   * `transition: height` does not resolve the height — it STARTS A TRANSITION
+   * toward it, and the very next layout read returns the current animated value,
+   * which is still ~0. The measurement measures the animation it just kicked off.
+   *
+   * It is a perfect trap: it fails to 0, a 0-high drawer looks exactly like a
+   * closed one, and the geometry underneath is completely correct — the same
+   * silent-failure shape §8 warns about for `grid-template-rows`.
+   *
+   * `transition: none` for the duration of the read makes `auto` resolve
+   * immediately, the way it would with no transition declared at all.
+   */
+  const measure = useCallback((reseed: boolean) => {
     const el = drawerRef.current;
     if (!el) return;
-    if (!open) {
-      el.style.height = '0px';
-      wasOpen.current = false;
-      return;
-    }
-    /*
-     * ★★★ THE TRANSITION HAS TO BE OFF WHILE MEASURING, AND THAT IS NOT
-     * BELT-AND-BRACES — WITHOUT IT THIS READS 0 EVERY TIME. Measured on the
-     * built app 2026-08-20: `scrollHeight` said 113 while `offsetHeight` at
-     * `height:auto` said 0.
-     *
-     * The cause is the very property §8 tells us not to rely on. `:root` carries
-     * `interpolate-size: allow-keywords` (globals.css:890), which makes
-     * `0px -> auto` an ANIMATABLE pair. So assigning `auto` to an element with a
-     * live `transition: height` does not resolve the height — it STARTS A
-     * TRANSITION toward it, and the very next layout read returns the current
-     * animated value, which is still ~0. The measurement measures the animation
-     * it just kicked off.
-     *
-     * It is a perfect trap: it fails to 0, a 0-high drawer looks exactly like a
-     * closed one, and the geometry underneath is completely correct — the same
-     * silent-failure shape §8 warns about for `grid-template-rows`.
-     *
-     * `transition: none` for the duration of the read makes `auto` resolve
-     * immediately, the way it would with no transition declared at all.
-     */
     const prevTransition = el.style.transition;
     el.style.transition = 'none';
     el.style.height = 'auto';
     const measured = el.offsetHeight;
-    if (!wasOpen.current) {
+    if (reseed) {
       el.style.height = '0px';
       // Force the layout the transition needs as its start value. Reading a
       // layout property is the documented way to flush it; without this the
@@ -167,8 +187,50 @@ export default function TopCommentDrawer({
     // Restore BEFORE the final write, so the write is the thing that animates.
     el.style.transition = prevTransition;
     el.style.height = `${measured}px`;
+  }, []);
+
+  useEffect(() => {
+    const el = drawerRef.current;
+    if (!el) return;
+    if (!open) {
+      el.style.height = '0px';
+      wasOpen.current = false;
+      return;
+    }
+    // ★ THE 0 -> REFLOW -> h DANCE IS ONLY FOR THE OPENING EDGE (`!wasOpen`).
+    //   Forcing it while already open — the comment arriving after the fetch, a
+    //   reply count ticking — would animate a collapse and re-open under a reader
+    //   mid-sentence. Measure always; re-seed only on the edge.
+    measure(!wasOpen.current);
     wasOpen.current = true;
-  }, [open, comment]);
+  }, [open, comment, thread, measure]);
+
+  /*
+   * ★★★ LATE HEIGHT CHANGES WHILE OPEN (thread-expand spec §3.4). The thread is
+   * rendered hidden the moment data resolves, so its bulk is measured before the
+   * click. But a reply's OWN height can change AFTER open without re-rendering
+   * this drawer — a cast vote's tally, an image in a reply's body finishing load
+   * — and none of those flow through the effect deps above. A ResizeObserver on
+   * the inner content catches them and REMEASURES WITHOUT the 0-reseed, so the
+   * drawer grows smoothly to fit rather than clipping the taller thread (the exact
+   * "re-measure to the new height, do not snap" the spec asks for, §4 "Reader
+   * votes a reply").
+   *
+   * ★ OBSERVE THE INNER, NOT THE DRAWER — this avoids a feedback loop. The
+   * drawer's own height writes never change the inner's size (`overflow:hidden`
+   * clips, it does not resize its children), so the observer fires only on real
+   * content changes, never on our own measurement writes.
+   */
+  useEffect(() => {
+    const inner = innerRef.current;
+    if (!inner || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      if (!open || !wasOpen.current) return; // only an already-open drawer
+      measure(false);
+    });
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, [open, measure]);
 
   // The wrapper is rendered unconditionally (see the a11y note above) but stays
   // measurably 0-high until there is something in it — `height: auto` on an
@@ -176,7 +238,7 @@ export default function TopCommentDrawer({
   return (
     <div className={styles.drawer} data-testid="post-card-drawer" data-open={open ? 'true' : 'false'} ref={drawerRef}>
       {comment ? (
-        <div className={styles.drawerInner}>
+        <div className={styles.drawerInner} ref={innerRef}>
           <span className={styles.seam} aria-hidden="true" />
           <div className={styles.cbox}>
             {/* ★★★ A STRETCHED LINK, NOT A WRAPPING ONE. The block has to be a
@@ -329,6 +391,20 @@ export default function TopCommentDrawer({
               </span>
             </div>
           </div>
+          {/* ★★★ THE FULL REPLY THREAD, A SIBLING OF `.cbox` (thread-expand spec
+              §2.4). Purely additive: the top comment above is byte-for-byte
+              unchanged. Rendered whenever the data is present — INDEPENDENT of
+              `open`, mirroring `.cbox`'s own `comment ? ... : null` gate — so the
+              thread is laid out (hidden inside the `height:0; overflow:hidden`
+              drawer) before any click, and the click is then a pure height
+              animation (§3.3). Gated on a non-empty descendant set so a top
+              comment with zero replies renders no section at all (§4). */}
+          {thread.nodes.length > 0 ? (
+            <TopCommentThread
+              thread={thread}
+              viewAllHref={`${postHref}#@${comment.author}/${comment.permlink}`}
+            />
+          ) : null}
         </div>
       ) : null}
     </div>

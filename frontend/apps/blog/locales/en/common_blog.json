@@ -1989,7 +1989,10 @@
   "discovery_feed": {
     "ready_pill": "Show your feed",
     "ranking_aging": "Your feed is refreshing. This is your ranking from a few hours ago.",
-    "feed_error": "We couldn't load the feed just now."
+    "feed_error": "We couldn't load the feed just now.",
+    "top_comment_thread": {
+      "view_all_replies": "View all {{count}} replies"
+    }
   },
   "meritum": {
     "intro": {
