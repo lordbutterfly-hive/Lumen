@@ -168,6 +168,7 @@ const InternalNavRow = ({
       aria-current={isActive ? 'page' : undefined}
       aria-busy={isPending || undefined}
       onNavigate={() => onNavigate?.(href)}
+      prefetchOnIntent
     >
       <NavRowContent icon={icon} label={label} isActive={isActive} isPending={isPending} />
     </BasePathLink>

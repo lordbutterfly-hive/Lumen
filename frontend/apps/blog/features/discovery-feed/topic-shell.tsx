@@ -15,6 +15,8 @@ import { useTranslation } from '@/blog/i18n/client';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
 import { useRankLuminosity } from '@/blog/features/retention/hooks/use-rank-marks';
+import { useTopicSeed } from './topic-seed-context';
+import { fetchTopicPage, topicFeedKey, type TopicResponse } from './lib/topic-feed-client';
 
 /**
  * A TOPIC IS THE FEED, FILTERED — not a different, older-looking page.
@@ -31,34 +33,32 @@ import { useRankLuminosity } from '@/blog/features/retention/hooks/use-rank-mark
  * trending, because a topic ranked by all-time payout reads as a dead topic.
  */
 
-interface TopicResponse {
-  entries: Entry[];
-  source: string;
-  degraded?: string;
-  nextCursor?: { author: string; permlink: string } | null;
-}
-
-const LIMIT = 30;
 
 export default function TopicShell({ tag }: { tag: string }) {
   const { t } = useTranslation('common_blog');
+  const seed = useTopicSeed();
 
   // Same infinite scroll as the main feed — a topic is the feed, filtered, so it
   // must not stop after one page either.
   const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage, refetch } =
     useInfiniteQuery<TopicResponse>({
-      queryKey: ['topicFeed', tag],
-      queryFn: async ({ pageParam }) => {
-        const cursor = pageParam as { author?: string; permlink?: string } | undefined;
-        const params = new URLSearchParams({ tag, limit: String(LIMIT) });
-        if (cursor?.author && cursor?.permlink) {
-          params.set('startAuthor', cursor.author);
-          params.set('startPermlink', cursor.permlink);
-        }
-        const res = await fetch(`/api/feed/for-you?${params.toString()}`);
-        if (!res.ok) throw new Error(`topic ${res.status}`);
-        return (await res.json()) as TopicResponse;
-      },
+      queryKey: topicFeedKey(tag),
+      queryFn: async ({ pageParam }) =>
+        fetchTopicPage(tag, pageParam as { author?: string; permlink?: string } | undefined),
+      // ★ THE POSTS CAN ALREADY BE IN THE PAGE (snappiness phase 4, 2026-09-03).
+      // app/topics/[tag]/page.tsx seeds this from the server's memo of the
+      // topic when it is warm, exactly as home is seeded, so a direct load
+      // paints the posts in the first frame and a click needs no second round
+      // trip. `initialDataUpdatedAt` is the memo's own timestamp, and the
+      // `staleTime` / `refetchOnMount` pair below turn it into a rule: a seed
+      // younger than a minute is final for this visit; an older one is shown
+      // at once and refreshed ONCE, at mount, before the reader has started
+      // reading (found in review: a seeded page makes no API call, and the
+      // server memo is only refreshed by API calls, so without this a topic
+      // that only ever got page loads would freeze). Cold topics: `undefined`,
+      // and the fetch above runs as it always did.
+      initialData: seed ? { pages: [seed.page], pageParams: [undefined] } : undefined,
+      initialDataUpdatedAt: seed ? seed.at : undefined,
       getNextPageParam: (lastPage) => {
         if (!lastPage?.nextCursor) return undefined;
         if (!lastPage.entries || lastPage.entries.length === 0) return undefined;
@@ -82,10 +82,13 @@ export default function TopicShell({ tag }: { tag: string }) {
     // before the reader was told anything, behind an unlabelled spinner the whole
     // time. One retry absorbs a transient blip; three only postpone bad news.
       retry: 1,
-      staleTime: Infinity,
+      // Was `Infinity` / `false`: with a server seed those would also have
+      // silenced the one refresh that keeps a seeded topic from freezing. Focus
+      // and reconnect refetches stay off, so nothing changes under a reader.
+      staleTime: 60_000,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
-      refetchOnMount: false
+      refetchOnMount: true
     });
 
   // ★ A TOPIC IS THE FEED, FILTERED — including its faults. This carried the

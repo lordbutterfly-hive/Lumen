@@ -29,6 +29,12 @@ const logger = getLogger('app');
  * entries other readers need. Ruled out by the owner on those grounds before
  * this was written, and recorded here so it is not re-proposed.
  *
+ * ★ Snappiness phase 4 (2026-09-03) prefetches the topic ROUTE on hover
+ * (components/intent-prefetch.tsx), which is a different thing: a page render
+ * that reads this warmer's memo and makes no chain call, so a hovered tag
+ * nobody opens costs a render, never a node round trip, and nothing is
+ * evicted. The DATA fetch on hover stays ruled out, exactly as above.
+ *
  * ★ WHICH TAGS. `features/layouts/right-rail/topics.tsx` deals NINE chips out of
  * the top FORTY browsable trending tags, reshuffled once per UTC day. Warming
  * the nine would mean re-deriving its date-seeded shuffle here and being wrong

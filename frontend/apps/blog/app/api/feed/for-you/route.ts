@@ -27,6 +27,18 @@ import { liteConfig } from '@/blog/lib/lite/config';
 import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
 import { startTopicWarmer } from '@/blog/lib/feed/topic-warmer';
+import {
+  TOPIC_CACHE_MAX,
+  TOPIC_CACHE_MS,
+  attachLanes,
+  cursorOf,
+  fallbackMemo,
+  forgetTopicFeed,
+  peekTopicFeed,
+  rememberTopicFeed,
+  topicKeyFor,
+  trimFeedBody
+} from '@/blog/lib/feed/topic-cache';
 import { noteViewerSeen } from '@/blog/lib/feed/viewer-seen';
 import type { WarmCandidate } from '@/blog/lib/feed/viewer-seen';
 import { startViewerWarmer } from '@/blog/lib/feed/viewer-warmer';
@@ -180,12 +192,6 @@ const hydrationCache = new Map<string, { entry: Entry; at: number }>();
  * is still an honest claim, and `?refresh=1` (honoured by the topic branch as of
  * this change) is the escape hatch for anyone who needs to skip it.
  */
-const TOPIC_CACHE_MS = 300_000;
-const TOPIC_CACHE_MAX = 200;
-const topicFeedCache = new Map<
-  string,
-  { entries: Entry[]; ranked: number; lanes: FeedLane[]; at: number }
->();
 /** When the ranker last failed to serve a `viewer|topic`. See the branch that writes it. */
 const topicFailedAt = new Map<string, number>();
 /**
@@ -212,15 +218,6 @@ const topicFailedAt = new Map<string, number>();
 const TOPIC_FAIL_MS = 300_000;
 const topicInflight = new Map<string, Promise<BuiltFeed | null>>();
 
-function rememberTopicFeed(key: string, entries: Entry[], ranked: number, lanes: FeedLane[]): void {
-  // Bounded so a crawler walking every tag cannot grow this without limit.
-  // Map preserves insertion order, so the oldest key is the first one.
-  if (topicFeedCache.size >= TOPIC_CACHE_MAX) {
-    const oldest = topicFeedCache.keys().next().value;
-    if (oldest !== undefined) topicFeedCache.delete(oldest);
-  }
-  topicFeedCache.set(key, { entries, ranked, lanes, at: Date.now() });
-}
 
 /**
  * One build per `viewer|topic` at a time. Unlike `buildOnce` this does NOT
@@ -478,25 +475,6 @@ async function viewerBlockActor(userId: string, username: string): Promise<Follo
  * renders whatever markdown it is handed — a smaller body is also less work in
  * the browser, on every card, on every render.
  */
-const FEED_BODY_CHARS = 4000;
-/** Markdown image, HTML image, and bare image URL — the forms `find_first_img` looks for. */
-const BODY_IMAGE_PATTERNS = [
-  /!\[[^\]]*\]\([^)\s]+\)/,
-  /<img\s+[^>]*src="[^"]+"[^>]*>/i,
-  /https?:\/\/\S+\.(?:png|jpe?g|webp|gif)/i
-];
-
-function trimFeedBody(body: string): string {
-  if (body.length <= FEED_BODY_CHARS) return body;
-  const head = body.slice(0, FEED_BODY_CHARS);
-  const rescued: string[] = [];
-  for (const pattern of BODY_IMAGE_PATTERNS) {
-    if (pattern.test(head)) continue;
-    const found = body.match(pattern);
-    if (found) rescued.push(found[0]);
-  }
-  return rescued.length > 0 ? `${head}\n\n${rescued.join('\n')}` : head;
-}
 
 /**
  * Strip a feed page down to what its cards read. See the note above for the
@@ -555,23 +533,6 @@ function trimFeedEntries(entries: Entry[], viewer: string): Entry[] {
  * per-candidate justification anywhere in the ranker — so inventing one here
  * would be fabricating an explanation the system never produced.
  */
-type RankedEntry = Entry & {
-  _rank?: { lane: string | null; score: number; rank: number; engagers: number | null };
-};
-
-function attachLanes(entries: Entry[], lanes?: FeedLane[] | null): Entry[] {
-  if (!lanes || lanes.length === 0) return entries;
-  const byKey = new Map(lanes.map((lane) => [lane.key, lane]));
-  return entries.map((entry) => {
-    const lane = byKey.get(`${entry.author}/${entry.permlink}`);
-    if (!lane) return entry;
-    const withRank: RankedEntry = {
-      ...entry,
-      _rank: { lane: lane.source, score: lane.score, rank: lane.rank, engagers: lane.engagers }
-    };
-    return withRank;
-  });
-}
 
 function feedJson(
   body: Record<string, unknown> & { entries: Entry[]; lanes?: FeedLane[] | null },
@@ -796,7 +757,7 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // their personal feed is exactly the bug the original comment guards against.
     // So this is a small cache and single-flight keyed by BOTH — `viewer|topic`.
     // Same viewer, same topic joins one build; different topic never does.
-    const topicKey = `${viewer}|${topic}`;
+    const topicKey = topicKeyFor(viewer, topic);
     // ★ `?refresh=1` REACHES THE TOPIC BRANCH TOO (2026-08-13). It used to be
     // read ~80 lines below this early return, so a topic page had no way to skip
     // its own cache at all. That was tolerable at a 20s TTL and is not at 300s:
@@ -804,11 +765,11 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // unreportable. Same parameter, same meaning, same single caller shape.
     const topicForceRefresh = req.nextUrl.searchParams.get('refresh') === '1';
     if (topicForceRefresh) {
-      topicFeedCache.delete(topicKey);
+      forgetTopicFeed(topicKey);
       topicFailedAt.delete(topicKey);
     }
-    const cached = topicForceRefresh ? undefined : topicFeedCache.get(topicKey);
-    if (cached && Date.now() - cached.at < TOPIC_CACHE_MS) {
+    const cached = topicForceRefresh ? undefined : peekTopicFeed(topicKey);
+    if (cached) {
       return feedJson({
         entries: cached.entries, lanes: cached.lanes, source: 'recsys', ranked: cached.ranked,
         served: cached.entries.length, cache: 'topic-cached', nextCursor: cursorOf(cached.entries)
@@ -2032,11 +1993,6 @@ async function getRankedPaged(
  * `_lite.chainAuthor` is the account that actually signed the post — the one
  * identifier on a re-attributed entry that Hive has ever heard of.
  */
-function cursorOf(entries: Entry[]): { author: string; permlink: string } | null {
-  const last = entries[entries.length - 1];
-  if (!last) return null;
-  return { author: last._lite?.chainAuthor || last.author, permlink: last.permlink };
-}
 
 /**
  * ★★★ THE SIGNED-OUT FEED HAD NO CACHE AT ALL (2026-08-10) — MEASURED.
@@ -2126,7 +2082,8 @@ const FALLBACK_CACHE_MS = 60_000;
  * realistic" (200); matched here for the same reason rather than invented.
  */
 const FALLBACK_CACHE_MAX = 200;
-const fallbackCache = new Map<string, { entries: Entry[]; at: number }>();
+// ★ Process-wide, shared with the topic page's seed (lib/feed/topic-cache.ts).
+const fallbackCache = fallbackMemo();
 const fallbackInflight = new Map<string, Promise<Entry[]>>();
 
 /**

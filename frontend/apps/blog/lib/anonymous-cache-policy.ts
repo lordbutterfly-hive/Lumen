@@ -19,6 +19,11 @@
  * The locale cookie (`NEXT_LOCALE`) DOES change the page, so the proxy keys
  * on it; that is Caddy's side (see the Caddyfile), not this file's.
  *
+ * ★ LOAD-BEARING AT THE PROXY: router navigations (`RSC: 1` header, `_rsc`
+ * query) get this same header, because Next hides both from the middleware
+ * (found in review). Caddy bypasses them; any CDN put in front must too, or it
+ * would store flight payloads under the page's key.
+ *
  * WHAT MUST HOLD FOR THIS TO BE SAFE. A response the proxy stores must carry
  * no Set-Cookie (the middleware skips minting the anonymous cookies exactly
  * when this says cacheable; the first API call of the visit mints them
@@ -86,7 +91,14 @@ export function anonymousCachePolicy(input: CachePolicyInput): CachePolicy {
   const parts = path.split('/').slice(1);
   if (parts.some((p) => p === '' || p === '.' || p === '..')) return NOT;
 
-  if (parts[0] === 'topics' && parts.length === 2) return policy('topic', 60, 120);
+  // Only a well-formed tag or community id is a topic page; anything else (an
+  // invalid tag the middleware rewrites to its 404 segment, whose name has a
+  // dot on purpose) is a 404 and must never be labelled shared-cacheable.
+  if (parts[0] === 'topics' && parts.length === 2) {
+    const tag = parts[1].toLowerCase();
+    if (!/^[a-z0-9\-_]{1,256}$/.test(tag) && !/^hive-[123]\d{4,6}$/.test(tag)) return NOT;
+    return policy('topic', 60, 120);
+  }
 
   // /@name and its public sub-pages
   if (ACCOUNT.test(parts[0])) {

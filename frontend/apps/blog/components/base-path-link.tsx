@@ -1,8 +1,11 @@
+'use client';
+
 // eslint-disable-next-line no-restricted-imports -- This is a wrapper component that needs direct access to next/link
 import Link from 'next/link';
 import { AnchorHTMLAttributes, MouseEvent, ReactNode, forwardRef } from 'react';
 import { buildSafePath, isInternalPath } from '@ui/lib/sanitize-url';
 import { getLogger } from '@ui/lib/logging';
+import { useIntentPrefetch } from './intent-prefetch';
 
 const logger = getLogger('BasePathLink');
 
@@ -13,6 +16,8 @@ interface BasePathLinkProps
   className?: string;
   'data-testid'?: string;
   prefetch?: boolean;
+  /** Prefetch the route (fully) the moment the reader shows intent; see components/intent-prefetch.tsx. */
+  prefetchOnIntent?: boolean;
   'aria-current'?: 'page' | undefined;
   'aria-busy'?: boolean | undefined;
   onClick?: (e: MouseEvent<HTMLAnchorElement>) => void;
@@ -54,6 +59,7 @@ const BasePathLink = forwardRef<HTMLAnchorElement, BasePathLinkProps>(
       className,
       'data-testid': dataTestId,
       prefetch = false,
+      prefetchOnIntent = false,
       'aria-current': ariaCurrent,
       'aria-busy': ariaBusy,
       onClick,
@@ -113,6 +119,7 @@ const BasePathLink = forwardRef<HTMLAnchorElement, BasePathLinkProps>(
       }
     };
 
+    const intent = useIntentPrefetch(prefetchOnIntent && isInternalPath(href) ? href : '');
     return (
       <Link
         ref={ref}
@@ -123,6 +130,7 @@ const BasePathLink = forwardRef<HTMLAnchorElement, BasePathLinkProps>(
         aria-current={ariaCurrent}
         aria-busy={ariaBusy}
         onClick={handleClick}
+        {...(prefetchOnIntent ? intent : {})}
         {...rest}
       >
         {children}
