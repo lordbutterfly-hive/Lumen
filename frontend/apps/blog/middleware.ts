@@ -63,7 +63,8 @@ function cachePolicyFor(request: NextRequest): CachePolicy {
       request.cookies.has('observer') ||
       request.cookies.has('account_info'),
     hasQuery: request.nextUrl.search.length > 0,
-    hasQaHeader: request.headers.has('x-lumen-qa')
+    hasQaHeader: request.headers.has('x-lumen-qa'),
+    localeCookie: request.cookies.get('NEXT_LOCALE')?.value ?? null
   });
 }
 

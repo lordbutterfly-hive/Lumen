@@ -70,7 +70,10 @@ export const useProcessAuth = (authenticateOnBackend: boolean, strict: boolean) 
       const hiveChain = await getChain();
       // Read challenge directly from cookie — React state may not have updated yet
       // if signAuth is called early (e.g., biometric auto-unlock on page load).
-      const challenge = loginChallenge || (await ensureLoginChallenge());
+      // Fresh cookie FIRST, mount-time state second (found in review round 2):
+      // two API calls minting in parallel can leave the state holding a pair
+      // the server has since replaced; the cookie is what the server compares.
+      const challenge = (await ensureLoginChallenge()) || loginChallenge || '';
       const operation: WaxOperation = await getOperationForLogin(username, keyType, challenge, loginType);
 
       const expr = new Date();

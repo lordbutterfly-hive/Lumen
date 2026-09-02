@@ -41,7 +41,17 @@ export interface CachePolicyInput {
   hasSession: boolean;
   hasQuery: boolean;
   hasQaHeader: boolean;
+  /**
+   * The NEXT_LOCALE cookie value, if any. Only the nine exact codes the app
+   * ships are cacheable; any other spelling (`pl-PL`, `%61r`, upper case) is
+   * honoured by the app's i18n but cannot be keyed safely by a proxy, so the
+   * response must stay private (found in review round 2, on the live edge:
+   * the proxy already bypasses these, this is the app's own guarantee).
+   */
+  localeCookie?: string | null;
 }
+
+export const CACHEABLE_LOCALES = new Set(['ar', 'en', 'es', 'fr', 'it', 'ja', 'pl', 'ru', 'zh']);
 
 export interface CachePolicy {
   cacheable: boolean;
@@ -67,6 +77,7 @@ const PROFILE_SUBPAGES = new Set(['followers', 'following', 'comments', 'communi
 export function anonymousCachePolicy(input: CachePolicyInput): CachePolicy {
   if (input.method !== 'GET') return NOT;
   if (input.hasSession || input.hasQuery || input.hasQaHeader) return NOT;
+  if (input.localeCookie != null && input.localeCookie !== '' && !CACHEABLE_LOCALES.has(input.localeCookie)) return NOT;
   const path = input.pathname;
   if (!path || path.includes('//')) return NOT;
 
