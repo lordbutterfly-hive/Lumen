@@ -46,11 +46,14 @@ import {
   ALTERNATIVE_AUTHOR_LABEL,
   DISCARD_DRAFT,
   DISCARD_DRAFT_CONFIRM_TITLE,
+  DRAFT_STATUS_SAVED,
+  DRAFT_STATUS_SAVING,
   RESTORED_DRAFT_DESCRIPTION,
   RESTORED_DRAFT_DISCARD,
   RESTORED_DRAFT_KEEP,
   RESTORED_DRAFT_TITLE
 } from "@/blog/features/post-editor/lib/composer-copy";
+import { DraftStatusIndicator, DraftStatus } from "@/blog/features/post-editor/DraftStatusIndicator";
 
 const MdEditor = dynamic(() => import("@/blog/features/post-editor/md-editor"), {
   ssr: false,
@@ -294,6 +297,39 @@ export default function PostForm({
   const showRestoredDraftNotice =
     restoredFromDraft && Boolean(watchedValues.title?.trim() || watchedValues.postArea?.trim());
 
+  /* ★★★ THE LIVE "DRAFT SAVED" CUE (owner, 2026-09-02: "the posting area lacks a
+     draft save. If people write, stop writing, they lose the post").
+
+     Auto-save already runs every 500 ms (use-post-form-actions.ts) and writes
+     `postData-new-<username>`; the only thing missing was a pixel confirming it.
+     `storedPost` is the SAME `useStorageWithTTL` value the auto-save setter
+     writes to, so it updates reactively in this very tab the moment a save lands
+     (the hook re-dispatches a `storage` event to itself). Comparing it field by
+     field against the live `watchedValues` therefore tells the truth with no
+     timer and no new state: equal => the on-screen work is in storage ("Draft
+     saved"); different => a write is still pending ("Saving…").
+
+     Scoped to a NEW post: the inline EDIT composer starts pre-filled from the
+     on-chain post while `storedPost` starts empty, so a naive compare would flash
+     "Saving…" on open; the owner complaint, and PeakD's cue, are about /submit.
+     Suppressed while `draftSaveFailed` is showing, so the quiet cue never
+     contradicts the red "not being saved" banner. String `===` short-circuits on
+     length, so even a large body is a cheap compare on the ~500 ms cadence. */
+  const draftHasContent = Boolean(watchedValues.title?.trim() || watchedValues.postArea?.trim());
+  const draftContentSaved =
+    watchedValues.title === storedPost.title &&
+    watchedValues.postArea === storedPost.postArea &&
+    watchedValues.tags === storedPost.tags &&
+    watchedValues.postSummary === storedPost.postSummary &&
+    watchedValues.category === storedPost.category &&
+    watchedValues.author === storedPost.author;
+  const draftStatus: DraftStatus =
+    editMode || draftSaveFailed || !draftHasContent
+      ? "idle"
+      : draftContentSaved
+        ? "saved"
+        : "saving";
+
   return (
     /* ★ THE PAGE OWNS THE PAGE PADDING (2026-08-10).
        `/submit.html` now renders inside the standard Lumen shell (nav column +
@@ -437,26 +473,35 @@ export default function PostForm({
                       />
                     </div>
                   </FormControl>
-                  <div className="flex items-center rounded-b-md border-x border-b border-border bg-background-secondary/50 px-3 py-1.5 text-caption text-muted-foreground">
-                    {t("submit_page.insert_images_by_dragging")} {t("submit_page.selecting_them")}
-                    <TooltipProvider>
-                      <Tooltip>
-                        {/* ★ `aria-hidden` (2026-08-19). A control sweep across all 29
-                            routes found exactly one button in the whole product with no
-                            accessible name, and this was it: a bare icon trigger, so a
-                            screen reader announced "button" and nothing else. Its two
-                            siblings in EditorOptionsBar.tsx (lines 71 and 90) are the
-                            same info-icon-with-tooltip and both already carry
-                            `aria-hidden`; this one was the odd one out. Hidden rather
-                            than labelled because the tooltip only repeats the sentence
-                            it sits at the end of, so a name here would make a screen
-                            reader read the same guidance twice. */}
-                        <TooltipTrigger type="button" tabIndex={-1} aria-hidden>
-                          <Icons.info className="ml-1 w-3" />
-                        </TooltipTrigger>
-                        <TooltipContent>{t("submit_page.insert_images_info")}</TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                  <div className="flex items-center justify-between gap-3 rounded-b-md border-x border-b border-border bg-background-secondary/50 px-3 py-1.5 text-caption text-muted-foreground">
+                    <span className="flex min-w-0 items-center">
+                      {t("submit_page.insert_images_by_dragging")} {t("submit_page.selecting_them")}
+                      <TooltipProvider>
+                        <Tooltip>
+                          {/* ★ `aria-hidden` (2026-08-19). A control sweep across all 29
+                              routes found exactly one button in the whole product with no
+                              accessible name, and this was it: a bare icon trigger, so a
+                              screen reader announced "button" and nothing else. Its two
+                              siblings in EditorOptionsBar.tsx (lines 71 and 90) are the
+                              same info-icon-with-tooltip and both already carry
+                              `aria-hidden`; this one was the odd one out. Hidden rather
+                              than labelled because the tooltip only repeats the sentence
+                              it sits at the end of, so a name here would make a screen
+                              reader read the same guidance twice. */}
+                          <TooltipTrigger type="button" tabIndex={-1} aria-hidden>
+                            <Icons.info className="ml-1 w-3" />
+                          </TooltipTrigger>
+                          <TooltipContent>{t("submit_page.insert_images_info")}</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </span>
+                    {/* ★ The live draft-save cue sits with the editor it reports on. */}
+                    <DraftStatusIndicator
+                      status={draftStatus}
+                      savingLabel={DRAFT_STATUS_SAVING}
+                      savedLabel={DRAFT_STATUS_SAVED}
+                      className="shrink-0"
+                    />
                   </div>
                   <FormMessage />
                 </FormItem>

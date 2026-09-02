@@ -120,6 +120,7 @@ export const Icons = {
   copyDone: CI.copyDone,
   clock: CI.pressTime,
   undo: CI.undo,
+  redo: CI.redo,
   doorOpen: CI.doorOpen,
   wallet: CI.pressWallet,
   creatorTokens: CI.pressMeritum,

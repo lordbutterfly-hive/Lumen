@@ -922,6 +922,7 @@
     "hive_link_converted": "Blog link converted",
     "hive_link_converted_count": "{{count}} Hive blog link(s) converted to relative path",
     "undo": "Undo",
+    "redo": "Redo",
     "convert_hive_links": "Convert Hive links",
     "convert_hive_links_tooltip": "Automatically converts pasted links from Hive blog frontends to frontend-agnostic relative paths, so your post works on any Hive app",
     "optimize_images": "Optimize images",

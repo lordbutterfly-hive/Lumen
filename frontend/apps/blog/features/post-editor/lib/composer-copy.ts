@@ -102,3 +102,20 @@ export const IMAGE_UPLOAD_KEYCHAIN_DECLINED =
 export const IMAGE_UPLOAD_ACCOUNT_NOT_READY =
   'Your account was not ready to sign this image yet. Wait a moment and try again.';
 export const IMAGE_UPLOAD_FAILED_RETRY = 'Could not upload that image. Try again in a moment.';
+
+/* ── the live "draft saved" cue (owner, 2026-09-02: "the posting area lacks a
+   draft save ... people ... lose the post") ──────────────────────────────────
+
+   The composer HAS auto-saved to localStorage every 500 ms for weeks, and the
+   masthead even promises "Saved as you type" — but nothing on screen ever
+   CONFIRMED a save had happened, so the owner (and every writer) read the
+   silence as "there is no draft save". PeakD shows a small, live "draft saved"
+   cue; this is Lumen's, in the app's quiet muted-caption voice. Shared by the
+   long-form composer and the reply box so the two can never word it
+   differently — the same reason `RC_LABEL`/`RC_EXPLAINER` are shared.
+
+   "Saving…" uses the ellipsis character the rest of the app already uses
+   ("Posting…", "Publishing…"), not three dots; no em or en dashes, per the
+   rules at the top of this file. */
+export const DRAFT_STATUS_SAVING = 'Saving…';
+export const DRAFT_STATUS_SAVED = 'Draft saved';

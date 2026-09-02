@@ -33,6 +33,9 @@ export const PATHS: Record<string, string> = {
   chevronRight: '<path d="M9.5 6l6 6-6 6"/>',
   arrowRight: '<path d="M4.5 12h14"/><path d="M13 6.5l6 5.5-6 5.5"/>',
   undo: '<path d="M8 7l-4 4 4 4"/><path d="M4 11h10.5a4.5 4.5 0 0 1 0 9H12"/>',
+  // Horizontal mirror of `undo` across x=12 (arrowhead flipped, arc sweep 1→0)
+  // so the pair reads as a matched set on the same 24×24 grid.
+  redo: '<path d="M16 7l4 4-4 4"/><path d="M20 11h-10.5a4.5 4.5 0 0 0 0 9H12"/>',
 
   // ── primitives ──────────────────────────────────────────────────────────
   x: '<path d="M6 6l12 12"/><path d="M18 6L6 18"/>',
@@ -270,6 +273,7 @@ export const chevronRight = make('chevronRight');
 export const marketChart = make('marketChart');
 export const arrowRight = make('arrowRight');
 export const undo = make('undo');
+export const redo = make('redo');
 export const x = make('x');
 export const add = make('add');
 export const check = make('check');

@@ -12,6 +12,7 @@ import {
   useState
 } from 'react';
 import { EditorView } from '@codemirror/view';
+import { undo, redo, undoDepth, redoDepth } from '@codemirror/commands';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { toast } from '@ui/components/hooks/use-toast';
@@ -96,11 +97,15 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
     processingOptionsRef.current = processingOptions;
   }, [processingOptions]);
 
-  // Stable ref for onChange
-  const onChangeRef = useRef(onChange);
-  useEffect(() => {
-    onChangeRef.current = onChange;
-  }, [onChange]);
+  // Undo/redo availability for the toolbar buttons. Recomputed from the
+  // CodeMirror history on every doc change -- see `handleEditorChange` below.
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+
+  // Stable ref for the editor's doc-change handler. Wired to `handleEditorChange`
+  // (defined once the view exists) in an effect below; initialised to the parent
+  // onChange so it is never a dangling call before that effect runs.
+  const onChangeRef = useRef<(value: string) => void>(onChange);
 
   // Adapter to bridge CodeMirror dispatch with React setState-style callbacks (used for undo)
   const setMarkdownAdapter: Dispatch<SetStateAction<string>> = useCallback((action) => {
@@ -238,6 +243,44 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
     isInternalChangeRef,
     lastInputTimeRef
   });
+
+  // Forwards every doc change to the parent AND refreshes undo/redo depth so the
+  // toolbar buttons enable/disable in step with the history. The CodeMirror
+  // updateListener (use-codemirror.ts) calls this on EVERY docChanged -- typing,
+  // paste, image insert, and undo/redo itself -- so the button state stays
+  // correct without adding a listener to the editor hook.
+  const handleEditorChange = useCallback(
+    (value: string) => {
+      onChange(value);
+      const view = viewRef.current;
+      if (view) {
+        setCanUndo(undoDepth(view.state) > 0);
+        setCanRedo(redoDepth(view.state) > 0);
+      }
+    },
+    [onChange, viewRef]
+  );
+
+  useEffect(() => {
+    onChangeRef.current = handleEditorChange;
+  }, [handleEditorChange]);
+
+  // Undo / redo toolbar actions. Dispatch straight to the view and return focus
+  // to the editor (same tabIndex={-1} / focus-back pattern as the formatting
+  // buttons); the resulting doc change recomputes the disabled state above.
+  const handleUndo = useCallback(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    undo(view);
+    view.focus();
+  }, [viewRef]);
+
+  const handleRedo = useCallback(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    redo(view);
+    view.focus();
+  }, [viewRef]);
 
   // Image upload handler -- supports single and multi-file selection
   const inputImageHandler = useCallback(
@@ -389,6 +432,10 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
         isBlockedUser={isBlockedUser}
         onToolbarClick={handleToolbarClick}
         onSpoilerClick={handleSpoiler}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        canUndo={canUndo}
+        canRedo={canRedo}
         inputRef={inputRef}
         t={t}
       />

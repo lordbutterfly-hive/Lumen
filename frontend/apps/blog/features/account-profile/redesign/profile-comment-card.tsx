@@ -124,21 +124,42 @@ export default function ProfileCommentCard({
         </Link>
       ) : null}
 
-      {/* Footer — same control grammar as MediumPostCard's action bar, minus reblog. */}
-      <div className="mt-3.5 flex items-center gap-2 font-sans text-[14px] leading-[22px]">
+      {/* Footer — the SAME action bar as MediumPostCard (owner ruling 2026-08-25:
+          "the profile cards have to be the same as feed"), minus reblog. This row
+          had drifted to its own smaller scale — 14px type, 16px icons, a grey
+          font-bold payout — so the owner reported the comment icon "does not match
+          the shape/visual of the comments on the post" and payouts that were grey
+          (with a hover breakdown) on live comments while $0.00 comments were green
+          (no hover). Both were this footer rendering at a scale and colour the feed
+          card never uses. It now mirrors `medium-post-card.tsx`'s action bar
+          verbatim: `text-[17px]`, 22px icons, and the payout on the shared payout
+          green. `flex-wrap` matches the feed too, so the payout drops to its own
+          line at narrow widths instead of overflowing. */}
+      <div className="mt-3.5 flex flex-wrap items-center gap-2.5 text-[17px]">
         {/* ★ NO PILL INSIDE THE CARD (2026-08-08). Same fix the feed card got:
             a grey capsule sitting on a white card reads as a second, nested
             surface — the owner's words were "a grey pill inside the window", and
             it looked weird. The count keeps its weight from type, not from a
             background. This variant was missed the first time round, so the
-            Comments tab kept the pill everywhere else had lost it. */}
-        <div className="flex items-center gap-1 py-1.5 [&_svg]:h-[16px] [&_svg]:w-[16px]">
+            Comments tab kept the pill everywhere else had lost it.
+            ★ THE `[&_svg]:h-[16px]` OVERRIDE IS GONE (2026-09-02). The Blade sizes
+            itself — `size="sm"` is 22px at feed density (see votes-component.tsx) —
+            and this line forced it down to 16px, so the vote arrows AND the comment
+            icon beside them were a step smaller than every other card in the app.
+            Removing it lets the row render at feed scale, matching the feed card's
+            own `-ml-2` vote group. */}
+        <div className="flex items-center gap-1 rounded-control -ml-2 py-1.5">
           {/* Same duplicate tally as medium-post-card — see that file's note. */}
           <VotesComponentWrapper post={post} type="comment" />
         </div>
 
-        <span className="flex items-center gap-1 rounded-control px-2.5 py-1.5 font-medium text-ink-10 transition-colors hover:bg-surface-21 hover:text-ink-4">
-          <PostCardCommentTooltip comments={post.children} url={`${href}/#comments`} iconClassName="h-4 w-4" />
+        {/* ★ THE FEED CARD'S COMMENT GLYPH, VERBATIM (2026-09-02, owner issue #2).
+            This shipped at `h-4 w-4` (16px) while the feed card renders the SAME
+            `Icons.comment` (pressComment) at `h-[22px] w-[22px] stroke-2`, so the
+            profile tab's comment icon looked smaller and thinner than everywhere
+            else. Same component, same size, same stroke as the feed now. */}
+        <span className="flex h-9 items-center gap-1 rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:bg-[#f4f5f7] hover:text-brand">
+          <PostCardCommentTooltip comments={post.children} url={`${href}/#comments`} iconClassName="h-[22px] w-[22px] stroke-2" />
         </span>
 
         {/* ★ ml-auto ON THE COMPONENT — its `decline` and `payout <= 0` branches
@@ -148,8 +169,18 @@ export default function ProfileCommentCard({
         <DetailsCardHover post={post} decline={payoutDeclined} className="ml-auto">
           <span
             className={cn(
-              // Payout is flat too — same reason as the vote group above.
-              'ml-auto flex items-center px-[3px] py-[6px] text-[14px] leading-[22px] font-bold tabular-nums text-ink-10 transition-colors hover:cursor-pointer hover:text-ink-4',
+              // ★ THE FEED CARD'S PAYOUT CHIP, VERBATIM (2026-09-02, owner issue #3).
+              // This was `text-ink-10` (grey) + `font-bold` + `tabular-nums` (no
+              // `font-num`), so a live comment's payout rendered grey, in Merriweather,
+              // faux-bolded — WITH a hover breakdown — while a $0.00 comment took
+              // DetailsCardHover's `payout <= 0` branch and rendered GREEN, in Fira,
+              // no hover. Same money, two colours and two faces, decided by whether the
+              // value was zero: exactly the class of bug details-card-hover.tsx's own
+              // header comment describes. Now green (`--pc-payout`), `font-num` (Fira),
+              // `font-medium`, `text-[17px]` — identical to `medium-post-card.tsx`. All
+              // three states agree: >0 is green + hover, $0.00 is green + no hover, and
+              // declined is muted + struck (the decline branch below), money one colour.
+              'ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-[17px] font-medium font-num text-[color:var(--pc-payout)] transition-colors hover:cursor-pointer',
               payoutDeclined && 'bg-transparent text-muted-foreground line-through'
             )}
           >

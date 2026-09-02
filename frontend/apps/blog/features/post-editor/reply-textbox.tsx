@@ -34,6 +34,8 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { getStorageItem, removeStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { useLoggedUserContext } from '@/blog/features/votes/hooks/use-logged-user';
+import { DRAFT_STATUS_SAVED, DRAFT_STATUS_SAVING } from '@/blog/features/post-editor/lib/composer-copy';
+import { DraftStatusIndicator, DraftStatus } from '@/blog/features/post-editor/DraftStatusIndicator';
 
 // ★ item 18: this used to reserve a single 200px box — but the mounted
 // MdEditor is THREE bands (EditorToolbar, a `windowheight`-tall CodeMirror
@@ -440,6 +442,18 @@ export function ReplyTextbox({
     }
   };
 
+  /* ★ THE SAME LIVE "DRAFT SAVED" CUE AS THE COMPOSER (owner, 2026-09-02).
+     `saveToStorage` already debounces a 500 ms write to `replyTo-…` /
+     `editDraft-…`; `storedDraft` is the reactive `useStorageWithTTL` value that
+     write lands in, so `storedDraft === text` is true exactly when the on-screen
+     reply is in storage. A reply must have real content to be "saving" (in edit
+     mode, real content means changed from the original — an unchanged edit stores
+     nothing, so it stays idle); the red "not being saved" banner owns failures,
+     so the quiet cue steps aside while it shows. */
+  const replyHasContent = editMode ? text.trim() !== '' && text !== commentBody : text.trim() !== '';
+  const replyDraftStatus: DraftStatus =
+    draftSaveFailed || !replyHasContent ? 'idle' : storedDraft === text ? 'saved' : 'saving';
+
   return (
     <div
       className="mb-4 flex w-full flex-col gap-4 rounded-lg border border-border bg-background p-4 text-primary shadow-sm"
@@ -518,16 +532,25 @@ export function ReplyTextbox({
             placeholder={t('post_content.footer.comment.reply')}
             ariaLabel={t('post_content.footer.comment.reply')}
           />
-          <div className="flex items-center rounded-b-md border-x border-b border-border bg-background-secondary/50 px-3 py-1.5 text-caption text-muted-foreground">
-            {t('post_content.footer.comment.insert_images')} {t('post_content.footer.comment.selecting_them')}
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger>
-                  <Icons.info className="ml-1 w-3" />
-                </TooltipTrigger>
-                <TooltipContent>{t('submit_page.insert_images_info')}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+          <div className="flex items-center justify-between gap-3 rounded-b-md border-x border-b border-border bg-background-secondary/50 px-3 py-1.5 text-caption text-muted-foreground">
+            <span className="flex min-w-0 items-center">
+              {t('post_content.footer.comment.insert_images')} {t('post_content.footer.comment.selecting_them')}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Icons.info className="ml-1 w-3" />
+                  </TooltipTrigger>
+                  <TooltipContent>{t('submit_page.insert_images_info')}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </span>
+            {/* ★ The live draft-save cue, identical to the long-form composer. */}
+            <DraftStatusIndicator
+              status={replyDraftStatus}
+              savingLabel={DRAFT_STATUS_SAVING}
+              savedLabel={DRAFT_STATUS_SAVED}
+              className="shrink-0"
+            />
           </div>
         </div>
 

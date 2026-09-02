@@ -690,10 +690,12 @@
   align-items: center;
   gap: 6px;
   min-height: 20px; /* §4 "Meta row 20px" */
-  /* ★ The label stays right-aligned (§4) — but right-aligned to the edge of the
-     text column, not to the edge of the counts. See the block comment above
-     `.commentText` for why this is horizontal and not a min-height. */
-  max-width: calc(100% - var(--pc-counts-reserve));
+  /* ★ The `TOP COMMENT` label right-aligns to the FULL right edge (owner, 2026-09-02),
+     so it sits directly above the counts column rather than drifting left of it. The
+     counts (`.counts`) are absolutely positioned at the BOTTOM of the block, not on
+     this meta row, so there is nothing on this row for the label to collide with — the
+     old `calc(100% - var(--pc-counts-reserve))` reserve only pushed it left of the edge. */
+  max-width: 100%;
 }
 
 /* ── §5 TYPE ──────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 "use client";
 
-import { Dispatch, RefObject, SetStateAction, useState } from "react";
+import { Dispatch, memo, RefObject, SetStateAction, useState } from "react";
 import clsx from "clsx";
 import { Link } from "@hive/ui";
 import { Button } from "@hive/ui/components/button";
@@ -23,7 +23,7 @@ interface PostPreviewPanelProps {
   proxyAuthToken: string | undefined;
 }
 
-export function PostPreviewPanel({
+function PostPreviewPanelInner({
   preview,
   sideBySide,
   syncScroll,
@@ -212,3 +212,9 @@ export function PostPreviewPanel({
     </div>
   );
 }
+
+// ★ MEMOISED (2026-09-02). The preview subtree runs the full markdown renderer;
+// wrapping it means a re-render of PostForm for an UNRELATED reason (typing the
+// title or tags, a proxy-auth token landing) no longer drags the whole preview
+// through reconciliation. It re-renders only when its own props change.
+export const PostPreviewPanel = memo(PostPreviewPanelInner);

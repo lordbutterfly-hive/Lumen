@@ -1,6 +1,6 @@
 "use client";
 
-import { Dispatch, MutableRefObject, RefObject, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
+import { Dispatch, MutableRefObject, RefObject, SetStateAction, startTransition, useCallback, useEffect, useRef, useState } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
@@ -98,10 +98,33 @@ export function usePostFormActions({
       //
       // Debounced to the same 300 ms as the form sync, so the preview is a beat
       // behind instead of fighting the typist for the main thread.
+      //
+      // ★★★ AND MARKED NON-URGENT (2026-09-02, owner: "the letters have a
+      // delay"). The debounce keeps the render from firing on EVERY keystroke,
+      // but when it does fire — on the ~300ms pause a writer takes between words
+      // — it used to run SYNCHRONOUSLY inside this timer's task: the whole
+      // markdown body re-parsed and re-rendered (RendererContainer's
+      // `hiveRenderer.render`, one indivisible call), plus a full `useWatch`
+      // re-render of the form. Measured on a 150k-char draft: that render blocks
+      // the main thread ~100ms per fire, and because the pause is over just as
+      // the writer resumes, the next keystrokes land squarely inside it — the
+      // felt "letter delay" (measured: typing stalled ~3.5s across one session).
+      //
+      // `startTransition` marks both state updates as non-urgent, so React
+      // schedules the expensive render through its yielding scheduler instead of
+      // running it inline here. Pending keystrokes are flushed BEFORE the render
+      // runs, and React holds the render for an idle gap rather than firing it
+      // into the middle of active typing. The preview still updates a beat later
+      // exactly as before; nothing about WHAT renders changes, only its priority.
+      // `latestPostAreaRef` above is still set synchronously, so submit/paste/
+      // undo — all of which read the ref, never this deferred state — are
+      // untouched.
       clearTimeout(postAreaSyncTimerRef.current);
       postAreaSyncTimerRef.current = setTimeout(() => {
-        form.setValue("postArea", value);
-        setPreviewContent(value);
+        startTransition(() => {
+          form.setValue("postArea", value);
+          setPreviewContent(value);
+        });
       }, 300);
     },
     [form, setPreviewContent]
