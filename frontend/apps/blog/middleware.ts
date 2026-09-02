@@ -5,8 +5,6 @@ import { getClientIp } from '@hive/middleware/lib/common-utils';
 import { checkRequestBudget } from '@/blog/lib/request-budget';
 import { anonymousCachePolicy, type CachePolicy } from '@/blog/lib/anonymous-cache-policy';
 import { cookieNamePrefix } from '@hive/smart-signer/lib/session';
-import { isValidTagFormat } from '@transaction/lib/validation/format/tag';
-import { isCommunityFormat } from '@transaction/lib/validation/format/community';
 
 /**
  * ★★★ `/@user/followed` -> `/@user/following`, AS A REAL HTTP 308 (2026-08-13).
@@ -35,8 +33,6 @@ import { isCommunityFormat } from '@transaction/lib/validation/format/community'
  * runs on exactly this path (see the `matcher` at the bottom of this file).
  */
 const FOLLOWED_PATH = /^\/(@|%40)([a-zA-Z0-9.-]{1,16})\/followed\/?$/;
-const TOPIC_PATH = /^\/topics\/([^/]+)$/;
-const INVALID_TOPIC_SEGMENT = 'invalid.tag';
 
 // NOTE: Nonce-based CSP is disabled because Next.js 14 doesn't fully support it.
 // Next.js internal scripts (__NEXT_DATA__, hydration) don't receive nonces automatically,
@@ -163,35 +159,6 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   // The route rename, answered before anything renders — see FOLLOWED_PATH.
   // `nextUrl.clone()` carries the basePath and the query string, so a link with
   // `?foo=1` keeps it and a deployment under a basePath still lands.
-  /*
-   * ★ AN INVALID TOPIC IS A 404 DECIDED HERE, NOT IN THE PAGE (phase 4). The
-   * topic page has a loading boundary now, and a `notFound()` thrown behind a
-   * streamed boundary arrives as a 200 (see app/topics/invalid.tag/page.tsx).
-   * Same rules the page applies: a tag, or a community id shown as a tag.
-   */
-  const topicMatch = TOPIC_PATH.exec(request.nextUrl.pathname);
-  // The sentinel itself must pass, or the rewrite loops: Next runs this
-  // middleware again on the rewritten path (found on the staged build).
-  if (topicMatch && topicMatch[1] !== INVALID_TOPIC_SEGMENT) {
-    let tag = topicMatch[1];
-    try {
-      tag = decodeURIComponent(tag);
-    } catch {
-      // undecodable is invalid, same as the page's own rule
-    }
-    tag = tag.toLowerCase();
-    if (!isValidTagFormat(tag) && !isCommunityFormat(tag)) {
-      const base = await baseMiddleware(request);
-      const out = NextResponse.rewrite(new URL(`/topics/${INVALID_TOPIC_SEGMENT}`, request.url));
-      // Carry the security headers and any cookies; NOT the `x-middleware-*`
-      // markers of the `next()` response, which conflict with a rewrite (500).
-      base.headers.forEach((value, key) => {
-        if (!key.startsWith('x-middleware') && key !== 'set-cookie') out.headers.set(key, value);
-      });
-      for (const cookie of base.cookies.getAll()) out.cookies.set(cookie);
-      return out;
-    }
-  }
 
   const renamed = FOLLOWED_PATH.exec(request.nextUrl.pathname);
   if (renamed) {
