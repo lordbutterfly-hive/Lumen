@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import { createMiddleware } from '@hive/middleware/lib/common';
 import { getClientIp } from '@hive/middleware/lib/common-utils';
 import { checkRequestBudget } from '@/blog/lib/request-budget';
+import { anonymousCachePolicy, type CachePolicy } from '@/blog/lib/anonymous-cache-policy';
+import { cookieNamePrefix } from '@hive/smart-signer/lib/session';
 
 /**
  * ★★★ `/@user/followed` -> `/@user/following`, AS A REAL HTTP 308 (2026-08-13).
@@ -38,7 +40,35 @@ const FOLLOWED_PATH = /^\/(@|%40)([a-zA-Z0-9.-]{1,16})\/followed\/?$/;
 // See GitLab issue #796 for tracking nonce CSP support in future Next.js versions.
 
 // Blog-specific middleware: redirects root to /trending, applies CSP at runtime
+/**
+ * ★★★ ANONYMOUS PAGES DECLARE THEMSELVES SHARED-CACHEABLE (2026-09-02,
+ * snappiness phase 2). See lib/anonymous-cache-policy.ts for what qualifies
+ * and why. Two things happen for a qualifying request: no anonymous cookies
+ * are minted on its response (createMiddleware's `skipCookieMinting`), and
+ * the response gets an explicit `public, s-maxage=...` below, so the proxy in
+ * front of Node (Caddy with the cache module) can hold it. Signed-in readers,
+ * queries, the QA header and every other path keep today's behaviour.
+ */
+function cachePolicyFor(request: NextRequest): CachePolicy {
+  return anonymousCachePolicy({
+    pathname: request.nextUrl.pathname,
+    method: request.method,
+    // Any cookie that can personalise a render counts as a session here: the
+    // sealed session itself, the client-set `observer` (read by getObserver in
+    // lib/auth-utils.ts to personalise bridge reads) and `account_info`. A
+    // reader carrying any of them may get a page nobody else should see, so
+    // it must never be stored. The proxy mirrors this list in its bypass rule.
+    hasSession:
+      request.cookies.has(`${cookieNamePrefix}session`) ||
+      request.cookies.has('observer') ||
+      request.cookies.has('account_info'),
+    hasQuery: request.nextUrl.search.length > 0,
+    hasQaHeader: request.headers.has('x-lumen-qa')
+  });
+}
+
 const baseMiddleware = createMiddleware({
+  skipCookieMinting: (request) => cachePolicyFor(request).cacheable,
   // rootRedirect removed for the rebuild: '/' now renders the discovery home.
   // The legacy trending feed still lives at /trending.
   csp: {
@@ -136,6 +166,12 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   }
 
   const response = await baseMiddleware(request);
+  const policy = cachePolicyFor(request);
+  if (policy.cacheable && !response.headers.has('set-cookie')) {
+    response.headers.set('cache-control', policy.cacheControl as string);
+    // Read by the proxy's access log and by our checks, never by a browser.
+    response.headers.set('x-lumen-cache-policy', policy.klass);
+  }
   if (response.headers.has('set-cookie') && !response.headers.has('cache-control')) {
     response.headers.set('cache-control', 'private, no-store');
   }

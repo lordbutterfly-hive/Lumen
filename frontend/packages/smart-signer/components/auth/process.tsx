@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, MutableRefObject } from 'react';
 import { cookieNamePrefix } from '@smart-signer/lib/session';
+import { ensureLoginChallenge } from '@smart-signer/lib/ensure-login-challenge';
 import { getCookie } from '@ui/lib/utils';
 import { KeyType } from '@smart-signer/types/common';
 import { useSignIn } from '@smart-signer/lib/auth/use-sign-in';
@@ -69,7 +70,7 @@ export const useProcessAuth = (authenticateOnBackend: boolean, strict: boolean) 
       const hiveChain = await getChain();
       // Read challenge directly from cookie — React state may not have updated yet
       // if signAuth is called early (e.g., biometric auto-unlock on page load).
-      const challenge = loginChallenge || getCookie(`${cookieNamePrefix}login_challenge`) || '';
+      const challenge = loginChallenge || (await ensureLoginChallenge());
       const operation: WaxOperation = await getOperationForLogin(username, keyType, challenge, loginType);
 
       const expr = new Date();

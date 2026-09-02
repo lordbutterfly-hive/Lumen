@@ -9,6 +9,18 @@ import { buildCsp, SECURITY_HEADERS, type CspConfig } from './csp';
  */
 export interface MiddlewareConfig {
   /**
+   * ★ NO COOKIE ON A SHARED-CACHEABLE PAGE (2026-09-02, snappiness phase 2).
+   * When this returns true for a request, the anonymous cookies
+   * (`session_uid`, the login challenge pair) are NOT minted on that
+   * response. The app uses it for the anonymous pages a proxy may store: a
+   * stored Set-Cookie would replay one visitor's cookies to the next, which
+   * is the exact hazard the "cookie-bearing responses are never
+   * shared-cacheable" rule in apps/blog/middleware.ts exists for. The first
+   * API call of the visit (`/api/users/me` on every page load) still passes
+   * through here without the flag and mints them.
+   */
+  skipCookieMinting?: (request: NextRequest) => boolean;
+  /**
    * If provided, redirect root path (/) to this path
    * Example: '/trending' will redirect / to /trending
    */
@@ -61,10 +73,11 @@ export function createMiddleware(config: MiddlewareConfig = {}) {
       }
     }
 
-    setLoginChallengeCookies(request, res);
+    const mintCookies = !(config.skipCookieMinting && config.skipCookieMinting(request));
+    if (mintCookies) setLoginChallengeCookies(request, res);
 
     // Generate session_uid for browser tracking (persists across login/logout)
-    if (!request.cookies.has('session_uid')) {
+    if (mintCookies && !request.cookies.has('session_uid')) {
       try {
         res.cookies.set({
           name: 'session_uid',

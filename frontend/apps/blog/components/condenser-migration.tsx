@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useSignIn } from '@smart-signer/lib/auth/use-sign-in';
 import { LoginType, KeyType } from '@smart-signer/types/common';
-import { getCookie } from '@ui/lib/utils';
+import { ensureLoginChallenge } from '@smart-signer/lib/ensure-login-challenge';
 import { cookieNamePrefix } from '@smart-signer/lib/session';
 import { getSigner } from '@smart-signer/lib/signer/get-signer';
 import { getOperationForLogin } from '@smart-signer/lib/login-operation';
@@ -98,10 +98,15 @@ export default function CondenserMigration() {
       }
 
       try {
-        const loginChallenge = getCookie(`${cookieNamePrefix}login_challenge`);
+        // ★ The challenge is no longer minted on cacheable anonymous page
+        // responses (snappiness phase 2); the first API call of the visit mints
+        // it, and this asks for it explicitly rather than assuming the page
+        // response carried it (found in review: this path used to wipe the
+        // stored key and retry forever on a cookie-less first load).
+        const loginChallenge = await ensureLoginChallenge();
         if (!loginChallenge) {
-          // Middleware should set this on every request. If missing,
-          // don't mark migrated so we retry on next page load.
+          // Could not obtain a challenge (offline, API down): do not mark
+          // migrated so we retry on the next page load.
           logger.warn('Condenser migration: no login_challenge cookie');
           removeStoredWif(username, loginType);
           return;

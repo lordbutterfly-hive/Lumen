@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 
 import { useRouter } from 'next/router';
 import { LoginType } from '@smart-signer/types/common';
-import { getCookie } from '@ui/lib/utils';
+import { ensureLoginChallenge } from '@smart-signer/lib/ensure-login-challenge';
 import type { Signatures, PostLoginSchema } from '@smart-signer/lib/auth/login-schema';
 import { useSignIn } from '@smart-signer/lib/auth/use-sign-in';
 import { useUser } from '@smart-signer/lib/auth/use-user';
@@ -41,7 +41,8 @@ export function LoginPanel({
   const signIn = useSignIn();
 
   useEffect(() => {
-    setLoginChallenge(getCookie(`${cookieNamePrefix}login_challenge`));
+    // Asks for the challenge if the (possibly cached) page response did not carry it.
+    void ensureLoginChallenge().then(setLoginChallenge);
   }, []);
 
   // Here we just check if user is already logged in and we redirect him
