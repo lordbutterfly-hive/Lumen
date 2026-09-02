@@ -94,7 +94,7 @@ const ROW_CLASS =
    * Fractional pixels are deliberate: rounding each one would drift the row off
    * a clean 10%.
    */
-  'flex items-center gap-[15.4px] rounded-xl px-[15.4px] py-[12.1px] font-sans text-[16.5px] leading-[26.4px] text-ink-8 transition-colors';
+  'flex items-center gap-[15.4px] rounded-xl px-[15.4px] py-[12.1px] font-ui text-[16.5px] leading-[26.4px] text-ink-8 transition-colors';
 /*
  * ★ THE ACTIVE TREATMENT MOVED TO left-rail.module.css (owner design `nav-2a`,
  * 2026-08-18): a brand-tinted seat, the brand label, and a 2px rule that grows in at the

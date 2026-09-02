@@ -118,7 +118,7 @@ export function MeritumTicker({
       {showLive ? (
         <div className={styles.live}>
           <span className={clsx(styles.dot, 'mt-dot bg-meritum-surface-brand')} aria-hidden="true" />
-          <span className="font-sans text-label font-bold uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
+          <span className="font-ui text-label font-medium uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
             {liveLabel}
           </span>
           {/*
@@ -177,16 +177,16 @@ export function MeritumTicker({
                  * unique today, but the index alone would be unstable if the
                  * list were ever reordered, and this list is never filtered.
                  */
-                <span className={clsx(styles.item, 'font-sans text-18')} key={`${item.handle}-${itemIndex}`}>
+                <span className={clsx(styles.item, 'font-ui text-18')} key={`${item.handle}-${itemIndex}`}>
                   <span className={clsx(styles.glyph, 'text-meritum-ink-faint')} aria-hidden="true">
                     {ITEM_GLYPH}
                   </span>
-                  <span className="font-bold text-meritum-ink">{item.handle}</span>
+                  <span className="font-medium text-meritum-ink">{item.handle}</span>
                   <span className="font-medium text-meritum-ink-muted">{item.sentence}</span>
                   {/* ★ The figure sits HERE, mid-sentence, because that is where it was
                       written. Item 4 ("has 12 holders on day one") and item 7 ("launched
                       in 5 seconds flat") are ungrammatical if it is moved to the end. */}
-                  <span className="font-bold tabular-nums text-meritum-ink-brand">{item.figure}</span>
+                  <span className="font-medium tabular-nums text-meritum-ink-brand">{item.figure}</span>
                   {item.trailing ? (
                     <span className="font-medium text-meritum-ink-muted">{item.trailing}</span>
                   ) : null}

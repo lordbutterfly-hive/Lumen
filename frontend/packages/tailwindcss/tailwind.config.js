@@ -34,8 +34,10 @@ module.exports = {
        */
       fontFamily: {
         lora: ['var(--font-lora)', 'Georgia', 'Cambria', 'serif'],
-        sans: ['var(--font-lora)', 'Georgia', 'Cambria', 'serif'],
-        serif: ['var(--font-lora)', 'Georgia', 'Cambria', 'serif'],
+        text: ['var(--font-text)', 'Georgia', 'Cambria', 'serif'],
+        ui: ['var(--font-ui)'],
+        sans: ['var(--font-ui)', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+        serif: ['var(--font-ui)', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
         mono: ['ui-monospace', 'SFMono-Regular', 'SF Mono', 'Cascadia Mono', 'Menlo', 'Consolas', '"Liberation Mono"', 'monospace'],
         consolas: ['ui-monospace', 'SFMono-Regular', 'SF Mono', 'Cascadia Mono', 'Menlo', 'Consolas', '"Liberation Mono"', 'monospace']
       },

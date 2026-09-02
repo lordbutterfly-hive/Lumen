@@ -26,9 +26,9 @@ import { useDelegations } from '../hooks/use-delegations';
  * brand red.
  */
 const PRIMARY_BUTTON_CLASS =
-  'rounded-card bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
+  'rounded-card bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-medium text-ink-27 transition-colors hover:bg-surface-brand-17';
 const SECONDARY_BUTTON_CLASS =
-  'lm-press rounded-card border border-line-11 px-4 py-2 text-caption font-semibold text-ink-7 transition-colors hover:bg-surface-16';
+  'lm-press rounded-card border border-line-11 px-4 py-2 text-caption font-medium text-ink-7 transition-colors hover:bg-surface-16';
 
 /**
  * Center column: fetches the logged-in user's real balances (see
@@ -119,7 +119,7 @@ export default function WalletContent() {
     return (
       <div data-testid="wallet-content-logged-out">
         <PageMasthead title={t('wallet.page_title')}>
-          <p className="max-w-[620px] font-serif text-caption text-ink-10">
+          <p className="max-w-[620px] font-ui text-caption text-ink-10">
             {t('wallet.login_required')}
           </p>
         </PageMasthead>
@@ -149,7 +149,7 @@ export default function WalletContent() {
       return (
         <div data-testid="wallet-content-lite-wallet">
           <PageMasthead title={t('wallet.wallet_title')}>
-            <p className="max-w-[620px] font-serif text-caption text-ink-10">
+            <p className="max-w-[620px] font-ui text-caption text-ink-10">
               {t('wallet.wallet_body')}
             </p>
           </PageMasthead>
@@ -160,7 +160,7 @@ export default function WalletContent() {
                 className="flex items-center justify-between gap-3 rounded-card border border-line-9 bg-surface-1 px-4 py-3"
               >
                 <span className="flex min-w-0 flex-col">
-                  <span className="font-sans text-[14px] leading-[22px] font-semibold text-ink-2">
+                  <span className="font-ui text-[14px] leading-[22px] font-medium text-ink-2">
                     {a.kind === 'evm' ? t('wallet.chain_evm') : t('wallet.chain_btc')}
                   </span>
                   {/* The address is the account tokens are held under. Shown in FULL
@@ -195,7 +195,7 @@ export default function WalletContent() {
     return (
       <div data-testid="wallet-content-lite">
         <PageMasthead title={t('wallet.lite_title')}>
-          <p className="max-w-[620px] font-serif text-caption text-ink-10">
+          <p className="max-w-[620px] font-ui text-caption text-ink-10">
             {t('wallet.lite_body')}
           </p>
         </PageMasthead>
@@ -254,7 +254,7 @@ export default function WalletContent() {
           </Link>
         }
       >
-        <p className="max-w-[620px] font-serif text-caption text-ink-10">
+        <p className="max-w-[620px] font-ui text-caption text-ink-10">
           {t('wallet.masthead_meta', { username: user.username })}
         </p>
       </PageMasthead>

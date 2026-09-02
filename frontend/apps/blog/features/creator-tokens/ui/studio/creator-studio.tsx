@@ -48,11 +48,11 @@ const Stat: FC<{ label: string; value: string; sub?: string; green?: boolean }> 
   green
 }) => (
   <div>
-    <div className="text-label font-semibold uppercase tracking-wide text-ink-14">{label}</div>
-    <div className={`mt-1 text-[22px] leading-[34px] font-bold tabular-nums ${green ? 'text-ink-ok-2' : 'text-ink-2'}`}>
+    <div className="text-label font-medium uppercase tracking-wide text-ink-14 font-ui">{label}</div>
+    <div className={`mt-1 text-[22px] leading-[34px] font-medium tabular-nums font-ui ${green ? 'text-ink-ok-2' : 'text-ink-2'}`}>
       {value}
     </div>
-    {sub ? <div className="mt-0.5 text-caption tabular-nums text-ink-10">{sub}</div> : null}
+    {sub ? <div className="mt-0.5 text-caption tabular-nums text-ink-10 font-ui">{sub}</div> : null}
   </div>
 );
 
@@ -121,7 +121,7 @@ const PriceInput: FC<{
           onFailure?.(`The price stayed at $${value}. ${writeFailureMessage(error, 'The chain refused the change. A price may only move 2x per 7 days.')}`);
         }
       }}
-      className="ml-1 w-[70px] border-0 text-[15px] leading-[24px] font-bold tabular-nums text-ink-2 outline-none focus-visible:outline-none disabled:opacity-60"
+      className="ml-1 w-[70px] border-0 text-[15px] leading-[24px] tabular-nums text-ink-2 font-num outline-none focus-visible:outline-none disabled:opacity-60"
     />
   );
 };
@@ -173,7 +173,7 @@ const TitleInput: FC<{
           onFailure?.(`The name stayed "${value}". ${writeFailureMessage(error, 'The chain refused the rename.')}`);
         }
       }}
-      className="w-full truncate border-0 bg-transparent text-[14px] leading-[22px] font-semibold text-ink-2 outline-none focus-visible:outline-none focus:underline disabled:opacity-60"
+      className="w-full truncate border-0 bg-transparent text-[14px] leading-[22px] font-medium text-ink-2 font-ui outline-none focus-visible:outline-none focus:underline disabled:opacity-60"
     />
   );
 };
@@ -224,12 +224,12 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
   const windowClosed = dueLabel === undefined;
   return (
     <ModalShell width={500} onClose={onClose} title="Mark this job delivered" className="p-6">
-      <div className="mb-2 font-serif text-xl font-semibold text-ink-2">Mark this job delivered</div>
+      <div className="mb-2 font-ui text-xl font-medium text-ink-2">Mark this job delivered</div>
       {/* The contract carries a REFERENCE, not the brief (USER RULING
             2026-07-28): it facilitates payment and reputation, and the two
             parties arrange the work between themselves. Showing the reference is
             honest; pretending a message arrived here would not be. */}
-      <div className="mb-3 rounded-control border border-line-9 bg-surface-16 px-3.5 py-3 text-caption text-ink-8">
+      <div className="mb-3 rounded-control border border-line-9 bg-surface-16 px-3.5 py-3 text-caption text-ink-8 font-ui">
         Reference <strong className="font-mono">{ask.contentHash || '—'}</strong> · from @{displayHandle(ask.asker)}
       </div>
       {/* ★ THE DEADLINE, ON THE SCREEN WHERE IT IS DECIDED (A14, 2026-08-23).
@@ -246,7 +246,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
       {dueLabel ? (
         <div
           className={cn(
-            'mb-3 rounded-control px-3.5 py-2.5 text-caption font-semibold',
+            'mb-3 rounded-control px-3.5 py-2.5 text-caption font-medium font-ui',
             urgent ? 'bg-surface-warn-4 text-ink-warn-3' : 'bg-surface-16 text-ink-8'
           )}
           data-testid="answer-modal-deadline"
@@ -256,7 +256,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
         </div>
       ) : (
         <div
-          className="mb-3 rounded-control bg-surface-warn-4 px-3.5 py-2.5 text-caption font-semibold text-ink-warn-3"
+          className="mb-3 rounded-control bg-surface-warn-4 px-3.5 py-2.5 text-caption font-medium text-ink-warn-3 font-ui"
           data-testid="answer-modal-deadline"
         >
           {/* ★ "MAY NO LONGER RELEASE" WAS A HEDGE ON A CERTAINTY (2026-08-30,
@@ -268,7 +268,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
           reclaims their tokens, and the chain records a miss against your delivery record.
         </div>
       )}
-      <p className="mb-3 text-caption text-ink-10">
+      <p className="mb-3 text-caption text-ink-10 font-ui">
         Arrange and deliver the work with @{displayHandle(ask.asker)} however you normally would. Marking it delivered
         releases the escrow to you, and the buyer then rates it, which is what your token’s reputation is
         built from.
@@ -287,7 +287,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
           setFailure(null);
         }}
         placeholder="Where did you deliver it? A link, a ticket number, “sent by email”…"
-        className="h-[130px] w-full resize-y rounded-xl border border-line-11 px-4 py-3 font-serif text-[15px] leading-[24px] text-ink-2 outline-none focus-visible:outline-none focus:border-line-brand-10"
+        className="h-[130px] w-full resize-y rounded-xl border border-line-11 px-4 py-3 font-ui text-[15px] leading-[24px] text-ink-2 outline-none focus-visible:outline-none focus:border-line-brand-10"
       />
       {/* ★ THE REASON, NOT JUST A DEAD BUTTON. A disabled control with no
           explanation reads as a broken page, and the failure it is standing in
@@ -295,16 +295,16 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
           credits, the chain refuses the answer, the escrow never releases and
           the miss lands on their delivery record. The message is the shared
           validator's own, so it names the exact character or byte count. */}
-      <div className="mt-1 flex justify-between gap-3 text-caption text-ink-14">
-        <span className={answerProblem ? 'font-semibold text-ink-brand-6' : ''}>
+      <div className="mt-1 flex justify-between gap-3 text-caption text-ink-14 font-ui">
+        <span className={answerProblem ? 'font-medium text-ink-brand-6 font-ui' : 'font-ui'}>
           {answerProblem ?? 'Stored on chain as a public reference.'}
         </span>
-        <span className="tabular-nums">
+        <span className="tabular-nums font-num">
           {text.length}/{MAX_HASH_LEN}
         </span>
       </div>
-      <div className="mt-3 rounded-control bg-surface-18 px-3.5 py-2.5 text-caption text-ink-ok-2">
-        This pays you <strong className="tabular-nums">{tok(ask.tokensEscrowed)} tokens</strong> and closes the job. It can’t be undone,
+      <div className="mt-3 rounded-control bg-surface-18 px-3.5 py-2.5 text-caption text-ink-ok-2 font-ui">
+        This pays you <strong className="tabular-nums font-num">{tok(ask.tokensEscrowed)} tokens</strong> and closes the job. It can’t be undone,
         and the buyer rates it afterwards.
       </div>
       <div className="mt-4 flex gap-3">
@@ -332,7 +332,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
             }
           }}
           disabled={busy || windowClosed}
-          className="flex-1 rounded-xl border border-line-11 py-3 text-[14px] leading-[22px] font-semibold text-ink-10 disabled:opacity-50"
+          className="flex-1 rounded-xl border border-line-11 py-3 text-[14px] leading-[22px] font-medium text-ink-10 font-ui disabled:opacity-50"
         >
           Decline &amp; refund
         </button>
@@ -363,13 +363,13 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
             }
           }}
           disabled={busy || !answerValid || windowClosed}
-          className="flex-1 rounded-xl bg-surface-brand-12 py-3 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-brand-17 disabled:opacity-50"
+          className="flex-1 rounded-xl bg-surface-brand-12 py-3 text-[14px] leading-[22px] font-medium text-ink-27 font-ui hover:bg-surface-brand-17 disabled:opacity-50"
         >
           {busy ? 'Confirm in your wallet…' : 'Mark as delivered'}
         </button>
       </div>
       {failure ? (
-        <div className="mt-3 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
+        <div className="mt-3 text-center text-caption font-medium text-ink-brand-6 font-ui">{failure}</div>
       ) : null}
     </ModalShell>
   );
@@ -395,8 +395,8 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
       title="End your Meritum?"
       className="border border-line-brand-1 p-6"
     >
-      <div className="mb-2 font-serif text-xl font-semibold text-ink-brand-6">End your Meritum?</div>
-      <ul className="mb-4 space-y-1.5 font-serif text-[14px] leading-[22px] text-ink-8">
+      <div className="mb-2 font-ui text-xl font-medium text-ink-brand-6">End your Meritum?</div>
+      <ul className="mb-4 space-y-1.5 font-ui text-[14px] leading-[22px] text-ink-8">
         <li>· The market freezes now. No new buys or asks.</li>
         <li>· You’re removed from discovery.</li>
         {/* ★ "refunded at the floor" until 2026-08-27. With the figure hidden
@@ -413,19 +413,19 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
         <li>· Your delivery record is lost. Coming back means a new token.</li>
         <li>· This can’t be undone.</li>
       </ul>
-      <label className="mb-1.5 block text-caption font-semibold text-ink-10">
+      <label className="mb-1.5 block text-caption font-medium text-ink-10 font-ui">
         Type your handle (@{handle}) to confirm
       </label>
       <input
         value={confirm}
         onChange={(e) => setConfirm(e.target.value)}
         placeholder={`@${handle}`}
-        className="mb-4 w-full rounded-xl border border-line-11 px-4 py-3 text-[15px] leading-[24px] font-semibold outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
+        className="mb-4 w-full rounded-xl border border-line-11 px-4 py-3 text-[15px] leading-[24px] font-medium font-ui outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
       />
       <div className="flex gap-3">
         <button
           onClick={onClose}
-          className="flex-1 rounded-xl border border-line-11 py-3 text-[14px] leading-[22px] font-semibold text-ink-10"
+          className="flex-1 rounded-xl border border-line-11 py-3 text-[14px] leading-[22px] font-medium text-ink-10 font-ui"
         >
           Cancel
         </button>
@@ -453,13 +453,13 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
             }
           }}
           disabled={!ok || busy}
-          className="flex-1 rounded-xl bg-surface-brand-12 py-3 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-brand-17 disabled:opacity-50"
+          className="flex-1 rounded-xl bg-surface-brand-12 py-3 text-[14px] leading-[22px] font-medium text-ink-27 font-ui hover:bg-surface-brand-17 disabled:opacity-50"
         >
           End my token
         </button>
       </div>
       {failure ? (
-        <div className="mt-3 text-center text-caption font-semibold text-ink-brand-6">{failure}</div>
+        <div className="mt-3 text-center text-caption font-medium text-ink-brand-6 font-ui">{failure}</div>
       ) : null}
     </ModalShell>
   );
@@ -515,9 +515,9 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
     title.trim().length > 0 && titleProblem === null && Number.isFinite(usd) && usd > 0 && supplyProblem === null && !atOfferingCap;
   return (
     <div className="mt-4 border-t border-line-2 pt-4">
-      <div className="mb-2 text-caption font-semibold text-ink-10">Add a service</div>
+      <div className="mb-2 text-caption font-medium text-ink-10 font-ui">Add a service</div>
       {atOfferingCap ? (
-        <p className="mb-2 text-caption text-ink-warn-3">
+        <p className="mb-2 text-caption text-ink-warn-3 font-ui">
           You’ve reached the limit of {MAX_OFFERINGS} services. Delete one to add another.
         </p>
       ) : null}
@@ -530,14 +530,14 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
           }}
           placeholder="e.g. Review my code"
           aria-invalid={titleProblem !== null}
-          className={`min-w-[200px] flex-1 rounded-control border px-3 py-2 text-[14px] leading-[22px] outline-none focus-visible:outline-none focus:ring-1 ${
+          className={`min-w-[200px] flex-1 rounded-control border px-3 py-2 text-[14px] leading-[22px] font-ui outline-none focus-visible:outline-none focus:ring-1 ${
             titleProblem !== null
               ? 'border-line-warn-2 focus:border-line-warn-2 focus:ring-line-warn-2'
               : 'border-line-11 focus:border-line-brand-10 focus:ring-line-brand-10'
           }`}
         />
         <div className="flex items-center rounded-control border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
-          <span className="font-bold text-ink-14">$</span>
+          <span className="text-ink-14 font-num">$</span>
           <input
             value={price}
             onChange={(e) => {
@@ -546,7 +546,7 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
             }}
             inputMode="decimal"
             placeholder="0"
-            className="ml-1 w-[80px] border-0 text-[14px] leading-[22px] font-bold tabular-nums outline-none focus-visible:outline-none"
+            className="ml-1 w-[80px] border-0 text-[14px] leading-[22px] tabular-nums font-num outline-none focus-visible:outline-none"
           />
         </div>
         <button
@@ -563,7 +563,7 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
             }
           }}
           disabled={!valid || studio.isBusy}
-          className="rounded-control bg-surface-43 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
+          className="rounded-control bg-surface-43 px-4 py-2 text-caption font-medium text-ink-27 font-ui disabled:opacity-50"
         >
           Add
         </button>
@@ -571,13 +571,13 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
       {/* The typing-time problem takes precedence: it is actionable right now,
           whereas `failure` is the outcome of an attempt already made. */}
       {titleProblem ? (
-        <div className="mt-2 text-caption font-semibold text-ink-warn-3">{titleProblem}</div>
+        <div className="mt-2 text-caption font-medium text-ink-warn-3 font-ui">{titleProblem}</div>
       ) : supplyProblem ? (
         // Same precedence rule as the title: actionable-right-now beats the
         // outcome of an attempt already made.
-        <div className="mt-2 text-caption font-semibold text-ink-warn-3">{supplyProblem}</div>
+        <div className="mt-2 text-caption font-medium text-ink-warn-3 font-ui">{supplyProblem}</div>
       ) : failure ? (
-        <div className="mt-2 text-caption font-semibold text-ink-brand-6">{failure}</div>
+        <div className="mt-2 text-caption font-medium text-ink-brand-6 font-ui">{failure}</div>
       ) : null}
     </div>
   );
@@ -659,10 +659,10 @@ const CreatorStudio: FC = () => {
     return (
       <TokenShell back={{ href: '/creators', label: '← All creators' }}>
         <div className="mx-auto max-w-[560px] pt-16 text-center">
-          <h1 className="font-serif text-3xl font-semibold text-ink-2">Creator Studio</h1>
-          <p className="mt-3 font-serif text-[15px] leading-[24px] text-ink-10">
+          <h1 className="font-ui text-3xl font-medium text-ink-2">Creator Studio</h1>
+          <p className="mt-3 font-ui text-[15px] leading-[24px] text-ink-10">
             This account can’t sign transactions yet, so it can’t run a Meritum.{' '}
-            <a href="/upgrade" className="font-semibold text-ink-brand-6 hover:underline">
+            <a href="/upgrade" className="font-medium text-ink-brand-6 hover:underline">
               Upgrade to a full account
             </a>{' '}
             to launch one. You can look through the steps first.
@@ -674,7 +674,7 @@ const CreatorStudio: FC = () => {
               Both exits are real links now, matching launch-wizard.tsx:179. */}
           <a
             href="/creators/launch"
-            className="mt-6 inline-block rounded-card border border-line-9 px-6 py-3 text-[15px] leading-[24px] font-bold text-ink-2 hover:bg-surface-17"
+            className="mt-6 inline-block rounded-card border border-line-9 px-6 py-3 text-[15px] leading-[24px] font-medium text-ink-2 font-ui hover:bg-surface-17"
           >
             Open the launch wizard
           </a>
@@ -705,7 +705,7 @@ const CreatorStudio: FC = () => {
     return (
       <TokenShell back={{ href: '/creators', label: '← All creators' }}>
         <div className="mx-auto max-w-[560px] pt-16 text-center">
-          <h1 className="font-serif text-3xl font-semibold text-ink-2">Launch your Meritum</h1>
+          <h1 className="font-ui text-3xl font-medium text-ink-2">Launch your Meritum</h1>
           {/* ★ "FREE TO LAUNCH" ALONE READ AS A BAIT (2026-08-23, journey run). It is true,
               and so is "About $10 a month" at step 1 of the wizard and "~$10/month" in the
               Subscription card below - the reader met the free claim first and the cost
@@ -713,13 +713,13 @@ const CreatorStudio: FC = () => {
               costs one sentence and removes the reveal. Figures match `term_listed_value`
               ("About $10 a month.") and the Subscription card verbatim; if either moves,
               move all three. */}
-          <p className="mt-3 font-serif text-[15px] leading-[24px] text-ink-10">
+          <p className="mt-3 font-ui text-[15px] leading-[24px] text-ink-10">
             One token, bound to your account, that trades on a live market and is spent on your services. Free
             to launch, then about $10 a month to stay listed. First month’s on the house.
           </p>
           <a
             href="/creators/launch"
-            className="mt-6 inline-block rounded-card bg-surface-brand-12 px-6 py-3 text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-brand-17"
+            className="mt-6 inline-block rounded-card bg-surface-brand-12 px-6 py-3 text-[15px] leading-[24px] font-medium text-ink-27 font-ui hover:bg-surface-brand-17"
           >
             Open the launch wizard
           </a>
@@ -841,12 +841,12 @@ const CreatorStudio: FC = () => {
   const banner =
     overdue || market.windingDown ? (
       <div className="mb-5 flex items-center justify-between gap-3 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5">
-        <span className="text-[14px] leading-[22px] font-semibold text-ink-warn-3">{lapseHeadline}</span>
+        <span className="text-[14px] leading-[22px] font-medium text-ink-warn-3 font-ui">{lapseHeadline}</span>
         {payControlAllowed ? (
           <button
             onClick={() => void runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.')}
             disabled={studio.isBusy}
-            className="rounded-control bg-surface-warn-11 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
+            className="rounded-control bg-surface-warn-11 px-4 py-2 text-caption font-medium text-ink-27 font-ui disabled:opacity-50"
           >
             Renew ~$10
           </button>
@@ -860,8 +860,8 @@ const CreatorStudio: FC = () => {
         <div className="mb-1 flex items-center gap-3">
           <span className="h-11 w-11 rounded-card bg-surface-28" />
           <div>
-            <h1 className="font-serif text-2xl font-semibold text-ink-2">Creator Studio</h1>
-            <p className="text-[14px] leading-[22px] text-ink-10">Your token @{displayHandle(studio.creator)} · your control room</p>
+            <h1 className="font-ui text-2xl font-medium text-ink-2">Creator Studio</h1>
+            <p className="text-[14px] leading-[22px] text-ink-10 font-ui">Your token @{displayHandle(studio.creator)} · your control room</p>
           </div>
         </div>
 
@@ -878,13 +878,13 @@ const CreatorStudio: FC = () => {
               key={s.id}
               onClick={() => setSection(s.id)}
               style={section === s.id ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
-              className={`rounded-control px-4 py-2 font-sans text-[14px] leading-[22px] font-semibold transition-colors ${
+              className={`rounded-control px-4 py-2 font-ui text-[14px] leading-[22px] font-medium transition-colors ${
                 section === s.id ? 'bg-[var(--lum-1)] text-ink-2' : 'text-ink-10 hover:text-ink-2'
               }`}
             >
               {s.label}
               {s.id === 'inbox' && inbox.length > 0 ? (
-                <span className="ml-1.5 rounded-full bg-surface-brand-12 px-1.5 text-caption tabular-nums text-ink-27">
+                <span className="ml-1.5 rounded-full bg-surface-brand-12 px-1.5 text-caption tabular-nums text-ink-27 font-num">
                   {inbox.length}
                 </span>
               ) : null}
@@ -894,7 +894,7 @@ const CreatorStudio: FC = () => {
 
         {banner}
         {actionFailure ? (
-          <div className="mb-5 rounded-card border border-line-brand-3 bg-surface-brand-7 px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-brand-6">
+          <div className="mb-5 rounded-card border border-line-brand-3 bg-surface-brand-7 px-5 py-3.5 text-[14px] leading-[22px] font-medium text-ink-brand-6 font-ui">
             {actionFailure}
           </div>
         ) : null}
@@ -916,7 +916,7 @@ const CreatorStudio: FC = () => {
           // with whatever button the creator just greyed out, with no per-section
           // copies and no per-action tracking.
           <div
-            className="sticky top-0 z-10 mb-5 rounded-card border border-line-11 bg-surface-1 px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-7"
+            className="sticky top-0 z-10 mb-5 rounded-card border border-line-11 bg-surface-1 px-5 py-3.5 text-[14px] leading-[22px] font-medium text-ink-7 font-ui"
             role="status"
             aria-live="polite"
           >
@@ -1052,7 +1052,7 @@ const CreatorStudio: FC = () => {
           <div className="flex flex-col gap-2.5">
             {inboxTruncated ? (
               <Card>
-                <p className="py-3 text-center text-caption text-ink-warn-3">
+                <p className="py-3 text-center text-caption text-ink-warn-3 font-ui">
                   You have a very large number of requests. Showing the most recent; {inboxOlderNotScanned} older
                   {inboxOlderNotScanned === 1 ? ' request is' : ' requests are'} not listed here. Answer or decline the ones below first.
                 </p>
@@ -1063,12 +1063,12 @@ const CreatorStudio: FC = () => {
                 not reassure — the same shape the Offerings tab already uses. */}
             {inboxUnavailable ? (
               <Card>
-                <div className="py-6 text-center text-caption text-ink-brand-2">
+                <div className="py-6 text-center text-caption text-ink-brand-2 font-ui">
                   <p>Your requests couldn’t be loaded just now. This is not an empty inbox.</p>
                   <button
                     type="button"
                     onClick={() => studio.retry()}
-                    className="mt-2 rounded-control border border-line-12 bg-surface-1 px-3 py-1.5 text-caption font-semibold text-ink-2 hover:border-line-28"
+                    className="mt-2 rounded-control border border-line-12 bg-surface-1 px-3 py-1.5 text-caption font-medium text-ink-2 font-ui hover:border-line-28"
                   >
                     Try again
                   </button>
@@ -1097,20 +1097,20 @@ const CreatorStudio: FC = () => {
               inbox.map((a, i) => (
                 <Card key={a.id} className={a.urgent ? 'border-line-warn-2 bg-surface-warn-4' : ''}>
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-[15px] leading-[24px] font-semibold text-ink-2">{a.service}</div>
+                    <div className="text-[15px] leading-[24px] font-medium text-ink-2 font-ui">{a.service}</div>
                     <div
-                      className={`text-caption font-semibold ${a.urgent ? 'text-ink-warn-3' : 'text-ink-10'}`}
+                      className={`text-caption font-medium font-ui ${a.urgent ? 'text-ink-warn-3' : 'text-ink-10'}`}
                     >
                       {a.dueLabel}
                     </div>
                   </div>
-                  <div className="mt-1 text-caption tabular-nums text-ink-10">
+                  <div className="mt-1 text-caption tabular-nums text-ink-10 font-num">
                     {usdWhole(a.costUsd)} · {tok(a.tokens)} tokens escrowed
                   </div>
                   <div className="mt-3">
                     <button
                       onClick={() => setAnswering(rawInbox[i])}
-                      className="rounded-control bg-surface-brand-12 px-4 py-2 text-caption font-semibold text-ink-27 hover:bg-surface-brand-17"
+                      className="rounded-control bg-surface-brand-12 px-4 py-2 text-caption font-medium text-ink-27 font-ui hover:bg-surface-brand-17"
                     >
                       Answer or decline
                     </button>
@@ -1131,19 +1131,19 @@ const CreatorStudio: FC = () => {
                 see it cannot learn from it. */}
             {!inboxUnavailable && expiredInbox.length > 0 ? (
               <div className="mt-1.5 flex flex-col gap-2.5">
-                <div className="text-label font-semibold uppercase tracking-wide text-ink-14">
+                <div className="text-label font-medium uppercase tracking-wide text-ink-14 font-ui">
                   Past their deadline
                 </div>
                 {expiredInbox.map((a) => (
                   <Card key={a.id} className="border-dashed">
                     <div className="flex items-center justify-between gap-3">
-                      <div className="text-[15px] leading-[24px] font-semibold text-ink-10">{a.service}</div>
-                      <div className="text-caption font-semibold text-ink-14">Deadline passed</div>
+                      <div className="text-[15px] leading-[24px] font-medium text-ink-10 font-ui">{a.service}</div>
+                      <div className="text-caption font-medium text-ink-14 font-ui">Deadline passed</div>
                     </div>
-                    <div className="mt-1 text-caption tabular-nums text-ink-14">
+                    <div className="mt-1 text-caption tabular-nums text-ink-14 font-num">
                       {usdWhole(a.costUsd)} · {tok(a.tokens)} tokens escrowed
                     </div>
-                    <p className="mt-2 text-caption text-ink-14">
+                    <p className="mt-2 text-caption text-ink-14 font-ui">
                       The answer window has closed, so this can no longer be answered or declined. The buyer
                       reclaims their tokens, and the chain records a miss against your delivery record.
                     </p>
@@ -1156,7 +1156,7 @@ const CreatorStudio: FC = () => {
 
         {section === 'offerings' ? (
           <Card>
-            <div className="mb-3 font-serif text-lg font-semibold text-ink-2">
+            <div className="mb-3 font-ui text-lg font-medium text-ink-2">
               Your services &amp; prices
             </div>
             {/* ★★★ SAY IT BEFORE THEY PRICE IT (2026-08-30, clauderfly-43).
@@ -1173,11 +1173,11 @@ const CreatorStudio: FC = () => {
                 means the quote has not answered, and renders nothing rather than
                 claiming the shop works. */}
             {servicesOracleStatus && servicesOracleStatus !== 'ok' ? (
-              <div className="mb-4 rounded-card border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-caption font-semibold text-ink-warn-3">
+              <div className="mb-4 rounded-card border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-caption font-medium text-ink-warn-3 font-ui">
                 {creatorOracleNotice(servicesOracleStatus)}
               </div>
             ) : null}
-            <p className="mb-4 text-caption text-ink-10">
+            <p className="mb-4 text-caption text-ink-10 font-ui">
               Buyers pay these in your token at the live price. Set the dollar price: the token amount
               follows the market. A price can move at most 2× in any 7 days, and that limit follows the
               SERVICE NAME, so renaming or re-creating one won’t reset it.
@@ -1192,8 +1192,8 @@ const CreatorStudio: FC = () => {
                 below, so there is one way to price something, not two. */}
             <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-line-11 bg-surface-5 px-4 py-3">
               <div className="min-w-0">
-                <div className="text-[14px] leading-[22px] font-semibold text-ink-2">Default ask price</div>
-                <div className="text-caption text-ink-14">
+                <div className="text-[14px] leading-[22px] font-medium text-ink-2 font-ui">Default ask price</div>
+                <div className="text-caption text-ink-14 font-ui">
                   {studio.offerings === null
                     ? 'Shown on your token page as “Ask a question”.'
                     : studio.offerings.length === 0
@@ -1202,7 +1202,7 @@ const CreatorStudio: FC = () => {
                 </div>
               </div>
               <div className="flex flex-shrink-0 items-center rounded-control border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
-                <span className="font-bold text-ink-14">$</span>
+                <span className="text-ink-14 font-num">$</span>
                 <PriceInput
                   value={market.basePriceUsd}
                   // Returns the promise (not a void wrapper) so PriceInput can
@@ -1233,12 +1233,12 @@ const CreatorStudio: FC = () => {
                   collapsed a rejected read into an empty array. Retry, do not
                   reassure. */}
               {studio.offerings === null ? (
-                <div className="rounded-xl border border-dashed border-line-brand-2 px-4 py-5 text-center text-caption text-ink-brand-2">
+                <div className="rounded-xl border border-dashed border-line-brand-2 px-4 py-5 text-center text-caption text-ink-brand-2 font-ui">
                   <p>Your services couldn’t be loaded just now. This is not an empty shop.</p>
                   <button
                     type="button"
                     onClick={() => studio.retry()}
-                    className="mt-2 rounded-control border border-line-12 bg-surface-1 px-3 py-1.5 text-caption font-semibold text-ink-2 hover:border-line-28"
+                    className="mt-2 rounded-control border border-line-12 bg-surface-1 px-3 py-1.5 text-caption font-medium text-ink-2 font-ui hover:border-line-28"
                   >
                     Try again
                   </button>
@@ -1271,7 +1271,7 @@ const CreatorStudio: FC = () => {
                           settles at, verified against `creditsForAskBaseUnits`
                           at the contract's settlement rate for four offerings.
                           One quote function, or the two screens disagree. */}
-                      <div className="text-caption tabular-nums text-ink-14">
+                      <div className="text-caption tabular-nums text-ink-14 font-ui">
                         {market.priceUsd > 0
                           ? `≈ ${tok(serviceQuote(o.priceHbd, market.priceUsd).tokens)} tokens at today’s price`
                           : 'Token price unavailable'}
@@ -1279,7 +1279,7 @@ const CreatorStudio: FC = () => {
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-2">
                       <div className="flex items-center rounded-control border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
-                        <span className="font-bold text-ink-14">$</span>
+                        <span className="text-ink-14 font-num">$</span>
                         <PriceInput
                           value={o.priceHbd}
                           onCommit={(usd) =>
@@ -1299,7 +1299,7 @@ const CreatorStudio: FC = () => {
                         }
                         disabled={studio.isBusy}
                         title="Delist this service. Asks already made against it are unaffected."
-                        className="rounded-control border border-line-11 px-3 py-2 text-caption font-semibold text-ink-10 hover:bg-surface-16 disabled:opacity-50"
+                        className="rounded-control border border-line-11 px-3 py-2 text-caption font-medium text-ink-10 font-ui hover:bg-surface-16 disabled:opacity-50"
                       >
                         Remove
                       </button>
@@ -1360,12 +1360,12 @@ const CreatorStudio: FC = () => {
             */}
             {market.cap < MAX_CAP_CREDITS_BASE_UNITS ? (
               <div className="mt-5 flex items-center gap-2">
-                <span className="text-caption text-ink-10">Raise cap to</span>
+                <span className="text-caption text-ink-10 font-ui">Raise cap to</span>
                 <input
                   value={capInput}
                   onChange={(e) => setCapInput(e.target.value)}
                   inputMode="numeric"
-                  className="w-[110px] rounded-control border border-line-11 px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
+                  className="w-[110px] rounded-control border border-line-11 px-3 py-2 text-[14px] leading-[22px] tabular-nums font-num outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
                 />
                 <button
                   onClick={async () => {
@@ -1418,16 +1418,16 @@ const CreatorStudio: FC = () => {
                   // it), but this still visually disables the button while busy so a
                   // reader is not left double-clicking into a caught CREATOR_TOKENS_BUSY.
                   disabled={studio.isBusy}
-                  className="rounded-control bg-surface-43 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
+                  className="rounded-control bg-surface-43 px-4 py-2 text-caption font-medium text-ink-27 font-ui disabled:opacity-50"
                 >
                   Raise cap
                 </button>
-                <span className="text-caption tabular-nums text-ink-14">
+                <span className="text-caption tabular-nums text-ink-14 font-num">
                   lower only down to {market.supply.toLocaleString('en-US')} issued
                 </span>
               </div>
             ) : null}
-            <p className="mt-4 rounded-control bg-surface-16 px-3.5 py-3 text-caption text-ink-10">
+            <p className="mt-4 rounded-control bg-surface-16 px-3.5 py-3 text-caption text-ink-10 font-ui">
               Your token’s price is set by the market: buys raise it, sells lower it. You don’t set the
               price; you set your <strong>service prices</strong> in dollars.
             </p>
@@ -1441,14 +1441,14 @@ const CreatorStudio: FC = () => {
               drift out of sync with each other or with Settings.
             */}
             <div className="mt-5 border-t border-line-9 pt-5">
-              <span className="text-caption text-ink-10">{t('meritum_launch.work_link')}</span>
+              <span className="text-caption text-ink-10 font-ui">{t('meritum_launch.work_link')}</span>
               <div className="mt-2">
                 <WorkLinkField
                   account={studio.creator ?? ''}
-                  inputClassName="min-w-[min(100%,220px)] flex-1 rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-[14px] leading-[22px] text-ink-2 outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10 disabled:opacity-60"
-                  buttonClassName="rounded-control bg-surface-43 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
-                  errorClassName="mt-1.5 text-caption font-semibold text-ink-brand-6"
-                  statusClassName="mt-1.5 text-caption text-ink-10"
+                  inputClassName="min-w-[min(100%,220px)] flex-1 rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-[14px] leading-[22px] text-ink-2 font-ui outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10 disabled:opacity-60"
+                  buttonClassName="rounded-control bg-surface-43 px-4 py-2 text-caption font-medium text-ink-27 font-ui disabled:opacity-50"
+                  errorClassName="mt-1.5 text-caption font-medium text-ink-brand-6 font-ui"
+                  statusClassName="mt-1.5 text-caption text-ink-10 font-ui"
                 />
               </div>
             </div>
@@ -1457,8 +1457,8 @@ const CreatorStudio: FC = () => {
 
         {section === 'billing' ? (
           <Card>
-            <div className="mb-1 font-serif text-lg font-semibold text-ink-2">Subscription</div>
-            <div className="mb-4 text-[14px] leading-[22px] text-ink-8">
+            <div className="mb-1 font-ui text-lg font-medium text-ink-2">Subscription</div>
+            <div className="mb-4 text-[14px] leading-[22px] text-ink-8 font-ui">
               {market.windingDown
                 ? 'This token is winding down, so the subscription no longer applies.'
                 : overdue
@@ -1486,7 +1486,7 @@ const CreatorStudio: FC = () => {
                 })()
               }
               disabled={studio.isBusy}
-              className="rounded-control bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-brand-17 disabled:opacity-50"
+              className="rounded-control bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-medium text-ink-27 font-ui hover:bg-surface-brand-17 disabled:opacity-50"
             >
               Renew ~$10
             </button>
@@ -1504,7 +1504,7 @@ const CreatorStudio: FC = () => {
                   setRenewUnconfirmed(false);
                   studio.retry();
                 }}
-                className="ml-2 rounded-control border border-line-11 px-4 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-7 hover:bg-surface-16"
+                className="ml-2 rounded-control border border-line-11 px-4 py-2.5 text-[14px] leading-[22px] font-medium text-ink-7 font-ui hover:bg-surface-16"
                 data-testid="renew-check-again"
               >
                 Check again
@@ -1529,14 +1529,14 @@ const CreatorStudio: FC = () => {
                 were never refunded AUTOMATICALLY even under v1 — Refund and
                 RefundHolder are pull rails somebody has to call. "can redeem"
                 is what was always true. */}
-            <p className="mt-4 text-caption text-ink-14">
+            <p className="mt-4 text-caption text-ink-14 font-ui">
               {market.rules === 'v2'
                 ? 'If you stop paying, your market stops taking new buyers. Holders keep their tokens and can still sell, your delivery record is unaffected, and renewing reopens buying on the same token. Answering and cashing out are never blocked by billing.'
                 : 'If you stop paying, your token’s market winds down: holders can redeem their share of the reserve, less any early-exit fee, your delivery record resets, and coming back means a new token. Answering and cashing out are never blocked by billing.'}
             </p>
             <div className="mt-5 border-t border-line-2 pt-4">
               {market.windingDown ? (
-                <div className="text-caption font-semibold text-ink-warn-3">
+                <div className="text-caption font-medium text-ink-warn-3 font-ui">
                   This token is winding down. Holders can redeem a slice of the reserve, less any early-exit fee;
                   nobody is refunded automatically. Answering and cashing
                   out still work.
@@ -1544,7 +1544,7 @@ const CreatorStudio: FC = () => {
               ) : (
                 <button
                   onClick={() => setRetireOpen(true)}
-                  className="rounded-control border border-line-brand-1 px-4 py-2 text-caption font-semibold text-ink-brand-6 hover:bg-surface-brand-3"
+                  className="rounded-control border border-line-brand-1 px-4 py-2 text-caption font-medium text-ink-brand-6 font-ui hover:bg-surface-brand-3"
                 >
                   End this token
                 </button>
@@ -1576,7 +1576,7 @@ const CreatorStudio: FC = () => {
                 {tradeFeeClaimableUsd === null ? (
                   <button
                     onClick={() => studio.retry()}
-                    className="rounded-control border border-line-12 bg-surface-1 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-2 hover:border-line-28"
+                    className="rounded-control border border-line-12 bg-surface-1 px-5 py-2.5 text-[14px] leading-[22px] font-medium text-ink-2 font-ui hover:border-line-28"
                   >
                     Try again
                   </button>
@@ -1589,7 +1589,7 @@ const CreatorStudio: FC = () => {
                       )
                     }
                     disabled={tradeFeeClaimableUsd <= 0 || studio.isBusy}
-                    className="rounded-control bg-surface-ok-7 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-ok-8 disabled:opacity-50"
+                    className="rounded-control bg-surface-ok-7 px-5 py-2.5 text-[14px] leading-[22px] font-medium text-ink-27 font-ui hover:bg-surface-ok-8 disabled:opacity-50"
                   >
                     {/* ★ "Claimed" ON A ZERO BALANCE READ AS "you already took it"
                         (2026-08-31, browser). Nothing had been claimed — there was
@@ -1650,17 +1650,17 @@ const CreatorStudio: FC = () => {
                   the creator to the one that already exists, on their own token
                   page. No dead control, no second implementation. */}
               {market.windingDown ? (
-                <div className="mt-4 rounded-control border border-line-11 bg-surface-5 px-4 py-3 text-caption text-ink-10">
+                <div className="mt-4 rounded-control border border-line-11 bg-surface-5 px-4 py-3 text-caption text-ink-10 font-ui">
                   This market is winding down, so selling on the curve is closed. Your tokens are redeemed from your
                   own token page instead.{' '}
-                  <a href={`/creators/${studio.creator ?? ''}`} className="font-semibold text-ink-brand-6 hover:underline">
+                  <a href={`/creators/${studio.creator ?? ''}`} className="font-medium text-ink-brand-6 hover:underline">
                     Open your token page
                   </a>
                 </div>
               ) : (
                 <>
               <div className="mt-4 flex items-center gap-2">
-                <span className="text-caption text-ink-10">Cash out</span>
+                <span className="text-caption text-ink-10 font-ui">Cash out</span>
                 <input
                   value={sellInput}
                   onChange={(e) => {
@@ -1669,7 +1669,7 @@ const CreatorStudio: FC = () => {
                   }}
                   placeholder="tokens"
                   inputMode="decimal"
-                  className="w-[110px] rounded-control border border-line-11 px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
+                  className="w-[110px] rounded-control border border-line-11 px-3 py-2 text-[14px] leading-[22px] tabular-nums font-num outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
                 />
                 <button
                   onClick={async () => {
@@ -1713,14 +1713,14 @@ const CreatorStudio: FC = () => {
                     sellTokens > held ||
                     studio.isBusy
                   }
-                  className="rounded-control bg-surface-43 px-4 py-2 text-caption font-semibold text-ink-27 disabled:opacity-50"
+                  className="rounded-control bg-surface-43 px-4 py-2 text-caption font-medium text-ink-27 font-ui disabled:opacity-50"
                 >
                   Sell
                 </button>
               </div>
               {sellTokens > 0 ? (
                 <div className="mt-2.5 flex items-center gap-2">
-                  <label className="text-caption text-ink-10">Minimum you’ll accept</label>
+                  <label className="text-caption text-ink-10 font-ui">Minimum you’ll accept</label>
                   <div className="flex items-center rounded-control border border-line-11 px-2.5 py-1.5 focus-within:border-line-brand-10">
                     <input
                       value={sellMinNetDisplay}
@@ -1731,9 +1731,9 @@ const CreatorStudio: FC = () => {
                       }}
                       inputMode="decimal"
                       placeholder="optional"
-                      className="w-[70px] border-0 text-[13px] leading-[20px] font-semibold tabular-nums text-ink-2 outline-none focus-visible:outline-none"
+                      className="w-[70px] border-0 text-[13px] leading-[20px] tabular-nums text-ink-2 font-num outline-none focus-visible:outline-none"
                     />
-                    <span className="text-caption font-semibold text-ink-14">HBD</span>
+                    <span className="text-caption font-medium text-ink-14 font-ui">HBD</span>
                   </div>
                 </div>
               ) : null}
@@ -1745,18 +1745,18 @@ const CreatorStudio: FC = () => {
                   dead button). Same `sellFailure` slot, so there is one place a
                   reader looks. */}
               {positionUnavailable && sellTokens > 0 ? (
-                <div className="mt-2 text-caption font-semibold text-ink-brand-6">
+                <div className="mt-2 text-caption font-medium text-ink-brand-6 font-ui">
                   We couldn’t read your token balance just now, so this can’t be sold safely. Try again in a moment.
                 </div>
               ) : sellTokens > held ? (
-                <div className="mt-2 text-caption font-semibold text-ink-brand-6">
+                <div className="mt-2 text-caption font-medium text-ink-brand-6 font-ui">
                   You hold {tok(held)} tokens. Lower the amount to sell.
                 </div>
               ) : null}
               {sellFailure ? (
-                <div className="mt-2 text-caption font-semibold text-ink-brand-6">{sellFailure}</div>
+                <div className="mt-2 text-caption font-medium text-ink-brand-6 font-ui">{sellFailure}</div>
               ) : null}
-              <p className="mt-3 text-caption text-ink-14">
+              <p className="mt-3 text-caption text-ink-14 font-ui">
                 Selling your own tokens returns them to dollars at the market price. Never blocked by billing. The
                 minimum above is pre-filled just under what you’d get right now, so the sell reverts (nothing
                 spent) rather than fill lower. Clear it for no minimum, or lower it to allow more slippage.

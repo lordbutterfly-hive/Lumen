@@ -62,7 +62,7 @@ export default function TokenShell({
         {back ? (
           <BasePathLink
             href={back.href}
-            className="mb-4 inline-block font-sans text-[14px] leading-[22px] font-semibold text-ink-brand-6 transition-colors hover:text-ink-brand-4"
+            className="mb-4 inline-block font-ui text-[14px] leading-[22px] font-medium text-ink-brand-6 transition-colors hover:text-ink-brand-4"
             data-testid="creator-back"
           >
             {back.label}

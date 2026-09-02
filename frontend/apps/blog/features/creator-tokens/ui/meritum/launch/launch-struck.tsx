@@ -50,13 +50,13 @@ const LaunchStruck: FC<LaunchStruckProps> = ({
       <div className="mt-[26px] grid grid-cols-3 gap-[34px] border-t border-meritum-line-card pt-[22px]">
         {facts.map((fact) => (
           <div key={fact.id}>
-            <div className="font-serif text-26 font-semibold tabular-nums text-meritum-ink">{fact.value}</div>
-            <div className="mt-1 font-serif text-caption text-meritum-ink-muted">{fact.label}</div>
+            <div className="font-ui text-26 font-medium tabular-nums text-meritum-ink">{fact.value}</div>
+            <div className="mt-1 font-ui text-caption text-meritum-ink-muted">{fact.label}</div>
           </div>
         ))}
       </div>
 
-      <p className="mt-[22px] max-w-[52ch] font-serif text-15 text-meritum-ink-2">{t('meritum_launch.struck_body')}</p>
+      <p className="mt-[22px] max-w-[52ch] font-ui text-15 text-meritum-ink-2">{t('meritum_launch.struck_body')}</p>
 
       {firstBuySkipped ? <Notice>{t('meritum_launch.first_buy_skipped')}</Notice> : null}
       {offersFailed ? <Notice>{t('meritum_launch.offers_failed')}</Notice> : null}

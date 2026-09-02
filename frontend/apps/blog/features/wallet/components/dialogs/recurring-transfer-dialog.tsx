@@ -154,7 +154,7 @@ export default function RecurringTransferDialog({
         testId="wallet-recurring-to"
       />
       <div className="flex flex-col gap-1.5">
-        <label className="text-caption font-semibold text-ink-7">{t('wallet.dialogs.common.amount')}</label>
+        <label className="text-caption font-medium text-ink-7">{t('wallet.dialogs.common.amount')}</label>
         <div className="flex gap-2">
           <Input
             {...form.register('amount', { valueAsNumber: true })}
@@ -201,14 +201,14 @@ export default function RecurringTransferDialog({
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-1.5">
-          <label className="text-caption font-semibold text-ink-7">
+          <label className="text-caption font-medium text-ink-7">
             {t('wallet.dialogs.recurring.recurrence_hours')}
           </label>
           <Input {...form.register('recurrence', { valueAsNumber: true })} type="text" inputMode="numeric" autoComplete="off" />
           <FieldError message={form.formState.errors.recurrence?.message} />
         </div>
         <div className="flex flex-col gap-1.5">
-          <label className="text-caption font-semibold text-ink-7">
+          <label className="text-caption font-medium text-ink-7">
             {t('wallet.dialogs.recurring.executions')}
           </label>
           <Input {...form.register('executions', { valueAsNumber: true })} type="text" inputMode="numeric" autoComplete="off" />
@@ -216,7 +216,7 @@ export default function RecurringTransferDialog({
         </div>
       </div>
       <div className="flex flex-col gap-1.5">
-        <label className="text-caption font-semibold text-ink-7">{t('wallet.dialogs.common.memo')}</label>
+        <label className="text-caption font-medium text-ink-7">{t('wallet.dialogs.common.memo')}</label>
         <Input {...form.register('memo')} placeholder={t('wallet.dialogs.common.memo')} />
         <FieldError message={form.formState.errors.memo?.message} />
       </div>

@@ -62,18 +62,18 @@ export default function EstimatedValueStrip({ figures }: { figures: WalletFigure
       // ~294px content box unwrapped — but it's the identical shape as the
       // three that didn't, so it gets the same `flex-wrap` rather than
       // waiting for a whale account to file the same bug again.
-      className="mb-[18px] flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-panel border border-line-9 bg-surface-5 px-6 py-[22px]"
+      className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-panel border border-line-9 bg-surface-5 px-6 py-4"
       data-testid="wallet-estimated-value"
     >
       <div>
-        <div className="text-[20px] font-semibold text-ink-2">{t('wallet.estimated_value.title')}</div>
+        <div className="text-[16px] leading-[24px] font-semibold text-ink-2">{t('wallet.estimated_value.title')}</div>
         <div className="mt-0.5 text-[14px] leading-[22px] text-ink-10">{t('wallet.estimated_value.description')}</div>
       </div>
       {/* ★ W-4: this figure was #2f7d4f. A balance is a neutral fact, not good
           news — the same $5,147.82 renders identically whether it went up or
           down today. Green is reserved for a DELTA (the price card's 24h change
           chip, a credit in the activity ledger); a holding is body colour. */}
-      <span className="font-sans text-[30px] leading-[46px] font-bold tabular-nums text-ink-2">
+      <span className="font-num font-semibold text-[28px] leading-[36px] text-ink-2">
         {valueUsd === null ? '—' : formatUsd(valueUsd)}
       </span>
     </div>

@@ -76,7 +76,7 @@ const CommunityDescription = ({
             <span>{data.title}</span>
             {data.is_nsfw ? <Badge variant="red">NSFW</Badge> : null}
           </CardTitle>
-          <span className="text-sm" data-testid="short-community-description">
+          <span className="font-text text-sm" data-testid="short-community-description">
             {data.about}
           </span>
         </CardHeader>

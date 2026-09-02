@@ -68,15 +68,15 @@ export default function MeritumHoldersBand() {
       <div className={styles.copyColumn}>
         {/* `tracking-tight` is -0.025em against the reference's -0.022em: a hair,
             so the app token wins per the handoff's own ground rule. */}
-        <p className="max-w-[24ch] text-pretty font-serif text-30 font-medium leading-[1.22] tracking-tight text-meritum-ink">
+        <p className="max-w-[24ch] text-pretty font-ui text-30 font-medium leading-[1.22] tracking-tight text-meritum-ink">
           <Trans
             t={t}
             i18nKey="meritum.intro.quote"
-            components={{ holders: <span className="font-bold text-meritum-ink-brand" /> }}
+            components={{ holders: <span className="font-medium text-meritum-ink-brand" /> }}
           />
         </p>
-        <p className="mt-5 max-w-[42ch] font-serif text-17 text-meritum-ink-3">
-          <Trans t={t} i18nKey="meritum.intro.quote_support" components={{ lead: <span className="font-bold text-meritum-ink" /> }} />
+        <p className="mt-5 max-w-[42ch] font-ui text-17 text-meritum-ink-3">
+          <Trans t={t} i18nKey="meritum.intro.quote_support" components={{ lead: <span className="font-medium text-meritum-ink" /> }} />
         </p>
       </div>
 
@@ -88,19 +88,19 @@ export default function MeritumHoldersBand() {
           {objections.map((objection) => (
             <div key={objection.id} className="flex items-center gap-3 bg-meritum-card px-0.5 py-[15px]">
               <ProhibitionIcon />
-              <span className="font-serif text-16 text-meritum-ink-2">{objection.text}</span>
+              <span className="font-ui text-16 text-meritum-ink-2">{objection.text}</span>
             </div>
           ))}
         </div>
 
         <div className="mt-[22px] flex flex-wrap items-center gap-3">
-          <span className="font-serif text-17 font-bold text-meritum-ink">{t('meritum.intro.no_gatekeeping')}</span>
+          <span className="font-ui text-17 font-medium text-meritum-ink">{t('meritum.intro.no_gatekeeping')}</span>
           <span className="inline-flex items-center gap-2 rounded-full border border-meritum-line-paper bg-meritum-paper px-[13px] py-1.5">
             {/* Same pulse and the same tracking as the tape's LIVE badge — two
                 live markers on one screen that differed by 0.06em of tracking
                 would read as a mistake, not as a distinction. */}
             <span className="mt-dot h-[7px] w-[7px] flex-none rounded-full bg-meritum-surface-brand" aria-hidden="true" />
-            <span className="font-sans text-label font-bold uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
+            <span className="font-ui text-label font-medium uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
               {t('meritum.intro.live_pill')}
             </span>
           </span>

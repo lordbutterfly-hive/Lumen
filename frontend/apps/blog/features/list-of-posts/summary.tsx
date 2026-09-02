@@ -38,7 +38,7 @@ const PostSummary = ({
     <CardContent>
       {nsfw === 'show' ? (
         <>
-          <CardTitle data-testid="post-title" className="text-lede">
+          <CardTitle data-testid="post-title" className="font-text text-lede">
             {Array.isArray(post.json_metadata?.tags) && post.json_metadata.tags.includes('nsfw') ? (
               <Badge variant="outline" className="mx-1 border-destructive text-destructive">
                 nsfw
@@ -51,7 +51,7 @@ const PostSummary = ({
               {post.title}
             </Link>
           </CardTitle>
-          <CardDescription className="block w-auto whitespace-pre-wrap break-words md:overflow-hidden md:overflow-ellipsis md:whitespace-nowrap">
+          <CardDescription className="block w-auto whitespace-pre-wrap break-words font-text md:overflow-hidden md:overflow-ellipsis md:whitespace-nowrap">
             <Link href={`/${post.category}/@${displayAuthor ?? post.author}/${post.permlink}`} data-testid="post-description">
               {userFromDMCA
                 ? t('cards.content_removed')

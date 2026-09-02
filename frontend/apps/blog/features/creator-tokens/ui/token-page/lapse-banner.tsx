@@ -91,7 +91,7 @@ const LapseBanner: FC<{
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <span className={`text-[14px] leading-[22px] font-semibold ${loud ? 'text-[15px] leading-[24px]' : ''}`}>
+        <span className={`text-[14px] leading-[22px] font-medium font-ui ${loud ? 'text-[15px] leading-[24px]' : ''}`}>
           {notice}
         </span>
         <div className="flex flex-shrink-0 items-center gap-2">
@@ -114,7 +114,7 @@ const LapseBanner: FC<{
                   setFailure(writeFailureMessage(err, 'That payment didn’t go through.'));
                 }
               }}
-              className="rounded-control bg-surface-brand-12 px-4 py-2 text-caption font-semibold text-ink-27 hover:bg-surface-brand-17 disabled:opacity-50"
+              className="rounded-control bg-surface-brand-12 px-4 py-2 text-caption font-medium text-ink-27 font-ui hover:bg-surface-brand-17 disabled:opacity-50"
             >
               {/* No promise about when it clears: the label says what the click
                   does, and the banner's own disappearance is the confirmation —
@@ -135,14 +135,14 @@ const LapseBanner: FC<{
                   // session; it returning on the next visit is the safe failure.
                 }
               }}
-              className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-semibold text-ink-10 hover:border-line-28"
+              className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-medium text-ink-10 font-ui hover:border-line-28"
             >
               Dismiss
             </button>
           ) : null}
         </div>
       </div>
-      {failure ? <div className="mt-2 text-caption font-semibold text-ink-brand-6">{failure}</div> : null}
+      {failure ? <div className="mt-2 text-caption font-medium text-ink-brand-6 font-ui">{failure}</div> : null}
     </div>
   );
 };

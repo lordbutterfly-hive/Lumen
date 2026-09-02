@@ -182,7 +182,7 @@ const MeritumCoinRail: FC<MeritumCoinRailProps> = ({
             ledger; if the state word stops reading as a state, this row is why
             and reverting it is a three-class change. */}
         <div
-          className={`text-body italic ${
+          className={`text-body font-text italic ${
  captionBrand ? 'text-meritum-ink-brand' : 'text-meritum-ink-faint'
  }`}
         >
@@ -190,7 +190,7 @@ const MeritumCoinRail: FC<MeritumCoinRailProps> = ({
         </div>
         {/* §4's own literal example of editorial voice ("Only your handle is
             engraved so far"), so it is italic too. */}
-        <p className="mx-auto mt-1.5 max-w-[30ch] font-serif text-caption italic text-meritum-ink-muted">{captionSub}</p>
+        <p className="mx-auto mt-1.5 max-w-[30ch] font-text text-caption italic text-meritum-ink-muted">{captionSub}</p>
       </div>
 
       <MeritumRailLedger rows={rows} emptyLabel={ledgerEmptyLabel} />

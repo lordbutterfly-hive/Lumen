@@ -72,7 +72,7 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
 
   return (
     <div
-      className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 rounded-card border border-line-2 bg-surface-1 px-[18px] py-3.5 transition-colors hover:bg-surface-5"
+      className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 rounded-card border border-line-2 bg-surface-1 px-[18px] py-2.5 transition-colors hover:bg-surface-5"
       data-testid="wallet-history-row"
     >
       <div className="min-w-0 flex-1">
@@ -84,7 +84,7 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
               {t(`wallet.history.direction.${entry.counterparty.direction}`)}{' '}
               <Link
                 href={`/@${entry.counterparty.name}`}
-                className="font-semibold text-ink-4 hover:underline"
+                className="font-medium text-ink-4 hover:underline"
                 data-testid="wallet-history-counterparty"
               >
                 @{entry.counterparty.name}
@@ -93,7 +93,7 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
           ) : null}
         </p>
         <span
-          className="flex flex-wrap items-center gap-1.5 font-sans text-caption tabular-nums text-ink-14"
+          className="flex flex-wrap items-center gap-1.5 font-num font-medium text-caption text-ink-14"
           data-testid="wallet-history-timestamp"
         >
           <time dateTime={date.toISOString()} title={date.toLocaleString(lang)}>
@@ -113,7 +113,7 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
 
       {entry.amountText ? (
         <span
-          className={`shrink-0 text-right font-sans text-[14px] leading-[22px] font-semibold tabular-nums ${TONE_CLASS[entry.tone]}`}
+          className={`shrink-0 text-right font-num font-medium text-[14px] leading-[22px] ${TONE_CLASS[entry.tone]}`}
           data-testid="wallet-history-amount"
         >
           {TONE_SIGN[entry.tone]}
@@ -126,7 +126,7 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
         // failed to load. These operations genuinely move nothing, so the row
         // says so instead of leaving the reader to guess which it was.
         <span
-          className="shrink-0 text-right font-sans text-caption font-medium text-ink-14"
+          className="shrink-0 text-right font-ui text-caption font-medium text-ink-14"
           data-testid="wallet-history-no-amount"
         >
           {t('wallet.history.no_amount')}

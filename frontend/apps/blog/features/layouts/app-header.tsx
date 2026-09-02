@@ -285,7 +285,7 @@ const AppHeader: FC = () => {
               Tracking relaxed from -0.025em to -0.01em. The tight negative tracking
               was tuned for Open Sans; a serif with real bracketed serifs collides
               at that value, and "Lumen" has an m-n pair that shows it first. */}
-          <span className="font-serif text-[24px] font-semibold leading-none tracking-[-0.01em] text-ink-2 sm:text-[30px] lg:text-[34px] lg:leading-[52px]">
+          <span className="font-text text-[24px] font-semibold leading-none tracking-[-0.01em] text-ink-2 sm:text-[30px] lg:text-[34px] lg:leading-[52px]">
             Lumen
           </span>
         </Link>

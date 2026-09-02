@@ -9,9 +9,9 @@ import SavingsWithdrawDialog from './dialogs/savings-withdraw-dialog';
 
 // W-2/W-3: Deposit was bg-surface-ok-7 and both were rounded-control.
 const DEPOSIT_BUTTON_CLASS =
-  'rounded-card bg-surface-brand-12 px-[15px] py-2 text-caption font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
+  'rounded-card bg-surface-brand-12 px-[15px] py-2 text-caption font-medium text-ink-27 transition-colors hover:bg-surface-brand-17';
 const WITHDRAW_BUTTON_CLASS =
-  'rounded-card border border-line-11 bg-surface-1 px-[15px] py-2 text-caption font-semibold text-ink-7 transition-colors hover:bg-surface-16';
+  'rounded-card border border-line-11 bg-surface-1 px-[15px] py-2 text-caption font-medium text-ink-7 transition-colors hover:bg-surface-16';
 
 /**
  * One HIVE or HBD row inside the Savings Vault panel. Generic over currency
@@ -56,22 +56,22 @@ export default function SavingsSlotCard({
     // non-wrapping row. See the inner button group below — that's the change
     // that actually matters at narrow widths.
     <div
-      className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 rounded-card border border-line-7 bg-surface-1 px-[18px] py-4"
+      className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 rounded-card border border-line-7 bg-surface-1 px-[18px] py-3"
       data-testid={testId}
     >
       <div className="min-w-0 max-w-[420px]">
         <div className="mb-1 flex items-center gap-2">
           <TokenIcon currency={currency} size={20} />
-          <span className="text-[15px] leading-[24px] font-bold text-ink-4">{title}</span>
+          <span className="text-[16px] leading-[24px] font-semibold text-ink-4">{title}</span>
           <span
-            className={`rounded-control px-2 py-[2px] text-caption font-bold tabular-nums ${
+            className={`rounded-control px-2 py-[2px] text-caption font-medium tabular-nums ${
  chipTone === 'green' ? 'bg-surface-ok-5 text-ink-ok-2' : 'bg-surface-23 text-ink-10'
  }`}
           >
             {chip}
           </span>
         </div>
-        {description ? <p className="font-serif text-caption text-ink-10">{description}</p> : null}
+        {description ? <p className="font-ui text-caption text-ink-10">{description}</p> : null}
       </div>
       {/* ★ THE load-bearing change (map item 1). Wrapping the outer row
           alone is not enough: this button group is ~370px on its own
@@ -84,7 +84,7 @@ export default function SavingsSlotCard({
           not at a `sm:`/`md:` variant — the desktop row is still one line
           because 370px fits comfortably above ~943px, no breakpoint needed. */}
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5">
-        <span className="font-sans text-[20px] leading-[30px] font-bold tabular-nums text-ink-2">
+        <span className="font-num font-semibold text-[22px] leading-[30px] text-ink-2">
           {formatTokenAmount(balance)}
         </span>
         <SavingsDepositDialog

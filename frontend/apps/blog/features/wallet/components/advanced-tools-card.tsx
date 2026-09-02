@@ -19,7 +19,7 @@ const ICON_WRAP_CLASS =
 function RowLabel({ label, sub }: { label: string; sub: string }) {
   return (
     <span className="min-w-0 flex-1">
-      <span className="block text-[14px] leading-[22px] font-semibold">{label}</span>
+      <span className="block text-[14px] leading-[22px] font-medium">{label}</span>
       <span className="block text-caption text-ink-14">{sub}</span>
     </span>
   );
@@ -67,9 +67,9 @@ export default function AdvancedToolsCard({
             list of manual controls (delegate, convert, schedule a transfer).
             Sliders say "settings you operate yourself", which is what it is. */}
         <Icons.settings className="h-4 w-4 text-ink-10" aria-hidden />
-        <span className="text-[15px] leading-[24px] font-bold text-ink-2">{t('wallet.advanced.title')}</span>
+        <span className="text-[16px] leading-[24px] font-semibold text-ink-2">{t('wallet.advanced.title')}</span>
       </div>
-      <p className="mb-3.5 font-serif text-caption text-ink-14">{t('wallet.advanced.description')}</p>
+      <p className="mb-3.5 font-ui text-caption text-ink-14">{t('wallet.advanced.description')}</p>
 
       <div className="flex flex-col gap-0.5">
         <DelegateDialog

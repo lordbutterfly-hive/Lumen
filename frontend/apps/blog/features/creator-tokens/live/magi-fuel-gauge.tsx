@@ -69,7 +69,7 @@ export function MagiFuelGauge({
     return (
       <div className={`flex items-center gap-3 ${className}`} data-testid="magi-fuel-loading">
         {ring(0, UNKNOWN)}
-        <span className="text-caption text-ink-10">Checking your Magi balance…</span>
+        <span className="text-caption text-ink-10 font-ui">Checking your Magi balance…</span>
       </div>
     );
   }
@@ -80,7 +80,7 @@ export function MagiFuelGauge({
     return (
       <div className={`flex items-center gap-3 ${className}`} data-testid="magi-fuel-failed">
         {ring(0, UNKNOWN)}
-        <span className="text-caption text-ink-10">
+        <span className="text-caption text-ink-10 font-ui">
           Couldn’t check your Magi balance just now. Nothing is wrong with your funds.
         </span>
       </div>
@@ -97,8 +97,8 @@ export function MagiFuelGauge({
     return (
       <div className={`flex items-start gap-3 ${className}`} data-testid="magi-fuel-blocked">
         {ring(readiness, SHORT)}
-        <div className="text-caption ">
-          <div className="font-semibold text-ink-warn-3">Not enough on Magi to send a transaction</div>
+        <div className="text-caption font-ui">
+          <div className="font-medium text-ink-warn-3">Not enough on Magi to send a transaction</div>
           <div className="text-ink-10">
             {/* Two genuinely different situations, measured on chain: a Hive
                 account is granted a small RC baseline and merely runs out,
@@ -137,8 +137,8 @@ export function MagiFuelGauge({
   return (
     <div className={`flex items-start gap-3 ${className}`} data-testid="magi-fuel-ok">
       {ring(readiness, short ? SHORT : READY)}
-      <div className="text-caption ">
-        <div className="font-semibold tabular-nums text-ink-2">{hbd(balance.hbdBaseUnits)} HBD on Magi</div>
+      <div className="text-caption font-ui">
+        <div className="tabular-nums text-ink-2 font-num">{hbd(balance.hbdBaseUnits)} HBD on Magi</div>
         {short ? (
           <div className="text-ink-warn-3">
             {/* M-03: state the COST only, not a second shortfall number. The gauge used to
@@ -227,13 +227,13 @@ function CopyRow({ label, value, testId }: { label: string; value: string; testI
   };
   return (
     <div className="mt-2 flex items-center gap-2" data-testid={testId}>
-      <span className="w-[5.5rem] flex-none font-semibold">{label}</span>
+      <span className="w-[5.5rem] flex-none font-medium font-ui">{label}</span>
       <code className="min-w-0 flex-1 break-all rounded bg-surface-warn-14 px-2 py-1 text-ink-27">{value}</code>
       <button
         type="button"
         onClick={onCopy}
         aria-label={`Copy ${label.toLowerCase()}`}
-        className="lm-press flex-none rounded-control px-2.5 py-1 font-semibold text-ink-warn-1 hover:bg-surface-warn-15"
+        className="lm-press flex-none rounded-control px-2.5 py-1 font-medium text-ink-warn-1 font-ui hover:bg-surface-warn-15"
       >
         {copied ? 'Copied' : 'Copy'}
       </button>
@@ -266,10 +266,10 @@ export function MagiFundingHelp({
 
   return (
     <div
-      className={`rounded-control border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-caption text-ink-warn-1 ${className}`}
+      className={`rounded-control border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-caption text-ink-warn-1 font-ui ${className}`}
       data-testid="magi-funding-help"
     >
-      <div className="mb-1 font-semibold">Add HBD to Magi</div>
+      <div className="mb-1 font-medium">Add HBD to Magi</div>
       <p>
         Send HBD to <strong>@{MAGI_GATEWAY}</strong> from any Hive wallet or exchange. That is a dedicated
         account run by the VSC consensus, so your funds stay in your own Magi wallet. Get the memo exactly
@@ -296,7 +296,7 @@ export function MagiFundingHelp({
                 href={ALTERA_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-semibold underline hover:text-ink-warn-3"
+                className="font-medium underline hover:text-ink-warn-3"
                 data-testid="magi-deposit-altera"
               >
                 Open the Altera market

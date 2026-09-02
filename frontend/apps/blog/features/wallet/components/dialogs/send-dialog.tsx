@@ -82,7 +82,7 @@ export default function SendDialog({
       isSubmitting={sendMutation.isPending}
     >
       <div className="flex flex-col gap-1.5">
-        <label className="text-caption font-semibold text-ink-7">{t('wallet.dialogs.common.from')}</label>
+        <label className="text-caption font-medium text-ink-7">{t('wallet.dialogs.common.from')}</label>
         <Input disabled defaultValue={username} className="text-ink-7" />
       </div>
       <RecipientField
@@ -101,7 +101,7 @@ export default function SendDialog({
         testId="wallet-send-amount"
       />
       <div className="flex flex-col gap-1.5">
-        <label className="text-caption font-semibold text-ink-7">{t('wallet.dialogs.common.memo')}</label>
+        <label className="text-caption font-medium text-ink-7">{t('wallet.dialogs.common.memo')}</label>
         <Input {...form.register('memo')} placeholder={t('wallet.dialogs.common.memo')} />
         {/* ★ Was missing (map item 4/7). `.max(2048)` DOES enforce — RHF
             never calls onValid, so no mutation is attempted on an over-long

@@ -51,10 +51,10 @@ import {
  *  redundant now that the real ring is back, so it goes too rather than
  *  stacking a red border UNDER a red ring. */
 const SELECT_TRIGGER =
-  'h-10 w-full rounded-control border border-line-11 bg-surface-1 px-3 font-sans text-[14px] leading-[22px] text-ink-2 [&>svg]:opacity-100 [&>svg]:text-ink-10';
+  'h-10 w-full rounded-control border border-line-11 bg-surface-1 px-3 font-ui text-[14px] leading-[22px] text-ink-2 [&>svg]:opacity-100 [&>svg]:text-ink-10';
 const SELECT_CONTENT = 'rounded-control border border-line-11 bg-surface-1 p-1 shadow-[0_8px_24px_rgba(20,18,10,0.10)]';
 const SELECT_ITEM =
-  'cursor-pointer rounded-control py-2 font-sans text-[14px] leading-[22px] text-ink-2 focus:bg-surface-brand-5 focus:text-ink-brand-6';
+  'cursor-pointer rounded-control py-2 font-ui text-[14px] leading-[22px] text-ink-2 focus:bg-surface-brand-5 focus:text-ink-brand-6';
 
 /**
  * ★ S7 — DIRTY-FIELD CUE (2026-08-11). The Update button already goes from
@@ -110,7 +110,7 @@ const Field = ({
       ) : null}
     </label>
     {children}
-    {error ? <p className="mt-1.5 text-caption text-ink-brand-6">{error}</p> : null}
+    {error ? <p className="mt-1.5 text-caption font-ui text-ink-brand-6">{error}</p> : null}
   </div>
   );
 };
@@ -319,7 +319,7 @@ const SettingsForm = ({ username }: { username: string }) => {
               onChange={(e) => setSettings((prev) => ({ ...prev, profile_image: e.target.value }))}
             />
             <label
-              className="mt-1.5 inline-block cursor-pointer text-caption font-semibold text-ink-brand-6 hover:text-ink-brand-4"
+              className="mt-1.5 inline-block cursor-pointer text-caption font-medium font-ui text-ink-brand-6 hover:text-ink-brand-4"
               htmlFor="profilePicture"
             >
               {t('settings_page.upload_image')}
@@ -352,7 +352,7 @@ const SettingsForm = ({ username }: { username: string }) => {
               onChange={(e) => setSettings((prev) => ({ ...prev, cover_image: e.target.value }))}
             />
             <label
-              className="mt-1.5 inline-block cursor-pointer text-caption font-semibold text-ink-brand-6 hover:text-ink-brand-4"
+              className="mt-1.5 inline-block cursor-pointer text-caption font-medium font-ui text-ink-brand-6 hover:text-ink-brand-4"
               htmlFor="coverPicture"
             >
               {t('settings_page.upload_image')}
@@ -516,7 +516,7 @@ const SettingsForm = ({ username }: { username: string }) => {
             it is true regardless of which of those three is why the button
             looks the way it does right now. */}
         {sameData && !busy ? (
-          <p className="mt-2 text-caption text-ink-10">{t('settings_page.update_hint')}</p>
+          <p className="mt-2 text-caption font-ui text-ink-10">{t('settings_page.update_hint')}</p>
         ) : null}
       </section>
 
@@ -529,7 +529,7 @@ const SettingsForm = ({ username }: { username: string }) => {
             per-account. Same muted-helper-text treatment `update_hint` already
             uses below the profile Update button, so this reads as the same
             kind of house copy, not a warning callout. */}
-        <p className="mt-2 text-caption text-ink-10" data-testid="settings-preferences-device-scope">
+        <p className="mt-2 text-caption font-ui text-ink-10" data-testid="settings-preferences-device-scope">
           {t('settings_page.preferences_device_scope')}
         </p>
 
@@ -588,7 +588,7 @@ const SettingsForm = ({ username }: { username: string }) => {
           */}
           {isLite ? (
             <div className="md:col-span-2" data-testid="reward-settings-lite-hint">
-              <p className="text-caption text-ink-10">
+              <p className="text-caption font-ui text-ink-10">
                 {t('settings_page.reward_settings_lite_hint')}
               </p>
             </div>

@@ -1,3 +1,67 @@
+/* ============================================================================
+   LUMEN TYPOGRAPHY v2 (2026-09-02, council rebuild) — ADDITIVE / OPT-IN.
+   Lora stays the app default (untouched). Two NEW families are opt-in only:
+     "Lumen UI"  = Merriweather Sans (interface) — applied via font-ui.
+     "Lumen Num" = Fira Sans digits  (numbers)   — applied via .font-num;
+       its subset carries ONLY digits, so letters in a .font-num element fall
+       through to "Lumen UI" (Merriweather) automatically. No unicode-range
+       stitching into font-ui => no global punctuation seam.
+   Weights loaded: 400/500/600 only (NO 700) so nothing can render bolder than
+   the app does today. Missing a surface just leaves it Lora (fail-safe).
+   ============================================================================ */
+
+/* ---------- Interface letters: Merriweather Sans ("Lumen UI") ---------- */
+@font-face{font-family:"Lumen UI";font-weight:400;font-style:normal;font-display:swap;
+  src:url(/fonts/merriweather-sans-latin-ext-400-normal.woff2) format("woff2");unicode-range:U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+@font-face{font-family:"Lumen UI";font-weight:400;font-style:normal;font-display:swap;
+  src:url(/fonts/merriweather-sans-latin-400-normal.woff2) format("woff2");}
+@font-face{font-family:"Lumen UI";font-weight:500;font-style:normal;font-display:swap;
+  src:url(/fonts/merriweather-sans-latin-ext-500-normal.woff2) format("woff2");unicode-range:U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+@font-face{font-family:"Lumen UI";font-weight:500;font-style:normal;font-display:swap;
+  src:url(/fonts/merriweather-sans-latin-500-normal.woff2) format("woff2");}
+@font-face{font-family:"Lumen UI";font-weight:600;font-style:normal;font-display:swap;
+  src:url(/fonts/merriweather-sans-latin-ext-600-normal.woff2) format("woff2");unicode-range:U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+@font-face{font-family:"Lumen UI";font-weight:600;font-style:normal;font-display:swap;
+  src:url(/fonts/merriweather-sans-latin-600-normal.woff2) format("woff2");}
+
+/* ---------- Interface DIGITS stitched into "Lumen UI": Fira wins for numbers in ANY
+   font-ui text (declared AFTER Merriweather so digits resolve to Fira). This is what
+   makes "Merriweather for UI, Fira for numbers" automatic everywhere. ---------- */
+@font-face{font-family:"Lumen UI";font-weight:400;font-style:normal;font-display:swap;
+  src:url(/fonts/fira-sans-digits-400.woff2) format("woff2");unicode-range:U+0030-0039,U+002C,U+002E,U+0024,U+0025,U+002B,U+2212,U+2013;}
+@font-face{font-family:"Lumen UI";font-weight:500;font-style:normal;font-display:swap;
+  src:url(/fonts/fira-sans-digits-500.woff2) format("woff2");unicode-range:U+0030-0039,U+002C,U+002E,U+0024,U+0025,U+002B,U+2212,U+2013;}
+@font-face{font-family:"Lumen UI";font-weight:600;font-style:normal;font-display:swap;
+  src:url(/fonts/fira-sans-digits-600.woff2) format("woff2");unicode-range:U+0030-0039,U+002C,U+002E,U+0024,U+0025,U+002B,U+2212,U+2013;}
+
+/* ---------- Numbers: Fira Sans digits ("Lumen Num") ---------- */
+@font-face{font-family:"Lumen Num";font-weight:400;font-style:normal;font-display:swap;
+  src:url(/fonts/fira-sans-digits-400.woff2) format("woff2");}
+@font-face{font-family:"Lumen Num";font-weight:500;font-style:normal;font-display:swap;
+  src:url(/fonts/fira-sans-digits-500.woff2) format("woff2");}
+@font-face{font-family:"Lumen Num";font-weight:600;font-style:normal;font-display:swap;
+  src:url(/fonts/fira-sans-digits-600.woff2) format("woff2");}
+
+/* ---------- Tokens ---------- */
+:root{
+  --font-ui:"Lumen UI", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-num:"Lumen Num", "Lumen UI", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* ★ READING FACE. `--font-lora` is bound on <html> by next/font (app/layout.tsx).
+     `font-text` (Tailwind) and the raw `var(--font-text)` rules in
+     discovery-feed/post-card.module.css BOTH point here. This token MUST exist:
+     without it every `font-text` element hits an unresolved var(), which invalidates
+     the whole font-family declaration at computed-value time and the element silently
+     inherits the UI face (Merriweather) instead of Lora. Georgia/Cambria/serif is the
+     in-token fallback so the bare `var(--font-text)` uses (no fallback list of their
+     own) still degrade to a serif, never to the sans UI face. */
+  --font-text: var(--font-lora), Georgia, Cambria, serif;
+}
+
+/* ---------- Number utility (opt-in). No weight/size/lh: inherits its row, so a
+   figure is never bolder than its neighbors and never shifts the baseline. ---------- */
+.font-num{ font-family:var(--font-num); font-variant-numeric: tabular-nums lining-nums; letter-spacing:-0.01em; font-synthesis:none; }
+/* font-ui must never faux-bold (only 400/500/600 exist). */
+.font-ui{ font-synthesis:none; }
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

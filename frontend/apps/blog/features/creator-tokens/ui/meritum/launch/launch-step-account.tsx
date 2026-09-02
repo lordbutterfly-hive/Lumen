@@ -44,12 +44,12 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
           <span aria-hidden="true" className="h-[46px] w-[46px] flex-shrink-0 rounded-card bg-meritum-line-input" />
         )}
         <div className="min-w-0">
-          <div className="truncate font-serif text-20 font-semibold text-meritum-ink">
+          <div className="truncate font-ui text-20 font-medium text-meritum-ink">
             {known ? handle : t('meritum_launch.account_unknown')}
           </div>
-          <div className="font-serif text-caption text-meritum-ink-muted">{t('meritum_launch.bound_sub')}</div>
+          <div className="font-ui text-caption text-meritum-ink-muted">{t('meritum_launch.bound_sub')}</div>
         </div>
-        <span className="ml-auto text-label font-bold uppercase tracking-label text-meritum-ink-muted">
+        <span className="ml-auto text-label font-medium uppercase tracking-label text-meritum-ink-muted font-ui">
           {t('meritum_launch.bound_badge')}
         </span>
       </div>
@@ -76,10 +76,10 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
         — no new copy, same facts, just told on the screen where the reader
         first decides to do this at all, as plain text, not a tooltip.
       */}
-      <div className="mt-[26px] border-t border-meritum-line-card pt-[22px] font-serif text-caption text-meritum-ink-muted">
+      <div className="mt-[26px] border-t border-meritum-line-card pt-[22px] font-ui text-caption text-meritum-ink-muted">
         <p>{t('meritum_launch.term_launch_value')}</p>
         <p className="mt-1.5">
-          <span className="font-semibold text-meritum-ink-3">{t('meritum_launch.term_listed_label')}:</span>{' '}
+          <span className="font-medium text-meritum-ink-3">{t('meritum_launch.term_listed_label')}:</span>{' '}
           {t('meritum_launch.term_listed_value')}
         </p>
       </div>
@@ -96,7 +96,7 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
         <MeritumEligibilityNotice
           surface="launch"
           who={eligibility}
-          className="rounded-card border border-meritum-line-card bg-meritum-paper px-4 py-3 font-serif text-14 leading-[22px] text-meritum-ink-3"
+          className="rounded-card border border-meritum-line-card bg-meritum-paper px-4 py-3 font-ui text-14 leading-[22px] text-meritum-ink-3"
         />
       </div>
 

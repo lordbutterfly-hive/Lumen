@@ -1301,7 +1301,7 @@ export default function MediumPostCard({
            */}
           {isNote && !dek ? (
             <Link href={href} className="block" data-testid="medium-card-note-title">
-              <p className="line-clamp-4 text-lede text-ink-4">{displayTitle}</p>
+              <p className="line-clamp-4 font-lora text-lede text-ink-4">{displayTitle}</p>
             </Link>
           ) : isNote ? null : (
             <Link href={href} className="block" data-testid="medium-card-title">
@@ -1340,7 +1340,7 @@ export default function MediumPostCard({
 
           {isNote && dek ? (
             <Link href={href} className="block" data-testid="medium-card-note">
-              <p className="line-clamp-4 text-lede text-ink-4">{dek}</p>
+              <p className="line-clamp-4 font-lora text-lede text-ink-4">{dek}</p>
             </Link>
           ) : dek ? (
             // ★ REDUNDANT TAB STOP REMOVED (2026-08-13, O5 a11y build map item
@@ -1351,7 +1351,7 @@ export default function MediumPostCard({
             // reader's browse-mode link list) while the title link remains the
             // one real stop.
             <Link href={href} className="mt-[10px] block" data-testid="medium-card-dek" tabIndex={-1}>
-              <p className="line-clamp-2 text-read text-ink-action">{dek}</p>
+              <p className="line-clamp-2 font-lora text-read text-ink-action">{dek}</p>
             </Link>
           ) : null}
 
@@ -1522,7 +1522,7 @@ export default function MediumPostCard({
            handoff's own number — `handoff_post_card/SPEC.md`'s box model reads
            `.pc__actions flex, align center, gap 24, padding-top 14`. The 18px
            shipped here was never the spec's; it was 4px of drift. */
-        className="mt-[14px] flex flex-wrap items-center gap-2.5 text-body-sm"
+        className="mt-[14px] flex flex-wrap items-center gap-2.5 text-[17px]"
         data-testid="medium-card-footer"
       >
         {/* Vote pill. The arrows are denser's real VotesComponent, so their size is
@@ -1553,7 +1553,7 @@ export default function MediumPostCard({
             20px, which is the handoff's stated floor, below which the concave
             flanks fuse. The control sizes itself; the card does not get a
             vote. */}
-        <div className="flex items-center gap-1 rounded-control px-1 py-1.5">
+        <div className="flex items-center gap-1 rounded-control -ml-2 py-1.5">
           {/* ★ The tally lives INSIDE the vote control now (Blade redesign,
               2026-08-14). This sibling printed `total_votes` a second time, so every
               card read "759 759" — measured on the Blade build before removal. The
@@ -1642,7 +1642,7 @@ export default function MediumPostCard({
                     >
                       {/* 20px/1.75 -> 22px/2 — see the note on the comment icon above. */}
                       <Icons.reblog className="h-[22px] w-[22px] stroke-2" aria-hidden="true" />
-                      {reblogCount}
+                      <span className="font-num">{reblogCount}</span>
                     </button>
                   </ReblogDialog>
                 </TooltipTrigger>
@@ -1687,7 +1687,7 @@ export default function MediumPostCard({
               // ★ `--pc-payout` (#2a6b44) replaces the literal #2f7d4f: the redesign
               // deepens the payout green so it sits inside the paper palette instead of
               // glowing out of it. Measured 6.4:1 on the card surface — AA at any size.
-              'ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-body-lg font-bold tabular-nums text-[color:var(--pc-payout)] transition-colors hover:cursor-pointer',
+              'ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-[17px] font-medium font-num text-[color:var(--pc-payout)] transition-colors hover:cursor-pointer',
               payoutDeclined && 'bg-transparent text-muted-foreground line-through'
             )}
             data-testid="medium-card-payout"

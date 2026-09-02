@@ -8,11 +8,11 @@ import TokenIcon from './token-icon';
 import SendDialog from './dialogs/send-dialog';
 import StakedHiveBlock from './staked-hive-block';
 
-const CARD_CLASS = 'mb-[18px] rounded-panel border border-line-9 bg-surface-1 p-6';
+const CARD_CLASS = 'mb-3 rounded-panel border border-line-9 bg-surface-1 p-5';
 // W-2/W-3: was rounded-control bg-surface-ok-7 — the success green used as an
 // action colour, at a radius no other control on the page shared.
 const SEND_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-card bg-surface-brand-12 px-[18px] py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
+  'flex items-center gap-1.5 rounded-card bg-surface-brand-12 px-[18px] py-2.5 text-[14px] leading-[22px] font-medium text-ink-27 transition-colors hover:bg-surface-brand-17';
 
 export default function HiveTokenCard({
   username,
@@ -42,7 +42,7 @@ export default function HiveTokenCard({
         <div className="flex items-center gap-3.5">
           <TokenIcon currency="HIVE" />
           <div>
-            <div className="text-[17px] leading-[26px] font-bold text-ink-2">{t('wallet.hive_card.name')}</div>
+            <div className="text-[16px] leading-[24px] font-semibold text-ink-2">{t('wallet.hive_card.name')}</div>
             <div className="text-[14px] leading-[22px] text-ink-10">{t('wallet.hive_card.description')}</div>
           </div>
         </div>
@@ -55,7 +55,7 @@ export default function HiveTokenCard({
             balance). */}
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5">
           <span
-            className="font-sans text-2xl font-bold tabular-nums text-ink-2"
+            className="font-num font-semibold text-[22px] leading-[30px] text-ink-2"
             data-testid="wallet-hive-balance"
           >
             {formatTokenAmount(figures.liquidHive)}

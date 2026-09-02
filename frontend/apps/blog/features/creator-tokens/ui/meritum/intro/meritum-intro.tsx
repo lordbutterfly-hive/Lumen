@@ -106,7 +106,7 @@ export default function MeritumIntro() {
             and the handoff's ground rule is that a value differing from an app
             token by a hair loses to the token. Weight, tracking and colour are
             the reference's. */}
-        <p className="font-sans text-label font-bold uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
+        <p className="font-ui text-label font-medium uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
           {t('meritum.intro.eyebrow')}
         </p>
 
@@ -116,7 +116,7 @@ export default function MeritumIntro() {
             own padding inside a 327px content column on a 375px phone. The
             headline would overflow its own card. 44 is the next real step on
             the scale, not a guess. */}
-        <h1 className="mt-[18px] max-w-[16ch] text-pretty font-serif text-44 font-bold tracking-meritum-display text-meritum-ink md:text-meritum-display">
+        <h1 className="mt-[18px] max-w-[16ch] text-pretty font-ui text-44 font-medium tracking-meritum-display text-meritum-ink md:text-meritum-display">
           {t('meritum.intro.headline')}
         </h1>
 
@@ -139,7 +139,7 @@ export default function MeritumIntro() {
             is a prop precisely so it can tell the truth. */}
         <MeritumTicker className="mt-[30px]" liveLabel={t('meritum.intro.example')} />
 
-        <p className="mt-6 max-w-[44ch] font-serif text-18 text-meritum-ink-3">{t('meritum.intro.subhead')}</p>
+        <p className="mt-6 max-w-[44ch] font-ui text-18 text-meritum-ink-3">{t('meritum.intro.subhead')}</p>
 
         {/* ★ THE REAL ROUTE, NOT A PLACEHOLDER. `/creators/launch` decides on
             the server whether the visitor is signed in and sends them to the
@@ -158,7 +158,7 @@ export default function MeritumIntro() {
             treatment. */}
         <Link
           href="/creators/launch"
-          className="mt-[34px] inline-flex h-16 items-center gap-3 whitespace-nowrap rounded-card bg-meritum-surface-brand px-10 text-18 font-bold text-meritum-ink-on-brand hover:bg-meritum-surface-brand-hover"
+          className="mt-[34px] inline-flex h-16 items-center gap-3 whitespace-nowrap rounded-card bg-meritum-surface-brand px-10 text-18 font-medium text-meritum-ink-on-brand font-ui hover:bg-meritum-surface-brand-hover"
         >
           {t('meritum.intro.cta')}
           <ArrowIcon />

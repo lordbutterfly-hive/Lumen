@@ -10,15 +10,15 @@
 export const SETTINGS_CARD =
   'rounded-panel border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]';
 
-/** Card headline: Lora, the same weight and ink as the rest of the product. */
-export const SETTINGS_CARD_TITLE = 'font-serif text-[18px] font-semibold leading-[28px] text-ink-2';
+/** Card headline: Merriweather (UI), the same weight and ink as the rest of the product. */
+export const SETTINGS_CARD_TITLE = 'font-ui text-[18px] font-medium leading-[28px] text-ink-2';
 
 /** The line under a card headline that says what the card is for. */
 export const SETTINGS_CARD_HINT = 'mt-1.5 text-caption text-ink-10';
 
 /** Field label above an input or a select. */
-export const SETTINGS_LABEL = 'mb-1.5 block text-caption font-semibold text-ink-7';
+export const SETTINGS_LABEL = 'mb-1.5 block text-caption font-medium font-ui text-ink-7';
 
 /** Text input / select trigger. */
 export const SETTINGS_INPUT =
-  'h-10 w-full rounded-control border border-line-11 bg-surface-1 px-3 font-sans text-[14px] leading-[22px] text-ink-2 outline-none focus-visible:outline-none transition-colors placeholder:text-ink-14 focus-visible:border-line-brand-10 focus-visible:ring-0';
+  'h-10 w-full rounded-control border border-line-11 bg-surface-1 px-3 font-ui text-[14px] leading-[22px] text-ink-2 outline-none focus-visible:outline-none transition-colors placeholder:text-ink-14 focus-visible:border-line-brand-10 focus-visible:ring-0';

@@ -112,7 +112,7 @@ const TimeAgo: FC<TimeAgoProps> = ({ date, lang, numeric = 'auto' }) => {
     return () => clearInterval(interval);
   }, [date, userLang, numeric]);
 
-  return <span title={parseHiveDate(date).toLocaleString(userLang)}>{timeAgo}</span>;
+  return <span className="font-num" title={parseHiveDate(date).toLocaleString(userLang)}>{timeAgo}</span>;
 };
 
 export default TimeAgo;

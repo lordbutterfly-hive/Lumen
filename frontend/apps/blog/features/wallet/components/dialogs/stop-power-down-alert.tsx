@@ -42,7 +42,7 @@ export default function StopPowerDownAlert({ trigger, username }: { trigger: Rea
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
-      <AlertDialogContent className="rounded-panel font-sans">
+      <AlertDialogContent className="rounded-panel font-ui">
         <AlertDialogHeader>
           <AlertDialogTitle className="text-ink-2">{t('wallet.dialogs.stop_power_down.title')}</AlertDialogTitle>
           <AlertDialogDescription className="text-ink-10">

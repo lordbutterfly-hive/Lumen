@@ -85,8 +85,8 @@ const Notice: FC<{
       className
         ? className
         : tone === 'blocked'
-        ? 'rounded-card border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-caption text-ink-warn-3'
-        : 'rounded-card border border-line-16 bg-surface-23 px-4 py-3 text-caption text-ink-8'
+        ? 'rounded-card border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-caption text-ink-warn-3 font-ui'
+        : 'rounded-card border border-line-16 bg-surface-23 px-4 py-3 text-caption text-ink-8 font-ui'
     }
   >
     {children}
@@ -94,7 +94,7 @@ const Notice: FC<{
   );
 
 const Action: FC<{ href: string; children: ReactNode }> = ({ href, children }) => (
-  <a href={href} className="font-semibold underline underline-offset-2">
+  <a href={href} className="font-medium underline underline-offset-2">
     {children}
   </a>
 );
@@ -163,7 +163,7 @@ export const MeritumEligibilityNotice: FC<{
   if (!who.canHold) {
     return (
       <Notice tone="blocked" testId="meritum-eligibility-google" className={className} inline={inline}>
-        <strong className="font-semibold">{t('meritum_eligibility.google_lead')}</strong>{' '}
+        <strong className="font-medium">{t('meritum_eligibility.google_lead')}</strong>{' '}
         {t('meritum_eligibility.google_why')} <Action href="/security">{t('meritum_eligibility.action_link_wallet')}</Action>{' '}
         {t('meritum_eligibility.google_to_hold')}{' '}
         <Action href="/upgrade">{t('meritum_eligibility.action_upgrade')}</Action>{' '}
@@ -210,7 +210,7 @@ export const MeritumEligibilityNotice: FC<{
   if (surface === 'launch') {
     return (
       <Notice tone="blocked" testId="meritum-eligibility-wallet-launch" className={className} inline={inline}>
-        <strong className="font-semibold">{t('meritum_eligibility.wallet_launch_lead')}</strong>{' '}
+        <strong className="font-medium">{t('meritum_eligibility.wallet_launch_lead')}</strong>{' '}
         {t('meritum_eligibility.wallet_launch_why', { wallet: walletLabel })}{' '}
         <Action href="/upgrade">{t('meritum_eligibility.action_upgrade')}</Action>{' '}
         {t('meritum_eligibility.wallet_launch_tail')}
@@ -220,7 +220,7 @@ export const MeritumEligibilityNotice: FC<{
 
   return (
     <Notice tone="blocked" testId="meritum-eligibility-wallet-trade" className={className} inline={inline}>
-      <strong className="font-semibold">{t('meritum_eligibility.wallet_trade_lead', { wallet: walletLabel })}</strong>{' '}
+      <strong className="font-medium">{t('meritum_eligibility.wallet_trade_lead', { wallet: walletLabel })}</strong>{' '}
       {t('meritum_eligibility.wallet_trade_why', { wallet: walletLabel })}{' '}
       <Action href="/upgrade">{t('meritum_eligibility.action_upgrade')}</Action>
       {t('meritum_eligibility.wallet_trade_tail')}

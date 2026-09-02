@@ -128,7 +128,7 @@ export default function WalletDialogShell({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="rounded-panel font-sans sm:max-w-[440px]">
+      <DialogContent className="rounded-panel font-ui sm:max-w-[440px]">
         <DialogHeader>
           <DialogTitle className="text-left text-xl text-ink-2">{title}</DialogTitle>
           {description ? (

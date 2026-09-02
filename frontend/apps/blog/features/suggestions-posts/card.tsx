@@ -45,7 +45,7 @@ const SuggestionsCard = ({ entry, variant = 'rail' }: SuggestionsCardProps) => {
             </div>
           )}
           <div className="p-2">
-            <h2 className="line-clamp-2 text-caption font-semibold">{displayTitle}</h2>
+            <h2 className="line-clamp-2 font-text text-caption font-semibold">{displayTitle}</h2>
             <p className="mt-1 truncate text-caption text-muted-foreground">@{displayAuthor}</p>
           </div>
         </Link>
@@ -85,7 +85,7 @@ const SuggestionsCard = ({ entry, variant = 'rail' }: SuggestionsCardProps) => {
         <div className="flex min-w-0 flex-1 flex-col">
           <Link
             href={href}
-            className="line-clamp-2 font-sans text-caption font-semibold text-ink-2 hover:underline"
+            className="line-clamp-2 font-text text-caption font-semibold text-ink-2 hover:underline"
           >
             {displayTitle}
           </Link>

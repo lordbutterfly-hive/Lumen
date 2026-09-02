@@ -159,16 +159,16 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
             <span aria-hidden="true" className="text-caption leading-none text-ink-brand-6">
               ◈
             </span>
-            <span className="font-sans text-label font-bold uppercase tracking-label text-ink-brand-6">
+            <span className="font-ui text-label font-medium uppercase tracking-label text-ink-brand-6">
               {COPY.eyebrow}
             </span>
-            <span className="font-sans text-caption font-semibold text-ink-12">@{username}</span>
+            <span className="font-ui text-caption font-medium text-ink-12">@{username}</span>
           </div>
           <div className="mt-[11px] flex flex-wrap items-baseline gap-3.5">
-            <span className="font-sans text-[34px] leading-[52px] font-bold tabular-nums tracking-[-0.02em] text-ink-2">
+            <span className="text-[34px] leading-[52px] tabular-nums tracking-[-0.02em] text-ink-2 font-num">
               {usdPrice(market.priceUsd)}
             </span>
-            <span className="font-sans text-[14px] leading-[22px] font-medium text-ink-12">{COPY.currentPrice}</span>
+            <span className="font-ui text-[14px] leading-[22px] font-medium text-ink-12">{COPY.currentPrice}</span>
           </div>
           {/* Completion rate / median reply — indexer-backed (live/adapt.ts's
               adaptDelivery). Omitted entirely rather than shown as "unavailable"
@@ -181,21 +181,21 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
                   failure to deliver. Same rule as `typicalResponse` below. */}
               {d.completionPct !== null ? (
                 <div className="flex flex-col gap-0.5">
-                  <span className="font-sans text-[17px] leading-[26px] font-bold tabular-nums text-ink-2">{pctLabel(d.answered, d.total) ?? '0%'}</span>
-                  <span className="text-caption text-ink-12">{COPY.completionRate}</span>
+                  <span className="text-[17px] leading-[26px] tabular-nums text-ink-2 font-num">{pctLabel(d.answered, d.total) ?? '0%'}</span>
+                  <span className="text-caption text-ink-12 font-ui">{COPY.completionRate}</span>
                 </div>
               ) : null}
               {d.typicalResponse ? (
                 <div className="flex flex-col gap-0.5">
-                  <span className="font-sans text-[17px] leading-[26px] font-bold tabular-nums text-ink-2">{d.typicalResponse}</span>
-                  <span className="text-caption text-ink-12">{COPY.medianReply}</span>
+                  <span className="text-[17px] leading-[26px] tabular-nums text-ink-2 font-num">{d.typicalResponse}</span>
+                  <span className="text-caption text-ink-12 font-ui">{COPY.medianReply}</span>
                 </div>
               ) : null}
             </div>
           ) : null}
           {healthLine ? (
             <p
-              className="mt-3 max-w-[52ch] font-sans text-caption font-semibold text-ink-warn-3"
+              className="mt-3 max-w-[52ch] font-ui text-caption font-medium text-ink-warn-3"
               data-testid="profile-token-health"
             >
               {healthLine}
@@ -208,7 +208,7 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
         {market.canBuy && !soldOut ? (
           <Link
             href={`/creators/${resolvedHandle}?a=buy`}
-            className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-sans text-[15px] leading-[24px] font-bold text-ink-27 transition-colors hover:bg-surface-brand-16"
+            className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-ui text-[15px] leading-[24px] font-medium text-ink-27 transition-colors hover:bg-surface-brand-16"
             data-testid="profile-token-buy"
           >
             {COPY.buy}
@@ -219,7 +219,7 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
           // cap), so the control is not offered, and nothing is said about the
           // creator, who is fine.
           <span
-            className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-sans text-[15px] leading-[24px] font-bold text-ink-27 opacity-50"
+            className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-ui text-[15px] leading-[24px] font-medium text-ink-27 opacity-50"
             aria-disabled="true"
             data-testid="profile-token-sold-out"
           >
@@ -241,13 +241,13 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
             ◈
           </span>
           <div>
-            <div className="font-sans text-[15px] leading-[24px] font-bold text-ink-2">{COPY.launchTitle}</div>
-            <p className="mt-0.5 font-sans text-caption text-ink-12">{COPY.launchBody}</p>
+            <div className="font-ui text-[15px] leading-[24px] font-medium text-ink-2">{COPY.launchTitle}</div>
+            <p className="mt-0.5 font-ui text-caption text-ink-12">{COPY.launchBody}</p>
           </div>
         </div>
         <Link
           href="/creators/launch"
-          className="shrink-0 rounded-xl bg-surface-brand-12 px-6 py-2.5 font-sans text-[14px] leading-[22px] font-bold text-ink-27 transition-colors hover:bg-surface-brand-16"
+          className="shrink-0 rounded-xl bg-surface-brand-12 px-6 py-2.5 font-ui text-[14px] leading-[22px] font-medium text-ink-27 transition-colors hover:bg-surface-brand-16"
         >
           {COPY.launchCta}
         </Link>

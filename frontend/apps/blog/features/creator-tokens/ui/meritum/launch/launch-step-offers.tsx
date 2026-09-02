@@ -96,10 +96,10 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
   return (
     <div className="mt-step">
       <div className="mt-[26px] flex items-baseline gap-[18px] px-5 pb-0.5">
-        <span className="min-w-0 flex-1 text-label font-bold uppercase tracking-label text-meritum-ink-faint">
+        <span className="min-w-0 flex-1 text-label font-medium uppercase tracking-label text-meritum-ink-faint font-ui">
           {t('meritum_launch.offers_col_skill')}
         </span>
-        <span className="flex-none basis-[106px] text-right text-label font-bold uppercase tracking-label text-meritum-ink-faint">
+        <span className="flex-none basis-[106px] text-right text-label font-medium uppercase tracking-label text-meritum-ink-faint font-ui">
           {t('meritum_launch.offers_col_price')}
         </span>
       </div>
@@ -110,7 +110,7 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
             key={`offer-${i}`}
             className="flex flex-wrap items-center gap-x-[18px] gap-y-3.5 rounded-2xl border border-meritum-line-input bg-meritum-card px-5 py-[18px]"
           >
-            <span className="flex-none font-serif text-15 font-semibold text-meritum-ink-faint" aria-hidden="true">
+            <span className="flex-none text-15 text-meritum-ink-faint font-num" aria-hidden="true">
               {`0${i + 1}`}
             </span>
             {/*
@@ -135,7 +135,7 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
                 aria-label={t('meritum_launch.offer_name_aria', { n: i + 1 })}
                 aria-invalid={offerTitleProblem(offer.name) !== null}
                 maxLength={MAX_OFFER_TITLE_LEN}
-                className="w-full border-0 border-b-[1.5px] border-meritum-line-input bg-transparent pb-1 font-serif text-16 font-semibold text-meritum-ink outline-none placeholder:text-meritum-ink-faint"
+                className="w-full border-0 border-b-[1.5px] border-meritum-line-input bg-transparent pb-1 font-ui text-16 font-medium text-meritum-ink outline-none placeholder:text-meritum-ink-faint"
               />
               {/*
                 ★ A COUNTER, NOT JUST A CAP (2026-08-31, verified UX defect —
@@ -147,12 +147,12 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
                 the input, never the gate — `offerTitleProblem` (below) and the
                 'offer-bad-title' block still own the real, byte-accurate rule.
               */}
-              <div className="mt-0.5 text-right text-caption tabular-nums text-meritum-ink-faint">
+              <div className="mt-0.5 text-right text-caption tabular-nums text-meritum-ink-faint font-num">
                 {offer.name.length}/{MAX_OFFER_TITLE_LEN}
               </div>
             </div>
             <div className="flex flex-none items-baseline gap-[5px]">
-              <span className="font-serif text-20 text-meritum-ink-faint" aria-hidden="true">
+              <span className="text-20 text-meritum-ink-faint font-num" aria-hidden="true">
                 $
               </span>
               {/*
@@ -179,7 +179,7 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
                 inputMode="decimal"
                 maxLength={9}
                 aria-label={t('meritum_launch.offer_price_aria', { n: i + 1 })}
-                className="w-[10ch] min-w-0 border-0 border-b-[1.5px] border-meritum-line-input bg-transparent pb-1 text-left font-serif text-30 font-semibold tabular-nums text-meritum-ink outline-none placeholder:text-meritum-ink-faint"
+                className="w-[10ch] min-w-0 border-0 border-b-[1.5px] border-meritum-line-input bg-transparent pb-1 text-left text-30 tabular-nums text-meritum-ink font-num outline-none placeholder:text-meritum-ink-faint"
               />
             </div>
           </div>
@@ -194,17 +194,17 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
         scroll past two unrelated blocks to learn why Continue was disabled.
       */}
       {touched && blockMessage ? (
-        <p className="mt-4 text-caption font-semibold text-meritum-ink-brand" role="status">
+        <p className="mt-4 text-caption font-medium text-meritum-ink-brand font-ui" role="status">
           {blockMessage}
         </p>
       ) : null}
 
       <div className="mt-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2.5">
-          <span className="text-label font-bold uppercase tracking-label text-meritum-ink-muted">
+          <span className="text-label font-medium uppercase tracking-label text-meritum-ink-muted font-ui">
             {t('meritum_launch.split_heading')}
           </span>
-          <span className="text-caption text-meritum-ink-faint">{t('meritum_launch.split_note')}</span>
+          <span className="text-caption text-meritum-ink-faint font-ui">{t('meritum_launch.split_note')}</span>
         </div>
         <div
           className="mt-2.5 flex h-[11px] overflow-hidden rounded-full bg-meritum-line-input"
@@ -218,16 +218,16 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
         </div>
         <div className="mt-3 flex flex-wrap items-baseline gap-x-7 gap-y-2.5" aria-hidden="true">
           <span className="flex items-baseline gap-2">
-            <span className="font-serif text-20 font-semibold tabular-nums text-meritum-ink">
+            <span className="text-20 tabular-nums text-meritum-ink font-num">
               {usdPrice(1 - COMMISSION)}
             </span>
-            <span className="font-serif text-caption text-meritum-ink-muted">{t('meritum_launch.split_you')}</span>
+            <span className="font-ui text-caption text-meritum-ink-muted">{t('meritum_launch.split_you')}</span>
           </span>
           <span className="flex items-baseline gap-2">
-            <span className="font-serif text-20 font-semibold tabular-nums text-meritum-ink-muted">
+            <span className="text-20 tabular-nums text-meritum-ink-muted font-num">
               {usdPrice(COMMISSION)}
             </span>
-            <span className="font-serif text-caption text-meritum-ink-faint">{t('meritum_launch.split_lumen')}</span>
+            <span className="font-ui text-caption text-meritum-ink-faint">{t('meritum_launch.split_lumen')}</span>
           </span>
         </div>
       </div>
@@ -252,17 +252,17 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
         a decision reversed.
       */}
       <div className="mt-[26px] border-t border-meritum-line-card pt-[22px]">
-        <div className="text-label font-bold uppercase tracking-label text-meritum-ink-3">
+        <div className="text-label font-medium uppercase tracking-label text-meritum-ink-3 font-ui">
           {t('meritum_launch.work_heading')}
         </div>
-        <p className="mt-2 max-w-[48ch] font-serif text-caption text-meritum-ink-muted">{t('meritum_launch.work_body')}</p>
+        <p className="mt-2 max-w-[48ch] font-ui text-caption text-meritum-ink-muted">{t('meritum_launch.work_body')}</p>
         <div className="mt-3">
           <WorkLinkField
             account={account}
-            inputClassName="min-w-[min(100%,220px)] flex-1 rounded-lg border border-meritum-line-input bg-meritum-card px-3 py-2 font-serif text-14 text-meritum-ink outline-none placeholder:text-meritum-ink-faint focus-visible:outline-none focus:border-meritum-line-brand disabled:opacity-60"
-            buttonClassName="inline-flex h-[38px] flex-none items-center rounded-lg bg-meritum-surface-brand px-4 text-caption font-bold text-meritum-ink-on-brand transition-colors hover:bg-meritum-surface-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
-            errorClassName="mt-1.5 text-caption font-semibold text-meritum-ink-brand"
-            statusClassName="mt-1.5 text-caption text-meritum-ink-faint"
+            inputClassName="min-w-[min(100%,220px)] flex-1 rounded-lg border border-meritum-line-input bg-meritum-card px-3 py-2 font-ui text-14 text-meritum-ink outline-none placeholder:text-meritum-ink-faint focus-visible:outline-none focus:border-meritum-line-brand disabled:opacity-60"
+            buttonClassName="inline-flex h-[38px] flex-none items-center rounded-lg bg-meritum-surface-brand px-4 text-caption font-medium text-meritum-ink-on-brand font-ui transition-colors hover:bg-meritum-surface-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
+            errorClassName="mt-1.5 text-caption font-medium text-meritum-ink-brand font-ui"
+            statusClassName="mt-1.5 text-caption text-meritum-ink-faint font-ui"
           />
         </div>
       </div>

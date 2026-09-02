@@ -47,7 +47,7 @@ export default function WalletRightRail() {
   const marketStatsUrl = getMarketStatsUrl();
 
   return (
-    <aside className="flex w-full flex-col gap-5 font-sans" data-testid="wallet-right-rail">
+    <aside className="flex w-full flex-col gap-4 font-ui" data-testid="wallet-right-rail">
       <PriceCardHive />
       <PriceCardHbd />
       {/* ★ Only offer the link when there is somewhere to send people.
@@ -62,7 +62,7 @@ export default function WalletRightRail() {
           href={marketStatsUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-center text-caption font-semibold text-ink-brand-6 hover:text-ink-brand-4"
+          className="text-center text-caption font-medium text-ink-brand-6 hover:text-ink-brand-4"
           data-testid="wallet-view-more-market-stats"
         >
           {t('wallet.market.view_more')}

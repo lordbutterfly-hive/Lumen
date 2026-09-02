@@ -27,7 +27,7 @@ const ErrorToastContent: React.FC<ErrorToastContentProps> = ({
   return (
     <div className={cn('text-ink-27', className)} data-testid="error-toast-content">
       <div className="flex flex-row items-center justify-between gap-x-16">
-        <h1 className="mr-6 font-semibold">{errorTitle}</h1>
+        <h1 className="mr-6 font-ui font-semibold">{errorTitle}</h1>
         {displayControls && (
           <div className="top-0 flex flex-row gap-x-2">
             <Button onClick={() => setShowMoreOpen(!showMoreOpen)} variant="link" className="p-0" data-testid="error-toast-content-trigger">
@@ -53,7 +53,7 @@ const ErrorToastContent: React.FC<ErrorToastContentProps> = ({
           it should be visible cannot fail that way. */}
       {displayControls && showMoreOpen && (
         <pre
-          className="mt-2 max-h-[60vh] w-full overflow-y-auto whitespace-pre-wrap break-words px-4 text-caption md:max-h-[80vh]"
+          className="mt-2 max-h-[60vh] w-full overflow-y-auto whitespace-pre-wrap break-words px-4 font-mono text-caption md:max-h-[80vh]"
           data-testid="error-toast-content-message"
         >
           {fullError}

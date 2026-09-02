@@ -86,12 +86,12 @@ const PageMasthead: FC<PageMastheadProps> = ({
       // ink cannot clear 4.5:1 over ANY ground dark enough to be a dark masthead
       // (measured: 4.48:1 even at #231815). Light keeps the 70% it was designed
       // with; dark restores full strength, which reads as the same weight there.
-      <p className="relative z-10 mb-1.5 text-label font-semibold uppercase tracking-label text-ink-brand-6/70 dark:text-ink-brand-6">
+      <p className="relative z-10 mb-1.5 text-label font-medium font-ui uppercase tracking-label text-ink-brand-6/70 dark:text-ink-brand-6">
         {eyebrow}
       </p>
     ) : null}
 
-    <Heading className="relative z-10 font-serif text-[34px] font-semibold leading-[38px] tracking-[-0.015em] text-ink-2">
+    <Heading className="relative z-10 font-ui text-[34px] font-medium leading-[38px] tracking-[-0.015em] text-ink-2">
       {title}
     </Heading>
 

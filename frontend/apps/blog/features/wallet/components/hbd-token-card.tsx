@@ -6,10 +6,10 @@ import { formatTokenAmount } from '../lib/format-amount';
 import TokenIcon from './token-icon';
 import SendDialog from './dialogs/send-dialog';
 
-const CARD_CLASS = 'mb-[18px] rounded-panel border border-line-9 bg-surface-1 p-6';
+const CARD_CLASS = 'mb-3 rounded-panel border border-line-9 bg-surface-1 p-5';
 // Same button as the HIVE card's Send — see hive-token-card.tsx (W-2/W-3).
 const SEND_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-card bg-surface-brand-12 px-[18px] py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
+  'flex items-center gap-1.5 rounded-card bg-surface-brand-12 px-[18px] py-2.5 text-[14px] leading-[22px] font-medium text-ink-27 transition-colors hover:bg-surface-brand-17';
 
 export default function HbdTokenCard({ username, liquidHbd }: { username: string; liquidHbd: Big }) {
   const { t } = useTranslation('common_blog');
@@ -28,12 +28,12 @@ export default function HbdTokenCard({ username, liquidHbd }: { username: string
         <div className="flex items-center gap-3.5">
           <TokenIcon currency="HBD" />
           <div>
-            <div className="text-[17px] leading-[26px] font-bold text-ink-2">{t('wallet.hbd_card.name')}</div>
+            <div className="text-[16px] leading-[24px] font-semibold text-ink-2">{t('wallet.hbd_card.name')}</div>
             <div className="text-[14px] leading-[22px] text-ink-10">{t('wallet.hbd_card.description')}</div>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5">
-          <span className="font-sans text-2xl font-bold tabular-nums text-ink-2" data-testid="wallet-hbd-balance">
+          <span className="font-num font-semibold text-[22px] leading-[30px] text-ink-2" data-testid="wallet-hbd-balance">
             {formatTokenAmount(liquidHbd)}
           </span>
           <SendDialog

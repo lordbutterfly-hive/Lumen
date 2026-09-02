@@ -175,7 +175,7 @@ const BlockedList = ({ username }: { username: string }) => {
         // `undefined` on a failed read, so the empty branch below would otherwise
         // catch it and state, in plain language, that this reader has blocked nobody.
         <p
-          className="mt-4 rounded-card border border-line-warn-3 bg-surface-5 px-4 py-5 text-center text-[14px] leading-[22px] text-ink-10"
+          className="mt-4 rounded-card border border-line-warn-3 bg-surface-5 px-4 py-5 text-center text-[14px] leading-[22px] font-ui text-ink-10"
           data-testid="settings-blocked-accounts-error"
         >
           {t('settings_page.blocked_accounts_error')}
@@ -211,7 +211,7 @@ const BlockedList = ({ username }: { username: string }) => {
                       everyone else. */}
                   {fromChain ? (
                     <p
-                      className="mt-0.5 truncate text-caption text-ink-14"
+                      className="mt-0.5 truncate text-caption font-ui text-ink-14"
                       data-testid="settings-blocked-chain-badge"
                     >
                       {t('settings_page.blocked_accounts_chain_hint')}

@@ -32,8 +32,8 @@ import { useTranslation } from '@/blog/i18n/client';
 const Panel: FC<{ title: string; children: ReactNode }> = ({ title, children }) => (
   <TokenShell back={{ href: '/creators', label: '← All creators' }}>
     <div className="mt-[26px] rounded-panel border border-line-9 bg-surface-1 p-8 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
-      <h1 className="mb-2 font-serif text-[20px] leading-[30px] font-semibold text-ink-2">{title}</h1>
-      <p className="max-w-[52ch] text-[14px] leading-[22px] text-ink-10">{children}</p>
+      <h1 className="mb-2 font-ui text-[20px] leading-[30px] font-medium text-ink-2">{title}</h1>
+      <p className="max-w-[52ch] text-[14px] leading-[22px] text-ink-10 font-ui">{children}</p>
     </div>
   </TokenShell>
 );
@@ -58,7 +58,7 @@ const Panel: FC<{ title: string; children: ReactNode }> = ({ title, children }) 
  */
 const LaunchEscape: FC<{ href?: string }> = ({ href }) =>
   href ? (
-    <a href={href} className="mt-4 inline-block text-[14px] leading-[22px] font-semibold text-ink-brand-6 hover:underline">
+    <a href={href} className="mt-4 inline-block text-[14px] leading-[22px] font-medium text-ink-brand-6 font-ui hover:underline">
       If you haven’t launched a token yet, open the launch wizard →
     </a>
   ) : null;
@@ -86,7 +86,7 @@ export const MarketReadFailed: FC<{ onRetry?: () => void; launchHref?: string }>
     {onRetry ? (
       <>
         {' '}
-        <button onClick={onRetry} className="font-semibold text-ink-brand-6 underline">
+        <button onClick={onRetry} className="font-medium text-ink-brand-6 underline">
           Try again
         </button>
       </>
@@ -132,7 +132,7 @@ export const MarketSessionUnavailable: FC<{ onRetry?: () => void }> = ({ onRetry
     {onRetry ? (
       <>
         {' '}
-        <button onClick={onRetry} className="font-semibold text-ink-brand-6 underline">
+        <button onClick={onRetry} className="font-medium text-ink-brand-6 underline">
           Try again
         </button>
       </>
@@ -151,28 +151,28 @@ export const MarketSessionUnavailable: FC<{ onRetry?: () => void }> = ({ onRetry
 export const MarketMissing: FC<{ handle: string }> = ({ handle }) => (
   <TokenShell>
     <div className="mt-[26px] rounded-panel border border-line-9 bg-surface-1 p-8 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
-      <h1 className="mb-2 font-serif text-[20px] leading-[30px] font-semibold text-ink-2">
+      <h1 className="mb-2 font-ui text-[20px] leading-[30px] font-medium text-ink-2">
         @{displayHandle(handle)} hasn’t launched a token
       </h1>
-      <p className="mb-5 max-w-[52ch] text-[14px] leading-[22px] text-ink-10">
+      <p className="mb-5 max-w-[52ch] text-[14px] leading-[22px] text-ink-10 font-ui">
         This creator hasn’t opened a market yet, so there’s nothing to buy or spend here.
       </p>
       <div className="flex flex-wrap gap-3">
         <a
           href="/creators"
-          className="rounded-card bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-27 hover:bg-surface-brand-17"
+          className="rounded-card bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-medium text-ink-27 font-ui hover:bg-surface-brand-17"
         >
           Browse creators
         </a>
         <a
           href="/creators/launch"
-          className="rounded-card border border-line-11 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-2 hover:bg-surface-16"
+          className="rounded-card border border-line-11 px-5 py-2.5 text-[14px] leading-[22px] font-medium text-ink-2 font-ui hover:bg-surface-16"
         >
           Launch your own token
         </a>
         <a
           href={`/@${handle}`}
-          className="rounded-card border border-line-11 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-2 hover:bg-surface-16"
+          className="rounded-card border border-line-11 px-5 py-2.5 text-[14px] leading-[22px] font-medium text-ink-2 font-ui hover:bg-surface-16"
         >
           Back to @{displayHandle(handle)}
         </a>

@@ -55,8 +55,8 @@ export default function SavingsVault({
 
   return (
     <section id="savings-vault">
-      <div className="mb-4 mt-[34px] flex items-center gap-3.5">
-        <span className="text-label font-bold uppercase tracking-label text-ink-14">
+      <div className="mb-4 mt-6 flex items-center gap-3.5">
+        <span className="text-label font-medium uppercase tracking-label text-ink-14">
           {t('wallet.savings.label')}
         </span>
         <div className="h-px flex-1 bg-surface-27" />
@@ -76,8 +76,8 @@ export default function SavingsVault({
             </svg>
           </span>
           <div>
-            <div className="text-[20px] font-semibold text-ink-2">{t('wallet.savings.heading')}</div>
-            <p className="mt-0.5 font-serif text-caption text-ink-10">{t('wallet.savings.description')}</p>
+            <div className="text-[16px] leading-[24px] font-semibold text-ink-2">{t('wallet.savings.heading')}</div>
+            <p className="mt-0.5 font-ui text-caption text-ink-10">{t('wallet.savings.description')}</p>
           </div>
         </div>
 
@@ -132,7 +132,7 @@ export default function SavingsVault({
                   type="button"
                   onClick={handleClaim}
                   disabled={!hasClaimableRewards || isClaiming}
-                  className="rounded-card bg-surface-42 px-4 py-2 text-caption font-semibold text-ink-27 transition-colors hover:bg-surface-44 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-card bg-surface-42 px-4 py-2 text-caption font-medium text-ink-27 transition-colors hover:bg-surface-44 disabled:cursor-not-allowed disabled:opacity-40"
                   data-testid="wallet-claim-now-button"
                 >
                   {t('wallet.savings.claim_now')}

@@ -12,13 +12,13 @@ import { FC, KeyboardEvent, PointerEvent, ReactNode } from 'react';
  */
 
 const PRIMARY =
-  'inline-flex h-[50px] items-center gap-[11px] rounded-xl bg-meritum-surface-brand px-7 text-15 font-bold ' +
+  'inline-flex h-[50px] items-center gap-[11px] rounded-xl bg-meritum-surface-brand px-7 text-15 font-medium font-ui ' +
   'text-meritum-ink-on-brand transition-colors hover:bg-meritum-surface-brand-hover ' +
   'disabled:cursor-not-allowed disabled:opacity-60';
 
 const SECONDARY =
   'inline-flex h-[50px] items-center rounded-xl border border-meritum-line-input bg-meritum-card px-[26px] ' +
-  'text-15 font-bold text-meritum-ink-3 transition-colors hover:text-meritum-ink';
+  'text-15 font-medium font-ui text-meritum-ink-3 transition-colors hover:text-meritum-ink';
 
 /** The forward arrow on the two Continue actions. Inline, so no image request. */
 const Arrow: FC = () => (
@@ -53,7 +53,7 @@ export const BackAction: FC<{ label: string; onClick: () => void }> = ({ label, 
     // ★ 44x44 MINIMUM TAP TARGET (2026-08-31, verified UX defect). Text-only
     // and borderless, so the padding below only grows the HIT area, not
     // anything visible — it does not balloon beside the 50px primary button.
-    className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center border-0 bg-transparent px-3 text-caption font-semibold text-meritum-ink-muted transition-colors hover:text-meritum-ink"
+    className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center border-0 bg-transparent px-3 text-caption font-medium text-meritum-ink-muted font-ui transition-colors hover:text-meritum-ink"
   >
     {label}
   </button>
@@ -148,9 +148,9 @@ export const HoldAction: FC<{
  */
 export const Notice: FC<{ tone?: 'info' | 'alert'; children: ReactNode }> = ({ tone = 'info', children }) => (
   <div
-    className={`mt-5 rounded-xl border px-4 py-3.5 text-14 ${
+    className={`mt-5 rounded-xl border px-4 py-3.5 text-14 font-ui ${
       tone === 'alert'
-        ? 'border-meritum-line-brand bg-meritum-rail font-semibold text-meritum-ink-brand'
+        ? 'border-meritum-line-brand bg-meritum-rail font-medium text-meritum-ink-brand'
         : 'border-meritum-line-card bg-meritum-rail text-meritum-ink-3'
     }`}
   >

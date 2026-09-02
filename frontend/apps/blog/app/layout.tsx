@@ -253,6 +253,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang={locale} dir={isRTL ? 'rtl' : 'ltr'} className={lora.variable}>
       <head>
+        {/* ★ Lumen UI (Merriweather Sans) base preload — opt-in typography (2026-09-02).
+            Lora is still loaded by next/font above; this only adds the interface face. */}
+        <link rel="preload" href="/fonts/merriweather-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
+        <link rel="preload" href="/fonts/merriweather-sans-latin-ext-400-normal.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
         {/* ★★★ THE ONLY THING THAT CAN CATCH A PURGED ROOT CHUNK (2026-08-11).
             `ChunkLoadError: Loading chunk app/layout failed` reached a real
             reader on /@lordbutterfly. `app/error.tsx` and `app/global-error.tsx`

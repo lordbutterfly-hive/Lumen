@@ -113,23 +113,23 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
       <dl className="mt-6 flex flex-col gap-px bg-meritum-line-card">
         {terms.map((term) => (
           <div key={term.id} className="flex flex-wrap items-baseline gap-x-[22px] gap-y-1.5 bg-meritum-card px-0.5 py-[15px]">
-            <dt className="flex-none basis-[164px] text-label font-bold uppercase tracking-label text-meritum-ink-3">
+            <dt className="flex-none basis-[164px] text-label font-medium uppercase tracking-label text-meritum-ink-3 font-ui">
               {term.label}
             </dt>
-            <dd className="min-w-0 flex-1 basis-60 font-serif text-14 text-meritum-ink-2">{term.value}</dd>
+            <dd className="min-w-0 flex-1 basis-60 font-ui text-14 text-meritum-ink-2">{term.value}</dd>
           </div>
         ))}
       </dl>
 
       <div className="mt-[22px] flex flex-wrap items-center justify-between gap-[18px] rounded-2xl border border-meritum-line-card bg-meritum-rail px-5 py-[18px]">
         <div className="min-w-[min(100%,230px)] flex-1 basis-64">
-          <div className="text-14 font-bold text-meritum-ink">{t('meritum_launch.first_buy_title')}</div>
-          <p className="mt-1 max-w-[42ch] font-serif text-caption text-meritum-ink-muted">
+          <div className="text-14 font-medium text-meritum-ink font-ui">{t('meritum_launch.first_buy_title')}</div>
+          <p className="mt-1 max-w-[42ch] font-ui text-caption text-meritum-ink-muted">
             {t('meritum_launch.first_buy_body')}
           </p>
         </div>
         <div className="flex items-baseline gap-[5px]">
-          <span className="font-serif text-20 text-meritum-ink-faint" aria-hidden="true">
+          <span className="text-20 text-meritum-ink-faint font-num" aria-hidden="true">
             $
           </span>
           {/*
@@ -150,7 +150,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
             inputMode="decimal"
             maxLength={9}
             aria-label={t('meritum_launch.first_buy_aria')}
-            className="w-[10ch] min-w-0 border-0 bg-transparent text-left font-serif text-30 font-semibold tabular-nums text-meritum-ink outline-none placeholder:text-meritum-ink-faint"
+            className="w-[10ch] min-w-0 border-0 bg-transparent text-left text-30 tabular-nums text-meritum-ink font-num outline-none placeholder:text-meritum-ink-faint"
           />
         </div>
       </div>
@@ -162,7 +162,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
       {block === 'signed-out' ? (
         <Notice>
           {t('meritum_launch.gate_signed_out')}{' '}
-          <a href="/login" className="font-semibold text-meritum-ink-link hover:underline">
+          <a href="/login" className="font-medium text-meritum-ink-link hover:underline">
             {t('meritum_launch.gate_sign_in')}
           </a>
         </Notice>
@@ -174,7 +174,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
       {canRetryRead ? (
         <Notice tone="alert">
           {t('meritum_launch.gate_unknown_market')}{' '}
-          <button type="button" onClick={onRetryRead} className="font-semibold underline">
+          <button type="button" onClick={onRetryRead} className="font-medium underline">
             {t('meritum_launch.gate_retry')}
           </button>
         </Notice>
@@ -182,7 +182,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
       {alreadyHasMarket ? (
         <Notice>
           {t('meritum_launch.gate_has_market')}{' '}
-          <a href="/creators/studio" className="font-semibold text-meritum-ink-link hover:underline">
+          <a href="/creators/studio" className="font-medium text-meritum-ink-link hover:underline">
             {t('meritum_launch.gate_open_studio')}
           </a>
         </Notice>
@@ -209,7 +209,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
         </Notice>
       ) : null}
       {blockMessage ? (
-        <p className="mt-5 text-caption font-semibold text-meritum-ink-brand" role="status">
+        <p className="mt-5 text-caption font-medium text-meritum-ink-brand font-ui" role="status">
           {blockMessage}
         </p>
       ) : null}

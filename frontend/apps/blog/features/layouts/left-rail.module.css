@@ -118,7 +118,8 @@
  * the grow-in animation lands on 66% instead of overshooting to 60% and snapping.
  */
 .row[data-active='true']::before {
-  content: '';
+  content: none;
+  display: none;
   position: absolute;
   left: 0;
   top: 50%;

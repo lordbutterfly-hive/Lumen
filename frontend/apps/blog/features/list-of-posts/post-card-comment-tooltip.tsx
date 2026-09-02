@@ -93,7 +93,7 @@ const PostCardCommentTooltip = ({
               aria-label={accessibleLabel}
             >
               <Icons.comment className={cn(iconClassName, 'sm:mr-1')} aria-hidden="true" />
-              <span className="pl-1">{comments}</span>
+              <span className="pl-1 font-num font-medium">{comments}</span>
             </Link>
           </TooltipTrigger>
           <TooltipContent data-testid="post-card-responses">

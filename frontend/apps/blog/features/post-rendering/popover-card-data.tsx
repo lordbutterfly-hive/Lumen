@@ -198,7 +198,7 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
 
               {/* About */}
               {about && (
-                <p data-testid="user-about" className="border-b border-border p-3 text-sm text-muted-foreground" translate="no">
+                <p data-testid="user-about" className="border-b border-border p-3 font-lora text-sm text-muted-foreground" translate="no">
                   {about.slice(0, 140)}{140 < about.length ? '...' : ''}
                 </p>
               )}

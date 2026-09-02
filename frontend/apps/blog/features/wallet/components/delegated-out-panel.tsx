@@ -61,12 +61,12 @@ export default function DelegatedOutPanel({
         className="flex w-full flex-wrap items-center justify-between gap-x-2 gap-y-1 rounded-card border border-line-9 bg-surface-1 px-3.5 py-2.5 transition-colors hover:bg-surface-16"
         data-testid="wallet-delegated-out-toggle"
       >
-        <span className="flex items-center gap-2.5 text-[14px] leading-[22px] font-semibold text-ink-7">
+        <span className="flex items-center gap-2.5 text-[14px] leading-[22px] font-medium text-ink-7">
           <Icons.swap className="h-[15px] w-[15px] text-ink-14" />
           {t('wallet.delegated.out')}
         </span>
         <span className="flex items-center gap-2.5">
-          <span className="font-sans text-[15px] leading-[24px] font-bold tabular-nums text-ink-brand-6">
+          <span className="font-num font-medium text-[15px] leading-[24px] text-ink-brand-6">
             {/* ★ No sign at zero (2026-08-09). The minus was unconditional, so an
                 account delegating nothing read "-0.000 HP" — a negative-looking
                 figure for the absence of a thing. */}
@@ -84,7 +84,7 @@ export default function DelegatedOutPanel({
       {delegatedOpen ? (
         <div className="rounded-card border border-line-9 bg-surface-5 px-4 py-3.5" data-testid="wallet-delegated-out-list">
           <div className="mb-2.5 flex items-center justify-between">
-            <span className="text-caption font-bold tabular-nums text-ink-4">
+            <span className="text-caption font-medium tabular-nums text-ink-4">
               {/* "Delegated to 0 accounts" is a claim, and an unread list cannot
                   support it. The heading falls back to its plain label until the
                   list is actually known. */}
@@ -96,7 +96,7 @@ export default function DelegatedOutPanel({
               href={getDelegationsUrl(username)}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-caption font-semibold text-ink-brand-6 hover:text-ink-brand-4"
+              className="text-caption font-medium text-ink-brand-6 hover:text-ink-brand-4"
               data-testid="wallet-manage-delegations"
             >
               {t('wallet.delegated.manage')}
@@ -126,7 +126,7 @@ export default function DelegatedOutPanel({
                     <UserAvatarImg username={d.name} pixelSize={24} />
                     <span className="truncate">@{d.name}</span>
                   </Link>
-                  <span className="shrink-0 font-sans text-[14px] leading-[22px] font-semibold tabular-nums text-ink-7">
+                  <span className="shrink-0 font-num font-medium text-[14px] leading-[22px] text-ink-7">
                     {d.hp} HP
                   </span>
                 </div>

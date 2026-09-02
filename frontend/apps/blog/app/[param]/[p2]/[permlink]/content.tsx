@@ -1427,7 +1427,7 @@ const PostContent = () => {
                           // `tracking-tight` (-0.025em, tuned for a sans) is gone at both
                           // widths: it is the value the wordmark had to abandon in August
                           // when it became Lora, for the same collision reason.
-                          'text-[28px] font-bold leading-[36px] tracking-hero text-foreground sm:text-hero',
+                          'font-text text-[28px] font-bold leading-[36px] tracking-hero text-foreground sm:text-hero',
                           isNote && 'sr-only'
                         )}
                         data-testid="article-title"
@@ -2049,7 +2049,7 @@ const PostContent = () => {
                           // `tabular-nums` added to match the comment payouts, which have
                           // always had it; without it the post's own figure was the only
                           // money on the page with proportional digits.
-                          className={`text-[15px] font-bold tabular-nums text-[color:rgb(var(--ink-payout))] hover:cursor-pointer ${
+                          className={`text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))] hover:cursor-pointer ${
                             parseFloat(postData.max_accepted_payout) === 0
                               ? '!text-ink-8 line-through'
                               : ''
@@ -2252,7 +2252,7 @@ const PostContent = () => {
                                   as well as between cards. The count beside it already
                                   says how many. */}
                               <Icons.comment className="mr-1 h-4 w-4" />
-                              <span className="font-medium">{visibleCommentCount}</span>
+                              <span className="text-[17px] font-medium font-num">{visibleCommentCount}</span>
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent data-testid="post-footer-response-tooltip">

@@ -129,7 +129,7 @@ const CommunitySimpleDescription = ({
       </div>
 
       {/* About */}
-      {data.about ? <p className="text-caption text-muted-foreground sm:text-sm">{data.about}</p> : null}
+      {data.about ? <p className="font-lora text-caption text-muted-foreground sm:text-sm">{data.about}</p> : null}
     </Card>
   );
 };

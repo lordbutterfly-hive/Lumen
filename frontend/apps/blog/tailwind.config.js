@@ -63,8 +63,10 @@ module.exports = {
          * proportions, so a failed load now degrades to one consistent voice.
          */
         lora: ['var(--font-lora)', 'Georgia', 'Cambria', 'serif'],
-        sans: ['var(--font-lora)', 'Georgia', 'Cambria', 'serif'],
-        serif: ['var(--font-lora)', 'Georgia', 'Cambria', 'serif'],
+        text: ['var(--font-text)', 'Georgia', 'Cambria', 'serif'],
+        ui: ['var(--font-ui)'],
+        sans: ['var(--font-ui)', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+        serif: ['var(--font-ui)', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
         /**
          * ★ MONO IS THE ONE DELIBERATE EXCEPTION (typography spec §7). A serif
          * cannot disambiguate characters in a hex string: wallet addresses,

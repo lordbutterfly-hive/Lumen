@@ -106,7 +106,7 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable, votesP
 
           {/* Title */}
           <Link href={postHref} data-testid="proposal-card-title">
-            <h2 className="font-sans text-[22px] font-semibold leading-[28px] tracking-[-0.01em] text-ink-2">
+            <h2 className="font-lora text-[22px] font-semibold leading-[28px] tracking-[-0.01em] text-ink-2">
               {proposal.subject} <span className="font-normal tabular-nums text-ink-14">#{id}</span>
             </h2>
           </Link>

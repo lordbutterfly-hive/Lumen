@@ -114,13 +114,13 @@ export default function ProfileCommentCard({
       {post.title ? (
         <Link href={href} className="block">
           {/* Decoded for the same reason as the feed card — see medium-post-card.tsx. */}
-          <h3 className="mb-1.5 font-sans text-[18px] leading-[28px] font-semibold text-ink-2">{normalizeTitle(post.title)}</h3>
+          <h3 className="mb-1.5 font-lora text-[18px] leading-[28px] font-semibold text-ink-2">{normalizeTitle(post.title)}</h3>
         </Link>
       ) : null}
 
       {body ? (
         <Link href={href} className="block">
-          <p className="line-clamp-3 font-serif text-[16px] leading-[24px] text-ink-8">{body}</p>
+          <p className="line-clamp-3 font-lora text-[16px] leading-[24px] text-ink-8">{body}</p>
         </Link>
       ) : null}
 

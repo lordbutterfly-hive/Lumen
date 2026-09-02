@@ -13,9 +13,9 @@ import DelegatedOutPanel from './delegated-out-panel';
 
 // W-2/W-3: both were rounded-control, and Stake was bg-surface-ok-7.
 const STAKE_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-card bg-surface-brand-12 px-[15px] py-2 text-caption font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
+  'flex items-center gap-1.5 rounded-card bg-surface-brand-12 px-[15px] py-2 text-caption font-medium text-ink-27 transition-colors hover:bg-surface-brand-17';
 const UNSTAKE_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-card border border-line-11 bg-surface-1 px-[15px] py-2 text-caption font-semibold text-ink-7 transition-colors hover:bg-surface-16';
+  'flex items-center gap-1.5 rounded-card border border-line-11 bg-surface-1 px-[15px] py-2 text-caption font-medium text-ink-7 transition-colors hover:bg-surface-16';
 
 export default function StakedHiveBlock({
   username,
@@ -32,7 +32,7 @@ export default function StakedHiveBlock({
   const { vestingHp, netHp, movableHp, delegatedOutHp, hpApr, powerDown } = figures;
 
   return (
-    <div className="mt-5 flex flex-col gap-5 border-l-2 border-line-2 pl-4">
+    <div className="mt-4 flex flex-col gap-4 border-l-2 border-line-2 pl-4">
       {/* ★ MOBILE OVERFLOW FIX (2026-08-14). No `flex-wrap` here meant the
           description block on the left and the HP-figures/Stake/Unstake
           column on the right were forced onto one line. The right column's
@@ -53,16 +53,16 @@ export default function StakedHiveBlock({
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-4">
         <div className="max-w-[520px]">
           <div className="mb-1 flex items-center gap-2">
-            <span className="text-[15px] leading-[24px] font-bold text-ink-4">{t('wallet.staked.title')}</span>
+            <span className="text-[16px] leading-[24px] font-semibold text-ink-4">{t('wallet.staked.title')}</span>
             {/* ink-8 not ink-10: #6b7280 on the #f1f3f5 chip ground is 4.35:1, under the 4.5:1 AA floor. ink-8 is 6.79:1 on the same ground. Same fix as the REP pill on the profile (2026-08-16). */}
-            <span className="rounded-control bg-surface-23 px-2 py-[2px] text-caption font-bold text-ink-8">
+            <span className="rounded-control bg-surface-23 px-2 py-[2px] text-caption font-medium text-ink-8">
               {t('wallet.staked.badge')}
             </span>
-            <span className="rounded-control bg-surface-ok-5 px-2 py-[2px] text-caption font-bold tabular-nums text-ink-ok-2">
+            <span className="rounded-control bg-surface-ok-5 px-2 py-[2px] text-caption font-medium tabular-nums text-ink-ok-2">
               {t('wallet.staked.apr', { apr: hpApr.toFixed(2) })}
             </span>
           </div>
-          <p className="font-serif text-[14px] leading-[22px] text-ink-10">{t('wallet.staked.description')}</p>
+          <p className="font-ui text-[14px] leading-[22px] text-ink-10">{t('wallet.staked.description')}</p>
 
           {powerDown.isActive ? (
             <div
@@ -83,7 +83,7 @@ export default function StakedHiveBlock({
                 trigger={
                   <button
                     type="button"
-                    className="shrink-0 rounded-control border border-line-brand-6 bg-surface-1 px-2.5 py-[2px] text-caption font-bold text-ink-brand-6 hover:bg-surface-brand-4"
+                    className="shrink-0 rounded-control border border-line-brand-6 bg-surface-1 px-2.5 py-[2px] text-caption font-medium text-ink-brand-6 hover:bg-surface-brand-4"
                     data-testid="wallet-stop-power-down"
                   >
                     {t('wallet.staked.stop')}
@@ -96,7 +96,7 @@ export default function StakedHiveBlock({
 
         <div className="flex flex-col items-end gap-2.5">
           <div className="text-right">
-            <div className="font-sans text-[20px] font-bold tabular-nums text-ink-2" data-testid="wallet-hp-balance">
+            <div className="font-num font-semibold text-[22px] leading-[30px] text-ink-2" data-testid="wallet-hp-balance">
               {formatTokenAmount(vestingHp)}
             </div>
             {/* ★ W-11: ONE LABEL, ONE FORMAT, ON BOTH PAGES.

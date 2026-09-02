@@ -215,7 +215,7 @@ const PostListItem = memo(
                 <span
                   title={t('post_content.reputation_title')}
                   aria-label={`${t('post_content.reputation_title')} ${accountReputation(displayReputation)}`}
-                  className="mr-1 block font-normal"
+                  className="mr-1 block font-normal font-num"
                   data-testid="post-author-reputation"
                 >
                   ({accountReputation(displayReputation)})
@@ -343,7 +343,7 @@ const PostListItem = memo(
                     <div
                       /* ★ Money green, no red hover — same change as the post page and the
                          comment row (2026-08-20, owner report). */
-                      className={`flex items-center text-[color:rgb(var(--ink-payout))] hover:cursor-pointer ${
+                      className={`flex items-center font-num text-[color:rgb(var(--ink-payout))] hover:cursor-pointer ${
                         parseFloat(post.max_accepted_payout) === 0 ? 'text-ink-8 line-through' : ''
                       }`}
                       data-testid="post-payout"
@@ -377,7 +377,7 @@ const PostListItem = memo(
                                   aria-label={`${t('cards.post_card.reblog')} ${displayTitle}`}
                                 >
                                   <Icons.forward className="h-4 w-4 sm:mr-1" aria-hidden="true" />
-                                  {reblogCount}
+                                  <span className="font-num">{reblogCount}</span>
                                 </button>
                               </ReblogDialog>
                             </div>

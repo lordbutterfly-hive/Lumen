@@ -214,6 +214,7 @@
    identically here and in the standalone vote control. */
 
 .title {
+  font-family: var(--font-text);
   font-size: 28px;
   line-height: 34px;
   font-weight: 600;
@@ -232,6 +233,7 @@
 }
 
 .excerpt {
+  font-family: var(--font-text);
   font-size: 18px;
   line-height: 30px;
   font-weight: 400;
@@ -239,6 +241,7 @@
 }
 
 .author {
+  font-family: var(--font-ui);
   font-size: 15px;
   line-height: 22px;
   font-weight: 600;
@@ -250,6 +253,7 @@
 }
 
 .community {
+  font-family: var(--font-ui);
   font-size: 15px;
   line-height: 22px;
   font-weight: 600;
@@ -261,6 +265,7 @@
 }
 
 .time {
+  font-family: var(--font-ui);
   font-size: 15px;
   line-height: 22px;
   font-weight: 400;
@@ -341,6 +346,7 @@
    The card this replaces had three different greys in one row. Colour carries
    state here, never accident. */
 .act {
+  font-family: var(--font-num);
   position: relative;
   display: flex;
   align-items: center;
@@ -351,7 +357,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 15px;
-  font-weight: 500;
+  font-weight: 400;
   letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums; /* a count that ticks must not shift the row */
   color: var(--pc-ink-quiet);
@@ -360,7 +366,7 @@
 /* The vote tally is the one figure in this row a reader is voting ON, so it
    carries the 700 the typography spec assigns to key figures. */
 .actVote {
-  font-weight: 700;
+  font-weight: 500;
 }
 .act svg {
   fill: var(--pc-ink-quiet);
@@ -503,11 +509,12 @@
    payout and the comment payout land on the same right edge, so money reads as
    one column down the feed. */
 .pay {
+  font-family: var(--font-num);
   width: 88px;
   flex: none;
   margin-left: auto;
   text-align: right;
-  font-weight: 700;
+  font-weight: 400;
   font-size: 17px;
   font-variant-numeric: tabular-nums;
   color: var(--pc-payout);
@@ -699,6 +706,7 @@
    drawer and the body sits one step back, which is what makes the block read as
    a quotation rather than as more card. */
 .commentAuthor {
+  font-family: var(--font-ui);
   font-size: 15px;
   line-height: 20px;
   font-weight: 600;
@@ -712,6 +720,7 @@
   color: var(--pc-ink-faint);
 }
 .commentTime {
+  font-family: var(--font-num);
   font-size: 14px;
   line-height: 20px;
   font-weight: 400;
@@ -719,6 +728,7 @@
   font-variant-numeric: tabular-nums;
 }
 .commentLabel {
+  font-family: var(--font-ui);
   margin-left: auto; /* §4 "label right-aligned" */
   font-size: 12px;
   line-height: 16px;
@@ -773,6 +783,7 @@
 }
 
 .commentText {
+  font-family: var(--font-text);
   font-size: 16px;
   line-height: 24px;
   font-weight: 400;
@@ -824,6 +835,7 @@
 }
 .voteCount,
 .replyCount {
+  font-family: var(--font-num);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -836,12 +848,14 @@
   line-height: 18px;
 }
 .voteCount {
+  font-family: var(--font-num);
   color: var(--pc-ink-faint);
 }
 /* §7: "The reply count is a number, not a button. No cursor:pointer, no hover
    colour, no hit target. A count that lights up under the pointer and does
    nothing is a false affordance." Hence no :hover rule for this one anywhere. */
 .replyCount {
+  font-family: var(--font-num);
   color: var(--pc-ink-quiet);
 }
 .voteCount svg,
@@ -1130,6 +1144,7 @@
   border-color: var(--id-pill-line);
 }
 .idHandle {
+  font-family: var(--font-ui);
   display: inline-flex;
   align-items: center;
   height: 100%;
@@ -1171,12 +1186,14 @@
   color: var(--pc-brand);
 }
 .idPriceFigure {
+  font-family: var(--font-num);
   color: var(--pc-ink-strong);
   font-variant-numeric: tabular-nums;
 }
 /* 51x28 chip. Fills solid brand with white text on hover — the one element in
    the cluster that inverts, because it is the only one that commits money. */
 .idBuy {
+  font-family: var(--font-ui);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1224,6 +1241,7 @@
    in a centred row also closes the gap from both sides: 22px of line box leaves
    8px below instead of 10px. */
 .rubric {
+  font-family: var(--font-ui);
   font-size: 15px;
   line-height: 22px;
   font-weight: 700;
@@ -1262,6 +1280,7 @@
    of a clamped two-line headline, which is what "immediately after the title
    text" means. */
 .titleText {
+  font-family: var(--font-text);
   /* ★ INLINE-box, not box. `-webkit-box` is BLOCK-level, so it claimed the full
      line and the date wrapped underneath it no matter how much width was
      reserved — measured, twice, at 337px cards. `-webkit-inline-box` clamps
@@ -1281,6 +1300,7 @@
   align-items: flex-end;
 }
 .titleDate {
+  font-family: var(--font-num);
   /* `flex: none` is the whole fix: the date is never the thing that wraps. */
   flex: none;
   margin-left: 10px;

@@ -414,10 +414,10 @@ const LumenLogin: FC<LumenLoginProps> = ({ embedded = false, googleConfiguredIni
           migration and misleads the next reader. */}
       {embedded ? null : (
         <div className="mb-8 mt-16 text-center">
-          <Link href="/" className="font-sans text-[44px] leading-[52px] font-bold leading-none tracking-[-0.025em] text-ink-2">
+          <Link href="/" className="font-text text-[44px] leading-[52px] font-bold leading-none tracking-[-0.025em] text-ink-2">
             Lumen
           </Link>
-          <p className="mt-2 font-serif text-base text-ink-10">{COPY.tagline}</p>
+          <p className="mt-2 font-text text-base text-ink-10">{COPY.tagline}</p>
         </div>
       )}
 

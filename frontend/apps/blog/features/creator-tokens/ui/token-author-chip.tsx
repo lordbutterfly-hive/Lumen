@@ -125,10 +125,10 @@ const TokenAuthorChip: FC<{ handle: string }> = ({ handle }) => {
       <span aria-hidden="true" className="text-caption leading-none text-ink-brand-6">
         ◈
       </span>
-      <span className="font-sans text-caption font-bold leading-none tabular-nums text-ink-2">
+      <span className="text-caption leading-none tabular-nums text-ink-2 font-num">
         {usdPrice(priceUsd)}
       </span>
-      <span className="rounded-full border border-line-warn-4 bg-surface-1 px-[9px] py-[2px] font-sans text-caption font-bold leading-none text-ink-brand-6">
+      <span className="rounded-full border border-line-warn-4 bg-surface-1 px-[9px] py-[2px] font-ui text-caption font-medium leading-none text-ink-brand-6">
         {/* Sold out replaces the ACTION word only when the market is healthy
             and every buy would revert; it is not a health (owner, 2026-08-30,
             market-health.ts soldOutOf). A state word wins when there is one. */}

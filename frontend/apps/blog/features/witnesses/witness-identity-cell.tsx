@@ -106,7 +106,7 @@ export default function WitnessIdentityCell({ row, className }: WitnessIdentityC
           // `break-words` lets it wrap inside the two clamped lines instead of
           // losing the tail. The `title` fallback below still carries the whole
           // string for a mouse user either way.
-          className={`max-w-[340px] break-words font-sans text-caption text-ink-14 ${row.description ? 'line-clamp-2' : ''}`}
+          className={`max-w-[340px] break-words font-lora text-caption text-ink-14 ${row.description ? 'line-clamp-2' : ''}`}
           title={row.description || t('witnesses.no_description')}
         >
           {row.description || t('witnesses.no_description')}

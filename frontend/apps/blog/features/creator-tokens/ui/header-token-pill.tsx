@@ -109,9 +109,9 @@ const HeaderTokenPill: FC = () => {
             states, and showing it a rocket in one and a glyph in the other is
             the kind of twin this codebase has been clearing out all day. */}
         <CreatorTokenRocket size={20} className="shrink-0 text-ink-brand-6" />
-        <span className="font-sans text-[14px] leading-[22px] font-bold leading-none text-ink-2">@{identity.username}</span>
+        <span className="font-ui text-[14px] leading-[22px] font-medium leading-none text-ink-2">@{identity.username}</span>
         <span aria-hidden="true" className="h-[15px] w-px bg-surface-32" />
-        <span className="pr-1.5 font-sans text-[14px] leading-[22px] font-bold leading-none tabular-nums text-ink-2">
+        <span className="pr-1.5 text-[14px] leading-[22px] leading-none tabular-nums text-ink-2 font-num">
           {usdPrice(chip.priceUsd)}
         </span>
         {/* ★ The creator's OWN header said nothing while their market was
@@ -120,7 +120,7 @@ const HeaderTokenPill: FC = () => {
             state word, only when there is one (market/market-health.ts). */}
         {chip.health !== null && healthWordFor(chip.health) !== null ? (
           <span
-            className="pr-1.5 font-sans text-[12px] leading-[22px] font-bold uppercase tracking-label text-ink-warn-3"
+            className="pr-1.5 font-ui text-[12px] leading-[22px] font-medium uppercase tracking-label text-ink-warn-3"
             data-testid="header-token-pill-health"
           >
             {healthWordFor(chip.health)}
@@ -143,7 +143,7 @@ const HeaderTokenPill: FC = () => {
        * its own launch call to action, so nobody loses a step by arriving there.
        */
       href="/creators"
-      className="flex items-center gap-2 whitespace-nowrap rounded-full border border-line-brand-10 bg-surface-1 px-4 py-[9px] font-sans text-[14px] leading-[22px] font-bold text-ink-brand-6 transition-colors hover:bg-surface-brand-12 hover:text-ink-27"
+      className="flex items-center gap-2 whitespace-nowrap rounded-full border border-line-brand-10 bg-surface-1 px-4 py-[9px] font-ui text-[14px] leading-[22px] font-medium text-ink-brand-6 transition-colors hover:bg-surface-brand-12 hover:text-ink-27"
       data-testid="header-token-launch-cta"
     >
       {/* ★ The Creator Tokens rocket replaces the ◈ glyph here (design handoff,

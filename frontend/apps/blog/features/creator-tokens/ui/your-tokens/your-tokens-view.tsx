@@ -85,7 +85,7 @@ const EXIT_NOTE_BACKING_HIDDEN =
   'Token prices float and you can lose money. You can exit two ways: sell on the curve while the market is open, at the curve’s price, after a 10% trade fee and any early-exit fee; or, if a market winds down, redeem a pro-rata slice of whatever the reserve holds then, less any early-exit fee. Neither is a fixed price, and neither is a refund of what you paid.';
 
 const Unavailable: FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="rounded-card border border-dashed border-line-11 px-5 py-6 text-center text-[14px] leading-[22px] text-ink-14">{children}</div>
+  <div className="rounded-card border border-dashed border-line-11 px-5 py-6 text-center text-[14px] leading-[22px] text-ink-14 font-ui">{children}</div>
 );
 
 /**
@@ -116,13 +116,13 @@ const HoldingRow: FC<{ h: HolderPosition; price?: MarketPrice }> = ({ h, price }
   <div className="flex flex-wrap items-center gap-4 rounded-card border border-line-9 bg-surface-1 px-5 py-4">
     <span className="h-11 w-11 flex-shrink-0 rounded-control bg-surface-28" />
     <div className="min-w-0 flex-1">
-      <Link href={`/creators/${routeHandle(h.creator)}`} className="text-[15px] leading-[24px] font-bold text-ink-2 hover:text-ink-brand-6">
+      <Link href={`/creators/${routeHandle(h.creator)}`} className="text-[15px] leading-[24px] font-medium text-ink-2 font-ui hover:text-ink-brand-6">
         @{displayHandle(h.creator)}
       </Link>
       {/* No bio line: it is not contract state, and the Hive profile is not read on this route. */}
     </div>
     <div className="text-right tabular-nums">
-      <div className="text-[15px] leading-[24px] font-bold text-ink-2">{tok(h.tokensHeld)} tokens</div>
+      <div className="text-[15px] leading-[24px] tabular-nums text-ink-2 font-num">{tok(h.tokensHeld)} tokens</div>
       {/* The FLOOR is net of this position's own exit tax. The least you're
           guaranteed back. There is deliberately no "current value" line: that
           needs the creator's live curve price, which is a per-market read this
@@ -131,7 +131,7 @@ const HoldingRow: FC<{ h: HolderPosition; price?: MarketPrice }> = ({ h, price }
           which is the fact this list exists to state, and the three actions. The
           figure returns here with the flag; nothing about it is deleted. */}
       {SHOW_BACKING_FIGURES ? (
-        <div className="text-caption text-ink-14">floor {usdPrice(usdFromHbd(h.floorValueHbd))}</div>
+        <div className="text-caption text-ink-14 font-num">floor {usdPrice(usdFromHbd(h.floorValueHbd))}</div>
       ) : null}
     </div>
     <div className="flex items-center gap-2">
@@ -139,7 +139,7 @@ const HoldingRow: FC<{ h: HolderPosition; price?: MarketPrice }> = ({ h, price }
         // The state word in the Buy slot, same words as every other surface
         // (market/market-health.ts). Not a link: there is nothing to buy.
         <span
-          className="rounded-control border border-line-warn-4 bg-surface-warn-2 px-3 py-2 text-caption font-semibold text-ink-warn-3"
+          className="rounded-control border border-line-warn-4 bg-surface-warn-2 px-3 py-2 text-caption font-medium text-ink-warn-3 font-ui"
           data-testid="holding-health"
         >
           {healthWordFor(price.health)}
@@ -147,20 +147,20 @@ const HoldingRow: FC<{ h: HolderPosition; price?: MarketPrice }> = ({ h, price }
       ) : (
         <Link
           href={`/creators/${routeHandle(h.creator)}?a=buy`}
-          className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-semibold text-ink-7 hover:bg-surface-23"
+          className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-medium text-ink-7 font-ui hover:bg-surface-23"
         >
           Buy
         </Link>
       )}
       <Link
         href={`/creators/${routeHandle(h.creator)}?a=${price?.health === 'closed' ? 'redeem' : 'sell'}`}
-        className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-semibold text-ink-7 hover:bg-surface-23"
+        className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-medium text-ink-7 font-ui hover:bg-surface-23"
       >
         {price?.health === 'closed' ? 'Redeem' : 'Sell'}
       </Link>
       <Link
         href={`/creators/${routeHandle(h.creator)}?a=send`}
-        className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-semibold text-ink-7 hover:bg-surface-23"
+        className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-medium text-ink-7 font-ui hover:bg-surface-23"
       >
         Send
       </Link>
@@ -189,10 +189,10 @@ const askStyle: Record<string, { label: string; cls: string }> = {
 const RateStrip: FC<{ onRate: (score: number) => Promise<void>; busy: boolean }> = ({ onRate, busy }) => {
   const [failure, setFailure] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  if (done) return <div className="mt-3 text-caption font-semibold text-ink-ok-2">Thanks. Your rating is recorded on-chain.</div>;
+  if (done) return <div className="mt-3 text-caption font-medium text-ink-ok-2 font-ui">Thanks. Your rating is recorded on-chain.</div>;
   return (
     <div className="mt-3 border-t border-line-2 pt-3">
-      <div className="mb-2 text-caption text-ink-10">How did it go? Your rating is the creator’s public record.</div>
+      <div className="mb-2 text-caption text-ink-10 font-ui">How did it go? Your rating is the creator’s public record.</div>
       <div className="flex items-center gap-1.5">
         {[1, 2, 3, 4, 5].map((score) => (
           <button
@@ -208,15 +208,15 @@ const RateStrip: FC<{ onRate: (score: number) => Promise<void>; busy: boolean }>
                 setFailure(writeFailureMessage(err, 'Your rating didn’t go through.'));
               }
             }}
-            className="h-8 w-8 rounded-control border border-line-11 bg-surface-1 text-caption font-bold text-ink-7 hover:bg-surface-23 disabled:opacity-50"
+            className="h-8 w-8 rounded-control border border-line-11 bg-surface-1 text-caption text-ink-7 font-num hover:bg-surface-23 disabled:opacity-50"
           >
             {score}
           </button>
         ))}
-        <span className="ml-1 text-caption text-ink-14">1 = poor · 5 = excellent</span>
+        <span className="ml-1 text-caption text-ink-14 font-num">1 = poor · 5 = excellent</span>
       </div>
       {failure ? (
-        <div className="mt-2 text-caption font-semibold text-ink-brand-6">{failure}</div>
+        <div className="mt-2 text-caption font-medium text-ink-brand-6 font-ui">{failure}</div>
       ) : null}
     </div>
   );
@@ -235,12 +235,12 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
   return (
     <div className={`rounded-card border bg-surface-1 px-5 py-4 ${reclaimable ? 'border-line-warn-2 bg-surface-warn-4' : 'border-line-9'}`}>
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[15px] leading-[24px] font-semibold text-ink-2">
+        <div className="text-[15px] leading-[24px] font-medium text-ink-2 font-ui">
           Ask · <span className="text-ink-8">@{displayHandle(a.creator)}</span>
         </div>
-        <div className={`text-caption font-bold ${s.cls}`}>{s.label}</div>
+        <div className={`text-caption font-medium font-ui ${s.cls}`}>{s.label}</div>
       </div>
-      <div className="mt-1 text-caption tabular-nums text-ink-10">
+      <div className="mt-1 text-caption tabular-nums text-ink-10 font-num">
         {a.tokensEscrowed.toFixed(2)} tokens{' '}
         {a.status === 'answered' ? 'paid to the creator' : a.status === 'reclaimed' || a.status === 'declined' ? 'returned to you' : 'in escrow'}
       </div>
@@ -251,7 +251,7 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
       {a.status === 'answered' ? <RateStrip onRate={onRate} busy={rating} /> : null}
       {reclaimable ? (
         <div className="mt-3 flex items-center justify-between gap-3">
-          <div className="text-caption text-ink-warn-2">You get {a.tokensEscrowed.toFixed(2)} tokens back to your balance, in full.</div>
+          <div className="text-caption text-ink-warn-2 font-ui">You get {a.tokensEscrowed.toFixed(2)} tokens back to your balance, in full.</div>
           <button
             onClick={async () => {
               if (busy) return;
@@ -264,19 +264,19 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
               }
             }}
             disabled={busy}
-            className="rounded-control bg-surface-warn-11 px-4 py-2 text-caption font-semibold text-ink-27 hover:bg-surface-warn-13 disabled:opacity-50"
+            className="rounded-control bg-surface-warn-11 px-4 py-2 text-caption font-medium text-ink-27 font-ui hover:bg-surface-warn-13 disabled:opacity-50"
           >
             {busy ? 'Confirm in your wallet…' : 'Get your tokens back'}
           </button>
         </div>
       ) : null}
       {busy ? (
-        <div role="status" aria-live="polite" className="mt-2 text-caption text-ink-14">
+        <div role="status" aria-live="polite" className="mt-2 text-caption text-ink-14 font-ui">
           Confirming on the chain. This can take a minute or two, so keep this open while it goes through.
         </div>
       ) : null}
       {failure ? (
-        <div className="mt-2 text-caption font-semibold text-ink-brand-6">{failure}</div>
+        <div className="mt-2 text-caption font-medium text-ink-brand-6 font-ui">{failure}</div>
       ) : null}
     </div>
   );
@@ -300,9 +300,9 @@ const YourTokensView: FC = () => {
   const rightRail = (
     <div className="flex flex-col gap-5 pt-[26px]">
       <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
-        <div className="mb-1.5 font-serif text-lg font-semibold text-ink-2">Find more creators</div>
-        <p className="mb-4 font-serif text-[14px] leading-[22px] text-ink-10">Hold their token, spend it on their work.</p>
-        <Link href="/creators" className="block rounded-control bg-surface-brand-12 py-3 text-center text-sm font-semibold text-ink-27 hover:bg-surface-brand-16">
+        <div className="mb-1.5 font-ui text-lg font-medium text-ink-2">Find more creators</div>
+        <p className="mb-4 font-ui text-[14px] leading-[22px] text-ink-10">Hold their token, spend it on their work.</p>
+        <Link href="/creators" className="block rounded-control bg-surface-brand-12 py-3 text-center text-sm font-medium text-ink-27 font-ui hover:bg-surface-brand-16">
           Discover creators →
         </Link>
       </div>
@@ -311,7 +311,7 @@ const YourTokensView: FC = () => {
 
   return (
     <TokenShell rightRail={rightRail}>
-      <h1 className="font-serif text-[34px] font-semibold tracking-[-0.015em] text-ink-2">Your Meritum tokens</h1>
+      <h1 className="font-ui text-[34px] font-medium tracking-[-0.015em] text-ink-2">Your Meritum tokens</h1>
 
       {p.unavailable ? (
         <div className="mt-5">
@@ -326,7 +326,7 @@ const YourTokensView: FC = () => {
         <div className="mt-5">
           <Unavailable>
             We couldn’t check your account, so we can’t show what you hold.{' '}
-            <button onClick={retrySession} className="font-semibold text-ink-brand-6 underline">
+            <button onClick={retrySession} className="font-medium text-ink-brand-6 underline">
               Try again
             </button>
           </Unavailable>
@@ -398,20 +398,20 @@ const YourTokensView: FC = () => {
               a placeholder dash. */}
           {SHOW_BACKING_FIGURES ? (
             <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-1">
-              <div className="text-display font-bold tabular-nums text-ink-2">{p.holdingsUnavailable ? '—' : usdPrice(floorTotalUsd)}</div>
-              <div className="pb-1.5 text-[15px] leading-[24px] tabular-nums text-ink-10">Floor value: what the reserve would pay out if the market wound down</div>
+              <div className="text-display tabular-nums text-ink-2 font-num">{p.holdingsUnavailable ? '—' : usdPrice(floorTotalUsd)}</div>
+              <div className="pb-1.5 text-[15px] leading-[24px] tabular-nums text-ink-10 font-ui">Floor value: what the reserve would pay out if the market wound down</div>
             </div>
           ) : null}
-          <p className="mt-1 text-[14px] leading-[22px] text-ink-10">
+          <p className="mt-1 text-[14px] leading-[22px] text-ink-10 font-ui">
             {p.holdingsUnavailable ? 'Your holdings can’t be loaded right now.' : `You hold tokens from ${p.holdings.length} ${p.holdings.length === 1 ? 'creator' : 'creators'}.`}
           </p>
 
           {reclaimable > 0 ? (
             <div className="mt-4 flex items-center justify-between gap-3 rounded-control border border-line-warn-2 bg-surface-warn-4 px-4 py-3">
-              <span className="text-[14px] leading-[22px] font-semibold text-ink-warn-3">
+              <span className="text-[14px] leading-[22px] font-medium text-ink-warn-3 font-ui">
                 You have {reclaimable} ask{reclaimable > 1 ? 's' : ''} with tokens to reclaim.
               </span>
-              <button onClick={() => setTab('asks')} className="text-caption font-semibold text-ink-warn-3 underline">
+              <button onClick={() => setTab('asks')} className="text-caption font-medium text-ink-warn-3 font-ui underline">
                 View
               </button>
             </div>
@@ -435,7 +435,7 @@ const YourTokensView: FC = () => {
                 onClick={() => setTab(t)}
                 aria-pressed={tab === t}
                 style={tab === t ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
-                className={`rounded-lg px-[18px] py-2 text-[14px] leading-[22px] font-semibold capitalize ${
+                className={`rounded-lg px-[18px] py-2 text-[14px] leading-[22px] font-medium font-ui capitalize ${
                   tab === t ? 'bg-[var(--lum-1)] text-ink-2' : 'text-ink-10'
                 }`}
               >
@@ -468,7 +468,7 @@ const YourTokensView: FC = () => {
                   figure, not just disappear: it ended by DEFINING the floor
                   value. Both branches are named constants at the top of this
                   file so a self-test can read them. */}
-              <p className="mt-4 font-serif text-caption text-ink-14">
+              <p className="mt-4 font-ui text-caption text-ink-14">
                 {SHOW_BACKING_FIGURES ? EXIT_NOTE_WITH_BACKING : EXIT_NOTE_BACKING_HIDDEN}
               </p>
             </>

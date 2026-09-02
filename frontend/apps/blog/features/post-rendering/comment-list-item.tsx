@@ -57,8 +57,6 @@ import { handleError } from '@ui/lib/handle-error';
 import { CircleSpinner } from 'react-spinners-kit';
 import MutePostDialog from './mute-post-dialog';
 import ChangeTitleDialog from '../community-profile/change-title-dialog';
-import { AlertDialogFlag } from './alert-window-flag';
-import FlagTooltip from './flag-icon';
 import TimeAgo from '@hive/ui/components/time-ago';
 import { getUserAvatarUrl } from '@hive/ui';
 import { UserPopoverCard } from './user-popover-card';
@@ -625,7 +623,7 @@ const CommentListItem = memo(function CommentListItem({
           <button
             type="button"
             onClick={() => setModerationRevealed(true)}
-            className="font-semibold text-ink-4 underline-offset-2 hover:underline"
+            className="font-medium text-ink-4 underline-offset-2 hover:underline"
             data-testid="comment-moderation-unknown-reveal"
           >
             {t('cards.comment_card.moderation_status_unknown_reveal')}
@@ -664,7 +662,7 @@ const CommentListItem = memo(function CommentListItem({
                     14px radius, which is the radius the design system assigns to rows. */}
                 <Card
                   className={cn(
-                    `mb-4 w-full min-w-0 overflow-hidden rounded-card border-line-9 bg-surface-1 text-primary depth-${comment.depth}`,
+                    `font-ui mb-4 w-full min-w-0 overflow-hidden rounded-card border-line-9 bg-surface-1 text-primary depth-${comment.depth}`,
                     {
                       'opacity-50 hover:opacity-100': hiddenComment || tempraryHidden,
                       'border border-destructive': comment._temporary,
@@ -687,7 +685,7 @@ const CommentListItem = memo(function CommentListItem({
                         <div className="flex w-full items-center justify-between text-caption sm:text-sm">
                           <div className="flex flex-wrap items-center">
                             {comment._temporary && !comment._optimistic ? (
-                              <div className="flex items-center font-bold hover:cursor-pointer hover:text-destructive">
+                              <div className="flex items-center font-medium hover:cursor-pointer hover:text-destructive">
                                 {displayAuthor}
                               </div>
                             ) : (
@@ -785,20 +783,7 @@ const CommentListItem = memo(function CommentListItem({
                           {comment._temporary && !comment._optimistic ? null : !hiddenComment ? (
                             <div className="flex items-center">
                               {/* Only show flag here for non-originally-hidden comments; originally hidden ones show flag in the reveal/hide section */}
-                              {!isOriginallyHidden && flagText && comment.community && !identity.isLoggedIn ? (
-                                <DialogLogin>
-                                  <FlagTooltip onClick={() => {}} />
-                                </DialogLogin>
-                              ) : !isOriginallyHidden && flagText && comment.community && identity.isLoggedIn ? (
-                                <AlertDialogFlag
-                                  community={comment.community}
-                                  username={comment.author}
-                                  permlink={comment.permlink}
-                                  flagText={flagText}
-                                >
-                                  <FlagTooltip onClick={() => {}} />
-                                </AlertDialogFlag>
-                              ) : null}
+                              {null}
                               <AccordionTrigger
                                 className="pb-0 pt-1 !no-underline sm:hidden"
                                 aria-label={
@@ -874,27 +859,14 @@ const CommentListItem = memo(function CommentListItem({
                                   {t('cards.comment_card.manage_list_link')}
                                 </Link>
                               ) : null}
-                              {flagText && comment.community && !identity.isLoggedIn ? (
-                                <DialogLogin>
-                                  <FlagTooltip onClick={() => {}} />
-                                </DialogLogin>
-                              ) : flagText && comment.community && identity.isLoggedIn ? (
-                                <AlertDialogFlag
-                                  community={comment.community}
-                                  username={comment.author}
-                                  permlink={comment.permlink}
-                                  flagText={flagText}
-                                >
-                                  <FlagTooltip onClick={() => {}} />
-                                </AlertDialogFlag>
-                              ) : null}
+                              {null}
                             </div>
                           </div>
                         ) : null}
 
                         {comment._temporary && !comment._optimistic ? null : !openState ? (
                           <div
-                            className="flex h-5 items-center gap-2 text-caption sm:text-sm"
+                            className="flex h-5 w-full items-center gap-2.5 text-[17px]"
                             data-testid="comment-card-footer"
                           >
                             <VotesComponentWrapper post={comment} type="comment" />
@@ -902,7 +874,7 @@ const CommentListItem = memo(function CommentListItem({
                             <DetailsCardHover
                               post={comment}
                               decline={parseFloat(comment.max_accepted_payout) === 0}
-                              className="order-last ml-auto flex min-w-[88px] items-center justify-end text-[15px] font-bold tabular-nums text-[color:rgb(var(--ink-payout))]"
+                              className="order-last ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))]"
                             >
                               <div
                                 data-testid="comment-card-footer-payout"
@@ -926,7 +898,7 @@ const CommentListItem = memo(function CommentListItem({
                                      `order-last ml-auto` puts it at the row's right edge,
                                      `font-medium` is the requested Lora weight, and the payout ink
                                      stops it inheriting near-black and hovering to --destructive. */
-                                  'order-last ml-auto flex min-w-[88px] items-center justify-end text-[15px] font-bold tabular-nums text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
+                                  'order-last ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
                                   {
                                     'line-through opacity-50': parseFloat(comment.max_accepted_payout) === 0
                                   }
@@ -1028,14 +1000,14 @@ const CommentListItem = memo(function CommentListItem({
                           // half-width and the payout vanished past the card's right
                           // edge. flex-wrap means a still-narrow card reflows the row
                           // onto a second line instead of silently cutting it off.
-                          className="flex flex-wrap items-center gap-2 pt-1 text-caption sm:text-sm"
+                          className="flex w-full flex-wrap items-center gap-2.5 pt-1 text-[17px]"
                           data-testid="comment-card-footer"
                         >
                           <VotesComponentWrapper post={comment} type="comment" />
                           <DetailsCardHover
                             post={comment}
                             decline={parseFloat(comment.max_accepted_payout) === 0}
-                            className="order-last ml-auto flex min-w-[88px] items-center justify-end text-[15px] font-bold tabular-nums text-[color:rgb(var(--ink-payout))]"
+                            className="order-last ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))]"
 >
                             <div
                               data-testid="comment-card-footer-payout"
@@ -1057,7 +1029,7 @@ const CommentListItem = memo(function CommentListItem({
                                 
                                    ★ MEDIUM, NOT NORMAL (same report): "the payouts need to be medium, not
                                    normal to give them a little bit of Lora font boldness." 400 -> 500. */
-                                'order-last ml-auto flex min-w-[88px] items-center justify-end text-[15px] font-bold tabular-nums text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
+                                'order-last ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
                                 {
                                   'line-through opacity-50': parseFloat(comment.max_accepted_payout) === 0
                                 }
@@ -1081,7 +1053,7 @@ const CommentListItem = memo(function CommentListItem({
                             <button
                               disabled={deleteCommentMutation.isLoading}
                               onClick={() => setReply(!reply)}
-                              className="flex min-h-[24px] items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
+                              className="flex h-9 items-center rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
                               data-testid="comment-card-footer-reply"
                             >
                               {t('cards.comment_card.reply')}
@@ -1089,7 +1061,7 @@ const CommentListItem = memo(function CommentListItem({
                           ) : (
                             <DialogLogin>
                               <button
-                                className="flex min-h-[24px] items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
+                                className="flex h-9 items-center rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
                                 data-testid="comment-card-footer-reply"
                               >
                                 {t('post_content.footer.reply')}
@@ -1102,7 +1074,7 @@ const CommentListItem = memo(function CommentListItem({
                               onClick={() => {
                                 setEdit(!edit);
                               }}
-                              className="flex min-h-[24px] items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
+                              className="flex h-9 items-center rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
                               data-testid="comment-card-footer-edit"
                             >
                               {t('cards.comment_card.edit')}
@@ -1119,7 +1091,7 @@ const CommentListItem = memo(function CommentListItem({
                             >
                               <button
                                 disabled={edit || deleteCommentMutation.isLoading}
-                                className="flex min-h-[24px] items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
+                                className="flex h-9 items-center rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
                                 data-testid="comment-card-footer-delete"
                               >
                                 {deleteCommentMutation.isLoading ? (
@@ -1204,7 +1176,7 @@ const CommentListItem = memo(function CommentListItem({
                                         )}
                                         data-testid="comment-card-footer-overflow"
                                       >
-                                        <Icons.moreHorizontal className="h-4 w-4" />
+                                        <Icons.moreHorizontal className="h-[22px] w-[22px]" />
                                       </button>
                                     </PopoverAnchor>
                                   </DropdownMenuTrigger>

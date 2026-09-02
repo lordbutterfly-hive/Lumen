@@ -286,7 +286,7 @@
      matching its neighbours and the tally being Lora are the same thing. The
      rule the old note was really defending still holds and is worth keeping:
      the card's own face wins, the control is a guest on it. */
-  font-family: var(--font-lora), Georgia, Cambria, serif;
+  font-family: var(--font-num), Georgia, Cambria, serif;
   /* ★ MATCHED TO THE CARD'S OWN COUNTS (2026-08-27, owner: "the blade icon on
      feed and the numbers are not the same font as comment icon and comment
      number. its obvious").
@@ -315,7 +315,7 @@
      the same row use, so the three counts now share one size. The 2026-08-13
      whole-pixels rule still holds, and so does the reason this rule exists —
      the payout is 17px, so the money is STILL the largest figure on the row. */
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .tallyUp {

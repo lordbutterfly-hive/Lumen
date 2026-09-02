@@ -62,7 +62,7 @@ export default function DetailsCardHover({ post, children, decline, post_page, c
   if (decline) {
     return (
       <div
-        className={cn(`flex items-center line-through opacity-50`, { 'text-ink-10': post_page }, className)}
+        className={cn(`flex items-center font-num line-through opacity-50`, { 'text-ink-10': post_page }, className)}
         data-testid="post-payout-decline"
         title="Payout Declined"
       >
@@ -89,7 +89,7 @@ export default function DetailsCardHover({ post, children, decline, post_page, c
          `post-card.module.css` intends with `--pc-payout-zero` — "deliberately not
          text you read". That treatment is not reachable from here, and green at least
          makes money one colour. If the owner wants zero muted, this is the line.) */
-        <div className={cn('flex items-center text-[color:rgb(var(--ink-payout))]', className)} data-testid="post-payout">
+        <div className={cn('flex items-center font-num text-[color:rgb(var(--ink-payout))]', className)} data-testid="post-payout">
         {'$'}
         {post.payout.toFixed(2)}
       </div>
@@ -127,7 +127,7 @@ export default function DetailsCardHover({ post, children, decline, post_page, c
       <HoverCardContent
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className="flex w-auto flex-col"
+        className="flex w-auto flex-col font-ui"
         data-testid="payout-post-card-tooltip"
       >
         <PayoutHoverContent post={post} />

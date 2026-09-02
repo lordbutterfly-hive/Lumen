@@ -337,7 +337,7 @@ const MeritumLaunchFlow: FC = () => {
     <TokenShell back={{ href: '/creators', label: '← All creators' }}>
       <div className="min-w-0 max-w-[940px]">
         {flow.restoredFromDraft && !live ? (
-          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-meritum-line-card bg-meritum-rail px-4 py-3 text-caption text-meritum-ink-3">
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-meritum-line-card bg-meritum-rail px-4 py-3 text-caption text-meritum-ink-3 font-ui">
             <span>{t('meritum_launch.draft_restored', { step: flow.step })}</span>
             <button
               type="button"
@@ -345,7 +345,7 @@ const MeritumLaunchFlow: FC = () => {
               // ★ 44x44 MINIMUM TAP TARGET (2026-08-31, verified UX defect).
               // Same fix as `BackAction` in launch-controls.tsx: text-only and
               // borderless, so the padding only grows the hit area.
-              className="inline-flex min-h-[44px] min-w-[44px] flex-shrink-0 items-center justify-center px-2 text-caption font-semibold text-meritum-ink-link hover:underline"
+              className="inline-flex min-h-[44px] min-w-[44px] flex-shrink-0 items-center justify-center px-2 text-caption font-medium text-meritum-ink-link font-ui hover:underline"
             >
               {t('meritum_launch.draft_start_over')}
             </button>
@@ -384,19 +384,19 @@ const MeritumLaunchFlow: FC = () => {
               longer the right frame for what is on screen.
             */}
             {!live && !landing ? (
-              <div className="text-label font-bold uppercase tracking-label tabular-nums text-meritum-ink-faint">
+              <div className="text-label font-medium uppercase tracking-label tabular-nums text-meritum-ink-faint font-ui">
                 {t('meritum_launch.step_indicator', { step: flow.step })}
               </div>
             ) : null}
             {header.eyebrow ? (
-              <span className="mt-2 inline-block text-label font-bold uppercase tracking-label text-meritum-ink-brand">
+              <span className="mt-2 inline-block text-label font-medium uppercase tracking-label text-meritum-ink-brand font-ui">
                 {header.eyebrow}
               </span>
             ) : null}
-            <h1 className="mt-3 max-w-[22ch] font-serif text-34 font-semibold tracking-[-0.02em] text-meritum-ink">
+            <h1 className="mt-3 max-w-[22ch] font-ui text-34 font-medium tracking-[-0.02em] text-meritum-ink">
               {header.headline}
             </h1>
-            <p className="mt-3 max-w-[52ch] font-serif text-15 text-meritum-ink-3">{header.subline}</p>
+            <p className="mt-3 max-w-[52ch] font-ui text-15 text-meritum-ink-3">{header.subline}</p>
 
             {live ? (
               <LaunchStruck
@@ -407,7 +407,7 @@ const MeritumLaunchFlow: FC = () => {
                 firstBuySkipped={flow.firstBuySkipped}
               />
             ) : landing ? (
-              <p className="mt-[26px] max-w-[52ch] font-serif text-15 text-meritum-ink-3">
+              <p className="mt-[26px] max-w-[52ch] font-ui text-15 text-meritum-ink-3">
                 {t('meritum_launch.landing_body')}
               </p>
             ) : flow.step === 1 ? (

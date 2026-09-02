@@ -205,7 +205,7 @@ export default function ProfileIdentity({
       ) : null}
 
       {profile?.about ? (
-        <p className="mt-3 max-w-[520px] font-serif text-[17px] leading-[26px] text-ink-7">{profile.about}</p>
+        <p className="mt-3 max-w-[520px] font-text text-[17px] leading-[26px] text-ink-7">{profile.about}</p>
       ) : isOwnProfile ? (
         // ★ DEFECT FIX (2026-08-17): an empty bio on your own profile rendered
         // nothing at all — no cue that a bio exists as a field, let alone that
@@ -231,7 +231,7 @@ export default function ProfileIdentity({
         // form, this one asks for a named field.
         <Link
           href={`/@${username}/settings#about`}
-          className="mt-3 inline-block max-w-[520px] font-serif text-[17px] leading-[26px] text-ink-14 underline-offset-2 hover:text-ink-10 hover:underline"
+          className="mt-3 inline-block max-w-[520px] font-lora text-[17px] leading-[26px] text-ink-14 underline-offset-2 hover:text-ink-10 hover:underline"
           data-testid="profile-add-about-prompt"
         >
           {t('user_profile.add_about_prompt')}
