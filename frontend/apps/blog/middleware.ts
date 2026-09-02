@@ -1,6 +1,8 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { createMiddleware } from '@hive/middleware/lib/common';
+import { getClientIp } from '@hive/middleware/lib/common-utils';
+import { checkRequestBudget } from '@/blog/lib/request-budget';
 
 /**
  * ★★★ `/@user/followed` -> `/@user/following`, AS A REAL HTTP 308 (2026-08-13).
@@ -85,7 +87,44 @@ const baseMiddleware = createMiddleware({
  * that is accidentally *uncacheable*, which costs a little traffic, instead of one
  * that accidentally replays one reader's session to another.
  */
+/**
+ * ★★★ THE REQUEST BUDGET RUNS FIRST, BEFORE THE RENAME, THE COOKIES AND THE
+ * VISIT LOG (2026-09-02, snappiness phase 1). A client over budget gets a 429
+ * that costs microseconds and no render. See lib/request-budget.ts for the
+ * measurements: 99% of a day's requests were one crawler's, each a ~1 s render
+ * on the single Node thread, and every human click queued behind them.
+ * Budgeted requests are page renders, router prefetches included (Next hides the
+ * flight headers from middleware, see lib/request-budget.ts); assets and API
+ * routes pass untouched (that file holds the exact predicate, by known public
+ * path, never by file suffix).
+ */
 export async function middleware(request: NextRequest): Promise<NextResponse> {
+  const budget = checkRequestBudget({
+    ip: getClientIp(request),
+    userAgent: request.headers.get('user-agent') ?? '',
+    pathname: request.nextUrl.pathname,
+    qaHeader: request.headers.get('x-lumen-qa')
+  });
+  if (!budget.ok) {
+    if (budget.shouldLog) {
+      // One line per key per minute. The visit log is deliberately NOT written
+      // for a refused request: it never became a page view.
+      console.warn(
+        `budget: 429 class=${budget.klass} key=${budget.key} path=${request.nextUrl.pathname} ua="${(
+          request.headers.get('user-agent') ?? ''
+        ).slice(0, 90)}"`
+      );
+    }
+    return new NextResponse('Too many requests. Please slow down and retry shortly.\n', {
+      status: 429,
+      headers: {
+        'retry-after': String(budget.retryAfterSeconds),
+        'cache-control': 'no-store',
+        'content-type': 'text/plain; charset=utf-8'
+      }
+    });
+  }
+
   // The route rename, answered before anything renders — see FOLLOWED_PATH.
   // `nextUrl.clone()` carries the basePath and the query string, so a link with
   // `?foo=1` keeps it and a deployment under a basePath still lands.

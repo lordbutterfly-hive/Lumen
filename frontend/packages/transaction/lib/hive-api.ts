@@ -9,6 +9,7 @@ import {
   IVote,
   IVoteListItem
 } from '@hive/common-hiveio-packages/wax';
+import { getLogger } from '@hive/ui/lib/logging';
 import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
 import { getChain } from './chain';
 import { withHiveRetry } from '@smart-signer/lib/hive-network-error';
@@ -18,6 +19,8 @@ import { stripInvisibleAndBidi } from '@ui/lib/text-safety';
 import { ApiAccount, IManabarData } from '@hiveio/wax';
 import { DATA_LIMIT } from './bridge-api';
 import { isBannedAuthor, withoutBannedAuthors } from '@ui/config/lists/banned-authors';
+
+const logger = getLogger('app');
 
 interface ISingleManabar {
   max: string;
@@ -544,7 +547,13 @@ export const getFollowing = async (params?: Partial<IGetFollowParams>): Promise<
     if (isBannedAuthor(account)) return [];
     return withoutBannedAuthors(following, (edge) => edge.following);
   } catch (error) {
-    console.error('Error:', error);
+    // ★ ONE LINE, NOT A 40-LINE DUMP (2026-09-02, snappiness phase 1). This was
+    // `console.error('Error:', error)`, which prints the whole WaxError with its
+    // request and response objects: 11,976 such blocks and 175 MB of log in one
+    // day, one per follower page the crawler asked for while the Hive node was
+    // answering 429. The caller rethrows and logs the error itself; here the
+    // label and the message are the useful part.
+    logger.warn('%s failed: %s', 'get_following', error instanceof Error ? error.message : String(error));
     throw error;
   }
 };
@@ -592,7 +601,13 @@ export const getFollowers = async (params?: Partial<IGetFollowParams>): Promise<
     // Lumen can do is never show him in your followers list.
     return withoutBannedAuthors(followers, (edge) => edge.follower);
   } catch (error) {
-    console.error('Error:', error);
+    // ★ ONE LINE, NOT A 40-LINE DUMP (2026-09-02, snappiness phase 1). This was
+    // `console.error('Error:', error)`, which prints the whole WaxError with its
+    // request and response objects: 11,976 such blocks and 175 MB of log in one
+    // day, one per follower page the crawler asked for while the Hive node was
+    // answering 429. The caller rethrows and logs the error itself; here the
+    // label and the message are the useful part.
+    logger.warn('%s failed: %s', 'get_followers', error instanceof Error ? error.message : String(error));
     throw error;
   }
 };

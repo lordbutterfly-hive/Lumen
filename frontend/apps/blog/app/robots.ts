@@ -42,11 +42,29 @@ const AI_AGENTS = [
   'omgili'
 ];
 
+/**
+ * ★★ THE FOLLOWER GRAPH IS NOT CONTENT (2026-09-02, snappiness phase 1).
+ *
+ * "AI is welcome" stands. What changed is what a day of it looked like once a
+ * training crawler arrived: 139,456 requests from one agent by 19:00 UTC,
+ * 104,892 of them `/@name/followers` and `/@name/following` across 113,878
+ * accounts, i.e. the crawler was reconstructing the whole Hive follower graph
+ * through our server, one ~1 s page render at a time, and the site queued
+ * behind it (see lib/request-budget.ts for the full measurement). Those two
+ * pages carry no post, no profile text, nothing a reader or a model learns
+ * from that the profile page itself does not already say. Every post and
+ * every profile stays crawlable for everyone.
+ *
+ * `crawlDelay` is advisory; the agents that honour it slow down, the rest
+ * meet the request budget in the middleware, which is the actual limit.
+ */
+const GRAPH_PAGES = ['/@*/followers', '/@*/following', '/%40*/followers', '/%40*/following'];
+
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: [
-      { userAgent: '*', allow: '/' },
-      { userAgent: AI_AGENTS, allow: '/' }
+      { userAgent: '*', allow: '/', disallow: GRAPH_PAGES },
+      { userAgent: AI_AGENTS, allow: '/', disallow: GRAPH_PAGES, crawlDelay: 5 }
     ]
   };
 }

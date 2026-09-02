@@ -40,7 +40,17 @@ const nextConfig = {
   // `NEXT_DISABLE_COMPRESSION=true` there to hand the work back to it and restore
   // denser#886's behaviour — double-compressing is pure waste, which is what that
   // issue was really about.
-  compress: process.env.NEXT_DISABLE_COMPRESSION !== 'true',
+  // ★★ NODE DOES NOT COMPRESS; CADDY DOES (2026-09-02, snappiness phase 1).
+  // Production sits behind Caddy with `encode zstd gzip` already on, so with
+  // this at its default (true) every HTML page, JSON answer and one of the 63
+  // JS chunks on the home route was gzipped a second time, on Node's single
+  // thread, and Caddy passed the bytes through. Measured on the box: the topic
+  // feed JSON went from 14 ms to 105 ms of CPU per request, a 396 KB chunk
+  // from 2 ms to 26 ms, and zlib plus stream writes were ~35% of a 15 s CPU
+  // profile of the live process. Off by default; a deployment WITHOUT a
+  // compressing proxy in front sets NEXT_ENABLE_COMPRESSION=true at build time
+  // (this value is baked into the standalone server.js, not read at boot).
+  compress: process.env.NEXT_ENABLE_COMPRESSION === 'true',
   output: 'standalone',
   swcMinify: false,
   basePath: basePath,
