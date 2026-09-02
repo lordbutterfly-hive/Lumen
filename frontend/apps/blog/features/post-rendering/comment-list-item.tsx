@@ -36,7 +36,6 @@ import {
 } from '@ui/components/alert-dialog';
 import { memo, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import DetailsCardVoters from '@/blog/features/post-rendering/details-card-voters';
 import { ReplyTextbox } from '../post-editor/reply-textbox';
 import DetailsCardHover from '../list-of-posts/details-card-hover';
 import { IFollowList, Entry } from '@hive/common-hiveio-packages/wax';
@@ -1068,28 +1067,6 @@ const CommentListItem = memo(function CommentListItem({
                               {comment.payout.toFixed(2)}
                             </div>
                           </DetailsCardHover>
-                          {!!comment.stats && comment.stats.total_votes > 0 ? (
-                            <>
-                              <div className="flex items-center">
-                                <DetailsCardVoters post={comment}>
-                                  {/* ★ whitespace-nowrap + tabular-nums (2026-08-13,
-                                      reported). `votes` is ONE interpolated string
-                                      ("{{votes}} votes"), so with no nowrap the row's
-                                      `flex-wrap` was free to break it between the number
-                                      and the word once the count reached 4 digits and the
-                                      line ran out of room — the number wrapping up onto
-                                      the payout's line and reading as if it overlapped.
-                                      tabular-nums additionally stops the digits changing
-                                      width as the count revalidates. */}
-                                  <span className="whitespace-nowrap tabular-nums hover:text-destructive">
-                                    {!!comment.stats && comment.stats.total_votes > 1
-                                      ? t('cards.post_card.votes', { votes: comment.stats.total_votes })
-                                      : t('cards.post_card.vote')}
-                                  </span>
-                                </DetailsCardVoters>
-                              </div>
-                            </>
-                          ) : null}
                           {/* ★ item 11: "the app's tokens" — copied verbatim from the
                               reply editor's own Cancel button (reply-textbox.tsx), the
                               nearest sibling component in this same feature, rather than
