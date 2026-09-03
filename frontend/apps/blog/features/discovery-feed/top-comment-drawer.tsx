@@ -6,6 +6,8 @@ import TimeAgo from '@ui/components/time-ago';
 import { Icons } from '@ui/components/icons';
 import { cn } from '@ui/lib/utils';
 import { extractBodySummary } from '@/blog/lib/utils';
+import { getUserAvatarUrl } from '@ui/lib/avatar-utils';
+import { find_first_img } from '@/blog/features/list-of-posts/post-img';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
 import { discussionKey, selectTopComment } from './lib/top-comment';
 import { useVisibleDiscussion } from './lib/use-visible-discussion';
@@ -98,6 +100,27 @@ export default function TopCommentDrawer({
    * memo only recomputes when the thread or the pick actually changes.
    */
   const chosenKey = comment?.key;
+  /* ★ THE TOP COMMENT'S OWN IMAGE (owner, 2026-09-03: image-only comments rendered
+     blank). The preview text is `extractBodySummary`, which strips markdown and
+     images to plain text — so an image-only comment shows NOTHING and, being empty,
+     is short enough to let the counts collide with the label. Pull the first image
+     the same way the card pulls its post thumbnail (`find_first_img` + the same
+     author-avatar-fallback exclusion), so the preview shows the picture and the
+     block has height. Full images still render in the expanded thread via
+     `RendererContainer`; this is only the collapsed one-comment preview. */
+  const commentThumb = useMemo(() => {
+    if (!comment) return '';
+    const img = find_first_img(comment.entry);
+    // Exclude `find_first_img`'s AVATAR fallbacks so a text-only comment never sprouts
+    // a fake avatar "image" (Fable review): the depth-0 large fallback (compared below)
+    // AND the nsfw-tagged proxified SMALL avatar (post-img.tsx:70) whose proxied URL the
+    // large-URL compare would miss. Both avatar URLs route through `/api/avatar?username=`.
+    if (!img || /avatar|username=/i.test(img) || img === getUserAvatarUrl(comment.author, 'large')) return '';
+    return img;
+    // Keyed on the stable comment id; a comment's image never changes within it, so this
+    // does not need to re-run on every drawer re-render (hover/open/reply-toggle).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comment?.key]);
   const thread = useMemo(
     () => (visible && chosenKey ? deriveThread(visible, chosenKey) : EMPTY_THREAD),
     [visible, chosenKey]
@@ -347,6 +370,29 @@ export default function TopCommentDrawer({
                   `getPostSummary` falls back to for the dek, so the drawer and
                   the excerpt cannot disagree about how prose is flattened. */}
               <p className={styles.commentText}>{extractBodySummary(comment.body)}</p>
+              {/* ★ The comment's image, when it has one (owner 2026-09-03). Small,
+                  left-aligned so it clears the bottom-right counts column; capped to
+                  leave that column even on a narrow card. For an image-only comment
+                  this is the whole preview — and gives the block the height that
+                  keeps the counts from riding up into the meta row. */}
+              {commentThumb ? (
+                <img
+                  src={commentThumb}
+                  alt=""
+                  /* NOT loading="lazy": the drawer markup renders inside a height:0
+                     overflow:hidden box before open, where a lazy image has zero
+                     intersection and never starts loading — so the preview would be
+                     blank until the drawer opens, then pop in (post-img.tsx:126-130
+                     removed lazy from card thumbs for this exact reason, Fable review).
+                     The drawer only renders for engaged cards, so this fetches at most
+                     once per looked-at card. */
+                  className={styles.commentThumb}
+                  data-testid="post-card-comment-thumb"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              ) : null}
             </div>
             {/* ★★ THE TWO COUNTS (spec §7), and the action row that used to be
                 here is GONE. §1: "The expansion has no action row of its own. It

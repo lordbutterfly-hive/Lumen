@@ -2566,17 +2566,21 @@ summary {
  */
 @layer utilities {
   .lm-card {
-    /* ★ THE FLOOR THE HOVER LIFTS FROM (C5). Without a resting shadow the hover was a
-       0 -> elevated jump; with one it is a rise. */
+    /* ★ THE RESTING SHADOW the hover glows up from (C5). Without one the hover was a
+       0 -> elevated jump; with one it is a soft rise of the shadow. */
     box-shadow: var(--lift-1);
-    transition-property: transform, box-shadow, color, background-color, border-color;
+    /* ★ NO `transform` in the transition list and NO `will-change: transform`
+       (owner 2026-09-03: "the cards all MOVE when hovered, that's annoying; keep
+       the background glow, remove the movement"). The hover used to `translateY(-2px)`
+       the whole card; that lift is gone everywhere `lm-card` is used — the feed, topics
+       and profile post cards (all the same MediumPostCard), the classic list card, and
+       profile comment cards. The shadow + background hover ("glow") is kept. */
+    transition-property: box-shadow, color, background-color, border-color;
     transition-duration: var(--t-fast);
     transition-timing-function: var(--ease-out);
-    will-change: transform;
   }
   @media (hover: hover) {
     .lm-card:hover {
-      transform: translateY(-2px);
       box-shadow: var(--lift-2);
     }
   }
@@ -2773,9 +2777,13 @@ summary {
      * ★★★ `backwards`, NOT `both` (2026-08-19) — `both` SILENTLY KILLED THE CARD
      * HOVER LIFT, measured in a browser rather than reasoned about.
      *
-     * `.lm-card:hover` twenty lines above sets `transform: translateY(-2px)` and
-     * carries the comment "the feed becomes physical: the card rises toward the
-     * cursor". It never rose. With `both`, a finished animation KEEPS APPLYING its
+     * (HISTORICAL, kept as the record of WHY `backwards`: until 2026-09-03
+     * `.lm-card:hover` set `transform: translateY(-2px)` — "the feed becomes
+     * physical: the card rises toward the cursor". The owner then had that hover
+     * lift REMOVED everywhere (cards must not move on hover; the glow stays), so
+     * the rule below no longer protects a lift. `backwards` is still the right
+     * fill: the `from` state during the stagger delay is the load-bearing half.)
+     * It never rose. With `both`, a finished animation KEEPS APPLYING its
      * final keyframe — here `transform: translateY(0)` — and animation values sit
      * above every normal declaration in the cascade, so the `:hover` transform
      * could not win no matter what it said. Measured on the live feed: at rest and

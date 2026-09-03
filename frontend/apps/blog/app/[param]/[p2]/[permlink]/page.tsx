@@ -5,11 +5,12 @@ import { attachLiteIdentities, attachLiteIdentitiesToDiscussion } from '@/blog/l
 import { applyOwnerBlocksToDiscussion } from '@/blog/lib/lite/social/block-filter';
 import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
 import { isLumenPermlink } from '@/blog/lib/lite/render/lite-post-id';
+import { commentPageRedirectTarget } from '@/blog/lib/post/comment-redirect';
 import { getCommunity, getDiscussion, getFollowList } from '@transaction/lib/bridge-api';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { isUsernameValid, isPermlinkValid, isValidUserParam } from '@/blog/utils/validate-links';
-import { notFound } from 'next/navigation';
+import { notFound, permanentRedirect } from 'next/navigation';
 import { getLogger } from '@ui/lib/logging';
 import { isCommunity } from '@ui/lib/utils';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
@@ -22,6 +23,7 @@ import {
 } from '@/blog/components/observer-provider';
 
 const logger = getLogger('app');
+
 
 /**
  * ════ WHY THIS ROUTE HAS NO `loading.tsx` ════
@@ -214,6 +216,31 @@ const PostPage = async ({
   // Skip 404 when navigating from post creation — the client has optimistic data
   // in React Query cache that will render while Hivemind indexes the post.
   if (!postData && !searchParams?.pending) notFound();
+
+  /*
+   * ★★★ A COMMENT URL OPENS THE POST AND SCROLLS TO THE COMMENT — no standalone
+   * comment page (owner, 2026-09-03: the "single comment's thread / view the full
+   * context / view the direct parent" page that notifications landed on is noise;
+   * a comment belongs under its post).
+   *
+   * Every comment link in the app (notifications, the comment card's own link, the
+   * profile Comments tab, other front ends' links, old shares) funnels into THIS
+   * route, so one redirect here fixes them all. The target costs nothing: the
+   * bridge's own `url` for a reply is exactly
+   *     /{category}/@{root_author}/{root_permlink}#@{author}/{permlink}
+   * (the fragment is the DOM id `comment-list-item.tsx` puts on every comment, and
+   * `comments-section.tsx` resolves it on arrival — switching to the right comments
+   * page first, then scrolling + highlighting). `permanentRedirect` = HTTP 308, so
+   * every existing link keeps working and crawlers get the post's metadata.
+   *
+   * Exempted (keep today's standalone view): Lumen-native posts (a lite post is a
+   * depth-1 chain comment by construction) and replies whose chain root is a
+   * rolling Lumen CONTAINER (`lumen-c-…` under the gateway account) — that root is
+   * not a page a reader should land on. `permanentRedirect` throws a control-flow
+   * signal, so it sits OUTSIDE the try/catch above, which would otherwise swallow it.
+   */
+  const commentRedirectTarget = commentPageRedirectTarget(postData);
+  if (commentRedirectTarget) permanentRedirect(commentRedirectTarget);
 
   // Pass data directly via context instead of Hydrate/dehydrate.
   // React Query v4's <Hydrate> has compatibility issues with Next.js App Router
