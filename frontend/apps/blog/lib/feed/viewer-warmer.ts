@@ -5,6 +5,7 @@ import { withAdvisoryLock } from '@/blog/lib/lite/db/pool';
 import { getRecsysConfig } from '@/blog/lib/recsys/feed-client';
 import { listViewersToWarm, sweepViewerSeen, type WarmCandidate } from './viewer-seen';
 import { acquireHiveWarm, hiveWarmHolder, releaseHiveWarm } from './hive-warm-gate';
+import { readStreakCache } from '@/blog/lib/lite/retention/streak-cache';
 
 const logger = getLogger('app');
 
@@ -116,7 +117,16 @@ const DEFAULTS = {
   /** In-process ticker. 0 disables it and leaves the endpoint as the only driver. */
   tickerMs: 60_000,
   /** Rows in `lumen_feed_viewer_seen` older than this are swept. */
-  seenTtlDays: 30
+  seenTtlDays: 30,
+  /** Streaks warmed per cycle (opt-in). Small: a streak walk is heavier than a
+   *  feed build, and skip-if-fresh already drops most candidates. */
+  streakBatch: 2,
+  /** Bound one streak self-fetch. Deliberately >= the streak route's own 20s
+   *  REQUEST_BUDGET_MS: aborting the loopback CLIENT does NOT cancel the server
+   *  handler (Next does not cancel on disconnect), so a timeout shorter than 20s
+   *  would let the warmer move on while the server walk kept running, producing
+   *  two concurrent walks. At 22s an abort implies the server walk has ended. */
+  streakTimeoutMs: 22_000
 } as const;
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -133,6 +143,10 @@ export interface WarmConfig {
   limit: number;
   tickerMs: number;
   seenTtlDays: number;
+  streakWarm: boolean;
+  streakBatch: number;
+  streakTimeoutMs: number;
+  selfBaseUrl: string;
 }
 
 export function warmConfig(): WarmConfig {
@@ -148,8 +162,70 @@ export function warmConfig(): WarmConfig {
     gapMs: numberFromEnv('FEED_WARM_GAP_MS', DEFAULTS.gapMs),
     limit: numberFromEnv('FEED_WARM_LIMIT', DEFAULTS.limit),
     tickerMs: numberFromEnv('FEED_WARM_TICKER_MS', DEFAULTS.tickerMs),
-    seenTtlDays: numberFromEnv('FEED_SEEN_TTL_DAYS', DEFAULTS.seenTtlDays)
+    seenTtlDays: numberFromEnv('FEED_SEEN_TTL_DAYS', DEFAULTS.seenTtlDays),
+    // ★ SEPARATE OPT-IN (default off), like every other warm flag. Warms each
+    // warmed viewer's OWN streak so the retention spark / profile card / /ranks
+    // arrive fast on their return instead of the 3-11s cold /api/streak walk.
+    streakWarm: (process.env.FEED_STREAK_WARM || '').toLowerCase() === 'yes',
+    streakBatch: numberFromEnv('FEED_STREAK_WARM_BATCH', DEFAULTS.streakBatch),
+    streakTimeoutMs: numberFromEnv('FEED_STREAK_WARM_TIMEOUT_MS', DEFAULTS.streakTimeoutMs),
+    // The Next server's own origin, for a loopback self-fetch that replays the
+    // real streak request (budget-exempt on 127.0.0.1; see request-budget.ts).
+    selfBaseUrl: process.env.FEED_STREAK_WARM_BASE || `http://127.0.0.1:${process.env.PORT || 3000}`
   };
+}
+
+/**
+ * Warm ONE viewer's own streak by replaying the real request against the local
+ * server, so the retention spark / profile card / /ranks are warm when they
+ * return instead of paying the 3-11s cold `/api/streak/<user>` walk.
+ *
+ * ★ SKIP-IF-FRESH trims the cheap cases but does NOT suppress most load, and the
+ * caller must not assume otherwise. `readStreakCache` returns an entry only while
+ * it is FRESH (positive < 5min, negative < 60s); it does not return stale
+ * (5-30min) entries. Warm candidates are selected precisely because they are AWAY
+ * (their feed row is > FEED_WARM_INTERVAL_MS, hours), so their streak is usually
+ * cold or stale and this skip does NOT fire for them. Expect a real cold walk for
+ * most non-lite candidates; the loop below caps the number of ACTUAL fetches at
+ * `streakBatch`, which is the real load bound. Skip-if-fresh only spares the
+ * genuinely-recent ones and the 60s negative window for a just-checked lite name.
+ *
+ * ★ LOOPBACK SELF-FETCH, NOT A REFACTOR. It runs the exact `computeStreakBody` +
+ * `writeStreakCache` path a real request runs (no divergence, nothing stubbed).
+ * 127.0.0.1 is exempt from the MIDDLEWARE request budget (request-budget.ts), so
+ * it never spends a real reader's page budget. It is NOT exempt from the streak
+ * route's OWN per-IP limiter (enforceStreakRate): a bare loopback fetch has no
+ * forwarded-for, so it counts against the shared `unattributed` streak bucket
+ * (LITE_STREAK_PER_IP_PER_DAY). At launch scale that is fine; a 429 there just
+ * yields 'failed' and the streak stays as cold as before.
+ *
+ * ★★ SINGLE-PROCESS PRECONDITION (load-bearing). The payoff exists only because
+ * the self-fetch lands in the SAME Node process whose module-local streak cache
+ * the retention widget later reads. Prod is one Node on :3000, so this holds. If
+ * Lumen is ever run clustered (multiple workers/replicas behind Caddy), the warm
+ * would populate the wrong process and this feature becomes a no-op (or doubles
+ * the Hive load: warm in A, read-miss in B). Revisit `selfBaseUrl` / the cache
+ * locality before any horizontal scale-out. Best-effort throughout.
+ */
+async function warmViewerStreak(
+  viewer: string,
+  baseUrl: string,
+  timeoutMs: number
+): Promise<'warmed' | 'fresh' | 'failed'> {
+  if (readStreakCache(viewer)) return 'fresh';
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  if (typeof timer.unref === 'function') timer.unref();
+  try {
+    const res = await fetch(`${baseUrl}/api/streak/${encodeURIComponent(viewer)}`, {
+      signal: ac.signal
+    });
+    return res.ok ? 'warmed' : 'failed';
+  } catch {
+    return 'failed';
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export type WarmCycleStatus = 'ok' | 'skipped' | 'disabled' | 'unavailable';
@@ -162,6 +238,8 @@ export interface WarmCycleResult {
   warmed: number;
   failed: number;
   backedOff: number;
+  /** Streaks warmed this cycle (only when FEED_STREAK_WARM is on). */
+  streaksWarmed?: number;
   ms: number;
 }
 
@@ -466,12 +544,40 @@ export async function runWarmCycle(): Promise<WarmCycleResult> {
         if (config.gapMs > 0) await sleep(config.gapMs);
       }
 
+      // ★ Then warm each candidate's OWN streak (opt-in, bounded, skip-if-fresh),
+      // inside the same held warm-gate so it shares the outbound budget the whole
+      // cycle already owns. Independent of whether the feed build succeeded: the
+      // streak is a different read, and a viewer whose feed could not be ranked
+      // (e.g. a lite account) simply skips or negative-caches here.
+      let streaksWarmed = 0;
+      if (config.streakWarm) {
+        // ★ Bound ACTUAL FETCHES (each a Hive walk), not successes, at streakBatch.
+        // A 'fresh' skip costs nothing and does not consume the budget; a lite
+        // candidate has no chain streak (the self-fetch would walk ~3 empty pages
+        // then 404), so skip it outright. Gap after every real fetch (warmed OR
+        // failed) so consecutive failures still trickle.
+        let fetches = 0;
+        for (const candidate of candidates) {
+          if (fetches >= config.streakBatch) break;
+          if (candidate.isLite) continue;
+          const r = await warmViewerStreak(candidate.viewer, config.selfBaseUrl, config.streakTimeoutMs);
+          if (r === 'fresh') continue;
+          fetches += 1;
+          if (r === 'warmed') {
+            streaksWarmed += 1;
+            logger.info('viewer-warmer: warmed streak for %s', candidate.viewer);
+          }
+          if (config.gapMs > 0) await sleep(config.gapMs);
+        }
+      }
+
       return {
         status: 'ok',
         selected: candidates.length,
         warmed,
         failed,
         backedOff,
+        streaksWarmed,
         ms: 0
       };
     });
@@ -487,9 +593,10 @@ export async function runWarmCycle(): Promise<WarmCycleResult> {
     const ms = Date.now() - startedAt;
     if (result.selected > 0) {
       logger.info(
-        'viewer-warmer: cycle warmed %d/%d viewers in %dms (%d failed, %d in backoff)',
+        'viewer-warmer: cycle warmed %d/%d viewers (%d streaks) in %dms (%d failed, %d in backoff)',
         result.warmed,
         result.selected,
+        result.streaksWarmed ?? 0,
         ms,
         result.failed,
         result.backedOff
