@@ -130,3 +130,52 @@ export function useRankLuminosity(authors: string[]): Map<string, number> {
   }
   return out;
 }
+
+/**
+ * The signed-in viewer's OWN tier, from the fast rank snapshot — UNGATED by the
+ * byline-emblem rule, unlike `useRankMarks`.
+ *
+ * ★ WHY IT EXISTS (2026-09-03, owner-reported: "the left navbar spark loads
+ * slow"). The left-rail showcase reads the viewer's full standing from
+ * `/api/streak/[user]`, which is a chain fan-out measured live at 4-11s COLD
+ * (0.14s warm) — so on a cold cache the block shimmers for seconds. But the
+ * viewer's TIER is already in `/api/streak/marks`, which reads only the
+ * `lumen_hive_rank` snapshot and answers in ~0.12s, and a tier is all the
+ * showcase needs to paint the emblem, the rung name and "rank N of 9"
+ * (`useRankNaming` takes the tier alone). So this hook lets the block paint its
+ * identity instantly and fill the ring and streak in when the slow read lands.
+ *
+ * ★ SAME COMPUTATION, SO NO "TWO CONTRADICTING RANKS" RISK. The snapshot this
+ * reads is WRITTEN by `/api/streak/[user]` (see the note on `useRankMarks`), so
+ * the instant tier can differ from the full read only by being older, never by
+ * being computed differently — and a rank moves over weeks, so in practice they
+ * agree. This costs one cheap snapshot read per viewer (~0.12s, `staleTime` 10
+ * min so once per 10 min per viewer, deduped across navigations); it does NOT
+ * share `useRankMarks`' cache entry (that hook keys on the sorted author LIST,
+ * `['rank-marks', a.join(',')]`, while this keys on the single viewer name), so
+ * the caller should gate it on `enabled` to skip the read entirely when the full
+ * summary is already in hand and this row will never render.
+ *
+ * Returns null when the viewer has no snapshot yet (a brand-new account whose
+ * streak was never computed) — the caller then falls back to its skeleton.
+ */
+export function useOwnRankTier(username: string, enabled = true): LeagueTier | null {
+  const key = (username || '').toLowerCase();
+
+  const { data } = useQuery({
+    queryKey: ['rank-marks', key],
+    queryFn: async () => {
+      const res = await fetch(`/api/streak/marks?users=${encodeURIComponent(key)}`);
+      if (!res.ok) return { marks: {} as Record<string, { tier: string; rankNumber: number; showMark: boolean }> };
+      return (await res.json()) as {
+        marks: Record<string, { tier: string; rankNumber: number; showMark: boolean }>;
+      };
+    },
+    enabled: key.length > 0 && enabled,
+    staleTime: 10 * 60 * 1000,
+    retry: false
+  });
+
+  const m = data?.marks?.[key];
+  return m ? toTier(m.tier) : null;
+}

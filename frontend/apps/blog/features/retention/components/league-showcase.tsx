@@ -7,8 +7,10 @@ import { useTranslation } from '@/blog/i18n/client';
 import { ManabarRing } from '@/blog/features/layouts/site-header/manabar-ring';
 import { LeagueEmblem } from '../emblems/league-emblem';
 import { TIERS } from '../lib/tiers';
+import type { LeagueTier } from '../types';
 import { type RetentionSummaryResponse } from '../hooks/use-retention';
 import { useViewerRetention } from '../hooks/use-viewer-retention';
+import { useOwnRankTier } from '../hooks/use-rank-marks';
 import { useAccountRankCopy, useRankNaming, useRankProgress } from './rank-scale';
 import { RetentionStats } from './retention-stats';
 import { RetentionFeedback } from './retention-feedback';
@@ -81,6 +83,18 @@ export function LeagueShowcase() {
   // behavior — so a real error does not leave a skeleton shimmering forever.
   const identity = useSessionIdentity();
 
+  // ★ INSTANT IDENTITY WHILE THE SLOW STANDING LOADS (2026-09-03, owner: "the
+  // left navbar spark loads slow"). `useViewerRetention` reads /api/streak/[user],
+  // a 4-11s cold chain fan-out, so this block used to shimmer for seconds. The
+  // viewer's TIER is in the fast rank snapshot (~0.12s), and a tier is all the
+  // rail row needs to paint its emblem, name and scale — so paint that instantly
+  // and let the ring and streak fill in when the full read lands. Called before
+  // the early return below so the hook order is stable; it self-disables on an
+  // empty username. See useOwnRankTier.
+  // Gated on `!summary`: when the full standing is already in hand the instant
+  // row never renders, so its snapshot read would be pure waste (LOW-1).
+  const ownTier = useOwnRankTier(identity.username, !summary);
+
   // Headless; renders no DOM. Mounted here rather than threaded through a layout
   // somebody else owns, and deliberately OUTSIDE the guard below: a lite account
   // has no league block to show and is exactly who the feedback moments are for.
@@ -89,7 +103,13 @@ export function LeagueShowcase() {
   return (
     <>
       <RetentionFeedback />
-      {summary ? <ShowcaseBlock summary={summary} /> : isError ? null : <ShowcaseSkeleton />}
+      {summary ? (
+        <ShowcaseBlock summary={summary} />
+      ) : isError ? null : ownTier ? (
+        <ShowcaseInstant tier={ownTier} />
+      ) : (
+        <ShowcaseSkeleton />
+      )}
     </>
   );
 }
@@ -113,6 +133,49 @@ function ShowcaseSkeleton() {
           </span>
           <span className="lumen-shimmer w-12 truncate rounded font-sans text-caption font-medium tabular-nums text-transparent">
             &nbsp;
+          </span>
+        </span>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * The rail row painted from the FAST rank snapshot alone (tier), shown while the
+ * full standing (/api/streak/[user], 4-11s cold) is still loading. It mirrors
+ * `ShowcaseBlock`'s trigger box EXACTLY — same wrapper `<li>`, same padding/gap
+ * classes, same 34px ring slot, same two text-size lines — so when `ShowcaseBlock`
+ * replaces it the swap changes zero pixels: only the ring fills (0 -> real
+ * progress) and the streak flame and popover appear, none of which move the box.
+ *
+ * Non-interactive by design: the click target (the standings popover) needs the
+ * full summary, so this row has no popover and no hover affordance — the moment
+ * the real data lands, `ShowcaseBlock`'s button takes over. The ring is drawn at
+ * 0% because progress is exactly what this fast path cannot know yet; an empty
+ * tier-coloured ring reads as "loading its fill", never as "0% and done".
+ */
+function ShowcaseInstant({ tier }: { tier: LeagueTier }) {
+  const { name, scale } = useRankNaming(tier);
+  const core = TIERS[tier].color.core;
+  return (
+    <li className="px-1 pb-2" data-testid="league-showcase-instant">
+      <div
+        aria-hidden="true"
+        className="flex w-full items-center gap-2.5 rounded-xl px-[10px] py-2 text-left"
+      >
+        <span className="relative inline-flex shrink-0 items-center justify-center">
+          <ManabarRing percentage={0} color={core} size={34} thickness={3} />
+          <span className="absolute inset-0 flex items-center justify-center">
+            <LeagueEmblem tier={tier} size="nav" />
+          </span>
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate font-sans text-[14px] leading-[22px] font-semibold text-ink-2">{name}</span>
+          <span
+            className="truncate font-sans text-caption font-medium tabular-nums text-ink-10"
+            data-testid="league-showcase-scale"
+          >
+            {scale}
           </span>
         </span>
       </div>
