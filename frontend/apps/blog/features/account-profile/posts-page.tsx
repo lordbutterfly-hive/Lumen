@@ -8,6 +8,7 @@ import { extractUsernameFromParam } from '@/blog/utils/validate-links';
 import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
 import { filterBlockedForViewer, viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { trimEntriesForSeed } from '@/blog/lib/feed/seed-trim';
 
 const logger = getLogger('app');
 
@@ -53,6 +54,12 @@ const PostsPage = async ({
       if (blockedKeys.size > 0) {
         initialPosts = await filterBlockedForViewer(initialPosts, blockedKeys);
       }
+      // ★ TRIM THE SEED TO WHAT A CARD SHOWS (snappiness phase 3, 2026-09-03).
+      // getAccountPosts returns full bodies and full vote lists; a profile card
+      // needs only a plaintext dek and the viewer's own vote. Untrimmed this
+      // seed measured ~870 KB per profile (77% vote lists, 18% bodies); trimmed
+      // ~127 KB. Same helper the feed uses (lib/feed/seed-trim.ts).
+      initialPosts = trimEntriesForSeed(initialPosts, viewerSession.user?.username ?? '');
     }
   } catch (error) {
     logger.error(error, 'Error in PostsPage:');

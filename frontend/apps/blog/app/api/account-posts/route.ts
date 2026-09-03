@@ -10,6 +10,7 @@ import {
   viewerBlockedKeySet
 } from '@/blog/lib/lite/social/block-filter';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { trimEntriesForSeed } from '@/blog/lib/feed/seed-trim';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 
 const logger = getLogger('app');
@@ -244,7 +245,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // to the chain-only count on every reload of this exact tab.
     entries = await mergeLumenEngagement(entries);
 
-    return NextResponse.json({ entries, nextCursor, hasMore });
+    // ★ Trim to what a card shows before sending (snappiness phase 3,
+    // 2026-09-03): full vote lists and full bodies are the bulk of this payload
+    // and the profile card needs neither. Same helper as the SSR seed and the
+    // feed, keyed to the viewer so their own vote survives. See lib/feed/seed-trim.ts.
+    const trimmed = trimEntriesForSeed(entries, viewerSession.user?.username ?? '');
+
+    return NextResponse.json({ entries: trimmed, nextCursor, hasMore });
   } catch (error) {
     logger.error(error, 'account posts fetch failed for %s (sort=%s)', account, sort);
     // ★ FAIL EMPTY, NEVER FAIL OPEN -- same posture as `/api/discussion`. The

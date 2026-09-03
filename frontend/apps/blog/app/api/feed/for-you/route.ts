@@ -27,6 +27,7 @@ import { liteConfig } from '@/blog/lib/lite/config';
 import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
 import { startTopicWarmer } from '@/blog/lib/feed/topic-warmer';
+import { trimEntriesForSeed } from '@/blog/lib/feed/seed-trim';
 import {
   TOPIC_CACHE_MAX,
   TOPIC_CACHE_MS,
@@ -36,8 +37,7 @@ import {
   forgetTopicFeed,
   peekTopicFeed,
   rememberTopicFeed,
-  topicKeyFor,
-  trimFeedBody
+  topicKeyFor
 } from '@/blog/lib/feed/topic-cache';
 import { noteViewerSeen } from '@/blog/lib/feed/viewer-seen';
 import type { WarmCandidate } from '@/blog/lib/feed/viewer-seen';
@@ -483,17 +483,10 @@ async function viewerBlockActor(userId: string, username: string): Promise<Follo
  * `viewer` is whose vote to keep. Empty (signed out) keeps none, which is right:
  * there is nobody for the card to highlight the arrows for.
  */
-function trimFeedEntries(entries: Entry[], viewer: string): Entry[] {
-  const me = (viewer || '').toLowerCase();
-  return entries.map((entry) => {
-    const votes = Array.isArray(entry.active_votes) ? entry.active_votes : [];
-    return {
-      ...entry,
-      active_votes: me ? votes.filter((vote) => (vote.voter ?? '').toLowerCase() === me) : [],
-      body: trimFeedBody(entry.body ?? '')
-    };
-  });
-}
+// ★ Shared with the profile posts seed (2026-09-03): one definition of what a
+// card seed needs, so the feed and the profile trim identically. See
+// lib/feed/seed-trim.ts.
+const trimFeedEntries = trimEntriesForSeed;
 
 /**
  * ★ EVERY BRANCH ANSWERS THROUGH HERE, for the same reason the block filter sits in
