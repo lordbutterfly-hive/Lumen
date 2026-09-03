@@ -93,11 +93,12 @@ export const getPostsRanked = async (
   observer: string,
   limit: number = DATA_LIMIT
 ): Promise<Entry[] | null> => {
-  // ★ A6 retry rollout (2026-08-18): idempotent read. Sole caller is
-  // `/api/feed/for-you`, which tolerates a page-2+ failure by returning the
-  // short page it already has (see that route's own comment) but does not
-  // itself retry `get_ranked_posts` — so this does not double anything.
-  return withRetry(
+  // ★ RETRY + NODE FAILOVER (2026-09-03), was ./retry withRetry (same-node, and
+  // it treats a 429 as a final 4xx so it never retried one). withHiveRetry rotates
+  // off a rate-limited api.hive.blog to a healthy node, so the feed fails over
+  // instead of hard-failing. Sole caller (`/api/feed/for-you`) tolerates a
+  // page-2+ failure and does not itself retry get_ranked_posts, so nothing doubles.
+  return withHiveRetry(
     async () =>
       (await getChain()).api.bridge.get_ranked_posts({
         sort,
@@ -107,7 +108,7 @@ export const getPostsRanked = async (
         tag,
         observer
       }),
-    { label: `get_ranked_posts(${sort},${tag})` }
+    `get_ranked_posts(${sort},${tag})`
   ).then((resp) => {
     // logger.info('getPostsRanked result: %o', resp);
     if (resp) {
@@ -302,14 +303,22 @@ export const getAccountPostsPage = async (
   // all this one call, so answering "nothing here" once covers every one of them.
   // `rawCount: 0` is the truth here — there is no next page to walk to.
   if (isBannedAuthor(account)) return { entries: [], rawCount: 0, rawCursor: null };
-  const resp = await (await getChain()).api.bridge.get_account_posts({
-    sort,
-    account,
-    start_author,
-    start_permlink,
-    limit,
-    observer
-  });
+  // ★ RETRY + NODE FAILOVER (2026-09-03). This was a bare call with no retry at
+  // all — the Following/Posts/Comments tabs are all this one call, and a 429 (or a
+  // dead node) hard-failed the whole tab (the "Lumen crashes when I click
+  // Following" report). withHiveRetry rotates off the bad node to a healthy one.
+  const resp = await withHiveRetry(
+    async () =>
+      (await getChain()).api.bridge.get_account_posts({
+        sort,
+        account,
+        start_author,
+        start_permlink,
+        limit,
+        observer
+      }),
+    `get_account_posts(${sort},${account})`
+  );
   if (!resp) return { entries: resp ?? null, rawCount: 0, rawCursor: null };
   // `sort: 'feed'` mixes in the reblogs of everyone this account follows,
   // so even a clean account's page can carry a banned author's post.
