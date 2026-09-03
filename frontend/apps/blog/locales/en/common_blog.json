@@ -1984,7 +1984,13 @@
     "emoji_search_label": "Search emoji",
     "emoji_search_placeholder": "Search",
     "emoji_no_results": "No emoji found.",
-    "emoji_recent": "Recent"
+    "emoji_recent": "Recent",
+    "reply": "Reply",
+    "reply_placeholder": "Write a reply…",
+    "reply_aria_label": "Write a reply",
+    "reply_published_title": "Reply posted",
+    "reply_published_hive": "It is on its way to Hive.",
+    "reply_published_lite": "It is saved and queued to publish to Hive."
   },
   "discovery_feed": {
     "ready_pill": "Show your feed",

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, UserAvatarImg } from '@hive/ui';
 import TimeAgo from '@ui/components/time-ago';
 import { Icons } from '@ui/components/icons';
@@ -9,8 +9,10 @@ import { extractBodySummary } from '@/blog/lib/utils';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
 import { discussionKey, selectTopComment } from './lib/top-comment';
 import { useVisibleDiscussion } from './lib/use-visible-discussion';
-import TopCommentThread from './top-comment-thread';
+import TopCommentThread, { BASE_INDENT } from './top-comment-thread';
 import { deriveThread, EMPTY_THREAD } from './lib/top-comment-thread';
+import QuickReplyButton from './composer/quick-reply-button';
+import QuickReplyComposer from './composer/quick-reply-composer';
 import styles from './post-card.module.css';
 
 /**
@@ -100,6 +102,23 @@ export default function TopCommentDrawer({
     () => (visible && chosenKey ? deriveThread(visible, chosenKey) : EMPTY_THREAD),
     [visible, chosenKey]
   );
+
+  /*
+   * ★★★ ONE QUICK-REPLY COMPOSER AT A TIME (QUICK-REPLY-SPEC §2.3). `activeReplyKey`
+   * is the `author/permlink` key of the comment whose composer is open — owned HERE
+   * because the drawer is the common parent of both the top comment's `.cbox` and
+   * `TopCommentThread`, so one piece of state governs both. Clicking Reply on B while
+   * A is open moves the composer to B (A's draft is safe in storage, §5); clicking the
+   * same comment again, or the composer's own close path, sets it back to null. At rest
+   * `activeReplyKey` is null and NO composer is mounted — the feature costs one small
+   * button per rendered comment and nothing else.
+   */
+  const [activeReplyKey, setActiveReplyKey] = useState<string | null>(null);
+  const toggleReply = useCallback(
+    (key: string) => setActiveReplyKey((current) => (current === key ? null : key)),
+    []
+  );
+  const closeReply = useCallback(() => setActiveReplyKey(null), []);
 
   /*
    * ★★★ THE HEIGHT IS MEASURED IN JS AND WRITTEN IN PIXELS (spec §8).
@@ -389,8 +408,34 @@ export default function TopCommentDrawer({
                 <Icons.comment className={cn(styles.iconComment, 'h-[16px] w-[16px]')} aria-hidden="true" />
                 {comment.directResponseCount}
               </span>
+              {/* ★ THE REPLY AFFORDANCE — a SEPARATE new control, NOT the count
+                  turned into a button (§7 forbids that; §2.1). Signed out it is a
+                  DialogLogin trigger; signed in it toggles this comment's composer.
+                  Re-enables its own pointer events (`.counts` is pointer-events:none)
+                  and stops propagation, exactly like the vote slot. */}
+              <QuickReplyButton
+                className={styles.replyAction}
+                active={activeReplyKey === comment.key}
+                onToggle={() => toggleReply(comment.key)}
+                replyKey={comment.key}
+              />
             </div>
           </div>
+          {/* ★★★ THE TOP COMMENT'S COMPOSER — a sibling of `.cbox` (never a child:
+              the stretched `.cboxLink` anchor would sit over its controls), mounted
+              only when this comment is the active reply target (§2.2). Indented as a
+              depth-1 child (`BASE_INDENT`) so it reads as part of the thread it will
+              join. */}
+          {activeReplyKey === comment.key ? (
+            <div style={{ marginLeft: `${BASE_INDENT}px` }} data-testid="quick-reply-mount-top">
+              <QuickReplyComposer
+                parent={comment.entry}
+                rootAuthor={author}
+                rootPermlink={permlink}
+                onClose={closeReply}
+              />
+            </div>
+          ) : null}
           {/* ★★★ THE FULL REPLY THREAD, A SIBLING OF `.cbox` (thread-expand spec
               §2.4). Purely additive: the top comment above is byte-for-byte
               unchanged. Rendered whenever the data is present — INDEPENDENT of
@@ -403,6 +448,11 @@ export default function TopCommentDrawer({
             <TopCommentThread
               thread={thread}
               viewAllHref={`${postHref}#@${comment.author}/${comment.permlink}`}
+              rootAuthor={author}
+              rootPermlink={permlink}
+              activeReplyKey={activeReplyKey}
+              onReply={toggleReply}
+              onCloseReply={closeReply}
             />
           ) : null}
         </div>

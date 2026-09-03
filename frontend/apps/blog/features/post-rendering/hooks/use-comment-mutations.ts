@@ -112,10 +112,22 @@ export function useCommentMutation() {
         _optimistic: true
       };
 
-      // Build updated data - start with previous data or empty object
-      const updatedData: Record<string, Entry> = {};
-
+      // ★ SEED ONLY A CACHE THAT ALREADY EXISTS (2026-09-03, quick-reply review
+      // F2). This mutation can now run from the feed drawer's quick reply,
+      // where ['discussionData', …] was never fetched. Fabricating a map in
+      // that case CREATED a fresh-stamped cache entry holding ONLY the
+      // optimistic reply — no root post, no other comments — and the post page
+      // (content.tsx:523-546, staleTime MEDIUM) then rendered a near-empty
+      // thread from it for up to a minute after the reader clicked through.
+      // With no prevData, nothing on screen is reading this key, so there is
+      // nothing to update optimistically; the validated refetch in onSuccess
+      // still reconciles the real thread. When prevData exists — every
+      // post-page reply, since content.tsx fetches this exact key with the same
+      // observer it passes down to reply-textbox — the seed below is exactly
+      // what it always was.
       if (prevData) {
+        const updatedData: Record<string, Entry> = {};
+
         // Copy existing data, updating parent's children count if found
         for (const [key, post] of Object.entries(prevData)) {
           if (post.permlink === parentPermlink && post.author === parentAuthor) {
@@ -128,13 +140,13 @@ export function useCommentMutation() {
             updatedData[key] = post;
           }
         }
+
+        // Add the new comment
+        updatedData[tempPermlink] = newComment as Entry;
+
+        // Update cache immediately - this triggers React Query subscribers to re-render
+        queryClient.setQueryData<Record<string, Entry>>(queryKey, updatedData);
       }
-
-      // Add the new comment
-      updatedData[tempPermlink] = newComment as Entry;
-
-      // Update cache immediately - this triggers React Query subscribers to re-render
-      queryClient.setQueryData<Record<string, Entry>>(queryKey, updatedData);
 
       logger.info('Optimistic comment added: %o', { tempPermlink, queryKey, hasPrevData: !!prevData });
 

@@ -25,6 +25,13 @@ interface PickerGeometry {
   leftOffset: number;
   /** Set only when NEITHER side has room for the picker's natural height. */
   maxHeight: number | null;
+  /**
+   * Viewport coordinates for `fixedPosition` mode (quick-reply, review F3) —
+   * same flip/clamp decision as above, expressed as `position:fixed` offsets.
+   * `undefined` in the default (absolute) mode, so the quick-post path is
+   * byte-identical to what it always rendered.
+   */
+  fixed?: { left: number; top: number | null; bottom: number | null };
 }
 
 const INITIAL_GEOMETRY: PickerGeometry = { openUpward: true, leftOffset: 0, maxHeight: null };
@@ -71,17 +78,44 @@ export interface EmojiPickerLabels {
 export default function EmojiPicker({
   onSelect,
   onClose,
-  labels
+  labels,
+  fixedPosition = false,
+  testIdPrefix = 'short-form-composer'
 }: {
   onSelect: (glyph: string) => void;
   onClose: () => void;
   labels: EmojiPickerLabels;
+  /**
+   * ★ OPT-IN `position:fixed` placement (2026-09-03, quick-reply review F3).
+   * The feed drawer is a JS-measured, `overflow:hidden` box, so the default
+   * `absolute` picker gets CLIPPED at the drawer's edge — and being absolutely
+   * positioned it never resizes the drawer's observed content either, so
+   * nothing remeasures. With this flag the picker stays in the SAME DOM
+   * position (focus-within, the composer's blur containment and the
+   * outside-click close below are all unchanged) but is positioned against the
+   * VIEWPORT, which no `overflow:hidden` ancestor can clip. The same
+   * flip/clamp geometry runs; only the output coordinates differ. CAVEAT: a
+   * transformed/filtered ancestor would re-trap `fixed` — verified absent for
+   * the drawer (post-card.module.css: the card hovers with shadow only).
+   * Default `false` keeps the quick-post byte-identical.
+   */
+  fixedPosition?: boolean;
+  /** Prefix for data-testids; default keeps the quick-post's existing ids. */
+  testIdPrefix?: string;
 }) {
   const [query, setQuery] = useState('');
   const [categoryId, setCategoryId] = useState(EMOJI_CATEGORIES[0].id);
   const [recent, setRecent] = useState<string[]>([]);
   const [geometry, setGeometry] = useState<PickerGeometry>(INITIAL_GEOMETRY);
   const rootRef = useRef<HTMLDivElement>(null);
+  /**
+   * Zero-size in-place probe for `fixedPosition` mode: a `position:fixed` root
+   * reports `offsetParent: null`, so the anchor (the footer's `relative`
+   * container) is read off this absolutely-positioned sibling instead — it sits
+   * in the exact slot the picker renders in, so its `offsetParent` is the same
+   * element the absolute mode anchors to.
+   */
+  const probeRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     setRecent(readRecent());
@@ -97,8 +131,11 @@ export default function EmojiPicker({
     const recompute = () => {
       // The nearest positioned ancestor IS the anchor the picker is positioned
       // against (the footer's `relative` container, which starts flush with the
-      // button cluster) — no extra ref needs to be threaded down for this.
-      const anchor = node.offsetParent as HTMLElement | null;
+      // button cluster) — no extra ref needs to be threaded down for this. In
+      // `fixedPosition` mode the root's own offsetParent is null (fixed
+      // elements have none), so the same ancestor is read off the in-place
+      // probe instead.
+      const anchor = (fixedPosition ? probeRef.current?.offsetParent : node.offsetParent) as HTMLElement | null;
       if (!anchor) return;
 
       const anchorRect = anchor.getBoundingClientRect();
@@ -131,7 +168,22 @@ export default function EmojiPicker({
       const maxLeft = viewportWidth - pickerWidth - SAFE_GAP;
       const clampedLeft = Math.min(naturalLeft, Math.max(SAFE_GAP, maxLeft));
 
-      setGeometry({ openUpward, leftOffset: clampedLeft - naturalLeft, maxHeight });
+      setGeometry({
+        openUpward,
+        leftOffset: clampedLeft - naturalLeft,
+        maxHeight,
+        // Same decision, viewport-fixed output: upward pins the picker's BOTTOM
+        // 8px above the anchor's top (no height needed); downward pins its TOP
+        // 8px below the anchor's bottom. The scroll/resize listeners below
+        // recompute on every event, so the fixed box stays glued to the anchor.
+        fixed: fixedPosition
+          ? {
+              left: clampedLeft,
+              top: openUpward ? null : anchorRect.bottom + SAFE_GAP,
+              bottom: openUpward ? viewportHeight - anchorRect.top + SAFE_GAP : null
+            }
+          : undefined
+      });
     };
 
     recompute();
@@ -147,7 +199,7 @@ export default function EmojiPicker({
     // height (query/category swap the grid, a first-ever pick adds the
     // "Recent" section) — the flip/clamp decision above depends on it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, categoryId, recent.length]);
+  }, [query, categoryId, recent.length, fixedPosition]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -172,11 +224,17 @@ export default function EmojiPicker({
   };
 
   return (
+    <>
+      {/* In-place anchor probe for `fixedPosition` mode — zero-size, no layout
+          impact; see `probeRef`'s doc. Rendered only when needed. */}
+      {fixedPosition ? (
+        <span ref={probeRef} aria-hidden="true" style={{ position: 'absolute', width: 0, height: 0 }} />
+      ) : null}
     <div
       ref={rootRef}
       role="dialog"
       aria-label={labels.searchLabel}
-      data-testid="short-form-composer-emoji-picker"
+      data-testid={`${testIdPrefix}-emoji-picker`}
       onMouseDown={(event) => event.preventDefault()}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
@@ -184,12 +242,25 @@ export default function EmojiPicker({
           onClose();
         }
       }}
-      style={{ left: geometry.leftOffset, maxHeight: geometry.maxHeight ?? undefined }}
+      style={
+        geometry.fixed
+          ? {
+              position: 'fixed',
+              left: geometry.fixed.left,
+              top: geometry.fixed.top ?? undefined,
+              bottom: geometry.fixed.bottom ?? undefined,
+              maxHeight: geometry.maxHeight ?? undefined
+            }
+          : { left: geometry.leftOffset, maxHeight: geometry.maxHeight ?? undefined }
+      }
       className={cn(
-        'absolute z-30 w-[360px] overflow-y-auto rounded-card border border-[#ebebeb] bg-white p-3 shadow-[0_8px_24px_rgba(20,18,10,0.10)]',
+        'z-30 w-[360px] overflow-y-auto rounded-card border border-[#ebebeb] bg-white p-3 shadow-[0_8px_24px_rgba(20,18,10,0.10)]',
         // ★ 2026-08-28: was `bottom-[calc(100%+8px)]` unconditionally — see the
-        // component doc comment above for why this is now computed.
-        geometry.openUpward ? 'bottom-[calc(100%+8px)]' : 'top-[calc(100%+8px)]'
+        // component doc comment above for why this is now computed. In
+        // `fixedPosition` mode the inline style above carries the placement
+        // instead (review F3).
+        !geometry.fixed && 'absolute',
+        !geometry.fixed && (geometry.openUpward ? 'bottom-[calc(100%+8px)]' : 'top-[calc(100%+8px)]')
       )}
     >
       <input
@@ -199,7 +270,7 @@ export default function EmojiPicker({
         placeholder={labels.searchPlaceholder}
         onChange={(event) => setQuery(event.target.value)}
         onMouseDown={(event) => event.stopPropagation()}
-        data-testid="short-form-composer-emoji-search"
+        data-testid={`${testIdPrefix}-emoji-search`}
         className="mb-2 w-full rounded-control border border-[#ebebeb] bg-white px-3 py-2 font-sans text-[14px] leading-[22px] text-[#333] outline-none focus-visible:outline-none placeholder:text-ink-14 focus:border-[#d5d5d5]"
       />
 
@@ -260,7 +331,7 @@ export default function EmojiPicker({
                 title={entry.name}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => pick(entry.glyph)}
-                data-testid="short-form-composer-emoji-option"
+                data-testid={`${testIdPrefix}-emoji-option`}
                 className="flex h-9 w-9 items-center justify-center rounded-control text-[20px] leading-none transition-colors hover:bg-[#f1f3f5]"
               >
                 {entry.glyph}
@@ -270,5 +341,6 @@ export default function EmojiPicker({
         )}
       </div>
     </div>
+    </>
   );
 }

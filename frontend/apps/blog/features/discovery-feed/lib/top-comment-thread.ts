@@ -188,8 +188,28 @@ export function deriveThread(
   const total = nodes.length;
   const inlineCap = opts?.inlineCap ?? THREAD_INLINE_CAP;
   const threshold = opts?.virtualizeThreshold ?? THREAD_VIRTUALIZE_THRESHOLD;
-  if (total > threshold) {
-    return { nodes: nodes.slice(0, inlineCap), total, truncated: true };
+
+  /*
+   * ★ OPTIMISTIC NODES NEVER COUNT TOWARD — AND ARE NEVER HIDDEN BY — THE
+   * VIRTUALIZATION CUT (2026-09-03, quick-reply review F5). The quick-reply
+   * inserts a temporary `_optimistic` entry the moment a reply broadcasts.
+   * Counting it toward the threshold meant posting the 31st reply flipped a
+   * fully-rendered 30-row thread into a 20-row truncated one — ten visible rows
+   * vanishing, the new reply (payout 0, so it sorts last in its sibling group)
+   * usually among them, right after a success toast. So the threshold judges
+   * only the REAL (indexed) nodes, and when a thread does truncate, optimistic
+   * nodes that fell outside the head slice are appended so the reader's own
+   * reply always renders. Deterministic (a pure function of the input order),
+   * and byte-identical to the old behaviour whenever no `_optimistic` node is
+   * present — which is every caller except the quick-reply's insert.
+   */
+  const isOptimistic = (n: ThreadNode): boolean =>
+    Boolean((n.entry as Entry & { _optimistic?: boolean })?._optimistic);
+  const realTotal = nodes.reduce((acc, n) => acc + (isOptimistic(n) ? 0 : 1), 0);
+  if (realTotal > threshold) {
+    const head = nodes.slice(0, inlineCap);
+    const optimisticTail = nodes.slice(inlineCap).filter(isOptimistic);
+    return { nodes: [...head, ...optimisticTail], total, truncated: true };
   }
   return { nodes, total, truncated: false };
 }

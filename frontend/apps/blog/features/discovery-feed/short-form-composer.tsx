@@ -16,6 +16,10 @@ import ComposerMediaStrip from './composer/composer-media-strip';
 import { useComposerDraft } from './composer/use-composer-draft';
 import { MAX_IMAGES, useComposerImages, type ImageIssue } from './composer/use-composer-images';
 import { useNotePublish } from './composer/use-note-publish';
+// ★ MAX_NOTE_LENGTH + the marker-wrap helpers are shared with the quick-reply
+// composer, so the two cannot drift (QUICK-REPLY-SPEC §3.1). Moved out of this
+// file behaviour-neutrally; the definitions are unchanged.
+import { MAX_NOTE_LENGTH, toggleMarkerWrap } from './composer/marker-wrap';
 
 /**
  * ★ The picker and its ~9KB data table stay out of the Home bundle until the
@@ -23,9 +27,6 @@ import { useNotePublish } from './composer/use-note-publish';
  * topics rail and the Creator Tokens gql client (audit §9.5).
  */
 const EmojiPicker = dynamic(() => import('./composer/emoji-picker'), { ssr: false });
-
-/** A note is short by definition; the counter now states the limit it enforces. */
-const MAX_NOTE_LENGTH = 1000;
 
 /** Reason code -> i18n key, so the hook stays free of translation concerns. */
 const ISSUE_KEYS: Record<ImageIssue, string> = {
@@ -35,75 +36,6 @@ const ISSUE_KEYS: Record<ImageIssue, string> = {
   'upload-failed': 'image_upload_failed',
   blocked: 'image_blocked'
 };
-
-/**
- * True when `text` has exactly `marker` ending at `index` — i.e.
- * `text.slice(index - marker.length, index) === marker` — AND it is not part
- * of a LONGER run of the same character. Without that second check, selecting
- * the word inside an existing **bold** span and pressing Italic (marker `*`)
- * would read the second `*` of `**` as a lone italic marker and strip it,
- * quietly weakening the bold instead of nesting italic inside it.
- */
-function markerEndsAt(text: string, index: number, marker: string): boolean {
-  const start = index - marker.length;
-  if (start < 0 || text.slice(start, index) !== marker) return false;
-  return text[start - 1] !== marker[0];
-}
-
-/** Mirror of `markerEndsAt`, checked forward from `index`. */
-function markerStartsAt(text: string, index: number, marker: string): boolean {
-  const end = index + marker.length;
-  if (end > text.length || text.slice(index, end) !== marker) return false;
-  return text[end] !== marker[0];
-}
-
-/**
- * Wraps `text[start, end)` in `marker` (`**` for bold, `*` for italic) for the
- * bold/italic toolbar buttons — or UNWRAPS it if it is already wrapped, so
- * pressing the same button twice toggles rather than double-wrapping
- * (`**bold**` -> `**bold**bold**`). "Already wrapped" covers both shapes: the
- * selection itself includes the markers (`**bold**` selected whole), or the
- * markers sit immediately outside a selection that excludes them (`bold`
- * selected inside `**bold**`). With no selection, the markers are inserted
- * with the caret left between them, ready to type.
- */
-function toggleMarkerWrap(
-  text: string,
-  start: number,
-  end: number,
-  marker: string
-): { text: string; selectionStart: number; selectionEnd: number } {
-  const markerLen = marker.length;
-  const selected = text.slice(start, end);
-
-  const wrappedInside =
-    selected.length >= markerLen * 2 &&
-    markerStartsAt(selected, 0, marker) &&
-    markerEndsAt(selected, selected.length, marker);
-  if (wrappedInside) {
-    const inner = selected.slice(markerLen, selected.length - markerLen);
-    return {
-      text: text.slice(0, start) + inner + text.slice(end),
-      selectionStart: start,
-      selectionEnd: start + inner.length
-    };
-  }
-
-  const wrappedOutside = markerEndsAt(text, start, marker) && markerStartsAt(text, end, marker);
-  if (wrappedOutside) {
-    return {
-      text: text.slice(0, start - markerLen) + selected + text.slice(end + markerLen),
-      selectionStart: start - markerLen,
-      selectionEnd: start - markerLen + selected.length
-    };
-  }
-
-  const nextText = text.slice(0, start) + marker + selected + marker + text.slice(end);
-  // No selection: land the caret BETWEEN the markers rather than after them.
-  return selected.length === 0
-    ? { text: nextText, selectionStart: start + markerLen, selectionEnd: start + markerLen }
-    : { text: nextText, selectionStart: start + markerLen, selectionEnd: end + markerLen };
-}
 
 /**
  * "What's on your mind?" compose box near the top of the home feed. At rest it is

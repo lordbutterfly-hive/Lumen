@@ -781,7 +781,14 @@
    counts' width cannot fix one guard and leave the other behind — which is the
    mistake this comment exists to prevent recurring. */
 .cbox {
-  --pc-counts-reserve: 112px;
+  /* ★ Reserve = the .counts row's real width + slack, so the out-of-flow counts
+     can never sit on .commentText's last line. Re-derived 2026-09-03 (review
+     F6) when the Reply affordance joined the row: vote control (18px blade +
+     gap + up-to-3-digit Fira count ≈ 46px) + 16px gap + reply count (16px icon
+     + 6px gap + digits ≈ 42px) + 16px gap + "Reply" label (14px/600
+     Merriweather ≈ 40px) ≈ 160px, + 8px slack = 168px. Was 112px — sized for
+     vote + count only, before the Reply button existed. */
+  --pc-counts-reserve: 168px;
 }
 
 .commentText {
@@ -834,6 +841,44 @@
   display: inline-flex;
   align-items: center;
   pointer-events: auto;
+}
+/* ★ THE REPLY AFFORDANCE (QUICK-REPLY-SPEC §2.1). Unlike the reply COUNT — a
+   number with no hit target (§7) — this is a real control, so it has a hover and,
+   like the vote slot, re-enables pointer events for itself (`.counts` is
+   `pointer-events:none`). Reused for the top comment (in `.counts`) and each
+   thread reply (in `.replyActions`), so the two read as the same control. */
+.replyAction {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  /* ★ Merriweather (var(--font-ui)), NOT Lora. "Reply" is a UI action label, not
+     reading text — the app's rule is Merriweather for UI, and the post page's own
+     reply button (`comment-list-item.tsx`) carries no font class so it renders the
+     ambient UI face too. Was var(--font-text) (Lora): a serif button sitting beside
+     the Merriweather byline and Fira counts read as off (owner font pass + live
+     Chrome check, 2026-09-03). */
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--pc-ink-quiet);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.replyAction:hover,
+.replyAction:focus-visible {
+  color: var(--pc-brand);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  /* ★ NO `outline: none` here (2026-09-03, review F10). `.card :focus-visible`
+     further down supplies the app's 2px brand ring at equal specificity, and
+     whether the ring survived depended purely on SOURCE ORDER — the later rule
+     won, so the ring did apply, but one refactor away from silently losing it.
+     Nothing needs suppressing anyway: buttons do not match `:focus-visible` on
+     a mouse click, so no UA outline ever shows on pointer use. */
 }
 .voteCount,
 .replyCount {
@@ -1339,32 +1384,16 @@
   min-width: 0;
   flex: 1;
 }
-.replyInner {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-.replyMeta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-.replyAuthor {
-  font-family: var(--font-text);
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--pc-ink-name);
-}
-.replyTime {
-  font-family: var(--font-text);
-  font-size: 13px;
-  color: var(--pc-ink-quiet);
-}
+/* ★ "replying to X" — a UI META LABEL, so Merriweather (var(--font-ui)), matching
+   the top comment's own meta (`.commentAuthor`/`.commentLabel`) and the post page's
+   own replying-to span (`comment-list-item.tsx`, which carries no font class and so
+   renders the ambient UI face). Was var(--font-text) (Lora); a serif meta label read
+   as drift from the UI around it (owner font pass, 2026-09-03).
+   NOTE: the former .replyInner/.replyMeta/.replyAuthor/.replyTime here were dead —
+   the reply meta REUSES the top comment's .commentAuthor/.commentTime since the
+   2026-09-03 alignment fix — so they were removed rather than left to rot. */
 .replyingTo {
-  font-family: var(--font-text);
+  font-family: var(--font-ui);
   font-size: 12px;
   color: var(--pc-ink-faint);
   white-space: nowrap;
@@ -1398,13 +1427,17 @@
 .replyActions {
   display: inline-flex;
   align-items: center;
+  gap: 16px;
 }
 /* Link to the full thread on the post page when a very long thread is truncated
    (spec §3.5). Reuses the top comment link's destination form. */
 .viewAll {
   display: inline-block;
   margin-top: 2px;
-  font-family: var(--font-text);
+  /* ★ Merriweather (var(--font-ui)) — a UI navigation link, not reading text; its
+     digit (the reply count) then renders in Fira via the UI face's numeric stitch.
+     Was var(--font-text) (Lora) (owner font pass, 2026-09-03). */
+  font-family: var(--font-ui);
   font-size: 14px;
   font-weight: 600;
   color: var(--pc-brand);

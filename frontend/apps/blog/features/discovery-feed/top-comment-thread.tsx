@@ -1,5 +1,6 @@
 'use client';
 
+import { Fragment } from 'react';
 import clsx from 'clsx';
 import { Link, UserAvatarImg } from '@hive/ui';
 import TimeAgo from '@ui/components/time-ago';
@@ -8,6 +9,8 @@ import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { useTranslation } from '@/blog/i18n/client';
 import { MAX_VISUAL_DEPTH, type DerivedThread, type ThreadNode } from './lib/top-comment-thread';
+import QuickReplyButton from './composer/quick-reply-button';
+import QuickReplyComposer from './composer/quick-reply-composer';
 import styles from './post-card.module.css';
 
 /**
@@ -44,7 +47,7 @@ import styles from './post-card.module.css';
 
 // Per-level indent, in px. The post page's single indent source is a 20px box
 // (`comment-list.tsx:14-22`: `w-4` 16px + `mr-1` 4px); this matches it.
-const INDENT_STEP = 20;
+export const INDENT_STEP = 20;
 
 // ★ BASE INDENT so the whole thread HANGS UNDER the top comment as its children
 // (owner, 2026-09-03: the connector was "far too left of the top comment it's
@@ -53,7 +56,7 @@ const INDENT_STEP = 20;
 // of each reply, a base of 24px lands a direct reply's avatar (24+20=44px) directly
 // under the top comment's body and the connector under the top comment's avatar, so
 // the thread reads as a continuation of it rather than a separate column.
-const BASE_INDENT = 24;
+export const BASE_INDENT = 24;
 
 /**
  * Mirror of `comment-list.tsx:24-56`'s `ThreadLine` — the vertical rule + curved
@@ -74,7 +77,17 @@ const ThreadLine = ({ isLast }: { isLast: boolean }) => (
  * run inside the parent's `.map`). Resolves the byline exactly as
  * `comment-list-item.tsx:264-265` does: `liteOverlay?.author ?? comment.author`.
  */
-function TopCommentReply({ node }: { node: ThreadNode }) {
+function TopCommentReply({
+  node,
+  active,
+  onReply
+}: {
+  node: ThreadNode;
+  /** True while THIS reply's composer is the open one. */
+  active: boolean;
+  /** Toggle this reply's composer (called only when signed in). */
+  onReply: () => void;
+}) {
   const { t } = useTranslation('common_blog');
   const entry = node.entry;
   const liteOverlay = useLiteOverlay(entry);
@@ -133,6 +146,14 @@ function TopCommentReply({ node }: { node: ThreadNode }) {
           }}
         >
           <VotesComponentWrapper post={entry} type="comment" size="quote" />
+          {/* ★ The Reply affordance for a thread reply (§2.1), beside its vote.
+              Same shared control as the top comment's. */}
+          <QuickReplyButton
+            className={styles.replyAction}
+            active={active}
+            onToggle={onReply}
+            replyKey={node.key}
+          />
         </div>
       </div>
     </div>
@@ -141,11 +162,25 @@ function TopCommentReply({ node }: { node: ThreadNode }) {
 
 export default function TopCommentThread({
   thread,
-  viewAllHref
+  viewAllHref,
+  rootAuthor,
+  rootPermlink,
+  activeReplyKey,
+  onReply,
+  onCloseReply
 }: {
   thread: DerivedThread;
   /** The post URL + the top comment fragment, for the "view all" link (§3.5). */
   viewAllHref: string;
+  /** The POST's author + permlink — the reply composer's cache identity (§4.3). */
+  rootAuthor: string;
+  rootPermlink: string;
+  /** The `author/permlink` key of the comment whose composer is open (§2.3). */
+  activeReplyKey: string | null;
+  /** Toggle a reply's composer; the drawer owns the one-at-a-time state. */
+  onReply: (key: string) => void;
+  /** Close the open composer (sets `activeReplyKey` null). */
+  onCloseReply: () => void;
 }) {
   const { t } = useTranslation('common_blog');
   if (thread.nodes.length === 0) return null;
@@ -156,17 +191,36 @@ export default function TopCommentThread({
         // Indent capped at MAX_VISUAL_DEPTH (depth 1 = a direct reply => 0 indent).
         const cappedDepth = Math.min(node.depth, MAX_VISUAL_DEPTH);
         const indent = BASE_INDENT + (cappedDepth - 1) * INDENT_STEP;
+        // ★ The composer sits where the NEW reply will land (§2.2/§6.1): one depth
+        //   deeper than this node, capped at MAX_VISUAL_DEPTH.
+        const cappedReplyDepth = Math.min(node.depth + 1, MAX_VISUAL_DEPTH);
+        const replyIndent = BASE_INDENT + (cappedReplyDepth - 1) * INDENT_STEP;
         return (
-          <div
-            key={node.key}
-            className={clsx('flex min-w-0 items-start', styles.threadRow)}
-            style={{ marginLeft: `${indent}px` }}
-          >
-            <ThreadLine isLast={node.isLast} />
-            <div className={styles.threadReply}>
-              <TopCommentReply node={node} />
+          <Fragment key={node.key}>
+            <div
+              className={clsx('flex min-w-0 items-start', styles.threadRow)}
+              style={{ marginLeft: `${indent}px` }}
+            >
+              <ThreadLine isLast={node.isLast} />
+              <div className={styles.threadReply}>
+                <TopCommentReply
+                  node={node}
+                  active={activeReplyKey === node.key}
+                  onReply={() => onReply(node.key)}
+                />
+              </div>
             </div>
-          </div>
+            {activeReplyKey === node.key ? (
+              <div style={{ marginLeft: `${replyIndent}px` }} data-testid="quick-reply-mount-thread">
+                <QuickReplyComposer
+                  parent={node.entry}
+                  rootAuthor={rootAuthor}
+                  rootPermlink={rootPermlink}
+                  onClose={onCloseReply}
+                />
+              </div>
+            ) : null}
+          </Fragment>
         );
       })}
       {thread.truncated && (

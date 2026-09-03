@@ -33,6 +33,7 @@ export interface ComposerFooterLabels {
  */
 export default function ComposerFooter({
   labels,
+  testIdPrefix = 'short-form-composer',
   count,
   limit,
   overLimit,
@@ -49,6 +50,10 @@ export default function ComposerFooter({
   picker
 }: {
   labels: ComposerFooterLabels;
+  /** Prefix for every data-testid below (review F9). Default keeps the
+      quick-post's existing ids byte-identical; the quick-reply passes its own
+      so the two composers' controls stay distinguishable in the DOM. */
+  testIdPrefix?: string;
   count: number;
   limit: number;
   overLimit: boolean;
@@ -79,7 +84,7 @@ export default function ComposerFooter({
           label={labels.bold}
           onClick={onToggleBold}
           disabled={submitting}
-          testId="short-form-composer-bold-button"
+          testId={`${testIdPrefix}-bold-button`}
         >
           <Icons.bold className={ICON_CLASS} aria-hidden="true" />
         </ComposerAction>
@@ -87,7 +92,7 @@ export default function ComposerFooter({
           label={labels.italic}
           onClick={onToggleItalic}
           disabled={submitting}
-          testId="short-form-composer-italic-button"
+          testId={`${testIdPrefix}-italic-button`}
         >
           <Icons.italic className={ICON_CLASS} aria-hidden="true" />
         </ComposerAction>
@@ -95,7 +100,7 @@ export default function ComposerFooter({
           label={labels.addImage}
           onClick={onOpenFilePicker}
           disabled={submitting}
-          testId="short-form-composer-image-button"
+          testId={`${testIdPrefix}-image-button`}
         >
           <Icons.imageIcon className={ICON_CLASS} aria-hidden="true" />
         </ComposerAction>
@@ -105,7 +110,7 @@ export default function ComposerFooter({
           disabled={submitting}
           active={emojiOpen}
           ariaExpanded={emojiOpen}
-          testId="short-form-composer-emoji-button"
+          testId={`${testIdPrefix}-emoji-button`}
         >
           <Smile className={ICON_CLASS} strokeWidth={1.75} aria-hidden="true" />
         </ComposerAction>
@@ -118,7 +123,7 @@ export default function ComposerFooter({
             type="button"
             onMouseDown={(event) => event.preventDefault()}
             onClick={onCancel}
-            data-testid="short-form-composer-cancel"
+            data-testid={`${testIdPrefix}-cancel`}
             className="font-sans text-caption text-[#6b7280] underline-offset-2 hover:text-[#333] hover:underline"
           >
             {labels.cancel}
@@ -136,7 +141,7 @@ export default function ComposerFooter({
             // character count.
             overLimit ? 'font-semibold text-ink-brand-6' : count >= limit * 0.9 ? 'text-ink-brand-6' : 'text-[#6b7280]'
           )}
-          data-testid="short-form-composer-counter"
+          data-testid={`${testIdPrefix}-counter`}
         >
           {count} / {limit}
         </span>
@@ -147,7 +152,7 @@ export default function ComposerFooter({
           className="rounded-control bg-surface-brand-12 px-[22px] font-semibold text-white transition-colors hover:bg-surface-brand-16"
           disabled={!canSubmit || submitting || uploading || overLimit}
           onClick={onSubmit}
-          data-testid="short-form-composer-post"
+          data-testid={`${testIdPrefix}-post`}
           aria-busy={submitting}
         >
           {submitting ? labels.posting : labels.post}

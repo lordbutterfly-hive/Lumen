@@ -23,16 +23,19 @@ export default function ComposerMediaStrip({
   media,
   pendingCount,
   removeLabel,
-  onRemove
+  onRemove,
+  testIdPrefix = 'short-form-composer'
 }: {
   media: ComposerMedia[];
   pendingCount: number;
   removeLabel: string;
   onRemove: (url: string) => void;
+  /** Prefix for the data-testids (review F9); default keeps the quick-post's ids. */
+  testIdPrefix?: string;
 }) {
   if (media.length === 0 && pendingCount === 0) return null;
   return (
-    <div className="mt-3 flex flex-wrap gap-2 pl-[56px]" data-testid="short-form-composer-media">
+    <div className="mt-3 flex flex-wrap gap-2 pl-[56px]" data-testid={`${testIdPrefix}-media`}>
       {media.map((item) => (
         <div
           key={item.url}
@@ -47,7 +50,7 @@ export default function ComposerMediaStrip({
             title={removeLabel}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onRemove(item.url)}
-            data-testid="short-form-composer-media-remove"
+            data-testid={`${testIdPrefix}-media-remove`}
             className="absolute right-1 top-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
           >
             <Icons.x className="h-3.5 w-3.5" aria-hidden="true" />
@@ -58,7 +61,7 @@ export default function ComposerMediaStrip({
         <div
           key={`pending-${index}`}
           className="relative flex h-[84px] w-[84px] items-center justify-center overflow-hidden rounded-control border border-dashed border-[#ebebeb] bg-white/70"
-          data-testid="short-form-composer-media-pending"
+          data-testid={`${testIdPrefix}-media-pending`}
         >
           <CircleSpinner size={20} color="#6b7280" loading />
         </div>
