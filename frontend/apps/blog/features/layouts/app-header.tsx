@@ -573,21 +573,32 @@ const AppHeader: FC = () => {
               <HeaderAvatar username={identity.username} />
             </Link>
           ) : (
-            /* /login is the ONE entry point, and it carries all four ways in:
-               Google, Hive Keychain, a Bitcoin wallet and an EVM wallet.
+            /* ★★★ ONE LOGIN SURFACE, EVERYWHERE (owner ruling 2026-09-03). This was
+               a `<Link href="/login">` to the full page while the Profile row, every
+               upvote/reply/composer and ~24 other triggers open the `DialogLogin`
+               POPUP — so the header was the one place that logged in differently,
+               and the owner saw "the popup from Profile isn't the same as the
+               top-right Log in". The two render the SAME four methods (Google,
+               Bitcoin wallet, Ethereum wallet, Hive Keychain — `LumenLogin`), the
+               only difference was page-vs-popup plus the popup's signup footer.
+               Now the header opens the identical popup, so every entry point is
+               the same thing, and the reader keeps their place instead of being
+               navigated away. `/login` still exists as a standalone URL (deep links,
+               the popup's own "Create a free account" link, the `next=` flow).
 
-               ★ OPERATOR RULING 2026-08-01 — the second "Use Hive keys" button
-               that used to sit here is gone. Two adjacent, undifferentiated login
-               buttons is a coin toss for anyone who has not used Hive before, and
-               the one it opened asked a first-time visitor for a private key.
-               DialogLogin still exists and still opens from the ~24 in-context
-               places (upvote, reply, composer) — it is now Keychain-only and
-               links onward to /login for people without an account. */
-            <Link href="/login" data-testid="login-link">
-              <Button variant="ghost" className="whitespace-nowrap text-base hover:text-destructive">
+               History: the 2026-08-01 ruling removed a second "Use Hive keys"
+               button from here; the comment that lived here also said DialogLogin
+               was "Keychain-only" — stale since 2026-08-07, when the popup gained
+               all four methods. */
+            <DialogLogin>
+              <Button
+                variant="ghost"
+                className="whitespace-nowrap text-base hover:text-destructive"
+                data-testid="login-link"
+              >
                 {LABELS.login}
               </Button>
-            </Link>
+            </DialogLogin>
           )}
 
           {/* Last in the cluster, the same slot upstream denser gives its own
