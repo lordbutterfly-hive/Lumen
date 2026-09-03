@@ -10,6 +10,7 @@ import {
 } from '@hive/common-hiveio-packages/wax';
 import { getChain } from './chain';
 import { withRetry } from './retry';
+import { withHiveRetry } from '@smart-signer/lib/hive-network-error';
 import {
   bannedAuthorList,
   hasBannedAuthors,
@@ -228,20 +229,22 @@ export const getPost = async (
   // 404 without any change to the page itself — `PostPage` already calls
   // `notFound()` when there is no post.
   if (isBannedAuthor(author)) return null;
-  return (await getChain()).api.bridge
-    .get_post({
-      author,
-      permlink,
-      observer
-    })
-    .then((resp) => {
-      if (resp) {
-        if (isBannedEntry(resp)) return null;
-        return resolvePost(withoutBannedReblogger(resp), observer);
-      }
-
-      return resp;
-    });
+  // ★ RETRY + NODE FAILOVER (2026-09-03). This was a bare upstream call: a 429
+  // from api.hive.blog (the single configured node routinely rate-limits us)
+  // hard-failed the whole post page with no attempt on a healthy node, even
+  // though openhive/deathwing/mahdiyari sit in the rotation. `withHiveRetry`
+  // classifies a 429 as retryable ("possible network or CORS error") and, after
+  // one same-node retry, rotates to the next node — unlike `./retry`'s withRetry,
+  // which treats any 4xx (429 included) as a final answer and never failovers.
+  const resp = await withHiveRetry(
+    async () => (await getChain()).api.bridge.get_post({ author, permlink, observer }),
+    `get_post(${author}/${permlink})`
+  );
+  if (resp) {
+    if (isBannedEntry(resp)) return null;
+    return resolvePost(withoutBannedReblogger(resp), observer);
+  }
+  return resp;
 };
 
 /**
@@ -333,9 +336,14 @@ export const getFollowList = async (
   follow_type: FollowListType
 ): Promise<IFollowList[]> => {
   // ★ A6 retry rollout (2026-08-18): idempotent read, single caller (`/api/follow-list`).
-  return withRetry(async () => (await getChain()).api.bridge.get_follow_list({ observer, follow_type }), {
-    label: `get_follow_list(${observer})`
-  });
+  // ★ withHiveRetry (failover), not withRetry: a 429 on the configured node must
+  // fail over to a healthy one, or the mute/blacklist read fails and the post
+  // page serves no thread (see the prod incident). withRetry would not retry a 429
+  // and would not rotate nodes.
+  return withHiveRetry(
+    async () => (await getChain()).api.bridge.get_follow_list({ observer, follow_type }),
+    `get_follow_list(${observer})`
+  );
 };
 
 export const getSubscribers = async (community: string): Promise<string[][] | null> => {
@@ -490,9 +498,12 @@ export const getCommunity = async (
   // ★ A6 (2026-08-18): a dropped socket to a public Hive node used to become a 502 on the
   // reader's community page. `withRetry` retries transport faults and 5xx only — a "no
   // such community" answer is returned, not retried. See lib/retry.ts.
-  const community = await withRetry(async () => (await getChain()).api.bridge.get_community({ name, observer }), {
-    label: `get_community(${name})`
-  });
+  // ★ withHiveRetry (failover), not withRetry: fail over on a 429/transport fault
+  // to a healthy node rather than hard-failing the community read.
+  const community = await withHiveRetry(
+    async () => (await getChain()).api.bridge.get_community({ name, observer }),
+    `get_community(${name})`
+  );
   if (!community) return community;
   return withCorrectedSubscriberCount(community, await bannedSubscriptionCounts());
 };
@@ -547,9 +558,13 @@ export const getDiscussion = async (
   // ★ A6 retry rollout (2026-08-18): idempotent read, single caller (`/api/discussion`,
   // which may call this twice for a Lumen permlink fallback — both calls benefit,
   // neither has a competing retry).
-  return withRetry(async () => (await getChain()).api.bridge.get_discussion({ author, permlink, observer }), {
-    label: `get_discussion(${author}/${permlink})`
-  })
+  // ★ withHiveRetry (failover), not withRetry: the comment tree read must rotate
+  // off a rate-limited node instead of hard-failing (prod: "Error fetching
+  // discussion data" on a 429 with no failover).
+  return withHiveRetry(
+    async () => (await getChain()).api.bridge.get_discussion({ author, permlink, observer }),
+    `get_discussion(${author}/${permlink})`
+  )
     // ★ THE COMMENT TREE IS THE POINT. A troll's replies under OTHER people's
     // posts are the surface he actually lives on — he does not need his own post
     // to reach every reader on the site, he needs yours. `withoutBannedDiscussion`
