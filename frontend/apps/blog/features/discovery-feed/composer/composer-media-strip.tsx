@@ -11,9 +11,10 @@ export interface ComposerMedia {
 /**
  * The attached-images row, between the textarea and the toolbar (audit §9.3).
  *
- * `pl-[56px]` lines the strip up with the textarea rather than the avatar, the
- * same 56px the footer already uses, so the card has one left edge for
- * everything the reader typed or attached.
+ * The strip lines up under the textarea rather than the avatar, via `indentClass`
+ * (default `pl-[56px]` for the quick-post's 44px avatar + 12px gap; the compact
+ * reply composer passes `pl-[48px]` for its 36px avatar). The footer itself is
+ * full-width and carries no such indent.
  *
  * The pending tile is a real tile, not a spinner somewhere else: an upload that
  * takes six seconds on a phone has to occupy the space its image will occupy, or
@@ -24,7 +25,8 @@ export default function ComposerMediaStrip({
   pendingCount,
   removeLabel,
   onRemove,
-  testIdPrefix = 'short-form-composer'
+  testIdPrefix = 'short-form-composer',
+  indentClass = 'pl-[56px]'
 }: {
   media: ComposerMedia[];
   pendingCount: number;
@@ -32,10 +34,14 @@ export default function ComposerMediaStrip({
   onRemove: (url: string) => void;
   /** Prefix for the data-testids (review F9); default keeps the quick-post's ids. */
   testIdPrefix?: string;
+  /** Left indent to line the strip up under the textarea; default is the
+   *  quick-post's 56px (44px avatar + 12px gap). The compact reply composer
+   *  (36px avatar) passes pl-[48px] so its strip stays aligned (owner 2026-09-03). */
+  indentClass?: string;
 }) {
   if (media.length === 0 && pendingCount === 0) return null;
   return (
-    <div className="mt-3 flex flex-wrap gap-2 pl-[56px]" data-testid={`${testIdPrefix}-media`}>
+    <div className={`mt-3 flex flex-wrap gap-2 ${indentClass}`} data-testid={`${testIdPrefix}-media`}>
       {media.map((item) => (
         <div
           key={item.url}

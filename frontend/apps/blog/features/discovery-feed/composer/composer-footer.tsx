@@ -47,13 +47,23 @@ export default function ComposerFooter({
   onToggleEmoji,
   onSubmit,
   onCancel,
-  picker
+  picker,
+  preventPostMouseDown = false
 }: {
   labels: ComposerFooterLabels;
   /** Prefix for every data-testid below (review F9). Default keeps the
       quick-post's existing ids byte-identical; the quick-reply passes its own
       so the two composers' controls stay distinguishable in the DOM. */
   testIdPrefix?: string;
+  /** ★ When true, the Post button preventDefaults its mousedown so a mouse click
+      does NOT move focus onto it (the same load-bearing line Cancel and every
+      ComposerAction already carry, composer-action.tsx:37 / :124). The quick-reply
+      passes this: clicking Post there would otherwise focus the button, and the
+      instant `submitting` flips it `disabled` the browser blurs it to <body> — which
+      the feed card reads as "focus left the card" and collapses the whole drawer
+      the reader just posted into (owner issue, 2026-09-03; Fable review). Default
+      false keeps the quick-post byte-identical (it has no drawer to collapse). */
+  preventPostMouseDown?: boolean;
   count: number;
   limit: number;
   overLimit: boolean;
@@ -151,6 +161,7 @@ export default function ComposerFooter({
           size="sm"
           className="rounded-control bg-surface-brand-12 px-[22px] font-semibold text-white transition-colors hover:bg-surface-brand-16"
           disabled={!canSubmit || submitting || uploading || overLimit}
+          onMouseDown={preventPostMouseDown ? (event) => event.preventDefault() : undefined}
           onClick={onSubmit}
           data-testid={`${testIdPrefix}-post`}
           aria-busy={submitting}

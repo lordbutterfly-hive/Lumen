@@ -236,13 +236,18 @@ export default function QuickReplyComposer({ parent, rootAuthor, rootPermlink, o
   useEffect(() => {
     const replyKey = discussionKey(parent.author, parent.permlink);
     const root = rootRef.current;
+    // Capture the DRAWER at setup (while root is attached); it outlives this
+    // composer's unmount, so the cleanup can scope the button lookup to THIS card
+    // even after root detaches — never matching a duplicate post in another card
+    // (Fable review finding 3).
+    const drawer = root?.closest('[data-testid="post-card-drawer"]') ?? null;
     return () => {
       if (skipFocusReturnRef.current) return;
       const active = document.activeElement;
       if (active && active !== document.body && !(root && root.contains(active))) return;
-      document
+      (drawer ?? document)
         .querySelector<HTMLButtonElement>(`[data-testid="quick-reply-button"][data-reply-key="${replyKey}"]`)
-        ?.focus();
+        ?.focus({ preventScroll: true });
     };
   }, [parent.author, parent.permlink]);
 
@@ -448,6 +453,30 @@ export default function QuickReplyComposer({ parent, rootAuthor, rootPermlink, o
         : t('short_form_composer.reply_published_hive'),
       variant: 'success'
     });
+    // ★ KEEP THE DRAWER OPEN AFTER POSTING (owner issue 2, 2026-09-03: "when I
+    // click to post, the expansion closes"). The card closes its drawer when
+    // focus leaves it (medium-post-card `onCardBlur` -> closeSelf). Posting
+    // unmounts this composer, which destroys the focused Post button and drops
+    // focus to <body> -> the drawer collapses, and the reader has to reopen the
+    // card to see their reply. So move focus to the in-card Reply button HERE,
+    // synchronously, BEFORE onClose unmounts us: the Post button blurs with the
+    // Reply button (in-card) as relatedTarget, onCardBlur sees focus stayed in
+    // the card, and the drawer stays open showing the new reply. The unmount
+    // focus-return effect runs too late for this (passive cleanup, after React
+    // has already detached the button), so skip it to avoid a double focus.
+    // ★ The Post button now preventDefaults its mousedown (ComposerFooter
+    // `preventPostMouseDown`), so a mouse click no longer parks focus on it and
+    // the submit-start disabled-blur that collapsed the drawer cannot happen. This
+    // success-time move still covers the Ctrl+Enter path (focus was in the
+    // textarea, which unmounts) and returns the reader to the Reply button.
+    // Scoped to THIS drawer (never a duplicate card) and preventScroll so a reader
+    // who scrolled away during a slow publish is not yanked back (Fable findings 2, 3).
+    skipFocusReturnRef.current = true;
+    (rootRef.current?.closest('[data-testid="post-card-drawer"]') ?? document)
+      .querySelector<HTMLButtonElement>(
+        `[data-testid="quick-reply-button"][data-reply-key="${discussionKey(parent.author, parent.permlink)}"]`
+      )
+      ?.focus({ preventScroll: true });
     onClose();
   };
 
@@ -472,12 +501,16 @@ export default function QuickReplyComposer({ parent, rootAuthor, rootPermlink, o
         void images.handleFiles(files);
       }}
       className={cn(
-        'rounded-panel border bg-white p-[20px_22px] font-sans shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)] transition-colors',
+        // ★ COMPACT vs the quick-post (owner 2026-09-03: "the reply window is far
+        // too large compared to the comment font"). A reply is written INTO a column
+        // of 16px comments, so the box, avatar and text are stepped down to sit with
+        // them rather than tower over them (the quick-post keeps its larger scale).
+        'rounded-panel border bg-white p-[12px_14px] font-sans shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)] transition-colors',
         dragActive ? 'border-dashed border-line-brand-10/40' : 'border-[#ebebeb]'
       )}
     >
-      <div className="flex gap-3">
-        <UserAvatarImg username={displayUsername} pixelSize={44} alt={displayUsername} />
+      <div className="flex items-start gap-3">
+        <UserAvatarImg username={displayUsername} pixelSize={36} alt={displayUsername} />
         <textarea
           ref={textareaRef}
           id={textareaId}
@@ -510,7 +543,7 @@ export default function QuickReplyComposer({ parent, rootAuthor, rootPermlink, o
           }}
           placeholder={t('short_form_composer.reply_placeholder')}
           rows={1}
-          className="max-h-[420px] min-h-[56px] flex-1 resize-none overflow-y-auto border-none bg-transparent py-2 font-sans text-[18px] leading-[30px] text-foreground placeholder:text-ink-14 focus:outline-none focus-visible:ring-0"
+          className="max-h-[300px] min-h-[36px] flex-1 resize-none overflow-y-auto border-none bg-transparent py-1 font-sans text-[16px] leading-[24px] text-foreground placeholder:text-ink-14 focus:outline-none focus-visible:ring-0"
         />
       </div>
 
@@ -534,10 +567,12 @@ export default function QuickReplyComposer({ parent, rootAuthor, rootPermlink, o
         removeLabel={t('short_form_composer.remove_image')}
         onRemove={(url) => images.removeMedia(url, setText)}
         testIdPrefix="quick-reply-composer"
+        indentClass="pl-[48px]"
       />
 
       <ComposerFooter
         testIdPrefix="quick-reply-composer"
+        preventPostMouseDown
         labels={{
           bold: t('short_form_composer.bold'),
           italic: t('short_form_composer.italic'),
@@ -589,7 +624,7 @@ export default function QuickReplyComposer({ parent, rootAuthor, rootPermlink, o
 
       {overLimit ? (
         <p
-          className="mt-2 pl-[56px] font-sans text-caption text-ink-brand-6"
+          className="mt-2 pl-[48px] font-sans text-caption text-ink-brand-6"
           data-testid="quick-reply-composer-over-limit"
         >
           {t('short_form_composer.over_limit', {
@@ -599,7 +634,7 @@ export default function QuickReplyComposer({ parent, rootAuthor, rootPermlink, o
         </p>
       ) : null}
       {error ? (
-        <p className="mt-2 pl-[56px] font-sans text-caption text-ink-brand-6" data-testid="quick-reply-composer-error">
+        <p className="mt-2 pl-[48px] font-sans text-caption text-ink-brand-6" data-testid="quick-reply-composer-error">
           {error}
         </p>
       ) : null}
