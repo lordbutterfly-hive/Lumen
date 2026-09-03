@@ -92,6 +92,14 @@ interface ForYouResponse {
   entries: Entry[];
   source: 'recsys' | 'trending-fallback' | 'chain-page';
   degraded?: string;
+  /**
+   * Signed-in fallback seed only: the trending seed was served because the
+   * reader's ranked feed was not fresh, so the client must fetch the ranked
+   * feed on mount and swap it in. Absent on the anonymous trending seed (final,
+   * must not add a refetch behind every edge-cached home view) and on a
+   * personalised stored seed. See feed-prefetch.ts and observer-provider.ts.
+   */
+  awaitingRank?: boolean;
   detail?: string;
   ranked?: number;
   /**
@@ -293,7 +301,15 @@ function ForYouFeed() {
       staleTime: Infinity,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
-      refetchOnMount: false,
+      // ★ If the seed is a NON-personalised fallback (trending, served when the
+      // reader's ranked feed was not fresh), fetch the ranked feed on mount and
+      // swap it in; a personalised seed (fresh stored ranking) needs no refetch.
+      // 'always' because React Query v4's `true` skips a fresh seed (learned on
+      // the topic seed). Cold (no seed) keeps the library default fetch.
+      // Only the SIGNED-IN fallback seed carries awaitingRank; the anonymous
+      // trending seed does not (it is final and must not add a refetch behind
+      // every edge-cached home view), and a personalised stored seed does not.
+      refetchOnMount: (initialFeed?.page as ForYouResponse | undefined)?.awaitingRank ? 'always' : false,
       retry: 3,
       initialData: initialFeed
         ? { pages: [initialFeed.page as ForYouResponse], pageParams: [undefined] }

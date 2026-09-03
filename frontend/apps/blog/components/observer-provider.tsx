@@ -130,6 +130,8 @@ export interface InitialFeedPage {
   degraded?: string | null;
   personalised?: boolean;
   nextCursor?: { author: string; permlink: string } | null;
+  /** Signed-in fallback seed: the client should fetch the ranked feed on mount and swap it in. Absent on anonymous (trending is final) and on a personalised stored seed. */
+  awaitingRank?: boolean;
 }
 
 export interface InitialFeedSeed {

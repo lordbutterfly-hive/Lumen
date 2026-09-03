@@ -236,18 +236,52 @@ async function prefetchStoredFeed(viewer: string): Promise<InitialFeedSeed | nul
 export async function prefetchHomeFeed(viewer: string): Promise<InitialFeedSeed | null> {
   try {
     if (viewer) {
-      return await withTimeout(prefetchStoredFeed(viewer), PREFETCH_TIMEOUT_MS);
+      const stored = await withTimeout(prefetchStoredFeed(viewer), PREFETCH_TIMEOUT_MS);
+      if (stored) return stored;
+      // ★★★ STORED FEED STALE OR MISSING -> DO NOT LEAVE HOME UNSEEDED (2026-09-03).
+      // A signed-in reader whose stored feed is not fresh (e.g. the ranker is
+      // slow, so the warmer cannot rebuild it) used to seed nothing here and the
+      // client then paid the full ranked cold-build (~5-12s) with a blank home.
+      // Fall through to the trending fallback, block-filtered for this viewer,
+      // so home paints instantly; `personalised: false` tells feed-tabs to
+      // refetch on mount and swap in the ranked feed when it is ready. Same
+      // resilience as the signed-in topic seed.
     }
     const entries = await withTimeout(prefetchTrending(), PREFETCH_TIMEOUT_MS);
     if (!entries || entries.length === 0) return null;
+    let seedEntries = entries;
+    if (viewer) {
+      // ★ Block-filter the fallback seed the SAME way the stored path does
+      // (prefetchStoredFeed above): an unbounded await on the block list, which
+      // lives in local Postgres and is fast. An earlier version raced this
+      // against a 500ms timer to guarantee an instant paint, but losing that
+      // race served the seed UNFILTERED, so a blocked/muted author could paint
+      // in home SSR and stay visible until the on-mount ranked refetch resolved
+      // (up to ~12s). A blocked author leaking is never an acceptable trade for
+      // a few hundred ms; the stored path already awaits this unraced.
+      try {
+        const session = await getLiteSession();
+        const blockedKeys = await viewerBlockedKeySet(session.user).catch(() => new Set<string>());
+        if (blockedKeys.size > 0) seedEntries = await filterBlockedForViewer(seedEntries, blockedKeys);
+      } catch {
+        // Block list unavailable: serve unfiltered, same as the stored path and
+        // the API route's own catch.
+      }
+    }
     const page: InitialFeedPage = {
-      entries,
+      entries: seedEntries,
       source: 'trending-fallback',
-      degraded: 'anonymous',
+      // No `degraded` for a signed-in reader (they are not anonymous, and a
+      // populated seed is not a degraded state); the anonymous seed keeps its
+      // existing flag for its own empty-state copy. `awaitingRank` tells
+      // feed-tabs to fetch the ranked feed and swap it in — ONLY for a
+      // signed-in reader; the anonymous trending seed is final and must NOT
+      // trigger a refetch behind every (edge-cached) home view.
+      ...(viewer ? { awaitingRank: true as const } : { degraded: 'anonymous' as const }),
       personalised: false,
       nextCursor:
-        entries.length > 0
-          ? { author: entries[entries.length - 1].author, permlink: entries[entries.length - 1].permlink }
+        seedEntries.length > 0
+          ? { author: seedEntries[seedEntries.length - 1].author, permlink: seedEntries[seedEntries.length - 1].permlink }
           : null
     };
     return { page, at: Date.now() };
