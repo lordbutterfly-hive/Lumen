@@ -88,7 +88,14 @@ export default function TopicShell({ tag }: { tag: string }) {
       staleTime: 60_000,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
-      refetchOnMount: true
+      // ★ 'always', NOT true (2026-09-03). React Query v4's refetchOnMount:true
+      // only refetches a STALE query, and a seed <60 s old is fresh — so a
+      // signed-in reader seeded with the newest-first fallback would never fetch
+      // the ranked feed and would be stuck on unranked (and the phase-4
+      // memo-refresh never fired either). 'always' fetches on every mount
+      // regardless of staleness; the seed still paints instantly and the ranked,
+      // fully block/mute-filtered feed swaps in behind it. Found in review.
+      refetchOnMount: 'always'
     });
 
   // ★ A TOPIC IS THE FEED, FILTERED — including its faults. This carried the

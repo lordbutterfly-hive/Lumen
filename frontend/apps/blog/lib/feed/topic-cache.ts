@@ -170,7 +170,12 @@ export function anonymousTopicSeed(topic: string, limit = 30, observer = 'hive.b
   const sliced = memo.entries.slice(0, limit);
   const entries = sliced.map((entry) => ({ ...entry, active_votes: [], body: trimFeedBody(entry.body ?? '') }));
   return {
-    page: { entries, source: 'trending-fallback', degraded: 'anonymous', nextCursor: cursorOf(sliced) },
+    // No `degraded` here: the seed always has entries (this returns null when
+    // empty), and a stray degraded flag could flash the empty-degraded panel to
+    // a signed-in reader if the client NSFW-hid every seeded post before the
+    // ranked feed arrives (found in review). The route still sets degraded on a
+    // genuinely degraded ANSWER; that is separate from this seed.
+    page: { entries, source: 'trending-fallback', nextCursor: cursorOf(sliced) },
     at: memo.at
   };
 }

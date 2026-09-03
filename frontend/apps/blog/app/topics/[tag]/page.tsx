@@ -5,6 +5,8 @@ import TopicShell from '@/blog/features/discovery-feed/topic-shell';
 import { TopicSeedProvider } from '@/blog/features/discovery-feed/topic-seed-context';
 import { anonymousTopicSeed } from '@/blog/lib/feed/topic-cache';
 import { getServerSessionUser } from '@/blog/lib/server-session';
+import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { viewerBlockedKeySet, filterBlockedForViewer } from '@/blog/lib/lite/social/block-filter';
 
 /**
  * A topic, rendered as the Lumen feed.
@@ -44,8 +46,39 @@ const Page = async ({ params }: { params: { tag: string } }) => {
   const tag = decodeURIComponent(params.tag).toLowerCase();
   // Community ids arrive here too — they are shown as tags, never as pages.
   if (!isValidTagFormat(tag) && !isCommunityFormat(tag)) notFound();
+  // ★★★ SEED SIGNED-IN READERS TOO (2026-09-03). A signed-out topic is seeded
+  // from the newest-posts fallback memo and paints instantly; a signed-in reader
+  // used to get NO seed and waited on the ranked cold-build, measured at
+  // 5.7-10 s for the FIRST topic of a session (route note; every later topic is
+  // instant once the viewer state is warm). That 10 s is the owner-reported lag.
+  // Now a signed-in reader is seeded with the SAME fast newest-posts fallback,
+  // block-filtered so nothing they blocked can flash, and TopicShell's
+  // refetch-on-mount fetches the ranked feed and swaps it in when the build
+  // finishes (masthead goes "newest first" -> "ranked for you"). Content in
+  // under a second either way; a cold tag with no warm memo seeds nothing, i.e.
+  // exactly today's behaviour, no regression.
   const { isLoggedIn } = await getServerSessionUser();
-  const seed = isLoggedIn ? null : anonymousTopicSeed(tag);
+  let seed = anonymousTopicSeed(tag);
+  if (seed && isLoggedIn) {
+    try {
+      // ★ Bounded: viewerBlockedKeySet can make a cold Hive call (chain mutes);
+      // it is warm after any prior feed read (the usual home->topic path), but a
+      // direct first-of-session /topics load must not wait on Hive for the seed.
+      // Race a short deadline; on timeout seed unfiltered and let the ranked
+      // refetch (refetchOnMount:'always') apply the full filter. Found in review.
+      const blockedKeys = await Promise.race([
+        viewerBlockedKeySet((await getLiteSession()).user),
+        new Promise<Set<string>>((resolve) => setTimeout(() => resolve(new Set<string>()), 500))
+      ]);
+      if (blockedKeys.size > 0) {
+        const entries = await filterBlockedForViewer(seed.page.entries, blockedKeys);
+        seed = { ...seed, page: { ...seed.page, entries } };
+      }
+    } catch {
+      // Block lookup failed (DB hiccup): show the unfiltered fallback for the
+      // second before the ranked feed replaces it, rather than a 10 s wait.
+    }
+  }
   return (
     <TopicSeedProvider value={seed}>
       <TopicShell tag={tag} />
