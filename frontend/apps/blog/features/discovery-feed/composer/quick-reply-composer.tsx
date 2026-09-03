@@ -543,7 +543,13 @@ export default function QuickReplyComposer({ parent, rootAuthor, rootPermlink, o
           }}
           placeholder={t('short_form_composer.reply_placeholder')}
           rows={1}
-          className="max-h-[300px] min-h-[36px] flex-1 resize-none overflow-y-auto border-none bg-transparent py-1 font-sans text-[16px] leading-[24px] text-foreground placeholder:text-ink-14 focus:outline-none focus-visible:ring-0"
+          // ★ font-lora, NOT font-sans (owner "reply fonts" pass, 2026-09-03): what you
+          //   TYPE here renders as Lora in the thread and sits in a column of Lora
+          //   comments, so the writing surface reads in the same face at the same 16px
+          //   — write-what-you-read. Only the textarea moves to Lora; the footer chrome
+          //   (Post, counter, cancel) stays Merriweather/Fira UI, and the quick-post is
+          //   untouched. font-lora is the proven token (font-text was the once-undefined one).
+          className="max-h-[300px] min-h-[36px] flex-1 resize-none overflow-y-auto border-none bg-transparent py-1 font-lora text-[16px] leading-[24px] text-foreground placeholder:text-ink-14 focus:outline-none focus-visible:ring-0"
         />
       </div>
 
