@@ -92,6 +92,26 @@ const nextConfig = {
   // Worker files need specific headers (security headers are applied via middleware)
   async headers() {
     return [
+      /**
+       * ★ SELF-HOSTED FONTS + PUBLIC IMAGES: CACHEABLE, ETAG-REVALIDATED (2026-09-03,
+       * found live at the Cloudflare cutover). These paths are excluded from the
+       * middleware (which had been stamping `private, no-store` on them), so the
+       * cache policy is set HERE explicitly rather than relying on a framework
+       * default. `public, max-age=86400, must-revalidate`: the browser and the CDN
+       * hold them a day, then revalidate by ETag (a 304 is ~200 bytes). Deliberately
+       * NOT `max-age=31536000, immutable` like `/_next/static/**`: those are
+       * content-hashed, these are not, so a changed font file must be able to
+       * replace itself within a day instead of a year. The CDN "Static assets"
+       * cache rule ("use cache-control if present") now caches them at the edge.
+       */
+      {
+        source: '/fonts/:path*',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=86400, must-revalidate' }]
+      },
+      {
+        source: '/images/:path*',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=86400, must-revalidate' }]
+      },
       {
         source: '/auth/worker.js',
         headers: [

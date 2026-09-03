@@ -260,7 +260,21 @@ export const config = {
   // cache can hold it — attaching this middleware would put a 400-day
   // `session_uid` Set-Cookie on that same cacheable response, replaying one
   // visitor's session to the next for up to five minutes.
+  // ★ `fonts` and `images` added 2026-09-03 (CDN Phase A cutover, found live).
+  // These are plain static files under `public/` — the self-hosted Lora /
+  // Merriweather / Fira woff2 that every page needs, and the wallet images. They
+  // read no cookie and no session, but they were NOT excluded, so this middleware
+  // stamped `private, no-store` on every one of them (line 178) and minted the
+  // 400-day `session_uid` Set-Cookie on each request. Measured at the edge the
+  // moment Cloudflare went in front: `cf-cache-status: BYPASS` on every font —
+  // the CDN's "cache if the origin says it's cacheable" rule correctly refused
+  // them — and, worse, `no-store` had been defeating the BROWSER cache too, so a
+  // reader re-downloaded ~120KB of fonts on every navigation, from France.
+  // Excluding them stops the `no-store` + Set-Cookie; the explicit cache policy
+  // for these paths lives in `next.config.js` `headers()` (public, 1 day, must-
+  // revalidate by ETag — NOT `immutable`, because `/fonts` and `/images` are not
+  // content-hashed, so a changed font must be able to replace itself).
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|api/avatar|api/trending-tags|api/streak/marks|api/creator-profile).*)'
+    '/((?!_next/static|_next/image|favicon\\.ico|fonts/|images/|api/avatar|api/trending-tags|api/streak/marks|api/creator-profile).*)'
   ]
 };
