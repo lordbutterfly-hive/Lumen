@@ -81,6 +81,17 @@ function expandIpv6Prefix(ip: string): string | null {
 }
 
 export function getClientIp(req: NextRequest): string {
+  // ★ CF-CONNECTING-IP behind Cloudflare (2026-09-03, CDN Phase A). Cloudflare
+  // sets this to the true client IP; it is the robust way to recover the client
+  // when a CDN hop is added ahead of Caddy (otherwise the whole site collapses
+  // into Cloudflare's IP bucket). Opt-in via BEHIND_CLOUDFLARE so behaviour is
+  // UNCHANGED until the DNS cutover sets it. Trustworthy only because the origin
+  // is firewalled to accept traffic solely from Cloudflare ranges (see the CDN
+  // runbook); a direct-to-origin hit could otherwise spoof this header.
+  if ((process.env.BEHIND_CLOUDFLARE || '').toLowerCase() === 'yes') {
+    const cf = req.headers.get('cf-connecting-ip');
+    if (cf && cf.trim()) return ipBucket(cf.trim());
+  }
   const forwarded = req.headers.get('x-forwarded-for');
   if (forwarded) {
     const parts = forwarded

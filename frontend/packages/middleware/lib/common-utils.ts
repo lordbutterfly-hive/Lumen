@@ -84,6 +84,24 @@ function fromForwardedFor(forwarded: string | undefined | null): string | null {
  * Returns a validated address, or 'unknown' — never raw header text.
  */
 export function getClientIp(req: NextRequest | NextApiRequest): string {
+  // ★ CF-CONNECTING-IP behind Cloudflare (2026-09-03, CDN Phase A). This is the
+  // true client IP Cloudflare stamps on every request; preferring it is what
+  // keeps the request budget AND the crawler-by-IP classifier working once a CDN
+  // hop sits ahead of the origin (without it the origin only sees Cloudflare IPs
+  // and buckets everyone together / stops classifying crawlers). Opt-in via
+  // BEHIND_CLOUDFLARE so behaviour is UNCHANGED until the DNS cutover. Safe only
+  // because the origin is firewalled to Cloudflare ranges (see the CDN runbook).
+  if ((process.env.BEHIND_CLOUDFLARE || '').toLowerCase() === 'yes') {
+    const cfRaw =
+      'headers' in req && typeof (req.headers as Headers).get === 'function'
+        ? (req.headers as Headers).get('cf-connecting-ip')
+        : (() => {
+            const h = (req as NextApiRequest).headers?.['cf-connecting-ip'];
+            return Array.isArray(h) ? h[0] : h ?? null;
+          })();
+    const cf = asAddress(cfRaw ?? undefined);
+    if (cf) return cf;
+  }
   // NextRequest.ip is set by the platform, not by the caller, so it is trusted.
   if ('ip' in req && req.ip) {
     return asAddress(req.ip) ?? 'unknown';
