@@ -2,6 +2,7 @@ import 'server-only';
 import { getLogger } from '@ui/lib/logging';
 import { getTrendingTags } from '@transaction/lib/hive';
 import { acquireHiveWarm, hiveWarmHolder, releaseHiveWarm } from './hive-warm-gate';
+import { selectWarmTopics } from './topic-warm-select';
 
 const logger = getLogger('app');
 
@@ -42,17 +43,19 @@ const logger = getLogger('app');
  * can possibly deal, today and tomorrow, and forty entries sit comfortably under
  * the route's 200-entry bound.
  *
- * `isWarmableTag` below is based on that file's `isBrowsableTopic` predicate,
- * deliberately duplicated rather than imported: it lives in a `'use client'`
+ * Selection lives in the pure `selectWarmTopics` (lib/feed/topic-warm-select.ts),
+ * split out so it is unit-tested (topic-warm-select.test.ts) and carries no
+ * `server-only`/chain imports. `isBrowsableTag` there is deliberately a COPY of
+ * the rail's predicate rather than an import: it lives in a `'use client'`
  * module, and pulling a client component's module graph into server startup to
- * reuse one string test is a worse trade than duplicating the test. It goes
- * WIDER than the rail in one deliberate way: it also warms community ids
- * (hive-N), which the rail's browsable chips omit but which readers still open
- * at /topics/hive-N and which sit near the top of the trending stream, so those
- * community topic pages get the same instant SSR seed as tag pages. The
- * duplication is safe: if it drifts, the warmer warms a tag the rail no longer
- * shows, or misses one it does. Both cost a slow first click. Neither can serve
- * a reader anything wrong.
+ * reuse one string test is a worse trade than duplicating it. The warmer warms
+ * every browsable tag PLUS the top community ids (hive-N): communities are
+ * omitted from the rail's chips, but readers still open /topics/hive-N and
+ * communities sit near the top of the trending stream. Warming browsable-first
+ * (never capped away) keeps every tag page warm while adding the popular
+ * community pages. The copy is safe: if it drifts from the rail, the warmer warms
+ * a tag the rail no longer shows, or misses one it does. Both cost a slow first click.
+ * Neither can serve a reader anything wrong.
  *
  * ★ IT MUST NOT STAMPEDE THE NODE. Tags are warmed ONE AT A TIME with a gap
  * between them, so a cycle is a slow trickle (~1 upstream call/second) rather
@@ -85,33 +88,6 @@ const BOOT_DELAY_MS = 2_000;
  *  — the same over-fetch, for the same reason, as `/api/trending-tags`. */
 const TAG_FETCH_LIMIT = 120;
 
-const EXCLUDED_TAGS = new Set(['', 'nsfw', 'test']);
-const REWARD_TRIBE_TAGS = new Set([
-  'pob', 'proofofbrain', 'neoxian', 'cent', 'waivio', 'waiv', 'pimp', 'archon',
-  'palnet', 'creativecoin', 'vyb', 'ctp', 'alive', 'oneup', 'lassecash', 'bbh',
-  'burnpost', 'hbd', 'hive', 'ecency', 'peakd', 'listnerds', 'dbuzz',
-  'posh', 'curation', 'blog'
-]);
-
-/**
- * ★ WHAT THE WARMER FILLS THE CACHE FOR - WIDER THAN THE BROWSABLE LIST (2026-09-03).
- *
- * The rail's browsable-topic predicate omits community ids because the
- * right-rail chips do not list communities. But a reader who opens
- * `/topics/hive-105017` still lands on the topic page, which seeds itself from the
- * SAME fallback memo the warmer fills (see topic-cache.ts / topics/[tag]/page.tsx),
- * and community ids ARE near the top of the trending stream. Excluding them from
- * the warm cycle is exactly why cold community pages server-rendered 0 cards while
- * warmed tag pages rendered 20. This warmer-specific predicate warms community ids
- * too (still dropping the reward-tribe and reserved tags, which are not real
- * browse destinations), so community topic pages get the same instant SSR seed.
- * It does not touch the right-rail's own predicate.
- */
-function isWarmableTag(name: string): boolean {
-  const tag = name.toLowerCase();
-  return !EXCLUDED_TAGS.has(tag) && !REWARD_TRIBE_TAGS.has(tag);
-}
-
 function numberFromEnv(name: string, fallback: number): number {
   const raw = Number(process.env[name]);
   return Number.isFinite(raw) && raw > 0 ? raw : fallback;
@@ -124,15 +100,14 @@ const sleep = (ms: number): Promise<void> =>
     if (typeof timer.unref === 'function') timer.unref();
   });
 
-/** The tags to warm, newest trending first, already filtered and capped. */
+/**
+ * The tags to warm, newest trending first. Selection (every browsable tag +
+ * top-N communities, capped) lives in the pure, unit-tested `selectWarmTopics`
+ * (topic-warm-select.ts) so the cap-eviction rule is covered by a test.
+ */
 export async function topicsToWarm(max = DEFAULT_MAX_TAGS): Promise<string[]> {
   const tags = await getTrendingTags(TAG_FETCH_LIMIT);
-  return (tags ?? [])
-    .map((tag) => (tag?.name ?? '').toLowerCase())
-    // The route only accepts `[a-z0-9-]{1,64}` as a topic; a tag it would reject
-    // is a tag no warmed entry could ever be read back for.
-    .filter((name) => /^[a-z0-9-]{1,64}$/.test(name) && isWarmableTag(name))
-    .slice(0, max);
+  return selectWarmTopics((tags ?? []).map((tag) => tag?.name ?? ''), max);
 }
 
 let running = false;
