@@ -9,7 +9,7 @@ import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
 import { filterBlockedForViewer, viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { trimEntriesForSeed } from '@/blog/lib/feed/seed-trim';
-import { seedAccountEntriesViaRoute } from '@/blog/lib/feed/seed-via-route';
+import { anonymousAccountPostsSeed } from '@/blog/lib/feed/account-posts-seed-cache';
 
 const logger = getLogger('app');
 
@@ -67,19 +67,25 @@ const PostsPage = async ({
   }
   // ★ FALLBACK WHEN THE RENDER-CONTEXT SEED CAME BACK EMPTY (2026-09-03).
   //
-  // The `getAccountPosts` call above is a wax chain read issued DURING the RSC
-  // render, and it fails deterministically here (empty seed => no posts in the
-  // SSR HTML => the browser refetches ~1.4s later; the profile is our slowest
-  // page for exactly this). The SAME read via our own `/api/account-posts`
-  // route succeeds reliably because it runs in an isolated route handler, not
-  // inside this heavy render. So when the direct seed is empty, seed from the
-  // route instead. Its entries are already resolved, block-filtered and
-  // trimmed, so they are a drop-in replacement and MUST NOT be re-processed.
-  // Opt-in + budgeted; see seed-via-route.ts. No-op (returns null) until the
-  // flag is set, so this never changes behaviour until enabled.
+  // `getAccountPosts` above is a wax chain read issued DURING the RSC render and
+  // it fails in the render context (empty seed => no posts in the SSR HTML =>
+  // the browser refetches ~1.4s later; the profile is our slowest page for
+  // exactly this). The render must do NO network to fix it - an earlier loopback
+  // self-fetch per render starved the single-process event loop under crawler
+  // load and 502'd the origin (see account-posts-seed-cache.ts).
+  //
+  // So for a SIGNED-OUT reader we seed from the anonymous cache that
+  // /api/account-posts writes: a process-local map read, zero network. The
+  // client's own fetch populates it, so the next reader's render paints from it.
+  // Signed-in readers are never seeded from the shared anonymous cache (their
+  // block list and own vote are per-request) - they fall through to the client
+  // fetch exactly as before. Cold miss = today's behaviour, never worse.
   if (!initialPosts || initialPosts.length === 0) {
-    const viaRoute = await seedAccountEntriesViaRoute(query, username, observer);
-    if (viaRoute) initialPosts = viaRoute;
+    const viewerSession = await getLiteSession();
+    if (!viewerSession.user) {
+      const cached = anonymousAccountPostsSeed(query, username);
+      if (cached && cached.length > 0) initialPosts = cached;
+    }
   }
   // Pass data directly via context instead of Hydrate/dehydrate.
   // React Query v4's <Hydrate> has compatibility issues with Next.js App Router

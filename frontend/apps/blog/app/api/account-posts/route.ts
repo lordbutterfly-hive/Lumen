@@ -11,6 +11,7 @@ import {
 } from '@/blog/lib/lite/social/block-filter';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { trimEntriesForSeed } from '@/blog/lib/feed/seed-trim';
+import { rememberAccountPostsSeed } from '@/blog/lib/feed/account-posts-seed-cache';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 
 const logger = getLogger('app');
@@ -250,6 +251,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // and the profile card needs neither. Same helper as the SSR seed and the
     // feed, keyed to the viewer so their own vote survives. See lib/feed/seed-trim.ts.
     const trimmed = trimEntriesForSeed(entries, viewerSession.user?.username ?? '');
+
+    // ★ SEED THE ANONYMOUS SSR CACHE (2026-09-03). A signed-OUT first-page read
+    // is viewer-independent, so cache it for the profile render to paint from
+    // with zero render-time network (replaces the reverted loopback that starved
+    // the event loop). Only anonymous + first page; see account-posts-seed-cache.ts.
+    if (!viewerSession.user && !startAuthor) {
+      rememberAccountPostsSeed(sort, account, trimmed);
+    }
 
     return NextResponse.json({ entries: trimmed, nextCursor, hasMore });
   } catch (error) {

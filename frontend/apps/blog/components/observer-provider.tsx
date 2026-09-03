@@ -2,7 +2,7 @@
 
 import { createContext, useContext, ReactNode } from 'react';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
-import type { Entry, Community, IFollowList } from '@hive/common-hiveio-packages/wax';
+import type { Entry, Community, IFollowList, FullAccount } from '@hive/common-hiveio-packages/wax';
 
 const ObserverContext = createContext<string>(DEFAULT_OBSERVER);
 
@@ -34,6 +34,28 @@ export const InitialPostsProvider = ({ value, children }: { value: Entry[] | nul
 );
 
 export const useInitialPosts = () => useContext(InitialPostsContext);
+
+const InitialProfileContext = createContext<FullAccount | null>(null);
+
+/**
+ * Provides the server-fetched account (the profile owner's FullAccount) to the
+ * client ProfileMain, so its `['profileData']` query has initialData during the
+ * SSR render itself. Same reason as InitialPostsProvider: React Query v4's
+ * Hydrate/dehydrate does not reliably populate a client component's useQuery
+ * during App Router SSR, so ProfileMain used to gate the WHOLE profile behind a
+ * full-viewport "Loading profile" loader on every server render (identity AND
+ * the Posts tab), then paint everything client-side. Seeding the account through
+ * context lets the gate pass on the server, so the profile server-renders.
+ */
+export const InitialProfileProvider = ({
+  value,
+  children
+}: {
+  value: FullAccount | null;
+  children: ReactNode;
+}) => <InitialProfileContext.Provider value={value}>{children}</InitialProfileContext.Provider>;
+
+export const useInitialProfile = () => useContext(InitialProfileContext);
 
 const InitialCommunitiesContext = createContext<Community[] | null>(null);
 

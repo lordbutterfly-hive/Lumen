@@ -179,7 +179,12 @@ const PostsContent = ({
   // error only when the reader would otherwise be left with a blank page.
   if (isError && !data?.pages?.some((page) => (page?.entries?.length ?? 0) > 0)) return <NoDataError />;
 
-  if (isLoading || (isFetching && !data?.pages?.[0]?.entries?.length)) {
+  // ★ LOADER ONLY WHEN THERE IS GENUINELY NOTHING TO SHOW (2026-09-03), the twin
+  // of the profile-posts-list fix. `isLoading` alone stayed true for a query
+  // seeded with `initialData` + `initialDataUpdatedAt: 0` (React Query v4), so the
+  // SSR seed (the /@user/feed tab) was hidden behind the loader and never
+  // server-rendered. Fall to the loader only when no page has entries yet.
+  if (!data?.pages?.some((page) => (page?.entries?.length ?? 0) > 0) && (isLoading || isFetching)) {
     return <LumenLoader size="lg" label={t('global.loading_posts')} />;
   }
 

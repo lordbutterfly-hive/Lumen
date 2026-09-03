@@ -8,7 +8,7 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { extractUsernameFromParam } from '@/blog/utils/validate-links';
-import { useSSRObserver, useInitialPosts } from '@/blog/components/observer-provider';
+import { useSSRObserver, useInitialPosts, useInitialProfile } from '@/blog/components/observer-provider';
 import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/use-following-infinitequery';
 import { useModerationStatus } from '@/blog/features/mute-follow/hooks/use-moderation-status';
 import NoDataError from '@/blog/components/no-data-error';
@@ -68,6 +68,7 @@ export default function ProfileMain() {
   const identity = useSessionIdentity();
   const ssrObserver = useSSRObserver();
   const initialPosts = useInitialPosts();
+  const initialProfile = useInitialProfile();
   const observer = isHydrated ? (chainObserver(user)) : ssrObserver;
 
   const {
@@ -77,14 +78,19 @@ export default function ProfileMain() {
   } = useQuery({
     queryKey: ['profileData', username],
     queryFn: () => fetchAccount(username),
-    enabled: Boolean(username)
+    enabled: Boolean(username),
+    // ★ SSR-seed from context so this query has data on the SERVER render, not
+    // only after client hydration (Hydrate does not populate SSR here). Without
+    // it, `isProfilePending` was true on every server render and the gate below
+    // returned the full-viewport loader, so nothing - identity or Posts tab -
+    // server-rendered. Seeded stale (updatedAt 0) so the client still revalidates.
+    initialData: initialProfile ?? undefined,
+    initialDataUpdatedAt: initialProfile ? 0 : undefined
   });
 
-  const {
-    data: dynamicGlobalData,
-    isError: isDynamicGlobalError,
-    isLoading: isDynamicGlobalPending
-  } = useQuery({
+  // dynamicGlobalData feeds ONLY the optional HP figure below (already guarded
+  // by `hp ? ... : null`). It must NOT gate the page - see the loader gate.
+  const { data: dynamicGlobalData } = useQuery({
     queryKey: ['dynamicGlobalData'],
     queryFn: () => fetchDynamicGlobalProperties()
   });
@@ -162,11 +168,11 @@ export default function ProfileMain() {
   // before the `!profileData` check below ever runs.
   const moderation = useModerationStatus(username, Boolean(profileData?._temporary));
 
-  if (isProfileError || isDynamicGlobalError) {
+  if (isProfileError) {
     return <NoDataError />;
   }
 
-  if (isProfilePending || isDynamicGlobalPending) {
+  if (isProfilePending) {
     return <LumenLoader size="lg" className="min-h-[70vh]" label={t('global.loading_profile')} />;
   }
 
@@ -174,9 +180,11 @@ export default function ProfileMain() {
     return notFound();
   }
 
-  if (!dynamicGlobalData) {
-    return <NoDataError />;
-  }
+  // ★ dynamicGlobalData NO LONGER GATES THE PAGE (2026-09-03). It feeds only the
+  // optional HP figure (guarded by `hp ? ... : null` in ProfileIdentity). Gating
+  // on it - or on its error/pending - blanked the whole profile on the server,
+  // where it is never seeded, and was the twin of the HP-gating bug already
+  // removed on 2026-08-28. A missing/failed dynamicGlobal now just omits HP.
 
   // ★★★ HP NO LONGER GATES THE PAGE (2026-08-28, owner: "profile always loads
   // a bit too slow... it is janky"). `hpFigures` is a THIRD, independent round

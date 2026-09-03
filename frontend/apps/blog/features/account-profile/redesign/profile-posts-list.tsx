@@ -64,7 +64,14 @@ export default function ProfilePostsList({
   // Show what we have. Only surrender the whole surface when there is genuinely
   // nothing to show.
   if (isError && entries.length === 0) return <NoDataError />;
-  if (isLoading || (isFetching && entries.length === 0))
+  // ★ LOADER ONLY WHEN THERE IS GENUINELY NOTHING TO SHOW (2026-09-03). Gating on
+  // `isLoading` alone hid the SSR seed: with `initialData` + `initialDataUpdatedAt: 0`
+  // (see use-account-entries.ts, seeded stale so the client revalidates), React
+  // Query v4 reports `isLoading: true` for the seeded query, so this returned the
+  // loader on the server even though `entries` already held 20 seeded posts - the
+  // profile's posts never server-rendered. Show what we have; only fall to the
+  // loader when the list is actually empty and still loading/fetching.
+  if (entries.length === 0 && (isLoading || isFetching))
     return <LumenLoader size="lg" label={t('global.loading_posts')} />;
 
   if (entries.length === 0) {

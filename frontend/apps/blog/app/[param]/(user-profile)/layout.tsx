@@ -3,6 +3,7 @@ import { Metadata } from 'next';
 import { dehydrate, Hydrate } from '@tanstack/react-query';
 import { siteConfig } from '@ui/config/site';
 import { getQueryClient } from '@/blog/lib/react-query';
+import { InitialProfileProvider } from '@/blog/components/observer-provider';
 import {
   getAccountFullCached,
   getAccountReputationsCached,
@@ -266,7 +267,17 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
   // `features/layouts/user-profile/profile-subpage-shell` from its own
   // layout.tsx. A route can no longer render a chrome that is not its own, and
   // there is no second profile left to reach.
-  return <Hydrate state={dehydratedState}>{children}</Hydrate>;
+  // ★ SEED ProfileMain's account through context, not just Hydrate (2026-09-03).
+  // Hydrate does not populate a client component's useQuery during App Router
+  // SSR (see observer-provider.tsx), so ProfileMain gated the whole profile
+  // behind "Loading profile" on every server render. Passing the account we
+  // already resolved above lets its ['profileData'] query have initialData on
+  // the server, so identity and the Posts tab actually server-render.
+  return (
+    <Hydrate state={dehydratedState}>
+      <InitialProfileProvider value={account}>{children}</InitialProfileProvider>
+    </Hydrate>
+  );
 };
 
 export default Layout;
