@@ -9,6 +9,7 @@ import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
 import { filterBlockedForViewer, viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { trimEntriesForSeed } from '@/blog/lib/feed/seed-trim';
+import { seedAccountEntriesViaRoute } from '@/blog/lib/feed/seed-via-route';
 
 const logger = getLogger('app');
 
@@ -63,6 +64,22 @@ const PostsPage = async ({
     }
   } catch (error) {
     logger.error(error, 'Error in PostsPage:');
+  }
+  // ★ FALLBACK WHEN THE RENDER-CONTEXT SEED CAME BACK EMPTY (2026-09-03).
+  //
+  // The `getAccountPosts` call above is a wax chain read issued DURING the RSC
+  // render, and it fails deterministically here (empty seed => no posts in the
+  // SSR HTML => the browser refetches ~1.4s later; the profile is our slowest
+  // page for exactly this). The SAME read via our own `/api/account-posts`
+  // route succeeds reliably because it runs in an isolated route handler, not
+  // inside this heavy render. So when the direct seed is empty, seed from the
+  // route instead. Its entries are already resolved, block-filtered and
+  // trimmed, so they are a drop-in replacement and MUST NOT be re-processed.
+  // Opt-in + budgeted; see seed-via-route.ts. No-op (returns null) until the
+  // flag is set, so this never changes behaviour until enabled.
+  if (!initialPosts || initialPosts.length === 0) {
+    const viaRoute = await seedAccountEntriesViaRoute(query, username, observer);
+    if (viaRoute) initialPosts = viaRoute;
   }
   // Pass data directly via context instead of Hydrate/dehydrate.
   // React Query v4's <Hydrate> has compatibility issues with Next.js App Router
