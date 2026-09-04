@@ -91,7 +91,7 @@ export default function WalletContent() {
    */
   const tokenAccounts = useTokenAccounts();
   const walletIdentities = tokenAccounts.accounts.filter((a) => a.kind !== 'hive');
-  const { account, figures, dynamicGlobal, isLoading, isError } = useWalletAccount(
+  const { account, figures, dynamicGlobal, isError } = useWalletAccount(
     isLite ? '' : user.username
   );
 
@@ -230,7 +230,14 @@ export default function WalletContent() {
     );
   }
 
-  if (isLoading || !account || !figures) {
+  // ★ Gate on data PRESENCE, not isLoading (T3g fix, 2026-09-04). React Query v4
+  // reports isLoading:true even when initialData (the SSR seed) is present, so
+  // gating on isLoading defeated the seeded masthead -- it painted "loading" then
+  // resolved, the exact flash this optimization exists to kill (see
+  // feedback_isloading_lies_with_initialdata; same fix shipped to profile 09-03).
+  // The seed provides account+figures so this paints immediately; the balance
+  // still revalidates behind it (the query is seeded initialDataUpdatedAt:0).
+  if (!account || !figures) {
     return (
       <div data-testid="wallet-content-loading">
         <PageMasthead title={t('wallet.page_title')}>
