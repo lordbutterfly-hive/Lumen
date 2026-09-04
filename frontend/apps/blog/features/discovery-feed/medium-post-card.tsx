@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useQuery } from '@tanstack/react-query';
 import { Link, UserAvatarImg, DIRECT_TIMEOUT_MS } from '@hive/ui';
 import {
@@ -45,12 +46,39 @@ import { useModerationStatus } from '@/blog/features/mute-follow/hooks/use-moder
 import { classifyBlacklist } from '@/blog/lib/moderation/blacklist-reason';
 import { isOwnModerationHide } from '@/blog/lib/muted-reasons';
 import cardStyles from './post-card.module.css';
-import TopCommentDrawer from './top-comment-drawer';
 import IdentityPill from './identity-pill';
 import type { MarketPrice } from '@/blog/features/creator-tokens/types';
 import { useVisibleDiscussion } from './lib/use-visible-discussion';
 import { claimOpen, lastInputWasKeyboard, releaseOpen } from './lib/card-expansion';
 import { getPostRubric } from './lib/post-rubric';
+
+/**
+ * ★ T2c (2026-09-04 perf hunt) — THE DRAWER'S MARKUP IS HOVER-ONLY; ITS CODE NO
+ * LONGER HAS TO SHIP WITH THE FEED.
+ *
+ * `TopCommentDrawer` -> `TopCommentThread` -> `RendererContainer` -> `lib/renderer`
+ * pulls in the full `@hive/renderer` markdown pipeline (remarkable + sanitize-html,
+ * ~295KB raw / ~97KB gzip) to render the EXPANDED reply thread. A plain `import`
+ * bundles that whole chain into whatever chunk this file lands in — every feed
+ * page, for every one of the 20-30 cards on it — even though the DATA behind it
+ * is already gated on `engaged` (a 140ms hover/focus/pointerdown intent, see
+ * below) and the drawer only ever mounts for a card that actually has a comment
+ * (`post.children > 0`, at the bottom of this file). `next/dynamic({ ssr: false })`
+ * makes webpack split it into its own async chunk instead, so the markdown
+ * renderer is fetched only for a reader who reaches a card with comments — never
+ * as part of the feed's first-load JS.
+ *
+ * `ssr: false` costs nothing here: the drawer is entirely pointer/keyboard/
+ * `useEffect`-height-measurement driven, so a no-JS visit gets nothing from it
+ * whether or not it is in the server HTML. `loading: () => null` matches that —
+ * the wrapper it would otherwise show is `height: 0; overflow: hidden` in CSS
+ * (`.drawer` in `post-card.module.css`) regardless of whether the chunk has
+ * arrived, so a placeholder would add a DOM node for zero visible difference.
+ */
+const TopCommentDrawer = dynamic(() => import('./top-comment-drawer'), {
+  ssr: false,
+  loading: () => null
+});
 
 // TODO: move to i18n
 const LABELS = {
@@ -86,21 +114,7 @@ const LABELS = {
  */
 const SHOW_CARD_OVERFLOW_MENU: boolean = false;
 
-/**
- * Medium-style feed card for a single Hive post: a roomy text column with a
- * larger square thumbnail (only when the post actually has one), followed by
- * the FULL Hive controls row — real vote control (upvote/downvote + weight
- * slider), payout, upvote count, comments, and one-tap reblog. Medium's
- * cleanliness and spacing, Hive's actions. The controls are denser's own
- * components (`VotesComponentWrapper`, `ReblogDialog`, the card tooltips) so
- * voting/reblog behaviour stays identical to the classic feed.
- */
-export default function MediumPostCard({
-  post,
-  mark,
-  price,
-  luminosity
-}: {
+interface MediumPostCardProps {
   post: Entry;
   mark?: RankMark;
   /*
@@ -119,7 +133,51 @@ export default function MediumPostCard({
    * a second one.
    */
   luminosity?: number;
-}) {
+}
+
+/**
+ * ★ T3j (2026-09-04 perf hunt) — `mark` NEEDS FIELD COMPARISON, NOT REFERENCE,
+ * or the `memo` below is a no-op.
+ *
+ * `useRankMarks` (`feed-tabs.tsx`'s only caller today) builds a brand-new `Map`
+ * AND a brand-new `RankMark` object literal on every call —
+ * `out.set(account, { tier, rankNumber: m.rankNumber, showMark: true })` — even
+ * when the underlying rank snapshot has not changed at all, because that hook
+ * never wraps its return in `useMemo`. A default shallow `React.memo` compares
+ * `mark` by reference, so it would see a "new" object on every parent
+ * re-render regardless of content and never once skip re-rendering a card
+ * that has one — exactly the "parent passes a new inline object every render"
+ * trap that makes a memo cosmetic instead of real.
+ *
+ * `post`/`price`/`luminosity` do not share that problem: `post` is an element
+ * of a React Query-backed array reused across renders (a `.map`/`.flatMap`
+ * rebuilds the wrapping array, not the entries inside it), `price` is read off
+ * a Map built from a stable query result or a shared `PENDING` constant
+ * (`use-token-price-chips.ts`), and `luminosity` is a plain number — reference/
+ * value equality is already correct for all three, so only `mark` gets the
+ * field-by-field check.
+ */
+function arePostCardPropsEqual(prev: Readonly<MediumPostCardProps>, next: Readonly<MediumPostCardProps>): boolean {
+  return (
+    prev.post === next.post &&
+    prev.price === next.price &&
+    prev.luminosity === next.luminosity &&
+    prev.mark?.tier === next.mark?.tier &&
+    prev.mark?.rankNumber === next.mark?.rankNumber &&
+    prev.mark?.showMark === next.mark?.showMark
+  );
+}
+
+/**
+ * Medium-style feed card for a single Hive post: a roomy text column with a
+ * larger square thumbnail (only when the post actually has one), followed by
+ * the FULL Hive controls row — real vote control (upvote/downvote + weight
+ * slider), payout, upvote count, comments, and one-tap reblog. Medium's
+ * cleanliness and spacing, Hive's actions. The controls are denser's own
+ * components (`VotesComponentWrapper`, `ReblogDialog`, the card tooltips) so
+ * voting/reblog behaviour stays identical to the classic feed.
+ */
+const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminosity }: MediumPostCardProps) {
   const { t } = useTranslation('common_blog');
   // ★ `sessionUnavailable` added alongside the pre-existing `user` (2026-08-16,
   // downvote-in-overflow-menu). Both feed `tierPending` below — see that
@@ -151,7 +209,13 @@ export default function MediumPostCard({
   // markdown/HTML. It is the same helper `getPostSummary` now uses for the dek
   // below, so a title and its excerpt can no longer disagree about whether an
   // apostrophe is an apostrophe.
-  const displayTitle = normalizeTitle(liteOverlay?.title || post.title);
+  // ★ T3j: memoized so a re-render triggered by the card's OWN state (hover
+  // engage, vote popover, NSFW reveal, thumbnail-failed...) does not re-run the
+  // sanitize/entity-decode pass on a title that has not changed.
+  const displayTitle = useMemo(
+    () => normalizeTitle(liteOverlay?.title || post.title),
+    [liteOverlay?.title, post.title]
+  );
 
   // ★ E1/E2/E4 (BUILDMAP-FUCKERY-V2, G3) — "muting a user currently does nothing".
   // Moderation acts on `post.author`, the account that actually signed on chain —
@@ -170,7 +234,9 @@ export default function MediumPostCard({
   // NOT `post.blacklists.length > 0` — see `classifyBlacklist`'s doc for the measured
   // proof that Hivemind mixes a synthetic "reputation-N" token into that array for
   // any low/negative-reputation author with no list involved at all.
-  const blacklistReason = classifyBlacklist(post.blacklists);
+  // ★ T3j: `classifyBlacklist` filters + regex-tests the whole array; memoized
+  // for the same reason as `displayTitle` above.
+  const blacklistReason = useMemo(() => classifyBlacklist(post.blacklists), [post.blacklists]);
   /**
    * ★★★ THE DRAWER'S FETCH GATE (2026-08-19, top-comment drawer).
    *
@@ -512,7 +578,12 @@ export default function MediumPostCard({
    */
   const voter = identity.username;
   const isLite = user?.account_tier === 'lite';
-  const checkVote = post.active_votes.find((entry) => entry.voter === voter);
+  // ★ T3j: an array scan over `active_votes`, memoized so it does not re-run
+  // on every one of this card's own state-driven re-renders.
+  const checkVote = useMemo(
+    () => post.active_votes.find((entry) => entry.voter === voter),
+    [post.active_votes, voter]
+  );
   const [downvoteActed, setDownvoteActed] = useState(false);
   const { data: userVotes } = useQuery({
     queryKey: ['votes', post.author, post.permlink, voter],
@@ -603,7 +674,9 @@ export default function MediumPostCard({
   // ★ NSFW GATE (2026-08-09) — see lib/nsfw.ts for why this lives here at all.
   // Every hook runs before the `hide` early-return below, so hook order stays
   // stable across renders of the same list even as the preference changes.
-  const isNsfw = isNsfwPost(post);
+  // ★ T3j: scans `json_metadata.tags`; memoized for the same reason as the
+  // other derived values above.
+  const isNsfw = useMemo(() => isNsfwPost(post), [post]);
   const nsfwPreference = useNsfwPreference();
   // Mirrors the classic card: the preference only ever applies to a post that
   // is actually flagged, so an ordinary post is never gated by it.
@@ -620,8 +693,11 @@ export default function MediumPostCard({
      can use the identical rule instead of having no fallback at all. The spec,
      both owner rulings and the reason for the `hive-\d+` shape test all moved
      with it — read them there, not here. */
-  const rubric = getPostRubric(post);
-  const dek = getPostSummary(post.json_metadata, post.body);
+  // ★ T3j: `getPostRubric` parses `json_metadata` (JSON.parse behind a
+  // try/catch) and `getPostSummary` walks the body for an excerpt — both
+  // memoized so a card's own state churn does not redo that work every time.
+  const rubric = useMemo(() => getPostRubric(post), [post]);
+  const dek = useMemo(() => getPostSummary(post.json_metadata, post.body), [post.json_metadata, post.body]);
   /**
    * ★ A NOTE IS NOT AN ARTICLE (2026-08-14, composer audit finding 7 / §9.6).
    *
@@ -647,9 +723,14 @@ export default function MediumPostCard({
   // image is found, so every card would always render "something". Medium's
   // card only shows a thumbnail when the post genuinely has one, so treat
   // that specific fallback value as "no image".
-  const extractedImage = find_first_img(post);
-  const authorAvatarFallback = getUserAvatarUrl(displayAuthor, 'large');
-  const thumbnail = extractedImage && extractedImage !== authorAvatarFallback ? extractedImage : '';
+  // ★ T3j: `find_first_img` walks metadata/body through several regex/string
+  // checks; memoized alongside its avatar-fallback compare so a state-only
+  // re-render (thumbnail load failing, hover, a vote) does not redo it.
+  const thumbnail = useMemo(() => {
+    const extractedImage = find_first_img(post);
+    const authorAvatarFallback = getUserAvatarUrl(displayAuthor, 'large');
+    return extractedImage && extractedImage !== authorAvatarFallback ? extractedImage : '';
+  }, [post, displayAuthor]);
 
   /**
    * ★ AN HONEST FALLBACK FOR A FAILED THUMBNAIL (2026-08-16, QA Low 9).
@@ -1744,4 +1825,7 @@ export default function MediumPostCard({
       ) : null}
     </article>
   );
-}
+},
+arePostCardPropsEqual);
+
+export default MediumPostCard;
