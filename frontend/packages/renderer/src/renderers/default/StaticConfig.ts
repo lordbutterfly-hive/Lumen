@@ -39,8 +39,9 @@ export class StaticConfig {
                 }
             },
             {
-                // eslint-disable-next-line security/detect-unsafe-regex
-                re: /^(https?:)?\/\/player.vimeo.com\/video\/.*/i,
+                // Dots escaped for hygiene (2026-09-04); the fn already re-validated with
+                // a strict escaped regex + rebuilt the host, so this was never exploitable.
+                re: /^(?:https?:)?\/\/player\.vimeo\.com\/video\/.*/i,
                 fn: (src: string) => {
                     // <iframe src="https://player.vimeo.com/video/179213493" width="640" height="360" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe>
                     if (!src) {
@@ -54,38 +55,93 @@ export class StaticConfig {
                 }
             },
             {
-                // eslint-disable-next-line security/detect-unsafe-regex
-                re: /^(https?:)?\/\/www.youtube.com\/embed\/.*/i,
+                // ★ DOTS ESCAPED + fn REBUILDS A HARDCODED HOST (2026-09-04, security).
+                // The old re had UNESCAPED dots (`www.youtube.com` — each `.` matched
+                // any char, so `//www-youtube.com/embed/x` matched) and the fn only
+                // stripped the query, returning the ATTACKER host verbatim: an author
+                // could embed an iframe pointing at a registerable look-alike host for
+                // phishing. Now only a real youtube embed id passes and the host is
+                // rebuilt from a literal, exactly as vimeo/3speak already do.
+                re: /^(?:https?:)?\/\/www\.youtube\.com\/embed\/[\w-]{11}(?:[/?#].*)?$/i,
                 fn: (src: string) => {
-                    return src.replace(/\?.+$/, ''); // strip query string (yt: autoplay=1,controls=0,showinfo=0, etc)
+                    if (!src) return null;
+                    // Exactly an 11-char youtube id (or the literal `videoseries` for a
+                    // playlist, also 11), captured with a hard boundary so no trailing
+                    // attacker chars fold into the rebuilt path.
+                    const m = src.match(/^(?:https?:)?\/\/www\.youtube\.com\/embed\/([\w-]{11})(?:[/?#]|$)/i);
+                    if (!m) return null;
+                    if (m[1].toLowerCase() === 'videoseries') {
+                        const list = src.match(/[?&]list=([\w-]{10,40})(?:[&#]|$)/i);
+                        return list ? `https://www.youtube.com/embed/videoseries?list=${list[1]}` : null;
+                    }
+                    return `https://www.youtube.com/embed/${m[1]}`;
                 }
             },
             {
-                re: /^https:\/\/w.soundcloud.com\/player\/.*/i,
+                // Dot escaped + the `url=` param VALIDATED to an api.soundcloud.com
+                // resource (2026-09-04). The host was already hardcoded in fn, but the
+                // old code embedded the raw attacker `url=` value; now only a real
+                // soundcloud tracks/playlists/users resource may ride in the player.
+                re: /^https:\/\/w\.soundcloud\.com\/player\/.*/i,
                 fn: (src: string) => {
                     if (!src) {
                         return null;
                     }
-                    // <iframe width="100%" height="450" scrolling="no" frameborder="no" src="https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/tracks/257659076&amp;auto_play=false&amp;hide_related=false&amp;show_comments=true&amp;show_user=true&amp;show_reposts=false&amp;visual=true"></iframe>
-                    const m = src.match(/url=(.+?)&/);
-                    if (!m || m.length !== 2) {
+                    const m = src.match(/[?&]url=([^&]+)/);
+                    if (!m) {
                         return null;
                     }
-                    return `https://w.soundcloud.com/player/?url=${m[1]}&auto_play=false&hide_related=false&show_comments=true&show_user=true&show_reposts=false&visual=true`;
+                    let decoded: string;
+                    try {
+                        decoded = decodeURIComponent(m[1]);
+                    } catch {
+                        return null;
+                    }
+                    if (!/^https:\/\/api\.soundcloud\.com\/(tracks|playlists|users)\/\d{1,20}$/i.test(decoded)) {
+                        return null;
+                    }
+                    return `https://w.soundcloud.com/player/?url=${encodeURIComponent(decoded)}&auto_play=false&hide_related=false&show_comments=true&show_user=true&show_reposts=false&visual=true`;
                 }
             },
             {
-                // eslint-disable-next-line security/detect-unsafe-regex
-                re: /^(https?:)?\/\/player.twitch.tv\/.*/i,
+                // ★ DOTS ESCAPED + params VALIDATED + host + parent HARDCODED (2026-09-04,
+                // security). The old re had unescaped dots and the fn did `return src`
+                // RAW, so `//player-twitch.tv/evil` rendered an attacker host. Now only
+                // a validated channel/video/collection passes, the host is a literal,
+                // and `parent` is OUR domain (never the src's — twitch requires parent
+                // to match the embedding page, and an author-set one is a smell).
+                re: /^(?:https?:)?\/\/player\.twitch\.tv\/\?.+/i,
                 fn: (src: string) => {
-                    // <iframe src="https://player.twitch.tv/?channel=ninja" frameborder="0" allowfullscreen="true" scrolling="no" height="378" width="620">
-                    return src;
+                    if (!src) return null;
+                    const q = src.match(/^(?:https?:)?\/\/player\.twitch\.tv\/\?(.+)$/i);
+                    if (!q) return null;
+                    const params = new URLSearchParams(q[1]);
+                    const channel = params.get('channel');
+                    const video = params.get('video');
+                    const collection = params.get('collection');
+                    let kind: string | null = null;
+                    if (channel && /^[A-Za-z0-9_]{4,25}$/.test(channel)) kind = `channel=${channel}`;
+                    else if (video && /^\d{1,20}$/.test(video)) kind = `video=${video}`;
+                    else if (collection && /^[A-Za-z0-9]{1,64}$/.test(collection)) kind = `collection=${collection}`;
+                    if (!kind) return null;
+                    // parent MUST be our own host(s), never the src's. Both prod origins
+                    // (Cloudflare serves apex + www) so a reader on either plays; twitch
+                    // accepts multiple parent params. Non-prod origins won't play twitch
+                    // (rare embed, acceptable) — never a security issue, just playback.
+                    return `https://player.twitch.tv/?${kind}&parent=lumensocial.net&parent=www.lumensocial.net`;
                 }
             },
             {
-                re: /^https:\/\/open\.spotify\.com\/(embed|embed-podcast)\/(playlist|show|episode|album|track|artist)\/(.*)/i,
+                // Path segment VALIDATED + host/path REBUILT (2026-09-04) instead of the
+                // old `return src` raw. Host was already anchored+escaped (no phishing),
+                // but the raw return kept the attacker's trailing path/query; now only a
+                // base62 spotify id survives.
+                re: /^https:\/\/open\.spotify\.com\/(embed|embed-podcast)\/(playlist|show|episode|album|track|artist)\/[A-Za-z0-9]{1,40}(?:[?#].*)?$/i,
                 fn: (src: string) => {
-                    return src;
+                    const m = src.match(
+                        /^https:\/\/open\.spotify\.com\/(embed|embed-podcast)\/(playlist|show|episode|album|track|artist)\/([A-Za-z0-9]{1,40})/i
+                    );
+                    return m ? `https://open.spotify.com/${m[1]}/${m[2]}/${m[3]}` : null;
                 }
             },
             {

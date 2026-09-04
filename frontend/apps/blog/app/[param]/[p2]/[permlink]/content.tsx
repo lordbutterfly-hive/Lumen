@@ -23,6 +23,7 @@ import ContextLinks from '@/blog/features/post-rendering/context-links';
 import FlagIcon from '@/blog/features/post-rendering/flag-icon';
 import MutePostDialog from '@/blog/features/post-rendering/mute-post-dialog';
 import PostBodySection from '@/blog/features/post-rendering/post-body-section';
+import { bodyWithThreeSpeakPlayer } from '@/blog/lib/post/threespeak-embed';
 import PostedViaLumen from '@/blog/features/post-rendering/posted-via-lumen';
 import { PostDeleteDialog } from '@/blog/features/post-rendering/post-delete-dialog';
 import { SharePost } from '@/blog/features/post-rendering/share-post-dialog';
@@ -1821,7 +1822,7 @@ const PostContent = () => {
                   <div className="px-2 py-6">{t('post_content.body.copyright')}</div>
                 ) : (
                   <PostBodySection
-                    body={postData.body}
+                    body={bodyWithThreeSpeakPlayer(postData.body, postData.json_metadata)}
                     author={postData.author}
                     permlink={postData.permlink}
                     mainPost={postData.depth === 0}

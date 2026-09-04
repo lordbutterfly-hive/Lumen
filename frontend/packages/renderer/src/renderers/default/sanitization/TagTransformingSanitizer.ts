@@ -69,7 +69,7 @@ export class TagTransformingSanitizer {
             // SEE https://www.owasp.org/index.php/XSS_Filter_Evasion_Cheat_Sheet
             allowedAttributes: {
                 // "src" MUST pass a whitelist (below)
-                iframe: ['src', 'width', 'height', 'frameborder', 'allowfullscreen', 'webkitallowfullscreen', 'mozallowfullscreen'],
+                iframe: ['src', 'width', 'height', 'frameborder', 'allowfullscreen', 'webkitallowfullscreen', 'mozallowfullscreen', 'sandbox', 'allow'],
 
                 // class attribute is strictly whitelisted (below)
                 // and title is only set in the case of a phishing warning
@@ -114,7 +114,17 @@ export class TagTransformingSanitizer {
                                     frameborder: '0',
                                     allowfullscreen: 'allowfullscreen',
                                     webkitallowfullscreen: 'webkitallowfullscreen',
-                                    mozallowfullscreen: 'mozallowfullscreen'
+                                    mozallowfullscreen: 'mozallowfullscreen',
+                                    // ★ SANDBOX (2026-09-04, security). Defense-in-depth over the
+                                    // src allowlist: even a whitelisted embed is confined. The
+                                    // players need scripts + their own origin (cross-origin, so
+                                    // allow-same-origin grants THEIR origin, not ours) + casting;
+                                    // we deliberately OMIT allow-top-navigation and allow-popups —
+                                    // those are the phishing levers (redirecting the tab / opening
+                                    // windows). Fullscreen rides on `allow`/allowfullscreen, not a
+                                    // sandbox token.
+                                    sandbox: 'allow-scripts allow-same-origin allow-presentation',
+                                    allow: 'fullscreen; picture-in-picture; encrypted-media'
                                 }
                             };
                             return iframeToBeReturned;

@@ -60,6 +60,24 @@ export abstract class AbstractEmbedder {
      * @param size - Object containing width and height dimensions for the embed
      * @returns The text with all embed markers replaced with their processed content
      */
+    // ★ SANDBOX FOR EMBEDDER-GENERATED IFRAMES (2026-09-04, security). Embedder
+    // iframes are inserted HERE, AFTER DefaultRenderer.sanitize() has run, so they
+    // never pass through the sanitizer's transformTags.iframe (where raw <iframe>
+    // in a body gets its sandbox). Their host is already hardcoded-safe by each
+    // processEmbed, but they still need the top-nav/popup lockdown. Same value the
+    // sanitizer uses: run scripts + own (cross-)origin + casting, but NO
+    // allow-top-navigation / allow-popups (the phishing levers). Fullscreen rides
+    // on `allow`/allowfullscreen, not a sandbox token.
+    private static readonly IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-presentation';
+    private static readonly IFRAME_ALLOW = 'fullscreen; picture-in-picture; encrypted-media';
+    /** Inject sandbox/allow into any <iframe> that lacks a sandbox. */
+    public static sandboxEmbedIframes(html: string): string {
+        return html.replace(
+            /<iframe(?![^>]*\bsandbox=)/gi,
+            `<iframe sandbox="${AbstractEmbedder.IFRAME_SANDBOX}" allow="${AbstractEmbedder.IFRAME_ALLOW}"`
+        );
+    }
+
     public static insertAllEmbeds(embedders: AbstractEmbedder[], input: string, size: {width: number; height: number}): string {
         const sections = [];
 
@@ -72,7 +90,7 @@ export abstract class AbstractEmbedder {
                 const type = match[2];
                 for (const embedder of embedders) {
                     if (embedder.type == type) {
-                        sections.push(embedder.processEmbed(id, size));
+                        sections.push(AbstractEmbedder.sandboxEmbedIframes(embedder.processEmbed(id, size)));
                         break;
                     }
                 }
