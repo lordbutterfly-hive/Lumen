@@ -79,6 +79,11 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
     { id: 'launch', label: t('meritum_launch.term_launch_label'), value: t('meritum_launch.term_launch_value') },
     { id: 'listed', label: t('meritum_launch.term_listed_label'), value: t('meritum_launch.term_listed_value') },
     { id: 'cut', label: t('meritum_launch.term_cut_label'), value: t('meritum_launch.term_cut_value', { pct: commission }) },
+    // ★ TRADING FEE disclosed here (owner, 2026-09-04). 10% on every curve buy
+    // and sell, split 5% creator + 5% platform (core/params.go TradeFeeBps=1000,
+    // tradefee.go: creator half -> kFeeBal, platform half -> kTreasury). It was
+    // shown in the buy/sell modals but not on this terms ledger.
+    { id: 'fee', label: t('meritum_launch.term_fee_label'), value: t('meritum_launch.term_fee_value') },
     /*
       ★ TWO ROWS DELETED 2026-08-30, both on the owner's word. Recorded here
       because both were added deliberately and neither should be re-added by

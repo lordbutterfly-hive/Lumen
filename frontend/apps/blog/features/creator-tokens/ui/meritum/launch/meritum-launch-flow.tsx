@@ -289,7 +289,10 @@ const MeritumLaunchFlow: FC = () => {
               */
               eyebrow: '',
               headline: t('meritum_launch.headline_step3'),
-              subline: t('meritum_launch.subline_step3')
+              // ★ NO SUBLINE ON STEP 3 (owner, 2026-09-04). The "nothing is
+              // hidden in a tooltip" line announced its own honesty; the terms
+              // list below is the honesty. Empty string, guarded at the render.
+              subline: ''
             };
 
   const caption = live
@@ -396,7 +399,9 @@ const MeritumLaunchFlow: FC = () => {
             <h1 className="mt-3 max-w-[22ch] font-ui text-34 font-medium tracking-[-0.02em] text-meritum-ink">
               {header.headline}
             </h1>
-            <p className="mt-3 max-w-[52ch] font-ui text-15 text-meritum-ink-3">{header.subline}</p>
+            {header.subline ? (
+              <p className="mt-3 max-w-[52ch] font-ui text-15 text-meritum-ink-3">{header.subline}</p>
+            ) : null}
 
             {live ? (
               <LaunchStruck
