@@ -1,5 +1,5 @@
 import type { Entry } from '@hive/common-hiveio-packages/wax';
-import { trimFeedBody } from '@/blog/lib/feed/topic-cache';
+import { trimFeedBody, trimJsonMetadata } from '@/blog/lib/feed/topic-cache';
 
 /**
  * ★★★ WHAT A POST-CARD SEED ACTUALLY NEEDS, AND NOTHING MORE (2026-09-03,
@@ -28,6 +28,7 @@ export function trimEntriesForSeed(entries: Entry[], viewer: string): Entry[] {
     const votes = Array.isArray(entry.active_votes) ? entry.active_votes : [];
     return {
       ...entry,
+      json_metadata: trimJsonMetadata(entry.json_metadata) as Entry['json_metadata'],
       // Keep the viewer's own vote (the "did I vote" SSR check) AND every
       // DOWNVOTE. splitTally (features/votes/vote-tallies.ts) counts others'
       // downvotes from active_votes to show the down chip; the up total comes

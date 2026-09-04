@@ -50,7 +50,7 @@ const PREFETCH_LIMIT = 20;
  * deadline worth the name nor a cache.
  */
 const PREFETCH_TIMEOUT_MS = 700;
-const FEED_BODY_CHARS = 4000;
+const FEED_BODY_CHARS = 800;
 const BODY_IMAGE_PATTERNS = [
   /!\[[^\]]*\]\([^)\s]+\)/,
   /<img\s+[^>]*src="[^"]+"[^>]*>/i,

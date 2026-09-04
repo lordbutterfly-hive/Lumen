@@ -75,7 +75,7 @@ export function resetTopicFeedCache(): void {
  * and the API answer are shaped by the SAME code. The comments that explain
  * them stayed with their first home; this is the mechanism only.
  */
-export const FEED_BODY_CHARS = 4000;
+export const FEED_BODY_CHARS = 800;
 export const BODY_IMAGE_PATTERNS = [
   /!\[[^\]]*\]\([^)\s]+\)/,
   /<img\s+[^>]*src="[^"]+"[^>]*>/i,
@@ -92,6 +92,24 @@ export function trimFeedBody(body: string): string {
     if (found) rescued.push(found[0]);
   }
   return rescued.length > 0 ? `${head}\n\n${rescued.join('\n')}` : head;
+}
+
+// ★ TRIM json_metadata TO WHAT A CARD READS (2026-09-04, perf). Untrimmed,
+// json_metadata is 24-47% of a feed/topic/profile payload - one video-tagged
+// author re-embeds the ENTIRE post body under json_metadata.video.content
+// .description (6-7.5 KB per post). A card only ever reads these keys (verified
+// across post-img.tsx / summary.tsx / medium-post-card.tsx / profile-identity.tsx
+// and getPostSummary); everything else (video, users, community, app, format,
+// canonical_url, oembed, ...) is dead weight. Keep the whitelist, drop the rest.
+// Defensive: leave non-object json_metadata (string / null) untouched. Shared by
+// seed-trim.ts (feed/profile/account-posts) and anonymousTopicSeed below (topic).
+const JM_SEED_KEYS = ['image', 'images', 'links', 'flow', 'tags', 'description', 'summary', 'type', 'profile'];
+export function trimJsonMetadata(jm: unknown): unknown {
+  if (!jm || typeof jm !== 'object' || Array.isArray(jm)) return jm;
+  const src = jm as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of JM_SEED_KEYS) if (k in src) out[k] = src[k];
+  return out;
 }
 
 export type RankedEntry = Entry & {
@@ -168,7 +186,12 @@ export function anonymousTopicSeed(topic: string, limit = 30, observer = 'hive.b
   memoStore.delete(key);
   memoStore.set(key, memo);
   const sliced = memo.entries.slice(0, limit);
-  const entries = sliced.map((entry) => ({ ...entry, active_votes: [], body: trimFeedBody(entry.body ?? '') }));
+  const entries = sliced.map((entry) => ({
+    ...entry,
+    active_votes: [],
+    json_metadata: trimJsonMetadata(entry.json_metadata) as typeof entry.json_metadata,
+    body: trimFeedBody(entry.body ?? '')
+  }));
   return {
     // No `degraded` here: the seed always has entries (this returns null when
     // empty), and a stray degraded flag could flash the empty-degraded panel to
