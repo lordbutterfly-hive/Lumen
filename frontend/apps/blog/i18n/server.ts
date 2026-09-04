@@ -1,5 +1,6 @@
 import { createInstance } from 'i18next';
 import resourcesToBackend from 'i18next-resources-to-backend';
+import { loadLocaleResources } from './locale-loaders';
 import { initReactI18next } from 'react-i18next/initReactI18next';
 import { getOptions, cookieName, defaultLocale } from './settings';
 import { cookies } from 'next/headers';
@@ -9,9 +10,7 @@ const initI18next = async (lng: string, ns: string) => {
   await i18nInstance
     .use(initReactI18next)
     .use(
-      resourcesToBackend(
-        (language: string, namespace: string) => import(`../locales/${language}/${namespace}.json`)
-      )
+      resourcesToBackend((language: string) => loadLocaleResources(language))
     )
     .init(getOptions(lng, ns));
   return i18nInstance;

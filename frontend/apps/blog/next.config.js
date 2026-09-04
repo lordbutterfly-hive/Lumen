@@ -298,9 +298,34 @@ const nextConfig = {
       ],
     };
   },
-  webpack: (config, { isServer }) => {
+  webpack: (config, { isServer, webpack }) => {
     if (!isServer) {
       config.resolve.fallback = { fs: false, module: false };
+
+      /*
+       * ★ KEEP ALL NINE LOCALES OUT OF THE CLIENT BUNDLE (2026-09-04, perf).
+       *
+       * i18n/client.ts is a 'use client' module that ALSO runs during SSR.
+       * There, loadServerResources() synchronously require()s every locale so
+       * the shared i18next store is populated before the first render (the
+       * SSR-race fix documented in that file). That
+       * `require(`../locales/${language}/common_blog.json`)` is a webpack
+       * require-CONTEXT: webpack bundles all nine locales into the CLIENT build
+       * too, into the main app chunk every route loads -- even though the client
+       * never executes that code (a `typeof window !== 'undefined'` guard
+       * returns first). Measured: ~400 KB raw / ~100 KB gzip of locale JSON that
+       * no visitor runs.
+       *
+       * Emptying that context on the CLIENT build (newContentRegExp matches
+       * nothing) drops all of it. The visitor's OWN locale still loads via the
+       * explicit per-locale `import()` literals in i18n/locale-loaders.ts, which
+       * are direct module references, not this context, so they are untouched.
+       * The SERVER build is unchanged (this is inside `if (!isServer)`), so SSR
+       * still has every locale synchronously and the race fix stands.
+       */
+      config.plugins.push(
+        new webpack.ContextReplacementPlugin(/apps[\/\\]blog[\/\\]locales$/, /$^/)
+      );
     }
 
     // Reown AppKit -> @coinbase/cdp-sdk imports the undeclared '@x402/*' peers.
