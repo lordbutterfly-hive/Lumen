@@ -1,5 +1,5 @@
 import type { IHiveChainInterface } from '@hiveio/wax';
-import { TTransactionPackType, ApiTransaction } from '@hiveio/wax';
+import type { TTransactionPackType, ApiTransaction } from '@hiveio/wax';
 import { getLogger } from '@hive/ui/lib/logging';
 import { getChain } from '@transaction/lib/chain';
 // ★ One shared definition of "Hive was unreachable" — this file used to keep a

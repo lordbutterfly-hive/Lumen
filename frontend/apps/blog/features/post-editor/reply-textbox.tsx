@@ -20,7 +20,7 @@ import { Progress } from '@ui/components/progress';
 import { Separator } from '@ui/components';
 
 import { DEFAULT_PREFERENCES, hoursAndMinutes, Preferences } from '@/blog/lib/utils';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import RendererContainer from '../post-rendering/rendererContainer';
 import { getLogger } from '@ui/lib/logging';
 import { useCommentMutation, useUpdateCommentMutation } from '../post-rendering/hooks/use-comment-mutations';

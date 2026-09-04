@@ -1,4 +1,4 @@
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import * as posts from '../repositories/post-repository';
 import { isLumenProxiedEntry, litePostIdOf } from './lite-post-id';
 import { resolvePublicNames } from './current-name';

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { cn } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import ProfilePostsList from './profile-posts-list';

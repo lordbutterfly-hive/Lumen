@@ -10,7 +10,7 @@
 
 import { SyntheticEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { IAccountNotification } from '@hive/common-hiveio-packages/wax';
+import type { IAccountNotification } from '@hive/common-hiveio-packages/wax';
 import NotificationList from './list';
 import { LoadMoreButton } from './load-more-button';
 import { Button } from '@ui/components/button';

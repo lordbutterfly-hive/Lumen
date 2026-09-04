@@ -11,7 +11,7 @@ import {
 import ScrollPagerFooter from './scroll-pager-footer';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { cn } from '@ui/lib/utils';

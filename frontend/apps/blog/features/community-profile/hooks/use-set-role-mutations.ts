@@ -1,8 +1,8 @@
 import { Roles } from '@/blog/features/community-profile/lib/utils';
-import { EAvailableCommunityRoles } from '@hiveio/wax';
+import type { EAvailableCommunityRoles } from '@hiveio/wax';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { transactionService } from '@transaction/index';
-import { Community } from '@hive/common-hiveio-packages/wax';
+import type { Community } from '@hive/common-hiveio-packages/wax';
 import { toast } from '@ui/components/hooks/use-toast';
 import { getLogger } from '@ui/lib/logging';
 const logger = getLogger('app');

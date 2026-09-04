@@ -1,4 +1,4 @@
-import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
+import type { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
 import { convertStringToBig } from '@ui/lib/helpers';
 import Big from 'big.js';
 

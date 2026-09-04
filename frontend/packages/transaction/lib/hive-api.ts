@@ -10,13 +10,13 @@ import {
   IVoteListItem
 } from '@hive/common-hiveio-packages/wax';
 import { getLogger } from '@hive/ui/lib/logging';
-import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
+import type { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
 import { getChain } from './chain';
 import { withHiveRetry } from '@smart-signer/lib/hive-network-error';
 import { withRetry } from './retry';
 import { bannedAuthorList, hasBannedAuthors } from '@ui/config/lists/banned-authors';
 import { stripInvisibleAndBidi } from '@ui/lib/text-safety';
-import { ApiAccount, IManabarData } from '@hiveio/wax';
+import type { ApiAccount, IManabarData } from '@hiveio/wax';
 import { DATA_LIMIT } from './bridge-api';
 import { isBannedAuthor, withoutBannedAuthors } from '@ui/config/lists/banned-authors';
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 
 /**
  * ★★★ ONE HIVE ACCOUNT'S OWN POSTS/COMMENTS, ALWAYS THROUGH OUR OWN SERVER.

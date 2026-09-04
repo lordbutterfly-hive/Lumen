@@ -38,7 +38,7 @@ import { QuillMark } from '@/blog/features/post-rendering/quill-mark';
 import DetailsCardHover from '@/blog/features/list-of-posts/details-card-hover';
 import { LeagueByline } from '@/blog/features/retention/components/league-byline';
 import type { RankMark } from '@/blog/features/retention/hooks/use-rank-marks';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { isNsfwPost, useNsfwPreference } from '@/blog/lib/nsfw';
 import { isNotePost } from '@/blog/lib/short-post-note';
 import { useModerationStatus } from '@/blog/features/mute-follow/hooks/use-moderation-status';

@@ -1,7 +1,7 @@
 'use client';
 
 import Big from 'big.js';
-import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
+import type { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
 import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
 import { useTranslation } from '@/blog/i18n/client';

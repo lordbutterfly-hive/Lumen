@@ -1,4 +1,4 @@
-import { IProposal } from '@hive/common-hiveio-packages/wax';
+import type { IProposal } from '@hive/common-hiveio-packages/wax';
 
 /** Segmented tab filter — mirrors the four real proposal lifecycle buckets. */
 export type ProposalTab = 'all' | 'active' | 'upcoming' | 'expired';

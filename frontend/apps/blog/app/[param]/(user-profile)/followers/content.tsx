@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { IFollow } from '@hive/common-hiveio-packages/wax';
+import type { IFollow } from '@hive/common-hiveio-packages/wax';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { fetchAccount } from '@/blog/lib/chain-fetch';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';

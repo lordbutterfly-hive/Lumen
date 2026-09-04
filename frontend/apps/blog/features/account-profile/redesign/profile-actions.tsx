@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger
 } from '@hive/ui/components/dropdown-menu';
 import { UseInfiniteQueryResult } from '@tanstack/react-query';
-import { IFollow } from '@hive/common-hiveio-packages/wax';
+import type { IFollow } from '@hive/common-hiveio-packages/wax';
 import { cn } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import { handleError } from '@ui/lib/handle-error';

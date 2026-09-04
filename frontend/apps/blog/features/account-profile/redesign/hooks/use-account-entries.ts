@@ -7,7 +7,7 @@ import {
   type InfiniteScrollSentinel
 } from '@/blog/features/discovery-feed/hooks/use-infinite-scroll-sentinel';
 import { fetchAccountPostsPage } from '@/blog/lib/lite/client/account-posts-fetch';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { StaleTime } from '@/blog/lib/react-query';
 import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
 

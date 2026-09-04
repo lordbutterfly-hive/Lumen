@@ -1,5 +1,5 @@
 import { logger } from '@ui/lib/logger';
-import { Entry, MixedPostsResponse, PostStub } from '@hive/common-hiveio-packages/wax';
+import type { Entry, MixedPostsResponse, PostStub } from '@hive/common-hiveio-packages/wax';
 import { isBannedAuthor, withoutBannedAuthors } from '@ui/config/lists/banned-authors';
 
 const logStandarizedError = (methodName: string, error: unknown): null => {

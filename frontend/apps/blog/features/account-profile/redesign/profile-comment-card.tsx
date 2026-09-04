@@ -4,7 +4,7 @@ import { Link } from '@hive/ui';
 import { Icons } from '@ui/components/icons';
 import TimeAgo from '@ui/components/time-ago';
 import { cn, numberWithCommas } from '@ui/lib/utils';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { useTranslation } from '@/blog/i18n/client';
 import { getPostSummary, normalizeTitle } from '@/blog/lib/utils';

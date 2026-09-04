@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Icons } from '@ui/components/icons';
 import { CircleSpinner } from 'react-spinners-kit';
 import { UseInfiniteQueryResult } from '@tanstack/react-query';
-import { IFollow } from '@hive/common-hiveio-packages/wax';
+import type { IFollow } from '@hive/common-hiveio-packages/wax';
 import { User } from '@smart-signer/types/common';
 import {
   DropdownMenu,

@@ -9,7 +9,7 @@ import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useQuery } from '@tanstack/react-query';
 import { fetchListVotesByCommentVoter } from '@/blog/lib/chain-fetch';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { Popover, PopoverTrigger, PopoverContent } from '@ui/components/popover';
 import { useLoggedUserContext } from '@/blog/features/votes/hooks/use-logged-user';
 import { useTranslation } from '@/blog/i18n/client';

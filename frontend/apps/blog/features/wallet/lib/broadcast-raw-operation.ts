@@ -1,4 +1,4 @@
-import { ITransaction } from '@hiveio/wax';
+import type { ITransaction } from '@hiveio/wax';
 import { transactionService, TransactionBroadcastResult, TransactionOptions } from '@transaction/index';
 
 /**

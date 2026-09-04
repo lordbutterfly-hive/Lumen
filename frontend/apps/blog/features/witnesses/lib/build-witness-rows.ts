@@ -1,6 +1,6 @@
 import Big from 'big.js';
-import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
-import { FullAccount, IWitness } from '@hive/common-hiveio-packages/wax';
+import type { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
+import type { FullAccount, IWitness } from '@hive/common-hiveio-packages/wax';
 import { Chain } from '@transaction/lib/chain';
 import { DISABLED_SIGNING_KEY, STALE_BLOCK_AGE_SECONDS } from './constants';
 import { WitnessRow } from './types';

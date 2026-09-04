@@ -1,5 +1,5 @@
 import { useTranslation } from '@/blog/i18n/client';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { Link } from '@hive/ui';
 
 /**

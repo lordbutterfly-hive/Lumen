@@ -1,5 +1,5 @@
 import Big from 'big.js';
-import { IWitness } from '@hive/common-hiveio-packages/wax';
+import type { IWitness } from '@hive/common-hiveio-packages/wax';
 
 /** Which set of columns the table currently renders. */
 

@@ -1,4 +1,4 @@
-import { NaiAsset, GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
+import type { NaiAsset, GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
 import type { HiveOperation } from '@hive/common-hiveio-packages/wax';
 import { Chain } from '@transaction/lib/chain';
 import { convertToHP } from '@ui/lib/utils';

@@ -38,7 +38,7 @@ import { memo, useEffect, useRef, useState, useCallback, type ReactNode } from '
 import { useQuery } from '@tanstack/react-query';
 import { ReplyTextbox } from '../post-editor/reply-textbox';
 import DetailsCardHover from '../list-of-posts/details-card-hover';
-import { IFollowList, Entry } from '@hive/common-hiveio-packages/wax';
+import type { IFollowList, Entry } from '@hive/common-hiveio-packages/wax';
 import clsx from 'clsx';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';

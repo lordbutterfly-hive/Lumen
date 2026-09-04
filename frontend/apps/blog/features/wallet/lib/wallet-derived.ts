@@ -1,6 +1,6 @@
 import Big from 'big.js';
-import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
-import { FullAccount } from '@hive/common-hiveio-packages/wax';
+import type { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
+import type { FullAccount } from '@hive/common-hiveio-packages/wax';
 import { convertStringToBig } from '@ui/lib/helpers';
 import { convertToHP, powerdownHive } from '@ui/lib/utils';
 import { Chain } from '@transaction/lib/chain';

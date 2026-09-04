@@ -1,4 +1,4 @@
-import { FullAccount } from '@hive/common-hiveio-packages/wax';
+import type { FullAccount } from '@hive/common-hiveio-packages/wax';
 import { getAccountFull } from '../../hive-api';
 import { ExistenceResult } from '../types';
 

@@ -1,4 +1,4 @@
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { User } from '@smart-signer/types/common';
 import * as blocks from '../repositories/block-repository';
 import * as posts from '../repositories/post-repository';

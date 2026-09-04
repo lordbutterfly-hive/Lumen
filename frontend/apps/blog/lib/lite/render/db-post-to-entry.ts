@@ -1,5 +1,5 @@
 import { liteConfig } from '../config';
-import { Entry, JsonMetadata } from '@hive/common-hiveio-packages/wax';
+import type { Entry, JsonMetadata } from '@hive/common-hiveio-packages/wax';
 import { LumenPost } from '../types';
 import { NOTE_METADATA_TYPE } from '@/blog/lib/short-post-note';
 

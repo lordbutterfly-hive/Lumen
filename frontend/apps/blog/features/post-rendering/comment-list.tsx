@@ -1,7 +1,7 @@
 'use client';
 
 import CommentListItem from '@/blog/features/post-rendering/comment-list-item';
-import { Entry, IFollowList } from '@hive/common-hiveio-packages/wax';
+import type { Entry, IFollowList } from '@hive/common-hiveio-packages/wax';
 import clsx from 'clsx';
 import { useEffect, useMemo, useState } from 'react';
 import { sanitizeHash } from '@ui/lib/sanitize-url';

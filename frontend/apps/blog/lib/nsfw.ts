@@ -2,7 +2,7 @@ import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { DEFAULT_PREFERENCES, Preferences } from '@/blog/lib/utils';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 
 /**
  * ★ ONE DEFINITION OF "IS THIS POST NSFW", AND ONE PLACE TO READ THE READER'S

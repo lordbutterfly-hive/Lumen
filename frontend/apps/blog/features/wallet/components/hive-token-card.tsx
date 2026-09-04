@@ -1,6 +1,6 @@
 'use client';
 
-import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
+import type { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
 import { useTranslation } from '@/blog/i18n/client';
 import { WalletFigures } from '../lib/wallet-derived';
 import { formatTokenAmount } from '../lib/format-amount';

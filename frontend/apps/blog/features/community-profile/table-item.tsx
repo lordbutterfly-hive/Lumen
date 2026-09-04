@@ -6,7 +6,7 @@ import { Roles, User } from './lib/utils';
 import BasePathLink from '@/blog/components/base-path-link';
 import { useSetRoleMutation } from '@/blog/features/community-profile/hooks/use-set-role-mutations';
 import { useState } from 'react';
-import { EAvailableCommunityRoles } from '@hiveio/wax';
+import type { EAvailableCommunityRoles } from '@hiveio/wax';
 import { handleError } from '@ui/lib/handle-error';
 import clsx from 'clsx';
 import { UserAvatarImg } from '@hive/ui';

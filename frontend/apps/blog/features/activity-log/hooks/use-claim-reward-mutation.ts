@@ -1,9 +1,9 @@
-import { ApiAccount } from '@hiveio/wax';
+import type { ApiAccount } from '@hiveio/wax';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { transactionService } from '@transaction/index';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { getLogger } from '@ui/lib/logging';
-import { FullAccount } from '@hive/common-hiveio-packages/wax';
+import type { FullAccount } from '@hive/common-hiveio-packages/wax';
 import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
 import { refuseIfLite } from '@/blog/lib/lite/client/require-full-account';

@@ -11,7 +11,7 @@ import {
   extractUrlsFromJsonString,
   extractYouTubeVideoIds
 } from '@/blog/lib/utils';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 
 // Match condenser's 256x512 to share image cache at images.hive.blog

@@ -3,7 +3,7 @@
 import PostListItem from '@/blog/features/list-of-posts/post-list-item';
 import MediumPostCard from '@/blog/features/discovery-feed/medium-post-card';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { Preferences } from '@/blog/lib/utils';
 import { useFollowListQuery } from '@/blog/components/hooks/use-follow-list';
 import { useRankLuminosity, useRankMarks } from '@/blog/features/retention/hooks/use-rank-marks';

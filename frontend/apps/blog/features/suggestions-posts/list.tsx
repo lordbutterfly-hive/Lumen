@@ -1,4 +1,4 @@
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { useState } from 'react';
 import SuggestionsCard from './card';
 import { Button } from '@ui/components';

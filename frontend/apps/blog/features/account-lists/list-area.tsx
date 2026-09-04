@@ -3,7 +3,7 @@ import { Input } from '@ui/components/input';
 import { Link } from '@hive/ui';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@ui/components/accordion';
 import clsx from 'clsx';
-import { IFollowList } from '@hive/common-hiveio-packages/wax';
+import type { IFollowList } from '@hive/common-hiveio-packages/wax';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from '@/blog/i18n/client';
 import { handleError } from '@ui/lib/handle-error';

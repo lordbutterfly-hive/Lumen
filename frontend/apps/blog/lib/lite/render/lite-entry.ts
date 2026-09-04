@@ -1,4 +1,4 @@
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { getPost } from '@transaction/lib/bridge-api';
 import { LumenPost } from '../types';
 import * as posts from '../repositories/post-repository';

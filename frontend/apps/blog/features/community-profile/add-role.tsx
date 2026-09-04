@@ -7,7 +7,7 @@ import { Roles } from './lib/utils';
 import RolesSelect from './roles-select';
 import { useSetRoleMutation } from '@/blog/features/community-profile/hooks/use-set-role-mutations';
 import { useState } from 'react';
-import { EAvailableCommunityRoles } from '@hiveio/wax';
+import type { EAvailableCommunityRoles } from '@hiveio/wax';
 import { handleError } from '@ui/lib/handle-error';
 
 const AddRole = ({ community, loggedUserLevel }: { loggedUserLevel: number; community: string }) => {

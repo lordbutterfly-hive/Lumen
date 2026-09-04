@@ -1,7 +1,7 @@
 'use client';
 
 import CommunitiesListItem from '@/blog/features/communities-list/communities-list-item';
-import { Community } from '@hive/common-hiveio-packages/wax';
+import type { Community } from '@hive/common-hiveio-packages/wax';
 
 const CommunitiesList = ({
   data,

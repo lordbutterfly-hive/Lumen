@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { getFollowList } from '@transaction/lib/bridge-api';
-import { FollowListType } from '@hive/common-hiveio-packages/wax';
+import type { FollowListType } from '@hive/common-hiveio-packages/wax';
 
 const logger = getLogger('app');
 

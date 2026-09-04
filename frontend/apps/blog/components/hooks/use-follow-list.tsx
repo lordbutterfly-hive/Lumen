@@ -1,6 +1,6 @@
 import { fetchFollowList } from '@/blog/lib/chain-fetch';
 import { useQuery } from '@tanstack/react-query';
-import { IFollowList, FollowListType } from '@hive/common-hiveio-packages/wax';
+import type { IFollowList, FollowListType } from '@hive/common-hiveio-packages/wax';
 import { StaleTime } from '@/blog/lib/react-query';
 
 /**

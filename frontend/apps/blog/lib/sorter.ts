@@ -1,4 +1,4 @@
-import { Entry } from '@hive/common-hiveio-packages/wax'; 
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { parseAsset } from '@ui/lib/utils';
 
 export enum SortOrder {

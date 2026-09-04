@@ -1,5 +1,5 @@
-import { FullAccount, IProposal, IProposalVote } from '@hive/common-hiveio-packages/wax';
-import { NaiAsset } from '@hiveio/wax';
+import type { FullAccount, IProposal, IProposalVote } from '@hive/common-hiveio-packages/wax';
+import type { NaiAsset } from '@hiveio/wax';
 import { getChain } from '@transaction/lib/chain';
 import { getAccount, getAccounts, getDynamicGlobalProperties } from '@transaction/lib/hive-api';
 import { convertToHP } from '@ui/lib/utils';

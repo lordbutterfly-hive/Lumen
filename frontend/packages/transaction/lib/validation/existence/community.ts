@@ -1,4 +1,4 @@
-import { Community } from '@hive/common-hiveio-packages/wax';
+import type { Community } from '@hive/common-hiveio-packages/wax';
 import { getCommunity } from '../../bridge-api';
 import { ExistenceResult } from '../types';
 

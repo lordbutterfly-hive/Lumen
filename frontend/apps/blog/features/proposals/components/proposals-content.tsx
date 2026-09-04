@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { IProposal } from '@hive/common-hiveio-packages/wax';
-import { NaiAsset } from '@hiveio/wax';
+import type { IProposal } from '@hive/common-hiveio-packages/wax';
+import type { NaiAsset } from '@hiveio/wax';
 import LeftRail from '@/blog/features/layouts/left-rail';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';

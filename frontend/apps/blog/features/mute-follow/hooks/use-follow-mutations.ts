@@ -1,7 +1,7 @@
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { QueryKey, UseInfiniteQueryResult, useMutation, useQueryClient } from '@tanstack/react-query';
 import { transactionService } from '@transaction/index';
-import { IFollow, IFollowList, FullAccount } from '@hive/common-hiveio-packages/wax';
+import type { IFollow, IFollowList, FullAccount } from '@hive/common-hiveio-packages/wax';
 import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
 import { scheduleInvalidations } from '@/blog/lib/react-query';

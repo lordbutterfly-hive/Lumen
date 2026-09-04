@@ -1,5 +1,5 @@
 import Big from 'big.js';
-import { NaiAsset } from '@hiveio/wax';
+import type { NaiAsset } from '@hiveio/wax';
 import { convertStringToBig } from '@ui/lib/helpers';
 import { numberWithCommas } from '@ui/lib/utils';
 

@@ -1,4 +1,4 @@
-import { THexString } from '@hiveio/wax';
+import type { THexString } from '@hiveio/wax';
 
 /**
  * Refuse to sign a transaction whose digest is not the one the caller built.

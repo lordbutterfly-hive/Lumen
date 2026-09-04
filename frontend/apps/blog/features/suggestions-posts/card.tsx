@@ -1,6 +1,6 @@
 'use client';
 
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { find_first_img } from '../list-of-posts/post-img';
 import { Link } from '@hive/ui';

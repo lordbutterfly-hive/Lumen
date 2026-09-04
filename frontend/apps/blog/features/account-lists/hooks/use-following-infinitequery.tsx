@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { IGetFollowParams, DEFAULT_PARAMS_FOR_FOLLOW } from '@transaction/lib/hive-api';
 import { fetchFollowing } from '@/blog/lib/chain-fetch';
-import { IFollow } from '@hive/common-hiveio-packages/wax';
+import type { IFollow } from '@hive/common-hiveio-packages/wax';
 import { StaleTime } from '@/blog/lib/react-query';
 import { liteFollowList } from '../lib/lite-follow-list';
 

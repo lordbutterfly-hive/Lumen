@@ -2,8 +2,8 @@
 
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { IProposal } from '@hive/common-hiveio-packages/wax';
-import { NaiAsset } from '@hiveio/wax';
+import type { IProposal } from '@hive/common-hiveio-packages/wax';
+import type { NaiAsset } from '@hiveio/wax';
 import { StaleTime } from '@/blog/lib/react-query';
 import { getHivePerMVestsLive, getProposalsList, getTreasuryHbdBalance } from '../lib/proposals-api';
 import {

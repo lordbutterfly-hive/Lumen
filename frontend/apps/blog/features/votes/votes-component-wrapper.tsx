@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import VotesComponent from './votes-component';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { BladeGlyph, VoteTally, voteStyles, type VoteSize } from './blade';
 import { splitTally } from './vote-tallies';
 import { FEATURE_INLINE_DOWNVOTE } from './feature-flags';

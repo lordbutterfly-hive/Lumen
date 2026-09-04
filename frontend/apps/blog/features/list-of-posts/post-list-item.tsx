@@ -14,7 +14,7 @@ import gdprUserList from '@ui/config/lists/gdpr-user-list';
 import TimeAgo from '@ui/components/time-ago';
 import { UserAvatarImg } from '@ui/components';
 import { accountReputation } from '@hive/ui';
-import { IFollowList, Entry } from '@hive/common-hiveio-packages/wax';
+import type { IFollowList, Entry } from '@hive/common-hiveio-packages/wax';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { cn } from '@ui/lib/utils';
 import { handleError } from '@ui/lib/handle-error';

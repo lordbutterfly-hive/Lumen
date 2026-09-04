@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { IFollow } from '@hive/common-hiveio-packages/wax';
+import type { IFollow } from '@hive/common-hiveio-packages/wax';
 import FollowButton from './follow-button';
 import BlockButton from './block-button';
 import { User } from '@smart-signer/types/common';

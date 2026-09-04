@@ -1,6 +1,6 @@
 import { getPostsRanked } from '@transaction/lib/bridge-api';
 import { getLogger } from '@ui/lib/logging';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
 import { filterBlockedForViewer, viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';

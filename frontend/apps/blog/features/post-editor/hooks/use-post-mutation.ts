@@ -1,4 +1,4 @@
-import { NaiAsset } from '@hiveio/wax';
+import type { NaiAsset } from '@hiveio/wax';
 import { haptic } from '@/blog/lib/haptics';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -6,7 +6,7 @@ import { transactionService } from '@transaction/index';
 import { appendAttributionFooter } from '@transaction/lib/attribution';
 import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
 import { deleteLitePost } from '@/blog/lib/lite/client/lite-write';
-import { Beneficiarie } from '@hive/common-hiveio-packages/wax';
+import type { Beneficiarie } from '@hive/common-hiveio-packages/wax';
 import { toast } from '@ui/components/hooks/use-toast';
 import { getLogger } from '@ui/lib/logging';
 import { handleError } from '@ui/lib/handle-error';

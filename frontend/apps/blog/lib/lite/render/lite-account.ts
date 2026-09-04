@@ -1,4 +1,4 @@
-import { FullAccount } from '@hive/common-hiveio-packages/wax';
+import type { FullAccount } from '@hive/common-hiveio-packages/wax';
 import * as users from '../repositories/user-repository';
 import * as posts from '../repositories/post-repository';
 import * as follows from '../repositories/follow-repository';

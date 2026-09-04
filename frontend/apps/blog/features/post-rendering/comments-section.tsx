@@ -8,7 +8,7 @@ import CommentSelectFilter from './comment-select-filter';
 import { Button } from '@ui/components/button';
 import { Switch } from '@ui/components/switch';
 import { Label } from '@ui/components/label';
-import { Entry, IFollowList } from '@hive/common-hiveio-packages/wax';
+import type { Entry, IFollowList } from '@hive/common-hiveio-packages/wax';
 // ★ 2026-08-17 — the empty-state composer below (see `replyCount === 0`) reuses
 // the SAME composer/gate pieces `content.tsx` already wires up for the post's
 // own "Reply" action row, rather than inventing a second one:

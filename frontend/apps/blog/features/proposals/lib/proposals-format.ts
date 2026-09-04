@@ -1,6 +1,6 @@
 import dayjs from 'dayjs';
-import { IProposal } from '@hive/common-hiveio-packages/wax';
-import { NaiAsset, GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
+import type { IProposal } from '@hive/common-hiveio-packages/wax';
+import type { NaiAsset, GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
 import { DhfStats, FundingState, ProposalViewModel } from './proposals-types';
 
 /**

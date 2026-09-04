@@ -1,6 +1,6 @@
 import SuggestionsList from '@/blog/features/suggestions-posts/list';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles } from 'lucide-react';
 import { Icons } from '@ui/components/icons';

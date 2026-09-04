@@ -1,6 +1,6 @@
 import type { ExtendedNodeApi, ExtendedRestApi } from '@hive/common-hiveio-packages/wax';
 import { getHiveChainService } from './hive-chain-service';
-import { TWaxExtended, TWaxRestExtended } from '@hiveio/wax';
+import type { TWaxExtended, TWaxRestExtended } from '@hiveio/wax';
 import { wrapChainWithLogging } from './chain-proxy';
 
 export type Chain = TWaxExtended<ExtendedNodeApi, TWaxRestExtended<ExtendedRestApi>>;

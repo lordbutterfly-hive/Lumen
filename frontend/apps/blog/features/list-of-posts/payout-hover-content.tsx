@@ -8,7 +8,7 @@ import Big from 'big.js';
 import Loading from '@ui/components/loading';
 import { convertStringToBig } from '@ui/lib/helpers';
 import { fetchFeedHistory } from '@/blog/lib/chain-fetch';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { useTranslation } from '@/blog/i18n/client';
 
 interface IBeneficiary {

@@ -9,7 +9,7 @@ import { useSSRObserver, useInitialPosts } from '@/blog/components/observer-prov
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { fetchAccountPostsPage } from '@/blog/lib/lite/client/account-posts-fetch';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { LumenLoader } from '@hive/ui';
 import userIllegalContent from '@ui/config/lists/user-illegal-content';
 import { useParams } from 'next/navigation';

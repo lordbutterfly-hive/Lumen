@@ -2,7 +2,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import ListArea from './list-area';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
-import { FullAccount, IFollowList } from '@hive/common-hiveio-packages/wax';
+import type { FullAccount, IFollowList } from '@hive/common-hiveio-packages/wax';
 import {
   useBlacklistBlogMutation,
   useResetBlacklistBlogMutation

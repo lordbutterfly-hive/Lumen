@@ -1,7 +1,7 @@
 import { KeyType } from '@smart-signer/types/common';
 import { create } from 'zustand';
 import { mountStoreDevtool } from 'simple-zustand-devtools';
-import { FullAccount } from '@hive/common-hiveio-packages/wax';
+import type { FullAccount } from '@hive/common-hiveio-packages/wax';
 
 // The retention slice that used to live here (reduce-motion pref, banked streak
 // freezes, today's forgeable task claims) was removed with the XP/daily-task

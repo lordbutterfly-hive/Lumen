@@ -9,7 +9,7 @@ import { appendAttributionFooter } from '@transaction/lib/attribution';
 // into the ['discussionData', ...] cache the thread renders from, so a bridge call
 // here would put every blocked comment back the moment somebody replied.
 import { fetchDiscussion } from '@/blog/lib/lite/client/discussion-fetch';
-import { Preferences, Entry } from '@hive/common-hiveio-packages/wax';
+import type { Preferences, Entry } from '@hive/common-hiveio-packages/wax';
 import { toast } from '@ui/components/hooks/use-toast';
 import { getLogger } from '@ui/lib/logging';
 import { handleError } from '@ui/lib/handle-error';

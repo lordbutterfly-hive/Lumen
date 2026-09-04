@@ -1,4 +1,4 @@
-import { IFollow } from '@hive/common-hiveio-packages/wax';
+import type { IFollow } from '@hive/common-hiveio-packages/wax';
 
 /**
  * ★★★ FALL BACK TO LUMEN'S OWN FOLLOW GRAPH.

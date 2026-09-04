@@ -1,7 +1,7 @@
 'use client';
 
 import { Card, CardTitle } from '@ui/components/card';
-import { Community, IAccountNotification } from '@hive/common-hiveio-packages/wax';
+import type { Community, IAccountNotification } from '@hive/common-hiveio-packages/wax';
 import { SubsListDialog } from './subscription-list-dialog';
 import { ActivityLogDialog } from '../../activity-log/dialog';
 import { useTranslation } from '@/blog/i18n/client';

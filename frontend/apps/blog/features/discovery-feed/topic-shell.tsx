@@ -12,7 +12,7 @@ import MediumPostCard from './medium-post-card';
 import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import { LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
 import { useRankLuminosity } from '@/blog/features/retention/hooks/use-rank-marks';
 import { useTopicSeed } from './topic-seed-context';

@@ -1,4 +1,4 @@
-import { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import * as users from '../repositories/user-repository';
 import { FollowActor, actorKey, TargetResolution } from './follow-actor';
 
