@@ -622,9 +622,20 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
   let userId = '';
   try {
     const session = await timed('session', () => getLiteSession());
-    viewer = session.user?.username ?? '';
     isLite = session.user?.account_tier === 'lite';
     userId = session.user?.userId ?? '';
+    // ★★★ RANK A LITE ACCOUNT BY ITS ULID, NEVER ITS WALLET/DID USERNAME
+    // (2026-09-04). recsys's `/feed?viewer=` accepts a real Hive account name or
+    // a 26-char Lumen ULID and NOTHING else (recsys `_viewer_is_lite`). A lite/
+    // wallet session's `username` is the DID (`did:pkh:...`), so sending it
+    // returned HTTP 400 "neither a plausible Hive account nor a Lumen Lite
+    // identity" — logged "not a warm-up, not retrying" — which pinned every
+    // wallet-login reader on the "Personalised ranking is warming up" banner
+    // permanently. Their `userId` IS that ULID (recsys 200), and it is also the
+    // correct stable key for the feed store, seen-log and own-post trim below.
+    // A Hive login has no ULID and its `username` IS the chain account recsys
+    // wants, so it is unchanged.
+    viewer = isLite && userId ? userId : (session.user?.username ?? '');
   } catch {
     viewer = '';
   }

@@ -91,8 +91,19 @@ export type ViewerFeedBuilder = (candidate: WarmCandidate, limit: number) => Pro
 /** Arbitrary but fixed: every warm cycle in every process contends on this one. */
 const WARM_LOCK = 971_020_315;
 
-/** How long the ranker health probe may take before the cycle gives up on it. */
-const HEALTH_TIMEOUT_MS = 5_000;
+/**
+ * How long the ranker health probe may take before the cycle gives up on it.
+ *
+ * ★ 20s, not 5s (2026-09-04). recsys is stdlib `ThreadingHTTPServer` on ONE
+ * process: a heavy per-viewer profile build — or recsys's own topic-warmer
+ * (~26s burst every 10min) — holds the GIL long enough that an otherwise
+ * instant `/health` does not answer within 5s. At 5s this probe aborted ("This
+ * operation was aborted") on essentially every cycle for two days, so per-viewer
+ * warming silently stopped and every logged-in reader built cold and saw the
+ * warming-up banner. 20s rides out those bursts; a genuinely-down ranker still
+ * costs only one skipped background cycle, so erring long is free here.
+ */
+const HEALTH_TIMEOUT_MS = 20_000;
 
 const DEFAULTS = {
   /**
