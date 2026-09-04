@@ -18,7 +18,17 @@ import { useTranslation } from '@/blog/i18n/client';
 // render below), so LumenLogin -- and wax -- now load only on a real login click,
 // never for a reader who never opens it. ssr:false is safe: it never server-renders.
 const LumenLogin = dynamic(() => import('@/blog/features/lite-auth/login/lumen-login'), {
-  ssr: false
+  ssr: false,
+  // ★ Reserve the form's rough height and show a spinner so the dialog does not
+  // flash an empty box and then jump on first open while this chunk loads (F6,
+  // 2026-09-04). The username field inside LumenLogin carries `autoFocus`, which
+  // React fires when the field finally mounts, so keyboard focus still lands on
+  // it. Spinner-only, no copy, so this stays i18n-clean.
+  loading: () => (
+    <div className="flex min-h-[280px] items-center justify-center" role="status">
+      <span className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+    </div>
+  )
 });
 
 const GOOGLE_GSI_SCRIPT_ID = 'google-gsi-script';

@@ -89,6 +89,20 @@ export async function getCreatorTokensHiveChain(
     // The promise is assigned to the cache SYNCHRONOUSLY (no await between the
     // get above and the set below), so two concurrent first callers still share
     // one chain -- the lazy import() happens INSIDE this promise, not before it.
+    // ★ EVICT A REJECTED CHAIN so a later call RETRIES instead of replaying the
+    // failure forever (2026-09-04). This cache holds a PROMISE, and the promise
+    // now awaits import('@hiveio/wax') as well as createHiveChain -- so a
+    // TRANSIENT failure (a network blip, or a stale-chunk 404 in the window after
+    // a deploy) would otherwise be cached for the whole session and brick every
+    // Meritum sign (buy/sell/launch/ask/transfer) on this key until a full page
+    // reload, even after the network recovers. No funds are at risk (it fails
+    // before signing), but the feature would be unusable. This mirrors the
+    // established pattern the rest of the codebase already uses for exactly this
+    // (packages/transaction/index.ts loadWax, hive-chain-service setChainClient,
+    // lite-auth/wallet/appkit getModal): import().catch that clears the cache and
+    // RE-THROWS, so the awaiting caller -- and react-query's onError on the money
+    // path -- still surfaces the failure. The identity guard
+    // (`chains.get(key) === chain`) avoids deleting a newer promise that raced in.
     chain = (async () => {
       const { createHiveChain } = await import('@hiveio/wax');
       return createHiveChain({
@@ -97,7 +111,10 @@ export async function getCreatorTokensHiveChain(
         apiTimeout: 10_000,
         restApiEndpoint: apiEndpoint
       });
-    })();
+    })().catch((error) => {
+      if (chains.get(key) === chain) chains.delete(key);
+      throw error;
+    });
     chains.set(key, chain);
   }
   return chain;

@@ -23,7 +23,23 @@ import { useEffect, useState } from 'react';
  */
 const GoogleOAuthRedirectHandler = dynamic(
   () => import('./google-oauth-redirect-handler').then((m) => m.GoogleOAuthRedirectHandler),
-  { ssr: false }
+  {
+    ssr: false,
+    // ★ Match the handler's own processing overlay so there is no blank gap
+    // between this gate mounting the handler and the handler starting to process
+    // the redirect (F3, 2026-09-04). Without it, the Safari redirect path (which
+    // returns to a full page load, not a popup) showed nothing while this chunk
+    // downloaded. Same markup the handler renders once isProcessing; spinner-only
+    // so it stays i18n-clean, and the handler's own translated loadingText takes
+    // over the instant it mounts.
+    loading: () => (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="status">
+        <div className="rounded-lg bg-background p-6 text-center shadow-lg">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      </div>
+    )
+  }
 );
 
 interface GoogleOAuthRedirectGateProps {
