@@ -581,24 +581,28 @@ const AppHeader: FC = () => {
                top-right Log in". The two render the SAME four methods (Google,
                Bitcoin wallet, Ethereum wallet, Hive Keychain — `LumenLogin`), the
                only difference was page-vs-popup plus the popup's signup footer.
-               Now the header opens the identical popup, so every entry point is
-               the same thing, and the reader keeps their place instead of being
-               navigated away. `/login` still exists as a standalone URL (deep links,
-               the popup's own "Create a free account" link, the `next=` flow).
+               ★ REVERSED FOR THIS CONTROL 2026-09-05 (owner): the top-right Log in
+               now NAVIGATES to the full `/login` page (below), not the popup. The
+               Profile row, upvote/reply/composer and the other inline triggers still
+               open the DialogLogin popup, so a contextual action keeps its place
+               while the primary top-right CTA goes to the page. `/login` renders the
+               same four methods (LumenLogin), so nothing about the auth options
+               changes, only page-vs-popup for this one entry point.
 
                History: the 2026-08-01 ruling removed a second "Use Hive keys"
                button from here; the comment that lived here also said DialogLogin
                was "Keychain-only" — stale since 2026-08-07, when the popup gained
                all four methods. */
-            <DialogLogin>
-              <Button
-                variant="ghost"
-                className="whitespace-nowrap text-base hover:text-destructive"
-                data-testid="login-link"
-              >
-                {LABELS.login}
-              </Button>
-            </DialogLogin>
+            <Link
+              href="/login"
+              className={cn(
+                buttonVariants({ variant: 'ghost' }),
+                'whitespace-nowrap text-base hover:text-destructive'
+              )}
+              data-testid="login-link"
+            >
+              {LABELS.login}
+            </Link>
           )}
 
           {/* Last in the cluster, the same slot upstream denser gives its own
