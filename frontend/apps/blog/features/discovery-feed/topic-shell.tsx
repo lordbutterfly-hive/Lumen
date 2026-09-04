@@ -15,6 +15,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
 import { useRankLuminosity } from '@/blog/features/retention/hooks/use-rank-marks';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useTopicSeed } from './topic-seed-context';
 import { fetchTopicPage, topicFeedKey, type TopicResponse } from './lib/topic-feed-client';
 
@@ -37,6 +38,30 @@ import { fetchTopicPage, topicFeedKey, type TopicResponse } from './lib/topic-fe
 export default function TopicShell({ tag }: { tag: string }) {
   const { t } = useTranslation('common_blog');
   const seed = useTopicSeed();
+
+  // ★ T3e (2026-09-04) — SKIP THE REFETCH ONLY WHEN THE SEED IS ALREADY THIS
+  // VIEWER'S FINAL ANSWER, same shape as ForYouFeed's `awaitingRank`
+  // (feed-tabs.tsx + feed-prefetch.ts, read-only reference for this fix).
+  // `refetchOnMount: 'always'` below used to fire unconditionally, downloading
+  // 102-165KB byte-identical to the SSR seed on EVERY view, anonymous or not.
+  //
+  // An anonymous seed IS the answer `/api/feed/for-you` would give an
+  // anonymous request for this tag (the route never ranks for a signed-out
+  // viewer — see anonymousTopicSeed's header in lib/feed/topic-cache.ts), so
+  // refetching it changes nothing and is pure waste.
+  //
+  // A signed-in seed is NOT that: app/topics/[tag]/page.tsx seeds a signed-in
+  // reader from that SAME anonymous fallback memo (only block-filtered), never
+  // from a ranked or fully per-viewer answer — its own header comment says so
+  // — so it is provisional by construction and must still be refetched to pick
+  // up ranking and the reader's live block list; skipping it here would leave a
+  // signed-in viewer on a blocked/unranked page forever. `source === 'recsys'`
+  // additionally covers an already-ranked seed should one ever be introduced,
+  // exactly like home's `personalised` check. `isLoggedIn` comes from
+  // `useSessionIdentity`, backed by the same `getServerSessionUser()` cookie
+  // read that decided the seed itself server-side, so the two never disagree.
+  const { isLoggedIn } = useSessionIdentity();
+  const seedIsFinal = !!seed && (!isLoggedIn || seed.page.source === 'recsys');
 
   // Same infinite scroll as the main feed — a topic is the feed, filtered, so it
   // must not stop after one page either.
@@ -88,14 +113,18 @@ export default function TopicShell({ tag }: { tag: string }) {
       staleTime: 60_000,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
-      // ★ 'always', NOT true (2026-09-03). React Query v4's refetchOnMount:true
-      // only refetches a STALE query, and a seed <60 s old is fresh — so a
-      // signed-in reader seeded with the newest-first fallback would never fetch
-      // the ranked feed and would be stuck on unranked (and the phase-4
-      // memo-refresh never fired either). 'always' fetches on every mount
-      // regardless of staleness; the seed still paints instantly and the ranked,
-      // fully block/mute-filtered feed swaps in behind it. Found in review.
-      refetchOnMount: 'always'
+      // ★ 'always', NOT true, WHEN NOT `seedIsFinal` (2026-09-03, gated 09-04 —
+      // see the T3e comment above `seedIsFinal`). React Query v4's
+      // `refetchOnMount: true` only refetches a STALE query, and a seed <60s
+      // old is fresh — so a signed-in reader seeded with the newest-first
+      // fallback would never fetch the ranked feed and would be stuck on
+      // unranked (and the phase-4 memo-refresh never fired either). 'always'
+      // fetches on every mount regardless of staleness; the seed still paints
+      // instantly and the ranked, fully block/mute-filtered feed swaps in
+      // behind it. Found in review. `false` for an anonymous (or already-
+      // ranked) seed: that seed IS the final answer, so no mount fetch is
+      // owed at all — this is the T3e fix.
+      refetchOnMount: seedIsFinal ? false : 'always'
     });
 
   // ★ A TOPIC IS THE FEED, FILTERED — including its faults. This carried the
