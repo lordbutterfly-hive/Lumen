@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { configuredImagesEndpoint } from '@hive/ui/config/public-vars';
+import { proxifyImageSrc } from '@hive/ui/lib/proxify-images';
 import { withRetry } from '@transaction/lib/retry';
 
 /**
@@ -53,26 +54,45 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const defaultUrl = `${configuredImagesEndpoint}/DQmb2HNSGKN3pakguJ4ChCRjgkVuDN9WniFRPmrxoJ4sjR4`;
 
+    // ★ WEBP (2026-09-04, T1b perf). `defaultUrl` above is the raw blob store, not
+    // the resize proxy — no redirect in the chain, and (verified) appending
+    // `?format=webp` to it does nothing; it just streams the stored bytes back
+    // unchanged. `proxifyImageSrc` builds this SAME image's `/p/<hash>` resize-proxy
+    // URL instead, which DOES honour `format` — width/height stay 0 (unset) so this
+    // asks for the source's own resolution transcoded to WebP, not a resize.
+    // Measured on this exact CID: 91,267 bytes PNG (raw fetch) -> 24,232 bytes WebP
+    // (-73%). This is the universal broken-image fallback (every missing avatar on
+    // the site), so every byte here is paid on top of an already-failed image load.
+    const webpUrl = proxifyImageSrc(defaultUrl, 0, 0);
+
     // Fetch the image from the image hoster and stream it to the client
     // ★ A6 retry rollout (2026-08-18): idempotent read of one immutable, content-
     // addressed image — the safest possible retry target in this codebase.
     const response = await withRetry(
-      () => fetch(defaultUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
+      () => fetch(webpUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
       { label: 'avatar-default' }
     );
 
-    if (!response.ok || !response.body) {
-      return NextResponse.json({ error: 'Failed to fetch default avatar' }, { status: response.status });
+    // WebP isn't guaranteed forever from the proxy — fall back to the original raw
+    // fetch (today's pre-fix behaviour) rather than turning a proxy hiccup into a
+    // broken universal fallback image.
+    const resolved =
+      response.ok && response.body
+        ? response
+        : await withRetry(() => fetch(defaultUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }), { label: 'avatar-default-fallback' });
+
+    if (!resolved.ok || !resolved.body) {
+      return NextResponse.json({ error: 'Failed to fetch default avatar' }, { status: resolved.status });
     }
 
     const headers = new Headers({
-      'Content-Type': response.headers.get('content-type') || 'image/png',
+      'Content-Type': resolved.headers.get('content-type') || 'image/png',
       'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
       'X-Content-Type-Options': 'nosniff',
     });
 
     // Stream the response body directly
-    return new NextResponse(response.body, {
+    return new NextResponse(resolved.body, {
       status: 200,
       headers,
     });

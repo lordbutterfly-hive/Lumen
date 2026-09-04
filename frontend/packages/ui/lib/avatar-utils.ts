@@ -63,6 +63,39 @@ export function getUserAvatarUrl(username: string, size: 'small' | 'medium' | 'l
  * generated initial-letter avatar. Point `src` here, point `onError` there, and the
  * common case costs us nothing while the uncommon case behaves as before.
  */
+/**
+ * ★ WEBP INVESTIGATED, NOT FIXABLE HERE (2026-09-04, T1b perf hunt).
+ *
+ * The perf hunt flagged this function alongside `/api/avatar` for serving PNG where
+ * WebP would do (one profile avatar measured 473,986 bytes PNG vs 3,058 bytes WebP,
+ * -99.35%), and suggested "resolve the 302 once + append &format=webp". That fix IS
+ * applied in `app/api/avatar/route.ts` (it controls its own `fetch` and can follow
+ * the redirect itself). It cannot be applied here, and the reason is load-bearing:
+ *
+ * `configuredImagesEndpoint/u/<name>/avatar/<size>` is Hive's own name->image
+ * redirect shortcut. Verified against the LIVE host (curl, 2026-09-04, including
+ * never-before-requested account names so this isn't a cache artifact): it ignores
+ * every format-ish query param tried (`format`, `type`, `mime`, `ext`, `output`,
+ * `as`, `convert`, and a plain `Accept: image/webp` header) and its `Location`
+ * ALWAYS points at a plain, source-format `/p/<hash>?width=&height=` URL — getting
+ * WebP requires a second request to that resolved URL with `format=webp` added.
+ * peakd.com and ecency.com hit this exact same bare shortcut with no format/size
+ * param either, which is corroborating evidence this is a platform limitation, not
+ * something fixable by asking differently.
+ *
+ * This function is a synchronous string builder with no network access, called
+ * directly as an `<img src>` by `packages/ui/components/user-avatar-img.tsx` — the
+ * WHOLE POINT of this code path (see the block comment above) is that resolving
+ * anything server-side is exactly the queueing bug it exists to avoid. Making this
+ * WebP-aware would mean either (a) this function performing the resolve itself,
+ * which needs `async`/a second fetch and breaks its only caller's synchronous
+ * `src={getUserAvatarDirectUrl(...)}` usage, or (b) routing it back through OUR
+ * origin to do that resolving, i.e. reverting the exact fix the comment above
+ * describes. Both are out of this function's reach without editing
+ * `user-avatar-img.tsx` (out of scope for this change) or reintroducing the
+ * queueing regression. Flagged as residual risk rather than papered over with a
+ * `?format=webp` that would be a no-op on the live host.
+ */
 export function getUserAvatarDirectUrl(
   username: string,
   size: 'small' | 'medium' | 'large' = 'small'
