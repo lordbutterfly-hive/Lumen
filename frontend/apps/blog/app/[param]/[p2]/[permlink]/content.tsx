@@ -20,7 +20,6 @@ import { ReplyTextbox } from '@/blog/features/post-editor/reply-textbox';
 import { AlertDialogFlag } from '@/blog/features/post-rendering/alert-window-flag';
 import CommentsSection from '@/blog/features/post-rendering/comments-section';
 import ContextLinks from '@/blog/features/post-rendering/context-links';
-import DetailsCardVoters from '@/blog/features/post-rendering/details-card-voters';
 import FlagIcon from '@/blog/features/post-rendering/flag-icon';
 import MutePostDialog from '@/blog/features/post-rendering/mute-post-dialog';
 import PostBodySection from '@/blog/features/post-rendering/post-body-section';
@@ -53,7 +52,6 @@ import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
 import { fetchLiteEntryByPermlink } from '@/blog/lib/lite/client/lite-post-fetch';
 import { fetchLiteEngagement } from '@/blog/lib/lite/client/lite-engagement';
 import { Entry } from '@hive/common-hiveio-packages/wax';
-import { fetchActiveVotes } from '@/blog/lib/chain-fetch';
 import { getSimilarPostsByPost, getHiveSenseStatus, isPostStub } from '@transaction/lib/hivesense-api';
 import { Button } from '@ui/components/button';
 import {
@@ -1078,18 +1076,14 @@ const PostContent = () => {
     select: (data) => data.role === 'mod' || data.role === 'admin' || data.role === 'owner'
   });
 
-  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). Unconditional
-  // (no `initialData`) for virtually every post — the highest-traffic page
-  // in the app, both signed in and out. See
-  // `apps/blog/app/api/active-votes/route.ts`.
-  const { data: activeVotesData } = useQuery({
-    queryKey: ['activeVotes', author, permlink],
-    queryFn: () => fetchActiveVotes(author, permlink),
-    enabled: isOnChain,
-    onError: (error) => {
-      handleError(error, { method: 'getActiveVotes', params: { author, permlink } });
-    }
-  });
+  // ★ REMOVED (2026-09-04, perf): the unconditional /api/active-votes fetch was
+  // DEAD - `activeVotesData` was never read anywhere. Its only consumer,
+  // `DetailsCardVoters` (the voter-list click-through), no longer renders (see
+  // the note further down), so this fired ~34.6 KB + a chain round trip on every
+  // post view for nothing. The my-vote/downvote check reads postData.active_votes
+  // (the SSR-seeded, trimmed entry); the viewer's own vote comes from
+  // fetchLiteEngagement. Deleting the query, its dead component chain, and the
+  // /api/active-votes route.
 
   const { data: mutedList, isError: mutedListIsError } = useFollowListQuery(
     user.username,
