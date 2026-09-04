@@ -4,9 +4,9 @@ import Big from 'big.js';
 import { convertStringToBig } from './helpers';
 import { TFunction } from 'i18next';
 import type { FullAccount, Entry, IVote, HiveChain } from '@hive/common-hiveio-packages/wax';
-import { EAssetName, GetDynamicGlobalPropertiesResponse, NaiAsset } from '@hiveio/wax';
+import type { GetDynamicGlobalPropertiesResponse, NaiAsset } from '@hiveio/wax';
 import { parseDate2 } from './parse-date';
-import { Symbol, getNaiToSymbol, getPrecision } from './asset-constants';
+import { EAssetName, Symbol, getNaiToSymbol, getPrecision } from './asset-constants';
 
 // Re-export getRoundedAbbreveration from math-utils for backward compatibility
 export { getRoundedAbbreveration } from './math-utils';

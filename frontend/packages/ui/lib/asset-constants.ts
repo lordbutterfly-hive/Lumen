@@ -6,10 +6,25 @@
  * 1. Call initializeAssetConstants(chain.ASSETS) during app bootstrap
  * 2. Use getAssetConfig(), getNaiSymbols(), etc. for type-safe access
  */
-import { EAssetName, NaiAsset } from '@hiveio/wax';
+import type { NaiAsset } from '@hiveio/wax';
 
-// Re-export EAssetName for convenience
-export { EAssetName };
+/**
+ * ★ LOCAL MIRROR of wax's EAssetName (2026-09-04, perf). wax defines it as a
+ * string enum (HIVE='HIVE', HBD='HBD', VESTS='VESTS'); importing the real value
+ * from '@hiveio/wax' dragged wax's ~220 KB pre-bundled runtime into EVERY page,
+ * because this file and ./utils are imported by 100+ components app-wide (a
+ * signed-out reader downloaded the whole chain/beekeeper stack for a numeric
+ * precision). A string enum compares by value at runtime, and Record<EAssetName,
+ * T> expands to the same { HIVE, HBD, VESTS } keys whichever enum produced it, so
+ * this local copy is interchangeable with any wax-produced EAssetName -- e.g.
+ * chain.ASSETS still assigns to initializeAssetConstants() below. Keep the
+ * members byte-identical to wax's.
+ */
+export enum EAssetName {
+  HIVE = 'HIVE',
+  HBD = 'HBD',
+  VESTS = 'VESTS'
+}
 
 // Symbol enum for type safety - includes SPK which is not a native Hive asset
 export enum Symbol {

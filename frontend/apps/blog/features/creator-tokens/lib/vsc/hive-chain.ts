@@ -1,4 +1,15 @@
-import { createHiveChain, type IHiveChainInterface } from '@hiveio/wax';
+import type { IHiveChainInterface } from '@hiveio/wax';
+
+// ★ createHiveChain is imported LAZILY at its call site below (2026-09-04, perf).
+// A static value import of @hiveio/wax here pulled wax + beekeeper (~100 KB gzip)
+// into the app-wide first-load bundle, because this module is reached from the
+// creator-tokens header pill (HeaderTokenPill -> useTokenPriceChip ->
+// creator-tokens-data-source -> here), which is mounted app-wide even though it
+// renders nothing for signed-out readers. Signed-out visitors never call
+// getCreatorTokensHiveChain(), so the dynamic import() keeps wax out of their
+// download entirely; a signed-in creator loads it on the first price read/write,
+// which they trigger regardless. `IHiveChainInterface` stays a type-only import
+// (erased at build, no runtime wax).
 
 /**
  * A Hive chain instance that belongs to creator-tokens alone.
@@ -75,12 +86,18 @@ export async function getCreatorTokensHiveChain(
   const key = `${chainId}@${apiEndpoint}`;
   let chain = chains.get(key);
   if (!chain) {
-    chain = createHiveChain({
-      chainId,
-      apiEndpoint,
-      apiTimeout: 10_000,
-      restApiEndpoint: apiEndpoint
-    });
+    // The promise is assigned to the cache SYNCHRONOUSLY (no await between the
+    // get above and the set below), so two concurrent first callers still share
+    // one chain -- the lazy import() happens INSIDE this promise, not before it.
+    chain = (async () => {
+      const { createHiveChain } = await import('@hiveio/wax');
+      return createHiveChain({
+        chainId,
+        apiEndpoint,
+        apiTimeout: 10_000,
+        restApiEndpoint: apiEndpoint
+      });
+    })();
     chains.set(key, chain);
   }
   return chain;
