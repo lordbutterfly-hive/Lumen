@@ -185,19 +185,31 @@ export function useAccountEntries(
           pageParams: [undefined]
         }
       : undefined,
-    // ★ SEED IT STALE, NOT FRESH (2026-08-13). `Date.now()` here told React Query the
-    // server-rendered page was freshly fetched, so the `staleTime` window blocked the
-    // `queryFn` — and the queryFn is where Lumen's own engagement (a lite reader's
-    // votes and reblogs, which never touch the chain) gets merged in. The SSR seed is
-    // a raw chain read with no merge, so a vote a reader had just cast vanished on
-    // every reload until the window expired. Verified in a browser: the count reverted
-    // 2/2 on this surface while the API itself returned the correct number.
+    // ★ SEED IT FRESH, NOT STALE (T1g, 2026-09-04). The 2026-08-13 reasoning this
+    // replaces: `Date.now()` told React Query the server-rendered page was freshly
+    // fetched, so `staleTime` blocked the `queryFn` — and the queryFn (via
+    // `/api/account-posts`) was the ONLY place Lumen's own engagement (a lite
+    // reader's votes and reblogs, which never touch the chain) got merged in. A
+    // fresh-looking seed with no merge froze a reader's just-cast Lumen vote at its
+    // pre-vote count until the window expired.
     //
-    // 0 means "paint this instantly, then revalidate" — the seed still avoids a
-    // loading flash, it just no longer suppresses the merge. Same two-token change
-    // already applied to the post page's `postData` query for the same reason; this
-    // surface was its twin and was missed.
-    initialDataUpdatedAt: seed ? 0 : undefined,
+    // That gap is now closed at the source: `PostsPage` (posts-page.tsx) merges the
+    // SAME `mergeLumenEngagement` into the SSR seed before it ever reaches here, so
+    // the seed and a live `/api/account-posts` response carry identical totals. What
+    // is genuinely per-VIEWER — "did I vote on this post" — was never sourced from
+    // THIS query to begin with: MediumPostCard reads that off its own always-live
+    // `['votes', author, permlink, voter]` query (medium-post-card.tsx), seeded from
+    // the SSR `active_votes` snapshot for a chain vote or `fetchLiteEngagement` for a
+    // lite voter — neither depends on this hook's staleness. So there is nothing
+    // viewer-specific left for a forced revalidation to protect, for an anonymous OR
+    // a signed-in reader.
+    //
+    // A real timestamp stops the redundant full refetch of the ~136KB page SSR
+    // already sent (measured on a real profile) the instant this query mounts.
+    // Reachable only when `seed` exists — never for a `lite` profile (seeded
+    // `undefined` above, which never gets an SSR prefetch) or the Comments tab
+    // (never seeded at all; see `profile-comments-list.tsx`).
+    initialDataUpdatedAt: seed ? Date.now() : undefined,
     // ★ A FAILED READ MUST SURFACE FAST (2026-08-13). `/api/account-posts` now
     // THROWS on a degraded upstream read instead of answering `{entries: null}`,
     // which is correct — but this query never overrode React Query's default

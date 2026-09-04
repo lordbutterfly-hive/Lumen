@@ -10,6 +10,7 @@ import { filterBlockedForViewer, viewerBlockedKeySet } from '@/blog/lib/lite/soc
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { trimEntriesForSeed } from '@/blog/lib/feed/seed-trim';
 import { anonymousAccountPostsSeed } from '@/blog/lib/feed/account-posts-seed-cache';
+import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 
 const logger = getLogger('app');
 
@@ -55,6 +56,19 @@ const PostsPage = async ({
       if (blockedKeys.size > 0) {
         initialPosts = await filterBlockedForViewer(initialPosts, blockedKeys);
       }
+      // ★ MERGE LUMEN ENGAGEMENT INTO THE SEED (T1g, 2026-09-04). `getAccountPosts`
+      // above is a raw chain read; Lumen's own vote/reblog totals (lite users' votes
+      // and reblogs, which never touch the chain — see this function's own doc
+      // comment) previously reached this seed nowhere. `/api/account-posts` already
+      // called this before answering the browser, which is exactly why
+      // `useAccountEntries` (redesign/hooks/use-account-entries.ts) had to seed
+      // `initialDataUpdatedAt: 0` — a fresh-looking seed with no merge froze a
+      // reader's just-cast Lumen vote at its pre-vote count. Doing the same merge
+      // here closes that gap, so the seed and a live `/api/account-posts` response
+      // now agree, and that hook no longer needs the immediate refetch to fix the
+      // numbers (own doc there). Same direct-DB call that route makes; not a
+      // loopback HTTP self-fetch.
+      initialPosts = await mergeLumenEngagement(initialPosts);
       // ★ TRIM THE SEED TO WHAT A CARD SHOWS (snappiness phase 3, 2026-09-03).
       // getAccountPosts returns full bodies and full vote lists; a profile card
       // needs only a plaintext dek and the viewer's own vote. Untrimmed this

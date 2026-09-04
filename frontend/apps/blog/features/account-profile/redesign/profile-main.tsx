@@ -105,7 +105,19 @@ export default function ProfileMain() {
     profileData?.delegated_vesting_shares && profileData?.received_vesting_shares && profileData?.vesting_shares
   );
   const { data: hpFigures, isError: isChainError } = useQuery({
-    queryKey: ['profileHpFigures', username, dynamicGlobalData?.total_vesting_shares],
+    // ★ T3F, 2026-09-04: `total_vesting_shares` DROPPED FROM THE KEY. It was
+    // included here (presumably) to keep the HP ratio current, but that figure
+    // moves on essentially every Hive block — network-wide vesting shares never
+    // sit still — so keying on its exact value meant this query could never
+    // hit its own cache: any two `dynamicGlobalData` reads landing even a few
+    // seconds apart produced two different keys, each firing BOTH
+    // `fetchVestsToHp` calls again. Measured 4 `/api/vests-to-hp` calls on a
+    // single profile view where 2 (one delegatedHive + one vestingHive) should
+    // cover it. `enabled` below already requires `dynamicGlobalData` to be
+    // present before this runs at all, so it still computes off a real
+    // snapshot — it just no longer treats every tick of that snapshot as a
+    // brand new query.
+    queryKey: ['profileHpFigures', username],
     queryFn: async () => {
       const totalVestingShares = dynamicGlobalData!.total_vesting_shares;
       const totalVestingFundHive = dynamicGlobalData!.total_vesting_fund_hive;
