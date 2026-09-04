@@ -352,3 +352,99 @@ export function describeRcBudget(budget: RcBudget, action: string): string | nul
     `Add ${add} HBD and this will go through.`
   );
 }
+
+/**
+ * ★★★ THE LAUNCH RC PRE-CHECK (2026-09-04, one-signature launch rework, item C).
+ *
+ * A one-signature launch is a SINGLE Hive transaction carrying `register` (op 0)
+ * plus one `createOffering` per configured service (ops 1..N). Every op executes
+ * on ONE shared RC session (`modules/state-processing/state_engine.go:2235`
+ * creates the session outside the op loop; `modules/rc-system/rc-system.go`'s
+ * `rcSession.rcMap` accumulates consumption across ops), so RC is charged
+ * CUMULATIVELY: op k's `CanConsume` sees the RC every earlier op already spent.
+ * And because the whole tx is ATOMIC (`state_engine.go:2241-2390`: any op
+ * failing does `ledgerSession.Revert(); break`, and `callSession.Commit()` runs
+ * only `if ok`), a later op that exhausts RC reverts the ENTIRE launch — register
+ * and its first-buy included. So the pre-check MUST cover the SUM, not one action.
+ *
+ * This is why `checkRcBudget` above (which keys off a SINGLE action's limit)
+ * CANNOT be reused for the launch — it would undercount the multi-call sum and
+ * wave through a launch that runs out of RC mid-bundle and reverts after the
+ * creator has signed and waited.
+ *
+ * The two conditions are the launch generalisation of `checkRcBudget`'s:
+ *   1. `rcNeeded <= availableRc`          — every op's rc_limit reservation, summed
+ *   2. `rcNeeded + firstBuy <= balance`   — the reservations and the first-buy
+ *                                           HBD come out of the same balance
+ * `rcNeeded` uses `rcLimitForAction` (the MEASURED worst case + 25%) per op, so
+ * it is the conservative ceiling, never an estimate.
+ *
+ * ★ UNKNOWN POWER NEVER BLOCKS (like Buy). A read we could not complete
+ * (`availableRc` or `balanceBaseUnits` null) resolves `ok`, exactly as the Buy
+ * affordability check returns 'unknown' rather than a refusal — a spending read
+ * that failed must never gate a launch. Only a KNOWN shortfall blocks.
+ */
+export function checkLaunchRcBudget(input: {
+  /** How many `createOffering` ops the launch will carry (one per configured, priced service). */
+  offerCount: number;
+  /** `getAccountRC.amount` (already balance + free − frozen), or null when unread. */
+  availableRc: number | null;
+  /** `getAccountBalance.hbd` base units, or null when unread. */
+  balanceBaseUnits: number | null;
+  /** HBD the optional creator first-buy spends (register's `intents` leg). 0 when there is no first buy. */
+  firstBuyHbdBaseUnits?: number;
+}): RcBudget {
+  // At least one offering always rides a launch (the flow blocks a launch with
+  // zero priced offers), and max(1, …) keeps the sum honest even if a caller
+  // passes 0. Whole ops only.
+  const offerCount = Math.max(1, Math.floor(input.offerCount));
+  const rcNeeded = rcLimitForAction('register') + offerCount * rcLimitForAction('createOffering');
+  const firstBuy = Math.max(0, Math.floor(input.firstBuyHbdBaseUnits ?? 0));
+
+  // Unknown never blocks — see the doc above.
+  if (input.availableRc === null || input.balanceBaseUnits === null) {
+    return { ok: true, rcLimit: rcNeeded, blocker: 'none', addBaseUnits: 0 };
+  }
+
+  if (input.availableRc < rcNeeded) {
+    return {
+      ok: false,
+      rcLimit: rcNeeded,
+      blocker: 'not-enough-rc',
+      addBaseUnits: rcNeeded - input.availableRc
+    };
+  }
+  const needed = rcNeeded + firstBuy;
+  if (input.balanceBaseUnits < needed) {
+    return {
+      ok: false,
+      rcLimit: rcNeeded,
+      blocker: 'not-enough-balance',
+      addBaseUnits: needed - input.balanceBaseUnits
+    };
+  }
+  return { ok: true, rcLimit: rcNeeded, blocker: 'none', addBaseUnits: 0 };
+}
+
+/**
+ * The launch counterpart of `describeRcBudget`: the same actionable, jargon-free
+ * remedy, worded for a launch (which spends on BOTH the transaction credit for
+ * every op and, if chosen, the first buy). Null when there is nothing to remedy.
+ */
+export function describeLaunchRcBudget(budget: RcBudget): string | null {
+  if (budget.ok) return null;
+  const add = hbd(budget.addBaseUnits);
+
+  if (budget.blocker === 'not-enough-rc') {
+    return (
+      `You don't have enough transaction credit to launch. ` +
+      `A launch sends your registration and each offering together, and credit is backed by your HBD balance. ` +
+      `Add at least ${add} HBD to top it up; every 1 HBD you hold gives you 1,000 credits, available straight away, and spent credit refills on its own over about five days.`
+    );
+  }
+  return (
+    `Your HBD balance is about ${add} HBD short of launching. ` +
+    `A launch briefly sets aside part of your balance as transaction credit for each step, and your first buy is paid from the same balance. ` +
+    `Add ${add} HBD and this will go through.`
+  );
+}

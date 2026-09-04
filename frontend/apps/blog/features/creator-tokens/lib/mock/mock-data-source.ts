@@ -1,5 +1,5 @@
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
-import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RenewSubscriptionInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../../types';
+import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchOfferingResult, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RenewSubscriptionInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../../types';
 import type { CreatorTokensDataSource } from '../creator-tokens-data-source';
 import {
   BLOCKS_PER_DAY,
@@ -649,6 +649,23 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       accrueFee(input.creator, feeCreatorBaseUnits, feePlatformBaseUnits);
     }
     return this.buildMarket(input.creator, seed);
+  }
+
+  // The one-signature launch (dev demo parity): register, then post each
+  // offering. The real source does this atomically in one Hive tx; the mock has
+  // no chain, so it applies them in order and resolves the same LaunchResult.
+  async launchMarket(input: LaunchMarketInput): Promise<LaunchResult> {
+    const market = await this.registerMarket(input.register);
+    const offerings: LaunchOfferingResult[] = [];
+    for (let i = 0; i < input.offerings.length; i++) {
+      const o = input.offerings[i];
+      await this.createOffering(o);
+      offerings.push({ index: i, title: o.title, ok: true });
+    }
+    // Signature + broadcast are instant here; move the UI to "confirming".
+    input.onBroadcast?.();
+    void market;
+    return { txId: `mock-launch-${input.register.creator}`, registered: true, offerings };
   }
 
   async renewSubscription(input: RenewSubscriptionInput): Promise<Market> {

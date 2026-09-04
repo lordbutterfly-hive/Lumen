@@ -13,7 +13,7 @@ import LaunchStepTerms from './launch-step-terms';
 import LaunchStruck from './launch-struck';
 import MeritumCoinRail from './meritum-coin-rail';
 import { MAX_PRICE_USD, MIN_PRICE_USD } from '../../launch-money';
-import { MERITUM_COMMISSION_PCT, useMeritumLaunch } from './use-meritum-launch';
+import { LAUNCH_CONFIRM_MINUTES, MERITUM_COMMISSION_PCT, useMeritumLaunch } from './use-meritum-launch';
 import type { MeritumLaunchBlock } from './use-meritum-launch';
 import { offerTitleProblem } from '@/blog/features/creator-tokens/lib/vsc/op-builders';
 
@@ -195,6 +195,10 @@ const MeritumLaunchFlow: FC = () => {
    * reader with a pending signature would watch a silent striking coin.
    */
   const landing = (stage === 'striking' || stage === 'revealed') && write === 'pending';
+  // Item B: the two sub-phases of the landing window — 'signing' (waiting for the
+  // single wallet signature) then 'confirming' (signed, waiting for the chain).
+  // Sourced from the hook so the copy tracks the real write, never a timer.
+  const launchPhase = flow.launchPhase;
   /**
    * Never raised while the ring is closing — the coin aborts a hold the moment
    * it is disabled, and `write` only leaves `idle` after the strike has already
@@ -261,8 +265,14 @@ const MeritumLaunchFlow: FC = () => {
     : landing
       ? {
           eyebrow: t('meritum_launch.eyebrow_landing'),
-          headline: t('meritum_launch.headline_landing'),
-          subline: t('meritum_launch.subline_landing')
+          headline:
+            launchPhase === 'confirming'
+              ? t('meritum_launch.headline_confirming')
+              : t('meritum_launch.headline_landing'),
+          subline:
+            launchPhase === 'confirming'
+              ? t('meritum_launch.subline_confirming', { minutes: LAUNCH_CONFIRM_MINUTES })
+              : t('meritum_launch.subline_landing')
         }
       : flow.step === 1
         ? {
@@ -298,7 +308,14 @@ const MeritumLaunchFlow: FC = () => {
   const caption = live
     ? { text: t('meritum_launch.caption_struck'), sub: t('meritum_launch.caption_struck_sub'), brand: true }
     : landing
-      ? { text: t('meritum_launch.caption_landing'), sub: t('meritum_launch.caption_landing_sub'), brand: true }
+      ? {
+          text: t('meritum_launch.caption_landing'),
+          sub:
+            launchPhase === 'signing'
+              ? t('meritum_launch.caption_signing_sub')
+              : t('meritum_launch.caption_landing_sub'),
+          brand: true
+        }
       : stage === 'striking'
         ? { text: t('meritum_launch.caption_striking'), sub: t('meritum_launch.caption_striking_sub'), brand: true }
         : stage === 'charging'
@@ -315,7 +332,13 @@ const MeritumLaunchFlow: FC = () => {
 
   const statusLabels: Partial<Record<MeritumStrikePhase, string>> = {
     charging: t('meritum_launch.status_charging'),
-    striking: t('meritum_launch.status_striking'),
+    // Item B: while the coin is in its 'striking' phase AND the write is
+    // confirming on chain, the screen-reader status is the on-chain wait, not
+    // "hold still" — nothing is being held any more.
+    striking:
+      landing && launchPhase === 'confirming'
+        ? t('meritum_launch.status_confirming', { minutes: LAUNCH_CONFIRM_MINUTES })
+        : t('meritum_launch.status_striking'),
     struck: t('meritum_launch.status_struck')
   };
 
@@ -412,9 +435,29 @@ const MeritumLaunchFlow: FC = () => {
                 firstBuySkipped={flow.firstBuySkipped}
               />
             ) : landing ? (
-              <p className="mt-[26px] max-w-[52ch] font-ui text-15 text-meritum-ink-3">
-                {t('meritum_launch.landing_body')}
-              </p>
+              /* ★ ITEM B — LIVE PROGRESS, phase-aware, with an aria-live region.
+                 signing: "approve in your wallet"; confirming: "up to N min,
+                 leave open" plus a looping indicator so the wait never looks
+                 frozen (the coin's own 1.5s impact is a one-shot). The "N min"
+                 is sourced from the confirm-timeout const (LAUNCH_CONFIRM_MINUTES)
+                 so it cannot drift from the real ceiling. */
+              <div className="mt-[26px]" role="status" aria-live="polite">
+                <p className="max-w-[52ch] font-ui text-15 text-meritum-ink-3">
+                  {launchPhase === 'signing'
+                    ? t('meritum_launch.landing_signing')
+                    : t('meritum_launch.landing_confirming', { minutes: LAUNCH_CONFIRM_MINUTES })}
+                </p>
+                {launchPhase === 'confirming' ? (
+                  <div className="mt-4 flex items-center gap-2 font-ui text-caption text-meritum-ink-muted">
+                    <span className="inline-flex items-center gap-1" aria-hidden="true">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-meritum-ink-brand [animation-delay:0ms]" />
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-meritum-ink-brand [animation-delay:200ms]" />
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-meritum-ink-brand [animation-delay:400ms]" />
+                    </span>
+                    <span>{t('meritum_launch.landing_working')}</span>
+                  </div>
+                ) : null}
+              </div>
             ) : flow.step === 1 ? (
               <LaunchStepAccount
                 handle={flow.handle}
@@ -446,6 +489,10 @@ const MeritumLaunchFlow: FC = () => {
                 alreadyHasMarket={flow.alreadyHasMarket}
                 pending={write === 'pending'}
                 failure={flow.failure}
+                launchUnconfirmed={flow.launchUnconfirmed}
+                spending={flow.spending}
+                launchRcMessage={flow.launchRcMessage}
+                account={account}
                 onHoldBegin={holdFromButton}
                 onHoldRelease={releaseFromButton}
                 onBack={flow.goBack}

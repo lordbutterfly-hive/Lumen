@@ -890,6 +890,42 @@ export interface CreateOfferingInput {
   priceHbd: number;
 }
 
+/**
+ * The ONE-SIGNATURE launch (2026-09-04). `register` (op 0) + `offerings` (ops
+ * 1..N) are broadcast as a single Hive transaction — one wallet prompt. The
+ * whole transaction is atomic on chain, so the launch fully succeeds or fully
+ * reverts (nothing charged); see VscCreatorTokensDataSource.launchMarket.
+ */
+export interface LaunchMarketInput {
+  register: RegisterMarketInput;
+  offerings: CreateOfferingInput[];
+  /**
+   * Fired once the bundle has been broadcast (the single signature is done and
+   * Hive has accepted the transaction) and BEFORE the on-chain confirm poll
+   * begins. Lets the UI move its progress copy from "approve in your wallet" to
+   * "confirming on-chain". Side-effect only; never affects what is signed.
+   */
+  onBroadcast?: () => void;
+}
+
+/** Per-offering outcome in a launch. Under atomicity every entry shares the launch's fate (all ok, or all not). */
+export interface LaunchOfferingResult {
+  index: number;
+  title: string;
+  ok: boolean;
+  error?: string;
+}
+
+/** The result of a SUCCESSFUL launch. A launch that reverts or cannot be confirmed rejects instead — see launchMarket's doc. */
+export interface LaunchResult {
+  /** The Hive transaction id the whole bundle was broadcast under. */
+  txId: string;
+  /** True when the launch is confirmed live on chain. (A launch only resolves when this is true.) */
+  registered: boolean;
+  /** One entry per configured offering, in broadcast order. */
+  offerings: LaunchOfferingResult[];
+}
+
 export interface SetOfferingPriceInput {
   creator: string;
   offeringId: number;

@@ -63,7 +63,11 @@ const LaunchStruck: FC<LaunchStruckProps> = ({
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <PrimaryLink href={`/creators/${account}`} label={t('meritum_launch.cta_token_page')} />
-        <SecondaryLink href="/creators/studio" label={t('meritum_launch.cta_studio')} />
+        {/* ★ ITEM D — deep-link straight to the Offerings tab in Studio. Under the
+            atomic launch every configured offering is already live, so this is a
+            general "add another service later" convenience, not a recovery path.
+            creator-studio.tsx honours ?section= to preselect the tab. */}
+        <SecondaryLink href="/creators/studio?section=offerings" label={t('meritum_launch.cta_studio')} />
       </div>
     </div>
   );

@@ -4,7 +4,8 @@ import { FC } from 'react';
 import { useTranslation } from '@/blog/i18n/client';
 import { BackAction, HoldAction, Notice } from './launch-controls';
 import type { MeritumLaunchBlock } from './use-meritum-launch';
-import { MagiFundingHelp } from '@/blog/features/creator-tokens/live/magi-fuel-gauge';
+import { MagiFuelGauge, MagiFundingHelp } from '@/blog/features/creator-tokens/live/magi-fuel-gauge';
+import type { MagiSpendingPowerState } from '@/blog/features/creator-tokens/live/use-magi-spending-power';
 import type { ContractRules } from '@/blog/features/creator-tokens/types';
 
 /**
@@ -42,6 +43,18 @@ export interface LaunchStepTermsProps {
   pending: boolean;
   /** A redacted failure message from the last attempt, or null. */
   failure: string | null;
+  /**
+   * TRUE when the last failure was an UNCONFIRMED timeout, not a definitive
+   * revert (item E). The launch may still have landed, so the banner must NOT say
+   * "nothing was charged" — it says "check your token before retrying".
+   */
+  launchUnconfirmed: boolean;
+  /** Live spending power (RC + HBD) for the fuel gauge shown when a launch is unaffordable (item C). */
+  spending: MagiSpendingPowerState;
+  /** The actionable "add N HBD to launch" remedy, shown on block === 'insufficient-rc'. */
+  launchRcMessage: string | null;
+  /** The creator's bare account, for the deposit memo in the funding help. */
+  account: string;
   onHoldBegin: () => void;
   onHoldRelease: () => void;
   onBack: () => void;
@@ -69,6 +82,10 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
   alreadyHasMarket,
   pending,
   failure,
+  launchUnconfirmed,
+  spending,
+  launchRcMessage,
+  account,
   onHoldBegin,
   onHoldRelease,
   onBack
@@ -192,9 +209,28 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
           </a>
         </Notice>
       ) : null}
+      {/* ★ ITEM C — THE FULL-SUM RC GATE. A launch is one atomic transaction whose
+          ops charge resource credit cumulatively; if a later offering runs out of
+          RC the WHOLE launch reverts (and burns the RC). So when the creator
+          cannot afford register + every offering + the first buy, the strike is
+          held and they are shown exactly how much HBD to add — with the live fuel
+          gauge and the no-signature deposit route. Account is always Hive here
+          (a lite account is blocked before this step). */}
+      {block === 'insufficient-rc' ? (
+        <Notice tone="alert">
+          <div className="mb-2">{t('meritum_launch.gate_insufficient_rc')}</div>
+          <MagiFuelGauge state={spending} kind="hive" className="mb-3" />
+          {launchRcMessage ? <p className="mb-3 text-caption">{launchRcMessage}</p> : null}
+          <MagiFundingHelp kind="hive" account={account} />
+        </Notice>
+      ) : null}
       {failure ? (
         <Notice tone="alert">
-          {t('meritum_launch.failed_title')} {failure}
+          {/* ★ ITEM E — TRUTHFUL FAILURE TITLE. A definitive revert charged
+              nothing, so "Nothing was charged." is accurate. An UNCONFIRMED
+              timeout may still land (register carries the first-buy HBD), so it
+              must NOT claim nothing was charged — it says check first. */}
+          {launchUnconfirmed ? t('meritum_launch.failed_title_unconfirmed') : t('meritum_launch.failed_title')} {failure}
           {/* ★★★ A FUNDING FAILURE MUST SAY HOW TO FUND (2026-08-18, owner).
               Taking the first token yourself SPENDS: the launch buys `firstBuy`
               worth of your own market, and on Magi HBD is ALSO the resource
@@ -208,7 +244,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
                   ? `Your first buy costs ${firstBuy} HBD. Send that to your Magi account plus a little extra. On Magi, HBD also pays the resource credits every action needs, so deposit a bit more than the buy itself.`
                   : 'Send HBD to your Magi account before launching. On Magi, HBD also pays the resource credits that every action needs.'}
               </p>
-              <MagiFundingHelp kind="hive" />
+              <MagiFundingHelp kind="hive" account={account} />
             </div>
           ) : null}
         </Notice>

@@ -16,7 +16,10 @@ import { MAX_PRICE_USD, MIN_PRICE_USD, STANDARD_CAP, parseMoney, sanitizeMoneyIn
 import { MERITUM_STUD_COUNT } from '../coin';
 import { getStorageItem, removeStorageItem, setStorageItem } from '@ui/lib/storage-with-ttl';
 import { offerTitleProblem } from '@/blog/features/creator-tokens/lib/vsc/op-builders';
-import { REGISTER_CONFIRM_TIMEOUT_MS } from '@/blog/features/creator-tokens/lib/vsc-data-source';
+import { EXECUTION_CONFIRM_TIMEOUT_MS, REGISTER_CONFIRM_TIMEOUT_MS } from '@/blog/features/creator-tokens/lib/vsc-data-source';
+import { useMagiSpendingPower } from '../../../live/use-magi-spending-power';
+import { checkLaunchRcBudget, describeLaunchRcBudget } from '../../../lib/vsc/rc-budget';
+import { humanToBaseUnits } from '../../../lib/contract-math';
 
 /**
  * THE MERITUM LAUNCH FLOW — all of its state, and the real launch write.
@@ -118,7 +121,27 @@ export type MeritumLaunchBlock =
    */
   | 'offer-supply-share'
   | 'price-band'
+  /**
+   * The creator cannot afford the launch's resource-credit sum (register + every
+   * offering) and/or the first-buy HBD (item C, 2026-09-04). Because the launch
+   * is one ATOMIC transaction, an offering that runs out of RC mid-bundle reverts
+   * the WHOLE launch (and burns the RC on the way down), so this is gated BEFORE
+   * the strike, on the full sum — see checkLaunchRcBudget. Unknown spending power
+   * never sets this (like Buy): a read we could not complete does not block.
+   */
+  | 'insufficient-rc'
   | 'first-buy-max';
+
+/**
+ * Where the launch write is, once the strike has fired (item B, 2026-09-04):
+ *   'signing'    — waiting for the single wallet signature
+ *   'confirming' — signed and accepted by Hive; waiting for on-chain confirmation
+ *   null         — not launching (idle, or already resolved to ok/failed)
+ */
+export type MeritumLaunchPhase = 'signing' | 'confirming' | null;
+
+/** The on-chain confirmation ceiling, in whole minutes, for the "up to ~N min" copy. Sourced from the timeout const so it can never drift. */
+export const LAUNCH_CONFIRM_MINUTES = Math.round(EXECUTION_CONFIRM_TIMEOUT_MS / 60_000);
 
 const emptyOffers = (): MeritumOffer[] => Array.from({ length: MERITUM_OFFER_COUNT }, () => ({ name: '', price: '' }));
 
@@ -318,12 +341,30 @@ export interface MeritumLaunchApi {
   unavailable: boolean;
 
   write: MeritumWriteState;
+  /**
+   * Where the write is between the strike and the result (item B). Drives the
+   * "approve in your wallet" -> "confirming on-chain" progress copy. Null unless
+   * `write === 'pending'`.
+   */
+  launchPhase: MeritumLaunchPhase;
   /** A formatted, redacted failure message. Only set when `write` is `failed`. */
   failure: string | null;
-  /** The market opened but one or more named offers did not post. */
+  /**
+   * TRUE when the last failure was an UNCONFIRMED timeout (Hive accepted it,
+   * Magi has not confirmed) rather than a definitive revert (item E). The launch
+   * may still have landed, so the copy must say "check your token before
+   * retrying", NOT "nothing was charged".
+   */
+  launchUnconfirmed: boolean;
+  /** The market opened but one or more named offers did not post. Always false under the atomic launch (all-or-nothing), kept for the struck panel's contract. */
   offersFailed: boolean;
   /** The market opened but the requested first buy could not be filled. */
   firstBuySkipped: boolean;
+
+  /** Live spending power (RC + HBD), for the step-3 fuel gauge when a launch is unaffordable. */
+  spending: ReturnType<typeof useMagiSpendingPower>;
+  /** The actionable "add N HBD" remedy when `block === 'insufficient-rc'`, else null. */
+  launchRcMessage: string | null;
 
   /** Fire the real launch write. Called from the coin's `onCharged`. */
   launch: () => void;
@@ -373,7 +414,9 @@ export function useMeritumLaunch(): MeritumLaunchApi {
   const [offers, setOffers] = useState<MeritumOffer[]>(emptyOffers);
   const [firstBuy, setFirstBuyState] = useState('');
   const [write, setWrite] = useState<MeritumWriteState>('idle');
+  const [launchPhase, setLaunchPhase] = useState<MeritumLaunchPhase>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [launchUnconfirmed, setLaunchUnconfirmed] = useState(false);
   const [offersFailed, setOffersFailed] = useState(false);
   const [firstBuySkipped, setFirstBuySkipped] = useState(false);
   const [restored, setRestored] = useState(false);
@@ -381,6 +424,17 @@ export function useMeritumLaunch(): MeritumLaunchApi {
 
   const account = studio.creator ?? identity.username;
   const handle = account ? `@${account}` : '';
+
+  /**
+   * ★ THE LAUNCH RC PRE-CHECK (item C, 2026-09-04). The account is always Hive on
+   * this path — a lite account is blocked before step 3 — so its spending power
+   * is the Hive one. The launch is ONE atomic transaction whose ops charge RC
+   * cumulatively; if a later op runs out of RC the whole tx reverts (and burns the
+   * RC), so the gate must cover the SUM of register + every offering, plus the
+   * first-buy HBD leg. `useMagiSpendingPower` also refetches after any write, so
+   * the gauge stays current.
+   */
+  const spending = useMagiSpendingPower(account);
 
   /**
    * ★ PER ACCOUNT, AND sessionStorage NOT localStorage. A single global key
@@ -636,6 +690,33 @@ export function useMeritumLaunch(): MeritumLaunchApi {
   const capBroken = STANDARD_CAP < MIN_CAP_CREDITS_BASE_UNITS || STANDARD_CAP > MAX_CAP_CREDITS_BASE_UNITS;
   const firstBuyTooBig = firstBuyUsd > MAX_PRICE_USD;
 
+  /**
+   * ★ THE FIRST-BUY HBD LEG (item C). The optional first buy is a DOLLAR budget on
+   * screen but on chain it spends `buyQuote(...).totalUsd` HBD (curve cost + trade
+   * fee), drawn from the SAME balance the launch's transaction credit is reserved
+   * against. Computed at supply 0 (a brand-new market), the same quote `launch()`
+   * uses to size the token count. Base units for the RC pre-check.
+   */
+  const firstBuyLegBaseUnits =
+    firstBuyUsd > 0
+      ? humanToBaseUnits(buyQuote(firstBuyUsd, { supply: 0, cap: STANDARD_CAP, position: null }).totalUsd)
+      : 0;
+
+  /**
+   * ★ THE FULL-SUM RC GATE (item C). register + one createOffering per priced
+   * offer, against available RC, then the whole reservation + first-buy against
+   * balance. Unknown spending power resolves `ok` (checkLaunchRcBudget returns ok
+   * on null inputs), so an unread balance never blocks — like Buy.
+   */
+  const launchRcBudget = checkLaunchRcBudget({
+    offerCount: offersPriced,
+    availableRc: spending.power?.rc.amount ?? null,
+    balanceBaseUnits: spending.power?.balance.hbdBaseUnits ?? null,
+    firstBuyHbdBaseUnits: firstBuyLegBaseUnits
+  });
+  const cannotAffordLaunch = !launchRcBudget.ok;
+  const launchRcMessage = describeLaunchRcBudget(launchRcBudget);
+
   // A title the contract will refuse. Only PRICED offers matter: an empty row is
   // not submitted, and `offer-needs-name` already covers a priced row with none.
   const offerTitleRejected = offers.some(
@@ -704,7 +785,16 @@ export function useMeritumLaunch(): MeritumLaunchApi {
           : alreadyHasMarket
             ? 'has-market'
             : (offerBlock ??
-              (firstBuyTooBig ? 'first-buy-max' : capBroken ? 'price-band' : null));
+              (firstBuyTooBig
+                ? 'first-buy-max'
+                : capBroken
+                  ? 'price-band'
+                  : // Funding is the LAST gate: config problems (bad offer, first
+                    // buy over max, price band) surface first; only a launch whose
+                    // shape is otherwise valid is refused for RC/balance.
+                    cannotAffordLaunch
+                    ? 'insufficient-rc'
+                    : null));
 
   const stepBlock: MeritumLaunchBlock | null = step === 2 ? offerBlock : null;
 
@@ -737,7 +827,9 @@ export function useMeritumLaunch(): MeritumLaunchApi {
 
     inFlight.current = true;
     setWrite('pending');
+    setLaunchPhase('signing');
     setFailure(null);
+    setLaunchUnconfirmed(false);
     setOffersFailed(false);
     setFirstBuySkipped(false);
 
@@ -752,60 +844,69 @@ export function useMeritumLaunch(): MeritumLaunchApi {
 
     const run = async () => {
       /**
-       * ★ TWO CALLS, TWO OUTCOMES, DELIBERATELY NOT ONE TRY BLOCK.
-       *
-       * `register` is the irreversible part, so it goes first and alone. If a
-       * named offering fails AFTER it, the creator has a live market with one
-       * working price and can post the rest from Creator Studio — reporting
-       * that as "your token wasn't launched" would be false, and false in the
-       * direction that makes someone launch a second time.
+       * ★ ONE SIGNATURE, ONE ATOMIC TRANSACTION (2026-09-04). register + every
+       * offering are broadcast together and land all-or-nothing, so there is no
+       * "market opened but some offers didn't" middle state to render (see
+       * launchMarket): success means the whole thing is live, failure means
+       * nothing is (nothing charged). offer #0's price still rides `register`'s
+       * `face` as the legacy "Ask a question" fallback, and each offer is also a
+       * named offering so its name shows.
        */
       try {
-        await studio.register({
-          faceHbd: services[0].usd,
-          capTokens: STANDARD_CAP,
-          firstBuyTokens: skipped ? 0 : firstBuyTokens
+        await studio.launchMarket({
+          register: {
+            faceHbd: services[0].usd,
+            capTokens: STANDARD_CAP,
+            firstBuyTokens: skipped ? 0 : firstBuyTokens
+          },
+          offerings: services.map((s) => ({ title: s.name, priceUsd: s.usd })),
+          // Signed and accepted by Hive: move the progress copy from "approve in
+          // your wallet" to "confirming on-chain".
+          onBroadcast: () => {
+            // ★ INFO-1 (2026-09-04): RE-STAMP the cross-tab claim at the moment of
+            // broadcast. The claim is taken BEFORE the signature (to interlock two
+            // tabs before either signs), but the ~180s confirm window starts only
+            // AFTER the wallet returns — so a signature prompt longer than the
+            // claim's 30s head-room (LAUNCH_CLAIM_TTL_MS − REGISTER_CONFIRM_TIMEOUT_MS)
+            // could let the claim lapse mid-confirm and a second tab broadcast a
+            // second launch (harmless to funds — atomic revert + one-market guard —
+            // but it wastes the creator's own RC). Refreshing here guarantees the
+            // full confirm window is always covered by a fresh TTL. The
+            // keep+extend-on-timeout in the catch below still applies.
+            if (claimKey) setStorageItem(claimKey, Date.now(), LAUNCH_CLAIM_TTL_MS);
+            setLaunchPhase('confirming');
+          }
         });
       } catch (e) {
         inFlight.current = false;
-        // ★ F1 (2026-08-31): register carries the first-buy HBD on the SAME
-        // broadcast, so on REGISTER_UNCONFIRMED ("Hive accepted it, Magi hasn't
-        // recorded the market yet, it may still land") releasing the claim would
-        // let a second attempt DOUBLE-CHARGE the first buy. Keep AND extend the
-        // claim there; release only on a genuine failure where nothing landed.
+        setLaunchPhase(null);
+        // ★ F1 / item E: register carries the first-buy HBD on the SAME broadcast,
+        // so on an UNCONFIRMED timeout ("Hive accepted it, Magi hasn't recorded it
+        // yet, it may still land") releasing the claim would let a second attempt
+        // DOUBLE-CHARGE the first buy. Keep AND extend the claim there, and mark
+        // the failure UNCONFIRMED so the copy says "check your token before
+        // retrying" — never "nothing was charged". A definitive revert
+        // (LAUNCH_REVERTED) charged nothing, so release the claim.
         const mayStillLand = e instanceof Error && e.message.includes('REGISTER_UNCONFIRMED');
         if (mayStillLand) {
           if (claimKey) setStorageItem(claimKey, Date.now(), LAUNCH_CLAIM_TTL_MS);
         } else {
           releaseClaim();
         }
+        setLaunchUnconfirmed(mayStillLand);
         setWrite('failed');
         // Routed through the shared formatter so the CREATOR_TOKENS_* machine
         // code is stripped and any key-shaped text is redacted before it is
         // painted into the DOM.
         setFailure(writeFailureMessage(e, 'Launch did not go through.'));
+        // ★ THE DRAFT IS DELIBERATELY NOT CLEARED ON FAILURE (item D). The launch
+        // did not land (or may not have), so the creator's typed offer names and
+        // prices are preserved for a one-click retry rather than lost.
         return;
       }
 
-      // Every offer is a named offering, so each shows the name the creator
-      // typed. The on-chain `face` carries a price but NO title, so offer #0
-      // posted as the face alone was unnamed — and because named offerings
-      // exist it was never rendered (faceAsService is the zero-offerings case),
-      // making the creator's flagship promise invisible and unbuyable. `faceHbd`
-      // (set at register) keeps offer #0's price as the legacy "Ask a question"
-      // fallback. Sequential, not parallel: they share one nonce and one signer,
-      // and being asked to sign several prompts at once is worse than in a row.
-      let postedAll = true;
-      for (const service of services) {
-        try {
-          await studio.createOffering({ title: service.name, priceUsd: service.usd });
-        } catch {
-          postedAll = false;
-        }
-      }
-
-      // The token is launched past this point, so the saved draft is spent —
-      // leaving it would re-open a stale flow over a live market.
+      // Atomic success: register AND every offering are live. The saved draft is
+      // spent now — leaving it would re-open a stale flow over a live market.
       try {
         window.sessionStorage.removeItem(draftKey);
       } catch {
@@ -813,12 +914,14 @@ export function useMeritumLaunch(): MeritumLaunchApi {
       }
 
       inFlight.current = false;
+      setLaunchPhase(null);
       // The market now exists, so `has-market` takes over as the real guard and
       // the claim has done its job. Released rather than left to expire so a
       // creator who launches and immediately opens Studio is not told, for the
-      // next 90 seconds, that a launch is running in another tab.
+      // next couple of minutes, that a launch is running in another tab.
       releaseClaim();
-      setOffersFailed(!postedAll);
+      // All offerings landed atomically — none failed to post.
+      setOffersFailed(false);
       setFirstBuySkipped(skipped);
       setWrite('ok');
     };
@@ -828,7 +931,9 @@ export function useMeritumLaunch(): MeritumLaunchApi {
 
   const dismissFailure = useCallback(() => {
     setWrite('idle');
+    setLaunchPhase(null);
     setFailure(null);
+    setLaunchUnconfirmed(false);
   }, []);
 
   const startOver = useCallback(() => {
@@ -846,7 +951,9 @@ export function useMeritumLaunch(): MeritumLaunchApi {
     setOffers(emptyOffers());
     setFirstBuyState('');
     setWrite('idle');
+    setLaunchPhase(null);
     setFailure(null);
+    setLaunchUnconfirmed(false);
     setOffersFailed(false);
     setFirstBuySkipped(false);
   }, [draftKey]);
@@ -877,9 +984,13 @@ export function useMeritumLaunch(): MeritumLaunchApi {
     alreadyHasMarket,
     unavailable: studio.status === 'unavailable',
     write,
+    launchPhase,
     failure,
+    launchUnconfirmed,
     offersFailed,
     firstBuySkipped,
+    spending,
+    launchRcMessage,
     launch,
     dismissFailure,
     restoredFromDraft,

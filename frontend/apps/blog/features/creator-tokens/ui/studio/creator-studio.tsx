@@ -607,7 +607,22 @@ const CreatorStudio: FC = () => {
     commissionEarnedUsd,
     status
   } = studio;
-  const [section, setSection] = useState<Section>('overview');
+  // ★ ITEM D (2026-09-04): honour a `?section=` query param so a deep-link (e.g.
+  // the launch success screen's "add an offering in Studio" link,
+  // /creators/studio?section=offerings) opens on the right tab instead of always
+  // 'overview'. Validated against the known SECTIONS — an unknown value falls
+  // back to 'overview' rather than rendering nothing. Read once in a lazy
+  // initializer; `window` is guarded for the SSR pass of this client component.
+  const [section, setSection] = useState<Section>(() => {
+    if (typeof window === 'undefined') return 'overview';
+    try {
+      const requested = new URLSearchParams(window.location.search).get('section');
+      if (requested && SECTIONS.some((s) => s.id === requested)) return requested as Section;
+    } catch {
+      // Malformed URL — fall back to the default tab.
+    }
+    return 'overview';
+  });
   const [answering, setAnswering] = useState<Ask | null>(null);
   const [retireOpen, setRetireOpen] = useState(false);
   const [capInput, setCapInput] = useState('');

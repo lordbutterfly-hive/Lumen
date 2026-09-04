@@ -11,6 +11,9 @@ import type {
   DeleteOfferingInput,
   DeliveryRecord,
   CreatorSummary,
+  LaunchMarketInput,
+  LaunchOfferingResult,
+  LaunchResult,
   Offering,
   PricePoint,
   RateInput,
@@ -102,6 +105,9 @@ import {
   transferTokensPayload,
   withdrawTreasuryPayload
 } from './vsc/op-builders';
+// The pure launch op-list builder (register + N offerings, in order). Its
+// output is EXACTLY what launchMarket broadcasts; see launch-ops.ts.
+import { buildLaunchOps } from './vsc/launch-ops';
 // Side-effect-only import: runs the payload-contract self-test in
 // development (see that file's own doc for why it lives here rather than in
 // op-builders.ts — importing it FROM op-builders.ts would be circular, since
@@ -266,6 +272,17 @@ export const EXECUTION_CONFIRM_TIMEOUT_MS = 180_000;
 export type Broadcaster = (op: CustomJsonOp) => Promise<string>;
 
 /**
+ * Broadcasts SEVERAL custom_json ops as ONE Hive transaction (one signature),
+ * returning that transaction's id. The one-signature Meritum launch (register +
+ * N offerings) is its only caller today. Injectable exactly like `broadcaster`:
+ * production supplies hiveTransactionBundleBroadcaster (./vsc/broadcaster.ts); a
+ * test injects its own. See `launchMarket` for how the returned tx id is
+ * confirmed, and broadcaster.ts for why bundling is a pure assembly change that
+ * leaves the signer/key path untouched.
+ */
+export type BundleBroadcaster = (ops: CustomJsonOp[]) => Promise<string>;
+
+/**
  * Reads a transaction's status by id. Injectable (VscCreatorTokensDataSourceDeps)
  * exactly like `broadcaster`: production leaves it unset and awaitExecution uses
  * the browser default below; a Node caller (a selftest) injects one. That is what
@@ -301,11 +318,15 @@ export interface VscCreatorTokensDataSourceDeps {
   config: CreatorTokensConfig;
   gql?: CreatorTokensGqlClient;
   broadcaster?: Broadcaster;
+  /** Broadcasts a multi-op bundle as one Hive transaction (the one-signature launch). See BundleBroadcaster. */
+  bundleBroadcaster?: BundleBroadcaster;
   /** Optional tx-status reader; unset in production (uses defaultTxStatusReader). See TxStatusReader. */
   txStatusReader?: TxStatusReader;
 }
 
 const NO_BROADCASTER_MSG = 'VscCreatorTokensDataSource: no broadcaster wired — inject the transaction service';
+const NO_BUNDLE_BROADCASTER_MSG =
+  'VscCreatorTokensDataSource: no bundle broadcaster wired: the one-signature launch needs bundleBroadcaster injected';
 
 /** Shared "n is a positive whole token count" guard — every buy/sell/refund/transfer amount on the curve is an integer (curve.go indexes price by the token ordinal; there is no fractional token). */
 function assertPositiveTokenCount(n: number, label: string): void {
@@ -392,6 +413,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   private readonly config: CreatorTokensConfig;
   private readonly gql: CreatorTokensGqlClient;
   private readonly broadcaster?: Broadcaster;
+  private readonly bundleBroadcaster?: BundleBroadcaster;
   private readonly txStatusReader: TxStatusReader | null;
   private readonly indexer: MagiIndexerClient | null;
 
@@ -404,6 +426,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // `unavailable`, which is honest, rather than empty, which is a lie.
     this.indexer = deps.config.indexerUrl ? new MagiIndexerClient(deps.config.indexerUrl, deps.config.contractId) : null;
     this.broadcaster = deps.broadcaster;
+    this.bundleBroadcaster = deps.bundleBroadcaster;
     // Unset in production -> awaitExecution uses defaultTxStatusReader (browser
     // fetch). A Node caller injects one; see TxStatusReader.
     this.txStatusReader = deps.txStatusReader ?? null;
@@ -559,7 +582,14 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
           out.set(c, { status: 'none', priceUsd: null, health: null });
           continue;
         }
-        const supply = Number(state[kSupply(did)] ?? '0');
+        // ★ F (2026-09-04): the strict toU64 every other reader uses, not a bare
+        // Number(... ?? '0'). Both give 0 for a missing key today, but toU64 is
+        // the one place the "u64 base-units string -> number" rule lives (it
+        // returns 0 for null/blank/malformed rather than NaN), so this stays
+        // consistent with buildMarket/readMarketPricesBatch's other reads and
+        // cannot drift. The finite/non-negative guard below is now defensive
+        // (toU64 already returns a non-negative finite number) but kept.
+        const supply = toU64(state[kSupply(did)]);
         if (!Number.isFinite(supply) || supply < 0) {
           out.set(c, { status: 'unknown', priceUsd: null, health: null });
           continue;
@@ -1308,7 +1338,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     const confirmed = await this.awaitRegisteredAdvance(input.creator, registeredBefore);
     if (!confirmed) {
       throw new Error(
-        'CREATOR_TOKENS_REGISTER_UNCONFIRMED: Hive accepted the launch, but Magi has not recorded your market yet. It may still land in a moment. Refresh before launching again — launching twice is refused on chain, but a second first-buy would be charged.'
+        'CREATOR_TOKENS_REGISTER_UNCONFIRMED: Hive accepted the launch, but Magi has not recorded your market yet. It may still land in a moment. Refresh before launching again. Launching twice is refused on chain and reverts in full, so you will not be charged twice.'
       );
     }
     // A Hive broadcast resolves at L1-accept — BEFORE the L2 contract executes
@@ -1352,6 +1382,119 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       ),
       pending: true
     };
+  }
+
+  /**
+   * ★★★ THE ONE-SIGNATURE LAUNCH (2026-09-04, Meritum launch rework — item A).
+   *
+   * Broadcasts `register` (op 0) plus one `createOffering` per configured service
+   * (ops 1..N) as a SINGLE Hive transaction — one wallet prompt instead of 1 + N
+   * — then confirms the on-chain outcome.
+   *
+   * ★ ATOMIC, verified against go-vsc-node (read, not assumed):
+   *   - ExecuteBatch runs the ops in ORDER on ONE shared ledger/call session
+   *     (state_engine.go:2235-2390): op 1 reads the market op 0 created, no
+   *     intervening commit.
+   *   - Any op failing does `ledgerSession.Revert(); break`, and
+   *     `callSession.Commit()` runs only `if ok` — so a rejected offering discards
+   *     register (and its first buy) too: NOTHING lands, nothing is charged for a
+   *     market. The whole tx gets ONE result: `TxOutput[tx.TxId] = {Ok: ok}`.
+   *   - RC is charged CUMULATIVELY on the shared session; an offering that runs
+   *     out of RC reverts the whole tx. use-meritum-launch's checkLaunchRcBudget
+   *     gates on the full sum so this cannot happen for an in-budget creator.
+   *
+   * ★ CONFIRMATION — the correction to the build map's literal instruction, made
+   * after reading the node (global rule 1: read the code before theorizing).
+   * The map said to confirm each offering by a per-op `(txId, opIndex)` L2 id via
+   * findTransaction. THAT ID DOES NOT RESOLVE for a `vsc.call` op: go-vsc-node
+   * ingests the WHOLE Hive transaction as ONE tx-status record keyed by the Hive
+   * tx id (state_engine.go:1764 `Id: self.TxId`) and writes ONE terminal
+   * CONFIRMED/FAILED for it (blockProducer.go MakeOplog + transactions.go
+   * ExecuteOplog SetOutput, both keyed by the Hive tx id). `MakeTxId(txId, opIdx)`
+   * yields `txId` / `txId-1` / … used only for CONTRACT-OUTPUT records, and the
+   * DagCbor `ContractId` is only for contract DEPLOYMENT — neither is a
+   * findTransaction status. So per-op awaitExecution would time out on EVERY real
+   * success and falsely report UNCONFIRMED (a false negative on a money path).
+   *
+   * Because the bundle is atomic, the correct confirm is the WHOLE-TX terminal
+   * status — which is exactly what awaitExecution(hiveTxId) already reads, the
+   * same proven mechanism the single-op Hive writes use:
+   *   confirmed -> register live AND every offering live (all-or-nothing)
+   *   failed    -> reverted atomically: nothing created, nothing charged
+   *   timeout   -> unknown; the first-buy HBD rides register, so a blind re-launch
+   *                could double-charge it — surface REGISTER_UNCONFIRMED, never
+   *                "nothing was charged".
+   *
+   * ★ ONE confirmation window, NOT two. This uses awaitExecution's
+   * EXECUTION_CONFIRM_TIMEOUT_MS (180s) and nothing more, deliberately: the
+   * launch flow's cross-tab claim is LAUNCH_CLAIM_TTL_MS = REGISTER_CONFIRM_TIMEOUT_MS
+   * + 30s (210s), and F1's invariant is that the claim must OUTLIVE the operation.
+   * Chaining a second state poll after a timeout could run to ~360s and expire
+   * the claim mid-flight, reopening the double-launch window. awaitExecution alone
+   * already yields the confirmed/failed/timeout the UI needs, so there is no
+   * second poll.
+   *
+   * SECURITY: the broadcast op list is EXACTLY buildLaunchOps' output (one
+   * register with the disclosed face/cap/first-buy + exactly the configured
+   * offerings, in order); the first-buy HBD leg rides ONLY register; each op keeps
+   * its own rc_limit; the signer/key path is unchanged (one active-key signature
+   * over the whole tx). See launch-ops.ts and broadcaster.ts.
+   *
+   * Resolves a LaunchResult on success; REJECTS (with a coded message the launch
+   * flow already keys on) on a definitive revert or an unconfirmed timeout — the
+   * same throw-based contract registerMarket uses, so writeFailureMessage and the
+   * cross-tab claim logic work unchanged.
+   */
+  async launchMarket(input: LaunchMarketInput): Promise<LaunchResult> {
+    this.assertBundleBroadcaster();
+
+    // Build the EXACT op list to broadcast. buildLaunchOps validates EVERY op
+    // (range checks on register, validOfferTitle + positive price on each
+    // offering, one-signer) so a doomed op throws HERE, before anything is signed
+    // — never after, where it would revert the whole atomic launch.
+    const ops = buildLaunchOps({
+      netId: this.config.netId,
+      contractId: this.config.contractId,
+      rcLimit: this.config.rcLimit,
+      register: input.register,
+      offerings: input.offerings
+    });
+
+    // ONE signature, one broadcast, all ops in order.
+    const txId = await this.bundleBroadcast(ops);
+
+    // The signature is done and Hive has accepted the transaction; the UI may now
+    // move from "approve in your wallet" to "confirming on-chain".
+    input.onBroadcast?.();
+
+    // Confirm the ATOMIC outcome by the whole-tx terminal status (see the doc
+    // above for why this is the correct — and the map's per-op id the incorrect —
+    // confirmation for a bundled vsc.call), in ONE window.
+    const outcome = await this.awaitExecution(txId);
+
+    if (outcome !== 'confirmed') {
+      // The launch did not verifiably land. Throw the coded shape the launch flow
+      // keys on so the correct copy is chosen (item E):
+      //  - FAILED  -> atomic revert, so "nothing was charged" is ACCURATE.
+      //  - timeout -> may still have landed; register carries the first-buy HBD,
+      //    so a blind re-launch would re-charge it — never say "nothing charged".
+      if (outcome === 'failed') {
+        throw new Error(
+          'CREATOR_TOKENS_LAUNCH_REVERTED: the chain refused this launch, so no market or offering was created and nothing was charged.'
+        );
+      }
+      throw new Error(
+        'CREATOR_TOKENS_REGISTER_UNCONFIRMED: Hive accepted the launch, but Magi has not recorded your market yet. It may still land in a moment. Check your token before launching again. Launching twice is refused on chain and reverts in full, so you will not be charged twice.'
+      );
+    }
+
+    // Confirmed live. Under atomicity every configured offering is live too.
+    const offerings: LaunchOfferingResult[] = input.offerings.map((o, i) => ({
+      index: i,
+      title: o.title,
+      ok: true
+    }));
+    return { txId, registered: true, offerings };
   }
 
   async renewSubscription(input: RenewSubscriptionInput): Promise<Market> {
@@ -2726,6 +2869,15 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   private async broadcast(op: CustomJsonOp): Promise<string> {
     if (!this.broadcaster) throw new Error(NO_BROADCASTER_MSG);
     return this.broadcaster(op);
+  }
+
+  private assertBundleBroadcaster(): void {
+    if (!this.bundleBroadcaster) throw new Error(NO_BUNDLE_BROADCASTER_MSG);
+  }
+
+  private async bundleBroadcast(ops: CustomJsonOp[]): Promise<string> {
+    if (!this.bundleBroadcaster) throw new Error(NO_BUNDLE_BROADCASTER_MSG);
+    return this.bundleBroadcaster(ops);
   }
 
   /**

@@ -3,7 +3,7 @@ import { getCreatorTokensConfig } from '../creator-tokens-data-source';
 import { getCreatorTokensHiveChain } from './hive-chain';
 import { LoginType } from '@smart-signer/types/common';
 import type { CustomJsonOp } from './op-builders';
-import type { Broadcaster } from '../vsc-data-source';
+import type { Broadcaster, BundleBroadcaster } from '../vsc-data-source';
 
 // Finding C-B: the real broadcaster. VscCreatorTokensDataSource's
 // broadcaster dependency existed (VscCreatorTokensDataSourceDeps.broadcaster)
@@ -287,6 +287,93 @@ export const hiveTransactionBroadcaster: Broadcaster = async (op: CustomJsonOp) 
     },
     // THE RUNTIME REQUIREMENT, not a comment. Reaches the signer as
     // SignTransaction.requiredKeyType (packages/transaction/index.ts:122,141-152).
+    { requiredKeyType: REQUIRED_KEY_TYPE }
+  );
+  return result.transactionId;
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// ONE-SIGNATURE BUNDLE (2026-09-04, Meritum launch rework — item A)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// The Meritum launch is register + N offerings. Broadcasting them as N+1
+// separate Hive transactions asks the creator for N+1 wallet prompts; a single
+// Hive transaction carrying all N+1 custom_json ops asks for ONE. That is safe
+// because the ops execute in order sharing one on-chain session and the whole tx
+// is ATOMIC (see launch-ops.ts + vsc-data-source.ts's launchMarket doc): all
+// ops land or none do.
+//
+// THIS IS PURELY AN ASSEMBLY CHANGE. It does the SAME thing hiveTransactionBroadcaster
+// does — same active-authority guard on EVERY op, same chain override, same ONE
+// signTransaction, same broadcast — except it calls `pushOperation` once per op
+// IN ORDER before the single signature. Nothing about the signer/key path
+// changes: the wallet is asked for exactly one active-key signature over the
+// whole transaction, and no WIF/key ever reaches this page (the same refusals in
+// assertCanSignWithActiveAuthority apply to every op). The per-op CustomJsonOp is
+// the identical wire object buildOp produced; it is passed straight through,
+// never reshaped, so the bundle contains exactly the disclosed launch.
+export const hiveTransactionBundleBroadcaster: BundleBroadcaster = async (ops: CustomJsonOp[]) => {
+  if (ops.length === 0) {
+    // ExecuteBatch rejects a 0-op tx (state_engine.go:3479); refuse locally too
+    // rather than prompt a wallet for a transaction that cannot execute.
+    throw new Error('CREATOR_TOKENS_EMPTY_BUNDLE: refusing to broadcast a transaction with no operations.');
+  }
+
+  // (1) EVERY op must pass the same active-authority guard the single-op path
+  // applies — an empty/posting auth, a signer mismatch, or a key-in-browser wif
+  // is refused per op, so no op in the bundle can slip past it.
+  for (const op of ops) assertCanSignWithActiveAuthority(op);
+
+  // (2) ONE SIGNER FOR THE WHOLE TRANSACTION. A Hive transaction carries a single
+  // signature; assertCanSignWithActiveAuthority already checked each op names the
+  // session's signer, so they necessarily agree — assert it explicitly anyway, so
+  // a future caller that assembled a mixed-signer list is refused here rather than
+  // producing a transaction that could never verify.
+  const signer = bareAccount(ops[0].required_auths[0]);
+  for (const op of ops) {
+    if (bareAccount(op.required_auths[0]) !== signer) {
+      throw new Error(
+        'CREATOR_TOKENS_BUNDLE_MIXED_SIGNERS: every operation in a launch bundle must be signed by the same account.'
+      );
+    }
+  }
+
+  // ★ WHICH HIVE CHAIN? — identical override logic to hiveTransactionBroadcaster
+  // above; see its comment. The bundle is built, signed and broadcast on OUR
+  // chain when an override is configured.
+  const config = getCreatorTokensConfig();
+  const override =
+    config?.hiveApi || config?.hiveChainId
+      ? { apiEndpoint: config?.hiveApi ?? '', chainId: config?.hiveChainId ?? '' }
+      : null;
+
+  if (override) {
+    const chain = await getCreatorTokensHiveChain(override);
+    const txBuilder = await chain.createTransaction();
+    // Each op pushed IN ORDER: register (op 0) first, then each offering. The op
+    // is passed straight through, byte-identical to what buildOp produced.
+    for (const op of ops) txBuilder.pushOperation({ custom_json_operation: op });
+    txBuilder.validate();
+    const signature = await transactionService.signTransaction(
+      txBuilder,
+      undefined,
+      REQUIRED_KEY_TYPE,
+      chain,
+      override.apiEndpoint || undefined,
+      override.chainId || undefined
+    );
+    txBuilder.addSignature(signature);
+    await chain.api.network_broadcast_api.broadcast_transaction({
+      max_block_age: -1,
+      trx: txBuilder.toApiJson()
+    });
+    return txBuilder.id;
+  }
+
+  const result = await transactionService.processHiveAppOperation(
+    (builder) => {
+      for (const op of ops) builder.pushOperation({ custom_json_operation: op });
+    },
     { requiredKeyType: REQUIRED_KEY_TYPE }
   );
   return result.transactionId;

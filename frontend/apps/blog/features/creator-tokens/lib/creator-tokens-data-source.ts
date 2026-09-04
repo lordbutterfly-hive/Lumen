@@ -1,7 +1,7 @@
 import env from '@beam-australia/react-env';
-import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, ContractRules, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RenewSubscriptionInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../types';
+import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, ContractRules, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RenewSubscriptionInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../types';
 import { MockCreatorTokensDataSource } from './mock/mock-data-source';
-import { hiveTransactionBroadcaster } from './vsc/broadcaster';
+import { hiveTransactionBroadcaster, hiveTransactionBundleBroadcaster } from './vsc/broadcaster';
 import { routingBroadcaster } from './vsc/wallet-broadcaster';
 import { signMessageWith, signTypedDataWith } from '@/blog/features/lite-auth/wallet/appkit';
 import { VscCreatorTokensDataSource } from './vsc-data-source';
@@ -117,6 +117,13 @@ export interface CreatorTokensDataSource {
   // VscCreatorTokensDataSource) — same deferred-broadcaster convention as
   // VscMarketDataSource.placeBet/claim. ----
   registerMarket(input: RegisterMarketInput): Promise<Market>;
+  /**
+   * The ONE-SIGNATURE launch: register + all offerings as a single, atomic Hive
+   * transaction (one wallet prompt). Resolves a LaunchResult once the launch is
+   * confirmed live; rejects (with a coded message) on an atomic revert or an
+   * unconfirmed timeout. See VscCreatorTokensDataSource.launchMarket.
+   */
+  launchMarket(input: LaunchMarketInput): Promise<LaunchResult>;
   renewSubscription(input: RenewSubscriptionInput): Promise<Market>;
   setFace(input: SetFaceInput): Promise<Market>;
   setCap(input: SetCapInput): Promise<Market>;
@@ -270,7 +277,15 @@ export function getCreatorTokensDataSource(): CreatorTokensDataSource | null {
           // provider call, different message. Bound to the 'btc' chain here so
           // the broadcaster never has to know which chains exist.
           (address, message) => signMessageWith('btc', address, message)
-        )
+        ),
+        // The one-signature launch is Hive-only: the launch flow blocks a lite
+        // (wallet/did:pkh) account before step 3, so launchMarket is only ever
+        // reached by a Hive creator. The Hive-rail bundle broadcaster applies the
+        // same active-authority guard per op, and refuses a non-Hive signer with a
+        // named error — so it fails closed rather than silently for any path that
+        // did reach it. Wallet-rail bundling is a container change out of scope
+        // here (and unreachable), so it is deliberately not wired.
+        bundleBroadcaster: hiveTransactionBundleBroadcaster
       });
     } else if (isCreatorTokensDemoEnabled()) {
       instance = new MockCreatorTokensDataSource();

@@ -21,7 +21,7 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useTokenAccounts } from './use-token-accounts';
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
 import { BLOCKS_PER_DAY } from '../lib/contract-math';
-import type { Ask, Market, Offering, QuoteOracleStatus } from '../types';
+import type { Ask, LaunchResult, Market, Offering, QuoteOracleStatus } from '../types';
 import { adaptAsk, adaptMarket, blocksToDays, usdFromHbd, type LiveTokenMarket } from './adapt';
 import type { PortfolioAsk } from '../market/portfolio';
 import type { LiveMarketStatus } from './use-live-token-market';
@@ -149,6 +149,18 @@ export interface LiveStudio {
 
   /** market.go Register — opens the creator's own market. `faceHbd` is their default posted price; named services are separate offerings. */
   register: (input: { faceHbd: number; capTokens: number; firstBuyTokens?: number }) => Promise<void>;
+  /**
+   * The ONE-SIGNATURE launch: register + all offerings in a single atomic Hive
+   * transaction (one wallet prompt). `onBroadcast` fires once the signature is
+   * done and the tx is accepted, before the on-chain confirm poll — the launch
+   * flow uses it to move from "approve in your wallet" to "confirming". Resolves
+   * a LaunchResult on success; rejects on an atomic revert or unconfirmed timeout.
+   */
+  launchMarket: (input: {
+    register: { faceHbd: number; capTokens: number; firstBuyTokens?: number };
+    offerings: { title: string; priceUsd: number }[];
+    onBroadcast?: () => void;
+  }) => Promise<LaunchResult>;
   answer: (input: { seq: number; deadlineBlock: number; answerHash: string }) => Promise<void>;
   decline: (input: { seq: number; deadlineBlock: number }) => Promise<void>;
   renew: (periods: number) => Promise<void>;
@@ -506,6 +518,30 @@ export function useLiveStudio(): LiveStudio {
         call(async ({ source, signer }) => {
           await source.registerMarket({ creator: signer, faceHbd: input.faceHbd, capTokens: input.capTokens, firstBuyTokens: input.firstBuyTokens });
         }),
+      [call]
+    ),
+    launchMarket: useCallback(
+      (input: {
+        register: { faceHbd: number; capTokens: number; firstBuyTokens?: number };
+        offerings: { title: string; priceUsd: number }[];
+        onBroadcast?: () => void;
+      }) =>
+        // Through the SAME `call()` choke point as every other write, so the
+        // per-tab inFlight guard and the post-write invalidation apply, and
+        // through the SAME `requireSigner()` — the signer/key path is unchanged.
+        // `signer` is the sole required auth on every op the source builds.
+        call(async ({ source, signer }) =>
+          source.launchMarket({
+            register: {
+              creator: signer,
+              faceHbd: input.register.faceHbd,
+              capTokens: input.register.capTokens,
+              firstBuyTokens: input.register.firstBuyTokens
+            },
+            offerings: input.offerings.map((o) => ({ creator: signer, title: o.title, priceHbd: o.priceUsd })),
+            onBroadcast: input.onBroadcast
+          })
+        ),
       [call]
     ),
     answer: useCallback(
