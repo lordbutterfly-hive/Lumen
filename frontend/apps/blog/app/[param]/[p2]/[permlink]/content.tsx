@@ -78,6 +78,7 @@ import { Link } from '@hive/ui';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CircleSpinner } from 'react-spinners-kit';
+import { useInView } from 'react-intersection-observer';
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -300,28 +301,42 @@ const PostContent = () => {
     },
     enabled: !!author && !!permlink,
     initialData: initialPostData ?? undefined,
-    // ★ NOT `Date.now()` (2026-08-13, audit O2 item 2a). `initialPostData` is
-    // `getPostCached` (page.tsx) — a raw chain read that has never seen the
-    // Lumen-vote merge above (:209-219), which is the ONLY code on this page
-    // that applies it. Stamping the SSR data as fresh-now made React Query
-    // treat it as valid for the full `staleTime` (2 minutes) and skip the
-    // `queryFn` on mount, so the merge never ran on an ordinary page view — a
-    // reader's own Lumen vote reverted to the chain-only count on every
-    // reload. `0` marks the SSR data stale so the merge runs one round trip
-    // later; `staleTime` still governs every fetch AFTER that first one.
+    // ★ WAS `0`, NOW `Date.now()` (2026-09-04, T3d perf pass). The note this
+    // replaces explained why `0` was correct THEN: `initialPostData` came from
+    // `getPostCached` (page.tsx) — a raw chain read that had never seen the
+    // Lumen-vote merge above — so stamping it fresh-now would have skipped the
+    // one round trip that actually applied the merge, and a reader's own vote
+    // would revert to the chain-only count on every reload.
     //
-    // ★ CORRECTION (2026-08-21). This note used to end "`0` still paints the
-    // SSR data instantly (no spinner, no layout shift)". The DATA is indeed
-    // still painted — but the claim about the spinner was wrong, and it cost
-    // this page its server-rendered article for eight days. React Query v4
-    // reports `isLoading === true` for the whole lifetime of a query carrying
-    // `initialDataUpdatedAt: 0`, data present or not (measured with
-    // `renderToString` against this repo's own v4). Anything gating on
-    // `postIsLoading` therefore rendered its loading arm on EVERY server
-    // render. One did: the article body's slot. Keep `0` — it is correct for
-    // the reason above — but never gate rendered output on `postIsLoading`
-    // while it is set; gate on whether `postData` exists.
-    initialDataUpdatedAt: 0,
+    // `page.tsx` now calls `mergeLumenEngagement` itself, on the same postData,
+    // before it ever reaches this seed — so `initialPostData` already carries
+    // the same Lumen vote/reblog totals this `queryFn` computes. The merge is
+    // an AGGREGATE (community-wide vote/reblog counts from `lumen_vote`/
+    // `lumen_reblog`), never the viewer's own vote or reblog state — those live
+    // in the wholly separate `viewerVoteData` (:1261) and `isReblogged`
+    // queries below, which do not read this seed at all — so this is equally
+    // safe for a signed-in viewer and an anonymous one; there is no per-viewer
+    // field this seed is missing.
+    //
+    // With the seed genuinely final, `0` no longer buys anything — it only
+    // forced the FULL `/api/post-status` refetch (~17KB) on every mount to
+    // reproduce data the server already sent. `Date.now()` marks the seed
+    // fresh, so `staleTime` below is honoured and that refetch becomes what it
+    // should always have been: conditional on the seed actually going stale
+    // (window refocus past `staleTime`, a later navigation), not mandatory on
+    // every view. Same pattern this file already uses for `communityData`
+    // (`useCommunityInitialData ? Date.now() : undefined`, below).
+    //
+    // ★ THE `isLoading` TRAP STILL APPLIES IN REVERSE, HARMLESSLY. The
+    // 2026-08-21 correction below documented that `initialDataUpdatedAt: 0`
+    // pins `postIsLoading` true for the query's whole life even with data
+    // present. A real timestamp does the opposite — `postIsLoading` now reads
+    // `false` as soon as this mounts. Checked both call sites: `:1323`
+    // (`!postData && !postIsLoading`) only matters when `postData` is falsy,
+    // where this change is a no-op, and `:2342`'s `<Loading loading=.../>` sits
+    // in the branch that only renders when `postData` is ALREADY falsy too — so
+    // neither depends on `postIsLoading` starting true.
+    initialDataUpdatedAt: Date.now(),
     staleTime: StaleTime.MEDIUM,
     onError: (error) => {
       handleError(error, { method: 'getPost', params: { author, permlink, observer } });
@@ -421,8 +436,34 @@ const PostContent = () => {
     staleTime: Infinity
   });
 
+  /**
+   * ★ VISIBILITY-GATED (2026-09-04, T3h perf pass). Both places `suggestionData`
+   * renders — the sticky right-rail `AnimatedList` (`rightRailExtra` below,
+   * beside the TOP of the article) and the below-article `SuggestionsList`
+   * strip (the `xl:hidden` block further down, right before the
+   * `#comments` sentinel) — sit at DIFFERENT scroll positions, so no single
+   * "is the rail on screen" check covers both. `suggestionsSentinelRef` is
+   * instead planted at the article/comments boundary — a point that exists in
+   * the DOM at every viewport (never itself CSS-hidden) — with a generous
+   * `rootMargin` so it fires well before a reader actually scrolls there.
+   * `triggerOnce` because React Query's `enabled` only needs to flip on once;
+   * flipping it back off on scroll-up would just tear down data already
+   * fetched for no benefit.
+   *
+   * This does not change what a desktop reader sees in the common case (most
+   * articles are taller than one viewport + the margin, so the rail still
+   * populates during ordinary reading, well before they'd notice its absence);
+   * it stops the ~44-88KB request from firing in the immediate post-hydration
+   * burst for every visit, and skips it entirely for a reader who never scrolls
+   * this far — a short visit, a bounce, a reader who stops at the byline.
+   */
+  const { ref: suggestionsSentinelRef, inView: suggestionsNearView } = useInView({
+    triggerOnce: true,
+    rootMargin: '800px 0px'
+  });
+
   const { data: suggestionData } = useQuery({
-    enabled: hiveSenseAvailable === true,
+    enabled: hiveSenseAvailable === true && suggestionsNearView,
     // ★ DO NOT RETRY: THE FAILURE THIS QUERY ACTUALLY SEES IS PERMANENT (2026-08-14).
     //
     // `getSimilarPostsByPost` funnels every failure through
@@ -443,12 +484,27 @@ const PostContent = () => {
     retry: false,
     queryKey: ['suggestions', author, permlink, observer],
     queryFn: async () => {
+      // ★ 5, NOT 10 (2026-09-04, T3h perf pass). The rail (`animated-tab.tsx`'s
+      // `RAIL_LIMIT`) has only ever shown 5 of these; the other consumer (the
+      // below-article `horizontal` strip) shows every USABLE entry it gets, with
+      // no cap of its own. `full_posts` cannot go to 0 — the Hivesense API's own
+      // contract for it (`extended-hive.chain.ts`'s `HivesenseEndpointsPostsSimilarParams`)
+      // is that anything past `full_posts` comes back a STUB — `{author,
+      // permlink}` only, no title, no image — and `isPostStub` below (correctly)
+      // filters every stub out. `full_posts: 0` would therefore return zero
+      // usable posts, not a lighter version of this feature. Matching
+      // `result_limit` to it means every requested post is a full one — nothing
+      // wasted fetching stubs this queryFn immediately throws away — while still
+      // cutting the previous 10-full-post payload (~88KB) by roughly half. The
+      // one real behaviour change: the horizontal strip's ceiling drops from 10
+      // suggestions to 5, same as the rail's — a below-the-fold "might also
+      // like" widget, not a page primitive.
       const results = await getSimilarPostsByPost({
         author,
         permlink,
         observer,
-        result_limit: 10, // Only get 10 suggestions
-        full_posts: 10 // Get all as full posts
+        result_limit: 5,
+        full_posts: 5
       });
 
       if (!results) return null;
@@ -529,17 +585,24 @@ const PostContent = () => {
     queryFn: () => fetchDiscussion(author, permlink, observer),
     enabled: isOnChain,
     initialData: initialDiscussion ?? undefined,
-    // ★ SEED IT STALE (2026-08-13) — WITHOUT THIS, TODAY'S COMMENT-VOTE FIX DOES
-    // NOTHING. `/api/discussion` gained `mergeLumenEngagement` today so a lite
-    // reader's vote on a COMMENT stops vanishing on reload. But this seed comes from
-    // `page.tsx`'s raw `getDiscussion` with no merge, and `Date.now()` told React
-    // Query it was freshly fetched — so for the whole `staleTime` window the
-    // merge-including `queryFn` never ran, and an ordinary page load is exactly that
-    // window. The fix was live in the route and inert on the path every reader takes.
+    // ★ WAS SEEDED STALE (2026-08-13), NOW REAL (2026-09-04, T3d perf pass).
+    // The bug this used to guard against: `/api/discussion` gained
+    // `mergeLumenEngagement` on 2026-08-13 so a lite reader's vote on a COMMENT
+    // stops vanishing on reload, but `page.tsx`'s SSR seed came from a raw
+    // `getDiscussion` with no merge — so seeding it fresh would have skipped the
+    // one refetch that ever applied it, for the whole `staleTime` window, on
+    // every ordinary page load.
     //
-    // This is the inverse of the change made to `postData` 188 lines above, in this
-    // same file, for this same reason. Same bug, same file, missed twin.
-    initialDataUpdatedAt: initialDiscussion ? 0 : undefined,
+    // `page.tsx` now runs the SAME three steps `/api/discussion` runs, in the
+    // same order (identities, owner-block filter, `mergeLumenEngagement`) —
+    // see its own note there — so `initialDiscussion` is no longer missing
+    // anything this route's refetch would have added. The merge is an
+    // aggregate vote/reblog total (`lumen_vote`/`lumen_reblog`), not
+    // per-viewer state, so this holds equally for a signed-in reader and an
+    // anonymous one. `Date.now()` lets `staleTime` govern this the same as
+    // every other seeded query on this page instead of forcing the full
+    // ~22KB thread refetch on every mount to reproduce what SSR already sent.
+    initialDataUpdatedAt: initialDiscussion ? Date.now() : undefined,
     staleTime: StaleTime.MEDIUM,
     onError: (error) => {
       handleError(error, { method: 'getDiscussion', params: { author, permlink, observer } });
@@ -2319,6 +2382,13 @@ const PostContent = () => {
                     </Link>
                   </div>
                 ) : null}
+                {/* ★ THE HIVESENSE VISIBILITY GATE (T3h, 2026-09-04) — see the
+                    `useInView` note by `suggestionData` above. Never itself
+                    `xl:hidden`, on purpose: this must exist in the DOM at every
+                    viewport so the article/comments boundary it marks is a
+                    consistent trigger point regardless of which of the two
+                    suggestion renderings below ends up visible. */}
+                <div ref={suggestionsSentinelRef} aria-hidden className="h-px" />
                 {/* ★ `xl:hidden`, NOT `md:hidden` (2026-08-13, audit §6.4 check e).
                     The rail that carries the suggestions only exists at `xl` and
                     up. While this said `md:hidden`, a reader between 768px and

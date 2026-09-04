@@ -1,8 +1,10 @@
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import PostContent from './content';
 import { getPostCached } from '@/blog/lib/cached-api';
 import { liteChainCoordinates, liteRecordExists } from '@/blog/lib/lite/render/lite-entry';
 import { attachLiteIdentities, attachLiteIdentitiesToDiscussion } from '@/blog/lib/lite/render/attach-lite';
 import { applyOwnerBlocksToDiscussion } from '@/blog/lib/lite/social/block-filter';
+import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
 import { isLumenPermlink } from '@/blog/lib/lite/render/lite-post-id';
 import { commentPageRedirectTarget } from '@/blog/lib/post/comment-redirect';
@@ -135,6 +137,32 @@ const PostPage = async ({
     // path, so this is skipped whenever that ran.
     if (postData && !postData._lite) await attachLiteIdentities([postData]);
 
+    // ★★★ MERGE LUMEN ENGAGEMENT INTO THE SSR SEED (T3d, 2026-09-04 perf pass).
+    //
+    // `getPostCached`/`liteEntryForPermlinkCached` above are both raw chain
+    // reads — neither has ever called `mergeLumenEngagement`, so this page's
+    // `postData` was missing the community-wide Lumen vote/reblog totals
+    // (`lumen_vote`/`lumen_reblog`) that `content.tsx`'s client `queryFn`
+    // applies via `fetchLiteEngagement`. `content.tsx` compensated by seeding
+    // `initialDataUpdatedAt: 0`, which forces React Query to immediately
+    // refetch the FULL post through `/api/post-status` (~17KB) on every
+    // mount just to run that merge once — see this repo's own note there.
+    //
+    // Doing the merge here means the SSR payload is the same complete answer
+    // the client refetch used to manufacture, so `content.tsx` can seed a
+    // real timestamp and let `staleTime` govern the refetch instead of
+    // forcing it every time. `mergeLumenEngagement` is an AGGREGATE
+    // (community totals, not the viewer's own vote/reblog state — see its
+    // own doc), so this holds for a signed-in viewer and an anonymous one
+    // identically; there is no per-viewer field it could get wrong.
+    //
+    // It never throws (its own internal catch logs and returns the entries
+    // unchanged on a DB hiccup), so this is never a new way for the post
+    // page to fail — only, on a good day, a way for it to arrive complete.
+    if (postData) {
+      postData = (await mergeLumenEngagement([postData]))[0] ?? postData;
+    }
+
     discussionData = discussionResult.status === 'fulfilled' ? (discussionResult.value ?? null) : null;
 
     // Same problem as the post itself, one level down: the discussion was fetched
@@ -192,6 +220,26 @@ const PostPage = async ({
     try {
       discussionData = await attachLiteIdentitiesToDiscussion(discussionData);
       discussionData = await applyOwnerBlocksToDiscussion(discussionData);
+
+      // ★★★ MERGE LUMEN ENGAGEMENT INTO THE SSR SEED TOO (T3d, 2026-09-04 perf
+      // pass) — same fix as `postData` above, same reason, its own missed
+      // twin. `/api/discussion` (the route `content.tsx`'s client refetch
+      // calls) already runs identities -> owner-block filter -> this exact
+      // merge, in this exact order (see that route's own note) — this SSR path
+      // ran the first two and stopped, so the seed was missing the community
+      // vote/reblog totals the client refetch existed to add. Applied last,
+      // same as the route: a Lumen lookup is never spent on a comment the
+      // block filter is about to discard. `mergeLumenEngagement` is an
+      // aggregate (never the viewer's own vote/reblog state), so this holds
+      // for a signed-in reader and an anonymous one identically, and it never
+      // throws on its own — a DB hiccup here surfaces the same as any other
+      // failure in this try, below.
+      if (discussionData) {
+        const beforeMerge: Record<string, Entry> = discussionData;
+        const discussionKeys = Object.keys(beforeMerge);
+        const mergedValues = await mergeLumenEngagement(discussionKeys.map((key) => beforeMerge[key]));
+        discussionData = Object.fromEntries(discussionKeys.map((key, i) => [key, mergedValues[i]]));
+      }
     } catch (error) {
       logger.error(error, 'owner-block filter failed for %s; serving no thread', permlink);
       discussionData = null;

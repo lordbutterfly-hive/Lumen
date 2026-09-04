@@ -127,6 +127,42 @@ function isSafePathSegment(value: string): boolean {
   return true;
 }
 
+/**
+ * ★★★ SLIM THE STATUS PAYLOAD (T1f, 2026-09-04, perf pass).
+ *
+ * The upstream root (`GET /hivesense-api/`, the trailing-slash URL built in the
+ * `status` case below) answers with its full OpenAPI info document — measured
+ * ~19KB, `info`/`paths`/`components`/`servers`, the whole schema — for a probe
+ * whose only consumer, `getHiveSenseStatus()`
+ * (`packages/transaction/lib/hivesense-api.ts` — outside this pass's file
+ * list, see its own doc), reads exactly one field:
+ * `response?.info?.title === 'Hivesense'`. Every post page pays for a document
+ * nothing has ever looked past the first two keys of.
+ *
+ * The wire CONTRACT stays `{ info: { title } }` on purpose, rather than moving
+ * to something like `{ available: boolean }` — the code that parses this
+ * response lives in `packages/transaction`, which this pass does not touch,
+ * and reshaping the payload here without updating that reader would break the
+ * probe instead of shrinking it. Keeping the same shape and dropping
+ * everything the reader never accesses gets the same byte win (19KB -> well
+ * under 100B) without reaching outside this job's brief.
+ *
+ * Only ever applied to a SUCCESSFUL status probe (see the call site) — an
+ * error body (`{error: ...}`, already small) is untouched, and a body that
+ * fails to parse as JSON is passed through untouched too. This is a size
+ * optimisation on the one payload known to be oversized, never a second place
+ * this route can fail differently than it already could.
+ */
+function slimStatusPayload(rawText: string): string {
+  try {
+    const parsed = JSON.parse(rawText) as { info?: { title?: unknown } } | null;
+    const title = parsed && typeof parsed === 'object' ? parsed.info?.title : undefined;
+    return JSON.stringify({ info: { title: typeof title === 'string' ? title : null } });
+  } catch {
+    return rawText;
+  }
+}
+
 /** Only forwards params of a type the upstream query string can carry, silently drops the rest. */
 function appendParams(url: URL, params: Record<string, unknown>, keys: string[]): void {
   for (const key of keys) {
@@ -357,7 +393,18 @@ async function proxy(
     const { status, text } = isStatusProbe
       ? await cachedRead(`hivesense:status:${base}`, STATUS_CACHE_MS, async () => {
           try {
-            return await readUpstream();
+            const upstreamResult = await readUpstream();
+            // ★ SLIMMED HERE, INSIDE THE MEMOISED CALLBACK — see
+            // `slimStatusPayload`'s own doc. Doing it here rather than after
+            // `cachedRead` returns means the ~19KB body is parsed and thrown away
+            // ONCE per `STATUS_CACHE_MS` window, and what actually sits in the
+            // server memo for those 5 minutes is the slim body, not the full
+            // OpenAPI document. Only a successful probe is slimmed; an upstream
+            // error already answers small (`{error: ...}`, the catch below) and
+            // is passed through as-is.
+            return upstreamResult.status >= 200 && upstreamResult.status < 300
+              ? { status: upstreamResult.status, text: slimStatusPayload(upstreamResult.text) }
+              : upstreamResult;
           } catch {
             return { status: 502, text: JSON.stringify({ error: 'upstream unreachable' }) };
           }
