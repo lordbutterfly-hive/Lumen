@@ -70,8 +70,17 @@ export function proxifyImageSrc(url?: string, width = 0, height = 0, format = 'w
   // is what actually means "already went through this function". Matching on
   // the path alone would wrongly treat every raw Hive-hosted upload as
   // pre-proxied and skip resizing/reformatting it entirely.
-  if (url.startsWith(`${proxyBase}/p/`) && /[?&]format=/.test(url)) {
-    return url; // Return as-is, already proxified
+  // ★ ...BUT ONLY WHEN NO RESIZE WAS REQUESTED (2026-09-04, perf). A card that
+  // asks for a width/height must still get THAT size, even off an already-proxied
+  // URL: an author's json_metadata.image often carries a full-size proxy URL
+  // (e.g. ?format=match&mode=fit&width=1536), and returning it unchanged shipped a
+  // single 1.9 MB image to a 256px card (96% of that page's image weight). When a
+  // width/height IS requested we fall through to extractPHash + rebuild below,
+  // which re-derives the SAME /p/<hash> at the requested size. With no resize
+  // requested (width=0,height=0) we still return it as-is (re-deriving would drop
+  // the existing width and, on mode=fit with no dimensions, can inflate the file).
+  if (url.startsWith(`${proxyBase}/p/`) && /[?&]format=/.test(url) && width === 0 && height === 0) {
+    return url; // already proxified, no resize asked for
   }
 
   if (url.indexOf('https://steemitimages.com/') === 0 && url.indexOf('https://steemitimages.com/D') !== 0) {
