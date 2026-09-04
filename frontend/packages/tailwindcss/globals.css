@@ -8,39 +8,54 @@
        stitching into font-ui => no global punctuation seam.
    Weights loaded: 400/500/600 only (NO 700) so nothing can render bolder than
    the app does today. Missing a surface just leaves it Lora (fail-safe).
+
+   ★ FILENAMES CARRY A CONTENT HASH (2026-09-04, perf hunt T-fonts). These 9
+   files used to be served under their bare descriptive names with a 1-day
+   Cache-Control (vs `/_next/static`'s 1-year immutable), costing a daily
+   conditional-GET round trip on every one of them. The 8-hex suffix is
+   `sha256sum <file> | cut -c1-8` of the CURRENT bytes: if a face is ever
+   re-subset or re-hinted, the new file gets a NEW hash and therefore a new
+   URL, so a long `immutable` cache lifetime (set at the edge/host layer, not
+   here) can never serve stale bytes under an old URL. Changing a font file's
+   content without also renaming it AND updating every `url(...)` below plus
+   the matching `<link rel=preload>` in `app/layout.tsx` reintroduces the
+   stale-cache trap this exists to close. apps/blog is the ONLY consumer of
+   this stylesheet (apps/wallet does not import it and ships no /fonts of its
+   own), so there is no second app whose public/fonts these paths must agree
+   with.
    ============================================================================ */
 
 /* ---------- Interface letters: Merriweather Sans ("Lumen UI") ---------- */
 @font-face{font-family:"Lumen UI";font-weight:400;font-style:normal;font-display:swap;
-  src:url(/fonts/merriweather-sans-latin-ext-400-normal.woff2) format("woff2");unicode-range:U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+  src:url(/fonts/merriweather-sans-latin-ext-400-normal.e3758ff1.woff2) format("woff2");unicode-range:U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;}
 @font-face{font-family:"Lumen UI";font-weight:400;font-style:normal;font-display:swap;
-  src:url(/fonts/merriweather-sans-latin-400-normal.woff2) format("woff2");}
+  src:url(/fonts/merriweather-sans-latin-400-normal.28371889.woff2) format("woff2");}
 @font-face{font-family:"Lumen UI";font-weight:500;font-style:normal;font-display:swap;
-  src:url(/fonts/merriweather-sans-latin-ext-500-normal.woff2) format("woff2");unicode-range:U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+  src:url(/fonts/merriweather-sans-latin-ext-500-normal.cebc3a77.woff2) format("woff2");unicode-range:U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;}
 @font-face{font-family:"Lumen UI";font-weight:500;font-style:normal;font-display:swap;
-  src:url(/fonts/merriweather-sans-latin-500-normal.woff2) format("woff2");}
+  src:url(/fonts/merriweather-sans-latin-500-normal.5d656fcf.woff2) format("woff2");}
 @font-face{font-family:"Lumen UI";font-weight:600;font-style:normal;font-display:swap;
-  src:url(/fonts/merriweather-sans-latin-ext-600-normal.woff2) format("woff2");unicode-range:U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+  src:url(/fonts/merriweather-sans-latin-ext-600-normal.6af270c2.woff2) format("woff2");unicode-range:U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;}
 @font-face{font-family:"Lumen UI";font-weight:600;font-style:normal;font-display:swap;
-  src:url(/fonts/merriweather-sans-latin-600-normal.woff2) format("woff2");}
+  src:url(/fonts/merriweather-sans-latin-600-normal.4f0b3ea5.woff2) format("woff2");}
 
 /* ---------- Interface DIGITS stitched into "Lumen UI": Fira wins for numbers in ANY
    font-ui text (declared AFTER Merriweather so digits resolve to Fira). This is what
    makes "Merriweather for UI, Fira for numbers" automatic everywhere. ---------- */
 @font-face{font-family:"Lumen UI";font-weight:400;font-style:normal;font-display:swap;
-  src:url(/fonts/fira-sans-digits-400.woff2) format("woff2");unicode-range:U+0030-0039,U+002C,U+002E,U+0024,U+0025,U+002B,U+2212,U+2013;}
+  src:url(/fonts/fira-sans-digits-400.64bd6851.woff2) format("woff2");unicode-range:U+0030-0039,U+002C,U+002E,U+0024,U+0025,U+002B,U+2212,U+2013;}
 @font-face{font-family:"Lumen UI";font-weight:500;font-style:normal;font-display:swap;
-  src:url(/fonts/fira-sans-digits-500.woff2) format("woff2");unicode-range:U+0030-0039,U+002C,U+002E,U+0024,U+0025,U+002B,U+2212,U+2013;}
+  src:url(/fonts/fira-sans-digits-500.cc36e988.woff2) format("woff2");unicode-range:U+0030-0039,U+002C,U+002E,U+0024,U+0025,U+002B,U+2212,U+2013;}
 @font-face{font-family:"Lumen UI";font-weight:600;font-style:normal;font-display:swap;
-  src:url(/fonts/fira-sans-digits-600.woff2) format("woff2");unicode-range:U+0030-0039,U+002C,U+002E,U+0024,U+0025,U+002B,U+2212,U+2013;}
+  src:url(/fonts/fira-sans-digits-600.aa2c09a8.woff2) format("woff2");unicode-range:U+0030-0039,U+002C,U+002E,U+0024,U+0025,U+002B,U+2212,U+2013;}
 
 /* ---------- Numbers: Fira Sans digits ("Lumen Num") ---------- */
 @font-face{font-family:"Lumen Num";font-weight:400;font-style:normal;font-display:swap;
-  src:url(/fonts/fira-sans-digits-400.woff2) format("woff2");}
+  src:url(/fonts/fira-sans-digits-400.64bd6851.woff2) format("woff2");}
 @font-face{font-family:"Lumen Num";font-weight:500;font-style:normal;font-display:swap;
-  src:url(/fonts/fira-sans-digits-500.woff2) format("woff2");}
+  src:url(/fonts/fira-sans-digits-500.cc36e988.woff2) format("woff2");}
 @font-face{font-family:"Lumen Num";font-weight:600;font-style:normal;font-display:swap;
-  src:url(/fonts/fira-sans-digits-600.woff2) format("woff2");}
+  src:url(/fonts/fira-sans-digits-600.aa2c09a8.woff2) format("woff2");}
 
 /* ---------- Tokens ---------- */
 :root{

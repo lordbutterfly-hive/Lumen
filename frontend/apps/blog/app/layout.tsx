@@ -17,9 +17,9 @@ import { trendingTagsForPrefetch, TRENDING_TAGS_QUERY_KEY } from '../lib/trendin
 import { StorageCleanup } from '@hive/ui';
 import CondenserMigration from '../components/condenser-migration';
 import OfflineGuard from '../components/offline-guard';
-import { getEnvVersion } from '../lib/env-version';
 import { Lora } from 'next/font/google';
 import { siteConfig } from '@ui/config/site';
+import { configuredImagesEndpoint } from '@ui/config/public-vars';
 
 // ★★★ ONE FAMILY. LORA, AND NOTHING ELSE (owner ruling, 2026-08-19).
 //
@@ -70,8 +70,36 @@ const lora = Lora({
   preload: true
 });
 
-// Get basePath from build-time environment
-const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+/**
+ * ★ T3b (perf hunt, 2026-09-04) — preconnect target for the image host.
+ *
+ * ~40 `<img>`s per page (feed thumbnails, avatars, post bodies) point at
+ * `configuredImagesEndpoint` (default `https://images.hive.blog`, overridable
+ * via `REACT_APP_IMAGES_ENDPOINT` — see `packages/ui/config/public-vars.ts`),
+ * and NOTHING warmed that connection before this: the DNS lookup + TCP + TLS
+ * handshake all happened on the first image request, serially blocking it.
+ * Derived from the same config the actual `<img src>`s resolve through
+ * (`proxifyImageSrc`/`getUserAvatarDirectUrl`) rather than hardcoded, so an
+ * env override moves the preconnect target with it instead of preconnecting
+ * to a host nothing on the page actually requests.
+ *
+ * ★ NO `crossOrigin` ON THE PRECONNECT. Grepped every `<img` in this app and
+ * `@hive/ui`/`@hive/renderer`'s components — none sets `crossOrigin`, so every
+ * image fetch is a plain, non-CORS request. A `crossorigin` preconnect opens
+ * an anonymous-CORS connection, which is a SEPARATE connection from the one
+ * a no-CORS `<img>` fetch actually uses — warming the wrong pool would waste
+ * the early connection instead of serving the real requests. (Contrast the
+ * font preloads below, which DO need `crossOrigin`: `as="font"` fetches are
+ * always anonymous-CORS by spec, same-origin or not.)
+ */
+function imagesPreconnectOrigin(): string {
+  try {
+    return new URL(configuredImagesEndpoint).origin;
+  } catch {
+    return 'https://images.hive.blog';
+  }
+}
+const imagesOrigin = imagesPreconnectOrigin();
 
 /**
  * ★★★ THIS WAS HIVE'S COPY, ON LUMEN'S MOST-SEEN SURFACE (2026-08-18).
@@ -201,15 +229,60 @@ export const viewport: Viewport = {
   themeColor: '#f7f7f7'
 };
 
+/**
+ * ★ T3a (perf hunt, 2026-09-04) — replaces the sync `<script src="/__ENV.js">`.
+ *
+ * `/__ENV.js` used to be a SEPARATE render-blocking request (826B, `no-store`,
+ * placed after the CSS chain): a full cold RTT before `<body>` could paint,
+ * every single load. `@beam-australia/react-env` (`dist/cli-index.js`,
+ * `getEnvironment()`) builds that file's content by taking every
+ * `process.env` key matching `/^REACT_APP_/i` verbatim and writing
+ * `window.__ENV = ${JSON.stringify(env)};` to `public/__ENV.js` ONCE, at
+ * container boot, BEFORE spawning `next start`/`server.js` — and that child
+ * process inherits the parent's (dotenv-expanded) `process.env` by default
+ * (`cross-spawn(..., { stdio: 'inherit' })` passes no `env` override). So the
+ * Next.js server process handling this exact render already holds, in its
+ * own `process.env`, byte-for-byte the same REACT_APP_* values react-env
+ * wrote to the file — reading them here cannot disagree with what the file
+ * would have said. `getBrowserEnv` below mirrors react-env's own filter
+ * exactly (same regex, same "every matching key, verbatim" rule).
+ *
+ * ★ WHY THIS IS SAFE TO DO PER-REQUEST, NOT JUST AT BOOT. This root layout
+ * already calls `cookies()` above, which opts the whole tree out of static
+ * rendering — every request re-runs this function against the LIVE
+ * `process.env` of the running container, so there is no build-time snapshot
+ * to go stale and no risk of shipping a dev/testnet value baked in at build.
+ * (Contrast: hardcoding any value here would have been wrong — the whole
+ * point of react-env is that the deploy's real `/opt/lumen/.env` decides
+ * this, not the source tree.)
+ *
+ * ★ `<`-ESCAPING, NOT A RAW `JSON.stringify`. This now sits INSIDE an
+ * HTML document (the old file was served as `application/javascript`, where
+ * this had no meaning). `JSON.stringify` does not escape `<`, so an operator
+ * env value that happened to contain `</script>` could otherwise break out
+ * of this tag; escaping every `<` to its JSON `\u` form (browsers decode it
+ * identically, `<script>` parsing never sees a literal `<`) closes that
+ * regardless of which key or position it appeared in — the same technique
+ * Next.js itself uses to inline `__NEXT_DATA__`.
+ */
+function getBrowserEnv(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of Object.keys(process.env)) {
+    if (/^REACT_APP_/i.test(key)) {
+      out[key] = process.env[key] as string;
+    }
+  }
+  return out;
+}
+
 export default async function RootLayout({ children }: { children: ReactNode }) {
   // Server-side locale and language handling
   const cookieStore = cookies();
   const locale = cookieStore.get('NEXT_LOCALE')?.value || 'en';
   const isRTL = locale === 'ar';
 
-  // Generate stable version hash for __ENV.js cache-busting
-  // Only changes when REACT_APP_* env variables change
-  const envVersion = getEnvVersion();
+  // window.__ENV, inlined below instead of fetched — see getBrowserEnv above.
+  const browserEnvScript = `window.__ENV = ${JSON.stringify(getBrowserEnv()).replace(/</g, '\\u003c')};`;
 
   // ★ The header and the left rail used to learn who you are only after React
   // mounted and `/api/users/me` came back, which on this app is 5-20s — so a
@@ -253,10 +326,88 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang={locale} dir={isRTL ? 'rtl' : 'ltr'} className={lora.variable}>
       <head>
-        {/* ★ Lumen UI (Merriweather Sans) base preload — opt-in typography (2026-09-02).
-            Lora is still loaded by next/font above; this only adds the interface face. */}
-        <link rel="preload" href="/fonts/merriweather-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
-        <link rel="preload" href="/fonts/merriweather-sans-latin-ext-400-normal.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
+        {/* ★ T3b (perf hunt, 2026-09-04) — warm the image host connection.
+            See imagesPreconnectOrigin() above for why there's no crossOrigin
+            here and why the origin is derived rather than hardcoded.
+            dns-prefetch is the fallback for browsers that ignore/cap
+            preconnect (old Safari; Firefox's ~India connections limit) — it
+            degrades to "just resolve the DNS early", still a net win. */}
+        <link rel="preconnect" href={imagesOrigin} />
+        <link rel="dns-prefetch" href={imagesOrigin} />
+        {/* ★ Lumen UI (Merriweather Sans) + Lumen Num (Fira Sans digits) preloads
+            (2026-09-02 typography; widened 2026-09-04 perf hunt). Lora is loaded by
+            next/font above and preloads itself; these cover the OTHER two faces.
+            ★ ALL NINE files that packages/tailwindcss/globals.css's "Lumen UI"/
+            "Lumen Num" @font-face rules actually reference are preloaded here —
+            previously only the 400-weight pair was, so any element rendered at
+            font-medium/font-semibold (.font-ui) or using .font-num (feed-card
+            payout figures, wallet balances — both above the fold) hit an
+            undiscovered, unpreloaded fetch and visibly swapped weight/face in
+            after first paint (FOUT). Filenames carry the content hash described
+            in globals.css; a re-subset font needs both updated together. */}
+        <link
+          rel="preload"
+          href="/fonts/merriweather-sans-latin-400-normal.28371889.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/merriweather-sans-latin-ext-400-normal.e3758ff1.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/merriweather-sans-latin-500-normal.5d656fcf.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/merriweather-sans-latin-ext-500-normal.cebc3a77.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/merriweather-sans-latin-600-normal.4f0b3ea5.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/merriweather-sans-latin-ext-600-normal.6af270c2.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/fira-sans-digits-400.64bd6851.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/fira-sans-digits-500.cc36e988.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="/fonts/fira-sans-digits-600.aa2c09a8.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
         {/* ★★★ THE ONLY THING THAT CAN CATCH A PURGED ROOT CHUNK (2026-08-11).
             `ChunkLoadError: Loading chunk app/layout failed` reached a real
             reader on /@lordbutterfly. `app/error.tsx` and `app/global-error.tsx`
@@ -342,7 +493,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             fix) is Next's own `main-app.js`, `app-pages-internals.js`,
             `app/global-error.js`, `app/not-found.js`, `app/page.js`,
             `app/layout.js`, `app/error.js` — ALL as `<script async>`, which
-            never block the HTML parser — THEN this script, THEN `__ENV.js`.
+            never block the HTML parser — THEN this script, THEN the inline
+            `window.__ENV` script (formerly a separate `__ENV.js` request,
+            inlined in the T3a perf fix, 2026-09-04 — still the same document
+            position, so this ordering argument is unaffected).
             Because none of those preceding tags are synchronous, the parser
             reaches this plain, non-async inline script and executes it
             essentially immediately, before any network request (even an
@@ -616,17 +770,18 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             __html: `(function () { try { localStorage.removeItem('theme'); } catch (e) {} })();`
           }}
         />
-        {/* Use plain script tag for guaranteed synchronous loading of env globals.
-            ★ suppressHydrationWarning (2026-08-11, audit item 7b): the Hive
-            Keychain browser extension rewrites this tag's `src` in the live DOM
-            before React hydrates, so React sees a server/client mismatch on
-            `src` that has nothing to do with our own code and cannot be fixed by
-            changing what we render — the extension edits the DOM out from under
-            us. This is the same pattern Next.js documents for third-party
-            extensions (e.g. Grammarly on <body>): suppress the mismatch warning
-            on exactly this one attribute-bearing node rather than papering over
-            real mismatches elsewhere. */}
-        <script src={`${basePath}/__ENV.js?v=${envVersion}`} suppressHydrationWarning />
+        {/* ★ T3a (perf hunt, 2026-09-04): was `<script src="/__ENV.js?v=...">`,
+            a separate render-blocking request (826B, `no-store`) needing a full
+            cold RTT after the CSS chain before <body> could paint. Inlined —
+            see getBrowserEnv()/browserEnvScript above for what it contains and
+            why it is safe to compute per-request from live process.env. Same
+            plain, non-async, synchronous script tag (still executes in
+            document order, still before hydration), just no network round
+            trip. suppressHydrationWarning is no longer needed: that guarded
+            against the Hive Keychain extension rewriting this tag's `src`
+            attribute pre-hydration, and an inline script has no `src` for it
+            to rewrite. */}
+        <script id="lumen-env" dangerouslySetInnerHTML={{ __html: browserEnvScript }} />
       </head>
       <body className="bg-background-secondary font-sans">
         <div className="min-h-screen">
