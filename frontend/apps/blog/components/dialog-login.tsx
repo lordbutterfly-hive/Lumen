@@ -3,12 +3,23 @@
 import { Link } from '@hive/ui';
 
 import { forwardRef, ReactNode, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from '@ui/components/dialog';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
-import LumenLogin from '@/blog/features/lite-auth/login/lumen-login';
 import { googleConfigured } from '@/blog/features/lite-auth/login/google-signin';
 import { siteConfig } from '@ui/config/site';
 import { useTranslation } from '@/blog/i18n/client';
+
+// ★ LumenLogin is loaded LAZILY (2026-09-04, perf). It pulls the whole sign-in
+// stack (useProcessAuth -> signin-form -> every signer -> @hiveio/wax, ~220 KB),
+// and this dialog is statically imported by the app-wide header (it wraps ~24
+// trigger buttons), so a static import dragged wax into every page's first load.
+// Radix mounts DialogContent only when the dialog OPENS (see the note by the
+// render below), so LumenLogin -- and wax -- now load only on a real login click,
+// never for a reader who never opens it. ssr:false is safe: it never server-renders.
+const LumenLogin = dynamic(() => import('@/blog/features/lite-auth/login/lumen-login'), {
+  ssr: false
+});
 
 const GOOGLE_GSI_SCRIPT_ID = 'google-gsi-script';
 const GOOGLE_GSI_SCRIPT_SRC = 'https://accounts.google.com/gsi/client';

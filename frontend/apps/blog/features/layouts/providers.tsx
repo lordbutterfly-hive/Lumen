@@ -5,7 +5,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { FC, PropsWithChildren, useMemo } from 'react';
 import Head from 'next/head';
 import { SignerProvider } from '@hive/smart-signer/components/signer-provider';
-import { GoogleOAuthRedirectHandler } from '@smart-signer/components/google-oauth-redirect-handler';
+import { GoogleOAuthRedirectGate } from '@smart-signer/components/google-oauth-redirect-gate';
 import { siteConfig } from '@ui/config/site';
 import { getQueryClient } from '@/blog/lib/react-query';
 import { LoggedUserProvider } from '@/blog/features/votes/hooks/use-logged-user';
@@ -43,7 +43,7 @@ export const Providers: FC<PropsWithChildren> = ({ children }) => {
           <NavigationProgress />
           <NavigationProgressHandler />
           <SignerProvider>
-            <GoogleOAuthRedirectHandler
+            <GoogleOAuthRedirectGate
               authenticateOnBackend={siteConfig.loginAuthenticateOnBackend}
               strict={!siteConfig.allowNonStrictLogin}
               loadingText={t('login_form.completing_google_auth')}

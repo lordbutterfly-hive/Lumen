@@ -1,7 +1,7 @@
 import { Icons } from '@hive/ui/components/icons';
 import TimeAgo from '@hive/ui/components/time-ago';
 import { UserAvatarImg } from '@ui/components';
-import { IAccountNotification } from '@hive/common-hiveio-packages/wax';
+import type { IAccountNotification } from '@hive/common-hiveio-packages/wax';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { usePathname } from 'next/navigation';
 import { Link } from '@hive/ui';

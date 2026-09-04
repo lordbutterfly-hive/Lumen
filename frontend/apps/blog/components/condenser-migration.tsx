@@ -12,7 +12,10 @@ import { cookieNamePrefix } from '@smart-signer/lib/session';
 // migration path. This component is mounted app-wide in app/layout.tsx, so a
 // static import here dragged that whole stack into the first-load bundle every
 // visitor downloads. The dynamic import() keeps it out until the path runs.
-import { hasCompatibleKeychain } from '@smart-signer/lib/signer/signer-keychain';
+// hasCompatibleKeychain is imported LAZILY in migrate() below (2026-09-04, perf).
+// signer-keychain.ts value-imports @hiveio/wax, and this component is mounted
+// app-wide in app/layout.tsx, so a static import dragged wax into every visitor's
+// first-load for a check only the rare Condenser-Keychain path makes.
 import type { Signatures } from '@smart-signer/lib/auth/login-schema';
 import {
   parseAutopost2,
@@ -92,6 +95,7 @@ export default function CondenserMigration() {
       // that is the part worth keeping. Without Keychain they simply sign in
       // again through the normal login page.
       let loginType: LoginType;
+      const { hasCompatibleKeychain } = await import('@smart-signer/lib/signer/signer-keychain');
       if (loginWithKeychain && hasCompatibleKeychain()) {
         loginType = LoginType.keychain;
       } else {

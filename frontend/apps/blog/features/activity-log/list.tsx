@@ -1,7 +1,7 @@
 'use client';
 
 import NotificationListItem from './list-item';
-import { IAccountNotification } from '@hive/common-hiveio-packages/wax';
+import type { IAccountNotification } from '@hive/common-hiveio-packages/wax';
 
 const NotificationList = ({
   data,

@@ -1,6 +1,6 @@
 import sanitize from 'sanitize-html';
 import remarkableStripper from '../lib/remmarkable-stripper';
-import { Entry, JsonMetadata, FullAccount } from '@hive/common-hiveio-packages/wax';
+import type { Entry, JsonMetadata, FullAccount } from '@hive/common-hiveio-packages/wax';
 import dayjs from 'dayjs';
 import { TFunction } from 'i18next';
 import { proxifyImageSrc, Symbol, accountReputation } from '@hive/ui';

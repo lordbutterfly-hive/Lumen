@@ -1,6 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useSignOut } from '@smart-signer/lib/auth/use-sign-out';
-import { getSigner } from '@smart-signer/lib/signer/get-signer';
+// getSigner is imported LAZILY inside the logout-cleanup block below
+// (2026-09-04, perf). get-signer statically pulls all seven signer
+// implementations, each of which value-imports @hiveio/wax (~220 KB), and this
+// hook is used by the app-wide header (user-menu), so a static import dragged
+// the whole signing stack + wax into every page's first load. It is only ever
+// needed when a signed-in user actually logs out, inside an already-async
+// fire-and-forget block, so the dynamic import() changes no behaviour.
 import { useUser } from '@smart-signer/lib/auth/use-user';
 import { useSigner } from '@smart-signer/lib/use-signer';
 import { QUERY_KEY } from '@smart-signer/lib/query-keys';
@@ -50,6 +56,7 @@ export function useLogout(redirect?: string) {
       // Signer cleanup
       Promise.resolve().then(async () => {
         try {
+          const { getSigner } = await import('@smart-signer/lib/signer/get-signer');
           const signer = getSigner(signerOptions);
           await signer.destroy();
         } catch (error) {

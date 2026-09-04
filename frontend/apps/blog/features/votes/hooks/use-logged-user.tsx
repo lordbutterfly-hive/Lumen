@@ -2,7 +2,7 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { createContext, FC, useContext } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { netVests } from '@/blog/lib/utils';
-import { FullAccount } from '@hive/common-hiveio-packages/wax';
+import type { FullAccount } from '@hive/common-hiveio-packages/wax';
 import { fetchAccount, fetchManabar } from '@/blog/lib/chain-fetch';
 
 interface SingleManabar {
