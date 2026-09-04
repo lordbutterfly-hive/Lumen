@@ -27,14 +27,17 @@ import WalletDialogShell from './shared/wallet-dialog-shell';
 export default function ClaimAccountDialog({
   trigger,
   username,
-  pendingClaimedAccounts
+  pendingClaimedAccounts,
+  defaultOpen
 }: {
   trigger: ReactNode;
   username: string;
   pendingClaimedAccounts: number;
+  /** See lazy-wallet-dialog.tsx — set on this dialog's first (lazy) load. */
+  defaultOpen?: boolean;
 }) {
   const { t } = useTranslation('common_blog');
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen ?? false);
   const claimAccountMutation = useClaimAccountMutation();
 
   const onSubmit = async () => {

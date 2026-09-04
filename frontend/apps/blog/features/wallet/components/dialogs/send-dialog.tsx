@@ -38,19 +38,22 @@ export default function SendDialog({
   trigger,
   currency,
   username,
-  balance
+  balance,
+  defaultOpen
 }: {
   trigger: ReactNode;
   currency: 'HIVE' | 'HBD';
   username: string;
   balance: Big;
+  /** See use-wallet-dialog.ts — set by lazy-wallet-dialog.tsx on first load. */
+  defaultOpen?: boolean;
 }) {
   const { t } = useTranslation('common_blog');
   const sendMutation = useSendMutation();
 
   const schema = useMemo(() => buildSchema(balance, t), [balance, t]);
   const form = useForm<SendFormValues>({ resolver: zodResolver(schema), mode: 'onSubmit' });
-  const { open, setOpen, onOpenChange } = useWalletDialog(form);
+  const { open, setOpen, onOpenChange } = useWalletDialog(form, defaultOpen);
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {

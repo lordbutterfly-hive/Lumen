@@ -1,10 +1,18 @@
 'use client';
 
+import type { ComponentProps } from 'react';
 import Big from 'big.js';
 import { useTranslation } from '@/blog/i18n/client';
 import { formatTokenAmount } from '../lib/format-amount';
 import TokenIcon from './token-icon';
-import SendDialog from './dialogs/send-dialog';
+import type SendDialogComponent from './dialogs/send-dialog';
+import { lazyWalletDialog } from './dialogs/shared/lazy-wallet-dialog';
+
+// ★ LAZY (T3g, 2026-09-04): defers SendDialog's react-hook-form/zod/mutation
+// stack until Send is actually clicked. See lazy-wallet-dialog.tsx.
+const SendDialog = lazyWalletDialog<ComponentProps<typeof SendDialogComponent>>(
+  () => import('./dialogs/send-dialog')
+);
 
 const CARD_CLASS = 'mb-3 rounded-panel border border-line-9 bg-surface-1 p-5';
 // Same button as the HIVE card's Send — see hive-token-card.tsx (W-2/W-3).

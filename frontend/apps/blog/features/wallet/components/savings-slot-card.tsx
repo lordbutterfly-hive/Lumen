@@ -1,11 +1,21 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ComponentProps, ReactNode } from 'react';
 import Big from 'big.js';
 import { formatTokenAmount } from '../lib/format-amount';
 import TokenIcon from './token-icon';
-import SavingsDepositDialog from './dialogs/savings-deposit-dialog';
-import SavingsWithdrawDialog from './dialogs/savings-withdraw-dialog';
+import type SavingsDepositDialogComponent from './dialogs/savings-deposit-dialog';
+import type SavingsWithdrawDialogComponent from './dialogs/savings-withdraw-dialog';
+import { lazyWalletDialog } from './dialogs/shared/lazy-wallet-dialog';
+
+// ★ LAZY (T3g, 2026-09-04): defers each dialog's react-hook-form/zod/mutation
+// stack until its trigger is actually clicked. See lazy-wallet-dialog.tsx.
+const SavingsDepositDialog = lazyWalletDialog<ComponentProps<typeof SavingsDepositDialogComponent>>(
+  () => import('./dialogs/savings-deposit-dialog')
+);
+const SavingsWithdrawDialog = lazyWalletDialog<ComponentProps<typeof SavingsWithdrawDialogComponent>>(
+  () => import('./dialogs/savings-withdraw-dialog')
+);
 
 // W-2/W-3: Deposit was bg-surface-ok-7 and both were rounded-control.
 const DEPOSIT_BUTTON_CLASS =

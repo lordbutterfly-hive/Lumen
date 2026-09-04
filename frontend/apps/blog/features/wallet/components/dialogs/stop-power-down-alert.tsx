@@ -22,7 +22,16 @@ import { useCancelPowerDownMutation } from '../../hooks/use-power-mutations';
  * "STOP" on the power-down notice. Real op: withdraw_vesting_operation with
  * 0 HP, which cancels the active schedule (keeps whatever is already staked).
  */
-export default function StopPowerDownAlert({ trigger, username }: { trigger: ReactNode; username: string }) {
+export default function StopPowerDownAlert({
+  trigger,
+  username,
+  defaultOpen
+}: {
+  trigger: ReactNode;
+  username: string;
+  /** See lazy-wallet-dialog.tsx — set on this dialog's first (lazy) load. */
+  defaultOpen?: boolean;
+}) {
   const { t } = useTranslation('common_blog');
   const cancelMutation = useCancelPowerDownMutation();
 
@@ -40,7 +49,7 @@ export default function StopPowerDownAlert({ trigger, username }: { trigger: Rea
   };
 
   return (
-    <AlertDialog>
+    <AlertDialog defaultOpen={defaultOpen}>
       <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
       <AlertDialogContent className="rounded-panel font-ui">
         <AlertDialogHeader>

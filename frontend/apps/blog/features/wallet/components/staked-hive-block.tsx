@@ -1,15 +1,29 @@
 'use client';
 
+import type { ComponentProps } from 'react';
 import Big from 'big.js';
 import { Icons } from '@ui/components/icons';
 import type { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
 import { useTranslation } from '@/blog/i18n/client';
 import { WalletFigures } from '../lib/wallet-derived';
 import { formatTokenAmount } from '../lib/format-amount';
-import PowerUpDialog from './dialogs/power-up-dialog';
-import PowerDownDialog from './dialogs/power-down-dialog';
-import StopPowerDownAlert from './dialogs/stop-power-down-alert';
+import type PowerUpDialogComponent from './dialogs/power-up-dialog';
+import type PowerDownDialogComponent from './dialogs/power-down-dialog';
+import type StopPowerDownAlertComponent from './dialogs/stop-power-down-alert';
+import { lazyWalletDialog } from './dialogs/shared/lazy-wallet-dialog';
 import DelegatedOutPanel from './delegated-out-panel';
+
+// ★ LAZY (T3g, 2026-09-04): defers each dialog's react-hook-form/zod/mutation
+// stack until its trigger is actually clicked. See lazy-wallet-dialog.tsx.
+const PowerUpDialog = lazyWalletDialog<ComponentProps<typeof PowerUpDialogComponent>>(
+  () => import('./dialogs/power-up-dialog')
+);
+const PowerDownDialog = lazyWalletDialog<ComponentProps<typeof PowerDownDialogComponent>>(
+  () => import('./dialogs/power-down-dialog')
+);
+const StopPowerDownAlert = lazyWalletDialog<ComponentProps<typeof StopPowerDownAlertComponent>>(
+  () => import('./dialogs/stop-power-down-alert')
+);
 
 // W-2/W-3: both were rounded-control, and Stake was bg-surface-ok-7.
 const STAKE_BUTTON_CLASS =

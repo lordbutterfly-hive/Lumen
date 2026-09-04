@@ -1,13 +1,31 @@
 'use client';
 
+import type { ComponentProps } from 'react';
 import Big from 'big.js';
 import { Gift } from 'lucide-react';
 import { Icons } from '@ui/components/icons';
 import { useTranslation } from '@/blog/i18n/client';
-import DelegateDialog from './dialogs/delegate-dialog';
-import ConvertDialog from './dialogs/convert-dialog';
-import RecurringTransferDialog from './dialogs/recurring-transfer-dialog';
-import ClaimAccountDialog from './dialogs/claim-account-dialog';
+import type DelegateDialogComponent from './dialogs/delegate-dialog';
+import type ConvertDialogComponent from './dialogs/convert-dialog';
+import type RecurringTransferDialogComponent from './dialogs/recurring-transfer-dialog';
+import type ClaimAccountDialogComponent from './dialogs/claim-account-dialog';
+import { lazyWalletDialog } from './dialogs/shared/lazy-wallet-dialog';
+
+// ★ LAZY (T3g, 2026-09-04): defers each dialog's react-hook-form/zod/mutation
+// stack (or, for Claim, its mutation hook) until its trigger is actually
+// clicked. See lazy-wallet-dialog.tsx.
+const DelegateDialog = lazyWalletDialog<ComponentProps<typeof DelegateDialogComponent>>(
+  () => import('./dialogs/delegate-dialog')
+);
+const ConvertDialog = lazyWalletDialog<ComponentProps<typeof ConvertDialogComponent>>(
+  () => import('./dialogs/convert-dialog')
+);
+const RecurringTransferDialog = lazyWalletDialog<ComponentProps<typeof RecurringTransferDialogComponent>>(
+  () => import('./dialogs/recurring-transfer-dialog')
+);
+const ClaimAccountDialog = lazyWalletDialog<ComponentProps<typeof ClaimAccountDialogComponent>>(
+  () => import('./dialogs/claim-account-dialog')
+);
 
 const CARD_CLASS = 'rounded-panel border border-line-9 bg-surface-1 p-5';
 // W-3: was rounded-control. Rows are 14px.

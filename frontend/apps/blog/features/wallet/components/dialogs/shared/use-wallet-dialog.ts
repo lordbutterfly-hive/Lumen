@@ -21,9 +21,24 @@ import type { FieldValues, UseFormReturn } from 'react-hook-form';
  * state, and neither widget reads the form's value back unless the call site
  * also makes it a controlled component (`value={...}`) — see
  * recurring-transfer-dialog.tsx and power-down-dialog.tsx.
+ *
+ * ★ `defaultOpen` (T3g, 2026-09-04): lets a caller mount this dialog already
+ * open. Added for `lazy-wallet-dialog.tsx`, which loads a dialog's module on
+ * its trigger's first click rather than up front (135.5KB wallet-unique JS
+ * off the wallet's first-load) — the click that requests the module is also
+ * the click that should open it, so the freshly-mounted dialog needs to
+ * start `true` rather than making the reader click twice. Skipping the
+ * reset-on-open call below for that first, `defaultOpen` mount is correct,
+ * not a gap: `form` was itself just constructed by this same mount, so it is
+ * already at its defaults — there is nothing to reset. Every later
+ * open/close on this same mounted instance goes through `onOpenChange`
+ * exactly as before.
  */
-export function useWalletDialog<TFieldValues extends FieldValues>(form: UseFormReturn<TFieldValues>) {
-  const [open, setOpen] = useState(false);
+export function useWalletDialog<TFieldValues extends FieldValues>(
+  form: UseFormReturn<TFieldValues>,
+  defaultOpen = false
+) {
+  const [open, setOpen] = useState(defaultOpen);
 
   const onOpenChange = (next: boolean) => {
     setOpen(next);

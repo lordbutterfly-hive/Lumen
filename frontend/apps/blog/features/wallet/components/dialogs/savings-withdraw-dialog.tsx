@@ -31,19 +31,22 @@ export default function SavingsWithdrawDialog({
   trigger,
   currency,
   username,
-  savingsBalance
+  savingsBalance,
+  defaultOpen
 }: {
   trigger: ReactNode;
   currency: 'HIVE' | 'HBD';
   username: string;
   savingsBalance: Big;
+  /** See use-wallet-dialog.ts — set by lazy-wallet-dialog.tsx on first load. */
+  defaultOpen?: boolean;
 }) {
   const { t } = useTranslation('common_blog');
   const withdrawMutation = useSavingsWithdrawMutation();
 
   const schema = useMemo(() => buildSchema(savingsBalance, t), [savingsBalance, t]);
   const form = useForm<WithdrawFormValues>({ resolver: zodResolver(schema), mode: 'onSubmit' });
-  const { open, setOpen, onOpenChange } = useWalletDialog(form);
+  const { open, setOpen, onOpenChange } = useWalletDialog(form, defaultOpen);
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {

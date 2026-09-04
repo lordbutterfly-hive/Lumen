@@ -92,12 +92,15 @@ export default function RecurringTransferDialog({
   trigger,
   username,
   liquidHive,
-  liquidHbd
+  liquidHbd,
+  defaultOpen
 }: {
   trigger: ReactNode;
   username: string;
   liquidHive: Big;
   liquidHbd: Big;
+  /** See use-wallet-dialog.ts — set by lazy-wallet-dialog.tsx on first load. */
+  defaultOpen?: boolean;
 }) {
   const { t } = useTranslation('common_blog');
   const recurringMutation = useRecurringTransferMutation();
@@ -108,7 +111,7 @@ export default function RecurringTransferDialog({
     mode: 'onSubmit',
     defaultValues: { currency: 'HIVE', recurrence: 24, executions: 2 }
   });
-  const { open, setOpen, onOpenChange } = useWalletDialog(form);
+  const { open, setOpen, onOpenChange } = useWalletDialog(form, defaultOpen);
   const currency = form.watch('currency');
   const currencyBalance = currency === 'HBD' ? liquidHbd : liquidHive;
 

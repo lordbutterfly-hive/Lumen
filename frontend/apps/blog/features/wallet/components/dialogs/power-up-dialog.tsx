@@ -25,18 +25,21 @@ type PowerUpFormValues = z.infer<ReturnType<typeof buildSchema>>;
 export default function PowerUpDialog({
   trigger,
   username,
-  hiveBalance
+  hiveBalance,
+  defaultOpen
 }: {
   trigger: ReactNode;
   username: string;
   hiveBalance: Big;
+  /** See use-wallet-dialog.ts — set by lazy-wallet-dialog.tsx on first load. */
+  defaultOpen?: boolean;
 }) {
   const { t } = useTranslation('common_blog');
   const powerUpMutation = usePowerUpMutation();
 
   const schema = useMemo(() => buildSchema(hiveBalance, t), [hiveBalance, t]);
   const form = useForm<PowerUpFormValues>({ resolver: zodResolver(schema), mode: 'onSubmit' });
-  const { open, setOpen, onOpenChange } = useWalletDialog(form);
+  const { open, setOpen, onOpenChange } = useWalletDialog(form, defaultOpen);
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {

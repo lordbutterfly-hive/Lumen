@@ -29,7 +29,8 @@ type DelegateFormValues = z.infer<ReturnType<typeof buildSchema>>;
 export default function DelegateDialog({
   trigger,
   username,
-  maxHp
+  maxHp,
+  defaultOpen
 }: {
   trigger: ReactNode;
   username: string;
@@ -43,13 +44,15 @@ export default function DelegateDialog({
    * (`wallet-derived.ts`), not `netHp`.
    */
   maxHp: Big;
+  /** See use-wallet-dialog.ts — set by lazy-wallet-dialog.tsx on first load. */
+  defaultOpen?: boolean;
 }) {
   const { t } = useTranslation('common_blog');
   const delegateMutation = useDelegateMutation();
 
   const schema = useMemo(() => buildSchema(maxHp, t), [maxHp, t]);
   const form = useForm<DelegateFormValues>({ resolver: zodResolver(schema), mode: 'onSubmit' });
-  const { open, setOpen, onOpenChange } = useWalletDialog(form);
+  const { open, setOpen, onOpenChange } = useWalletDialog(form, defaultOpen);
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {

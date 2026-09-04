@@ -28,7 +28,8 @@ type PowerDownFormValues = z.infer<ReturnType<typeof buildSchema>>;
 export default function PowerDownDialog({
   trigger,
   username,
-  maxHp
+  maxHp,
+  defaultOpen
 }: {
   trigger: ReactNode;
   username: string;
@@ -41,13 +42,15 @@ export default function PowerDownDialog({
    * whatever this dialog moves.
    */
   maxHp: Big;
+  /** See use-wallet-dialog.ts — set by lazy-wallet-dialog.tsx on first load. */
+  defaultOpen?: boolean;
 }) {
   const { t } = useTranslation('common_blog');
   const powerDownMutation = usePowerDownMutation();
 
   const schema = useMemo(() => buildSchema(maxHp, t), [maxHp, t]);
   const form = useForm<PowerDownFormValues>({ resolver: zodResolver(schema), mode: 'onSubmit', defaultValues: { amount: 0 } });
-  const { open, setOpen, onOpenChange } = useWalletDialog(form);
+  const { open, setOpen, onOpenChange } = useWalletDialog(form, defaultOpen);
   /**
    * ★ `Number.isFinite`, NOT `|| 0` (2026-08-13, A1 review W-4). `|| 0`
    * neutralises `NaN` (falsy) but NOT `Infinity`, which is truthy — and

@@ -25,18 +25,21 @@ type ConvertFormValues = z.infer<ReturnType<typeof buildSchema>>;
 export default function ConvertDialog({
   trigger,
   username,
-  hbdBalance
+  hbdBalance,
+  defaultOpen
 }: {
   trigger: ReactNode;
   username: string;
   hbdBalance: Big;
+  /** See use-wallet-dialog.ts — set by lazy-wallet-dialog.tsx on first load. */
+  defaultOpen?: boolean;
 }) {
   const { t } = useTranslation('common_blog');
   const convertMutation = useConvertMutation();
 
   const schema = useMemo(() => buildSchema(hbdBalance, t), [hbdBalance, t]);
   const form = useForm<ConvertFormValues>({ resolver: zodResolver(schema), mode: 'onSubmit' });
-  const { open, setOpen, onOpenChange } = useWalletDialog(form);
+  const { open, setOpen, onOpenChange } = useWalletDialog(form, defaultOpen);
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
