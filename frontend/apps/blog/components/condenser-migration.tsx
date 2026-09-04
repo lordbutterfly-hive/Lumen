@@ -5,9 +5,13 @@ import { useSignIn } from '@smart-signer/lib/auth/use-sign-in';
 import { LoginType, KeyType } from '@smart-signer/types/common';
 import { ensureLoginChallenge } from '@smart-signer/lib/ensure-login-challenge';
 import { cookieNamePrefix } from '@smart-signer/lib/session';
-import { getSigner } from '@smart-signer/lib/signer/get-signer';
-import { getOperationForLogin } from '@smart-signer/lib/login-operation';
-import { getChain } from '@transaction/lib/chain';
+// ★ getSigner, getOperationForLogin and getChain are imported LAZILY at their
+// point of use inside migrate() below (2026-09-04, perf). getChain() pulls in
+// @hiveio/wax + beekeeper (~123 KB gzip) and the signer factory pulls the
+// signing stack; all three are only ever reached on the rare Condenser-Keychain
+// migration path. This component is mounted app-wide in app/layout.tsx, so a
+// static import here dragged that whole stack into the first-load bundle every
+// visitor downloads. The dynamic import() keeps it out until the path runs.
 import { hasCompatibleKeychain } from '@smart-signer/lib/signer/signer-keychain';
 import type { Signatures } from '@smart-signer/lib/auth/login-schema';
 import {
@@ -112,7 +116,9 @@ export default function CondenserMigration() {
           return;
         }
 
+        const { getChain } = await import('@transaction/lib/chain');
         const hiveChain = await getChain();
+        const { getOperationForLogin } = await import('@smart-signer/lib/login-operation');
         const operation = await getOperationForLogin(
           username,
           KeyType.posting,
@@ -126,6 +132,7 @@ export default function CondenserMigration() {
         txBuilder.pushOperation(operation);
         txBuilder.validate();
 
+        const { getSigner } = await import('@smart-signer/lib/signer/get-signer');
         const signer = getSigner({
           username,
           loginType,
