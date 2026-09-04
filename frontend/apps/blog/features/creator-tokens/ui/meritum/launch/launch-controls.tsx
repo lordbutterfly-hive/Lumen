@@ -1,6 +1,7 @@
 'use client';
 
-import { FC, KeyboardEvent, PointerEvent, ReactNode } from 'react';
+import { FC, FocusEvent, KeyboardEvent, PointerEvent, ReactNode } from 'react';
+import { HOLD_CONTROL_MARKER, focusStaysInHoldGroup, noteHoldPointerDown, noteHoldPointerUp } from '../coin/use-hold-to-strike';
 
 /**
  * The four controls the launch panels share.
@@ -104,13 +105,25 @@ export const HoldAction: FC<{
    */
   const press = (e: PointerEvent<HTMLButtonElement>): void => {
     if (disabled) return;
-    if (e.button === 0) onBegin();
+    if (e.button === 0) {
+      // Mark the pointer down BEFORE begin so the coin's blur (this press steals
+      // focus from it) reads it as an in-press twin blur and does not abort. The
+      // window listener clears it on pointerup — this button unmounts at the
+      // 1100ms commit, so its own release cannot be relied on (Fable F1).
+      noteHoldPointerDown(e.pointerId);
+      onBegin();
+    }
   };
   const keyPress = (e: KeyboardEvent<HTMLButtonElement>): void => {
     if (disabled) return;
     if (e.key === 'Enter' || e.key === ' ') {
       // Space would scroll the page out from under the coin mid-hold.
       e.preventDefault();
+      // ★ Ignore auto-repeat (Fable R2, 2026-09-04). Without this, a keyboard
+      // hold that tabs onto this button aborts (correct) and then the next
+      // auto-repeat keydown immediately re-arms a fresh hold — mirrors the guard
+      // the hook's own onKeyDown already carries.
+      if (e.repeat) return;
       onBegin();
     }
   };
@@ -118,9 +131,21 @@ export const HoldAction: FC<{
     if (disabled) return;
     if (e.key === 'Enter' || e.key === ' ') onRelease();
   };
-  const release = (): void => {
+  const release = (e?: PointerEvent<HTMLButtonElement>): void => {
+    // Belt clear for a mouse released outside the window (Fable R1); the window
+    // listener owns the unmount path where this control's up never fires. `e` is
+    // absent when called from blurRelease (a blur is not a pointer up).
+    if (e) noteHoldPointerUp(e.pointerId);
     if (disabled) return;
     onRelease();
+  };
+  // ★ TWIN-CONTROL BLUR (2026-09-04, QA #1). This button and the coin drive one
+  // strike machine from two subtrees, so starting a hold on the coin blurs this
+  // button; that blur must not abort the hold the coin just began. Only a blur
+  // that leaves the whole hold group releases — see focusStaysInHoldGroup.
+  const blurRelease = (e: FocusEvent<HTMLButtonElement>): void => {
+    if (focusStaysInHoldGroup(e.relatedTarget)) return;
+    release();
   };
   return (
     <button
@@ -128,13 +153,14 @@ export const HoldAction: FC<{
       disabled={disabled}
       title={title}
       className={`${PRIMARY} touch-none select-none disabled:pointer-events-none`}
+      {...HOLD_CONTROL_MARKER}
       onPointerDown={press}
       onPointerUp={release}
       onPointerLeave={release}
       onPointerCancel={release}
       onKeyDown={keyPress}
       onKeyUp={keyRelease}
-      onBlur={release}
+      onBlur={blurRelease}
     >
       {label}
     </button>

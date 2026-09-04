@@ -148,38 +148,56 @@ export const MarketSessionUnavailable: FC<{ onRetry?: () => void }> = ({ onRetry
  * feature — and it offered no way onward at all. A reader arrived, was told
  * nothing is here, and had to use the browser's Back button.
  */
-export const MarketMissing: FC<{ handle: string }> = ({ handle }) => (
-  <TokenShell>
-    <div className="mt-[26px] rounded-panel border border-line-9 bg-surface-1 p-8 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
-      <h1 className="mb-2 font-ui text-[20px] leading-[30px] font-medium text-ink-2">
-        @{displayHandle(handle)} hasn’t launched a token
-      </h1>
-      <p className="mb-5 max-w-[52ch] text-[14px] leading-[22px] text-ink-10 font-ui">
-        This creator hasn’t opened a market yet, so there’s nothing to buy or spend here.
-      </p>
-      <div className="flex flex-wrap gap-3">
-        <a
-          href="/creators"
-          className="rounded-card bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-medium text-ink-27 font-ui hover:bg-surface-brand-17"
-        >
-          Browse creators
-        </a>
-        <a
-          href="/creators/launch"
-          className="rounded-card border border-line-11 px-5 py-2.5 text-[14px] leading-[22px] font-medium text-ink-2 font-ui hover:bg-surface-16"
-        >
-          Launch your own token
-        </a>
-        <a
-          href={`/@${handle}`}
-          className="rounded-card border border-line-11 px-5 py-2.5 text-[14px] leading-[22px] font-medium text-ink-2 font-ui hover:bg-surface-16"
-        >
-          Back to @{displayHandle(handle)}
-        </a>
+// ★ SECOND PERSON FOR THE OWNER (2026-09-04, QA #7). Viewing your OWN
+// unlaunched token page read "@you hasn't launched a token / This creator hasn't
+// opened a market" — the page talking about you in the third person, with Launch
+// buried behind two other buttons. When the signed-in viewer IS this creator,
+// address them directly and lead with Launch. Also restores the top "← All
+// creators" back link every other market state carries.
+export const MarketMissing: FC<{ handle: string; isOwner?: boolean }> = ({ handle, isOwner = false }) => {
+  const PRIMARY =
+    'rounded-card bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-medium text-ink-27 font-ui hover:bg-surface-brand-17';
+  const SECONDARY =
+    'rounded-card border border-line-11 px-5 py-2.5 text-[14px] leading-[22px] font-medium text-ink-2 font-ui hover:bg-surface-16';
+  return (
+    <TokenShell back={{ href: '/creators', label: '← All creators' }}>
+      <div className="mt-[26px] rounded-panel border border-line-9 bg-surface-1 p-8 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
+        <h1 className="mb-2 font-ui text-[20px] leading-[30px] font-medium text-ink-2">
+          {isOwner ? 'You haven’t launched your token yet' : `@${displayHandle(handle)} hasn’t launched a token`}
+        </h1>
+        <p className="mb-5 max-w-[52ch] text-[14px] leading-[22px] text-ink-10 font-ui">
+          {isOwner
+            ? 'Open your market to let people hold your token and pay you for your work.'
+            : 'This creator hasn’t opened a market yet, so there’s nothing to buy or spend here.'}
+        </p>
+        <div className="flex flex-wrap gap-3">
+          {isOwner ? (
+            <>
+              <a href="/creators/launch" className={PRIMARY}>
+                Launch your token
+              </a>
+              <a href="/creators" className={SECONDARY}>
+                Browse creators
+              </a>
+            </>
+          ) : (
+            <>
+              <a href="/creators" className={PRIMARY}>
+                Browse creators
+              </a>
+              <a href="/creators/launch" className={SECONDARY}>
+                Launch your own token
+              </a>
+              <a href={`/@${handle}`} className={SECONDARY}>
+                Back to @{displayHandle(handle)}
+              </a>
+            </>
+          )}
+        </div>
       </div>
-    </div>
-  </TokenShell>
-);
+    </TokenShell>
+  );
+};
 
 export const MarketLoading: FC = () => {
   const { t } = useTranslation('common_blog');

@@ -44,7 +44,12 @@
    * opacity, and the line reads as broken text rather than as a tape dissolving
    * off the edge. One custom property, used twice, so the two cannot drift.
    */
-  --mt-tape-fade: 90px;
+  /* ★ PROPORTIONAL (2026-09-04, QA #3). A fixed 90px each side left only ~3px
+     of opaque tape at 390px (window ~183px), a faded smear. `min(90px, 13%)`
+     keeps the desktop look and, on a narrow window, fades at most 13% a side
+     so the text stays readable. Still ONE property used twice — the two
+     sides cannot drift, which is the invariant the handoff insists on. */
+  --mt-tape-fade: min(90px, 13%);
 
   display: flex;
   align-items: center;

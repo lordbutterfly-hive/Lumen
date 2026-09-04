@@ -3,7 +3,7 @@
 import { ForwardRefRenderFunction, forwardRef, useImperativeHandle } from 'react';
 import MeritumCoin, { MeritumCoinProps } from './meritum-coin';
 import styles from './meritum-coin.module.css';
-import { HoldToStrikeApi, UseHoldToStrikeOptions, useHoldToStrike } from './use-hold-to-strike';
+import { HOLD_CONTROL_MARKER, HoldToStrikeApi, UseHoldToStrikeOptions, useHoldToStrike } from './use-hold-to-strike';
 import {
   MERITUM_CHARGE_DURATION_STYLE,
   MERITUM_RING_BOX,
@@ -164,6 +164,7 @@ const HoldToStrikeInner: ForwardRefRenderFunction<HoldToStrikeHandle, HoldToStri
         className={styles.coin}
         aria-label={holdLabel}
         disabled={disabled}
+        {...HOLD_CONTROL_MARKER}
         onPointerDown={handlers.onPointerDown}
         onPointerUp={handlers.onPointerUp}
         onPointerLeave={handlers.onPointerLeave}

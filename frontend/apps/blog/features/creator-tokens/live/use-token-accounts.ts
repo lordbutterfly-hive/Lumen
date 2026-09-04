@@ -153,6 +153,11 @@ export function useTokenAccounts(): TokenAccounts {
   const { user, isHydrated, sessionUnavailable } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
   const isLite = user.account_tier === 'lite';
+  // ★ IS THIS SESSION LITE-CAPABLE? The exact server-side rule (whichReader in
+  // app/api/lite/interests/route.ts): a `userId` OR a lite tier means a lite
+  // session — the latter still true for up to 14 days after an upgrade, since
+  // /api/users/me reads the cookie not the DB. A pure Hive account has neither.
+  const hasLiteSession = Boolean(user.userId) || isLite;
 
   const query = useQuery({
     queryKey: ['creatorTokens', 'walletDids', user.username],
@@ -164,14 +169,18 @@ export function useTokenAccounts(): TokenAccounts {
       return (await res.json()) as WalletDidsResponse;
     },
     /**
-     * ★ NOT `&& isLite` any more. An upgraded user still owns their wallet credentials,
-     * and while their session cookie still says `lite` (which it does for up to 14 days,
-     * since `/api/users/me` reads the cookie and never the DB) this lookup is what keeps
-     * their wallet-held tokens visible. Harmless for a never-lite Hive account: it has no
-     * lite session, the route answers 401, `query.data` stays undefined, and the branch
-     * below simply yields the Hive account on its own - exactly the old behaviour.
+     * ★ `hasLiteSession`, NOT bare `loggedIn` (2026-09-04, QA #5). An upgraded user
+     * still owns their wallet credentials, and while their cookie still says `lite`
+     * (up to 14 days — `/api/users/me` reads the cookie, never the DB) this lookup
+     * keeps their wallet-held tokens visible; `userId` OR the lite tier catches
+     * exactly that session, matching the route's own `whichReader` rule. But a
+     * PURE Hive account is neither, and firing this for it just draws a 401 the
+     * browser logs as a red console error on every page (QA #5) for a request whose
+     * answer is always "no wallet bound". Not firing yields the identical result —
+     * `query.data` undefined, the branch below returns the Hive account alone — with
+     * no error. Never-lite accounts lose nothing; the console goes quiet.
      */
-    enabled: loggedIn,
+    enabled: loggedIn && hasLiteSession,
     staleTime: 5 * 60 * 1000
   });
 

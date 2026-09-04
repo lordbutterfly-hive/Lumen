@@ -130,12 +130,95 @@ export interface HoldToStrikeApi {
     onPointerCancel: (e: React.PointerEvent<HTMLElement>) => void;
     onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => void;
     onKeyUp: (e: React.KeyboardEvent<HTMLElement>) => void;
-    onBlur: () => void;
+    onBlur: (e: React.FocusEvent<HTMLElement>) => void;
   };
 }
 
 /** Enter and Space both hold. Older engines still report Space as 'Spacebar'. */
 const isHoldKey = (key: string): boolean => key === 'Enter' || key === ' ' || key === 'Spacebar';
+
+/**
+ * ★ THE HOLD GROUP (2026-09-04). The coin and the launch button both drive this
+ * ONE machine but sit in different subtrees, so press-and-holding one moves
+ * focus off the other and fires that other control's `blur`. Left unguarded,
+ * the losing control's blur aborts the hold the winning control JUST started —
+ * a dead first attempt with no feedback (QA #1). Both controls carry this
+ * marker; a blur whose focus lands on any marked control is focus moving WITHIN
+ * the group, not away from it, so it must not abort. Only a blur that leaves the
+ * group aborts — the keyboard tab-away backstop `onBlur` exists for. Same
+ * relatedTarget rule the post-card drawer uses for sibling controls.
+ */
+const HOLD_CONTROL_ATTR = 'data-meritum-hold-control';
+/** Spread onto every element that drives the strike machine. */
+export const HOLD_CONTROL_MARKER: Record<string, string> = { [HOLD_CONTROL_ATTR]: '' };
+
+/**
+ * ★ Which pointers are PHYSICALLY pressed on a hold control right now? This is
+ * the signal that separates the two blurs that both land on a twin hold control:
+ *   · pressing the coin/button focuses it and BLURS the other — that blur fires
+ *     WHILE a pointer is down, and must NOT abort the hold just started (QA #1);
+ *   · tabbing away from a keyboard hold onto the twin fires with NO pointer down,
+ *     and MUST abort — the strike is a real fund action and must never complete
+ *     behind the user's back (the backstop `onBlur` exists for).
+ *
+ * ★★ THE CLEAR COMES FROM THE WINDOW, NOT THE CONTROL (Fable review 2026-09-04,
+ * F1). On a SUCCESSFUL strike the pointer is still physically down at the 1100ms
+ * commit — the user cannot have released, or there'd be no strike — and the
+ * launch flow unmounts the HoldAction at that instant (meritum-launch-flow.tsx's
+ * `landing` swaps LaunchStepTerms out). So the control's own pointerup never
+ * runs; a control-scoped clear would leak the pressed state forever, and since
+ * this is module scope, for the whole session — silently degrading the
+ * keyboard-abort backstop on a money write into a tab-order accident. A
+ * capture-phase window listener sees every pointerup/cancel regardless of
+ * target, unmount, hit-test or disabled state. Keyed by pointerId so two fingers
+ * on the two controls never clear each other (F2). Armed lazily on the first
+ * press, so it never touches `window` during SSR (this is a 'use client' module
+ * but its top level still runs on the server).
+ *
+ * A plain module Set, not React state: it is read synchronously inside the blur
+ * the same gesture's pointerdown just caused, and never rendered.
+ */
+const activeHoldPointers = new Set<number>();
+let holdPointerWindowArmed = false;
+const forgetHoldPointer = (e: PointerEvent): void => {
+  activeHoldPointers.delete(e.pointerId);
+};
+const armHoldPointerWindow = (): void => {
+  if (holdPointerWindowArmed || typeof window === 'undefined') return;
+  window.addEventListener('pointerup', forgetHoldPointer, true);
+  window.addEventListener('pointercancel', forgetHoldPointer, true);
+  holdPointerWindowArmed = true;
+};
+/** A hold control's pointerdown. Pass the pointerId that armed it. */
+export const noteHoldPointerDown = (pointerId: number): void => {
+  armHoldPointerWindow();
+  activeHoldPointers.add(pointerId);
+};
+/**
+ * A hold control's own up/leave/cancel. A BELT on top of the window listener
+ * (Fable R1, 2026-09-04): a MOUSE released OUTSIDE the browser window delivers no
+ * pointerup to the page, so the window clear alone can leave a stale id. But
+ * leaving the window means the pointer first left the control, firing its
+ * pointerleave — so clearing here on leave closes that gap. Safe for twin-blur
+ * suppression: the guard is read only during the pointerdown→blur sequence, which
+ * precedes any leave. The window listener still OWNS the unmount path (F1), where
+ * no control up/leave ever fires.
+ */
+export const noteHoldPointerUp = (pointerId: number): void => {
+  activeHoldPointers.delete(pointerId);
+};
+/** Belt-and-braces clear-all, for the machine's unmount cleanup. */
+export const resetHoldPointers = (): void => {
+  activeHoldPointers.clear();
+};
+/**
+ * True when a blur is focus moving to the twin hold control WHILE a pointer is
+ * physically pressed on a hold control — the only case where a blur must not
+ * abort. A keyboard tab-away has no pressed pointer, so it still aborts even when
+ * it lands on a hold control.
+ */
+export const focusStaysInHoldGroup = (relatedTarget: EventTarget | null): boolean =>
+  activeHoldPointers.size > 0 && relatedTarget instanceof Element && relatedTarget.closest(`[${HOLD_CONTROL_ATTR}]`) !== null;
 
 type Timer = ReturnType<typeof setTimeout> | null;
 type Ticker = ReturnType<typeof setInterval> | null;
@@ -378,6 +461,9 @@ export const useHoldToStrike = (options: UseHoldToStrikeOptions = {}): HoldToStr
       clearTimer(strikeTimer);
       clearTimer(releaseTimer);
       clearTicker();
+      // Belt-and-braces on the window clear: if the machine unmounts mid-press,
+      // drop any pressed-pointer state so the twin-blur guard can't read stale.
+      resetHoldPointers();
       const el = optsRef.current.heightLockRef?.current;
       if (el) el.style.minHeight = '';
     };
@@ -398,6 +484,7 @@ export const useHoldToStrike = (options: UseHoldToStrikeOptions = {}): HoldToStr
       onPointerDown: (e) => {
         // Primary button only; a right-click must not arm the strike.
         if (e.button !== 0) return;
+        noteHoldPointerDown(e.pointerId);
         holdPointer.current = e.pointerId;
         begin();
       },
@@ -424,9 +511,22 @@ export const useHoldToStrike = (options: UseHoldToStrikeOptions = {}): HoldToStr
        * browser taking over the gesture (a scroll, a system gesture) is exactly
        * the case where a touch hold would otherwise charge with no way back.
        */
-      onPointerUp: (e) => releaseFor(e.pointerId),
-      onPointerLeave: (e) => releaseFor(e.pointerId),
-      onPointerCancel: (e) => releaseFor(e.pointerId),
+      // The pressed-pointer Set is cleared by the window listener for the
+      // unmount path (see armHoldPointerWindow); these are the belt that also
+      // clears when a mouse is released outside the window (Fable R1) — a leave
+      // necessarily precedes leaving the window. They also release the hold.
+      onPointerUp: (e) => {
+        noteHoldPointerUp(e.pointerId);
+        releaseFor(e.pointerId);
+      },
+      onPointerLeave: (e) => {
+        noteHoldPointerUp(e.pointerId);
+        releaseFor(e.pointerId);
+      },
+      onPointerCancel: (e) => {
+        noteHoldPointerUp(e.pointerId);
+        releaseFor(e.pointerId);
+      },
       onKeyDown: (e) => {
         if (e.key === 'Escape') {
           abort();
@@ -445,8 +545,13 @@ export const useHoldToStrike = (options: UseHoldToStrikeOptions = {}): HoldToStr
         abort();
       },
       // Tabbing away mid-hold leaves no key-up to arrive, so without this the
-      // hold would run to completion behind the user's back.
-      onBlur: abort
+      // hold would run to completion behind the user's back. But focus moving to
+      // the TWIN hold control (coin <-> button) is not tabbing away — it is the
+      // start of a hold on the other control — so that blur must not abort.
+      onBlur: (e) => {
+        if (focusStaysInHoldGroup(e.relatedTarget)) return;
+        abort();
+      }
     }),
     [begin, abort, releaseFor]
   );

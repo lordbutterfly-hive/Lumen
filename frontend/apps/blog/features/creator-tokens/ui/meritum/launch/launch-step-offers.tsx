@@ -95,7 +95,12 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
 
   return (
     <div className="mt-step">
-      <div className="mt-[26px] flex items-baseline gap-[18px] px-5 pb-0.5">
+      {/* ★ HEADERS ONLY WHEN THE CARDS ARE SIDE-BY-SIDE (2026-09-04, QA #10).
+          Below sm the offer card wraps name over price, so a two-column header
+          ("WHAT IS YOUR SKILL?" | "YOUR PRICE") aligns to nothing and "YOUR
+          PRICE" right-aligns to empty space. Hidden there; each field's own
+          aria-label and placeholder carry the meaning on narrow screens. */}
+      <div className="mt-[26px] hidden items-baseline gap-[18px] px-5 pb-0.5 sm:flex">
         <span className="min-w-0 flex-1 text-label font-medium uppercase tracking-label text-meritum-ink-faint font-ui">
           {t('meritum_launch.offers_col_skill')}
         </span>
@@ -126,6 +131,11 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
               included in a block, and then discarded on chain with an empty
               result and no error the UI could show.
             */}
+            {/* ★ aria-invalid: empty is UNFILLED, not INVALID (2026-09-04, QA #15).
+                offerTitleProblem('') reports "needs a title", which marked every
+                fresh field aria-invalid before a keystroke — a screen reader
+                announcing each blank input as an error. Flag invalid only once
+                there is content that is actually bad. */}
             <div className="min-w-[min(100%,180px)] flex-1 basis-60">
               <input
                 type="text"
@@ -133,7 +143,7 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
                 onChange={(e) => handleName(i, e.target.value)}
                 placeholder={examples[i]}
                 aria-label={t('meritum_launch.offer_name_aria', { n: i + 1 })}
-                aria-invalid={offerTitleProblem(offer.name) !== null}
+                aria-invalid={offer.name.trim() !== '' && offerTitleProblem(offer.name) !== null}
                 maxLength={MAX_OFFER_TITLE_LEN}
                 className="w-full border-0 border-b-[1.5px] border-meritum-line-input bg-transparent pb-1 font-ui text-16 font-medium text-meritum-ink outline-none placeholder:text-meritum-ink-faint"
               />

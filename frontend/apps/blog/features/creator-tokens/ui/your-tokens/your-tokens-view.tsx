@@ -402,9 +402,17 @@ const YourTokensView: FC = () => {
               <div className="pb-1.5 text-[15px] leading-[24px] tabular-nums text-ink-10 font-ui">Floor value: what the reserve would pay out if the market wound down</div>
             </div>
           ) : null}
-          <p className="mt-1 text-[14px] leading-[22px] text-ink-10 font-ui">
-            {p.holdingsUnavailable ? 'Your holdings can’t be loaded right now.' : `You hold tokens from ${p.holdings.length} ${p.holdings.length === 1 ? 'creator' : 'creators'}.`}
-          </p>
+          {/* ★ No "from 0 creators" line (2026-09-04, QA #17). At zero holdings
+              it sat directly above the empty state's "You don't hold any Meritum
+              yet", saying the same thing twice and less clearly. Show the count
+              only when it counts something; the empty state owns the zero case. */}
+          {p.holdingsUnavailable ? (
+            <p className="mt-1 text-[14px] leading-[22px] text-ink-10 font-ui">Your holdings can’t be loaded right now.</p>
+          ) : p.holdings.length > 0 ? (
+            <p className="mt-1 text-[14px] leading-[22px] text-ink-10 font-ui">
+              You hold tokens from {p.holdings.length} {p.holdings.length === 1 ? 'creator' : 'creators'}.
+            </p>
+          ) : null}
 
           {reclaimable > 0 ? (
             <div className="mt-4 flex items-center justify-between gap-3 rounded-control border border-line-warn-2 bg-surface-warn-4 px-4 py-3">
@@ -457,9 +465,21 @@ const YourTokensView: FC = () => {
                     unreachable. Your tokens are safe on-chain; each creator’s own token page still shows your balance.
                   </Unavailable>
                 ) : p.holdings.length === 0 ? (
-                  <p className="py-8 text-center font-serif text-sm italic text-ink-14">
-                    You don’t hold any Meritum yet. Browse creators and buy in to start.
-                  </p>
+                  // ★ INLINE BROWSE LINK (2026-09-04, QA #4). The only "Discover
+                  // creators" link lives in the right rail, which hides below xl,
+                  // so on tablet/mobile this empty state was a dead end. The link
+                  // belongs with the sentence that invites it, at every width.
+                  <div className="py-8 text-center">
+                    <p className="font-serif text-sm italic text-ink-14">
+                      You don’t hold any Meritum yet. Browse creators and buy in to start.
+                    </p>
+                    <Link
+                      href="/creators"
+                      className="mt-4 inline-block rounded-control bg-surface-brand-12 px-5 py-2.5 text-sm font-medium text-ink-27 font-ui hover:bg-surface-brand-16"
+                    >
+                      Discover creators →
+                    </Link>
+                  </div>
                 ) : (
                   p.holdings.map((h) => <HoldingRow key={`${h.holder}:${h.creator}`} h={h} price={prices.get(h.creator)} />)
                 )}

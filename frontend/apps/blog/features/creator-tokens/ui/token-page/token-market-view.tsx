@@ -257,7 +257,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   // live/market-states.tsx exists to prevent. Found live against the deployed
   // testnet contract, where a correct read of an unregistered creator rendered
   // as a node outage.
-  if (status === 'missing') return <MarketMissing handle={handle} />;
+  if (status === 'missing') return <MarketMissing handle={handle} isOwner={live.signingIdentity === handle} />;
   if (status === 'rate-limited') return <MarketRateLimited />;
   if (status === 'error' || !market) return <MarketReadFailed onRetry={live.retry} />;
 
