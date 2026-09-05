@@ -101,9 +101,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
      * retry for exactly this case and keep it for everything else, instead of
      * having to give up retrying altogether.
      */
+    /**
+     * ★★ 503, NOT 502 (2026-09-05, verified on prod through the edge). Cloudflare
+     * replaces an origin's 502/504 response with its own error page: the origin
+     * answered `{"error":"search_timeout"}` (seen over loopback on the box) and
+     * the browser received `text/plain` "error code: 502". So the code this
+     * route was so careful to name never reached the client, and the client's
+     * retry predicate could not skip the deterministic timeout: measured 13.3s
+     * for /search?q=hive&s=created in production (two 5.8s attempts). Other 5xx
+     * codes pass through Cloudflare unchanged; a search index that cannot answer
+     * is a 503 in the RFC's own words anyway. `retry-after` says what the
+     * message says: nothing changes for a while.
+     */
+    const timeout = isStatementTimeout(error);
     return NextResponse.json(
-      { error: isStatementTimeout(error) ? 'search_timeout' : 'search_unavailable' },
-      { status: 502 }
+      { error: timeout ? 'search_timeout' : 'search_unavailable' },
+      { status: 503, headers: { 'cache-control': 'private, no-store', 'retry-after': timeout ? '60' : '10' } }
     );
   }
 }
