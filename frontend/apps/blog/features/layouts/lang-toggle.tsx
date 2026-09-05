@@ -160,7 +160,21 @@ export default function LangToggle({
     <span
       lang={currentLocale}
       dir={RTL_LOCALES.has(currentLocale) ? 'rtl' : 'ltr'}
-      className={clsx(META_CLASS, 'ml-auto normal-case')}
+      // ★ Visual alignment (2026-09-05, owner: account-menu polish). In
+      // submenu mode this span is the right-hand meta of an ACCOUNT-MENU row,
+      // sitting directly under "3 held" / "◈ @handle" — which render via
+      // user-menu.tsx's META_CLASS (14px caption on the rows' 22px line box).
+      // META_CLASS here is the 12px tracked-uppercase LABEL treatment, so the
+      // meta column read as two different type styles one row apart. Written
+      // out literally (not clsx(META_CLASS, ...)) because clsx does no
+      // conflict resolution: emitting text-label AND text-caption together
+      // would leave the winner to stylesheet order. The standalone
+      // header-button path keeps the exact classes it had.
+      className={
+        renderAs === 'submenu'
+          ? 'ml-auto shrink-0 font-sans text-caption leading-[22px] text-ink-9'
+          : clsx(META_CLASS, 'ml-auto normal-case')
+      }
       data-testid="current-language"
     >
       {currentLabel}

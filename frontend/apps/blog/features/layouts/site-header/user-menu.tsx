@@ -38,14 +38,15 @@ const LABELS = {
 };
 
 const ROW_CLASS =
-  'flex cursor-pointer items-center justify-between gap-2.5 rounded-control px-3 py-2.5 font-ui text-[14px] leading-[22px] text-ink-7 transition-colors hover:bg-surface-20 hover:text-ink-2 focus:bg-surface-20 focus:text-ink-2';
+  'flex cursor-pointer items-center justify-between gap-2.5 rounded-control px-3 py-2.5 font-ui text-[14px] leading-[22px] text-ink-7 transition-colors hover:bg-surface-21 hover:text-ink-2 focus:bg-surface-21 focus:text-ink-2 data-[state=open]:bg-surface-21 data-[state=open]:text-ink-2';
 // ★ Contrast fix (2026-08-13, O5 a11y build map item 4). Was `#a29a92` at
 // 2.77:1 on white/against this row's `#f6f5f2` hover background — both fail
 // the 4.5:1 floor for real informational text ("N held", "◈ @handle"). This
-// row sits on the grey `#f6f5f2` hover ground, so it takes the darker
+// row sits on the grey `#f4f5f7` (surface-21) hover ground, so it takes the darker
 // "grey-ground" replacement rather than the plain-white one: `#6f6963` is
-// 4.97:1 on `#f6f5f2` and 5.42:1 on white, independently measured.
-const META_CLASS = 'shrink-0 font-sans text-caption tabular-nums text-ink-9';
+// 4.97:1 on that grey (measured on `#f6f5f2`, same luminance) and 5.42:1 on
+// white, independently measured.
+const META_CLASS = 'shrink-0 font-sans text-caption leading-[22px] tabular-nums text-ink-9';
 
 // ★ DEFECT FIX (2026-08-17): Upgrade previously shared ROW_CLASS with every
 // other row, including Language — so a lite reader's one CTA to leave the
@@ -128,7 +129,7 @@ const AccountMenuContent = ({ user }: { user: User }) => {
           rule as the header pill). No display name: `User`
           (smart-signer/types/common.ts) carries none, and inventing one here
           would be exactly the placeholder text rule 5 forbids. */}
-      <div className="flex items-center gap-[11px] px-2.5 pb-3 pt-2.5">
+      <div className="flex items-center gap-3 px-3 pb-2.5 pt-2.5">
         <MenuAvatar username={user.username} />
         <div className="min-w-0">
           <div
@@ -152,7 +153,7 @@ const AccountMenuContent = ({ user }: { user: User }) => {
           ) : null}
         </div>
       </div>
-      <DropdownMenuSeparator className="mx-1 my-0 mb-1.5 h-px bg-surface-24" />
+      <DropdownMenuSeparator className="-mx-2 my-1.5 h-px bg-line-9" />
 
       {/* ★ DEFECT FIX (2026-08-17): GROUPED, WITH SEPARATORS. This used to be 9
           rows in one flat `DropdownMenuGroup` with no visual break anywhere —
@@ -183,7 +184,7 @@ const AccountMenuContent = ({ user }: { user: User }) => {
       */}
       {user.account_tier === 'lite' ? (
         <>
-          <DropdownMenuSeparator className="mx-1 my-1.5 h-px bg-surface-24" />
+          <DropdownMenuSeparator className="-mx-2 my-1.5 h-px bg-line-9" />
           <DropdownMenuGroup className="flex flex-col gap-0.5">
             <DropdownMenuItem asChild className={ROW_CLASS}>
               <Link href="/security" data-testid="user-profile-menu-security-link">
@@ -199,7 +200,7 @@ const AccountMenuContent = ({ user }: { user: User }) => {
         </>
       ) : null}
 
-      <DropdownMenuSeparator className="mx-1 my-1.5 h-px bg-surface-24" />
+      <DropdownMenuSeparator className="-mx-2 my-1.5 h-px bg-line-9" />
 
       <DropdownMenuGroup className="flex flex-col gap-0.5">
         {/* Your tokens (design brief §4) — the held-token count, real from
@@ -264,7 +265,7 @@ const AccountMenuContent = ({ user }: { user: User }) => {
         </DropdownMenuItem>
       </DropdownMenuGroup>
 
-      <DropdownMenuSeparator className="mx-1 my-1.5 h-px bg-surface-24" />
+      <DropdownMenuSeparator className="-mx-2 my-1.5 h-px bg-line-9" />
 
       {/* Own group + separator + destructive styling (2026-08-17) — see
           `LOGOUT_ROW_CLASS` above. This is the one action in the menu that
