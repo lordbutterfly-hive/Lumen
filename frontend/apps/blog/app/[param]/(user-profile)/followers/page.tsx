@@ -1,5 +1,5 @@
 import FollowersContent from './content';
-import { getFollowers } from '@transaction/lib/hive-api';
+import { getFollowersCached } from '@/blog/lib/cached-api';
 import { extractUsernameFromParam } from '@/blog/utils/validate-links';
 import { notFound } from 'next/navigation';
 import { getLogger } from '@ui/lib/logging';
@@ -13,8 +13,12 @@ const FollowersPage = async ({ params }: { params: { param: string } }) => {
 
   let initialFollowers = null;
   try {
+    // ★ CACHED (2026-09-05, perf batch C-A). See getFollowersCached's own doc
+    // comment in lib/cached-api.ts -- neither result is viewer-dependent, so a
+    // 30s cross-request cache is safe here the way it is not for anything
+    // transactional.
     initialFollowers =
-      (await getFollowers({ account: username, start: '', type: 'blog', limit: LIMIT })) ?? null;
+      (await getFollowersCached({ account: username, start: '', type: 'blog', limit: LIMIT })) ?? null;
   } catch (error) {
     logger.error(error, 'Error fetching followers list:');
   }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { getCommunity } from '@transaction/lib/bridge-api';
+import { getCommunityCached } from '@/blog/lib/cached-api';
 
 const logger = getLogger('app');
 
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'name_required' }, { status: 400 });
   }
   try {
-    const community = await getCommunity(name, observer);
+    const community = await getCommunityCached(name, observer);
     return NextResponse.json(community, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'community lookup failed for %s', name);

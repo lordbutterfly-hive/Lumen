@@ -7,7 +7,8 @@ import { InitialProfileProvider } from '@/blog/components/observer-provider';
 import {
   getAccountFullCached,
   getAccountReputationsCached,
-  getDynamicGlobalPropertiesCached
+  getDynamicGlobalPropertiesCached,
+  primeAccountFullCache
 } from '@/blog/lib/cached-api';
 import { liteAccountAsProfile } from '@/blog/lib/lite/render/lite-account';
 import { getAccountFull, getAccountReputations, getDynamicGlobalProperties } from '@transaction/lib/hive-api';
@@ -173,7 +174,23 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
     // transient failure; the pause only needs to be long enough not to arrive
     // inside the same blip.
     await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS));
-    return getAccountFull(username).catch(() => null);
+    // ★ WRITE THROUGH ON SUCCESS (2026-09-05, perf batch C-A). This retry used
+    // to hand its answer straight to THIS page and nowhere else -- every other
+    // reader who landed in the same 30s window (the exact scenario that put
+    // them here: a burst hitting a rate-limited node) paid the identical
+    // failed-then-retried round trip again, one at a time, for as long as the
+    // burst lasted. `primeAccountFullCache` deposits a successful retry into
+    // the same 30s store `getAccountFullCached` reads from, under its own
+    // `ttlFor`/`staleWhileRevalidateMs` rules (see that function's and
+    // `server-ttl-cache.ts`'s `.set` doc comments) -- only on success, so a
+    // retry that fails too still writes nothing and this page still 404s via
+    // the lite-account fallback below exactly as before.
+    return getAccountFull(username)
+      .then((result) => {
+        primeAccountFullCache(username, result);
+        return result;
+      })
+      .catch(() => null);
   });
 
   // Lumen lite account fallback. A lite user has no Hive account until they upgrade,

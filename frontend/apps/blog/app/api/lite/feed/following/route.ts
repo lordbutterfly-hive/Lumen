@@ -10,7 +10,6 @@ import * as posts from '@/blog/lib/lite/repositories/post-repository';
 import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
 import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
 import { getAccountPosts } from '@transaction/lib/bridge-api';
-import { withRetry } from '@transaction/lib/retry';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 
 const logger = getLogger('app');
@@ -154,14 +153,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           // 'blog' (which folds in their reblogs) — a reblog by someone you
           // follow is a different product decision, and silently including it
           // here would make the feed disagree with what the follow promised.
-          // ★ A6 retry rollout (2026-08-18): wired here, not inside `getAccountPosts`
-          // itself — see that function's own comment (its `streak/[user]` caller has
-          // a competing wall-clock budget). This route's per-author calls already run
-          // in parallel via `Promise.all` below, so a bounded retry per author cannot
-          // multiply the whole batch's worst case beyond the slowest single author.
-          const r = await withRetry(() => getAccountPosts('posts', author, author, '', ''), {
-            label: `getAccountPosts(posts,${author})`
-          });
+          // ★ OUTER `withRetry` REMOVED (2026-09-05, perf batch C-A).
+          // `getAccountPosts` calls `getAccountPostsPage`, which now retries AND
+          // fails over across Hive nodes internally (`withHiveRetry`,
+          // 2026-09-03 -- see its own comment in bridge-api.ts). The `withRetry`
+          // that used to wrap this call only retried transport faults/5xx on the
+          // SAME node and never failed over, so per author it was a strictly
+          // weaker second retry loop stacked on top of a stronger one -- and
+          // this route already runs one such call per author in parallel via
+          // `Promise.all` below, so the doubling applied to every author at once.
+          const r = await getAccountPosts('posts', author, author, '', '');
           return { ok: true, entries: (r ?? []).slice(0, PER_CHAIN_AUTHOR) };
         } catch (error) {
           // One unreachable author must not empty the whole feed.

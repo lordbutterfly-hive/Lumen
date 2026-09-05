@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { getPost } from '@transaction/lib/bridge-api';
-import { withRetry } from '@transaction/lib/retry';
 import { getObserver } from '@/blog/lib/auth-utils';
 import { isPermlinkValid, isUsernameValid, isValidUserParam } from '@/blog/utils/validate-links';
 import { getLogger } from '@ui/lib/logging';
@@ -47,12 +46,15 @@ export async function GET(request: Request, { params }: { params: { user: string
 
     let post;
     try {
-      // ★ A6 retry rollout (2026-08-18): wired here, not inside `getPost` itself —
-      // see that function's own comment on why (its other caller, `/api/feed/for-you`,
-      // already has its own hand-rolled retry across a ~30-way fan-out).
-      post = await withRetry(() => getPost(username, String(params?.permlink), observer), {
-        label: `getPost(${username})`
-      });
+      // ★ OUTER `withRetry` REMOVED (2026-09-05, perf batch C-A). `getPost`
+      // itself now retries AND fails over across Hive nodes internally
+      // (`withHiveRetry`, 2026-09-03 -- see its own comment in bridge-api.ts).
+      // The `withRetry` that used to wrap this call only retried transport
+      // faults/5xx on the SAME node and never failed over, so it was a
+      // strictly weaker second retry loop stacked on top of a stronger one --
+      // doubling this route's worst-case latency on a real outage for no
+      // added resilience.
+      post = await getPost(username, String(params?.permlink), observer);
     } catch (fetchErr) {
       logger.error(fetchErr, 'Failed to fetch post');
 

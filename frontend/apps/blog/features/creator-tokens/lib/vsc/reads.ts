@@ -451,6 +451,13 @@ export const HEAD_QUERY = `query CreatorTokensHead {
   localNodeInfo { last_processed_block }
 }`;
 /**
+ * C-D coalesce: how long getHeadBlockCached() may serve a last-good head
+ * before asking again. Kept under one Hive block (~3s) so a cache hit is
+ * NEVER more than one block stale — see getHeadBlockCached's own doc for why
+ * that bound is harmless everywhere it is used.
+ */
+const HEAD_BLOCK_TTL_MS = 2_500;
+/**
  * Which bytecode is deployed under the contract id (schema.graphql
  * findContract / FindContractFilter.byId; `code` is the wasm CID). The ONE
  * read that decides ContractRules (market/contract-rules.ts, which also has
@@ -542,6 +549,67 @@ export class CreatorTokensGqlClient {
     } catch {
       return null;
     }
+  }
+
+  // ── C-D coalesce (2026-09-05, measured live): every page that renders a
+  // creator-tokens widget fires getHeadBlock() 2-3x independently — each
+  // readMarketPricesBatch (vsc-data-source.ts) runs its own
+  // Promise.all([getStateByKeys, getHeadBlock, readRules]), and the header
+  // pill's own readMarket() stacks another — all asking separately for a
+  // value that only changes once per Hive block (~3s). getHeadBlockCached()
+  // below is that coalescing. Same TTL-cache + single-flight SHAPE as
+  // readRules'/rulesInFlight's own cache (vsc-data-source.ts:448-466, read
+  // that first) — a TTL'd last-good value plus an in-flight promise so
+  // callers within the same short window join one round trip instead of
+  // each firing their own — with one deliberate difference, noted at the
+  // field below.
+  //
+  // getHeadBlock() ITSELF IS LEFT UNTOUCHED. Two reasons:
+  //  (1) vsc-data-source.ts's answer()/decline()/reclaim() call it directly
+  //      and each already carries its own comment on why: they gate a
+  //      block<=deadline pre-broadcast window meant to catch a call that
+  //      would otherwise revert on-chain a moment later, needing a head
+  //      "fetched fresh rather than trusting any cached value" — a cached
+  //      head could let a stale guard pass locally on exactly the call it
+  //      exists to catch. Every OTHER caller only ever uses the head for a
+  //      display-side phase/deadline computation or an optimistic
+  //      post-write projection later reconciled by a poll, where being off
+  //      by at most one Hive block (HEAD_BLOCK_TTL_MS's own bound) is no
+  //      different from the staleness this code already lived with (head
+  //      is read once per call, never live-subscribed, and the real chain
+  //      state is always the authority at broadcast time regardless of
+  //      what a client-side read shows) — those call sites use
+  //      getHeadBlockCached() instead.
+  //  (2) the e2e harness's FakeGql (__e2e__/vsc-data-path.e2e.ts) subclasses
+  //      this class and overrides ONLY getHeadBlock(), to return a scripted
+  //      head with no network call. getHeadBlockCached() calls
+  //      `this.getHeadBlock()` (not a private duplicate of its body), so
+  //      that override is still honored polymorphically when a FakeGql
+  //      instance calls getHeadBlockCached() — the harness needed zero
+  //      changes for this fix.
+  private headBlockCache: { block: number; until: number } | null = null;
+  private headBlockInFlight: Promise<number | null> | null = null;
+
+  async getHeadBlockCached(): Promise<number | null> {
+    if (this.headBlockCache && Date.now() < this.headBlockCache.until) return this.headBlockCache.block;
+    if (this.headBlockInFlight) return this.headBlockInFlight;
+    this.headBlockInFlight = (async (): Promise<number | null> => {
+      try {
+        const block = await this.getHeadBlock();
+        // ONE difference from rulesInFlight: a FAILED read is deliberately
+        // NOT cached here. rulesInFlight caches its 'v1' fallback because
+        // 'v1' is asserted to be a safe default value everywhere it is used;
+        // there is no equivalent safe default head, so caching a transient
+        // failure would fail every OTHER widget sharing this client for the
+        // rest of the TTL window instead of letting the very next call retry
+        // live — required by the fail-open constraint on this cache.
+        if (block !== null) this.headBlockCache = { block, until: Date.now() + HEAD_BLOCK_TTL_MS };
+        return block;
+      } finally {
+        this.headBlockInFlight = null;
+      }
+    })();
+    return this.headBlockInFlight;
   }
 }
 

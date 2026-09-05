@@ -9,6 +9,9 @@ import SkipToContent from '../features/layouts/skip-to-content';
 import ClientEffects from '../features/layouts/site-header/client-effects';
 import ScrollReset from '../features/layouts/scroll-reset';
 import { ServerSessionProvider } from '../features/layouts/server-session';
+import { ServerAccountTierProvider } from '../features/wallet/lib/server-account-tier-context';
+import { OwnRankTierProvider } from '../features/retention/lib/own-rank-tier-context';
+import { fetchOwnRankTierSeed } from '../features/retention/lib/own-rank-tier-seed';
 import { Providers } from '../features/layouts/providers';
 import { getServerSessionUser } from '../lib/server-session';
 import { Hydrate, dehydrate } from '@tanstack/react-query';
@@ -284,13 +287,6 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   // window.__ENV, inlined below instead of fetched — see getBrowserEnv above.
   const browserEnvScript = `window.__ENV = ${JSON.stringify(getBrowserEnv()).replace(/</g, '\\u003c')};`;
 
-  // ★ The header and the left rail used to learn who you are only after React
-  // mounted and `/api/users/me` came back, which on this app is 5-20s — so a
-  // signed-in reader was served signed-out chrome for that whole window. This
-  // request already carries the session cookie; read it once here and hand the
-  // answer down. See features/layouts/server-session.tsx.
-  const serverSession = await getServerSessionUser();
-
   /*
    * ★★★ THE RIGHT RAIL'S TOPICS, IN THE HTML (2026-08-30).
    *
@@ -314,8 +310,56 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
    * seeding it: react-query would treat `[]` as a fresh answer for the whole
    * `StaleTime.LONG` window and the card would render its empty state instead of
    * fetching. So a miss must leave the key ABSENT, not present-and-empty.
+   *
+   * ★ PARALLEL WITH THE SESSION READ, NOT AFTER IT (C-B, 2026-09-05). This and
+   * `getServerSessionUser()` below used to run as two sequential `await`s, but
+   * neither's input depends on the other's output — the session read opens a
+   * cookie, this races a Hive read against its own deadline — so making a
+   * reader wait for them back-to-back only ever added the first's latency to
+   * the second's. `Promise.all` runs the same two reads concurrently; the
+   * root layout's wall-clock cost is now the SLOWER of the two, not the sum.
    */
-  const trendingTags = await trendingTagsForPrefetch();
+  const [serverSession, trendingTags] = await Promise.all([
+    // ★ The header and the left rail used to learn who you are only after React
+    // mounted and `/api/users/me` came back, which on this app is 5-20s — so a
+    // signed-in reader was served signed-out chrome for that whole window. This
+    // request already carries the session cookie; read it once here and hand the
+    // answer down. See features/layouts/server-session.tsx.
+    getServerSessionUser(),
+    trendingTagsForPrefetch()
+  ]);
+
+  /**
+   * ★★★ THE LEFT RAIL'S RANK TIER, IN THE HTML TOO (C-B, 2026-09-05, owner:
+   * "the left navbar spark loads slow"). Same idea as the trending-tags seed
+   * above, for `league-showcase.tsx`'s instant-tier row: `useOwnRankTier`
+   * reads a snapshot that answers in ~10ms once the read itself starts, but
+   * on a cold load nothing started it until the client mounted and fired its
+   * own `/api/streak/marks` request, so the rail always painted
+   * `ShowcaseSkeleton` first regardless of how fast that read was. This reads
+   * the SAME snapshot directly (`own-rank-tier-seed.ts`, no HTTP hop) so
+   * `OwnRankTierProvider` below can hand `useOwnRankTier` an answer it already
+   * has on the very first render.
+   *
+   * UNLIKE `trendingTagsForPrefetch()`, this cannot join the `Promise.all`
+   * above — it needs `serverSession.username`, which is that call's own
+   * output, so the dependency is real, not incidental. Bounded by its own
+   * short race for the same reason `app/wallet/page.tsx`'s `PREFETCH_BUDGET_MS`
+   * is: this seed feeds EVERY page via the root layout, not one route, so a
+   * degraded read must never add more than a small, fixed amount to every
+   * page's TTFB. Sized with generous headroom over the ~10ms the snapshot
+   * read itself costs; a miss or timeout just means "no seed" —
+   * `useOwnRankTier`'s existing unseeded client fetch runs exactly as it does
+   * today.
+   */
+  const RANK_TIER_PREFETCH_BUDGET_MS = 150;
+  const rankTierSeed = serverSession.isLoggedIn
+    ? await Promise.race([
+        fetchOwnRankTierSeed(serverSession.username),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), RANK_TIER_PREFETCH_BUDGET_MS))
+      ])
+    : null;
+
   const queryClient = getQueryClient();
   if (trendingTags) {
     queryClient.setQueryData([...TRENDING_TAGS_QUERY_KEY], trendingTags);
@@ -335,26 +379,32 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <link rel="preconnect" href={imagesOrigin} />
         <link rel="dns-prefetch" href={imagesOrigin} />
         {/* ★ Lumen UI (Merriweather Sans) + Lumen Num (Fira Sans digits) preloads
-            (2026-09-02 typography; widened 2026-09-04 perf hunt). Lora is loaded by
-            next/font above and preloads itself; these cover the OTHER two faces.
-            ★ ALL NINE files that packages/tailwindcss/globals.css's "Lumen UI"/
-            "Lumen Num" @font-face rules actually reference are preloaded here —
-            previously only the 400-weight pair was, so any element rendered at
-            font-medium/font-semibold (.font-ui) or using .font-num (feed-card
-            payout figures, wallet balances — both above the fold) hit an
-            undiscovered, unpreloaded fetch and visibly swapped weight/face in
-            after first paint (FOUT). Filenames carry the content hash described
-            in globals.css; a re-subset font needs both updated together. */}
+            (2026-09-02 typography; widened 2026-09-04 perf hunt; latin-ext DROPPED
+            2026-09-05, batch C-C). Lora is loaded by next/font above and preloads
+            itself; these cover the OTHER two faces.
+            ★ SIX of the NINE files packages/tailwindcss/globals.css's "Lumen UI"/
+            "Lumen Num" @font-face rules reference are preloaded here — the 400/500/
+            600 "latin" cut of Merriweather Sans (plain, no unicode-range — matches
+            everything the "latin-ext" cut doesn't) plus all three Fira Sans digit
+            weights. Any element rendered at font-medium/font-semibold (.font-ui) or
+            using .font-num (feed-card payout figures, wallet balances — both above
+            the fold) needs these, so an unpreloaded fetch there was a visible
+            weight/face swap after first paint (FOUT).
+            ★ THE THREE "latin-ext" CUTS ARE NOT PRELOADED, DELIBERATELY. They stay
+            declared in globals.css (`merriweather-sans-latin-ext-{400,500,600}-*`,
+            `unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB,
+            U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF` — mostly Central/Eastern-
+            European Latin diacritics), so the browser still fetches one on demand
+            the moment a page actually renders a character in that range — this is
+            the CSS unicode-range subsetting mechanism working as intended, not a
+            missing fallback. Forcing them via `<link rel=preload>` bypassed that
+            mechanism and fetched all three unconditionally on every load (~51KB +
+            3 requests) for a range most readers' content never touches. Filenames
+            carry the content hash described in globals.css; a re-subset font needs
+            both updated together. */}
         <link
           rel="preload"
           href="/fonts/merriweather-sans-latin-400-normal.28371889.woff2"
-          as="font"
-          type="font/woff2"
-          crossOrigin="anonymous"
-        />
-        <link
-          rel="preload"
-          href="/fonts/merriweather-sans-latin-ext-400-normal.e3758ff1.woff2"
           as="font"
           type="font/woff2"
           crossOrigin="anonymous"
@@ -368,21 +418,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         />
         <link
           rel="preload"
-          href="/fonts/merriweather-sans-latin-ext-500-normal.cebc3a77.woff2"
-          as="font"
-          type="font/woff2"
-          crossOrigin="anonymous"
-        />
-        <link
-          rel="preload"
           href="/fonts/merriweather-sans-latin-600-normal.4f0b3ea5.woff2"
-          as="font"
-          type="font/woff2"
-          crossOrigin="anonymous"
-        />
-        <link
-          rel="preload"
-          href="/fonts/merriweather-sans-latin-ext-600-normal.6af270c2.woff2"
           as="font"
           type="font/woff2"
           crossOrigin="anonymous"
@@ -800,6 +836,13 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 `useRouter()` call site at once. See components/offline-guard.tsx. */}
             <OfflineGuard>
               <ServerSessionProvider value={serverSession}>
+                {/* ★ C-B, 2026-09-05: `accountTier` (wallet-content.tsx /
+                    wallet-right-rail.tsx) and the rank-tier snapshot
+                    (league-showcase.tsx) — see each provider's own doc for why
+                    these are separate, feature-scoped contexts rather than
+                    fields added to `ServerSessionProvider` itself. */}
+                <ServerAccountTierProvider value={serverSession.accountTier}>
+                <OwnRankTierProvider value={rankTierSeed}>
                 <StorageCleanup />
                 <CondenserMigration />
                 {/* Every route lands at the top of its own page. See scroll-reset.tsx. */}
@@ -817,6 +860,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 <div className="mx-auto" id="main-content" tabIndex={-1}>
                   {children}
                 </div>
+                </OwnRankTierProvider>
+                </ServerAccountTierProvider>
               </ServerSessionProvider>
             </OfflineGuard>
             </Hydrate>

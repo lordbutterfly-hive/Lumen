@@ -429,17 +429,22 @@ export const getProfileInfo = async (
   };
 };
 
+// ★ PARALLELIZED (2026-09-05, perf batch C-A). `getProfileInfo` takes only the
+// username -- it never reads anything off `account` -- so it was waiting on
+// `getAccount` for no reason and adding its own full round trip on top of
+// `getAccount`'s. `Promise.all` starts both upstream calls together; the
+// `.catch(() => null)` on `getProfileInfo` keeps the exact fallback this had
+// before (`follow_stats`/`reputation` left undefined on any failure there),
+// while `getAccount` still rejects the whole thing on its own failure exactly
+// as it did in the chained version.
 export const getAccountFull = (username: string): Promise<FullAccount> =>
-  getAccount(username).then(async (account) => {
-    let follow_stats: AccountFollowStats | undefined;
-    let reputation: number | undefined;
-    try {
-      const profileInfo = await getProfileInfo(username);
-      follow_stats = profileInfo.follow_stats;
-      reputation = profileInfo.reputation;
-    } catch (e) {}
-    return { ...account, follow_stats, reputation };
-  });
+  Promise.all([getAccount(username), getProfileInfo(username).catch(() => null)]).then(
+    ([account, profileInfo]) => ({
+      ...account,
+      follow_stats: profileInfo?.follow_stats,
+      reputation: profileInfo?.reputation
+    })
+  );
 
 export const getFollowCount = async (username: string): Promise<AccountFollowStats> => {
   const profileInfo = await getProfileInfo(username);

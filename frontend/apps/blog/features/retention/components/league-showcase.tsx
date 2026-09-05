@@ -93,6 +93,18 @@ export function LeagueShowcase() {
   // empty username. See useOwnRankTier.
   // Gated on `!summary`: when the full standing is already in hand the instant
   // row never renders, so its snapshot read would be pure waste (LOW-1).
+  //
+  // ★★★ NOW SSR-SEEDED TOO (C-B, 2026-09-05). "Instantly" above used to still
+  // mean "after one client round trip to `/api/streak/marks`", so a COLD load
+  // painted `ShowcaseSkeleton` first regardless of how fast that read was —
+  // no fetch can beat the render that triggers it. `useOwnRankTier` itself now
+  // carries `initialData` from `app/layout.tsx`'s server-side read of the same
+  // snapshot (see `own-rank-tier-seed.ts` / `own-rank-tier-context.tsx`), so on
+  // a seed hit `ownTier` is non-null on the very FIRST render — server and
+  // client alike — and this renders `ShowcaseInstant` immediately with no
+  // skeleton frame at all. Nothing here changed to make that true: the seed is
+  // consumed entirely inside the hook, keyed and guarded exactly like every
+  // other SSR seed in this codebase (`use-wallet-account.ts`'s own doc).
   const ownTier = useOwnRankTier(identity.username, !summary);
 
   // Headless; renders no DOM. Mounted here rather than threaded through a layout

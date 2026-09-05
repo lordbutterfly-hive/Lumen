@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { getCommunity } from '@transaction/lib/bridge-api';
+import { getCommunityCached } from '@/blog/lib/cached-api';
 import CommunityLayout from './community-layout';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
 import { getLogger } from '@ui/lib/logging';
@@ -16,7 +16,7 @@ const PrefetchComponent = async ({ children, community }: { children: ReactNode;
   try {
     // Only fetch community data for actual communities (not tags)
     if (isCommunity(community)) {
-      communityData = (await getCommunity(community, observer)) ?? null;
+      communityData = (await getCommunityCached(community, observer)) ?? null;
     }
   } catch (error) {
     logger.error(error, 'Error in PrefetchComponent:');

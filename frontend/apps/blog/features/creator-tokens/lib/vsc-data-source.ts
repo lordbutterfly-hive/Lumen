@@ -565,7 +565,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       let head: number | null;
       let rules: ContractRules;
       try {
-        [state, head, rules] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock(), this.readRules()]);
+        [state, head, rules] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlockCached(), this.readRules()]);
       } catch {
         // A failed read is NOT "no market" — saying so would tell a creator with
         // a live market that they have none. Report it as unanswered.
@@ -642,7 +642,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     let head: number | null;
     let rules: ContractRules;
     try {
-      [state, head, rules] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock(), this.readRules()]);
+      [state, head, rules] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlockCached(), this.readRules()]);
     } catch (e) {
       // A rate limit is a distinct, honest UI state, not the generic UNKNOWN read
       // failure -- re-throw the coded error so use-live-token-market can surface it.
@@ -792,7 +792,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     const [state, maturedState, head] = await Promise.all([
       this.gql.getStateByKeys(this.config.contractId, keys),
       this.gql.getStateByKeysHex(this.config.contractId, [kMatured(creator, holder)]),
-      this.gql.getHeadBlock()
+      this.gql.getHeadBlockCached()
     ]);
     if (toU64(state[kRegisteredAt(creator)]) === 0) return null;
     if (head === null) {
@@ -893,7 +893,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     const seqCount = toU64(seqState[kSeq(creator)]);
     if (seqCount === 0) return { asks: [], scannedAll: true, olderNotScanned: 0 };
 
-    const head = await this.gql.getHeadBlock();
+    const head = await this.gql.getHeadBlockCached();
     const CHUNK = VscCreatorTokensDataSource.INBOX_CHUNK;
     const cap = VscCreatorTokensDataSource.MAX_INBOX_SCAN;
     // The stop line: an ask whose deadline is older than this was opened over
@@ -947,7 +947,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       // deadline shown are current rather than a replay that may lag a block.
       const rows = await this.indexer.asksOf(toDid(asker));
       const keys = rows.map((r) => kEscrow(r.creator, r.seq));
-      const [state, head] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock()]);
+      const [state, head] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlockCached()]);
       const asks: Ask[] = [];
       for (const r of rows) {
         const raw = state[kEscrow(r.creator, r.seq)];
@@ -1039,7 +1039,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         ...obsKeys,
         ...obsLongKeys
       ]),
-      this.gql.getHeadBlock()
+      this.gql.getHeadBlockCached()
     ]);
 
     // The posted price this ask will actually settle against. For a named
@@ -1143,7 +1143,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     assertPositiveTokenCount(tokens, 'tokens');
     const [state, head] = await Promise.all([
       this.gql.getStateByKeys(this.config.contractId, [kRegisteredAt(creator), kSupply(creator), kCap(creator), kPaidUntil(creator), kState(creator), kPaused(), kRetiredAt(creator)]),
-      this.gql.getHeadBlock()
+      this.gql.getHeadBlockCached()
     ]);
     if (toU64(state[kRegisteredAt(creator)]) === 0) {
       throw new Error(`VscCreatorTokensDataSource: no such market ${creator}`);
@@ -1205,7 +1205,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         kRetiredAt(creator)
       ]),
       this.gql.getStateByKeysHex(this.config.contractId, [kMatured(creator, seller)]),
-      this.gql.getHeadBlock(),
+      this.gql.getHeadBlockCached(),
       this.readRules()
     ]);
     if (toU64(state[kRegisteredAt(creator)]) === 0) {
@@ -1348,7 +1348,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // it as the outcome. Return the EXPECTED post-state, flagged `pending`, and
     // let useCreatorToken's poll reconcile it against real chain state (mirrors
     // ask()'s `:pending` Ask and prediction-market's optimistic placeBet).
-    const [head, rules] = await Promise.all([this.gql.getHeadBlock(), this.readRules()]);
+    const [head, rules] = await Promise.all([this.gql.getHeadBlockCached(), this.readRules()]);
     if (head === null) return { ...unknownMarket(input.creator), pending: true };
     return {
       ...this.buildMarket(
@@ -1527,7 +1527,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // The contract fixed it; this client had re-introduced it by gating on
     // canBuy, which carries the delivery term. Blocking a debtor from paying
     // you is not a penalty, it is a trap. Gate on canRenew, never canBuy.
-    const [market, head] = await Promise.all([this.readMarket(input.creator), this.gql.getHeadBlock()]);
+    const [market, head] = await Promise.all([this.readMarket(input.creator), this.gql.getHeadBlockCached()]);
     if (market && market.phase !== 'UNKNOWN') {
       if (!market.canRenew) {
         throw new Error(renewRefusalMessage(market.renewRefusal));
@@ -1856,7 +1856,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async retire(input: RetireInput): Promise<Market> {
     this.assertBroadcaster();
-    const [priorMarket, head] = await Promise.all([this.readMarket(input.creator), this.gql.getHeadBlock()]);
+    const [priorMarket, head] = await Promise.all([this.readMarket(input.creator), this.gql.getHeadBlockCached()]);
     const op = buildOp({
       netId: this.config.netId,
       contractId: this.config.contractId,
@@ -1971,7 +1971,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     };
     if (!this.indexer) return unknown;
     try {
-      const [health, nodeBlock] = await Promise.all([this.indexer.health(), this.gql.getHeadBlock()]);
+      const [health, nodeBlock] = await Promise.all([this.indexer.health(), this.gql.getHeadBlockCached()]);
       const indexerBlock = health.latestBlockHeight;
       // Both heights, or no lag number at all. A one-sided read cannot produce
       // a difference, and defaulting the missing side to 0 would report the
@@ -2011,7 +2011,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       kState(r.creator),
       kRetiredAt(r.creator)
     ]);
-    const [state, head, rules] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock(), this.readRules()]);
+    const [state, head, rules] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlockCached(), this.readRules()]);
 
     const epochOf = (c: string) => toU64(state[kOfferEpoch(c)]);
     const idsState = await this.gql.getStateByKeys(
@@ -2339,6 +2339,11 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // itself (kEscrow) to get the deadline — that would incidentally
     // implement the excluded escrow-existence check; AnswerInput.deadlineBlock
     // carries it instead, sourced from the Ask the caller already has.
+    //
+    // ★ C-D (2026-09-05): deliberately `getHeadBlock()`, NOT
+    // `getHeadBlockCached()` — decline()'s and reclaim()'s identical guards
+    // below are the same. See getHeadBlockCached's own doc in reads.ts for
+    // why this trio is excluded from the coalescing cache.
     const head = await this.gql.getHeadBlock();
     if (head === null) {
       throw new Error('VscCreatorTokensDataSource: cannot verify the answer window (chain head unavailable)');
@@ -3074,7 +3079,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   }
 
   private async readOneAsk(creator: string, seq: number): Promise<Ask> {
-    const [state, head] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, [kEscrow(creator, seq)]), this.gql.getHeadBlock()]);
+    const [state, head] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, [kEscrow(creator, seq)]), this.gql.getHeadBlockCached()]);
     const raw = state[kEscrow(creator, seq)];
     const parsed = raw ? parseEscrow(raw) : null;
     if (!parsed) throw new Error(`VscCreatorTokensDataSource: no such escrow ${creator}:${seq}`);

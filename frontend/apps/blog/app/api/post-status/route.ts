@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { getPost } from '@transaction/lib/bridge-api';
-import { withRetry } from '@transaction/lib/retry';
 import { isPermlinkValid } from '@/blog/utils/validate-links';
 
 const logger = getLogger('app');
@@ -27,12 +26,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'author_and_permlink_required' }, { status: 400 });
   }
   try {
-    // ★ A6 retry rollout (2026-08-18): wired here, not inside `getPost` itself —
-    // that function's other caller (`/api/feed/for-you`) already has its own
-    // hand-rolled retry across a ~30-way fan-out; see `getPost`'s own comment.
-    const post = await withRetry(() => getPost(author, permlink, observer), {
-      label: `getPost(${author}/${permlink})`
-    }).catch(() => null);
+    // ★ OUTER `withRetry` REMOVED (2026-09-05, perf batch C-A). `getPost` itself
+    // now retries AND fails over across Hive nodes internally (`withHiveRetry`,
+    // 2026-09-03 -- see its own comment in bridge-api.ts). The `withRetry` that
+    // used to wrap this call only retried transport faults/5xx on the SAME node
+    // and never failed over, so it was a strictly weaker second retry loop
+    // stacked on top of a stronger one -- doubling this route's worst-case
+    // latency on a real outage for no added resilience.
+    const post = await getPost(author, permlink, observer).catch(() => null);
     return NextResponse.json({ post: post ?? null }, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'post status lookup failed for %s/%s', author, permlink);

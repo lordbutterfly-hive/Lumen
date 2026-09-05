@@ -1,6 +1,6 @@
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import PostContent from './content';
-import { getPostCached } from '@/blog/lib/cached-api';
+import { getPostCached, getDiscussionCached, getCommunityCached } from '@/blog/lib/cached-api';
 import { liteChainCoordinates, liteRecordExists } from '@/blog/lib/lite/render/lite-entry';
 import { attachLiteIdentities, attachLiteIdentitiesToDiscussion } from '@/blog/lib/lite/render/attach-lite';
 import { applyOwnerBlocksToDiscussion } from '@/blog/lib/lite/social/block-filter';
@@ -8,7 +8,7 @@ import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-re
 import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
 import { isLumenPermlink } from '@/blog/lib/lite/render/lite-post-id';
 import { commentPageRedirectTarget } from '@/blog/lib/post/comment-redirect';
-import { getCommunity, getDiscussion, getFollowList } from '@transaction/lib/bridge-api';
+import { getFollowList } from '@transaction/lib/bridge-api';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { isUsernameValid, isPermlinkValid, isValidUserParam } from '@/blog/utils/validate-links';
@@ -93,10 +93,10 @@ const PostPage = async ({
     const [postResult, discussionResult, mutedListResult, communityResult] = await Promise.allSettled([
       // Use cached version — deduplicated with layout's generateMetadata within the same request
       getPostCached(username, permlink, observer),
-      getDiscussion(username, permlink, observer),
+      getDiscussionCached(username, permlink, observer),
       // Prefetch the user's muted list so comments are filtered from the first render
       isLoggedIn ? getFollowList(observer, 'muted') : Promise.resolve(null),
-      isCommunity(community) ? getCommunity(community, observer) : Promise.resolve(null)
+      isCommunity(community) ? getCommunityCached(community, observer) : Promise.resolve(null)
     ]);
 
     postData = postResult.status === 'fulfilled' ? (postResult.value ?? null) : null;
@@ -172,7 +172,7 @@ const PostPage = async ({
     if (!discussionData) {
       const chain = await liteChainCoordinates(permlink);
       if (chain) {
-        discussionData = await getDiscussion(chain.author, chain.permlink, observer).catch(() => null);
+        discussionData = await getDiscussionCached(chain.author, chain.permlink, observer).catch(() => null);
       }
     }
     if (discussionResult.status === 'rejected') {

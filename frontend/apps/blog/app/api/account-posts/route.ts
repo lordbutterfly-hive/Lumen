@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { getAccountPostsPage, DATA_LIMIT } from '@transaction/lib/bridge-api';
-import { withRetry } from '@transaction/lib/retry';
 import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
 import {
   applyOwnerBlocksToAuthoredEntries,
@@ -128,18 +127,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : undefined;
 
   try {
-    // ★ A6 retry rollout (2026-08-18): wired here, not inside `getAccountPosts`
-    // itself — that function's other caller (`streak/[user]/route.ts`) already
-    // wraps it in its own wall-clock budget; see `getAccountPosts`'s own comment.
+    // ★ OUTER `withRetry` REMOVED (2026-09-05, perf batch C-A). `getAccountPostsPage`
+    // itself now retries AND fails over across Hive nodes internally
+    // (`withHiveRetry`, 2026-09-03 -- "the Lumen crashes when I click Following"
+    // fix, see its own comment in bridge-api.ts). The `withRetry` that used to
+    // wrap this call only retried transport faults/5xx on the SAME node and
+    // never failed over, so it was a strictly weaker second retry loop stacked
+    // on top of a stronger one -- doubling this route's worst-case latency on a
+    // real outage for no added resilience.
     // ★ `getAccountPostsPage`, NOT `getAccountPosts` (2026-08-23). The plain function
     // returns only the FILTERED array, and `dropBannedEntries` has already run inside it
     // — so the page size and the cursor computed from that array are both post-filter,
     // which is exactly what breaks paging (see the long note further down). This variant
     // reports the node's own count and last entry alongside the filtered entries.
-    const page = await withRetry(
-      () => getAccountPostsPage(sort, account, observer, startAuthor, startPermlink, limit),
-      { label: `getAccountPosts(${sort},${account})` }
-    ).catch(() => null);
+    const page = await getAccountPostsPage(sort, account, observer, startAuthor, startPermlink, limit).catch(
+      () => null
+    );
     let entries: Entry[] | null = page?.entries ?? null;
     // ★ THE READ FAILED -- SAY SO. See the doc comment above: this used to be
     // indistinguishable from "this account genuinely has nothing posted".

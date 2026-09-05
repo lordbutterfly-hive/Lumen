@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { LeagueTier } from '../types';
 import { TIERS } from '../lib/tiers';
+import { useOwnRankTierSeed } from '../lib/own-rank-tier-context';
 
 /**
  * Byline marks for a page of authors, in ONE request.
@@ -158,9 +159,36 @@ export function useRankLuminosity(authors: string[]): Map<string, number> {
  *
  * Returns null when the viewer has no snapshot yet (a brand-new account whose
  * streak was never computed) — the caller then falls back to its skeleton.
+ *
+ * ★★★ SSR-SEEDED (C-B, 2026-09-05). `app/layout.tsx` reads this same snapshot
+ * server-side (`own-rank-tier-seed.ts`, no HTTP hop) and hands it down via
+ * `OwnRankTierProvider` so this query has data on the SERVER render itself,
+ * not only after the client's own `/api/streak/marks` round trip resolves —
+ * without it, `league-showcase.tsx` painted `ShowcaseSkeleton` on every cold
+ * load regardless of how fast the client fetch was, because a fetch cannot
+ * beat the first paint it is triggered from.
+ *
+ * The `seed.username === key` guard is the same money-correctness pattern
+ * `use-wallet-account.ts` uses for its own SSR seed: the context is a single
+ * value, not keyed by username, so it must never be applied to a query for a
+ * DIFFERENT viewer than the one it was fetched for (a session change on the
+ * client, or a `username` that arrives before `identity` has settled, must
+ * not paint a stranger's tier).
+ *
+ * Seeded with `initialDataUpdatedAt: 0`, not a real timestamp — same choice
+ * `use-wallet-account.ts` and `profile-main.tsx` make and for the same reason
+ * (see feedback_isloading_lies_with_initialdata): the query is marked
+ * immediately stale so it still revalidates against the client's own fetch in
+ * the background, this can only ever replace a slightly-stale seed with a
+ * fresher answer sooner, never show a stale one longer.
  */
 export function useOwnRankTier(username: string, enabled = true): LeagueTier | null {
   const key = (username || '').toLowerCase();
+  const seed = useOwnRankTierSeed();
+  const seedMatches = seed && seed.username === key;
+  const initialData = seedMatches
+    ? { marks: { [key]: { tier: seed.tier, rankNumber: seed.rankNumber, showMark: seed.showMark } } }
+    : undefined;
 
   const { data } = useQuery({
     queryKey: ['rank-marks', key],
@@ -173,7 +201,9 @@ export function useOwnRankTier(username: string, enabled = true): LeagueTier | n
     },
     enabled: key.length > 0 && enabled,
     staleTime: 10 * 60 * 1000,
-    retry: false
+    retry: false,
+    initialData,
+    initialDataUpdatedAt: initialData ? 0 : undefined
   });
 
   const m = data?.marks?.[key];

@@ -1,6 +1,15 @@
 import { cache } from 'react';
-import { getAccountFull, getAccountReputations, getDynamicGlobalProperties } from '@transaction/lib/hive-api';
-import { getCommunities, getPost } from '@transaction/lib/bridge-api';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
+import {
+  getAccountFull,
+  getAccountReputations,
+  getDynamicGlobalProperties,
+  getFollowers,
+  getFollowing,
+  DEFAULT_PARAMS_FOR_FOLLOW,
+  type IGetFollowParams
+} from '@transaction/lib/hive-api';
+import { getAccountPosts, getCommunities, getCommunity, getDiscussion, getPost } from '@transaction/lib/bridge-api';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 
 /**
@@ -72,8 +81,39 @@ const accountFullTtl = withTtlCache(getAccountFull, (username: string) => userna
 /**
  * Cached `getAccountFull`: request-level dedup (React `cache()`) over a 30s
  * cross-request layer. See the note above for why both are needed.
+ *
+ * ★ CAST TO A PLAIN FUNCTION TYPE BEFORE `cache()` (2026-09-05). `accountFullTtl`
+ * is now a `TtlCache` (it carries `.set`, added for `primeAccountFullCache`
+ * below). React's `cache()` returns a brand-new memoizing function that does
+ * NOT copy that property over, but TypeScript's generic `cache<T>` signature
+ * would otherwise happily claim the RESULT still has `.set` too -- a type that
+ * compiles and throws at runtime the moment anyone believes it. Narrowing the
+ * argument here keeps `getAccountFullCached` typed as what it actually is.
  */
-export const getAccountFullCached = cache(accountFullTtl);
+export const getAccountFullCached = cache(accountFullTtl as (username: string) => ReturnType<typeof getAccountFull>);
+
+/**
+ * ★ WRITE-THROUGH FOR THE LAYOUT'S OWN RETRY (2026-09-05).
+ *
+ * `(user-profile)/layout.tsx` retries a rejected `getAccountFullCached` by
+ * calling the raw `getAccountFull` directly — deliberately bypassing both the
+ * request-scoped `cache()` above and this 30s layer, because replaying either
+ * would just hand back the same already-rejected promise (see that file's own
+ * comment on the retry). That retry answer used to go straight to the one
+ * page that triggered it and nowhere else: the next reader within the same
+ * 30s window hit the exact same rate-limited call and paid the exact same
+ * retry, for as many readers as landed in that window.
+ *
+ * This writes the retry's successful answer into `accountFullTtl`'s own
+ * store, under the same `ttlFor`/`staleWhileRevalidateMs` rules a normal load
+ * would have earned — see `server-ttl-cache.ts`'s `.set` doc for why that has
+ * to be the SAME store and not a second one. Call it only on success; a
+ * rejected retry must never reach here, or a real outage would be primed into
+ * the cache as if it were an answer (property 1, `server-ttl-cache.ts`).
+ */
+export function primeAccountFullCache(username: string, account: Awaited<ReturnType<typeof getAccountFull>>): void {
+  accountFullTtl.set(username, account);
+}
 
 /**
  * Request-level cached version of getPost.
@@ -181,3 +221,114 @@ export const getCommunitiesCached = withTtlCache(
   (_sort: string, _query: string | null, observer?: string) => `${_sort}|${_query ?? ''}|${observer ?? ''}`,
   { ttlMs: 300_000, max: 200, staleWhileRevalidateMs: 300_000 }
 );
+
+/**
+ * ★★★ THE PROFILE'S POSTS TAB — THE SLOWEST PAGE IN THE APP (2026-09-05,
+ * perf batch C-A). `posts-page.tsx` seeds the Posts/Feed/Comments tabs with a
+ * `getAccountPosts` chain read issued DURING the RSC render, uncached, on
+ * every single view — a ~1MB response (see that file's own trim comment) with
+ * no cross-request memory at all, unlike every other read on the profile.
+ *
+ * Only the FIRST page of ONE sort for ONE (username, observer) pair is ever
+ * cached — this wrapper fixes `start_author`/`start_permlink` to `''` and the
+ * limit to `getAccountPosts`'s own default, matching the one call site
+ * (`posts-page.tsx`'s SSR seed) exactly. It is deliberately not a general
+ * pass-through for arbitrary pagination: a key of only `sort|account|observer`
+ * would otherwise answer a page-2 request with page 1's cached entries.
+ *
+ * KEYED ON THE OBSERVER, same reasoning as `getCommunitiesCached`: the reply
+ * can carry viewer-dependent context (the observer's own vote on each entry),
+ * so sharing one entry across observers would leak one reader's view to
+ * another.
+ *
+ * 25s, not 30s like the account header: this is the far larger payload of the
+ * two, and this app's own posture (`server-ttl-cache.ts` header) is to keep a
+ * TTL close to what the data can tolerate rather than round up. `shouldCache`
+ * refuses an empty/absent result — an upstream hiccup must not serve "no
+ * posts" to every reader of a profile for the next 25 seconds. `staleWhileRevalidateMs`
+ * matches the TTL for the same reason `getCommunitiesCached` serves stale: the
+ * reader who lands on the expiry must not pay the ~1MB round trip themselves.
+ */
+const accountPostsFirstPageTtl = withTtlCache(
+  (sort: string, account: string, observer: string) => getAccountPosts(sort, account, observer, '', ''),
+  (sort: string, account: string, observer: string) => `${sort}|${account}|${observer}`,
+  {
+    ttlMs: 25_000,
+    max: 500,
+    shouldCache: (entries) => Array.isArray(entries) && entries.length > 0,
+    staleWhileRevalidateMs: 25_000
+  }
+);
+
+/**
+ * Cached first page of a profile's posts feed, budgeted against a short
+ * deadline by the caller (see `posts-page.tsx`) — this function itself never
+ * times out, it only makes a warm/stale answer free and lets a cold miss keep
+ * running to fill the cache for the next reader, exactly like
+ * `trendingForPrefetch` in `feed-prefetch.ts`.
+ */
+export async function getAccountPostsCached(
+  sort: string,
+  account: string,
+  observer: string
+): Promise<Entry[] | null> {
+  return accountPostsFirstPageTtl(sort, account, observer);
+}
+
+/**
+ * ★ getDiscussion, CACHED (2026-09-05, perf batch C-A). The comment tree for
+ * one post, keyed on (author, permlink, observer) — the observer matters here
+ * for the same reason it does on `getCommunitiesCached`: Hivemind's own reply
+ * carries viewer-dependent muting, so two observers must never share an entry.
+ * 30s: a comment tree changes as replies land, and this trades a small,
+ * bounded staleness (a reply appearing up to 30s late to a DIFFERENT reader
+ * than the one who just posted it — their own render is not cached, see
+ * `cache()`'s request scope) for removing the read from every repeat view of
+ * a popular post. A failed/absent read is never stored (default `keep`), so a
+ * transient 429 cannot freeze "no discussion" in for 30 seconds.
+ */
+export const getDiscussionCached = withTtlCache(
+  getDiscussion,
+  (author: string, permlink: string, observer?: string) => `${author}|${permlink}|${observer ?? ''}`,
+  { ttlMs: 30_000, max: 500 }
+);
+
+/**
+ * ★ getCommunity, CACHED (2026-09-05, perf batch C-A) — the SINGLE-community
+ * lookup, not the list `getCommunitiesCached` above already covers. Keyed on
+ * (name, observer) for the same viewer-dependent-context reason as every
+ * other observer-keyed entry in this file. 30s: a community's title,
+ * description and subscriber count move on the order of hours, not seconds,
+ * and `getCommunity` itself already costs seven upstream round trips (see its
+ * own comment in bridge-api.ts) — collapsing repeat renders of the same
+ * community page is exactly the shape `getCommunitiesCached` was built for,
+ * one level down. Absence/failure is never stored (default `keep`).
+ */
+export const getCommunityCached = withTtlCache(
+  getCommunity,
+  (name: string, observer?: string) => `${name}|${observer ?? ''}`,
+  { ttlMs: 30_000, max: 500 }
+);
+
+/** Same key shape both `getFollowersCached` and `getFollowingCached` use. */
+const followParamsKey = (params?: Partial<IGetFollowParams>): string =>
+  `${params?.account || DEFAULT_PARAMS_FOR_FOLLOW.account}|${params?.start || ''}|${
+    params?.type || DEFAULT_PARAMS_FOR_FOLLOW.type
+  }|${params?.limit || DEFAULT_PARAMS_FOR_FOLLOW.limit}`;
+
+/**
+ * ★ getFollowers / getFollowing, CACHED (2026-09-05, perf batch C-A). Both are
+ * bare, uncached upstream reads today — `/@user/followers` and
+ * `/@user/following` hit them fresh on every view — and unlike a profile
+ * header neither result is viewer-dependent: two different observers looking
+ * at the same account's follower list see the same list. Keyed on the full
+ * param tuple (account, start cursor, type,
+ * limit), not just the account, so a paginated request can never be answered
+ * from a different page's cache entry — the same reasoning
+ * `getAccountPostsCached` above states for why it fixes its own cursor rather
+ * than keying on it. 30s, matching every other short-lived read in this file;
+ * a failed read is never stored (default `keep`), matching the "failures are
+ * never cached" property this whole module is built around.
+ */
+export const getFollowersCached = withTtlCache(getFollowers, followParamsKey, { ttlMs: 30_000, max: 500 });
+export const getFollowingCached = withTtlCache(getFollowing, followParamsKey, { ttlMs: 30_000, max: 500 });

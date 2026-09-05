@@ -4,6 +4,7 @@ import { Link } from '@hive/ui';
 
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
+import { useServerAccountTier } from '@/blog/features/wallet/lib/server-account-tier-context';
 import { useTranslation } from '@/blog/i18n/client';
 import DialogLogin from '@/blog/components/dialog-login';
 import PageMasthead from '@/blog/features/layouts/page-masthead';
@@ -45,7 +46,7 @@ const SECONDARY_BUTTON_CLASS =
  */
 export default function WalletContent() {
   const { t, i18n } = useTranslation('common_blog');
-  const { user } = useUserClient();
+  const { user, clientAnswered } = useUserClient();
   /**
    * ★★★ THE PAGE ALREADY KNEW; THIS COMPONENT DID NOT ASK IT (2026-08-11).
    *
@@ -61,21 +62,43 @@ export default function WalletContent() {
    * re-guessing "signed out" until the client catches up.
    */
   const identity = useSessionIdentity();
+  // Hooks cannot be conditional — read unconditionally, used only in the
+  // fallback branch of `isLite` below.
+  const serverAccountTier = useServerAccountTier();
   // A keyless Lumen account has no Hive account, so there is nothing on chain to
   // look up. Passing '' disables the account queries (`enabled: !!username` in
   // use-wallet-account.ts) — without that the page fetched a name that does not
   // exist, got an empty result back, and threw inside the figure derivation
   // before any of the honest states below could render. The whole page was a
   // blank error, reached from a link that is always on screen in the left rail.
-  //
-  // `isLite` still reads the plain client value, not `identity` — the server
-  // session only carries isLoggedIn/username, not account tier. While the
-  // client hasn't answered yet, `isLite` defaults false, `user.username` is
-  // still '', and the account query below stays disabled — which the existing
-  // isLoading branch already renders as a neutral "loading" masthead rather
-  // than guessing a tier. That is correct: it never shows a lite reader the
-  // full-balance UI or a full reader the lite UI, it just waits one beat.
-  const isLite = user.account_tier === 'lite';
+  /**
+   * ★★★ `isLite` NOW HAS AN EARLY, CORRECT ANSWER TOO (C-B, 2026-09-05).
+   *
+   * This used to read only `user.account_tier` (client-only, undefined until
+   * `/api/users/me` answers or a localStorage seed already supplies it) and
+   * default to `false` while unknown — safe ONLY because the fetch below was
+   * ALSO gated on the equally-client-only `user.username`, so both facts were
+   * always wrong (empty username, `isLite` false) or both right, together, on
+   * the same render. Switching the fetch to `identity.username` below (the
+   * whole point of this fix — it resolves from the server session cookie, at
+   * the FIRST render) breaks that pairing: `identity.username` is correct
+   * immediately, but a wrong `isLite` default would then fire a real Hive
+   * balance/history/delegation fetch for a Lumen handle that is not a Hive
+   * account — the exact crash class the comment above already exists to
+   * prevent, just relocated to the API's own error path instead of a client
+   * throw (see `/api/wallet/summary/route.ts`: a missing account still
+   * resolves, via a caught 502, to `isError: true`).
+   *
+   * `useServerAccountTier()` carries the SAME cookie read `identity.username`
+   * already trusts (`lib/server-session.ts`'s `accountTier`, threaded down by
+   * `app/layout.tsx`), so it is correct on that same first render. Precedence
+   * mirrors `useSessionIdentity`'s own: once the client has actually answered
+   * (`clientAnswered`) trust it outright — it is the only source that can see
+   * a same-session upgrade; a returning visitor's localStorage-seeded
+   * `user.isLoggedIn` is next; only with NEITHER does this fall back to the
+   * server tier.
+   */
+  const isLite = clientAnswered || user.isLoggedIn ? user.account_tier === 'lite' : serverAccountTier === 'lite';
   /**
    * ★ THE WALLET PAGE NOW ASKS WHICH KIND OF LITE ACCOUNT THIS IS (owner, 2026-08-19).
    *
@@ -91,8 +114,20 @@ export default function WalletContent() {
    */
   const tokenAccounts = useTokenAccounts();
   const walletIdentities = tokenAccounts.accounts.filter((a) => a.kind !== 'hive');
+  /**
+   * ★★★ `identity.username`, NOT `user.username` (C-B, 2026-09-05, the
+   * identity-gate waterfall). `user.username` cannot answer during SSR and
+   * stays '' until `/api/users/me` resolves, so this fetch — and the two
+   * below — never even STARTED until that request landed, on a page the
+   * server had already redirected a signed-out reader away from.
+   * `identity.username` carries the server session's own answer from the
+   * first render (see `useSessionIdentity`), so the balance/history/
+   * delegation reads now fire immediately instead of waiting behind a
+   * request whose answer this page's own auth gate had already made
+   * redundant.
+   */
   const { account, figures, dynamicGlobal, isError } = useWalletAccount(
-    isLite ? '' : user.username
+    isLite ? '' : identity.username
   );
 
   /**
@@ -112,8 +147,8 @@ export default function WalletContent() {
    * still own their own loading and error states.
    */
   const historyLang = i18n.resolvedLanguage ?? 'en';
-  useAccountHistory(isLite ? '' : user.username, historyLang);
-  useDelegations(isLite ? '' : user.username);
+  useAccountHistory(isLite ? '' : identity.username, historyLang);
+  useDelegations(isLite ? '' : identity.username);
 
   if (!identity.isLoggedIn) {
     return (
@@ -262,15 +297,24 @@ export default function WalletContent() {
         }
       >
         <p className="max-w-[620px] font-ui text-caption text-ink-10">
-          {t('wallet.masthead_meta', { username: user.username })}
+          {/* ★ `identity.username`, NOT `user.username` (C-B, 2026-09-05) —
+              NOT just the perf fix, a correctness fix. `account`/`figures` are
+              now fetched keyed on `identity.username` (above), which resolves
+              before `user.username` does; without this change, this branch
+              could be reached — real balances rendered — while `user.username`
+              was STILL '', printing "wallet for " with no name and handing an
+              empty username to every card below. Both names are the same
+              person once either has resolved; this just reads the one that is
+              actually driving the data on screen. */}
+          {t('wallet.masthead_meta', { username: identity.username })}
         </p>
       </PageMasthead>
 
-      <HiveTokenCard username={user.username} figures={figures} dynamicGlobal={dynamicGlobal} />
-      <HbdTokenCard username={user.username} liquidHbd={figures.liquidHbd} />
+      <HiveTokenCard username={identity.username} figures={figures} dynamicGlobal={dynamicGlobal} />
+      <HbdTokenCard username={identity.username} liquidHbd={figures.liquidHbd} />
 
       <SavingsVault
-        username={user.username}
+        username={identity.username}
         savingsHive={figures.savingsHive}
         savingsHbd={figures.savingsHbd}
         liquidHive={figures.liquidHive}
@@ -283,7 +327,7 @@ export default function WalletContent() {
 
       <EstimatedValueStrip figures={figures} />
 
-      <AccountHistoryList username={user.username} />
+      <AccountHistoryList username={identity.username} />
     </div>
   );
 }

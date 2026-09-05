@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
-import { getDiscussion } from '@transaction/lib/bridge-api';
+import { getDiscussionCached } from '@/blog/lib/cached-api';
 import { attachLiteIdentitiesToDiscussion } from '@/blog/lib/lite/render/attach-lite';
 import { liteChainCoordinates } from '@/blog/lib/lite/render/lite-entry';
 import { applyOwnerBlocksToDiscussion } from '@/blog/lib/lite/social/block-filter';
@@ -37,7 +37,7 @@ async function readDiscussion(
   observer: string
 ): Promise<Record<string, Entry> | null> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const result = await getDiscussion(author, permlink, observer).catch(() => null);
+    const result = await getDiscussionCached(author, permlink, observer).catch(() => null);
     if (result && Object.keys(result).length > 0) return result;
     if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 250));
   }

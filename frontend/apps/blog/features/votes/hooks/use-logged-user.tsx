@@ -1,4 +1,6 @@
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
+import { useServerAccountTier } from '@/blog/features/wallet/lib/server-account-tier-context';
 import { createContext, FC, useContext } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { netVests } from '@/blog/lib/utils';
@@ -42,7 +44,32 @@ export const useLoggedUserContext = () => {
 };
 
 export const LoggedUserProvider: FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user } = useUserClient();
+  const { user, clientAnswered } = useUserClient();
+  /**
+   * ★★★ `identity.username` + a SERVER-KNOWN TIER, NOT `user.username` ALONE
+   * (C-B, 2026-09-05, part of the identity-gate waterfall — this provider is
+   * the actual source of the measured 810-1178ms manabar / 1307ms account
+   * waterfall: it is mounted GLOBALLY and both queries below used to wait for
+   * the same slow `user.username`/`user.account_tier` every other identity-
+   * gated widget did).
+   *
+   * `identity.username` resolves from the server session cookie at the FIRST
+   * render (`useSessionIdentity`); `user.username` cannot answer until
+   * `/api/users/me` does. Swapping the query's username source alone would
+   * decouple it from `isChainAccount` below exactly the way
+   * `wallet-right-rail.tsx`'s own doc on this class of bug describes: a
+   * genuine lite account would get a correct, early `identity.username` while
+   * `user.account_tier` was still `undefined` (reading as "not lite"), firing
+   * a real Hive account/manabar fetch for a Lumen handle. `useServerAccountTier()`
+   * (`features/wallet/lib/server-account-tier-context.tsx`) carries the SAME
+   * cookie-sourced tier `identity.username` already trusts, closing that gap
+   * with no added wait; see that file's own doc for the full reasoning and
+   * why this hook — outside `features/wallet/` — is a deliberate second
+   * consumer rather than a duplicated context.
+   */
+  const identity = useSessionIdentity();
+  const serverAccountTier = useServerAccountTier();
+  const isLite = clientAnswered || user.isLoggedIn ? user.account_tier === 'lite' : serverAccountTier === 'lite';
   // ★★★ A LUMEN LITE ACCOUNT HAS NO HIVE ACCOUNT (2026-08-06) — CRASH FIX.
   //
   // This provider is mounted GLOBALLY (`features/layouts/providers.tsx`), so it
@@ -69,15 +96,15 @@ export const LoggedUserProvider: FC<{ children: React.ReactNode }> = ({ children
   // this one too, since `enabled` is false until a real Hive account signs
   // in. See `apps/blog/app/api/account/route.ts` and `.../api/manabar/
   // route.ts`.
-  const isChainAccount = !!user.username && user.account_tier !== 'lite';
+  const isChainAccount = !!identity.username && !isLite;
   const { data: accountData } = useQuery({
-    queryKey: ['loggedUserAccount', user.username],
-    queryFn: () => fetchAccount(user.username),
+    queryKey: ['loggedUserAccount', identity.username],
+    queryFn: () => fetchAccount(identity.username),
     enabled: isChainAccount
   });
   const { data: manabarsData } = useQuery({
-    queryKey: ['manabars', user.username],
-    queryFn: () => fetchManabar(user.username),
+    queryKey: ['manabars', identity.username],
+    queryFn: () => fetchManabar(identity.username),
     enabled: isChainAccount,
     refetchOnWindowFocus: false,
     refetchInterval: 60000
@@ -115,7 +142,10 @@ export const LoggedUserProvider: FC<{ children: React.ReactNode }> = ({ children
    * So publish whether the number is an answer. The consumer decides what to do
    * with "unknown"; what it must not do is keep reading it as "zero".
    */
-  const vestsKnown = user.account_tier === 'lite' || !!accountData?.vesting_shares;
+  // `isLite` (not the raw `user.account_tier === 'lite'`), so this agrees with
+  // `isChainAccount` above on the exact same server-then-client tier answer
+  // rather than re-deriving a second, possibly-stale-during-hydration one.
+  const vestsKnown = isLite || !!accountData?.vesting_shares;
 
   return (
     <LoggedUserContext.Provider

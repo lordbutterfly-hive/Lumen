@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { getIronSession } from 'iron-session';
 import { sessionOptions } from '@smart-signer/lib/session';
@@ -7,12 +8,32 @@ import { getLogger } from '@ui/lib/logging';
 
 const logger = getLogger('app');
 
+/**
+ * 'full' also covers a legacy cookie that carries no tier at all — matching
+ * `AccountTier`'s own documented default (`@smart-signer/types/common.ts`:
+ * "Optional and absent on legacy full-Hive sessions (treated as 'full')").
+ * `null` only for a signed-out session, where tier has no meaning.
+ */
+export type ServerAccountTier = 'lite' | 'full' | null;
+
 export interface ServerSessionUser {
   isLoggedIn: boolean;
   username: string;
+  /**
+   * ★ ADDED (C-B, 2026-09-05) alongside `username` and for the SAME reason:
+   * consumers gating a real Hive-account fetch (wallet-content.tsx,
+   * wallet-right-rail.tsx, use-logged-user.tsx) need to know it is safe to fire
+   * BEFORE the client's own `/api/users/me` answers — `username` alone is not
+   * enough, because a Lumen handle (lite account) is not a Hive account, and
+   * without this those files would have had to fire the real-account query on
+   * `username` while still gating the tier check on the slow client answer,
+   * reopening the exact "isLite and username must resolve TOGETHER" hazard
+   * `wallet-right-rail.tsx`'s own Advanced Tools gate already documents.
+   */
+  accountTier: ServerAccountTier;
 }
 
-const SIGNED_OUT: ServerSessionUser = { isLoggedIn: false, username: '' };
+const SIGNED_OUT: ServerSessionUser = { isLoggedIn: false, username: '', accountTier: null };
 
 /**
  * Who the session cookie says this request is, read on the server.
@@ -27,8 +48,17 @@ const SIGNED_OUT: ServerSessionUser = { isLoggedIn: false, username: '' };
  * A cookie that will not open is "signed out", never an error page: a stale or
  * malformed cookie is the normal state of a returning visitor whose session
  * secret rotated, and a 500 there would lock them out of the whole site.
+ *
+ * ★ `React.cache()`-WRAPPED (C-B, 2026-09-05) — its sibling `getObserver`
+ * (`lib/auth-utils.ts`) already carries this and documents why: without it,
+ * every one of this function's call sites in a single request (the root
+ * layout, `/wallet`'s auth gate, and now the rank-tier SSR seed it feeds) re-runs
+ * the full cookie-open + `applyHiveSessionTtl` dance instead of sharing one
+ * answer. `cache()` scopes the memo to the one request's render — it is not a
+ * cross-request cache, so this cannot leak one visitor's session into
+ * another's render.
  */
-export async function getServerSessionUser(): Promise<ServerSessionUser> {
+export const getServerSessionUser = cache(async (): Promise<ServerSessionUser> => {
   try {
     const session = await getIronSession<IronSessionData>(cookies(), sessionOptions);
     // A sealed cookie no longer carries its own expiry (J6's `maxAge: undefined`
@@ -41,13 +71,17 @@ export async function getServerSessionUser(): Promise<ServerSessionUser> {
     // Component render, where Next.js forbids writing cookies.
     await applyHiveSessionTtl(session, { canPersist: false });
     if (session.user?.isLoggedIn && session.user.username) {
-      return { isLoggedIn: true, username: session.user.username };
+      return {
+        isLoggedIn: true,
+        username: session.user.username,
+        accountTier: session.user.account_tier === 'lite' ? 'lite' : 'full'
+      };
     }
   } catch (error) {
     logger.warn('server-session: could not read the session cookie, treating as signed out: %o', error);
   }
   return SIGNED_OUT;
-}
+});
 
 /**
  * Where to send a signed-out reader who asked for a page that needs an account,

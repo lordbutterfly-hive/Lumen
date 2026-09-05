@@ -1,4 +1,3 @@
-import { getAccountPosts } from '@transaction/lib/bridge-api';
 import { ReactNode } from 'react';
 import { QueryTypes } from './lib/utils';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
@@ -11,8 +10,36 @@ import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { trimEntriesForSeed } from '@/blog/lib/feed/seed-trim';
 import { anonymousAccountPostsSeed } from '@/blog/lib/feed/account-posts-seed-cache';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
+import { getAccountPostsCached } from '@/blog/lib/cached-api';
 
 const logger = getLogger('app');
+
+/**
+ * ★★★ CACHED + BUDGETED (2026-09-05, perf batch C-A). This used to call the
+ * raw, uncached `getAccountPosts` below, during the RSC render, on every
+ * single view of a profile -- the slowest read in the app (~1MB, 0.4-6s
+ * against api.hive.blog, never settling to a stable number). `getAccountPostsCached`
+ * (lib/cached-api.ts) puts a 25s cross-request cache in front of exactly the
+ * first-page read this component always asks for.
+ *
+ * A COLD cache still costs the full round trip, so the fetch below races it
+ * against a short deadline -- the render must not wait out a slow upstream any
+ * more than the profile layout already refuses to (see
+ * `(user-profile)/layout.tsx`'s own `PREFETCH_BUDGET_MS`). Losing the race
+ * leaves `initialPosts` empty and falls through to the anonymous seed cache
+ * further down exactly like today's "seed came back empty" path already does
+ * -- a cold miss is not a new failure mode here, it is the existing one,
+ * just reached sooner.
+ *
+ * The losing promise is deliberately NOT abandoned: it keeps running after the
+ * timer wins, and `server-ttl-cache.ts` stores its result when it finally
+ * resolves, so the next reader in the 25s window gets a warm cache. Its own
+ * eventual rejection is swallowed at the call site (`.catch(() => undefined)`)
+ * for the same reason `feed-prefetch.ts`'s `withTimeout` does: nobody is still
+ * awaiting it, so an unhandled rejection would otherwise crash the process on
+ * the next 429.
+ */
+const POSTS_PREFETCH_BUDGET_MS = 500;
 
 const PostsPage = async ({
   children,
@@ -27,7 +54,16 @@ const PostsPage = async ({
   const observer = await getObserverFromCookies();
   let initialPosts = null;
   try {
-    initialPosts = (await getAccountPosts(query, username, observer, '', '')) ?? null;
+    const postsPromise = getAccountPostsCached(query, username, observer);
+    initialPosts =
+      (await Promise.race([
+        postsPromise,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), POSTS_PREFETCH_BUDGET_MS))
+      ])) ?? null;
+    // The loser of the race above is never abandoned -- see this file's
+    // `POSTS_PREFETCH_BUDGET_MS` comment for why it keeps running and why its
+    // eventual rejection must be swallowed here.
+    void postsPromise.catch(() => undefined);
       // Resolve Lumen identities before this reaches the browser, so a lite post
       // never renders under the shared publishing account and then corrects itself.
       if (initialPosts) await attachLiteIdentities(initialPosts);

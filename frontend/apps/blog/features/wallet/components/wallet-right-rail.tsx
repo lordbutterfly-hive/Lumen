@@ -3,6 +3,7 @@
 import Big from 'big.js';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
+import { useServerAccountTier } from '@/blog/features/wallet/lib/server-account-tier-context';
 import { useTranslation } from '@/blog/i18n/client';
 import { useWalletAccount } from '../hooks/use-wallet-account';
 import { getMarketStatsUrl } from '../lib/wallet-endpoint';
@@ -20,7 +21,7 @@ const ZERO = new Big(0);
  */
 export default function WalletRightRail() {
   const { t } = useTranslation('common_blog');
-  const { user } = useUserClient();
+  const { user, clientAnswered } = useUserClient();
   /**
    * ★ SAME DEFECT AS /witnesses (2026-08-11, class sweep). `/wallet` (app/wallet/
    * page.tsx) already redirects to /login server-side before this ever mounts, so
@@ -32,6 +33,10 @@ export default function WalletRightRail() {
    * from the same session cookie the page-level redirect already trusted.
    */
   const identity = useSessionIdentity();
+  // Hooks cannot be conditional — read unconditionally, used only in the
+  // fallback branch of `isLite` below. See its own doc in wallet-content.tsx
+  // (`server-account-tier-context.tsx`) for why this exists at all.
+  const serverAccountTier = useServerAccountTier();
   // Same guard as wallet-content.tsx, and it is NOT redundant: this rail fetches
   // its own copy, so guarding only the centre column left the page still
   // crashing. `getAccountFull` on a name that does not exist on chain resolves to
@@ -41,8 +46,22 @@ export default function WalletRightRail() {
   // `Big(undefined)` throws inside its useMemo. There is no error.tsx under
   // app/wallet, so that throw blanks the whole page — including the honest
   // "no wallet yet" panel that was added to explain the situation.
-  const isLite = user.account_tier === 'lite';
-  const { figures, pendingClaimedAccounts } = useWalletAccount(isLite ? '' : user.username);
+  //
+  // ★ SAME `isLite` FIX AS wallet-content.tsx (C-B, 2026-09-05): prefer the
+  // live client answer once it exists (`clientAnswered`, or an
+  // already-logged-in localStorage seed); otherwise trust the server
+  // session's own `accountTier` rather than defaulting to "not lite" — the
+  // fetch below now fires on `identity.username`, which resolves earlier than
+  // `user.account_tier` does, so a stale "not lite" default would otherwise
+  // fire a real-account balance fetch for a Lumen handle.
+  const isLite = clientAnswered || user.isLoggedIn ? user.account_tier === 'lite' : serverAccountTier === 'lite';
+  // ★ `identity.username`, NOT `user.username` (C-B, 2026-09-05) — see
+  // wallet-content.tsx's parallel doc. This hook's `figures` only ever reaches
+  // the screen inside the `clientAnswered`-gated Advanced Tools card below, so
+  // firing it earlier here is a pure win with no display-correctness risk: by
+  // the time anything on screen reads `figures`, `clientAnswered` is already
+  // true and `user.username`/`identity.username` already agree.
+  const { figures, pendingClaimedAccounts } = useWalletAccount(isLite ? '' : identity.username);
 
   const marketStatsUrl = getMarketStatsUrl();
 
@@ -81,20 +100,20 @@ export default function WalletRightRail() {
           about a balance, not an absence of one.
 
           ★ `identity.clientAnswered` GATES THIS TOO (2026-08-11, follow-through
-          fix). `isLite` and `username` below both read the raw `useUserClient()`
-          object, which `useSessionIdentity` does NOT carry (it only exposes
-          isLoggedIn/username sourced from the cookie). On a cold tab with a
-          session cookie and no localStorage seed, `identity.isLoggedIn` answers
-          true immediately while `user.account_tier` is still `undefined` and
-          `user.username` is still `''` — so `isLite` false-negatives to "not
-          lite" and this card rendered with an empty username and every figure
-          at ZERO (see advanced-tools-card.tsx's own comment on why that's
-          unacceptable). `account_tier` and `username` only become trustworthy
-          together, in the same render, once `clientAnswered` flips true (same
-          fetch, same response) — same reasoning list-variant.tsx already
-          applies to its write gate. So the safe default here is "treat as lite
-          until proven otherwise": wait for `clientAnswered` before showing the
-          card at all, rather than showing one full of zeros. */}
+          fix; UPDATED 2026-09-05 — `isLite` itself no longer false-negatives
+          here, see its own doc above, but this gate is still required for a
+          DIFFERENT field). `username` below is `user.username`, which still
+          reads the raw `useUserClient()` object directly (not `identity`,
+          which carries no wallet DID/tier) — on a cold tab with a session
+          cookie and no localStorage seed, `identity.isLoggedIn` answers true
+          immediately while `user.username` is still `''`, so without this
+          gate the card would render correctly-hidden-from-lite but with an
+          EMPTY username and every figure at ZERO (see advanced-tools-card.tsx's
+          own comment on why that's unacceptable) until `clientAnswered` also
+          supplies a real `user.username`. Same reasoning list-variant.tsx
+          already applies to its write gate: wait for `clientAnswered` before
+          showing the card at all, rather than showing one with no identity
+          behind it. */}
       {identity.isLoggedIn && identity.clientAnswered && !isLite && (
         <AdvancedToolsCard
           username={user.username}

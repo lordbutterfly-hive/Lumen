@@ -235,7 +235,21 @@ async function prefetchStoredFeed(viewer: string): Promise<InitialFeedSeed | nul
  */
 export async function prefetchHomeFeed(viewer: string): Promise<InitialFeedSeed | null> {
   try {
+    // ★★ ONE 700ms BUDGET FOR THE WHOLE SIGNED-IN FALLBACK, NOT TWO (2026-09-05,
+    // perf batch C-A). This used to race `prefetchStoredFeed` against its own
+    // 700ms deadline and then, on a miss, fall into the trending call below and
+    // race THAT against a FRESH 700ms deadline -- up to 1.4s of worst case for a
+    // signed-in reader whose stored feed was not ready. The stored read and the
+    // trending fallback are one fallback chain, not two independent budgets, so
+    // they now share a single clock: whatever time the stored read did not use
+    // is what the trending call gets below, and if the clock is already spent,
+    // the trending call is skipped rather than started against a budget of
+    // zero -- the client's own fetch is still there to catch it, exactly like
+    // any other miss. The anonymous path is unaffected: it never enters this
+    // block, so `trendingBudgetMs` stays the full `PREFETCH_TIMEOUT_MS` for it.
+    let trendingBudgetMs = PREFETCH_TIMEOUT_MS;
     if (viewer) {
+      const storedStartedAt = Date.now();
       const stored = await withTimeout(prefetchStoredFeed(viewer), PREFETCH_TIMEOUT_MS);
       if (stored) return stored;
       // ★★★ STORED FEED STALE OR MISSING -> DO NOT LEAVE HOME UNSEEDED (2026-09-03).
@@ -246,8 +260,10 @@ export async function prefetchHomeFeed(viewer: string): Promise<InitialFeedSeed 
       // so home paints instantly; `personalised: false` tells feed-tabs to
       // refetch on mount and swap in the ranked feed when it is ready. Same
       // resilience as the signed-in topic seed.
+      trendingBudgetMs = PREFETCH_TIMEOUT_MS - (Date.now() - storedStartedAt);
+      if (trendingBudgetMs <= 0) return null;
     }
-    const entries = await withTimeout(prefetchTrending(), PREFETCH_TIMEOUT_MS);
+    const entries = await withTimeout(prefetchTrending(), trendingBudgetMs);
     if (!entries || entries.length === 0) return null;
     let seedEntries = entries;
     if (viewer) {

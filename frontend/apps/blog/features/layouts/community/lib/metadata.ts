@@ -7,7 +7,7 @@
  * REACT_APP_BLOG_DOMAIN fix did not cover it. Now Lumen's own og image and copy.
  */
 import { Metadata } from 'next';
-import { getCommunity } from '@transaction/lib/bridge-api';
+import { getCommunityCached } from '@/blog/lib/cached-api';
 import { getLogger } from '@ui/lib/logging';
 import { isCommunity } from '@ui/lib/utils';
 
@@ -22,7 +22,7 @@ export async function buildCommunityTagMetadata(
   if (!isCommunity(tag)) return { title: `#${tag}${sectionLabel ? ` / ${sectionLabel}` : ''} - Lumen` };
 
   try {
-    const data = await getCommunity(tag);
+    const data = await getCommunityCached(tag);
 
     const communityName = data?.title ?? data?.name ?? tag;
     const titleSection = sectionLabel ? ` / ${sectionLabel}` : '';

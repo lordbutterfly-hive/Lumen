@@ -101,14 +101,23 @@ export interface TtlCacheOptions<T> {
 }
 
 /**
+ * A `withTtlCache` result: callable exactly like the wrapped loader, plus a
+ * `.set` escape hatch — see its own doc comment below for why it exists.
+ */
+export interface TtlCache<A extends unknown[], T> {
+  (...args: A): Promise<T>;
+  set(key: string, value: T): void;
+}
+
+/**
  * Wrap an async single-argument-keyed loader with a bounded TTL cache.
- * The returned function has the same signature as the loader.
+ * The returned function has the same signature as the loader, plus `.set`.
  */
 export function withTtlCache<A extends unknown[], T>(
   loader: (...args: A) => Promise<T>,
   keyOf: (...args: A) => string,
   { ttlMs, max = 500, shouldCache, ttlFor, staleWhileRevalidateMs }: TtlCacheOptions<T>
-): (...args: A) => Promise<T> {
+): TtlCache<A, T> {
   // `staleUntil` is stored, not recomputed on read: the window a value earned is
   // a property of THAT value (an absence may earn none — see the option's note),
   // and deciding it at write time is what keeps the read path a comparison.
@@ -121,23 +130,34 @@ export function withTtlCache<A extends unknown[], T>(
   };
 
   /**
-   * The one place an upstream call is started and its result stored. Shared by
-   * the blocking miss and the background refresh so the two can never drift into
-   * different storage or eviction rules — and so `inFlight` is written by
-   * exactly one code path, which is what makes single-flight hold across both.
+   * The one place a value is written into `fresh`. Shared by the ordinary load
+   * path below and by `.set` (added 2026-09-05, see its own doc comment) so
+   * there remains exactly one place deciding whether a value is worth storing
+   * and for how long — a caller priming the cache by hand earns the same
+   * `keep`/`ttlFor`/`staleWhileRevalidateMs` rules as a value this module
+   * fetched itself, never a second, drifting copy of them.
+   */
+  const store = (key: string, value: T): void => {
+    if (!keep(value)) return;
+    const expires = Date.now() + (ttlFor ? ttlFor(value) : ttlMs);
+    fresh.set(key, { value, expires, staleUntil: expires + Math.max(0, staleFor(value)) });
+    while (fresh.size > max) {
+      const oldest = fresh.keys().next().value;
+      if (oldest === undefined) break;
+      fresh.delete(oldest);
+    }
+  };
+
+  /**
+   * The one place an upstream call is started. Used by the blocking miss and
+   * the background refresh so `inFlight` is written by exactly one code path
+   * — that is what makes single-flight hold across both. Storing the result
+   * is delegated to `store` above, the same helper `.set` uses.
    */
   const startLoad = (key: string, ...args: A): Promise<T> => {
     const pending = loader(...args)
       .then((value) => {
-        if (keep(value)) {
-          const expires = Date.now() + (ttlFor ? ttlFor(value) : ttlMs);
-          fresh.set(key, { value, expires, staleUntil: expires + Math.max(0, staleFor(value)) });
-          while (fresh.size > max) {
-            const oldest = fresh.keys().next().value;
-            if (oldest === undefined) break;
-            fresh.delete(oldest);
-          }
-        }
+        store(key, value);
         return value;
       })
       .finally(() => {
@@ -148,7 +168,7 @@ export function withTtlCache<A extends unknown[], T>(
     return pending;
   };
 
-  return (...args: A): Promise<T> => {
+  const cached = ((...args: A): Promise<T> => {
     const key = keyOf(...args);
     const now = Date.now();
 
@@ -178,5 +198,31 @@ export function withTtlCache<A extends unknown[], T>(
     if (flying) return flying;
 
     return startLoad(key, ...args);
-  };
+  }) as TtlCache<A, T>;
+
+  /**
+   * ★ WRITE-THROUGH FOR A CALLER'S OWN SUCCESSFUL RETRY (2026-09-05).
+   *
+   * Every value in `fresh` used to arrive only through this module's own
+   * `loader` call — right for every caller that existed then, since none of
+   * them ever compute the value another way. `(user-profile)/layout.tsx` does:
+   * on a rejected `getAccountFullCached`, its retry calls the RAW
+   * `getAccountFull` directly (deliberately bypassing both this cache and the
+   * request-scoped `cache()` wrapper around it, per that file's own comment,
+   * to open a fresh connection rather than replay the already-rejected
+   * promise). A successful retry answer used to be handed straight to that one
+   * page and then thrown away — every other reader landing in the same 30s
+   * window paid the identical failed-then-retried round trip again.
+   *
+   * `.set` lets that retry deposit its answer into the SAME store a normal
+   * `loader` call would have filled, under the SAME rules `store` above
+   * enforces: an absence, or a rejected retry, still writes nothing (the
+   * caller never calls `.set` on a rejection — see the call site), exactly as
+   * an absence never reaches `fresh` from the ordinary path (property 1 in
+   * this file's header comment). It does not touch `inFlight`: a `.set` is not
+   * a load, so there is nothing to single-flight and nothing pending to mark.
+   */
+  cached.set = store;
+
+  return cached;
 }
