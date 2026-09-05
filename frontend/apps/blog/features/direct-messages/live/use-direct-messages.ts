@@ -41,8 +41,8 @@ interface KeyResponse {
 }
 
 interface RawLastMessage {
-  nonceBase64: string;
-  ciphertextBase64: string;
+  nonce: string;
+  ciphertext: string;
   senderActorKey: string;
 }
 
@@ -55,8 +55,8 @@ interface RawThread {
 
 interface RawMessage {
   messageId: string;
-  nonceBase64: string;
-  ciphertextBase64: string;
+  nonce: string;
+  ciphertext: string;
   senderKeyVersion: number;
   recipientKeyVersion: number;
   createdAt: string;
@@ -294,7 +294,7 @@ export function useDmThreads() {
           }
           if (pub) {
             try {
-              preview = await decrypt(myActorKey, pub, t.lastMessage.nonceBase64, t.lastMessage.ciphertextBase64);
+              preview = await decrypt(myActorKey, pub, t.lastMessage.nonce, t.lastMessage.ciphertext);
             } catch {
               previewUndecryptable = true;
             }
@@ -377,7 +377,7 @@ export function useDmThread(threadId: string | null) {
         let undecryptable = false;
         if (counterpartyPub) {
           try {
-            text = await decrypt(myActorKey, counterpartyPub, m.nonceBase64, m.ciphertextBase64);
+            text = await decrypt(myActorKey, counterpartyPub, m.nonce, m.ciphertext);
           } catch {
             undecryptable = true;
           }

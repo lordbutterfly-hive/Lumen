@@ -36,7 +36,7 @@ export async function GET(
     return NextResponse.json({
       thread_id: result.threadId,
       status: result.status,
-      other_actor_key: result.otherActorKey,
+      otherActorKey: result.otherActorKey,
       messages: result.messages
     });
   } catch (error) {
