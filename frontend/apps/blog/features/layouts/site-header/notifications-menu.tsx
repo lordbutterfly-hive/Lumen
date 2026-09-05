@@ -226,8 +226,8 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
               the chain notification type, which carries chain-only fields. */}
           {lumenItems.length > 0 ? (
             <ul data-testid="lumen-notifications">
-              {lumenItems.map((n) => (
-                <li key={`${n.url}-${n.date}`} className="border-b border-line-9 last:border-0">
+              {lumenItems.map((n, i) => (
+                <li key={`${n.url}-${n.date}-${i}`} className="border-b border-line-9 last:border-0">
                   <BasePathLink
                     href={`/${n.url}`}
                     className="flex items-center gap-3 px-4 py-3 font-sans text-sm hover:bg-surface-21"

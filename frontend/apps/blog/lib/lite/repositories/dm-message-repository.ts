@@ -149,15 +149,22 @@ export interface UnreadSender {
  * touched. The thread join is the authorisation boundary.
  */
 export async function unreadSendersForActor(actorKey: string, limit: number): Promise<UnreadSender[]> {
+  // DISTINCT ON must ORDER BY sender_key first (one row per sender = the latest per sender),
+  // so the LIMIT has to be applied by a SEPARATE outer sort or it would keep the
+  // alphabetically-first senders, not the most recent. The outer ORDER BY message_id DESC
+  // (ULID = time-sortable) keeps the 10 senders with the newest unread messages.
   const { rows } = await query<{ sender_key: string; at: Date }>(
-    `SELECT DISTINCT ON (m.sender_key) m.sender_key, m.created_at AS at
-       FROM lumen_dm_message m
-       JOIN lumen_dm_thread t ON t.thread_id = m.thread_id
-      WHERE (t.actor_a_key = $1 OR t.actor_b_key = $1)
-        AND m.sender_key <> $1
-        AND m.read_at IS NULL
-      ORDER BY m.sender_key, m.message_id DESC
-      LIMIT $2`,
+    `SELECT s.sender_key, s.at FROM (
+       SELECT DISTINCT ON (m.sender_key) m.sender_key, m.created_at AS at, m.message_id
+         FROM lumen_dm_message m
+         JOIN lumen_dm_thread t ON t.thread_id = m.thread_id
+        WHERE (t.actor_a_key = $1 OR t.actor_b_key = $1)
+          AND m.sender_key <> $1
+          AND m.read_at IS NULL
+        ORDER BY m.sender_key, m.message_id DESC
+     ) s
+     ORDER BY s.message_id DESC
+     LIMIT $2`,
     [actorKey, limit]
   );
   return rows.map((r) => ({ senderKey: r.sender_key, at: r.at }));

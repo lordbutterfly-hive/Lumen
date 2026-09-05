@@ -636,13 +636,25 @@ const CreatorStudio: FC = () => {
   const [answering, setAnswering] = useState<Ask | null>(null);
   // Inbox sub-tab: paid-ask REQUESTS (money + deadlines) vs direct MESSAGES (off-chain,
   // no money). Kept separate, never merged — see the toggle note in the Inbox section.
-  const [inboxTab, setInboxTab] = useState<'requests' | 'messages'>('requests');
-  // ★ NEW-MESSAGE BADGE (2026-09-05, owner): opening the Messages tab clears the unread
-  // badge by marking all incoming DMs read. Fires on navigation INTO the tab, not per
-  // render (deps are the section/sub-tab + the stable markRead).
+  const [inboxTab, setInboxTab] = useState<'requests' | 'messages'>(() => {
+    // ★ Deep-link the Messages sub-tab (2026-09-05): the bell's "New message" row links to
+    // /creators/studio?section=inbox&tab=messages, so it must land on Messages (not the
+    // default Requests) for the unread state to clear on arrival. Same lazy-init +
+    // window-guard pattern as `section` above.
+    if (typeof window === 'undefined') return 'requests';
+    try {
+      return new URLSearchParams(window.location.search).get('tab') === 'messages' ? 'messages' : 'requests';
+    } catch {
+      return 'requests';
+    }
+  });
+  // ★ NEW-MESSAGE BADGE (2026-09-05, owner): mark all incoming DMs read while the Messages
+  // tab is open, clearing the badge. `dmUnreadCount` is a dep so a message ARRIVING while
+  // the tab is already open (the 60s poll bumps the count) also clears, not just opening
+  // the tab. Loop-safe: markRead -> count 0 -> the guard is false, nothing re-fires.
   useEffect(() => {
-    if (section === 'inbox' && inboxTab === 'messages') void markDmRead();
-  }, [section, inboxTab, markDmRead]);
+    if (section === 'inbox' && inboxTab === 'messages' && dmUnreadCount > 0) void markDmRead();
+  }, [section, inboxTab, dmUnreadCount, markDmRead]);
   const [retireOpen, setRetireOpen] = useState(false);
   const [capInput, setCapInput] = useState('');
   const [sellInput, setSellInput] = useState('');

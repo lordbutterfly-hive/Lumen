@@ -44,12 +44,15 @@ const DmThreadView: FC<{ threadId: string; onBack?: () => void }> = ({ threadId,
   const thread = useDmThread(threadId);
   const [reply, setReply] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Newest message sits at the bottom (normal DM order); keep it in view by pinning
-  // the scroll to the bottom whenever the message set changes.
+  const lastMessageId = thread.messages.length ? thread.messages[thread.messages.length - 1].messageId : null;
+  // Newest message sits at the bottom (normal DM order); pin the scroll to the bottom when
+  // the newest message changes. Keyed on the last message id, NOT messages.length, so a
+  // reply in a full (>=50, server-capped) thread still scrolls even though the count is
+  // unchanged.
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [thread.messages.length, thread.isLoading]);
+  }, [lastMessageId, thread.isLoading]);
 
   const trimmed = reply.trim();
   const tooLong = reply.length > MAX_MESSAGE_CHARS;

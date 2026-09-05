@@ -146,9 +146,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         return {
           type: 'dm' as const,
           msg: name ? `New message from ${isHive ? '@' : ''}${name}` : 'New message from a Lumen member',
-          // The recipient's own Studio inbox — where the message is read (opening it clears
-          // the unread state). Not the sender's profile, unlike a follow row.
-          url: 'creators/studio?section=inbox',
+          // The recipient's own Studio inbox, deep-linked to the MESSAGES sub-tab so the
+          // click lands where the message is read and the unread state clears (the tab
+          // defaults to Requests otherwise). Not the sender's profile, unlike a follow row.
+          url: 'creators/studio?section=inbox&tab=messages',
           date: s.at instanceof Date ? s.at.toISOString() : String(s.at),
           // Only a Hive sender has a handle the bell can draw an avatar from; a lite sender
           // falls back to the monogram, and is named generically in `msg`.
