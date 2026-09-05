@@ -82,7 +82,15 @@ type Operation = 'status' | 'search' | 'similar' | 'byIds';
 const ALLOWED_OPERATIONS: ReadonlySet<Operation> = new Set(['status', 'search', 'similar', 'byIds']);
 
 function upstreamBase(): string {
-  return (process.env.REACT_APP_API_ENDPOINT ?? 'https://api.hive.blog').replace(/\/+$/, '');
+  // ★ PINNED TO api.hive.blog, INDEPENDENT OF THE MAIN READ NODE (2026-09-05).
+  // The `hivesense-api` REST extension (AI search / "similar posts") exists ONLY
+  // on api.hive.blog and 404s on api.openhive.network and other nodes. When the
+  // main read endpoint (REACT_APP_API_ENDPOINT) was moved to openhive.network for
+  // speed, this proxy silently went dark (getHiveSenseStatus fails soft to "off").
+  // So hivesense reads its OWN endpoint, defaulting to api.hive.blog, rather than
+  // riding the shared read-node var. Overridable via REACT_APP_HIVESENSE_ENDPOINT
+  // if a future node ever serves the extension.
+  return (process.env.REACT_APP_HIVESENSE_ENDPOINT ?? 'https://api.hive.blog').replace(/\/+$/, '');
 }
 
 /**
