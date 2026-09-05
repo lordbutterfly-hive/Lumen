@@ -20,6 +20,8 @@ import { stripInvisibleAndBidi } from '@ui/lib/text-safety';
 import type { ApiAccount, IManabarData } from '@hiveio/wax';
 import { DATA_LIMIT } from './bridge-api';
 import { isBannedAuthor, withoutBannedAuthors } from '@ui/config/lists/banned-authors';
+import { renderTimer, renderTimingEnabled, renderStopwatch } from '@ui/lib/render-timing';
+import { bannedFollowEdgesEnabled } from './profile-fanout-config';
 
 const logger = getLogger('app');
 
@@ -348,16 +350,55 @@ export const getAccount = (username: string): Promise<FullAccount> =>
  * Nothing is stored when any edge lookup failed, so a node hiccup cannot freeze
  * "no banned followers" in for five minutes.
  */
+/**
+ * ★★★ SUB-STAGE TIMINGS FOR ONE `getAccountFull` (2026-09-05). Built ONLY when
+ * `LUMEN_RENDER_TIMING=yes`; `undefined` otherwise, which is what keeps every
+ * clock read, every allocation and the log line itself off the hot path -- and
+ * `getAccountFull` is the most-used read in the app.
+ *
+ * It is a mutable record threaded DOWN rather than a richer return type on the
+ * way back up, deliberately: `getProfileInfo` and `bannedFollowEdges` have other
+ * callers (`getFollowCount`, and `getProfileInfo` directly) whose signatures
+ * must not move for an instrument, and the alternative -- returning timings
+ * alongside the data -- would have rippled through all of them.
+ *
+ * `-1` means "not measured", never 0: a stage that never ran and a stage that
+ * ran instantly must not read the same in the log.
+ */
+interface AccountFullTimings {
+  accountMs: number;
+  profileMs: number;
+  edgesMs: number;
+  edgesMemo: 'hit' | 'miss' | 'skipped';
+}
+
 const BANNED_EDGES_TTL_MS = 300_000;
 const BANNED_EDGES_MAX = 500;
 const bannedEdgesMemo = new Map<string, { value: { followers: number; following: number }; expiresAt: number }>();
 const bannedEdgesInFlight = new Map<string, Promise<{ followers: number; following: number }>>();
 
-const bannedFollowEdges = async (username: string): Promise<{ followers: number; following: number }> => {
-  if (!hasBannedAuthors()) return { followers: 0, following: 0 };
+const bannedFollowEdges = async (
+  username: string,
+  timings?: AccountFullTimings
+): Promise<{ followers: number; following: number }> => {
+  // ★★★ THE KILL SWITCH (2026-09-05). `LUMEN_BANNED_FOLLOW_EDGES=no` skips the
+  // whole fan-out and leaves `get_profile`'s own follower/following counts
+  // uncorrected -- see `profile-fanout-config.ts` for why this is a switch to be
+  // measured on the box and NOT a deletion. Default is unchanged behaviour.
+  if (!bannedFollowEdgesEnabled() || !hasBannedAuthors()) {
+    if (timings) timings.edgesMemo = 'skipped';
+    return { followers: 0, following: 0 };
+  }
 
   const hit = bannedEdgesMemo.get(username);
-  if (hit && hit.expiresAt > Date.now()) return hit.value;
+  if (hit && hit.expiresAt > Date.now()) {
+    if (timings) timings.edgesMemo = 'hit';
+    return hit.value;
+  }
+  // A join onto an IN-FLIGHT fan-out counts as a miss: it issues no calls of its
+  // own, but it still waits on the twelve already running, and this record's job
+  // is to explain the wait, not to count requests.
+  if (timings) timings.edgesMemo = 'miss';
   const pending = bannedEdgesInFlight.get(username);
   if (pending) return pending;
 
@@ -400,8 +441,12 @@ const bannedFollowEdges = async (username: string): Promise<{ followers: number;
  * Returns both values from a single API call.
  */
 export const getProfileInfo = async (
-  username: string
+  username: string,
+  timings?: AccountFullTimings
 ): Promise<{ follow_stats: AccountFollowStats; reputation: number }> => {
+  // `timings` is present only when render timing is on (see AccountFullTimings);
+  // every caller that does not pass it gets byte-identical behaviour.
+  const profileWatch = timings ? renderStopwatch() : null;
   // ★ A6 retry rollout (2026-08-18): idempotent read. Callers (`getAccountFull`,
   // `getFollowCount`) both already swallow a failure here into a fallback value
   // with no retry of their own, so a fast transient blip previously had zero
@@ -409,6 +454,7 @@ export const getProfileInfo = async (
   const profile = await withRetry(async () => (await getChain()).api.bridge.get_profile({ account: username }), {
     label: `get_profile(${username})`
   });
+  if (profileWatch) timings!.profileMs = profileWatch.elapsedMs();
   if (!profile || !profile.stats) {
     return {
       follow_stats: {
@@ -419,7 +465,9 @@ export const getProfileInfo = async (
       reputation: 25
     };
   }
-  const banned = await bannedFollowEdges(username).catch(() => ({ followers: 0, following: 0 }));
+  const edgesWatch = timings ? renderStopwatch() : null;
+  const banned = await bannedFollowEdges(username, timings).catch(() => ({ followers: 0, following: 0 }));
+  if (edgesWatch) timings!.edgesMs = edgesWatch.elapsedMs();
   return {
     follow_stats: {
       account: username,
@@ -438,14 +486,54 @@ export const getProfileInfo = async (
 // before (`follow_stats`/`reputation` left undefined on any failure there),
 // while `getAccount` still rejects the whole thing on its own failure exactly
 // as it did in the chained version.
-export const getAccountFull = (username: string): Promise<FullAccount> =>
-  Promise.all([getAccount(username), getProfileInfo(username).catch(() => null)]).then(
-    ([account, profileInfo]) => ({
+//
+// ★★★ AND NOW INSTRUMENTED (2026-09-05, cold pass 2). Measured on prod over 45
+// minutes / 950 profile renders with the layout's own render-timing line, the
+// stage that awaits THIS function is p50 800ms, p90 2194ms, max 9470ms -- the
+// dominant cold stage, and from the outside it is one opaque number. The line
+// emitted below splits it into the two branches of the `Promise.all` (which
+// overlap, hence a stopwatch per branch rather than sequential marks) and then
+// splits the second branch into `get_profile` versus the banned-edge fan-out,
+// which is the pair the `LUMEN_BANNED_FOLLOW_EDGES` A/B has to compare.
+//
+// Emitted only when `LUMEN_RENDER_TIMING=yes`: with the flag off, `timings` is
+// undefined, no clock is read, no timer is created and no object is built for a
+// no-op to ignore -- which matters here more than anywhere, this being the
+// most-used read in the app.
+export const getAccountFull = async (username: string): Promise<FullAccount> => {
+  const timings: AccountFullTimings | undefined = renderTimingEnabled()
+    ? { accountMs: -1, profileMs: -1, edgesMs: -1, edgesMemo: 'skipped' }
+    : undefined;
+  const timer = timings ? renderTimer('account-full') : null;
+  const accountWatch = timings ? renderStopwatch() : null;
+  try {
+    const [account, profileInfo] = await Promise.all([
+      getAccount(username).then((value) => {
+        if (accountWatch) timings!.accountMs = accountWatch.elapsedMs();
+        return value;
+      }),
+      getProfileInfo(username, timings).catch(() => null)
+    ]);
+    return {
       ...account,
       follow_stats: profileInfo?.follow_stats,
       reputation: profileInfo?.reputation
-    })
-  );
+    };
+  } finally {
+    // `finally`, so the FAILING path is timed too -- a rejected `getAccount` is
+    // exactly the shape the 9470ms outlier is likely to have. It re-throws as
+    // before; the timer adds nothing to the control flow.
+    if (timer && timings) {
+      timer.done({
+        user: username,
+        account: `${timings.accountMs}ms`,
+        profile: `${timings.profileMs}ms`,
+        edges: `${timings.edgesMs}ms`,
+        edgesMemo: timings.edgesMemo
+      });
+    }
+  }
+};
 
 export const getFollowCount = async (username: string): Promise<AccountFollowStats> => {
   const profileInfo = await getProfileInfo(username);

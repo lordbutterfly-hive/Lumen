@@ -12,7 +12,7 @@ import { isValidAccountNameFormat } from '@transaction/lib/validation';
 import { isBannedAuthor } from '@/blog/lib/moderation/banned-authors';
 import { notFound } from 'next/navigation';
 import { getLogger } from '@ui/lib/logging';
-import { renderTimer } from '@/blog/lib/render-timing';
+import { renderTimer } from '@ui/lib/render-timing';
 
 const logger = getLogger('app');
 
@@ -114,7 +114,7 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
   // ★ RENDER TIMING, OFF UNLESS `LUMEN_RENDER_TIMING=yes` (2026-09-05). The
   // profile is our slowest route and every number we had for it came from the
   // outside (curl TTFB), which cannot say WHICH await cost the second. See
-  // `lib/render-timing.ts`. A `notFound()` below throws, so a 404 render simply
+  // `@ui/lib/render-timing`. A `notFound()` below throws, so a 404 render simply
   // emits no line -- the timer never changes control flow to get one.
   const timer = renderTimer('profile-layout');
   // ★ EVERY 404 PATH REPORTS TOO (2026-09-05, review). `notFound()` THROWS, so

@@ -1,10 +1,19 @@
-import { getLogger } from '@ui/lib/logging';
+import { getLogger } from './logging';
 
 const logger = getLogger('app');
 
 /**
  * ★★★ WHERE A SERVER RENDER ACTUALLY SPENDS ITS TIME, OFF BY DEFAULT
  * (2026-09-05, cold-profile fix).
+ *
+ * ★ IN `packages/ui`, NOT `apps/blog`, SINCE 2026-09-05 (evening). The stage
+ * that turned out to dominate a cold profile lives in `packages/transaction`
+ * (`hive-api.ts`'s `getAccountFull`), which cannot import from the app -- there
+ * is no `@/blog/*` path in that package's tsconfig and the dependency would
+ * point the wrong way. The alternative was a second copy of this file with the
+ * same shape, i.e. two timers to keep in step; one module both sides already
+ * import (`@ui/*`) is strictly better. Nothing about the behaviour changed in
+ * the move.
  *
  * WHY THIS EXISTS. Every number we had for the profile render came from the
  * OUTSIDE (curl TTFB), which cannot tell a slow upstream from a slow merge from
@@ -44,8 +53,58 @@ const NO_OP: RenderTimer = Object.freeze({
   done: () => undefined
 });
 
-export function renderTimingEnabled(env: Record<string, string | undefined> = process.env): boolean {
+/**
+ * `process.env` READ THROUGH A GUARD, because this module is now reachable from
+ * the CLIENT bundle too (`hive-api.ts` is: several surfaces call a Hive node
+ * directly from the browser). `@ui/config/lists/banned-authors.ts` already
+ * guards its own `process.env` read for exactly this reason -- "so bundlers that
+ * inline `process.env` in browser builds cannot throw". In a browser this
+ * resolves to an empty environment, so the timer is simply OFF there, which is
+ * the correct answer: `LUMEN_RENDER_TIMING` is a server variable and is never
+ * shipped to the client.
+ */
+function currentEnv(): Record<string, string | undefined> {
+  try {
+    return typeof process !== 'undefined' && process.env ? process.env : {};
+  } catch {
+    return {};
+  }
+}
+
+export function renderTimingEnabled(env: Record<string, string | undefined> = currentEnv()): boolean {
   return env.LUMEN_RENDER_TIMING === 'yes';
+}
+
+/**
+ * A single duration, for work that does NOT fit the sequential `mark()` model --
+ * two branches of a `Promise.all`, say, where "time since the previous mark" is
+ * meaningless because they overlap. Start one per branch and read it when that
+ * branch settles.
+ *
+ * Returns **-1**, never a throw and never a plausible-looking 0, when the clock
+ * could not be read: a missing number must be visible in the log line as a
+ * missing number, not silently indistinguishable from "instant".
+ */
+export interface RenderStopwatch {
+  elapsedMs(): number;
+}
+
+export function renderStopwatch(): RenderStopwatch {
+  let started: number | null = null;
+  try {
+    started = performance.now();
+  } catch {
+    started = null;
+  }
+  return {
+    elapsedMs(): number {
+      try {
+        return started === null ? -1 : Math.round(performance.now() - started);
+      } catch {
+        return -1;
+      }
+    }
+  };
 }
 
 /**
@@ -68,7 +127,7 @@ const defaultSink = (line: string): void => logger.info(line);
 export function renderTimer(
   label: string,
   log: (line: string) => void = defaultSink,
-  env: Record<string, string | undefined> = process.env
+  env: Record<string, string | undefined> = currentEnv()
 ): RenderTimer {
   if (!renderTimingEnabled(env)) return NO_OP;
   // ★ EVEN THE FIRST READING IS GUARDED (2026-09-05, review). `mark`/`done`

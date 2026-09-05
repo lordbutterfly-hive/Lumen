@@ -15,7 +15,7 @@ import {
   postsPrefetchBudgetMs,
   POSTS_PREFETCH_BUDGET_MS
 } from '@/blog/lib/feed/posts-prefetch-budget';
-import { renderTimer } from '@/blog/lib/render-timing';
+import { renderTimer } from '@ui/lib/render-timing';
 
 const logger = getLogger('app');
 

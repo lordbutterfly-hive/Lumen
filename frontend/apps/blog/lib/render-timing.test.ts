@@ -4,8 +4,12 @@
  * sink is INJECTED rather than mocked, so nothing here depends on pino's level
  * or stream.
  *
- * RUN IT (`-r tsconfig-paths/register` because the module logs through the
- * `@ui/*` path alias):
+ * ★ THE SUBJECT LIVES IN `packages/ui/lib/render-timing.ts` (moved there so
+ * `packages/transaction` can use it too); the TEST stays here because this app
+ * is where a runner exists. `-r tsconfig-paths/register` resolves the `@ui/*`
+ * alias for both the import below and the module's own logger.
+ *
+ * RUN IT:
  *   pnpm --filter @hive/blog exec ts-node -r tsconfig-paths/register \
  *     --compilerOptions '{"module":"commonjs","moduleResolution":"node"}' \
  *     lib/render-timing.test.ts
@@ -17,7 +21,7 @@
  * every production render), and taking part in the render it is supposed to be
  * watching (a throw from a log line failing a page). Both are asserted here.
  */
-import { renderTimer, renderTimingEnabled } from './render-timing';
+import { renderTimer, renderTimingEnabled, renderStopwatch } from '@ui/lib/render-timing';
 
 let failures = 0;
 function check(label: string, cond: boolean): void {
@@ -147,6 +151,31 @@ check(`ON: no negative duration (got ${durations.join(',')})`, durations.length 
     threw = true;
   }
   check('the OFF timer calls the sink at all times: never', !threw);
+}
+
+// ---- THE STOPWATCH (used for overlapping work, e.g. a Promise.all branch) --
+{
+  const watch = renderStopwatch();
+  const first = watch.elapsedMs();
+  const until = Date.now() + 25;
+  while (Date.now() < until) {
+    /* burn ~25ms */
+  }
+  const second = watch.elapsedMs();
+  check(`stopwatch starts at ~0 and never negative (got ${first})`, first >= 0 && first < 15);
+  check(`stopwatch measures real elapsed time (got ${second}ms, expected >= 15)`, second >= 15);
+  check('stopwatch is re-readable (monotonic non-decreasing)', second >= first);
+  let threw = false;
+  try {
+    watch.elapsedMs();
+  } catch {
+    threw = true;
+  }
+  check('stopwatch never throws', !threw);
+  check(
+    'stopwatch is independent of LUMEN_RENDER_TIMING (the CALLER decides to start one)',
+    renderStopwatch().elapsedMs() >= 0
+  );
 }
 
 // ---- NEGATIVE CONTROL ----------------------------------------------------
