@@ -24,6 +24,7 @@ import WorkLinkField from '../work-link-field';
 import { creatorOracleNotice } from '../../market/oracle-copy';
 import { lapseNoticeFor, lapseStateOf, shouldOfferRenewNow } from '../../market/lapse';
 import DmInboxPanel from '@/blog/features/direct-messages/ui/dm-inbox-panel';
+import { useOwnDmRegistration } from '@/blog/features/direct-messages/live/use-direct-messages';
 
 type Section = 'overview' | 'inbox' | 'offerings' | 'market' | 'billing' | 'earnings';
 const SECTIONS: { id: Section; label: string }[] = [
@@ -594,6 +595,12 @@ const CreatorStudio: FC = () => {
   // rather than adding a second, untranslated one beside a translated one.
   const { t } = useTranslation('common_blog');
   const studio = useLiveStudio();
+  // ★ DISCOVERABILITY (2026-09-05). A creator's messaging key used to register only when
+  // they found and clicked the Messages sub-tab, so most creators were unreachable and
+  // had no way to know. Registering on Studio open (any section) means a creator becomes
+  // reachable simply by managing their token, which is what Studio is for. Idempotent and
+  // de-duped within a session (useOwnDmRegistration), so this is one cheap upsert at most.
+  useOwnDmRegistration();
   const {
     market,
     inbox,

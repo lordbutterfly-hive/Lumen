@@ -23,6 +23,11 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
 import { decrypt, encrypt, getOrCreateKeypair, getPublicKeyBase64 } from '../lib/dm-crypto';
 
+// Actor keys whose public key this browser has already registered in this session, so
+// repeated compose/inbox mounts don't each re-POST (see useOwnDmRegistration). Cleared
+// on reload, where one idempotent re-register is harmless.
+const registeredThisSession = new Set<string>();
+
 const JSON_POST: HeadersInit = { 'Content-Type': 'application/json', [csrfHeaderName]: '1' };
 
 /** Client-side cap, mirrored by the server's ciphertext byte cap (~16KB). */
@@ -107,19 +112,26 @@ export interface OwnDmRegistration {
 export function useOwnDmRegistration(): OwnDmRegistration {
   const { user, isHydrated, sessionUnavailable } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
+  const actorKey = loggedIn ? actorKeyOf(user) : null;
   const [state, setState] = useState<'idle' | 'registering' | 'ready' | 'error'>('idle');
 
   const ensure = useCallback(async (): Promise<boolean> => {
-    if (!loggedIn) return false;
+    if (!loggedIn || !actorKey) return false;
+    // Already registered this identity in this session: resolve without another POST.
+    if (registeredThisSession.has(actorKey)) {
+      setState('ready');
+      return true;
+    }
     setState('registering');
     try {
-      const publicKey = await getPublicKeyBase64();
+      const publicKey = await getPublicKeyBase64(actorKey);
       const res = await fetch('/api/lite/dm/keys', {
         method: 'POST',
         headers: JSON_POST,
         body: JSON.stringify({ publicKey })
       });
       if (!res.ok) throw new Error(`DM key registration failed: HTTP ${res.status}`);
+      registeredThisSession.add(actorKey);
       setState('ready');
       return true;
     } catch {
@@ -128,7 +140,7 @@ export function useOwnDmRegistration(): OwnDmRegistration {
       setState('error');
       return false;
     }
-  }, [loggedIn]);
+  }, [loggedIn, actorKey]);
 
   useEffect(() => {
     if (loggedIn && state === 'idle') void ensure();
@@ -192,10 +204,13 @@ export interface SendInput {
  */
 export function useSendMessage() {
   const qc = useQueryClient();
+  const { user, isHydrated } = useUserClient();
+  const myActorKey = isHydrated && user.isLoggedIn ? actorKeyOf(user) : null;
   return useMutation({
     mutationFn: async (input: SendInput) => {
-      const own = await getOrCreateKeypair();
-      const { nonce, ciphertext } = await encrypt(input.recipientPublicKey, input.plaintext);
+      if (!myActorKey) throw new Error('You must be signed in to send a message.');
+      const own = await getOrCreateKeypair(myActorKey);
+      const { nonce, ciphertext } = await encrypt(myActorKey, input.recipientPublicKey, input.plaintext);
       const res = await fetch('/api/lite/dm/send', {
         method: 'POST',
         headers: JSON_POST,
@@ -253,6 +268,7 @@ export function useDmThreads() {
     queryKey: ['dm-threads', myActorKey],
     enabled: loggedIn,
     queryFn: async (): Promise<DmThreadSummary[]> => {
+      if (!myActorKey) return [];
       const res = await fetch('/api/lite/dm/threads');
       if (!res.ok) throw new Error(`DM threads read failed: HTTP ${res.status}`);
       const body = (await res.json()) as { threads?: RawThread[] };
@@ -278,7 +294,7 @@ export function useDmThreads() {
           }
           if (pub) {
             try {
-              preview = await decrypt(pub, t.lastMessage.nonceBase64, t.lastMessage.ciphertextBase64);
+              preview = await decrypt(myActorKey, pub, t.lastMessage.nonceBase64, t.lastMessage.ciphertextBase64);
             } catch {
               previewUndecryptable = true;
             }
@@ -338,6 +354,7 @@ export function useDmThread(threadId: string | null) {
     queryKey: ['dm-thread', threadId, myActorKey],
     enabled: Boolean(threadId) && loggedIn,
     queryFn: async (): Promise<DmThreadData> => {
+      if (!myActorKey) return { status: null, otherActorKey: null, messages: [] };
       const res = await fetch(`/api/lite/dm/threads/${encodeURIComponent(threadId as string)}/messages`);
       if (!res.ok) throw new Error(`DM messages read failed: HTTP ${res.status}`);
       const body = (await res.json()) as RawMessagesResponse;
@@ -360,7 +377,7 @@ export function useDmThread(threadId: string | null) {
         let undecryptable = false;
         if (counterpartyPub) {
           try {
-            text = await decrypt(counterpartyPub, m.nonceBase64, m.ciphertextBase64);
+            text = await decrypt(myActorKey, counterpartyPub, m.nonceBase64, m.ciphertextBase64);
           } catch {
             undecryptable = true;
           }
@@ -389,10 +406,11 @@ export function useDmThread(threadId: string | null) {
       setSending(true);
       setSendError(null);
       try {
+        if (!myActorKey) throw new Error('You must be signed in to send a message.');
         const { publicKey, keyVersion } = await fetchPublicKeyFor(otherActorKey);
         if (!publicKey) throw new Error('The other person has no messaging key registered.');
-        const own = await getOrCreateKeypair();
-        const { nonce, ciphertext } = await encrypt(publicKey, plaintext);
+        const own = await getOrCreateKeypair(myActorKey);
+        const { nonce, ciphertext } = await encrypt(myActorKey, publicKey, plaintext);
         const res = await fetch('/api/lite/dm/send', {
           method: 'POST',
           headers: JSON_POST,
@@ -415,7 +433,7 @@ export function useDmThread(threadId: string | null) {
         setSending(false);
       }
     },
-    [q, qc]
+    [q, qc, myActorKey]
   );
 
   return {
