@@ -1,0 +1,33 @@
+[Unit]
+Description=Lumen lite publisher drain
+# WITHOUT THIS RUNNING, LITE POSTS NEVER REACH HIVE. They accumulate in Postgres,
+# the author sees their post on the site, and nothing anywhere reports a problem.
+# It is the quietest way this product can be broken, which is why it is a service
+# and not a line in a runbook.
+After=lumen.service
+# PartOf, NOT Requires (2026-09-05). Requires= propagates STOP but not START:
+# `systemctl stop lumen` killed this unit and a later `start lumen` left it dead,
+# silently, for 6 days (Aug 30 - Sep 5) while lite posts queued in Postgres.
+# PartOf= propagates stop AND restart, and lumen.service.d/publisher.conf carries
+# the matching Wants= so any start of lumen pulls this unit back up.
+PartOf=lumen.service
+
+[Service]
+Type=simple
+EnvironmentFile=/opt/lumen/.env
+Restart=always
+RestartSec=10
+# A loop rather than a timer: one less unit, and the interval is visible here.
+# The drain endpoint takes a cluster-wide advisory lock and is idempotent, so
+# overlapping ticks answer {"status":"skipped"} instead of double-publishing.
+ExecStart=/bin/bash -c 'while true; do \
+  curl -fsS -m 120 -X POST http://127.0.0.1:3000/api/lite/publisher/drain \
+    -H "x-lite-publisher-token: $LITE_PUBLISHER_TOKEN" \
+    -H "Content-Type: application/json" -d "{\"max\":25}" \
+    || echo "drain call failed (non-fatal)"; \
+  sleep 60; done'
+StandardOutput=append:/var/log/lumen-publisher.log
+StandardError=append:/var/log/lumen-publisher.log
+
+[Install]
+WantedBy=multi-user.target
