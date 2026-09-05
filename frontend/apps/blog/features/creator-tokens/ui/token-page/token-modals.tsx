@@ -48,6 +48,39 @@ import {
 // is the on-chain token TRANSFER dialog - do not collide the two.
 export type TokenDialog = 'buy' | 'sell' | 'redeem' | 'ask' | 'send' | 'inter' | 'dm' | null;
 
+/**
+ * A small inline spinner. `border-current` so it takes the colour of whatever text
+ * it sits in - white on the brand button, ink in the confirming banner - and needs
+ * no palette of its own. Tailwind's `animate-spin`, no new dependency.
+ */
+const Spinner: FC<{ className?: string }> = ({ className }) => (
+  <span
+    aria-hidden="true"
+    className={`inline-block h-4 w-4 flex-shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent ${className ?? ''}`}
+  />
+);
+
+/**
+ * ★ THE CONFIRMING BANNER (2026-09-05, owner). Every money write now WAITS for the
+ * chain to confirm (vsc-data-source.ts awaitExecution, ~20s and up to a minute).
+ * During that window the button greyed with a stale "Confirm in your wallet…"
+ * label - which reads as a frozen dialog after the wallet step is already done -
+ * and the only account of the wait was a faint grey line easy to miss. A MOVING
+ * spinner plus a plain statement of what is happening is the whole fix: the buyer
+ * can see it is working, and knows why it is taking a moment. Shared by all four
+ * money dialogs (buy/sell/ask/transfer), which all wait the same way.
+ */
+const ConfirmingOnChain: FC = () => (
+  <div
+    role="status"
+    aria-live="polite"
+    className="mt-3 flex items-center justify-center gap-2.5 rounded-card border border-line-brand-10 bg-surface-16 px-4 py-3 text-center text-caption font-medium text-ink-2 font-ui"
+  >
+    <Spinner />
+    <span>Confirming on the Magi network. This usually takes about 20 seconds, sometimes up to a minute. Keep this open while it goes through.</span>
+  </div>
+);
+
 const ModalHead: FC<{ title: string; onClose: () => void }> = ({ title, onClose }) => (
   <div className="flex items-center justify-between px-6 pt-[22px]">
     <div className="font-ui text-[22px] leading-[32px] font-medium text-ink-2">{title}</div>
@@ -328,7 +361,11 @@ const BuyModal: FC<{
               the cent — sub-cent, and unavoidable without a formatter this feature does
               not have. */}
           {busy
-            ? 'Confirm in your wallet…'
+            ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <Spinner /> Confirming…
+              </span>
+            )
             : soldOut
               ? 'Sold out. Every token is issued'
               : affordability === 'no_resource_credits'
@@ -372,9 +409,7 @@ const BuyModal: FC<{
             window, which reads as broken and invites a reload that drops the
             poll. This says what is actually happening. */}
         {busy ? (
-          <div role="status" aria-live="polite" className="mt-2.5 text-center text-caption text-ink-14 font-ui">
-            Confirming on the chain. This can take a minute or two, so keep this open while it goes through.
-          </div>
+          <ConfirmingOnChain />
         ) : null}
         {failure ? (
           <div role="alert" ref={(n) => n?.scrollIntoView({ block: 'nearest' })} className="mt-2.5 text-center text-caption font-medium text-ink-brand-6 font-ui">{failure}</div>
@@ -713,7 +748,11 @@ const SellModal: FC<{
           className="w-full rounded-card bg-surface-42 py-[15px] text-[15px] leading-[24px] font-medium tabular-nums text-ink-27 font-ui hover:bg-surface-44 disabled:opacity-50"
         >
           {busy
-            ? 'Confirm in your wallet…'
+            ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <Spinner /> Confirming…
+              </span>
+            )
             : tokens > held
               ? 'More than you hold'
               : redeem
@@ -728,9 +767,7 @@ const SellModal: FC<{
             window, which reads as broken and invites a reload that drops the
             poll. This says what is actually happening. */}
         {busy ? (
-          <div role="status" aria-live="polite" className="mt-2.5 text-center text-caption text-ink-14 font-ui">
-            Confirming on the chain. This can take a minute or two, so keep this open while it goes through.
-          </div>
+          <ConfirmingOnChain />
         ) : null}
         {failure ? (
           <div role="alert" ref={(n) => n?.scrollIntoView({ block: 'nearest' })} className="mt-2.5 text-center text-caption font-medium text-ink-brand-6 font-ui">{failure}</div>
@@ -1006,7 +1043,11 @@ const AskModal: FC<{
           className="w-full rounded-card bg-surface-42 py-[15px] text-[15px] leading-[24px] font-medium tabular-nums text-ink-27 font-ui hover:bg-surface-44 disabled:opacity-50"
         >
           {busy
-            ? 'Confirm in your wallet…'
+            ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <Spinner /> Confirming…
+              </span>
+            )
             : askQuote.isLoading
               ? 'Checking the price…'
               : priceRefused
@@ -1026,9 +1067,7 @@ const AskModal: FC<{
             window, which reads as broken and invites a reload that drops the
             poll. This says what is actually happening. */}
         {busy ? (
-          <div role="status" aria-live="polite" className="mt-2.5 text-center text-caption text-ink-14 font-ui">
-            Confirming on the chain. This can take a minute or two, so keep this open while it goes through.
-          </div>
+          <ConfirmingOnChain />
         ) : null}
         {failure ? (
           <div role="alert" ref={(n) => n?.scrollIntoView({ block: 'nearest' })} className="mt-2.5 text-center text-caption font-medium text-ink-brand-6 font-ui">{failure}</div>
@@ -1148,7 +1187,11 @@ const SendModal: FC<{
           {checking
             ? 'Checking the account…'
             : busy
-              ? 'Confirm in your wallet…'
+              ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <Spinner /> Confirming…
+              </span>
+            )
               : tokens > held
                 ? 'More than you hold'
                 : confirmAnyway
@@ -1162,9 +1205,7 @@ const SendModal: FC<{
             window, which reads as broken and invites a reload that drops the
             poll. This says what is actually happening. */}
         {busy ? (
-          <div role="status" aria-live="polite" className="mt-2.5 text-center text-caption text-ink-14 font-ui">
-            Confirming on the chain. This can take a minute or two, so keep this open while it goes through.
-          </div>
+          <ConfirmingOnChain />
         ) : null}
         {failure ? (
           <div role="alert" ref={(n) => n?.scrollIntoView({ block: 'nearest' })} className="mt-2.5 text-center text-caption font-medium text-ink-brand-6 font-ui">{failure}</div>
