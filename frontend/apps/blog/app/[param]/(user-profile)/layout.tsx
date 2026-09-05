@@ -12,6 +12,7 @@ import { isValidAccountNameFormat } from '@transaction/lib/validation';
 import { isBannedAuthor } from '@/blog/lib/moderation/banned-authors';
 import { notFound } from 'next/navigation';
 import { getLogger } from '@ui/lib/logging';
+import { renderTimer } from '@/blog/lib/render-timing';
 
 const logger = getLogger('app');
 
@@ -110,12 +111,29 @@ export async function generateMetadata({ params }: { params: { param: string } }
 }
 
 const Layout = async ({ children, params }: { children: ReactNode; params: { param: string } }) => {
+  // ★ RENDER TIMING, OFF UNLESS `LUMEN_RENDER_TIMING=yes` (2026-09-05). The
+  // profile is our slowest route and every number we had for it came from the
+  // outside (curl TTFB), which cannot say WHICH await cost the second. See
+  // `lib/render-timing.ts`. A `notFound()` below throws, so a 404 render simply
+  // emits no line -- the timer never changes control flow to get one.
+  const timer = renderTimer('profile-layout');
+  // ★ EVERY 404 PATH REPORTS TOO (2026-09-05, review). `notFound()` THROWS, so
+  // the `timer.done()` at the bottom of this function is unreachable on all
+  // four of them -- including the most expensive render in the file, the
+  // account read that failed, backed off RETRY_BACKOFF_MS and retried before
+  // giving up. That is precisely the path a timing instrument must not be blind
+  // to. This emits the line and then throws exactly as before, so the timer
+  // still cannot change control flow; it just stops missing the slow exits.
+  const bail = (outcome: string, user: string): never => {
+    timer.done({ user, outcome });
+    notFound();
+  };
   const queryClient = getQueryClient();
   const { param } = params;
 
   // Only process if it looks like a username (starts with @ or %40)
   if (!param.startsWith('@') && !param.startsWith('%40')) {
-    notFound();
+    bail('not-an-account', param);
   }
 
   const username = param.startsWith('%40') ? param.replace('%40', '') : param.replace('@', '');
@@ -134,13 +152,14 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
   // renders the not-found page, so no OpenGraph card is ever produced for him
   // and Lumen links to him stop generating share previews.
   if (isBannedAuthor(username)) {
-    notFound();
+    bail('banned', username);
   }
 
   // Layer 1: Format validation (cheap, WASM-based, no API call)
   const validFormat = await isValidAccountNameFormat(username);
+  timer.mark('valid');
   if (!validFormat) {
-    notFound();
+    bail('invalid-name', username);
   }
 
   // Layer 2: Existence check (API call) - fixes 500 for nonexistent users
@@ -201,8 +220,14 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
     account = await liteAccountAsProfile(username);
   }
   if (!account || !account.name) {
-    notFound();
+    // The slow one: this is reached only after the failed read, the backoff and
+    // the retry, so its timing line is the one worth having.
+    timer.mark('account');
+    bail('no-account', username);
   }
+  // Covers the cached read, its one retry (RETRY_BACKOFF_MS included) and the
+  // lite-account fallback -- i.e. everything it took to have an account.
+  timer.mark('account');
 
   try {
     const prefetchPromises = [
@@ -284,6 +309,7 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
   } catch (error) {
     logger.error(error, 'Error in Layout:');
   }
+  timer.mark('prefetch');
   const dehydratedState = dehydrate(queryClient);
   queryClient.clear();
 
@@ -311,6 +337,7 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
   // behind "Loading profile" on every server render. Passing the account we
   // already resolved above lets its ['profileData'] query have initialData on
   // the server, so identity and the Posts tab actually server-render.
+  timer.done({ user: username, outcome: 'ok' });
   return (
     <Hydrate state={dehydratedState}>
       <InitialProfileProvider value={account}>{children}</InitialProfileProvider>

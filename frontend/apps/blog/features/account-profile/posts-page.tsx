@@ -11,6 +11,11 @@ import { trimEntriesForSeed } from '@/blog/lib/feed/seed-trim';
 import { anonymousAccountPostsSeed } from '@/blog/lib/feed/account-posts-seed-cache';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { getAccountPostsCached } from '@/blog/lib/cached-api';
+import {
+  postsPrefetchBudgetMs,
+  POSTS_PREFETCH_BUDGET_MS
+} from '@/blog/lib/feed/posts-prefetch-budget';
+import { renderTimer } from '@/blog/lib/render-timing';
 
 const logger = getLogger('app');
 
@@ -38,8 +43,28 @@ const logger = getLogger('app');
  * for the same reason `feed-prefetch.ts`'s `withTimeout` does: nobody is still
  * awaiting it, so an unhandled rejection would otherwise crash the process on
  * the next 429.
+ *
+ * ★★★ THE DEADLINE IS NOW CHOSEN BY AUDIENCE (2026-09-05, cold-profile fix).
+ * "A short deadline" above was ONE number, 500ms, for everybody, and a cold
+ * `get_account_posts` (0.5-2s) loses that race every time -- measured on prod,
+ * 5 of 8 never-visited profiles were served with ZERO articles in the HTML.
+ * For a SIGNED-IN reader that stays exactly as it is: their page is never held
+ * by a shared cache and their client refetch fills it a beat later. For an
+ * ANONYMOUS reader it is the wrong trade, because that render is cached at the
+ * edge for 300s (`lib/anonymous-cache-policy.ts`) and the empty page is then
+ * handed to every anonymous visitor for minutes -- so they wait longer, once,
+ * on behalf of all of them. Both numbers and the full reasoning live in
+ * `lib/feed/posts-prefetch-budget.ts`; the losing-promise behaviour above is
+ * unchanged for either audience.
  */
-const POSTS_PREFETCH_BUDGET_MS = 500;
+
+/**
+ * The deadline's own answer, kept DISTINCT from `null`: `getAccountPostsCached`
+ * can itself resolve null, so null alone cannot tell "the upstream answered
+ * nothing" from "the budget expired" -- and won/lost is precisely the number
+ * the audience split has to be judged on. Nothing about the race changes.
+ */
+const BUDGET_EXPIRED = Symbol('posts-prefetch-budget-expired');
 
 const PostsPage = async ({
   children,
@@ -50,23 +75,77 @@ const PostsPage = async ({
   param: string;
   query: QueryTypes;
 }) => {
+  const timer = renderTimer('profile-posts');
   const username = extractUsernameFromParam(param) ?? param;
-  const observer = await getObserverFromCookies();
+  // ★ ONE session read, HOISTED -- AND RUN ALONGSIDE THE OBSERVER (2026-09-05).
+  // The session was read twice further down (once for the block list, once for
+  // the anonymous-seed fallback) and the budget below has to know the audience
+  // BEFORE the race, so it moves up here. In PARALLEL with the observer cookie
+  // read, deliberately: two sequential awaits would have made a signed-in
+  // reader's critical path longer than it was before this change, and neither
+  // read needs the other's answer.
+  //
+  // ★ A FAILED SESSION READ DEGRADES TO AN ANONYMOUS ONE. Hoisting took this
+  // out of the try/catch that used to cover it, and iron-session genuinely can
+  // throw on a cookie it cannot unseal (a rotated
+  // DENSER_SERVER_SECRET_COOKIE_PASSWORD, a truncated cookie). Rendering the
+  // profile as signed-OUT is exactly what an absent cookie already does and is
+  // always safe -- serving a 500 for the whole page is not. `null`, not a
+  // hand-built session object: nothing below reads anything but `.user`, and a
+  // fake `IronSession` would be a lie about `save`/`destroy`.
+  const [observer, viewerSession] = await Promise.all([
+    getObserverFromCookies(),
+    getLiteSession().catch((error) => {
+      logger.warn(error, 'getLiteSession failed in PostsPage; rendering as anonymous');
+      return null;
+    })
+  ]);
+  const isSignedIn = Boolean(viewerSession?.user);
+  timer.mark('session');
+  // ★★★ PEEK AT THE ANONYMOUS SEED BEFORE THE RACE, NOT AFTER (2026-09-05,
+  // review). This is a process-local map lookup with zero network (see
+  // account-posts-seed-cache.ts) and it decides how long the race below may
+  // run: with a usable seed ALREADY IN HAND there is nothing to wait 3.5s for.
+  // A fast upstream still wins the short race and gives fresher data; a slow
+  // one loses in 500ms and the reader gets the seed immediately instead of
+  // staring at a 3.5s wait for an answer we were holding all along. Only a
+  // reader we have nothing at all for pays the long budget.
+  //
+  // Read ONCE, here, and reused by the fallback at the bottom -- this call also
+  // touches the seed cache's LRU, so calling it twice per render would be two
+  // touches for one reader. Signed-in readers never read this shared cache
+  // (their block list and own vote are per-request), which `isSignedIn ? null`
+  // now enforces by construction rather than by a guard further down.
+  const anonSeed = isSignedIn ? null : anonymousAccountPostsSeed(query, username);
+  const hasAnonSeed = Boolean(anonSeed && anonSeed.length > 0);
+  const budgetMs = hasAnonSeed ? POSTS_PREFETCH_BUDGET_MS : postsPrefetchBudgetMs(isSignedIn);
   let initialPosts = null;
+  let raceWon = false;
+  let seedUsed = false;
+  let budgetTimer: ReturnType<typeof setTimeout> | undefined;
   try {
     const postsPromise = getAccountPostsCached(query, username, observer);
-    initialPosts =
-      (await Promise.race([
-        postsPromise,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), POSTS_PREFETCH_BUDGET_MS))
-      ])) ?? null;
-    // The loser of the race above is never abandoned -- see this file's
-    // `POSTS_PREFETCH_BUDGET_MS` comment for why it keeps running and why its
-    // eventual rejection must be swallowed here.
+    const raced = await Promise.race([
+      postsPromise,
+      new Promise<typeof BUDGET_EXPIRED>((resolve) => {
+        budgetTimer = setTimeout(() => resolve(BUDGET_EXPIRED), budgetMs);
+      })
+    ]);
+    if (raced === BUDGET_EXPIRED) {
+      initialPosts = null;
+    } else {
+      raceWon = true;
+      initialPosts = raced ?? null;
+    }
+    timer.mark('posts');
+    // The loser of the race above is never abandoned -- see this file's budget
+    // comment for why it keeps running and why its eventual rejection must be
+    // swallowed here.
     void postsPromise.catch(() => undefined);
-      // Resolve Lumen identities before this reaches the browser, so a lite post
-      // never renders under the shared publishing account and then corrects itself.
-      if (initialPosts) await attachLiteIdentities(initialPosts);
+    // Resolve Lumen identities before this reaches the browser, so a lite post
+    // never renders under the shared publishing account and then corrects itself.
+    if (initialPosts) await attachLiteIdentities(initialPosts);
+    timer.mark('attach');
     // ★ THE READER'S OWN BLOCK LIST, SERVER-SIDE (2026-08-23).
     //
     // This is the half that actually closes the leak. This component is a SERVER
@@ -85,13 +164,14 @@ const PostsPage = async ({
     // `/api/account-posts` — the reader's own preference must not blank a profile over a
     // database hiccup.
     if (initialPosts) {
-      const viewerSession = await getLiteSession();
-      const blockedKeys = await viewerBlockedKeySet(viewerSession.user).catch(
+      // `viewerSession` is the single read hoisted to the top of this component.
+      const blockedKeys = await viewerBlockedKeySet(viewerSession?.user).catch(
         () => new Set<string>()
       );
       if (blockedKeys.size > 0) {
         initialPosts = await filterBlockedForViewer(initialPosts, blockedKeys);
       }
+      timer.mark('block');
       // ★ MERGE LUMEN ENGAGEMENT INTO THE SEED (T1g, 2026-09-04). `getAccountPosts`
       // above is a raw chain read; Lumen's own vote/reblog totals (lite users' votes
       // and reblogs, which never touch the chain — see this function's own doc
@@ -105,15 +185,24 @@ const PostsPage = async ({
       // numbers (own doc there). Same direct-DB call that route makes; not a
       // loopback HTTP self-fetch.
       initialPosts = await mergeLumenEngagement(initialPosts);
+      timer.mark('merge');
       // ★ TRIM THE SEED TO WHAT A CARD SHOWS (snappiness phase 3, 2026-09-03).
       // getAccountPosts returns full bodies and full vote lists; a profile card
       // needs only a plaintext dek and the viewer's own vote. Untrimmed this
       // seed measured ~870 KB per profile (77% vote lists, 18% bodies); trimmed
       // ~127 KB. Same helper the feed uses (lib/feed/seed-trim.ts).
-      initialPosts = trimEntriesForSeed(initialPosts, viewerSession.user?.username ?? '');
+      initialPosts = trimEntriesForSeed(initialPosts, viewerSession?.user?.username ?? '');
+      timer.mark('trim');
     }
   } catch (error) {
     logger.error(error, 'Error in PostsPage:');
+  } finally {
+    // ★ THE LOSING TIMER IS CLEARED (2026-09-05, review). A WON race used to
+    // leave a live `setTimeout` running for the remainder of the budget; at
+    // 3.5s that is a handle holding the event loop open, and on SIGTERM it can
+    // delay the worker's exit by up to that long on every in-flight profile.
+    // `finally`, not the happy path, so a rejected upstream clears it as well.
+    if (budgetTimer !== undefined) clearTimeout(budgetTimer);
   }
   // ★ FALLBACK WHEN THE RENDER-CONTEXT SEED CAME BACK EMPTY (2026-09-03).
   //
@@ -131,12 +220,26 @@ const PostsPage = async ({
   // block list and own vote are per-request) - they fall through to the client
   // fetch exactly as before. Cold miss = today's behaviour, never worse.
   if (!initialPosts || initialPosts.length === 0) {
-    const viewerSession = await getLiteSession();
-    if (!viewerSession.user) {
-      const cached = anonymousAccountPostsSeed(query, username);
-      if (cached && cached.length > 0) initialPosts = cached;
+    // `anonSeed` is the read taken before the race (null for a signed-in
+    // reader, so the "never seed a session from the shared cache" rule above
+    // still holds without a second check).
+    if (anonSeed && anonSeed.length > 0) {
+      initialPosts = anonSeed;
+      seedUsed = true;
     }
+    timer.mark('seed');
   }
+  // `count`, NOT `posts`: `posts` is already the name of the RACE STAGE on this
+  // same line, and two `posts=` keys (one ms, one a bare count) make the line
+  // ambiguous to read and to grep.
+  timer.done({
+    user: username,
+    anon: String(!isSignedIn),
+    budget: budgetMs,
+    race: raceWon ? 'won' : 'lost',
+    seed: seedUsed ? 'hit' : 'miss',
+    count: initialPosts?.length ?? 0
+  });
   // Pass data directly via context instead of Hydrate/dehydrate.
   // React Query v4's <Hydrate> has compatibility issues with Next.js App Router
   // streaming SSR where dehydrated state doesn't reliably reach the browser

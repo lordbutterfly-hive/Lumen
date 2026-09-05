@@ -30,6 +30,33 @@ DST=/mnt/o/Lumen/frontend
 # so it was only ever disk noise, but it buried the real diff. `.tls/` holds the
 # local self-signed TLS PRIVATE KEY used by scripts/lumen-https-front.mjs, which
 # has no business in the repo directory even though .gitignore catches it.
+# ★ GUARD (2026-09-05): this copies DEV TREE -> REPO with --delete. Twice in one
+# day work written straight into the repo (untracked files an agent had not yet
+# committed) was deleted by a --go that its author believed ran the other way.
+# So --go now refuses while the repo has uncommitted changes under frontend/
+# that are not mirrored in the dev tree; commit them, or copy them into the dev
+# tree first. --force skips the check when you have looked and mean it.
+if [ "${1:-}" = "--go" ] && [ "${2:-}" != "--force" ]; then
+  dirty=$(git -C /mnt/o/Lumen status --porcelain -- frontend 2>/dev/null || true)
+  unmirrored=""
+  for f in $(printf '%s\n' "$dirty" | awk '{print $2}'); do
+    case "$f" in frontend/*) ;; *) continue;; esac
+    if [ -d "/mnt/o/Lumen/$f" ]; then
+      for g in $(find "/mnt/o/Lumen/$f" -type f); do
+        rel=${g#/mnt/o/Lumen/frontend/}
+        cmp -s "$g" "$SRC/$rel" 2>/dev/null || unmirrored="$unmirrored\n  $g"
+      done
+    else
+      rel=${f#frontend/}
+      cmp -s "/mnt/o/Lumen/$f" "$SRC/$rel" 2>/dev/null || unmirrored="$unmirrored\n  $f"
+    fi
+  done
+  if [ -n "$unmirrored" ]; then
+    printf 'REFUSING --go: the repo has uncommitted frontend/ changes that the dev tree does not have;\n--go would DELETE or OVERWRITE them:%b\nCommit them or copy them into %s first (or pass --go --force).\n' "$unmirrored" "$SRC"
+    exit 5
+  fi
+fi
+
 MODE="--dry-run"
 LABEL="DRY RUN — nothing copied. Re-run with --go to apply."
 if [ "${1:-}" = "--go" ]; then MODE=""; LABEL="Copied. Now commit + push in GitHub Desktop."; fi

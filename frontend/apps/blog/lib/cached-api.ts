@@ -3,7 +3,6 @@ import type { Entry, FollowListType } from '@hive/common-hiveio-packages/wax';
 import {
   getAccountFull,
   getAccountReputations,
-  getDynamicGlobalProperties,
   getFollowers,
   getFollowing,
   DEFAULT_PARAMS_FOR_FOLLOW,
@@ -147,37 +146,31 @@ export const getPostCached = cache(getPost);
  *
  * ★ TTLs chosen from what the values ARE, not from taste:
  *
- *  · `getDynamicGlobalProperties` is GLOBAL — not keyed on anything — so one
- *    entry serves every reader and every route, and the hit rate is ~100% after
- *    the first request. The chain advances every 3 seconds, but nothing on a
- *    profile reads a block number off it; it is there for the vesting-to-HP
- *    conversion, whose inputs (total_vesting_fund_hive / total_vesting_shares)
- *    move by fractions of a percent per hour. 20s is far tighter than the data
- *    needs and still collapses the call.
- *
  *  · Reputation is per-account and moves when votes land. 60s.
  *
- * Both are PREFETCHES — their only job is to seed the React Query cache so the
- * browser does not refetch, and every one has a client-side path that fetches
- * if the dehydrated state lacks it. A stale one costs a reader nothing; a slow
- * one costs every reader 400ms.
+ * It is a PREFETCH — its only job is to seed the React Query cache so the
+ * browser does not refetch, and it has a client-side path that fetches if the
+ * dehydrated state lacks it. A stale one costs a reader nothing; a slow one
+ * costs every reader 400ms.
  *
- * ★ WHICH IS PRECISELY WHY BOTH SERVE STALE (2026-08-17). "A stale one costs a
+ * ★ WHICH IS PRECISELY WHY IT SERVES STALE (2026-08-17). "A stale one costs a
  * reader nothing" is the argument for the TTL and it is the same argument, only
- * stronger, past the TTL: at expiry these two were still handing one reader per
- * period the full 400ms budget back. Refreshing behind the reader is the whole
- * benefit with none of that. The windows match the TTLs — a prefetch twice its
- * intended age is still a prefetch, and the client refetches anyway.
+ * stronger, past the TTL: at expiry it was still handing one reader per period
+ * the full 400ms budget back. Refreshing behind the reader is the whole benefit
+ * with none of that. The window matches the TTL — a prefetch twice its intended
+ * age is still a prefetch, and the client refetches anyway.
  *
- * NOT applied to the wallet, which calls `getDynamicGlobalProperties` directly
- * for money math and must keep doing so.
+ * ★ THE OTHER HALF OF THIS PAIR, `getDynamicGlobalPropertiesCached`, IS GONE
+ * (2026-09-05). It was here for the same reason and with the same 20s TTL — one
+ * global entry, no key, ~100% hit rate, feeding the vesting-to-HP conversion —
+ * but commit 1c68664 rewrote the profile prefetch and left it with ZERO readers
+ * (grep-verified across apps/ and packages/). The only thing still calling it
+ * was `warm-server-caches.ts`, i.e. it cost one real upstream call per restart
+ * to fill a cache nobody read. Every remaining caller — the wallet, for money
+ * math, and the profile layout — calls `getDynamicGlobalProperties` directly and
+ * always did; that was already documented here as deliberate. Re-add the wrapper
+ * only alongside a reader that wants it.
  */
-export const getDynamicGlobalPropertiesCached = withTtlCache(
-  getDynamicGlobalProperties,
-  () => 'dgp',
-  { ttlMs: 20_000, max: 1, staleWhileRevalidateMs: 20_000 }
-);
-
 export const getAccountReputationsCached = withTtlCache(
   getAccountReputations,
   (username: string, limit: number) => `${username}|${limit}`,

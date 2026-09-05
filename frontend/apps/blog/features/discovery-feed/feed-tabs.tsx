@@ -649,7 +649,15 @@ function ForYouFeed() {
   // not popular posts, they are the reader's own ranking. Selected on the
   // dedicated `aging` field rather than on `degraded`, because a working state
   // must not travel down the degradation channel.
-  const degradedMessage = ranked
+  // ★★★ AND NOT WHILE THE READY PILL IS OFFERING THE RANKING (2026-09-05).
+  // `readyToSwap` is true only when the poll has the reader's OWN personalised
+  // page in hand and the rendered page is not it — i.e. the ranking demonstrably
+  // exists and is one click away. "Personalised ranking is warming up" is false
+  // at that moment, and stacking it above the "your feed is ready" button tells
+  // the reader two contradictory things about the same fact. The button is the
+  // stronger and the more accurate of the two, so it speaks alone; the banner
+  // comes back on its own if the swap fails and the page stays unpersonalised.
+  const degradedMessage = ranked || readyToSwap
     ? null
     : firstPage?.aging
       ? t('discovery_feed.ranking_aging')

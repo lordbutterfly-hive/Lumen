@@ -220,9 +220,26 @@ const topicInflight = new Map<string, Promise<BuiltFeed | null>>();
 
 
 /**
- * One build per `viewer|topic` at a time. Unlike `buildOnce` this does NOT
- * detach: a topic page has no persistent store to write into, so a build nobody
- * is awaiting would burn a recsys round trip and throw the result away.
+ * One build per `viewer|topic` at a time.
+ *
+ * ★★★ IT NOW DETACHES, BECAUSE THE PREMISE THAT SAID IT MUST NOT HAS BEEN FIXED
+ * (2026-09-05). What stood here was: "Unlike `buildOnce` this does NOT detach: a
+ * topic page has no persistent store to write into, so a build nobody is
+ * awaiting would burn a recsys round trip and throw the result away." That was
+ * true only because the CALLER did the remembering — `rememberTopicFeed` ran
+ * after the `await`, so a result nobody was still waiting for was indeed
+ * dropped. The caller now stores inside the builder (see the topic branch), so
+ * an abandoned build writes the topic cache exactly as `buildViewerFeed` writes
+ * `lumen_feed_store`, and the round trip is kept rather than burnt.
+ *
+ * That is what makes a patience window possible here at all, and the reason one
+ * was needed is arithmetic: this branch `await`ed the build with no ceiling, so
+ * a reader paid `RECSYS_ATTEMPTS x RECSYS_FEED_TIMEOUT_MS` plus backoff in full
+ * — 13.5s at the 4000ms this box was misconfigured with, and 46.5s at the
+ * correct 15000ms. Raising a timeout to fix the ranker must not buy a 46-second
+ * topic page; the owner's ruling of 2026-08-14 ("one-time trending on first
+ * visit is acceptable, a 16s spinner never is") is the same ruling here as on
+ * the personal feed, and this is the one branch it had never been applied to.
  */
 function buildTopicOnce(key: string, build: () => Promise<BuiltFeed | null>): Promise<BuiltFeed | null> {
   const existing = topicInflight.get(key);
@@ -809,20 +826,53 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
       return fallback(chainObserver, limit, 'unavailable', 'the ranker is not answering right now', topic, viewer);
     }
 
-    const built = await buildTopicOnce(topicKey, async () => {
+    // ★★★ THE BOOKKEEPING MOVED INSIDE THE BUILDER (2026-09-05), and that is the
+    // load-bearing half of this change rather than a tidy-up. Both memos — the
+    // topic cache on success and `topicFailedAt` on failure — are facts about
+    // THE BUILD, not about whoever happened to still be waiting for it. Left
+    // outside, a reader who stopped waiting threw away a completed ranking and
+    // the next visitor rebuilt it from scratch; inside, the build stores its own
+    // result exactly as `buildViewerFeed` does, so stopping the wait costs this
+    // reader one trending page and costs the NEXT reader nothing.
+    const topicBuild = buildTopicOnce(topicKey, async () => {
       const state = await timed('viewerState', () => collectViewerState(viewer, isLite, userId));
-      return assembleFeed({ viewer, limit, chainObserver, topic, ...state });
-    });
-    if (!built) {
-      if (topicFailedAt.size >= TOPIC_CACHE_MAX) {
-        const oldest = topicFailedAt.keys().next().value;
-        if (oldest !== undefined) topicFailedAt.delete(oldest);
+      const assembled = await assembleFeed({ viewer, limit, chainObserver, topic, ...state });
+      if (assembled) {
+        topicFailedAt.delete(topicKey);
+        rememberTopicFeed(topicKey, assembled.entries, assembled.ranked, assembled.lanes);
+      } else {
+        if (topicFailedAt.size >= TOPIC_CACHE_MAX) {
+          const oldest = topicFailedAt.keys().next().value;
+          if (oldest !== undefined) topicFailedAt.delete(oldest);
+        }
+        topicFailedAt.set(topicKey, Date.now());
       }
-      topicFailedAt.set(topicKey, Date.now());
+      return assembled;
+    });
+
+    // ★ THE SAME WINDOW THE PERSONAL FEED USES, FOR THE SAME REASON. See
+    // `firstBuildPatienceMs`: this bounds how long a reader WATCHES the build,
+    // never whether the build runs. Measured topic builds on this route are
+    // 8.5-24.6s signed in, and a recsys that times out costs 46.5s of retries at
+    // the correct 15s per-attempt timeout — neither is a wait a reader may be
+    // held for behind a bare skeleton.
+    const topicOutcome = await awaitWithPatience(topicBuild, TOPIC_BUILD_PATIENCE_MS);
+    if (!topicOutcome.settled) {
+      logger.info(
+        'for-you: topic build for %s exceeded %dms of patience — serving the chronological page, build continues and will fill the topic cache',
+        topicKey,
+        TOPIC_BUILD_PATIENCE_MS
+      );
+      return fallback(
+        chainObserver, limit, 'building',
+        'the ranked topic build is still running; it will be cached and served on the next visit',
+        topic, viewer
+      );
+    }
+    const built = topicOutcome.value;
+    if (!built) {
       return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed', topic, viewer);
     }
-    topicFailedAt.delete(topicKey);
-    rememberTopicFeed(topicKey, built.entries, built.ranked, built.lanes);
     // ★ NOT RECORDED IN THE SERVED LOG, DELIBERATELY. The log's domain is the
     // PERSONAL ranked page — the thing the demotion will act on and the thing
     // §7's slot budgets are written about. `lumen_feed_served` has no topic
@@ -1214,6 +1264,19 @@ function swapOfferEnabled(): boolean {
  * `FEED_FIRST_BUILD_PATIENCE_MS` still wins over both, for an operator who
  * genuinely wants one without the other.
  */
+/**
+ * ★ TOPIC patience is its OWN number (2026-09-05, review of the topic-branch
+ * patience). `firstBuildPatienceMs()` drops to 2s whenever the ready pill is on,
+ * and that 2s is justified only by the pill's in-session upgrade path, which the
+ * topic page does not have (`topic-shell.tsx` runs no probe poll and renders no
+ * pill). Against measured 8.5-24.6s topic builds a 2s patience would hand nearly
+ * every first topic visit the chronological page with nothing to upgrade it.
+ * 12s is the no-pill value the personal feed used before the pill existed: long
+ * enough for a warm ranker to answer, short enough that a cold one cannot hold a
+ * reader for the full three-attempt retry (46.5s at the 15s floor).
+ */
+const TOPIC_BUILD_PATIENCE_MS = 12_000;
+
 function firstBuildPatienceMs(): number {
   const raw = Number(process.env.FEED_FIRST_BUILD_PATIENCE_MS);
   if (Number.isFinite(raw) && raw > 0) return raw;

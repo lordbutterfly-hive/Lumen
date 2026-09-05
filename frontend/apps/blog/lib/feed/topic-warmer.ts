@@ -3,6 +3,12 @@ import { getLogger } from '@ui/lib/logging';
 import { getTrendingTags } from '@transaction/lib/hive';
 import { acquireHiveWarm, hiveWarmHolder, releaseHiveWarm } from './hive-warm-gate';
 import { selectWarmTopics } from './topic-warm-select';
+import {
+  repeatPhaseDelayMs,
+  resolveWorkerIndex,
+  workerCountFromEnv,
+  workerStaggerMs
+} from './topic-warm-offset';
 
 const logger = getLogger('app');
 
@@ -83,6 +89,22 @@ const GAP_MS = 1_500;
  * site is warm within seconds of coming up.
  */
 const BOOT_DELAY_MS = 2_000;
+/**
+ * ★★ BETWEEN TWO WORKERS' FIRST CYCLES, and deliberately NOT the steady-state
+ * share of an interval (2026-09-05, second pass). Phasing the first cycle too
+ * would have left worker index 2 warming nothing for `BOOT_DELAY_MS + 400s`
+ * after every deploy — a third of readers on cold topic pages for almost seven
+ * minutes, which is the exact cost this module's header exists to remove. Thirty
+ * seconds gets every worker warm inside a minute of a restart.
+ *
+ * ★ THE TRADE, STATED: a cycle measured 75-98s, so 30s is SHORTER than a cycle
+ * and the first cycles after a restart DO still overlap. That is one bounded
+ * burst per deploy against the 116 overlapping cycles a day the stagger removes,
+ * and it buys back six minutes of cold topic pages for a third of readers. If a
+ * deploy-time burst ever proves to be the expensive one, this is the number to
+ * raise — not the steady-state phase below it.
+ */
+const FIRST_CYCLE_STAGGER_MS = 30_000;
 /** How many tags to ask the chain for. Most of the head of this list is
  *  community ids and reward-tribe tags, so the browsable forty sit well down it
  *  — the same over-fetch, for the same reason, as `/api/trending-tags`. */
@@ -206,12 +228,51 @@ export function startTopicWarmer(warm: (tag: string) => Promise<void>): void {
 
   const max = numberFromEnv('FEED_TOPIC_WARM_MAX', DEFAULT_MAX_TAGS);
   const interval = numberFromEnv('FEED_TOPIC_WARM_INTERVAL_MS', DEFAULT_INTERVAL_MS);
-  logger.info('topic-warmer: starting — %d tags every %dms', max, interval);
+
+  /*
+   * ★★ ONE CYCLE AT A TIME ACROSS THE CLUSTER, BY STAGGERING (2026-09-05). The
+   * `running` flag above and the `hive-warm-gate` below it both stop overlaps
+   * WITHIN a process, and that was the whole job when this app was one process.
+   * It is now three cluster workers (see `topic-warm-offset.ts` for the log
+   * evidence: 116 overlapping cycles from different pids in 24h), each with its
+   * own copy of both guards, all firing on the same ten-minute boundary. Each
+   * worker still has to warm its own in-process topic cache — electing a single
+   * warmer would leave two thirds of the caches cold — so the workers are spread
+   * evenly across one interval instead.
+   *
+   * ★ TWO SCHEDULES, NOT ONE. The FIRST cycle runs early for every worker, on
+   * the small `FIRST_CYCLE_STAGGER_MS` step, so nobody's topic pages are cold
+   * for minutes after a deploy; only the REPEATING schedule is phased a full
+   * `interval / workerCount` apart, and `repeatPhaseDelayMs` subtracts the
+   * first-cycle stagger so the steady state lands exactly on that phase.
+   *
+   * Both numbers are logged because an index that failed to resolve would
+   * collapse every worker to 0 and quietly restore the overlap; three
+   * `worker N/3` lines with three different delays are the proof it did not.
+   */
+  const workerCount = workerCountFromEnv();
+  const workerIndex = resolveWorkerIndex(workerCount);
+  const firstDelayMs = BOOT_DELAY_MS + workerStaggerMs(workerIndex, FIRST_CYCLE_STAGGER_MS);
+  const phaseDelayMs = repeatPhaseDelayMs(workerIndex, workerCount, interval, FIRST_CYCLE_STAGGER_MS);
+  logger.info(
+    'topic-warmer: starting — %d tags every %dms (worker %d/%d first cycle +%dms, repeat phase +%dms)',
+    max,
+    interval,
+    workerIndex + 1,
+    workerCount,
+    firstDelayMs,
+    phaseDelayMs
+  );
 
   const boot = setTimeout(() => {
     void runCycle(warm, max);
-    const repeat = setInterval(() => void runCycle(warm, max), interval);
-    if (typeof repeat.unref === 'function') repeat.unref();
-  }, BOOT_DELAY_MS);
+    // The repeating schedule starts a phase later, so the steady state is
+    // `interval / workerCount` apart even though the first cycles were not.
+    const phase = setTimeout(() => {
+      const repeat = setInterval(() => void runCycle(warm, max), interval);
+      if (typeof repeat.unref === 'function') repeat.unref();
+    }, phaseDelayMs);
+    if (typeof phase.unref === 'function') phase.unref();
+  }, firstDelayMs);
   if (typeof boot.unref === 'function') boot.unref();
 }

@@ -1,7 +1,11 @@
 import 'server-only';
 import { getLogger } from '@ui/lib/logging';
+import { RECSYS_FEED_TIMEOUT_FLOOR_MS, resolveRecsysTimeoutMs } from './feed-timeout';
 
 const logger = getLogger('app');
+
+/** One clamp warning per process — `getRecsysConfig` is called on every request. */
+let warnedAboutTimeoutFloor = false;
 
 /**
  * ★★★ THE CONSUMER THE RANKING ENGINE NEVER HAD (2026-08-06).
@@ -87,14 +91,25 @@ export function getRecsysConfig(): RecsysConfig | null {
   const baseUrl = (process.env.RECSYS_FEED_URL || '').replace(/\/+$/, '');
   const token = process.env.RECSYS_API_TOKEN || '';
   if (!baseUrl) return null;
-  const raw = Number(process.env.RECSYS_FEED_TIMEOUT_MS);
-  // ★ MEASURED 2026-08-06 against a real recsys with a real trust snapshot:
-  // 9.6s for a viewer whose profile cache is COLD, 0.51s once warm. 4000ms —
-  // the first guess here — fell back to trending on every first view, so a
-  // reader would never see a ranked feed until something else warmed them.
-  // 15s covers the cold case with headroom; the fallback still protects
-  // against a genuinely wedged recsys.
-  const timeoutMs = Number.isFinite(raw) && raw > 0 ? raw : 15000;
+  // ★ THE NUMBER AND ITS FLOOR NOW LIVE IN A PURE, TESTED MODULE (2026-09-05).
+  // The measurement that chose 15s, and the two days of production this floor
+  // was bought with, are both in `feed-timeout.ts`. It is a separate file only
+  // because this one is `import 'server-only'` and therefore unloadable by a
+  // plain test runner.
+  const { timeoutMs, clampedFrom } = resolveRecsysTimeoutMs();
+  // ★ SAID OUT LOUD, ONCE PER PROCESS. The failure this replaces was silent:
+  // every response still looked like an ordinary fallback, so a value that had
+  // switched personalisation off entirely produced no signal an operator could
+  // have found without reading `lumen_feed_store` by hand.
+  if (clampedFrom !== undefined && !warnedAboutTimeoutFloor) {
+    warnedAboutTimeoutFloor = true;
+    logger.warn(
+      'recsys: RECSYS_FEED_TIMEOUT_MS=%d is below the %dms floor and would abort every build before recsys can answer (measured cold /feed: 11.6-24.4s) — using %dms instead. Personalised ranking cannot be built at the configured value; see lib/recsys/feed-timeout.ts.',
+      clampedFrom,
+      RECSYS_FEED_TIMEOUT_FLOOR_MS,
+      timeoutMs
+    );
+  }
   return { baseUrl, token, timeoutMs };
 }
 
