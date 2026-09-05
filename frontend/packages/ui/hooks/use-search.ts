@@ -10,6 +10,19 @@ export type { SearchScope, SearchSort };
 export { buildSearchHref };
 
 /**
+ * ★★★ AMENDED 2026-09-05: SEARCH IS POSTS AND PEOPLE, WITH SUGGESTIONS WHILE
+ * TYPING (owner instruction, 2026-09-05, supersedes the 2026-08-10 ruling kept
+ * below for its reasoning). The owner's words: "We need to be able to search
+ * posts, search profiles, and have recommended options (typeahead suggestions)
+ * while typing." What the 08-10 ruling removed stays removed: no scope dropdown,
+ * no invisible prefix modes. The scope is now `t=posts|people` in the URL,
+ * chosen by VISIBLE controls (the Posts | People tabs on /search, and the
+ * typeahead's "Search people for..." row). The one typed shortcut, `@name`,
+ * exists because it is the universal spelling of "a person" on Hive and the
+ * typeahead SHOWS the row it will take ("Search people for 'name'" moves to the
+ * top), so it is not the silent redirect the ruling objected to; with the list
+ * dismissed, Enter searches posts (see `search-input.tsx`).
+ *
  * ★★★ SEARCH IS ONE THING NOW: POSTS (owner ruling, 2026-08-10).
  *
  * This hook used to carry five MODES — `ai`, `classic`, `account`, `userTopic`,

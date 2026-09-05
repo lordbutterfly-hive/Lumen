@@ -25,12 +25,18 @@ const LITE_LOOKUP_LIMIT = 5;
  * asking hived again in a second will not change that). A REJECTION still
  * stores nothing, per `server-ttl-cache.ts` property 1.
  */
-export const getSearchSuggestionsCached = withTtlCache(loadSuggestions, (query: string) => query, {
-  ttlMs: 60_000,
-  max: 2000,
-  shouldCache: (value) => Boolean(value),
-  staleWhileRevalidateMs: 300_000
-});
+// Key = the query as the loader reads it (trimmed, lowercased): `Photo` and
+// `photo` are one answer and must be one memo entry (review 2026-09-05).
+export const getSearchSuggestionsCached = withTtlCache(
+  loadSuggestions,
+  (query: string) => normalizeSearchText(query).toLowerCase(),
+  {
+    ttlMs: 60_000,
+    max: 2000,
+    shouldCache: (value) => Boolean(value),
+    staleWhileRevalidateMs: 300_000
+  }
+);
 
 async function loadSuggestions(query: string): Promise<SearchSuggestions> {
   const text = normalizeSearchText(query);
@@ -56,7 +62,11 @@ async function loadLiteCandidates(prefix: string): Promise<LiteAccountCandidate[
   if (!liteConfig.enabled || !liteConfig.databaseUrl) return [];
   try {
     const rows = await users.searchLiteUsersByPrefix(prefix, LITE_LOOKUP_LIMIT);
-    return rows.map((user) => ({ displayName: user.displayName, profileName: user.profile?.name ?? null }));
+    return rows.map((user) => ({
+      displayName: user.displayName,
+      profileName: user.profile?.name ?? null,
+      avatarUrl: user.avatarUrl || user.profile?.profile_image || null
+    }));
   } catch (error) {
     logger.warn('search suggest: lite lookup failed: %s', error instanceof Error ? error.message : String(error));
     return [];

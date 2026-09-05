@@ -651,7 +651,10 @@
     "people_followers_one": "{{count}} подписчик",
     "people_followers_other": "Подписчиков: {{count}}",
     "people_posts_one": "{{count}} пост",
-    "people_posts_other": "Постов: {{count}}"
+    "people_posts_other": "Постов: {{count}}",
+    "newest_too_broad": "Сортировка по новизне слишком тяжела для поискового индекса при таком широком запросе, поэтому время ожидания истекло.",
+    "try_relevance": "Искать по релевантности",
+    "no_results_for": "По запросу «{{query}}» ничего не найдено. Попробуйте другие слова или меньше слов."
   },
   "settings_page": {
     "invalid_url": "Неверный URL",

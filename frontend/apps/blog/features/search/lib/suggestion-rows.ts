@@ -1,6 +1,7 @@
 import { buildSearchHref } from '@ui/lib/search-href';
 import { accountPrefixOf, intendsPeople, normalizeSearchText, tagPrefixOf } from '@/blog/lib/search/query';
 import type { SearchSuggestionsWire } from '@/blog/lib/chain-fetch';
+import type { RecentSearch } from './recent-searches';
 
 /**
  * Turn "what the reader typed" + "what the server suggested" + "what they
@@ -11,9 +12,17 @@ import type { SearchSuggestionsWire } from '@/blog/lib/chain-fetch';
 export type SuggestionRow =
   | { id: string; kind: 'posts'; query: string; href: string }
   | { id: string; kind: 'people'; query: string; href: string }
-  | { id: string; kind: 'account'; name: string; accountKind: 'hive' | 'lite'; displayName?: string; href: string }
+  | {
+      id: string;
+      kind: 'account';
+      name: string;
+      accountKind: 'hive' | 'lite';
+      displayName?: string;
+      avatarUrl?: string;
+      href: string;
+    }
   | { id: string; kind: 'tag'; tag: string; href: string }
-  | { id: string; kind: 'recent'; query: string; href: string };
+  | { id: string; kind: 'recent'; query: string; scope: 'posts' | 'people'; href: string };
 
 export interface BuildSuggestionRowsInput {
   /** The raw field value. */
@@ -21,7 +30,7 @@ export interface BuildSuggestionRowsInput {
   /** The server's answer for the debounced text, or `null` while there is none. */
   suggestions: SearchSuggestionsWire | null;
   /** The reader's recent searches, most recent first. */
-  recent: readonly string[];
+  recent: readonly RecentSearch[];
 }
 
 /**
@@ -35,12 +44,16 @@ export interface BuildSuggestionRowsInput {
 export function buildSuggestionRows(input: BuildSuggestionRowsInput): SuggestionRow[] {
   const text = normalizeSearchText(input.text);
   if (!text) {
-    return input.recent.map((query) => ({
-      id: `recent:${query.toLowerCase()}`,
-      kind: 'recent',
-      query,
-      href: buildSearchHref(query)
-    }));
+    return input.recent.map((entry) => {
+      const scope = entry.t === 'people' ? 'people' : 'posts';
+      return {
+        id: `recent:${entry.q.toLowerCase()}`,
+        kind: 'recent',
+        query: entry.q,
+        scope,
+        href: buildSearchHref(entry.q, 'relevance', scope)
+      };
+    });
   }
 
   const people = intendsPeople(text);
@@ -78,6 +91,7 @@ export function buildSuggestionRows(input: BuildSuggestionRowsInput): Suggestion
       name: account.name,
       accountKind: account.kind,
       displayName: account.displayName,
+      avatarUrl: account.avatarUrl,
       href: `/@${account.name}`
     });
   }

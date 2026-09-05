@@ -33,7 +33,7 @@ const PeopleResults = ({ query }: { query: string }) => {
 
   const byName = useQuery({
     queryKey: ['searchPeople', 'prefix', query],
-    queryFn: () => fetchSearchPeople(query, 'prefix'),
+    queryFn: ({ signal }) => fetchSearchPeople(query, 'prefix', signal),
     enabled: !!query,
     retry: 1,
     staleTime: StaleTime.MEDIUM,
@@ -41,7 +41,7 @@ const PeopleResults = ({ query }: { query: string }) => {
   });
   const byTopic = useQuery({
     queryKey: ['searchPeople', 'topic', query],
-    queryFn: () => fetchSearchPeople(query, 'topic'),
+    queryFn: ({ signal }) => fetchSearchPeople(query, 'topic', signal),
     enabled: !!query,
     retry: false,
     staleTime: StaleTime.LONG,
@@ -156,7 +156,12 @@ function PersonCard({ person }: { person: SearchPersonWire }) {
       data-testid="search-person-card"
     >
       <BasePathLink href={href} className="mt-0.5 shrink-0" tabIndex={-1} aria-hidden>
-        <UserAvatarImg username={person.name} pixelSize={44} radiusClassName="rounded-control" />
+        <UserAvatarImg
+          username={person.name}
+          pixelSize={44}
+          radiusClassName="rounded-control"
+          src={person.avatarUrl ?? undefined}
+        />
       </BasePathLink>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">

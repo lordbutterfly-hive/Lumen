@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef } from 'react';
+import { useMemo } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { Link, LumenLoader } from '@hive/ui';
 import { fetchSearch } from '@/blog/lib/chain-fetch';
@@ -163,12 +163,14 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
   // ★ RE-RANKED PER PAGE FOR DISPLAY ONLY (2026-09-05). `getNextPageParam` above
   // reads the cursor from the RAW page, so this never touches pagination; see
   // `lib/search/rerank.ts` for the score and the measurement behind it. The
-  // clock is fixed for the life of this list so an entry's score, and thus the
-  // order, cannot drift between renders.
-  const rankedAt = useRef(Date.now());
+  // clock is fixed per QUERY (reset when the query or sort changes) so an
+  // entry's score, and thus the order, cannot drift between renders of one
+  // list, and a new search does not inherit a stale "now".
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- query/sort ARE the reset triggers
+  const rankedAt = useMemo(() => Date.now(), [query, sort]);
   const rawEntries = useMemo(
-    () => (data?.pages ?? []).flatMap((page) => rerankSearchPage(page ?? [], rankedAt.current)),
-    [data]
+    () => (data?.pages ?? []).flatMap((page) => rerankSearchPage(page ?? [], rankedAt)),
+    [data, rankedAt]
   );
   const marks = useRankMarks(rawEntries.map((entry) => entry.author));
   /* One market read for the whole page (3 state keys per creator, chunked at 33
@@ -241,12 +243,17 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
         <div className="flex flex-col gap-6">
           {header}
           <div className="mx-auto flex flex-col items-center gap-3 py-10 text-center">
-            <p className="font-sans text-sm text-muted-foreground">{t('search_page.newest_too_broad')}</p>
+            <p className="font-sans text-sm text-muted-foreground">
+              {t('search_page.newest_too_broad', {
+                defaultValue:
+                  'Sorting by newest is too much work for the search index on a broad term like this, so it timed out.'
+              })}
+            </p>
             <Link
               href={`/search?q=${encodeURIComponent(query)}&s=relevance`}
               className="font-sans text-sm text-primary hover:underline"
             >
-              {t('search_page.try_relevance')}
+              {t('search_page.try_relevance', { defaultValue: 'Search this by relevance instead' })}
             </Link>
           </div>
         </div>
@@ -277,7 +284,12 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
           {/* ★ Drawn empty state (2026-08-18) — a search that finds nothing was a
               single grey line, which reads more like a failure than a result. */}
           <EmptyStateIllustration name="no-results" size={128} />
-          <p className="font-sans text-sm text-muted-foreground">{t('search_page.no_results_for', { query })}</p>
+          <p className="font-sans text-sm text-muted-foreground">
+            {t('search_page.no_results_for', {
+              query,
+              defaultValue: 'No results for “{{query}}”. Try different or fewer words.'
+            })}
+          </p>
         </div>
       ) : (
         <div data-testid="search-results-list">

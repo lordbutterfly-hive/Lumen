@@ -645,7 +645,10 @@
     "people_followers_one": "{{count}} follower",
     "people_followers_other": "{{count}} follower",
     "people_posts_one": "{{count}} post",
-    "people_posts_other": "{{count}} post"
+    "people_posts_other": "{{count}} post",
+    "newest_too_broad": "Ordinare per più recenti è troppo oneroso per l’indice di ricerca con un termine così generico, quindi è scaduto il tempo.",
+    "try_relevance": "Cerca per rilevanza invece",
+    "no_results_for": "Nessun risultato per “{{query}}”. Prova con parole diverse o con meno parole."
   },
   "settings_page": {
     "invalid_url": "URL non valido",

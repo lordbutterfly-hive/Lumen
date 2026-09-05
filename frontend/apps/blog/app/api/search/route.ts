@@ -133,9 +133,9 @@ function errorDetail(error: unknown): string {
   if (!(error instanceof Error)) return String(error ?? '');
   const response = (error as { response?: { response?: unknown } }).response;
   let body = '';
-  if (response && typeof response === 'object') {
+  if (response && typeof response === 'object' && response.response !== undefined) {
     try {
-      body = JSON.stringify(response.response ?? response).slice(0, 4000);
+      body = JSON.stringify(response.response).slice(0, 4000);
     } catch {
       body = '';
     }

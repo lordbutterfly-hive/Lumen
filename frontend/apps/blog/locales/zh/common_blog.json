@@ -645,7 +645,10 @@
     "people_followers_one": "{{count}} 位关注者",
     "people_followers_other": "{{count}} 位关注者",
     "people_posts_one": "{{count}} 篇帖子",
-    "people_posts_other": "{{count}} 篇帖子"
+    "people_posts_other": "{{count}} 篇帖子",
+    "newest_too_broad": "对这样宽泛的词按最新排序对搜索索引来说负担过重，已超时。",
+    "try_relevance": "改按相关度搜索",
+    "no_results_for": "没有找到与“{{query}}”相关的结果。试试其他词或更少的词。"
   },
   "settings_page": {
     "invalid_url": "无效的URL",

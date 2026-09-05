@@ -42,17 +42,22 @@ import {
   defaultRow,
   stepActiveIndex
 } from '../../../features/search/lib/suggestion-rows';
+import { mapBounded } from '../bounded';
 
 let checks = 0;
 let failures = 0;
-function check(name: string, fn: () => void): void {
+const pending: Promise<void>[] = [];
+function check(name: string, fn: () => void | Promise<void>): void {
   checks += 1;
-  try {
-    fn();
-  } catch (error) {
-    failures += 1;
-    console.error(`FAIL ${name}\n     ${error instanceof Error ? error.message : String(error)}`);
-  }
+  const run = async () => {
+    try {
+      await fn();
+    } catch (error) {
+      failures += 1;
+      console.error(`FAIL ${name}\n     ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  pending.push(run());
 }
 
 // 1. query shapes
@@ -190,38 +195,51 @@ check('takeSuggestToken: burst, then refuse, then refill; keys isolated', () => 
 });
 
 // 5. recent searches
-check('addRecentSearch de-dups case-insensitively, moves to the front, caps', () => {
-  let list: string[] = [];
+check('addRecentSearch de-dups case-insensitively, moves to the front, keeps the scope, caps', () => {
+  let list: ReturnType<typeof addRecentSearch> = [];
   list = addRecentSearch(list, 'hive engine');
-  list = addRecentSearch(list, 'photography');
+  list = addRecentSearch(list, 'photography', 'people');
   list = addRecentSearch(list, 'Hive Engine');
-  assert.deepEqual(list, ['Hive Engine', 'photography']);
+  assert.deepEqual(list, [{ q: 'Hive Engine' }, { q: 'photography', t: 'people' }]);
+  list = addRecentSearch(list, 'photography', 'posts');
+  assert.deepEqual(list[0], { q: 'photography' }, 'searching the same text in another scope replaces the entry');
   assert.deepEqual(addRecentSearch(list, '   '), list, 'blank is ignored');
   for (let i = 0; i < 20; i++) list = addRecentSearch(list, `q${i}`);
   assert.equal(list.length, MAX_RECENT_SEARCHES);
-  assert.equal(list[0], 'q19');
-  assert.equal(addRecentSearch([], 'x'.repeat(100))[0].length, 60);
+  assert.equal(list[0].q, 'q19');
+  assert.equal(addRecentSearch([], 'x'.repeat(100))[0].q.length, 60);
 });
-check('parseRecentSearches trusts only an array of non-empty strings', () => {
+check('parseRecentSearches trusts only well-formed entries and still reads the pre-scope string shape', () => {
   assert.deepEqual(parseRecentSearches(null), []);
   assert.deepEqual(parseRecentSearches('not json'), []);
   assert.deepEqual(parseRecentSearches('{"a":1}'), []);
-  assert.deepEqual(parseRecentSearches('["a", 1, "", null, " b "]'), ['a', ' b ']);
+  assert.deepEqual(parseRecentSearches('["a", 1, "", null, " b ", {"q":"c","t":"people"}, {"q":"d","t":"junk"}, {"q":""}, {"x":1}]'), [
+    { q: 'a' },
+    { q: ' b ' },
+    { q: 'c', t: 'people' },
+    { q: 'd' }
+  ]);
   assert.equal(parseRecentSearches(JSON.stringify(Array(30).fill('x'))).length, MAX_RECENT_SEARCHES);
 });
 
 // 6. typeahead rows
-check('buildSuggestionRows: empty text lists recent searches only', () => {
-  const rows = buildSuggestionRows({ text: '  ', suggestions: { accounts: [{ name: 'gtg', kind: 'hive' }], tags: ['x'] }, recent: ['hive engine', 'cats'] });
+check('buildSuggestionRows: empty text lists recent searches only, each with its own scope', () => {
+  const rows = buildSuggestionRows({
+    text: '  ',
+    suggestions: { accounts: [{ name: 'gtg', kind: 'hive' }], tags: ['x'] },
+    recent: [{ q: 'hive engine' }, { q: 'cats', t: 'people' }]
+  });
   assert.deepEqual(rows.map((r) => r.kind), ['recent', 'recent']);
   assert.equal(rows[0].href, '/search?q=hive%20engine&s=relevance');
+  assert.equal(rows[1].href, '/search?q=cats&s=relevance&t=people');
+  assert.equal(rows[1].kind === 'recent' && rows[1].scope, 'people');
   assert.equal(defaultRow(rows), null);
 });
 check('buildSuggestionRows: actions first, then accounts, then tags, with the right hrefs', () => {
   const rows = buildSuggestionRows({
     text: 'photo',
     suggestions: { accounts: [{ name: 'photo', kind: 'hive' }, { name: 'photo-lite', kind: 'lite', displayName: 'Photo Lite' }], tags: ['photography'] },
-    recent: ['ignored while typing']
+    recent: [{ q: 'ignored while typing' }]
   });
   assert.deepEqual(rows.map((r) => r.kind), ['posts', 'people', 'account', 'account', 'tag']);
   assert.equal(rows[0].href, '/search?q=photo&s=relevance');
@@ -259,7 +277,26 @@ check('stepActiveIndex wraps in both directions and handles an empty list', () =
   assert.equal(stepActiveIndex(5, 1, 0), -1);
 });
 
-// 7. topics
+// 7. bounded fan-out
+check('mapBounded never exceeds the limit, preserves order, and settles rejections', async () => {
+  let inFlight = 0;
+  let peak = 0;
+  const items = Array.from({ length: 11 }, (_, i) => i);
+  const settled = await mapBounded(items, 4, async (i) => {
+    inFlight += 1;
+    peak = Math.max(peak, inFlight);
+    await new Promise((resolve) => setTimeout(resolve, 5 + (i % 3) * 5));
+    inFlight -= 1;
+    if (i === 6) throw new Error('boom');
+    return i * 10;
+  });
+  assert.equal(peak, 4, `peak concurrency ${peak}`);
+  assert.equal(settled.length, 11);
+  assert.deepEqual(settled.map((s) => (s.status === 'fulfilled' ? s.value : 'x')), [0, 10, 20, 30, 40, 50, 'x', 70, 80, 90, 100]);
+  assert.deepEqual(await mapBounded([], 4, async () => 1), []);
+});
+
+// 8. topics
 check('isBrowsableTopic excludes community ids, tribe tags and system tags', () => {
   assert.equal(isBrowsableTopic('photography'), true);
   assert.equal(isBrowsableTopic('hive-123456'), false);
@@ -270,8 +307,10 @@ check('isBrowsableTopic excludes community ids, tribe tags and system tags', () 
   assert.equal(isBrowsableTopic('splinterlands'), true);
 });
 
-if (failures > 0) {
-  console.error(`\nFAILED — ${failures} of ${checks} checks`);
-  process.exit(1);
-}
-console.log(`PASS — ${checks} checks`);
+void Promise.all(pending).then(() => {
+  if (failures > 0) {
+    console.error(`\nFAILED — ${failures} of ${checks} checks`);
+    process.exit(1);
+  }
+  console.log(`PASS — ${checks} checks`);
+});

@@ -692,7 +692,10 @@
     "people_followers_one": "متابع واحد",
     "people_followers_other": "{{count}} متابعين",
     "people_posts_one": "منشور واحد",
-    "people_posts_other": "{{count}} منشورات"
+    "people_posts_other": "{{count}} منشورات",
+    "newest_too_broad": "الترتيب حسب الأحدث يتطلب جهدًا كبيرًا من فهرس البحث مع كلمة واسعة كهذه، لذا انتهت مهلة الطلب.",
+    "try_relevance": "ابحث حسب الصلة بدلًا من ذلك",
+    "no_results_for": "لا توجد نتائج لـ ”{{query}}“. جرّب كلمات مختلفة أو أقل."
   },
   "settings_page": {
     "invalid_url": "عنوان URL غير صالح",

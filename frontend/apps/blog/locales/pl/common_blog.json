@@ -650,7 +650,10 @@
     "people_followers_one": "{{count}} obserwujący",
     "people_followers_other": "Obserwujących: {{count}}",
     "people_posts_one": "{{count}} wpis",
-    "people_posts_other": "Wpisów: {{count}}"
+    "people_posts_other": "Wpisów: {{count}}",
+    "newest_too_broad": "Sortowanie od najnowszych to za dużo pracy dla indeksu wyszukiwania przy tak szerokim haśle, więc upłynął limit czasu.",
+    "try_relevance": "Szukaj według trafności",
+    "no_results_for": "Brak wyników dla „{{query}}”. Spróbuj innych lub mniejszej liczby słów."
   },
   "settings_page": {
     "invalid_url": "Nieprawidłowy adres URL",

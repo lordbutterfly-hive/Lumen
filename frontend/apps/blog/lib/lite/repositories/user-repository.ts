@@ -187,8 +187,14 @@ export async function findNamesInUse(names: string[]): Promise<Set<string>> {
  *
  * The caller validates `prefix` against the Hive name charset before this runs
  * (`accountPrefixOf`), which is what keeps `%` and `_` out of the LIKE pattern;
- * the value is still bound as `$1`, never interpolated. `display_name` is
- * citext, so the comparison is case-insensitive without a functional index.
+ * the value is still bound as `$1`, never interpolated.
+ *
+ * ★ `lower(display_name::text) LIKE ...`, NOT `display_name LIKE ...` (review
+ * 2026-09-05). A prefix LIKE on the CITEXT column has no usable index (the unique
+ * index is citext-ordered, and the repo's own rule in migration 0028 says a
+ * prefix LIKE needs `text_pattern_ops`). Migration 0042 builds exactly this
+ * expression with that opclass, so the planner can use it; the expression here
+ * must stay byte-for-byte what 0042 indexes or the scan comes back silently.
  */
 export async function searchLiteUsersByPrefix(prefix: string, limit: number): Promise<LumenUser[]> {
   const clean = prefix.trim().toLowerCase();
@@ -198,7 +204,7 @@ export async function searchLiteUsersByPrefix(prefix: string, limit: number): Pr
       WHERE status = 'active'
         AND account_tier = 'lite'
         AND hive_account_name IS NULL
-        AND display_name LIKE ($1 || '%')
+        AND lower(display_name::text) LIKE ($1 || '%')
       ORDER BY length(display_name::text), display_name
       LIMIT $2`,
     [clean, Math.max(1, Math.min(limit, 50))]

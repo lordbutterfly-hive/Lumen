@@ -37,6 +37,15 @@ export interface UserAvatarImgProps {
   /** `alt` for the `<img>`. Most call sites already carry the name on a surrounding `<Link>` or adjacent text, so this defaults to `''` (decorative) — pass a real string when the image is the only thing naming the account. */
   alt?: string;
   loading?: 'lazy' | 'eager';
+  /**
+   * A known picture URL to try FIRST instead of the Hive image host (2026-09-05,
+   * search review). A Lumen lite account has no hosted Hive avatar, so the
+   * direct stage was a guaranteed miss and the proxy stage a second round trip
+   * before the monogram; a caller that already holds the lite user's own
+   * picture (the People tab, the typeahead) hands it in here. The proxy ->
+   * monogram fallback chain below is unchanged for a `src` that fails.
+   */
+  src?: string;
 }
 
 /**
@@ -140,7 +149,8 @@ export function UserAvatarImg({
   radiusClassName = 'rounded-full',
   className,
   alt = '',
-  loading = 'lazy'
+  loading = 'lazy',
+  src
 }: UserAvatarImgProps) {
   // 'direct' -> images.hive.blog, 'proxy' -> /api/avatar (which itself never
   // hard-fails — see the route), 'failed' -> even that request errored
@@ -254,7 +264,7 @@ export function UserAvatarImg({
       {stage !== 'failed' ? (
         <img
           ref={imgRef}
-          src={stage === 'direct' ? getUserAvatarDirectUrl(username, apiSize) : getUserAvatarUrl(username, apiSize)}
+          src={stage === 'direct' ? src || getUserAvatarDirectUrl(username, apiSize) : getUserAvatarUrl(username, apiSize)}
           /*
            * ★ ALWAYS EMPTY ALT, EVEN WHEN A CALLER PASSED ONE (2026-08-16).
            *

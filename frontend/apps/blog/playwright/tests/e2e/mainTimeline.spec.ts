@@ -134,7 +134,7 @@ test.describe('Home page tests', () => {
     await homePage.goto();
 
     await expect(homePage.getNavSearchInput).toBeVisible();
-    await expect(homePage.getNavSearchInput).toHaveAttribute('placeholder', 'Search posts');
+    await expect(homePage.getNavSearchInput).toHaveAttribute('placeholder', 'Search posts and people');
   });
 
   test('navigation search link is visible', async ({ page }) => {

@@ -977,15 +977,6 @@ export type ExtendedNodeApi = {
      * prefix lookup on condenser_api. `[prefix, limit]`, names ascending, limit <= 1000.
      */
     lookup_accounts: TWaxApiRequest<[ /* lower_bound_name: */ string /*; limit: */, number ], string[]>;
-    /**
-     * Hivemind's raw reputation for accounts from `account_lower_bound` upward, in
-     * name order. Same window semantics as `lookup_accounts`; `reputation` is the
-     * raw integer `accountReputation()` turns into the badge number.
-     */
-    get_account_reputations: TWaxApiRequest<
-      [ /* account_lower_bound: */ string /*; limit: */, number ],
-      IAccountReputations[]
-    >;
     get_reblogged_by: TWaxApiRequest<[ /* author: */ string /*; permlink: */, string ], string[]>;
     get_followers: TWaxApiRequest<
       [ /* account: */ string /*; start: */, string /*; type: */, string /*; limit: */, number ],

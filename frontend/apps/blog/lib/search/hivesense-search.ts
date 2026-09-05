@@ -32,9 +32,22 @@ const AUTHORS_TIMEOUT_MS = 6_000;
 const MAX_POSTS = 50;
 const MAX_AUTHORS = 20;
 
+/**
+ * 50 full posts with bodies and votes measured ~75KB (`by-ids`, 20 posts);
+ * 4MB is forty times that. Past it the upstream is not answering our question,
+ * and a body this route would have to parse and hold is the one thing a
+ * misbehaving upstream could make expensive for us.
+ */
+const MAX_BODY_BYTES = 4_000_000;
+
 async function readJson(url: URL, timeoutMs: number, label: string): Promise<unknown> {
   const res = await fetch(url.toString(), { signal: AbortSignal.timeout(timeoutMs), cache: 'no-store' });
+  const declared = Number(res.headers.get('content-length') ?? '0');
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+    throw new Error(`${label}: upstream body too large (${declared} bytes)`);
+  }
   const text = await res.text();
+  if (text.length > MAX_BODY_BYTES) throw new Error(`${label}: upstream body too large (${text.length} chars)`);
   if (!res.ok) throw new Error(`${label}: upstream HTTP ${res.status}`);
   try {
     return JSON.parse(text);
@@ -73,15 +86,18 @@ export async function hivesenseSearchPosts(params: {
   if (params.observer) url.searchParams.set('observer', params.observer);
   const body = await readJson(url, POSTS_TIMEOUT_MS, 'hivesense posts/search');
   if (!Array.isArray(body)) throw new Error('hivesense posts/search: unexpected shape');
-  return withoutBannedAuthors(body.filter(isFullPost), (post) => post.author);
+  // Sliced to what was asked BEFORE anything walks it: the upstream's own
+  // `result_limit` is a request, not a promise.
+  return withoutBannedAuthors(body.slice(0, limit).filter(isFullPost), (post) => post.author);
 }
 
 /** Accounts whose posts are thematically close to `topic`, in upstream order. */
 export async function hivesenseAuthorsByTopic(topic: string, limit: number): Promise<string[]> {
+  const bounded = Math.max(1, Math.min(limit, MAX_AUTHORS));
   const url = new URL(`${hivesenseBase()}/hivesense-api/authors/search`);
   url.searchParams.set('topic', topic);
-  url.searchParams.set('result_limit', String(Math.max(1, Math.min(limit, MAX_AUTHORS))));
+  url.searchParams.set('result_limit', String(bounded));
   const body = await readJson(url, AUTHORS_TIMEOUT_MS, 'hivesense authors/search');
   if (!Array.isArray(body)) throw new Error('hivesense authors/search: unexpected shape');
-  return body.filter((name): name is string => typeof name === 'string' && name.length > 0);
+  return body.slice(0, bounded).filter((name): name is string => typeof name === 'string' && name.length > 0);
 }

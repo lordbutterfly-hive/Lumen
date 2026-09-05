@@ -10,6 +10,8 @@ export interface AccountSuggestion {
   kind: 'hive' | 'lite';
   /** The profile's chosen display name when it differs from `name` (lite only today). */
   displayName?: string;
+  /** A lite account's own picture; absent for Hive accounts (resolved by name). */
+  avatarUrl?: string;
 }
 
 export interface SearchSuggestions {
@@ -25,6 +27,7 @@ export const MAX_TAG_SUGGESTIONS = 4;
 export interface LiteAccountCandidate {
   displayName: string;
   profileName?: string | null;
+  avatarUrl?: string | null;
 }
 
 export interface RankSuggestionsInput {
@@ -68,11 +71,10 @@ export function rankSuggestions(input: RankSuggestionsInput): SearchSuggestions 
       if (!lower.startsWith(prefix) || seen.has(lower)) continue;
       seen.add(lower);
       const displayName = (user.profileName ?? '').trim();
-      accounts.push(
-        displayName && displayName.toLowerCase() !== lower
-          ? { name: lower, kind: 'lite', displayName }
-          : { name: lower, kind: 'lite' }
-      );
+      const row: AccountSuggestion = { name: lower, kind: 'lite' };
+      if (displayName && displayName.toLowerCase() !== lower) row.displayName = displayName;
+      if (user.avatarUrl) row.avatarUrl = user.avatarUrl;
+      accounts.push(row);
     }
     accounts.sort((a, b) => {
       const aExact = a.name === prefix ? 0 : 1;

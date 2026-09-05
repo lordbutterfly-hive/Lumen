@@ -8,10 +8,9 @@ import { cn } from '@ui/lib/utils';
 import { useSearch } from '@ui/hooks/use-search';
 import { useNavigationProgress } from '@ui/components/navigation-progress';
 import { useTranslation } from '@/blog/i18n/client';
-import { intendsPeople } from '@/blog/lib/search/query';
 import { useSearchSuggestions } from './use-search-suggestions';
 import { buildSuggestionRows, defaultRow, stepActiveIndex, type SuggestionRow } from './lib/suggestion-rows';
-import { clearRecentSearches, readRecentSearches, rememberSearch } from './lib/recent-searches';
+import { clearRecentSearches, readRecentSearches, rememberSearch, type RecentSearch } from './lib/recent-searches';
 
 /**
  * ★★★ THE ONLY SEARCH FIELD IN LUMEN (owner ruling, 2026-08-10), NOW A REAL
@@ -51,7 +50,7 @@ export function SearchInput({ className }: { className?: string }) {
 
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
-  const [recent, setRecent] = useState<string[]>([]);
+  const [recent, setRecent] = useState<RecentSearch[]>([]);
 
   const { suggestions } = useSearchSuggestions(inputValue, open);
   const rows = useMemo(
@@ -78,13 +77,17 @@ export function SearchInput({ className }: { className?: string }) {
       inputRef.current?.blur();
       switch (row.kind) {
         case 'posts':
-        case 'recent':
-          rememberSearch(row.query);
+          rememberSearch(row.query, 'posts');
           handleSearch(row.query, undefined, 'posts');
           return;
         case 'people':
-          rememberSearch(row.query);
+          rememberSearch(row.query, 'people');
           handleSearch(row.query, undefined, 'people');
+          return;
+        case 'recent':
+          // Reopens where it was searched: a People search stays a People search.
+          rememberSearch(row.query, row.scope);
+          handleSearch(row.query, undefined, row.scope);
           return;
         case 'account':
         case 'tag':
@@ -96,18 +99,28 @@ export function SearchInput({ className }: { className?: string }) {
     [close, handleSearch, router, startNavigation]
   );
 
-  /** Enter with nothing highlighted, or the magnifier button. */
+  /**
+   * Enter with nothing highlighted, or the magnifier button.
+   *
+   * ★ THE `@name` SHORTCUT ONLY FIRES WHILE THE READER CAN SEE IT (review
+   * 2026-09-05). With the list open, the first row says what Enter does
+   * ("Search people for 'name'" for `@name`), so it is taken. After Escape has
+   * dismissed the list there is no such hint on screen, and a silent detour to
+   * People would be exactly the invisible-mode behaviour the 2026-08-10 ruling
+   * removed; so with the list closed, Enter searches POSTS for the text as
+   * typed, the same thing the field has always done.
+   */
   const submit = useCallback(() => {
     const text = inputValue.trim();
     if (!text) return;
-    const row = defaultRow(rows);
+    const row = showList ? defaultRow(rows) : null;
     if (row) {
       activate(row);
       return;
     }
-    rememberSearch(text);
-    handleSearch(text, undefined, intendsPeople(text) ? 'people' : 'posts');
-  }, [inputValue, rows, activate, handleSearch]);
+    rememberSearch(text, 'posts');
+    handleSearch(text, undefined, 'posts');
+  }, [inputValue, rows, showList, activate, handleSearch]);
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLInputElement>) => {
@@ -351,7 +364,7 @@ function RowIcon({ row }: { row: SuggestionRow }) {
         </span>
       );
     case 'account':
-      return <UserAvatarImg username={row.name} pixelSize={24} className="shrink-0" />;
+      return <UserAvatarImg username={row.name} pixelSize={24} className="shrink-0" src={row.avatarUrl} />;
   }
 }
 

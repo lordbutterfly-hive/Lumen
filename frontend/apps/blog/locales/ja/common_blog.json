@@ -645,7 +645,10 @@
     "people_followers_one": "フォロワー {{count}} 人",
     "people_followers_other": "フォロワー {{count}} 人",
     "people_posts_one": "投稿 {{count}} 件",
-    "people_posts_other": "投稿 {{count}} 件"
+    "people_posts_other": "投稿 {{count}} 件",
+    "newest_too_broad": "これほど広い語で新着順に並べ替えるのは検索インデックスには負荷が大きすぎるため、タイムアウトしました。",
+    "try_relevance": "代わりに関連度順で検索",
+    "no_results_for": "「{{query}}」に一致する結果はありません。別の語や、より少ない語で試してください。"
   },
   "settings_page": {
     "invalid_url": "無効なURL",

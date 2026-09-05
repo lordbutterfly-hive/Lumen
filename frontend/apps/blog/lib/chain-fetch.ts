@@ -257,7 +257,7 @@ export interface SearchParams {
 }
 /** Mirrors `SearchSuggestions` in `lib/search/suggest-rank.ts` (server); duplicated as a wire type so this browser module imports no server code. */
 export interface SearchSuggestionsWire {
-  accounts: Array<{ name: string; kind: 'hive' | 'lite'; displayName?: string }>;
+  accounts: Array<{ name: string; kind: 'hive' | 'lite'; displayName?: string; avatarUrl?: string }>;
   tags: string[];
 }
 /**
@@ -278,10 +278,16 @@ export interface SearchPersonWire {
   reputation: number | null;
   postCount: number | null;
   followers: number | null;
+  avatarUrl: string | null;
 }
-export function fetchSearchPeople(query: string, mode: 'prefix' | 'topic'): Promise<SearchPersonWire[]> {
+/** `signal` is React Query's, so a superseded People query is cancelled like a superseded suggestion. */
+export function fetchSearchPeople(
+  query: string,
+  mode: 'prefix' | 'topic',
+  signal?: AbortSignal
+): Promise<SearchPersonWire[]> {
   const params = new URLSearchParams({ q: query, mode });
-  return fetchJson(`/api/search/people?${params.toString()}`, 'search people');
+  return fetchJson(`/api/search/people?${params.toString()}`, 'search people', { signal });
 }
 
 export function fetchSearch(search: SearchParams): Promise<Entry[]> {

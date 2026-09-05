@@ -645,7 +645,10 @@
     "people_followers_one": "{{count}} abonné",
     "people_followers_other": "{{count}} abonnés",
     "people_posts_one": "{{count}} publication",
-    "people_posts_other": "{{count}} publications"
+    "people_posts_other": "{{count}} publications",
+    "newest_too_broad": "Trier par date est trop lourd pour l’index de recherche sur un terme aussi large, la requête a expiré.",
+    "try_relevance": "Rechercher par pertinence à la place",
+    "no_results_for": "Aucun résultat pour « {{query}} ». Essayez d’autres mots, ou moins de mots."
   },
   "settings_page": {
     "invalid_url": "URL invalide",

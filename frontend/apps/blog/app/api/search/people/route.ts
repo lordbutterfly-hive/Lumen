@@ -4,6 +4,7 @@ import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceHivesenseRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { searchPeopleByPrefixCached, searchPeopleByTopicCached } from '@/blog/lib/search/people';
 import { MIN_QUERY_LENGTH, normalizeSearchText } from '@/blog/lib/search/query';
+import { takeSuggestToken } from '@/blog/lib/search/suggest-limiter';
 
 const logger = getLogger('app');
 
@@ -26,7 +27,13 @@ const NO_STORE = { 'cache-control': 'private, no-store' };
  * Both memoised server-side (`lib/search/people.ts`). The topic leg counts
  * against the same per-IP Hivesense budget the proxy route uses, best-effort
  * like every limiter call in this repo (a limiter-store outage must not take a
- * read-only feature offline). Takes `req` for the reason every route here does.
+ * read-only feature offline). The prefix leg takes a token from the same
+ * in-memory per-IP bucket as `/api/search/suggest` (review 2026-09-05: `/api/*`
+ * is exempt from the middleware page budget, and one anonymous GET here is a
+ * `lookup_accounts` + up to twelve `get_profile` calls + a Postgres scan on a
+ * miss). Keyed `people:` so a typing reader's suggest traffic and their People
+ * tab do not spend each other's tokens. Takes `req` for the reason every route
+ * here does.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const query = normalizeSearchText(req.nextUrl.searchParams.get('q'));
@@ -42,6 +49,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     } catch {
       /* limiter unavailable: proceed */
     }
+  } else if (!takeSuggestToken(`people:${getClientIp(req)}`)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429, headers: { ...NO_STORE, 'retry-after': '5' } });
   }
   try {
     const people =
