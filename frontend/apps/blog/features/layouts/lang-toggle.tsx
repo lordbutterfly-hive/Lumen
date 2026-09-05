@@ -13,6 +13,7 @@ import {
 } from '@ui/components/dropdown-menu';
 import { useState } from 'react';
 import clsx from 'clsx';
+import { cn } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import TooltipContainer from '@ui/components/tooltip-container';
 import { getLanguage, setLanguage } from '../../utils/language';
@@ -172,7 +173,13 @@ export default function LangToggle({
       // header-button path keeps the exact classes it had.
       className={
         renderAs === 'submenu'
-          ? 'ml-auto shrink-0 font-sans text-caption leading-[22px] text-ink-9'
+          ? // ★ 2026-09-05, owner: put the value ("English") at the far right, aligned with
+            // the other rows' metas ("3 held"), with the submenu chevron to its LEFT. The
+            // shared SubTrigger appends `<ChevronRight class="ml-auto">` AFTER children, so
+            // `order-last` renders this value after that chevron, and the chevron's ml-auto
+            // pushes the [chevron, value] pair to the right. (Row uses justify-start below,
+            // so this is the only thing positioning the pair.)
+            'order-last shrink-0 font-sans text-caption leading-[22px] text-ink-9'
           : clsx(META_CLASS, 'ml-auto normal-case')
       }
       data-testid="current-language"
@@ -184,7 +191,7 @@ export default function LangToggle({
   if (renderAs === 'submenu') {
     return (
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger data-testid="toggle-language" className={className}>
+        <DropdownMenuSubTrigger data-testid="toggle-language" className={cn(className, 'justify-start')}>
           <span>{logged ? t('navigation.user_menu.toggle_lang') : t('navigation.main_nav_bar.language')}</span>
           {currentValue}
         </DropdownMenuSubTrigger>

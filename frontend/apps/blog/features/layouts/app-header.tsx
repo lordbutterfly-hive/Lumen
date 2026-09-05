@@ -36,7 +36,6 @@ import DialogLogin from '@/blog/components/dialog-login';
 import UserMenu from '@/blog/features/layouts/site-header/user-menu';
 import { useLumenNotifications } from '@/blog/features/layouts/site-header/use-lumen-notifications';
 import NotificationsMenu from '@/blog/features/layouts/site-header/notifications-menu';
-import { ManabarRing } from '@/blog/features/layouts/site-header/manabar-ring';
 import MobileNav from '@/blog/features/layouts/mobile-nav';
 import { SearchInput } from '@/blog/features/search/search-input';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
@@ -173,9 +172,8 @@ const AppHeader: FC = () => {
   const lumen = useLumenNotifications(bellUsername ?? '');
   const chainUnread = data?.unread ?? 0;
   const unreadTotal = chainUnread + lumen.unread;
-  const upvotePercent = manabarsData?.upvote.percentageValue ?? 0;
-  const downvotePercent = manabarsData?.downvote.percentageValue ?? 0;
-  const rcPercent = manabarsData?.rc.percentageValue ?? 0;
+  // rcPercent / upvotePercent / downvotePercent were only ever the ManabarRing inputs,
+  // removed 2026-09-05 (owner). The hover tooltip reads manabarsData.* directly.
   // Same fallback the deleted notifications page used: if nothing's been
   // read yet, treat "now" as the cutoff so nothing is retroactively unread.
   const lastRead = data?.lastread ? new Date(data.lastread) : new Date();
@@ -498,61 +496,40 @@ const AppHeader: FC = () => {
                           controls, and the avatar — which opens the account menu,
                           not notifications — appeared to carry news of its own.
                           The bell is the control that answers it. */}
-                      {/* Default state: RC ring only */}
-                      <ManabarRing
-                        percentage={rcPercent}
-                        color="#0088FE"
-                        size={48}
-                        thickness={6}
-                        className="absolute z-20 group-hover:invisible group-hover:delay-300 group-hover:duration-300 group-hover:animate-out group-hover:zoom-out-75"
-                      />
-
-                      {/* Hover state: Three concentric rings */}
-                      <ManabarRing
-                        percentage={downvotePercent}
-                        color="#C01000"
-                        size={43}
-                        thickness={3.5}
-                        className="invisible absolute z-20 group-hover:visible group-hover:delay-300 group-hover:duration-300 group-hover:animate-in group-hover:zoom-in-50"
-                      />
-                      <ManabarRing
-                        percentage={upvotePercent}
-                        color="#00C040"
-                        size={50}
-                        thickness={3.5}
-                        className="invisible absolute z-10 group-hover:visible group-hover:delay-300 group-hover:duration-300 group-hover:animate-in group-hover:zoom-in-50"
-                      />
-                      <ManabarRing
-                        percentage={rcPercent}
-                        color="#0088FE"
-                        size={57}
-                        thickness={3.5}
-                        className="invisible absolute group-hover:visible group-hover:delay-300 group-hover:duration-300 group-hover:animate-in group-hover:zoom-in-50"
-                      />
+                      {/* ★ 2026-09-05, owner: the ManabarRing "circles" (a blue RC ring by
+                          default, plus red/green/blue concentric rings on hover) were removed
+                          as visual clutter around the avatar. The RC / voting / downvote
+                          detail still appears on hover, in the restyled tooltip below. */}
                       <HeaderAvatar username={user?.username || ''} />
                     </div>
                   </TooltipTrigger>
                 </UserMenu>
+                {/* ★ 2026-09-05, owner: restyled to the app's card + font (was the default
+                    bg-background-tertiary with blue/green/red text matching the removed
+                    rings). Same data, house surface-1 card / line-9 border / font-ui, with
+                    the "full in" cooldown folded onto the value line. */}
                 {manabarsData && (
-                  <TooltipContent className="flex flex-col bg-background-tertiary">
-                    <span>Resource Credits</span>
-                    <div className="flex flex-col text-ink-info-5">
-                      <span>(RC) level: {manabarsData.rc.percentageValue}%</span>
-                      {manabarsData.rc.percentageValue !== 100 ? (
-                        <span>Full in: {hoursAndMinutes(manabarsData.rc.cooldown, t)}</span>
-                      ) : null}
+                  <TooltipContent className="flex flex-col gap-2 rounded-2xl border border-line-9 bg-surface-1 px-4 py-3 font-ui text-caption text-ink-2 shadow-[0_12px_34px_rgba(20,18,10,0.12)]">
+                    <div className="flex flex-col">
+                      <span className="font-medium text-ink-2">Resource Credits</span>
+                      <span className="text-ink-10">
+                        {manabarsData.rc.percentageValue}%
+                        {manabarsData.rc.percentageValue !== 100 ? ` · full in ${hoursAndMinutes(manabarsData.rc.cooldown, t)}` : ''}
+                      </span>
                     </div>
-                    <div className="flex flex-col text-ink-ok-4">
-                      <span> Voting Power: {manabarsData.upvote.percentageValue}%</span>
-                      {manabarsData?.upvote.percentageValue !== 100 ? (
-                        <span>Full in: {hoursAndMinutes(manabarsData.upvote.cooldown, t)}</span>
-                      ) : null}
+                    <div className="flex flex-col">
+                      <span className="font-medium text-ink-2">Voting power</span>
+                      <span className="text-ink-10">
+                        {manabarsData.upvote.percentageValue}%
+                        {manabarsData.upvote.percentageValue !== 100 ? ` · full in ${hoursAndMinutes(manabarsData.upvote.cooldown, t)}` : ''}
+                      </span>
                     </div>
-                    <div className="flex flex-col text-destructive">
-                      <span> Downvote power: {manabarsData.downvote.percentageValue}%</span>
-                      {manabarsData.downvote.percentageValue !== 100 ? (
-                        <span>Full in: {hoursAndMinutes(manabarsData.downvote.cooldown, t)}</span>
-                      ) : null}
+                    <div className="flex flex-col">
+                      <span className="font-medium text-ink-2">Downvote power</span>
+                      <span className="text-ink-10">
+                        {manabarsData.downvote.percentageValue}%
+                        {manabarsData.downvote.percentageValue !== 100 ? ` · full in ${hoursAndMinutes(manabarsData.downvote.cooldown, t)}` : ''}
+                      </span>
                     </div>
                   </TooltipContent>
                 )}

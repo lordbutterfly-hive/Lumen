@@ -118,7 +118,6 @@ const AccountMenuContent = ({ user }: { user: User }) => {
   const onLogout = useLogout();
   const chip = useTokenPriceChip(user.username);
   const portfolio = useLivePortfolio();
-  const hasToken = chip.status === 'ready' && chip.priceUsd !== null;
   const heldCountKnown = !portfolio.isLoading && !portfolio.holdingsUnavailable;
 
   return (
@@ -220,7 +219,9 @@ const AccountMenuContent = ({ user }: { user: User }) => {
         <DropdownMenuItem asChild className={ROW_CLASS}>
           <Link href="/creators/studio" data-testid="user-profile-menu-creator-studio-link">
             <span>{LABELS.creatorStudio}</span>
-            {hasToken ? <span className={META_CLASS}>◈ @{user.username}</span> : null}
+            {/* ★ 2026-09-05, owner: the "◈ @handle" meta here duplicated the header's
+                own "◈ @handle" one row above — obvious which account you're on — so it
+                was removed. The header block keeps it. */}
           </Link>
         </DropdownMenuItem>
 
