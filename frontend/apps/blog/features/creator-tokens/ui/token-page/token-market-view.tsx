@@ -4,6 +4,7 @@ import { FC, ReactNode, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { Service } from '../../market/token-detail';
 import { buyQuote, serviceQuote } from '../../market/curve';
+import { UserAvatarImg } from '@ui/components';
 import { displayHandle } from '../../live/adapt';
 import { useLiveTokenMarket } from '../../live/use-live-token-market';
 import { useCreatorFollow } from '../../live/use-creator-follow';
@@ -478,7 +479,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
     <TokenShell rightRail={rightRail} back={{ href: '/creators', label: '← All creators' }}>
       {/* 1. Creator header */}
       <div className="mb-5 flex items-center gap-4">
-        <span className="h-[60px] w-[60px] flex-shrink-0 rounded-2xl" style={{ background: avatarColor }} />
+        <UserAvatarImg username={handle} apiSize="medium" pixelSize={60} radiusClassName="rounded-2xl" />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
             {/* ★ Link to the creator's profile so a buyer can see who they're

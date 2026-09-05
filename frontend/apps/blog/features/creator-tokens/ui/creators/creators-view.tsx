@@ -3,12 +3,13 @@
 import PageMasthead from '@/blog/features/layouts/page-masthead';
 import { FC, ReactNode, useMemo, useState } from 'react';
 import { Link, LumenLoader } from '@hive/ui';
+import { UserAvatarImg } from '@ui/components';
 import { useTranslation } from '@/blog/i18n/client';
 import { useLiveDiscovery } from '../../live/use-live-discovery';
 import { describeLag, useIndexerHealth } from '../../live/use-indexer-health';
 import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
 import type { CreatorSummary } from '../../types';
-import { avatarGradient, deliveryMarks, pctLabel, usdCompact, usdMoney, usdPrice } from '../../market/format';
+import { deliveryMarks, pctLabel, usdCompact, usdMoney, usdPrice } from '../../market/format';
 import { resolveDiscoveryControls, type DiscoverySort } from '../../market/discovery-ranking';
 import TokenShell from '../token-shell';
 
@@ -156,7 +157,7 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
       className="block rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)] transition-colors hover:bg-surface-12"
     >
       <div className="mb-3.5 flex items-center gap-3">
-        <span className="h-[46px] w-[46px] flex-shrink-0 rounded-card" style={{ background: avatarGradient(c.creator) }} />
+        <UserAvatarImg username={routeHandle(c.creator)} apiSize="medium" pixelSize={46} radiusClassName="rounded-card" />
         <div className="min-w-0 flex-1">
           <div className="text-[16px] font-medium text-ink-2 font-ui">@{displayHandle(c.creator)}</div>
           {/* No bio: not contract state, not indexed, and inventing one under
@@ -431,7 +432,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
                 className="block min-w-[240px] rounded-2xl border border-line-9 bg-surface-1 p-4 transition-colors hover:border-line-17"
               >
                 <div className="mb-3 flex items-center gap-3">
-                  <span className="h-10 w-10 rounded-control" style={{ background: avatarGradient(c.creator) }} />
+                  <UserAvatarImg username={routeHandle(c.creator)} apiSize="medium" pixelSize={40} radiusClassName="rounded-control" />
                   <div>
                     <div className="text-[15px] leading-[24px] font-medium text-ink-2 font-ui">@{displayHandle(c.creator)}</div>
                   </div>

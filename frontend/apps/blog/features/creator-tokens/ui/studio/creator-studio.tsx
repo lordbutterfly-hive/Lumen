@@ -1,6 +1,7 @@
 'use client';
 
 import { cn } from '@ui/lib/utils';
+import { UserAvatarImg } from '@ui/components';
 import { useTranslation } from '@/blog/i18n/client';
 import { displayHandle, dueLabelFor } from '../../live/adapt';
 import { FC, useState, useEffect, useRef } from 'react';
@@ -877,7 +878,7 @@ const CreatorStudio: FC = () => {
     <TokenShell back={{ href: '/creators', label: '← All creators' }}>
       <div className="pt-[26px]">
         <div className="mb-1 flex items-center gap-3">
-          <span className="h-11 w-11 rounded-card bg-surface-28" />
+          <UserAvatarImg username={studio.creator ?? ''} apiSize="medium" pixelSize={44} radiusClassName="rounded-card" />
           <div>
             <h1 className="font-ui text-2xl font-medium text-ink-2">Creator Studio</h1>
             <p className="text-[14px] leading-[22px] text-ink-10 font-ui">Your token @{displayHandle(studio.creator)} · your control room</p>

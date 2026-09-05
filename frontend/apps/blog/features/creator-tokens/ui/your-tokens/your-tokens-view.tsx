@@ -32,6 +32,7 @@
 
 import { FC, useState } from 'react';
 import { Link } from '@hive/ui';
+import { UserAvatarImg } from '@ui/components';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useLivePortfolio } from '../../live/use-live-portfolio';
 import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
@@ -114,7 +115,7 @@ const Unavailable: FC<{ children: React.ReactNode }> = ({ children }) => (
  */
 const HoldingRow: FC<{ h: HolderPosition; price?: MarketPrice }> = ({ h, price }) => (
   <div className="flex flex-wrap items-center gap-4 rounded-card border border-line-9 bg-surface-1 px-5 py-4">
-    <span className="h-11 w-11 flex-shrink-0 rounded-control bg-surface-28" />
+    <UserAvatarImg username={routeHandle(h.creator)} apiSize="medium" pixelSize={44} radiusClassName="rounded-control" />
     <div className="min-w-0 flex-1">
       <Link href={`/creators/${routeHandle(h.creator)}`} className="text-[15px] leading-[24px] font-medium text-ink-2 font-ui hover:text-ink-brand-6">
         @{displayHandle(h.creator)}
