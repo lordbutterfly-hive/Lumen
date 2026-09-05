@@ -1,5 +1,5 @@
 import { cache } from 'react';
-import type { Entry } from '@hive/common-hiveio-packages/wax';
+import type { Entry, FollowListType } from '@hive/common-hiveio-packages/wax';
 import {
   getAccountFull,
   getAccountReputations,
@@ -9,7 +9,15 @@ import {
   DEFAULT_PARAMS_FOR_FOLLOW,
   type IGetFollowParams
 } from '@transaction/lib/hive-api';
-import { getAccountPosts, getCommunities, getCommunity, getDiscussion, getPost } from '@transaction/lib/bridge-api';
+import {
+  getAccountPosts,
+  getCommunities,
+  getCommunity,
+  getDiscussion,
+  getFollowList,
+  getPost,
+  type GetCommunityOptions
+} from '@transaction/lib/bridge-api';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 
 /**
@@ -303,10 +311,74 @@ export const getDiscussionCached = withTtlCache(
  * own comment in bridge-api.ts) — collapsing repeat renders of the same
  * community page is exactly the shape `getCommunitiesCached` was built for,
  * one level down. Absence/failure is never stored (default `keep`).
+ *
+ * ★ KEY ALSO CARRIES `correctSubscribers` (2026-09-05, post-page TTFB pass).
+ * `getCommunity` now takes that option (see its own doc in bridge-api.ts) so
+ * the post page can decline the banned-subscriber-count correction it never
+ * displays. Folding the flag into the key — not just forwarding it — keeps a
+ * `correctSubscribers:false` post-page read and a `correctSubscribers:true`
+ * community-page read (`prefetch-component.tsx`, community layout metadata)
+ * in SEPARATE cache entries: without this, whichever one missed first would
+ * cache its answer under the bare `name|observer` key and silently hand the
+ * OTHER caller the wrong count for up to 30s — a corrected count going raw on
+ * the community page, or (harmless but pointless) a raw request paying for a
+ * correction it doesn't use. Every existing caller omits the option and
+ * therefore keys identically to before (`options?.correctSubscribers ?? true`
+ * reproduces the old `name|observer` behaviour exactly).
  */
 export const getCommunityCached = withTtlCache(
   getCommunity,
-  (name: string, observer?: string) => `${name}|${observer ?? ''}`,
+  (name: string, observer?: string, options?: GetCommunityOptions) =>
+    `${name}|${observer ?? ''}|${options?.correctSubscribers ?? true}`,
+  { ttlMs: 30_000, max: 500 }
+);
+
+/**
+ * ★ getFollowList, CACHED — POST-PAGE MUTED-LIST SEED ONLY (2026-09-05, perf
+ * batch C-A). This was the one fan-out branch in `page.tsx`'s
+ * `Promise.allSettled` with no cross-request memory at all — every sibling
+ * there (`getPostCached`, `getDiscussionCached`, `getCommunityCached`) already
+ * had one — so every signed-in reader's post-page render paid a fresh
+ * `bridge.get_follow_list` round trip just to seed the muted-list filter for
+ * first paint.
+ *
+ * ★★★ KEYED ON (observer, follow_type) TOGETHER — NEITHER HALF IS OPTIONAL.
+ * `get_follow_list`'s `observer` IS the viewer whose list is being read (see
+ * `bridge-api.ts`), so dropping it would serve viewer A's muted/blacklist rows
+ * to viewer B — the one thing every other observer-keyed entry in this file
+ * (`getCommunitiesCached`, `getDiscussionCached`, `getCommunityCached`) exists
+ * to prevent, and the hard line for this cache specifically. Dropping
+ * `follow_type` would let a cached 'muted' answer satisfy a
+ * 'follow_blacklist' (or any other type) request instead. The key below is
+ * `${observer}|${follow_type}` and nothing else, so neither collapse is
+ * possible.
+ *
+ * ★ SCOPE, DELIBERATELY NARROW — ONLY `page.tsx`'s post-page seed is wired to
+ * this. `getFollowList`'s other three call sites stay on the RAW function,
+ * unchanged: `/api/follow-list` (what the client's own
+ * `useFollowListQuery`/`fetchFollowList` hits after hydration — including the
+ * SAME post page's own client-side re-check via `useModerationStatus`),
+ * `settings/page.tsx`, and `lib/lite/social/chain-mute.ts`. This is also NOT
+ * the path anything follow/DM-gating logic reads: Lumen's own `isFollowing`
+ * (DM request-vs-open gating, `lib/lite/repositories/follow-repository.ts`)
+ * is a separate DB-backed "lite" follow system that never calls
+ * `getFollowList` — nothing there can go stale from this cache existing.
+ *
+ * ★ A SELF-MUTE STAYS INSTANT ON THE PAGE THAT MADE IT. Mute/unmute
+ * (`use-mute-mutations.ts`) is a pure client-side React Query mutation:
+ * `onMutate`/`onSettled` call `setQueryData`/`invalidateQueries` directly on
+ * the browser's own `['muted', username]` entry, which `useFollowListQuery`
+ * reads on the current page — neither this server cache nor the SSR seed it
+ * feeds is ever in that path. The 30s window here only bounds how stale a
+ * BRAND-NEW SSR render (a fresh navigation or reload) of this reader's own
+ * post page can be relative to a mute/unmute they just made elsewhere — a
+ * just-muted account still filtering into a fresh page load for up to 30s,
+ * which is the one staleness this cache is scoped to accept (see the caller's
+ * own note). A failed/absent read is never stored (default `keep`).
+ */
+export const getFollowListCached = withTtlCache(
+  getFollowList,
+  (observer: string, follow_type: FollowListType) => `${observer}|${follow_type}`,
   { ttlMs: 30_000, max: 500 }
 );
 

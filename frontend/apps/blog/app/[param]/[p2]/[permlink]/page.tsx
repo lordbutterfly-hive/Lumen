@@ -1,6 +1,6 @@
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import PostContent from './content';
-import { getPostCached, getDiscussionCached, getCommunityCached } from '@/blog/lib/cached-api';
+import { getPostCached, getDiscussionCached, getCommunityCached, getFollowListCached } from '@/blog/lib/cached-api';
 import { liteChainCoordinates, liteRecordExists } from '@/blog/lib/lite/render/lite-entry';
 import { attachLiteIdentities, attachLiteIdentitiesToDiscussion } from '@/blog/lib/lite/render/attach-lite';
 import { applyOwnerBlocksToDiscussion } from '@/blog/lib/lite/social/block-filter';
@@ -8,7 +8,6 @@ import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-re
 import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
 import { isLumenPermlink } from '@/blog/lib/lite/render/lite-post-id';
 import { commentPageRedirectTarget } from '@/blog/lib/post/comment-redirect';
-import { getFollowList } from '@transaction/lib/bridge-api';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { isUsernameValid, isPermlinkValid, isValidUserParam } from '@/blog/utils/validate-links';
@@ -94,9 +93,21 @@ const PostPage = async ({
       // Use cached version — deduplicated with layout's generateMetadata within the same request
       getPostCached(username, permlink, observer),
       getDiscussionCached(username, permlink, observer),
-      // Prefetch the user's muted list so comments are filtered from the first render
-      isLoggedIn ? getFollowList(observer, 'muted') : Promise.resolve(null),
-      isCommunity(community) ? getCommunityCached(community, observer) : Promise.resolve(null)
+      // Prefetch the user's muted list so comments are filtered from the first render.
+      // ★ CACHED, 30s, keyed on (observer, follow_type) — see getFollowListCached's
+      // own doc in cached-api.ts. This was the one branch here with no
+      // cross-request memory at all; a just-muted account can show for up to
+      // 30s on a fresh page load, which that doc explains is the accepted cost.
+      isLoggedIn ? getFollowListCached(observer, 'muted') : Promise.resolve(null),
+      // ★ `correctSubscribers: false` (2026-09-05, TTFB pass) — this page never
+      // shows `.subscribers` (see `getCommunity`'s own doc in bridge-api.ts), so
+      // it must not block on the banned-subscriber-count correction that number
+      // needs. On a cold correction cache that correction alone is 578-1195ms;
+      // without this flag it sat on the critical path of every community post's
+      // `Promise.allSettled` for a number this render never uses.
+      isCommunity(community)
+        ? getCommunityCached(community, observer, { correctSubscribers: false })
+        : Promise.resolve(null)
     ]);
 
     postData = postResult.status === 'fulfilled' ? (postResult.value ?? null) : null;

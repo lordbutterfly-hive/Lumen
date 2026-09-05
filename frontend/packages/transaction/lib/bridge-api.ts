@@ -500,9 +500,37 @@ const withCorrectedSubscriberCount = (community: Community, banned: Map<string, 
   return drop === 0 ? community : { ...community, subscribers: Math.max(0, community.subscribers - drop) };
 };
 
+export interface GetCommunityOptions {
+  /**
+   * Apply the banned-subscriber-count correction above before returning.
+   * Defaults to `true` so every caller that already exists keeps the exact
+   * number it always got.
+   *
+   * ★ SET `false` ONLY WHEN THE CALLER NEVER SHOWS `.subscribers` (2026-09-05,
+   * post-page TTFB pass). `getCommunity` had no way for a caller to decline
+   * this correction, so every call paid whatever `bannedSubscriptionCounts()`
+   * cost at that moment — cheap on its warm 5-minute cache, but the miss is
+   * six parallel `list_all_subscriptions` calls against a node that answers
+   * 378-795ms each (see that function's own comment; measured 578-1195ms for
+   * the batch). The post page's `Promise.allSettled` awaits `getCommunityCached`
+   * alongside the post/discussion reads, so landing on that miss stalled the
+   * ENTIRE post render behind a number the post page never displays —
+   * `content.tsx` reads `communityData` only for `flag_text` and title
+   * context, never `.subscribers` (rendered exclusively by
+   * `community-description.tsx`/`community-simple-description.tsx`, the
+   * community's OWN layout, not the post page). `false` returns the raw
+   * Hivemind count — the exact number this correction already falls open to
+   * on any upstream error (see `bannedSubscriptionCounts`), so a caller that
+   * opts out is indistinguishable from one that opted in and hit that error
+   * path.
+   */
+  correctSubscribers?: boolean;
+}
+
 export const getCommunity = async (
   name: string,
-  observer: string | undefined = ''
+  observer: string | undefined = '',
+  { correctSubscribers = true }: GetCommunityOptions = {}
 ): Promise<Community | null> => {
   // ★ A6 (2026-08-18): a dropped socket to a public Hive node used to become a 502 on the
   // reader's community page. `withRetry` retries transport faults and 5xx only — a "no
@@ -514,6 +542,7 @@ export const getCommunity = async (
     `get_community(${name})`
   );
   if (!community) return community;
+  if (!correctSubscribers) return community;
   return withCorrectedSubscriberCount(community, await bannedSubscriptionCounts());
 };
 /**

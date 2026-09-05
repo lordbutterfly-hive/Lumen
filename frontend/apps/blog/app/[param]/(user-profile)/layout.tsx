@@ -4,12 +4,7 @@ import { dehydrate, Hydrate } from '@tanstack/react-query';
 import { siteConfig } from '@ui/config/site';
 import { getQueryClient } from '@/blog/lib/react-query';
 import { InitialProfileProvider } from '@/blog/components/observer-provider';
-import {
-  getAccountFullCached,
-  getAccountReputationsCached,
-  getDynamicGlobalPropertiesCached,
-  primeAccountFullCache
-} from '@/blog/lib/cached-api';
+import { getAccountFullCached, primeAccountFullCache } from '@/blog/lib/cached-api';
 import { liteAccountAsProfile } from '@/blog/lib/lite/render/lite-account';
 import { getAccountFull, getAccountReputations, getDynamicGlobalProperties } from '@transaction/lib/hive-api';
 import { getTwitterInfo, isThirdPartyApiEnabled } from '@transaction/lib/custom-api';
@@ -22,10 +17,14 @@ const logger = getLogger('app');
 
 /**
  * How long the profile layout will wait for its React Query prefetches before
- * sending the page anyway. Sized against the measured cost of the two real
- * network prefetches (~362ms and ~364ms against api.hive.blog, in parallel):
- * a healthy chain answers inside this and keeps the full hydration benefit, a
- * degraded one stops costing the reader their first byte.
+ * sending the page anyway. Originally sized against two real network
+ * prefetches this race used to carry — `get_account_reputations` (~362ms) and
+ * `get_dynamic_global_properties` (~364ms) against api.hive.blog, in parallel
+ * — both removed from the race outright on 2026-09-05 (see the comment above
+ * `prefetchPromises`). Left at 400ms rather than retuned down: the only
+ * candidate still inside it is the optional Twitter-info fetch below, and a
+ * healthy answer still keeps the full hydration benefit while a degraded one
+ * still stops costing the reader their first byte.
  */
 const PREFETCH_BUDGET_MS = 400;
 
@@ -211,16 +210,33 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
       queryClient.prefetchQuery({
         queryKey: ['profileData', username],
         queryFn: () => account
-      }),
-      queryClient.prefetchQuery({
-        queryKey: ['accountReputationData', username],
-        queryFn: () => getAccountReputationsCached(username, 1)
-      }),
-      queryClient.prefetchQuery({
-        queryKey: ['dynamicGlobalData'],
-        queryFn: () => getDynamicGlobalPropertiesCached()
       })
     ];
+
+    // ★ accountReputationData / dynamicGlobalData REMOVED FROM THIS PREFETCH
+    // (2026-09-05, TTFB perf pass). Both used to be awaited in the race below,
+    // each adding a real ~360ms network call (`get_account_reputations` /
+    // `get_dynamic_global_properties` against api.hive.blog) to TTFB, to seed
+    // caches that turned out not to need seeding:
+    //   - `accountReputationData` had NO reader anywhere in the app (grepped
+    //     the whole frontend for the query key and for `getAccountReputationsCached`
+    //     — this prefetch call was its only reference). Reputation already
+    //     renders from `account.reputation`: `getAccountFull`/`getProfileInfo`
+    //     attach it from the same `bridge.get_profile` call this layout already
+    //     awaits above (`@transaction/lib/hive-api.ts`), and `ProfileMain`
+    //     already hands it down as `reputation={profileData.reputation}` (see
+    //     `features/account-profile/redesign/profile-main.tsx`). This was a
+    //     second `bridge.get_profile`-shaped round trip for a value the layout
+    //     already had.
+    //   - `dynamicGlobalData` DOES have readers (`ProfileMain`'s optional HP
+    //     figure, `popover-card-data`'s post hover cards) but neither needs it
+    //     for first paint: both read it via a plain `useQuery` with no
+    //     `initialData` and no dependency gating the profile header's render,
+    //     and `ProfileMain`'s own 2026-09-03 comment already establishes that
+    //     this query "must NOT gate the page" (it only fills in the HP line a
+    //     beat later, same as `hpFigures` below it). The client now fetches it
+    //     post-hydration through the identical `['dynamicGlobalData']` key
+    //     instead of the layout prefetching and dehydrating it.
 
     // Only prefetch Twitter data if third-party APIs are enabled
     if (isThirdPartyApiEnabled()) {
@@ -238,8 +254,13 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
     // send its first byte until every prefetch had answered. Measured against
     // the real chain API: `get_account_reputations` ~362ms and
     // `get_dynamic_global_properties` ~364ms, neither cached, both on every
-    // profile view. They run in parallel, so they added roughly 360ms to a
-    // ~560ms TTFB — the majority of it, on the slowest server route we have.
+    // profile view. They ran in parallel, so together they added roughly
+    // 360ms to a ~560ms TTFB — the majority of it, on the slowest server
+    // route we have. (Both calls were removed from this race outright on
+    // 2026-09-05 — see the comment above `prefetchPromises` — so today this
+    // budget guards only the optional Twitter-info fetch below; the
+    // race/budget mechanism itself stays, since a slow or misbehaving third
+    // party must never hold TTFB hostage either.)
     //
     // The prefetch is an OPTIMISATION, not a requirement: its only job is to
     // seed the React Query cache so the browser does not refetch. Every one of
