@@ -418,3 +418,40 @@ export async function listThreadMessages(
     }))
   };
 }
+
+// ── read: unread count + mark read ───────────────────────────────────────────
+
+export type UnreadOutcome =
+  | { ok: true; count: number }
+  | { ok: false; status: number; error: string };
+
+/** How many unread INCOMING messages the caller has across all their threads. */
+export async function unreadDmCount(
+  sessionUser: User | undefined,
+  session: SessionRef
+): Promise<UnreadOutcome> {
+  const from = await actorFor(sessionUser, false, session);
+  if (!from.ok) return from;
+  const count = await dmMessages.countUnreadForActor(actorKey(from.actor));
+  return { ok: true, count };
+}
+
+export type MarkReadOutcome =
+  | { ok: true; marked: number }
+  | { ok: false; status: number; error: string };
+
+/**
+ * Mark the caller's unread incoming messages read. `threadId` scopes it to one thread
+ * (opening that conversation); omit it to mark everything read (opening the Messages
+ * inbox). Idempotent — a repeat call marks nothing.
+ */
+export async function markDmsRead(
+  sessionUser: User | undefined,
+  session: SessionRef,
+  opts: { threadId?: string } = {}
+): Promise<MarkReadOutcome> {
+  const from = await actorFor(sessionUser, false, session);
+  if (!from.ok) return from;
+  const marked = await dmMessages.markReadForActor(actorKey(from.actor), opts.threadId);
+  return { ok: true, marked };
+}

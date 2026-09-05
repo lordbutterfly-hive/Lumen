@@ -110,3 +110,71 @@ export async function listMessages(
   );
   return rows.map(mapMessage);
 }
+
+/**
+ * How many messages the actor has NOT read: INCOMING (sender != actor) messages in
+ * threads the actor participates in, with read_at still null. The thread join is the
+ * authorisation boundary — an actor only ever counts messages in their own threads,
+ * and never their own sent messages. Content is never touched.
+ */
+export async function countUnreadForActor(actorKey: string): Promise<number> {
+  const { rows } = await query<{ n: number }>(
+    `SELECT count(*)::int AS n
+       FROM lumen_dm_message m
+       JOIN lumen_dm_thread t ON t.thread_id = m.thread_id
+      WHERE (t.actor_a_key = $1 OR t.actor_b_key = $1)
+        AND m.sender_key <> $1
+        AND m.read_at IS NULL`,
+    [actorKey]
+  );
+  return rows[0]?.n ?? 0;
+}
+
+/**
+ * Mark the actor's unread INCOMING messages read (read_at = now). Scoped to one thread
+ * when threadId is given, otherwise every thread the actor participates in. Only ever
+ * touches messages the actor RECEIVED (sender != actor) that are not already read, so
+ * read_at records first-read and a repeat call is a no-op. Returns the number newly
+ * marked. Never touches content.
+ */
+export interface UnreadSender {
+  senderKey: string;
+  at: Date;
+}
+
+/**
+ * The distinct senders who have UNREAD incoming messages to the actor, newest message
+ * per sender first — for the notifications bell ("New message from @X"). One row per
+ * sender (not per message) so a chatty sender does not flood the bell. Content is never
+ * touched. The thread join is the authorisation boundary.
+ */
+export async function unreadSendersForActor(actorKey: string, limit: number): Promise<UnreadSender[]> {
+  const { rows } = await query<{ sender_key: string; at: Date }>(
+    `SELECT DISTINCT ON (m.sender_key) m.sender_key, m.created_at AS at
+       FROM lumen_dm_message m
+       JOIN lumen_dm_thread t ON t.thread_id = m.thread_id
+      WHERE (t.actor_a_key = $1 OR t.actor_b_key = $1)
+        AND m.sender_key <> $1
+        AND m.read_at IS NULL
+      ORDER BY m.sender_key, m.message_id DESC
+      LIMIT $2`,
+    [actorKey, limit]
+  );
+  return rows.map((r) => ({ senderKey: r.sender_key, at: r.at }));
+}
+
+export async function markReadForActor(actorKey: string, threadId?: string): Promise<number> {
+  const { rows } = await query<{ message_id: string }>(
+    `UPDATE lumen_dm_message m
+        SET read_at = now()
+       FROM lumen_dm_thread t
+      WHERE t.thread_id = m.thread_id
+        AND (t.actor_a_key = $1 OR t.actor_b_key = $1)
+        AND m.sender_key <> $1
+        AND m.read_at IS NULL
+        AND ($2::text IS NULL OR m.thread_id = $2)
+      RETURNING m.message_id`,
+    [actorKey, threadId ?? null]
+  );
+  return rows.length;
+}

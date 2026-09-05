@@ -392,6 +392,9 @@ export function useDmThread(threadId: string | null) {
           fromMe: m.senderActorKey ? (myActorKey !== null && m.senderActorKey === myActorKey) : null
         });
       }
+      // Server returns newest-first (message_id DESC); reverse to chronological so the
+      // newest message sits at the BOTTOM - the normal DM reading order.
+      messages.reverse();
       return { status: body.status ?? null, otherActorKey, messages };
     }
   });
@@ -448,4 +451,56 @@ export function useDmThread(threadId: string | null) {
     sending,
     sendError
   };
+}
+
+/* ---------- unread count + mark read ---------- */
+
+export interface DmUnread {
+  count: number;
+  loggedIn: boolean;
+  /** Mark unread incoming messages read: one thread (threadId) or all (omit). */
+  markRead: (threadId?: string) => Promise<void>;
+}
+
+/**
+ * The caller's unread INCOMING message count, for the Studio Messages-tab badge and the
+ * notifications bell. Polls on a gentle cadence; `markRead` clears it (all, or one
+ * thread) and refetches. Server-side (read_at), so it is consistent across devices.
+ */
+export function useDmUnread(): DmUnread {
+  const qc = useQueryClient();
+  const { user, isHydrated } = useUserClient();
+  const loggedIn = isHydrated && user.isLoggedIn;
+  const myActorKey = loggedIn ? actorKeyOf(user) : null;
+
+  const q = useQuery({
+    queryKey: ['dm-unread', myActorKey],
+    enabled: loggedIn,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    queryFn: async (): Promise<number> => {
+      const res = await fetch('/api/lite/dm/unread');
+      if (!res.ok) return 0;
+      const body = (await res.json()) as { count?: number };
+      return body.count ?? 0;
+    }
+  });
+
+  const markRead = useCallback(
+    async (threadId?: string): Promise<void> => {
+      try {
+        const res = await fetch('/api/lite/dm/read', {
+          method: 'POST',
+          headers: JSON_POST,
+          body: JSON.stringify(threadId ? { threadId } : {})
+        });
+        if (res.ok) void qc.invalidateQueries({ queryKey: ['dm-unread'] });
+      } catch {
+        /* a failed mark-read just leaves the badge; never a user-facing error */
+      }
+    },
+    [qc]
+  );
+
+  return { count: q.data ?? 0, loggedIn, markRead };
 }

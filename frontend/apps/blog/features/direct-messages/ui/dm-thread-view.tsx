@@ -1,6 +1,6 @@
 'use client';
 
-import { FC, useState } from 'react';
+import { FC, useEffect, useRef, useState } from 'react';
 import { MAX_MESSAGE_CHARS, useDmThread } from '../live/use-direct-messages';
 
 /**
@@ -43,6 +43,13 @@ function shortTime(iso: string): string {
 const DmThreadView: FC<{ threadId: string; onBack?: () => void }> = ({ threadId, onBack }) => {
   const thread = useDmThread(threadId);
   const [reply, setReply] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Newest message sits at the bottom (normal DM order); keep it in view by pinning
+  // the scroll to the bottom whenever the message set changes.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [thread.messages.length, thread.isLoading]);
 
   const trimmed = reply.trim();
   const tooLong = reply.length > MAX_MESSAGE_CHARS;
@@ -78,7 +85,7 @@ const DmThreadView: FC<{ threadId: string; onBack?: () => void }> = ({ threadId,
         ) : null}
       </div>
 
-      <div className="flex max-h-[420px] min-h-[120px] flex-col gap-2 overflow-y-auto py-1">
+      <div ref={scrollRef} className="flex max-h-[420px] min-h-[120px] flex-col gap-2 overflow-y-auto py-1">
         {thread.isLoading ? (
           <p className="py-6 text-center font-ui text-caption text-ink-10">{COPY.loading}</p>
         ) : thread.isError ? (

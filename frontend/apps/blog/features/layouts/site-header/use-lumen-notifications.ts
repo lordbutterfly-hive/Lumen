@@ -33,7 +33,7 @@ import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with
  * deliberate act, or the badge clears itself for a reader who never looked.
  */
 export interface LumenNotification {
-  type: 'follow';
+  type: 'follow' | 'dm';
   msg: string;
   url: string;
   date: string;

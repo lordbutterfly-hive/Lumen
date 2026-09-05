@@ -5,6 +5,7 @@ import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { requireActiveLiteUser } from '@/blog/lib/lite/http/actor';
 import { listRecentFollowersWithTime } from '@/blog/lib/lite/repositories/follow-repository';
 import { findUsersByIds } from '@/blog/lib/lite/repositories/user-repository';
+import * as dmMessages from '@/blog/lib/lite/repositories/dm-message-repository';
 import { viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { actorKey } from '@/blog/lib/lite/social/follow-actor';
 
@@ -96,7 +97,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
             return !key || !blockedKeys.has(key);
           });
 
-    if (followers.length === 0) return NextResponse.json({ notifications: [] });
+    // No early return on empty followers: DM notifications are merged in below, so the
+    // bell can carry new-message rows even for a reader with no recent followers.
 
     // Resolve Lumen ids to the names those people use TODAY, so a renamed
     // account is not announced under a stale handle.
@@ -104,7 +106,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const users = ids.length ? await findUsersByIds(ids).catch(() => []) : [];
     const nameById = new Map(users.map((u) => [u.userId, u.displayName]));
 
-    const notifications = followers.map((f) => {
+    const followRows = followers.map((f) => {
       const name = f.userId ? (nameById.get(f.userId) ?? f.userId) : (f.hive ?? 'someone');
       return {
         type: 'follow' as const,
@@ -124,7 +126,44 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         source: 'lumen' as const
       };
     });
-    return NextResponse.json({ notifications });
+
+    // ── DM rows: unread incoming messages, ONE per sender (bell "New message from @X") ──
+    // Content is never touched — sender + time only. Blocked senders are dropped with the
+    // same key set the follow rows use, and a DM-side failure degrades open (follows still
+    // show), exactly like the outer catch.
+    let dmRows: Array<{ type: 'dm'; msg: string; url: string; date: string; actor?: string; source: 'lumen' }> = [];
+    try {
+      const myKey = actor.userId ? actorKey({ userId: actor.userId }) : actorKey({ hive: actor.hive as string });
+      const senders = await dmMessages.unreadSendersForActor(myKey, 10);
+      const visible =
+        blockedKeys.size === 0 ? senders : senders.filter((s) => !blockedKeys.has(s.senderKey));
+      const dmIds = visible.filter((s) => s.senderKey.startsWith('u:')).map((s) => s.senderKey.slice(2));
+      const dmUsers = dmIds.length ? await findUsersByIds(dmIds).catch(() => []) : [];
+      const dmNameById = new Map(dmUsers.map((u) => [u.userId, u.displayName]));
+      dmRows = visible.map((s) => {
+        const isHive = s.senderKey.startsWith('h:');
+        const name = isHive ? s.senderKey.slice(2) : (dmNameById.get(s.senderKey.slice(2)) ?? null);
+        return {
+          type: 'dm' as const,
+          msg: name ? `New message from ${isHive ? '@' : ''}${name}` : 'New message from a Lumen member',
+          // The recipient's own Studio inbox — where the message is read (opening it clears
+          // the unread state). Not the sender's profile, unlike a follow row.
+          url: 'creators/studio?section=inbox',
+          date: s.at instanceof Date ? s.at.toISOString() : String(s.at),
+          // Only a Hive sender has a handle the bell can draw an avatar from; a lite sender
+          // falls back to the monogram, and is named generically in `msg`.
+          actor: isHive && name ? name : undefined,
+          source: 'lumen' as const
+        };
+      });
+    } catch (e) {
+      logger.error(e, 'DM notifications lookup failed');
+    }
+
+    const merged = [...followRows, ...dmRows].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
+    return NextResponse.json({ notifications: merged });
   } catch (error) {
     // The bell must not break because this half failed — the chain half (for a
     // Hive account) is still worth showing.

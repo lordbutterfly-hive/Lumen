@@ -24,7 +24,7 @@ import WorkLinkField from '../work-link-field';
 import { creatorOracleNotice } from '../../market/oracle-copy';
 import { lapseNoticeFor, lapseStateOf, shouldOfferRenewNow } from '../../market/lapse';
 import DmInboxPanel from '@/blog/features/direct-messages/ui/dm-inbox-panel';
-import { useOwnDmRegistration } from '@/blog/features/direct-messages/live/use-direct-messages';
+import { useOwnDmRegistration, useDmUnread } from '@/blog/features/direct-messages/live/use-direct-messages';
 
 type Section = 'overview' | 'inbox' | 'offerings' | 'market' | 'billing' | 'earnings';
 const SECTIONS: { id: Section; label: string }[] = [
@@ -601,6 +601,7 @@ const CreatorStudio: FC = () => {
   // reachable simply by managing their token, which is what Studio is for. Idempotent and
   // de-duped within a session (useOwnDmRegistration), so this is one cheap upsert at most.
   useOwnDmRegistration();
+  const { count: dmUnreadCount, markRead: markDmRead } = useDmUnread();
   const {
     market,
     inbox,
@@ -636,6 +637,12 @@ const CreatorStudio: FC = () => {
   // Inbox sub-tab: paid-ask REQUESTS (money + deadlines) vs direct MESSAGES (off-chain,
   // no money). Kept separate, never merged — see the toggle note in the Inbox section.
   const [inboxTab, setInboxTab] = useState<'requests' | 'messages'>('requests');
+  // ★ NEW-MESSAGE BADGE (2026-09-05, owner): opening the Messages tab clears the unread
+  // badge by marking all incoming DMs read. Fires on navigation INTO the tab, not per
+  // render (deps are the section/sub-tab + the stable markRead).
+  useEffect(() => {
+    if (section === 'inbox' && inboxTab === 'messages') void markDmRead();
+  }, [section, inboxTab, markDmRead]);
   const [retireOpen, setRetireOpen] = useState(false);
   const [capInput, setCapInput] = useState('');
   const [sellInput, setSellInput] = useState('');
@@ -1092,6 +1099,11 @@ const CreatorStudio: FC = () => {
                   }`}
                 >
                   {label}
+                  {id === 'messages' && dmUnreadCount > 0 ? (
+                    <span className="ml-1.5 rounded-full bg-surface-brand-12 px-1.5 text-caption tabular-nums text-ink-27 font-num">
+                      {dmUnreadCount}
+                    </span>
+                  ) : null}
                 </button>
               ))}
             </div>
