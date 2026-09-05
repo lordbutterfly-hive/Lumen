@@ -9,6 +9,7 @@ nothing reads this directory, so editing a file here changes nothing on the box.
 | `lumen-publisher.service` | `/etc/systemd/system/lumen-publisher.service` |
 | `lumen.service.d/publisher.conf` | `/etc/systemd/system/lumen.service.d/publisher.conf` |
 | `lumen-watchdog.sh` | `/usr/local/bin/lumen-watchdog.sh` |
+| `publisher-drain.json` | `/opt/lumen/publisher-drain.json` |
 
 `lumen.service` itself is unchanged and is not copied here; the drop-in above is
 the only edit made to it.
@@ -33,10 +34,17 @@ Three changes, so that one stop can no longer do this:
 Backups of the pre-change files are on the box beside each original, suffixed
 `.bak-2026-09-05`.
 
-## Known issue, not fixed here
+## The drain body bug, fixed 2026-09-05
 
-The publisher's `ExecStart` sends `-d "{\"max\":25}"`. systemd unescapes `\"`
-before bash sees it, bash then removes the quotes, and curl posts `{max:25}`,
-which is not valid JSON. The drain route parses it with `.catch(() => ({}))` and
-falls back to `max = 1`, so each 60 second tick publishes one post instead of up
-to 25. Harmless at current volume, throughput-limiting under a backlog.
+The publisher's `ExecStart` used to send `-d "{\"max\":25}"`. That literal passed
+through two unescapers: systemd turned `\"` into `"`, then bash removed the quotes,
+so curl posted `{max:25}`, which is not valid JSON. The drain route parses the body
+with `.catch(() => ({}))` and fell back to `max = 1`, so each 60 second tick
+published one post instead of up to 25, silently. The backlog drained on
+2026-09-05 shows it: three separate ticks of `processed:1` rather than one tick
+of three.
+
+The body is now a file, `/opt/lumen/publisher-drain.json`, passed as
+`-d @/opt/lumen/publisher-drain.json`. A path argument has nothing left for either
+parser to unescape. Verified at the wire: the new form posts `{"max":25}` and
+parses to `max=25`, the old form posts `{max:25}` and does not parse.

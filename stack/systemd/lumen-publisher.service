@@ -20,10 +20,15 @@ RestartSec=10
 # A loop rather than a timer: one less unit, and the interval is visible here.
 # The drain endpoint takes a cluster-wide advisory lock and is idempotent, so
 # overlapping ticks answer {"status":"skipped"} instead of double-publishing.
+# The body is a FILE, not an inline literal (2026-09-05). Inline, the JSON passed
+# through two unescapers: systemd turned \" into ", then bash removed the quotes,
+# so curl posted {max:25}. The route parses with .catch(() => ({})) and silently
+# fell back to max=1, draining one post per tick instead of up to 25, with no error
+# anywhere. A path argument has nothing left to unescape.
 ExecStart=/bin/bash -c 'while true; do \
   curl -fsS -m 120 -X POST http://127.0.0.1:3000/api/lite/publisher/drain \
     -H "x-lite-publisher-token: $LITE_PUBLISHER_TOKEN" \
-    -H "Content-Type: application/json" -d "{\"max\":25}" \
+    -H "Content-Type: application/json" -d @/opt/lumen/publisher-drain.json \
     || echo "drain call failed (non-fatal)"; \
   sleep 60; done'
 StandardOutput=append:/var/log/lumen-publisher.log
