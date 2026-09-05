@@ -22,6 +22,7 @@ import { offerTitleProblem } from '../../lib/vsc/op-builders';
 import WorkLinkField from '../work-link-field';
 import { creatorOracleNotice } from '../../market/oracle-copy';
 import { lapseNoticeFor, lapseStateOf, shouldOfferRenewNow } from '../../market/lapse';
+import DmInboxPanel from '@/blog/features/direct-messages/ui/dm-inbox-panel';
 
 type Section = 'overview' | 'inbox' | 'offerings' | 'market' | 'billing' | 'earnings';
 const SECTIONS: { id: Section; label: string }[] = [
@@ -624,6 +625,9 @@ const CreatorStudio: FC = () => {
     return 'overview';
   });
   const [answering, setAnswering] = useState<Ask | null>(null);
+  // Inbox sub-tab: paid-ask REQUESTS (money + deadlines) vs direct MESSAGES (off-chain,
+  // no money). Kept separate, never merged — see the toggle note in the Inbox section.
+  const [inboxTab, setInboxTab] = useState<'requests' | 'messages'>('requests');
   const [retireOpen, setRetireOpen] = useState(false);
   const [capInput, setCapInput] = useState('');
   const [sellInput, setSellInput] = useState('');
@@ -1064,7 +1068,29 @@ const CreatorStudio: FC = () => {
         ) : null}
 
         {section === 'inbox' ? (
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-4">
+            {/* ★ DMs sit ALONGSIDE the paid-ask escrow cards, never merged: asks
+                carry money and deadlines, direct messages do not. This sub-toggle
+                switches the Inbox between the two without conflating them. */}
+            <div className="flex gap-1.5 self-start rounded-card border border-line-6 bg-[var(--amb-1)] p-[5px]">
+              {([['requests', 'Requests'], ['messages', 'Messages']] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setInboxTab(id)}
+                  style={inboxTab === id ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
+                  className={`rounded-control px-4 py-1.5 font-ui text-[14px] leading-[22px] font-medium transition-colors ${
+                    inboxTab === id ? 'bg-[var(--lum-1)] text-ink-2' : 'text-ink-10 hover:text-ink-2'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {inboxTab === 'messages' ? (
+              <DmInboxPanel />
+            ) : (
+            <div className="flex flex-col gap-2.5">
             {inboxTruncated ? (
               <Card>
                 <p className="py-3 text-center text-caption text-ink-warn-3 font-ui">
@@ -1166,6 +1192,8 @@ const CreatorStudio: FC = () => {
                 ))}
               </div>
             ) : null}
+          </div>
+            )}
           </div>
         ) : null}
 

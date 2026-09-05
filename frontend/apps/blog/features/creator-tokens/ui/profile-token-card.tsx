@@ -2,6 +2,7 @@
 
 import { FC } from 'react';
 import { Link } from '@hive/ui';
+import MessageButton from '@/blog/features/direct-messages/ui/message-button';
 import { useLiveTokenMarket } from '../live/use-live-token-market';
 import { useTokenAccounts } from '../live/use-token-accounts';
 import { pctLabel, usdPrice } from '../market/format';
@@ -202,30 +203,39 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
             </p>
           ) : null}
         </div>
-        {/* Buy only when buy.go would take it (`canBuy` is RequireInflowOpen,
-            the same gate the token page disables its own button on). A lapsed
-            market keeps it, under the line above. */}
-        {market.canBuy && !soldOut ? (
-          <Link
-            href={`/creators/${resolvedHandle}?a=buy`}
-            className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-ui text-[15px] leading-[24px] font-medium text-ink-27 transition-colors hover:bg-surface-brand-16"
-            data-testid="profile-token-buy"
-          >
-            {COPY.buy}
-          </Link>
-        ) : market.canBuy && soldOut ? (
-          // The token page's own disabled-button word, in the Buy slot, with no
-          // warning styling: every buy would revert (buy.go refuses past the
-          // cap), so the control is not offered, and nothing is said about the
-          // creator, who is fine.
-          <span
-            className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-ui text-[15px] leading-[24px] font-medium text-ink-27 opacity-50"
-            aria-disabled="true"
-            data-testid="profile-token-sold-out"
-          >
-            {SOLD_OUT_WORD}
-          </span>
-        ) : null}
+        {/* Message + Buy sit together on the right. Message is offered on any
+            launched creator's card EXCEPT the viewer's own (you cannot DM
+            yourself); Buy carries the same gates as before. Both can be
+            present, one, or (own profile with buying closed) neither. */}
+        <div className="flex shrink-0 items-center gap-3">
+          {/* Buy has no self-gate, but DM does: a creator viewing their own card
+              gets no Message button (the compose target would be themselves). */}
+          {!isOwnProfile ? <MessageButton handle={username} /> : null}
+          {/* Buy only when buy.go would take it (`canBuy` is RequireInflowOpen,
+              the same gate the token page disables its own button on). A lapsed
+              market keeps it, under the line above. */}
+          {market.canBuy && !soldOut ? (
+            <Link
+              href={`/creators/${resolvedHandle}?a=buy`}
+              className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-ui text-[15px] leading-[24px] font-medium text-ink-27 transition-colors hover:bg-surface-brand-16"
+              data-testid="profile-token-buy"
+            >
+              {COPY.buy}
+            </Link>
+          ) : market.canBuy && soldOut ? (
+            // The token page's own disabled-button word, in the Buy slot, with no
+            // warning styling: every buy would revert (buy.go refuses past the
+            // cap), so the control is not offered, and nothing is said about the
+            // creator, who is fine.
+            <span
+              className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-ui text-[15px] leading-[24px] font-medium text-ink-27 opacity-50"
+              aria-disabled="true"
+              data-testid="profile-token-sold-out"
+            >
+              {SOLD_OUT_WORD}
+            </span>
+          ) : null}
+        </div>
       </div>
     );
   }

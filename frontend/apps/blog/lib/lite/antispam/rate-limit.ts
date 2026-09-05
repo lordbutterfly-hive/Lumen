@@ -5,6 +5,7 @@ import * as posts from '../repositories/post-repository';
 import { getUserCaps } from './trust';
 import { ageDays, dayKey, hourKey } from './windows';
 import { ipKey } from '../http/ip';
+import { FollowActor } from '../social/follow-actor';
 
 /**
  * High-level rate enforcement (spec §H). Per-account intake caps are the bot-farm
@@ -469,6 +470,63 @@ export async function enforceProfileWriteRate(userId: string): Promise<boolean> 
     `user:${userId}`,
     'profile_write',
     envPositiveInt('LITE_PROFILE_WRITE_PER_DAY', 200),
+    dayKey()
+  );
+}
+
+/**
+ * ★ DIRECT-MESSAGE SEND CAPS — TWO BUCKETS, "NEW THREAD STRICTER THAN REPLY".
+ *
+ * A new conversation is the abuse shape (spamming strangers), so it has its OWN, much
+ * smaller daily ceiling, charged on top of the generous overall send cap. A reply
+ * within an existing thread only touches the overall cap.
+ *
+ *   overall `dm_send`  — charged on EVERY send, BEFORE the recipient is resolved, so a
+ *                        loop of nonsense recipient names cannot spend a Hive API lookup
+ *                        each without consuming budget (the free-ammunition hole
+ *                        follow-service documents).
+ *   `dm_new_thread`    — charged additionally, ONLY when the send opens a new thread.
+ *
+ * Own key space per actor (a lite user by id, a Hive login by name — the name is proved
+ * by a signed challenge at login), never shared with follow/block/vote buckets, so DM
+ * volume can never exhaust an unrelated action's budget (F-L14's lesson).
+ */
+function dmSubject(actor: FollowActor): string {
+  return actor.userId ? `user:${actor.userId}` : `hive:${actor.hive ?? ''}`;
+}
+
+export async function enforceDmSendRate(actor: FollowActor): Promise<boolean> {
+  return rateRepo.checkAndConsume(
+    dmSubject(actor),
+    'dm_send',
+    envPositiveInt('LITE_DM_SEND_PER_DAY', 500),
+    dayKey()
+  );
+}
+
+export async function enforceDmNewThreadRate(actor: FollowActor): Promise<boolean> {
+  return rateRepo.checkAndConsume(
+    dmSubject(actor),
+    'dm_new_thread',
+    envPositiveInt('LITE_DM_NEW_THREAD_PER_DAY', 20),
+    dayKey()
+  );
+}
+
+/**
+ * Per-IP cap on the public DM public-key lookup (`GET /api/lite/dm/keys?actor=`).
+ *
+ * The key it returns is public, but resolving an unknown name fans out to a Hive API
+ * call, so an uncapped endpoint is both an enumeration surface and free ammunition
+ * against Hive. Its OWN bucket, never the signup-funnel `lookup` one (see
+ * `enforceLookupRate`'s warning), sized generously for a compose UI that probes on
+ * open.
+ */
+export async function enforceDmKeyLookupRate(ip: string): Promise<boolean> {
+  return rateRepo.checkAndConsume(
+    ipKey(ip),
+    'dm_key_lookup',
+    envPositiveInt('LITE_DM_KEY_LOOKUP_PER_IP_PER_DAY', 3_000),
     dayKey()
   );
 }

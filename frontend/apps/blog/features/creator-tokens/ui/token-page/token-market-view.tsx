@@ -174,6 +174,13 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   // are outflows and stay open in every state (the rail-switch doc).
   useEffect(() => {
     if (!market) return;
+    // ★ Direct messages are OFF-CHAIN and need no signing key, so `?a=dm` opens the
+    // compose dialog BEFORE the writes-blocked gate below: a lite/keyless viewer,
+    // who cannot buy or ask, can still message the creator. (Mirrors a=buy/a=ask.)
+    if (searchParams?.get('a') === 'dm') {
+      setDialog('dm');
+      return;
+    }
     // ★ A DEEP LINK MUST HONOUR THE SAME GATE AS THE BUTTON IT MIRRORS.
     //
     // `writeBlockedReason` disables every write control on this page and states
@@ -786,6 +793,19 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
             </div>
             {writeBlockedReason ? (
               <div className="mt-2.5 text-center text-caption text-ink-10 font-ui">{blockedNotice}</div>
+            ) : null}
+            {/* ★ Message the creator. Off-chain and keyless, so it is NOT gated by
+                writesBlocked (a lite viewer who cannot trade can still message),
+                and it is hidden on the creator's OWN page (no self-DM). Routed
+                through the shared TokenModals via setDialog('dm'). */}
+            {!isOwner ? (
+              <button
+                onClick={() => setDialog('dm')}
+                className="mt-3 w-full rounded-xl border border-line-11 bg-surface-1 py-3 text-[15px] leading-[24px] font-medium text-ink-7 font-ui hover:bg-surface-16"
+                data-testid="token-message-button"
+              >
+                Message the creator
+              </button>
             ) : null}
           </div>
           <div>

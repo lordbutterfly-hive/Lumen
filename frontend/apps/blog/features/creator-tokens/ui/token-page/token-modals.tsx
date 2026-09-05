@@ -13,6 +13,7 @@ import { useTokenAccounts } from '../../live/use-token-accounts';
 import { useMagiSpendingPower } from '../../live/use-magi-spending-power';
 import { MagiFuelGauge, MagiFundingHelp } from '../../live/magi-fuel-gauge';
 import ModalShell from '../modal-shell';
+import DmComposeModal from '@/blog/features/direct-messages/ui/dm-compose-modal';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
 import { getCreatorTokensDataSource } from '../../lib/creator-tokens-data-source';
 import { sellEmptyStateMessage } from './sell-empty-state';
@@ -35,17 +36,17 @@ import {
   askCost,
   buyCeilingNote,
   buyRows,
-  defaultMaxPriceText,
   effectiveExitFeePct,
   exitFeeBaseNote,
   parseAmount,
   askCostSegments,
   redeemQuote,
-  resolveMaxPriceCap,
   sellRows
 } from './trade-preview';
 
-export type TokenDialog = 'buy' | 'sell' | 'redeem' | 'ask' | 'send' | 'inter' | null;
+// ★ 'dm' is the creator direct-message compose. It is DISTINCT from 'send', which
+// is the on-chain token TRANSFER dialog - do not collide the two.
+export type TokenDialog = 'buy' | 'sell' | 'redeem' | 'ask' | 'send' | 'inter' | 'dm' | null;
 
 const ModalHead: FC<{ title: string; onClose: () => void }> = ({ title, onClose }) => (
   <div className="flex items-center justify-between px-6 pt-[22px]">
@@ -80,18 +81,6 @@ const BuyModal: FC<{
   // M-01: default to the lowest quick-pick chip ($10), not $50 — a $50 default on a
   // small market is most of the whole market, and it matched none of the 10/25/100 chips.
   const [amt, setAmt] = useState('10');
-  const [adv, setAdv] = useState(false);
-  /**
-   * ★ THE CAP IS PRE-FILLED FROM THE LIVE QUOTE, NOT FROZEN AT MOUNT
-   * (2026-08-27, F-C). It used to be `useState((m.priceUsd * 1.05).toFixed(2))`:
-   * a bare CURVE spot price, captured once, that then stopped describing the
-   * amount actually being bought. Same `touched` idiom the sell dialog's
-   * minimum-net floor already uses — the default tracks the quote until the
-   * reader edits it, and an edit (including clearing the field) is theirs to
-   * keep. See resolveMaxPriceCap for the measurement and the ruling on basis.
-   */
-  const [maxPriceText, setMaxPriceText] = useState('');
-  const [maxPriceTouched, setMaxPriceTouched] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const usd = parseAmount(amt); // strips thousands separators ("1,000" → 1000, not 1)
   const q = buyQuote(usd, m);
@@ -116,40 +105,14 @@ const BuyModal: FC<{
    */
   const minBuy = minBuyUsd(m);
   /**
-   * ★★★ THE CAP REFUSED EVERY BUY THERE WAS (2026-08-27, F-C). `overMax`
-   * compared the reader's max against `q.priceAfter` — a BARE CURVE price — while
-   * the ceiling actually signed, `maxP × q.tokens`, was checked in
-   * token-market-view.tsx's handleBuy against `totalDueHbd`, which INCLUDES the
-   * 10% trade fee. Two different bases for one number: since TotalDue >= 1.10 ×
-   * price(S) × n and the field defaulted to 1.05 × price(S), it could never pass.
-   * Measured 19 of 19 (supply, budget) combinations refused at ZERO price drift,
-   * 11 of them with the button still enabled, throwing "The price moved above
-   * your limit" when nothing had moved. Both sides are the ALL-IN price per token
-   * now; resolveMaxPriceCap carries the ruling and the measurement.
-   */
-  const defaultMaxPrice = defaultMaxPriceText(q.avgPrice);
-  const maxPriceValue = maxPriceTouched ? maxPriceText : defaultMaxPrice;
-  const cap = resolveMaxPriceCap(adv ? maxPriceValue : '', q);
-  const overMax = adv && cap.overMax; // slippage guard
-  /**
    * ★ A SOLD-OUT MARKET DISABLED BUY AND SAID NOTHING (2026-08-23).
    *
-   * `overMax` above is the SLIPPAGE guard and was the only reason this button could be
-   * dark for a reason other than money. When `supply >= cap` every token is issued, the
-   * contract refuses the buy, and the reader got a greyed control with the ordinary
-   * label and no explanation — indistinguishable from a bug. Seen live on a cap-reached
-   * market. `>=` not `==`: a cap that moves down must not leave the button live.
+   * When `supply >= cap` every token is issued, the contract refuses the buy, and
+   * the reader got a greyed control with the ordinary label and no explanation,
+   * indistinguishable from a bug. Seen live on a cap-reached market. `>=` not
+   * `==`: a cap that moves down must not leave the button live.
    */
   const soldOut = Number.isFinite(m.supply) && Number.isFinite(m.cap) && m.cap > 0 && m.supply >= m.cap;
-  // The "max price per token" cap, converted to a TOTAL-cost bound for the
-  // quoted count — buy.go's own doc: "slippage protection is the buyer's own
-  // signed transfer.allow" on TotalDue, not on a per-token price the chain
-  // never receives as such. Threading this through is what makes the control
-  // mean something once buy() is wired to a real chain call (previously it
-  // only disabled this button locally and was never passed to onBuy at all).
-  // The cap is now struck on the SAME fee-inclusive basis TotalDue is, so the
-  // multiplication below and handleBuy's comparison are like for like.
-  const maxTotalUsd = adv ? cap.maxTotalUsd : undefined;
 
   // ★ THE SPENDING CHECK, before the action rather than after the signature.
   //
@@ -169,12 +132,10 @@ const BuyModal: FC<{
   const payer = tokenAccounts.accounts.find((a) => a.canSign) ?? tokenAccounts.accounts[0] ?? null;
   const spending = useMagiSpendingPower(payer?.id ?? null);
   // HBD is a 3-decimal base-unit integer; the modal works in whole USD, and HBD is
-  // dollar-pegged (see live/adapt.ts usdFromHbd — the one documented 1:1).
-  // F-C14 (H-FE-11): the affordability gauge must reflect the MAXIMUM the buy could
-  // charge, not just the base budget. In Advanced mode the signed ceiling is
-  // maxTotalUsd (maxP × tokens), which can exceed `usd`; checking only `usd` would pass
-  // a user whose balance covers the budget but not the higher ceiling they authorised.
-  const costBaseUnits = Math.round(Math.max(usd, maxTotalUsd ?? 0) * 1000);
+  // dollar-pegged (see live/adapt.ts usdFromHbd, the one documented 1:1). The
+  // affordability gauge checks the typed budget, which is also the spend ceiling
+  // the parent signs (cap = usd), so there is nothing higher to account for.
+  const costBaseUnits = Math.round(usd * 1000);
   const affordability = spending.affordability(costBaseUnits, 'buy');
   const blockedBySpending = affordability === 'no_resource_credits' || affordability === 'insufficient_hbd';
 
@@ -262,7 +223,7 @@ const BuyModal: FC<{
               the number the button repeats and the number signed for) and lands
               the at-most-one-cent residue on the curve-cost row. */}
           <div className="mt-2.5 flex justify-between text-caption text-ink-7 font-ui">
-            <span>Curve cost</span>
+            <span>Token cost</span>
             <span className="font-num">{usdPrice(rows.curveCostUsd)}</span>
           </div>
           <div className="mt-1.5 flex justify-between text-caption text-ink-warn-3 font-ui">
@@ -270,50 +231,17 @@ const BuyModal: FC<{
             <span className="font-num">+{usdPrice(rows.tradeFeeUsd)}</span>
           </div>
           <div className="mt-2 flex justify-between border-t border-line-2 pt-2 text-[15px] leading-[24px]">
-            <span className="font-medium font-ui">Total charged</span>
+            <span className="font-medium font-ui">Total</span>
             <span className="text-ink-2 font-num">{usdPrice(rows.totalUsd)}</span>
           </div>
+          {/* Whole-token rounding: the curve mints integers, so the charge can
+              land under the entered budget. Say so, using the two figures on screen. */}
+          {q.tokens > 0 && usd > rows.totalUsd ? (
+            <div className="mt-2 text-caption text-ink-14 font-ui">
+              You get the most whole tokens that fit your ${usd}.
+            </div>
+          ) : null}
         </div>
-        <button
-          onClick={() => setAdv((v) => !v)}
-          className="mb-3 flex items-center gap-1.5 border-0 bg-transparent text-caption font-medium text-ink-10 font-ui"
-        >
-          Advanced {adv ? '▴' : '▾'}
-        </button>
-        {adv ? (
-          <div className="mb-3.5">
-            {/* The label names the BASIS now. "Max price per token" alone was
-                ambiguous between the curve price and what you actually pay, and
-                the code read it one way while handleBuy enforced it the other. */}
-            <label className="mb-1.5 block text-caption text-ink-10 font-ui">Max price per token, all in</label>
-            <div className="flex items-center rounded-control border border-line-11 px-3.5 py-2.5 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
-              <span className="text-ink-14 font-num">$</span>
-              <input
-                value={maxPriceValue}
-                onChange={(e) => {
-                  // Same refusal the amount field makes, for the same reason: a
-                  // price cap has no negative or exponential meaning either, and
-                  // this field had NO validation at all before (F-B).
-                  setMaxPriceTouched(true);
-                  setMaxPriceText(acceptAmountText(maxPriceValue, e.target.value));
-                  setFailure(null);
-                }}
-                inputMode="decimal"
-                className="ml-0.5 flex-1 border-0 text-[15px] leading-[24px] tabular-nums font-num outline-none focus-visible:outline-none"
-              />
-            </div>
-            <div className="mt-1.5 text-caption text-ink-14 font-ui">
-              Fees included, so this is what one token may cost you. The curve moves as others trade.
-            </div>
-            {cap.note ? <div className="mt-1.5 text-caption text-ink-14 font-ui">{cap.note}</div> : null}
-            {overMax ? (
-              <div className="mt-1.5 text-caption font-medium text-ink-warn-3 font-ui">
-                This buy works out at {usdPrice(q.avgPrice)} a token all in, above your cap of{' '}
-                {usdPrice(cap.maxPricePerTokenUsd ?? 0)}. Lower the amount or raise the cap.
-              </div>
-            ) : null}
-          </div>
-        ) : null}
         {/* What you can actually spend, and whether you can send anything at all. */}
         <MagiFuelGauge state={spending} costBaseUnits={costBaseUnits} kind={payer?.kind} className="mb-3" />
         {blockedBySpending && payer ? <MagiFundingHelp kind={payer.kind} account={payer.id} className="mb-3" /> : null}
@@ -326,7 +254,7 @@ const BuyModal: FC<{
             })()
           : null}
         <div className="mb-3 rounded-control bg-surface-16 px-3.5 py-3 text-caption text-ink-10 font-ui">
-          Includes a 10% trade fee (5% to @{displayHandle(m.handle)}, 5% to Lumen).
+          The 10% trade fee is on the token cost, not your budget (5% to @{displayHandle(m.handle)}, 5% to Lumen).
         </div>
         {/* ★★ HIDDEN FOR LAUNCH: `buyRiskNote` defaults to SHOW_BACKING_FIGURES
             and returns the standalone variant while it is false, so this
@@ -350,7 +278,7 @@ const BuyModal: FC<{
             // q.tokens <= 0 is the same refusal the disabled attribute makes
             // below — the two must never disagree, or a keyboard activation
             // broadcasts what the pointer cannot.
-            if (!Number.isFinite(usd) || usd <= 0 || q.tokens <= 0 || overMax) return;
+            if (!Number.isFinite(usd) || usd <= 0 || q.tokens <= 0) return;
             // F7: synchronous — see the `inFlight` doc above. Checked and set
             // BEFORE any await, so a same-tick second click is a no-op.
             if (inFlight.current) return;
@@ -363,7 +291,7 @@ const BuyModal: FC<{
             setBusy(true);
             setFailure(null);
             try {
-              await onBuy(usd, maxTotalUsd);
+              await onBuy(usd);
               onClose();
             } catch (err) {
               // The REAL reason, not a guess. See ../write-failure.ts.
@@ -378,7 +306,7 @@ const BuyModal: FC<{
           // not enough for this particular purchase), so the label stays short.
           // Note it does NOT block on `affordability === 'unknown'`: a failed
           // balance read must not stop a user who may well be able to afford this.
-          disabled={!Number.isFinite(usd) || usd <= 0 || q.tokens <= 0 || overMax || busy || blockedBySpending || soldOut}
+          disabled={!Number.isFinite(usd) || usd <= 0 || q.tokens <= 0 || busy || blockedBySpending || soldOut}
           className="w-full rounded-card bg-surface-brand-12 py-[15px] text-[15px] leading-[24px] font-medium tabular-nums text-ink-27 font-ui hover:bg-surface-brand-16 disabled:opacity-50"
         >
           {/* ★ THE CTA NAMED A NUMBER NOBODY IS CHARGED (2026-08-27). The label was
@@ -392,8 +320,8 @@ const BuyModal: FC<{
               `q` IS the charge. token-market-view.tsx's handleBuy recomputes the identical
               `buyQuote(usd, market)` and sends `local.tokens` to live.buy(), so the tokens
               this label is priced from are the tokens actually bought. The typed `usd`
-              survives only as the spend CEILING (handleBuy's `cap`) — a limit, not a price,
-              and it must not be shown as one.
+              survives only as the spend CEILING (handleBuy's `cap`, which is `usd`),
+              a limit, not a price, and it must not be shown as one.
 
               usdPrice, not usdWhole: two decimals, the same helper the Sell CTA already
               uses. TotalDue is a 3-decimal HBD figure, so the third decimal is rounded to
@@ -417,8 +345,8 @@ const BuyModal: FC<{
                   //
                   // ★★★ AND THEN IT NAMED A NUMBER NOBODY IS GUARANTEED (F-E, same
                   // day). `q` is the LOCAL quote; handleBuy re-quotes against live
-                  // state before signing and the ceiling it signs is `maxTotalUsd ??
-                  // usd`, the typed BUDGET, which is strictly above this figure
+                  // state before signing and the ceiling it signs is `usd`, the typed
+                  // BUDGET, which is strictly above this figure
                   // whenever the integer token count leaves change. Measured on a $50
                   // budget at supply 50 (label $48.59): +5 supply of drift charges
                   // $49.90 and still executes. The re-quote is right and stays; what
@@ -452,14 +380,14 @@ const BuyModal: FC<{
           <div role="alert" ref={(n) => n?.scrollIntoView({ block: 'nearest' })} className="mt-2.5 text-center text-caption font-medium text-ink-brand-6 font-ui">{failure}</div>
         ) : null}
         {/* F-E: the label above is an estimate; THIS is the number that binds.
-            handleBuy refuses outright above `maxTotalUsd ?? usd`, so this is a
-            guarantee rather than a hedge and is worth stating plainly. */}
+            handleBuy refuses outright above `usd`, the typed budget (its `cap`),
+            so this is a guarantee rather than a hedge and is worth stating plainly. */}
         {/* Minor: don't state "confirms your buy" / a $0 ceiling while the CTA reads
-            "Minimum buy is $X" for an empty or sub-minimum amount — show the binding
+            "Minimum buy is $X" for an empty or sub-minimum amount, show the binding
             ceiling only when there is a real buy to confirm. */}
         {q.tokens > 0 && usd > 0 ? (
           <div className="mt-2.5 text-center text-caption text-ink-14 font-ui">
-            One signature confirms your buy. {buyCeilingNote(maxTotalUsd ?? usd, maxTotalUsd !== undefined)}
+            One signature confirms your buy. {buyCeilingNote(usd, false)}
           </div>
         ) : null}
       </div>
@@ -962,7 +890,12 @@ const AskModal: FC<{
           className="h-[120px] w-full resize-y rounded-xl border border-line-11 px-4 py-3.5 font-ui text-[15px] leading-[24px] text-ink-2 outline-none focus-visible:outline-none focus:border-line-brand-10"
         />
         <div className="my-2 mb-3.5 text-caption text-ink-14 font-ui">
-          Private. Stored on Lumen, only its fingerprint goes on-chain.
+          {/* ★ HONESTY FIX: the old copy claimed the text was "Stored on Lumen".
+              It is NOT: the question plaintext is discarded, and only a content
+              hash (a receipt) is recorded on-chain (see live/adapt.ts:387 and
+              token-market-view.tsx's onSpend -> askReference). The reworded line
+              makes no storage claim it cannot keep. */}
+          Private: your question text isn&rsquo;t stored on Lumen or on-chain. Only a short fingerprint of it is recorded on-chain, as a receipt, so keep your own copy.
         </div>
         {/* ★ THE REFUSAL REPLACES THE PRICE, it does not sit under one. Leaving a
             cost sentence on screen beside "this cannot be bought" is the same
@@ -1315,6 +1248,9 @@ const TokenModals: FC<{
   if (dialog === 'ask')
     return <AskModal m={market} service={service} quoteAsk={quoteAsk} onSpend={onSpend} onClose={onClose} />;
   if (dialog === 'send') return <SendModal m={market} onTransfer={onTransfer} onClose={onClose} />;
+  // Creator DM compose. Self-contained (its own keypair + encryption + send), so it
+  // takes none of the money-path callbacks above - just the recipient and a close.
+  if (dialog === 'dm') return <DmComposeModal recipientHandle={market.handle} onClose={onClose} />;
   if (dialog === 'inter') return <InterstitialModal handle={market.handle} onClose={onClose} />;
   return null;
 };
