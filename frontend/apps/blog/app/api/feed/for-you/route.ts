@@ -192,8 +192,20 @@ const hydrationCache = new Map<string, { entry: Entry; at: number }>();
  * is still an honest claim, and `?refresh=1` (honoured by the topic branch as of
  * this change) is the escape hatch for anyone who needs to skip it.
  */
-/** When the ranker last failed to serve a `viewer|topic`. See the branch that writes it. */
-const topicFailedAt = new Map<string, number>();
+/**
+ * When the ranker last failed to serve a `viewer|topic`, AND FOR HOW LONG THAT
+ * IS TRUSTED. See the branch that writes it, and `noteTopicFailure`.
+ *
+ * ★ THE LEASH IS STORED PER ENTRY (2026-09-05, review), because the two things
+ * that can fail here deserve very different memories and a single module-wide
+ * constant cannot express that: see `TOPIC_FAIL_MS` and `TOPIC_THROW_MS`.
+ */
+interface TopicFailure {
+  at: number;
+  /** `TOPIC_FAIL_MS` for a ranker verdict, `TOPIC_THROW_MS` for a thrown fault. */
+  ttlMs: number;
+}
+const topicFailedAt = new Map<string, TopicFailure>();
 /**
  * How long that failure is trusted before the ranker is tried again.
  *
@@ -216,7 +228,69 @@ const topicFailedAt = new Map<string, number>();
  * `?refresh=1` clears both memos immediately for anyone who cannot wait.
  */
 const TOPIC_FAIL_MS = 300_000;
-const topicInflight = new Map<string, Promise<BuiltFeed | null>>();
+
+/**
+ * ★★★ HOW LONG A **THROWN** BUILD IS REMEMBERED, AND WHY IT IS NOT
+ * `TOPIC_FAIL_MS` (2026-09-05, review of the catch added the same day).
+ *
+ * The 300s above is an argument about THE RANKER'S COVERAGE: "recsys cannot
+ * serve this tag" is a property of a deployment or an index, it does not change
+ * per Hive block, and re-asking every 20 seconds bought nothing. Every word of
+ * that reasoning is false for a throw. A rejection here is an INFRASTRUCTURE
+ * fault — realistically `collectViewerState`'s database round trip, the one call
+ * in the builder with no error handling of its own — and a database blip is
+ * exactly the kind of failure that is over in seconds. Giving it the ranker's
+ * five-minute leash would pin that `viewer|topic` to the chronological page long
+ * after the fault cleared, and the reader has no way to tell the two apart: both
+ * render as `degraded: 'unavailable'`.
+ *
+ * 30s is the number the personal feed already uses for the same fact —
+ * `FAILED_BUILD_COOLDOWN_MS` in feed-cache.ts, the cooldown after a build that
+ * failed — and it is chosen for the same reason there: long enough that a reader
+ * hammering reload cannot queue a chain of doomed builds behind a wedged
+ * dependency, short enough that a transient fault costs one topic visit rather
+ * than five minutes of them. `?refresh=1` still clears it immediately.
+ */
+const TOPIC_THROW_MS = 30_000;
+
+/**
+ * Write the "this `viewer|topic` could not be served" memo, with the leash that
+ * suits WHY it could not.
+ *
+ * A function rather than two copies of four lines because it has two callers —
+ * `assembleFeed` returning null, and the builder THROWING — and the
+ * bounded-eviction half is the part that must not drift between them: an
+ * unbounded map of every tag anyone ever failed on is the same leak
+ * `TOPIC_CACHE_MAX` exists to prevent for the positive memo.
+ */
+function noteTopicFailure(key: string, ttlMs: number): void {
+  if (topicFailedAt.size >= TOPIC_CACHE_MAX) {
+    const oldest = topicFailedAt.keys().next().value;
+    if (oldest !== undefined) topicFailedAt.delete(oldest);
+  }
+  topicFailedAt.set(key, { at: Date.now(), ttlMs });
+}
+
+/**
+ * The in-flight build for a `viewer|topic`, WITH THE CLOCK IT STARTED ON.
+ *
+ * ★ THE TIMESTAMP IS NEW (2026-09-05) and it is the whole point of this being an
+ * object rather than the bare promise it used to be: a request that JOINS a
+ * running build has to be able to ask how much of the patience window that build
+ * has already spent, or it starts a second full window of its own. `Inflight` in
+ * feed-cache.ts carries the same field for the same class of question.
+ */
+interface TopicInflight {
+  promise: Promise<BuiltFeed | null>;
+  startedAt: number;
+}
+const topicInflight = new Map<string, TopicInflight>();
+
+/** How long the build for this key has been running, or null when none is. */
+function topicBuildAgeMs(key: string): number | null {
+  const entry = topicInflight.get(key);
+  return entry === undefined ? null : Date.now() - entry.startedAt;
+}
 
 
 /**
@@ -243,11 +317,16 @@ const topicInflight = new Map<string, Promise<BuiltFeed | null>>();
  */
 function buildTopicOnce(key: string, build: () => Promise<BuiltFeed | null>): Promise<BuiltFeed | null> {
   const existing = topicInflight.get(key);
-  if (existing) return existing;
+  if (existing) return existing.promise;
+  // The entry is created BEFORE the build so `.finally` can compare identity
+  // against it; the placeholder promise is overwritten on the next line and is
+  // never handed out.
+  const entry: TopicInflight = { promise: Promise.resolve(null), startedAt: Date.now() };
   const running = build().finally(() => {
-    if (topicInflight.get(key) === running) topicInflight.delete(key);
+    if (topicInflight.get(key) === entry) topicInflight.delete(key);
   });
-  topicInflight.set(key, running);
+  entry.promise = running;
+  topicInflight.set(key, entry);
   // A rejection still reaches real awaiters; this only stops an unhandled one.
   void running.catch(() => undefined);
   return running;
@@ -811,8 +890,12 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // much shorter than `TOPIC_CACHE_MS`: a ranker that has just come back should be
     // picked up quickly, and being wrong here costs only that one topic page a stale
     // fallback for a few seconds, never a wrong or missing page.
-    const failedAt = topicFailedAt.get(topicKey);
-    if (failedAt !== undefined && Date.now() - failedAt < TOPIC_FAIL_MS) {
+    //
+    // ★ THE LEASH COMES FROM THE ENTRY, NOT FROM THIS LINE (2026-09-05). A
+    // ranker verdict is remembered for `TOPIC_FAIL_MS` and a thrown build for
+    // `TOPIC_THROW_MS`; see `noteTopicFailure` for why those must differ.
+    const failure = topicFailedAt.get(topicKey);
+    if (failure !== undefined && Date.now() - failure.at < failure.ttlMs) {
       return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed', topic, viewer);
     }
     // ★ AND THE SAME ANSWER FOR A TAG THIS PROCESS HAS NEVER SEEN — see
@@ -826,6 +909,59 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
       return fallback(chainObserver, limit, 'unavailable', 'the ranker is not answering right now', topic, viewer);
     }
 
+    // ★★★ THE PATIENCE WINDOW IS PAID ONCE PER BUILD, NOT ONCE PER REQUEST
+    // (2026-09-05, and corrected the same day — see below).
+    //
+    // `buildTopicOnce` single-flights by `viewer|topic`, so a second request for
+    // a topic already being built JOINS that build — and then sat in
+    // `awaitWithPatience` for a FULL fresh window waiting on it, exactly the
+    // defect the personal feed was fixed for on 2026-08-15 (see the
+    // `isRebuilding(viewer)` branch further down, whose comment records the
+    // measured 12s + 11s a virgin account paid across two loads).
+    //
+    // ★ THE FIRST ATTEMPT AT THIS ONLY CAUGHT THE EXTREME, AND SAID OTHERWISE.
+    // It served the fallback immediately when the running build was ALREADY
+    // older than the window, and claimed the window was now paid once per build.
+    // It was not: a joiner arriving at 11,999ms of a 12,000ms build failed that
+    // test and then started a fresh 12,000ms window of its own, so it could sit
+    // behind a bare skeleton for ~24s in total — twice the ceiling this constant
+    // exists to impose, and worse than the case that WAS handled.
+    //
+    // What is paid once is the WINDOW, measured from the build's own clock. A
+    // joiner is handed what is LEFT of it, so every watcher of one build stops
+    // watching at `startedAt + TOPIC_BUILD_PATIENCE_MS` no matter when they
+    // arrived, and no reader can ever be held longer than that constant. Nothing
+    // left means nothing to wait for: that is the immediate fallback below,
+    // which is the old branch expressed as the zero case rather than as a
+    // separate rule.
+    //
+    // Nothing is cancelled. The build keeps running, and (since the bookkeeping
+    // moved inside the builder, see below) it stores its own result, so the next
+    // visit to this topic is the `cache: 'topic-cached'` one.
+    //
+    // `?refresh=1` is the one exception and keeps a full window of its own, for
+    // the reason it does everywhere else in this file: it is a deliberate user
+    // action asking for the real thing, and it is a per-REQUEST ceiling, so that
+    // reader still waits at most `TOPIC_BUILD_PATIENCE_MS`.
+    const inflightAgeMs = topicBuildAgeMs(topicKey);
+    const topicPatienceMs =
+      topicForceRefresh || inflightAgeMs === null
+        ? TOPIC_BUILD_PATIENCE_MS
+        : Math.max(0, TOPIC_BUILD_PATIENCE_MS - inflightAgeMs);
+    if (topicPatienceMs === 0) {
+      logger.info(
+        'for-you: a build for %s has been running %dms and has no patience left (window %dms) — serving the chronological page now rather than waiting a second window',
+        topicKey,
+        inflightAgeMs,
+        TOPIC_BUILD_PATIENCE_MS
+      );
+      return fallback(
+        chainObserver, limit, 'building',
+        'a ranked build for this topic is already running; it will be cached and served on the next visit',
+        topic, viewer
+      );
+    }
+
     // ★★★ THE BOOKKEEPING MOVED INSIDE THE BUILDER (2026-09-05), and that is the
     // load-bearing half of this change rather than a tidy-up. Both memos — the
     // topic cache on success and `topicFailedAt` on failure — are facts about
@@ -835,19 +971,46 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // result exactly as `buildViewerFeed` does, so stopping the wait costs this
     // reader one trending page and costs the NEXT reader nothing.
     const topicBuild = buildTopicOnce(topicKey, async () => {
-      const state = await timed('viewerState', () => collectViewerState(viewer, isLite, userId));
-      const assembled = await assembleFeed({ viewer, limit, chainObserver, topic, ...state });
-      if (assembled) {
-        topicFailedAt.delete(topicKey);
-        rememberTopicFeed(topicKey, assembled.entries, assembled.ranked, assembled.lanes);
-      } else {
-        if (topicFailedAt.size >= TOPIC_CACHE_MAX) {
-          const oldest = topicFailedAt.keys().next().value;
-          if (oldest !== undefined) topicFailedAt.delete(oldest);
+      try {
+        const state = await timed('viewerState', () => collectViewerState(viewer, isLite, userId));
+        const assembled = await assembleFeed({ viewer, limit, chainObserver, topic, ...state });
+        if (assembled) {
+          topicFailedAt.delete(topicKey);
+          rememberTopicFeed(topicKey, assembled.entries, assembled.ranked, assembled.lanes);
+        } else {
+          // A VERDICT, not a fault: the ranker answered and had nothing usable
+          // for this tag. Remembered on the long leash.
+          noteTopicFailure(topicKey, TOPIC_FAIL_MS);
         }
-        topicFailedAt.set(topicKey, Date.now());
+        return assembled;
+      } catch (error) {
+        // ★★★ A BUILD THAT THROWS IS A FAILED BUILD (2026-09-05, review).
+        //
+        // Only the two branches above wrote anything, so a builder that THREW —
+        // `collectViewerState` hitting a database fault is the realistic one, and
+        // it is the one call here with no error handling of its own — ran neither
+        // memo. `awaitWithPatience` catches the rejection and reports
+        // `{ settled: true, value: null }`, which this branch reads as
+        // 'unavailable' — so the reader was told the ranker could not serve them
+        // while NOTHING recorded that, and the next request rebuilt the whole
+        // viewer state to fail in exactly the same way. A persistently throwing
+        // build therefore re-ran on every single request, which is the precise
+        // cost `topicFailedAt` was introduced to stop.
+        //
+        // For the memo's purpose the two are the same fact: "this viewer|topic
+        // cannot be served right now" — but NOT for the same length of time.
+        // `assembleFeed` returning null is the ranker's own verdict about its
+        // coverage and keeps the 300s leash; a throw is an infrastructure fault
+        // that is usually over in seconds, so it gets `TOPIC_THROW_MS` instead.
+        // Writing 300s here would pin this reader to the chronological page for
+        // five minutes after a database blip had already cleared, and nothing
+        // in the response could tell them which of the two had happened.
+        noteTopicFailure(topicKey, TOPIC_THROW_MS);
+        // Rethrown, never swallowed into `null`: `awaitWithPatience` logs the
+        // error, and converting a database fault into a ranker verdict here
+        // would delete the only record that it happened.
+        throw error;
       }
-      return assembled;
     });
 
     // ★ THE SAME WINDOW THE PERSONAL FEED USES, FOR THE SAME REASON. See
@@ -856,11 +1019,15 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // 8.5-24.6s signed in, and a recsys that times out costs 46.5s of retries at
     // the correct 15s per-attempt timeout — neither is a wait a reader may be
     // held for behind a bare skeleton.
-    const topicOutcome = await awaitWithPatience(topicBuild, TOPIC_BUILD_PATIENCE_MS);
+    //
+    // `topicPatienceMs`, not the constant: a request that JOINED a running build
+    // gets the remainder of that build's window, never a fresh one. See above.
+    const topicOutcome = await awaitWithPatience(topicBuild, topicPatienceMs);
     if (!topicOutcome.settled) {
       logger.info(
-        'for-you: topic build for %s exceeded %dms of patience — serving the chronological page, build continues and will fill the topic cache',
+        'for-you: topic build for %s exceeded %dms of patience (window %dms) — serving the chronological page, build continues and will fill the topic cache',
         topicKey,
+        topicPatienceMs,
         TOPIC_BUILD_PATIENCE_MS
       );
       return fallback(

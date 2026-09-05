@@ -182,6 +182,27 @@ export default function TopicShell({ tag }: { tag: string }) {
   // Read across ALL pages, not just page 0: a degraded page 2 is the same fact.
   const degradedPage = (data?.pages ?? []).some((page) => !!page?.degraded);
 
+  // ★★★ AND A DEGRADED PAGE **WITH** POSTS SAID NOTHING AT ALL (2026-09-05,
+  // review of the topic patience window). `degradedPage` above is read on one
+  // branch only — `shown.length === 0` — which was right for every reason that
+  // existed when it was written, because they all arrived empty. `'building'`
+  // does not: the route now answers the chronological page for this tag while
+  // the ranked build keeps running (see the patience window and the joined-build
+  // branch in app/api/feed/for-you/route.ts), so the reader gets a full page of
+  // real posts in the wrong ORDER, labelled `ranked: false` by the masthead dot
+  // and otherwise indistinguishable from a topic the ranker has finished with.
+  // "Newest first" is true but it is not the whole truth — it reads as this
+  // topic's settled state rather than a temporary one — so the same warming-up
+  // hint the home feed shows over its fallback belongs here, and for the same
+  // reason: the degradation is reported, not hidden.
+  //
+  // `!ranked` is what makes it disappear. When the ranked page lands, page 0's
+  // `source` is `recsys` and a hint about a build that has finished would be a
+  // second small lie. Behind `shown.length > 0` exactly like feed-tabs.tsx's
+  // banner: over an empty list the empty/degraded state is the only honest
+  // message on screen, and this would contradict it.
+  const buildingPage = (data?.pages ?? []).some((page) => page?.degraded === 'building');
+
   // ★ A COMMUNITY ID IS NOT A READABLE TOPIC (owner ruling, 2026-08-07).
   // Communities are shown as tags, so `hive-13323` lands here — and "#hive-13323"
   // tells a reader nothing. The posts themselves carry the real name, so use it
@@ -237,6 +258,14 @@ export default function TopicShell({ tag }: { tag: string }) {
           </span>
           <span>{t('topic_page.masthead.only_posts_tagged', { tag })}</span>
         </PageMasthead>
+
+        {/* Same shape, same tokens, same placement as `feed-tabs.tsx`'s degraded
+            banner — this is that hint, scoped to a topic. */}
+        {buildingPage && !ranked && shown.length > 0 ? (
+          <p className="mb-4 rounded-control bg-[#fdf6e7] px-3 py-2 font-sans text-caption italic text-[#9a7b2e]">
+            {t('topic_page.building_hint')}
+          </p>
+        ) : null}
 
         {isLoading ? (
           <LumenLoader size="lg" label={t('global.loading_posts')} />

@@ -714,4 +714,8 @@
     "trending_posts": "post di tendenza",
     "muted_posts": "post silenziati"
   }
+,
+  "topic_page": {
+    "building_hint": "La classifica di questo argomento si sta ancora preparando. Nel frattempo mostriamo i post più recenti."
+  }
 }

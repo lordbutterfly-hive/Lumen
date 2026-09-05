@@ -2,7 +2,6 @@ import { cache } from 'react';
 import type { Entry, FollowListType } from '@hive/common-hiveio-packages/wax';
 import {
   getAccountFull,
-  getAccountReputations,
   getFollowers,
   getFollowing,
   DEFAULT_PARAMS_FOR_FOLLOW,
@@ -18,8 +17,46 @@ import {
   type GetCommunityOptions
 } from '@transaction/lib/bridge-api';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
+import { registerCache } from '@/blog/lib/cache-registry';
 
 /**
+ * ★★★ THE PER-WORKER BYTE BUDGET OF EVERYTHING IN THIS FILE: ~75 MB at the caps
+ * below, ~95 MB including `getCommunitiesCached`, which is left alone. That is
+ * PER WORKER, x3 cluster workers on a 7.9 GB box (2026-09-05). SIZE AGAINST THAT
+ * NUMBER, not against "500 sounds fine" — every `max` here is a RESIDENCY
+ * commitment per worker, not a hit-rate knob.
+ *
+ * ★★ AND EVERY RATE BELOW IS PER WORKER TOO. This is the arithmetic error the
+ * first version of this pass made: the measured traffic figures are WHOLE-BOX
+ * (~870 profile renders/hour, ~2200 post-page requests/10min), while each of
+ * these Maps lives in ONE worker of `LUMEN_WORKERS`=3. Every rate must be divided
+ * by 3 before it is compared with a cap. The caps were kept where the wrong
+ * arithmetic put them, because that error was in the SAFE direction — it sized
+ * them for 3x the traffic any single worker sees — but the numbers in each
+ * comment are now the per-worker ones, so the next person sizing these starts
+ * from the truth.
+ *
+ * Worst case is `max` x per-entry size, and only the first line is MEASURED:
+ *   · accountPostsFirstPageTtl  60 x ~870 KB (raw, untrimmed)  ~= 52 MB  [measured]
+ *   · getDiscussionCached      100 x ~200 KB (full reply tree) ~= 20 MB  [estimate]
+ *   · getCommunitiesCached     200 x small list records        ~= 20 MB  [estimate, unchanged]
+ *   · getCommunityCached / getAccountFullCached / getFollowListCached /
+ *     getFollowers / getFollowing — 100 each x small records (a follow list is
+ *     50 x {follower, following, what[]})                      ~=  3 MB total
+ *
+ * Before this pass the same table read ~435 MB for the posts cache ALONE. The
+ * caps were never reached by repeat traffic paying for itself; they were reached
+ * by dead entries nobody read twice — see `server-ttl-cache.ts`'s header for the
+ * measurement, and note the sweep added there floors steady-state residency near
+ * `max/2` under distinct-key crawler traffic, so the typical figure is roughly
+ * half the worst case above.
+ *
+ * ★ CHECK IT INSTEAD OF TRUSTING IT: every cache here registers with
+ * `lib/cache-registry.ts`, and `/api/debug/mem` (gated on `DENSER_DEBUG_MEM`)
+ * reports each one's live `size` alongside `sweeps`/`swept`/`evictions`. A `size`
+ * pinned at its cap with `evictions` climbing means the cap is the binding
+ * constraint and this budget is understated.
+ *
  * ★★★ THE PROFILE PAGE'S TTFB IS ONE UPSTREAM CALL (measured 2026-08-15).
  *
  * `/@<account>` was the slowest server route in the app: 407ms warm TTFB, ~92%
@@ -49,7 +86,25 @@ import { withTtlCache } from '@/blog/lib/server-ttl-cache';
  */
 const accountFullTtl = withTtlCache(getAccountFull, (username: string) => username, {
   ttlMs: 30_000,
-  max: 500,
+  /*
+   * ★ 500 -> 100 (2026-09-05, box memory pass). THIS ONE IS NOT ABOUT BYTES.
+   * An account record is small (~10 KB), so 500 of them was never the memory
+   * problem the posts cache was; what it was, was 500 RESIDENT DEAD RECORDS.
+   * Under crawler traffic across 868 distinct accounts every key is a miss,
+   * nothing is read twice, and the only thing that ever removed an entry was a
+   * read past `staleUntil` or the cap itself — so this map sat permanently full
+   * of accounts whose 60s lifetime ended long ago. The sweep in
+   * `server-ttl-cache.ts` is what actually reclaims them; this cap just stops the
+   * ceiling being five times higher than any real working set.
+   *
+   * THE ARITHMETIC, PER WORKER: lifetime is 30s TTL + 30s stale window = 60s.
+   * ~870 profile renders/hour whole-box / 3 workers = ~4.8 renders/min/worker,
+   * so ~4.8/min x 60s ~= 5 entries can be alive in one worker at once. 100 is 20x
+   * that, which is deliberate generosity for the hottest key space in the app:
+   * unlike the posts cache this one is cheap per entry, so headroom costs almost
+   * nothing and an eviction here would cost a ~360ms round trip.
+   */
+  max: 100,
   /*
    * ★ THE ABSENCE IS CACHED TOO, AND THAT IS THE LITE READER'S FIX (2026-08-15).
    *
@@ -129,53 +184,33 @@ export function primeAccountFullCache(username: string, account: Awaited<ReturnT
 export const getPostCached = cache(getPost);
 
 /**
- * ★★★ THE PROFILE'S REMAINING TTFB WAS THE PREFETCH BUDGET ITSELF (2026-08-15).
+ * ★★★ BOTH PROFILE-PREFETCH WRAPPERS ARE GONE — A TOMBSTONE, NOT AN OVERSIGHT.
  *
- * After the account read above was cached, `/@lordbutterfly` still answered in a
- * flat 404-412ms on every repeat — suspiciously stable, and exactly
- * `PREFETCH_BUDGET_MS = 400`. That is the tell: the layout races its prefetches
- * against a 400ms timer, and the two chain reads it waits on
- * (`get_account_reputations` ~362ms, `get_dynamic_global_properties` ~364ms,
- * measured in that file's own note) never beat the timer. So TTFB was not
- * "however long the work takes" — it was PINNED at the budget, every time.
+ * `getAccountReputationsCached` (deleted 2026-09-05, box memory pass) and
+ * `getDynamicGlobalPropertiesCached` (deleted 2026-09-05, earlier the same day)
+ * were a pair: 60s and 20s wrappers that existed only to let the profile
+ * layout's prefetch race resolve inside `PREFETCH_BUDGET_MS` without a ~360ms
+ * round trip each.
  *
- * Caching the account alone could never fix that; it only stopped the budget
- * being paid ON TOP of a 360ms account read (cold 1073ms -> warm 405ms). The
- * budget itself only goes away when the prefetches can actually resolve inside
- * it, which means they have to be answerable without a round trip.
+ * Commit 1c68664 rewrote that prefetch and removed both call sites, leaving two
+ * caches with ZERO readers. `getDynamicGlobalPropertiesCached` went first; the
+ * reputation wrapper survived only because nothing pointed at it either way. It
+ * is dead for a stronger reason than "unused": reputation never needed a second
+ * round trip at all, since `getAccountFull`/`getProfileInfo` already attach it
+ * from the same `bridge.get_profile` call the layout awaits, and `ProfileMain`
+ * renders it from `profileData.reputation`. See the long note at
+ * `app/[param]/(user-profile)/layout.tsx` (accountReputationData /
+ * dynamicGlobalData REMOVED FROM THIS PREFETCH) for the full reasoning and the
+ * grep that established it — that note still names this symbol, deliberately, as
+ * the record of what was removed.
  *
- * ★ TTLs chosen from what the values ARE, not from taste:
- *
- *  · Reputation is per-account and moves when votes land. 60s.
- *
- * It is a PREFETCH — its only job is to seed the React Query cache so the
- * browser does not refetch, and it has a client-side path that fetches if the
- * dehydrated state lacks it. A stale one costs a reader nothing; a slow one
- * costs every reader 400ms.
- *
- * ★ WHICH IS PRECISELY WHY IT SERVES STALE (2026-08-17). "A stale one costs a
- * reader nothing" is the argument for the TTL and it is the same argument, only
- * stronger, past the TTL: at expiry it was still handing one reader per period
- * the full 400ms budget back. Refreshing behind the reader is the whole benefit
- * with none of that. The window matches the TTL — a prefetch twice its intended
- * age is still a prefetch, and the client refetches anyway.
- *
- * ★ THE OTHER HALF OF THIS PAIR, `getDynamicGlobalPropertiesCached`, IS GONE
- * (2026-09-05). It was here for the same reason and with the same 20s TTL — one
- * global entry, no key, ~100% hit rate, feeding the vesting-to-HP conversion —
- * but commit 1c68664 rewrote the profile prefetch and left it with ZERO readers
- * (grep-verified across apps/ and packages/). The only thing still calling it
- * was `warm-server-caches.ts`, i.e. it cost one real upstream call per restart
- * to fill a cache nobody read. Every remaining caller — the wallet, for money
- * math, and the profile layout — calls `getDynamicGlobalProperties` directly and
- * always did; that was already documented here as deliberate. Re-add the wrapper
- * only alongside a reader that wants it.
+ * Every surviving caller of either underlying read — the wallet, for money math,
+ * and the profile layout — calls the RAW `getAccountReputations` /
+ * `getDynamicGlobalProperties` and always did. Re-add a wrapper only alongside a
+ * reader that actually wants one, never on the assumption that a cache is free:
+ * an unread cache is not free, it is `max` entries of resident bytes per worker
+ * (see this file's budget note at the top).
  */
-export const getAccountReputationsCached = withTtlCache(
-  getAccountReputations,
-  (username: string, limit: number) => `${username}|${limit}`,
-  { ttlMs: 60_000, max: 500, staleWhileRevalidateMs: 60_000 }
-);
 
 /**
  * ★★ THE COMMUNITY LIST IS THE OTHER 600ms (measured 2026-08-15).
@@ -255,7 +290,39 @@ const accountPostsFirstPageTtl = withTtlCache(
   (sort: string, account: string, observer: string) => `${sort}|${account}|${observer}`,
   {
     ttlMs: 25_000,
-    max: 500,
+    /*
+     * ★★★ 500 -> 60: THE SINGLE BIGGEST MAP IN THE PROCESS (2026-09-05, box
+     * memory pass). This one stores the RAW `getAccountPosts` page — the trim
+     * in `posts-page.tsx` runs on the RETURNED array and builds new objects
+     * (`trimEntriesForSeed` maps, see seed-trim.ts), so what sits in here is the
+     * untrimmed ~870 KB payload that file's own comment measured, not the
+     * ~127 KB trimmed one.
+     *
+     * THE ARITHMETIC, PER WORKER — and the per-worker part is the correction that
+     * matters (see this file's header). Lifetime of an entry is 25s TTL + 25s
+     * stale window = 50s. Measured traffic is ~870 profile renders/hour, but that
+     * is WHOLE-BOX across `LUMEN_WORKERS`=3, so one worker sees ~290/hour =
+     * ~0.081/s. Crawlers walk DISTINCT accounts (868 distinct in that hour), so
+     * essentially every render is a new key: 0.081/s x 50s ~= 4 entries can be
+     * simultaneously alive IN ONE WORKER'S MAP.
+     *
+     * 60 is therefore ~15x the live set, not the ~5x the whole-box figure
+     * suggested. The cap is left at 60 anyway: the error ran in the safe
+     * direction, 60 x 870 KB is already only ~52 MB, and a cap this far above the
+     * working set means evictions never fight the sweep for a value someone is
+     * about to read.
+     *
+     * THE BYTES, which is the actual point: 500 x ~870 KB ~= 435 MB per worker,
+     * x3 workers on a 7.9 GB box. At 60: ~52 MB per worker. The old cap was never
+     * reached by REPEAT traffic paying for itself — it was reached by 500 dead
+     * payloads that expired 50 seconds ago and stayed resident because nobody
+     * ever read that key again (see `server-ttl-cache.ts`'s header).
+     *
+     * The TTL, the stale window and `shouldCache` are all UNCHANGED: a warm
+     * profile is exactly as warm as before, because at 12 live entries against a
+     * 60 cap nothing evictable was ever being evicted for cache-hit reasons.
+     */
+    max: 60,
     shouldCache: (entries) => Array.isArray(entries) && entries.length > 0,
     staleWhileRevalidateMs: 25_000
   }
@@ -288,10 +355,28 @@ export async function getAccountPostsCached(
  * a popular post. A failed/absent read is never stored (default `keep`), so a
  * transient 429 cannot freeze "no discussion" in for 30 seconds.
  */
+/*
+ * ★★ 500 -> 100 (2026-09-05, box memory pass). A full comment TREE per entry —
+ * every reply body on a post — so this is the second-largest map here after the
+ * posts page above (not separately measured in bytes; it is bounded by the post's
+ * reply count, and a busy post's tree is comfortably into the hundreds of KB).
+ *
+ * THE ARITHMETIC, PER WORKER (see this file's header on why that qualifier is
+ * the whole point). Lifetime is 30s (TTL, no stale window). Measured post-page
+ * traffic is ~2200 requests/10min = 3.67/s over distinct posts WHOLE-BOX, which
+ * across `LUMEN_WORKERS`=3 is ~1.22/s per worker: ~1.22 x 30 ~= 37 entries alive
+ * in one worker's map at once.
+ *
+ * So 100 is ~2.7x the live set rather than sitting exactly ON it, as the earlier
+ * whole-box figure of ~110 wrongly implied. Kept at 100: the mistake was in the
+ * safe direction, and this is the largest per-entry value here after the posts
+ * page, so buying more headroom than 2.7x is not obviously worth the bytes. TTL
+ * and semantics unchanged.
+ */
 export const getDiscussionCached = withTtlCache(
   getDiscussion,
   (author: string, permlink: string, observer?: string) => `${author}|${permlink}|${observer ?? ''}`,
-  { ttlMs: 30_000, max: 500 }
+  { ttlMs: 30_000, max: 100 }
 );
 
 /**
@@ -319,11 +404,20 @@ export const getDiscussionCached = withTtlCache(
  * therefore keys identically to before (`options?.correctSubscribers ?? true`
  * reproduces the old `name|observer` behaviour exactly).
  */
+/*
+ * ★ 500 -> 100 (2026-09-05, box memory pass). Small values (title, description,
+ * subscriber count) but the same "one cap per worker, three workers" arithmetic,
+ * and the key space here is far SMALLER than the traffic: distinct communities
+ * number in the hundreds across the whole site, and a 30s lifetime at post-page
+ * rates only ever has a handful of them live at once. 100 is well above the
+ * plausible live set and the map should now sit far below its cap rather than
+ * pinned at it. TTL, key shape and semantics unchanged.
+ */
 export const getCommunityCached = withTtlCache(
   getCommunity,
   (name: string, observer?: string, options?: GetCommunityOptions) =>
     `${name}|${observer ?? ''}|${options?.correctSubscribers ?? true}`,
-  { ttlMs: 30_000, max: 500 }
+  { ttlMs: 30_000, max: 100 }
 );
 
 /**
@@ -369,10 +463,19 @@ export const getCommunityCached = withTtlCache(
  * which is the one staleness this cache is scoped to accept (see the caller's
  * own note). A failed/absent read is never stored (default `keep`).
  */
+/*
+ * ★ 500 -> 100 (2026-09-05, box memory pass). Moderate values (one observer's
+ * muted/blacklist name list), 30s TTL unchanged. Keyed on the OBSERVER, so the
+ * live set is bounded by concurrent SIGNED-IN readers of post pages inside a 30s
+ * window — the measured crawler load is anonymous and never reaches this cache at
+ * all (`page.tsx` calls it only when `isLoggedIn`). 100 is far above that live
+ * set. Key shape untouched: dropping either half would leak one viewer's muted
+ * list to another, which this cache's own note above calls its hard line.
+ */
 export const getFollowListCached = withTtlCache(
   getFollowList,
   (observer: string, follow_type: FollowListType) => `${observer}|${follow_type}`,
-  { ttlMs: 30_000, max: 500 }
+  { ttlMs: 30_000, max: 100 }
 );
 
 /** Same key shape both `getFollowersCached` and `getFollowingCached` use. */
@@ -395,5 +498,41 @@ const followParamsKey = (params?: Partial<IGetFollowParams>): string =>
  * a failed read is never stored (default `keep`), matching the "failures are
  * never cached" property this whole module is built around.
  */
-export const getFollowersCached = withTtlCache(getFollowers, followParamsKey, { ttlMs: 30_000, max: 500 });
-export const getFollowingCached = withTtlCache(getFollowing, followParamsKey, { ttlMs: 30_000, max: 500 });
+/*
+ * ★ 500 -> 100 EACH (2026-09-05, box memory pass). A follower/following page is
+ * a list of up to `limit` account records, so neither is small, and there are TWO
+ * of these maps. `/@user/followers` and `/@user/following` are a small fraction of
+ * profile traffic (the crawler load measured is on the profile ROOT), so at a 30s
+ * lifetime the live set is single digits; 100 each is generous against that and
+ * 800 fewer resident list objects per worker than before. TTL and key shape
+ * unchanged — the full param tuple still keys them, so pagination still cannot
+ * collide.
+ */
+export const getFollowersCached = withTtlCache(getFollowers, followParamsKey, { ttlMs: 30_000, max: 100 });
+export const getFollowingCached = withTtlCache(getFollowing, followParamsKey, { ttlMs: 30_000, max: 100 });
+
+/**
+ * ★★★ EVERY CACHE ABOVE, REGISTERED FOR `/api/debug/mem` (2026-09-05, box memory
+ * pass). One block rather than a line beside each cache, so that "is anything
+ * unregistered?" is answerable by reading twelve lines instead of grepping the
+ * file — the failure mode being an instrument that silently omits the one map
+ * that is actually growing.
+ *
+ * ★ `accountFullTtl`, NOT `getAccountFullCached`: the export is wrapped in
+ * React's `cache()`, which returns a fresh memoizing function that does not
+ * carry `.stats` (the same reason that export is cast on its way through
+ * `cache()` — see its own note). The TTL instance is the thing holding bytes, so
+ * the TTL instance is the thing measured.
+ *
+ * Registration happens at module load, so a worker that has served no profile or
+ * post page reports nothing at all — see `allCacheStats`'s note on why an empty
+ * result is a true answer rather than a broken instrument.
+ */
+registerCache('accountFull', accountFullTtl.stats);
+registerCache('accountPostsFirstPage', accountPostsFirstPageTtl.stats);
+registerCache('communities', getCommunitiesCached.stats);
+registerCache('community', getCommunityCached.stats);
+registerCache('discussion', getDiscussionCached.stats);
+registerCache('followList', getFollowListCached.stats);
+registerCache('followers', getFollowersCached.stats);
+registerCache('following', getFollowingCached.stats);

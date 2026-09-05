@@ -23,6 +23,13 @@
  *      un-cached, never wrong.
  *   7. A per-value window of 0 is honoured, which is what keeps
  *      `getAccountFullCached`'s 10s absence from being stretched to 40s.
+ *   8. ★ THE EXPIRY SWEEP (2026-09-05): an insert past `max/2` reclaims entries
+ *      already past `staleUntil`, NEVER a fresh one and NEVER one still inside
+ *      its stale window, the hard `max` bound still holds when there is nothing
+ *      to reclaim, and `stats()` counts it. 8b and 8b-bis are the load-bearing
+ *      ones — a sweep that touched a live entry, or one that confused `expires`
+ *      with `staleUntil`, would be a silent cache-hit regression rather than a
+ *      wrong answer, so both are checked with the sweep proven to have run.
  *
  * ★ TIME IS REAL HERE, NOT MOCKED. The module reads `Date.now()` directly and
  * injecting a clock would mean changing production code to suit its test. The
@@ -253,6 +260,135 @@ async function main(): Promise<void> {
     const waitedGhost = Date.now() - tGhost;
     check('an absence is NOT served stale — the caller WAITS for a re-read', waitedGhost >= 50, `waited=${waitedGhost}ms`);
     check('and the re-read still reports the absence', ghost === null, JSON.stringify(ghost));
+  }
+
+  // ── 8. the expiry sweep (2026-09-05, box memory pass) ─────────────────────
+  //
+  // WHY THIS SECTION EXISTS. Before the sweep, an entry was removed by exactly
+  // two things: a READ past `staleUntil`, and insertion-order eviction at `max`.
+  // Crawler traffic never re-reads a key, so neither fired, and every map filled
+  // to its cap with values that had expired 50 seconds earlier and would never be
+  // read again — the whole reason worker RSS climbed to 1.08-1.35 GB. The claim
+  // under test is narrow and has to stay narrow: expired entries go, FRESH ONES
+  // NEVER DO, and the hard cap still bounds a map with nothing to reclaim.
+  section('8. the expiry sweep');
+  {
+    // 8a. THE TRIGGER AND THE BOUND. `max/2` is both the level a sweep starts at
+    //     and the level it stops at, so one insert frees one dead entry and
+    //     returns — not a stop-the-world scan of the whole map.
+    const { state, load } = countingLoader();
+    const cached = withTtlCache(load, (k: string) => k, { ttlMs: 30, max: 10 });
+    for (let i = 0; i < 6; i++) await cached(`a${i}`);
+    check('below max/2 nothing sweeps', cached.stats().sweeps === 0, JSON.stringify(cached.stats()));
+    check('and all six are resident', cached.stats().size === 6, JSON.stringify(cached.stats()));
+
+    await sleep(60); // every one of the six is now past `staleUntil`
+    const before = state.calls;
+    await cached('a6');
+    const st = cached.stats();
+    check('an insert past max/2 runs a sweep', st.sweeps === 1, JSON.stringify(st));
+    check('and reclaims a dead entry', st.swept === 1, JSON.stringify(st));
+    check('the sweep is not a read — no loader call of its own', state.calls === before + 1, `calls=${state.calls}`);
+  }
+  {
+    // 8b. ★ THE ONE THING THAT WOULD MAKE THIS A BUG RATHER THAN A FIX: a sweep
+    //     that touches a LIVE entry is a silent cache-hit regression, invisible
+    //     in production except as upstream load. Every entry here is fresh for
+    //     10s, so a correct sweep must free NOTHING however often it runs, and
+    //     every key must still answer from cache.
+    const { state, load } = countingLoader();
+    const cached = withTtlCache(load, (k: string) => k, { ttlMs: 10_000, max: 10 });
+    for (let i = 0; i < 8; i++) await cached(`f${i}`);
+    const afterFill = state.calls;
+    const st = cached.stats();
+    check('sweeps DID run (past max/2), so the check is not vacuous', st.sweeps > 0, JSON.stringify(st));
+    check('★ but a fresh entry is NEVER swept', st.swept === 0, JSON.stringify(st));
+    check('all eight are still resident', st.size === 8, JSON.stringify(st));
+    for (let i = 0; i < 8; i++) await cached(`f${i}`);
+    check('and every one of them still HITS', state.calls === afterFill, `calls=${state.calls} afterFill=${afterFill}`);
+  }
+  {
+    // 8b-bis. ★★ THE STALE WINDOW IS NOT EXPIRY, AND THE SWEEP MUST KNOW THE
+    //     DIFFERENCE. This is the case 8b cannot reach: entries here are past
+    //     `expires` but well inside `staleWhileRevalidateMs`, i.e. still SERVABLE
+    //     (that is the whole point of serve-stale, sections 3 to 6). A sweep that
+    //     tested `expires > now` instead of `staleUntil > now` would delete
+    //     exactly these, and the damage would be invisible in every other test in
+    //     this file: no wrong answers, just serve-stale silently downgraded back
+    //     to blocking misses and one reader per period paying the full round trip
+    //     again — the regression `staleWhileRevalidateMs` exists to prevent.
+    //
+    //     Mutating the predicate in `sweepExpired` from `staleUntil` to `expires`
+    //     must fail the two starred checks below.
+    const { state, load } = countingLoader();
+    const cached = withTtlCache(load, (k: string) => k, {
+      ttlMs: 30,
+      max: 10,
+      staleWhileRevalidateMs: 10_000
+    });
+    for (let i = 0; i < 8; i++) await cached(`s${i}`);
+    const first = await cached('s0');
+    await sleep(60); // past `expires` (30ms), far inside `staleUntil` (30ms + 10s)
+
+    await cached('s8'); // size is 8, past max/2 — this insert sweeps
+    const st = cached.stats();
+    check('the sweep ran (past max/2), so the check is not vacuous', st.sweeps > 0, JSON.stringify(st));
+    check('★★ nothing inside its stale window is swept', st.swept === 0, JSON.stringify(st));
+    check('★★ so all nine entries are still resident', st.size === 9, JSON.stringify(st));
+
+    // And prove they are genuinely EXPIRED-BUT-SERVABLE, not merely still fresh:
+    // a read returns the OLD value with no wait, which is serve-stale behaviour
+    // and impossible if the entry had been swept.
+    const callsBefore = state.calls;
+    const t = Date.now();
+    const stale = await cached('s0');
+    check('a swept-over entry still serves stale', stale === first, `${stale} vs ${first}`);
+    check('without waiting for the upstream', Date.now() - t < 20, `waited=${Date.now() - t}ms`);
+    check('and refreshes behind the reader', state.calls === callsBefore + 1, `calls=${state.calls}`);
+  }
+  {
+    // 8c. THE HARD BOUND IS UNCHANGED. The sweep is an optimisation on top of
+    //     insertion-order eviction, never a replacement: when nothing has expired
+    //     there is nothing to reclaim, and `max` alone must still keep the map
+    //     finite. This is the property that makes the cache safe against a
+    //     crawler regardless of TTL.
+    const { load } = countingLoader();
+    const cached = withTtlCache(load, (k: string) => k, { ttlMs: 10_000, max: 4 });
+    for (let i = 0; i < 10; i++) await cached(`c${i}`);
+    const st = cached.stats();
+    check('size never exceeds max', st.size === 4, JSON.stringify(st));
+    check('the overflow is counted as evictions', st.evictions === 6, JSON.stringify(st));
+    check('and none of it was swept (nothing had expired)', st.swept === 0, JSON.stringify(st));
+  }
+  {
+    // 8d. ★★ THE ACTUAL BUG, END TO END. Sixteen DISTINCT keys through a map of
+    //     10, the first six long expired before the rest arrive — exactly the
+    //     crawler shape. The falsifiable claim is `evictions === 0`: reclaiming
+    //     the six corpses means the cap never has to throw out a LIVE entry.
+    //     Before the sweep this same sequence evicted six live entries and kept
+    //     ten dead ones, which is the memory profile measured on the box.
+    const { load } = countingLoader();
+    const cached = withTtlCache(load, (k: string) => k, { ttlMs: 30, max: 10 });
+    for (let i = 0; i < 6; i++) await cached(`old${i}`);
+    await sleep(60);
+    for (let i = 0; i < 10; i++) await cached(`new${i}`);
+    const st = cached.stats();
+    check('★★ all six dead entries were reclaimed', st.swept === 6, JSON.stringify(st));
+    check('★★ so NO live entry was ever evicted', st.evictions === 0, JSON.stringify(st));
+    check('and the map holds exactly the ten live keys', st.size === 10, JSON.stringify(st));
+  }
+  {
+    // 8e. `stats()` itself: a counter snapshot, and `inFlight` reflects a real
+    //     in-flight miss (the number `size` alone cannot show).
+    const { load } = countingLoader(40);
+    const cached = withTtlCache(load, (k: string) => k, { ttlMs: 10_000, max: 10 });
+    const pending = cached('slow');
+    const during = cached.stats();
+    check('a miss in progress is visible as inFlight', during.inFlight === 1, JSON.stringify(during));
+    check('and is not yet resident', during.size === 0, JSON.stringify(during));
+    await pending;
+    const after = cached.stats();
+    check('once resolved it is resident and no longer in flight', after.size === 1 && after.inFlight === 0, JSON.stringify(after));
   }
 }
 

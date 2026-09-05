@@ -8,6 +8,7 @@ import type { MarketPrice } from '@/blog/features/creator-tokens/types';
 import { usdPrice } from '@/blog/features/creator-tokens/market/format';
 import styles from './post-card.module.css';
 import { buyWordFor } from '@/blog/features/creator-tokens/market/market-health';
+import { useIntentPrefetch } from '@/blog/components/intent-prefetch';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -123,6 +124,24 @@ export default function IdentityPill({ handle, price, luminosity }: IdentityPill
   const profileHref = `/@${handle}`;
   const hasMarket = priceLabel !== null && buyWord !== null;
 
+  /*
+   * ★★ THE FACE AND THE HANDLE WARM THE PROFILE THEY BOTH POINT AT (2026-09-05,
+   * snappiness phase 4b). This is the click the owner measured as the slow one:
+   * a byline in the feed goes to a page whose server render is an account read
+   * plus that account's first page of posts, and a client-side navigation pays
+   * every millisecond of it AFTER the press with nothing moving on screen. A
+   * pointer resting 80 ms on either half of this cluster prefetches that route
+   * in full, so the press lands on a page already in the router cache.
+   *
+   * ONE hook for both links, because they are one destination: the module-level
+   * once-a-minute guard in `intent-prefetch.tsx` is keyed by href, so sliding off
+   * the picture and onto the name (they overlap by 16 px) re-arms the timer but
+   * cannot fire a second render. The market half is NOT wired: `/creators/…` is
+   * a different, cheaper page and no one asked for it — a prefetch there would be
+   * cost with no measured complaint behind it.
+   */
+  const profileIntent = useIntentPrefetch(profileHref);
+
   return (
     <span className={styles.idCluster} data-testid="identity-pill">
       {/* The face. Decorative to assistive tech (see the tab-stop note above) —
@@ -136,6 +155,7 @@ export default function IdentityPill({ handle, price, luminosity }: IdentityPill
         style={luminosity ? ({ '--l': luminosity } as React.CSSProperties) : undefined}
         tabIndex={-1}
         aria-hidden="true"
+        {...profileIntent}
       >
         <UserAvatarImg username={handle} pixelSize={40} alt="" />
       </Link>
@@ -146,6 +166,7 @@ export default function IdentityPill({ handle, price, luminosity }: IdentityPill
           className={styles.idHandle}
           aria-label={`Profile of ${handle}`}
           data-testid="identity-pill-profile"
+          {...profileIntent}
         >
           @{handle}
         </Link>

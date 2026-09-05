@@ -83,6 +83,43 @@ check(
     .clampedFrom === undefined
 );
 
+// 3b. THE BOUNDARY ITSELF, ONE MILLISECOND EITHER SIDE. `raw < FLOOR` is the
+//     whole clamp, and every check above holds just as well if that `<` is
+//     rewritten as `<=` (or as `raw !== FLOOR`, or flipped): 4000 still clamps
+//     and 30000 still does not. These three values are the only ones that tell
+//     those apart — FLOOR-1 must be raised AND reported, FLOOR and FLOOR+1 must
+//     be honoured untouched. Written as ONE resolve per value so a failure names
+//     which side of the boundary moved.
+const belowFloor = resolveRecsysTimeoutMs({
+  RECSYS_FEED_TIMEOUT_MS: String(RECSYS_FEED_TIMEOUT_FLOOR_MS - 1)
+});
+check(
+  'one millisecond below the floor is raised to the floor',
+  belowFloor.timeoutMs === RECSYS_FEED_TIMEOUT_FLOOR_MS
+);
+check(
+  'one millisecond below the floor reports the exact value it was raised from',
+  belowFloor.clampedFrom === RECSYS_FEED_TIMEOUT_FLOOR_MS - 1
+);
+
+const atFloor = resolveRecsysTimeoutMs({
+  RECSYS_FEED_TIMEOUT_MS: String(RECSYS_FEED_TIMEOUT_FLOOR_MS)
+});
+check(
+  'the floor itself resolves to exactly itself',
+  atFloor.timeoutMs === RECSYS_FEED_TIMEOUT_FLOOR_MS
+);
+check('the floor itself carries no clamp report', atFloor.clampedFrom === undefined);
+
+const aboveFloor = resolveRecsysTimeoutMs({
+  RECSYS_FEED_TIMEOUT_MS: String(RECSYS_FEED_TIMEOUT_FLOOR_MS + 1)
+});
+check(
+  'one millisecond above the floor is honoured exactly',
+  aboveFloor.timeoutMs === RECSYS_FEED_TIMEOUT_FLOOR_MS + 1
+);
+check('one millisecond above the floor is not reported as clamped', aboveFloor.clampedFrom === undefined);
+
 // 4. NO VALUE CAN EVER PRODUCE A ZERO OR NaN TIMEOUT. `setTimeout(NaN)` fires
 //    immediately, which would abort every recsys call before it left the box -
 //    strictly worse than having no override at all.

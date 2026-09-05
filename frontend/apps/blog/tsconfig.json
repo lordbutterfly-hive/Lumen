@@ -7,6 +7,15 @@
       "@/blog/*": [
         "./*"
       ],
+      "// note": [
+        "The two @hive/common-hiveio-packages entries below are TYPE-ONLY PLUMBING FOR test:unit (2026-09-05). This project resolves with moduleResolution Bundler, which reads that package's `exports` map; the test:unit harness overrides moduleResolution to `node` (node10), which ignores `exports` entirely, so every one of the 20+ lib modules that `import type { Entry } from '@hive/common-hiveio-packages/wax'` failed to compile with TS2307 and could never be unit-tested. These paths point at exactly the files that package's `exports` map already points at, so they are a no-op for the build and a fix for the harness."
+      ],
+      "@hive/common-hiveio-packages": [
+        "../../packages/common-hiveio-packages/src/index.ts"
+      ],
+      "@hive/common-hiveio-packages/wax": [
+        "../../packages/common-hiveio-packages/src/wax/index.ts"
+      ],
       "@smart-signer/*": [
         "../../packages/smart-signer/*"
       ],

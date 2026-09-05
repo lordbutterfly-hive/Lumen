@@ -1958,6 +1958,7 @@
     "no_posts_for_tag": "Nobody has posted under #{{tag}} yet."
   },
   "topic_page": {
+    "building_hint": "Ranking this topic is still warming up. Showing the newest posts meanwhile.",
     "masthead": {
       "eyebrow": "Topic",
       "ranked_for_you": "Ranked for you",

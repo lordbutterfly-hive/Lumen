@@ -714,4 +714,8 @@
     "trending_posts": "トレンド投稿",
     "muted_posts": "ミュートされた投稿"
   }
+,
+  "topic_page": {
+    "building_hint": "このトピックのランキングはまだ準備中です。その間は新しい順に表示しています。"
+  }
 }

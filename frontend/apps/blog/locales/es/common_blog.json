@@ -714,4 +714,8 @@
     "trending_posts": "publicaciones de tendencia",
     "muted_posts": "publicaciones silenciadas"
   }
+,
+  "topic_page": {
+    "building_hint": "La clasificación de este tema todavía se está preparando. Mientras tanto, mostramos las publicaciones más recientes."
+  }
 }

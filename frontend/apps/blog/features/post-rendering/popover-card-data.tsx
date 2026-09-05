@@ -118,7 +118,22 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
         <>
           {/* Header with avatar and name */}
           <div className="flex items-start gap-3 border-b border-border p-4">
-            <BasePathLink href={`/@${author}`} data-testid="popover-card-user-avatar">
+            {/* ★★ THE AUTHOR CARD'S THREE LINKS ALL WARM THE SAME PROFILE
+                (2026-09-05, snappiness phase 4b). This card is the app's other
+                route into a profile, and by the time it is on screen the reader
+                has already clicked once to open it — so a pointer resting on the
+                face or the name here is about as strong a signal of intent as the
+                product gets. `prefetchOnIntent` applies the same rules as every
+                other intent link: 80 ms of rest, at most one prefetch per href per
+                minute (so the three links below share one, not three), never on a
+                touch device, never for the page already open. See
+                components/intent-prefetch.tsx for what a profile prefetch costs
+                and why it is bounded. */}
+            <BasePathLink
+              href={`/@${author}`}
+              data-testid="popover-card-user-avatar"
+              prefetchOnIntent
+            >
               <Avatar className="h-14 w-14 ring-2 ring-border">
                 <AvatarImage
                   className="h-full w-full object-cover"
@@ -142,6 +157,7 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
                    `text-foreground` (audit §5.3). */
                 className="block text-base font-semibold text-ink-2 hover:text-destructive"
                 data-testid="popover-card-user-name"
+                prefetchOnIntent
               >
                 {account.profile?.name || author}
               </BasePathLink>
@@ -150,6 +166,7 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
                   href={`/@${author}`}
                   className="text-sm text-muted-foreground hover:text-destructive"
                   data-testid="popover-card-user-nickname"
+                  prefetchOnIntent
                 >
                   @{author}
                 </BasePathLink>

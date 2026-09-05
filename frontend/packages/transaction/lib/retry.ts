@@ -64,23 +64,107 @@ const TRANSPORT_FAULT =
   /ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EPIPE|socket hang up|fetch failed|network error|request timed out|timed out|aborted/i;
 
 /**
+ * ★★★ THE REASON IS BURIED, SO THE PREDICATE HAS TO DIG (2026-09-05).
+ *
+ * This used to read the TOP-LEVEL error only, which is exactly the bug
+ * `smart-signer/lib/hive-network-error.ts` was written to fix on the other side
+ * of the app: wax does not surface the transport failure, it WRAPS it, and the
+ * thing that actually carried `ETIMEDOUT` on this box was an `AggregateError`
+ * two levels down from a `WaxUnknownRequestError`. A top-level read of that sees
+ * a message with no `ECONNRESET` in it anywhere and calls it permanent.
+ *
+ * What that costs is not an extra 150ms. `getProfileInfo` (hive-api.ts) is
+ * wrapped in `withRetry`, and its caller `getAccountFull` swallows a failure
+ * with `.catch(() => null)` into `follower_count: 0, following_count: 0,
+ * reputation: 25`. So a single wrapped reset does not show up as an error at
+ * all: the profile renders with a plausible-looking WRONG follower count, and
+ * that render is then held by the edge for up to 5 minutes for every anonymous
+ * reader. A silently wrong number is the worst outcome available here, which is
+ * why this is worth fixing whether or not connection reuse is ever switched on
+ * (`apps/blog/lib/http-keepalive.ts`) -- reuse only makes a stale-socket reset
+ * more likely, it does not create the class.
+ *
+ * ★ WHY THIS DOES NOT JUST CALL `isHiveNetworkError`. Two reasons, and the
+ * second is the load-bearing one:
+ *   1. That module imports the endpoint-rotation machinery and a logger at its
+ *      top level, so importing it here would drag both into every consumer of a
+ *      dependency-free 100-line file.
+ *   2. Its pattern list matches a BARE `/timeout/i`, on purpose, because for a
+ *      login "we could not reach the node" is the only question. Here it is not:
+ *      this module's whole doc comment above is about `NOT_TRANSIENT`, i.e. that
+ *      Hivemind's Postgres statement timeout is an ANSWER and retrying it costs
+ *      a reader ~12.4s to learn nothing. Sharing the predicate would re-introduce
+ *      precisely the bug that regex was added to kill.
+ * So the SHAPE is copied (walk `cause`, follow `AggregateError.errors`, cap the
+ * depth, read wax's `type` as well as `name`) and the RULES stay this module's
+ * own. If the shape ever needs to change, both files change together.
+ *
+ * ★ EXCLUSIONS WIN ACROSS THE WHOLE CHAIN, not just at the level they appear.
+ * `NOT_TRANSIENT` is checked over every level FIRST, so a statement timeout
+ * cannot be dragged back into "retry me" by some outer wrapper whose generic
+ * message happens to say "fetch failed".
+ *
+ * ★ AN HTTP STATUS STILL SHORT-CIRCUITS AT THE LEVEL THAT CARRIES IT. A node
+ * that answered 404 has answered; walking deeper to find a transport-shaped word
+ * would turn "no such community" into three slow 404s.
+ */
+const MAX_CAUSE_DEPTH = 5;
+
+/** Every error in the `cause` / `AggregateError.errors` tree, shallowest first. */
+function causeChain(error: unknown, depth = 0, seen = new Set<unknown>()): unknown[] {
+  if (error === null || error === undefined) return [];
+  if (depth >= MAX_CAUSE_DEPTH) return [];
+  // A `cause` that points back at an ancestor would otherwise spin until the
+  // depth cap; cheap to make impossible rather than merely bounded.
+  if (typeof error === 'object' && seen.has(error)) return [];
+  if (typeof error === 'object') seen.add(error);
+
+  const chain: unknown[] = [error];
+  const aggregated = (error as { errors?: unknown[] }).errors;
+  if (Array.isArray(aggregated)) {
+    for (const nested of aggregated) chain.push(...causeChain(nested, depth + 1, seen));
+  }
+  chain.push(...causeChain((error as { cause?: unknown }).cause, depth + 1, seen));
+  return chain;
+}
+
+/**
+ * The text one level is matched on. `name` and wax's `type` are included because
+ * wax reports its class as `type` ("WaxRequestTimeoutError") while `name` stays
+ * the generic "WaxError" -- the same reasoning `hive-network-error.ts` records.
+ * `code` is included because a bare `ECONNRESET` often lives only there.
+ */
+function errorText(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const waxType = (error as { type?: unknown }).type;
+  const code = (error as NodeJS.ErrnoException).code ?? '';
+  return `${error.name}: ${typeof waxType === 'string' ? `${waxType}: ` : ''}${error.message} ${code}`;
+}
+
+/**
  * True when the failure carries no information about the request itself — i.e. retrying
  * could plausibly produce a different answer.
  */
 export function isTransient(error: unknown): boolean {
   if (error === null || error === undefined) return false;
 
-  const status = (error as { status?: number; statusCode?: number; response?: { status?: number } });
-  const code = status.status ?? status.statusCode ?? status.response?.status;
-  if (typeof code === 'number') {
-    // 5xx is the upstream failing to answer. 4xx is the upstream answering.
-    if (code >= 500) return true;
-    if (code >= 400) return false;
+  const chain = causeChain(error);
+
+  // Exclusions first and across the whole chain. See the doc comment.
+  if (chain.some((level) => NOT_TRANSIENT.test(errorText(level)))) return false;
+
+  for (const level of chain) {
+    const status = level as { status?: number; statusCode?: number; response?: { status?: number } };
+    const code = status.status ?? status.statusCode ?? status.response?.status;
+    if (typeof code === 'number') {
+      // 5xx is the upstream failing to answer. 4xx is the upstream answering.
+      if (code >= 500) return true;
+      if (code >= 400) return false;
+    }
+    if (TRANSPORT_FAULT.test(errorText(level))) return true;
   }
 
-  const message = error instanceof Error ? `${error.message} ${(error as NodeJS.ErrnoException).code ?? ''}` : String(error);
-  if (NOT_TRANSIENT.test(message)) return false;
-  return TRANSPORT_FAULT.test(message);
+  return false;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

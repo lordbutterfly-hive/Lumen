@@ -719,4 +719,8 @@
     "trending_posts": "trendingowe posty",
     "muted_posts": "wyciszone posty"
   }
+,
+  "topic_page": {
+    "building_hint": "Ranking tego tematu wciąż się przygotowuje. W międzyczasie pokazujemy najnowsze wpisy."
+  }
 }

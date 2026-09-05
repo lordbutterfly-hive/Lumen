@@ -714,4 +714,8 @@
     "trending_posts": "趋势帖子",
     "muted_posts": "静音帖子"
   }
+,
+  "topic_page": {
+    "building_hint": "该话题的排序仍在准备中。暂时按最新发布顺序显示。"
+  }
 }

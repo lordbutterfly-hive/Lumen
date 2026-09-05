@@ -275,6 +275,9 @@ importers:
       tailwind-merge:
         specifier: ^1.13.2
         version: 1.14.0
+      undici:
+        specifier: ^6.28.1
+        version: 6.28.1
       usehooks-ts:
         specifier: ^3.1.0
         version: 3.1.0(react@18.3.0)
@@ -10589,6 +10592,10 @@ packages:
 
   undici-types@7.29.0:
     resolution: {integrity: sha512-vamA8dGlzMwhpyYpQp9d8vka3o4D/yn5I7ez7Or+msDA4bZ8Uh+Zy91WvWf3I73gDAkFha9JcYRqm2li0Npfgg==}
+
+  undici@6.28.1:
+    resolution: {integrity: sha512-zWpdTVD54H48CIybL0rWQ3ukpb9d23wM7eH5RtfdmeP70cWHNjtfo7P4vZX+5CoDcO53J4Pu5uXp7lNfjc6DRA==}
+    engines: {node: '>=18.17'}
 
   unicode-canonical-property-names-ecmascript@2.0.1:
     resolution: {integrity: sha512-dA8WbNeb2a6oQzAQ55YlT5vQAWGV9WXOsi3SskE3bcCdM0P4SDd+24zS/OCacdRq5BkdsRj9q3Pg6YyQoxIGqg==}
@@ -23411,6 +23418,8 @@ snapshots:
 
   undici-types@7.29.0:
     optional: true
+
+  undici@6.28.1: {}
 
   unicode-canonical-property-names-ecmascript@2.0.1: {}
 

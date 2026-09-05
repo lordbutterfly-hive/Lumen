@@ -714,4 +714,8 @@
     "trending_posts": "posts tendances",
     "muted_posts": "posts muets"
   }
+,
+  "topic_page": {
+    "building_hint": "Le classement de ce sujet est encore en cours de préparation. En attendant, voici les publications les plus récentes."
+  }
 }

@@ -58,6 +58,64 @@
  * answering from the value we already hold and refresh it BEHIND the reader. The
  * freshness contract is unchanged in kind — a caller already declared how stale
  * this value may be — and only the reader's wait is removed.
+ *
+ * ★★★ WHY EXPIRY NOW SWEEPS, AND WHY `max: 500` WAS THE WRONG DEFAULT
+ * (measured on the prod box 2026-09-05).
+ *
+ * Everything above reasons about a value's LIFETIME and nothing about its
+ * RESIDENCY, and those stopped being the same thing. Two assumptions baked into
+ * the 500-entry defaults both broke:
+ *
+ *  · **One process.** These maps are per-process by design (property 4), and the
+ *    box now runs THREE cluster workers, so every bound below is really three
+ *    times itself. A 500-entry cap is a 1500-entry cap.
+ *
+ *  · **Warm repeat traffic.** A cap only bounds what a cache HOLDS; the TTL was
+ *    doing the actual shrinking, on the assumption that readers keep coming back
+ *    to the same keys. Crawler traffic has no repeats: measured 2026-09-05,
+ *    ~870 profile renders/hour across 868 DISTINCT accounts and ~2200 post-page
+ *    requests per 10 minutes across distinct posts. Every key is a miss, every
+ *    miss stores, and NOTHING reads it again.
+ *
+ * The consequence is the bug: an entry that expired 50 seconds ago was still
+ * RESIDENT, because the only two things that ever removed one were a READ past
+ * `staleUntil` and insertion-order eviction at `max`. A key nobody reads twice
+ * gets neither. So each map filled to its cap with dead values and stayed there
+ * — worker RSS grew 540 MB at start to 1.08-1.35 GB within 80 minutes, on a
+ * 7.9 GB box also carrying a 2.4 GB ranker.
+ *
+ * The fix is in two halves, and only the first one is in this file:
+ *
+ *  6. **Expiry now costs memory, not just a read.** An insert that actually
+ *     STORES a value, landing with the map past `max/2`, sweeps entries whose
+ *     `staleUntil` has already passed. This is deliberately NOT a timer: no
+ *     `setInterval` to leak, no work on an idle process, and the sweep runs
+ *     exactly when the map is growing.
+ *
+ *     ★ "THAT ACTUALLY STORES" IS LOAD-BEARING, not a quibble. `store` returns
+ *     early when `shouldCache` rejects a value, BEFORE the sweep — so a cache
+ *     being hammered with results it refuses to keep (an upstream returning
+ *     empty pages, say) never sweeps at all. That is the right trade, since such
+ *     a cache is not growing either, but it does mean the sweep is driven by
+ *     successful writes and NOT by request volume. A cache that has stopped
+ *     storing has also stopped reclaiming, and its residents age out only on a
+ *     read past `staleUntil`, exactly as before this change.
+ *
+ *     The walk is bounded by `max` for free: `store` restores `size <= max`
+ *     before it returns, so the map can never hold more than `max` entries to
+ *     walk. It stops earlier than that in the ordinary case, the moment `size`
+ *     is back under `max/2`.
+ *
+ *     ★ SEMANTICS ARE UNCHANGED, and that is the whole safety argument: the
+ *     sweep deletes ONLY entries past `staleUntil`, which is precisely what the
+ *     read path already does to such an entry (`fresh.delete(key)` below). It
+ *     can never drop a fresh value or one inside its stale window, so no reader
+ *     sees a miss it would not have seen anyway. It changes WHEN the delete
+ *     happens, never WHETHER.
+ *
+ *     The second half is in `cached-api.ts`: caps re-derived from each TTL and
+ *     the measured request rate, because a sweep cannot help a value that is
+ *     still fresh and still unread.
  */
 
 export interface TtlCacheOptions<T> {
@@ -104,9 +162,31 @@ export interface TtlCacheOptions<T> {
  * A `withTtlCache` result: callable exactly like the wrapped loader, plus a
  * `.set` escape hatch — see its own doc comment below for why it exists.
  */
+export interface TtlCacheStats {
+  /** Entries currently resident (fresh, stale-servable, and not-yet-swept). */
+  size: number;
+  /** Entries in flight right now — a miss others are sharing. */
+  inFlight: number;
+  /** How many inserts ran a sweep (i.e. landed with the map past `max/2`). */
+  sweeps: number;
+  /** Entries removed by those sweeps because they were past `staleUntil`. */
+  swept: number;
+  /** Entries removed by the hard insertion-order bound at `max`. */
+  evictions: number;
+}
+
 export interface TtlCache<A extends unknown[], T> {
   (...args: A): Promise<T>;
   set(key: string, value: T): void;
+  /**
+   * A cheap read-only counter snapshot — no iteration, just the running totals
+   * plus `Map.size`. It exists so "is this cache actually bounded in prod?" is
+   * answerable without a heap snapshot: `swept` climbing while `size` sits well
+   * under `max` is the sweep working; `size` pinned AT `max` with `evictions`
+   * climbing means the cap, not expiry, is doing the bounding and the cap is
+   * too small for the traffic.
+   */
+  stats(): TtlCacheStats;
 }
 
 /**
@@ -130,6 +210,63 @@ export function withTtlCache<A extends unknown[], T>(
   };
 
   /**
+   * The level the sweep triggers at AND stops at. Half the cap, so a map only
+   * pays for a sweep once it is genuinely filling, and a sweep that reaches this
+   * level has already freed enough to stop walking.
+   *
+   * ★ `max` can be 1 (nothing in the app does this, a test may): `Math.max(1, …)`
+   * keeps the threshold at least 1 so `size > halfMax` cannot be true for an
+   * empty map and the sweep is never entered with nothing to do.
+   */
+  const halfMax = Math.max(1, Math.floor(max / 2));
+  const counters = { sweeps: 0, swept: 0, evictions: 0 };
+
+  /**
+   * ★ REMOVE WHAT EXPIRY ALREADY KILLED (2026-09-05) — see this file's header
+   * for the measurement that made it necessary.
+   *
+   * Deletes ONLY entries past `staleUntil`, i.e. exactly the ones the read path
+   * would delete on sight, so this is a change of TIMING and never of meaning.
+   * Two independent bounds keep an insert cheap:
+   *
+   *  · the walk can never exceed `max` entries, because `store` re-establishes
+   *    `size <= max` before returning, so that is the map's hard size;
+   *  · it stops the moment `size` is back under `halfMax`, which is the exit the
+   *    ordinary case takes.
+   *
+   * ★ WHAT IS **NOT** GUARANTEED, AND WAS ONCE CLAIMED HERE: that insertion
+   * order tracks expiry order, i.e. that the dead entries sit at the FRONT. It
+   * does not, for two independent reasons. `Map.set` on an EXISTING key updates
+   * the value and KEEPS the key's original position, so a refreshed entry stays
+   * wherever it first landed while carrying a brand-new, later `staleUntil` — a
+   * live entry parked at the front. And `ttlFor` lets one cache mint different
+   * lifetimes per value (`getAccountFullCached` gives an absence 10s and a real
+   * account 30s), so even first-insert order is not expiry order there.
+   *
+   * The consequence is only about WORK, never about correctness: a sweep may
+   * walk past live entries before reaching a dead one, and in the worst case
+   * walks the whole map and frees nothing. Both bounds above still hold, and the
+   * `staleUntil > now` test below is what makes the outcome safe regardless of
+   * the order the walk happens to see.
+   *
+   * Deleting during `for…of` over a Map is well-defined: the iterator visits
+   * each remaining key once and is unaffected by removals at or behind it.
+   */
+  const sweepExpired = (now: number): void => {
+    if (fresh.size <= halfMax) return;
+    counters.sweeps++;
+    // No explicit walk counter: `store` guarantees `size <= max` on entry, so
+    // this loop is already bounded by `max` and a second guard would be dead
+    // code pretending to be a safety net.
+    for (const [key, entry] of fresh) {
+      if (entry.staleUntil > now) continue;
+      fresh.delete(key);
+      counters.swept++;
+      if (fresh.size <= halfMax) break;
+    }
+  };
+
+  /**
    * The one place a value is written into `fresh`. Shared by the ordinary load
    * path below and by `.set` (added 2026-09-05, see its own doc comment) so
    * there remains exactly one place deciding whether a value is worth storing
@@ -139,12 +276,22 @@ export function withTtlCache<A extends unknown[], T>(
    */
   const store = (key: string, value: T): void => {
     if (!keep(value)) return;
-    const expires = Date.now() + (ttlFor ? ttlFor(value) : ttlMs);
+    const now = Date.now();
+    // Reclaim the already-dead before adding to the pile. Ordered BEFORE the
+    // insert so a fresh value is never a sweep candidate in its own write, and
+    // so the hard bound below only ever evicts when the map is genuinely full of
+    // LIVE entries rather than of corpses.
+    sweepExpired(now);
+    const expires = now + (ttlFor ? ttlFor(value) : ttlMs);
     fresh.set(key, { value, expires, staleUntil: expires + Math.max(0, staleFor(value)) });
+    // The hard bound stays exactly as it was: the sweep is an optimisation on
+    // top of it, never a replacement for it. If every entry is still live, this
+    // is what keeps the map finite.
     while (fresh.size > max) {
       const oldest = fresh.keys().next().value;
       if (oldest === undefined) break;
       fresh.delete(oldest);
+      counters.evictions++;
     }
   };
 
@@ -223,6 +370,15 @@ export function withTtlCache<A extends unknown[], T>(
    * a load, so there is nothing to single-flight and nothing pending to mark.
    */
   cached.set = store;
+
+  /** See `TtlCacheStats` — counters only, no iteration, safe to call anywhere. */
+  cached.stats = (): TtlCacheStats => ({
+    size: fresh.size,
+    inFlight: inFlight.size,
+    sweeps: counters.sweeps,
+    swept: counters.swept,
+    evictions: counters.evictions
+  });
 
   return cached;
 }
