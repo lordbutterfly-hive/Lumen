@@ -2,15 +2,18 @@
 
 import PageShell from '@/blog/features/layouts/page-shell';
 import SearchResults from '@/blog/features/search/search-results';
+import PeopleResults from '@/blog/features/search/people-results';
+import SearchScopeTabs from '@/blog/features/search/search-scope-tabs';
 import { useTranslation } from '@/blog/i18n/client';
-import { SearchSort } from '@ui/hooks/use-search';
+import { SearchScope, SearchSort } from '@ui/hooks/use-search';
 
 interface SearchContentProps {
   query: string | undefined;
   sort: SearchSort;
+  scope: SearchScope;
 }
 
-const SearchContent = ({ query, sort }: SearchContentProps) => {
+const SearchContent = ({ query, sort, scope }: SearchContentProps) => {
   const { t } = useTranslation('common_blog');
   return (
     // ★ THE LUMEN SHELL, NOT A BARE COLUMN (2026-08-08). Search rendered as a
@@ -37,11 +40,17 @@ const SearchContent = ({ query, sort }: SearchContentProps) => {
       {!query ? (
         <p className="py-10 text-center font-sans text-sm text-muted-foreground">
           {t('search_page.start_prompt', {
-            defaultValue: 'Search Hive posts. Type in the field at the top and press Enter.'
+            defaultValue: 'Search Hive posts and people. Type in the field at the top and press Enter.'
           })}
         </p>
       ) : (
-        <SearchResults query={query} sort={sort} />
+        <>
+          {/* ★ POSTS | PEOPLE (2026-09-05). The scope is `t=` in the URL, read by
+              page.tsx, so the tabs are plain links and the header field keeps
+              driving the route exactly as the ruling above requires. */}
+          <SearchScopeTabs query={query} scope={scope} sort={sort} />
+          {scope === 'people' ? <PeopleResults query={query} /> : <SearchResults query={query} sort={sort} />}
+        </>
       )}
     </PageShell>
   );

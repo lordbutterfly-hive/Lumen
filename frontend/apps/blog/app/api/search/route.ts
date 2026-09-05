@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { getByText } from '@transaction/lib/hive-api';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
+import { hivesenseSearchPosts } from '@/blog/lib/search/hivesense-search';
 
 const logger = getLogger('app');
 
@@ -30,15 +31,56 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'pattern_required' }, { status: 400 });
   }
   try {
-    const results = await getByText({
-      pattern,
-      sort,
-      author,
-      limit,
-      observer,
-      start_author: startAuthor,
-      start_permlink: startPermlink
-    });
+    let results;
+    try {
+      results = await getByText({
+        pattern,
+        sort,
+        author,
+        limit,
+        observer,
+        start_author: startAuthor,
+        start_permlink: startPermlink
+      });
+    } catch (error) {
+      /**
+       * ★ A SECOND BACKEND FOR THE FIRST PAGE (2026-09-05). Hivemind's search
+       * plugin runs on two of the six nodes in the fallback list and `getByText`
+       * is deliberately not retried across nodes (see its own doc), so a search
+       * outage was total. Hivesense (api.hive.blog, a different service on a
+       * different node) is tried before giving up, with three limits:
+       *   * never for the deterministic statement timeout: that one is the
+       *     reader asking for "Newest" on a broad word, and the page has copy
+       *     for it that a 10s semantic detour would only delay;
+       *   * never for a later page: a fallback list has no cursor, so answering
+       *     page 2 from it would duplicate or replace what is already on screen
+       *     (`search-results.tsx` keeps loaded results on a failed `fetchNextPage`);
+       *   * never for an author-scoped search, which Hivesense cannot express.
+       * If the fallback fails too, the ORIGINAL error is what gets classified
+       * and logged, so the log says what actually broke.
+       */
+      const firstPage = !startAuthor && !startPermlink;
+      if (firstPage && !author && !isStatementTimeout(error)) {
+        try {
+          // No `observer` on the fallback, deliberately: it only personalises
+          // mute/blacklist context, and Hivesense answers HTTP 400 for an observer
+          // it does not know (measured 2026-09-05 with `observer=Lumen_User`, which
+          // is also what made hivemind reject the first attempt). A fallback that
+          // fails for the same reason as the primary is not a fallback.
+          results = await hivesenseSearchPosts({ q: pattern, limit });
+          logger.warn('search: find_text failed for "%s", served %d Hivesense results instead', pattern, results.length);
+        } catch (fallbackError) {
+          logger.warn(
+            'search: Hivesense fallback failed too for "%s": %s',
+            pattern,
+            fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+          );
+          throw error;
+        }
+      } else {
+        throw error;
+      }
+    }
     const merged = await mergeLumenEngagement(results);
     return NextResponse.json(merged, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
@@ -59,11 +101,44 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
      * retry for exactly this case and keep it for everything else, instead of
      * having to give up retrying altogether.
      */
-    const detail = error instanceof Error ? error.message : String(error ?? '');
-    const isStatementTimeout = /57014|statement timeout|canceling statement/i.test(detail);
     return NextResponse.json(
-      { error: isStatementTimeout ? 'search_timeout' : 'search_unavailable' },
+      { error: isStatementTimeout(error) ? 'search_timeout' : 'search_unavailable' },
       { status: 502 }
     );
   }
+}
+
+/**
+ * Both spellings of the same abort: api.hive.blog forwards Postgres `57014`
+ * "canceling statement due to statement timeout"; api.openhive.network answers
+ * `result: null`, which `getByText` now rethrows with "statement timeout" in
+ * the message so this one test covers both nodes.
+ */
+function isStatementTimeout(error: unknown): boolean {
+  return /57014|statement timeout|canceling statement/i.test(errorDetail(error));
+}
+
+/**
+ * ★ THE CODE IS NOT IN THE MESSAGE (found 2026-09-05 on the dev box, which reads
+ * api.hive.blog). wax wraps a JSON-RPC error as `WaxUnknownRequestError` whose
+ * MESSAGE is only "Received non 2xx-3xx http response code ... #502"; the
+ * Postgres `57014` body lives on `error.response.response.error`. Testing the
+ * message alone therefore never matched on that node, and the Newest timeout
+ * fell through to a 10s Hivesense detour before answering `search_unavailable`
+ * (measured 15.8s). Only the RESPONSE half is read, never `request.data`: that
+ * carries the reader's own pattern, and a search for the words "statement
+ * timeout" must not classify itself as one.
+ */
+function errorDetail(error: unknown): string {
+  if (!(error instanceof Error)) return String(error ?? '');
+  const response = (error as { response?: { response?: unknown } }).response;
+  let body = '';
+  if (response && typeof response === 'object') {
+    try {
+      body = JSON.stringify(response.response ?? response).slice(0, 4000);
+    } catch {
+      body = '';
+    }
+  }
+  return `${error.message} ${body}`;
 }

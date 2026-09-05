@@ -39,9 +39,22 @@ import Big from 'big.js';
  * why caching was deliberately left for a later pass.
  */
 
-async function fetchJson<T>(url: string, errorLabel: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${errorLabel} request failed: HTTP ${res.status}`);
+async function fetchJson<T>(url: string, errorLabel: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    // ★ CARRY THE ROUTE'S OWN CODE (2026-09-05). Routes answer `{ error: 'search_timeout' }`
+    // and the like precisely so a caller can tell a deterministic failure from a blip;
+    // dropping the body here had left `search-results.tsx`'s retry predicate matching
+    // a message that never contained what it looked for. Read once, best effort.
+    let code = '';
+    try {
+      const body = (await res.json()) as { error?: unknown } | null;
+      if (body && typeof body.error === 'string') code = body.error;
+    } catch {
+      /* not JSON, nothing to add */
+    }
+    throw new Error(`${errorLabel} request failed: HTTP ${res.status}${code ? ` (${code})` : ''}`);
+  }
   return (await res.json()) as T;
 }
 
@@ -242,6 +255,35 @@ export interface SearchParams {
   start_permlink?: string;
   limit?: number;
 }
+/** Mirrors `SearchSuggestions` in `lib/search/suggest-rank.ts` (server); duplicated as a wire type so this browser module imports no server code. */
+export interface SearchSuggestionsWire {
+  accounts: Array<{ name: string; kind: 'hive' | 'lite'; displayName?: string }>;
+  tags: string[];
+}
+/**
+ * The header typeahead. `signal` is React Query's per-query AbortSignal, so a
+ * request for "phot" is cancelled the moment "photo" supersedes it, instead of
+ * both landing and the older one painting last.
+ */
+export function fetchSearchSuggestions(query: string, signal?: AbortSignal): Promise<SearchSuggestionsWire> {
+  return fetchJson(`/api/search/suggest?q=${encodeURIComponent(query)}`, 'search suggestions', { signal });
+}
+
+/** Mirrors `PersonResult` in `lib/search/people.ts` (server). */
+export interface SearchPersonWire {
+  name: string;
+  kind: 'hive' | 'lite';
+  displayName: string;
+  about: string;
+  reputation: number | null;
+  postCount: number | null;
+  followers: number | null;
+}
+export function fetchSearchPeople(query: string, mode: 'prefix' | 'topic'): Promise<SearchPersonWire[]> {
+  const params = new URLSearchParams({ q: query, mode });
+  return fetchJson(`/api/search/people?${params.toString()}`, 'search people');
+}
+
 export function fetchSearch(search: SearchParams): Promise<Entry[]> {
   const params = new URLSearchParams({ pattern: search.pattern });
   if (search.sort) params.set('sort', search.sort);

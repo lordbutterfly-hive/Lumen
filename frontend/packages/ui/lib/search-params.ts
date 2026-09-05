@@ -13,7 +13,15 @@ import { z } from 'zod';
  */
 export const searchParamsSchema = z.object({
   q: z.string().max(500, 'Search query too long').optional(),
-  s: z.enum(['relevance', 'created']).optional()
+  s: z.enum(['relevance', 'created']).optional(),
+  /**
+   * ★ THE SCOPE CAME BACK AS ONE PARAMETER, NOT FIVE MODES (2026-09-05). `t`
+   * says WHAT is listed (`posts`, the default, or `people`); `s` still says
+   * how posts are sorted. Unlike the removed `ai`/`a`/`p`, both values are
+   * produced by visible controls (the scope tabs on /search and the typeahead's
+   * "Search people for..." row) and read by one page.
+   */
+  t: z.enum(['posts', 'people']).optional()
 });
 
 export type SearchParams = z.infer<typeof searchParamsSchema>;
@@ -25,7 +33,8 @@ export type SearchParams = z.infer<typeof searchParamsSchema>;
 export function parseSearchParams(params: Record<string, string | string[] | undefined>): SearchParams {
   const normalized = {
     q: typeof params.q === 'string' ? params.q : undefined,
-    s: typeof params.s === 'string' ? params.s : undefined
+    s: typeof params.s === 'string' ? params.s : undefined,
+    t: typeof params.t === 'string' ? params.t : undefined
   };
 
   const result = searchParamsSchema.safeParse(normalized);
@@ -41,6 +50,9 @@ export function parseSearchParams(params: Record<string, string | string[] | und
   if (!errors.q && normalized.q) validParams.q = normalized.q;
   if (!errors.s && (normalized.s === 'relevance' || normalized.s === 'created')) {
     validParams.s = normalized.s;
+  }
+  if (!errors.t && (normalized.t === 'posts' || normalized.t === 'people')) {
+    validParams.t = normalized.t;
   }
 
   return validParams;

@@ -969,6 +969,23 @@ export type ExtendedNodeApi = {
      * topics." permanently. Verified against api.hive.blog 2026-08-06.
      */
     get_trending_tags: TWaxApiRequest<(string | number)[], ITrendingTag[]>;
+    /**
+     * ★ ALSO HERE, NOT ON database_api (search typeahead, 2026-09-05). The
+     * `database_api.lookup_accounts` declared below answers the same Assert
+     * Exception as `get_trending_tags` did ("method_itr != api_itr->second.end()",
+     * verified against api.openhive.network 2026-09-05); hived only registers the
+     * prefix lookup on condenser_api. `[prefix, limit]`, names ascending, limit <= 1000.
+     */
+    lookup_accounts: TWaxApiRequest<[ /* lower_bound_name: */ string /*; limit: */, number ], string[]>;
+    /**
+     * Hivemind's raw reputation for accounts from `account_lower_bound` upward, in
+     * name order. Same window semantics as `lookup_accounts`; `reputation` is the
+     * raw integer `accountReputation()` turns into the badge number.
+     */
+    get_account_reputations: TWaxApiRequest<
+      [ /* account_lower_bound: */ string /*; limit: */, number ],
+      IAccountReputations[]
+    >;
     get_reblogged_by: TWaxApiRequest<[ /* author: */ string /*; permlink: */, string ], string[]>;
     get_followers: TWaxApiRequest<
       [ /* account: */ string /*; start: */, string /*; type: */, string /*; limit: */, number ],

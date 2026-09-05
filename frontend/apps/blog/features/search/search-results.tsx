@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo, useRef } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { Link, LumenLoader } from '@hive/ui';
 import { fetchSearch } from '@/blog/lib/chain-fetch';
@@ -23,6 +24,7 @@ import { useRankLuminosity, useRankMarks } from '@/blog/features/retention/hooks
 import NoDataError from '@/blog/components/no-data-error';
 import { PER_PAGE } from './lib/utils';
 import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
+import { rerankSearchPage } from '@/blog/lib/search/rerank';
 
 // Fallbacks for the same reason every label on this page carries one: SSR
 // resolves no translations in this app (see search-input.tsx), and the result
@@ -128,7 +130,8 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
       const message = error instanceof Error ? error.message : String(error ?? '');
       // Hivemind surfaces the abort as a 502 carrying the Postgres code; match on
       // either so a reworded upstream message still degrades to "retry once".
-      if (/57014|statement timeout|canceling statement/i.test(message)) return false;
+      // `search_timeout` is the route's own code for it (carried by `fetchJson` since 2026-09-05).
+      if (/search_timeout|57014|statement timeout|canceling statement/i.test(message)) return false;
       return failureCount < 1;
     },
     staleTime: StaleTime.MEDIUM
@@ -157,7 +160,16 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
   // after a conditional return corrupts hook order for the next render of this
   // list. See lib/nsfw.ts for the React #310 this exact pattern caused before.
   const nsfwPreference = useNsfwPreference();
-  const rawEntries = (data?.pages ?? []).flatMap((page) => page ?? []);
+  // ★ RE-RANKED PER PAGE FOR DISPLAY ONLY (2026-09-05). `getNextPageParam` above
+  // reads the cursor from the RAW page, so this never touches pagination; see
+  // `lib/search/rerank.ts` for the score and the measurement behind it. The
+  // clock is fixed for the life of this list so an entry's score, and thus the
+  // order, cannot drift between renders.
+  const rankedAt = useRef(Date.now());
+  const rawEntries = useMemo(
+    () => (data?.pages ?? []).flatMap((page) => rerankSearchPage(page ?? [], rankedAt.current)),
+    [data]
+  );
   const marks = useRankMarks(rawEntries.map((entry) => entry.author));
   /* One market read for the whole page (3 state keys per creator, chunked at 33
      inside the data source). Threaded to the cards exactly like `useRankMarks`

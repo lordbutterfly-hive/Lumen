@@ -6,6 +6,7 @@ import {
   IAccountReputations,
   IFeedHistory,
   IFollow,
+  IProfile,
   IVote,
   IVoteListItem
 } from '@hive/common-hiveio-packages/wax';
@@ -702,7 +703,63 @@ export const getByText = async ({
     start_author,
     start_permlink
   });
+  /**
+   * ★★ A `null` RESULT IS THE STATEMENT TIMEOUT, NOT AN EMPTY LIST (2026-09-05).
+   *
+   * api.hive.blog reports the Postgres `57014` abort as a JSON-RPC error (HTTP
+   * 502), which the caller classifies as `search_timeout`. api.openhive.network,
+   * the production read node, reports the SAME abort as `{"result": null}` with
+   * HTTP 200, after the same ~5.1s (measured 2026-09-05: `hive`, `bitcoin`,
+   * `hive engine` on sort=created, 3 of 3). `withoutBannedAuthors` below maps
+   * `null` to `[]`, so the reader was told "No results for hive" for the most
+   * common word on the chain, instead of the "too broad, try relevance" message
+   * the search page already has for exactly this failure. Throwing with the
+   * words the route's classifier looks for keeps that copy on one code path.
+   */
+  if (results === null || results === undefined) {
+    throw new Error('search_api.find_text returned null: statement timeout on the node');
+  }
   return withoutBannedAuthors(results, (entry) => entry.author);
+};
+
+/** Upstream's own bound for `lookup_accounts`; asking for more is a hived error. */
+const LOOKUP_ACCOUNTS_MAX = 1000;
+
+/**
+ * Account names that START WITH `prefix`, ascending, from hived's own index
+ * (`condenser_api.lookup_accounts`, ~140ms on api.openhive.network 2026-09-05).
+ * This is the typeahead's account source: it is the one call that answers
+ * "who is called something like this" without a hivemind scan.
+ *
+ * ★ hived returns names from the lower bound UPWARD, so past the last real
+ * prefix match the window continues with alphabetically later names
+ * (`["photo", ...]` then `"photocopy"`, then `"photz..."`). The prefix filter
+ * here is what makes the result mean "starts with", not "sorts after".
+ */
+export const lookupAccounts = async (prefix: string, limit: number): Promise<string[]> => {
+  const lower = (prefix ?? '').trim().toLowerCase();
+  if (!lower) return [];
+  const bounded = Math.max(1, Math.min(limit, LOOKUP_ACCOUNTS_MAX));
+  const names = await withRetry(
+    async () => (await getChain()).api.condenser_api.lookup_accounts([lower, bounded]),
+    { label: `lookup_accounts(${lower})` }
+  );
+  return (names ?? []).filter((name) => typeof name === 'string' && name.startsWith(lower));
+};
+
+/**
+ * One `bridge.get_profile`, raw. Deliberately NOT `getProfileInfo`: that one
+ * fans out into `bannedFollowEdges` (up to 12 extra calls per account, see
+ * `project_lumen_handoff_2026_09_05` §3.4), which is fine for one profile page
+ * and not for sixteen search results in parallel. Search only needs the fields
+ * on the profile itself; the follower count is displayed as the node reports it.
+ * Rejections propagate so a caller can drop the one account that failed rather
+ * than the whole list.
+ */
+export const getBridgeProfile = async (username: string): Promise<IProfile | null> => {
+  return withRetry(async () => (await getChain()).api.bridge.get_profile({ account: username }), {
+    label: `get_profile(${username})`
+  });
 };
 
 export const getActiveVotes = async (author: string, permlink: string): Promise<IVote[]> => {

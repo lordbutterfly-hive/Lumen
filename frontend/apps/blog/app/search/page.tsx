@@ -2,7 +2,7 @@ import SearchContent from './content';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
 import { parseSearchParams } from '@ui/lib/search-params';
 import { ObserverProvider } from '@/blog/components/observer-provider';
-import type { SearchSort } from '@ui/hooks/use-search';
+import type { SearchScope, SearchSort } from '@ui/hooks/use-search';
 
 interface SearchPageProps {
   searchParams: { [key: string]: string | string[] | undefined };
@@ -39,12 +39,15 @@ const SearchPage = async ({ searchParams }: SearchPageProps) => {
   const validatedParams = parseSearchParams(searchParams);
   const query = validatedParams.q;
   const sort: SearchSort = (validatedParams.s as SearchSort | undefined) ?? 'relevance';
+  // Same rule as the sort: an absent `t=` is Posts, so every pre-2026-09-05
+  // search URL keeps meaning what it meant.
+  const scope: SearchScope = (validatedParams.t as SearchScope | undefined) ?? 'posts';
 
   const observer = await getObserverFromCookies();
 
   return (
     <ObserverProvider value={observer}>
-      <SearchContent query={query} sort={sort} />
+      <SearchContent query={query} sort={sort} scope={scope} />
     </ObserverProvider>
   );
 };

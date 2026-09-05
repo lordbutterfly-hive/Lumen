@@ -175,6 +175,37 @@ export async function findNamesInUse(names: string[]): Promise<Set<string>> {
   return new Set(rows.map((r) => String(r.name).toLowerCase()));
 }
 
+/**
+ * Lite accounts whose handle STARTS WITH `prefix`, shortest first, for the
+ * search typeahead and the People tab (2026-09-05).
+ *
+ * ★ Only accounts a `/@name` link can open: `status = 'active'` (a suspended or
+ * banned handle must not be offered), `account_tier = 'lite'` with no Hive name
+ * (an upgraded user is found through their Hive account instead, and
+ * `liteAccountAsProfile` deliberately answers null for them, so `/@handle`
+ * would 404).
+ *
+ * The caller validates `prefix` against the Hive name charset before this runs
+ * (`accountPrefixOf`), which is what keeps `%` and `_` out of the LIKE pattern;
+ * the value is still bound as `$1`, never interpolated. `display_name` is
+ * citext, so the comparison is case-insensitive without a functional index.
+ */
+export async function searchLiteUsersByPrefix(prefix: string, limit: number): Promise<LumenUser[]> {
+  const clean = prefix.trim().toLowerCase();
+  if (!/^[a-z][a-z0-9.-]{0,15}$/.test(clean)) return [];
+  const { rows } = await query<UserRow>(
+    `${SELECT}
+      WHERE status = 'active'
+        AND account_tier = 'lite'
+        AND hive_account_name IS NULL
+        AND display_name LIKE ($1 || '%')
+      ORDER BY length(display_name::text), display_name
+      LIMIT $2`,
+    [clean, Math.max(1, Math.min(limit, 50))]
+  );
+  return rows.map(mapUser);
+}
+
 /** Batch id lookup — one query for a whole feed page, never one per post. */
 export async function findUsersByIds(userIds: string[]): Promise<LumenUser[]> {
   if (userIds.length === 0) return [];

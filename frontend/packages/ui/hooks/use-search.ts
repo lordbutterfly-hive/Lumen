@@ -3,7 +3,11 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useNavigationProgress } from '@ui/components/navigation-progress';
 
-export type SearchSort = 'created' | 'relevance';
+import { buildSearchHref, type SearchScope, type SearchSort } from '@ui/lib/search-href';
+
+/** `SearchSort` and `SearchScope` (what /search lists; posts needs no `t=`) live in `lib/search-href.ts`. */
+export type { SearchScope, SearchSort };
+export { buildSearchHref };
 
 /**
  * ★★★ SEARCH IS ONE THING NOW: POSTS (owner ruling, 2026-08-10).
@@ -31,6 +35,7 @@ export function useSearch() {
 
   const query = searchParams?.get('q') ?? undefined;
   const sortQuery = searchParams?.get('s') ?? undefined;
+  const scopeQuery: SearchScope = searchParams?.get('t') === 'people' ? 'people' : 'posts';
 
   const [inputValue, setInputValue] = useState(query ?? '');
 
@@ -40,19 +45,29 @@ export function useSearch() {
     setInputValue(query ?? '');
   }, [query]);
 
-  const handleSearch = (value: string, currentSort?: SearchSort) => {
+  /**
+   * ★ SCOPE IS A SECOND, OPTIONAL PARAMETER (2026-09-05). Search has two
+   * destinations again, posts and PEOPLE, but unlike the five removed modes
+   * neither is chosen by an invisible prefix: the caller (a visible tab, or a
+   * typeahead row the reader clicked) says which. Omitted, the scope the URL
+   * already carries is kept, so changing the sort on the People tab does not
+   * silently move the reader to Posts. `@name` typed into the field is the one
+   * shortcut, and the header resolves it before calling this.
+   */
+  const handleSearch = (value: string, currentSort?: SearchSort, scope?: SearchScope) => {
     const trimmed = value.trim();
     if (!trimmed) return;
     startNavigation();
-    router.push(
-      `/search?q=${encodeURIComponent(trimmed)}&s=${currentSort ?? sortQuery ?? 'relevance'}`
-    );
+    // `s=` from the URL is any string; only the two real sorts reach the href.
+    const sort: SearchSort = currentSort ?? (sortQuery === 'created' ? 'created' : 'relevance');
+    router.push(buildSearchHref(trimmed, sort, scope ?? scopeQuery));
   };
 
   return {
     inputValue,
     setInputValue,
     handleSearch,
-    sortQuery
+    sortQuery,
+    scopeQuery
   };
 }
