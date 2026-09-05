@@ -4,8 +4,8 @@ import { getTrendingTags } from '@transaction/lib/hive';
 import { acquireHiveWarm, hiveWarmHolder, releaseHiveWarm } from './hive-warm-gate';
 import { selectWarmTopics } from './topic-warm-select';
 import {
-  repeatPhaseDelayMs,
   resolveWorkerIndex,
+  slotStartMs,
   workerCountFromEnv,
   workerStaggerMs
 } from './topic-warm-offset';
@@ -105,6 +105,14 @@ const BOOT_DELAY_MS = 2_000;
  * raise — not the steady-state phase below it.
  */
 const FIRST_CYCLE_STAGGER_MS = 30_000;
+/**
+ * The closest the first ALIGNED cycle may follow the boot cycle. A cycle takes
+ * 75-98s, so a slot landing seconds after the boot cycle finished would be two
+ * back-to-back passes over the same forty tags for nothing; the schedule skips
+ * to the next slot instead. Measured from the boot cycle's END, which is why the
+ * alignment is computed in `runCycle`'s continuation rather than up front.
+ */
+const MIN_SLOT_GAP_MS = 60_000;
 /** How many tags to ask the chain for. Most of the head of this list is
  *  community ids and reward-tribe tags, so the browsable forty sit well down it
  *  — the same over-fetch, for the same reason, as `/api/trending-tags`. */
@@ -240,39 +248,61 @@ export function startTopicWarmer(warm: (tag: string) => Promise<void>): void {
    * warmer would leave two thirds of the caches cold — so the workers are spread
    * evenly across one interval instead.
    *
-   * ★ TWO SCHEDULES, NOT ONE. The FIRST cycle runs early for every worker, on
-   * the small `FIRST_CYCLE_STAGGER_MS` step, so nobody's topic pages are cold
-   * for minutes after a deploy; only the REPEATING schedule is phased a full
-   * `interval / workerCount` apart, and `repeatPhaseDelayMs` subtracts the
-   * first-cycle stagger so the steady state lands exactly on that phase.
+   * ★ TWO SCHEDULES, NOT ONE, AND ONLY ONE OF THEM IS RELATIVE TO THIS PROCESS.
+   * The BOOT cycle runs early for every worker, on the small
+   * `FIRST_CYCLE_STAGGER_MS` step, so nobody's topic pages are cold for minutes
+   * after a deploy. The REPEATING cycles are pinned to the EPOCH instead
+   * (`slotStartMs`), because a per-process phase is not a stagger at all: this
+   * function runs when the `/api/feed/for-you` route module is first loaded in a
+   * worker, i.e. whenever a request lands there, and on build y-7rJmYNwX7P2lgOCVl0d
+   * those three moments were 18:01:17 / 18:04:52 / 18:07:14 — nearly six minutes
+   * apart. Offsets measured from three different origins separate the workers
+   * only by luck. Epoch-aligned slots separate them by construction.
    *
-   * Both numbers are logged because an index that failed to resolve would
-   * collapse every worker to 0 and quietly restore the overlap; three
-   * `worker N/3` lines with three different delays are the proof it did not.
+   * The resolved worker is logged because an index that failed to resolve would
+   * collapse every worker to slot 0 and quietly restore the overlap; three
+   * `worker N/3` lines with three different slots are the proof it did not.
    */
   const workerCount = workerCountFromEnv();
   const workerIndex = resolveWorkerIndex(workerCount);
   const firstDelayMs = BOOT_DELAY_MS + workerStaggerMs(workerIndex, FIRST_CYCLE_STAGGER_MS);
-  const phaseDelayMs = repeatPhaseDelayMs(workerIndex, workerCount, interval, FIRST_CYCLE_STAGGER_MS);
   logger.info(
-    'topic-warmer: starting — %d tags every %dms (worker %d/%d first cycle +%dms, repeat phase +%dms)',
+    'topic-warmer: starting — %d tags every %dms (worker %d/%d boot cycle +%dms, repeats epoch-aligned)',
     max,
     interval,
     workerIndex + 1,
     workerCount,
-    firstDelayMs,
-    phaseDelayMs
+    firstDelayMs
   );
 
-  const boot = setTimeout(() => {
-    void runCycle(warm, max);
-    // The repeating schedule starts a phase later, so the steady state is
-    // `interval / workerCount` apart even though the first cycles were not.
-    const phase = setTimeout(() => {
+  /**
+   * Hand the repeating schedule over to the shared clock. Called once, from the
+   * BOOT cycle's continuation, so `Date.now()` here is the moment that cycle
+   * ENDED and the `MIN_SLOT_GAP_MS` guard means what it says.
+   */
+  const startAlignedSchedule = (): void => {
+    const now = Date.now();
+    let startAt = slotStartMs(now, workerIndex, workerCount, interval);
+    if (startAt - now < MIN_SLOT_GAP_MS) startAt += interval;
+    logger.info(
+      'topic-warmer: repeats aligned to the shared clock — worker %d/%d next cycle in %dms',
+      workerIndex + 1,
+      workerCount,
+      startAt - now
+    );
+    const aligned = setTimeout(() => {
+      void runCycle(warm, max);
       const repeat = setInterval(() => void runCycle(warm, max), interval);
       if (typeof repeat.unref === 'function') repeat.unref();
-    }, phaseDelayMs);
-    if (typeof phase.unref === 'function') phase.unref();
+    }, startAt - now);
+    if (typeof aligned.unref === 'function') aligned.unref();
+  };
+
+  const boot = setTimeout(() => {
+    // `runCycle` swallows every failure and always resolves, so this cannot
+    // reject; `catch` is belt and braces so a schedule that never starts can
+    // never be an unhandled rejection either.
+    void runCycle(warm, max).then(startAlignedSchedule, startAlignedSchedule);
   }, firstDelayMs);
   if (typeof boot.unref === 'function') boot.unref();
 }

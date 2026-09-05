@@ -10,11 +10,13 @@
  * Exits 0 when every check passes, 1 (and prints each failure) otherwise.
  *
  * WHY THIS EXISTS: the anonymous budget is the whole cold-profile fix, and the
- * two ways it can silently die are (a) somebody "simplifies" the signed-in
+ * three ways it can silently die are (a) somebody "simplifies" the signed-in
  * branch to the anonymous number, which would put a 3.5s wait in front of every
- * logged-in reader's TTFB, and (b) a malformed env override parsing to NaN,
- * which `setTimeout` treats as 0 - turning EVERY anonymous profile postless,
- * the exact bug this file exists to prevent, with no error anywhere.
+ * logged-in reader's TTFB, (b) a malformed env override parsing to NaN, which
+ * `setTimeout` treats as 0 - turning EVERY profile postless, the exact bug this
+ * file exists to prevent, with no error anywhere, and (c) the two audiences'
+ * overrides crossing wires, which would make the A/B on the box unreadable
+ * (whichever audience you meant to move, both moved).
  */
 import {
   postsPrefetchBudgetMs,
@@ -53,12 +55,39 @@ check(
   POSTS_PREFETCH_BUDGET_ANON_MS >= 2000
 );
 
-// 2. A SIGNED-IN READER IS NEVER SLOWED, whatever the env says. The override is
-//    scoped to the anonymous branch on purpose: their page is not shared-cached,
-//    so there is nobody for them to wait on behalf of.
+// 2. THE TWO KNOBS ARE INDEPENDENT. Each audience has its own variable and
+//    neither may reach the other's budget - otherwise an A/B on the box moves
+//    both populations at once and can attribute nothing.
 check(
-  'the env override cannot reach the signed-in budget',
+  'the ANONYMOUS override cannot reach the signed-in budget',
   postsPrefetchBudgetMs(true, { LUMEN_POSTS_BUDGET_ANON_MS: '9000' }) === POSTS_PREFETCH_BUDGET_MS
+);
+check(
+  'the SIGNED-IN override cannot reach the anonymous budget',
+  postsPrefetchBudgetMs(false, { LUMEN_POSTS_BUDGET_SIGNED_IN_MS: '9000' }) ===
+    POSTS_PREFETCH_BUDGET_ANON_MS
+);
+check(
+  'both set at once: each audience gets its own',
+  postsPrefetchBudgetMs(true, { LUMEN_POSTS_BUDGET_SIGNED_IN_MS: '1500', LUMEN_POSTS_BUDGET_ANON_MS: '9000' }) ===
+    1500 &&
+    postsPrefetchBudgetMs(false, {
+      LUMEN_POSTS_BUDGET_SIGNED_IN_MS: '1500',
+      LUMEN_POSTS_BUDGET_ANON_MS: '9000'
+    }) === 9000
+);
+
+// 2b. THE SIGNED-IN OVERRIDE ITSELF. The owner's own cold experience is a
+//     signed-in one (measured: posts arrived at 693ms against a 500ms budget),
+//     and because a signed-in page is never shared-cached the trade is entirely
+//     per-reader - so it has to be measurable, not assumed.
+check(
+  'a valid signed-in override is honoured (693ms case: 1000 > 693)',
+  postsPrefetchBudgetMs(true, { LUMEN_POSTS_BUDGET_SIGNED_IN_MS: '1000' }) === 1000
+);
+check(
+  'the signed-in override can restore the 500ms default explicitly (the off switch)',
+  postsPrefetchBudgetMs(true, { LUMEN_POSTS_BUDGET_SIGNED_IN_MS: '500' }) === POSTS_PREFETCH_BUDGET_MS
 );
 
 // 3. THE OVERRIDE WORKS (this is what makes an on/off measurement possible, and
@@ -77,22 +106,36 @@ check(
 //    typo in /opt/lumen/.env must degrade to the constant, never to worse than
 //    the bug we are fixing.
 for (const bad of ['', '   ', 'abc', 'NaN', '0', '-1', '1e', 'Infinity', '3500ms', 'null']) {
-  const got = postsPrefetchBudgetMs(false, { LUMEN_POSTS_BUDGET_ANON_MS: bad });
+  const anon = postsPrefetchBudgetMs(false, { LUMEN_POSTS_BUDGET_ANON_MS: bad });
   check(
-    `malformed override ${JSON.stringify(bad)} falls back to ${POSTS_PREFETCH_BUDGET_ANON_MS} (got ${got})`,
-    got === POSTS_PREFETCH_BUDGET_ANON_MS
+    `anon: malformed ${JSON.stringify(bad)} falls back to ${POSTS_PREFETCH_BUDGET_ANON_MS} (got ${anon})`,
+    anon === POSTS_PREFETCH_BUDGET_ANON_MS
+  );
+  const signedIn = postsPrefetchBudgetMs(true, { LUMEN_POSTS_BUDGET_SIGNED_IN_MS: bad });
+  check(
+    `signed-in: malformed ${JSON.stringify(bad)} falls back to ${POSTS_PREFETCH_BUDGET_MS} (got ${signedIn})`,
+    signedIn === POSTS_PREFETCH_BUDGET_MS
   );
 }
 check(
-  'an unset override falls back',
+  'an unset anonymous override falls back',
   postsPrefetchBudgetMs(false, { LUMEN_POSTS_BUDGET_ANON_MS: undefined }) === POSTS_PREFETCH_BUDGET_ANON_MS
+);
+check(
+  'an unset signed-in override falls back',
+  postsPrefetchBudgetMs(true, { LUMEN_POSTS_BUDGET_SIGNED_IN_MS: undefined }) === POSTS_PREFETCH_BUDGET_MS
 );
 
 // 5. THE RETURN IS ALWAYS A USABLE TIMEOUT: finite and > 0 for every input above.
 const everyInput = [true, false].flatMap((signedIn) =>
-  ['', 'abc', '0', '-5', '1200', undefined].map((v) =>
-    postsPrefetchBudgetMs(signedIn, { LUMEN_POSTS_BUDGET_ANON_MS: v })
-  )
+  ['', 'abc', '0', '-5', '1200', undefined].flatMap((v) => [
+    postsPrefetchBudgetMs(signedIn, { LUMEN_POSTS_BUDGET_ANON_MS: v }),
+    postsPrefetchBudgetMs(signedIn, { LUMEN_POSTS_BUDGET_SIGNED_IN_MS: v }),
+    postsPrefetchBudgetMs(signedIn, {
+      LUMEN_POSTS_BUDGET_ANON_MS: v,
+      LUMEN_POSTS_BUDGET_SIGNED_IN_MS: v
+    })
+  ])
 );
 check(
   'every result is a finite positive number of ms',

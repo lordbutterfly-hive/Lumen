@@ -10,11 +10,20 @@
  * never-visited profile: measured on prod 2026-09-05, 5 of 8 cold profiles were
  * served with ZERO <article> elements in the HTML.
  *
- * For a SIGNED-IN reader that is an acceptable trade and stays at 500ms. Their
- * page is never held by a shared cache (`anonymous-cache-policy.ts` refuses any
- * request carrying a session cookie), the empty shell is theirs alone, and the
- * client refetch fills the posts in a beat -- exactly what the fast-shell design
- * intends.
+ * For a SIGNED-IN reader the DEFAULT stays 500ms. Their page is never held by a
+ * shared cache (`anonymous-cache-policy.ts` refuses any request carrying a
+ * session cookie), the empty shell is theirs alone, and the client refetch fills
+ * the posts in a beat -- the fast-shell design.
+ *
+ * ★ BUT THAT TRADE IS AN ASSUMPTION, AND IT IS NOW MEASURABLE (2026-09-05).
+ * Because a signed-in page is NOT shared-cached, the cost and the benefit both
+ * land on the one reader in front of it: nobody else is served by their wait,
+ * and nobody else is spared their empty shell. That makes it a genuine
+ * per-reader trade-off -- exactly the kind that must be measured rather than
+ * asserted, and the owner's own cold experience is a signed-in one (measured
+ * tonight: a signed-in render lost the 500ms race with the posts arriving at
+ * 693ms). So the signed-in budget carries its own env override too, and the two
+ * audiences can be A/B'd independently on the box.
  *
  * For an ANONYMOUS reader it is the wrong trade, because the answer is not
  * theirs alone. `/@name` answers `public, max-age=0, s-maxage=300,
@@ -36,23 +45,37 @@ export const POSTS_PREFETCH_BUDGET_MS = 500;
 export const POSTS_PREFETCH_BUDGET_ANON_MS = 3500;
 
 /**
+ * One env override, parsed the same way for both audiences. Anything that is not
+ * a positive finite number -- unset, empty, `'   '`, `abc`, `0`, negative,
+ * `Infinity` -- falls back to the constant rather than producing a budget of
+ * NaN, which `setTimeout` silently treats as 0: a single typo in
+ * `/opt/lumen/.env` would otherwise make EVERY render postless, which is worse
+ * than the bug this module exists to fix. A misconfigured env var must never be
+ * worse than no env var.
+ */
+function budgetOverride(raw: string | undefined, fallback: number): number {
+  const override = Number(raw);
+  if (!Number.isFinite(override) || override <= 0) return fallback;
+  return override;
+}
+
+/**
  * The race budget in ms for this render. `env` is injectable for the test only;
  * production always passes `process.env`.
  *
- * `LUMEN_POSTS_BUDGET_ANON_MS` exists so the anonymous budget can be retuned (or
- * pulled back to today's behaviour with `500`) from `/opt/lumen/.env` without a
- * rebuild, which is what makes an on/off measurement possible at all. Anything
- * that is not a positive finite number -- unset, empty, `''`, `abc`, `0`,
- * negative -- falls back to the constant rather than producing a budget of NaN,
- * which `setTimeout` would silently treat as 0 and turn every anonymous render
- * postless. A misconfigured env var must never be worse than no env var.
+ * Each audience has its OWN variable, and neither can reach the other's budget:
+ *   · `LUMEN_POSTS_BUDGET_SIGNED_IN_MS` (default 500)
+ *   · `LUMEN_POSTS_BUDGET_ANON_MS`      (default 3500)
+ * Two separate knobs, not one, because the two trades are different in kind
+ * (see this module's doc comment) and A/B'ing them together could not tell which
+ * audience moved the number. Either can be pulled back to today's behaviour
+ * without a rebuild, which is what makes an on/off measurement possible at all.
  */
 export function postsPrefetchBudgetMs(
   isSignedIn: boolean,
   env: Record<string, string | undefined> = process.env
 ): number {
-  if (isSignedIn) return POSTS_PREFETCH_BUDGET_MS;
-  const override = Number(env.LUMEN_POSTS_BUDGET_ANON_MS);
-  if (!Number.isFinite(override) || override <= 0) return POSTS_PREFETCH_BUDGET_ANON_MS;
-  return override;
+  return isSignedIn
+    ? budgetOverride(env.LUMEN_POSTS_BUDGET_SIGNED_IN_MS, POSTS_PREFETCH_BUDGET_MS)
+    : budgetOverride(env.LUMEN_POSTS_BUDGET_ANON_MS, POSTS_PREFETCH_BUDGET_ANON_MS);
 }

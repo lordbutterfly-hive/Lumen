@@ -170,29 +170,42 @@ export function workerStaggerMs(workerIndex: number, stepMs: number): number {
 }
 
 /**
- * ★★ HOW LONG AFTER ITS FIRST CYCLE A WORKER WAITS BEFORE STARTING ITS REPEATING
- * SCHEDULE (2026-09-05, second pass).
+ * ★★★ THE REPEATING SCHEDULE IS PINNED TO THE WALL CLOCK, NOT TO THIS PROCESS
+ * (2026-09-05, third pass - a live observation on prod killed the second one).
  *
- * The first version simply delayed everything by the steady-state offset, which
- * meant worker 2 did not warm ANY topic for `BOOT_DELAY_MS + 400s` after a
- * deploy - a third of readers on cold topic pages for almost seven minutes,
- * which is precisely the cost the module header says this warmer exists to
- * remove. So the two schedules were split: every worker runs its FIRST cycle
- * early, on a small `firstStaggerMs` step, and only the REPEAT is phased.
+ * The previous version delayed each worker's repeat by its share of an interval
+ * and then started a `setInterval`. That is only a stagger if all three workers
+ * start counting at the same moment, AND THEY DO NOT: `startTopicWarmer` runs
+ * when the `/api/feed/for-you` route module is first loaded in a worker, which
+ * is whenever a request happens to land there. Measured on build
+ * y-7rJmYNwX7P2lgOCVl0d: 18:01:17, 18:04:52 and 18:07:14 - the three base times
+ * were almost SIX MINUTES apart, so "+170000ms" and "+340000ms" were offsets
+ * from three different origins. No overlap was observed, but nothing was
+ * preventing one; the separation was luck.
  *
- * Subtracting the first-cycle stagger is what keeps the steady state exactly
- * `interval / workerCount` apart: worker i's repeat begins at
- * `first + i*firstStagger + (offset - i*firstStagger)` = `first + offset`.
- * Clamped at 0 for the degenerate case where the stagger is wider than the
- * share (a very short `FEED_TOPIC_WARM_INTERVAL_MS`).
+ * A shared origin is the fix, and the only clock all three workers already agree
+ * on is the epoch. This returns the next instant at or after `now` that sits on
+ * this worker's slot - `t mod intervalMs === index * intervalMs / workerCount` -
+ * so the three workers land on 0s / 200s / 400s past every ten-minute epoch
+ * boundary no matter when each of them booted, and a worker that restarts at
+ * 3pm rejoins the same grid the other two are already on.
+ *
+ * `now` is expected to be a finite epoch ms (`Date.now()`); a nonsense interval
+ * gives back `now`, i.e. "as soon as you like", which is the pre-stagger
+ * behaviour rather than a broken schedule.
  */
-export function repeatPhaseDelayMs(
+export function slotStartMs(
+  now: number,
   workerIndex: number,
   workerCount: number,
-  intervalMs: number,
-  firstStaggerMs: number
+  intervalMs: number
 ): number {
-  const offset = topicWarmOffsetMs(workerIndex, workerCount, intervalMs);
-  const first = workerStaggerMs(normalizedIndex(workerIndex, normalizedCount(workerCount)), firstStaggerMs);
-  return Math.max(0, offset - first);
+  if (!Number.isFinite(now)) return 0;
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) return now;
+  const interval = Math.floor(intervalMs);
+  const offset = topicWarmOffsetMs(workerIndex, workerCount, interval);
+  // Two `%` and a `+ interval` because JS `%` keeps the sign of the dividend,
+  // and `now - offset` is negative for any epoch before the offset.
+  const sinceSlot = (((now - offset) % interval) + interval) % interval;
+  return sinceSlot === 0 ? now : now + (interval - sinceSlot);
 }

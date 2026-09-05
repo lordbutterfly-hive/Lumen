@@ -17,7 +17,8 @@
  * alone: the env reads (`workerCountFromEnv`, `workerIndexFromEnv`) against
  * missing/garbage/"0"/negative values, the cluster read (`currentWorkerId`)
  * against a cluster object that has no worker, the respawn wrap in
- * `clusterWorkerIndex`, and the two schedules `topic-warmer.ts` builds from them.
+ * `clusterWorkerIndex`, and the epoch-aligned slot grid `topic-warmer.ts` puts
+ * its repeating cycles on.
  *
  * WHAT IT DOES NOT COVER, and what does: nothing here executes a real
  * `cluster.fork()` or a real `process.env` - both are injected. The real cluster
@@ -28,8 +29,8 @@
 import {
   clusterWorkerIndex,
   currentWorkerId,
-  repeatPhaseDelayMs,
   resolveWorkerIndex,
+  slotStartMs,
   topicWarmOffsetMs,
   workerCountFromEnv,
   workerIndexFromEnv,
@@ -146,32 +147,85 @@ check('negative index -> 0ms', workerStaggerMs(-1, BOOT_STAGGER) === 0);
 check('step 0 -> 0ms', workerStaggerMs(2, 0) === 0);
 check('step NaN -> 0ms', workerStaggerMs(2, Number.NaN) === 0);
 
-console.log('\nrepeatPhaseDelayMs: first cycles land early, steady state stays evenly phased');
-check('index 0 -> 0ms', repeatPhaseDelayMs(0, WORKERS, INTERVAL, FIRST_STAGGER) === 0);
-check('index 1 -> 170000ms (200000 - 30000)', repeatPhaseDelayMs(1, WORKERS, INTERVAL, FIRST_STAGGER) === 170_000);
-check('index 2 -> 340000ms (400000 - 60000)', repeatPhaseDelayMs(2, WORKERS, INTERVAL, FIRST_STAGGER) === 340_000);
-// THE POINT OF THE SUBTRACTION: first-cycle time + phase delay is the same
-// `index * interval/count` for every worker, so the repeats stay evenly spread.
+console.log('\nslotStartMs: the repeats sit on a SHARED epoch grid, not on this process');
+// Prod shape: 3 workers, 600000ms interval -> slots at +0s / +200s / +400s past
+// every ten-minute epoch boundary.
+const EPOCH_SLOT = 1_756_999_800_000; // a real instant that is a whole multiple of 600000
+check('the fixture instant really is on a slot boundary', EPOCH_SLOT % INTERVAL === 0);
+check('index 0, exactly on its slot -> now', slotStartMs(EPOCH_SLOT, 0, WORKERS, INTERVAL) === EPOCH_SLOT);
+check('index 1, at the boundary -> +200000ms', slotStartMs(EPOCH_SLOT, 1, WORKERS, INTERVAL) === EPOCH_SLOT + 200_000);
+check('index 2, at the boundary -> +400000ms', slotStartMs(EPOCH_SLOT, 2, WORKERS, INTERVAL) === EPOCH_SLOT + 400_000);
+
+// JUST BEFORE / JUST AFTER a slot - the two cases an off-by-one would flip.
+check(
+  'index 1, 1ms before its slot -> that same slot',
+  slotStartMs(EPOCH_SLOT + 199_999, 1, WORKERS, INTERVAL) === EPOCH_SLOT + 200_000
+);
+check(
+  'index 1, exactly on its slot -> that slot (not a whole interval later)',
+  slotStartMs(EPOCH_SLOT + 200_000, 1, WORKERS, INTERVAL) === EPOCH_SLOT + 200_000
+);
+check(
+  'index 1, 1ms after its slot -> the NEXT one, one interval on',
+  slotStartMs(EPOCH_SLOT + 200_001, 1, WORKERS, INTERVAL) === EPOCH_SLOT + 800_000
+);
+check(
+  'index 0, 1ms after the boundary -> the next boundary',
+  slotStartMs(EPOCH_SLOT + 1, 0, WORKERS, INTERVAL) === EPOCH_SLOT + INTERVAL
+);
+
+// ★ THE WHOLE POINT: three workers that booted at wildly different times (the
+// observed 18:01:17 / 18:04:52 / 18:07:14) still land on the same grid, exactly
+// interval/count apart, because the origin is the epoch and not their own start.
+const bootTimes = [EPOCH_SLOT + 77_000, EPOCH_SLOT + 292_000, EPOCH_SLOT + 434_000];
+const landed = bootTimes.map((t, index) => slotStartMs(t, index, WORKERS, INTERVAL));
+check(
+  `workers booting ${(bootTimes[2] - bootTimes[0]) / 1000}s apart still land on distinct slots: ${landed.join(', ')}`,
+  new Set(landed.map((t) => t % INTERVAL)).size === WORKERS
+);
 for (const index of [0, 1, 2]) {
-  const firstAt = workerStaggerMs(index, FIRST_STAGGER);
-  const repeatAt = firstAt + repeatPhaseDelayMs(index, WORKERS, INTERVAL, FIRST_STAGGER);
   check(
-    `index ${index}: repeats begin at ${repeatAt}ms = index * interval/count`,
-    repeatAt === index * (INTERVAL / WORKERS)
+    `index ${index} lands on its own slot regardless of boot time`,
+    landed[index] % INTERVAL === index * (INTERVAL / WORKERS)
   );
 }
-// And the first cycles themselves are inside a minute of the restart.
+// NEGATIVE CONTROL: the schedule this replaces (boot time + a relative phase)
+// would have put two of those three workers within a cycle length of each other.
+const relative = bootTimes.map((t, index) => t + index * (INTERVAL / WORKERS));
+const gaps = [relative[1] - relative[0], relative[2] - relative[1]];
+check(
+  `negative control: the old per-process phase gave gaps of ${gaps.map((g) => g / 1000).join('s, ')}s, not a clean ${INTERVAL / WORKERS / 1000}s`,
+  gaps.some((g) => g !== INTERVAL / WORKERS)
+);
+
+console.log('\nslotStartMs: degenerate inputs never produce a broken schedule');
+check('workerCount 1 -> plain interval boundaries', slotStartMs(EPOCH_SLOT + 1, 0, 1, INTERVAL) === EPOCH_SLOT + INTERVAL);
+check('workerCount 1, index ignored', slotStartMs(EPOCH_SLOT + 1, 2, 1, INTERVAL) === EPOCH_SLOT + INTERVAL);
+check('interval 0 -> now (fire as soon as you like)', slotStartMs(EPOCH_SLOT, 1, WORKERS, 0) === EPOCH_SLOT);
+check('interval NaN -> now', slotStartMs(EPOCH_SLOT, 1, WORKERS, Number.NaN) === EPOCH_SLOT);
+check('now NaN -> 0 rather than NaN', slotStartMs(Number.NaN, 1, WORKERS, INTERVAL) === 0);
+check('an epoch before the offset still resolves forward', slotStartMs(0, 2, WORKERS, INTERVAL) === 400_000);
+
+// An interval that does not divide evenly: slots must still be distinct, whole,
+// inside one period, and always at or after `now`.
+const ODD = 100_000;
+for (const index of [0, 1, 2]) {
+  for (const now of [EPOCH_SLOT, EPOCH_SLOT + 1, EPOCH_SLOT + 33_333, EPOCH_SLOT + 99_999]) {
+    const t = slotStartMs(now, index, WORKERS, ODD);
+    check(
+      `odd interval, index ${index}, now +${now - EPOCH_SLOT}: t=${t - EPOCH_SLOT} is forward, whole and on the slot`,
+      Number.isInteger(t) && t >= now && t - now < ODD && t % ODD === topicWarmOffsetMs(index, WORKERS, ODD)
+    );
+  }
+}
+
+// The BOOT cycle is unchanged: every worker still warms within a minute.
 for (const index of [0, 1, 2]) {
   check(
-    `index ${index}: first cycle within 60s of boot (was up to 400s)`,
+    `index ${index}: boot cycle within 60s of start (was up to 400s)`,
     workerStaggerMs(index, FIRST_STAGGER) <= 60_000
   );
 }
-// Degenerate: a stagger wider than the share must clamp, never go negative.
-check(
-  'a 30s stagger on a 60s interval clamps to 0 rather than going negative',
-  repeatPhaseDelayMs(2, WORKERS, 60_000, FIRST_STAGGER) === 0
-);
 
 if (failures === 0) {
   console.log('\ntopic-warm-offset: ALL CHECKS PASSED');
