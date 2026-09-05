@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { fetchAccountPostsPage } from '@/blog/lib/lite/client/account-posts-fetch';
@@ -441,13 +441,20 @@ function ForYouFeed() {
   // ★ ABOVE THE GUARDS. `useRankMarks` is a hook and must run in the same order on
   // every render, so it reads the list computed above rather than being derived
   // after an early return.
-  const marks = useRankMarks(shown.map((e) => e.author));
+  /* ★ T3j (2026-09-04 perf hunt): ONE author list, read by all three hooks. It
+     was built three separate times per render, once inside each call below, for
+     an answer all three want identically. Not `useMemo`d: `shown` is a fresh
+     array on every render (it comes off `filterVisiblePosts`), so a memo could
+     never hit and would only add bookkeeping. The saving is the two redundant
+     passes, and the hooks themselves now memoise the maps they return. */
+  const authors = shown.map((e) => e.author);
+  const marks = useRankMarks(authors);
   /* One market read for the whole page (3 state keys per creator, chunked at 33
      inside the data source). Threaded to the cards exactly like `useRankMarks`
      beside it — a per-card fetch is the N+1 that cost this feed 30s a load. */
-  const { prices } = useTokenPriceChips(shown.map((e) => e.author));
+  const { prices } = useTokenPriceChips(authors);
   /* §2 rank luminosity for the avatar glow — shares `useRankMarks`' request. */
-  const luminosity = useRankLuminosity(shown.map((e) => e.author));
+  const luminosity = useRankLuminosity(authors);
 
   // Posts the silent poll found that are not on the reader's page yet. Filtered the
   // same way the list is, so the button can never offer posts that would render as
@@ -756,6 +763,35 @@ function ForYouFeed() {
             key={`${entry.author}-${entry.permlink}`}
             post={entry}
             mark={marks.get(entry.author?.toLowerCase() ?? '')}
+            /* ★★★ THE CHIP AND THE GLOW WERE COMPUTED HERE AND NEVER HANDED TO
+               THE CARD (fixed 2026-09-05). This file called `useTokenPriceChips`
+               and `useRankLuminosity` for the whole page, paid for the market
+               read, and then dropped both answers on the floor: the two
+               `MediumPostCard` sites in this file passed only `post` and `mark`.
+
+               An OVERSIGHT, not a ruling, established from history rather than
+               judgement. `e61f78a` ("N1 identity pill, the card, its CSS, the
+               four list components") added the `useTokenPriceChips` call here in
+               the same commit that added `price={prices.get(entry.author)}` to
+               `topic-shell`, `search-results` and `profile-posts-list`, and
+               `55f5dc1` did exactly the same for `luminosity` a week later. Both
+               times the sibling lists were wired and this one was missed.
+               `git log -S"price={" -S"luminosity={"` on this file returns
+               NOTHING: those props have never existed here in any commit, so
+               there was never a removal to have been ruled on.
+
+               The ruling that DOES exist points the other way, on
+               `medium-post-card.tsx` at the chip itself: "a token price
+               indicator belongs next to every post and every name". The home
+               feed is the surface with the most posts and names in the product.
+
+               Costs no request: the hooks above already run and already fetch.
+               `IdentityPill` renders nothing for an author with no token and
+               nothing while the answer is unknown, so the only visible change is
+               that a creator WITH a market now shows the same chip and glow here
+               that they already show on topics, search and their profile. */
+            price={prices.get(entry.author)}
+            luminosity={luminosity.get((entry.author ?? '').toLowerCase())}
           />
         ))
       )}
@@ -943,13 +979,24 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   // in the same order — calling it after `if (isError) return` breaks that the moment the
   // query flips state. Derived from the raw pages rather than the NSFW-filtered list
   // below: hiding a post is a display decision and must not change hook behaviour.
-  const marks = useRankMarks((data?.pages.flatMap((pg) => pg?.entries ?? []) ?? []).map((e) => e.author));
+  /* ★ T3j (2026-09-04 perf hunt): ONE flatMap over the loaded pages, memoised.
+     The same `data?.pages.flatMap(...)` was written out FOUR times per render of
+     this component — once in each of the three hooks below and once more in the
+     `entries` derivation further down — and unlike the ranked feed above, this
+     list grows with every infinite-scroll page the reader loads, so the waste
+     scaled with the session. `data` is React Query's own object and is the same
+     reference until a page is actually added, which makes it the exact and only
+     dependency. Behaviour is unchanged: this is still the RAW page list, before
+     the block and NSFW filters, for the reason stated just above. */
+  const rawPageEntries = useMemo(() => data?.pages.flatMap((pg) => pg?.entries ?? []) ?? [], [data]);
+  const authors = useMemo(() => rawPageEntries.map((e) => e.author), [rawPageEntries]);
+  const marks = useRankMarks(authors);
   /* One market read for the whole page (3 state keys per creator, chunked at 33
      inside the data source). Threaded to the cards exactly like `useRankMarks`
      beside it — a per-card fetch is the N+1 that cost this feed 30s a load. */
-  const { prices } = useTokenPriceChips((data?.pages.flatMap((pg) => pg?.entries ?? []) ?? []).map((e) => e.author));
+  const { prices } = useTokenPriceChips(authors);
   /* §2 rank luminosity for the avatar glow — shares `useRankMarks`' request. */
-  const luminosity = useRankLuminosity((data?.pages.flatMap((pg) => pg?.entries ?? []) ?? []).map((e) => e.author));
+  const luminosity = useRankLuminosity(authors);
 
   // ★ EVERY DERIVED LIST IS BUILT ABOVE THE GUARDS, same reason as ForYouFeed:
   // the empty-answer guard right below reads it, and a hook may never run
@@ -957,7 +1004,7 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   //
   // Same NSFW list-level filter as the ranked feed above (see lib/nsfw.ts).
   const entries = filterVisiblePosts(
-    (data?.pages.flatMap((pg) => pg?.entries ?? []) ?? []).filter((entry) => !isBlockedEntry(entry, blockList)),
+    rawPageEntries.filter((entry) => !isBlockedEntry(entry, blockList)),
     nsfwPreference
   );
 
@@ -1022,6 +1069,11 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
             key={`${entry.author}-${entry.permlink}`}
             post={entry}
             mark={marks.get(entry.author?.toLowerCase() ?? '')}
+            /* ★ Same fix as `ForYouFeed` above, same commits (`e61f78a`,
+               `55f5dc1`), same reason: computed for this list and never passed.
+               See that site for the history and the owner ruling. */
+            price={prices.get(entry.author)}
+            luminosity={luminosity.get((entry.author ?? '').toLowerCase())}
           />
         ))
       )}

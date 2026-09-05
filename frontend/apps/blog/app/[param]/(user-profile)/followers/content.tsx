@@ -63,6 +63,9 @@ const FollowersContent = ({
     if (!followersData.data) return;
 
     if (page + 1 < followersData.data.pages.length) {
+      // ★ NEVER STAND ON AN EMPTY PAGE -- see the fetch branch below for how one
+      // gets into `pages` in the first place.
+      if ((followersData.data.pages[page + 1]?.length ?? 0) === 0) return;
       return setPage((prev) => prev + 1);
     }
     // ★ ADVANCE ONLY IF THE PAGE ACTUALLY ARRIVED.
@@ -72,8 +75,24 @@ const FollowersContent = ({
     // a claim about nothing, and Next went permanently disabled with no error —
     // recoverable only by a full reload. Pre-existing; surfaced by a forced
     // network failure 2026-08-07.
+    // ★ AND ONLY IF IT ACTUALLY HAS ROWS (2026-09-05, review). `get_followers` pages by
+    // cursor, so a list whose length is an exact multiple of the page size
+    // answers the NEXT request with ZERO rows; react-query resolves that
+    // successfully and appends the empty page, and `page` moved onto it -- an
+    // empty list under a "page 6 of 6" label. This refuses a GENUINELY EMPTY
+    // page only; a short-but-non-empty page is a real last page and is still
+    // shown.
+    //
+    // It is deliberately NOT a "shorter than the page size" test. A page can be
+    // short because the ban filter removed a name from it, and treating that as
+    // the end used to stop a 500-follower list at page one. That is fixed at the
+    // root instead -- `followFetchLimit` in hive-api.ts asks the chain for
+    // `limit + ban list size` rows so a full page survives the filter full --
+    // and this guard is left holding only the case it can actually judge.
     followersData.fetchNextPage().then((result) => {
       if (result.isError) return;
+      const pages = result.data?.pages ?? [];
+      if ((pages[pages.length - 1]?.length ?? 0) === 0) return;
       setPage((prev) => prev + 1);
     });
   };
@@ -94,6 +113,15 @@ const FollowersContent = ({
   );
 
   const followerCount = profileData?.follow_stats?.follower_count;
+  // ★ COUNT-DERIVED, AS IT HAS ALWAYS BEEN (2026-09-05, final gate). The count
+  // and the rows come from different places and can disagree by up to the ban
+  // list's size (6 names today): `get_followers` strips banned accounts from every page
+  // server-side while the count may not be corrected for them at all -- it never
+  // is with LUMEN_BANNED_FOLLOW_EDGES=no. So the last page can be labelled one
+  // page early. That is a generous label, and it is what shipped before.
+  // Deriving the total from the pages actually fetched instead was tried and was
+  // WORSE: on a page the ban filter had shortened it collapsed to 1 and hid the
+  // pager completely on a 500-follower account. Root cause fixed in hive-api.ts.
   const totalPages = followerCount ? Math.ceil(followerCount / FOLLOW_LIST_PAGE_SIZE) : 1;
 
   return (

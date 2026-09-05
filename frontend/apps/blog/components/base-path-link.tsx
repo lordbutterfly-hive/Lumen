@@ -2,7 +2,7 @@
 
 // eslint-disable-next-line no-restricted-imports -- This is a wrapper component that needs direct access to next/link
 import Link from 'next/link';
-import { AnchorHTMLAttributes, MouseEvent, ReactNode, forwardRef } from 'react';
+import { AnchorHTMLAttributes, MouseEvent, PointerEvent, ReactNode, forwardRef } from 'react';
 import { buildSafePath, isInternalPath } from '@ui/lib/sanitize-url';
 import { getLogger } from '@ui/lib/logging';
 import { useIntentPrefetch } from './intent-prefetch';
@@ -119,7 +119,57 @@ const BasePathLink = forwardRef<HTMLAnchorElement, BasePathLinkProps>(
       }
     };
 
-    const intent = useIntentPrefetch(prefetchOnIntent && isInternalPath(href) ? href : '');
+    // ★ A LINK THAT IS GOING TO HARD-NAVIGATE MUST NOT PREFETCH (2026-09-05).
+    // `handleClick` above turns a `/@name` href (and `/#@`, and the two static
+    // pages) into a `window.location.href` assignment whenever a basePath is
+    // deployed — a full document load, which reads nothing from the client
+    // router cache a prefetch fills. On such a deployment the prefetch would be
+    // a profile render bought for nothing, and profile renders are the most
+    // expensive page this app serves. Root deployments (no basePath, which is
+    // production today) take the normal client navigation and keep the benefit,
+    // so this changes nothing there; it only stops the waste where the reload
+    // branch is live.
+    const hardNavigates =
+      Boolean(basePath) &&
+      (href.startsWith('/@') || href.includes('/#@') || href === '/privacy.html' || href === '/tos.html');
+    const intent = useIntentPrefetch(
+      prefetchOnIntent && !hardNavigates && isInternalPath(href) ? href : ''
+    );
+
+    /**
+     * ★★ COMPOSED, AND SPREAD LAST (2026-09-05, review). These three handlers
+     * used to be spread BEFORE `{...rest}`, which is the same bug the `onClick`
+     * composition above was written to fix and which this component's own
+     * forwardRef note describes: `rest` carries whatever Radix's `Slot` merges
+     * in when this is used with `asChild`, and a `Slot`-supplied
+     * `onPointerEnter`/`onPointerMove`/`onPointerLeave` landing after the intent
+     * handlers silently replaced them — the prefetch simply stopped existing on
+     * exactly the surfaces (dropdown rows, menu items) where a caller is most
+     * likely to pass its own pointer handlers, with no error to notice.
+     *
+     * Now they go last so nothing can clobber them, and each one CALLS the
+     * caller's handler first — same order, and the same reasoning, as
+     * `handleClick` above and as `next/link`'s own convention. Only installed
+     * when `prefetchOnIntent` is set, so an ordinary link's `rest` handlers pass
+     * straight through untouched.
+     */
+    const intentHandlers = prefetchOnIntent
+      ? {
+          onPointerEnter: (event: PointerEvent<HTMLAnchorElement>) => {
+            rest.onPointerEnter?.(event);
+            intent.onPointerEnter(event);
+          },
+          onPointerMove: (event: PointerEvent<HTMLAnchorElement>) => {
+            rest.onPointerMove?.(event);
+            intent.onPointerMove(event);
+          },
+          onPointerLeave: (event: PointerEvent<HTMLAnchorElement>) => {
+            rest.onPointerLeave?.(event);
+            intent.onPointerLeave();
+          }
+        }
+      : null;
+
     return (
       <Link
         ref={ref}
@@ -130,8 +180,8 @@ const BasePathLink = forwardRef<HTMLAnchorElement, BasePathLinkProps>(
         aria-current={ariaCurrent}
         aria-busy={ariaBusy}
         onClick={handleClick}
-        {...(prefetchOnIntent ? intent : {})}
         {...rest}
+        {...(intentHandlers ?? {})}
       >
         {children}
       </Link>

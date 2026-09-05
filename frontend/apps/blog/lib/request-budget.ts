@@ -67,6 +67,13 @@
  * the render, so they earn nothing either. When phase 4 turns hover prefetch
  * on, the per-IP client budget is the knob to raise.
  *
+ * ★★★ AND IT HAS BEEN RAISED, 60 -> 90 (2026-09-05, phase 4b). Hover prefetch
+ * is now on for profile links as well as topic chips, so a reader's own browser
+ * generates page renders this budget cannot tell from navigations — see
+ * `budgetFor` below for the arithmetic, for the per-worker dilution that makes
+ * the number smaller than it looks, and for why the answer is a bigger number
+ * rather than a prefetch discount that was already proven dead here.
+ *
  * EXEMPT, ALWAYS: loopback (the box's own curl and the deploy checks), the
  * addresses in `LUMEN_BUDGET_ALLOW_IPS`, and any request carrying the QA
  * bypass header `x-lumen-qa: <LUMEN_QA_BYPASS_TOKEN>`. Our own QA harnesses
@@ -189,7 +196,58 @@ function budgetFor(kind: 'search' | 'unfurler' | 'crawler' | 'crawler-all' | 'cl
     case 'crawler-all':
       return positiveNumber(process.env.LUMEN_BUDGET_CRAWLER_ALL_PER_MIN, 36);
     default:
-      return positiveNumber(process.env.LUMEN_BUDGET_PAGE_PER_MIN, 60);
+      /**
+       * ★★★ 90, NOT 60, SINCE HOVER PREFETCH SHIPPED (2026-09-05, phase 4b;
+       * 180 in the first draft, corrected at the final gate — see the dilution
+       * note below, which is the reason 180 was the wrong number). This module's
+       * header already ruled that a router prefetch is indistinguishable from a
+       * navigation here and counts as a page render; what changed is that a
+       * signed-in reader's browser now produces them.
+       *
+       * THE ARITHMETIC, FROM THE LIMITER THAT ACTUALLY BINDS. The prefetch side
+       * is NOT "30 cards, 30 hrefs, 30 renders": components/intent-prefetch.tsx
+       * caps itself at 15 fires per rolling minute per page, whatever the feed
+       * is showing. So the worst honest minute is 15 prefetches plus a fast
+       * reader's real traffic — the page they are on, the profile they open, its
+       * sub-tabs, the back-and-forth of reading — which is another 20-30. Call
+       * it 35-45. 60 sat inside that band, which is why it had to move at all:
+       * the first reader to use the feature as designed could 429 THEMSELVES on
+       * their own next click (`Retry-After: 30` on a page they asked for). 90 is
+       * that worst case with 2x margin, and 2x is the right size of margin for a
+       * number whose failure mode is refusing a human.
+       *
+       * ★★★ AND IT IS 90 PER WORKER, NOT 90 PER BOX — the correction that made
+       * 180 wrong. `buckets` above is a module-level Map, so there is one bucket
+       * table per PROCESS. Production runs `/opt/lumen/cluster.js` with
+       * LUMEN_WORKERS=3: the parent holds the only listening socket on :3000 and
+       * Node's cluster round-robins each connection to one of 3 `next-server`
+       * children (verified on the box, 2026-09-05: 3 children, one listener on
+       * the parent). One IP's requests therefore land in 3 independent tables,
+       * so THE EFFECTIVE PER-IP CEILING IS THIS VALUE x LUMEN_WORKERS — 270/min
+       * at 90, and it would have been 540/min at 180. Read the other way: a
+       * reader doing 45/min sends ~15/min to each worker, so the margin over the
+       * worst honest case is 6x in practice, not 2x. Both readings say the same
+       * thing — do not raise this number again to "add margin" that the worker
+       * split has already added. If a genuinely tight ceiling is ever needed the
+       * fix is a SHARED bucket (one store across workers), not a bigger number;
+       * until then this comment is the only place that says what the ceiling
+       * really is.
+       *
+       * WHY THIS IS NOT A LICENCE. Even 270/min effective is an order of
+       * magnitude under what the crawl this module was built for was doing
+       * (ClaudeBot: 138,901 page renders in a day from two addresses), and the
+       * crawler and search classes are UNTOUCHED — a crawler still gets 12 a
+       * minute per vendor and 36 for the class, and crawlers never hover, so
+       * none of this widens the hole that mattered. The client class was never
+       * the load problem; it was the class that had to not break.
+       *
+       * ★ THE REAL BOUND IS ON THE OTHER SIDE. The client-side limiter (15 per
+       * rolling minute, one prefetch at a time, 1.5 s between fires) is a sixth
+       * of this per-worker value and an eighteenth of the effective ceiling. This
+       * number is the backstop for a client that ignores it — a stale bundle, a
+       * script, a second tab — not the mechanism that keeps hover prefetch civil.
+       */
+      return positiveNumber(process.env.LUMEN_BUDGET_PAGE_PER_MIN, 90);
   }
 }
 

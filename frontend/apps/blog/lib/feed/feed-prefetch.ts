@@ -9,8 +9,77 @@ import { readViewerFeed, feedBands, feedVersion } from '@/blog/lib/feed/feed-cac
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
 import type { InitialFeedSeed, InitialFeedPage } from '@/blog/components/observer-provider';
+import { renderStopwatch, type RenderStopwatch, type RenderTimer } from '@ui/lib/render-timing';
 
 const logger = getLogger('app');
+
+/**
+ * ★ WHAT THE HOME RENDER'S ONE TIMING LINE NEEDS FROM THIS PREFETCH (2026-09-05).
+ *
+ * `app/page.tsx` emits a single `render-timing: home ...` line and this is how the
+ * facts that only exist in here reach it: whether the viewer's stored (recsys)
+ * feed was a hit, a miss, stale or simply never answered inside the deadline, and
+ * what the three sub-stages cost. Filled in by `prefetchHomeFeed`; the caller
+ * allocates it with `newHomeFeedTrace()` and reads it after the await.
+ *
+ * ★ OPTIONAL AND WRITE-ONLY, AND ITS ABSENCE IS THE OFF SWITCH. Nothing in this
+ * module ever READS a trace field to decide anything -- a trace is an observer,
+ * never a participant. `app/page.tsx` allocates one only when
+ * `LUMEN_RENDER_TIMING=yes`, so with the flag off this module allocates no trace,
+ * no stopwatch, and reads no clock at all: see `stopwatchIf` below. That is why
+ * the gate is `trace` itself rather than a second `renderTimingEnabled()` read.
+ *
+ * ★ `-1` MEANS NOT MEASURED, never "took no time". Same convention
+ * `renderStopwatch()` documents, and it is the honest answer for a stage the path
+ * taken never ran (a stored-feed miss never reaches the trim; a fallback seed is
+ * trimmed inside the cached trending loader, so no trim happens per render at all).
+ */
+export interface HomeFeedTrace {
+  /** `skip` = anonymous, so no stored feed was ever looked for. */
+  stored: 'skip' | 'hit' | 'miss' | 'stale' | 'empty' | 'timeout';
+  source: 'none' | 'recsys' | 'trending-fallback';
+  /** True only for the personalised stored feed -- i.e. `page.personalised`. */
+  ranked: boolean;
+  count: number;
+  /** ms in `readViewerFeed` (memory, then `findStoredFeed`'s Postgres row). */
+  readMs: number;
+  /** ms in the viewer's block-list filter, on whichever path applied it. */
+  blockMs: number;
+  /** ms in `trimForSSR`, stored path only. */
+  trimMs: number;
+}
+
+/**
+ * ★ THE INSTRUMENT MUST COST NOTHING WHEN IT IS OFF (2026-09-05, review). An
+ * ungated `renderStopwatch()` is an object plus a `performance.now()`, and one
+ * signed-in home render reaches four of them -- eight clock reads charged to
+ * every production render to measure nothing. `renderStopwatch` is deliberately
+ * flag-INDEPENDENT (its own doc: the CALLER decides to start one), which makes
+ * this gate the caller's job, not the helper's.
+ *
+ * `null`, and the -1 it reads back as, mean NOT MEASURED -- exactly what the
+ * flag-off case is. The same -1 already covers a stage the path taken never ran,
+ * and neither is ever confusable with "took no time".
+ */
+function stopwatchIf(on: boolean): RenderStopwatch | null {
+  return on ? renderStopwatch() : null;
+}
+
+function elapsedOf(watch: RenderStopwatch | null): number {
+  return watch ? watch.elapsedMs() : -1;
+}
+
+export function newHomeFeedTrace(): HomeFeedTrace {
+  return {
+    stored: 'skip',
+    source: 'none',
+    ranked: false,
+    count: 0,
+    readMs: -1,
+    blockMs: -1,
+    trimMs: -1
+  };
+}
 
 const PREFETCH_LIMIT = 20;
 /**
@@ -192,21 +261,57 @@ export async function warmHomeFeedCache(): Promise<void> {
   await trendingForPrefetch();
 }
 
-async function prefetchStoredFeed(viewer: string): Promise<InitialFeedSeed | null> {
+/**
+ * ★ THE OUTCOME TRAVELS WITH THE SEED, RATHER THAN THROUGH A SHARED OBJECT
+ * (2026-09-05, home instrument). Every `return null` below means something
+ * DIFFERENT -- nothing stored, too old, wrong ranking version, filtered to empty
+ * -- and the home timing line has to tell them apart, because "the stored feed
+ * was stale" and "the store had nothing" call for opposite fixes.
+ *
+ * It is returned rather than written into the caller's trace on purpose. This
+ * function is RACED by `withTimeout`, which deliberately does not cancel the
+ * loser (see that function and the cache comment above), so a version that wrote
+ * into shared state could still be running -- and could overwrite `stored=` with
+ * a late `hit` -- while the fallback path it lost to was being timed. A value the
+ * caller only reads when it actually consumed it cannot do that.
+ *
+ * NOTHING ABOUT THE CONTROL FLOW MOVES: the same four early exits happen at the
+ * same points, and `seed` is exactly the `InitialFeedSeed | null` this used to
+ * return.
+ */
+interface StoredFeedRead {
+  seed: InitialFeedSeed | null;
+  outcome: 'hit' | 'miss' | 'stale' | 'empty';
+  readMs: number;
+  blockMs: number;
+  trimMs: number;
+}
+
+async function prefetchStoredFeed(viewer: string, timing: boolean): Promise<StoredFeedRead> {
+  const readWatch = stopwatchIf(timing);
   const stored = await readViewerFeed(viewer);
-  if (!stored || stored.entries.length === 0) return null;
+  const readMs = elapsedOf(readWatch);
+  const nothing = (outcome: StoredFeedRead['outcome'], blockMs = -1, trimMs = -1): StoredFeedRead => ({
+    seed: null,
+    outcome,
+    readMs,
+    blockMs,
+    trimMs
+  });
+  if (!stored || stored.entries.length === 0) return nothing('miss');
   // The API route refuses to serve a stored feed past the abandon ceiling
   // (it falls back to trending + starts a rebuild). The SSR seed must do the
   // same, or a stale feed would be served as initialData with staleTime:
   // Infinity and the client would never discover the staleness.
   const age = Date.now() - stored.at;
-  if (age >= feedBands().abandonMs) return null;
+  if (age >= feedBands().abandonMs) return nothing('stale');
   // A version mismatch means the ranking WEIGHTS changed; the content is stale
   // even though the timestamp looks recent.
-  if (stored.version !== feedVersion()) return null;
+  if (stored.version !== feedVersion()) return nothing('stale');
   let entries = filterBannedEntries(stored.entries);
   // Apply the viewer's block list server-side so blocked authors never appear
   // in the SSR HTML. Degrades open on failure, same as the API route.
+  const blockWatch = stopwatchIf(timing);
   try {
     const session = await getLiteSession();
     const blockedKeys = await viewerBlockedKeySet(session.user).catch(() => new Set<string>());
@@ -216,14 +321,17 @@ async function prefetchStoredFeed(viewer: string): Promise<InitialFeedSeed | nul
   } catch {
     // Block list unavailable: serve unfiltered, same as the API route's own catch.
   }
-  if (entries.length === 0) return null;
+  const blockMs = elapsedOf(blockWatch);
+  if (entries.length === 0) return nothing('empty', blockMs);
+  const trimWatch = stopwatchIf(timing);
   const page: InitialFeedPage = {
     entries: trimForSSR(entries),
     source: 'recsys',
     personalised: true,
     nextCursor: cursorOf(entries)
   };
-  return { page, at: stored.at };
+  const trimMs = elapsedOf(trimWatch);
+  return { seed: { page, at: stored.at }, outcome: 'hit', readMs, blockMs, trimMs };
 }
 
 /**
@@ -232,9 +340,24 @@ async function prefetchStoredFeed(viewer: string): Promise<InitialFeedSeed | nul
  *
  * Anonymous: trending posts from the Hive node, same as the API route's fallback.
  * Signed-in: the viewer's stored ranking from Postgres/memory, if one exists.
+ *
+ * ★ `timer` AND `trace` ARE INSTRUMENTS, BOTH OPTIONAL (2026-09-05). The signed-in
+ * home render is the owner's cold complaint and every deadline that can cost it a
+ * second lives in this function, so `app/page.tsx` passes its own `RenderTimer`
+ * down rather than emitting a second line here -- one line per render. Neither is
+ * ever read to decide anything; omit them and the behaviour is identical (an
+ * absent `timer` marks nothing, a disabled one is the shared no-op).
  */
-export async function prefetchHomeFeed(viewer: string): Promise<InitialFeedSeed | null> {
+export async function prefetchHomeFeed(
+  viewer: string,
+  timer?: RenderTimer,
+  trace?: HomeFeedTrace
+): Promise<InitialFeedSeed | null> {
   try {
+    // ★ THE ONE GATE for every stopwatch below and inside `prefetchStoredFeed`:
+    // with no trace to write into, nothing is measured, nothing is allocated and
+    // no clock is read. `app/page.tsx` only allocates a trace when the flag is on.
+    const timing = Boolean(trace);
     // ★★ ONE 700ms BUDGET FOR THE WHOLE SIGNED-IN FALLBACK, NOT TWO (2026-09-05,
     // perf batch C-A). This used to race `prefetchStoredFeed` against its own
     // 700ms deadline and then, on a miss, fall into the trending call below and
@@ -250,8 +373,27 @@ export async function prefetchHomeFeed(viewer: string): Promise<InitialFeedSeed 
     let trendingBudgetMs = PREFETCH_TIMEOUT_MS;
     if (viewer) {
       const storedStartedAt = Date.now();
-      const stored = await withTimeout(prefetchStoredFeed(viewer), PREFETCH_TIMEOUT_MS);
-      if (stored) return stored;
+      const stored = await withTimeout(prefetchStoredFeed(viewer, timing), PREFETCH_TIMEOUT_MS);
+      // `race` is the whole stored-feed attempt INCLUDING the deadline, so it is
+      // capped at PREFETCH_TIMEOUT_MS by construction; `read`/`block`/`trim` on
+      // the same line break down what the winner spent it on.
+      timer?.mark('race');
+      if (trace) {
+        // `null` here is the DEADLINE, not an empty store -- `withTimeout`
+        // resolves null on expiry and the read itself always resolves an object.
+        trace.stored = stored ? stored.outcome : 'timeout';
+        trace.readMs = stored?.readMs ?? -1;
+        trace.blockMs = stored?.blockMs ?? -1;
+        trace.trimMs = stored?.trimMs ?? -1;
+      }
+      if (stored?.seed) {
+        if (trace) {
+          trace.source = 'recsys';
+          trace.ranked = true;
+          trace.count = stored.seed.page.entries.length;
+        }
+        return stored.seed;
+      }
       // ★★★ STORED FEED STALE OR MISSING -> DO NOT LEAVE HOME UNSEEDED (2026-09-03).
       // A signed-in reader whose stored feed is not fresh (e.g. the ranker is
       // slow, so the warmer cannot rebuild it) used to seed nothing here and the
@@ -264,6 +406,10 @@ export async function prefetchHomeFeed(viewer: string): Promise<InitialFeedSeed 
       if (trendingBudgetMs <= 0) return null;
     }
     const entries = await withTimeout(prefetchTrending(), trendingBudgetMs);
+    // The trending race. On a TTL-cache hit this is ~0ms and the whole cost of a
+    // cold one (`getPostsRanked` + merge + trim) is inside it, which is why there
+    // is no separate `trim` figure on this path.
+    timer?.mark('trend');
     if (!entries || entries.length === 0) return null;
     let seedEntries = entries;
     if (viewer) {
@@ -275,6 +421,7 @@ export async function prefetchHomeFeed(viewer: string): Promise<InitialFeedSeed 
       // in home SSR and stay visible until the on-mount ranked refetch resolved
       // (up to ~12s). A blocked author leaking is never an acceptable trade for
       // a few hundred ms; the stored path already awaits this unraced.
+      const blockWatch = stopwatchIf(timing);
       try {
         const session = await getLiteSession();
         const blockedKeys = await viewerBlockedKeySet(session.user).catch(() => new Set<string>());
@@ -283,6 +430,10 @@ export async function prefetchHomeFeed(viewer: string): Promise<InitialFeedSeed 
         // Block list unavailable: serve unfiltered, same as the stored path and
         // the API route's own catch.
       }
+      // Overwrites the stored path's `blockMs`, correctly: we are here only
+      // because that path produced no seed, so this is the filter that ran on
+      // the entries the reader actually gets.
+      if (trace) trace.blockMs = elapsedOf(blockWatch);
     }
     const page: InitialFeedPage = {
       entries: seedEntries,
@@ -300,6 +451,14 @@ export async function prefetchHomeFeed(viewer: string): Promise<InitialFeedSeed 
           ? { author: seedEntries[seedEntries.length - 1].author, permlink: seedEntries[seedEntries.length - 1].permlink }
           : null
     };
+    // Everything after the trending race: the block filter above (broken out as
+    // `block=` on the line) plus building this object.
+    timer?.mark('assemble');
+    if (trace) {
+      trace.source = 'trending-fallback';
+      trace.ranked = false;
+      trace.count = seedEntries.length;
+    }
     return { page, at: Date.now() };
   } catch (error) {
     logger.warn('feed-prefetch: SSR prefetch failed, client will fetch: %o', error);

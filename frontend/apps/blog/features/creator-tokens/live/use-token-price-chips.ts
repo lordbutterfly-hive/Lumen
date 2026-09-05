@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
@@ -45,11 +46,25 @@ export function useTokenPriceChips(handles: readonly string[]): TokenPriceChips 
 
   // Sorted + de-duplicated so the key is stable across render order, and so a
   // page that reshuffles its cards does not refetch.
-  const wanted = [...new Set(handles.map((h) => h.trim()).filter((h) => h.length > 0))].sort();
+  const deduped = [...new Set(handles.map((h) => h.trim()).filter((h) => h.length > 0))].sort();
+  const wantedKey = deduped.join(',');
+  /*
+   * ★ T3j (2026-09-04 perf hunt) — STABILISED BY ITS OWN CACHE KEY.
+   *
+   * `deduped` is a fresh array on every render because `handles` is (every
+   * caller passes `list.map((e) => e.author)`), but its CONTENT changes only
+   * when `wantedKey` does. `wantedKey` is already the string this hook trusts to
+   * decide whether two renders are asking the same question, since it is the
+   * React Query key. Keying the array on it makes `wanted` a stable reference
+   * for exactly as long as that is true, which is what lets the price map below
+   * be memoised at all.
+   */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const wanted = useMemo(() => deduped, [wantedKey]);
   const enabled = wanted.length > 0 && dataSource !== null;
 
   const query = useQuery({
-    queryKey: ['creator-tokens', 'prices', wanted.join(',')],
+    queryKey: ['creator-tokens', 'prices', wantedKey],
     queryFn: () => dataSource!.readMarketPrices(wanted),
     enabled,
     staleTime: STALE_MS
@@ -57,10 +72,24 @@ export function useTokenPriceChips(handles: readonly string[]): TokenPriceChips 
 
   // A failed read reports `unknown` per handle rather than an empty map, so a
   // caller looping over its own handles never has to special-case "missing".
-  const prices = new Map<string, MarketPrice>();
-  for (const handle of wanted) {
-    prices.set(handle, query.data?.get(handle) ?? PENDING);
-  }
+  //
+  // ★ T3j: built once per (handle set, query result) rather than once per render
+  // of the list. React Query returns the same `data` reference while its cache
+  // entry is untouched, so those two are the whole dependency set. The VALUES
+  // were already reference-stable (they come straight off `query.data`, or the
+  // shared `PENDING` constant), which is why `MediumPostCard`'s comparator can
+  // compare `price` by reference; this makes the map holding them stable too.
+  const data = query.data;
+  const prices = useMemo(() => {
+    const out = new Map<string, MarketPrice>();
+    for (const handle of wanted) {
+      out.set(handle, data?.get(handle) ?? PENDING);
+    }
+    return out;
+  }, [wanted, data]);
 
-  return { prices, isLoading: enabled && query.isLoading };
+  const isLoading = enabled && query.isLoading;
+  // The RESULT OBJECT is memoised too, so a caller that ever puts it in a
+  // dependency array does not re-fire on every render of its list.
+  return useMemo(() => ({ prices, isLoading }), [prices, isLoading]);
 }

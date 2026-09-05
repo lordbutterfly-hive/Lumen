@@ -47,6 +47,33 @@ export interface RenderTimer {
   done(extra?: Record<string, string | number>): void;
 }
 
+/**
+ * ★★★ EVERY FIELD IS SANITISED, BECAUSE ONE OF THEM IS UNTRUSTED INPUT
+ * (2026-09-05, review of the live instrument). This line is SPACE-DELIMITED
+ * `key=value`, and at least one emitter puts a URL segment in it: the profile
+ * layout's `generateMetadata` reaches `getAccountFullCached` with whatever
+ * `/@<param>` contained, so a request for `/@a%20total=1ms` would have written
+ *
+ *     render-timing: account-full user=a total=1ms account=812ms ... total=830ms
+ *
+ * -- a forged field, ahead of the real one, in the log a latency decision is
+ * about to be made from. Log injection is not a crash and nothing would ever
+ * have flagged it; it just quietly poisons the measurement.
+ *
+ * The rule is the Hive account-name charset (`[a-z0-9.-]`, lower-cased first
+ * because that is what a Hive name is), everything else becomes `_`, capped at
+ * 32 characters. Applied to the LABEL, every KEY and every VALUE -- not just
+ * `user` -- so a field added later cannot reopen this by being the one nobody
+ * sanitised. Our own values (`812ms`, `won`, `not-an-account`, `3500`) already
+ * live inside that charset and pass through unchanged.
+ */
+export function sanitiseTimingField(value: string | number): string {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9.-]/g, '_')
+    .slice(0, 32);
+}
+
 /** The whole cost of "off": one shared frozen object, two empty functions. */
 const NO_OP: RenderTimer = Object.freeze({
   mark: () => undefined,
@@ -83,7 +110,9 @@ export function renderTimingEnabled(env: Record<string, string | undefined> = cu
  *
  * Returns **-1**, never a throw and never a plausible-looking 0, when the clock
  * could not be read: a missing number must be visible in the log line as a
- * missing number, not silently indistinguishable from "instant".
+ * missing number, not silently indistinguishable from "instant". A caller that
+ * emits its line before a branch has settled reports the same -1, and means the
+ * same thing by it: NOT MEASURED, not "took no time".
  */
 export interface RenderStopwatch {
   elapsedMs(): number;
@@ -147,7 +176,7 @@ export function renderTimer(
     mark(stage: string): void {
       try {
         const now = performance.now();
-        stages.push(`${stage}=${Math.round(now - previous)}ms`);
+        stages.push(`${sanitiseTimingField(stage)}=${Math.round(now - previous)}ms`);
         previous = now;
       } catch {
         // An instrument may not break a render. See this module's doc comment.
@@ -156,8 +185,14 @@ export function renderTimer(
     done(extra?: Record<string, string | number>): void {
       try {
         const total = Math.round(performance.now() - started);
-        const head = extra ? Object.entries(extra).map(([key, value]) => `${key}=${value}`) : [];
-        log(`render-timing: ${label} ${[...head, ...stages, `total=${total}ms`].join(' ')}`);
+        const head = extra
+          ? Object.entries(extra).map(
+              ([key, value]) => `${sanitiseTimingField(key)}=${sanitiseTimingField(value)}`
+            )
+          : [];
+        log(
+          `render-timing: ${sanitiseTimingField(label)} ${[...head, ...stages, `total=${total}ms`].join(' ')}`
+        );
       } catch {
         // Same: a failed log line is not a failed page.
       }

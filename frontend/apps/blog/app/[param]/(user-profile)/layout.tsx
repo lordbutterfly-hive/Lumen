@@ -65,6 +65,22 @@ export async function generateMetadata({ params }: { params: { param: string } }
   if (isBannedAuthor(username)) {
     return { title: FALLBACK_TITLE, description: SITE_DESC };
   }
+  // ★★★ THE SAME FORMAT GATE THE LAYOUT USES, AND FOR ONE MORE REASON THAN THE
+  // LAYOUT HAS (2026-09-05, review of the live render-timing instrument). The
+  // layout 404s an ill-formed name before it touches the chain; this function
+  // runs INDEPENDENTLY of that 404 (its own comment above says so) and had no
+  // such gate, so `/@a%20total=1ms` -- any junk at all after the `@` -- reached
+  // `getAccountFullCached` and put an attacker-chosen string into a chain call
+  // and into that call's `render-timing: account-full user=...` line. The line
+  // is space-delimited `key=value`, so a name containing a space and an `=`
+  // forged a whole extra field in the log a latency decision is made from. Two
+  // independent fixes, both applied: the timing helper now sanitises every field
+  // (`@ui/lib/render-timing`), and the junk no longer gets that far in the first
+  // place. Same predicate as the layout, so a name this refuses is a name the
+  // page 404s anyway -- the fallback metadata below is what a 404 already shows.
+  if (!(await isValidAccountNameFormat(username))) {
+    return { title: FALLBACK_TITLE, description: SITE_DESC };
+  }
   try {
     // Use cached version - deduplicated with Layout's prefetch within the same request
     const account = await getAccountFullCached(username);

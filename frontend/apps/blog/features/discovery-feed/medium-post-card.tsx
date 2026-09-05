@@ -23,6 +23,7 @@ import { cn } from '@ui/lib/utils';
 import { handleError } from '@ui/lib/handle-error';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
+import { useIntentPrefetch } from '@/blog/components/intent-prefetch';
 import { useLumenBlock } from '@/blog/lib/lite/client/use-lumen-block';
 import { getPostSummary, normalizeTitle } from '@/blog/lib/utils';
 import { find_first_img } from '@/blog/features/list-of-posts/post-img';
@@ -689,6 +690,20 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
 
   const href = `/${post.category}/@${displayAuthor}/${post.permlink}`;
 
+  /*
+   * ★★ THE REBLOG LINE WARMS THE PROFILE IT NAMES (2026-09-05, snappiness phase
+   * 4b). Same reason as the byline cluster (`identity-pill.tsx`): a profile is
+   * the slowest navigation in the app and a client-side click pays the whole
+   * server render before anything moves. The hook is called UNCONDITIONALLY —
+   * this card has an early return further down for a hidden NSFW post, and a
+   * conditional hook would change hook order between renders of the same list —
+   * so an absent reblogger resolves to an empty href, which `useIntentPrefetch`
+   * already treats as "nothing to prefetch".
+   */
+  const rebloggerIntent = useIntentPrefetch(
+    post.reblogged_by && post.reblogged_by.length > 0 ? `/@${post.reblogged_by[0]}` : ''
+  );
+
   /* ★ MOVED OUT (2026-08-26) to `./lib/post-rubric`, so the profile COMMENT card
      can use the identical rule instead of having no fallback at all. The spec,
      both owner rulings and the reason for the `hive-\d+` shape test all moved
@@ -974,6 +989,7 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
             href={`/@${post.reblogged_by[0]}`}
             className="hover:underline"
             data-testid="medium-card-reblogged-by-link"
+            {...rebloggerIntent}
           >
             {post.reblogged_by[0]}
           </Link>

@@ -23,6 +23,7 @@ import OfflineGuard from '../components/offline-guard';
 import { Lora } from 'next/font/google';
 import { siteConfig } from '@ui/config/site';
 import { configuredImagesEndpoint } from '@ui/config/public-vars';
+import { renderTimer, renderStopwatch, renderTimingEnabled } from '@ui/lib/render-timing';
 
 // ★★★ ONE FAMILY. LORA, AND NOTHING ELSE (owner ruling, 2026-08-19).
 //
@@ -278,7 +279,43 @@ function getBrowserEnv(): Record<string, string> {
   return out;
 }
 
+/**
+ * ★ TIME ONE BRANCH OF A `Promise.all` WITHOUT JOINING THE RENDER (2026-09-05,
+ * home instrument). The two reads below overlap, so `RenderTimer.mark()` -- which
+ * measures "time since the previous mark" -- cannot say what EITHER of them cost;
+ * only which of the pair finished last. `renderStopwatch()` exists for exactly
+ * this case (see its doc in `@ui/lib/render-timing`), and this wrapper attaches
+ * one to a branch while handing back a promise that settles with the identical
+ * value.
+ *
+ * ★ IT PASSES REJECTIONS THROUGH UNCHANGED. A `.then` with no `onRejected`
+ * forwards a rejection verbatim, so `Promise.all` still rejects exactly when and
+ * with what it rejected before; a failed read is not swallowed, timed, or turned
+ * into a resolved value. The recorded ms is simply never written on that branch,
+ * which the caller reports as the documented -1 ("not measured").
+ *
+ * ★ ONLY CALLED WHEN THE FLAG IS ON, so a production render allocates neither the
+ * stopwatch nor the extra promise. An instrument that costs something when it is
+ * off changes the thing it measures.
+ */
+function timeBranch<T>(promise: Promise<T>, record: (ms: number) => void): Promise<T> {
+  const watch = renderStopwatch();
+  return promise.then((value) => {
+    record(watch.elapsedMs());
+    return value;
+  });
+}
+
 export default async function RootLayout({ children }: { children: ReactNode }) {
+  // ★ RENDER TIMING, OFF UNLESS `LUMEN_RENDER_TIMING=yes` (2026-09-05, signed-in
+  // home). This layout runs on EVERY route, and three of its awaits carry their
+  // own deadlines (the tags prefetch's 600ms, the rank tier's 150ms below), so a
+  // slow one is charged to every page's TTFB and nothing measured which. Same
+  // instrument the profile layout already carries; see `@ui/lib/render-timing`.
+  // Started FIRST so `total` also covers `getBrowserEnv()`/`JSON.stringify`
+  // below, which are the only other per-render work in this function.
+  const timer = renderTimer('root-layout');
+  const timingOn = renderTimingEnabled();
   // Server-side locale and language handling
   const cookieStore = cookies();
   const locale = cookieStore.get('NEXT_LOCALE')?.value || 'en';
@@ -319,15 +356,35 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
    * the second's. `Promise.all` runs the same two reads concurrently; the
    * root layout's wall-clock cost is now the SLOWER of the two, not the sum.
    */
+  // ★ THE TWO CALLS ARE HOISTED INTO CONSTS PURELY SO EACH CAN BE TIMED
+  // SEPARATELY (2026-09-05, home instrument). They are still started
+  // back-to-back and awaited together, so the concurrency the comment above
+  // describes is exactly unchanged; `timeBranch` only attaches a stopwatch to
+  // each, and only when the flag is on.
+  let sessionMs = -1;
+  let tagsMs = -1;
+  // ★ The header and the left rail used to learn who you are only after React
+  // mounted and `/api/users/me` came back, which on this app is 5-20s — so a
+  // signed-in reader was served signed-out chrome for that whole window. This
+  // request already carries the session cookie; read it once here and hand the
+  // answer down. See features/layouts/server-session.tsx.
+  const sessionRead = getServerSessionUser();
+  const tagsRead = trendingTagsForPrefetch();
   const [serverSession, trendingTags] = await Promise.all([
-    // ★ The header and the left rail used to learn who you are only after React
-    // mounted and `/api/users/me` came back, which on this app is 5-20s — so a
-    // signed-in reader was served signed-out chrome for that whole window. This
-    // request already carries the session cookie; read it once here and hand the
-    // answer down. See features/layouts/server-session.tsx.
-    getServerSessionUser(),
-    trendingTagsForPrefetch()
+    timingOn
+      ? timeBranch(sessionRead, (ms) => {
+          sessionMs = ms;
+        })
+      : sessionRead,
+    timingOn
+      ? timeBranch(tagsRead, (ms) => {
+          tagsMs = ms;
+        })
+      : tagsRead
   ]);
+  // The WALL CLOCK of the pair, which is the slower of the two -- the `session=`
+  // and `tags=` fields on the line say which one that was.
+  timer.mark('awaited');
 
   /**
    * ★★★ THE LEFT RAIL'S RANK TIER, IN THE HTML TOO (C-B, 2026-09-05, owner:
@@ -359,6 +416,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         new Promise<null>((resolve) => setTimeout(() => resolve(null), RANK_TIER_PREFETCH_BUDGET_MS))
       ])
     : null;
+  // Sequential (it needs `serverSession.username`), so a plain mark is the right
+  // measure here: this is time NOBODY else's await is overlapping.
+  timer.mark('rank');
 
   const queryClient = getQueryClient();
   if (trendingTags) {
@@ -366,6 +426,24 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   }
   const dehydratedState = dehydrate(queryClient);
   queryClient.clear();
+  timer.mark('dehydrate');
+  // ★ ONE LINE PER RENDER, e.g.
+  //   render-timing: root-layout user=bozz tags=hit tier=hit session=8ms
+  //   tagfetch=341ms awaited=342ms rank=151ms dehydrate=0ms total=494ms
+  // `session`/`tagfetch` are the two OVERLAPPING branch costs (stopwatches);
+  // `awaited`/`rank`/`dehydrate` are sequential stages and sum to `total`.
+  // A `-1ms` value means NOT MEASURED, never "instant" -- the convention
+  // `renderStopwatch` documents. `tags`/`tier` say whether each seed was
+  // actually produced, which is what decides if its deadline bought anything.
+  // Every key and value is sanitised by the helper ([a-z0-9.-], 32 chars), so
+  // a username can never forge a field.
+  timer.done({
+    user: serverSession.isLoggedIn ? serverSession.username || 'anon' : 'anon',
+    tags: trendingTags ? 'hit' : 'miss',
+    tier: rankTierSeed ? 'hit' : 'miss',
+    session: `${sessionMs}ms`,
+    tagfetch: `${tagsMs}ms`
+  });
 
   return (
     <html lang={locale} dir={isRTL ? 'rtl' : 'ltr'} className={lora.variable}>

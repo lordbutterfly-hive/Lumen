@@ -21,7 +21,12 @@
  * every production render), and taking part in the render it is supposed to be
  * watching (a throw from a log line failing a page). Both are asserted here.
  */
-import { renderTimer, renderTimingEnabled, renderStopwatch } from '@ui/lib/render-timing';
+import {
+  renderTimer,
+  renderTimingEnabled,
+  renderStopwatch,
+  sanitiseTimingField
+} from '@ui/lib/render-timing';
 
 let failures = 0;
 function check(label: string, cond: boolean): void {
@@ -175,6 +180,47 @@ check(`ON: no negative duration (got ${durations.join(',')})`, durations.length 
   check(
     'stopwatch is independent of LUMEN_RENDER_TIMING (the CALLER decides to start one)',
     renderStopwatch().elapsedMs() >= 0
+  );
+}
+
+// ---- LOG INJECTION: the line carries UNTRUSTED input -----------------------
+// `generateMetadata` on the profile layout reaches getAccountFull with whatever
+// followed the `@` in the URL, so `user=` is attacker-chosen. The line is
+// space-delimited `key=value`; a name with a space and an `=` in it forged a
+// whole extra field before this was sanitised.
+{
+  const ATTACK = 'a total=1ms';
+  check('sanitiser: a space and an = both become _', sanitiseTimingField(ATTACK) === 'a_total_1ms');
+  check('sanitiser: upper case is folded (Hive names are lower case)', sanitiseTimingField('BoZZ') === 'bozz');
+  check(
+    'sanitiser: capped at 32 characters',
+    sanitiseTimingField('x'.repeat(200)).length === 32 && sanitiseTimingField('x'.repeat(200)) === 'x'.repeat(32)
+  );
+  check(
+    'sanitiser: newline, quote, backslash and control bytes all become _',
+    sanitiseTimingField('a\nb"c\\d\te') === 'a_b_c_d_e'
+  );
+  check(
+    'sanitiser: every value THIS app actually emits passes through untouched',
+    ['bozz', 'a.b-c', '812ms', '-1ms', '3500', 'won', 'miss', 'nolist', 'not-an-account', 'true'].every(
+      (v) => sanitiseTimingField(v) === v
+    )
+  );
+  check('sanitiser: a number is accepted and stringified', sanitiseTimingField(20) === '20');
+
+  const attacked: string[] = [];
+  const t = renderTimer('account-full', (l) => attacked.push(l), ON);
+  t.mark('acc ount=9ms');
+  t.done({ user: ATTACK, 'ed gesMemo': 'hit' });
+  const forged = attacked[0] ?? '';
+  check(`ON: the forged line still has exactly ONE total= field (${forged})`,
+    forged.split('total=').length - 1 === 1);
+  check('ON: the injected value is neutralised in the line', forged.includes('user=a_total_1ms'));
+  check('ON: an injected KEY is neutralised too', forged.includes('ed_gesmemo=hit'));
+  check('ON: an injected STAGE name is neutralised too', forged.includes('acc_ount_9ms='));
+  check(
+    'negative control: the raw attack string WOULD have forged a field',
+    `render-timing: account-full user=${ATTACK} total=1ms`.split('total=').length - 1 === 2
   );
 }
 

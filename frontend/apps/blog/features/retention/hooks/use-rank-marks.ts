@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { LeagueTier } from '../types';
 import { TIERS } from '../lib/tiers';
@@ -53,17 +54,37 @@ export function useRankMarks(authors: string[]): Map<string, RankMark> {
     retry: false
   });
 
-  const out = new Map<string, RankMark>();
-  for (const [account, m] of Object.entries(data?.marks ?? {})) {
-    const tier = toTier(m.tier);
-    if (!tier) continue;
-    // Trust the ladder over the snapshot for the DISPLAY rule: `show_mark` is a
-    // denormalised copy, and if the ladder's boundary ever moves, the live table is the
-    // authority. The snapshot still decides WHICH rung.
-    if (!TIERS[tier].showBylineEmblem) continue;
-    out.set(account.toLowerCase(), { tier, rankNumber: m.rankNumber, showMark: true });
-  }
-  return out;
+  /*
+   * ★ T3j (2026-09-04 perf hunt) — MEMOISED ON THE QUERY RESULT, NOT REBUILT
+   * PER RENDER.
+   *
+   * Without this the hook allocated a fresh `Map` AND a fresh `RankMark` object
+   * literal for every author on every render of the list that calls it, even
+   * when the rank snapshot behind it had not changed at all. React Query hands
+   * back the SAME `data` object while a cache entry is untouched, so `data.marks`
+   * is the correct and only dependency: a new Map is built exactly when the
+   * snapshot actually changes.
+   *
+   * This also gives the `RankMark` objects stable identity between renders. That
+   * is not what makes `MediumPostCard`'s `memo` work today (its comparator reads
+   * `mark` field by field precisely because this used to be unstable, and it
+   * still must, since a caller may pass a mark from anywhere), but it removes the
+   * reason that comparator had to exist.
+   */
+  const marks = data?.marks;
+  return useMemo(() => {
+    const out = new Map<string, RankMark>();
+    for (const [account, m] of Object.entries(marks ?? {})) {
+      const tier = toTier(m.tier);
+      if (!tier) continue;
+      // Trust the ladder over the snapshot for the DISPLAY rule: `show_mark` is a
+      // denormalised copy, and if the ladder's boundary ever moves, the live table is the
+      // authority. The snapshot still decides WHICH rung.
+      if (!TIERS[tier].showBylineEmblem) continue;
+      out.set(account.toLowerCase(), { tier, rankNumber: m.rankNumber, showMark: true });
+    }
+    return out;
+  }, [marks]);
 }
 
 /**
@@ -123,13 +144,18 @@ export function useRankLuminosity(authors: string[]): Map<string, number> {
     retry: false
   });
 
-  const out = new Map<string, number>();
-  for (const [account, m] of Object.entries(data?.marks ?? {})) {
-    const l = RANK_LUMINOSITY[m.rankNumber];
-    if (l === undefined) continue; // rank 0 / unknown: unlit, no entry
-    out.set(account.toLowerCase(), l);
-  }
-  return out;
+  // ★ T3j: memoised on the query result for the same reason as `useRankMarks`
+  // above. Same `data`, so the two hooks rebuild their maps on the same beat.
+  const marks = data?.marks;
+  return useMemo(() => {
+    const out = new Map<string, number>();
+    for (const [account, m] of Object.entries(marks ?? {})) {
+      const l = RANK_LUMINOSITY[m.rankNumber];
+      if (l === undefined) continue; // rank 0 / unknown: unlit, no entry
+      out.set(account.toLowerCase(), l);
+    }
+    return out;
+  }, [marks]);
 }
 
 /**

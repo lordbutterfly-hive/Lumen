@@ -63,6 +63,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       query,
       error instanceof Error ? error.message : String(error)
     );
-    return NextResponse.json({ error: 'people_unavailable' }, { status: 502, headers: NO_STORE });
+    // 503, not 502: Cloudflare replaces an origin 502/504 body with its own error
+    // page (verified on prod 2026-09-05, see /api/search), and the client reads
+    // this code. `people-results.tsx` keys on the failure, not the status.
+    return NextResponse.json(
+      { error: 'people_unavailable' },
+      { status: 503, headers: { ...NO_STORE, 'retry-after': '10' } }
+    );
   }
 }

@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { getCookie } from '@ui/lib/utils';
 import { getLanguage, LOCALE_KEY } from '@/blog/utils/language';
-import { defaultLocale } from '@/blog/i18n/settings';
+import { localeCookieDelete, localeCookieMountAction } from '@/blog/lib/locale-cookie';
 
 export default function ClientEffects() {
   useEffect(() => {
@@ -34,22 +34,61 @@ export default function ClientEffects() {
      * in audit §1.2, and it is invisible to anyone testing only from `/`.
      *
      * Fix: state `path=/`, so there is one cookie and it is the site's.
+     *
+     * ★★★ AND THE DEFAULT LOCALE NO LONGER GETS A COOKIE AT ALL (2026-09-05).
+     *
+     * The line this replaced planted `NEXT_LOCALE=en` on every visitor who did
+     * not have one, which is every first-time reader. That cookie is the reason
+     * the site is not on the edge cache: Cloudflare Free cannot vary a cache key
+     * on a cookie, so the owner's anonymous-HTML rule excludes any request
+     * carrying `NEXT_LOCALE` (LUMEN-DOCS/BENCHMARK-AND-PHASEB-2026-09-04.md).
+     * Only a visitor's FIRST request could ever hit the edge; the response to it
+     * planted the cookie, and every reload afterwards went to the origin in
+     * France. Measured with curl against prod on 2026-09-05: HIT with the
+     * anonymous session cookies present, DYNAMIC as soon as `NEXT_LOCALE` is
+     * added.
+     *
+     * Absence already means `en` in every reader (root layout, i18n server and
+     * client, TimeAgo, the middleware's cache policy) and the origin proxy keys
+     * absence and `en` to the SAME Souin entry, so nothing renders differently
+     * and the origin cache does not split. The proof for each of those, with
+     * file and line, is in lib/locale-cookie.ts. A reader who actually chose a
+     * language still gets a cookie, and it is still written at `path=/`.
+     *
+     * A `NEXT_LOCALE=en` cookie already in a reader's jar is expired here on
+     * their next page load, whether it was planted by the old auto-writer or
+     * chosen deliberately (owner call, 2026-09-05): it says nothing that its
+     * absence does not, and localStorage keeps the deliberate choice. So an
+     * English reader becomes edge-eligible from their second load onward.
      */
     if (typeof window === 'undefined') return;
 
-    if (!getCookie(LOCALE_KEY)) {
-      document.cookie = `${LOCALE_KEY}=${defaultLocale}; SameSite=Lax; path=/`;
-    } else if (document.cookie.split('; ').filter((c) => c.startsWith(`${LOCALE_KEY}=`)).length > 1) {
+    const readCookieState = () => ({
+      cookieValue: getCookie(LOCALE_KEY),
+      cookieCount: document.cookie.split('; ').filter((c) => c.startsWith(`${LOCALE_KEY}=`)).length
+    });
+
+    let action = localeCookieMountAction(readCookieState());
+
+    if (action === 'clear-duplicates') {
       // Self-heal for anyone already carrying a narrow duplicate written by the
-      // old code. Expire it at every path prefix of this URL EXCEPT `/` — those
+      // old code. Expire it at every path prefix of this URL EXCEPT `/`: those
       // are the only paths a stray copy can be sitting on and still be visible
       // here, and skipping `/` is what stops this from deleting the real,
       // site-wide cookie. Expiring a path that holds nothing is a no-op.
       let prefix = '';
       for (const segment of window.location.pathname.split('/').filter(Boolean)) {
         prefix += `/${segment}`;
-        document.cookie = `${LOCALE_KEY}=; Max-Age=0; SameSite=Lax; path=${prefix}`;
+        document.cookie = localeCookieDelete(prefix);
       }
+      // The cleanup changes what `getCookie` can see (it reports '' while a
+      // duplicate exists), so the surviving single cookie only becomes
+      // readable now. Ask again with the healed jar.
+      action = localeCookieMountAction(readCookieState());
+    }
+
+    if (action === 'delete') {
+      document.cookie = localeCookieDelete('/');
     }
 
     // Handle language setting from localStorage/cookies

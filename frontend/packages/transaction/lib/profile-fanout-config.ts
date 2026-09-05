@@ -30,6 +30,16 @@
  * through react-env. A browser-side `getAccountFull` therefore always sees the
  * default and keeps correcting. That is the honest scope of the A/B: it moves
  * SERVER render time, which is what the profile layout's cold stage is made of.
+ *
+ * ★ THE ONE BROWSER CALLER, NAMED so nobody has to re-grep for it:
+ * `apps/blog/features/lite-auth/upgrade/upgrade-panel.tsx`'s `onChainOwnerKeys`
+ * dynamically imports `@transaction/lib/hive-api` and calls `getAccountFull` up
+ * to five times while it waits for a freshly broadcast account to appear in a
+ * block. That runs in the page, where `process.env.LUMEN_BANNED_FOLLOW_EDGES`
+ * does not exist, so it keeps the fan-out with the switch off -- twelve extra
+ * calls per attempt, from the client, unaffected by this experiment. It is not a
+ * render path and it is not what the A/B measures; it is listed here so the
+ * result is not mistaken for "the fan-out is gone everywhere".
  */
 export const BANNED_FOLLOW_EDGES_ENV = 'LUMEN_BANNED_FOLLOW_EDGES';
 

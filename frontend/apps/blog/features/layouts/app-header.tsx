@@ -39,6 +39,7 @@ import NotificationsMenu from '@/blog/features/layouts/site-header/notifications
 import MobileNav from '@/blog/features/layouts/mobile-nav';
 import { SearchInput } from '@/blog/features/search/search-input';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
+import { useIntentPrefetch } from '@/blog/components/intent-prefetch';
 import HeaderTokenPill from '@/blog/features/creator-tokens/ui/header-token-pill';
 
 // TODO i18n - move into locales/*/common_blog.json once copy is final
@@ -113,6 +114,45 @@ const AppHeader: FC = () => {
    * link to somebody who is already signed in.
    */
   const identity = useSessionIdentity();
+  /*
+   * ★★ THE READER'S OWN PROFILE, WARMED ON HOVER (2026-09-05, snappiness phase
+   * 4b). The owner's complaint covered this control by name: reaching for the
+   * avatar in the navbar and waiting up to a second for their own profile,
+   * because the render behind it is an account read plus their first page of
+   * posts and a client navigation pays all of it after the press.
+   *
+   * ★★★ AND IT HAD TO BE WIRED TWICE, BECAUSE THE AVATAR IS TWO DIFFERENT
+   * CONTROLS (2026-09-05, review). The first pass wired only the
+   * `header-avatar-pending` link below — which is real, but it is the
+   * PRE-HYDRATION branch: it exists for the frame between the server's cookie
+   * answer and `useUserClient` catching up, and the steady-state header a reader
+   * actually hovers is the branch above it, where the avatar is a
+   * `TooltipTrigger` button that OPENS THE ACCOUNT MENU rather than navigating
+   * anywhere. Wiring only the pending link meant the control the owner named was
+   * warmed for a fraction of a second after page load and never again.
+   *
+   * The steady-state avatar is therefore armed too, on the wrapper `div` inside
+   * the trigger — this file's own markup, not the menu's. The link it warms
+   * lives in `site-header/user-menu.tsx` (`user-profile-menu-profile-link`,
+   * `/@{username}`) and is deliberately NOT touched: another change owns those
+   * rows, and `DropdownMenuContent` does not render its children at all while the
+   * menu is closed (see that file's header), so a `prefetchOnIntent` on the row
+   * itself could not fire until the menu was already open — too late to help.
+   * Hovering the face is the earliest honest signal we have: the reader has to
+   * cross the avatar, open the menu and travel to the Profile row before they can
+   * click it, which is a far longer head start than the 80 ms rest this costs.
+   * It is one render per minute at most (`REPEAT_MS`), and a reader who opens the
+   * menu for Logout instead has spent exactly that one render.
+   *
+   * ONE hook for both branches, called at the top level and unconditionally: the
+   * two Links render in different branches of this header, so a hook inside
+   * either would change hook order the moment `useUserClient` catches up. The
+   * handle prefers the client's answer and falls back to the cookie's, which is
+   * the same precedence `identity` itself uses; an empty href while signed out is
+   * already a no-op in the hook.
+   */
+  const ownProfileHandle = user?.username || identity.username || '';
+  const ownProfileIntent = useIntentPrefetch(ownProfileHandle ? `/@${ownProfileHandle}` : '');
 
   const { manabarsData } = useLoggedUserContext();
   // ★ A LITE ACCOUNT HAS NO CHAIN NOTIFICATIONS, BECAUSE IT HAS NO CHAIN ACCOUNT.
@@ -487,7 +527,10 @@ const AppHeader: FC = () => {
                     aria-label="Account menu"
                     className="cursor-pointer"
                   >
-                    <div className="group relative inline-flex w-fit cursor-pointer items-center justify-center">
+                    <div
+                      className="group relative inline-flex w-fit cursor-pointer items-center justify-center"
+                      {...ownProfileIntent}
+                    >
                       {/* ★ THE COUNT LIVES ON THE BELL, ONCE (2026-08-16, owner:
                           "profile image top right shows 1 notification for some
                           reason? why if the bell shows it"). This drew the SAME
@@ -546,6 +589,7 @@ const AppHeader: FC = () => {
               aria-label={LABELS.yourProfile}
               data-testid="header-avatar-pending"
               className="inline-flex items-center justify-center"
+              {...ownProfileIntent}
             >
               <HeaderAvatar username={identity.username} />
             </Link>

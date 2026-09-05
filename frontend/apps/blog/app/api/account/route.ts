@@ -45,6 +45,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json(account, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'account lookup failed for %s', username);
-    return NextResponse.json({ error: 'account_unavailable' }, { status: 502 });
+    // 503, not 502 (2026-09-05): Cloudflare replaces an origin 502/504 body with
+    // its own error page, so the code below never reached a browser through the
+    // edge. Readers of this route key on the failure (`fetchJson` throws on any
+    // non-2xx), never on the status number.
+    return NextResponse.json(
+      { error: 'account_unavailable' },
+      { status: 503, headers: { 'cache-control': 'private, no-store', 'retry-after': '10' } }
+    );
   }
 }

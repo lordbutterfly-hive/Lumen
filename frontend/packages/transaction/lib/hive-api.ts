@@ -369,7 +369,17 @@ interface AccountFullTimings {
   accountMs: number;
   profileMs: number;
   edgesMs: number;
-  edgesMemo: 'hit' | 'miss' | 'skipped';
+  /**
+   * WHY the fan-out did or did not cost anything. One word per distinct reason,
+   * because collapsing them makes the A/B unreadable: `off` (the switch is set
+   * to `no`) and `nolist` (no banned accounts are configured, so there was never
+   * anything to correct) both mean "zero calls", but only the first is the
+   * experiment -- reading `nolist` in the log while expecting `off` is how you
+   * conclude the switch works on a box where it was never the thing saving the
+   * time. `skipped` is now reserved for NEVER REACHED (`get_profile` returned
+   * nothing, so the code never got as far as the edges).
+   */
+  edgesMemo: 'hit' | 'miss' | 'off' | 'nolist' | 'skipped';
 }
 
 const BANNED_EDGES_TTL_MS = 300_000;
@@ -385,8 +395,15 @@ const bannedFollowEdges = async (
   // whole fan-out and leaves `get_profile`'s own follower/following counts
   // uncorrected -- see `profile-fanout-config.ts` for why this is a switch to be
   // measured on the box and NOT a deletion. Default is unchanged behaviour.
-  if (!bannedFollowEdgesEnabled() || !hasBannedAuthors()) {
-    if (timings) timings.edgesMemo = 'skipped';
+  if (!bannedFollowEdgesEnabled()) {
+    if (timings) timings.edgesMemo = 'off';
+    return { followers: 0, following: 0 };
+  }
+  // Not the same thing as the switch, and the log must not say it is: an empty
+  // ban list means there is nothing to correct FOR, on any box, switch or no
+  // switch.
+  if (!hasBannedAuthors()) {
+    if (timings) timings.edgesMemo = 'nolist';
     return { followers: 0, following: 0 };
   }
 
@@ -445,16 +462,35 @@ export const getProfileInfo = async (
   timings?: AccountFullTimings
 ): Promise<{ follow_stats: AccountFollowStats; reputation: number }> => {
   // `timings` is present only when render timing is on (see AccountFullTimings);
-  // every caller that does not pass it gets byte-identical behaviour.
-  const profileWatch = timings ? renderStopwatch() : null;
+  // every caller that does not pass it gets byte-identical behaviour, and the
+  // `if (timings)` blocks below allocate nothing when it is absent.
+  //
   // ★ A6 retry rollout (2026-08-18): idempotent read. Callers (`getAccountFull`,
   // `getFollowCount`) both already swallow a failure here into a fallback value
   // with no retry of their own, so a fast transient blip previously had zero
   // chance to recover before falling back.
-  const profile = await withRetry(async () => (await getChain()).api.bridge.get_profile({ account: username }), {
-    label: `get_profile(${username})`
-  });
-  if (profileWatch) timings!.profileMs = profileWatch.elapsedMs();
+  // Started BEFORE the call, so the duration covers everything the read costs.
+  const profileWatch = timings ? renderStopwatch() : null;
+  let profilePromise = withRetry(
+    async () => (await getChain()).api.bridge.get_profile({ account: username }),
+    { label: `get_profile(${username})` }
+  );
+  if (timings && profileWatch) {
+    // Recorded on REJECT as well as fulfil: a `get_profile` that finally gave up
+    // after its retries is the expensive case, and a line that reports -1 for it
+    // is blind precisely where the time went.
+    profilePromise = profilePromise.then(
+      (value) => {
+        timings.profileMs = profileWatch.elapsedMs();
+        return value;
+      },
+      (error) => {
+        timings.profileMs = profileWatch.elapsedMs();
+        throw error;
+      }
+    );
+  }
+  const profile = await profilePromise;
   if (!profile || !profile.stats) {
     return {
       follow_stats: {
@@ -465,9 +501,16 @@ export const getProfileInfo = async (
       reputation: 25
     };
   }
+  // Started BEFORE the call, same reason as `profileWatch` above.
   const edgesWatch = timings ? renderStopwatch() : null;
-  const banned = await bannedFollowEdges(username, timings).catch(() => ({ followers: 0, following: 0 }));
-  if (edgesWatch) timings!.edgesMs = edgesWatch.elapsedMs();
+  let edgesPromise = bannedFollowEdges(username, timings).catch(() => ({ followers: 0, following: 0 }));
+  if (timings && edgesWatch) {
+    edgesPromise = edgesPromise.then((value) => {
+      timings.edgesMs = edgesWatch.elapsedMs();
+      return value;
+    });
+  }
+  const banned = await edgesPromise;
   return {
     follow_stats: {
       account: username,
@@ -496,22 +539,54 @@ export const getProfileInfo = async (
 // splits the second branch into `get_profile` versus the banned-edge fan-out,
 // which is the pair the `LUMEN_BANNED_FOLLOW_EDGES` A/B has to compare.
 //
-// Emitted only when `LUMEN_RENDER_TIMING=yes`: with the flag off, `timings` is
-// undefined, no clock is read, no timer is created and no object is built for a
-// no-op to ignore -- which matters here more than anywhere, this being the
-// most-used read in the app.
+// Emitted only when `LUMEN_RENDER_TIMING=yes`. WITH THE FLAG OFF THIS FUNCTION
+// ALLOCATES EXACTLY WHAT IT ALLOCATED BEFORE THE INSTRUMENT EXISTED (corrected
+// 2026-09-05 in review -- the previous wording claimed that while an
+// unconditional `.then()` wrapper was in fact being allocated on every call, on
+// the most-used read in the app). `timings` is undefined, so the `if (timings)`
+// block below is not entered, no closure and no derived promise are created, no
+// clock is read, no timer exists and no extras object is built.
+//
+// ★ EACH BRANCH IS TIMED ON ITS OWN SETTLE, FULFIL **OR** REJECT (fixed
+// 2026-09-05 in review). The first version recorded only in `.then`'s fulfil
+// handler, so the one path worth measuring -- a `getAccount` that FAILS, the
+// likely shape of the 9470ms outlier -- logged `account=-1`, and the line was
+// blind exactly where it was needed.
+//
+// What this deliberately does NOT do is wait for the other branch. `Promise.all`
+// rejects the instant either side rejects, and that is the caller's contract:
+// making the instrument hold the rejection until the slow branch settled would
+// add real latency to a failing render to improve a log line. So a branch still
+// in flight when the line is emitted reports `-1`, which this module defines as
+// NOT MEASURED (see `renderStopwatch`), never as "took no time".
 export const getAccountFull = async (username: string): Promise<FullAccount> => {
   const timings: AccountFullTimings | undefined = renderTimingEnabled()
     ? { accountMs: -1, profileMs: -1, edgesMs: -1, edgesMemo: 'skipped' }
     : undefined;
   const timer = timings ? renderTimer('account-full') : null;
-  const accountWatch = timings ? renderStopwatch() : null;
   try {
+    // ★ THE WATCH STARTS BEFORE THE CALL IT TIMES, and the call itself is INSIDE
+    // this `try` (both fixed 2026-09-05 in review). Started after, the stopwatch
+    // missed whatever `getAccount` does before it returns its promise; left
+    // outside, a SYNCHRONOUS throw from it would have skipped `finally` and
+    // emitted no line at all -- the two ways an instrument lies about the path
+    // that fails fastest.
+    const accountWatch = timings ? renderStopwatch() : null;
+    let accountPromise = getAccount(username);
+    if (timings && accountWatch) {
+      accountPromise = accountPromise.then(
+        (value) => {
+          timings.accountMs = accountWatch.elapsedMs();
+          return value;
+        },
+        (error) => {
+          timings.accountMs = accountWatch.elapsedMs();
+          throw error;
+        }
+      );
+    }
     const [account, profileInfo] = await Promise.all([
-      getAccount(username).then((value) => {
-        if (accountWatch) timings!.accountMs = accountWatch.elapsedMs();
-        return value;
-      }),
+      accountPromise,
       getProfileInfo(username, timings).catch(() => null)
     ]);
     return {
@@ -520,9 +595,8 @@ export const getAccountFull = async (username: string): Promise<FullAccount> => 
       reputation: profileInfo?.reputation
     };
   } finally {
-    // `finally`, so the FAILING path is timed too -- a rejected `getAccount` is
-    // exactly the shape the 9470ms outlier is likely to have. It re-throws as
-    // before; the timer adds nothing to the control flow.
+    // `finally`, so a rejected read is reported rather than silently dropped.
+    // It re-throws as before; the timer adds nothing to the control flow.
     if (timer && timings) {
       timer.done({
         user: username,
@@ -616,6 +690,39 @@ export interface IGetFollowParams {
   limit: number;
 }
 
+/**
+ * ★★★ WHY A FOLLOW PAGE IS FETCHED OVERSIZED (2026-09-05, final gate on the
+ * follow-list pager).
+ *
+ * `getFollowers`/`getFollowing` strip banned accounts from every page
+ * (`withoutBannedAuthors`, below). The consumer's paging decision, however, is
+ * "did this page come back FULL?" -- `use-followers-infinitequery.tsx`'s
+ * `getNextPageParam` returns a cursor only while `lastPage.length >= limit`.
+ * Those two facts contradicted each other: ONE banned name anywhere in a page
+ * made it 49 of 50, the cursor went undefined, `hasNextPage` went false, and a
+ * 500-follower account's list simply stopped at page one with no error and no
+ * way forward. The paging decision was being made from a number the moderation
+ * filter had already changed.
+ *
+ * THE FIX IS AT THE ROOT: ask the chain for `limit + <ban list size>` rows, strip,
+ * and hand back exactly `limit`. A page is then short only when the CHAIN ran
+ * out, which is what "short page" was always meant to mean, so the existing
+ * `length >= limit` rule in the hook becomes correct again and needs no change.
+ * At most `<ban list size>` (6 today) extra rows are fetched per page, and no
+ * row is ever skipped: the cursor is the last row we KEPT.
+ *
+ * THE ONE PLACE IT CANNOT HELP, stated rather than hidden: a caller already
+ * asking for `FOLLOW_LIST_MAX_LIMIT` has no headroom left to over-fetch into, so
+ * its page can still come back stripped-short. Today that is only the viewer's
+ * own follow/mute set (`useFollowingInfiniteQuery(identity.username, 1000, ...)`),
+ * which is loaded whole and never paginated in the UI.
+ */
+const FOLLOW_LIST_MAX_LIMIT = 1000;
+
+/** How many rows to ask the chain for so that `limit` survive the ban filter. */
+const followFetchLimit = (limit: number): number =>
+  hasBannedAuthors() ? Math.min(limit + bannedAuthorList().length, FOLLOW_LIST_MAX_LIMIT) : limit;
+
 export const DEFAULT_PARAMS_FOR_FOLLOW: IGetFollowParams = {
   account: '',
   start: null,
@@ -630,16 +737,22 @@ export const getFollowing = async (params?: Partial<IGetFollowParams>): Promise<
     const type = params?.type || DEFAULT_PARAMS_FOR_FOLLOW.type;
     const limit = params?.limit || DEFAULT_PARAMS_FOR_FOLLOW.limit;
 
+    // Oversized on purpose when a ban list exists — see `followFetchLimit`.
+    const fetchLimit = followFetchLimit(limit);
+
     // ★ A6 retry rollout (2026-08-18): idempotent read, single caller (`/api/following`,
     // already behind its own `cachedRead` memo).
     const following = await withRetry(
-      async () => (await getChain()).api.condenser_api.get_following([account, start, type, limit]),
+      async () => (await getChain()).api.condenser_api.get_following([account, start, type, fetchLimit]),
       { label: `get_following(${account})` }
     );
     // A banned account is nobody's "following" entry, and the account itself has
     // no following list to browse.
     if (isBannedAuthor(account)) return [];
-    return withoutBannedAuthors(following, (edge) => edge.following);
+    const kept = withoutBannedAuthors(following, (edge) => edge.following);
+    // Back to exactly what the caller asked for; untouched when nothing was
+    // over-fetched.
+    return fetchLimit === limit ? kept : kept.slice(0, limit);
   } catch (error) {
     // ★ ONE LINE, NOT A 40-LINE DUMP (2026-09-02, snappiness phase 1). This was
     // `console.error('Error:', error)`, which prints the whole WaxError with its
@@ -685,15 +798,21 @@ export const getFollowers = async (params?: Partial<IGetFollowParams>): Promise<
     const type = params?.type || DEFAULT_PARAMS_FOR_FOLLOW.type;
     const limit = params?.limit || DEFAULT_PARAMS_FOR_FOLLOW.limit;
 
+    // Oversized on purpose when a ban list exists — see `followFetchLimit`.
+    const fetchLimit = followFetchLimit(limit);
+
     // ★ A6 retry rollout (2026-08-18): idempotent read, single caller (`/api/followers`).
     const followers = await withRetry(
-      async () => (await getChain()).api.condenser_api.get_followers([account, start, type, limit]),
+      async () => (await getChain()).api.condenser_api.get_followers([account, start, type, fetchLimit]),
       { label: `get_followers(${account})` }
     );
     if (isBannedAuthor(account)) return [];
     // He can still follow you on chain — nothing Lumen does can stop that. What
     // Lumen can do is never show him in your followers list.
-    return withoutBannedAuthors(followers, (edge) => edge.follower);
+    const kept = withoutBannedAuthors(followers, (edge) => edge.follower);
+    // Back to exactly what the caller asked for. When nothing was over-fetched
+    // the array is handed through untouched, as it always was.
+    return fetchLimit === limit ? kept : kept.slice(0, limit);
   } catch (error) {
     // ★ ONE LINE, NOT A 40-LINE DUMP (2026-09-02, snappiness phase 1). This was
     // `console.error('Error:', error)`, which prints the whole WaxError with its
