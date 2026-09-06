@@ -28,7 +28,26 @@ function makeQueryClient() {
     defaultOptions: {
       queries: {
         // Default to 1 minute - individual queries can override with StaleTime constants
-        staleTime: 60 * 1000
+        staleTime: 60 * 1000,
+
+        /**
+         * ★ SERVER DEFAULT, SET EXPLICITLY (2026-09-06, worker-memory build
+         * map R1/item 2). A finite `cacheTime` arms query-core's GC
+         * `setTimeout` in the `Query` constructor; on the server that pins
+         * this render's whole `QueryClient` (and every `initialData` seed it
+         * holds) for that long, because `getQueryClient()` below hands each
+         * SSR render its own client. `undefined` here on the client is a
+         * no-op: query-core falls back to its own default (5 minutes)
+         * exactly as before this change.
+         *
+         * This is defense-in-depth, not the fix: it only changes the
+         * DEFAULT. Any hook that sets its own `cacheTime` (as
+         * `use-reblogged-by-query.ts` did before its own `isServer` fix)
+         * still overrides this per-query. Grep for `cacheTime:` / `gcTime:`
+         * before adding a new one; give it the same `isServer ? Infinity :
+         * value` treatment if it can run during SSR.
+         */
+        cacheTime: isServer ? Infinity : undefined
       }
     }
   });
