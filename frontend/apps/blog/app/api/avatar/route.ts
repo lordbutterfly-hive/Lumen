@@ -18,6 +18,11 @@ import { proxifyImageSrc } from '@hive/ui/lib/proxify-images';
 import { isHiveAccountNameValid } from '@transaction/lib/validate-hive-account';
 import { withRetry } from '@transaction/lib/retry';
 import { liteAvatar } from '@/blog/lib/lite/render/lite-identity';
+// ★ Pulled into its own `lib/` module (2026-09-07) so the per-hop timeout / total
+// budget fix can be unit-tested with a mocked `fetch` — see that module's own doc
+// comment for why (a Route Handler file may only export the HTTP-verb functions
+// Next recognises). Behaviour here is unchanged: same call, same signature.
+import { fetchAsWebp } from '@/blog/lib/fetch-avatar-webp';
 
 /**
  * Proxy endpoint for user avatars.
@@ -198,47 +203,6 @@ function avatarBox(size: string | null, width: string | null, height: string | n
   if (size === 'large') return { width: 512, height: 512 };
   if (size === 'medium') return { width: 256, height: 256 };
   return { width: 128, height: 128 };
-}
-
-/**
- * ★ WEBP RESOLVER (2026-09-04, T1b perf). `shortcutUrl` is Hive's own
- * `/u/<name>/avatar/<size>` redirect — it ignores every format param on the request
- * (verified) and always 302s to a plain, source-format `/p/<hash>?width=&height=` URL.
- * That resolved URL DOES honour `format`, so this follows the ONE redirect itself
- * (`redirect: 'manual'`, which — unlike a browser's cross-origin fetch — gives a real
- * status/Location here since this runs server-side with no CORS restriction) and
- * re-requests it with `format=webp` set.
- *
- * Falls back to exactly the un-modified resolved URL — i.e. today's PNG behaviour —
- * if the WebP-forced request fails, so a source the proxy can't transcode still
- * resolves to a real picture instead of a broken avatar. If `shortcutUrl` doesn't
- * redirect at all (missing account, upstream error), the probe response is handed
- * back untouched so the caller's existing `!response.ok` fallback logic runs exactly
- * as it did before this change.
- */
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
-
-async function fetchAsWebp(shortcutUrl: string, label: string): Promise<Response> {
-  const probe = await withRetry(
-    () => fetch(shortcutUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, redirect: 'manual' }),
-    { label: `${label}-probe` }
-  );
-
-  const location = probe.headers.get('location');
-  if (!REDIRECT_STATUSES.has(probe.status) || !location) {
-    return probe;
-  }
-
-  const original = new URL(location, shortcutUrl);
-  const asWebp = new URL(original);
-  asWebp.searchParams.set('format', 'webp');
-
-  const webp = await withRetry(() => fetch(asWebp.toString(), { headers: { 'User-Agent': 'Mozilla/5.0' } }), { label });
-  if (webp.ok && webp.body) {
-    return webp;
-  }
-
-  return withRetry(() => fetch(original.toString(), { headers: { 'User-Agent': 'Mozilla/5.0' } }), { label: `${label}-fallback` });
 }
 
 /**

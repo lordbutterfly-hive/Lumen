@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { getManabar } from '@transaction/lib/hive-api';
+import { getAccountFull, getManabar } from '@transaction/lib/hive-api';
 import { cachedRead } from '@/blog/lib/server-read-cache';
 
 const logger = getLogger('app');
@@ -15,6 +15,16 @@ const logger = getLogger('app');
  *
  * NOT CACHED: manabar regenerates continuously (it is literally a "how full is
  * this bar right now" read), so a shared cache would show a stale percentage.
+ *
+ * ★ NO LONGER FETCHES THE ACCOUNT ITSELF (2026-09-07, dupe-call fix). This
+ * route and `/api/account` each independently called `find_accounts` for the
+ * same user, milliseconds apart. `getManabar` now reuses `/api/account`'s own
+ * `cachedRead('account:...', ...)` entry -- same key, same TTL, same
+ * `getAccountFull` call -- so whichever route's request lands first is the
+ * one that pays for it; the in-flight map coalesces the other even in the
+ * same millisecond (see lib/server-read-cache.ts). Trade-off: the manabar
+ * fields sourced from the account are now only as fresh as that 15s cache,
+ * not always-fresh; `dgpo`/`rc_accounts` are still fetched fresh every call.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const username = (req.nextUrl.searchParams.get('username') ?? '').trim().toLowerCase();
@@ -27,7 +37,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Shorter than `/api/account`'s 5s precisely because of the comment above:
     // this bar regenerates continuously, so one Hive block is the honest ceiling.
     // That is still enough to collapse the duplicate reads a single render makes.
-    const manabar = await cachedRead(`manabar:${username}`, 3_000, () => getManabar(username));
+    const manabar = await cachedRead(`manabar:${username}`, 3_000, () =>
+      getManabar(username, cachedRead(`account:${username}`, 15_000, () => getAccountFull(username)))
+    );
     return NextResponse.json(manabar, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'manabar lookup failed for %s', username);

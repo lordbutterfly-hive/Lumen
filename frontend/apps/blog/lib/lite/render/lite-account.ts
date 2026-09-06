@@ -96,6 +96,8 @@ export async function liteAccountAsProfile(displayName: string): Promise<FullAcc
     proxied_vsf_votes: ['0', '0', '0', '0'],
     voting_manabar: ZERO_MANABAR,
     downvote_manabar: ZERO_MANABAR,
+    // VESTS-denominated, like `vesting_shares` above — a lite account has none.
+    post_voting_power: ZERO_VESTS,
     witness_votes: [],
     // Reputation is a chain-derived score. A lite account has none; 25 is Hive's
     // own "new account" floor, so it renders as new rather than as suspicious.

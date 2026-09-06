@@ -49,34 +49,38 @@ interface IManabars {
 const PERCENT_VALUE_DOUBLE_PRECISION = 100;
 const ONE_HUNDRED_PERCENT = BigInt(100) * BigInt(PERCENT_VALUE_DOUBLE_PRECISION);
 
-export const getManabars = async (accountName: string): Promise<IManabars | null> => {
+export const getManabars = async (
+  accountName: string,
+  // ★ DUPE-CALL FIX (2026-09-07): the caller hands in `/api/account`'s own
+  // `find_accounts` result (same user, fetched milliseconds earlier) instead
+  // of this issuing a second one. Awaited INSIDE `Promise.all` below so a
+  // rejection is still caught by this function's own `catch`, unchanged.
+  accountPromise: Promise<FullAccount>
+): Promise<IManabars | null> => {
   try {
     const chain = await getChain();
 
-    // ★ A6 retry rollout (2026-08-18): the whole 3-call batch, retried together as
-    // one idempotent read. The outer `try/catch` below silently swallows ANY
+    // ★ A6 retry rollout (2026-08-18): the dgpo+rc pair, retried together as one
+    // idempotent read. The outer `try/catch` below silently swallows ANY
     // failure into `null` — before this, that meant a single fast transient blip
     // gave up on manabars immediately with no chance to recover. Single caller
     // (`getManabar`, used only by `/api/manabar`), so this cannot double anyone
     // else's retry.
-    const [dgpo, {
-      accounts: [account]
-    }, {
+    const [account, [dgpo, {
       rc_accounts: [rcAccount]
-    }] = await withRetry(
-      () =>
-        Promise.all([
-          chain.api.database_api.get_dynamic_global_properties({}),
-          chain.api.database_api.find_accounts({
-            accounts: [accountName],
-            delayed_votes_active: false
-          }),
-          chain.api.rc_api.find_rc_accounts({ accounts: [accountName] })
-        ]),
-      { label: `getManabars(${accountName})` }
-    );
+    }]] = await Promise.all([
+      accountPromise,
+      withRetry(
+        () =>
+          Promise.all([
+            chain.api.database_api.get_dynamic_global_properties({}),
+            chain.api.rc_api.find_rc_accounts({ accounts: [accountName] })
+          ]),
+        { label: `getManabars(${accountName})` }
+      )
+    ]);
 
-    if (!account || !rcAccount) {
+    if (!account?.post_voting_power || !rcAccount) {
       return null;
     }
 
@@ -141,8 +145,11 @@ export const getManabars = async (accountName: string): Promise<IManabars | null
     return null;
   }
 };
-export const getManabar = async (accountName: string): Promise<Manabar | null> => {
-  const manabars = await getManabars(accountName!);
+export const getManabar = async (
+  accountName: string,
+  accountPromise: Promise<FullAccount>
+): Promise<Manabar | null> => {
+  const manabars = await getManabars(accountName!, accountPromise);
   if (!manabars) return null;
   const { upvote, upvoteCooldown, downvote, downvoteCooldown, rc, rcCooldown } = manabars;
 
@@ -226,6 +233,7 @@ export const getAccounts = async (usernames: string[]): Promise<FullAccount[]> =
       proxied_vsf_votes: x.proxied_vsf_votes,
       voting_manabar: x.voting_manabar,
       downvote_manabar: x.downvote_manabar,
+      post_voting_power: x.post_voting_power,
       __loaded: true
     };
 
@@ -490,6 +498,25 @@ export const getProfileInfo = async (
       }
     );
   }
+  // ★ PARALLELIZED (2026-09-07): `bannedFollowEdges` needs only `username`,
+  // which this function already had before ever touching `profilePromise`.
+  // Started here, alongside it, not after. One side effect: on the rare
+  // no-profile account (`!profile || !profile.stats` below), this is now
+  // started before that check runs instead of never at all -- its own
+  // `.catch` still fails it softly and its result is still never awaited on
+  // that branch, and `bannedEdgesMemo` means a repeat caller does not pay for
+  // it again, so nothing waits longer for this. `timings.edgesMemo` can no
+  // longer read `'skipped'` on that branch -- a diagnostic label, not a
+  // behaviour.
+  const edgesWatch = timings ? renderStopwatch() : null;
+  let edgesPromise = bannedFollowEdges(username, timings).catch(() => ({ followers: 0, following: 0 }));
+  if (timings && edgesWatch) {
+    edgesPromise = edgesPromise.then((value) => {
+      timings.edgesMs = edgesWatch.elapsedMs();
+      return value;
+    });
+  }
+
   const profile = await profilePromise;
   if (!profile || !profile.stats) {
     return {
@@ -500,15 +527,6 @@ export const getProfileInfo = async (
       },
       reputation: 25
     };
-  }
-  // Started BEFORE the call, same reason as `profileWatch` above.
-  const edgesWatch = timings ? renderStopwatch() : null;
-  let edgesPromise = bannedFollowEdges(username, timings).catch(() => ({ followers: 0, following: 0 }));
-  if (timings && edgesWatch) {
-    edgesPromise = edgesPromise.then((value) => {
-      timings.edgesMs = edgesWatch.elapsedMs();
-      return value;
-    });
   }
   const banned = await edgesPromise;
   return {

@@ -59,6 +59,10 @@ export interface FullAccount {
   proxied_vsf_votes: (number | string)[];
   voting_manabar: ApiManabar;
   downvote_manabar: ApiManabar;
+  // ★ ADDED 2026-09-07: `find_accounts` already returns this; `getManabars`
+  // (hive-api.ts) needs it to compute mana from a shared account instead of
+  // fetching its own.
+  post_voting_power: NaiAsset;
   // Fields that need to be fetched from separate APIs (not available in database_api.find_accounts)
   witness_votes?: string[];
   reputation?: number;

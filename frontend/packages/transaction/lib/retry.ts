@@ -20,8 +20,21 @@
  * ★ THE TIME BUDGET IS THE POINT, NOT THE ATTEMPT COUNT. A route that retries without a
  * deadline converts a fast failure into a slow one and holds a server connection open
  * while it does — under load that is how a retry turns a blip into an outage. `budgetMs`
- * is checked BEFORE each sleep, so the caller's worst case is bounded whatever the
- * attempt count says.
+ * is checked BEFORE each sleep, so the caller's cumulative SLEEP TIME is bounded whatever
+ * the attempt count says.
+ *
+ * ★★★ CORRECTED (2026-09-07): the claim above used to end "so the caller's worst case is
+ * bounded" — full stop. That overstated it. `budgetMs` bounds the SLEEP between attempts
+ * only; it never bounds a single in-flight `fn()` call. `fn` is `await`ed to completion
+ * (or rejection) however long that genuinely takes, so a `fn` with no timeout of its own
+ * — a bare `fetch()` with no `AbortSignal` is the case that actually bit us — can hang
+ * every attempt indefinitely, and this module cannot see or cancel that from the outside.
+ * Proven on `/api/avatar` (`apps/blog/app/api/avatar/route.ts`): three attempts with no
+ * `AbortSignal`, each free to run long, logged real `withRetry` give-ups at 28735ms,
+ * 54998ms and 59564ms — none of which `budgetMs` (default 2500ms of SLEEP) had any power
+ * to prevent, because none of that time was spent sleeping. THE CALLER MUST BOUND `fn`
+ * ITSELF (an `AbortSignal` per attempt is the pattern that route now uses) — this module
+ * only ever promised to bound what happens between attempts.
  *
  * ★ JITTER IS NOT DECORATION. Without it, every request that failed on the same upstream
  * hiccup retries in the same millisecond, which is the thundering herd that keeps a
@@ -33,7 +46,15 @@ export interface RetryOptions {
   attempts?: number;
   /** Base backoff; attempt n waits roughly baseMs * 2^(n-1), plus jitter. */
   baseMs?: number;
-  /** Hard ceiling on time spent retrying. The first attempt is never cut short by this. */
+  /**
+   * Hard ceiling on time spent SLEEPING between attempts. The first attempt is never cut
+   * short by this, and NEITHER IS ANY OTHER ATTEMPT: this bounds the backoff sleeps only,
+   * never the `await fn()` call itself. A `fn` that can hang (any `fetch` with no
+   * `AbortSignal`) hangs for exactly as long as it hangs, budget or no budget — bound `fn`
+   * with its own per-attempt timeout/`AbortSignal` if it must never run unbounded. See the
+   * corrected doc comment above this interface for the incident that found this the hard
+   * way.
+   */
   budgetMs?: number;
   /** Included in the thrown error so a log line says which call gave up. */
   label?: string;
@@ -194,7 +215,27 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
   }
 
   if (lastError instanceof Error && options.label) {
-    lastError.message = `${options.label}: ${lastError.message} (gave up after ${Date.now() - startedAt}ms)`;
+    try {
+      lastError.message = `${options.label}: ${lastError.message} (gave up after ${Date.now() - startedAt}ms)`;
+    } catch {
+      // ★★★ FOUND LIVE (2026-09-07), both in production and while proving the avatar
+      // fix against a real hung listener: a `DOMException` — which is exactly what
+      // `AbortSignal.timeout()` rejects with, i.e. every caller that bounds `fn` with
+      // a per-attempt timeout, including the avatar route's new fix — has a
+      // GETTER-ONLY `message`. Assigning to it throws
+      // `TypeError: Cannot set property message of ... which has only a getter`,
+      // which was then thrown INSTEAD OF `lastError`: the real failure (a timeout)
+      // got replaced by an unrelated TypeError about this line, for every caller
+      // downstream. Confirmed already live: `/var/log/lumen.log` carries this exact
+      // message from `creator-tokens/gql/route.ts`'s `withRetry` call, logged as
+      // "Creator tokens GQL proxy: upstream unreachable" with a `TypeError` where an
+      // `AbortError`/`TimeoutError` belonged. Losing the "(gave up after Xms)"
+      // annotation here is fine; throwing a DIFFERENT error than the real one is
+      // not — every caller (`isTransient`, route-level catches matching on
+      // `error.name`/`instanceof`) needs the ORIGINAL error's type and identity
+      // intact, so this falls through to throwing `lastError` completely unmodified
+      // rather than replacing it.
+    }
   }
   throw lastError;
 }
