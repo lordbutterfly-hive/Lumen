@@ -46,6 +46,20 @@ function makeQueryClient() {
          * still overrides this per-query. Grep for `cacheTime:` / `gcTime:`
          * before adding a new one; give it the same `isServer ? Infinity :
          * value` treatment if it can run during SSR.
+         *
+         * ★ THIS IS ALSO WHY `lib/__tests__/server-cache-time-guard.test.ts`
+         * EXISTS. "Grep before adding one" only works if whoever adds the
+         * next `cacheTime`/`gcTime` remembers to grep — a manual step that a
+         * hot fix, a copy-pasted hook, or a rebase can silently skip, and
+         * the failure mode when it's skipped isn't a crash or a type error,
+         * it's a slow multi-hour RSS climb that only shows up in production
+         * metrics. That test scans every `.ts`/`.tsx` file under `app/`,
+         * `features/`, `components/`, `lib/`, `packages/ui/` and
+         * `packages/smart-signer/` for `cacheTime:`/`gcTime:` and fails the
+         * `pnpm --filter @hive/blog test:unit` run with a file:line and this
+         * same fix pattern if it finds one that isn't `isServer`-aware —
+         * turning "remember to grep" into a red CI check instead of an
+         * honor system.
          */
         cacheTime: isServer ? Infinity : undefined
       }
