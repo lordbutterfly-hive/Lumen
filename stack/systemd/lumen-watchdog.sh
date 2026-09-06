@@ -147,6 +147,12 @@ NOW_EPOCH=$(date +%s)
 LUMEN_UPTIME_S=0
 [ "$LUMEN_ACTIVE_EPOCH" -gt 0 ] && LUMEN_UPTIME_S=$((NOW_EPOCH - LUMEN_ACTIVE_EPOCH))
 
+# The state directory (mkdir above) and this CSV trend line are written on EVERY
+# run, --dry-run included: the trend line is the visibility this guard exists to
+# provide, so dry-run does not mean "leave no trace" here. "Dry" only covers the
+# restart decision: under DRY_RUN, the low/swap counter FILES below are not
+# updated (so a dry-run pass can't advance the consecutive-count state a later
+# real run would act on) and `systemctl restart` is never called.
 MEM_HEADER="timestamp,mem_available_mb,swap_used_mb,worker_rss_mb,recsys_mem_mb,lumen_uptime_s"
 [ -f "$MEM_LOG" ] || echo "$MEM_HEADER" > "$MEM_LOG"
 echo "$(date -Is),${MEM_AVAIL_MB},${SWAP_USED_MB},${WORKER_RSS_MB},${RECSYS_MEM_MB},${LUMEN_UPTIME_S}" >> "$MEM_LOG"
@@ -190,11 +196,25 @@ fi
 
 if [ "$RESTART_WANTED" -eq 1 ]; then
   LUMEN_STATE=$(systemctl is-active lumen 2>/dev/null)
+  LUMEN_ENABLED=$(systemctl is-enabled lumen 2>/dev/null)
   LAST_RESTART=$(cat "$MEM_LAST_RESTART_FILE" 2>/dev/null || echo 0)
   case "$LAST_RESTART" in ''|*[!0-9]*) LAST_RESTART=0 ;; esac
   SINCE_LAST=$((NOW_EPOCH - LAST_RESTART))
-  if [ "$LUMEN_STATE" != "active" ]; then
-    ok "memory guard: lumen not active, not restarting"
+  # Skip ONLY a deliberate stop: an operator ran `systemctl stop` (is-active says
+  # "inactive", not "failed") or masked/disabled the unit. A gate on `is-active ==
+  # active` alone (the original form) also skipped "failed" and "activating", which
+  # is exactly the crash the guard exists to act on, so those now fall through to
+  # the checks below instead of being swallowed here.
+  #
+  # systemd's own Restart=always (RestartUSec=5s, read on the box 2026-09-06) does
+  # retry a crashed lumen by itself, so this guard is not the first line of defense.
+  # But StartLimitBurst=5 within StartLimitIntervalUSec=10s (StartLimitAction=none,
+  # also read on the box) means a fast crash loop trips systemd's own limiter and it
+  # gives up, parked in "failed" with no further auto-restart until something calls
+  # `systemctl restart`/`reset-failed` - that stuck state is what this gate must not
+  # mistake for a deliberate stop.
+  if [ "$LUMEN_STATE" = "inactive" ] || [ "$LUMEN_ENABLED" = "masked" ] || [ "$LUMEN_ENABLED" = "disabled" ]; then
+    alert "memory guard: lumen is ${LUMEN_STATE} (enabled=${LUMEN_ENABLED}) - treating as a deliberate stop, not restarting"
   elif [ "$LUMEN_UPTIME_S" -lt 600 ]; then
     ok "memory guard: would restart lumen ($REASON) but lumen uptime is ${LUMEN_UPTIME_S}s < 600s, skipping"
   elif [ "$LAST_RESTART" -gt 0 ] && [ "$SINCE_LAST" -lt "$WATCHDOG_RESTART_COOLDOWN_S" ]; then

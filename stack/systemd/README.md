@@ -83,14 +83,39 @@ script touched:
    reason and can't restart-loop. Consecutive-low counter and last-restart
    timestamp persist in `/var/lib/lumen-watchdog/`. All three thresholds are
    overridable from `/opt/lumen/watchdog.env` (not present yet on the box;
-   defaults apply).
-3. `--dry-run` (or `WATCHDOG_DRY_RUN=1`) evaluates and logs the decision
-   (`ALERT memory guard would restart lumen ... [dry-run, ...]`) without ever
-   calling `systemctl restart`.
+   defaults apply). Only skips as a deliberate-stop check: lumen `inactive`
+   (a plain `systemctl stop`) or masked/disabled. A "must be `active`"
+   allow-list was tried first and rejected: it also silently swallowed
+   `failed` and `activating`, which is exactly the crash case this guard
+   exists for, so `failed`/`activating`/anything else now falls through to
+   the uptime/cooldown checks instead, and the "not restarting" line is an
+   `ALERT`, not `ok`, since it is worth a human's attention either way.
+   systemd's own `Restart=always` (`RestartUSec=5s`, read on the box
+   2026-09-06) already retries a crash, but `StartLimitBurst=5` within
+   `StartLimitIntervalUSec=10s` (`StartLimitAction=none`, same read) means a
+   fast crash loop trips systemd's own limiter and it gives up, parked in
+   `failed` with no further auto-restart until something calls
+   `systemctl restart` — that stuck state is what this guard now catches.
+3. `--dry-run` (or `WATCHDOG_DRY_RUN=1`) is dry only about the restart
+   decision: it still creates `/var/lib/lumen-watchdog/` and appends the CSV
+   trend line on every run (that line is the whole point of the guard, so
+   dry-run does not mean "no trace"). It evaluates and logs the restart
+   decision (`ALERT memory guard would restart lumen ... [dry-run, ...]`),
+   does not persist the low/swap counter files, and never calls
+   `systemctl restart`.
 
-Tested on the box 2026-09-06: `--dry-run` at default thresholds took no action;
-`WATCHDOG_MEM_MIN_MB=99999 --dry-run` run twice produced the "would restart"
-alert only on the second (consecutive) run, with `lumen`'s `ActiveEnterTimestamp`
-unchanged throughout, proving no real restart fired; the low-count counter was
-then reset to 0. A normal (non-dry-run) run confirmed the CSV line shape and
-exit 0. `bash -n` clean before and after.
+Tested in a sandbox 2026-09-06 with a `PATH`-shimmed `systemctl` (so nothing
+real starts, stops, or restarts) and `MEM_STATE_DIR`/`MEM_LOG`/`MEMINFO_FILE`
+pointed at scratch files: with the low-count counter pre-seeded to 1 (one
+reading away from the restart threshold), a shimmed `lumen` in state `failed`
+was restarted by the guard, a shimmed `lumen` in state `activating` was also
+restarted (the crash-loop case the old `== active` gate missed), a shimmed
+`lumen` in state `inactive` was left alone with an `ALERT ... treating as a
+deliberate stop` line, and the same held with `is-enabled` returning
+`disabled`. Separately, because the counter file is not written under
+`--dry-run`, two consecutive `--dry-run` invocations no longer reach the
+"would restart" alert on their own (the counter reads 0 both times) — the
+reproducible recipe is one real (non-dry-run) invocation to seed the counter
+to 1 (below threshold, no restart), followed by one `--dry-run` invocation,
+which reads 1, computes 2, prints the "would restart ... [dry-run, ...]"
+alert, and leaves the counter file at 1. `bash -n` clean before and after.

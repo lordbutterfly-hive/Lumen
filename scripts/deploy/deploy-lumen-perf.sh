@@ -41,6 +41,27 @@ if [ "${1:-}" != "--go" ]; then
 fi
 
 set -e
+# ★ GUARDS BEFORE ANYTHING SHIPS (2026-09-06, review). `pnpm --filter @hive/blog
+# test:unit` (the cacheTime/withTtlCache-name source-scanning guards among
+# others) and the packages/transaction mocha suite used to appear in no CI
+# file, no deploy script and no git hook -- they protected nothing unless a
+# human remembered to run them by hand. Run both here, before the first byte
+# moves (the purge below is the first real action), so a red guard exits 1
+# and the server is never touched. `$MONOREPO_ROOT` is two levels above $APP
+# (.../apps/blog -> the pnpm workspace root) so `--filter` resolves; both
+# suites together are ~30s, well under the minutes the rsync+restart+verify
+# below already take.
+MONOREPO_ROOT="$(cd "$APP/../.." && pwd)"
+echo "==> guards 1/2: pnpm --filter @hive/blog test:unit"
+if ! (cd "$MONOREPO_ROOT" && pnpm --filter @hive/blog run test:unit); then
+  echo "DEPLOY BLOCKED: pnpm --filter @hive/blog test:unit FAILED -- see the '== <file>' lines above for which guard/test failed. Nothing was copied to the server."
+  exit 1
+fi
+echo "==> guards 2/2: packages/transaction mocha suite"
+if ! (cd "$MONOREPO_ROOT/packages/transaction" && pnpm test); then
+  echo "DEPLOY BLOCKED: packages/transaction mocha suite FAILED -- see the failing test name(s) above. Nothing was copied to the server."
+  exit 1
+fi
 # ★ Snappiness phase 2: empty the edge cache BEFORE anything changes on disk,
 # so no reader is served cached HTML from the old build while the files under it
 # move (found in review: the old order served pages naming deleted chunks for
@@ -67,7 +88,7 @@ echo "==> 4/5 install cluster.js (worker slots) + restart"
 $SSH "$HOST" 'if [ -f /opt/lumen/cluster.js.new ]; then cp /opt/lumen/cluster.js.new /tmp/cluster-check.js && node --check /tmp/cluster-check.js && cp /opt/lumen/cluster.js.new /opt/lumen/cluster.js && echo "cluster.js installed"; rm -f /tmp/cluster-check.js; fi'
 $SSH "$HOST" systemctl restart lumen
 # ★ 2026-09-05: lumen-publisher.service is PartOf=lumen.service and lumen carries a
-# Wants=lumen-publisher.service drop-in (commit 7051e14), so a restart of lumen now
+# Wants=lumen-publisher.service drop-in (commit 7f3127d), so a restart of lumen now
 # brings the publisher up in the same second (before that it stayed dead from Aug 30
 # to Sep 5 and three lite posts never reached Hive). The explicit start below is a
 # harmless belt-and-braces no-op; the assert further down is the real check.

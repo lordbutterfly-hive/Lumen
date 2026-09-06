@@ -148,9 +148,14 @@ const PREFETCH_TIMEOUT_MS = 700;
  * common case -- see `trendingForPrefetch`'s own doc) the call costs about
  * 0 ms, so the floor is almost never actually spent; it only matters on a
  * cold trending cache, where it buys a real chance at a seed instead of a
- * guaranteed blank home. Worst case WITH the floor: `PREFETCH_TIMEOUT_MS`
- * (the raced read) plus the unraced `finishStoredFeed` plus this floor --
- * bounded, and strictly better than shipping nothing.
+ * guaranteed blank home. Worst case WITH the floor, corrected 2026-09-06 (the
+ * original version of this comment only counted three of the four bounds):
+ * `PREFETCH_TIMEOUT_MS` (the raced stored read) + `BLOCK_LOOKUP_TIMEOUT_MS`
+ * (the unraced `finishStoredFeed`'s own block lookup) + this floor +
+ * `BLOCK_LOOKUP_TIMEOUT_MS` again (the trending-fallback path's OWN separate
+ * `boundedBlockedKeySet` call further down, for a signed-in viewer) -- about
+ * 1950 ms at current defaults (700 + 500 + 250 + 500). Still bounded, and
+ * strictly better than shipping nothing.
  */
 const TRENDING_MIN_BUDGET_MS = 250;
 const FEED_BODY_CHARS = 800;
@@ -389,10 +394,21 @@ const BLOCK_LOOKUP_TIMEOUT_MS = 500;
 async function boundedBlockedKeySet(
   sessionUser: Parameters<typeof viewerBlockedKeySet>[0]
 ): Promise<Set<string> | 'timeout'> {
-  return Promise.race([
-    viewerBlockedKeySet(sessionUser).catch(() => new Set<string>()),
-    new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), BLOCK_LOOKUP_TIMEOUT_MS))
-  ]);
+  // ★ TIMER CLEARED ON BOTH OUTCOMES (2026-09-06, review). This is called
+  // twice per fallback render now (the stored path above, the trending-
+  // fallback path below), and an uncleared `setTimeout` left one pending
+  // timer per call sitting in the event loop until it fired on its own --
+  // whichever side of the race actually won -- so a render that hit both
+  // call sites leaked two live timers instead of zero.
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), BLOCK_LOOKUP_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([viewerBlockedKeySet(sessionUser).catch(() => new Set<string>()), timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
 }
 
 /**

@@ -13,11 +13,19 @@
  * WHAT THIS PROVES (2026-09-06, review of commit a467dba fixing two live
  * defects in `prefetchHomeFeed`):
  *
- *   1. THE EMPTY-HOME DOOR IS CLOSED. A stored-feed attempt whose UNRACED
- *      `finishStoredFeed` overruns the shared 700ms clock (live lines showed
- *      `finish=899ms`/`finish=510ms`) still reaches the trending fallback and
- *      gets a seed -- `TRENDING_MIN_BUDGET_MS` floors the budget instead of
- *      letting it go negative and returning null outright.
+ *   1. THE EMPTY-HOME DOOR IS NARROWED, NOT CLOSED (worded precisely
+ *      2026-09-06 -- "closed" overstated what this actually proves). A
+ *      stored-feed attempt whose UNRACED `finishStoredFeed` overruns the
+ *      shared 700ms clock (live lines showed `finish=899ms`/`finish=510ms`)
+ *      still reaches the trending fallback and gets a seed --
+ *      `TRENDING_MIN_BUDGET_MS` floors the budget instead of letting it go
+ *      negative and returning null outright. That only helps because
+ *      section 0 below warms the trending cache first, same as production
+ *      does at boot: `TRENDING_MIN_BUDGET_MS` (250ms) is enough for a WARM
+ *      cache's ~0ms cost, not for a COLD `prefetchTrending()` build, which
+ *      this file does not exercise and which can still return null within
+ *      the floor -- the door narrows from "guaranteed blank" to "blank only
+ *      when the trending cache is also cold," it does not remove that case.
  *   2. THE FALLBACK'S OWN BLOCK FILTER IS BOUNDED. When the trending
  *      fallback's block-set lookup exceeds `BLOCK_LOOKUP_TIMEOUT_MS`, the
  *      whole seed is DROPPED (`prefetchHomeFeed` returns null) -- never

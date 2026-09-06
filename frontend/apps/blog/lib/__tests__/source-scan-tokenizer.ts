@@ -32,27 +32,48 @@
  * to catch.
  *
  * Regex-vs-divide is genuinely ambiguous in a hand-rolled tokenizer (`a / b`
- * vs `/regex/`); the heuristic here is deliberately the SAFE side of that
- * ambiguity for these scanners' purpose: a `/` is treated as a regex
- * literal start unless the last significant character was one that could
- * end a VALUE (a letter, digit, `_`, `$`, `)`, `]`, or `` ` ``) — which means
- * `return /foo/` (an identifier-like keyword immediately before `/`) is
- * misread as division and NOT masked as a regex. That is an accepted false
- * negative (the regex's own quotes could still corrupt masking in that rare
- * shape); the shape that actually broke `feed-prefetch.ts` — a regex
- * following `[`, `,`, `(`, `=`, or the start of a line, none of which end a
- * value — IS caught. Whatever is inside a detected regex is blanked exactly
- * like a string, so a `(`, `)`, `[`, `]`, `{`, `}` or quote character INSIDE
- * a regex literal can never be mistaken for real code punctuation.
+ * vs `/regex/`). A `/` is treated as a regex literal start unless the last
+ * significant character was one that could end a VALUE (a letter, digit,
+ * `_`, `$`, `)`, `]`, or `` ` ``) — but a trailing letter alone is itself
+ * ambiguous, because the last character of an identifier (`total / 2`) and
+ * the last character of a KEYWORD (`return /foo/`) look identical to a
+ * one-character lookbehind. ★ (2026-09-06) So when the last character is a
+ * letter/digit/`_`/`$`, the tokenizer also tracks the contiguous identifier
+ * run that produced it (`lastWord`, reset to empty at every string/comment/
+ * regex mode-entry point so it can never carry a stale prefix across one of
+ * those) and checks it against the keywords that can legally precede a
+ * regex literal: `return`, `typeof`, `case`, `in`, `of`, `instanceof`,
+ * `new`, `delete`, `void`, `do`, `else`, `yield`, `await`, `throw`. A match
+ * means the `/` starts a regex even though the preceding character is a
+ * letter (`return /a"b/;`); anything else ending in a letter — including a
+ * lookalike identifier that merely ENDS in one of those words, e.g.
+ * `preturn / 2` — is still division, exactly as before. The shape that
+ * actually broke `feed-prefetch.ts` — a regex following `[`, `,`, `(`, `=`,
+ * or the start of a line, none of which end a value — was already caught
+ * before this keyword check existed and still is. Whatever is inside a
+ * detected regex is blanked exactly like a string, so a `(`, `)`, `[`, `]`,
+ * `{`, `}` or quote character INSIDE a regex literal can never be mistaken
+ * for real code punctuation.
  */
 
 type Mode = 'normal' | 'line' | 'block' | 'single' | 'double' | 'template' | 'regex' | 'regexClass';
+
+// Keywords after which a `/` is a regex literal, not division, even though
+// each one ends in a letter (see the doc comment above). `in` and `of` are
+// included for `for (x in /re/.exec(y))`-style and `for...of` guard shapes;
+// both are also valid standalone operators (`"k" in obj`) where the same
+// ambiguity applies.
+const REGEX_PRECEDING_KEYWORDS: ReadonlySet<string> = new Set([
+  'return', 'typeof', 'case', 'in', 'of', 'instanceof', 'new', 'delete',
+  'void', 'do', 'else', 'yield', 'await', 'throw',
+]);
 
 export function maskNonCode(content: string): string {
   const n = content.length;
   const out: string[] = new Array(n);
   let mode: Mode = 'normal';
   let lastSignificant = '';
+  let lastWord = ''; // contiguous identifier run behind lastSignificant, for the keyword check below
   let i = 0;
   while (i < n) {
     const c = content[i];
@@ -180,6 +201,7 @@ export function maskNonCode(content: string): string {
       out[i] = ' ';
       out[i + 1] = ' ';
       mode = 'line';
+      lastWord = '';
       i += 2;
       continue;
     }
@@ -187,15 +209,23 @@ export function maskNonCode(content: string): string {
       out[i] = ' ';
       out[i + 1] = ' ';
       mode = 'block';
+      lastWord = '';
       i += 2;
       continue;
     }
     if (c === '/') {
-      // Regex-vs-divide: see this file's own doc comment above.
-      const isValueBefore = /[A-Za-z0-9_$)\]`]/.test(lastSignificant);
+      // Regex-vs-divide: see this file's own doc comment above. A trailing
+      // letter/digit/`_`/`$` is ambiguous on its own (identifier vs.
+      // keyword), so it defers to lastWord; `)`, `]` and `` ` `` are never
+      // ambiguous (a paren/index/template result is always a value).
+      const trailingIdentChar = /[A-Za-z0-9_$]/.test(lastSignificant);
+      const isValueBefore = trailingIdentChar
+        ? !REGEX_PRECEDING_KEYWORDS.has(lastWord)
+        : /[)\]`]/.test(lastSignificant);
       if (!isValueBefore) {
         out[i] = ' ';
         mode = 'regex';
+        lastWord = '';
         i++;
         continue;
       }
@@ -204,23 +234,27 @@ export function maskNonCode(content: string): string {
     if (c === "'") {
       out[i] = ' ';
       mode = 'single';
+      lastWord = '';
       i++;
       continue;
     }
     if (c === '"') {
       out[i] = ' ';
       mode = 'double';
+      lastWord = '';
       i++;
       continue;
     }
     if (c === '`') {
       out[i] = ' ';
       mode = 'template';
+      lastWord = '';
       i++;
       continue;
     }
     out[i] = c;
     lastSignificant = c;
+    lastWord = /[A-Za-z0-9_$]/.test(c) ? lastWord + c : '';
     i++;
   }
   return out.join('');

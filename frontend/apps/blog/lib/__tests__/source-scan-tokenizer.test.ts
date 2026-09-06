@@ -84,6 +84,18 @@ check(
   'regex flag letters after the closing slash are consumed as part of the same blanked token',
   !maskNonCode("const RE = /it's/gi;\nconst real = 1;").includes("it's")
 );
+check(
+  'a regex right after the `return` keyword is recognised as a regex, not division ' +
+    '(the odd-quote body does not desync masking for the rest of the file)',
+  (() => {
+    const snippet = 'return /a"b/;\nconst cacheTime = 60000;';
+    return maskNonCode(snippet).includes('const cacheTime = 60000;');
+  })()
+);
+check(
+  'an identifier that merely ENDS in a regex-preceding keyword (e.g. "preturn") is still division',
+  maskNonCode('preturn / 2;').includes('preturn / 2')
+);
 
 if (failures === 0) {
   console.log(`\nsource-scan-tokenizer: ALL CHECKS PASSED (${checks} checks)`);

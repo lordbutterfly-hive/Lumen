@@ -70,6 +70,16 @@ jobs:
       # real missing-translation regression, not the gate's own bug.
       - name: Translation usage gate
         run: pnpm --filter @hive/blog run lint:translations:usage
+      # ★ 2026-09-06: these two suites (the cacheTime/withTtlCache-name
+      # source-scanning guards among others) used to run only when a human
+      # remembered to by hand -- no CI file, no deploy script, no git hook
+      # ran either. `deploy-lumen.sh`/`deploy-lumen-perf.sh` now gate the
+      # deploy path on the same two commands; this is the PR-time copy of
+      # that gate, ~30s total.
+      - name: Unit tests (apps/blog)
+        run: pnpm --filter @hive/blog run test:unit
+      - name: Unit tests (packages/transaction)
+        run: pnpm --filter @hive/transaction run test
 
   recsys:
     needs: changes
