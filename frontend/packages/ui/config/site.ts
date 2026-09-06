@@ -1,6 +1,6 @@
 import env from '@beam-australia/react-env';
 
-import { configuredApiEndpoint, configuredSiteDomain } from '@hive/ui/config/public-vars';
+import { configuredApiEndpoint, configuredRestApiEndpoint, configuredSiteDomain } from '@hive/ui/config/public-vars';
 
 const SERVER_VAR_PREFIX = 'DENSER_SERVER_';
 
@@ -20,6 +20,10 @@ export const siteConfig = {
   name: 'Lumen',
   url: configuredSiteDomain,
   endpoint: configuredApiEndpoint,
+  // See `configuredRestApiEndpoint`'s own doc comment: wax's REST-shaped APIs
+  // (hafah-api, hivemind-api) are a different service from `endpoint` above
+  // and need their own default, not the RPC host's.
+  restEndpoint: configuredRestApiEndpoint,
   chainId,
   chainEnv: chainEnv[chainId] || chainEnv['testnet'],
   ogImage: '',

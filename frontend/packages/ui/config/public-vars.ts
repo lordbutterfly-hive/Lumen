@@ -20,6 +20,26 @@ export const configuredAIDomain = env('AI_DOMAIN') ?? 'https://api.syncad.com';
 export const configuredSiteDomain = env('SITE_DOMAIN') ?? 'https://lumensocial.net/';
 export const configuredImagesEndpoint = (env('IMAGES_ENDPOINT') ?? 'https://images.hive.blog').replace(/\/+$/, '');
 export const configuredApiEndpoint = (env('API_ENDPOINT') ?? 'https://api.hive.blog').replace(/\/+$/, '');
+/**
+ * ★ THE HAFAH HOST IS NOT THE RPC HOST (2026-09-06, wallet history 404 fix).
+ * `configuredApiEndpoint` above answers plain JSON-RPC (`bridge.*`,
+ * `database_api.*`); wax's REST-shaped APIs (`hafah-api`, `hivemind-api`) are a
+ * DIFFERENT service, and not every Hive node runs both. Confirmed live from
+ * this box:
+ *
+ *     GET https://api.openhive.network/hafah-api/operation-types   404
+ *     GET https://api.hive.blog/hafah-api/operation-types          200
+ *
+ * `getDefaultClientOptions` (`hive-chain-service.ts`) used to default wax's
+ * `restApiEndpoint` straight from `configuredApiEndpoint` — fine only as long
+ * as the RPC host happened to also serve hafah, and broken the moment
+ * `advanceToNextRpcEndpoint` failed the RPC host over to a rotation node that
+ * doesn't (`app/api/wallet/history/route.ts`'s "Recent activity" card, which
+ * reads both `hafah-api` and `hivemind-api`, is what surfaced it). This is a
+ * SEPARATE knob so an unset deployment still gets a host proven to serve
+ * hafah, independent of whatever `API_ENDPOINT` is pointed at.
+ */
+export const configuredRestApiEndpoint = (env('REST_API_ENDPOINT') ?? 'https://api.hive.blog').replace(/\/+$/, '');
 export const configuredBlogDomain = (env('BLOG_DOMAIN') ?? 'https://hive.blog/').replace(/\/+$/, '');
 
 /**

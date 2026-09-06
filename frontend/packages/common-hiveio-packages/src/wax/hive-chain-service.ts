@@ -33,10 +33,16 @@ const logger = getLogger('wax');
  * its own, because the copy that never calls `createHiveChain()` (an ADOPTING
  * copy, one that finds `hiveChainPromise` already in the slot) would otherwise
  * never run `initializeAssetConstants` at all. `ensureAssetConstantsFor` below
- * is what closes that gap: it runs in every copy that awaits the chain,
- * creator and adopter alike, guarded by `isAssetConstantsInitialized()` so a
- * repeat call is a no-op. See that file's own header for why suffixes like
+ * is what closes that gap for the ADOPT PATH ONLY (`initChain`/`getChain`/
+ * `reuseHiveChain`), guarded by `isAssetConstantsInitialized()` so a repeat
+ * adopt is a no-op. See that file's own header for why suffixes like
  * "HIVE"/"HBD" would otherwise silently vanish for an adopting copy's readers.
+ * The CREATING copy — `setChainClient`'s own `.then()` — deliberately does
+ * NOT go through that guard: it calls `initializeAssetConstants` directly and
+ * unconditionally, because a guard that protects "don't redo it if this copy
+ * already has constants" is exactly wrong for a copy that just built a
+ * genuinely NEW chain (2026-09-06 review fix — see `resetChain()`'s own note
+ * on the corrupted-constants bug this guard placement used to cause).
  *
  * ★ A NAMED BEHAVIOUR CHANGE, NOT A BUG (corrected 2026-09-06 review — the
  * first draft of this note named a specific caller that does not actually hit
@@ -207,6 +213,24 @@ const getEndpointRotation = (): string[] => {
   return [primary, ...FALLBACK_ENDPOINTS.filter((e) => e !== primary)];
 };
 
+/**
+ * The REST/hafah rotation `advanceToNextRpcEndpoint` below fails over in
+ * lockstep with `getEndpointRotation()`, INDEX FOR INDEX — see that
+ * function's own comment for why. `HIVE_REST_API_ENDPOINTS` (comma-separated,
+ * same naming pattern as `HIVE_API_ENDPOINTS`, server-only) is how an operator
+ * opts in; with nothing configured this returns a single-entry list
+ * (`siteConfig.restEndpoint`), which is what makes failover a no-op for REST
+ * by default — see the length check at the call site.
+ */
+const getRestEndpointRotation = (): string[] => {
+  const configured = process.env.HIVE_REST_API_ENDPOINTS;
+  if (configured) {
+    const list = configured.split(',').map((e) => e.trim()).filter(Boolean);
+    if (list.length) return list;
+  }
+  return [siteConfig.restEndpoint];
+};
+
 const getDefaultClientOptions = (): IWaxOptionsChain => {
   // I don't think this logic should be here, but for now it is easier to keep it. We have dedicated MemoryMixin (?)
   let jsonRpcNode: string | undefined = undefined;
@@ -241,7 +265,16 @@ const getDefaultClientOptions = (): IWaxOptionsChain => {
     // test can pass without ever touching the node it was told to start from.
     apiEndpoint: jsonRpcNode || getEndpointRotation()[0] || siteConfig.endpoint,
     apiTimeout: getApiTimeout(),
-    restApiEndpoint: restNode || jsonRpcNode || siteConfig.endpoint,
+    // ★ NO LONGER `|| jsonRpcNode || siteConfig.endpoint` (2026-09-06, wallet
+    // history 404 fix — see `configuredRestApiEndpoint`'s doc comment in
+    // `public-vars.ts` for the two curl results that proved it). REST-shaped
+    // APIs (hafah-api, hivemind-api) are a different service from JSON-RPC,
+    // and not every node runs both: falling back to `jsonRpcNode` — a node the
+    // reader or the failover rotation picked FOR RPC — silently pointed REST
+    // reads at a host with no reason to serve them. `siteConfig.restEndpoint`
+    // is this endpoint's OWN configured default; a reader who explicitly pins
+    // a REST node (`restNode`, from `rest-node-endpoint`) still wins.
+    restApiEndpoint: restNode || siteConfig.restEndpoint,
   };
 };
 
@@ -284,6 +317,19 @@ export const isWasmMemoryError = (error: unknown): boolean => {
  *
  * WORKAROUND: This is a temporary fix until WAX library handles WASM errors internally.
  * See: https://gitlab.syncad.com/hive/wax/-/issues/161
+ *
+ * ★ THE CORRUPTED-CONSTANTS BUG THIS USED TO LEAVE BEHIND (2026-09-06 review
+ * fix, in `setChainClient`'s own `.then()`, not here). Clearing `hiveChain`
+ * and `hiveChainPromise` above is not the whole story for a copy that
+ * rebuilds in response: `setChainClient` used to re-initialise its per-copy
+ * `asset-constants.ts` through `ensureAssetConstantsFor`, whose
+ * `isAssetConstantsInitialized()` guard made it a no-op for any copy that had
+ * already initialised once — which every copy calling `resetChain()` after a
+ * WASM error necessarily had. The process would keep running on the
+ * CORRUPTED chain's NAI symbols/precision forever, even after successfully
+ * building a fresh chain. Fixed by having the creating copy call
+ * `initializeAssetConstants` directly, unconditionally, instead of through
+ * that guard — see this file's header note and `setChainClient`'s own.
  */
 export const resetChain = (): void => {
   logger.warn('Resetting WAX chain singleton due to WASM error - see wax#161');
@@ -340,6 +386,23 @@ const PREFERRED_RETRY_AFTER_MS = 60_000;
  * Passing what you failed on makes the move idempotent: whoever gets there first
  * moves the process off that node, and everyone else arriving with the same
  * stale endpoint is told "already handled" and simply retries on the new one.
+ *
+ * ★ MOVES THE REST ENDPOINT TOO, WHEN THERE IS SOMEWHERE CONFIGURED TO MOVE IT
+ * TO (2026-09-06, wallet history REST-404 fix). This used to touch only
+ * `s.hiveChain.api.endpointUrl` — the JSON-RPC endpoint — and leave
+ * `restApi.endpointUrl` (hafah-api, hivemind-api) pinned to whatever it was
+ * built with, for the life of the chain. Confirmed live:
+ * `api.openhive.network` answers JSON-RPC fine but 404s on
+ * `hafah-api/operation-types`, so a failover that moved RPC there while REST
+ * stayed behind on a still-healthy host was harmless — but a failover that
+ * moves RPC AWAY FROM a host serving both, onto a rotation member that only
+ * serves RPC, left REST silently calling a host that was never going to
+ * answer it, with no failover ever able to heal it. Only follows
+ * `getRestEndpointRotation()` at the SAME index, and only when an operator
+ * actually configured more than the single default entry there — with just
+ * the default, moving REST in lockstep with an arbitrary RPC rotation would
+ * as often break a working REST host as fix anything, since a JSON-RPC node's
+ * hafah counterpart is not guaranteed to live at the same URL.
  */
 export const advanceToNextRpcEndpoint = (failedEndpoint?: string): string | undefined => {
   if (typeof window === 'object') return undefined; // browser: respect the reader's node
@@ -359,6 +422,16 @@ export const advanceToNextRpcEndpoint = (failedEndpoint?: string): string | unde
 
   logger.warn('Hive node %s unreachable — failing over to %s', current, next);
   s.hiveChain.api.endpointUrl = next;
+
+  const restRotation = getRestEndpointRotation();
+  if (restRotation.length > 1) {
+    const restNext = restRotation[(index + 1) % restRotation.length];
+    if (restNext && restNext !== s.hiveChain.restApi.endpointUrl) {
+      logger.warn('Also failing over REST endpoint %s to %s', s.hiveChain.restApi.endpointUrl, restNext);
+      s.hiveChain.restApi.endpointUrl = restNext;
+    }
+  }
+
   s.lastFailoverAt = Date.now();
   return next;
 };
@@ -517,23 +590,45 @@ const setChainClient = (options: Partial<IWaxOptionsChain> = {}): Promise<HiveCh
     // provoked) ran while `createHiveChain()` above was still in flight, this
     // attempt is stale — do not let it clobber whatever the reset/rebuild put
     // in the slot. The caller who started THIS specific call still gets a
-    // perfectly usable chain back; it is just not adopted into the shared slot.
-    if (s.generation !== generationAtStart) {
+    // perfectly usable chain back — asset constants and the search endpoint
+    // are still assigned below exactly as on the adopted path — it is just
+    // not adopted into the shared slot.
+    //
+    // ★★★ ONLY THE SLOT ADOPTION IS GATED ON THE GENERATION CHECK (2026-09-06
+    // review fix). This used to `return extended` here, BEFORE either of the
+    // two assignments below ever ran — a stale build's caller therefore got a
+    // chain whose `restApi['hivesense-api'].endpointUrl` was never pointed
+    // anywhere but wax's own compiled-in default, silently different from
+    // every other chain in the process. There is now exactly one `return`,
+    // and no path through this function skips either assignment.
+    const isCurrentGeneration = s.generation === generationAtStart;
+    if (isCurrentGeneration) {
+      s.hiveChain = extended;
+    } else {
       logger.warn('Discarding a stale Wax Chain build superseded by a reset (generation moved on)');
-      return extended;
     }
 
-    s.hiveChain = extended;
-
-    // Initialize THIS (creating) copy's asset constants from wax's chain.ASSETS.
-    // An adopting copy — one that never runs this `.then()` because it found
-    // `hiveChainPromise` already in the slot — gets its own turn via
-    // `ensureAssetConstantsFor` in `initChain`/`getChain` below.
-    ensureAssetConstantsFor(extended);
+    // ★ UNCONDITIONAL, NOT `ensureAssetConstantsFor` (2026-09-06 review fix —
+    // this is the OTHER half of the generation fix above). This line runs
+    // because THIS copy just genuinely called `createHiveChain()` — win or
+    // lose the adoption race, `extended.ASSETS` is fresh and must replace
+    // whatever this copy's `asset-constants.ts` held before. Routing it
+    // through `ensureAssetConstantsFor`'s `isAssetConstantsInitialized()`
+    // guard was the bug: that guard exists to protect the ADOPT path
+    // (`initChain`/`getChain`/`reuseHiveChain` below, none of which called
+    // `createHiveChain()` themselves) from redundantly re-running init on a
+    // chain that never changed — applied here too, it made `resetChain()`
+    // pointless for a same-copy rebuild, since this copy's `assetConfig` was
+    // already non-null from BEFORE the reset and the guard would no-op
+    // forever after, quietly keeping the OLD, corrupted chain's asset
+    // constants (NAI symbols, precision) for the rest of the process's life.
+    initializeAssetConstants(extended.ASSETS);
 
     const aiEndpoint = getAIDefaultEndpoint();
 
-    // Always use the same endpoint as the main API for hivesense-api
+    // Always use the same endpoint as the main API for hivesense-api. Also
+    // unconditional now, for the identical reason — see this block's own
+    // header note on the discard path that used to skip this entirely.
     extended.restApi['hivesense-api'].endpointUrl = aiEndpoint || clientOptions.restApiEndpoint;
     if (aiEndpoint) {
       extended.api['search-api'].find_text.endpointUrl = aiEndpoint;

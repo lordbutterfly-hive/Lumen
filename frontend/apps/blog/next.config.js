@@ -60,7 +60,27 @@ const nextConfig = {
   },
   experimental: {
     outputFileTracingRoot: path.join(__dirname, '../..'),
-    instrumentationHook: true
+    instrumentationHook: true,
+    /**
+     * ★★★ undici MUST NOT BE BUNDLED (2026-09-06, found live). `instrumentation.ts`
+     * imports `undici` to install a keep-alive dispatcher for the server's outbound
+     * Hive calls. Webpack was bundling the package into a server chunk, and the
+     * MINIFIED chunk does not parse: production logged
+     * `http-keepalive off (REQUESTED but not installed: Unexpected identifier '#P')`
+     * on every worker boot, so the flag was a no-op and both arms of its A/B were
+     * the same arm. Node parses the same private-field syntax fine by hand, so this
+     * is the bundle, not the runtime. Listing the package here makes Next require it
+     * from node_modules at runtime and trace it into the standalone output instead
+     * of rewriting it.
+     *
+     * This is the SAME knob the comment below warns about for `@hiveio/beekeeper`
+     * and `@hiveio/wax`, and that warning stands: those two are WASM packages and
+     * listing either one turns every page into a 500. `undici` is plain JavaScript
+     * with no WASM and no React, and it is verified by booting the built standalone
+     * and checking both that a page renders and that the boot line now says the
+     * dispatcher installed. Do not extend this list without that same check.
+     */
+    serverComponentsExternalPackages: ['undici']
     // ★ `experimental.preloadEntriesOnStart` WAS TRIED HERE AND REMOVED — do not
     // re-add it without re-measuring (2026-08-17).
     //

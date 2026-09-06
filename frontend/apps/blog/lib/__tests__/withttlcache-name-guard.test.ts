@@ -1,8 +1,11 @@
 /**
  * SOURCE-SCANNING GUARD: every `withTtlCache(...)` call in `apps/blog` must
- * pass a `name` (2026-09-06, review fix on the module-copies build map).
- * Same style and philosophy as `server-cache-time-guard.test.ts` — a
- * hand-rolled tokenizer, not a real TS parser, run under `test:unit`.
+ * pass a `name` (2026-09-06, review fix on the module-copies build map), AND
+ * no two call sites anywhere in the tree may pass the SAME `name` (section C,
+ * added the same day — see its own header for why `server-ttl-cache.ts`'s own
+ * runtime guards cannot catch this specific case). Same style and philosophy
+ * as `server-cache-time-guard.test.ts` — a hand-rolled tokenizer, not a real
+ * TS parser, run under `test:unit`.
  *
  * WHY THIS EXISTS: an unnamed `withTtlCache` keeps its own module-local
  * `fresh`/`inFlight`/`counters`, so it silently gets ONE copy per webpack
@@ -58,6 +61,13 @@
  *     awareness at all) now imports that same tokenizer too, so both guards
  *     get this fix from one shared source instead of one carrying a gap the
  *     other already closed.
+ *   - Section C's name-uniqueness check only sees a `name:` whose value is a
+ *     plain single/double-quoted string literal (`NAME_VALUE_RE`). A call
+ *     that still passes the mandatory `name:` key but as a template literal
+ *     or a variable is still caught as NAMED by section B (nothing here lets
+ *     that requirement lapse), just not entered into the uniqueness check,
+ *     since a static scan cannot know its runtime value. No real call site
+ *     does this today.
  */
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, resolve } from 'path';
@@ -106,9 +116,23 @@ function findMatchingParen(text: string, openParenIndex: number): number {
   return -1; // unterminated — treated as a violation by the caller
 }
 
-/** Split the text strictly BETWEEN the call's outer parens on depth-0 commas. */
-function splitTopLevelArgs(inner: string): string[] {
-  const args: string[] = [];
+/**
+ * Split the text strictly BETWEEN the call's outer parens on depth-0 commas.
+ * Returns each argument's TRIMMED text plus its `[start, end)` offsets INTO
+ * `inner` — offsets, not just text, because section C below needs to go back
+ * to the UNMASKED source at the same positions to read a `name:` value's
+ * actual characters (`maskNonCode` blanks string CONTENTS, so the masked text
+ * alone can prove a call is named but not what it is named — see that
+ * function's own doc comment).
+ */
+interface ArgSpan {
+  text: string;
+  start: number;
+  end: number;
+}
+
+function splitTopLevelArgs(inner: string): ArgSpan[] {
+  const raw: Array<{ start: number; end: number }> = [];
   let depth = 0;
   let start = 0;
   for (let i = 0; i < inner.length; i++) {
@@ -116,23 +140,52 @@ function splitTopLevelArgs(inner: string): string[] {
     if (c === '(' || c === '{' || c === '[') depth++;
     else if (c === ')' || c === '}' || c === ']') depth--;
     else if (c === ',' && depth === 0) {
-      args.push(inner.slice(start, i));
+      raw.push({ start, end: i });
       start = i + 1;
     }
   }
-  args.push(inner.slice(start));
-  return args.map((a) => a.trim()).filter((a) => a.length > 0);
+  raw.push({ start, end: inner.length });
+  return raw
+    .map(({ start, end }) => {
+      const untrimmed = inner.slice(start, end);
+      const text = untrimmed.trim();
+      const leading = untrimmed.length - untrimmed.trimStart().length;
+      const trailing = untrimmed.length - untrimmed.trimEnd().length;
+      return { text, start: start + leading, end: end - trailing };
+    })
+    .filter((a) => a.text.length > 0);
 }
 
 const NAME_KEY_RE = /\bname\s*:/;
 
+/** A `name:` value that is a plain quoted string literal — every real call site today. */
+const NAME_VALUE_RE = /\bname\s*:\s*(['"])((?:\\.|(?!\1).)*)\1/;
+
 interface CallCheck {
   named: boolean;
   reason: string;
+  /**
+   * The literal `name:` VALUE, when it could be read — only ever set when
+   * `named` is true AND the value is a plain single/double-quoted string with
+   * no more than backslash escapes (`NAME_VALUE_RE` above). `undefined` for
+   * an unnamed call OR a named call whose value is not a simple literal (a
+   * template literal or an identifier) — see this file's own "KNOWN
+   * LIMITATIONS" note on why section C (name uniqueness) cannot check what it
+   * cannot read.
+   */
+  name?: string;
 }
 
-/** Runs the whole pipeline (mask -> find calls -> split args -> check last arg) on one masked file's text. */
-function checkCalls(masked: string): CallCheck[] {
+/**
+ * Runs the whole pipeline (mask -> find calls -> split args -> check last
+ * arg) on one file's text. `masked` drives call/arg-boundary detection
+ * (safe to split on, since a comma or brace INSIDE a string is blanked to a
+ * space rather than left as real punctuation); `original` is the SAME file's
+ * unmasked text, same length, same positions — used only to recover the
+ * actual characters of a `name:` string literal, which `masked` has already
+ * blanked out by design.
+ */
+function checkCalls(masked: string, original: string): CallCheck[] {
   const results: CallCheck[] = [];
   CALL_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -146,13 +199,43 @@ function checkCalls(masked: string): CallCheck[] {
     const inner = masked.slice(openParen + 1, closeParen);
     const args = splitTopLevelArgs(inner);
     const last = args[args.length - 1];
-    if (!last || !last.startsWith('{')) {
-      results.push({ named: false, reason: `expected a trailing options object literal, got: ${JSON.stringify(last)}` });
+    if (!last || !last.text.startsWith('{')) {
+      results.push({ named: false, reason: `expected a trailing options object literal, got: ${JSON.stringify(last?.text)}` });
       continue;
     }
-    results.push({ named: NAME_KEY_RE.test(last), reason: NAME_KEY_RE.test(last) ? 'has name:' : 'no name: in options object' });
+    const named = NAME_KEY_RE.test(last.text);
+    let name: string | undefined;
+    if (named) {
+      // Same `[openParen+1, closeParen)` window, but read from `original` —
+      // see this function's own doc comment on why the two texts diverge
+      // exactly where a `name:` VALUE lives.
+      const rawInner = original.slice(openParen + 1, closeParen);
+      const rawLast = rawInner.slice(last.start, last.end);
+      name = rawLast.match(NAME_VALUE_RE)?.[2];
+    }
+    results.push({ named, reason: named ? 'has name:' : 'no name: in options object', name });
   }
   return results;
+}
+
+/**
+ * Given every named call site found, group by `name:` and return only the
+ * names used more than once — the exact failure mode this section exists to
+ * catch (see section C's own header). A pure function so section A can drive
+ * it with synthetic data without re-running the real file scan.
+ */
+function findDuplicateNames(entries: Array<{ name: string; file: string }>): Map<string, string[]> {
+  const byName = new Map<string, string[]>();
+  for (const { name, file } of entries) {
+    const files = byName.get(name);
+    if (files) files.push(file);
+    else byName.set(name, [file]);
+  }
+  const duplicates = new Map<string, string[]>();
+  for (const [name, files] of byName) {
+    if (files.length > 1) duplicates.set(name, files);
+  }
+  return duplicates;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +243,7 @@ function checkCalls(masked: string): CallCheck[] {
 // ---------------------------------------------------------------------------
 
 function callsIn(snippet: string): CallCheck[] {
-  return checkCalls(maskNonCode(snippet));
+  return checkCalls(maskNonCode(snippet), snippet);
 }
 
 check(
@@ -230,6 +313,64 @@ check('multiple calls in one file are each checked independently', (() => {
   );
   return results.length === 2 && results[0].named === true && results[1].named === false;
 })());
+
+// ---------------------------------------------------------------------------
+// A2. NAME EXTRACTION + UNIQUENESS (section C's own machinery), self-tested
+// before section C runs it over the real tree.
+// ---------------------------------------------------------------------------
+check(
+  "a single-quoted name: value is read from the RAW source, not the masked one " +
+    "(masking blanks a string's CONTENTS, so this proves the offset math into `original` is right)",
+  callsIn("const x = withTtlCache(load, keyOf, { name: 'accountFull', ttlMs: 1000 });")[0]?.name === 'accountFull'
+);
+check(
+  'a double-quoted name: value is read the same way',
+  callsIn('const x = withTtlCache(load, keyOf, { name: "accountFull", ttlMs: 1000 });')[0]?.name === 'accountFull'
+);
+check(
+  'a multi-line call (the real cached-api.ts shape) still reads the right name: value',
+  callsIn(
+    [
+      'const x = withTtlCache(',
+      '  load,',
+      '  (a: string, b: string) => `${a}|${b}`,',
+      '  { name: "followList", ttlMs: 30000, max: 100 }',
+      ');'
+    ].join('\n')
+  )[0]?.name === 'followList'
+);
+check(
+  'an unnamed call has no name: value to read',
+  callsIn('const x = withTtlCache(load, keyOf, { ttlMs: 1000 });')[0]?.name === undefined
+);
+check(
+  'findDuplicateNames flags a name used by two different files',
+  (() => {
+    const dupes = findDuplicateNames([
+      { name: 'foo', file: 'a.ts' },
+      { name: 'foo', file: 'b.ts' }
+    ]);
+    return dupes.size === 1 && dupes.get('foo')?.join(',') === 'a.ts,b.ts';
+  })()
+);
+check(
+  'findDuplicateNames does not flag two distinct names',
+  findDuplicateNames([
+    { name: 'foo', file: 'a.ts' },
+    { name: 'bar', file: 'b.ts' }
+  ]).size === 0
+);
+check(
+  'findDuplicateNames does not flag a name that appears exactly once',
+  findDuplicateNames([{ name: 'foo', file: 'a.ts' }]).size === 0
+);
+check(
+  'findDuplicateNames also flags the SAME file using one name twice (a copy-paste within one module)',
+  findDuplicateNames([
+    { name: 'foo', file: 'a.ts' },
+    { name: 'foo', file: 'a.ts' }
+  ]).size === 1
+);
 
 // ★★★ REGRESSION SUITE for the regex-literal masking bug this file's own
 // maskNonCode doc comment describes — found live in feed-prefetch.ts's
@@ -331,14 +472,19 @@ interface Violation {
 
 let realCallCount = 0;
 const violations: Violation[] = [];
+const namedEntries: Array<{ name: string; file: string }> = [];
 for (const displayPath of files) {
   const absPath = join(blogRoot, displayPath);
   const content = readFileSync(absPath, 'utf8');
   const masked = maskNonCode(content);
-  const results = checkCalls(masked);
+  const results = checkCalls(masked, content);
   realCallCount += results.length;
   for (const r of results) {
-    if (!r.named) violations.push({ file: displayPath, reason: r.reason });
+    if (!r.named) {
+      violations.push({ file: displayPath, reason: r.reason });
+    } else if (r.name) {
+      namedEntries.push({ name: r.name, file: displayPath });
+    }
   }
 }
 
@@ -360,6 +506,48 @@ if (violations.length > 0) {
   console.error('\nFIX: add `name: \'somethingUnique\'` to the options object — see server-ttl-cache.ts\'s header note.');
 }
 check(`zero violations across ${realCallCount} call(s)`, violations.length === 0);
+
+// ---------------------------------------------------------------------------
+// C. NAME UNIQUENESS. Every call above was checked for HAVING a name:; this
+//    section checks the actual VALUES are unique across the whole scanned
+//    tree — the gap this guard did not close until now.
+//
+//    ★ WHY THIS IS A REAL GAP AND NOT ALREADY CAUGHT AT RUNTIME.
+//    `server-ttl-cache.ts`'s shared slot throws at module load when two call
+//    sites share a `name:` with DIFFERENT `ttlMs`/`max` (a real, load-bearing
+//    guard — see its own header note), and a SEPARATE same-copy check catches
+//    two calls in the identical module instantiation reusing a name for a
+//    different loader/keyOf pair. Neither one catches two DIFFERENT modules
+//    that happen to pick the same name AND agree on `ttlMs`/`max`: if they
+//    never end up sharing one instantiation of `server-ttl-cache.ts` (plainly
+//    possible — Next compiles it once per webpack LAYER, and the same-copy
+//    check is a plain module-local `Map`, not `globalThis`-shared), the
+//    cross-copy check sees matching options and ADOPTS silently instead of
+//    throwing — two semantically unrelated caches sharing one store, with no
+//    error anywhere. Two single-layer modules with the same name and the
+//    common `{ttlMs: 30_000, max: 100}` shape (six of today's real caches use
+//    exactly that pair) would hit precisely this. A static, whole-tree name
+//    check makes the failure mode impossible regardless of how webpack
+//    happens to chunk anything, which is the one thing runtime code cannot
+//    promise about itself.
+// ---------------------------------------------------------------------------
+const duplicateNames = findDuplicateNames(namedEntries);
+if (duplicateNames.size > 0) {
+  console.error(`\n${duplicateNames.size} DUPLICATE NAME(S) — the same name: used by more than one call site:\n`);
+  for (const [name, fs] of duplicateNames) {
+    console.error(`  "${name}": ${fs.join(', ')}`);
+  }
+  console.error(
+    '\nFIX: give one of them a different name — see server-ttl-cache.ts\'s header note on why two call sites ' +
+      'that agree on ttlMs/max as well as name would otherwise silently share one store.'
+  );
+}
+const distinctNameCount = new Set(namedEntries.map((e) => e.name)).size;
+check(
+  `every named cache's name: is unique (checked ${namedEntries.length} named call site(s), ` +
+    `${distinctNameCount} distinct name(s))`,
+  duplicateNames.size === 0
+);
 
 if (failures === 0) {
   console.log(`\nwithttlcache-name-guard: ALL CHECKS PASSED (${checks} checks, ${files.length} files scanned)`);
