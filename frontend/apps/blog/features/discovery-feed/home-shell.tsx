@@ -14,6 +14,15 @@ import HomeIntro from '@/blog/components/home-intro';
 // React hook. Imported under its own name it trips `react-hooks/rules-of-hooks`
 // ('cannot be called in an async function') purely because of the `use` prefix.
 import { useTranslation as getServerTranslation } from '@/blog/i18n/server';
+// ★ SSR CARD COUNT (2026-09-06, SIGNED-IN-HOME-BUILD-MAP-2026-09-06.md item 2).
+// Pure function, unit-tested in lib/feed/home-ssr-card-count.test.ts. Read here
+// and nowhere else client-executed: `process.env.LUMEN_HOME_SSR_CARDS` must
+// never be read from `feed-tabs.tsx` (a `'use client'` file) — that module is
+// bundled to the browser, where a bare (non-`NEXT_PUBLIC_`) env var is not
+// reliably available, and any mismatch between what the server decided and
+// what the client would decide on its own is a hydration bug. `ForYouFeed`
+// gets the already-resolved number as a plain prop instead.
+import { getHomeSsrCardCount } from '@/blog/lib/feed/home-ssr-card-count';
 
 /**
  * Home shell — the redesign's fixed 3-column grid (200 / 1fr / 312, gap 44,
@@ -24,6 +33,12 @@ import { useTranslation as getServerTranslation } from '@/blog/i18n/server';
  */
 export default async function HomeShell({ showIntro = false }: { showIntro?: boolean }) {
   const { t } = await getServerTranslation('common_blog');
+  // `showIntro` is `!signedIn` from `app/page.tsx`'s own session read — the
+  // exact fact this needs, already computed by the caller. See
+  // `getHomeSsrCardCount`'s doc comment for why the env read has to happen
+  // here and not in `ForYouFeed`.
+  const isSignedIn = !showIntro;
+  const ssrCardCount = getHomeSsrCardCount(isSignedIn);
   return (
     <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
       {/* 1px vertical divider at the nav's right edge — equal 44px gutter each side */}
@@ -67,7 +82,7 @@ export default async function HomeShell({ showIntro = false }: { showIntro?: boo
         <RetentionNudge className="mb-4" />
         <ShortFormComposer />
         <div className="mt-6">
-          <FeedTabs />
+          <FeedTabs ssrCardCount={ssrCardCount} />
         </div>
       </main>
 

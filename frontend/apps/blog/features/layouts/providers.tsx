@@ -8,6 +8,7 @@ import { SignerProvider } from '@hive/smart-signer/components/signer-provider';
 import { GoogleOAuthRedirectGate } from '@smart-signer/components/google-oauth-redirect-gate';
 import { siteConfig } from '@ui/config/site';
 import { getQueryClient } from '@/blog/lib/react-query';
+import { UserClientProvider } from '@smart-signer/lib/auth/user-client-context';
 import { LoggedUserProvider } from '@/blog/features/votes/hooks/use-logged-user';
 import TopCommentSessionReset from '@/blog/features/discovery-feed/top-comment-session-reset';
 import { ModalContainer } from '@smart-signer/components/modal-container';
@@ -48,15 +49,23 @@ export const Providers: FC<PropsWithChildren> = ({ children }) => {
               strict={!siteConfig.allowNonStrictLogin}
               loadingText={t('login_form.completing_google_auth')}
             />
-            <LoggedUserProvider>
-              {/* Renders nothing. Clears the post card's per-session top-comment
-                  picks when the signed-in identity changes — see the file's own
-                  header for why this watches identity instead of hooking the
-                  logout button. Mounted here because this is the one place that
-                  is inside the query client and mounted on every route. */}
-              <TopCommentSessionReset />
-              {children}
-            </LoggedUserProvider>
+            {/* ★ ONE `useUserCore` INSTANCE FOR THE WHOLE TREE (option A,
+                warm-reclick build map, 2026-09-06). Wraps `LoggedUserProvider`
+                (which itself calls `useUserClient()` and now reads this
+                context instead of running its own copy) and every route's
+                content below it — see `user-client-context.tsx` for the full
+                accounting of what used to run once per call site. */}
+            <UserClientProvider>
+              <LoggedUserProvider>
+                {/* Renders nothing. Clears the post card's per-session top-comment
+                    picks when the signed-in identity changes — see the file's own
+                    header for why this watches identity instead of hooking the
+                    logout button. Mounted here because this is the one place that
+                    is inside the query client and mounted on every route. */}
+                <TopCommentSessionReset />
+                {children}
+              </LoggedUserProvider>
+            </UserClientProvider>
           </SignerProvider>
         </NavigationProgressProvider>
         <ModalContainer />

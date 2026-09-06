@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { fetchAccountPostsPage } from '@/blog/lib/lite/client/account-posts-fetch';
@@ -27,6 +27,7 @@ import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useOffline } from '@/blog/components/offline-guard';
 import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
 import { useInitialFeed } from '@/blog/components/observer-provider';
+import { computeScrollRestoreTarget } from '@/blog/lib/feed/scroll-restore-target';
 
 // TODO: move to i18n
 const LABELS = {
@@ -54,7 +55,18 @@ const LABELS = {
   sessionError: 'We couldn’t check your account, so we can’t load your Following feed.',
   sessionRetry: 'Try again',
   newPost: 'Show 1 new post',
-  newPosts: (count: number) => `Show ${count} new posts`
+  newPosts: (count: number) => `Show ${count} new posts`,
+  // ★ THE `<noscript>` HINT (2026-09-06, coordinator review). A reader with no
+  // JavaScript never runs the reveal effect, so `revealed` stays exactly what
+  // the server rendered it as — permanently truncated at `ssrCardCount`, with
+  // no button that could work anyway (every existing control here, "Load
+  // more" included, is an onClick handler). Naming the count and saying why
+  // is more honest than either silence (looks like the feed just ends) or a
+  // dead control. See the `truncated` guard beside `ForYouFeed`'s `<noscript>`
+  // for why this never costs a JS-enabled reader anything: the browser never
+  // parses `<noscript>` contents when JavaScript is on.
+  jsRequiredForMore: (count: number) =>
+    `${count} more post${count === 1 ? '' : 's'} in your feed ${count === 1 ? 'needs' : 'need'} JavaScript enabled to show.`
 };
 
 type TabKey = 'for-you' | 'feed' | 'predictions';
@@ -247,10 +259,123 @@ async function fetchForYou(
   return (await res.json()) as ForYouResponse;
 }
 
-function ForYouFeed() {
+/**
+ * ★ LAYOUT EFFECT, NOT `useEffect`, FOR THE SSR REVEAL (2026-09-06,
+ * coordinator review). `useEffect` is scheduled AFTER the browser has a
+ * chance to paint, so a fast-hydrating client can paint the just-hydrated
+ * 12-card DOM a SECOND time (identical to the server's HTML, but now it is
+ * React's own committed tree) before the reveal ever runs — and that second,
+ * still-short paint is exactly the moment a browser's native scroll
+ * restoration (`history.scrollRestoration` defaults to `'auto'`; nothing in
+ * this app's Next 14.2 setup ever sets it to `'manual'`) is likely to read
+ * the document's height and restore or clamp scroll against it. A layout
+ * effect runs SYNCHRONOUSLY inside the same commit, before that next paint,
+ * so the DOM is already full height by the time the browser paints anything
+ * React produced. It cannot undo the very first paint of the raw server HTML
+ * (that one happens before any JS has run at all, on every hydration,
+ * regardless of which effect type is used — see the `<noscript>` fallback
+ * below for the case where no JS ever runs) — only the window after it.
+ *
+ * `useLayoutEffect` warns when it runs during actual server rendering ("does
+ * nothing on the server"), so this is the standard isomorphic alias: the
+ * check runs ONCE per module load, and a module loaded by Node for SSR never
+ * has `window`, so the server always gets the ordinary `useEffect` (silent,
+ * correct — the warning is exactly what the alias avoids) while a module
+ * loaded by the browser always gets the real layout effect.
+ */
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
+/**
+ * ★★ REPLACED (2026-09-06, coordinator review #2). The previous version of
+ * this comment described `isLikelyScrollRestore`, which fed `revealed`'s
+ * INITIAL state from `window.scrollY`/the Navigation Timing API — a
+ * deliberate hydration mismatch against the server's 12-card HTML on a
+ * restore navigation. Ruled out: React 18 treats that as a recoverable error
+ * (logged) and re-renders the mismatched boundary from scratch on the
+ * client, which costs MORE than the render this feature exists to save, and
+ * can itself flash. The server and the client's first render now ALWAYS
+ * agree (see `revealed`'s initializer below — it no longer reads anything
+ * browser-only), and scroll position is instead handled explicitly, after
+ * hydration, by the scroll keeper and the two effects below.
+ *
+ * THE SCROLL KEEPER: a passive, rAF-throttled `scroll` listener (same
+ * throttle idiom as `use-infinite-scroll-sentinel.ts`'s waker 2) plus a
+ * `pagehide` listener, writing `window.scrollY` into `sessionStorage` keyed
+ * by pathname. `sessionStorage` (not `localStorage`) because a restored
+ * position is only ever meaningful for a reload or a back/forward within
+ * the SAME tab's history — `computeScrollRestoreTarget` enforces that this
+ * value is only ever read back under those two navigation types.
+ */
+const SCROLL_KEEPER_PREFIX = 'lumen:scroll:';
+
+function scrollKeeperKey(pathname: string): string {
+  return `${SCROLL_KEEPER_PREFIX}${pathname}`;
+}
+
+function readSavedScrollPosition(pathname: string): number | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(scrollKeeperKey(pathname));
+    if (raw === null) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function currentNavigationType(): string | undefined {
+  if (typeof performance === 'undefined') return undefined;
+  try {
+    const [nav] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
+    return nav?.type;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * ★ "HAS THIS BROWSER TAB ALREADY HYDRATED ONCE." Module-scope, mutated only
+ * inside `useIsomorphicLayoutEffect` below — never during render — which is
+ * what makes this safe despite living at module scope in a file that also
+ * renders on the SERVER. Node loads this module once per worker process and
+ * reuses it across every request from every reader that worker ever serves;
+ * if anything set this flag during a RENDER, every subsequent reader on that
+ * worker would inherit a stranger's `true`. Effects never run during SSR
+ * (Next calls only the render function), so the server's copy of this
+ * variable is permanently `false` for the life of the process — every server
+ * render reads exactly the `false` it always would have. In the browser the
+ * module loads once per page load and survives for the life of that tab, so
+ * this correctly stays `true` across everything that can remount
+ * `ForYouFeed` without a real navigation — a tab switch away from and back
+ * to "For You", or a client-side Back that reuses the loaded bundle — and
+ * correctly resets to `false` on an actual full reload (a fresh module
+ * instance). See `revealed`'s initializer: once this is `true`, slicing to
+ * `ssrCardCount` would only be jank with no render-cost benefit, because
+ * nothing is being rendered on a server at that point.
+ */
+let hasHydratedOnce = false;
+
+function ForYouFeed({ ssrCardCount = Number.POSITIVE_INFINITY }: { ssrCardCount?: number }) {
   const { t } = useTranslation('common_blog');
   const queryClient = useQueryClient();
   const initialFeed = useInitialFeed();
+  // Keys the scroll keeper and the saved-position read below. This is the
+  // home route's own pathname (this component only ever mounts from
+  // `home-shell.tsx`), read here rather than threaded down as a prop because
+  // `usePathname()` is already free of any hydration-mismatch risk — App
+  // Router resolves it identically on the server and the client's first
+  // render.
+  const pathname = usePathname() ?? '/';
+  // No truncation ever happens for these two cases (signed-out, or the
+  // `LUMEN_HOME_SSR_CARDS` off switch) — the DOM is full height from the very
+  // first paint, so the browser's OWN scroll restoration already works
+  // correctly and none of the machinery below (the keeper, the
+  // `history.scrollRestoration` takeover, the manual `scrollTo`) has
+  // anything to correct for. Gating on it keeps that machinery entirely out
+  // of the anonymous path, which stays behaviourally untouched by this
+  // feature, not merely byte-identical in its HTML.
+  const canTruncate = ssrCardCount !== Number.POSITIVE_INFINITY;
 
   // ★ INFINITE SCROLL (2026-08-07). This was a single `useQuery` for one page of
   // 30, on the reasoning that a ranked feed is one scored ORDER with no cursor —
@@ -376,6 +501,164 @@ function ForYouFeed() {
   /** New posts the reader accepted, kept above the pages they were already reading. */
   const [accepted, setAccepted] = useState<Entry[]>([]);
 
+  /**
+   * ★★★ SSR RENDERS ONLY THE FIRST `ssrCardCount` CARDS; THE CLIENT REVEALS
+   * THE REST RIGHT AFTER HYDRATION (2026-09-06,
+   * SIGNED-IN-HOME-BUILD-MAP-2026-09-06.md item 2, hardened twice after
+   * coordinator review the same day). Measured: React DOM server rendering
+   * the post-card module costs about 4ms per card, so 45 seeded cards cost
+   * about 180ms of the signed-in home's render floor (build map section
+   * 3.4). The seed itself is untouched — `shown` below still holds every
+   * entry, so the "new posts" poll, block filtering and the dedupe logic all
+   * see the full list exactly as before; only which of `shown` gets PAINTED
+   * changes, at the one `.map()` below.
+   *
+   * ★★ THE INITIAL VALUE NEVER READS ANYTHING BROWSER-ONLY (review #2). An
+   * earlier version of this also started `true` on a detected scroll-restore
+   * navigation, which meant the CLIENT's first render could disagree with
+   * the SERVER's — a genuine hydration mismatch. Ruled out: React 18 treats
+   * that as a recoverable error (logged) and re-renders the mismatched
+   * boundary from scratch on the client, which costs MORE than the render
+   * this feature saves and can itself flash. So the only two branches left
+   * are both things the server already knows or that are `false` identically
+   * in both environments on a genuine first render:
+   *   1. `ssrCardCount` is `Infinity` — signed-out (see `getHomeSsrCardCount`)
+   *      or the `LUMEN_HOME_SSR_CARDS` off switch. Nothing is ever hidden, so
+   *      the `hasNextPage`/`endLabel` gates below are simply inert.
+   *   2. `hasHydratedOnce` — `false` identically on the server (permanently,
+   *      per its own comment) AND on the client's first-ever render in this
+   *      tab (the module was just loaded fresh) — so this branch cannot
+   *      cause a mismatch either; it only matters on a LATER remount (a tab
+   *      switch away from and back to "For You", a soft client-side Back),
+   *      where there is no server render to save cost on, only a pop-in to
+   *      avoid.
+   *   3. Otherwise `false` — the genuine first render, matching the server
+   *      exactly. Scroll position for a reload/back-forward is now handled
+   *      AFTER this, explicitly, by the two effects below — never by
+   *      guessing at the initial value.
+   */
+  const [revealed, setRevealed] = useState(() => {
+    if (ssrCardCount === Number.POSITIVE_INFINITY) return true;
+    return hasHydratedOnce;
+  });
+
+  /**
+   * ★ THE SCROLL KEEPER (review #2). Only attached when there is anything to
+   * protect (`canTruncate`) — see that constant's own comment. Passive and
+   * rAF-throttled, same idiom as `use-infinite-scroll-sentinel.ts`'s scroll
+   * waker, plus `pagehide` (covers a tab close or a hard navigation away,
+   * which `scroll` alone would miss the LAST position for).
+   */
+  useEffect(() => {
+    if (!canTruncate || typeof window === 'undefined') return;
+    const key = scrollKeeperKey(pathname);
+    const save = () => {
+      try {
+        window.sessionStorage.setItem(key, String(window.scrollY));
+      } catch {
+        // sessionStorage can throw (private browsing, quota) — losing the
+        // saved position only means the next reload/back-forward restores
+        // nothing, never a wrong position, so this is safe to swallow.
+      }
+    };
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        save();
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('pagehide', save);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('pagehide', save);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [canTruncate, pathname]);
+
+  /** Set by the mount effect below, consumed once the reveal has actually
+   *  committed (the second effect, keyed on `revealed`). `null` means
+   *  "nothing to restore" for every reason `computeScrollRestoreTarget`
+   *  covers, INCLUDING a remount that is not the genuine first one. */
+  const restoreTargetRef = useRef<number | null>(null);
+  /** The value `history.scrollRestoration` had before this mount changed it,
+   *  so the cleanup below can put it back exactly as found. `undefined`
+   *  means this mount never touched it. */
+  const previousScrollRestorationRef = useRef<'auto' | 'manual' | undefined>(undefined);
+
+  useIsomorphicLayoutEffect(() => {
+    // Captured BEFORE the mutation just below: only a render that started
+    // with `hasHydratedOnce === false` is the render a server might have
+    // just produced short HTML for. A tab-switch remount already starts
+    // `revealed: true` (branch 2 above) and has no truncation to correct —
+    // recomputing a restore target for it would be a scrollTo the reader
+    // never asked for, triggered by switching tabs.
+    const isGenuineFirstMount = !hasHydratedOnce;
+    // Every mount counts as "hydrated once" for this tab from here on,
+    // independent of whether THIS mount had anything to reveal.
+    hasHydratedOnce = true;
+
+    if (canTruncate && isGenuineFirstMount && typeof window !== 'undefined') {
+      const target = computeScrollRestoreTarget(currentNavigationType(), readSavedScrollPosition(pathname));
+      restoreTargetRef.current = target;
+      // ★ TAKE OVER FROM THE BROWSER BEFORE IT CAN CLAMP (review #2). Next
+      // 14.2 never sets `history.scrollRestoration = 'manual'` anywhere in
+      // this app, so the browser's default `'auto'` behaviour runs on its
+      // own timeline — which can complete BEFORE this effect does on a slow
+      // bundle load, already restored/clamped against the still-short
+      // (`ssrCardCount`-card) document. Switching to `'manual'` here, as
+      // early as a layout effect can run, tells the browser to do nothing
+      // so ONLY the explicit `window.scrollTo` below (once the DOM is full
+      // height) ever moves the reader. Scoped tightly: only entered when
+      // there is a real saved position to apply, and only for the life of
+      // THIS mount — the cleanup puts it back untouched otherwise.
+      if (target !== null && 'scrollRestoration' in window.history) {
+        previousScrollRestorationRef.current = window.history.scrollRestoration;
+        window.history.scrollRestoration = 'manual';
+      }
+    }
+
+    if (!revealed) setRevealed(true);
+
+    return () => {
+      if (previousScrollRestorationRef.current !== undefined && typeof window !== 'undefined') {
+        window.history.scrollRestoration = previousScrollRestorationRef.current;
+        previousScrollRestorationRef.current = undefined;
+      }
+    };
+    // Intentionally once, on mount: `ssrCardCount`/`canTruncate` are fixed
+    // for the life of this component (they come from the server render that
+    // created it), and `pathname` does not change under a mounted
+    // `ForYouFeed` (a pathname change unmounts the home route entirely).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * ★ THE SCROLL RESTORE ITSELF — a SEPARATE layout effect, keyed on
+   * `revealed`, not inlined into the mount effect above (review #2 asked for
+   * "the same layout effect that reveals"; this is its exact intent, not
+   * its literal code shape). `setRevealed(true)` inside a layout effect
+   * schedules React's next synchronous render-and-commit pass — it does NOT
+   * apply before the REST of the calling effect's own function body
+   * finishes running, so a `window.scrollTo` written directly after it in
+   * one function would still see the OLD (`ssrCardCount`-card) DOM height.
+   * This effect fires again once that next commit lands — still entirely
+   * within layout-effect timing, so still before the browser paints — which
+   * is the earliest point `cardsToRender` (below) actually equals `shown`.
+   * On a mount that starts already `revealed` (nothing to truncate), this
+   * runs once, immediately, with the DOM already full height, which is
+   * exactly as correct.
+   */
+  useIsomorphicLayoutEffect(() => {
+    if (!revealed) return;
+    const target = restoreTargetRef.current;
+    if (target === null) return;
+    restoreTargetRef.current = null; // once per mount
+    if (typeof window !== 'undefined') window.scrollTo(0, target);
+  }, [revealed]);
+
   // ★ THE SENTINEL IS NO LONGER A BARE `inView` EFFECT (2026-08-13). It fired
   // twice per scroll gesture and never stopped growing; both faults, the
   // measurements behind them and why the fix is a geometry read rather than an
@@ -386,8 +669,19 @@ function ForYouFeed() {
   // profile and tag lists were fixed for and this one was not. It stops, and
   // `ScrollPagerFooter` says so and offers the retry, rather than dead-ending
   // silently.
+  //
+  // ★ GATED ON `revealed` TOO (2026-09-06, same item as above). `hasNextPage`
+  // answers "does the SERVER have more beyond this page", which says nothing
+  // about the 33 already-loaded-but-still-hidden cards in THIS page. Passing
+  // the real value through unguarded would let the geometry check in
+  // `useInfiniteScrollSentinel` see its sentinel much closer to the top (only
+  // 12 cards above it instead of 45) and fetch page 2 before the reveal ever
+  // ran — appending real new content after 33 cards nobody has seen yet. This
+  // only changes the AUTO-FETCH decision; `ScrollPagerFooter` below still gets
+  // the real `hasNextPage`, so it never claims "that's everything" while cards
+  // remain hidden (see its own `endLabel` just below).
   const sentinel = useInfiniteScrollSentinel({
-    hasNextPage,
+    hasNextPage: hasNextPage && revealed,
     isFetching: isFetchingNextPage,
     isError,
     fetchNextPage,
@@ -680,6 +974,18 @@ function ForYouFeed() {
           ? LABELS.degradedStale
           : LABELS.degraded;
 
+  // Not a hook — a plain derived value, computed fresh every render from
+  // `shown` and `revealed` above. `slice(0, Infinity)` is the whole array, so
+  // a signed-out viewer (`ssrCardCount` is `Infinity`, `revealed` starts
+  // `true`) takes this exact path with no behaviour change at all.
+  const cardsToRender = revealed ? shown : shown.slice(0, ssrCardCount);
+  // True only while genuinely truncated — drives the `<noscript>` hint below.
+  // For a JS-enabled reader this is `true` for at most one render (the one
+  // `revealed`'s initializer or the layout effect above already resolves),
+  // and for a JS-disabled reader it never resolves at all, which is exactly
+  // who that hint is for.
+  const truncated = !revealed && shown.length > cardsToRender.length;
+
   return (
     <div>
       {/* ★ THE LITE STRIP IS GONE FROM HERE FOR GOOD, NOT JUST FOR SIGNED-OUT
@@ -758,7 +1064,15 @@ function ForYouFeed() {
       {shown.length === 0 ? (
         <p className="py-12 text-center font-sans text-sm italic text-muted-foreground">{LABELS.empty}</p>
       ) : (
-        shown.map((entry) => (
+        /* ★ ONLY THE PAINTED SLICE CHANGES, NEVER `shown` ITSELF. `authors`,
+           `marks`, `prices`, `luminosity`, `shownKeys`, `offered`/`readyToSwap`
+           and `lastRendered` above all read the FULL `shown` — slicing that
+           upstream would make posts 13-45 look "new" to the poll the moment
+           they are revealed (they were never in `shownKeys`), which is the
+           exact bug the "NEW MEANS NEWER THAN ANYTHING THE READER HAS SEEN"
+           comment above exists to prevent. `cardsToRender` is the one place
+           that actually shrinks — see the `revealed` comment above. */
+        cardsToRender.map((entry) => (
           <MediumPostCard
             key={`${entry.author}-${entry.permlink}`}
             post={entry}
@@ -796,6 +1110,37 @@ function ForYouFeed() {
         ))
       )}
 
+      {/* ★★★ THE `<noscript>` HINT (2026-09-06, coordinator review, item 4).
+          WHAT EACH READER ACTUALLY SEES:
+            · JavaScript on (everyone measured tonight): `revealed` resolves
+              to `true` before or within the first committed paint (see the
+              layout effect and the scroll-restore initializer above), so
+              `truncated` is `false` by the time anything is visible, and the
+              browser never parses a `<noscript>` element's contents in the
+              first place. Net: no change from before this feature existed.
+            · JavaScript off, or the bundle fails to load: `revealed` never
+              leaves its initial value, `truncated` stays `true` forever, and
+              this is the ONLY thing such a reader sees below card
+              `ssrCardCount` — no silent dead end, no dead "Load more" button
+              (every control on this list, that one included, is an onClick
+              handler and cannot work without JS regardless of what it says).
+          WHY NOT PUT THE REMAINING CARDS INSIDE THE `<noscript>` INSTEAD OF A
+          ONE-LINE HINT: React still fully server-renders whatever markup is
+          written here — `<noscript>` only changes whether the BROWSER
+          displays it, not whether the SERVER produces it. Duplicating the
+          33 hidden cards in here would put the exact render cost this
+          feature exists to remove back on every single request, including
+          the 99%+ with JavaScript, who would pay for HTML that is guaranteed
+          to be thrown away unread. A plain sentence costs nothing to render
+          by comparison. */}
+      {truncated ? (
+        <noscript>
+          <p className="py-4 text-center font-sans text-sm text-muted-foreground">
+            {LABELS.jsRequiredForMore(shown.length - cardsToRender.length)}
+          </p>
+        </noscript>
+      ) : null}
+
       {/* ★ BUG 2 FIX (2026-08-12, FX3) — "infinite scroll can dead-end with a
           confident 'No posts yet'". The sentinel used to be gated on
           `shown.length > 0`, same as the empty-message branch above it. If
@@ -820,7 +1165,15 @@ function ForYouFeed() {
 
           ★ 2026-08-13: still mounted on `hasNextPage` alone, for exactly the
           reason above — `ScrollPagerFooter` renders `null`/the end line only
-          when `hasNextPage` is false, never on `shown.length`. */}
+          when `hasNextPage` is false, never on `shown.length`.
+
+          ★ `hasNextPage` HERE IS THE REAL VALUE, DELIBERATELY NOT GATED ON
+          `revealed` (2026-09-06) — only the sentinel hook's copy above is. If
+          this one were gated too, a viewer whose 45 seeded cards are already
+          everything the server has (`hasNextPage: false`) would see "That's
+          everything for now." while 33 of them are still hidden — an honest
+          message about the wrong 12. `endLabel` just below is what actually
+          needs to wait for `revealed`. */}
       <ScrollPagerFooter
         sentinel={sentinel}
         hasNextPage={hasNextPage}
@@ -828,7 +1181,7 @@ function ForYouFeed() {
         isError={isError}
         loadedCount={shown.length}
         loadingLabel={LABELS.loadingMore}
-        endLabel={shown.length > 0 ? 'That’s everything for now.' : undefined}
+        endLabel={shown.length > 0 && revealed ? 'That’s everything for now.' : undefined}
         endIllustration
         testId="for-you-pager"
       />
@@ -1169,7 +1522,18 @@ function TabButton({
   );
 }
 
-export default function FeedTabs() {
+export default function FeedTabs({
+  ssrCardCount = Number.POSITIVE_INFINITY
+}: {
+  /**
+   * How many `ForYouFeed` cards the server rendered for THIS viewer — decided
+   * by `home-shell.tsx` (the only caller of this component) from
+   * `getHomeSsrCardCount`, never recomputed here. Defaults to "everything" so
+   * any future caller that omits this prop gets today's behaviour rather than
+   * a silently truncated feed. See `ForYouFeed`'s own comment for the reveal.
+   */
+  ssrCardCount?: number;
+} = {}) {
   const { t } = useTranslation('common_blog');
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -1376,7 +1740,7 @@ export default function FeedTabs() {
           <EntryFeed sort={FEED_SORT} observer={identity.username} lite={user.account_tier === 'lite'} />
         )
       ) : (
-        <ForYouFeed />
+        <ForYouFeed ssrCardCount={ssrCardCount} />
       )}
     </div>
   );
