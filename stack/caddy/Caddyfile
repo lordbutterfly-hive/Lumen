@@ -1,0 +1,170 @@
+{
+	# after request_header so the client Cache-Control/Pragma strip below runs first;
+	# still ahead of encode, so the store holds uncompressed bodies (verified).
+	order cache after request_header
+	cache {
+		# Only responses that SAY they are shared-cacheable are stored (the app's
+		# middleware sets `public, s-maxage=...` on anonymous pages, see
+		# apps/blog/lib/anonymous-cache-policy.ts). Everything else stays no-store.
+		default_cache_control no-store
+		# Otter: a bounded in-memory store (the module's default map store is
+		# documented as development-only and unbounded). The count bound times
+		# the size bound must stay under the container's 1.5 GB limit: 600
+		# entries at up to 1 MB each (bodies are stored uncompressed; the heaviest
+		# real profile measured 1.24 MB and simply is not stored). That is still
+		# the whole hot set: home, topics, popular profiles and posts.
+		otter {
+			configuration {
+				size 600
+			}
+		}
+		ttl 300s
+		stale 60s
+		key {
+			disable_host
+			headers X-Lumen-Locale
+		}
+		max_cacheable_body_bytes 1000000
+		log_level info
+	}
+}
+
+lumensocial.net, www.lumensocial.net {
+	encode zstd gzip
+
+	# ★★★ CRAWLERS THAT TAKE WITHOUT GIVING ARE REFUSED AT THE EDGE (2026-09-06,
+	# owner ruling: "I dont want anything to compete with responsiveness or my
+	# readers"). Measured before this went in: 168,866 edge requests in 24h, 83 to
+	# 92 percent bots, and meta-webindexer ALONE was 46.7 percent, 85,024 requests,
+	# which had never once fetched robots.txt and was hitting paths disallowed
+	# since 09-02. Every one of those cost a full render AND the upstream Hive
+	# calls behind it, for a page no human reads, competing for the same Hive
+	# quota readers wait on (648 rate-limit failovers a day).
+	#
+	# KEPT ON PURPOSE, do not add these to the list:
+	#   Googlebot        the only crawler that demonstrably sends readers
+	#   the unfurlers    facebookexternalhit, Twitterbot, Discordbot, Slackbot,
+	#                    TelegramBot, WhatsApp, LinkedInBot, redditbot, Embedly,
+	#                    Iframely, Mastodon. These fire because a HUMAN shared a
+	#                    link, and blocking them breaks how that link looks.
+	# Applebot is blocked by explicit owner instruction (2026-09-06), which also
+	# costs Siri and Spotlight results. Reverse by removing it from the list.
+	#
+	# Reverting the whole thing: restore Caddyfile.before-botblock-2026-09-06 and
+	# reload. No deploy, no restart, seconds.
+	@blockedbots header_regexp User-Agent (?i)(meta-webindexer|meta-externalagent|FacebookBot|ClaudeBot|anthropic-ai|GPTBot|OAI-SearchBot|ChatGPT-User|CCBot|Bytespider|Amazonbot|Applebot|PerplexityBot|YouBot|Diffbot|omgili|ImagesiftBot|Timpibot|cohere-ai|DataForSeoBot|AhrefsBot|SemrushBot|MJ12bot|DotBot|Barkrowler|SeekportBot|serpstatbot|ZoominfoBot|bingbot|BLEXBot|PetalBot|YandexBot|SeznamBot|Sogou|Exabot|magpie-crawler|TurnitinBot|Screaming.Frog)
+	handle @blockedbots {
+		respond "Not served to automated indexers. Contact the site owner." 403 {
+			close
+		}
+	}
+
+	# The app reads the client address from the RIGHTMOST X-Forwarded-For entry
+	# our own edge appended (LITE_TRUSTED_PROXY_COUNT). Caddy appends, so with
+	# Caddy alone that count is 1. When Cloudflare proxying (orange cloud) is
+	# turned on it becomes 2, and that setting MUST change at the same time:
+	# too low and every visitor behind the proxy shares one rate-limit bucket,
+	# too high and a caller can forge a fresh bucket per request.
+
+	# ★ Snappiness phase 2 (2026-09-02): anonymous HTML from the cache.
+	# The cache key varies on the reader's locale cookie (rendered into a
+	# header here, so the key never contains the whole Cookie header). Bypassed
+	# outright for signed-in readers (session cookie), for router navigations
+	# (RSC flight requests, whose payload depends on client state), and for our
+	# own QA checks (header), so those always reach the app.
+	# Locale into a header for the cache key: the default FIRST (this also
+	# discards any X-Lumen-Locale a client sent, so nobody can mint keys), then
+	# the cookie value, accepted only when it is one of the app's nine
+	# languages (an arbitrary cookie value would otherwise be a fresh key each).
+	# Both branches carry a matcher on purpose: Caddy orders same-directive
+	# handlers by matcher, not by line, so an unmatched default would run last
+	# and overwrite the cookie value (found on the staged proxy).
+	# Anchored at a cookie boundary: an unanchored match let `junk=NEXT_LOCALE=en;
+	# NEXT_LOCALE=pl` store a Polish page under the English key (found in review).
+	@haslocale header_regexp locale Cookie (^|;\s*)NEXT_LOCALE=(ar|en|es|fr|it|ja|pl|ru|zh)(;|$)
+	@nolocale not header_regexp Cookie (^|;\s*)NEXT_LOCALE=
+	request_header @haslocale X-Lumen-Locale {re.locale.2}
+	request_header @nolocale X-Lumen-Locale en
+	# A locale cookie in ANY other spelling (`pl-PL`, `%61r`, upper case ...) is
+	# honoured by the app but not by the key above, so it would be stored under
+	# `en` and served to everyone (found in review round 2, on the live edge).
+	# Such requests never touch the cache at all.
+	@oddlocale {
+		header_regexp Cookie (^|;\s*)NEXT_LOCALE=
+		not header_regexp Cookie (^|;\s*)NEXT_LOCALE=(ar|en|es|fr|it|ja|pl|ru|zh)(;|$)
+	}
+
+	# Any sealed session cookie whatever its APP_NAME prefix (`app_session`,
+	# `blog_session`, ...), the client-set `observer`, `account_info`, and HEAD
+	# requests (which would otherwise get a key of their own and always miss).
+	@bypass {
+		header_regexp Cookie (^|;\s*)([A-Za-z0-9_-]*_)?(session|observer|account_info)=
+	}
+	@head method HEAD
+	@rsc header RSC 1
+	@rscq query _rsc=*
+	@qa header X-Lumen-Qa *
+	@api path /api/* /_next/* /oidc/* /.well-known/*
+
+	handle @bypass {
+		reverse_proxy 127.0.0.1:3000
+	}
+	handle @oddlocale {
+		reverse_proxy 127.0.0.1:3000
+	}
+	handle @rsc {
+		reverse_proxy 127.0.0.1:3000
+	}
+	handle @rscq {
+		reverse_proxy 127.0.0.1:3000
+	}
+	handle @qa {
+		reverse_proxy 127.0.0.1:3000
+	}
+	handle @api {
+		reverse_proxy 127.0.0.1:3000
+	}
+	# A HEAD on a page costs the origin a full render (86 of 476 renders in a
+	# 15-minute window were crawler HEADs). Pages answer HEAD at the edge with
+	# an empty 200; API HEADs still reach the app (matched earlier by @api).
+	handle @head {
+		respond 200
+	}
+	handle {
+		# A client's own Cache-Control/Pragma must not be able to force an origin
+		# render (the primitive behind every poisoning attempt found in review).
+		request_header -Cache-Control
+		request_header -Pragma
+		# The app sends no validators, so a client's If-Modified-Since only ever
+		# meant "revalidate at the origin"; same primitive, same treatment.
+		request_header -If-None-Match
+		request_header -If-Modified-Since
+		cache
+		reverse_proxy 127.0.0.1:3000 {
+			# The app sets its cache policy before it knows the status, so a 404
+			# (any /@name that does not exist) would be stored for 300 s and
+			# a thousand made-up names would evict the whole hot set. Not stored.
+			@notok status 404 410 500 502 503
+			handle_response @notok {
+				header Cache-Control "private, no-store"
+				copy_response
+			}
+		}
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 100mb
+			roll_keep 5
+			roll_keep_for 720h
+		}
+		format json
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options    "nosniff"
+		Referrer-Policy           "strict-origin-when-cross-origin"
+		-Server
+	}
+}
