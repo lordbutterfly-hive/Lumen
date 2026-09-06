@@ -5,19 +5,34 @@ import { renderTimer, renderTimingEnabled } from '@ui/lib/render-timing';
 import { getServerSessionUser } from '@/blog/lib/server-session';
 
 /**
- * ★★ ONE UNSEAL PER REQUEST, NOT TWO (2026-09-06, signed-in home build map
- * item 4). This used to open and unseal the session cookie a second time with
- * its own `getIronSession` + `applyHiveSessionTtl(canPersist: false)` call --
- * byte-for-byte the same decode the root layout already does, two lines
- * below, through `getServerSessionUser()` (lib/server-session.ts), which is
- * `React.cache()`-wrapped for exactly this reason. Same `sessionOptions`
- * import, same `canPersist: false` (this file is a Server Component render,
- * which cannot write cookies either way), so delegating here is a like-for-
- * like substitution for the overwhelming majority of sessions -- and it means
- * this call and the layout's share the ONE unseal React memoised for the
- * request instead of each paying the ~4 webcrypto thread-pool hops (PBKDF2 +
- * HMAC verify + AES-GCM decrypt) that showed up as 286-605ms `session=`
- * values under contention in tonight's samples.
+ * ★★ ONE `getServerSessionUser` UNSEAL PER REQUEST, NOT TWO (2026-09-06,
+ * signed-in home build map item 4). This used to open and unseal the session
+ * cookie a second time with its own `getIronSession` + `applyHiveSessionTtl
+ * (canPersist: false)` call -- byte-for-byte the same decode the root layout
+ * already does, two lines below, through `getServerSessionUser()`
+ * (lib/server-session.ts), which is `React.cache()`-wrapped for exactly this
+ * reason. Same `sessionOptions` import, same `canPersist: false` (this file
+ * is a Server Component render, which cannot write cookies either way), so
+ * delegating here is a like-for-like substitution for the overwhelming
+ * majority of sessions -- and it means this call and the layout's share the
+ * ONE unseal React memoised for the request instead of each paying the ~4
+ * webcrypto thread-pool hops (PBKDF2 + HMAC verify + AES-GCM decrypt) that
+ * showed up as 286-605ms `session=` values under contention in tonight's
+ * samples.
+ *
+ * ★ THIS CLOSES ONE OF THE REQUEST'S TWO UNSEALS, NOT BOTH (correction,
+ * 2026-09-06 review -- an earlier version of this header claimed "one unseal
+ * per request", full stop, which overstates what changed here). A signed-in
+ * home render still pays a SECOND, separate unseal: `getLiteSession()` in
+ * `lib/feed/feed-prefetch.ts`, its own `React.cache()`-wrapped function over
+ * the same cookie under a DIFFERENT policy (`canPersist: true`, plus the
+ * lite-tier TTL check `getServerSessionUser()` does not run -- see that
+ * function's own doc for why the two are deliberately not merged). That
+ * function's doc and `lib/lite/http/session.ts`'s own comment both account
+ * for it correctly: three cookie unseals per request are now TWO --
+ * `getServerSessionUser()` (this one, shared with the root layout) and
+ * `getLiteSession()` (shared across its own two call sites in
+ * `feed-prefetch.ts`) -- not one.
  *
  * ★ ONE SMALL, DELIBERATE BEHAVIOUR CHANGE (2026-09-06, review, worth stating
  * rather than glossing over): the OLD inline read here considered a session
@@ -87,10 +102,18 @@ export default async function HomePage() {
     count: trace?.count ?? 0,
     read: `${trace?.readMs ?? -1}ms`,
     // `blockMs` is `number | 'timeout'` (feed-prefetch.ts's `HomeFeedTrace`):
-    // a bounded block-set lookup that lost its own 500ms race logs the
-    // literal `block=timeout` rather than a fabricated duration, so this
-    // field is the one that is NOT always `...ms` -- see
-    // `boundedBlockedKeySet`'s doc comment in feed-prefetch.ts.
+    // the literal `block=timeout` means `boundedBlockedKeySet` lost its own
+    // 500ms race and the seed was dropped -- but a NUMBER here is NOT proof
+    // that bound was respected (correction, 2026-09-06 review). The clock
+    // starts before the `getLiteSession()` unseal that precedes the bounded
+    // lookup, which is itself unbounded (see `session=` above for the
+    // 286-605ms it can cost under contention), so `block=` measures "unseal
+    // plus lookup", not the lookup alone -- live `stored=hit` lines have
+    // logged `block=898ms` and `block=510ms`, both past the 500ms
+    // `boundedBlockedKeySet` itself enforces. Read this field as how long the
+    // step took, never as evidence the bound held -- see `HomeFeedTrace`'s
+    // own `blockMs` doc and `boundedBlockedKeySet`'s doc comment in
+    // feed-prefetch.ts for what IS actually bounded.
     block: trace?.blockMs === 'timeout' ? 'timeout' : `${trace?.blockMs ?? -1}ms`,
     trim: `${trace?.trimMs ?? -1}ms`
   });

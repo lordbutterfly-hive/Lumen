@@ -656,7 +656,30 @@ function ForYouFeed({ ssrCardCount = Number.POSITIVE_INFINITY }: { ssrCardCount?
     const target = restoreTargetRef.current;
     if (target === null) return;
     restoreTargetRef.current = null; // once per mount
-    if (typeof window !== 'undefined') window.scrollTo(0, target);
+    if (typeof window !== 'undefined') {
+      window.scrollTo(0, target);
+      // ★★★ HAND THE BROWSER BACK ITS RESTORE *HERE*, ON THIS HISTORY ENTRY
+      // (2026-09-06, found by a live browser scrutiny: client-side Back after
+      // a reload of `/` dumped the reader at card 1, 3 reproductions of 3).
+      // `history.scrollRestoration` is a property of the CURRENT history
+      // ENTRY, not of the document or the session. The unmount cleanup below
+      // looked correct and was not: a client-side navigation pushes the new
+      // entry BEFORE this component unmounts, so the cleanup wrote `'auto'`
+      // onto the entry the reader had just moved TO, and `/`'s own entry kept
+      // `'manual'` forever. On a later Back, this mount is no longer the
+      // genuine first one, so nothing here recomputes a target or scrolls,
+      // and `'manual'` means the browser does not restore either. The reader
+      // lands at 0. Restoring it immediately after the explicit `scrollTo`
+      // keeps the takeover exactly as long as it is needed -- from before the
+      // browser could clamp against the short document, to the moment the
+      // reader is placed -- and never outlives the entry it was set on. The
+      // cleanup stays as the safety net for the mount whose reveal never
+      // commits, which is the only path that can still reach it.
+      if (previousScrollRestorationRef.current !== undefined && 'scrollRestoration' in window.history) {
+        window.history.scrollRestoration = previousScrollRestorationRef.current;
+        previousScrollRestorationRef.current = undefined;
+      }
+    }
   }, [revealed]);
 
   // ★ THE SENTINEL IS NO LONGER A BARE `inView` EFFECT (2026-08-13). It fired

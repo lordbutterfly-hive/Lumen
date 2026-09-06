@@ -46,6 +46,14 @@ Sentry.init({
   // traced, so a signed-in reader's own request is not still paying the same
   // per-request tracing cost this build map's item 7 measured on the edge
   // side.
+  //
+  // ★ ONLY TAKES EFFECT IF A DSN IS EVER CONFIGURED (correction, 2026-09-06
+  // review). `dsn` above reads `REACT_APP_SENTRY_DSN`, which is EMPTY in the
+  // live worker environment today -- `Sentry.init()` never initialises the
+  // SDK without one, so none of this sampling, and none of the tracing cost
+  // it describes, is currently running in production. This comment (and the
+  // edge config's own copy) describe what happens WHEN a DSN is configured,
+  // not what this box is paying right now.
   tracesSampler: (samplingContext) => {
     const cookie = samplingContext.request?.headers?.cookie ?? '';
     if (cookie.split(';').some((c: string) => c.trim().startsWith('account_info='))) {

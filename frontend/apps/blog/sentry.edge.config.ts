@@ -8,11 +8,19 @@ import { scrubEvent } from "@ui/lib/sentry-scrub";
 
 /**
  * ★★ ENV-DRIVEN, DEFAULT 0.05 (2026-09-06, signed-in home build map item 7).
+ * ★ ONLY TAKES EFFECT IF A DSN IS EVER CONFIGURED (correction, 2026-09-06
+ * review -- an earlier version of this comment implied tracing was costing
+ * something on this box right now). `Sentry.init({ dsn: ... })` below never
+ * initialises the SDK when `dsn` is empty, and `REACT_APP_SENTRY_DSN` IS
+ * empty in the live worker environment today -- so none of the sampling
+ * described here currently runs, and none of it currently costs anything.
+ * The measurement below is what it costs WHEN a DSN is configured (staging,
+ * or production if one is ever set), not a claim about live traffic today.
  * This ran every single request at 100% tracing -- measured at ~5ms of the
  * ~10ms the middleware costs per request (lib/request-budget.ts's own
  * analysis, section 3.4/4.8), a fixed tax on every page the middleware runs
- * for, tracked or not. `SENTRY_TRACES_SAMPLE_RATE` overrides it; unset or
- * unparsable falls back to 0.05, never to 0 or NaN (a bad env value must
+ * for, tracked or not, WHEN a DSN makes Sentry live. `SENTRY_TRACES_SAMPLE_RATE`
+ * overrides it; unset or unparsable falls back to 0.05, never to 0 or NaN (a bad env value must
  * degrade to "sampled a little", not "no traces recorded" or a thrown init).
  * ★ EMPTY STRING IS TREATED AS UNSET, NOT AS ZERO (2026-09-06, review, caught
  * before ship): `Number('')` is `0` in JS, not `NaN` -- so a declared-but-

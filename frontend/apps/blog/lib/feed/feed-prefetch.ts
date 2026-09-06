@@ -44,10 +44,19 @@ export interface HomeFeedTrace {
   /** ms in `readViewerFeed` (memory, then `findStoredFeed`'s Postgres row). */
   readMs: number;
   /**
-   * ms in the viewer's block-list filter, on whichever path applied it, or
-   * the literal `'timeout'` when the stored path's own bounded lookup
-   * (`boundedBlockedKeySet`, `BLOCK_LOOKUP_TIMEOUT_MS`) hit its deadline and
-   * the seed was dropped rather than served unfiltered.
+   * ms in the viewer's block-list filter, on whichever path applied it --
+   * timed from BEFORE the `getLiteSession()` unseal that precedes the bounded
+   * lookup, so a NUMBER here is not proof the 500ms bound below was
+   * respected, only that this whole step (unseal plus lookup) took that long.
+   * `getLiteSession()`'s own unseal is not bounded (the `session=` field
+   * above can cost 286-605ms under contention for the same reason), and live
+   * `stored=hit` lines have logged `block=898ms` and `block=510ms`, both past
+   * the 500ms `boundedBlockedKeySet` itself enforces. The literal `'timeout'`
+   * means the bounded lookup (`boundedBlockedKeySet`, `BLOCK_LOOKUP_TIMEOUT_MS`)
+   * hit ITS deadline and the seed was dropped rather than served unfiltered --
+   * true on BOTH paths that can produce a seed here: the stored path
+   * (`finishStoredFeed`) and, since 2026-09-06, the trending fallback's own
+   * block filter too.
    */
   blockMs: number | 'timeout';
   /** ms in `trimForSSR`, stored path only. */
@@ -124,6 +133,26 @@ const PREFETCH_LIMIT = 20;
  * deadline worth the name nor a cache.
  */
 const PREFETCH_TIMEOUT_MS = 700;
+/**
+ * ★★ THE FLOOR THAT REPLACES "RETURN NULL" (2026-09-06, review of build map
+ * item 3 -- the empty-home door). Without this, a signed-in reader whose
+ * stored feed missed AND whose `finishStoredFeed` (block filter plus trim,
+ * UNRACED -- see that function's own comment) overran the shared clock got
+ * NOTHING: `trendingBudgetMs` went negative or zero and `prefetchHomeFeed`
+ * returned null outright, leaving Home BLANK on the client's next paint --
+ * exactly the failure this whole batch of work exists to remove. Live lines
+ * show `finish=899ms` and `finish=510ms` on renders that never even reached a
+ * `stored=hit`, so this is not a theoretical case.
+ *
+ * 250 ms is a FLOOR, not a second full budget: on a WARM trending cache (the
+ * common case -- see `trendingForPrefetch`'s own doc) the call costs about
+ * 0 ms, so the floor is almost never actually spent; it only matters on a
+ * cold trending cache, where it buys a real chance at a seed instead of a
+ * guaranteed blank home. Worst case WITH the floor: `PREFETCH_TIMEOUT_MS`
+ * (the raced read) plus the unraced `finishStoredFeed` plus this floor --
+ * bounded, and strictly better than shipping nothing.
+ */
+const TRENDING_MIN_BUDGET_MS = 250;
 const FEED_BODY_CHARS = 800;
 const BODY_IMAGE_PATTERNS = [
   /!\[[^\]]*\]\([^)\s]+\)/,
@@ -350,6 +379,10 @@ async function readStoredFeedRow(
  * included, wraps it in `.catch(() => new Set())`), so the only way this
  * resolves to `'timeout'` is the setTimeout branch of the race actually
  * winning.
+ *
+ * ★ REUSED BY THE TRENDING FALLBACK'S OWN BLOCK FILTER TOO (2026-09-06,
+ * review) -- that path used to await `viewerBlockedKeySet` directly, with no
+ * bound at all; see `prefetchHomeFeed`'s fallback block-filter comment.
  */
 const BLOCK_LOOKUP_TIMEOUT_MS = 500;
 
@@ -468,11 +501,13 @@ export async function prefetchHomeFeed(
     // signed-in reader whose stored feed was not ready. The stored read and the
     // trending fallback are one fallback chain, not two independent budgets, so
     // they now share a single clock: whatever time the stored read did not use
-    // is what the trending call gets below, and if the clock is already spent,
-    // the trending call is skipped rather than started against a budget of
-    // zero -- the client's own fetch is still there to catch it, exactly like
-    // any other miss. The anonymous path is unaffected: it never enters this
-    // block, so `trendingBudgetMs` stays the full `PREFETCH_TIMEOUT_MS` for it.
+    // is what the trending call gets below -- FLOORED at `TRENDING_MIN_BUDGET_MS`
+    // rather than left to go negative or zero, because starting the trending
+    // call against no time at all is not "skipping a wasted call", it is
+    // shipping a blank home (see that constant's own doc for the live
+    // `finish=` numbers that made this a real case, not a theoretical one).
+    // The anonymous path is unaffected: it never enters this block, so
+    // `trendingBudgetMs` stays the full `PREFETCH_TIMEOUT_MS` for it.
     let trendingBudgetMs = PREFETCH_TIMEOUT_MS;
     if (viewer) {
       const storedStartedAt = Date.now();
@@ -511,8 +546,10 @@ export async function prefetchHomeFeed(
       // so home paints instantly; `personalised: false` tells feed-tabs to
       // refetch on mount and swap in the ranked feed when it is ready. Same
       // resilience as the signed-in topic seed.
-      trendingBudgetMs = PREFETCH_TIMEOUT_MS - (Date.now() - storedStartedAt);
-      if (trendingBudgetMs <= 0) return null;
+      // ★ FLOORED, NOT LEFT TO GO NEGATIVE (2026-09-06, review) -- see
+      // `TRENDING_MIN_BUDGET_MS`'s own doc for why an unseeded home is worse
+      // than spending a small floor the fallback will almost never need.
+      trendingBudgetMs = Math.max(PREFETCH_TIMEOUT_MS - (Date.now() - storedStartedAt), TRENDING_MIN_BUDGET_MS);
     }
     const entries = await withTimeout(prefetchTrending(), trendingBudgetMs);
     // The trending race. On a TTL-cache hit this is ~0ms and the whole cost of a
@@ -522,22 +559,38 @@ export async function prefetchHomeFeed(
     if (!entries || entries.length === 0) return null;
     let seedEntries = entries;
     if (viewer) {
-      // ★ Block-filter the fallback seed the SAME way the stored path does
-      // (`finishStoredFeed` above): an unbounded await on the block list, which
-      // lives in local Postgres and is fast. An earlier version raced this
-      // against a 500ms timer to guarantee an instant paint, but losing that
-      // race served the seed UNFILTERED, so a blocked/muted author could paint
-      // in home SSR and stay visible until the on-mount ranked refetch resolved
-      // (up to ~12s). A blocked author leaking is never an acceptable trade for
-      // a few hundred ms; the stored path already awaits this unraced.
+      // ★★ BOUNDED THE SAME WAY THE STORED PATH IS, 500ms (2026-09-06,
+      // review). This used to await `viewerBlockedKeySet` with NO bound at
+      // all. An earlier version raced it against a 500ms timer and served
+      // the seed UNFILTERED on a loss -- a comment here used to defend that
+      // as the safer trade, and it is not: `viewerBlockedKeySet` can reach a
+      // cold `chainMutedKeysOfActor`, and `withTtlCache`'s single-flight
+      // means a sick or rate-limiting Hive node can hold this call (and
+      // every reader sharing its in-flight promise) through
+      // `withHiveRetry`'s full retry chain -- three attempts, ~8s each,
+      // ~24s -- UNBOUNDED, on the one request path that reaches here
+      // specifically because the stored feed was NOT ready. `boundedBlockedKeySet`
+      // (above) is the exact same 500ms bound `finishStoredFeed` already
+      // uses for the stored path; reused here rather than duplicated.
       const blockWatch = stopwatchIf(timing);
       try {
         const session = await getLiteSession();
-        const blockedKeys = await viewerBlockedKeySet(session.user).catch(() => new Set<string>());
+        const blockedKeys = await boundedBlockedKeySet(session.user);
+        if (blockedKeys === 'timeout') {
+          // ★ DROP THE SEED, NEVER SERVE UNFILTERED -- the same rule
+          // `finishStoredFeed` applies to its own block lookup, for the same
+          // reason: a muted or blocked author painting in SSR HTML is a
+          // product bug, not an acceptable latency trade. No seed at all
+          // (the client's own fetch is still there to catch it) is the safe
+          // failure mode; an unfiltered one is not.
+          if (trace) trace.blockMs = 'timeout';
+          return null;
+        }
         if (blockedKeys.size > 0) seedEntries = await filterBlockedForViewer(seedEntries, blockedKeys);
       } catch {
-        // Block list unavailable: serve unfiltered, same as the stored path and
-        // the API route's own catch.
+        // getLiteSession threw: serve unfiltered, same as the stored path's
+        // own catch and the API route's. (boundedBlockedKeySet cannot itself
+        // throw -- see its own doc comment.)
       }
       // Overwrites the stored path's `blockMs`, correctly: we are here only
       // because that path produced no seed, so this is the filter that ran on
