@@ -12,6 +12,7 @@ import {
   hiveNamesByUserId,
   ownerChainMutedNamesOrThrow
 } from './chain-mute';
+import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 
 /**
  * ★★★ WHERE A BLOCK ACTUALLY REMOVES SOMETHING.
@@ -624,14 +625,102 @@ export async function resolvePostOwnerActor(
  * viewer contributes nothing extra here, correctly: they have no Hive account to have
  * muted anyone from.
  */
-export async function viewerBlockedKeySet(sessionUser: User | undefined): Promise<Set<string>> {
+async function computeViewerBlockedKeySet(sessionUser: User | undefined): Promise<Set<string>> {
   const actor = await sessionActor(sessionUser);
   if (!actor) return new Set();
   const [lumenKeys, chainMutes] = await Promise.all([
     blocks.listBlockedKeysOf(actor),
     chainMutedKeysOfActor(actor)
   ]);
+  // ★★ A DEGRADED chain-mute read must never be cached as a confirmed empty
+  // answer (2026-09-06, review). `chainMutedKeysOfActor` itself fails OPEN
+  // by design (see its own doc comment) — a Hive 429/timeout and "this
+  // viewer genuinely mutes nobody" both come back as `{ keys: [] }`, and only
+  // `degraded` tells them apart. Throwing here means `withTtlCache`'s own
+  // property 1 ("failures are never cached", server-ttl-cache.ts) refuses to
+  // store this result, for free — and every existing caller of
+  // `viewerBlockedKeySet` (this module's own two call sites in
+  // `lib/feed/feed-prefetch.ts`, plus every API route that reads it) already
+  // wraps the call in `.catch(() => new Set())`, so a throw changes nothing
+  // for any of them; only the NEXT call within the 10s window behaves
+  // differently (retries the read instead of reusing a stale-by-construction
+  // empty answer).
+  if (chainMutes.degraded) {
+    throw new Error('viewerBlockedKeySet: chain-mute read degraded, refusing to cache an unconfirmed result');
+  }
   return new Set([...lumenKeys, ...chainMutes.keys]);
+}
+
+/**
+ * The viewer identity a cache entry is keyed on, WITHOUT running
+ * `sessionActor`'s own DB lookup (that stays inside the cached loader itself,
+ * where a `withTtlCache` miss pays it once and a hit pays nothing). Mirrors
+ * `sessionActor`'s own branches closely enough that two calls for the same
+ * signed-in viewer always land on the same key, without duplicating its
+ * "has this Hive login upgraded to a Lumen account" resolution here.
+ */
+function blockedKeySetCacheKey(sessionUser: User | undefined): string {
+  if (!sessionUser?.isLoggedIn) return 'anon';
+  if (sessionUser.account_tier === 'lite') return sessionUser.userId ? `u:${sessionUser.userId}` : 'anon';
+  return sessionUser.username ? `h:${sessionUser.username.toLowerCase()}` : 'anon';
+}
+
+/**
+ * ★★ MEMOISED, 10s PER VIEWER (2026-09-06, signed-in home build map item 5).
+ *
+ * MEASURED tonight: 6-45ms warm (three loop turns plus one cookie unseal
+ * inside `sessionActor`), but 129-188ms on the FIRST read per worker per
+ * viewer, because `chainMutedKeysOfActor` degrading to a cold Hive
+ * `bridge.get_follow_list` round trip is itself only cached for 10 minutes
+ * PER PROCESS -- with 2-3 cluster workers, a viewer's first render can land
+ * on a worker that has never asked for their mutes yet. This wrapper is a
+ * SEPARATE, shorter cache in front of the whole computation (Lumen blocks +
+ * chain mutes together), so the home path (`lib/feed/feed-prefetch.ts`,
+ * called up to twice per render) and the profile posts path
+ * (`features/account-profile/posts-page.tsx`) share one answer instead of
+ * each re-running `blocks.listBlockedKeysOf` and `chainMutedKeysOfActor`.
+ *
+ * ★ FAILURES ARE NEVER CACHED -- this is `withTtlCache`'s own property 1
+ * (server-ttl-cache.ts): a rejection from `computeViewerBlockedKeySet` never
+ * reaches `.then()`, so it is never stored, and every existing call site
+ * already wraps its own `.catch(() => new Set())` around this function for
+ * the same reason this file's own doc block states -- "degrades open on
+ * failure". ★ THIS IS NOT FREE, THOUGH (2026-09-06, review, caught before
+ * ship): `chainMutedKeysOfActor` swallows a Hive 429/timeout internally and
+ * RESOLVES to `{ keys: [] }` rather than rejecting -- indistinguishable, to a
+ * naive caller, from "confirmed: mutes nobody". `computeViewerBlockedKeySet`
+ * now checks its `degraded` flag (chain-mute.ts, added the same review) and
+ * THROWS when set, so property 1 actually applies to this failure mode too,
+ * instead of silently caching a degraded answer as a confirmed one for the
+ * full 10s.
+ *
+ * ★ WHY 10s AND NOT LONGER: a viewer who just blocked someone must stop
+ * seeing them soon, and the write path (`app/api/lite/block/route.ts` /
+ * `.../unblock/route.ts`) does not invalidate this cache -- `withTtlCache`
+ * has no delete/invalidate primitive today, only `.set()` (write-through for
+ * a caller that already HAS a fresh value, which the block/unblock routes do
+ * not) and time-based expiry. Adding one would mean changing a small, heavily
+ * -used, heavily-commented shared module (eight other callers in
+ * `lib/cached-api.ts` alone) for this one caller, which is out of scope here.
+ * So: a just-blocked (or just-unblocked) author can still appear in an SSR
+ * seed for up to 10 seconds after the write on another worker or another
+ * request in-flight before it — the SAME trade the build map's own item 5
+ * calls "defensible", and the live API routes that ENFORCE a block
+ * (`applyOwnerBlocksToThread` and friends) do not go through this cache at
+ * all, so nothing here weakens the one guarantee that cannot degrade (a
+ * blocked author's replies hidden from everyone else).
+ *
+ * `max: 500` — small on purpose: this is one `Set<string>` per active
+ * viewer, all with a 10s lifetime, and the busiest viewer count this app has
+ * is nowhere near that within any 10s window.
+ */
+const viewerBlockedKeySetTtl = withTtlCache(computeViewerBlockedKeySet, blockedKeySetCacheKey, {
+  ttlMs: 10_000,
+  max: 500
+});
+
+export async function viewerBlockedKeySet(sessionUser: User | undefined): Promise<Set<string>> {
+  return viewerBlockedKeySetTtl(sessionUser);
 }
 
 /**

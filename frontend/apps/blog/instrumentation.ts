@@ -1,5 +1,9 @@
 import {commonRegister} from '@hive/ui/lib/common-instrumentation';
 import * as Sentry from '@sentry/nextjs';
+// Type-only: erased at compile time, so this costs the edge bundle nothing —
+// same reasoning as every dynamic `import()` below, just for a type instead
+// of a value.
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export async function register() {
   await commonRegister('blog');
@@ -87,6 +91,202 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     const { warmServerCaches } = await import('./lib/warm-server-caches');
     warmServerCaches();
+  }
+
+  /**
+   * ★★★ THE REQUEST-TIMING INSTRUMENT THAT CLOSES THE GAP THE PER-RENDER
+   * LINES CANNOT SEE (2026-09-06, signed-in home build map section 6).
+   *
+   * `render-timing: home` and `render-timing: root-layout` cover every await
+   * INSIDE the page and the layout, and that data phase is small and fully
+   * accounted for (the build map's own section 0: warm root-layout 5-65ms,
+   * home 18-173ms, run CONCURRENTLY). What is missing is everything AFTER the
+   * last await: React's server-side HTML render of the client component tree,
+   * and the event-loop queueing while that render waits behind every other
+   * request in the same worker. Neither is an `await` this app controls, so
+   * no `RenderTimer` inside a page can see it — it can only be measured from
+   * OUTSIDE the render, at the HTTP layer itself.
+   *
+   * ★ `node:diagnostics_channel`, NOT a `http.Server.prototype.emit` patch.
+   * Node 20 ships a built-in `http.server.request.start` channel (verified on
+   * this box's Node 20.20.1: it fires with `{ request, response, socket,
+   * server }` for a plain `http.createServer`) that fires for EVERY
+   * `http.Server` in the process, however it was created — so this works
+   * whether Next is started by `next start`, by a cluster launcher, or in
+   * dev, with no dependency on WHEN `register()` runs relative to Next
+   * building its own server object. A prototype patch would have needed to
+   * land before that object existed; a diagnostics_channel subscription only
+   * needs to exist before the first request, which boot-time `register()`
+   * already guarantees. Node ALSO ships a `http.server.response.finish`
+   * channel, but this code does not subscribe to it (fixed in this comment,
+   * 2026-09-06, review) — the `response` object handed to the
+   * `request.start` listener is a plain Node `ServerResponse`, so its own
+   * ordinary `'finish'`/`'close'` events (below) are the simpler way to know
+   * when it is done, on the exact same object this code already has a
+   * reference to and is patching `write`/`end` on.
+   *
+   * ★ `nodejs` ONLY, behind `LUMEN_RENDER_TIMING=yes` — the same contract
+   * `@ui/lib/render-timing` documents: with the flag off, nothing here is
+   * imported, no channel is subscribed, no histogram runs, and the whole
+   * block is one `renderTimingEnabled()` check.
+   *
+   * ★ ONLY HTML PAGE RESPONSES ARE LOGGED — `isBudgetedPage()` from
+   * `lib/request-budget.ts` (reused, not reinvented: it already excludes
+   * `_next/*`, every `/api/*` except the one it budgets as a page,
+   * `/robots.txt`, and everything else in `public/`) plus an explicit
+   * `/api/` exclusion, because `isBudgetedPage('/api/og')` is `true` for
+   * THAT module's purpose (it rasterises an image on the same thread) but is
+   * not an HTML page render for this one.
+   *
+   * ★ WHAT THIS NEVER DOES: change a byte of the response. `write`/`end` are
+   * wrapped to OBSERVE `arguments` and call straight through with the
+   * original `this`, inside a `try` that cannot throw past the original call
+   * — an instrument is not allowed to be the reason a render fails, the same
+   * rule `render-timing.ts` states for its own `mark()`/`done()`.
+   */
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    try {
+      const { renderTimingEnabled, sanitiseTimingField } = await import('@ui/lib/render-timing');
+      if (renderTimingEnabled()) {
+        const { getLogger } = await import('@ui/lib/logging');
+        const logger = getLogger('app');
+        const { isBudgetedPage } = await import('./lib/request-budget');
+        const { cookieNamePrefix } = await import('@hive/smart-signer/lib/session');
+        const dc = await import('node:diagnostics_channel');
+        const { monitorEventLoopDelay } = await import('node:perf_hooks');
+
+        const sessionCookieMarker = `${cookieNamePrefix}session=`;
+
+        /**
+         * A rough bucket, not a route match — this file has no access to
+         * Next's router, and a bucket is enough to tell "which shape of page
+         * is this" apart in a log line without ever printing an account name
+         * or a permlink (every field is still run through
+         * `sanitiseTimingField` below regardless, as defence in depth).
+         */
+        function classify(pathname: string): string {
+          const segments = pathname.split('/').filter(Boolean);
+          if (segments.length === 0) return 'home';
+          if (segments[0] === 'topics') return 'topic';
+          if (segments[0].startsWith('@') || segments[0].startsWith('%40')) {
+            return segments.length === 1 ? 'profile' : 'profile-sub';
+          }
+          if (segments.length >= 2 && (segments[1].startsWith('@') || segments[1].startsWith('%40'))) {
+            return 'post';
+          }
+          if (['trending', 'hot', 'created', 'payout', 'muted', 'roles'].includes(segments[0])) {
+            return 'community-feed';
+          }
+          return 'other';
+        }
+
+        // ★ ONE HISTOGRAM FOR THE WHOLE WORKER, READ NOT RESET PER REQUEST.
+        // Resetting on every request would make "the last second" mean
+        // "since the last request", which is not the same quantity under
+        // contention — exactly what this instrument exists to measure.
+        // Refreshed once a second; `perf_hooks` reports nanoseconds,
+        // converted to ms here so the log line matches every other `...ms`
+        // field.
+        const loopDelay = monitorEventLoopDelay({ resolution: 10 });
+        loopDelay.enable();
+        let loopP99Ms = 0;
+        setInterval(() => {
+          loopP99Ms = Math.round(loopDelay.percentile(99) / 1e6);
+          loopDelay.reset();
+        }, 1000).unref();
+
+        let inFlight = 0;
+
+        dc.subscribe('http.server.request.start', (message: unknown) => {
+          try {
+            const { request, response } = message as { request: IncomingMessage; response: ServerResponse };
+            const rawUrl = request.url || '/';
+            const pathname = rawUrl.split('?')[0] || '/';
+            if (request.method !== 'GET' || pathname.startsWith('/api/') || !isBudgetedPage(pathname)) return;
+
+            const startedAt = Date.now();
+            const startedInFlight = inFlight;
+            inFlight += 1;
+            let settled = false;
+            let firstByteMs = -1;
+            let bytes = 0;
+
+            const cookieHeader = request.headers.cookie || '';
+            const signed = cookieHeader.includes(sessionCookieMarker);
+            const rsc = request.headers['rsc'] === '1';
+
+            const observe = (chunk: unknown, encoding: unknown): void => {
+              try {
+                if (firstByteMs === -1) firstByteMs = Date.now() - startedAt;
+                // ★ `ArrayBuffer.isView`, NOT `Buffer.isBuffer` (2026-09-06,
+                // review, caught before ship). The App Router's Fizz renderer
+                // streams plain `Uint8Array` chunks through `res.write`, not
+                // Node `Buffer` instances -- `Buffer.isBuffer(uint8array)` is
+                // `false` for those, so the original check silently counted
+                // `bytes=0` for every real page response. `ArrayBuffer.isView`
+                // is `true` for a `Uint8Array` (and for a `Buffer`, which IS
+                // one), and `Buffer.byteLength` accepts any `ArrayBufferView`
+                // directly -- no copy, no conversion.
+                if (typeof chunk === 'string' || ArrayBuffer.isView(chunk)) {
+                  // Cast needed: `ArrayBuffer.isView`'s type guard narrows to the DOM
+                  // lib's global `ArrayBufferView`, a structurally similar but
+                  // DIFFERENT type from the `NodeJS.ArrayBufferView` `Buffer.byteLength`
+                  // actually declares -- a real Uint8Array satisfies both at runtime.
+                  bytes += Buffer.byteLength(
+                    chunk as string | NodeJS.ArrayBufferView,
+                    typeof encoding === 'string' ? (encoding as BufferEncoding) : undefined
+                  );
+                }
+              } catch {
+                // An instrument may not break the write it is observing.
+              }
+            };
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const origWrite = (response.write as any).bind(response);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const origEnd = (response.end as any).bind(response);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (response as any).write = (...args: any[]) => {
+              observe(args[0], args[1]);
+              return origWrite(...args);
+            };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (response as any).end = (...args: any[]) => {
+              observe(args[0], args[1]);
+              return origEnd(...args);
+            };
+
+            const finishOnce = (): void => {
+              if (settled) return;
+              settled = true;
+              inFlight = Math.max(0, inFlight - 1);
+              const totalMs = Date.now() - startedAt;
+              logger.info(
+                `request-timing: path=${sanitiseTimingField(classify(pathname))} ` +
+                  `signed=${sanitiseTimingField(signed ? 'yes' : 'no')} rsc=${sanitiseTimingField(rsc ? 'yes' : 'no')} ` +
+                  `ttfb=${sanitiseTimingField(`${firstByteMs}ms`)} total=${sanitiseTimingField(`${totalMs}ms`)} ` +
+                  `bytes=${sanitiseTimingField(bytes)} inflight=${sanitiseTimingField(startedInFlight)} ` +
+                  `loop=${sanitiseTimingField(`${loopP99Ms}ms`)}`
+              );
+            };
+            response.once('finish', finishOnce);
+            response.once('close', finishOnce);
+          } catch {
+            // An instrument may not break a request. Same rule as `observe` above.
+          }
+        });
+
+        logger.info('request-timing: instrument installed (LUMEN_RENDER_TIMING=yes)');
+      }
+    } catch (error) {
+      // Same degrade-never-throw contract as the keep-alive block above: a
+      // failed import (or an old Node without these diagnostics_channel
+      // hooks) must never fail server boot.
+      console.warn(
+        'request-timing: not installed ' + `(${error instanceof Error ? error.message : String(error)})`
+      );
+    }
   }
 
   if (!!process.env.REACT_APP_SENTRY_DSN && process.env.NEXT_RUNTIME === 'nodejs') {

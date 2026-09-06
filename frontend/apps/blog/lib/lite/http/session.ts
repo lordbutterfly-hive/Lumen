@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { getIronSession, IronSession } from 'iron-session';
 import { sessionOptions } from '@smart-signer/lib/session';
@@ -69,7 +70,47 @@ declare module '@smart-signer/types/common' {
   }
 }
 
-export async function getLiteSession(): Promise<IronSession<IronSessionData>> {
+/**
+ * ★★ `React.cache()`-WRAPPED (2026-09-06, signed-in home build map item 4).
+ *
+ * This function has NO arguments -- it reads `cookies()` itself -- so wrapping
+ * it is a request-scoped memo with nothing to key on but "which request".
+ * That matters because it is called TWICE inside one signed-in home render
+ * (`lib/feed/feed-prefetch.ts`'s stored path and its trending-fallback path
+ * each call it independently) and again from other routes that read the
+ * session more than once per request (e.g. `app/topics/[tag]/page.tsx`).
+ * Every one of those calls used to re-run the full unseal (iron-webcrypto:
+ * PBKDF2 + HMAC verify + AES-GCM decrypt, four thread-pool hops) AND
+ * `applyHiveSessionTtl(session, { canPersist: true })`'s own work, including
+ * its best-effort `session.save()` backfill attempt -- so a request that hit
+ * this twice paid that backfill attempt twice, redundantly, for the same
+ * cookie.
+ *
+ * ★ THIS IS DELIBERATELY NOT MERGED WITH `lib/server-session.ts`'s
+ * `getServerSessionUser()`, even though both end in an iron-session unseal of
+ * the same cookie. They enforce DIFFERENT policies documented at length
+ * below: `canPersist: true` here (this accessor is reached from Route
+ * Handlers where a cookie write is legal) versus `canPersist: false` there
+ * (pure Server Component reads, where a write would throw), and the LITE-TIER
+ * TTL block just below (clearing `session.user` for a stale or unstamped lite
+ * cookie) that `getServerSessionUser()` does not run at all. Sharing one
+ * unseal across both would mean picking ONE of those policies for every
+ * caller of the other function -- exactly the class of bug this file's own
+ * history (F-L37, F-L38, F-L40, all cited below) came from assuming two
+ * session readers were interchangeable when they were not. That unification
+ * is real follow-up work (it needs the shared "pure policy function" the
+ * build map itself calls out as a separate step), not something to fold into
+ * this change.
+ *
+ * Net effect for the signed-in home: three cookie unseals per request (root
+ * layout's `getServerSessionUser()`, `app/page.tsx`'s own former unseal, and
+ * this function, called twice by `feed-prefetch.ts`) are now two -- the first
+ * two collapse into one shared `getServerSessionUser()` call (see
+ * `app/page.tsx`), and this function's own two internal call sites collapse
+ * into one. Going from two down to one would require the unification the
+ * paragraph above explains is out of scope here.
+ */
+export const getLiteSession = cache(async (): Promise<IronSession<IronSessionData>> => {
   // F-L3 (revised, J6, 2026-08-11): this used to wire `sessionTtlDays` into a
   // real cookie maxAge — a genuine, persistent ~14-day cookie that survived
   // closing the browser. The owner's report ("closing the browser must sign
@@ -345,7 +386,7 @@ export async function getLiteSession(): Promise<IronSession<IronSessionData>> {
       return Reflect.set(target, prop, value, receiver);
     }
   });
-}
+});
 
 export async function destroyLiteSession(): Promise<void> {
   const session = await getLiteSession();

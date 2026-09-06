@@ -233,15 +233,33 @@ export async function ownerChainMutedNamesOrThrow(owner: FollowActor | null): Pr
  *
  * Degrades to `{ keys: [], names: [] }` on any failure — see the file header for why
  * this half fails OPEN rather than closed, unlike `ownerChainMutedNamesOrThrow`.
+ *
+ * ★★ `degraded: true` ADDED (2026-09-06, review). Every existing caller
+ * destructures only `.keys`/`.names` and is UNAFFECTED by this addition —
+ * this is a pure extension, not a behaviour change for them, and they keep
+ * failing open exactly as documented above. It exists because
+ * `block-filter.ts`'s `viewerBlockedKeySet` is now cached for 10s
+ * (`withTtlCache`), and "failed, so we degraded to empty" is a fundamentally
+ * different answer from "confirmed: this viewer mutes nobody" — caching the
+ * first AS the second would mean a Hive 429 (or any other transient failure)
+ * gets remembered as a confirmed, correct answer for the next 10 seconds.
+ * `degraded` is set ONLY when the underlying read genuinely failed or is
+ * unresolved — never for `hiveNameOfActor` returning `null` (a pure lite
+ * account correctly has no chain mutes at all) or for a confirmed, non-null,
+ * empty `Set` (a real account that has muted nobody).
  */
 export async function chainMutedKeysOfActor(
   actor: FollowActor
-): Promise<{ keys: string[]; names: string[] }> {
+): Promise<{ keys: string[]; names: string[]; degraded?: boolean }> {
   try {
     const hiveName = await hiveNameOfActor(actor);
     if (!hiveName) return { keys: [], names: [] };
     const muted = await chainMutedNamesOf(hiveName);
-    if (!muted || muted.size === 0) return { keys: [], names: [] };
+    // `null` is `chainMutedNamesOf`'s own documented "unknown" signal — a cold
+    // name whose live fetch just failed — NOT "confirmed: mutes nobody". Only
+    // a non-null `Set` (empty or not) is a confirmed answer.
+    if (muted === null) return { keys: [], names: [], degraded: true };
+    if (muted.size === 0) return { keys: [], names: [] };
 
     // An upgraded Lumen user among the muted names should also match on their
     // `u:<id>` key — an entry from them may be identified either way, exactly the
@@ -259,6 +277,6 @@ export async function chainMutedKeysOfActor(
     return { keys, names: [...muted] };
   } catch (error) {
     logger.warn('chain-mute: viewer chain-mute read failed, degrading to none: %o', error);
-    return { keys: [], names: [] };
+    return { keys: [], names: [], degraded: true };
   }
 }

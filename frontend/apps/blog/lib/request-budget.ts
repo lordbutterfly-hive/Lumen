@@ -147,9 +147,41 @@ const USER_AGENT_UA = /claude-user|chatgpt-user|perplexity-user/i;
  * one address is a client with a per-IP budget; putting it in a shared
  * crawler bucket would have refused the deploy script's own check the moment
  * a crawler was active (found in review).
+ *
+ * ★★★ `meta-webindexer` ADDED (2026-09-06, signed-in home build map item 1).
+ * MEASURED on prod, Caddy access log, 19.5 minutes ending 00:0x UTC: 83.2
+ * page renders per minute from this one crawler — 76% of ALL page renders the
+ * origin served — with a Chrome/145 (Windows or Mac) prefix ahead of the
+ * `meta-webindexer/1.1` token, so `BROWSER_UA` (below) matched it and the
+ * generic-crawler fallback at `classify()`'s tail never got a look. Zero
+ * `budget: 429` lines for it anywhere in the last 4,000 log lines — the
+ * budget was never refusing it, it was letting it through at the CLIENT
+ * class's 90/min per-IP ceiling. Every one of tonight's samples whose TTFB
+ * exceeded 1s had 2 to 6 other renders overlapping it in the same worker;
+ * zero of the overlap-free samples did. `VENDOR_UA` is matched BEFORE
+ * `BROWSER_UA` is ever consulted (see `classify()`), so putting the token
+ * here — its own bucket, same 12/min-per-vendor + 36/min-class limits every
+ * other named crawler already gets — throttles it without the Chrome prefix
+ * ever mattering. Owner ruling "AI is welcome" (robots.ts, 2026-08-28, cited
+ * at this file's own header) is unaffected: this crawler keeps crawling at
+ * 12/min, same treatment as ClaudeBot and MJ12bot, nothing is blocked.
+ *
+ * ★ TWO THINGS "12/min" DOES NOT MEAN, stated so nobody re-derives them
+ * wrong later (2026-09-06, review): (1) this bucket, like every bucket in
+ * this module, lives in the per-process `buckets` Map, so the EFFECTIVE
+ * ceiling across the fleet is `12 x LUMEN_WORKERS` — the exact multiplier
+ * `budgetFor`'s own comment already derives for the client budget, for the
+ * identical reason (cluster round-robin gives each worker an independent
+ * table). (2) meta-webindexer now also counts against `crawler:*`, the
+ * 36/min-for-the-whole-class ceiling every named vendor already shares — so
+ * on a day when several crawlers are active at once, meta-webindexer can see
+ * a 429 from the SHARED class cap even while its own per-vendor bucket
+ * still has room. Neither of these is new behaviour this addition invents;
+ * they are the same rules ClaudeBot and MJ12bot were already under, now
+ * applying to a third vendor too.
  */
 const VENDOR_UA =
-  /(claudebot|anthropic-ai|gptbot|bytespider|ccbot|amazonbot|meta-externalagent|diffbot|omgili|cohere-ai|google-extended|applebot-extended|petalbot|dataforseo|semrushbot|ahrefsbot|mj12bot|dotbot|shapbot|perplexitybot|youbot|timpibot|imagesiftbot)/i;
+  /(claudebot|anthropic-ai|gptbot|bytespider|ccbot|amazonbot|meta-externalagent|meta-webindexer|diffbot|omgili|cohere-ai|google-extended|applebot-extended|petalbot|dataforseo|semrushbot|ahrefsbot|mj12bot|dotbot|shapbot|perplexitybot|youbot|timpibot|imagesiftbot)/i;
 /**
  * Case-SENSITIVE on purpose: "FooBot/1.0" and "foobot" are crawlers, "CUBOT MAX 3"
  * (an Android phone, upper-case BOT in the device token) is a person (found in

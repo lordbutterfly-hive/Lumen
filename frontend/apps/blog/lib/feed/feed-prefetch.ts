@@ -43,8 +43,13 @@ export interface HomeFeedTrace {
   count: number;
   /** ms in `readViewerFeed` (memory, then `findStoredFeed`'s Postgres row). */
   readMs: number;
-  /** ms in the viewer's block-list filter, on whichever path applied it. */
-  blockMs: number;
+  /**
+   * ms in the viewer's block-list filter, on whichever path applied it, or
+   * the literal `'timeout'` when the stored path's own bounded lookup
+   * (`boundedBlockedKeySet`, `BLOCK_LOOKUP_TIMEOUT_MS`) hit its deadline and
+   * the seed was dropped rather than served unfiltered.
+   */
+  blockMs: number | 'timeout';
   /** ms in `trimForSSR`, stored path only. */
   trimMs: number;
 }
@@ -175,9 +180,9 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null
  * `bridge.get_ranked_posts('trending')` with the default observer, so every
  * signed-out reader was being served a byte-identical result computed from
  * scratch. One fetch per window now serves all of them. The SIGNED-IN path is
- * deliberately NOT cached here — `prefetchStoredFeed(viewer)` is per-person
- * ranking out of Postgres and answers in ~7 ms, so it has neither the cost nor
- * the shareability that makes a shared cache correct.
+ * deliberately NOT cached here — `readStoredFeedRow(viewer, ...)` is
+ * per-person ranking out of Postgres and answers in ~7 ms, so it has neither
+ * the cost nor the shareability that makes a shared cache correct.
  *
  * WHY 45 SECONDS. Long enough that a burst of arrivals costs one upstream call,
  * short enough that Home is never visibly behind the chain. Trending moves on
@@ -268,12 +273,16 @@ export async function warmHomeFeedCache(): Promise<void> {
  * -- and the home timing line has to tell them apart, because "the stored feed
  * was stale" and "the store had nothing" call for opposite fixes.
  *
- * It is returned rather than written into the caller's trace on purpose. This
- * function is RACED by `withTimeout`, which deliberately does not cancel the
- * loser (see that function and the cache comment above), so a version that wrote
- * into shared state could still be running -- and could overwrite `stored=` with
- * a late `hit` -- while the fallback path it lost to was being timed. A value the
- * caller only reads when it actually consumed it cannot do that.
+ * It is returned rather than written into the caller's trace on purpose.
+ * ★ UPDATED (2026-09-06, build map item 3): only the READ half
+ * (`readStoredFeedRow` below) is raced by `withTimeout` now, which
+ * deliberately does not cancel the loser (see that function and the cache
+ * comment above) -- so a slow read could still be running, and could still
+ * fill `feed-cache.ts`'s Map, while the fallback path it lost to is being
+ * timed. `finishStoredFeed`, which actually produces this object, is UNRACED
+ * (same section), but the same argument for "return it, don't write it"
+ * still holds: a value the caller only reads when it actually consumed it
+ * cannot be overwritten by a stray late write into shared state.
  *
  * NOTHING ABOUT THE CONTROL FLOW MOVES: the same four early exits happen at the
  * same points, and `seed` is exactly the `InitialFeedSeed | null` this used to
@@ -283,15 +292,86 @@ interface StoredFeedRead {
   seed: InitialFeedSeed | null;
   outcome: 'hit' | 'miss' | 'stale' | 'empty';
   readMs: number;
-  blockMs: number;
+  blockMs: number | 'timeout';
   trimMs: number;
 }
 
-async function prefetchStoredFeed(viewer: string, timing: boolean): Promise<StoredFeedRead> {
+/**
+ * ★★★ ONLY THIS READ IS RACED (2026-09-06, signed-in home build map item 3).
+ *
+ * This used to be the FIRST HALF of one function that also ran the age/version
+ * checks, the viewer's block filter and the SSR trim -- all of it inside the
+ * `withTimeout(..., PREFETCH_TIMEOUT_MS)` race in `prefetchHomeFeed`. That
+ * meant a loop stall during the BLOCK FILTER (measured tonight: 129-188ms on a
+ * cold chain-mute read, once 702ms under a genuine stall) could burn the same
+ * 700ms deadline the Postgres/memory read itself never came close to,
+ * resolving the whole race to `null` and reporting `stored=timeout` for a read
+ * that actually completed in 0ms. The reader then got an EMPTY home even
+ * though their ranked feed was sitting in memory the entire time.
+ *
+ * Splitting the read out means the race can only ever time out on the thing
+ * that is actually slow enough to deserve a deadline -- `readViewerFeed`
+ * (memory, then a Postgres row). Everything downstream of a successful read
+ * (`finishStoredFeed` below) runs to completion EXCEPT its own block filter,
+ * which turned out to need a bound of its own -- see `boundedBlockedKeySet`'s
+ * doc comment for why (a cold chain-mute read can itself reach the network
+ * and stall far longer than 700ms).
+ */
+async function readStoredFeedRow(
+  viewer: string,
+  timing: boolean
+): Promise<{ stored: Awaited<ReturnType<typeof readViewerFeed>>; readMs: number }> {
   const readWatch = stopwatchIf(timing);
   const stored = await readViewerFeed(viewer);
-  const readMs = elapsedOf(readWatch);
-  const nothing = (outcome: StoredFeedRead['outcome'], blockMs = -1, trimMs = -1): StoredFeedRead => ({
+  return { stored, readMs: elapsedOf(readWatch) };
+}
+
+/**
+ * ★★ BOUNDED, 500ms (2026-09-06, review of build map item 3). Splitting the
+ * race so only `readStoredFeedRow` sits inside `withTimeout` (above) removed
+ * the bound the OLD single-race `prefetchStoredFeed` gave this step for
+ * free: `viewerBlockedKeySet` can reach a cold `chainMutedKeysOfActor`,
+ * which on a sick or rate-limiting Hive node is `withHiveRetry`'s 3 attempts
+ * x an ~8s socket timeout each (`hive-network-error.ts`) -- up to ~24s
+ * UNRACED, holding the whole signed-in home HTML response, where the old
+ * code returned at 700ms. Same 500ms shape `app/topics/[tag]/page.tsx`'s own
+ * bounded block lookup already uses.
+ *
+ * `viewerBlockedKeySet` itself never rejects (every caller, this one
+ * included, wraps it in `.catch(() => new Set())`), so the only way this
+ * resolves to `'timeout'` is the setTimeout branch of the race actually
+ * winning.
+ */
+const BLOCK_LOOKUP_TIMEOUT_MS = 500;
+
+async function boundedBlockedKeySet(
+  sessionUser: Parameters<typeof viewerBlockedKeySet>[0]
+): Promise<Set<string> | 'timeout'> {
+  return Promise.race([
+    viewerBlockedKeySet(sessionUser).catch(() => new Set<string>()),
+    new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), BLOCK_LOOKUP_TIMEOUT_MS))
+  ]);
+}
+
+/**
+ * The age/version staleness checks, the viewer's block filter and the SSR
+ * trim -- applied to an ALREADY-READ stored-feed row. The staleness checks
+ * and the trim are UNRACED (see `readStoredFeedRow` above for why): once the
+ * Postgres/memory read has answered, nothing here is allowed to turn that
+ * answer into a dropped seed just because the event loop is busy. The block
+ * filter is the one exception -- it has its OWN short bound, immediately
+ * below, because it is the one step here that can reach the network.
+ */
+async function finishStoredFeed(
+  row: { stored: Awaited<ReturnType<typeof readViewerFeed>>; readMs: number },
+  timing: boolean
+): Promise<StoredFeedRead> {
+  const { stored, readMs } = row;
+  const nothing = (
+    outcome: StoredFeedRead['outcome'],
+    blockMs: StoredFeedRead['blockMs'] = -1,
+    trimMs = -1
+  ): StoredFeedRead => ({
     seed: null,
     outcome,
     readMs,
@@ -310,16 +390,29 @@ async function prefetchStoredFeed(viewer: string, timing: boolean): Promise<Stor
   if (stored.version !== feedVersion()) return nothing('stale');
   let entries = filterBannedEntries(stored.entries);
   // Apply the viewer's block list server-side so blocked authors never appear
-  // in the SSR HTML. Degrades open on failure, same as the API route.
+  // in the SSR HTML. A `getLiteSession()` failure degrades open (unfiltered),
+  // same as the API route; a `boundedBlockedKeySet` TIMEOUT is different and
+  // deliberately NOT the same as "no blocks" -- see that function's own
+  // comment -- it drops the whole seed instead.
   const blockWatch = stopwatchIf(timing);
+  let blockedKeys: Set<string> | 'timeout' = new Set();
   try {
     const session = await getLiteSession();
-    const blockedKeys = await viewerBlockedKeySet(session.user).catch(() => new Set<string>());
-    if (blockedKeys.size > 0) {
-      entries = await filterBlockedForViewer(entries, blockedKeys);
-    }
+    blockedKeys = await boundedBlockedKeySet(session.user);
   } catch {
-    // Block list unavailable: serve unfiltered, same as the API route's own catch.
+    // getLiteSession threw: serve unfiltered, same as the API route's own catch.
+    // (boundedBlockedKeySet cannot itself throw -- see its own doc comment.)
+  }
+  if (blockedKeys === 'timeout') {
+    // ★ DROP THE SEED, NEVER SERVE UNFILTERED (2026-09-06, review). The
+    // block lookup is the one part of this function that can reach the
+    // network; losing ITS OWN 500ms race must fall through to the
+    // trending-fallback path exactly like a genuine store miss does, not
+    // answer with a list nobody has confirmed is safe to show this viewer.
+    return nothing('miss', 'timeout');
+  }
+  if (blockedKeys.size > 0) {
+    entries = await filterBlockedForViewer(entries, blockedKeys);
   }
   const blockMs = elapsedOf(blockWatch);
   if (entries.length === 0) return nothing('empty', blockMs);
@@ -354,13 +447,14 @@ export async function prefetchHomeFeed(
   trace?: HomeFeedTrace
 ): Promise<InitialFeedSeed | null> {
   try {
-    // ★ THE ONE GATE for every stopwatch below and inside `prefetchStoredFeed`:
-    // with no trace to write into, nothing is measured, nothing is allocated and
-    // no clock is read. `app/page.tsx` only allocates a trace when the flag is on.
+    // ★ THE ONE GATE for every stopwatch below and inside `readStoredFeedRow`/
+    // `finishStoredFeed`: with no trace to write into, nothing is measured,
+    // nothing is allocated and no clock is read. `app/page.tsx` only allocates
+    // a trace when the flag is on.
     const timing = Boolean(trace);
     // ★★ ONE 700ms BUDGET FOR THE WHOLE SIGNED-IN FALLBACK, NOT TWO (2026-09-05,
-    // perf batch C-A). This used to race `prefetchStoredFeed` against its own
-    // 700ms deadline and then, on a miss, fall into the trending call below and
+    // perf batch C-A). This used to race the whole stored-feed attempt against
+    // its own 700ms deadline and then, on a miss, fall into the trending call below and
     // race THAT against a FRESH 700ms deadline -- up to 1.4s of worst case for a
     // signed-in reader whose stored feed was not ready. The stored read and the
     // trending fallback are one fallback chain, not two independent budgets, so
@@ -373,14 +467,20 @@ export async function prefetchHomeFeed(
     let trendingBudgetMs = PREFETCH_TIMEOUT_MS;
     if (viewer) {
       const storedStartedAt = Date.now();
-      const stored = await withTimeout(prefetchStoredFeed(viewer, timing), PREFETCH_TIMEOUT_MS);
-      // `race` is the whole stored-feed attempt INCLUDING the deadline, so it is
-      // capped at PREFETCH_TIMEOUT_MS by construction; `read`/`block`/`trim` on
-      // the same line break down what the winner spent it on.
+      // ★ ONLY THE READ RACES (2026-09-06, item 3 above). `row` is `null` only
+      // when `readViewerFeed` itself did not answer inside the deadline --
+      // never because the block filter or trim that follow were slow.
+      const row = await withTimeout(readStoredFeedRow(viewer, timing), PREFETCH_TIMEOUT_MS);
       timer?.mark('race');
+      // Unraced on purpose: see `finishStoredFeed`'s own comment. A stall here
+      // still shows up honestly, in `blockMs`/`trimMs` and in the `finish`
+      // stage below, rather than silently becoming a dropped seed.
+      const stored = row ? await finishStoredFeed(row, timing) : null;
+      timer?.mark('finish');
       if (trace) {
-        // `null` here is the DEADLINE, not an empty store -- `withTimeout`
-        // resolves null on expiry and the read itself always resolves an object.
+        // `null` here is the READ DEADLINE, not an empty store -- `withTimeout`
+        // resolves null on expiry and a completed read always resolves an
+        // object (`finishStoredFeed` never returns null).
         trace.stored = stored ? stored.outcome : 'timeout';
         trace.readMs = stored?.readMs ?? -1;
         trace.blockMs = stored?.blockMs ?? -1;
@@ -414,7 +514,7 @@ export async function prefetchHomeFeed(
     let seedEntries = entries;
     if (viewer) {
       // ★ Block-filter the fallback seed the SAME way the stored path does
-      // (prefetchStoredFeed above): an unbounded await on the block list, which
+      // (`finishStoredFeed` above): an unbounded await on the block list, which
       // lives in local Postgres and is fast. An earlier version raced this
       // against a 500ms timer to guarantee an instant paint, but losing that
       // race served the seed UNFILTERED, so a blocked/muted author could paint

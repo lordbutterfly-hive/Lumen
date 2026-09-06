@@ -1,27 +1,40 @@
-import { cookies } from 'next/headers';
-import { getIronSession } from 'iron-session';
-import { sessionOptions } from '@smart-signer/lib/session';
-import { applyHiveSessionTtl } from '@smart-signer/lib/get-session';
-import type { IronSessionData } from '@smart-signer/types/common';
-import { getLogger } from '@ui/lib/logging';
 import HomeShell from '@/blog/features/discovery-feed/home-shell';
 import { InitialFeedProvider } from '@/blog/components/observer-provider';
 import { prefetchHomeFeed, newHomeFeedTrace } from '@/blog/lib/feed/feed-prefetch';
 import { renderTimer, renderTimingEnabled } from '@ui/lib/render-timing';
+import { getServerSessionUser } from '@/blog/lib/server-session';
 
-const logger = getLogger('app');
-
+/**
+ * ★★ ONE UNSEAL PER REQUEST, NOT TWO (2026-09-06, signed-in home build map
+ * item 4). This used to open and unseal the session cookie a second time with
+ * its own `getIronSession` + `applyHiveSessionTtl(canPersist: false)` call --
+ * byte-for-byte the same decode the root layout already does, two lines
+ * below, through `getServerSessionUser()` (lib/server-session.ts), which is
+ * `React.cache()`-wrapped for exactly this reason. Same `sessionOptions`
+ * import, same `canPersist: false` (this file is a Server Component render,
+ * which cannot write cookies either way), so delegating here is a like-for-
+ * like substitution for the overwhelming majority of sessions -- and it means
+ * this call and the layout's share the ONE unseal React memoised for the
+ * request instead of each paying the ~4 webcrypto thread-pool hops (PBKDF2 +
+ * HMAC verify + AES-GCM decrypt) that showed up as 286-605ms `session=`
+ * values under contention in tonight's samples.
+ *
+ * ★ ONE SMALL, DELIBERATE BEHAVIOUR CHANGE (2026-09-06, review, worth stating
+ * rather than glossing over): the OLD inline read here considered a session
+ * signed in whenever `session.user?.isLoggedIn` was truthy, full stop --
+ * `viewer` fell back to `''` if `username` happened to be missing, but
+ * `signedIn` itself did not depend on it. `getServerSessionUser()` requires
+ * BOTH `isLoggedIn` AND a non-empty `username` (`lib/server-session.ts`'s own
+ * `if (session.user?.isLoggedIn && session.user.username)`), else it returns
+ * `SIGNED_OUT`. For every session this app actually issues the two conditions
+ * always travel together, so this is not expected to change what any real
+ * cookie renders as -- but a session somehow carrying `isLoggedIn: true` with
+ * no `username` would have shown the SIGNED-IN shell before and now renders
+ * the SIGNED-OUT one instead.
+ */
 async function readSession(): Promise<{ signedIn: boolean; viewer: string }> {
-  const cookieStore = cookies();
-  try {
-    const session = await getIronSession<IronSessionData>(cookieStore, sessionOptions);
-    await applyHiveSessionTtl(session, { canPersist: false });
-    const signedIn = Boolean(session.user?.isLoggedIn);
-    return { signedIn, viewer: signedIn ? (session.user?.username ?? '') : '' };
-  } catch (error) {
-    logger.error(error, 'home: could not read session');
-    return { signedIn: false, viewer: '' };
-  }
+  const session = await getServerSessionUser();
+  return { signedIn: session.isLoggedIn, viewer: session.isLoggedIn ? session.username : '' };
 }
 
 export default async function HomePage() {
@@ -73,7 +86,12 @@ export default async function HomePage() {
     source: trace?.source ?? 'none',
     count: trace?.count ?? 0,
     read: `${trace?.readMs ?? -1}ms`,
-    block: `${trace?.blockMs ?? -1}ms`,
+    // `blockMs` is `number | 'timeout'` (feed-prefetch.ts's `HomeFeedTrace`):
+    // a bounded block-set lookup that lost its own 500ms race logs the
+    // literal `block=timeout` rather than a fabricated duration, so this
+    // field is the one that is NOT always `...ms` -- see
+    // `boundedBlockedKeySet`'s doc comment in feed-prefetch.ts.
+    block: trace?.blockMs === 'timeout' ? 'timeout' : `${trace?.blockMs ?? -1}ms`,
     trim: `${trace?.trimMs ?? -1}ms`
   });
   return (
