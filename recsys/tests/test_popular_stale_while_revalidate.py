@@ -34,13 +34,13 @@ class _Client(HafsqlClient):
         self.query_count = 0
         self._query_started = threading.Event()
 
-    def _fetch_lite(self, sql, params):  # type: ignore[override]
+    def _fetch_lite(self, sql, params, *, timeout_ms=None):  # type: ignore[override]
         self.query_count += 1
         self._query_started.set()
         time.sleep(SLOW_QUERY_S)
         return []
 
-    def _hydrate(self, rows):  # type: ignore[override]
+    def _hydrate(self, rows, *, timeout_ms=None):  # type: ignore[override]
         return []
 
 

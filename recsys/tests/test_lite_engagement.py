@@ -18,6 +18,7 @@ Each test names the mutant it catches; every one was applied and shown to fail.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import fields as fields_of
 from datetime import UTC, datetime
 from typing import Any
@@ -169,6 +170,10 @@ class _FakeCursor:
 class _FakeConn:
     def __init__(self, rows: list[tuple[Any, ...]], sink: dict[str, Any]) -> None:
         self._rows, self._sink = rows, sink
+        #: L1 (2026-09-06): `_ConnPool.release`/`.closeall` read/set this on
+        #: every real `psycopg.Connection` — needed the moment fetches route
+        #: through the pool (the default), not just a direct `_connect`.
+        self.closed = False
 
     def __enter__(self) -> _FakeConn:
         return self
@@ -178,6 +183,21 @@ class _FakeConn:
 
     def cursor(self) -> _FakeCursor:
         return _FakeCursor(self._rows, self._sink)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.fixture(autouse=True)
+def _reset_lite_local_pool() -> Any:
+    """L1 (2026-09-06): the pool is a MODULE-LEVEL dict keyed by dsn, and
+    every test in this file uses the same placeholder dsn
+    (``"postgresql://x"``) — without this, a `_FakeConn` pooled by one test
+    would still be sitting in `_idle` for the next one, which would never see
+    its own freshly-monkeypatched `_connect` at all."""
+    lite_engagement.reset_local_pool()
+    yield
+    lite_engagement.reset_local_pool()
 
 
 def _reader(rows: list[tuple[Any, ...]], monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
@@ -276,14 +296,16 @@ def test_hydration_merges_lite_votes_into_the_post_it_serves(
         HafsqlConfig(),
         LiteConfig(publisher_accounts=frozenset({"lumen.pub"}), engagement_dsn="postgresql://x"),
     )
+
+    def whale_votes(self: Any, a: Any, p: Any, **_kw: Any) -> dict[Any, Any]:
+        return {key: [_chain_vote("whale")]}
+
+    monkeypatch.setattr(hafsql.HafsqlClient, "_votes_for_posts", whale_votes)
+    monkeypatch.setattr(hafsql.HafsqlClient, "_comments_for_posts", lambda self, a, p, **_kw: {})
     monkeypatch.setattr(
-        hafsql.HafsqlClient, "_votes_for_posts", lambda self, a, p: {key: [_chain_vote("whale")]}
+        hafsql.HafsqlClient, "_rebloggers_for_posts", lambda self, a, p, **_kw: {key: ("bob",)}
     )
-    monkeypatch.setattr(hafsql.HafsqlClient, "_comments_for_posts", lambda self, a, p: {})
-    monkeypatch.setattr(
-        hafsql.HafsqlClient, "_rebloggers_for_posts", lambda self, a, p: {key: ("bob",)}
-    )
-    monkeypatch.setattr(hafsql.HafsqlClient, "_reputations_for_authors", lambda self, a: {})
+    monkeypatch.setattr(hafsql.HafsqlClient, "_reputations_for_authors", lambda self, a, **_kw: {})
     monkeypatch.setattr(
         lite_engagement, "fetch_lite_votes", lambda cfg, keys: {key: [_lite_vote("01LITE")]}
     )
@@ -319,12 +341,14 @@ def test_hydration_is_untouched_when_no_lite_dsn_is_configured(
     key = ("alice", "p1")
     called: list[str] = []
     client = hafsql.HafsqlClient(HafsqlConfig(), LiteConfig())
-    monkeypatch.setattr(
-        hafsql.HafsqlClient, "_votes_for_posts", lambda self, a, p: {key: [_chain_vote("whale")]}
-    )
-    monkeypatch.setattr(hafsql.HafsqlClient, "_comments_for_posts", lambda self, a, p: {})
-    monkeypatch.setattr(hafsql.HafsqlClient, "_rebloggers_for_posts", lambda self, a, p: {})
-    monkeypatch.setattr(hafsql.HafsqlClient, "_reputations_for_authors", lambda self, a: {})
+
+    def whale_votes(self: Any, a: Any, p: Any, **_kw: Any) -> dict[Any, Any]:
+        return {key: [_chain_vote("whale")]}
+
+    monkeypatch.setattr(hafsql.HafsqlClient, "_votes_for_posts", whale_votes)
+    monkeypatch.setattr(hafsql.HafsqlClient, "_comments_for_posts", lambda self, a, p, **_kw: {})
+    monkeypatch.setattr(hafsql.HafsqlClient, "_rebloggers_for_posts", lambda self, a, p, **_kw: {})
+    monkeypatch.setattr(hafsql.HafsqlClient, "_reputations_for_authors", lambda self, a, **_kw: {})
     monkeypatch.setattr(
         lite_engagement,
         "fetch_lite_votes",
@@ -575,28 +599,58 @@ def test_one_failing_query_cannot_be_held_closed_by_another_succeeding(
     breaker.
 
     MUTANT: share one counter across both queries again. This fails.
+
+    ★ L1-UPDATED (2026-09-06): with `RECSYS_LOCAL_POOL` default on, a
+    connection is no longer 1:1 with a call — a healthy connection opened for
+    the SUCCEEDING reblogs query can be POOLED and handed to the very next
+    votes call. Failing at CONNECT (the old `selective`, monkeypatching
+    `_connect` itself) no longer models "the votes table is broken" under
+    pooling: the reblogs success would donate its connection and the next
+    votes call would silently reuse it and never even attempt one. A broken
+    TABLE fails at EXECUTE time regardless of which physical connection ran
+    it, so that is what this now simulates — one `_connect` for the whole
+    test (or several, as the pool churns unhealthy connections), and a
+    cursor that raises only for votes-shaped SQL.
     """
     lite_engagement.reset_breaker()
     votes_attempts: list[int] = []
-    real_connect = lite_engagement._connect
 
-    def selective(dsn: str):  # type: ignore[no-untyped-def]
-        # The reblogs path is exercised via `_reader` below; this stands in for
-        # the votes path only, and always fails.
-        votes_attempts.append(1)
-        raise OSError("votes table unavailable")
+    class _Cursor:
+        def __enter__(self) -> _Cursor:
+            return self
 
+        def __exit__(self, *exc: object) -> bool:
+            return False
+
+        def execute(self, sql: str, params: dict[str, Any]) -> None:
+            if "lumen_vote" in sql:
+                votes_attempts.append(1)
+                raise OSError("votes table unavailable")
+
+        def fetchall(self) -> list[tuple[Any, ...]]:
+            return []
+
+    class _Conn:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def cursor(self) -> _Cursor:
+            return _Cursor()
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(lite_engagement, "_connect", lambda dsn: _Conn())
     cfg = LiteConfig(engagement_dsn="postgresql://x")
     for _ in range(8):
-        monkeypatch.setattr(lite_engagement, "_connect", selective)
         lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
-        # ...and the sibling query succeeds on the same request.
-        _reader([], monkeypatch)
+        # ...and the sibling query succeeds on the same request, on whatever
+        # connection the pool hands it (possibly the very one votes just
+        # marked unhealthy and discarded).
         lite_engagement.fetch_lite_rebloggers(cfg, [("alice", "p1")])
-    monkeypatch.setattr(lite_engagement, "_connect", real_connect)
 
     assert len(votes_attempts) == 3, (
-        f"the votes query was dialled {len(votes_attempts)} times while failing "
+        f"the votes query was attempted {len(votes_attempts)} times while failing "
         "— a succeeding sibling held its breaker closed"
     )
     lite_engagement.reset_breaker()
@@ -641,6 +695,365 @@ def test_a_recovered_lite_store_closes_the_breaker(monkeypatch: pytest.MonkeyPat
     cfg = LiteConfig(engagement_dsn="postgresql://x")
     assert lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
     assert not lite_engagement._breaker_is_open("votes", 0.0)
+    lite_engagement.reset_breaker()
+
+
+# ---------------------------------------------------------------------------
+# L1 (RECSYS-LATENCY-BUILD-MAP-2026-09-06) — pooled loopback connections and
+# its RECSYS_LOCAL_POOL flag.
+# ---------------------------------------------------------------------------
+
+
+def test_local_pool_flag_defaults_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RECSYS_LOCAL_POOL", raising=False)
+    assert lite_engagement._local_pool_enabled() is True
+
+
+@pytest.mark.parametrize("off_value", ["0", "false", "no", "off"])
+def test_local_pool_flag_kill_switch_values(
+    off_value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RECSYS_LOCAL_POOL", off_value)
+    assert lite_engagement._local_pool_enabled() is False
+
+
+def test_pooling_opens_one_connection_for_many_fetches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The map's own measured win: 7-9 fresh connections per request collapse
+    to one pooled connection reused across every fetch of that account's
+    engagement."""
+    connects: list[str] = []
+
+    class _Cursor:
+        def __enter__(self) -> _Cursor:
+            return self
+
+        def __exit__(self, *exc: object) -> bool:
+            return False
+
+        def execute(self, sql: str, params: dict[str, Any]) -> None:
+            pass
+
+        def fetchall(self) -> list[tuple[Any, ...]]:
+            return []
+
+    class _Conn:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def cursor(self) -> _Cursor:
+            return _Cursor()
+
+        def close(self) -> None:
+            self.closed = True
+
+    def counting_connect(dsn: str) -> _Conn:  # type: ignore[no-untyped-def]
+        connects.append(dsn)
+        return _Conn()
+
+    monkeypatch.setattr(lite_engagement, "_connect", counting_connect)
+    cfg = LiteConfig(engagement_dsn="postgresql://x")
+    for _ in range(5):
+        lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
+        lite_engagement.fetch_lite_rebloggers(cfg, [("alice", "p1")])
+    # `RECSYS_LOCAL_POOL_MIN` default is 2 (review fix, 2026-09-06 — matches
+    # `max_concurrent_requests`'s floor, not 1), so the first borrow also
+    # pre-warms one extra idle connection (`_ConnPool._warm_up`) — 2 physical
+    # connects total for 10 fetches, not 10, which is still the whole point.
+    assert len(connects) == 2, (
+        f"expected 2 pooled physical connections (1 borrowed + 1 warm) for "
+        f"10 fetches, got {len(connects)}"
+    )
+
+
+def test_local_pool_flag_off_opens_one_connection_per_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The kill switch must restore today's exact behaviour: a fresh
+    connection, opened and closed, on every single fetch."""
+    monkeypatch.setenv("RECSYS_LOCAL_POOL", "off")
+    connects: list[str] = []
+
+    def counting_connect(dsn: str):  # type: ignore[no-untyped-def]
+        connects.append(dsn)
+        return _FakeConn([], {})
+
+    monkeypatch.setattr(lite_engagement, "_connect", counting_connect)
+    cfg = LiteConfig(engagement_dsn="postgresql://x")
+    for _ in range(3):
+        lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
+    assert len(connects) == 3, (
+        f"expected one connect per fetch with pooling off, got {len(connects)}"
+    )
+
+
+def test_pool_connect_drops_tls_on_the_conninfo_but_direct_connect_is_untouched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """L1's other half: `sslmode=disable` must reach the physical connect
+    when the POOL opens it, and must never be forced onto a direct
+    `_connect(dsn)` call (the flag-off path, and the live statement-timeout
+    test below, which points at an arbitrary — possibly non-loopback — dsn)."""
+    seen_dsns: list[str] = []
+
+    def recording_connect(dsn: str):  # type: ignore[no-untyped-def]
+        seen_dsns.append(dsn)
+        return _FakeConn([], {})
+
+    monkeypatch.setattr(lite_engagement, "_connect", recording_connect)
+    cfg = LiteConfig(engagement_dsn="postgresql://user:pw@127.0.0.1:5432/lumen_lite")
+
+    # Pooled (default): the DSN `_connect` itself receives has sslmode=disable.
+    # (2 physical connects: the borrowed one plus the pool's min_size=2 warm-up
+    # — see `test_pooling_opens_one_connection_for_many_fetches`'s own comment.)
+    lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
+    assert seen_dsns
+    assert all("sslmode=disable" in dsn for dsn in seen_dsns)
+
+    # Direct call to `_connect` (what the flag-off path and the live test
+    # use) must NOT have sslmode injected — it goes straight through.
+    conn = lite_engagement._connect("postgresql://user:pw@example.com:5432/db")
+    assert isinstance(conn, _FakeConn)
+    assert seen_dsns[-1] == "postgresql://user:pw@example.com:5432/db"
+
+
+def test_sslmode_disable_is_never_applied_to_a_non_loopback_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """★★★ REVIEW FIX (2026-09-06). `sslmode=disable` used to be forced onto
+    EVERY pooled connection regardless of host — a real TLS-downgrade risk if
+    `LUMEN_LITE_DATABASE_URL` ever pointed at a non-loopback Postgres. It must
+    now only fire for a loopback host with no `sslmode` of its own."""
+    seen_dsns: list[str] = []
+
+    def recording_connect(dsn: str):  # type: ignore[no-untyped-def]
+        seen_dsns.append(dsn)
+        return _FakeConn([], {})
+
+    monkeypatch.setattr(lite_engagement, "_connect", recording_connect)
+    cfg = LiteConfig(engagement_dsn="postgresql://user:pw@db.example.com:5432/lumen_lite")
+
+    lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
+    assert seen_dsns
+    assert all("sslmode" not in dsn for dsn in seen_dsns), (
+        f"a non-loopback host must never have sslmode forced onto it, got {seen_dsns}"
+    )
+    assert all(dsn == cfg.engagement_dsn for dsn in seen_dsns), (
+        "a non-loopback DSN must reach _connect completely unmodified"
+    )
+
+
+def test_sslmode_disable_never_overrides_an_explicit_sslmode_even_on_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An operator who explicitly set `sslmode` on a loopback DSN (e.g. for a
+    stunnel/sidecar setup) must have that respected, not silently replaced."""
+    seen_dsns: list[str] = []
+
+    def recording_connect(dsn: str):  # type: ignore[no-untyped-def]
+        seen_dsns.append(dsn)
+        return _FakeConn([], {})
+
+    monkeypatch.setattr(lite_engagement, "_connect", recording_connect)
+    cfg = LiteConfig(
+        engagement_dsn="postgresql://user:pw@127.0.0.1:5432/lumen_lite?sslmode=require"
+    )
+
+    lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
+    assert seen_dsns
+    assert all(dsn == cfg.engagement_dsn for dsn in seen_dsns), (
+        f"an explicit sslmode must be preserved unmodified, got {seen_dsns}"
+    )
+
+
+def test_pool_exhaustion_falls_back_to_a_direct_connect_not_to_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """★★★ REVIEW FIX (2026-09-06). Before this, a pool-exhaustion
+    (`HafsqlUnavailableError` from `borrow()`) propagated to the caller's own
+    `except Exception`, degrading to `{}` — losing real engagement signal for
+    a condition a single fresh connection can usually still answer. It must
+    now fall back to a direct connect for this one call instead."""
+    from recsys.io import hafsql
+
+    lite_engagement.reset_local_pool()
+
+    class _ExhaustedPool:
+        def borrow(self):  # type: ignore[no-untyped-def]
+            raise hafsql.PoolExhaustedError("pool exhausted: 16 in use and none released")
+
+    monkeypatch.setattr(lite_engagement, "_get_pool", lambda dsn: _ExhaustedPool())
+
+    direct_connects: list[str] = []
+
+    def counting_connect(dsn: str):  # type: ignore[no-untyped-def]
+        direct_connects.append(dsn)
+        return _FakeConn([("alice", "p1", "01VOTER", _EPOCH)], {})
+
+    monkeypatch.setattr(lite_engagement, "_connect", counting_connect)
+    cfg = LiteConfig(engagement_dsn="postgresql://x")
+
+    out = lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
+
+    assert direct_connects == ["postgresql://x"], "exhaustion must fall back to ONE direct connect"
+    assert out, "the fallback connect must still deliver real rows, not {}"
+    lite_engagement.reset_local_pool()
+
+
+def test_breaker_open_does_not_take_the_direct_connect_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """★★★ SECOND REVIEW FIX (2026-09-06). The exhaustion fallback above must
+    NOT also fire when the pool's breaker is OPEN (the last several connect
+    attempts failed) — that is a DIFFERENT condition from genuine exhaustion,
+    raised as the base `HafsqlUnavailableError`, not the `PoolExhaustedError`
+    subclass exhaustion uses. Falling back to a direct connect here would
+    just retry a database already proven down, one call at a time, defeating
+    the entire point of the breaker. This must fast-fail instead — no direct
+    connect attempted — and degrade to `{}` via the caller's own outer
+    `except Exception`, exactly like any other unrecovered failure."""
+    from recsys.io import hafsql
+
+    lite_engagement.reset_local_pool()
+
+    class _BreakerOpenPool:
+        def borrow(self):  # type: ignore[no-untyped-def]
+            raise hafsql.HafsqlUnavailableError(
+                "circuit breaker open — too many consecutive connection failures"
+            )
+
+    monkeypatch.setattr(lite_engagement, "_get_pool", lambda dsn: _BreakerOpenPool())
+
+    direct_connects: list[str] = []
+
+    def counting_connect(dsn: str):  # type: ignore[no-untyped-def]
+        direct_connects.append(dsn)
+        return _FakeConn([("alice", "p1", "01VOTER", _EPOCH)], {})
+
+    monkeypatch.setattr(lite_engagement, "_connect", counting_connect)
+    cfg = LiteConfig(engagement_dsn="postgresql://x")
+
+    out = lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
+
+    assert direct_connects == [], (
+        "breaker-open must fast-fail, never fall back to a direct connect"
+    )
+    assert out == {}, "breaker-open must degrade to no lite engagement for this call"
+    lite_engagement.reset_local_pool()
+
+
+def test_pool_exhaustion_fallback_warning_is_throttled_not_once_per_call(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """★★★ SECOND REVIEW FIX (2026-09-06). A SUSTAINED exhaustion must not
+    write one WARNING per request for as long as it lasts — throttled to at
+    most once per `_BREAKER_COOLDOWN_S`, reusing this module's own breaker
+    window rather than a new interval."""
+    from recsys.io import hafsql
+
+    lite_engagement.reset_local_pool()
+    lite_engagement._reset_pool_exhaustion_log_for_tests()
+    monkeypatch.setattr(lite_engagement, "_BREAKER_COOLDOWN_S", 60.0)
+
+    class _ExhaustedPool:
+        def borrow(self):  # type: ignore[no-untyped-def]
+            raise hafsql.PoolExhaustedError("pool exhausted: 16 in use and none released")
+
+    monkeypatch.setattr(lite_engagement, "_get_pool", lambda dsn: _ExhaustedPool())
+    monkeypatch.setattr(
+        lite_engagement,
+        "_connect",
+        lambda dsn: _FakeConn([("alice", "p1", "01VOTER", _EPOCH)], {}),
+    )
+    cfg = LiteConfig(engagement_dsn="postgresql://x")
+
+    with caplog.at_level(logging.WARNING, logger="recsys.io.lite_engagement"):
+        lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
+        lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
+        lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
+
+    exhaustion_warnings = [r for r in caplog.records if "pool exhausted" in r.message]
+    assert len(exhaustion_warnings) == 1, (
+        f"expected exactly ONE throttled WARNING across 3 calls within the cooldown "
+        f"window, got {len(exhaustion_warnings)}"
+    )
+    lite_engagement.reset_local_pool()
+    lite_engagement._reset_pool_exhaustion_log_for_tests()
+
+
+# ---------------------------------------------------------------------------
+# REVIEW FIX (2026-09-06) — RECSYS_LOCAL_POOL_MIN/MAX must never crash the
+# process on a bad value; they are tuning knobs, not boot-critical config.
+# ---------------------------------------------------------------------------
+
+
+def test_local_pool_size_env_falls_back_to_the_default_on_a_bad_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RECSYS_LOCAL_POOL_MAX", "not-a-number")
+    assert lite_engagement._int_env_or_default("RECSYS_LOCAL_POOL_MAX", 16) == 16
+
+
+def test_local_pool_size_env_parses_a_good_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RECSYS_LOCAL_POOL_MAX", "8")
+    assert lite_engagement._int_env_or_default("RECSYS_LOCAL_POOL_MAX", 16) == 8
+
+
+def test_local_pool_size_env_unset_uses_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RECSYS_LOCAL_POOL_MAX", raising=False)
+    assert lite_engagement._int_env_or_default("RECSYS_LOCAL_POOL_MAX", 16) == 16
+
+
+def test_a_query_error_on_a_pooled_connection_does_not_wedge_the_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A query failure marks the connection unhealthy (discarded, per
+    `_fetch_rows`'s own comment) rather than returning it to `_idle` — the
+    NEXT fetch must still get a working connection, not inherit a broken one."""
+    lite_engagement.reset_breaker()
+
+    class _BoomOnceCursor:
+        def __init__(self, should_raise: bool) -> None:
+            self._should_raise = should_raise
+
+        def __enter__(self) -> _BoomOnceCursor:
+            return self
+
+        def __exit__(self, *exc: object) -> bool:
+            return False
+
+        def execute(self, sql: str, params: dict[str, Any]) -> None:
+            if self._should_raise:
+                raise OSError("boom")
+
+        def fetchall(self) -> list[tuple[Any, ...]]:
+            return []
+
+    conns_opened: list[bool] = []
+
+    class _Conn:
+        def __init__(self, should_raise: bool) -> None:
+            self.closed = False
+            self._should_raise = should_raise
+
+        def cursor(self) -> _BoomOnceCursor:
+            return _BoomOnceCursor(self._should_raise)
+
+        def close(self) -> None:
+            self.closed = True
+
+    def connect(dsn: str):  # type: ignore[no-untyped-def]
+        # First physical connection fails its query; every connection opened
+        # after that succeeds.
+        should_raise = not conns_opened
+        conns_opened.append(True)
+        return _Conn(should_raise)
+
+    monkeypatch.setattr(lite_engagement, "_connect", connect)
+    cfg = LiteConfig(engagement_dsn="postgresql://x")
+    assert lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")]) == {}
+    assert lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")]) == {}
+    assert len(conns_opened) == 2, "the failed connection must not be reused from idle"
     lite_engagement.reset_breaker()
 
 

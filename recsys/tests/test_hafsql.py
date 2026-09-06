@@ -50,6 +50,7 @@ _SQL_CONSTANTS = (
     hafsql._SQL_IN_NETWORK_POSTS,
     hafsql._SQL_TAG_POSTS,
     hafsql._SQL_ENGAGED_OON_POSTS,
+    hafsql._SQL_ENGAGED_OON_POSTS_V2,
     hafsql._SQL_VOTES_FOR_POSTS,
     hafsql._SQL_COMMENTS_FOR_POSTS,
     hafsql._SQL_REBLOGGERS_FOR_POSTS,
@@ -630,6 +631,251 @@ def test_in_network_posts_and_engaged_oon_posts_use_fetch_lite(
     assert calls == ["lite", "lite"]
 
 
+# ---------------------------------------------------------------------------
+# Q2 (RECSYS-LATENCY-BUILD-MAP-2026-09-06) — the engaged-OON time bound and
+# its RECSYS_OON_TIME_BOUND flag.
+# ---------------------------------------------------------------------------
+
+
+def test_engaged_oon_v2_sql_bounds_both_exists_by_since() -> None:
+    sql = hafsql._SQL_ENGAGED_OON_POSTS_V2
+    assert "r.created_at >= %(since)s" in sql
+    assert 'rc."timestamp" >= %(since)s' in sql
+    # The candidate-level bound must still be there too — Q2 adds a bound,
+    # it does not replace the one that already existed.
+    assert "c.created >= %(since)s" in sql
+
+
+def test_engaged_oon_v2_sql_bound_is_null_safe() -> None:
+    """REVIEW FIX (2026-09-06). A bare `r.created_at >= %(since)s` drops a
+    NULL-timestamped row that the UNBOUNDED V1 EXISTS kept (SQL three-valued
+    logic: NULL >= x is NULL, not true). Both EXISTS must use the
+    `IS NULL OR ... >= since` form, and the bare comparison must be gone.
+
+    MUTANT: replace either NULL-safe clause with the bare comparison. This
+    fails.
+    """
+    sql = hafsql._SQL_ENGAGED_OON_POSTS_V2
+    assert "r.created_at IS NULL OR r.created_at >= %(since)s" in sql
+    assert 'rc."timestamp" IS NULL OR rc."timestamp" >= %(since)s' in sql
+    assert "AND r.created_at >= %(since)s" not in sql, (
+        "the bare (NULL-dropping) reblog bound must be gone, not merely joined"
+    )
+    assert 'AND rc."timestamp" >= %(since)s' not in sql, (
+        "the bare (NULL-dropping) reply bound must be gone, not merely joined"
+    )
+
+
+def test_engaged_oon_v1_sql_is_unchanged_by_q2() -> None:
+    """The kill-switch target must stay byte-identical to what shipped before
+    Q2 — no bound inside either EXISTS."""
+    sql = hafsql._SQL_ENGAGED_OON_POSTS
+    assert "r.created_at" not in sql
+    assert 'rc."timestamp"' not in sql
+
+
+def test_oon_time_bound_flag_defaults_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RECSYS_OON_TIME_BOUND", raising=False)
+    assert hafsql._oon_time_bound_enabled() is True
+
+
+@pytest.mark.parametrize("off_value", ["0", "false", "no", "off", "OFF"])
+def test_oon_time_bound_flag_kill_switch_values(
+    off_value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RECSYS_OON_TIME_BOUND", off_value)
+    assert hafsql._oon_time_bound_enabled() is False
+
+
+def test_engaged_oon_posts_uses_v2_sql_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RECSYS_OON_TIME_BOUND", raising=False)
+    seen: list[str] = []
+
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient, sql: str, params: dict[str, Any], *, timeout_ms=None
+    ) -> list[Any]:
+        seen.append(sql)
+        return []
+
+    monkeypatch.setattr(hafsql.HafsqlClient, "_fetch_lite", fake_fetch_lite)
+    since = datetime(2026, 1, 1, tzinfo=UTC)
+    CLIENT.engaged_oon_posts(frozenset({"alice"}), since, 5)
+    assert seen == [hafsql._SQL_ENGAGED_OON_POSTS_V2]
+
+
+def test_engaged_oon_posts_uses_v1_sql_when_flag_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RECSYS_OON_TIME_BOUND", "off")
+    seen: list[str] = []
+
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient, sql: str, params: dict[str, Any], *, timeout_ms=None
+    ) -> list[Any]:
+        seen.append(sql)
+        return []
+
+    monkeypatch.setattr(hafsql.HafsqlClient, "_fetch_lite", fake_fetch_lite)
+    since = datetime(2026, 1, 1, tzinfo=UTC)
+    CLIENT.engaged_oon_posts(frozenset({"alice"}), since, 5)
+    assert seen == [hafsql._SQL_ENGAGED_OON_POSTS]
+
+
+# ---------------------------------------------------------------------------
+# C1 (RECSYS-LATENCY-BUILD-MAP-2026-09-06) — the request-scoped statement
+# timeout, distinct from the 900s HAFSQL_STATEMENT_TIMEOUT_MS batch/global.
+# ---------------------------------------------------------------------------
+
+
+def test_request_statement_timeout_defaults_to_10s(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RECSYS_REQUEST_STATEMENT_TIMEOUT_MS", raising=False)
+    client = hafsql.HafsqlClient(HafsqlConfig())
+    assert client._request_statement_timeout_ms == 10_000
+
+
+def test_request_statement_timeout_kill_switch_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RECSYS_REQUEST_STATEMENT_TIMEOUT_MS", "0")
+    client = hafsql.HafsqlClient(HafsqlConfig())
+    assert client._request_statement_timeout_ms is None
+
+
+def test_request_statement_timeout_kill_switch_via_kwarg() -> None:
+    client = hafsql.HafsqlClient(HafsqlConfig(), request_statement_timeout_ms=0)
+    assert client._request_statement_timeout_ms is None
+
+
+def test_request_statement_timeout_explicit_kwarg_wins_over_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RECSYS_REQUEST_STATEMENT_TIMEOUT_MS", "5000")
+    client = hafsql.HafsqlClient(HafsqlConfig(), request_statement_timeout_ms=2500)
+    assert client._request_statement_timeout_ms == 2500
+
+
+def test_request_statement_timeout_never_exceeds_the_client_wide_bound() -> None:
+    """C1's whole point: the request-path bound must be strictly tighter than
+    the 900s batch/global one, or it does not bound anything."""
+    client = hafsql.HafsqlClient(HafsqlConfig())
+    assert client._request_statement_timeout_ms is not None
+    assert client._request_statement_timeout_ms < client._statement_timeout_ms
+
+
+@pytest.mark.parametrize(
+    "method_name,args",
+    [
+        ("in_network_posts", (frozenset({"alice"}), datetime(2026, 1, 1, tzinfo=UTC), 5)),
+        ("engaged_oon_posts", (frozenset({"alice"}), datetime(2026, 1, 1, tzinfo=UTC), 5)),
+        ("tag_posts", (frozenset({"art"}), datetime(2026, 1, 1, tzinfo=UTC), 5)),
+    ],
+)
+def test_request_path_lanes_pass_the_request_timeout_to_fetch_lite(
+    method_name: str, args: tuple[Any, ...], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[int | None] = []
+
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient, sql: str, params: dict[str, Any], *, timeout_ms=None
+    ) -> list[Any]:
+        seen.append(timeout_ms)
+        return []
+
+    monkeypatch.setattr(hafsql.HafsqlClient, "_fetch_lite", fake_fetch_lite)
+    getattr(CLIENT, method_name)(*args)
+    assert seen and seen[0] == CLIENT._request_statement_timeout_ms
+
+
+def test_second_degree_engagers_passes_the_request_timeout() -> None:
+    seen: list[int | None] = []
+
+    def fake_fetch(
+        self: hafsql.HafsqlClient, sql: str, params: dict[str, Any], *, timeout_ms=None
+    ) -> list[Any]:
+        seen.append(timeout_ms)
+        return []
+
+    client = hafsql.HafsqlClient(HafsqlConfig())
+    client._fetch = fake_fetch.__get__(client, hafsql.HafsqlClient)  # type: ignore[method-assign]
+    client.second_degree_engagers(frozenset({"@alice/p1"}), frozenset({"bob"}))
+    assert seen == [client._request_statement_timeout_ms]
+
+
+def test_suppressed_keys_passes_the_request_timeout() -> None:
+    seen: list[int | None] = []
+
+    def fake_fetch_recsys(
+        self: hafsql.HafsqlClient, sql: str, params: dict[str, Any], *, timeout_ms=None
+    ) -> list[Any]:
+        seen.append(timeout_ms)
+        return []
+
+    client = hafsql.HafsqlClient(HafsqlConfig(), recsys_dsn="postgresql://fake/dsn")
+    client._fetch_recsys = fake_fetch_recsys.__get__(  # type: ignore[method-assign]
+        client, hafsql.HafsqlClient
+    )
+    client.suppressed_keys(frozenset({"@alice/p1"}))
+    assert seen == [client._request_statement_timeout_ms]
+
+
+def test_window_posts_hydration_is_not_bound_by_the_request_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one thing C1 must NEVER touch: `window_posts` is the BACKGROUND
+    norm-context builder (every 30 min), not a request, and must keep the
+    900s `HAFSQL_STATEMENT_TIMEOUT_MS` bound. `_hydrate`'s `timeout_ms`
+    parameter defaults to `None` for exactly this reason."""
+    seen: list[int | None] = []
+
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient, sql: str, params: dict[str, Any], *, timeout_ms=None
+    ) -> list[Any]:
+        seen.append(timeout_ms)
+        if sql is hafsql._SQL_WINDOW_POSTS:
+            return [("alice", "p1", "art", datetime(2026, 1, 1, tzinfo=UTC), ["art"], None)]
+        return []  # votes/comments/rebloggers/reputations: empty is a valid row set
+
+    monkeypatch.setattr(hafsql.HafsqlClient, "_fetch_lite", fake_fetch_lite)
+    CLIENT.window_posts(datetime(2026, 1, 1, tzinfo=UTC), 5)
+    assert seen, "window_posts must still fetch"
+    assert all(t is None for t in seen), (
+        f"window_posts hydration must never receive the request-scoped timeout, got {seen}"
+    )
+
+
+def test_a_request_path_hydrate_passes_the_timeout_to_votes_and_comments_subfetches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """★★★ REVIEW FIX (2026-09-06) — a POSITIVE proof, not just the negative
+    one above. `test_request_path_lanes_pass_the_request_timeout_to_fetch_lite`
+    only proves the LANE's own candidate query gets the timeout — its fake
+    gateway returns `[]`, so `_hydrate` short-circuits on `if not rows: return
+    []` and never actually calls `_votes_for_posts`/`_comments_for_posts` at
+    all. This calls `_hydrate` directly with a non-empty row so the sub-fetches
+    really run, and asserts each one received the SAME explicit `timeout_ms` —
+    proving the parameter is actually threaded through `_hydrate`'s body, not
+    just accepted and dropped."""
+    seen: dict[str, int | None] = {}
+
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient, sql: str, params: dict[str, Any], *, timeout_ms=None
+    ) -> list[Any]:
+        if sql is hafsql._SQL_VOTES_FOR_POSTS:
+            seen["votes"] = timeout_ms
+        elif sql is hafsql._SQL_COMMENTS_FOR_POSTS:
+            seen["comments"] = timeout_ms
+        elif sql is hafsql._SQL_REBLOGGERS_FOR_POSTS:
+            seen["rebloggers"] = timeout_ms
+        elif sql is hafsql._SQL_REPUTATIONS_FOR_AUTHORS:
+            seen["reputations"] = timeout_ms
+        return []
+
+    monkeypatch.setattr(hafsql.HafsqlClient, "_fetch_lite", fake_fetch_lite)
+    client = hafsql.HafsqlClient(HafsqlConfig())
+    rows = [("alice", "p1", "art", datetime(2026, 1, 1, tzinfo=UTC), ["art"], None)]
+    client._hydrate(rows, timeout_ms=1234)
+
+    assert seen == {"votes": 1234, "comments": 1234, "rebloggers": 1234, "reputations": 1234}, (
+        f"every hydrate sub-fetch must receive the SAME explicit timeout_ms, got {seen}"
+    )
+
+
 def test_tag_posts_sql_uses_the_jsonb_any_operator() -> None:
     """break #3 (live: ``UndefinedFunction: operator does not exist: jsonb &&
     unknown``): ``hafsql.comments.tags`` is ``jsonb``, not ``text[]`` — ``&&``
@@ -1012,6 +1258,63 @@ def test_pool_reuses_a_released_healthy_connection() -> None:
     assert conn2 is conn1
     assert len(created) == 1
     assert pool.connections_opened == 1
+
+
+def test_pool_reaps_an_idle_connection_older_than_idle_max_age_s() -> None:
+    """★★★ THIRD REVIEW FIX (2026-09-06). `_ConnPool` never closed an idle
+    connection before this — a pool that grew under a burst stayed at that
+    size forever. `idle_max_age_s` bounds that: a connection released and
+    left idle past it must be closed and NOT handed back out by a later
+    `borrow()`, above `min_size`."""
+    created: list[_FakeConn] = []
+
+    def connect() -> _FakeConn:
+        conn = _FakeConn()
+        created.append(conn)
+        return conn
+
+    # min_size=1, max_size=2: exactly ONE of the two idle connections can be
+    # reaped without going below the floor — the OLDER one (`first`,
+    # released first, therefore at the front of the LIFO idle stack).
+    pool = _pool(connect, min_size=1, max_size=2, idle_max_age_s=0.01)
+    first = pool.borrow()
+    second = pool.borrow()
+    pool.release(first, healthy=True)
+    pool.release(second, healthy=True)
+    time.sleep(0.05)  # both now well past idle_max_age_s
+
+    third = pool.borrow()
+
+    assert first.closed is True, "the older idle connection must be reaped and closed"
+    assert second.closed is False, "the newer idle connection must survive (at min_size)"
+    assert third is second, "borrow must hand back the surviving connection, not open a new one"
+    assert len(created) == 2, "no THIRD physical connection should have been opened"
+
+
+def test_pool_never_reaps_below_min_size() -> None:
+    """The floor is `min_size`, not zero — a reaper aggressive enough to
+    empty the pool during a lull would just reopen everything on the very
+    next request, which is worse than not reaping at all."""
+    created: list[_FakeConn] = []
+
+    def connect() -> _FakeConn:
+        conn = _FakeConn()
+        created.append(conn)
+        return conn
+
+    pool = _pool(connect, min_size=1, max_size=1, idle_max_age_s=0.01)
+    first = pool.borrow()
+    pool.release(first, healthy=True)
+    time.sleep(0.05)
+
+    second = pool.borrow()
+
+    assert second is first, (
+        "the ONLY idle connection sits at min_size and must never be reaped, "
+        "however old it is"
+    )
+    assert len(created) == 1
+    assert first.closed is False
 
 
 def test_pool_discards_an_unhealthy_connection_on_release() -> None:

@@ -93,7 +93,11 @@ def test_the_popularity_lane_excludes_banned_authors() -> None:
     assert "def _popular_excluded" in src
 
     body = src[src.index("def _popular_excluded") :]
-    body = body[: body.index("popular_pool = ")]
+    # ★ REVIEW FIX (2026-09-06): the marker gained a type annotation
+    # (`popular_pool: list[Post] = ...`, added alongside other `_lane_or_empty`
+    # call sites to satisfy mypy's inference on a bare-literal default) — match
+    # on the variable name alone so this slice point survives that.
+    body = body[: body.index("popular_pool")]
     # ★ COMMENTS STRIPPED FIRST. Without this the check passes on the explanatory
     # comment inside this very function, which NAMES `banned_authors()` while
     # describing the omission — proven by mutation: deleting the actual `|

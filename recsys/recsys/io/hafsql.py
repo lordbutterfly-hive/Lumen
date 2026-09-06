@@ -198,6 +198,21 @@ _ENV_DEFAULTS: dict[str, str] = {
     "RECSYS_DB_POOL_MIN": "1",
     "RECSYS_DB_POOL_MAX": "3",
     "HAFSQL_POPULAR_CACHE_TTL_S": "300",
+    # ★★★ C1 (RECSYS-LATENCY-BUILD-MAP-2026-09-06). `HAFSQL_STATEMENT_TIMEOUT_MS`
+    # is 900_000 in this deployment, deliberately — the trust/author-prior BATCH
+    # legitimately runs for minutes. That means NO request-path query is bounded
+    # at all beyond `_VOTE_HISTORY_TIMEOUT_MS`/`_FIRST_POST_TIMEOUT_MS`'s own
+    # explicit overrides, and a SET issued at connect time cannot save a request
+    # from a pooler that queues the whole session (measured live: one `SET
+    # statement_timeout` sat unanswered at the mirror's pooler for 81.4s while
+    # nothing this client controls was cancellable). This value is the default
+    # request-scoped bound every request-path fetch now carries — see
+    # `HafsqlClient._request_statement_timeout_ms` and its call sites
+    # (`in_network_posts`, `engaged_oon_posts`, `tag_posts`, the four hydrate
+    # fetches, `second_degree_engagers`, `popular_posts`, `suppressed_keys`).
+    # `<= 0` is the kill switch: it disables the override entirely, so those
+    # same calls fall back to the client-wide timeout — today's behaviour.
+    "RECSYS_REQUEST_STATEMENT_TIMEOUT_MS": "10000",
 }
 
 
@@ -214,6 +229,24 @@ class HafsqlUnavailableError(RuntimeError):
     consecutive CONNECTION failures in a row. Fails the request loudly and
     immediately rather than hanging through another round of retries against a
     database that is provably down."""
+
+
+class PoolExhaustedError(HafsqlUnavailableError):
+    """REVIEW FIX (2026-09-06). Raised by `_ConnPool.borrow` when every slot
+    is genuinely in use and none was released within `acquire_timeout_s` —
+    a DIFFERENT condition from the breaker being open (the base class
+    above): here the database itself may be perfectly healthy, it is only
+    this process's own local pool that is momentarily saturated.
+
+    A subclass, not a flag on the base error, so that `except
+    HafsqlUnavailableError` callers that do not care about the distinction
+    (e.g. an operator-facing "the store is unavailable" 503 handler) keep
+    working unchanged, while a caller that specifically wants to fall back
+    to one direct, unpooled connection for a single call — a reasonable
+    thing to do when the DB is fine and only the pool is full, and a WRONG
+    thing to do when the breaker is open (that would just retry against a
+    database already proven down, defeating the breaker's purpose) — can
+    catch this narrower type first."""
 
 
 def _as_aware(ts: datetime) -> datetime:
@@ -485,6 +518,85 @@ WHERE {_top_level_or_lite("c")}
 ORDER BY c.created DESC
 LIMIT %(limit)s
 """
+
+# ★★★ Q2 (RECSYS-LATENCY-BUILD-MAP-2026-09-06) — TIME-BOUND BOTH EXISTS.
+#
+# `_SQL_ENGAGED_OON_POSTS` above bounds the CANDIDATE post by `c.created >=
+# since`, but neither EXISTS carries any time bound of its own, so the
+# planner materialises a subplan over EVERY reblog/reply the viewer's follows
+# have EVER made before joining it against the (already time-bounded)
+# candidate rows. Measured live 2026-09-06: hbd-temp (19 follows) 9.15s — the
+# reblog EXISTS alone materialised 62,112 reblog rows by those 19 accounts,
+# ever, 59,689 after joins, 8.4s of read I/O — while gtg (847 follows) hit a
+# different, fast plan at 52ms and never showed the problem at all.
+#
+# This adds `AND (r.created_at IS NULL OR r.created_at >= %(since)s)` /
+# the same shape for `rc."timestamp"` inside each EXISTS, so the planner can
+# bound the SUBPLAN by time too, not just the outer candidate. Measured the
+# same day: hbd-temp 2.21s (4x), gtg unchanged at 52ms. `since` is already
+# computed and passed by every caller (`engaged_oon_posts` below) — this
+# needs no new parameter.
+#
+# ★★★ REVIEW FIX (2026-09-06) — THE NULL CASE. A bare `r.created_at >=
+# %(since)s` is not equivalent to the unbounded V1 query: SQL's three-valued
+# logic makes `NULL >= since` evaluate to NULL (neither true nor false), so a
+# reblog/reply row with a NULL timestamp column would be SILENTLY DROPPED by
+# the bound while V1's unbounded EXISTS kept it (an unbounded EXISTS has no
+# comparison to fail). Whether `hafsql.reblogs.created_at` or
+# `operation_comment_view."timestamp"` can ever be NULL is NOT something this
+# builder can verify against the live mirror from here (no live access this
+# session) — so both use the NULL-safe form below, at essentially zero extra
+# cost (the planner already visits the row to evaluate the first condition),
+# rather than assume NOT NULL and risk quietly narrowing this lane's results
+# relative to the query it is supposed to be a pure speed-up of.
+#
+# EXACTNESS (for every NON-NULL row), not a heuristic tightening: a reblog or
+# reply that TARGETS a post created after `since` necessarily itself happened
+# after `since` (you cannot reblog or reply to a post before it exists), so
+# bounding the EXISTS by the same `since` the candidate is already bounded by
+# can never exclude a NON-NULL row the unbounded query would have kept, and
+# the `IS NULL` branch keeps every NULL row exactly as V1 did. Proven live
+# (2026-09-06, no NULL rows encountered in that data): identical 29 rows for
+# hbd-temp both ways (`EXCEPT` empty in both directions) — the NULL branch
+# itself is a correctness argument, not something exercised by that proof.
+_SQL_ENGAGED_OON_POSTS_V2 = f"""
+SELECT DISTINCT c.author, c.permlink, c.category, c.created, c.tags,
+       c.json_metadata->>'lumen_user_id'
+FROM hafsql.comments c
+WHERE {_top_level_or_lite("c")}
+  AND c.deleted = false
+  AND {_identity("c")} <> ALL(%(follows)s)
+  AND c.created >= %(since)s
+  AND (
+    EXISTS (
+        SELECT 1 FROM hafsql.reblogs r
+        WHERE r.author = c.author AND r.permlink = c.permlink
+          AND r.account_name = ANY(%(follows)s)
+          AND (r.created_at IS NULL OR r.created_at >= %(since)s)
+    )
+    OR EXISTS (
+        SELECT 1 FROM hafsql.operation_comment_view rc
+        WHERE rc.parent_author = c.author AND rc.parent_permlink = c.permlink
+          AND rc.author = ANY(%(follows)s)
+          AND (rc."timestamp" IS NULL OR rc."timestamp" >= %(since)s)
+    )
+  )
+ORDER BY c.created DESC
+LIMIT %(limit)s
+"""
+
+
+def _oon_time_bound_enabled() -> bool:
+    """``RECSYS_OON_TIME_BOUND`` — build map Q2. Defaults ON: the bound is
+    EXACT (see :data:`_SQL_ENGAGED_OON_POSTS_V2`'s own comment for the proof)
+    and reuses the `since` value every caller already computes — not a new
+    behaviour, a strictly cheaper plan for an identical row set. ``0``/
+    ``false``/``no``/``off`` is the kill switch back to the unbounded EXISTS.
+    Same default-on/opt-out polarity as ``RECSYS_RING_DETECTION``
+    (``recsys/config.py``) and Q1's ``RECSYS_VOTE_HISTORY_V2`` above."""
+    raw = os.environ.get("RECSYS_OON_TIME_BOUND", "").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
 
 # ---------------------------------------------------------------------------
 # SQL — per-post hydration, batched over a page of (author, permlink) keys via
@@ -1670,6 +1782,23 @@ def _build_post(
     )
 
 
+#: THIRTEENTH REVIEW FIX (2026-09-06). `_ConnPool` retained every idle
+#: connection forever — nothing ever closed one once opened, so a pool that
+#: grew to `max_size` under a traffic burst STAYED there indefinitely, one
+#: request thread's single borrowed-at-a-time connection notwithstanding.
+#: Two `RECSYS_LOCAL_POOL_MAX=16` pools (`lite_engagement`, `seen_log`) could
+#: therefore pin up to 32 permanent backends on Lumen's OWN Postgres, where
+#: none were retained at all before L1. This bounds how long an idle
+#: connection may sit before a later `borrow()` closes it instead of reusing
+#: it, never below `min_size`. 120s is a judgment call, not a measurement:
+#: long enough that a normal request cadence never sees a reap-then-reconnect
+#: (this project has no live traffic data on inter-request gaps for either
+#: local-Postgres reader to size it more precisely against), short enough
+#: that a burst's excess connections do not linger for the life of the
+#: process the way they did before this fix existed at all.
+_DEFAULT_POOL_IDLE_MAX_AGE_S = 120.0
+
+
 class _ConnPool:
     """A minimal thread-safe pool of ``psycopg`` connections to ONE DSN target.
 
@@ -1694,6 +1823,13 @@ class _ConnPool:
     immediately — fail loudly rather than hang through more retries against a
     database that is provably down — until ``breaker_cooldown_s`` elapses,
     at which point one probe connection is allowed through (half-open).
+
+    Idle reaping (2026-09-06): connections idle longer than ``idle_max_age_s``
+    are closed on a later ``borrow()`` rather than reused, down to but never
+    below ``min_size`` — see :data:`_DEFAULT_POOL_IDLE_MAX_AGE_S`. Checked
+    lazily inside ``borrow()``, not on a background thread/timer: this class
+    owns no thread today and a reap-on-borrow is sufficient (a pool nobody is
+    borrowing from is a pool putting no load on anything either).
     """
 
     def __init__(
@@ -1707,6 +1843,7 @@ class _ConnPool:
         breaker_threshold: int,
         breaker_cooldown_s: float,
         acquire_timeout_s: float | None = None,
+        idle_max_age_s: float = _DEFAULT_POOL_IDLE_MAX_AGE_S,
     ) -> None:
         self._connect = connect
         self._min_size = max(0, min_size)
@@ -1720,12 +1857,19 @@ class _ConnPool:
             if acquire_timeout_s is not None
             else _env_float("HAFSQL_POOL_ACQUIRE_TIMEOUT_S")
         )
+        self._idle_max_age_s = idle_max_age_s
 
         self._lock = threading.Lock()
         #: ★ B4b — capacity signal. Waiters block here when every slot is in
         #: use; `release`/`closeall`/a failed open all notify.
         self._cond = threading.Condition(self._lock)
-        self._idle: list[psycopg.Connection[Any]] = []
+        #: Each entry is ``(connection, monotonic time it became idle)`` — the
+        #: timestamp is what the idle-reaping in `borrow()` ages against.
+        #: Appended in `release()`/`_warm_up()`, always at the END (this list
+        #: is a stack: `borrow()` pops the most-recently-released connection
+        #: first, so whatever sits at the FRONT is whatever has gone longest
+        #: without being reused — exactly what reaping should evict first).
+        self._idle: list[tuple[psycopg.Connection[Any], float]] = []
         #: ★ B4b — PHYSICAL connections currently in existence (idle + checked
         #: out). This, not `len(self._idle)`, is what `max_size` now bounds.
         #: Before B4b `max_size` gated only whether a RETURNED connection was
@@ -1807,6 +1951,31 @@ class _ConnPool:
                 self.connections_opened += 1
                 return conn
 
+    def _reap_idle_locked(self) -> list[psycopg.Connection[Any]]:
+        """Evict idle connections older than ``idle_max_age_s``, from the
+        STALE (front/oldest) end of ``self._idle``, never taking ``self.
+        _live`` below ``self._min_size``. Must be called WITH ``self._cond``
+        held; returns the evicted connections for the CALLER to close outside
+        the lock (see `borrow`'s own comment on why).
+        """
+        now = time.monotonic()
+        evicted: list[psycopg.Connection[Any]] = []
+        while (
+            self._idle
+            and self._live > self._min_size
+            and now - self._idle[0][1] >= self._idle_max_age_s
+        ):
+            conn, _idle_since = self._idle.pop(0)
+            evicted.append(conn)
+            self._live -= 1
+        if evicted:
+            # A reap frees capacity exactly like a release does — wake a
+            # waiter blocked in `borrow()`'s wait loop so it can claim the
+            # newly-available slot instead of sitting out the rest of its
+            # `acquire_timeout_s`.
+            self._cond.notify_all()
+        return evicted
+
     def borrow(self) -> psycopg.Connection[Any]:
         """Hand out a pooled connection, opening one only if the pool is below
         ``max_size``, and WAITING (not opening) when it is at capacity.
@@ -1822,9 +1991,16 @@ class _ConnPool:
         """
         deadline = time.monotonic() + self._acquire_timeout_s
         with self._cond:
+            reaped = self._reap_idle_locked()
+        for conn in reaped:
+            # Closed OUTSIDE the lock, same discipline as `release`/`closeall`
+            # below — a socket close must never hold the capacity mutex.
+            with contextlib.suppress(Exception):
+                conn.close()
+        with self._cond:
             while True:
                 while self._idle:
-                    conn = self._idle.pop()
+                    conn, _idle_since = self._idle.pop()
                     if not conn.closed:
                         return conn
                     # Dead idle connection (e.g. server-side timeout). It no
@@ -1838,7 +2014,12 @@ class _ConnPool:
                     break
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise HafsqlUnavailableError(
+                    # `PoolExhaustedError`, not the base `HafsqlUnavailableError`
+                    # — see that class's own docstring. This is genuine local
+                    # exhaustion (every slot in use, none released in time),
+                    # not the breaker being open, and callers need to be able
+                    # to tell the two apart.
+                    raise PoolExhaustedError(
                         f"connection pool exhausted: {self._max_size} in use and none "
                         f"released within {self._acquire_timeout_s}s"
                     )
@@ -1884,7 +2065,7 @@ class _ConnPool:
                 return
             with self._cond:
                 if len(self._idle) < self._max_size:
-                    self._idle.append(conn)
+                    self._idle.append((conn, time.monotonic()))
                     self._cond.notify()
                     continue
             self._free_slot()
@@ -1897,7 +2078,7 @@ class _ConnPool:
             if healthy and not conn.closed and len(self._idle) < self._max_size:
                 # Still live, now reusable: the slot stays claimed, but a waiter
                 # can take this exact connection off the idle list.
-                self._idle.append(conn)
+                self._idle.append((conn, time.monotonic()))
                 self._cond.notify()
                 return
             # About to be closed -> the slot is genuinely freed.
@@ -1912,7 +2093,7 @@ class _ConnPool:
             idle, self._idle = self._idle, []
             self._live -= len(idle)
             self._cond.notify_all()
-        for conn in idle:
+        for conn, _idle_since in idle:
             with contextlib.suppress(Exception):
                 conn.close()
 
@@ -1937,6 +2118,7 @@ class HafsqlClient:
         breaker_cooldown_s: float | None = None,
         recsys_pool_min: int | None = None,
         recsys_pool_max: int | None = None,
+        request_statement_timeout_ms: int | None = None,
     ) -> None:
         self._config = config
         # Lumen Lite reachability. An explicit `lite=` kwarg always wins,
@@ -1975,6 +2157,20 @@ class HafsqlClient:
             statement_timeout_ms
             if statement_timeout_ms is not None
             else _env_int("HAFSQL_STATEMENT_TIMEOUT_MS")
+        )
+        # C1 (2026-09-06): the request-scoped bound every request-path fetch
+        # carries — see `_ENV_DEFAULTS["RECSYS_REQUEST_STATEMENT_TIMEOUT_MS"]`'s
+        # own comment. Resolved to `None` (meaning "no override — inherit
+        # `_statement_timeout_ms`") whenever the resolved value is `<= 0`, so
+        # both an explicit `request_statement_timeout_ms=0` and
+        # `RECSYS_REQUEST_STATEMENT_TIMEOUT_MS=0` are the kill switch.
+        _resolved_request_timeout_ms = (
+            request_statement_timeout_ms
+            if request_statement_timeout_ms is not None
+            else _env_int("RECSYS_REQUEST_STATEMENT_TIMEOUT_MS")
+        )
+        self._request_statement_timeout_ms: int | None = (
+            _resolved_request_timeout_ms if _resolved_request_timeout_ms > 0 else None
         )
         _max_retries = max_retries if max_retries is not None else _env_int("HAFSQL_MAX_RETRIES")
         _retry_backoff_s = (
@@ -2131,16 +2327,23 @@ class HafsqlClient:
         the only way to hold both without a second client."""
         return self._fetch_via(self._pool, sql, params, timeout_ms=timeout_ms)
 
-    def _fetch_recsys(self, sql: str, params: dict[str, Any]) -> list[tuple[Any, ...]]:
+    def _fetch_recsys(
+        self, sql: str, params: dict[str, Any], *, timeout_ms: int | None = None
+    ) -> list[tuple[Any, ...]]:
         """Execute one parameterized, read-only query against the recsys DB
         (A15), on its own pooled connection. Returns ``[]`` without opening a
         connection when no DSN is configured — the caller decides whether
         that absence is worth a WARNING (some callers, like
         ``suppressed_keys``, already logged one; others build an exclusion
-        list where empty is silently the correct degrade)."""
+        list where empty is silently the correct degrade).
+
+        ``timeout_ms`` (C1, 2026-09-06): ``None`` (the default) leaves every
+        caller at the client-wide timeout, unchanged — only ``suppressed_keys``
+        passes the request-scoped override; ``author_engagement``'s own
+        suppression pre-check is out of C1's scope and stays as it was."""
         if not self._recsys_dsn:
             return []
-        return self._fetch_via(self._recsys_pool, sql, params)
+        return self._fetch_via(self._recsys_pool, sql, params, timeout_ms=timeout_ms)
 
     def _fetch_via(
         self,
@@ -2207,9 +2410,13 @@ class HafsqlClient:
             pool.release(conn, healthy=healthy)
 
     def _votes_for_posts(
-        self, authors: list[str], permlinks: list[str]
+        self, authors: list[str], permlinks: list[str], *, timeout_ms: int | None = None
     ) -> dict[tuple[str, str], list[Vote]]:
-        rows = self._fetch_lite(_SQL_VOTES_FOR_POSTS, {"authors": authors, "permlinks": permlinks})
+        rows = self._fetch_lite(
+            _SQL_VOTES_FOR_POSTS,
+            {"authors": authors, "permlinks": permlinks},
+            timeout_ms=timeout_ms,
+        )
         grouped: dict[tuple[str, str], list[Vote]] = {}
         for author, permlink, voter, rshares, timestamp in rows:
             grouped.setdefault((author, permlink), []).append(
@@ -2227,7 +2434,7 @@ class HafsqlClient:
         return grouped
 
     def _comments_for_posts(
-        self, authors: list[str], permlinks: list[str]
+        self, authors: list[str], permlinks: list[str], *, timeout_ms: int | None = None
     ) -> dict[tuple[str, str], dict[str, int]]:
         """Per-post commenter attribution: ``{key: {commenter: comment_count}}``.
 
@@ -2237,7 +2444,9 @@ class HafsqlClient:
         chain ``(author, permlink)``, which is what the rows are stored under.
         """
         rows = self._fetch_lite(
-            _SQL_COMMENTS_FOR_POSTS, {"authors": authors, "permlinks": permlinks}
+            _SQL_COMMENTS_FOR_POSTS,
+            {"authors": authors, "permlinks": permlinks},
+            timeout_ms=timeout_ms,
         )
         grouped: dict[tuple[str, str], dict[str, int]] = {}
         for author, permlink, commenter, count in rows:
@@ -2245,11 +2454,13 @@ class HafsqlClient:
         return grouped
 
     def _rebloggers_for_posts(
-        self, authors: list[str], permlinks: list[str]
+        self, authors: list[str], permlinks: list[str], *, timeout_ms: int | None = None
     ) -> dict[tuple[str, str], tuple[str, ...]]:
         """Per-post reblogger attribution: ``{key: (distinct account names)}``."""
         rows = self._fetch_lite(
-            _SQL_REBLOGGERS_FOR_POSTS, {"authors": authors, "permlinks": permlinks}
+            _SQL_REBLOGGERS_FOR_POSTS,
+            {"authors": authors, "permlinks": permlinks},
+            timeout_ms=timeout_ms,
         )
         grouped: dict[tuple[str, str], set[str]] = {}
         for author, permlink, account in rows:
@@ -2278,27 +2489,51 @@ class HafsqlClient:
         names = list({a for a in accounts if a})
         if not names:
             return {}
+        # C1 (2026-09-06): `reputations_for` — unlike `_reputations_for_authors`,
+        # which `_hydrate` also calls from the BACKGROUND `window_posts` builder
+        # (norm rebuild, every 30 min, must keep the 900s batch timeout) — has
+        # exactly one production caller, `pipeline.py`'s request-time popular-
+        # lane engager weighting, so it is safe to apply the request-scoped
+        # timeout unconditionally here rather than threading it through a
+        # caller that must never see it.
         return {
             name: _reputation_display(raw)
-            for name, raw in self._reputations_for_authors(names).items()
+            for name, raw in self._reputations_for_authors(
+                names, timeout_ms=self._request_statement_timeout_ms
+            ).items()
         }
 
-    def _reputations_for_authors(self, authors: list[str]) -> dict[str, int]:
-        rows = self._fetch_lite(_SQL_REPUTATIONS_FOR_AUTHORS, {"authors": authors})
+    def _reputations_for_authors(
+        self, authors: list[str], *, timeout_ms: int | None = None
+    ) -> dict[str, int]:
+        rows = self._fetch_lite(
+            _SQL_REPUTATIONS_FOR_AUTHORS, {"authors": authors}, timeout_ms=timeout_ms
+        )
         return dict(rows)
 
-    def _hydrate(self, rows: list[tuple[Any, ...]]) -> list[Post]:
+    def _hydrate(
+        self, rows: list[tuple[Any, ...]], *, timeout_ms: int | None = None
+    ) -> list[Post]:
         """Batch-fetch votes/commenters/rebloggers/reputation for a page of
         posts — comment and reblog identity included, so every hydrated post is
-        an :class:`AttributedPost` the organic term can exclusion-filter."""
+        an :class:`AttributedPost` the organic term can exclusion-filter.
+
+        ``timeout_ms`` (C1, 2026-09-06): ``None`` (the default) leaves every
+        sub-fetch at the client-wide ``HAFSQL_STATEMENT_TIMEOUT_MS`` — the
+        BACKGROUND `window_posts` builder (norm rebuild) calls this with no
+        override and must keep that 900s batch bound. Every REQUEST-PATH lane
+        (`in_network_posts`/`engaged_oon_posts`/`tag_posts`/`popular_posts`)
+        passes its own `_request_statement_timeout_ms` explicitly instead."""
         if not rows:
             return []
         authors = [row[0] for row in rows]
         permlinks = [row[1] for row in rows]
-        votes = self._votes_for_posts(authors, permlinks)
-        comments = self._comments_for_posts(authors, permlinks)
-        rebloggers = self._rebloggers_for_posts(authors, permlinks)
-        reputations = self._reputations_for_authors(list(dict.fromkeys(authors)))
+        votes = self._votes_for_posts(authors, permlinks, timeout_ms=timeout_ms)
+        comments = self._comments_for_posts(authors, permlinks, timeout_ms=timeout_ms)
+        rebloggers = self._rebloggers_for_posts(authors, permlinks, timeout_ms=timeout_ms)
+        reputations = self._reputations_for_authors(
+            list(dict.fromkeys(authors)), timeout_ms=timeout_ms
+        )
         lite_rebloggers: dict[tuple[str, str], tuple[str, ...]] = {}
         self._merge_lite_engagement(
             votes, lite_rebloggers, list(zip(authors, permlinks, strict=True))
@@ -2352,10 +2587,17 @@ class HafsqlClient:
         # `_top_level_or_lite()`'s `%(lite_publishers)s`/`%(lite_app)s`
         # placeholders at import time — they must be bound even with lite off,
         # or psycopg raises `query parameter missing`. Must be `_fetch_lite`.
+        #
+        # C1 (2026-09-06): a REQUEST-PATH lane, so it gets the request-scoped
+        # statement timeout (far below the 900s batch/warm default) — see
+        # `_request_statement_timeout_ms`'s own comment.
+        timeout_ms = self._request_statement_timeout_ms
         rows = self._fetch_lite(
-            _SQL_IN_NETWORK_POSTS, {"authors": list(follows), "since": since, "limit": limit}
+            _SQL_IN_NETWORK_POSTS,
+            {"authors": list(follows), "since": since, "limit": limit},
+            timeout_ms=timeout_ms,
         )
-        return self._hydrate(rows)
+        return self._hydrate(rows, timeout_ms=timeout_ms)
 
     def engaged_oon_posts(
         self, follows: frozenset[str], since: datetime, limit: int
@@ -2365,22 +2607,29 @@ class HafsqlClient:
         if not follows:
             return []
         # break #2 (verified live 2026-08-04): same cause as break #1 above.
+        # Q2 (2026-09-06): the V2 SQL adds a `since` bound inside both EXISTS —
+        # see `_SQL_ENGAGED_OON_POSTS_V2`'s own comment for the equivalence
+        # proof. Same `since`/`follows`/`limit` params either way.
+        sql = _SQL_ENGAGED_OON_POSTS_V2 if _oon_time_bound_enabled() else _SQL_ENGAGED_OON_POSTS
+        timeout_ms = self._request_statement_timeout_ms
         rows = self._fetch_lite(
-            _SQL_ENGAGED_OON_POSTS, {"follows": list(follows), "since": since, "limit": limit}
+            sql, {"follows": list(follows), "since": since, "limit": limit}, timeout_ms=timeout_ms
         )
         return [
             Candidate(post=post, source=CandidateSource.OON_ENGAGED)
-            for post in self._hydrate(rows)
+            for post in self._hydrate(rows, timeout_ms=timeout_ms)
         ]
 
     def tag_posts(self, tags: frozenset[str], since: datetime, limit: int) -> list[Post]:
         """Recent posts carrying any of the given tags (§13.1)."""
         if not tags:
             return []
+        timeout_ms = self._request_statement_timeout_ms
         rows = self._fetch_lite(
-            _SQL_TAG_POSTS, {"tags": list(tags), "since": since, "limit": limit}
+            _SQL_TAG_POSTS, {"tags": list(tags), "since": since, "limit": limit},
+            timeout_ms=timeout_ms,
         )
-        return self._hydrate(rows)
+        return self._hydrate(rows, timeout_ms=timeout_ms)
 
     def window_posts(self, since: datetime, limit: int) -> list[Post]:
         """A5: ALL (top-level + lite) posts created since ``since``, ordered by
@@ -2610,9 +2859,11 @@ class HafsqlClient:
         if not post_keys or not follows:
             return {}
         authors, permlinks, reverse = _resolve_post_keys(post_keys, chain_authors)
+        # C1 (2026-09-06): request-path only — see `in_network_posts`'s comment.
         rows = self._fetch(
             _SQL_SECOND_DEGREE_ENGAGERS,
             {"authors": authors, "permlinks": permlinks, "follows": list(follows)},
+            timeout_ms=self._request_statement_timeout_ms,
         )
         grouped: dict[str, set[str]] = {}
         for author, permlink, engager in rows:
@@ -2635,11 +2886,16 @@ class HafsqlClient:
         it runs on a daemon thread with no one to catch it, and a failed refresh
         must leave the existing stale entry in place rather than clear it."""
         try:
+            # C1 (2026-09-06): a request-triggered background refill of a
+            # request-serving cache — still holds a mirror pool slot, so it
+            # gets the same request-scoped timeout the blocking miss below does.
+            timeout_ms = self._request_statement_timeout_ms
             rows = self._fetch_lite(
                 _SQL_POPULAR_POSTS,
                 {"since": since, "limit": limit, "per_author": _POPULAR_MAX_PER_AUTHOR},
+                timeout_ms=timeout_ms,
             )
-            posts = self._hydrate(rows)
+            posts = self._hydrate(rows, timeout_ms=timeout_ms)
             with self._popular_cache_lock:
                 self._popular_cache[key] = (time.monotonic(), posts)
         except Exception:
@@ -2727,11 +2983,14 @@ class HafsqlClient:
         # needs 75 distinct authors rather than one account posting every five
         # minutes. Not 1: a genuinely huge day for one author (a post and its
         # follow-up) is real and should not be silently halved.
+        # C1 (2026-09-06): the blocking cold-miss path — request-path only.
+        timeout_ms = self._request_statement_timeout_ms
         rows = self._fetch_lite(
             _SQL_POPULAR_POSTS,
             {"since": since, "limit": limit, "per_author": _POPULAR_MAX_PER_AUTHOR},
+            timeout_ms=timeout_ms,
         )
-        posts = self._hydrate(rows)
+        posts = self._hydrate(rows, timeout_ms=timeout_ms)
         with self._popular_cache_lock:
             self._popular_cache[key] = (now, posts)
         return posts
@@ -2909,8 +3168,11 @@ class HafsqlClient:
             self._warn_missing_recsys_dsn_once()
             return frozenset()
         authors, permlinks, reverse = _resolve_post_keys(post_keys, chain_authors)
+        # C1 (2026-09-06): request-path only — see `in_network_posts`'s comment.
         rows = self._fetch_recsys(
-            _SQL_SUPPRESSED_KEYS, {"authors": authors, "permlinks": permlinks}
+            _SQL_SUPPRESSED_KEYS,
+            {"authors": authors, "permlinks": permlinks},
+            timeout_ms=self._request_statement_timeout_ms,
         )
         return frozenset(
             reverse.get((author, permlink), f"@{author}/{permlink}") for author, permlink in rows

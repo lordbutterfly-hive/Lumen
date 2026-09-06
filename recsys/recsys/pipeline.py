@@ -19,6 +19,7 @@ from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequenc
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from typing import TypeVar
 
 from recsys.config import DEFAULT_SETTINGS, MIN_TRUSTED_SEEDS, ScoreWeights, Settings
 from recsys.contracts import (
@@ -888,6 +889,84 @@ def _enforce_protected_head(
     return ranked
 
 
+# ---------------------------------------------------------------------------
+# C1 REVIEW FIX (2026-09-06) — per-lane isolation against the new request-path
+# statement timeout (`HafsqlClient._request_statement_timeout_ms`, default
+# 10s). Before this, NONE of the direct `gateway.*` calls below were wrapped:
+# a QueryCanceled from any ONE lane propagated all the way up through
+# `rank_feed` into `build_feed`'s outer handler as a 503 for the WHOLE
+# request. That was tolerable at the 900s global timeout (a query either
+# finished or the request was already a lost cause), but at a 10s request
+# bound it is not: a lane that legitimately takes 12s and would have
+# SUCCEEDED under the old 900s ceiling now 503s a feed that could otherwise
+# have served with one lane missing. `_lane_or_empty` restores the posture
+# `select_popular`'s own reputation-tilt comment already promises ("a
+# gateway that cannot answer ... must give a degraded lane, never no feed at
+# all") and extends it to every direct gateway call in this function.
+T = TypeVar("T")
+
+# EIGHTH REVIEW FIX (2026-09-06). Per-lane failure bookkeeping for
+# `_lane_or_empty`, below. Process-local, not thread-safe by design — same
+# posture as `_EventCounter` above: an approximate count under a rare race is
+# an acceptable price for not putting a lock in every request's hot path, and
+# this dict only ever grows by one small int entry per lane name (bounded by
+# the fixed number of call sites, not by request volume).
+_LANE_FAILURE_COUNTS: dict[str, int] = {}
+
+
+def _reset_lane_failure_counts_for_tests() -> None:
+    """Test seam — see `_LANE_FAILURE_COUNTS`'s own comment."""
+    _LANE_FAILURE_COUNTS.clear()
+
+
+def _lane_or_empty(name: str, viewer_account: str, fn: Callable[[], T], default: T) -> T:
+    try:
+        return fn()
+    except (TypeError, KeyError, AttributeError, NameError):
+        # NINTH REVIEW FIX (2026-09-06). These are PROGRAMMER errors — a bug
+        # in THIS code (a bad key, a bad attribute access, a wrong type
+        # threaded through, a typo'd name) — not an operational failure of
+        # the gateway. The old bare `except Exception` swallowed these
+        # exactly like a `QueryCanceled`: a real bug in a lane degraded
+        # silently to an empty lane and a 200 for every viewer, which is
+        # worse than the 500 it should have been — nothing would ever
+        # surface the bug short of someone noticing a lane is always empty.
+        # Re-raise so a programmer error fails loudly, the way it does
+        # everywhere else in this codebase.
+        raise
+    except Exception:
+        # TENTH REVIEW FIX (2026-09-06). The first failure for a given lane,
+        # in this process, still gets the full traceback (`exc_info=True`) —
+        # an operator needs that to diagnose it. Every subsequent failure for
+        # the SAME lane, in the SAME process, is a one-line WARNING with a
+        # running count instead: a stalled mirror used to write a full
+        # traceback per lane PER REQUEST for as long as the stall lasted,
+        # which is a logging-volume incident stacked on top of the one it is
+        # trying to report.
+        count = _LANE_FAILURE_COUNTS.get(name, 0) + 1
+        _LANE_FAILURE_COUNTS[name] = count
+        if count == 1:
+            logger.warning(
+                "gather_candidates: %s lane failed for viewer=%s (statement timeout "
+                "or a mirror/connection error) — degrading this lane to empty so "
+                "the rest of the feed still serves.",
+                name,
+                viewer_account,
+                exc_info=True,
+            )
+        else:
+            logger.warning(
+                "gather_candidates: %s lane failed again for viewer=%s (%d failures "
+                "this process for this lane) — degrading this lane to empty so the "
+                "rest of the feed still serves. Traceback suppressed after the "
+                "first occurrence; see the earlier log line for this lane.",
+                name,
+                viewer_account,
+                count,
+            )
+        return default
+
+
 def gather_candidates(
     viewer: ViewerProfile,
     gateway: HafsqlGateway,
@@ -959,10 +1038,31 @@ def gather_candidates(
             "1-2) to stop this from being the steady-state path.",
             viewer.account,
         )
+    # C1 review fix (2026-09-06): `_lane_or_empty` — flagged as an unwrapped
+    # residual risk in the first review pass (CHANGES-2026-09-06.md: "tag_posts
+    # inside core/coldstart.py's interest-lane helpers"), now closed. Both
+    # helpers below call `gateway.tag_posts`, which runs for EVERY viewer (cold
+    # or established) — unlike the other lanes, this one has no `if` gating it
+    # out for some viewers, so an unwrapped statement-timeout here would 503
+    # every feed, not just a subset.
     if not viewer.follows:
-        groups.append(interest_candidates(viewer, gateway, since, limit, settings.cold_start))
+        groups.append(
+            _lane_or_empty(
+                "interest_cold",
+                viewer.account,
+                lambda: interest_candidates(viewer, gateway, since, limit, settings.cold_start),
+                [],
+            )
+        )
     else:
-        groups.append(established_interest_candidates(viewer, gateway, since, limit))
+        groups.append(
+            _lane_or_empty(
+                "interest_established",
+                viewer.account,
+                lambda: established_interest_candidates(viewer, gateway, since, limit),
+                [],
+            )
+        )
 
     if viewer.follows:
         # ★ THE VIEWER'S OWN FOLLOWS GET THEIR OWN, WIDER WINDOW (2026-08-03).
@@ -981,19 +1081,27 @@ def gather_candidates(
             - settings.history.sourcing_freshness_days,
         )
         in_network_since = since - timedelta(days=extra_days) if extra_days else since
+        # ★ Muted follows do not spend the recall budget (2026-08-24).
+        # Their posts were fetched and then discarded by
+        # `filter_eligible`, so every muted follow's post displaced a
+        # wanted follow's post from the `limit` before scoring ever ran.
+        # Dropping them at the source is behaviour-neutral for what is
+        # SERVED and strictly frees budget for follows the viewer wants.
+        #
+        # C1 review fix (2026-09-06): `_lane_or_empty` — a statement-timeout
+        # on this lane alone must not 503 the whole feed. See that helper's
+        # own comment.
+        _viewer_follows_minus_mutes = viewer.follows - viewer.mutes
+        in_network_posts: list[Post] = _lane_or_empty(
+            "in_network",
+            viewer.account,
+            lambda: gateway.in_network_posts(
+                _viewer_follows_minus_mutes, in_network_since, limit
+            ),
+            [],
+        )
         groups.append(
-            [
-                Candidate(post=p, source=CandidateSource.IN_NETWORK)
-                # ★ Muted follows do not spend the recall budget (2026-08-24).
-                # Their posts were fetched and then discarded by
-                # `filter_eligible`, so every muted follow's post displaced a
-                # wanted follow's post from the `limit` before scoring ever ran.
-                # Dropping them at the source is behaviour-neutral for what is
-                # SERVED and strictly frees budget for follows the viewer wants.
-                for p in gateway.in_network_posts(
-                    viewer.follows - viewer.mutes, in_network_since, limit
-                )
-            ]
+            [Candidate(post=p, source=CandidateSource.IN_NETWORK) for p in in_network_posts]
         )
         # ★★★ MUTED FOLLOWS DO NOT CURATE THIS FEED (2026-08-24). This lane is
         # "posts my follows engaged with" — so an account the viewer muted was
@@ -1001,9 +1109,13 @@ def gather_candidates(
         # posts never touched their power to pull OTHER posts in. Muting is a
         # request to stop hearing from someone, and their curation IS hearing
         # from them.
-        groups.append(
-            list(gateway.engaged_oon_posts(viewer.follows - viewer.mutes, since, limit))
+        engaged_oon_posts: list[Candidate] = _lane_or_empty(
+            "engaged_oon",
+            viewer.account,
+            lambda: gateway.engaged_oon_posts(viewer.follows - viewer.mutes, since, limit),
+            [],
         )
+        groups.append(list(engaged_oon_posts))
 
     # ★ OON_ALS PRODUCER (2026-08-01). This source was declared, prioritised and
     # gated but emitted by NOTHING, so collaborative filtering could only
@@ -1028,11 +1140,14 @@ def gather_candidates(
     ):
         top_authors = _cf_source_authors(viewer, snapshot, settings.als.als_source_authors)
         if top_authors:
+            oon_als_posts: list[Post] = _lane_or_empty(
+                "oon_als",
+                viewer.account,
+                lambda: gateway.in_network_posts(top_authors, since, limit),
+                [],
+            )
             groups.append(
-                [
-                    Candidate(post=p, source=CandidateSource.OON_ALS)
-                    for p in gateway.in_network_posts(top_authors, since, limit)
-                ]
+                [Candidate(post=p, source=CandidateSource.OON_ALS) for p in oon_als_posts]
             )
 
     # ★★★ THE ACROSS-HIVE POPULARITY LANE (2026-08-08). Sourced for EVERY
@@ -1095,7 +1210,14 @@ def gather_candidates(
                 | viewer.mutes
             )
 
-        popular_pool = gateway.popular_posts(since, settings.popular.source_limit)
+        # C1 review fix (2026-09-06): degrade to an EMPTY popular lane on
+        # failure rather than 503ing the whole feed — `_lane_or_empty`.
+        popular_pool: list[Post] = _lane_or_empty(
+            "popular",
+            viewer.account,
+            lambda: gateway.popular_posts(since, settings.popular.source_limit),
+            [],
+        )
         # ★ 2026-08-09: the lane weights each commenter/reblogger by on-chain
         # reputation (owner's >=60 rule). Those identities are NOT the post
         # authors, so nothing upstream has fetched them — one batched lookup
@@ -1110,9 +1232,21 @@ def gather_candidates(
         # degraded read) must give an unranked-by-reputation lane, never no feed
         # at all. Missing reps make `_rep_tilt` return 1.0 uniformly, which is
         # exactly "nobody gets a bonus" — the honest degradation.
+        #
+        # ★ C1 REVIEW FIX (2026-09-06). This comment used to be a PROMISE with
+        # no enforcement behind it for the case that actually matters: the
+        # `getattr`/`callable` guard only covers a gateway that does not
+        # IMPLEMENT `reputations_for` (a simulator, an old fake) — it did
+        # nothing for a REAL gateway whose call raises (a statement timeout,
+        # a connection error), which propagated straight past this comment
+        # into a 503 for the whole feed. `_lane_or_empty` now covers both.
         _reps_for = getattr(gateway, "reputations_for", None)
-        popular_reps = (
-            _reps_for(sorted(engagers)) if engagers and callable(_reps_for) else {}
+        popular_reps: dict[str, float] = (
+            _lane_or_empty(
+                "popular_reputations", viewer.account, lambda: _reps_for(sorted(engagers)), {}
+            )
+            if engagers and callable(_reps_for)
+            else {}
         )
         groups.append(
             select_popular(
@@ -1224,7 +1358,17 @@ def _fallback_filler(
     if len(eligible) >= settings.diversity.top_k:
         return []
 
-    fallback = popular_fallback(gateway, since, limit)
+    # C1 review fix (2026-09-06): `_lane_or_empty` — `popular_fallback` is a
+    # direct gateway call reachable on the request path (a starved viewer's
+    # padding, via `rank_feed`), the same statement-timeout exposure as every
+    # other lane in `gather_candidates`. Degrading this to empty just means the
+    # starved viewer gets whatever `eligible` pool they already had, not a 503.
+    fallback: list[Candidate] = _lane_or_empty(
+        "popular_fallback",
+        viewer.account,
+        lambda: popular_fallback(gateway, since, limit),
+        [],
+    )
     admissible = filter_eligible(
         fallback,
         viewer,
@@ -2301,12 +2445,23 @@ def rank_feed(
     # already-updated-gateways-keep-working reason `_suppressed` documents.
     chain_authors = chain_author_map(c.post for c in candidates)
     chain_author_kwargs = {"chain_authors": chain_authors} if chain_authors else {}
-    engager_index = (
+    engager_index: dict[str, frozenset[str]] = (
         # ★ Muted follows are not vouchers (2026-08-24). The vouch gate asks
         # "has someone this viewer trusts already engaged this"; a muted account
         # is the explicit statement that they are not.
-        gateway.second_degree_engagers(
-            gated_keys, viewer.follows - viewer.mutes, **chain_author_kwargs
+        #
+        # C1 review fix (2026-09-06): `_lane_or_empty` — a statement-timeout here
+        # must not 503 the whole feed. Degrading to `{}` is exactly the
+        # already-existing "no gated candidates" branch below, so every gated
+        # post simply fails the second-degree vouch gate instead of the request
+        # crashing outright.
+        _lane_or_empty(
+            "second_degree_engagers",
+            viewer.account,
+            lambda: gateway.second_degree_engagers(
+                gated_keys, viewer.follows - viewer.mutes, **chain_author_kwargs
+            ),
+            {},
         )
         if gated_keys
         else {}

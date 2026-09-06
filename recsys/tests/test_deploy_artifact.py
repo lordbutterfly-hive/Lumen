@@ -223,36 +223,88 @@ def test_every_env_var_the_service_reads_reaches_the_container() -> None:
     that names a variable can only ever catch the variable somebody already
     thought of.
 
-    So this asks the general question — every `RECSYS_*` name `app.py` reads
-    from the environment must appear in the feed service's `environment:` block
-    — and asking it for the first time immediately found FIVE more: the four
+    So this asks the general question — every `RECSYS_*` name any module the
+    running service actually imports reads from the environment must appear in
+    the feed service's `environment:` block — and asking it for the first time
+    (scoped to `app.py` alone) immediately found FIVE more: the four
     author-prior knobs and `RECSYS_VIEWER_CACHE_MAX_ENTRIES`, all unreachable
     since they were written. None was a security control, which is exactly why
     no human ever went looking.
 
+    ★★★ REVIEW FIX (2026-09-06) — EXTENDED PAST `app.py`. The 2026-09-06
+    latency build added `RECSYS_*` flags read directly inside `viewer.py`,
+    `io/hafsql.py`, `io/lite_engagement.py` and `io/seen_log.py` — modules
+    `app.py` imports and that run in the SAME process, but which this scan
+    never looked at, so a flag introduced there could repeat the identical
+    defect and this gate would stay green. Scanning them immediately found a
+    SIXTH pre-existing instance: `RECSYS_DB_POOL_MIN`/`RECSYS_DB_POOL_MAX`
+    (`io/hafsql.py`, via `_env_int("RECSYS_...")` — a shape the OLD pattern
+    list did not even look for) were declared in code and reached no
+    container either.
+
+    ★★★ SECOND REVIEW FIX (2026-09-06). `_int_env_or_default("RECSYS_...", n)`
+    (`io/lite_engagement.py`/`io/seen_log.py`, guarding `RECSYS_LOCAL_POOL_MIN`/
+    `MAX` against a non-numeric value at import time) is YET ANOTHER shape the
+    pattern list did not look for — an accessor that takes the name as its
+    FIRST argument, like `_env_int`/`_env_float`, but under a different name.
+    `RECSYS_LOCAL_POOL_MIN`/`MAX` happened to reach the container anyway only
+    because someone added them to compose BY HAND, which is exactly the
+    "config exists in code and the gate never actually checked it" failure
+    mode this test exists to close — they were invisible to `read`, so a typo
+    or a future rename here would not have failed this test. The new pattern
+    is written against the NAMING CONVENTION (`*_env_or_default`), not just
+    `_int_env_or_default` by name, so a sibling this project has not written
+    yet (a `_float_env_or_default`, say) is covered the same way `_env_int`/
+    `_env_float` already cover each other above, without a further manual
+    pattern added the next time one is.
+
     MUTANT: delete any one variable from compose. This fails and names it.
     """
-    app = (_ROOT / "recsys" / "service" / "app.py").read_text()
+    modules = [
+        _ROOT / "recsys" / "service" / "app.py",
+        _ROOT / "recsys" / "viewer.py",
+        _ROOT / "recsys" / "io" / "hafsql.py",
+        _ROOT / "recsys" / "io" / "lite_engagement.py",
+        _ROOT / "recsys" / "io" / "seen_log.py",
+    ]
     feed = (_ROOT / "deploy" / "compose.recsys.yml").read_text().split(
         "\n  recsys-trust-batch:", 1
     )[0]
 
-    read = set(re.findall(r'os\.environ\.get\(\s*"(RECSYS_[A-Z0-9_]+)"', app))
-    read |= set(re.findall(r'_csv_env\(\s*\n?\s*"(RECSYS_[A-Z0-9_]+)"', app))
+    read: set[str] = set()
+    for path in modules:
+        text = path.read_text()
+        read |= set(re.findall(r'os\.environ\.get\(\s*"(RECSYS_[A-Z0-9_]+)"', text))
+        read |= set(re.findall(r'_csv_env\(\s*\n?\s*"(RECSYS_[A-Z0-9_]+)"', text))
+        # `io/hafsql.py`'s own A4 convention: `_env_int`/`_env_float(name)`
+        # resolve `os.environ.get(name, _ENV_DEFAULTS[name])` one level of
+        # indirection away from the literal call, so the two patterns above
+        # never see `RECSYS_DB_POOL_MIN`/`MAX`/`RECSYS_REQUEST_STATEMENT_
+        # TIMEOUT_MS` at all — this is the shape that hid the sixth instance.
+        read |= set(re.findall(r'_env_int\(\s*"(RECSYS_[A-Z0-9_]+)"', text))
+        read |= set(re.findall(r'_env_float\(\s*"(RECSYS_[A-Z0-9_]+)"', text))
+        # SECOND REVIEW FIX (2026-09-06): `_int_env_or_default("RECSYS_...", n)`
+        # and any sibling accessor sharing its `*_env_or_default(name, ...)`
+        # naming convention (see this test's own docstring) — matched on the
+        # convention, not the one name written so far, so a future sibling
+        # (e.g. a `_float_env_or_default`) is covered without another pattern.
+        read |= set(re.findall(r'\w*_env_or_default\(\s*"(RECSYS_[A-Z0-9_]+)"', text))
     # Non-empty control: a regex that silently stops matching would make this
     # test pass by measuring nothing — the vacuous-gate failure mode this
     # project has shipped twice.
     assert len(read) >= 15, (
-        f"only found {len(read)} RECSYS_* env reads in app.py — the extraction "
-        "is broken, so this gate is vacuous. Fix the pattern before trusting it."
+        f"only found {len(read)} RECSYS_* env reads across {len(modules)} modules — "
+        "the extraction is broken, so this gate is vacuous. Fix the pattern before "
+        "trusting it."
     )
 
     missing = sorted(name for name in read if f"{name}:" not in feed)
     assert not missing, (
-        f"{len(missing)} env var(s) are read by the service and reach NO "
-        f"container: {', '.join(missing)}. Add them to the feed service's "
-        "environment: block in deploy/compose.recsys.yml. Config that exists in "
-        "code and not in the artifact is config that does not exist."
+        f"{len(missing)} env var(s) are read by the service (or a module it "
+        f"imports) and reach NO container: {', '.join(missing)}. Add them to "
+        "the feed service's environment: block in deploy/compose.recsys.yml. "
+        "Config that exists in code and not in the artifact is config that "
+        "does not exist."
     )
 
 

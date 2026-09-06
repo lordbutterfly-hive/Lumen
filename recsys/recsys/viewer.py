@@ -71,6 +71,7 @@ in steady state; part 3 is what protects the viewer if it happens anyway).
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any, Protocol
@@ -151,6 +152,87 @@ WHERE voter = %(account)s
 ORDER BY "timestamp" DESC
 LIMIT %(limit)s
 """
+
+# ★★★ Q1 (RECSYS-LATENCY-BUILD-MAP-2026-09-06) — THE VOTER-INDEX REWRITE.
+#
+# `_SQL_RECENT_VOTES_BY` above cannot use `hafsql_voter_idx ON hafd.operations
+# ((...->>'voter'), op_type, id) WHERE op_type IN (0, 72)` at all: the view's
+# `timestamp` comes from a join to `blocks`, so a `timestamp` predicate plus
+# `ORDER BY timestamp` forces a backward index scan of `blocks` instead
+# (measured live 2026-09-06: gtg 3.99s/170,178 blocks visited; hbd-temp
+# 34.72s/1,292,280 blocks — the WHOLE 45-day window walked for 7 votes, then
+# cancelled at the 6s `_VOTE_HISTORY_TIMEOUT_MS` on every cold build for any
+# viewer who votes rarely).
+#
+# This query drops the `timestamp` predicate/`ORDER BY` entirely and orders by
+# `id DESC` instead — `id` IS the voter index's trailing column, so the
+# planner can walk it directly with no `blocks` join at all. Measured live the
+# same day: hbd-temp 5.4ms, gtg 8.6ms, lordbutterfly 22.6ms — 400x to 1500x
+# faster, same three accounts.
+#
+# EQUIVALENCE, not approximation: the `since` filter moves to Python (see the
+# call site in :func:`derive_interest_tags`) and is applied to the newest
+# `vote_history_limit` votes by `id` instead of by `timestamp`. Proven live:
+# the resulting row sets are IDENTICAL (gtg: 60 vs 60 rows, `EXCEPT` both
+# directions empty) — because `id` order tracks time order for one voter's own
+# history, so the newest N votes BY ID are the newest N votes overall; filtered
+# to the window, they equal the newest N INSIDE the window whenever at least N
+# of them fall inside it. ★ CORRECTED (2026-09-06 review) — the OTHER case is
+# NOT "an account can only have fewer than `limit` votes TOTAL", which is
+# false and was a common, non-degenerate state to describe as impossible (an
+# old, less-recently-active account can have thousands of votes total and
+# still see fewer than `limit` of them fall inside a short recent window).
+# The actual case is fewer than `limit` votes INSIDE THE WINDOW: the window's
+# K in-window votes are, by the same id/time correlation, exactly the K
+# most-recent-by-id among ALL of the voter's votes, so any `limit` > K already
+# includes all K of them in the fetched page, and filtering to the window
+# after fetching recovers exactly those K — identical to what V1's own
+# `since`-bounded, `LIMIT limit` query would return. `derive_interest_tags`
+# never sees a different tag set either way, for any account this was
+# measured against.
+_SQL_RECENT_VOTES_BY_V2 = """
+SELECT author, permlink, "timestamp"
+FROM hafsql.operation_effective_comment_vote_view
+WHERE voter = %(account)s
+ORDER BY id DESC
+LIMIT %(limit)s
+"""
+
+
+def _vote_history_v2_enabled() -> bool:
+    """``RECSYS_VOTE_HISTORY_V2`` — build map Q1. Defaults ON: this is a
+    PROVEN EQUIVALENCE (identical result sets, measured live on
+    gtg/hbd-temp/lordbutterfly — see :data:`_SQL_RECENT_VOTES_BY_V2`'s own
+    comment), not a behaviour change, so the safe default ships the fast
+    query. ``0``/``false``/``no``/``off`` is the kill switch back to the
+    pre-2026-09-06 blocks-backward scan — same default-on/opt-out polarity
+    ``RECSYS_RING_DETECTION`` already uses (``recsys/config.py``), so an
+    unrecognised value fails toward keeping the fix armed rather than
+    silently reverting to the query with the 6s-timeout failure mode."""
+    raw = os.environ.get("RECSYS_VOTE_HISTORY_V2", "").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+#: THIRD REVIEW FIX (2026-09-06). This used to gate ONLY the one-time ERROR
+#: log while the call site's `use_v1` was a fresh local recomputed from
+#: `_vote_history_v2_enabled()` on every single call — so a structural V2
+#: failure logged its ERROR once, then went right back to ATTEMPTING (and
+#: re-failing) V2 on every subsequent request for the rest of the process,
+#: paying the V2-then-V1 double-query cost every time instead of once.
+#: Renamed and widened: `use_v1`'s own initial computation now ORs this flag
+#: in, so the first structural failure disables V2 for the REST OF THE
+#: PROCESS, not just for the request that discovered it — the log-once
+#: behaviour falls out of the same flag for free, no separate bookkeeping
+#: needed. A test seam (`_reset_v2_disabled_for_process_for_tests`) resets it
+#: between tests.
+_v2_disabled_for_process = False
+
+
+def _reset_v2_disabled_for_process_for_tests() -> None:
+    """Test seam — see `_v2_disabled_for_process`'s own comment."""
+    global _v2_disabled_for_process
+    _v2_disabled_for_process = False
+
 
 # Fast pre-check, live-measured 2026-08-04: a plain `WHERE voter = X LIMIT 1`
 # with NO `ORDER BY`/`timestamp` bound resolves in ~0.03-0.05s REGARDLESS of
@@ -523,14 +605,105 @@ def derive_interest_tags(
     # tags, which are index-backed and reliably fast, and log loudly so an
     # operator can see the degrade rather than a silently thinner result.
     vote_rows: list[tuple[Any, ...]] = []
+    # `global` must appear before ANY reference to the name in this function
+    # (Python raises a SyntaxError otherwise) — declared once, here, covering
+    # both the read below and the write further down in the V2 except clause.
+    global _v2_disabled_for_process
     try:
         has_voted = bool(gateway._fetch(_SQL_HAS_EVER_VOTED, {"account": account}))
         if has_voted:
-            vote_rows = gateway._fetch(
-                _SQL_RECENT_VOTES_BY,
-                {"account": account, "since": since, "limit": vote_history_limit},
-                timeout_ms=_VOTE_HISTORY_TIMEOUT_MS,
-            )
+            # FOURTH REVIEW FIX (2026-09-06): OR in `_v2_disabled_for_process`
+            # here — see that flag's own comment. Without this, `use_v1` is a
+            # fresh local every call, so a structural failure discovered on
+            # request #1 only affected request #1: request #2 went right back
+            # to attempting V2, re-failing it, and paying for BOTH queries
+            # again. This makes the disable process-wide and permanent (until
+            # a restart), matching the "for the rest of this process" the
+            # ERROR log below already claimed but did not enforce.
+            use_v1 = (not _vote_history_v2_enabled()) or _v2_disabled_for_process
+            if not use_v1:
+                # Q1: no `since` predicate on the mirror side — see
+                # `_SQL_RECENT_VOTES_BY_V2`'s own comment for the equivalence
+                # proof. `since` may be tz-aware (every real caller's `now` is
+                # UTC-aware); the mirror's `timestamp` column comes back naive
+                # (HAFSQL break #8 — `hafsql.py::_as_aware`'s own docstring),
+                # so compare naive-to-naive rather than pull in that module's
+                # coercion helper for one comparison.
+                #
+                # ★★★ REVIEW FIX (2026-09-06) — A STRUCTURAL V2 FAILURE FALLS
+                # BACK TO V1, IT DOES NOT DEGRADE STRAIGHT TO OWN-POSTS-ONLY.
+                # The equivalence proof assumes the mirror's view still has an
+                # `id` column and still returns naive timestamps for this
+                # column; if either assumption ever stops holding (a mirror
+                # schema change, or a timestamp that comes back AWARE and
+                # raises `TypeError` on the naive comparison below), the OLD
+                # code's single broad `except Exception` below would catch it
+                # and silently degrade EVERY viewer to own-posts-only tags,
+                # forever, with only a per-request WARNING — losing all
+                # vote-derived interest when the working V1 query was one
+                # fallback away. This tries V1 instead, and only degrades
+                # further (in the outer `except` below) if V1 ALSO fails.
+                import psycopg
+
+                try:
+                    since_naive = (
+                        since.replace(tzinfo=None) if since.tzinfo is not None else since
+                    )
+                    raw_vote_rows = gateway._fetch(
+                        _SQL_RECENT_VOTES_BY_V2,
+                        {"account": account, "limit": vote_history_limit},
+                        timeout_ms=_VOTE_HISTORY_TIMEOUT_MS,
+                    )
+                    vote_rows = [
+                        (author, permlink)
+                        for author, permlink, timestamp in raw_vote_rows
+                        if (
+                            timestamp.replace(tzinfo=None)
+                            if timestamp.tzinfo is not None
+                            else timestamp
+                        )
+                        >= since_naive
+                    ]
+                except psycopg.OperationalError:
+                    # FIFTH REVIEW FIX (2026-09-06). `QueryCanceled` (a
+                    # statement-timeout cancel) IS an `OperationalError`, and
+                    # so is a connection-level failure — NEITHER is a
+                    # structural break in the V2 query shape, they are the
+                    # same operational condition V1's own query is equally
+                    # exposed to (V1 runs under the identical
+                    # `_VOTE_HISTORY_TIMEOUT_MS` budget). Falling back to V1
+                    # here would pay BOTH queries' timeout budgets — up to
+                    # 12s instead of 6s — on exactly the accounts Q1 targets
+                    # (real, active voters, the ones the old blocks-backward
+                    # V1 scan was already slow for), for a retry with no
+                    # better odds of finishing in time. Let it propagate
+                    # instead, straight to the outer `except Exception`
+                    # below, which already degrades to own-posts-only tags
+                    # for exactly this case (see that except's own comment:
+                    # "on ANY exception here (timeout, transient connection
+                    # loss, ...) fall back").
+                    raise
+                except Exception:
+                    if not _v2_disabled_for_process:
+                        _v2_disabled_for_process = True
+                        logger.error(
+                            "derive_interest_tags: RECSYS_VOTE_HISTORY_V2's query "
+                            "failed structurally for %s (e.g. the mirror's view no "
+                            "longer has `id`, or returned a timestamp shape this "
+                            "code did not expect) — falling back to the "
+                            "pre-2026-09-06 SQL for the rest of this process. This "
+                            "is logged once; fix the mismatch and restart to "
+                            "re-enable the fast query.",
+                            account,
+                            exc_info=True,
+                        )
+                    use_v1 = True
+            if use_v1:
+                vote_rows = gateway._fetch(
+                    _SQL_RECENT_VOTES_BY,
+                    {"account": account, "since": since, "limit": vote_history_limit},
+                    timeout_ms=_VOTE_HISTORY_TIMEOUT_MS,
+                )
     except Exception:
         logger.warning(
             "derive_interest_tags: %s's voting-history query failed/timed out — "

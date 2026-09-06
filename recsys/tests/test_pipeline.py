@@ -3586,3 +3586,227 @@ def test_charged_serves_reads_the_delivered_list_not_the_spliced_one() -> None:
     assert _charged_exploration_serves(delivered, spliced, 3) == ["early"]
     assert _charged_exploration_serves(delivered, spliced, 4) == ["early", "late"]
     assert _charged_exploration_serves(delivered, spliced, 2) == []
+
+
+# ---------------------------------------------------------------------------
+# C1 REVIEW FIX (2026-09-06) — per-lane isolation. Before this fix, a
+# statement-timeout (or any exception) from ANY ONE of these direct gateway
+# calls propagated out of `gather_candidates` uncaught, which `build_feed`'s
+# outer handler then turned into a 503 for the WHOLE feed — even when every
+# OTHER lane would have succeeded. `_lane_or_empty` degrades the failing
+# lane to empty (with a WARNING) instead.
+# ---------------------------------------------------------------------------
+
+
+class _RaisingInNetworkGateway(FakeGateway):
+    def in_network_posts(self, follows, since, limit):  # type: ignore[no-untyped-def]
+        raise TimeoutError("simulated statement timeout")
+
+
+class _RaisingEngagedOonGateway(FakeGateway):
+    def engaged_oon_posts(self, follows, since, limit):  # type: ignore[no-untyped-def]
+        raise TimeoutError("simulated statement timeout")
+
+
+class _RaisingPopularGateway(FakeGateway):
+    def popular_posts(self, since, limit):  # type: ignore[no-untyped-def]
+        raise TimeoutError("simulated statement timeout")
+
+
+class _RaisingReputationsGateway(FakeGateway):
+    """`FakeGateway` has no `reputations_for` at all (the `getattr`/`callable`
+    guard covers that case already) — this one HAS it, and it raises, which
+    is the gap the guard alone did not cover."""
+
+    def reputations_for(self, accounts):  # type: ignore[no-untyped-def]
+        raise TimeoutError("simulated statement timeout")
+
+
+def test_in_network_lane_failure_degrades_to_empty_not_a_crash(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    viewer = make_viewer("me", follows=frozenset({"alice"}))
+    gateway = _RaisingInNetworkGateway(
+        oon=[Candidate(post=make_post("stranger", "x1"), source=CandidateSource.OON_ENGAGED)]
+    )
+    with caplog.at_level(logging.WARNING, logger="recsys.pipeline"):
+        candidates = gather_candidates(viewer, gateway, EPOCH, 400, DEFAULT_SETTINGS)
+    assert not any(c.source is CandidateSource.IN_NETWORK for c in candidates), (
+        "the failing lane must contribute nothing, not crash the whole gather"
+    )
+    assert "in_network lane failed" in caplog.text
+
+
+def test_engaged_oon_lane_failure_degrades_to_empty_not_a_crash(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    viewer = make_viewer("me", follows=frozenset({"alice"}))
+    gateway = _RaisingEngagedOonGateway(in_network=[make_post("alice", "p1")])
+    with caplog.at_level(logging.WARNING, logger="recsys.pipeline"):
+        candidates = gather_candidates(viewer, gateway, EPOCH, 400, DEFAULT_SETTINGS)
+    assert any(c.source is CandidateSource.IN_NETWORK for c in candidates), (
+        "a healthy sibling lane must still be served"
+    )
+    assert not any(c.source is CandidateSource.OON_ENGAGED for c in candidates)
+    assert "engaged_oon lane failed" in caplog.text
+
+
+def test_popular_lane_failure_degrades_to_empty_not_a_crash(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    viewer = make_viewer("me", follows=frozenset({"alice"}))
+    gateway = _RaisingPopularGateway(in_network=[make_post("alice", "p1")])
+    with caplog.at_level(logging.WARNING, logger="recsys.pipeline"):
+        candidates = gather_candidates(viewer, gateway, EPOCH, 400, DEFAULT_SETTINGS)
+    assert any(c.source is CandidateSource.IN_NETWORK for c in candidates), (
+        "a healthy sibling lane must still be served when popular_posts fails"
+    )
+    assert "popular lane failed" in caplog.text
+
+
+def test_popular_reputations_failure_still_serves_the_popular_lane_unranked(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """★★★ THE GAP THE OLD COMMENT PROMISED WAS ALREADY CLOSED, AND WAS NOT.
+    `getattr(gateway, "reputations_for", None)` only guards a gateway that
+    does not IMPLEMENT the method — it did nothing for a REAL implementation
+    that raises. This is that case."""
+    viewer = make_viewer("me")
+    base = make_post("pop1", "p1")
+    post = AttributedPost(
+        author=base.author, permlink=base.permlink, category=base.category,
+        community=base.community, created=base.created, children=base.children,
+        reblog_count=base.reblog_count, author_reputation=base.author_reputation,
+        tags=base.tags, commenters=("engager1",), votes=(),
+    )
+    gateway = _RaisingReputationsGateway(popular=[post])
+    with caplog.at_level(logging.WARNING, logger="recsys.pipeline"):
+        candidates = gather_candidates(viewer, gateway, EPOCH, 400, DEFAULT_SETTINGS)
+    assert any(c.post.key == post.key for c in candidates), (
+        "reputations_for failing must not remove the popular lane's own posts"
+    )
+    assert "popular_reputations lane failed" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# THIRD REVIEW FIX (2026-09-06) — the three request-path calls this project's
+# own review named as still unwrapped: `tag_posts` (via the interest lane,
+# which runs for EVERY viewer — the widest-reach gap of the three) and
+# `second_degree_engagers` (the vouch-gate lookup inside `rank_feed`, not
+# `gather_candidates`). `popular_fallback`, the third, is covered at the
+# HTTP/`build_feed` layer in `tests/test_service.py` instead (it lives inside
+# `_fallback_filler`, not this module's `gather_candidates`). Raises the REAL
+# `psycopg.errors.QueryCanceled` a request-path statement-timeout actually
+# produces, not a generic stand-in, since that is the exact failure mode C1's
+# 10s `RECSYS_REQUEST_STATEMENT_TIMEOUT_MS` default introduced.
+# ---------------------------------------------------------------------------
+
+
+class _RaisingTagPostsGateway(FakeGateway):
+    def tag_posts(self, tags, since, limit):  # type: ignore[no-untyped-def]
+        import psycopg
+
+        raise psycopg.errors.QueryCanceled("simulated statement timeout")
+
+
+class _RaisingSecondDegreeEngagersGateway(FakeGateway):
+    def second_degree_engagers(self, post_keys, follows, **kwargs):  # type: ignore[no-untyped-def]
+        import psycopg
+
+        raise psycopg.errors.QueryCanceled("simulated statement timeout")
+
+
+def test_cold_viewer_interest_lane_query_canceled_degrades_instead_of_a_crash(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A followless (cold) viewer's interest lane calls `gateway.tag_posts`
+    UNCONDITIONALLY — no `if` gates it out the way the in-network/engaged-OON
+    lanes are gated by `viewer.follows`. Before this fix, a statement-timeout
+    here propagated straight out of `gather_candidates` uncaught."""
+    viewer = make_viewer("me", interest_tags=frozenset({"art"}))
+    gateway = _RaisingTagPostsGateway(popular=[make_post("pop1", "p1")])
+    with caplog.at_level(logging.WARNING, logger="recsys.pipeline"):
+        candidates = gather_candidates(viewer, gateway, EPOCH, 400, DEFAULT_SETTINGS)
+    assert not any(c.source is CandidateSource.INTEREST_TAG for c in candidates), (
+        "the failing interest lane must contribute nothing, not crash the whole gather"
+    )
+    assert "interest_cold lane failed" in caplog.text
+
+
+def test_established_viewer_interest_lane_query_canceled_degrades_instead_of_a_crash(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The OTHER branch of the same unconditional `tag_posts` call — a viewer
+    WITH a follow graph, which sources `OON_INTEREST` instead of
+    `INTEREST_TAG` (see `established_interest_candidates`). Both branches
+    needed their own lane guard; this proves the second one."""
+    viewer = make_viewer(
+        "me", follows=frozenset({"alice"}), interest_tags=frozenset({"art"})
+    )
+    gateway = _RaisingTagPostsGateway(in_network=[make_post("alice", "p1")])
+    with caplog.at_level(logging.WARNING, logger="recsys.pipeline"):
+        candidates = gather_candidates(viewer, gateway, EPOCH, 400, DEFAULT_SETTINGS)
+    assert any(c.source is CandidateSource.IN_NETWORK for c in candidates), (
+        "a healthy sibling lane must still be served"
+    )
+    assert not any(c.source is CandidateSource.OON_INTEREST for c in candidates)
+    assert "interest_established lane failed" in caplog.text
+
+
+def test_second_degree_engagers_query_canceled_degrades_instead_of_a_503(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`second_degree_engagers` runs inside `rank_feed` (not `gather_
+    candidates`), so this needs the full `rank_feed` call, with a gated
+    (`OON_ENGAGED`) candidate actually present to make `gated_keys` non-empty
+    — otherwise the call is skipped entirely and this would prove nothing."""
+    oon_post = make_post("stranger", "x1")
+    viewer = make_viewer("me", follows=frozenset({"alice"}))
+    gateway = _RaisingSecondDegreeEngagersGateway(
+        oon=[Candidate(post=oon_post, source=CandidateSource.OON_ENGAGED)]
+    )
+    with caplog.at_level(logging.WARNING, logger="recsys.pipeline"):
+        scored = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+    assert scored == [], (
+        "a QueryCanceled vouch-gate lookup must degrade to 'nothing vouched for', "
+        "not crash rank_feed outright"
+    )
+    assert "second_degree_engagers lane failed" in caplog.text
+
+
+def test_a_typeerror_in_a_lane_is_a_programmer_bug_and_must_propagate(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """★★★ NINTH REVIEW FIX (2026-09-06). `_lane_or_empty`'s old bare `except
+    Exception` swallowed a genuine programmer bug (bad key, bad attribute, a
+    wrong type threaded through) exactly like a statement timeout — silently
+    emptying the lane and still returning 200. A `TypeError` (and `KeyError`/
+    `AttributeError`/`NameError`) must now propagate instead of degrading, so
+    a real bug fails loudly rather than shipping an invisibly-incomplete
+    feed forever."""
+
+    class _RaisingTypeErrorGateway(FakeGateway):
+        def in_network_posts(self, follows, since, limit):  # type: ignore[no-untyped-def]
+            raise TypeError("simulated programmer bug: wrong argument type")
+
+    viewer = make_viewer("me", follows=frozenset({"alice"}))
+    gateway = _RaisingTypeErrorGateway(in_network=[make_post("alice", "p1")])
+    with pytest.raises(TypeError, match="simulated programmer bug"):
+        gather_candidates(viewer, gateway, EPOCH, 400, DEFAULT_SETTINGS)
+
+
+@pytest.mark.parametrize("exc_type", [KeyError, AttributeError, NameError])
+def test_other_programmer_error_types_in_a_lane_also_propagate(exc_type: type) -> None:
+    """Same proof as above, for the other three types `_lane_or_empty`
+    re-raises rather than degrades — a single parametrized case, since the
+    mechanism (an `except (TypeError, KeyError, AttributeError, NameError):
+    raise`) is identical for all four."""
+
+    class _RaisingGateway(FakeGateway):
+        def popular_posts(self, since, limit):  # type: ignore[no-untyped-def]
+            raise exc_type("simulated programmer bug")
+
+    viewer = make_viewer("me", follows=frozenset({"alice"}))
+    gateway = _RaisingGateway(in_network=[make_post("alice", "p1")])
+    with pytest.raises(exc_type, match="simulated programmer bug"):
+        gather_candidates(viewer, gateway, EPOCH, 400, DEFAULT_SETTINGS)

@@ -166,6 +166,42 @@ services:
       # `0` opts out of the production fail-shut for LOCAL runs only. Unset
       # means production, which is the safe default and what this file assumes.
       RECSYS_PRODUCTION:
+      # ★★★ RECSYS-LATENCY-BUILD-MAP-2026-09-06 — all default ON; `0`/`false`/
+      # `no`/`off` is each one's own kill switch back to the pre-2026-09-06
+      # behaviour. See CHANGES-2026-09-06.md for the full rollback procedure.
+      #
+      # Q1 — vote-history query on the voter index instead of a blocks-backward
+      # scan (recsys/viewer.py).
+      RECSYS_VOTE_HISTORY_V2:
+      # Q2 — time bound inside both engaged-OON EXISTS clauses (recsys/io/hafsql.py).
+      RECSYS_OON_TIME_BOUND:
+      # L1 — pool the loopback connection to Lumen's own Postgres (lite
+      # engagement + seen-suppression reads) instead of a fresh TLS+SCRAM
+      # connection per call, and drop TLS on that loopback hop.
+      RECSYS_LOCAL_POOL:
+      RECSYS_LOCAL_POOL_MIN:
+      RECSYS_LOCAL_POOL_MAX:
+      # C1 — request-path statement timeout on mirror queries, far below the
+      # 900s HAFSQL_STATEMENT_TIMEOUT_MS batch/global bound above. `<= 0`
+      # disables the override (falls back to the global bound).
+      RECSYS_REQUEST_STATEMENT_TIMEOUT_MS:
+      # S1 — single-flight concurrent /feed builds for the same
+      # (account, serve_limit) into one upstream ranking, and log (INFO, one
+      # line) instead of a traceback when a client disconnects before the
+      # response can be written.
+      RECSYS_SINGLE_FLIGHT:
+      # ★ REVIEW FIX (2026-09-06): how long a single-flight WAITER blocks on
+      # the leader before giving up and refusing (503) rather than joining a
+      # possibly-stalled mirror query indefinitely. Default 20s.
+      RECSYS_SINGLE_FLIGHT_WAIT_S:
+      # ★ REVIEW FIX (2026-09-06) — PRE-EXISTING GAP, found by extending this
+      # test's scan past app.py into io/hafsql.py: A4's own local-DB pool
+      # tunables (`recsys/io/hafsql.py`, via `_env_int`) were declared in code
+      # and reached no container at all, unrelated to this build. Bounds the
+      # SECOND pooled connection this client holds (A15 network suppression /
+      # §8.7), distinct from L1's lite-engagement/seen-suppression pool above.
+      RECSYS_DB_POOL_MIN:
+      RECSYS_DB_POOL_MAX:
     # ★★★ ROUND-5 COUNCIL (Seat 1) — WITHOUT THIS, A COLD DEPLOY IS UNHEALTHY
     # FOREVER. `/feed` refuses to serve without a trust snapshot, the probe
     # gates on `serving`, and the batch below was documented as "an operator

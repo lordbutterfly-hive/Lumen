@@ -67,9 +67,11 @@ import logging
 import os
 import threading
 import time
+from typing import Any
 
 from recsys.config import LiteConfig
 from recsys.core.seen import SeenState
+from recsys.io.hafsql import HafsqlUnavailableError, PoolExhaustedError, _ConnPool
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +159,187 @@ def _connect(dsn: str):  # type: ignore[no-untyped-def]
     return conn
 
 
+# ---------------------------------------------------------------------------
+# L1 (RECSYS-LATENCY-BUILD-MAP-2026-09-06) — pool the loopback connection.
+# Same design as `recsys.io.lite_engagement`'s own L1 section (see that
+# module's comment for the full measured evidence and the reasoning behind
+# each choice); duplicated here rather than shared, matching this file's own
+# existing duplication of `_STATEMENT_TIMEOUT_MS`/`_CONNECT_TIMEOUT_S`/the
+# breaker shape from that module.
+# ---------------------------------------------------------------------------
+# ★★★ REVIEW FIX (2026-09-06) — sslmode=disable is now CONDITIONAL, and the
+# pool defaults changed. See `lite_engagement`'s identical section for the
+# full reasoning (forced sslmode overrode an explicit one and risked a TLS
+# downgrade off loopback; a pool max below `max_concurrent_requests` is a
+# self-inflicted exhaustion, reproduced at 12 concurrent callers on max=3).
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _int_env_or_default(name: str, default: int) -> int:
+    """Defensive parse for a module-import-time env read — see
+    `lite_engagement._int_env_or_default`'s identical docstring."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning(
+            "%s=%r is not a valid integer — using the default %d instead", name, raw, default
+        )
+        return default
+
+
+_LOCAL_POOL_MIN = _int_env_or_default("RECSYS_LOCAL_POOL_MIN", 2)
+#: ★ REVIEW FIX (2026-09-06), SECOND PASS: was 16, now 6. See
+#: `lite_engagement._LOCAL_POOL_MAX`'s own comment for the full reasoning —
+#: this pool and that one, both at 16, could pin up to 32 permanent backends
+#: on Lumen's own Postgres (which never reaped an idle connection until this
+#: same pass — see `hafsql._DEFAULT_POOL_IDLE_MAX_AGE_S`) while any one
+#: request thread holds at most ONE connection from this pool at a time. 6
+#: is safe against bursts above it now that `_fetch_rows`'s exhaustion
+#: fallback (below) answers that call with one direct connection instead of
+#: losing signal.
+_LOCAL_POOL_MAX = _int_env_or_default("RECSYS_LOCAL_POOL_MAX", 6)
+
+_pools_lock = threading.Lock()
+_pools: dict[str, _ConnPool] = {}
+
+
+def _local_pool_enabled() -> bool:
+    """``RECSYS_LOCAL_POOL`` — build map L1. Defaults ON; ``0``/``false``/
+    ``no``/``off`` is the kill switch back to a fresh, unmodified-DSN
+    connection on every call. Shares the flag NAME with
+    `lite_engagement._local_pool_enabled` (one operator switch for both
+    local-Postgres readers), but reads the environment independently — no
+    shared state between the two modules beyond that name."""
+    raw = os.environ.get("RECSYS_LOCAL_POOL", "").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _sslmode_disable_dsn_if_loopback(dsn: str) -> str:
+    """See `lite_engagement._sslmode_disable_dsn_if_loopback`'s identical
+    docstring: only a loopback host with no `sslmode` of its own gets one
+    forced; everything else, including an unparseable DSN, passes through
+    unchanged."""
+    import psycopg
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+    try:
+        parsed = conninfo_to_dict(dsn)
+    except psycopg.ProgrammingError:
+        return dsn
+    if parsed.get("sslmode"):
+        return dsn
+    if parsed.get("host") not in _LOOPBACK_HOSTS:
+        return dsn
+    return make_conninfo(dsn, sslmode="disable")
+
+
+def _pool_connect(dsn: str):  # type: ignore[no-untyped-def]
+    """The pool's own physical-open callable — folds ``sslmode=disable`` into
+    the DSN only when it is safe to (see `_sslmode_disable_dsn_if_loopback`),
+    then delegates to `_connect` (the same monkeypatch seam a direct,
+    flag-off call uses, untouched by this)."""
+    return _connect(_sslmode_disable_dsn_if_loopback(dsn))
+
+
+def _get_pool(dsn: str) -> _ConnPool:
+    with _pools_lock:
+        pool = _pools.get(dsn)
+        if pool is None:
+            pool = _ConnPool(
+                lambda: _pool_connect(dsn),
+                min_size=_LOCAL_POOL_MIN,
+                max_size=_LOCAL_POOL_MAX,
+                max_retries=2,
+                retry_backoff_s=0.2,
+                breaker_threshold=_BREAKER_THRESHOLD,
+                breaker_cooldown_s=_BREAKER_COOLDOWN_S,
+                acquire_timeout_s=5.0,
+            )
+            _pools[dsn] = pool
+        return pool
+
+
+def reset_local_pool() -> None:
+    """Test seam — same reasoning as `reset_breaker`."""
+    with _pools_lock:
+        pools = list(_pools.values())
+        _pools.clear()
+    for pool in pools:
+        pool.closeall()
+
+
+# REVIEW FIX (2026-09-06). See `lite_engagement`'s identical helper's own
+# comment: throttles the exhaustion-fallback WARNING below to at most once
+# per `_BREAKER_COOLDOWN_S` instead of once per call.
+_pool_exhaustion_log_lock = threading.Lock()
+_pool_exhaustion_last_logged: dict[str, float] = {}
+
+
+def _reset_pool_exhaustion_log_for_tests() -> None:
+    """Test seam — see `_pool_exhaustion_last_logged`'s own comment."""
+    with _pool_exhaustion_log_lock:
+        _pool_exhaustion_last_logged.clear()
+
+
+def _log_pool_exhaustion_fallback(dsn: str) -> None:
+    now = time.monotonic()
+    with _pool_exhaustion_log_lock:
+        last = _pool_exhaustion_last_logged.get(dsn, 0.0)
+        if now - last < _BREAKER_COOLDOWN_S:
+            return
+        _pool_exhaustion_last_logged[dsn] = now
+    logger.warning(
+        "L1 pool exhausted for %s — falling back to a direct connection for "
+        "this call (further occurrences suppressed for %.0fs)",
+        dsn.split("@")[-1] if "@" in dsn else dsn,
+        _BREAKER_COOLDOWN_S,
+    )
+
+
+def _fetch_rows(dsn: str, sql: str, params: dict[str, Any]) -> list[tuple[Any, ...]]:
+    """L1: run one query against the Lumen frontend's Postgres, pooled by
+    default. See `lite_engagement._fetch_rows`'s own docstring — identical
+    shape, including the any-exception-marks-unhealthy simplification and
+    the pool-exhaustion fallback to a direct connect (2026-09-06 review fix),
+    narrowed (2026-09-06 second pass) to genuine exhaustion only — a
+    breaker-open failure fast-fails instead, see below."""
+    if not _local_pool_enabled():
+        with _connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+    pool = _get_pool(dsn)
+    try:
+        conn = pool.borrow()
+    except PoolExhaustedError:
+        # Genuine local exhaustion — every slot in use past
+        # `acquire_timeout_s` — with the underlying database presumably
+        # still healthy. Falls back to one direct, unpooled connection.
+        _log_pool_exhaustion_fallback(dsn)
+        with _connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+    except HafsqlUnavailableError:
+        # The BREAKER is open, not exhaustion (`PoolExhaustedError`, caught
+        # above, is a subclass and is matched first). Falling back to a
+        # direct connect here would just retry against a database already
+        # proven down. Fast-fail: propagate to the caller's `except
+        # Exception`, which degrades to "nothing suppressed" for this call.
+        raise
+    healthy = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+    except Exception:
+        healthy = False
+        raise
+    finally:
+        pool.release(conn, healthy=healthy)
+
+
 def fetch_seen(
     lite: LiteConfig,
     viewer: str,
@@ -191,22 +374,23 @@ def fetch_seen(
 
     out: dict[str, SeenState] = {}
     try:
-        with _connect(lite.engagement_dsn) as conn, conn.cursor() as cur:
-            cur.execute(_SQL_SEEN, {"viewer": viewer, "window_days": window_days})
-            for ranked_key, impressions, engagers, last_epoch in cur.fetchall():
-                if not ranked_key:
-                    continue
-                out[str(ranked_key)] = SeenState(
-                    impressions=int(impressions or 0),
-                    # ★ NULL STAYS None. Never coerced to 0 — an unknown baseline
-                    # means resurrection cannot be evaluated, which `core.seen.
-                    # resurrects` deliberately resolves toward SHOWING the post.
-                    # Reading it as 0 would silently turn "we could not tell" into
-                    # "it has never been engaged", which is the strictest possible
-                    # reading of the least reliable data.
-                    engagers_at_last_serve=None if engagers is None else int(engagers),
-                    last_served_at=float(last_epoch or 0.0),
-                )
+        rows = _fetch_rows(
+            lite.engagement_dsn, _SQL_SEEN, {"viewer": viewer, "window_days": window_days}
+        )
+        for ranked_key, impressions, engagers, last_epoch in rows:
+            if not ranked_key:
+                continue
+            out[str(ranked_key)] = SeenState(
+                impressions=int(impressions or 0),
+                # ★ NULL STAYS None. Never coerced to 0 — an unknown baseline
+                # means resurrection cannot be evaluated, which `core.seen.
+                # resurrects` deliberately resolves toward SHOWING the post.
+                # Reading it as 0 would silently turn "we could not tell" into
+                # "it has never been engaged", which is the strictest possible
+                # reading of the least reliable data.
+                engagers_at_last_serve=None if engagers is None else int(engagers),
+                last_served_at=float(last_epoch or 0.0),
+            )
     except Exception as exc:  # a feed request must never die for this
         _record_outcome(ok=False, now=now)
         logger.warning(

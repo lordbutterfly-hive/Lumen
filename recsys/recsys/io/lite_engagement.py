@@ -49,9 +49,11 @@ import threading
 import time
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
+from typing import Any
 
 from recsys.config import LiteConfig
 from recsys.contracts import Vote
+from recsys.io.hafsql import HafsqlUnavailableError, PoolExhaustedError, _ConnPool
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +183,234 @@ def _connect(dsn: str):  # type: ignore[no-untyped-def]
     return conn
 
 
+# ---------------------------------------------------------------------------
+# ★★★ L1 (RECSYS-LATENCY-BUILD-MAP-2026-09-06) — POOL THE LOOPBACK CONNECTION.
+#
+# Every fetch above opened a fresh `_connect(dsn)` — a full TLS handshake
+# (`ssl=on` on the host, psycopg's default `sslmode=prefer`) plus SCRAM, for a
+# connection to Lumen's OWN Postgres on 127.0.0.1. Measured live 2026-09-06:
+# 7 to 9 such connections per `/feed` request across this module and
+# `seen_log`, 0.05 to 2.5s each, 0.8 to 4.0s per request — plus 9/day
+# `ConnectionTimeout` failures on the LOCAL database when the box is busy.
+# Loopback traffic inside the same host needs no transport encryption, and a
+# connection this cheap to open is exactly the case a small pool amortises.
+#
+# `_connect` stays the ONE place that opens a physical connection (same
+# monkeypatch seam every test in this module already uses) — the pool's own
+# "open" callable is `_pool_connect`, which folds `sslmode=disable` into the
+# DSN and THEN calls `_connect`, so the TLS choice is scoped to connections
+# THE POOL opens and never touches a direct `_connect(dsn)` call (the flag-off
+# path below, and `test_the_lite_connection_actually_enforces_a_statement_
+# timeout`'s live call against an arbitrary — possibly non-loopback — dsn).
+#
+# ★★★ REVIEW FIX (2026-09-06) — sslmode=disable is now CONDITIONAL. It was
+# forced onto every pooled connection unconditionally, which (a) silently
+# overrode an operator-set `sslmode` already present in the DSN and (b) would
+# have disabled TLS against a NON-loopback Postgres if `LUMEN_LITE_DATABASE_URL`
+# ever pointed at one — a real credential-in-cleartext regression, not a
+# hypothetical. It is now applied ONLY when BOTH hold: the DSN's host is
+# loopback (`127.0.0.1`, `::1`, `localhost`) AND the DSN does not already set
+# `sslmode` explicitly. Otherwise the DSN passes through unchanged. Verified
+# live 2026-09-06 (`docker inspect`): production runs this container with
+# `--network host`, and `RECSYS_DATABASE_URL`/(by the same deploy)
+# `LUMEN_LITE_DATABASE_URL` point at `127.0.0.1` — the loopback branch is what
+# actually fires today. `deploy/compose.recsys.yml`'s bridge-network shape is
+# not what runs on the box.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _int_env_or_default(name: str, default: int) -> int:
+    """Defensive parse for a module-import-time env read. A bare `int(os.
+    environ.get(...))` here would raise `ValueError` at IMPORT time on a
+    non-numeric value — crashing the whole process before it ever serves a
+    health check — for what is a tuning knob, not a boot-critical setting.
+    Falls back to the default and logs once, rather than refusing to start."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning(
+            "%s=%r is not a valid integer — using the default %d instead", name, raw, default
+        )
+        return default
+
+
+_LOCAL_POOL_MIN = _int_env_or_default("RECSYS_LOCAL_POOL_MIN", 2)
+#: ★ REVIEW FIX (2026-09-06): was 3, then 16, now 6 (SECOND REVIEW FIX,
+#: 2026-09-06). The 3 -> 16 change matched `ServiceConfig.
+#: max_concurrent_requests`'s ceiling (default 16) to remove a SELF-INFLICTED
+#: exhaustion (reproduced: 12 concurrent callers against a max of 3 exhausted
+#: the pool). But `_ConnPool` never reaped an idle connection (fixed
+#: alongside this, see `hafsql._DEFAULT_POOL_IDLE_MAX_AGE_S`), so 16 here PLUS
+#: `seen_log`'s own 16 could pin up to 32 permanent backends on Lumen's OWN
+#: Postgres, forever, while any one request thread holds at most ONE
+#: connection from this pool at a time — a self-inflicted problem of the
+#: opposite kind. 6 is a middle ground: comfortably above the steady-state
+#: concurrent-borrower count this pool actually sees, small enough that even
+#: fully idle-reaped-away-and-reopened churn is not a real backend-count
+#: concern, and no longer a correctness risk for BURSTS above 6 now that
+#: `_fetch_rows`'s exhaustion fallback (below) answers that call with one
+#: direct, unpooled connection instead of losing signal — the same safety net
+#: the max=16 change was originally trying to buy by raising the ceiling
+#: instead.
+_LOCAL_POOL_MAX = _int_env_or_default("RECSYS_LOCAL_POOL_MAX", 6)
+
+_pools_lock = threading.Lock()
+_pools: dict[str, _ConnPool] = {}
+
+
+def _local_pool_enabled() -> bool:
+    """``RECSYS_LOCAL_POOL`` — build map L1. Defaults ON. ``0``/``false``/
+    ``no``/``off`` is the kill switch back to a fresh connection (with its
+    original, unmodified DSN — no forced ``sslmode``) on every call, same
+    default-on/opt-out polarity as Q1/Q2's flags above."""
+    raw = os.environ.get("RECSYS_LOCAL_POOL", "").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _sslmode_disable_dsn_if_loopback(dsn: str) -> str:
+    """Fold `sslmode=disable` into `dsn` ONLY when its host is loopback and it
+    does not already declare `sslmode` — see this section's own comment for
+    why. Returns `dsn` unchanged in every other case, including when the DSN
+    cannot be parsed at all (fail safe: never guess at a stranger's DSN)."""
+    import psycopg
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+    try:
+        parsed = conninfo_to_dict(dsn)
+    except psycopg.ProgrammingError:
+        return dsn
+    if parsed.get("sslmode"):
+        return dsn
+    if parsed.get("host") not in _LOOPBACK_HOSTS:
+        return dsn
+    return make_conninfo(dsn, sslmode="disable")
+
+
+def _pool_connect(dsn: str):  # type: ignore[no-untyped-def]
+    """The pool's own "open a physical connection" callable. Drops TLS only
+    on a loopback DSN with no explicit `sslmode` of its own — never applied
+    to a direct `_connect(dsn)` call (see this section's own comment)."""
+    return _connect(_sslmode_disable_dsn_if_loopback(dsn))
+
+
+def _get_pool(dsn: str) -> _ConnPool:
+    with _pools_lock:
+        pool = _pools.get(dsn)
+        if pool is None:
+            pool = _ConnPool(
+                lambda: _pool_connect(dsn),
+                min_size=_LOCAL_POOL_MIN,
+                max_size=_LOCAL_POOL_MAX,
+                max_retries=2,
+                retry_backoff_s=0.2,
+                breaker_threshold=_BREAKER_THRESHOLD,
+                breaker_cooldown_s=_BREAKER_COOLDOWN_S,
+                acquire_timeout_s=5.0,
+            )
+            _pools[dsn] = pool
+        return pool
+
+
+def reset_local_pool() -> None:
+    """Test seam — same reasoning as `reset_breaker`: module-level pool state
+    (one physical connection cached per dsn) would otherwise leak between
+    tests that all use the same placeholder dsn string."""
+    with _pools_lock:
+        pools = list(_pools.values())
+        _pools.clear()
+    for pool in pools:
+        pool.closeall()
+
+
+# REVIEW FIX (2026-09-06). Throttle the exhaustion-fallback WARNING below to
+# at most once per `_BREAKER_COOLDOWN_S` (reusing this module's own breaker
+# window rather than inventing a second interval) instead of once per call —
+# a SUSTAINED exhaustion (the local Postgres genuinely can't keep up) would
+# otherwise write one WARNING per request for as long as it lasted, on top
+# of whatever else is already going wrong.
+_pool_exhaustion_log_lock = threading.Lock()
+_pool_exhaustion_last_logged: dict[str, float] = {}
+
+
+def _reset_pool_exhaustion_log_for_tests() -> None:
+    """Test seam — see `_pool_exhaustion_last_logged`'s own comment."""
+    with _pool_exhaustion_log_lock:
+        _pool_exhaustion_last_logged.clear()
+
+
+def _log_pool_exhaustion_fallback(dsn: str) -> None:
+    now = time.monotonic()
+    with _pool_exhaustion_log_lock:
+        last = _pool_exhaustion_last_logged.get(dsn, 0.0)
+        if now - last < _BREAKER_COOLDOWN_S:
+            return
+        _pool_exhaustion_last_logged[dsn] = now
+    logger.warning(
+        "L1 pool exhausted for %s — falling back to a direct connection for "
+        "this call (further occurrences suppressed for %.0fs)",
+        dsn.split("@")[-1] if "@" in dsn else dsn,
+        _BREAKER_COOLDOWN_S,
+    )
+
+
+def _fetch_rows(dsn: str, sql: str, params: dict[str, Any]) -> list[tuple[Any, ...]]:
+    """L1: run one query against Lumen's own Postgres, pooled by default.
+
+    Flag off (`RECSYS_LOCAL_POOL` set to a kill value): today's exact
+    behaviour — a fresh `_connect(dsn)` per call, closed on exit.
+
+    Flag on (default): borrow a pooled connection opened via `_pool_connect`
+    (loopback, TLS off) and release it back rather than closing it. Marks the
+    connection unhealthy on ANY exception (simpler and more conservative than
+    `HafsqlClient._fetch_via`'s OperationalError-only distinction — this pool
+    is small and local, so discarding a connection after any failure costs
+    little and never risks reusing a session left in a bad state)."""
+    if not _local_pool_enabled():
+        with _connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+    pool = _get_pool(dsn)
+    try:
+        conn = pool.borrow()
+    except PoolExhaustedError:
+        # ★ REVIEW FIX (2026-09-06), NARROWED (2026-09-06 second pass). Pool
+        # exhausted — every slot in use past `acquire_timeout_s` — with the
+        # underlying database presumably still healthy. Before this, that
+        # propagated up to the caller's own `except Exception`, which
+        # degrades to "no lite engagement"/"no suppression" — losing real
+        # signal for a condition that a single fresh connection can usually
+        # still answer. Falls back to exactly the pre-L1 behaviour for this
+        # one call: a direct, unpooled connection.
+        _log_pool_exhaustion_fallback(dsn)
+        with _connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+    except HafsqlUnavailableError:
+        # SECOND REVIEW FIX (2026-09-06). This is the BREAKER being open, not
+        # exhaustion (`PoolExhaustedError`, caught above, is a subclass and
+        # is matched first). The breaker opened because the last
+        # `breaker_threshold` connect attempts failed — falling back to a
+        # direct connect here would just retry against a database already
+        # proven down, one call at a time, defeating the entire point of the
+        # breaker. Fast-fail instead, exactly as the pre-L1 code's own
+        # equivalent failure did: propagate to the caller's `except
+        # Exception`, which degrades to "no lite engagement" for this call.
+        raise
+    healthy = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+    except Exception:
+        healthy = False
+        raise
+    finally:
+        pool.release(conn, healthy=healthy)
+
+
 def fetch_lite_votes(
     lite: LiteConfig, keys: Iterable[PostKey]
 ) -> Mapping[PostKey, list[Vote]]:
@@ -213,20 +443,23 @@ def fetch_lite_votes(
         return {}
     out: dict[PostKey, list[Vote]] = {}
     try:
-        with _connect(lite.engagement_dsn) as conn, conn.cursor() as cur:
-            cur.execute(_SQL_LITE_VOTES, {**_key_params(wanted), "min_weight": _MIN_WEIGHT})
-            for author, permlink, voter, updated_at in cur.fetchall():
-                out.setdefault((author, permlink), []).append(
-                    Vote(
-                        voter=voter,
-                        # Zero, never synthetic. A lite vote has no stake, and
-                        # `Vote.lite` — not a fabricated magnitude — is what
-                        # makes it count for breadth.
-                        rshares=0,
-                        timestamp=_as_aware(updated_at),
-                        lite=True,
-                    )
+        rows = _fetch_rows(
+            lite.engagement_dsn,
+            _SQL_LITE_VOTES,
+            {**_key_params(wanted), "min_weight": _MIN_WEIGHT},
+        )
+        for author, permlink, voter, updated_at in rows:
+            out.setdefault((author, permlink), []).append(
+                Vote(
+                    voter=voter,
+                    # Zero, never synthetic. A lite vote has no stake, and
+                    # `Vote.lite` — not a fabricated magnitude — is what
+                    # makes it count for breadth.
+                    rshares=0,
+                    timestamp=_as_aware(updated_at),
+                    lite=True,
                 )
+            )
     except Exception as exc:  # a feed request must not die for this
         _record_outcome("votes", ok=False, now=now)
         logger.warning(
@@ -259,10 +492,9 @@ def fetch_lite_rebloggers(
         return {}
     collected: dict[PostKey, set[str]] = {}
     try:
-        with _connect(lite.engagement_dsn) as conn, conn.cursor() as cur:
-            cur.execute(_SQL_LITE_REBLOGS, _key_params(wanted))
-            for author, permlink, reblogger in cur.fetchall():
-                collected.setdefault((author, permlink), set()).add(reblogger)
+        rows = _fetch_rows(lite.engagement_dsn, _SQL_LITE_REBLOGS, _key_params(wanted))
+        for author, permlink, reblogger in rows:
+            collected.setdefault((author, permlink), set()).add(reblogger)
     except Exception as exc:
         _record_outcome("reblogs", ok=False, now=now)
         logger.warning(

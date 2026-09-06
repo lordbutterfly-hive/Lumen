@@ -178,6 +178,58 @@ def _csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 
+def _bool_env_default_on(raw: str | None) -> bool:
+    """A flag that ships DEFAULT ON, opted OUT of by a named off-value —
+    same polarity as ``RECSYS_RING_DETECTION`` (``recsys/config.py``) and the
+    build map's other 2026-09-06 flags (``RECSYS_VOTE_HISTORY_V2``,
+    ``RECSYS_OON_TIME_BOUND``, ``RECSYS_LOCAL_POOL``). ``0``/``false``/``no``/
+    ``off`` (any case) disable it; unset or anything else leaves it on, so an
+    unrecognised value fails toward keeping the fix armed rather than
+    silently reverting to the slower/riskier pre-fix behaviour.
+
+    Takes the ALREADY-READ raw value (rather than an env var name) so every
+    call site still reads via a literal ``os.environ.get("RECSYS_...")`` —
+    ``test_every_env_var_the_service_reads_reaches_the_container`` (this
+    package's own repeated-defect gate) extracts new flags by scanning for
+    exactly that literal shape, and a name threaded through a second function
+    would be invisible to it."""
+    return (raw or "").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _positive_or_default(value: float, *, default: float, env_name: str) -> float:
+    """★ REVIEW FIX (2026-09-06). ``RECSYS_SINGLE_FLIGHT_WAIT_S`` at ``0`` or
+    negative is NOT a usable "disabled" value the way ``0`` is for
+    ``RECSYS_RATE_LIMIT_PER_MINUTE``/``max_concurrent_requests`` above — a
+    waiter's ``event.wait(timeout)`` treats ``0`` as "return immediately" (a
+    waiter would time out on its very first check, before the leader could
+    plausibly finish anything) and a NEGATIVE value the same way, neither of
+    which is "wait indefinitely". This build's own convention elsewhere
+    trains an operator to read ``0`` as "the kill switch" (every
+    ``RECSYS_*_V2``/``RECSYS_LOCAL_POOL``/``RECSYS_SINGLE_FLIGHT`` flag above
+    treats ``0``/``false``/``off`` as opt-out) — so a ``0`` set here by the
+    same instinct would silently turn into "every waiter fails instantly",
+    not "single-flight is off". Falls back to ``default`` (still armed, not
+    disabled) with a WARNING naming the value, rather than either honouring a
+    value that cannot mean what an operator likely intended or crashing at
+    construction for what is a tuning knob.
+
+    Same call-site-visibility reasoning as ``_bool_env_default_on`` above:
+    takes the already-parsed value, not the env var name, so the literal
+    ``os.environ.get("RECSYS_SINGLE_FLIGHT_WAIT_S", ...)`` call the deploy-
+    artifact scanner looks for stays inline at the call site."""
+    if value <= 0:
+        logger.warning(
+            "%s=%r is <= 0, which is not a usable single-flight wait bound "
+            "(a waiter would fail immediately, not wait indefinitely) — "
+            "falling back to the default of %.1fs instead.",
+            env_name,
+            value,
+            default,
+        )
+        return default
+    return value
+
+
 @functools.lru_cache(maxsize=32)
 def _proxy_networks(
     peers: tuple[str, ...],
@@ -394,6 +446,138 @@ class _ViewerProfileCache:
             return len(self._entries)
 
 
+@dataclass
+class _InFlightBuild(Generic[T]):
+    """One in-progress `_SingleFlight` build: the leader publishes into
+    `value`/`error` and sets `event`; every waiter blocks on `event` and then
+    reads whichever of the two the leader filled in."""
+
+    event: threading.Event = field(default_factory=threading.Event)
+    value: T | None = None
+    error: BaseException | None = None
+
+
+def _clone_exception(exc: BaseException) -> BaseException:
+    """A fresh, independent exception object carrying the same data as
+    `exc`, for a `_SingleFlight` waiter to raise (2026-09-06 review fix).
+
+    `copy.copy(exc)` looks like the obvious tool here and is NOT safe in
+    general: `BaseException`'s default `__reduce__` reconstructs via
+    `type(exc)(*exc.args)`, and a subclass whose `__init__` takes MORE
+    parameters than it forwards to `super().__init__(...)` — `Feed
+    UnavailableError(kind, detail, *, norm_samples=None)` calls only
+    `super().__init__(detail)`, so `.args == (detail,)` — then fails
+    reconstruction with a confusing `missing required positional argument`,
+    which would replace a real upstream error with an unrelated crash for
+    every waiter. This bypasses `__init__` entirely (`__new__` needs no
+    constructor arguments) and copies instance state directly, which works
+    for any exception shape without knowing its constructor. Falls back to
+    returning the SAME instance (today's pre-fix behaviour) if even that
+    fails, rather than raising something worse than the original error."""
+    try:
+        clone = exc.__class__.__new__(exc.__class__)
+        clone.__dict__.update(exc.__dict__)
+        clone.args = exc.args
+        return clone
+    except Exception:
+        return exc
+
+
+class _SingleFlightTimeout(Exception):
+    """Raised by a WAITER (never the leader) when the leader's build has not
+    finished within `_SingleFlight`'s `wait_timeout_s`. See `_SingleFlight.
+    run`'s own comment for why the caller (`build_feed`) turns this into a
+    503 rather than starting a second, independent build."""
+
+    def __init__(self, key: Any, waited_s: float) -> None:
+        super().__init__(f"single-flight wait for key={key!r} exceeded {waited_s:.0f}s")
+        self.key = key
+        self.waited_s = waited_s
+
+
+class _SingleFlight(Generic[T]):
+    """RECSYS_SINGLE_FLIGHT (S1, build map 2026-09-06) — coalesce concurrent
+    builds that share a key into ONE upstream computation.
+
+    ★★★ WHY THIS EXISTS. Measured live: the frontend's 3-attempts-times-15s
+    retry pattern (`RECSYS_ATTEMPTS=3`, 750ms apart) never cancels anything on
+    the recsys side — every abort leaves the build running and starts a new
+    one, so one viewer's warm cycle produced 3 CONCURRENT full builds of the
+    same account (the 53s case in the build map), each independently paying
+    the mirror queries, the connection churn and the Python tail. Measured
+    24h impact: 12 `HAFSQL_POOL_MAX` exhaustions in one day, all during these
+    storms, and 498 of 511 finished rankings written to an already-closed
+    socket (`_write_json`'s own BrokenPipe fix, this same flag).
+    `_ViewerProfileCache.get` above only coalesces the PROFILE half (0.5-6s);
+    this coalesces the WHOLE build (profile + candidates + hydration +
+    ranking), which is what the retry storm actually multiplies.
+
+    Threading, not asyncio: `FeedRequestHandler` runs one OS thread per
+    request (`ThreadingHTTPServer`), so a plain lock/event pair is enough —
+    no event loop to integrate with.
+
+    A build FAILURE releases every waiter, rather than leaving them blocked —
+    an outage must still surface as a fast 503 to every caller, not a hang.
+    Each waiter is raised a FRESH `_clone_exception` of the leader's
+    exception (2026-09-06 review fix; see that function's own docstring for
+    why plain `copy.copy` was tried first and rejected), not the same shared
+    instance: re-raising one exception OBJECT across multiple threads
+    accumulates a `__traceback__` chain that does not belong to the waiter
+    raising it, and every waiter sharing identity makes "which caller
+    actually saw this" unanswerable from a traceback alone.
+
+    ★★★ THE WAIT IS BOUNDED (2026-09-06 review fix; `wait_timeout_s`,
+    default 20s / `RECSYS_SINGLE_FLIGHT_WAIT_S`). Measured live: a mirror
+    pooler stall can hold the LEADER for 81s (the build map's own worst
+    case) — an unbounded `event.wait()` used to make every WAITER join that
+    same 81s stall instead of the 10-24s `/feed` was measured at without
+    single-flight, which is worse than what S1 exists to fix. On timeout a
+    waiter raises `_SingleFlightTimeout` (see `build_feed`'s handling): it
+    does NOT start its own independent build. A stalled leader means the
+    mirror is already in trouble; adding a second concurrent build on top of
+    that is more load on the exact resource that is failing, and the
+    frontend already treats a slow /feed as "serve stored/trending" — a fast,
+    clearly-reasoned 503 for the waiter costs it nothing further."""
+
+    def __init__(self, *, wait_timeout_s: float = 20.0) -> None:
+        self._lock = threading.Lock()
+        self._inflight: dict[Any, _InFlightBuild[T]] = {}
+        self._wait_timeout_s = wait_timeout_s
+
+    def run(self, key: Any, builder: Callable[[], T]) -> T:
+        with self._lock:
+            entry = self._inflight.get(key)
+            is_leader = entry is None
+            if is_leader:
+                entry = _InFlightBuild()
+                self._inflight[key] = entry
+        if not is_leader:
+            assert entry is not None
+            finished = entry.event.wait(timeout=self._wait_timeout_s)
+            if not finished:
+                raise _SingleFlightTimeout(key, self._wait_timeout_s)
+            if entry.error is not None:
+                raise _clone_exception(entry.error)
+            return entry.value  # type: ignore[return-value]
+        assert entry is not None
+        try:
+            value = builder()
+        except BaseException as exc:  # every waiter must be released, not just the happy path
+            entry.error = exc
+            raise
+        else:
+            entry.value = value
+            return value
+        finally:
+            with self._lock:
+                self._inflight.pop(key, None)
+            entry.event.set()
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._inflight)
+
+
 def _load_snapshot_fixed(dsn: str | None) -> TrustSnapshot | None:
     """Load the current :class:`TrustSnapshot`, applying a fix for a bug this
     builder found (and does not own the file to fix directly) in
@@ -577,6 +761,22 @@ class ServiceConfig:
     #: `None` by default, so a slow-loris client held a thread indefinitely;
     #: `daemon_threads` bounds shutdown, not occupancy.
     request_read_timeout_s: float = 10.0
+    #: RECSYS_SINGLE_FLIGHT (S1, build map 2026-09-06). Defaults ON: coalesces
+    #: concurrent `build_feed` calls for the same (account, serve_limit) into
+    #: one upstream ranking — see `_SingleFlight`'s own docstring for the
+    #: measured retry-storm cost this removes — and makes `_write_json`
+    #: (below) log one INFO line on a client disconnect instead of a 20-line
+    #: BrokenPipe traceback (498 of 511 rankings/day, measured). `0`/`false`/
+    #: `no`/`off` is the kill switch back to today's per-request build and
+    #: unhandled-BrokenPipe behaviour.
+    single_flight: bool = True
+    #: ★ REVIEW FIX (2026-09-06). How long a single-flight WAITER blocks on
+    #: the leader before giving up — see `_SingleFlight`'s own docstring for
+    #: why an unbounded wait let a waiter join an 81s mirror-pooler stall.
+    #: 20s: comfortably above the 5-29s cold-build range the build map
+    #: measured, short of making a waiter outlast the frontend's own 15s
+    #: per-attempt patience by much.
+    single_flight_wait_s: float = 20.0
 
     def __post_init__(self) -> None:
         # ★ B10. Validate at CONSTRUCTION, so a bad value cannot reach a request.
@@ -653,6 +853,14 @@ class ServiceConfig:
             author_prior_chunk_size=int(
                 os.environ.get("RECSYS_AUTHOR_PRIOR_CHUNK_SIZE", cls.author_prior_chunk_size)
             ),
+            single_flight=_bool_env_default_on(os.environ.get("RECSYS_SINGLE_FLIGHT")),
+            single_flight_wait_s=_positive_or_default(
+                float(
+                    os.environ.get("RECSYS_SINGLE_FLIGHT_WAIT_S", cls.single_flight_wait_s)
+                ),
+                default=cls.single_flight_wait_s,
+                env_name="RECSYS_SINGLE_FLIGHT_WAIT_S",
+            ),
         )
 
 
@@ -701,6 +909,13 @@ class ServiceState:
     #: let a restart refund a spent budget.
     serve_log: ExplorationServeLog = field(default_factory=ExplorationServeLog)
     now_fn: Callable[[], datetime] = field(default=_default_now)
+    #: RECSYS_SINGLE_FLIGHT (S1) — see `_SingleFlight`'s own docstring. Keyed
+    #: on `(account, serve_limit)` in `build_feed`, not `account` alone: two
+    #: concurrent callers for the same viewer asking for a DIFFERENT page
+    #: size must never be coalesced onto one build sized for the other's
+    #: `serve_limit` (the exploration-seat and seen-suppression-floor rules
+    #: both read it). One instance per process, like `viewer_cache` above.
+    feed_single_flight: _SingleFlight[FeedResult] = field(default_factory=_SingleFlight)
 
     @classmethod
     def build(
@@ -803,6 +1018,12 @@ class ServiceState:
             snapshot_cache=snapshot_cache,
             viewer_cache=viewer_cache,
             author_prior_cache=author_prior_cache,
+            # ★ REVIEW FIX (2026-09-06): threaded from `cfg` explicitly — the
+            # dataclass field's own `default_factory=_SingleFlight` (used by
+            # a bare `ServiceState(...)` construction, e.g. in tests) cannot
+            # see `cfg.single_flight_wait_s`, since a default_factory takes
+            # no arguments.
+            feed_single_flight=_SingleFlight(wait_timeout_s=cfg.single_flight_wait_s),
         )
 
     def warm(self) -> None:
@@ -1002,7 +1223,7 @@ def build_feed(
             # no interests yet — that is an empty set, not something to derive.
             tags_arg = frozenset()
 
-    def _build() -> ViewerProfile:
+    def _build_profile() -> ViewerProfile:
         return build_viewer_profile(
             account,
             state.gateway,
@@ -1017,112 +1238,167 @@ def build_feed(
     # and follows are on it: `viewer_cache` is keyed on ACCOUNT ALONE, so a
     # cached profile would serve the FIRST request's mute list to every later
     # request from that viewer — a mute that works once and then silently stops.
-    if tags_arg is not None or follows_arg is not None or explicit_mutes is not None:
-        viewer = _build()
-    else:
-        viewer = state.viewer_cache.get(account, builder=_build)
-
-    # ★ WIRED 2026-08-04. `state.author_prior_cache.get` is exactly the
-    # `Callable[[frozenset[str]], Mapping[str, AuthorEngagement]]` shape
-    # `rank_feed` wants — no adapter. Without it, `_author_priors` calls
-    # `author_engagement(...)` fresh on every request, which EXCEEDS the live
-    # 15s statement timeout for a realistic candidate pool (measured: 150 busy
-    # authors -> QueryCanceled at 16.1s). With it, that same lookup is 0.042ms.
     #
-    # A miss degrades to the post's own engagement — the documented pre-existing
-    # behaviour — and the cache counts and logs misses and reports them on
-    # /health, because that degradation silently moves ~80% of the composite.
-    try:
-        # ★★★ SEEN-POST SUPPRESSION — the one read, taken here and injected, not
-        # taken inside `rank_feed` (2026-08-15). Keeping the ranker free of I/O is
-        # what makes the rule reproducible offline and what stops a database
-        # outage from changing a ranking decision by anything except HOW MUCH is
-        # suppressed.
-        #
-        # ★ GATED ON THE FEATURE FLAG so that with `RECSYS_SEEN_SUPPRESSION` unset
-        # (the default, contract C11) this costs ZERO round trips — not a query
-        # whose result is then discarded. `fetch_seen` itself never raises and
-        # returns {} on an absent DSN or an unreachable store, and {} means
-        # "suppress nothing", so every degrade lands on the pre-suppression feed.
-        seen = (
-            fetch_seen(
-                state.settings.lite,
-                account,
-                window_days=state.settings.seen.window_days,
-            )
-            if state.settings.seen.enabled
-            else {}
-        )
-        scored = rank_feed(
-            viewer,
-            state.gateway,
-            norm,
-            now=now,
-            settings=state.settings,
-            snapshot=snapshot,
-            trust_policy=TrustPolicy.FAIL_CLOSED,
-            author_prior_cache=state.author_prior_cache.get,
-            serve_log=state.serve_log,
-            seen=seen,
-            serve_limit=serve_limit,
-        )
-    except MissingTrustError as exc:
-        # ★★ B5 (2026-08-05) — THIS PATH USED TO BE COMPLETELY SILENT. Compare
-        # the generic handler below, which documents `exc_info=True`: a stale or
-        # absent trust snapshot took down every single request while writing
-        # nothing to the server log at all, so the only evidence an operator had
-        # was client-side 503s. Logged at ERROR because under FAIL_CLOSED this
-        # is a total outage, not a degraded mode.
-        logger.error(
-            "feed: REFUSING every request — trust snapshot absent or stale "
-            "(viewer=%s): %s. The weekly trust batch has probably stopped "
-            "running; /health now reports status=degraded for this.",
-            account,
-            exc,
-        )
-        raise FeedUnavailableError("trust_unavailable", str(exc)) from exc
-    except ValueError as exc:
-        raise FeedUnavailableError(
-            "norm_unavailable",
-            str(exc),
-            norm_samples={
-                "vote_signal": len(norm.vote_signal_samples),
-                "reputation": len(norm.reputation_samples),
-                "organic": len(norm.organic_samples),
-            },
-        ) from exc
-    except Exception as exc:
-        # ★ OPERATIONAL FINDING (2026-08-04, found running this service for
-        # real against the live mirror, including containerized). `rank_feed`
-        # -> `_author_priors` -> `HafsqlClient.author_engagement` (both files
-        # this builder does not own) queries `hafsql.comments` filtered by
-        # the FULL candidate-author set, and cost scales with that set's
-        # size. Live-measured: ~0.5-1s for 3 authors, but a real, ordinary,
-        # well-followed account (1,731 follows) hit the 15s statement timeout
-        # — reproduced repeatedly running this exact service in a real Docker
-        # container against the real mirror (`psycopg.errors.QueryCanceled`
-        # inside `author_engagement`). This is NOT a bug this module
-        # introduced — `rank_feed` had no production caller before A10 — but
-        # A10 is what makes it a REQUEST a real viewer can trigger, so it
-        # gets handled here rather than left as a stack trace. A DB timeout
-        # deep in the gateway is an operational, likely-transient condition —
-        # the same posture `MissingTrustError` already gets (503, not 500) —
-        # not evidence of a bug in the ranking logic itself. Full traceback
-        # still goes to the server log (`exc_info=True`) so it stays
-        # diagnosable; only the HTTP-facing classification changes. Report:
-        # `author_engagement`'s query likely needs either a narrower author
-        # set, a dedicated shorter timeout, or an index — out of this
-        # builder's file ownership to fix directly.
-        logger.error(
-            "build_feed: unexpected error from the gateway while ranking for "
-            "viewer=%s — treating as an operational/upstream condition (503), "
-            "not an application bug (500). See traceback.",
-            account,
-            exc_info=True,
-        )
-        raise FeedUnavailableError("upstream_error", f"{type(exc).__name__}: {exc}") from exc
+    # S1 (2026-09-06): this is ALSO exactly the set of requests
+    # `feed_single_flight` (below) may safely coalesce — a request carrying
+    # its own explicit tags/follows/mutes is per-CALL state, never per-viewer,
+    # and sharing one build across two callers with different explicit state
+    # would silently serve one caller's picks to the other.
+    cache_eligible = not (
+        tags_arg is not None or follows_arg is not None or explicit_mutes is not None
+    )
 
-    return FeedResult(account=account, now=now, viewer=viewer, scored=scored)
+    def _build_result() -> FeedResult:
+        if cache_eligible:
+            viewer = state.viewer_cache.get(account, builder=_build_profile)
+        else:
+            viewer = _build_profile()
+
+        # ★ WIRED 2026-08-04. `state.author_prior_cache.get` is exactly the
+        # `Callable[[frozenset[str]], Mapping[str, AuthorEngagement]]` shape
+        # `rank_feed` wants — no adapter. Without it, `_author_priors` calls
+        # `author_engagement(...)` fresh on every request, which EXCEEDS the
+        # live 15s statement timeout for a realistic candidate pool (measured:
+        # 150 busy authors -> QueryCanceled at 16.1s). With it, that same
+        # lookup is 0.042ms.
+        #
+        # A miss degrades to the post's own engagement — the documented
+        # pre-existing behaviour — and the cache counts and logs misses and
+        # reports them on /health, because that degradation silently moves
+        # ~80% of the composite.
+        try:
+            # ★★★ SEEN-POST SUPPRESSION — the one read, taken here and
+            # injected, not taken inside `rank_feed` (2026-08-15). Keeping the
+            # ranker free of I/O is what makes the rule reproducible offline
+            # and what stops a database outage from changing a ranking
+            # decision by anything except HOW MUCH is suppressed.
+            #
+            # ★ GATED ON THE FEATURE FLAG so that with `RECSYS_SEEN_SUPPRESSION`
+            # unset (the default, contract C11) this costs ZERO round trips —
+            # not a query whose result is then discarded. `fetch_seen` itself
+            # never raises and returns {} on an absent DSN or an unreachable
+            # store, and {} means "suppress nothing", so every degrade lands
+            # on the pre-suppression feed.
+            seen = (
+                fetch_seen(
+                    state.settings.lite,
+                    account,
+                    window_days=state.settings.seen.window_days,
+                )
+                if state.settings.seen.enabled
+                else {}
+            )
+            scored = rank_feed(
+                viewer,
+                state.gateway,
+                norm,
+                now=now,
+                settings=state.settings,
+                snapshot=snapshot,
+                trust_policy=TrustPolicy.FAIL_CLOSED,
+                author_prior_cache=state.author_prior_cache.get,
+                serve_log=state.serve_log,
+                seen=seen,
+                serve_limit=serve_limit,
+            )
+        except MissingTrustError as exc:
+            # ★★ B5 (2026-08-05) — THIS PATH USED TO BE COMPLETELY SILENT.
+            # Compare the generic handler below, which documents
+            # `exc_info=True`: a stale or absent trust snapshot took down
+            # every single request while writing nothing to the server log at
+            # all, so the only evidence an operator had was client-side 503s.
+            # Logged at ERROR because under FAIL_CLOSED this is a total
+            # outage, not a degraded mode.
+            logger.error(
+                "feed: REFUSING every request — trust snapshot absent or stale "
+                "(viewer=%s): %s. The weekly trust batch has probably stopped "
+                "running; /health now reports status=degraded for this.",
+                account,
+                exc,
+            )
+            raise FeedUnavailableError("trust_unavailable", str(exc)) from exc
+        except ValueError as exc:
+            raise FeedUnavailableError(
+                "norm_unavailable",
+                str(exc),
+                norm_samples={
+                    "vote_signal": len(norm.vote_signal_samples),
+                    "reputation": len(norm.reputation_samples),
+                    "organic": len(norm.organic_samples),
+                },
+            ) from exc
+        except Exception as exc:
+            # ★ OPERATIONAL FINDING (2026-08-04, found running this service
+            # for real against the live mirror, including containerized).
+            # `rank_feed` -> `_author_priors` -> `HafsqlClient.
+            # author_engagement` (both files this builder does not own)
+            # queries `hafsql.comments` filtered by the FULL candidate-author
+            # set, and cost scales with that set's size. Live-measured:
+            # ~0.5-1s for 3 authors, but a real, ordinary, well-followed
+            # account (1,731 follows) hit the 15s statement timeout —
+            # reproduced repeatedly running this exact service in a real
+            # Docker container against the real mirror
+            # (`psycopg.errors.QueryCanceled` inside `author_engagement`).
+            # This is NOT a bug this module introduced — `rank_feed` had no
+            # production caller before A10 — but A10 is what makes it a
+            # REQUEST a real viewer can trigger, so it gets handled here
+            # rather than left as a stack trace. A DB timeout deep in the
+            # gateway is an operational, likely-transient condition — the
+            # same posture `MissingTrustError` already gets (503, not 500) —
+            # not evidence of a bug in the ranking logic itself. Full
+            # traceback still goes to the server log (`exc_info=True`) so it
+            # stays diagnosable; only the HTTP-facing classification changes.
+            # Report: `author_engagement`'s query likely needs either a
+            # narrower author set, a dedicated shorter timeout, or an index —
+            # out of this builder's file ownership to fix directly.
+            logger.error(
+                "build_feed: unexpected error from the gateway while ranking "
+                "for viewer=%s — treating as an operational/upstream "
+                "condition (503), not an application bug (500). See "
+                "traceback.",
+                account,
+                exc_info=True,
+            )
+            raise FeedUnavailableError("upstream_error", f"{type(exc).__name__}: {exc}") from exc
+
+        return FeedResult(account=account, now=now, viewer=viewer, scored=scored)
+
+    # ★★★ S1 (2026-09-06) — SINGLE-FLIGHT THE WHOLE BUILD, not just the
+    # profile. `_ViewerProfileCache` above only ever coalesced the profile
+    # half (0.5-6s); the frontend's 3-attempts-times-15s retry storm
+    # multiplies the WHOLE build (candidates, hydration, ranking too) — see
+    # `_SingleFlight`'s own docstring for the measured cost. Keyed on
+    # `(account, serve_limit)`, not `account` alone: see `cache_eligible`'s
+    # comment above for why a distinct explicit-state request must never be
+    # coalesced, and `ServiceState.feed_single_flight`'s own comment for why
+    # `serve_limit` is part of the key.
+    if cache_eligible and state.config.single_flight:
+        try:
+            return state.feed_single_flight.run((account, serve_limit), _build_result)
+        except _SingleFlightTimeout as exc:
+            # ★ REVIEW FIX (2026-09-06). A WAITER whose leader has not
+            # finished within `single_flight_wait_s` (default 20s) refuses
+            # fast rather than either (a) hanging further on a leader that
+            # may be stuck on an 81s mirror-pooler stall, or (b) starting its
+            # own independent build and doubling load on a mirror that is
+            # already in trouble. See `_SingleFlight`'s own docstring for the
+            # full reasoning behind this choice over the alternative.
+            logger.warning(
+                "feed: single-flight wait timed out after %.0fs for viewer=%s "
+                "(serve_limit=%s) — the leader build is still running, "
+                "probably on a stalled mirror query; refusing this waiter "
+                "rather than piling another build onto it.",
+                exc.waited_s,
+                account,
+                serve_limit,
+            )
+            raise FeedUnavailableError(
+                "single_flight_timeout",
+                f"a concurrent build for this viewer has been running for over "
+                f"{exc.waited_s:.0f}s; refusing to start a second one against a "
+                "possibly-stalled mirror",
+            ) from exc
+    return _build_result()
 
 
 def serialize_scored(scored: ScoredCandidate) -> dict[str, Any]:
@@ -1392,11 +1668,37 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
 
     def _write_json(self, status: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        # ★★★ S1 (2026-09-06) — BROKEN-PIPE-AWARE WRITER. Measured 24h
+        # (09-05): 498 of 511 finished rankings were written to a socket the
+        # caller had already closed (the frontend's 3-attempts-times-15s retry
+        # abandons a connection but never cancels the recsys-side build that
+        # was answering it), each logged as a full ~20-line BrokenPipeError
+        # traceback — noise that told an operator nothing actionable, 24h a
+        # day. A closed-socket write changes nothing the client ever sees (it
+        # is already gone), so this only changes what the SERVER LOG records:
+        # one INFO line instead of a traceback. Gated on the same flag as
+        # single-flight (`RECSYS_SINGLE_FLIGHT`) per the build map; off
+        # reverts to today's unhandled-exception behaviour (a traceback,
+        # surfaced by the base `http.server` machinery).
+        if not self.state.config.single_flight:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            logger.info(
+                "feed: client disconnected before the response could be written "
+                "(status=%s)",
+                status,
+            )
 
     def setup(self) -> None:
         # B4c: bound how long one connection may hold a thread. Applied AFTER

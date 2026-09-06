@@ -34,7 +34,9 @@ Three groups:
 
 from __future__ import annotations
 
+import contextlib
 import json
+import logging
 import os
 import threading
 import time
@@ -101,7 +103,9 @@ class _FetchStubGateway(FakeGateway):
         super().__init__(**kwargs)
         self.fetch_calls: list[str] = []
 
-    def _fetch(self, sql: str, params: dict[str, Any]) -> list[tuple[Any, ...]]:
+    def _fetch(
+        self, sql: str, params: dict[str, Any], *, timeout_ms: int | None = None
+    ) -> list[tuple[Any, ...]]:
         self.fetch_calls.append(sql)
         return []
 
@@ -221,6 +225,57 @@ def test_timer_cache_stop_halts_further_refreshes() -> None:
 
 
 # ---------------------------------------------------------------------------
+# ServiceConfig.from_env — RECSYS_SINGLE_FLIGHT (S1, 2026-09-06)
+# ---------------------------------------------------------------------------
+
+
+def test_single_flight_config_defaults_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RECSYS_SINGLE_FLIGHT", raising=False)
+    assert service_app.ServiceConfig.from_env().single_flight is True
+
+
+@pytest.mark.parametrize("off_value", ["0", "false", "no", "off", "OFF"])
+def test_single_flight_config_kill_switch_values(
+    off_value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RECSYS_SINGLE_FLIGHT", off_value)
+    assert service_app.ServiceConfig.from_env().single_flight is False
+
+
+@pytest.mark.parametrize("on_value", ["1", "true", "yes", "on", "anything-else"])
+def test_single_flight_config_stays_on_for_anything_not_a_kill_value(
+    on_value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RECSYS_SINGLE_FLIGHT", on_value)
+    assert service_app.ServiceConfig.from_env().single_flight is True
+
+
+@pytest.mark.parametrize("bad_value", ["0", "-1", "-20.5"])
+def test_single_flight_wait_s_zero_or_negative_falls_back_to_the_default(
+    bad_value: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """★★★ SECOND REVIEW FIX (2026-09-06). `0`/negative is NOT a usable wait
+    bound the way `0` disables `rate_limit_per_minute`/`max_concurrent_
+    requests` above — a waiter's `event.wait(timeout=0)` returns almost
+    immediately, so every waiter would fail instantly instead of single-
+    flight being "disabled". This build's own convention elsewhere trains an
+    operator to read `0` as a kill switch, so it must fail toward the
+    default (still armed), not toward the worst possible number, and it must
+    say so loudly."""
+    monkeypatch.setenv("RECSYS_SINGLE_FLIGHT_WAIT_S", bad_value)
+    with caplog.at_level(logging.WARNING, logger="recsys.service.app"):
+        cfg = service_app.ServiceConfig.from_env()
+    assert cfg.single_flight_wait_s == service_app.ServiceConfig.single_flight_wait_s
+    assert "RECSYS_SINGLE_FLIGHT_WAIT_S" in caplog.text
+    assert bad_value in caplog.text
+
+
+def test_single_flight_wait_s_positive_value_is_honoured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RECSYS_SINGLE_FLIGHT_WAIT_S", "5.5")
+    assert service_app.ServiceConfig.from_env().single_flight_wait_s == 5.5
+
+
+# ---------------------------------------------------------------------------
 # _ViewerProfileCache
 # ---------------------------------------------------------------------------
 
@@ -275,6 +330,217 @@ def test_viewer_profile_cache_evicts_when_full() -> None:
     cache.get("bob", lambda: ViewerProfile(account="bob"))
     cache.get("carol", lambda: ViewerProfile(account="carol"))
     assert len(cache) == 2
+
+
+# ---------------------------------------------------------------------------
+# _SingleFlight (S1, RECSYS-LATENCY-BUILD-MAP-2026-09-06) — coalescing with
+# REAL threads, not simulated sequencing. A single-threaded "call it twice"
+# test cannot distinguish "coalesces concurrent callers" from "just runs the
+# builder twice fast" — these use a barrier so the second `run()` provably
+# starts while the first is still inside the builder.
+# ---------------------------------------------------------------------------
+
+
+def test_single_flight_runs_the_builder_once_for_two_concurrent_callers() -> None:
+    sf: service_app._SingleFlight[str] = service_app._SingleFlight()
+    call_count = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    def builder() -> str:
+        call_count.append(1)
+        entered.set()
+        assert release.wait(timeout=5), "leader was not released in time"
+        return "built"
+
+    results: list[str] = []
+    errors: list[BaseException] = []
+
+    def leader() -> None:
+        try:
+            results.append(sf.run("k", builder))
+        except BaseException as exc:
+            errors.append(exc)
+
+    def follower() -> None:
+        try:
+            results.append(sf.run("k", builder))
+        except BaseException as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=leader)
+    t1.start()
+    assert entered.wait(timeout=5), "leader never entered the builder"
+    t2 = threading.Thread(target=follower)
+    t2.start()
+    # Give the follower a moment to register as a waiter before releasing —
+    # otherwise it could race the leader's own completion and never actually
+    # test the waiting path.
+    time.sleep(0.05)
+    release.set()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    assert not errors
+    assert call_count == [1], f"builder ran {len(call_count)} times for 2 concurrent callers"
+    assert results == ["built", "built"]
+    assert len(sf) == 0, "the in-flight entry must be cleared after the build finishes"
+
+
+def test_single_flight_different_keys_are_never_coalesced() -> None:
+    sf: service_app._SingleFlight[str] = service_app._SingleFlight()
+    calls: list[str] = []
+
+    def builder_for(key: str) -> str:
+        calls.append(key)
+        return key
+
+    assert sf.run("alice", lambda: builder_for("alice")) == "alice"
+    assert sf.run("bob", lambda: builder_for("bob")) == "bob"
+    assert calls == ["alice", "bob"]
+
+
+def test_single_flight_a_build_failure_releases_every_waiter() -> None:
+    """A build failure must not strand a waiter — every caller for that key
+    must see the SAME failure promptly, not hang."""
+    sf: service_app._SingleFlight[str] = service_app._SingleFlight()
+    entered = threading.Event()
+    release = threading.Event()
+
+    def failing_builder() -> str:
+        entered.set()
+        release.wait(timeout=5)
+        raise RuntimeError("upstream exploded")
+
+    errors: list[BaseException] = []
+
+    def call() -> None:
+        try:
+            sf.run("k", failing_builder)
+        except BaseException as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=call)
+    t1.start()
+    assert entered.wait(timeout=5)
+    t2 = threading.Thread(target=call)
+    t2.start()
+    time.sleep(0.05)
+    release.set()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    assert len(errors) == 2
+    assert all(isinstance(e, RuntimeError) and str(e) == "upstream exploded" for e in errors)
+    assert len(sf) == 0, "a failed build must still clear its in-flight entry"
+    # ★ REVIEW FIX (2026-09-06): each waiter must get its OWN exception
+    # object, not the same shared instance re-raised twice — sharing one
+    # instance's `__traceback__` across threads makes "who actually saw
+    # this" unanswerable, and some exception subclasses cannot be copy.copy'd
+    # (see `_clone_exception`'s own docstring).
+    assert errors[0] is not errors[1], "waiters must not share one exception instance"
+
+
+def test_single_flight_a_build_failure_clones_a_custom_exception_that_copy_copy_cannot(
+) -> None:
+    """`FeedUnavailableError(kind, detail, *, norm_samples=None)` calls only
+    `super().__init__(detail)`, so `.args == (detail,)` — plain `copy.copy`
+    reconstructs via `type(exc)(*exc.args)` and fails with a confusing
+    TypeError for exactly this shape. `_SingleFlight` must survive it."""
+    sf: service_app._SingleFlight[str] = service_app._SingleFlight()
+    entered = threading.Event()
+    release = threading.Event()
+
+    def failing_builder() -> str:
+        entered.set()
+        release.wait(timeout=5)
+        raise service_app.FeedUnavailableError(
+            "upstream_error", "simulated", norm_samples={"organic": 3}
+        )
+
+    errors: list[BaseException] = []
+
+    def call() -> None:
+        try:
+            sf.run("k", failing_builder)
+        except BaseException as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=call)
+    t1.start()
+    assert entered.wait(timeout=5)
+    t2 = threading.Thread(target=call)
+    t2.start()
+    time.sleep(0.05)
+    release.set()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    assert len(errors) == 2
+    assert errors[0] is not errors[1]
+    for exc in errors:
+        assert isinstance(exc, service_app.FeedUnavailableError)
+        assert exc.kind == "upstream_error"
+        assert exc.norm_samples == {"organic": 3}
+
+
+def test_single_flight_waiter_times_out_without_starting_its_own_build() -> None:
+    """★★★ REVIEW FIX (2026-09-06). An unbounded `event.wait()` let a waiter
+    join a leader stuck on the build map's own measured 81s mirror-pooler
+    stall. A short `wait_timeout_s` must raise `_SingleFlightTimeout`
+    promptly instead — and the leader's OWN build must still be the only one
+    that ran (the waiter must not fall back to an independent build)."""
+    sf: service_app._SingleFlight[str] = service_app._SingleFlight(wait_timeout_s=0.2)
+    call_count = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_builder() -> str:
+        call_count.append(1)
+        entered.set()
+        release.wait(timeout=5)  # never released within this test's lifetime
+        return "built"
+
+    errors: list[BaseException] = []
+
+    def leader() -> None:
+        sf.run("k", slow_builder)
+
+    def waiter() -> None:
+        try:
+            sf.run("k", slow_builder)
+        except BaseException as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=leader, daemon=True)
+    t1.start()
+    assert entered.wait(timeout=5)
+    t0 = time.monotonic()
+    t2 = threading.Thread(target=waiter)
+    t2.start()
+    t2.join(timeout=5)
+    elapsed = time.monotonic() - t0
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], service_app._SingleFlightTimeout)
+    assert elapsed < 2.0, f"the waiter should time out near 0.2s, took {elapsed:.2f}s"
+    assert call_count == [1], "the waiter must not start its own independent build on timeout"
+    release.set()  # let the leader's thread finish so it does not leak past the test
+
+
+def test_single_flight_sequential_calls_after_completion_each_rerun_the_builder() -> None:
+    """Coalescing must be scoped to OVERLAPPING calls only — once a build has
+    finished and cleared, the next call is a fresh build, not a cache."""
+    sf: service_app._SingleFlight[int] = service_app._SingleFlight()
+    calls = []
+
+    def builder() -> int:
+        calls.append(1)
+        return len(calls)
+
+    assert sf.run("k", builder) == 1
+    assert sf.run("k", builder) == 2
+    assert len(calls) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -452,17 +718,423 @@ def test_build_feed_uses_the_viewer_cache_not_rebuilding_per_call() -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# build_feed x _SingleFlight (S1) — the real wiring, not just the class.
+# ---------------------------------------------------------------------------
+
+
+def _blocking_rank_feed(
+    call_count: list[int], entered: threading.Event, release: threading.Event
+) -> Any:
+    """A stand-in for `service_app.rank_feed` that blocks until released,
+    counting how many times it actually ran — the barrier a same-thread test
+    cannot provide."""
+    real_rank_feed = service_app.rank_feed
+
+    def _fake(*args: Any, **kwargs: Any) -> Any:
+        call_count.append(1)
+        entered.set()
+        assert release.wait(timeout=5), "leader was never released"
+        return real_rank_feed(*args, **kwargs)
+
+    return _fake
+
+
+def test_build_feed_single_flight_coalesces_concurrent_builds_for_the_same_viewer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    posts = [make_post("author1", "p1")]
+    gateway = _FetchStubGateway(popular=posts)
+    fresh = _fresh_snapshot(built_at=EPOCH)
+    state = _state_with(
+        gateway=gateway, norm=_flat_norm(), snapshot=fresh, now=EPOCH + timedelta(days=1)
+    )
+    assert state.config.single_flight is True, "default must be ON"
+
+    call_count: list[int] = []
+    entered = threading.Event()
+    release = threading.Event()
+    monkeypatch.setattr(
+        service_app, "rank_feed", _blocking_rank_feed(call_count, entered, release)
+    )
+
+    results: list[Any] = []
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            results.append(service_app.build_feed(state, "viewer1"))
+        except BaseException as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=worker)
+    t1.start()
+    assert entered.wait(timeout=5), "leader never reached rank_feed"
+    t2 = threading.Thread(target=worker)
+    t2.start()
+    time.sleep(0.05)
+    release.set()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    assert not errors, f"unexpected errors: {errors}"
+    assert len(results) == 2
+    assert call_count == [1], (
+        f"rank_feed ran {len(call_count)} times for 2 concurrent same-viewer builds — "
+        "single-flight did not coalesce them"
+    )
+
+
+def test_build_feed_single_flight_off_never_coalesces(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The kill switch: RECSYS_SINGLE_FLIGHT off must restore today's exact
+    behaviour — every concurrent call independently pays for its own build."""
+    posts = [make_post("author1", "p1")]
+    gateway = _FetchStubGateway(popular=posts)
+    fresh = _fresh_snapshot(built_at=EPOCH)
+    state = _state_with(
+        gateway=gateway, norm=_flat_norm(), snapshot=fresh, now=EPOCH + timedelta(days=1)
+    )
+    state.config = replace(state.config, single_flight=False)
+
+    call_count: list[int] = []
+    entered = threading.Event()
+    release = threading.Event()
+    # With the flag off both callers run for real and neither one blocks the
+    # other, so release immediately — this only proves the count, not ordering.
+    release.set()
+    monkeypatch.setattr(
+        service_app, "rank_feed", _blocking_rank_feed(call_count, entered, release)
+    )
+
+    service_app.build_feed(state, "viewer1")
+    service_app.build_feed(state, "viewer1")
+
+    assert call_count == [1, 1], (
+        f"expected 2 independent rank_feed calls with single-flight off, got {call_count}"
+    )
+
+
+def test_build_feed_single_flight_does_not_coalesce_different_serve_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """★★★ REVIEW FIX (2026-09-06) — made genuinely CONCURRENT. The previous
+    version called the two `build_feed`s SEQUENTIALLY, so neither ever found
+    an in-flight entry to (wrongly) join regardless of what the single-flight
+    KEY was — it would have passed even if `_SingleFlight` were keyed on
+    `account` alone. A `threading.Barrier(2)` inside the fake `rank_feed`
+    forces both threads to actually be in-flight AT THE SAME TIME: if
+    `serve_limit` were dropped from the key, the second thread would be
+    coalesced onto the first's in-flight entry and would never reach
+    `rank_feed` at all, so the barrier's OTHER party would never arrive and
+    `barrier.wait()` would raise `BrokenBarrierError` on timeout — a
+    deterministic proof the key actually includes `serve_limit`."""
+    posts = [make_post("author1", "p1")]
+    gateway = _FetchStubGateway(popular=posts)
+    fresh = _fresh_snapshot(built_at=EPOCH)
+    state = _state_with(
+        gateway=gateway, norm=_flat_norm(), snapshot=fresh, now=EPOCH + timedelta(days=1)
+    )
+    real_rank_feed = service_app.rank_feed
+    barrier = threading.Barrier(2, timeout=5)
+
+    def fake_rank_feed(*args: Any, **kwargs: Any) -> Any:
+        barrier.wait()  # only satisfied if BOTH calls actually reached here
+        return real_rank_feed(*args, **kwargs)
+
+    monkeypatch.setattr(service_app, "rank_feed", fake_rank_feed)
+
+    results: dict[int, Any] = {}
+    errors: list[BaseException] = []
+
+    def worker(limit: int) -> None:
+        try:
+            results[limit] = service_app.build_feed(state, "viewer1", serve_limit=limit)
+        except BaseException as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=worker, args=(10,))
+    t2 = threading.Thread(target=worker, args=(68,))
+    t1.start()
+    t2.start()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    assert not errors, f"unexpected errors (likely a BrokenBarrierError): {errors}"
+    assert set(results) == {10, 68}, "both distinct serve_limit builds must have completed"
+
+
+def test_build_feed_single_flight_does_not_coalesce_explicit_state_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """★★★ REVIEW FIX (2026-09-06) — made genuinely CONCURRENT; see the
+    sibling test above for why a sequential version proves nothing about the
+    single-flight KEY. An explicit-tags request is never cache-eligible at
+    all (see `cache_eligible` in `build_feed`), so it must run independently
+    even while a bare request for the SAME account is in flight."""
+    posts = [make_post("author1", "p1")]
+    gateway = _FetchStubGateway(popular=posts)
+    fresh = _fresh_snapshot(built_at=EPOCH)
+    state = _state_with(
+        gateway=gateway, norm=_flat_norm(), snapshot=fresh, now=EPOCH + timedelta(days=1)
+    )
+    real_rank_feed = service_app.rank_feed
+    barrier = threading.Barrier(2, timeout=5)
+
+    def fake_rank_feed(*args: Any, **kwargs: Any) -> Any:
+        barrier.wait()
+        return real_rank_feed(*args, **kwargs)
+
+    monkeypatch.setattr(service_app, "rank_feed", fake_rank_feed)
+
+    results: list[Any] = []
+    errors: list[BaseException] = []
+
+    def explicit_worker() -> None:
+        try:
+            results.append(
+                service_app.build_feed(
+                    state, "viewer1", explicit_interest_tags=frozenset({"art"})
+                )
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    def bare_worker() -> None:
+        try:
+            results.append(service_app.build_feed(state, "viewer1"))
+        except BaseException as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=explicit_worker)
+    t2 = threading.Thread(target=bare_worker)
+    t1.start()
+    t2.start()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    assert not errors, f"unexpected errors (likely a BrokenBarrierError): {errors}"
+    assert len(results) == 2, "both the explicit-state and the bare build must have completed"
+
+
+def test_build_feed_single_flight_a_build_failure_reaches_every_waiter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed leader build must release every waiter with the SAME
+    FeedUnavailableError, not hang them."""
+    posts = [make_post("author1", "p1")]
+    gateway = _FetchStubGateway(popular=posts)
+    fresh = _fresh_snapshot(built_at=EPOCH)
+    state = _state_with(
+        gateway=gateway, norm=_flat_norm(), snapshot=fresh, now=EPOCH + timedelta(days=1)
+    )
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def failing_rank_feed(*args: Any, **kwargs: Any) -> Any:
+        entered.set()
+        assert release.wait(timeout=5)
+        raise RuntimeError("simulated upstream failure")
+
+    monkeypatch.setattr(service_app, "rank_feed", failing_rank_feed)
+
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            service_app.build_feed(state, "viewer1")
+        except BaseException as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=worker)
+    t1.start()
+    assert entered.wait(timeout=5)
+    t2 = threading.Thread(target=worker)
+    t2.start()
+    time.sleep(0.05)
+    release.set()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    assert len(errors) == 2
+    assert errors[0] is not errors[1], "waiters must not share one exception instance"
+    for exc in errors:
+        assert isinstance(exc, service_app.FeedUnavailableError)
+        assert exc.kind == "upstream_error"
+
+
+def test_build_feed_single_flight_timeout_produces_a_clear_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """★★★ REVIEW FIX (2026-09-06). A waiter whose leader has not finished
+    within `single_flight_wait_s` must get a fast, clearly-reasoned
+    `FeedUnavailableError` (kind="single_flight_timeout") — not a hang, and
+    not a second independent build racing the stalled one."""
+    posts = [make_post("author1", "p1")]
+    gateway = _FetchStubGateway(popular=posts)
+    fresh = _fresh_snapshot(built_at=EPOCH)
+    state = _state_with(
+        gateway=gateway, norm=_flat_norm(), snapshot=fresh, now=EPOCH + timedelta(days=1)
+    )
+    # A short wait so the test does not take 20 real seconds.
+    state.feed_single_flight = service_app._SingleFlight(wait_timeout_s=0.2)
+
+    call_count: list[int] = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    def stalled_rank_feed(*args: Any, **kwargs: Any) -> Any:
+        call_count.append(1)
+        entered.set()
+        release.wait(timeout=5)  # simulates the build map's own 81s pooler stall
+        raise AssertionError("should not be reached inside this test's window")
+
+    monkeypatch.setattr(service_app, "rank_feed", stalled_rank_feed)
+
+    def leader() -> None:
+        with contextlib.suppress(BaseException):
+            service_app.build_feed(state, "viewer1")
+
+    t1 = threading.Thread(target=leader, daemon=True)
+    t1.start()
+    assert entered.wait(timeout=5)
+
+    with pytest.raises(service_app.FeedUnavailableError) as exc_info:
+        service_app.build_feed(state, "viewer1")
+    assert exc_info.value.kind == "single_flight_timeout"
+    assert call_count == [1], "the waiter must not start a second, independent build"
+    release.set()  # let the leader's daemon thread unwind
+
+
+# ---------------------------------------------------------------------------
+# _write_json x BrokenPipeError/ConnectionResetError (S1)
+# ---------------------------------------------------------------------------
+
+
+class _BoomWfile:
+    def write(self, body: bytes) -> None:
+        raise BrokenPipeError("simulated client disconnect")
+
+
+class _WriteJsonHandlerStub:
+    """Everything `_write_json` touches on `self`, and nothing else — calls
+    the REAL `FeedRequestHandler._write_json` (an unbound function call, duck
+    typed) rather than reimplementing its logic."""
+
+    def __init__(self, state: service_app.ServiceState) -> None:
+        self.state = state
+        self.command = "GET"
+        self.wfile = _BoomWfile()
+
+    def send_response(self, status: int) -> None:
+        pass
+
+    def send_header(self, key: str, value: str) -> None:
+        pass
+
+    def end_headers(self) -> None:
+        pass
+
+
+def test_write_json_logs_instead_of_raising_on_broken_pipe(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    state = _offline_state()
+    assert state.config.single_flight is True
+    stub = _WriteJsonHandlerStub(state)
+    with caplog.at_level(logging.INFO, logger="recsys.service.app"):
+        service_app.FeedRequestHandler._write_json(stub, 200, {"ok": True})  # must not raise
+    assert any("disconnected" in r.message for r in caplog.records)
+
+
+def test_write_json_swallows_connection_reset_too(caplog: pytest.LogCaptureFixture) -> None:
+    state = _offline_state()
+
+    class _ResetWfile:
+        def write(self, body: bytes) -> None:
+            raise ConnectionResetError("simulated reset")
+
+    stub = _WriteJsonHandlerStub(state)
+    stub.wfile = _ResetWfile()  # type: ignore[assignment]
+    with caplog.at_level(logging.INFO, logger="recsys.service.app"):
+        service_app.FeedRequestHandler._write_json(stub, 200, {"ok": True})
+    assert any("disconnected" in r.message for r in caplog.records)
+
+
+def test_write_json_flag_off_lets_broken_pipe_propagate() -> None:
+    """The kill switch restores today's behaviour — an unhandled exception,
+    which the base `http.server` machinery is left to deal with as before."""
+    state = _offline_state()
+    state.config = replace(state.config, single_flight=False)
+    stub = _WriteJsonHandlerStub(state)
+    with pytest.raises(BrokenPipeError):
+        service_app.FeedRequestHandler._write_json(stub, 200, {"ok": True})
+
+
+def test_write_json_a_non_socket_error_still_propagates() -> None:
+    """★★★ REVIEW FIX (2026-09-06) — the fix must only swallow the two named
+    disconnect exceptions. Anything ELSE (a bug in this handler, a bad
+    payload, whatever) must still surface as a real exception, not vanish
+    into the same INFO log line a genuine disconnect gets."""
+    state = _offline_state()
+
+    class _WeirdWfile:
+        def write(self, body: bytes) -> None:
+            raise ValueError("not a socket problem at all")
+
+    stub = _WriteJsonHandlerStub(state)
+    stub.wfile = _WeirdWfile()  # type: ignore[assignment]
+    with pytest.raises(ValueError, match="not a socket problem"):
+        service_app.FeedRequestHandler._write_json(stub, 200, {"ok": True})
+
+
+def test_write_json_still_writes_the_body_on_a_healthy_connection() -> None:
+    """The fix must not become a silent no-op on the common, successful path."""
+    state = _offline_state()
+
+    class _RecordingWfile:
+        def __init__(self) -> None:
+            self.written: list[bytes] = []
+
+        def write(self, body: bytes) -> None:
+            self.written.append(body)
+
+    stub = _WriteJsonHandlerStub(state)
+    stub.wfile = _RecordingWfile()  # type: ignore[assignment]
+    service_app.FeedRequestHandler._write_json(stub, 200, {"ok": True})
+    assert stub.wfile.written and b'"ok": true' in stub.wfile.written[0]
+
+
 class _TimeoutRaisingGateway(_FetchStubGateway):
-    """Simulates the real operational finding (module docstring, and
-    `build_feed`'s own comment): a gateway call inside `rank_feed` (here,
-    `popular_posts`, reached via the tagless-viewer fallback path) can raise
-    an unexpected error — live-reproduced as `author_engagement` hitting the
-    15s statement timeout for a well-followed real account. `build_feed`
-    must convert this to a clean, logged `FeedUnavailableError("upstream_error"`
-    rather than letting it surface as an unclassified crash."""
+    """★★★ THIRD REVIEW FIX (2026-09-06) — REPURPOSED, not deleted.
+
+    This used to raise `TimeoutError` from `popular_posts` to simulate the
+    real operational finding (module docstring, and `build_feed`'s own
+    comment): a gateway call inside `rank_feed` — here, `popular_posts`,
+    reached via the tagless-viewer fallback path (`popular_fallback`) — can
+    raise an unexpected error, live-reproduced as `author_engagement` hitting
+    the 15s statement timeout for a well-followed real account.
+
+    That EXACT path is what C1's per-lane isolation now covers: `_lane_or_
+    empty` wraps `popular_fallback` (2026-09-06, this review pass), so an
+    OPERATIONAL failure here (a timeout, a connection error) now degrades
+    that one lane to empty instead of failing the whole request — see
+    `test_a_query_canceled_in_the_tagless_fallback_path_degrades_instead_of_
+    a_503` below for that corrected behaviour, locked in.
+
+    So this class now raises `TypeError` instead — a GENUINE programmer-class
+    bug (a bad key, a bad attribute, a wrong type), which `_lane_or_empty`
+    (`pipeline.py`, review fix 9) deliberately does NOT swallow into an empty
+    lane: it re-raises, so the bug still reaches this exact assertion instead
+    of silently shipping a subtly-incomplete 200. What this class still
+    proves, accurately post-fix: an unexpected/unhandled condition reaching
+    `build_feed` is still converted to a clean, logged `FeedUnavailableError
+    ("upstream_error")` rather than an unclassified crash — it is simply no
+    longer true for every exception type from this path, only for the ones
+    that are not a recognised, gracefully-degradable operational failure."""
 
     def popular_posts(self, since: datetime, limit: int) -> list[Any]:
-        raise TimeoutError("simulated: canceling statement due to statement timeout")
+        raise TypeError("simulated: a genuine bug, e.g. a bad response shape")
 
 
 def test_build_feed_maps_an_unexpected_gateway_error_to_upstream_error(
@@ -476,7 +1148,7 @@ def test_build_feed_maps_an_unexpected_gateway_error_to_upstream_error(
     with pytest.raises(service_app.FeedUnavailableError) as exc_info:
         service_app.build_feed(state, "viewer1")
     assert exc_info.value.kind == "upstream_error"
-    assert "TimeoutError" in exc_info.value.detail
+    assert "TypeError" in exc_info.value.detail
 
 
 def test_http_feed_upstream_error_is_503_not_500() -> None:
@@ -486,6 +1158,37 @@ def test_http_feed_upstream_error_is_503_not_500() -> None:
         status, body = server.get("/feed?viewer=alice")
     assert status == 503
     assert body["error"] == "upstream_error"
+
+
+def test_a_query_canceled_in_the_tagless_fallback_path_degrades_instead_of_a_503(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """★★★ THIRD REVIEW FIX (2026-09-06) — the corrected behaviour for the
+    EXACT scenario `_TimeoutRaisingGateway` above used to model. Before this
+    pass, ANY exception from `popular_posts` reached via the tagless-viewer
+    `popular_fallback` path — operational or not — propagated uncaught to
+    `build_feed`'s outer handler and became a 503 for the whole feed, even
+    though the request had no interest tags to serve from in the first
+    place. A real, transient `psycopg.errors.QueryCanceled` (a statement
+    timeout) must now degrade that one lane to empty instead: the request
+    still succeeds, just without the fallback padding."""
+    import psycopg
+
+    class _QueryCanceledPopularGateway(_FetchStubGateway):
+        def popular_posts(self, since: datetime, limit: int) -> list[Any]:
+            raise psycopg.errors.QueryCanceled("simulated statement timeout")
+
+    gateway = _QueryCanceledPopularGateway()
+    fresh = _fresh_snapshot(built_at=EPOCH)
+    state = _state_with(
+        gateway=gateway, norm=_flat_norm(), snapshot=fresh, now=EPOCH + timedelta(days=1)
+    )
+    with caplog.at_level(logging.WARNING, logger="recsys.pipeline"):
+        result = service_app.build_feed(state, "viewer1")
+    assert result is not None, (
+        "a QueryCanceled in the fallback lane must degrade to empty, not fail the request"
+    )
+    assert "popular_fallback lane failed" in caplog.text
 
 
 # ---------------------------------------------------------------------------
