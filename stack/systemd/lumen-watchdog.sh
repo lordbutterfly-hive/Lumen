@@ -77,6 +77,10 @@ for s in lumen lumen-publisher postgresql; do
   STATE=$(systemctl is-active $s)
   if [ "$STATE" = "active" ]; then ok "$s active"; continue; fi
   if [ "$s" = "lumen-publisher" ] && [ "$(systemctl is-active lumen)" = "active" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      alert "lumen-publisher is $STATE - would self-heal lumen-publisher [dry-run, not started]"
+      continue
+    fi
     systemctl start lumen-publisher >/dev/null 2>&1
     sleep 2
     NEW=$(systemctl is-active lumen-publisher)
@@ -106,14 +110,18 @@ WATCHDOG_MEM_MIN_MB=${WATCHDOG_MEM_MIN_MB:-450}
 WATCHDOG_SWAP_MAX_MB=${WATCHDOG_SWAP_MAX_MB:-400}
 WATCHDOG_RESTART_COOLDOWN_S=${WATCHDOG_RESTART_COOLDOWN_S:-3600}
 
-MEM_LOG=/var/log/lumen-mem.log
-MEM_STATE_DIR=/var/lib/lumen-watchdog
+# ★ Overridable ONLY so the sandbox can exercise this exact file rather than a
+# near-copy of it (a copy is not the thing you ship). Unset means production.
+MEM_LOG=${MEM_LOG:-/var/log/lumen-mem.log}
+MEM_STATE_DIR=${MEM_STATE_DIR:-/var/lib/lumen-watchdog}
+MEMINFO_FILE=${MEMINFO_FILE:-/proc/meminfo}
 mkdir -p "$MEM_STATE_DIR"
 MEM_LOW_COUNT_FILE="$MEM_STATE_DIR/mem-low-count"
+SWAP_HIGH_COUNT_FILE="$MEM_STATE_DIR/swap-high-count"
 MEM_LAST_RESTART_FILE="$MEM_STATE_DIR/mem-guard-last-restart"
 
-MEM_AVAIL_MB=$(awk '/MemAvailable:/{printf "%d", $2/1024}' /proc/meminfo)
-SWAP_USED_MB=$(awk '/SwapTotal:/{t=$2} /SwapFree:/{f=$2} END{printf "%d", (t-f)/1024}' /proc/meminfo)
+MEM_AVAIL_MB=$(awk '/MemAvailable:/{printf "%d", $2/1024}' "$MEMINFO_FILE")
+SWAP_USED_MB=$(awk '/SwapTotal:/{t=$2} /SwapFree:/{f=$2} END{printf "%d", (t-f)/1024}' "$MEMINFO_FILE")
 
 WORKER_RSS_MB=""
 for p in $(pgrep -f "^next-server"); do
@@ -151,10 +159,22 @@ if [ "$MEM_AVAIL_MB" -lt "$WATCHDOG_MEM_MIN_MB" ]; then
 else
   MEM_LOW_COUNT=0
 fi
-echo "$MEM_LOW_COUNT" > "$MEM_LOW_COUNT_FILE"
+[ "$DRY_RUN" -eq 1 ] || echo "$MEM_LOW_COUNT" > "$MEM_LOW_COUNT_FILE"
 
+# Swap trigger needs two consecutive readings too, same shape as the low-memory
+# counter above, so one noisy sample can't fire a restart on its own.
+SWAP_COND=0
+[ "$SWAP_USED_MB" -gt "$WATCHDOG_SWAP_MAX_MB" ] && [ "$MEM_AVAIL_MB" -lt 900 ] && SWAP_COND=1
+SWAP_HIGH_COUNT=$(cat "$SWAP_HIGH_COUNT_FILE" 2>/dev/null || echo 0)
+case "$SWAP_HIGH_COUNT" in ''|*[!0-9]*) SWAP_HIGH_COUNT=0 ;; esac
+if [ "$SWAP_COND" -eq 1 ]; then
+  SWAP_HIGH_COUNT=$((SWAP_HIGH_COUNT+1))
+else
+  SWAP_HIGH_COUNT=0
+fi
+[ "$DRY_RUN" -eq 1 ] || echo "$SWAP_HIGH_COUNT" > "$SWAP_HIGH_COUNT_FILE"
 SWAP_TRIGGER=0
-[ "$SWAP_USED_MB" -gt "$WATCHDOG_SWAP_MAX_MB" ] && [ "$MEM_AVAIL_MB" -lt 900 ] && SWAP_TRIGGER=1
+[ "$SWAP_HIGH_COUNT" -ge 2 ] && SWAP_TRIGGER=1
 
 RESTART_WANTED=0
 REASON=""
@@ -165,14 +185,17 @@ fi
 if [ "$SWAP_TRIGGER" -eq 1 ]; then
   RESTART_WANTED=1
   [ -n "$REASON" ] && REASON="${REASON}; "
-  REASON="${REASON}swap=${SWAP_USED_MB}MB above ${WATCHDOG_SWAP_MAX_MB}MB with MemAvailable=${MEM_AVAIL_MB}MB below 900MB"
+  REASON="${REASON}swap=${SWAP_USED_MB}MB above ${WATCHDOG_SWAP_MAX_MB}MB with MemAvailable=${MEM_AVAIL_MB}MB below 900MB for 2 consecutive runs"
 fi
 
 if [ "$RESTART_WANTED" -eq 1 ]; then
+  LUMEN_STATE=$(systemctl is-active lumen 2>/dev/null)
   LAST_RESTART=$(cat "$MEM_LAST_RESTART_FILE" 2>/dev/null || echo 0)
   case "$LAST_RESTART" in ''|*[!0-9]*) LAST_RESTART=0 ;; esac
   SINCE_LAST=$((NOW_EPOCH - LAST_RESTART))
-  if [ "$LUMEN_UPTIME_S" -lt 600 ]; then
+  if [ "$LUMEN_STATE" != "active" ]; then
+    ok "memory guard: lumen not active, not restarting"
+  elif [ "$LUMEN_UPTIME_S" -lt 600 ]; then
     ok "memory guard: would restart lumen ($REASON) but lumen uptime is ${LUMEN_UPTIME_S}s < 600s, skipping"
   elif [ "$LAST_RESTART" -gt 0 ] && [ "$SINCE_LAST" -lt "$WATCHDOG_RESTART_COOLDOWN_S" ]; then
     ok "memory guard: would restart lumen ($REASON) but last restart was ${SINCE_LAST}s ago < cooldown ${WATCHDOG_RESTART_COOLDOWN_S}s, skipping"
@@ -181,6 +204,11 @@ if [ "$RESTART_WANTED" -eq 1 ]; then
   else
     systemctl restart lumen >/dev/null 2>&1
     echo "$NOW_EPOCH" > "$MEM_LAST_RESTART_FILE"
+    # Both counters, not just the low one: a restart that was triggered BY the
+    # swap rule would otherwise leave swap-high-count at 2 and re-arm itself the
+    # moment the cooldown expires, even though the restart already acted on it.
+    echo 0 > "$MEM_LOW_COUNT_FILE"
+    echo 0 > "$SWAP_HIGH_COUNT_FILE"
     alert "memory guard restarted lumen (MemAvailable=${MEM_AVAIL_MB} swap=${SWAP_USED_MB})"
   fi
 else

@@ -8,12 +8,22 @@ nothing reads this directory, so editing a file here changes nothing on the box.
 | --- | --- |
 | `lumen-publisher.service` | `/etc/systemd/system/lumen-publisher.service` |
 | `lumen.service.d/publisher.conf` | `/etc/systemd/system/lumen.service.d/publisher.conf` |
+| `lumen.service.d/cluster.conf` | `/etc/systemd/system/lumen.service.d/cluster.conf` |
+| `cluster.js` | `/opt/lumen/cluster.js` |
 | `lumen-watchdog.sh` | `/usr/local/bin/lumen-watchdog.sh` |
 | `publisher-drain.json` | `/opt/lumen/publisher-drain.json` |
 | `lumen-mem.logrotate` | `/etc/logrotate.d/lumen-mem` |
 
-`lumen.service` itself is unchanged and is not copied here; the drop-in above is
-the only edit made to it.
+`lumen.service` itself is unchanged and is not copied here; the two drop-ins
+above are the only edits made to it. `publisher.conf` adds `Wants=` (see below).
+`cluster.conf` overrides `ExecStart=` to run `/opt/lumen/cluster.js` instead of
+the plain Next server, sets `Environment=LUMEN_WORKERS=3`, and sets
+`TimeoutStopSec=20` so the cluster's workers get a real chance to drain before
+being killed. `scripts/deploy/deploy-lumen-perf.sh` installs `cluster.js`
+(staged as `cluster.js.new`, `node --check`'d, then copied over); it lives at
+`/opt/lumen/cluster.js`, outside `/opt/lumen/app`, so the app-tree
+`rsync --delete` in `deploy-lumen.sh` / `deploy-lumen-perf.sh` never removes
+it.
 
 ## Why these changed on 2026-09-05
 
