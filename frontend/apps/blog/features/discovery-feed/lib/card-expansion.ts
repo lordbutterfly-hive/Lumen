@@ -25,36 +25,43 @@
  *     bottom because an unrequested expansion pushing unseen content is rude.
  *     A card the reader deliberately clicked is not unrequested
  *
- * What survives is the one rule that is still a statement about the FEED rather
- * than about one card, and is still wanted: only one card open at a time.
+ * ★★★ AND NOW THE LAST OF IT IS GONE TOO — "ONE AT A TIME" WAS THE JUMP
+ * (owner, 2026-09-06: "when I scroll down and click another card, sometimes it
+ * doesn't know where to point my focus to on screen, it just jumps to a random
+ * spot in the feed ... might have something to do with the prior card getting
+ * closed when another card is opened").
+ *
+ * The owner's guess was exactly right, and it measures cleanly. `claimOpen`
+ * closed the previously-open card. By the time the reader clicks a second card
+ * they have usually scrolled the first one ABOVE the viewport, so that close
+ * deletes its drawer's height from the document ABOVE the reader — and the
+ * browser does not give it back. Nothing scrolls; the page simply gets shorter
+ * over their head and everything below slides up under a stationary scrollY.
+ *
+ * Measured on production, signed in, 1440x900, 6 runs (scratchpad
+ * `measure-jump.cjs`): with a 202px drawer open above the fold, the clicked
+ * card's viewport top went 311 -> 109 five times out of five, `window.scrollY`
+ * pinned at 2700 the whole time. The sixth run is the negative control — the
+ * card above happened to have a 0px drawer (no top comment), nothing collapsed,
+ * and the jump was 0px. The jump size IS the closing drawer's height, which
+ * varies with that thread's length: hence "a random spot", and hence
+ * "sometimes".
+ *
+ * Scroll anchoring is supposed to absorb exactly this and demonstrably did not
+ * (scrollY never moved). Rather than fight the browser for the right to remove
+ * content from above a reader, do not remove it: a card the reader opened stays
+ * open until they close it, or until they leave the page. Nothing above the
+ * viewport changes height, so there is nothing to compensate for.
+ *
+ * A/B on a dev build of this exact code, 8 runs each, same harness, a 938px
+ * drawer open above the fold. BEFORE: the clicked card's viewport top went
+ * 613 -> -325 (and 431 -> -507, 163 -> -775, 351 -> -587), -938px every single
+ * run, 8/8, `document.scrollHeight` down by the same amount. AFTER: 0px, 8/8,
+ * and two drawers open at once where there had been one.
+ *
+ * That leaves this module with one export: the input-modality flag below.
  * ═══════════════════════════════════════════════════════════════════════════
  */
-
-/**
- * Every card that is currently OPEN, by its own close function. A Set rather
- * than a single "current" reference because "close any other" has to be able to
- * run even if two cards somehow opened in the same frame — closing all but the
- * claimant is correct in both cases, where clobbering a single slot is not.
- */
-const open = new Set<() => void>();
-
-/**
- * "One at a time. Opening a card closes any other." The caller passes its own
- * close function and MUST call `releaseOpen` when it closes by any route.
- */
-export function claimOpen(close: () => void): void {
-  for (const other of [...open]) if (other !== close) other();
-  open.add(close);
-}
-
-export function releaseOpen(close: () => void): void {
-  open.delete(close);
-}
-
-/** Test seam. Resets every module-level bit of state. */
-export function __resetCardExpansion(): void {
-  open.clear();
-}
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════

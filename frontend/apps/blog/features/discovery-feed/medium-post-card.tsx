@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useQuery } from '@tanstack/react-query';
 import { Link, UserAvatarImg, DIRECT_TIMEOUT_MS } from '@hive/ui';
@@ -50,7 +50,7 @@ import cardStyles from './post-card.module.css';
 import IdentityPill from './identity-pill';
 import type { MarketPrice } from '@/blog/features/creator-tokens/types';
 import { useVisibleDiscussion } from './lib/use-visible-discussion';
-import { claimOpen, lastInputWasKeyboard, releaseOpen } from './lib/card-expansion';
+import { lastInputWasKeyboard } from './lib/card-expansion';
 import { getPostRubric } from './lib/post-rubric';
 
 /**
@@ -305,7 +305,9 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
    * was the right shape for "open on hover" and the wrong one for every rule §8
    * adds, none of which CSS can express: a 350ms dwell, a scroll flag, a
    * viewport-bottom guard, and "opening a card closes any other". So the trigger
-   * is here and the three cross-card rules are in `lib/card-expansion.ts`.
+   * is here. (Every one of those cross-card rules has since been retired —
+   * `lib/card-expansion.ts` now holds only the input-modality flag; the last of
+   * them, "one at a time", was the source of the 2026-09-06 feed jump.)
    *
    * ★★ THE FETCH GATE AND THE OPEN GATE ARE DIFFERENT CLOCKS, ON PURPOSE.
    * `engage` above still fires at 140ms and still only starts the REQUEST; the
@@ -341,19 +343,20 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
   const cardRef = useRef<HTMLElement | null>(null);
 
   /*
-   * ★ ONE STABLE IDENTITY FOR THE WHOLE MOUNT. `claimOpen`/`releaseOpen` hold
-   * this function in a module-level Set, so it has to be the SAME function
-   * object every render — a `useCallback` that ever re-created it would leave a
-   * stale closer registered and that card could never be closed by another
-   * card's claim. Built once in a ref and self-referencing through that ref.
+   * ★ A CARD ONLY EVER CLOSES ITSELF NOW (2026-09-06 — see `card-expansion.ts`
+   * for the measurement). This used to be a self-referencing ref because
+   * `claimOpen`/`releaseOpen` held the function in a module-level Set and a
+   * re-created closure would have left a stale entry there. That Set is gone
+   * with the "one at a time" rule, so the only requirement left is a stable
+   * identity for the unmount cleanup below.
    */
-  const closeSelf = useRef<() => void>();
-  if (!closeSelf.current) {
-    closeSelf.current = () => {
-      setOpen(false);
-      releaseOpen(closeSelf.current!);
-    };
-  }
+  /* Which of the two triggers opened this card — see `openNow` below for why it
+     decides whether a blur is allowed to close it. */
+  const openedByFocus = useRef(false);
+  const closeSelf = useCallback(() => {
+    openedByFocus.current = false;
+    setOpen(false);
+  }, []);
 
   /* ★ THE DWELL AND CLOSE TIMERS ARE GONE (2026-08-25). Their refs survived the
      hover-to-click rewrite as write-only leftovers — assigned `null` in four
@@ -362,9 +365,31 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
      click closes, and nothing is scheduled. Removed rather than left as
      defensive noise. */
 
-  const openNow = () => {
-    // §8 "One at a time. Opening a card closes any other."
-    claimOpen(closeSelf.current!);
+  /* ★★★ OPENING THIS CARD NO LONGER CLOSES ANY OTHER (owner, 2026-09-06). §8's
+     "One at a time" is what produced the feed jump: the previously-open card is
+     almost always scrolled ABOVE the viewport by the time a second one is
+     clicked, and collapsing its drawer deletes that height from over the
+     reader's head while `scrollY` stays put, so the whole feed slides up by the
+     old drawer's height. Measured 311 -> 109 (a 202px drawer), 5/5, with a 0px
+     drawer as the 0px control — full numbers in `card-expansion.ts`. Every card
+     the reader opens now stays open until they close it or leave the page.
+
+     ★★ AND `viaFocus` IS THE SECOND HALF OF THE SAME FIX. Deleting the cross-card
+     close was not enough: `onCardBlur` below is a SECOND route to exactly the same
+     collapse, and it is reached by an ordinary pointer flow. Open a card, use
+     something inside it (vote on the top comment, reach for Reply) so focus is
+     parked in that card, scroll away, click another card — the press blurs the
+     first card and closes it, above the viewport, with the same result. Measured
+     after the cross-card fix and before this one: -938px, 4/4 (scratchpad
+     `blur-probe.cjs`).
+
+     Blur-close exists for the KEYBOARD pair only — focus opens the drawer so a
+     reader tabbing into the comment is not stranded in a `height: 0` box, and
+     focus leaving undoes it. It was never meant to close a card the reader had
+     deliberately clicked open. So remember which of the two opened it, and let
+     only the focus-opened one close on blur. */
+  const openNow = (viaFocus = false) => {
+    openedByFocus.current = viaFocus;
     setOpen(true);
   };
 
@@ -394,8 +419,9 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
    * the reader had stopped reading, so a 200ms grace then close was right. Under
    * click-to-open the drawer is there because the reader ASKED for it, and
    * taking it away because the mouse wandered is the same class of mistake the
-   * hover trigger was. It closes on a second click, on another card opening, or
-   * on focus leaving — never on the pointer moving.
+   * hover trigger was. It closes on a second click on the same card or on focus
+   * leaving it — never on the pointer moving, and (since 2026-09-06) never
+   * because another card was opened.
    */
   const onCardLeave = () => {
     cancelEngage();
@@ -456,12 +482,20 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
        of every menu. What actually distinguishes the two is whether the reader's
        last input was a key or a pointer, which only the event stream knows. */
     if (!lastInputWasKeyboard()) return;
-    openNow();
+    openNow(true);
   };
   const onCardBlur = (e: React.FocusEvent<HTMLElement>) => {
     // Focus moving BETWEEN children of the card is not a blur of the card.
     if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-    closeSelf.current!();
+    /* ★★★ ONLY UNDOES A FOCUS-OPEN (2026-09-06 — the second half of the feed-jump
+       fix, see `openNow`). A card the reader CLICKED open must survive their focus
+       leaving it, because parking focus inside a card is what using its drawer
+       does: vote on the top comment, reach for Reply, then click another card and
+       the press blurs this one. Closing here collapsed it above the viewport and
+       threw the feed up by its drawer's height, measured -938px 4/4. Focus-open
+       and blur-close remain the matched keyboard pair they always were. */
+    if (!openedByFocus.current) return;
+    closeSelf();
   };
 
   /**
@@ -511,21 +545,14 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
        double-click deterministic — it opens, once — instead of depending on
        whether the second click happened to land on selectable text. */
     if (e.detail > 1) return;
-    if (openRef.current) closeSelf.current!();
+    if (openRef.current) closeSelf();
     else openNow();
   };
 
   // A card unmounted mid-intent (infinite feed recycling a row) must not leave a
-  // timer to fire into a dead component, nor a closer registered in the shared
-  // Set — a stale entry there would be called on the next card's claim and set
-  // state on something that no longer exists.
-  useEffect(
-    () => () => {
-      cancelEngage();
-      releaseOpen(closeSelf.current!);
-    },
-    []
-  );
+  // timer to fire into a dead component. (There is no longer a closer to
+  // deregister: the shared Set went with the "one at a time" rule, 2026-09-06.)
+  useEffect(() => () => cancelEngage(), []);
 
   const [moderationRevealed, setModerationRevealed] = useState(false);
   // ★ OWNER RULING 2026-08-12 — the post overflow menu's ONE moderation control is
