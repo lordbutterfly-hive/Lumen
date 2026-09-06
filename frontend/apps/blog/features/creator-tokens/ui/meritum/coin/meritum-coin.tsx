@@ -1,6 +1,7 @@
 'use client';
 
 import { FC, useId } from 'react';
+import { CREATOR_TOKEN_LAUREL_PATH } from '../../creator-token-laurel';
 import styles from './meritum-coin.module.css';
 import { MERITUM_CHARGE_DURATION_STYLE, MERITUM_IDLE_FOIL_STYLE, MeritumCssVars, MeritumStrikePhase } from './timing';
 import {
@@ -10,8 +11,12 @@ import {
   COIN_DIVIDER_Y,
   COIN_EMBERS,
   COIN_FIELD_PX,
+  COIN_BEAD_R,
   COIN_HAIRLINE_R,
+  COIN_LAUREL_EDGE,
+  COIN_LAUREL_TRANSFORM,
   COIN_LEGEND_PATH,
+  COIN_STUD_R,
   MeritumCoinFlowState,
   coinDeviceFontSize,
   coinDeviceName,
@@ -98,10 +103,15 @@ const MeritumCoin: FC<MeritumCoinProps> = ({
 }) => {
   /**
    * `useId` gives a per-instance id, so two coins on one page cannot both own
-   * `#arc` and steal each other's legend. The colons React puts in it are legal
-   * in an id but awkward in a URL fragment, so they come out.
+   * `#arc` and steal each other's legend — or `#laurel` and steal each other's
+   * metal ramp, which is the same bug with a louder failure: an SVG paint server
+   * is resolved by id, so the second coin would silently paint its wreath from
+   * the FIRST coin's gradient. Both ids are built from one call. The colons React
+   * puts in it are legal in an id but awkward in a URL fragment, so they come out.
    */
-  const arcId = `mt-arc-${useId().replace(/:/g, '')}`;
+  const uid = useId().replace(/:/g, '');
+  const arcId = `mt-arc-${uid}`;
+  const laurelId = `mt-laurel-${uid}`;
 
   const detail = deriveCoinDetail({ handle, offersPriced, step }, phase);
   const name = coinDeviceName(handle, unboundLabel);
@@ -145,6 +155,19 @@ const MeritumCoin: FC<MeritumCoinProps> = ({
               >
                 <defs>
                   <path id={arcId} d={COIN_LEGEND_PATH} fill="none" />
+                  {/*
+                    ★ THE WREATH'S METAL, AS A GRADIENT AND NOT A FLAT FILL. A
+                    single grey would read as a printed sticker on a face that is
+                    itself a gradient; a light silver falling to a mid silver down
+                    the leaves is what makes it read as struck relief. The three
+                    stops are named in the module so `.struck` and dark mode can
+                    re-point them the way they re-point every other metal here.
+                  */}
+                  <linearGradient id={laurelId} x1="0" y1="0" x2="0" y2="1">
+                    <stop className={styles.laurelHigh} offset="0" />
+                    <stop className={styles.laurelMid} offset="0.52" />
+                    <stop className={styles.laurelLow} offset="1" />
+                  </linearGradient>
                 </defs>
 
                 {/* the tooth ring — cut at step 2 */}
@@ -163,7 +186,7 @@ const MeritumCoin: FC<MeritumCoinProps> = ({
                       className={lit ? `${styles.bead} ${styles.stud}` : styles.bead}
                       cx={b.cx}
                       cy={b.cy}
-                      r={lit ? 4.6 : 2.1}
+                      r={lit ? COIN_STUD_R : COIN_BEAD_R}
                     />
                   );
                 })}
@@ -180,6 +203,19 @@ const MeritumCoin: FC<MeritumCoinProps> = ({
                   y1={COIN_DIVIDER_Y}
                   x2={COIN_FIELD_PX / 2 + COIN_DIVIDER_HALF}
                   y2={COIN_DIVIDER_Y}
+                />
+
+                {/* the Meritum laurel, struck into the exergue under the rule.
+                    THE SAME traced path the nav and the token cards use — see
+                    `COIN_LAUREL_TRANSFORM` in geometry.ts for why it sits here
+                    and at this size, and why the edge width is measured in the
+                    mark's own units rather than the field's. */}
+                <path
+                  className={styles.laurel}
+                  d={CREATOR_TOKEN_LAUREL_PATH}
+                  transform={COIN_LAUREL_TRANSFORM}
+                  fill={`url(#${laurelId})`}
+                  strokeWidth={COIN_LAUREL_EDGE}
                 />
               </svg>
 

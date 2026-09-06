@@ -93,6 +93,16 @@
   --mt-device: #2f3742;
   --mt-exergue: #8f97a1;
   --mt-device-relief: 0 1px 0 rgba(255, 255, 255, 0.95), 0 -1px 1px rgba(20, 18, 10, 0.26);
+  /* The wreath in the exergue. Three stops, not one flat grey: light silver on
+     the leaf tops, mid silver by the stems, and an edge a shade under the
+     darkest of them. On a face that is itself a gradient a flat fill reads as a
+     sticker; this reads as metal displaced by the die. Deliberately a HALF-STOP
+     DARKER than the face it sits on (--mt-face bottoms out at #dbe0e6) or the
+     mark would dissolve into its own background at the coin's real 268px. */
+  --mt-laurel-high: #f2f5f8;
+  --mt-laurel-mid: #c8d1da;
+  --mt-laurel-low: #8a95a2;
+  --mt-laurel-edge: #646f7b;
 
   position: relative;
   display: grid;
@@ -145,6 +155,19 @@
   --mt-device: rgb(var(--meritum-ink-brand));
   --mt-exergue: rgb(var(--meritum-ink-brand));
   --mt-device-relief: 0 1px 0 rgba(255, 255, 255, 0.9), 0 -1px 1px rgba(139, 38, 23, 0.28);
+  /* ★ THE WREATH STAYS SILVER WHEN THE COIN TURNS OVER. Everything else in this
+     block re-points to oxblood; the laurel is the one element that must not,
+     because the owner's ask was for a silver mark and a silver mark on a red
+     face is the only place on this coin where "silverish" is actually legible as
+     a colour rather than as the absence of one. It reads as an inlay — bimetal —
+     which is a real striking technique, not a mismatch. Only the ramp's floor
+     moves, a step darker: the oxblood face is PALER than the silver one
+     (#eecdc5 against #dbe0e6) so the same low stop would have lost contrast at
+     the bottom of the leaves. Checked at 268px in both states. */
+  --mt-laurel-high: #f4f7fa;
+  --mt-laurel-mid: #c3ccd6;
+  --mt-laurel-low: #7f8b98;
+  --mt-laurel-edge: #5a6572;
 }
 
 /**
@@ -163,6 +186,13 @@
   --mt-engrave: #5d6773;
   --mt-device: #21272f;
   --mt-exergue: #6b7481;
+  /* Same reason the engraving re-darkens here: the face comes down a stop
+     (#eef1f4..#b5bdc7), so a ramp tuned against the light face would sit on top
+     of its own background. Down one step, edge with it. */
+  --mt-laurel-high: #e9eef3;
+  --mt-laurel-mid: #bcc6d0;
+  --mt-laurel-low: #7b8693;
+  --mt-laurel-edge: #58626d;
 }
 
 /* ==========================================================================
@@ -332,6 +362,46 @@
   opacity: 0.42;
 }
 
+/**
+ * ★ THE LAUREL, STRUCK INTO THE EXERGUE. Paint only — every number that places
+ * it is derived in `geometry.ts` (`COIN_LAUREL_TRANSFORM`), and its edge width
+ * arrives as an attribute for the reason recorded there.
+ *
+ * It rides the SAME `.engraving` relief filter as the legend and the beads, so
+ * the white-below/dark-above pair that makes the rest of the face read as
+ * displaced metal lands on the wreath too, for free and in register.
+ *
+ * ★ ON THE LADDER, like every other engraved element here. The coin earns its
+ * detail (see `deriveCoinDetail`), and a mark at full weight on a blank planchet
+ * whose legend is still a 0.28 ghost would read as the one thing that did not
+ * have to be struck. It comes up with the legend at `.legible`. It is never
+ * absent, though: at 0.5 it is plainly there on a step-1 coin, which is what
+ * "the die always had a wreath in it" should look like.
+ */
+.laurel {
+  stroke: var(--mt-laurel-edge);
+  stroke-linejoin: round;
+  opacity: 0.5;
+}
+
+.legible .laurel,
+.struck .laurel {
+  opacity: 1;
+}
+
+/* The three ramp stops. Named so `.struck` and dark mode can re-point them. */
+.laurelHigh {
+  stop-color: var(--mt-laurel-high);
+}
+
+.laurelMid {
+  stop-color: var(--mt-laurel-mid);
+}
+
+.laurelLow {
+  stop-color: var(--mt-laurel-low);
+}
+
 /* ---- the device: HTML text, not SVG text ------------------------------- */
 
 /**
@@ -355,6 +425,35 @@
   font-family: var(--font-lora), Georgia, Cambria, serif;
   font-weight: 600;
   line-height: 1;
+  /**
+   * ★★★ THE NEGATIVE MARGIN IS WHAT PINS THE EXERGUE. It is not spacing.
+   *
+   * The device's font-size is computed from the handle's LENGTH — 40px at three
+   * characters, 19px at sixteen (`coinDeviceFontSize`) — and with `line-height: 1`
+   * the row is as tall as whatever that comes out to. This column is centred, so
+   * the handle itself never moved (its line box is centred 19px above the box
+   * centre at every size, which is arithmetic, not luck). The EXERGUE under it
+   * did: it slid a full 10.5px down the field between the longest handle and the
+   * shortest, while the rule it is supposed to sit on is fixed geometry at
+   * `COIN_DIVIDER_Y`. So `@abc` had the rule struck THROUGH its price and
+   * `@abcdefghijklmnop` had it sitting clear underneath — one composition, two
+   * different coins, and the drift is invisible until you look at both.
+   *
+   * `(19px - 1em) / 2` top and bottom collapses the row's MARGIN BOX to a
+   * constant 19px — the exergue's own row height — whatever `1em` is. It is
+   * negative for every handle shorter than 16 characters, and that is the point:
+   * the line box is not touched, so the handle renders on exactly the baseline it
+   * renders on today (checked at all eight sizes the length curve produces), while
+   * the row below it lands on ONE register for every name. Setting `line-height`
+   * to a fixed 19px would have pinned the exergue just as well and moved the
+   * handle up to 2px, which is why it is not what this does.
+   *
+   * This is also what makes room for the wreath: the mark is placed off
+   * `COIN_DIVIDER_Y`, and a price free to wander 10.5px down the field would have
+   * collided with it on short handles, or forced the mark 20% smaller for every
+   * handle to stay clear of a case most coins never hit.
+   */
+  margin: calc((19px - 1em) / 2) 0;
   letter-spacing: -0.02em;
   white-space: nowrap;
   text-align: center;

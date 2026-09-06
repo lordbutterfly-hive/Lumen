@@ -44,6 +44,17 @@ export const COIN_HAIRLINE_R = 94;
 const BEAD_COUNT = 36;
 const BEAD_R = 85;
 
+/**
+ * How big a bead is, and how big a STUD is — a bead cut deeper for an offer that
+ * carries a price. Exported because two other things now have to agree with
+ * them: the component that draws the circles, and the laurel below, whose whole
+ * bottom clearance is measured off the stud due south. A stud is more than twice
+ * a bead's radius, so a mark placed against `BEAD_R` alone would clear the
+ * three-offer coin by 2px less than it thinks it does.
+ */
+export const COIN_BEAD_R = 2.1;
+export const COIN_STUD_R = 4.6;
+
 /** One stud per offer. Three offers, three studs. */
 export const MERITUM_STUD_COUNT = 3;
 
@@ -108,6 +119,61 @@ export const COIN_LEGEND_PATH: string = (() => {
   const to = px(LEGEND_R, LEGEND_TO_DEG);
   return `M ${from.x},${from.y} A ${LEGEND_R},${LEGEND_R} 0 0 1 ${to.x},${to.y}`;
 })();
+
+/**
+ * ★★★ THE WREATH IN THE EXERGUE — placed by arithmetic, not by eye.
+ *
+ * The owner's laurel (`ui/creator-token-laurel.tsx`, one traced path in a 24-unit
+ * box) is stamped into the empty crescent BELOW the exergue rule. That is the
+ * only region of the face where a mark of any size can go without touching type:
+ * the legend occupies r 74..85 over the top, the device runs the FULL width of
+ * the field at 27px (145px wide for a 9-character handle, 179px for the 16
+ * character maximum) and the exergue sits on the rule under it. A wreath big
+ * enough to encircle the device would have to be ~390px across for its opening
+ * alone to clear that name — nearly twice the 230px field — so it would cross
+ * every letter. The crescent under the rule is the honest place for it.
+ *
+ * ★ THE TWO NUMBERS THE SCALE IS DERIVED FROM, so it cannot drift out of
+ * register when either edge of that crescent moves:
+ *   top    — the exergue rule, plus 4.5 of clearance. The mark's own topmost ink
+ *            is its two leaf tips, at x = CENTRE +/- ~8, i.e. directly under the
+ *            price, so the rule (and the price sitting on it) is what it has to
+ *            clear, not the wider field.
+ *   bottom — the beaded border's inner edge measured off the STUD radius, not
+ *            the bead radius, less 2.5 of air. The bead due south is the one the
+ *            stems come down on, and on the coin that actually gets struck it is
+ *            a STUD (all three offers priced), more than twice as deep. Measured
+ *            against the plain bead the stems closed to 2.0 on the launch coin;
+ *            against the stud they hold 3.8, which is what the rendered exergue
+ *            reads as separated rather than resting on it.
+ *
+ * ★ MEASURED, NOT ASSUMED: the traced path does not fill its 24-unit box. Its
+ * ink runs y 1.4300..22.6565 and is centred on x 12.0011, so scaling by
+ * `size / 24` would leave the wreath floating high and a hair off-centre. These
+ * four numbers come from `getBBox()` on the shipped path; re-measure them if the
+ * trace is ever regenerated.
+ */
+const LAUREL_INK = { cx: 12.0011, top: 1.43, bottom: 22.6565 };
+const LAUREL_TOP_Y = COIN_DIVIDER_Y + 4.5;
+const LAUREL_BOTTOM_Y = CENTRE + BEAD_R - COIN_STUD_R - 2.5;
+
+/** How far the 24-unit mark is scaled to span that crescent. ~1.974 today. */
+export const COIN_LAUREL_SCALE = round((LAUREL_BOTTOM_Y - LAUREL_TOP_Y) / (LAUREL_INK.bottom - LAUREL_INK.top));
+
+/** Ready to drop straight onto `transform`. Rounded, so SSR and the client agree. */
+export const COIN_LAUREL_TRANSFORM = `translate(${round(CENTRE - LAUREL_INK.cx * COIN_LAUREL_SCALE)} ${round(
+  LAUREL_TOP_Y - LAUREL_INK.top * COIN_LAUREL_SCALE
+)}) scale(${COIN_LAUREL_SCALE})`;
+
+/**
+ * The darker edge round the leaves, in the MARK's own units, so it lands at a
+ * constant 0.65 field units however the scale above comes out. Written here
+ * rather than in the stylesheet because it is geometry: `vector-effect:
+ * non-scaling-stroke` would have held it steady against the coin's own idle and
+ * impact scaling too, which is exactly the wrong thing for a line that is meant
+ * to be part of the metal.
+ */
+export const COIN_LAUREL_EDGE = round(0.65 / COIN_LAUREL_SCALE);
 
 /**
  * ★ ONE LINE, ALWAYS. A Hive account name runs to 16 characters and the device
