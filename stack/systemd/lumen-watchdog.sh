@@ -16,6 +16,9 @@
 # or Slack webhook works as-is). Without it the checks still run and still record.
 set -uo pipefail
 [ -f /opt/lumen/watchdog.env ] && . /opt/lumen/watchdog.env
+DRY_RUN=0
+for _arg in "$@"; do [ "$_arg" = "--dry-run" ] && DRY_RUN=1; done
+[ "${WATCHDOG_DRY_RUN:-0}" = "1" ] && DRY_RUN=1
 FAILS=0
 alert() { echo "$(date -Is) ALERT $*"; FAILS=$((FAILS+1)); }
 ok()    { echo "$(date -Is) ok    $*"; }
@@ -87,6 +90,102 @@ for s in lumen lumen-publisher postgresql; do
   alert "$s is $STATE"
 done
 [ "$(docker inspect -f '{{.State.Running}}' recsys-feed 2>/dev/null)" = "true" ] && ok "recsys-feed running" || alert "recsys-feed not running"
+
+# 8. MEMORY (added 2026-09-06). Workers have been seen growing to 1.3-1.5GB each
+# within an hour, and a box that swaps freezes for 10s at a time under this RAM
+# budget (7.9GB, 4 cores, a 2.75GB-capped recsys-feed container next to Node).
+# A code fix for the leak is being deployed separately; this is the safety net
+# underneath it: log a CSV trend line every run so a slow leak is visible before
+# it becomes an incident, and restart lumen (which also restarts the publisher,
+# since lumen-publisher carries PartOf=lumen.service) if memory pressure gets
+# severe and stays severe. Conservative on purpose: two consecutive low-memory
+# runs (15min apart) before acting on MemAvailable alone, a cooldown so a flapping
+# condition cannot restart-loop the box, and a floor under lumen's own uptime so
+# the guard never fights a restart that just happened for another reason.
+WATCHDOG_MEM_MIN_MB=${WATCHDOG_MEM_MIN_MB:-450}
+WATCHDOG_SWAP_MAX_MB=${WATCHDOG_SWAP_MAX_MB:-400}
+WATCHDOG_RESTART_COOLDOWN_S=${WATCHDOG_RESTART_COOLDOWN_S:-3600}
+
+MEM_LOG=/var/log/lumen-mem.log
+MEM_STATE_DIR=/var/lib/lumen-watchdog
+mkdir -p "$MEM_STATE_DIR"
+MEM_LOW_COUNT_FILE="$MEM_STATE_DIR/mem-low-count"
+MEM_LAST_RESTART_FILE="$MEM_STATE_DIR/mem-guard-last-restart"
+
+MEM_AVAIL_MB=$(awk '/MemAvailable:/{printf "%d", $2/1024}' /proc/meminfo)
+SWAP_USED_MB=$(awk '/SwapTotal:/{t=$2} /SwapFree:/{f=$2} END{printf "%d", (t-f)/1024}' /proc/meminfo)
+
+WORKER_RSS_MB=""
+for p in $(pgrep -f "^next-server"); do
+  R=$(ps -o rss= -p "$p" 2>/dev/null | tr -d ' ')
+  [ -n "${R:-}" ] || continue
+  WORKER_RSS_MB="${WORKER_RSS_MB}${WORKER_RSS_MB:+;}$((R/1024))"
+done
+[ -n "$WORKER_RSS_MB" ] || WORKER_RSS_MB="0"
+
+RECSYS_RAW=$(docker stats --no-stream --format '{{.MemUsage}}' recsys-feed 2>/dev/null | awk '{print $1}')
+RECSYS_MEM_MB=$(awk -v raw="${RECSYS_RAW:-}" 'BEGIN{
+  if (raw ~ /GiB$/) { sub("GiB","",raw); printf "%d", raw*1024; exit }
+  if (raw ~ /MiB$/) { sub("MiB","",raw); printf "%d", raw; exit }
+  if (raw ~ /KiB$/) { sub("KiB","",raw); printf "%d", raw/1024; exit }
+  print 0
+}')
+[ -n "${RECSYS_MEM_MB:-}" ] || RECSYS_MEM_MB=0
+
+LUMEN_ACTIVE_TS=$(systemctl show -p ActiveEnterTimestamp lumen 2>/dev/null | cut -d= -f2-)
+LUMEN_ACTIVE_EPOCH=0
+[ -n "$LUMEN_ACTIVE_TS" ] && LUMEN_ACTIVE_EPOCH=$(date -d "$LUMEN_ACTIVE_TS" +%s 2>/dev/null || echo 0)
+NOW_EPOCH=$(date +%s)
+LUMEN_UPTIME_S=0
+[ "$LUMEN_ACTIVE_EPOCH" -gt 0 ] && LUMEN_UPTIME_S=$((NOW_EPOCH - LUMEN_ACTIVE_EPOCH))
+
+MEM_HEADER="timestamp,mem_available_mb,swap_used_mb,worker_rss_mb,recsys_mem_mb,lumen_uptime_s"
+[ -f "$MEM_LOG" ] || echo "$MEM_HEADER" > "$MEM_LOG"
+echo "$(date -Is),${MEM_AVAIL_MB},${SWAP_USED_MB},${WORKER_RSS_MB},${RECSYS_MEM_MB},${LUMEN_UPTIME_S}" >> "$MEM_LOG"
+# logrotate (weekly, 8 rotations) owns size; /etc/logrotate.d/lumen-mem.
+
+MEM_LOW_COUNT=$(cat "$MEM_LOW_COUNT_FILE" 2>/dev/null || echo 0)
+case "$MEM_LOW_COUNT" in ''|*[!0-9]*) MEM_LOW_COUNT=0 ;; esac
+if [ "$MEM_AVAIL_MB" -lt "$WATCHDOG_MEM_MIN_MB" ]; then
+  MEM_LOW_COUNT=$((MEM_LOW_COUNT+1))
+else
+  MEM_LOW_COUNT=0
+fi
+echo "$MEM_LOW_COUNT" > "$MEM_LOW_COUNT_FILE"
+
+SWAP_TRIGGER=0
+[ "$SWAP_USED_MB" -gt "$WATCHDOG_SWAP_MAX_MB" ] && [ "$MEM_AVAIL_MB" -lt 900 ] && SWAP_TRIGGER=1
+
+RESTART_WANTED=0
+REASON=""
+if [ "$MEM_LOW_COUNT" -ge 2 ]; then
+  RESTART_WANTED=1
+  REASON="MemAvailable=${MEM_AVAIL_MB}MB below ${WATCHDOG_MEM_MIN_MB}MB for 2 consecutive runs"
+fi
+if [ "$SWAP_TRIGGER" -eq 1 ]; then
+  RESTART_WANTED=1
+  [ -n "$REASON" ] && REASON="${REASON}; "
+  REASON="${REASON}swap=${SWAP_USED_MB}MB above ${WATCHDOG_SWAP_MAX_MB}MB with MemAvailable=${MEM_AVAIL_MB}MB below 900MB"
+fi
+
+if [ "$RESTART_WANTED" -eq 1 ]; then
+  LAST_RESTART=$(cat "$MEM_LAST_RESTART_FILE" 2>/dev/null || echo 0)
+  case "$LAST_RESTART" in ''|*[!0-9]*) LAST_RESTART=0 ;; esac
+  SINCE_LAST=$((NOW_EPOCH - LAST_RESTART))
+  if [ "$LUMEN_UPTIME_S" -lt 600 ]; then
+    ok "memory guard: would restart lumen ($REASON) but lumen uptime is ${LUMEN_UPTIME_S}s < 600s, skipping"
+  elif [ "$LAST_RESTART" -gt 0 ] && [ "$SINCE_LAST" -lt "$WATCHDOG_RESTART_COOLDOWN_S" ]; then
+    ok "memory guard: would restart lumen ($REASON) but last restart was ${SINCE_LAST}s ago < cooldown ${WATCHDOG_RESTART_COOLDOWN_S}s, skipping"
+  elif [ "$DRY_RUN" -eq 1 ]; then
+    alert "memory guard would restart lumen (MemAvailable=${MEM_AVAIL_MB} swap=${SWAP_USED_MB}) [dry-run, not restarted: $REASON]"
+  else
+    systemctl restart lumen >/dev/null 2>&1
+    echo "$NOW_EPOCH" > "$MEM_LAST_RESTART_FILE"
+    alert "memory guard restarted lumen (MemAvailable=${MEM_AVAIL_MB} swap=${SWAP_USED_MB})"
+  fi
+else
+  ok "memory guard: MemAvailable=${MEM_AVAIL_MB}MB swap=${SWAP_USED_MB}MB workers=${WORKER_RSS_MB}MB recsys=${RECSYS_MEM_MB}MB (below thresholds)"
+fi
 
 if [ "$FAILS" -gt 0 ] && [ -z "${ALERT_WEBHOOK:-}" ]; then
   echo "$(date -Is) ALERT-NOT-SENT ALERT_WEBHOOK is unset (create /opt/lumen/watchdog.env with ALERT_WEBHOOK=<discord-or-slack-url>) - the $FAILS alert(s) above stay on this box and nobody is told"
