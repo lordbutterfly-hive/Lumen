@@ -4,6 +4,7 @@ import { Link } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { MeritumTicker } from '../ticker/meritum-ticker';
 import MeritumHoldersBand from './meritum-holders-band';
+import { CreatorTokenLaurel } from '../../creator-token-laurel';
 import styles from './meritum-intro.module.css';
 
 /**
@@ -106,7 +107,20 @@ export default function MeritumIntro() {
             and the handoff's ground rule is that a value differing from an app
             token by a hair loses to the token. Weight, tracking and colour are
             the reference's. */}
-        <p className="font-ui text-label font-medium uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
+        {/* ★ THE MARK SITS IN FRONT OF THE WORD (owner, 2026-09-06): the laurel
+            leads the eyebrow, so the title above "Launch your own Meritum token."
+            reads as mark + wordmark rather than as a bare label. `inline-flex`
+            with the icon `shrink-0` keeps the two on one line at every width; the
+            eyebrow is one short word, so there is nothing here to wrap.
+
+            No colour of its own — `fill="currentColor"` takes
+            `text-meritum-ink-brand` from this same <p>, which is what keeps it
+            correct in the light theme and the dark one without a second asset.
+            18px against a 12px `text-label`: the wreath is a mark next to a
+            wordmark, not a glyph inside the text, and 18 is where it still reads
+            cleanly at 1x (see creator-token-laurel.tsx). */}
+        <p className="flex items-center gap-2 font-ui text-label font-medium uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
+          <CreatorTokenLaurel size={18} className="shrink-0" />
           {t('meritum.intro.eyebrow')}
         </p>
 

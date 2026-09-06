@@ -7,7 +7,7 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useTokenAccounts } from '../live/use-token-accounts';
 import { useTokenPriceChip } from '../live/use-token-price-chip';
 import { usdPrice } from '../market/format';
-import { CreatorTokenRocket } from './creator-token-rocket';
+import { CreatorTokenLaurel } from './creator-token-laurel';
 import { healthWordFor } from '../market/market-health';
 
 // TODO i18n — staged copy, same precedent as the rest of this feature.
@@ -105,10 +105,10 @@ const HeaderTokenPill: FC = () => {
         className="flex items-center gap-2.5 rounded-full border border-line-16 bg-surface-warn-2 py-[7px] pl-3 pr-2 transition-colors hover:border-line-23 hover:bg-surface-warn-7"
         data-testid="header-token-pill"
       >
-        {/* Same mark as the launch state above: this is one control in two
-            states, and showing it a rocket in one and a glyph in the other is
+        {/* Same mark as the launch state below: this is one control in two
+            states, and showing it one thing in one and a glyph in the other is
             the kind of twin this codebase has been clearing out all day. */}
-        <CreatorTokenRocket size={20} className="shrink-0 text-ink-brand-6" />
+        <CreatorTokenLaurel size={20} className="shrink-0 text-ink-brand-6" />
         <span className="font-ui text-[14px] leading-[22px] font-medium leading-none text-ink-2">@{identity.username}</span>
         <span aria-hidden="true" className="h-[15px] w-px bg-surface-32" />
         <span className="pr-1.5 text-[14px] leading-[22px] leading-none tabular-nums text-ink-2 font-num">
@@ -146,12 +146,13 @@ const HeaderTokenPill: FC = () => {
       className="flex items-center gap-2 whitespace-nowrap rounded-full border border-line-brand-10 bg-surface-1 px-4 py-[9px] font-ui text-[14px] leading-[22px] font-medium text-ink-brand-6 transition-colors hover:bg-surface-brand-12 hover:text-ink-27"
       data-testid="header-token-launch-cta"
     >
-      {/* ★ The Creator Tokens rocket replaces the ◈ glyph here (design handoff,
-          2026-08-13). 20px is the handoff's own floor — below it the three speed
-          lines fuse — and it fits the pill's 40px box (22px line + 9px padding
-          each side) without changing the pill's height. `currentColor` is why it
-          follows the hover state from `ink-brand-6` to white; the glyph could not. */}
-      <CreatorTokenRocket size={20} className="shrink-0" />
+      {/* ★ The Meritum laurel replaces the ◈ glyph here (owner's mark, 2026-09-06;
+          it replaced the 2026-08-13 rocket in the same three places). 20px fits
+          the pill's 40px box (22px line + 9px padding each side) without changing
+          the pill's height. `currentColor` is why it follows the hover state from
+          `ink-brand-6` to white — the glyph could not, and neither could a bitmap
+          or a mask; see creator-token-laurel.tsx. */}
+      <CreatorTokenLaurel size={20} className="shrink-0" />
       <span>{COPY.launch}</span>
     </Link>
   );

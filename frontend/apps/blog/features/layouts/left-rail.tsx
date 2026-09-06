@@ -11,7 +11,7 @@ import BasePathLink from '../../components/base-path-link';
 import { useTranslation } from '@/blog/i18n/client';
 import DialogLogin from '@/blog/components/dialog-login';
 import { LeagueShowcase } from '@/blog/features/retention/components/league-showcase';
-import { CreatorTokenRocket } from '@/blog/features/creator-tokens/ui/creator-token-rocket';
+import { CreatorTokenLaurel } from '@/blog/features/creator-tokens/ui/creator-token-laurel';
 import styles from './left-rail.module.css';
 
 /**
@@ -47,19 +47,20 @@ type NavIcon = ComponentType<LucideProps>;
 /**
  * ★ THE RAIL AND THE HEADER NOW SHOW THE SAME MARK (2026-08-16, owner). The rail
  * carried `Icons.creatorTokens` (the ◈ coin) while the header pill carried the
- * rocket — one product wearing two faces on one screen, which is the exact twin
- * this codebase keeps clearing out.
+ * product mark — one product wearing two faces on one screen, which is the exact
+ * twin this codebase keeps clearing out. Both now carry the laurel wreath
+ * (owner's asset, 2026-09-06), which replaced the rocket in all three places it
+ * appeared; see `creator-token-laurel.tsx` for the trace and the sizing.
  *
  * An adapter rather than a direct assignment because `NavIcon` is lucide's
- * `LucideProps`, whose `size` is `string | number`, and the rocket takes a
+ * `LucideProps`, whose `size` is `string | number`, and the mark takes a
  * `number` — passing the component straight in does not typecheck.
  *
- * `size={20}` is deliberate and is the icon's documented FLOOR: below 20px its
- * three speed lines fuse. It matches the rail's own `h-5 w-5` (20px), so the
- * className cannot shrink it under the floor either.
+ * `size={22}` matches the `h-[22px] w-[22px]` the row applies below, so the
+ * className cannot fight the prop.
  */
 const MeritumTokensIcon: NavIcon = ({ className }) => (
-  <CreatorTokenRocket size={22} className={className} />
+  <CreatorTokenLaurel size={22} className={className} />
 );
 
 /**
@@ -135,11 +136,47 @@ const NavRowContent = ({
   const IconTag = icon;
   return (
     <span className={cn(ROW_CLASS, styles.row)} data-active={isActive || isPending ? 'true' : undefined}>
-      <IconTag className="h-[22px] w-[22px] shrink-0" />
-      <span>{label}</span>
+      {/* ★★★ THE SPINNER TAKES THE ICON'S SLOT; IT DOES NOT ADD A THIRD ONE
+          (2026-09-06, owner: "sometimes when I click Meritum Tokens on the
+          navbar, the word Tokens slips below Meritum").
+
+          Measured on production, `/` -> `/creators`, rail column 200px:
+
+            idle     label 126.00px intrinsic, 131.80px available -> 1 line, row 50.59px
+            pending  label 128.00px intrinsic,  94.05px available -> 2 LINES, row 77.00px
+            active   label 128.00px intrinsic, 131.80px available -> 1 line, row 50.59px
+
+          Two things moved at the click, and they compounded. `.row[data-active]`
+          in left-rail.module.css sets `font-weight: 600`, which widens the label
+          126 -> 128px; and `data-active` is `isActive || isPending`, so it fires
+          on the CLICK, not on arrival. At the same instant the spinner appeared
+          as a THIRD flex child, costing its own 16px plus a second 15.4px `gap`
+          — 31.4px off the label's share, 131.8 -> 100.4px of room for a 128px
+          word pair. It wrapped, the row grew by exactly one 26.4px line, and
+          every row below it was shoved down for as long as the navigation took.
+          Then it silently un-wrapped on arrival, which is why it read as
+          "sometimes".
+
+          Putting the spinner IN the icon's 22px slot means the row has the same
+          two children at the same two widths in every state: nothing reflows,
+          nothing below moves, and the feedback still lands under the cursor
+          (the point the `pending` doc above makes) rather than at the top of the
+          window. `animate-spin` is a transform, so it does not affect layout.
+
+          `min-w-0 truncate` on the label is the belt to that braces. `truncate`
+          carries `white-space: nowrap`, so the label can no longer wrap in ANY
+          state — which matters because even the fixed ACTIVE state clears its
+          131.8px slot by only 3.8px, and any locale whose "Meritum tokens" runs
+          a hair longer than English's would wrap permanently rather than just
+          while pending. In that case it now ellipsises, which is survivable,
+          instead of wrapping or spilling out of the 200px rail. English fits
+          (128 <= 131.8), so nothing is clipped today. */}
       {isPending ? (
-        <Loader2 className="ml-auto h-4 w-4 shrink-0 animate-spin text-ink-brand-6" aria-hidden="true" />
-      ) : null}
+        <Loader2 className="h-[22px] w-[22px] shrink-0 animate-spin text-ink-brand-6" aria-hidden="true" />
+      ) : (
+        <IconTag className="h-[22px] w-[22px] shrink-0" />
+      )}
+      <span className="min-w-0 truncate">{label}</span>
     </span>
   );
 };
