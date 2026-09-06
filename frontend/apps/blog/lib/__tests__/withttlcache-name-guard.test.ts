@@ -43,22 +43,25 @@
  *     be understood by this scanner and reported as a violation — conservative
  *     (fails loud), not a silent pass.
  *   - REGEX LITERALS containing a quote character are handled — see
- *     `maskNonCode`'s own doc comment for the real bug this caught
- *     (`feed-prefetch.ts`'s `BODY_IMAGE_PATTERNS`) — via a regex-vs-divide
- *     heuristic that is conservative in the OTHER direction for one shape:
- *     `return /foo/`-style regexes (immediately preceded by an identifier
- *     ending in a letter/digit, e.g. a keyword) are misread as division and
- *     NOT masked as a regex. None of that shape exist in the files this guard
- *     scans today (the real-scan baseline in section B would not vacuously
- *     pass if the masker were broken outright — proven live by the bug this
- *     fix caught). ★ `server-cache-time-guard.test.ts`'s OWN masker was
- *     copied as the starting point for this one and carries the IDENTICAL
- *     gap (no regex-literal awareness at all) — not fixed here, since that
- *     file is out of scope for this build; flagged for a human to decide
- *     whether it is worth porting this fix back.
+ *     `./source-scan-tokenizer.ts`'s own doc comment for the real bug this
+ *     caught (`feed-prefetch.ts`'s `BODY_IMAGE_PATTERNS`) — via a
+ *     regex-vs-divide heuristic that is conservative in the OTHER direction
+ *     for one shape: `return /foo/`-style regexes (immediately preceded by
+ *     an identifier ending in a letter/digit, e.g. a keyword) are misread as
+ *     division and NOT masked as a regex. None of that shape exist in the
+ *     files this guard scans today (the real-scan baseline in section B
+ *     would not vacuously pass if the masker were broken outright — proven
+ *     live by the bug this fix caught). ★ 2026-09-06 UPDATE: the masker was
+ *     extracted into the shared `./source-scan-tokenizer.ts` and
+ *     `server-cache-time-guard.test.ts` (whose OWN masker was the starting
+ *     point for this one, and carried the IDENTICAL gap — no regex-literal
+ *     awareness at all) now imports that same tokenizer too, so both guards
+ *     get this fix from one shared source instead of one carrying a gap the
+ *     other already closed.
  */
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, resolve } from 'path';
+import { maskNonCode } from './source-scan-tokenizer';
 
 let failures = 0;
 let checks = 0;
@@ -73,219 +76,15 @@ function check(label: string, cond: boolean): void {
 }
 
 // ---------------------------------------------------------------------------
-// 1. THE MASKER (byte-for-byte the same algorithm as server-cache-time-guard's
-//    own maskNonCode, duplicated rather than imported: these are standalone
-//    ts-node scripts, and importing across `__tests__` files would tie their
-//    lifecycles together for no benefit).
+// 1. THE MASKER. Extracted 2026-09-06 into `./source-scan-tokenizer.ts` and
+//    shared byte-for-byte with `server-cache-time-guard.test.ts` (which used
+//    to carry its own, older copy of this function with no regex-literal
+//    handling at all -- see that file's header note, now updated, on the
+//    fix this guard found and that guard has since received). See
+//    `source-scan-tokenizer.ts`'s own doc comment for the regex-vs-divide
+//    heuristic and the exact `feed-prefetch.ts` bug this masker's
+//    regex-literal awareness exists to prevent.
 // ---------------------------------------------------------------------------
-
-type Mode = 'normal' | 'line' | 'block' | 'single' | 'double' | 'template' | 'regex' | 'regexClass';
-
-/**
- * ★★★ REGEX-LITERAL AWARE (2026-09-06, found while building this guard, NOT
- * present in the `server-cache-time-guard.test.ts` masker this was copied
- * from — see this file's own header note on that). Without this, a regex
- * literal containing a QUOTE character corrupts masking for the REST OF THE
- * FILE: `feed-prefetch.ts`'s own `BODY_IMAGE_PATTERNS` array holds
- * `/<img\s+[^>]*src="[^"]+"[^>]*>/i` — an ODD number of `"` inside one regex
- * literal — which, unmasked, flipped this masker into `double`-string mode
- * and kept it there (string/template modes do not reset at a newline, on
- * purpose, for real multi-line template literals) until some UNRELATED `"`
- * elsewhere in the file happened to close it, blanking every real
- * `withTtlCache(` call after it to nothing. Caught because this guard's own
- * baseline count (`>= 12`) came back short.
- *
- * Regex-vs-divide is genuinely ambiguous in a hand-rolled tokenizer (`a / b`
- * vs `/regex/`); the heuristic here is deliberately the SAFE side of that
- * ambiguity for this scanner's purpose: a `/` is treated as a regex literal
- * start unless the last significant character was one that could end a VALUE
- * (a letter, digit, `_`, `$`, `)`, `]`, or `` ` ``) — which means `return
- * /foo/` (an identifier-like keyword immediately before `/`) is misread as
- * division and NOT masked as a regex. That is an accepted false negative (the
- * regex's own quotes could still corrupt masking in that rare shape); the
- * shape that actually broke this file — a regex following `[`, `,`, `(`, `=`,
- * or the start of a line, none of which end a value — IS caught. Whatever is
- * inside a detected regex is blanked exactly like a string, so a `(`, `)`,
- * `[`, `]`, `{`, `}` or quote character INSIDE a regex literal can never be
- * mistaken for real code punctuation.
- */
-function maskNonCode(content: string): string {
-  const n = content.length;
-  const out: string[] = new Array(n);
-  let mode: Mode = 'normal';
-  let lastSignificant = '';
-  let i = 0;
-  while (i < n) {
-    const c = content[i];
-
-    if (mode === 'single' || mode === 'double' || mode === 'template') {
-      if (c === '\n') {
-        out[i] = '\n';
-        i++;
-        continue;
-      }
-      const quoteChar = mode === 'single' ? "'" : mode === 'double' ? '"' : '`';
-      if (c === '\\') {
-        out[i] = ' ';
-        const nxt = i + 1 < n ? content[i + 1] : '';
-        if (nxt === '\n') {
-          i += 1; // leave the newline itself alone; loop handles it next pass
-          continue;
-        }
-        if (i + 1 < n) out[i + 1] = ' ';
-        i += 2;
-        continue;
-      }
-      if (c === quoteChar) {
-        out[i] = ' ';
-        mode = 'normal';
-        lastSignificant = quoteChar === '`' ? '`' : ')'; // a string behaves like a value for regex-vs-divide purposes
-        i++;
-        continue;
-      }
-      out[i] = ' ';
-      i++;
-      continue;
-    }
-
-    if (mode === 'regex' || mode === 'regexClass') {
-      if (c === '\n') {
-        // A real regex literal cannot span a newline unescaped; bail out to
-        // normal mode rather than risk staying stuck (safer than the bug this
-        // fix exists to prevent).
-        out[i] = '\n';
-        mode = 'normal';
-        i++;
-        continue;
-      }
-      if (c === '\\') {
-        out[i] = ' ';
-        if (i + 1 < n) out[i + 1] = ' ';
-        i += 2;
-        continue;
-      }
-      if (mode === 'regex' && c === '[') {
-        out[i] = ' ';
-        mode = 'regexClass'; // `/` inside a character class does not end the regex
-        i++;
-        continue;
-      }
-      if (mode === 'regexClass' && c === ']') {
-        out[i] = ' ';
-        mode = 'regex';
-        i++;
-        continue;
-      }
-      if (mode === 'regex' && c === '/') {
-        out[i] = ' ';
-        mode = 'normal';
-        // Consume trailing flag letters (g, i, m, s, u, y, d) as part of the
-        // same blanked token.
-        i++;
-        while (i < n && /[a-z]/i.test(content[i])) {
-          out[i] = ' ';
-          i++;
-        }
-        lastSignificant = ')'; // a regex literal behaves like a value afterwards
-        continue;
-      }
-      out[i] = ' ';
-      i++;
-      continue;
-    }
-
-    if (mode === 'line') {
-      if (c === '\n') {
-        out[i] = '\n';
-        mode = 'normal';
-        i++;
-        continue;
-      }
-      out[i] = ' ';
-      i++;
-      continue;
-    }
-
-    if (mode === 'block') {
-      if (c === '\n') {
-        out[i] = '\n';
-        i++;
-        continue;
-      }
-      const nxt = i + 1 < n ? content[i + 1] : '';
-      if (c === '*' && nxt === '/') {
-        out[i] = ' ';
-        out[i + 1] = ' ';
-        mode = 'normal';
-        i += 2;
-        continue;
-      }
-      out[i] = ' ';
-      i++;
-      continue;
-    }
-
-    // mode === 'normal'
-    if (c === '\n') {
-      out[i] = '\n';
-      i++;
-      continue;
-    }
-    if (/\s/.test(c)) {
-      out[i] = c;
-      i++;
-      continue; // whitespace never counts as "the last significant character"
-    }
-    const nxt = i + 1 < n ? content[i + 1] : '';
-    if (c === '/' && nxt === '/') {
-      out[i] = ' ';
-      out[i + 1] = ' ';
-      mode = 'line';
-      i += 2;
-      continue;
-    }
-    if (c === '/' && nxt === '*') {
-      out[i] = ' ';
-      out[i + 1] = ' ';
-      mode = 'block';
-      i += 2;
-      continue;
-    }
-    if (c === '/') {
-      // Regex-vs-divide: see this function's own doc comment above.
-      const isValueBefore = /[A-Za-z0-9_$)\]`]/.test(lastSignificant);
-      if (!isValueBefore) {
-        out[i] = ' ';
-        mode = 'regex';
-        i++;
-        continue;
-      }
-      // Falls through to the default "kept as code" branch below (division).
-    }
-    if (c === "'") {
-      out[i] = ' ';
-      mode = 'single';
-      i++;
-      continue;
-    }
-    if (c === '"') {
-      out[i] = ' ';
-      mode = 'double';
-      i++;
-      continue;
-    }
-    if (c === '`') {
-      out[i] = ' ';
-      mode = 'template';
-      i++;
-      continue;
-    }
-    out[i] = c;
-    lastSignificant = c;
-    i++;
-  }
-  return out.join('');
-}
 
 // ---------------------------------------------------------------------------
 // 2. FIND EACH withTtlCache(...) CALL AND SPLIT ITS TOP-LEVEL ARGUMENTS

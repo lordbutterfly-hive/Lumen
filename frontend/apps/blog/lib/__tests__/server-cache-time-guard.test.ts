@@ -76,12 +76,17 @@
  *     inside a template-literal interpolation would therefore be MISSED
  *     (false negative), not falsely flagged. None exist in this codebase
  *     today (the real-scan baseline count below is the check for that).
- *   - Regex literals are not specially tokenized; a `cacheTime`/`gcTime`
- *     sequence inside one could in principle be matched. In practice this
- *     scanner's own allow-list regexes contain `cacheTime`/`gcTime` as
- *     alternation text followed by `\s*:` written in regex syntax (literal
- *     backslash-s-star), not actual whitespace, so `PROP_RE` does not match
- *     them — verified by this file scanning cleanly (see section B).
+ *   - Regex literals ARE tokenized (as of 2026-09-06, ported from the
+ *     sibling `withttlcache-name-guard.test.ts`, which found the gap live):
+ *     the shared masker in `./source-scan-tokenizer.ts` recognizes
+ *     `/.../flags` and blanks its body exactly like a string, specifically
+ *     so a regex literal containing an ODD number of quote characters (e.g.
+ *     `lib/feed/feed-prefetch.ts`'s `BODY_IMAGE_PATTERNS`, which holds
+ *     `/<img\s+[^>]*src="[^"]+"[^>]*>/i`) cannot flip the masker into
+ *     string mode and desync it — silently blanking (undercounting) every
+ *     real occurrence for the rest of the file. See section A's regression
+ *     check and `source-scan-tokenizer.ts`'s own doc comment for the
+ *     regex-vs-divide heuristic this relies on.
  *   - Classification looks only at the same source line as the key. A value
  *     that wraps onto a following line won't match any allow pattern and is
  *     reported as a violation — conservative (fails loud) rather than
@@ -89,6 +94,7 @@
  */
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, resolve } from 'path';
+import { maskNonCode } from './source-scan-tokenizer';
 
 let failures = 0;
 let checks = 0;
@@ -103,10 +109,10 @@ function check(label: string, cond: boolean): void {
 }
 
 // ---------------------------------------------------------------------------
-// 1. THE MASKER + CLASSIFIER — pure, tested against synthetic snippets below
-//    (section A) BEFORE either is ever pointed at real files, so a broken
-//    masker or classifier cannot make the real-repo scan (section B)
-//    vacuously pass.
+// 1. THE CLASSIFIER — pure, tested against synthetic snippets below
+//    (section A) BEFORE it is ever pointed at real files, so a broken
+//    masker (imported above) or classifier cannot make the real-repo scan
+//    (section B) vacuously pass.
 // ---------------------------------------------------------------------------
 
 type Verdict = 'helper' | 'ternary' | 'literal' | 'violation';
@@ -127,129 +133,12 @@ function classify(tail: string): Verdict {
   return 'violation';
 }
 
-type Mode = 'normal' | 'line' | 'block' | 'single' | 'double' | 'template';
-
-/**
- * Replaces every character that is part of a `//` line comment, a `/* *\/`
- * block comment, or the body of a `'...'` / `"..."` / `` `...` `` literal
- * with a space, leaving every newline and every real-code character exactly
- * where it was — so line numbers and column positions of any surviving
- * `cacheTime`/`gcTime` match are unaffected. Character-by-character and
- * quote-aware ON PURPOSE (see the KNOWN LIMITATIONS note in the file header
- * for what broke the previous, substring-search version of this function).
- */
-function maskNonCode(content: string): string {
-  const n = content.length;
-  const out: string[] = new Array(n);
-  let mode: Mode = 'normal';
-  let i = 0;
-  while (i < n) {
-    const c = content[i];
-
-    if (mode === 'single' || mode === 'double' || mode === 'template') {
-      if (c === '\n') {
-        out[i] = '\n';
-        i++;
-        continue;
-      }
-      const quoteChar = mode === 'single' ? "'" : mode === 'double' ? '"' : '`';
-      if (c === '\\') {
-        out[i] = ' ';
-        const nxt = i + 1 < n ? content[i + 1] : '';
-        if (nxt === '\n') {
-          i += 1; // leave the newline itself alone; loop handles it next pass
-          continue;
-        }
-        if (i + 1 < n) out[i + 1] = ' ';
-        i += 2;
-        continue;
-      }
-      if (c === quoteChar) {
-        out[i] = ' ';
-        mode = 'normal';
-        i++;
-        continue;
-      }
-      out[i] = ' ';
-      i++;
-      continue;
-    }
-
-    if (mode === 'line') {
-      if (c === '\n') {
-        out[i] = '\n';
-        mode = 'normal';
-        i++;
-        continue;
-      }
-      out[i] = ' ';
-      i++;
-      continue;
-    }
-
-    if (mode === 'block') {
-      if (c === '\n') {
-        out[i] = '\n';
-        i++;
-        continue;
-      }
-      const nxt = i + 1 < n ? content[i + 1] : '';
-      if (c === '*' && nxt === '/') {
-        out[i] = ' ';
-        out[i + 1] = ' ';
-        mode = 'normal';
-        i += 2;
-        continue;
-      }
-      out[i] = ' ';
-      i++;
-      continue;
-    }
-
-    // mode === 'normal'
-    if (c === '\n') {
-      out[i] = '\n';
-      i++;
-      continue;
-    }
-    const nxt = i + 1 < n ? content[i + 1] : '';
-    if (c === '/' && nxt === '/') {
-      out[i] = ' ';
-      out[i + 1] = ' ';
-      mode = 'line';
-      i += 2;
-      continue;
-    }
-    if (c === '/' && nxt === '*') {
-      out[i] = ' ';
-      out[i + 1] = ' ';
-      mode = 'block';
-      i += 2;
-      continue;
-    }
-    if (c === "'") {
-      out[i] = ' ';
-      mode = 'single';
-      i++;
-      continue;
-    }
-    if (c === '"') {
-      out[i] = ' ';
-      mode = 'double';
-      i++;
-      continue;
-    }
-    if (c === '`') {
-      out[i] = ' ';
-      mode = 'template';
-      i++;
-      continue;
-    }
-    out[i] = c;
-    i++;
-  }
-  return out.join('');
-}
+// `maskNonCode` itself (comment/string/template/regex-literal masking) lives
+// in `./source-scan-tokenizer.ts`, shared byte-for-byte with
+// `withttlcache-name-guard.test.ts` — see that file's doc comment for the
+// regex-literal-desync bug this tokenizer's regex handling exists to
+// prevent, and this file's own section A below for the regression check
+// proving it against THIS guard's classifier.
 
 interface Occurrence {
   file: string;
@@ -396,6 +285,21 @@ check(
 check(
   'an escaped quote inside a string does not end the string early',
   occurrencesIn("const s = 'it\\'s /* not a comment */ cacheTime: 60000';\nconst real = 2;").length === 0
+);
+check(
+  'a regex literal with an ODD number of quote characters (the feed-prefetch.ts ' +
+    'BODY_IMAGE_PATTERNS shape) does not desync masking and hide a following cacheTime: 60_000 ' +
+    '— it must still be caught, and caught as a violation',
+  (() => {
+    const snippet = [
+      'const PATTERNS = [',
+      '  /<img\\s+[^>]*src="[^"]+"[^>]*>/i',
+      '];',
+      'cacheTime: 60_000,'
+    ].join('\n');
+    const occurrences = occurrencesIn(snippet);
+    return occurrences.length === 1 && occurrences[0]?.verdict === 'violation';
+  })()
 );
 
 // ---------------------------------------------------------------------------
