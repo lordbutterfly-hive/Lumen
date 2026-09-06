@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import hashlib
+import inspect
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
@@ -3772,6 +3774,191 @@ def test_second_degree_engagers_query_canceled_degrades_instead_of_a_503(
         "not crash rank_feed outright"
     )
     assert "second_degree_engagers lane failed" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# FOURTH REVIEW FIX (2026-09-06) — a full-stack review found `_suppressed`
+# (`gateway.suppressed_keys`) was the one call the C1 sweep missed entirely:
+# it is called inline, as a keyword-argument expression in `_fallback_filler`
+# and as a bare assignment in `rank_feed`, never through a statement the
+# earlier grep for `_lane_or_empty` call sites would have flagged. The
+# `rank_feed` call site runs for EVERY feed — no `if` gates it out for any
+# viewer — so an unwrapped statement-timeout there was a 503 for the whole
+# feed, plus an unthrottled traceback per request, for as long as the mirror
+# stayed slow.
+# ---------------------------------------------------------------------------
+
+
+class _RaisingSuppressedKeysGateway(FakeGateway):
+    def suppressed_keys(self, post_keys, **kwargs):  # type: ignore[no-untyped-def]
+        import psycopg
+
+        raise psycopg.errors.QueryCanceled("simulated statement timeout")
+
+
+def test_suppressed_keys_query_canceled_degrades_to_no_suppression_not_a_503(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`_suppressed` runs inside `rank_feed`'s own body (not `gather_
+    candidates`), unconditionally, for every feed. A post that WOULD have
+    been reported suppressed under a healthy gateway must still be served
+    when the read is cancelled — the documented degrade ("the reader may see
+    a post they have already seen, which is strictly better than no feed at
+    all") — rather than the whole request failing."""
+    post = make_post("alice", "p1")
+    viewer = make_viewer("me", follows=frozenset({"alice"}))
+    gateway = _RaisingSuppressedKeysGateway(in_network=[post], suppressed=frozenset({post.key}))
+    pipeline_mod._reset_lane_failure_counts_for_tests()
+    with caplog.at_level(logging.WARNING, logger="recsys.pipeline"):
+        scored = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+    assert any(s.post.key == post.key for s in scored), (
+        "a cancelled suppression read must degrade to 'nothing suppressed', not drop "
+        "the post or crash rank_feed"
+    )
+    assert "suppressed lane failed" in caplog.text
+
+
+def test_suppressed_fallback_keys_query_canceled_degrades_instead_of_a_crash(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The SECOND, independent `_suppressed` call site — inline inside
+    `_fallback_filler`'s padding path, reached only when the viewer's own
+    pool is starved. A tagless, followless viewer with a non-empty popular
+    pool exercises exactly this: `popular_fallback` returns candidates, which
+    makes `_suppressed`'s `keys` non-empty in `_fallback_filler` too, which is
+    what actually reaches `gateway.suppressed_keys` a second time."""
+    pop_post = make_post("popular_author", "pp1")
+    viewer = make_viewer("me")
+    gateway = _RaisingSuppressedKeysGateway(popular=[pop_post])
+    pipeline_mod._reset_lane_failure_counts_for_tests()
+    with caplog.at_level(logging.WARNING, logger="recsys.pipeline"):
+        rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+    assert "suppressed_fallback lane failed" in caplog.text
+
+
+def test_suppressed_keys_failure_is_logged_once_per_process_then_throttled(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The first `suppressed_keys` failure for this lane, in this process,
+    gets the full traceback (`exc_info=True`); every subsequent one for the
+    SAME lane in the SAME process is a one-line WARNING with a running count
+    and no traceback instead — `_lane_or_empty`'s own posture, proven here
+    for the lane the earlier fix left unwrapped."""
+    post = make_post("alice", "p1")
+    viewer = make_viewer("me", follows=frozenset({"alice"}))
+    gateway = _RaisingSuppressedKeysGateway(in_network=[post])
+    pipeline_mod._reset_lane_failure_counts_for_tests()
+    with caplog.at_level(logging.WARNING, logger="recsys.pipeline"):
+        rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+        rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+    assert pipeline_mod._LANE_FAILURE_COUNTS["suppressed"] == 2, (
+        "two failed requests through the same lane in the same process must be counted"
+    )
+    first = next(
+        r for r in caplog.records if "suppressed lane failed for viewer=me" in r.getMessage()
+    )
+    second = next(
+        r for r in caplog.records if "suppressed lane failed again for viewer=me" in r.getMessage()
+    )
+    assert "(2 failures this process for this lane)" in second.getMessage()
+    assert "Traceback suppressed after the first occurrence" in second.getMessage()
+    assert first.exc_info is not None, "the first occurrence must carry the traceback"
+    assert second.exc_info is None, "the second occurrence must NOT re-log a traceback"
+
+
+# ---------------------------------------------------------------------------
+# THE AUDIT, PINNED. `_suppressed` was missed because it is called INLINE —
+# as a keyword-argument expression and as a bare assignment — rather than as
+# its own guarded statement, which is exactly the shape a human sweep (or a
+# naive text grep for `_lane_or_empty`) can walk past. This is a structural
+# regression guard, not a behavioural test: it parses `pipeline.py`'s OWN
+# source and fails if a call reaching a request-path-timeout query is ever
+# added outside a `_lane_or_empty(...)` guard again — for THIS module.
+#
+# Two calls are stand-ins for calls that actually happen one module away
+# (`recsys/core/coldstart.py`): `popular_fallback`, `interest_candidates` and
+# `established_interest_candidates` each wrap exactly one `gateway.tag_posts`/
+# `gateway.popular_posts` call and are the only callers of those methods, so
+# guarding the wrapper call here is equivalent to guarding the gateway call
+# itself. `_suppressed` is the same shape, one module closer to home: it is
+# DEFINED in this file, so its own body's two `gateway.suppressed_keys(...)`
+# calls are deliberately NOT in `RISKY_NAMES` below (they would always show
+# up as "unguarded" — the guard belongs at `_suppressed`'s CALL sites, which
+# `RISKY_NAMES` checks instead). The one gap this cannot see: a brand-new
+# gateway method added to `HafsqlClient` that carries
+# `_request_statement_timeout_ms`, reached through a wrapper name not yet in
+# this set — see CHANGES-2026-09-06.md for the full manually-audited list.
+# ---------------------------------------------------------------------------
+
+RISKY_NAMES = frozenset(
+    {
+        # Direct `gateway.<name>(...)` calls made inline inside a lambda in
+        # this module.
+        "in_network_posts",
+        "engaged_oon_posts",
+        "second_degree_engagers",
+        "popular_posts",
+        "reputations_for",
+        # `_reps_for = getattr(gateway, "reputations_for", None)` — the local
+        # alias actually called, since `reputations_for` above never appears
+        # as a literal attribute access in this module.
+        "_reps_for",
+        # This module's own wrapper around `gateway.suppressed_keys` — guard
+        # at ITS call sites, not inside its definition (see comment above).
+        "_suppressed",
+        # `recsys.core.coldstart` wrappers, each the sole caller of one
+        # `gateway.tag_posts`/`gateway.popular_posts` call.
+        "popular_fallback",
+        "interest_candidates",
+        "established_interest_candidates",
+    }
+)
+
+
+def _call_name(node: ast.Call) -> str | None:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def test_every_risky_call_site_in_pipeline_sits_inside_a_lane_guard() -> None:
+    """Fails if `RISKY_NAMES` above is ever reached from `pipeline.py` outside
+    a `_lane_or_empty(...)` call — the exact gap `_suppressed` was left in.
+    This is the audit from the full-stack review, pinned so it cannot regress
+    silently: `suppressed`/`suppressed_fallback` were the two lanes missing
+    before this fix; `in_network`/`oon_als`/`engaged_oon`/`popular`/
+    `second_degree_engagers`/`popular_reputations`/`interest_cold`/
+    `interest_established`/`popular_fallback` were already covered."""
+    tree = ast.parse(inspect.getsource(pipeline_mod))
+
+    guarded_ids: set[int] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_lane_or_empty"
+        ):
+            for inner in ast.walk(node):
+                if inner is not node and isinstance(inner, ast.Call):
+                    guarded_ids.add(id(inner))
+
+    unguarded = [
+        f"{name} at pipeline.py:{node.lineno}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (name := _call_name(node)) in RISKY_NAMES
+        and id(node) not in guarded_ids
+    ]
+    assert unguarded == [], (
+        "found a request-path gateway call (or a thin single-purpose wrapper "
+        "around one) that is not nested inside a `_lane_or_empty` guard: "
+        + ", ".join(unguarded)
+        + ". Every call that can carry `HafsqlClient._request_statement_timeout_ms` "
+        "must degrade its own lane to empty on failure, not fail the whole request."
+    )
 
 
 def test_a_typeerror_in_a_lane_is_a_programmer_bug_and_must_propagate(

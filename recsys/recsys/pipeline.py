@@ -1369,13 +1369,29 @@ def _fallback_filler(
         lambda: popular_fallback(gateway, since, limit),
         [],
     )
+    # C1 REVIEW FIX FOLLOW-UP (2026-09-06): `_lane_or_empty` — `_suppressed`
+    # calls `gateway.suppressed_keys`, which carries the same request-path
+    # statement timeout as every other lane here, and was the one direct
+    # gateway call in this function the first review pass missed (it sits
+    # inline in a keyword argument, not its own statement, which is likely
+    # why it slipped past the sweep that wrapped `popular_fallback` just
+    # above). Degrading to `frozenset()` means this padding batch is treated
+    # as unsuppressed — a reader may see a post they already saw, which is
+    # strictly better than the padding (and the whole feed, if this is the
+    # exception that reaches `build_feed`'s outer handler) failing outright.
+    suppressed: frozenset[str] = _lane_or_empty(
+        "suppressed_fallback",
+        viewer.account,
+        lambda: _suppressed(gateway, fallback),
+        frozenset(),
+    )
     admissible = filter_eligible(
         fallback,
         viewer,
         {},
         snap.graph_creds,
         settings.thresholds,
-        suppressed=_suppressed(gateway, fallback),
+        suppressed=suppressed,
         show_nsfw=show_nsfw,
         popular=settings.popular,
         lite_publishers=settings.lite.publisher_accounts,
@@ -2430,7 +2446,21 @@ def rank_feed(
     snap = snapshot if snapshot is not None else TrustSnapshot()
 
     candidates = gather_candidates(viewer, gateway, since, limit, settings, snap)
-    suppressed = _suppressed(gateway, candidates)
+    # C1 REVIEW FIX FOLLOW-UP (2026-09-06): `_lane_or_empty` — this call runs
+    # for EVERY feed (not gated by any `if`, unlike most lanes above), so an
+    # unwrapped statement-timeout here was the widest-reach gap the C1 sweep
+    # left: one cancelled `suppressed_keys` query turned into a 503 for the
+    # whole feed, plus a traceback per request with no throttling, for as
+    # long as the mirror stayed slow. Degrading to `frozenset()` means
+    # `filter_eligible` treats this batch as unsuppressed — a reader may see
+    # a post already covered by a §8.7 report, which is strictly better than
+    # no feed at all.
+    suppressed: frozenset[str] = _lane_or_empty(
+        "suppressed",
+        viewer.account,
+        lambda: _suppressed(gateway, candidates),
+        frozenset(),
+    )
     gated_keys = frozenset(c.post.key for c in candidates if c.source.requires_second_degree)
 
     # ★ A12 (2026-08-04). Same resolution `_suppressed` above needs, for the
