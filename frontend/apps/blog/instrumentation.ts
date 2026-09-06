@@ -87,10 +87,39 @@ export async function register() {
    * ★ `nodejs` ONLY. The edge runtime gets its own module instance, so warming
    * there would spend the upstream calls again to fill a cache no page render
    * reads. The dynamic import keeps that cost out of the edge bundle entirely.
+   *
+   * ★★★ WRAPPED IN A try/catch (2026-09-06, review fix). Before this, the
+   * `import()` below sat OUTSIDE any try, unlike the http-keepalive block
+   * above it — a gap that was harmless while nothing this module transitively
+   * loaded could throw synchronously at MODULE LOAD. That stopped being true
+   * the moment `withTtlCache`'s per-copy name-collision guard
+   * (server-ttl-cache.ts) was added: it throws synchronously the instant two
+   * named caches in the same copy collide, and `warm-server-caches.ts`
+   * transitively imports every named cache in `cached-api.ts`,
+   * `trending-tags.ts`, `feed-prefetch.ts` and (as of this same review)
+   * `block-filter.ts` and `search/suggest.ts`/`search/people.ts`. An
+   * unguarded throw here would reject `register()` itself — "IT MUST NEVER
+   * STOP THE SERVER" (this file's own rule, stated for the block above) has
+   * to be true of the CODE, not just of a comment. Degraded on failure: no
+   * boot warm runs this restart, and the first real reader pays the cold read
+   * the warm exists to remove — exactly today's pre-warm behaviour, never
+   * worse, and `warm-server-caches.ts`'s own header states the same rule for
+   * a warm that starts but fails partway.
    */
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    const { warmServerCaches } = await import('./lib/warm-server-caches');
-    warmServerCaches();
+    try {
+      const { warmServerCaches } = await import('./lib/warm-server-caches');
+      warmServerCaches();
+    } catch (error) {
+      const message = `cache warm: could not load warm-server-caches (${String(error)}); no boot warm this restart, the first reader will pay these reads`;
+      try {
+        const { getLogger } = await import('@ui/lib/logging');
+        getLogger('app').warn(message);
+      } catch {
+        // The logger module itself failed to load — degrade further, not to a crash.
+        console.warn(message);
+      }
+    }
   }
 
   /**

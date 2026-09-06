@@ -2,11 +2,119 @@ import { createHiveChain, IWaxOptionsChain, TWaxExtended, TWaxRestExtended } fro
 import { siteConfig } from '@hive/ui/config/site'; // Maybe move this to package specific only to config
 import { ExtendedNodeApi, ExtendedRestApi } from './extended-hive.chain';
 import { getLogger } from '@hive/ui/lib/logging';
-import { initializeAssetConstants } from '@hive/ui/lib/asset-constants';
+import { initializeAssetConstants, isAssetConstantsInitialized } from '@hive/ui/lib/asset-constants';
 
 export type HiveChain = TWaxExtended<ExtendedNodeApi, TWaxRestExtended<ExtendedRestApi>>;
 
 const logger = getLogger('wax');
+
+/**
+ * ★★★ ONE CHAIN PER PROCESS, NOT PER WEBPACK LAYER (2026-09-06, module-copies
+ * build map R2). Next compiles this file once per layer — proven live: the rsc
+ * copy (every page render and app route handler) held a chain on
+ * api.hive.blog while the instrument copy (instrumentation.ts's boot warm)
+ * held a SEPARATE chain, built from a SEPARATE `createHiveChain()` call, on
+ * api.openhive.network — two 64 MB wasm linear memories per worker
+ * (`Creating instance of Wax Chain` logged twice per pid) with INDEPENDENT
+ * failover state, so a node the rsc copy had already failed away from could
+ * still be the one the instrument copy kept retrying.
+ *
+ * `hiveChainPromise`, `hiveChain` and `lastFailoverAt` — the three module-level
+ * `let`s this used to be — now live in one process-wide slot, so every copy
+ * that calls `getChain()`/`initChain()` shares the SAME promise, the SAME chain
+ * object and the SAME failover clock. `setChainClient` still only runs once
+ * per process (the first caller to find the slot empty), which is what makes
+ * this a one-chain fix and not just a one-failover-clock fix.
+ *
+ * ★ WHAT IS DELIBERATELY *NOT* SHARED: `packages/ui/lib/asset-constants.ts`'s
+ * `assetConfig`. It is cheap, pure, per-copy state, and it is read by CODE
+ * running in whichever copy asked (e.g. `app/api/wallet/history/route.ts`'s own
+ * copy) — sharing the chain does not make that copy's `assetConfig` correct on
+ * its own, because the copy that never calls `createHiveChain()` (an ADOPTING
+ * copy, one that finds `hiveChainPromise` already in the slot) would otherwise
+ * never run `initializeAssetConstants` at all. `ensureAssetConstantsFor` below
+ * is what closes that gap: it runs in every copy that awaits the chain,
+ * creator and adopter alike, guarded by `isAssetConstantsInitialized()` so a
+ * repeat call is a no-op. See that file's own header for why suffixes like
+ * "HIVE"/"HBD" would otherwise silently vanish for an adopting copy's readers.
+ *
+ * ★ A NAMED BEHAVIOUR CHANGE, NOT A BUG (corrected 2026-09-06 review — the
+ * first draft of this note named a specific caller that does not actually hit
+ * it): `reuseHiveChain()` used to return `undefined` in the `ssr` layer's copy
+ * during server-side rendering of a client component, because that copy NEVER
+ * built a chain — layer isolation guaranteed it. `popover-card-data.tsx`'s
+ * `hiveChainService.reuseHiveChain()` call was checked and does NOT exercise
+ * this: Radix `PopoverContent` never mounts on the server, so that component
+ * never runs its HP maths during SSR in the first place, changed behaviour or
+ * not. The general claim stands for every OTHER caller, though: after this
+ * change, `reuseHiveChain()`'s answer during SSR is `chain-or-undefined`
+ * depending on whether ANY layer in this worker has already initialised the
+ * shared chain — previously it was unconditionally `undefined` in the `ssr`
+ * copy, guaranteed by layer isolation; now a chain built by the `rsc` or
+ * `instrument` layer is visible there too, because they share the slot. This
+ * is intentional (one chain, one truth) and is named here because it is
+ * exactly the kind of per-layer semantic Q6 of the build map says to name
+ * rather than silently change — it is a property of this file, not of any one
+ * caller.
+ *
+ * ★★ `reuseHiveChain()` ALSO NOW RUNS `ensureAssetConstantsFor` BEFORE
+ * RETURNING (2026-09-06 review). Without it, a copy that only ever calls
+ * `reuseHiveChain()` — never `getChain()`/`initChain()` — could observe a
+ * live, shared `hiveChain` whose `ASSETS` were never fed into THIS copy's own
+ * `asset-constants.ts` (per-copy by design, see above), and any caller doing
+ * HP/asset maths off the result (`convertToHP` and friends) would throw on an
+ * uninitialised `assetConfig` despite `reuseHiveChain()` returning a real
+ * chain. This closes that gap the same way the async paths already do.
+ */
+const CHAIN_SLOT = Symbol.for('lumen.hiveChain.v1');
+
+interface HiveChainSlotState {
+  hiveChainPromise: Promise<HiveChain> | undefined;
+  hiveChain: HiveChain | undefined;
+  lastFailoverAt: number;
+  /**
+   * ★★★ BUMPED BY `resetChain()` (2026-09-06 review fix). A per-process chain
+   * has one consequence a per-copy one never had: OTHER modules that memoise
+   * their OWN wrapped copy of this chain (`packages/transaction/lib/chain.ts`'s
+   * `let chain`, which wraps whatever `getHiveChainService().getHiveChain()`
+   * resolves to) have no way to notice a reset unless something tells them.
+   * Before this field, `validate-hive-account.ts`'s WASM-corruption handler
+   * called `resetChain()` (this slot) AND `resetTransactionChain()` (that
+   * memo) — but only cleared ITS OWN copy's memo; every OTHER webpack layer's
+   * `chain.ts` copy kept the pre-reset wrapped chain forever, since nothing
+   * else ever called ITS `resetTransactionChain()`. `generation` is the fix:
+   * `getChainGeneration()` lets any interested memo compare "what generation
+   * did I cache this for?" against "what generation is it now?" on every read,
+   * and rebuild on a mismatch — self-healing, with no reset call required.
+   */
+  generation: number;
+}
+
+function chainSlotState(): HiveChainSlotState {
+  const carrier = globalThis as typeof globalThis & { [CHAIN_SLOT]?: HiveChainSlotState };
+  carrier[CHAIN_SLOT] ??= { hiveChainPromise: undefined, hiveChain: undefined, lastFailoverAt: 0, generation: 0 };
+  return carrier[CHAIN_SLOT];
+}
+
+/**
+ * How many times `resetChain()` has run in this process. Exported so a
+ * dependent memo outside this file (`packages/transaction/lib/chain.ts`) can
+ * detect a reset it was never directly told about — see `generation`'s own
+ * doc on `HiveChainSlotState` above.
+ */
+export const getChainGeneration = (): number => chainSlotState().generation;
+
+/**
+ * Initialise THIS copy's `asset-constants.ts` from the shared chain, exactly
+ * once per copy — see this file's header note on why that state is
+ * deliberately per-copy rather than moved into the shared slot.
+ */
+function ensureAssetConstantsFor(chain: HiveChain): HiveChain {
+  if (!isAssetConstantsInitialized()) {
+    initializeAssetConstants(chain.ASSETS);
+  }
+  return chain;
+}
 
 /**
  * ★ THE BROWSER AND THE SERVER DO NOT WANT THE SAME TIMEOUT (2026-08-09).
@@ -152,10 +260,6 @@ const getAIDefaultEndpoint = (): string | undefined => {
   return undefined;
 };
 
-let hiveChainPromise: Promise<HiveChain> | undefined = undefined;
-// This should be just a reference retrieved from the hiveChainPromise.
-let hiveChain: HiveChain | undefined = undefined;
-
 /**
  * Check if an error is a WASM memory corruption error.
  * These errors indicate the WASM module state is corrupted and needs recreation.
@@ -183,8 +287,19 @@ export const isWasmMemoryError = (error: unknown): boolean => {
  */
 export const resetChain = (): void => {
   logger.warn('Resetting WAX chain singleton due to WASM error - see wax#161');
-  hiveChainPromise = undefined;
-  hiveChain = undefined;
+  const s = chainSlotState();
+  s.hiveChainPromise = undefined;
+  s.hiveChain = undefined;
+  // ★ CLEAR THE FAILOVER CLOCK TOO (2026-09-06 review fix). A fresh chain
+  // starts on the preferred endpoint (`getDefaultClientOptions`); a stale
+  // `lastFailoverAt` surviving the reset would let `restorePreferredRpcEndpoint`
+  // believe a failover happened on a chain that no longer exists, or race the
+  // cooldown against the NEW chain's own first real failover.
+  s.lastFailoverAt = 0;
+  // ★ BUMP THE GENERATION — see `HiveChainSlotState.generation`'s own doc.
+  // Every dependent memo's next read notices this reset even if it never
+  // received an explicit reset call of its own.
+  s.generation += 1;
 };
 
 /**
@@ -210,7 +325,6 @@ export const resetChain = (): void => {
  * When we last moved off the preferred node, and therefore when it is worth
  * trying again. See `restorePreferredRpcEndpoint`.
  */
-let lastFailoverAt = 0;
 const PREFERRED_RETRY_AFTER_MS = 60_000;
 
 /**
@@ -229,12 +343,13 @@ const PREFERRED_RETRY_AFTER_MS = 60_000;
  */
 export const advanceToNextRpcEndpoint = (failedEndpoint?: string): string | undefined => {
   if (typeof window === 'object') return undefined; // browser: respect the reader's node
-  if (!hiveChain) return undefined;
+  const s = chainSlotState();
+  if (!s.hiveChain) return undefined;
 
   const rotation = getEndpointRotation();
   if (rotation.length < 2) return undefined;
 
-  const current = hiveChain.api.endpointUrl;
+  const current = s.hiveChain.api.endpointUrl;
   // Someone else already moved us off the node this caller failed on.
   if (failedEndpoint && failedEndpoint !== current) return undefined;
 
@@ -243,8 +358,8 @@ export const advanceToNextRpcEndpoint = (failedEndpoint?: string): string | unde
   if (!next || next === current) return undefined;
 
   logger.warn('Hive node %s unreachable — failing over to %s', current, next);
-  hiveChain.api.endpointUrl = next;
-  lastFailoverAt = Date.now();
+  s.hiveChain.api.endpointUrl = next;
+  s.lastFailoverAt = Date.now();
   return next;
 };
 
@@ -268,32 +383,34 @@ export const advanceToNextRpcEndpoint = (failedEndpoint?: string): string | unde
  */
 export const restorePreferredRpcEndpoint = (): void => {
   if (typeof window === 'object') return;
-  if (!hiveChain) return;
-  if (!lastFailoverAt) return;
-  if (Date.now() - lastFailoverAt < PREFERRED_RETRY_AFTER_MS) return;
+  const s = chainSlotState();
+  if (!s.hiveChain) return;
+  if (!s.lastFailoverAt) return;
+  if (Date.now() - s.lastFailoverAt < PREFERRED_RETRY_AFTER_MS) return;
 
   const preferred = getEndpointRotation()[0];
-  if (!preferred || hiveChain.api.endpointUrl === preferred) {
-    lastFailoverAt = 0;
+  if (!preferred || s.hiveChain.api.endpointUrl === preferred) {
+    s.lastFailoverAt = 0;
     return;
   }
   logger.info('Cooldown elapsed — trying the preferred Hive node %s again', preferred);
-  hiveChain.api.endpointUrl = preferred;
-  lastFailoverAt = 0;
+  s.hiveChain.api.endpointUrl = preferred;
+  s.lastFailoverAt = 0;
 };
 
 /** The endpoint currently in use, for callers that need to report or compare it. */
-export const currentRpcEndpoint = (): string | undefined => hiveChain?.api.endpointUrl;
+export const currentRpcEndpoint = (): string | undefined => chainSlotState().hiveChain?.api.endpointUrl;
 
 export const setRpcEndpoint = (newEndpoint: string): void => {
   logger.info('Changing chain.api.endpointUrl with newEndpoint: %o', newEndpoint);
 
   // We should ensure the call flow is correct (init first -> modify next)
-  if (!hiveChain) {
+  const s = chainSlotState();
+  if (!s.hiveChain) {
     throw new Error('Wax Chain is not initialized yet. Call initChain() first.');
   }
 
-  hiveChain.api.endpointUrl = newEndpoint;
+  s.hiveChain.api.endpointUrl = newEndpoint;
 
   window.localStorage.setItem('node-endpoint', JSON.stringify(newEndpoint));
 };
@@ -302,11 +419,12 @@ export const setRestApiEndpoint = (newEndpoint: string): void => {
   logger.info('Changing chain.restApi.endpointUrl with newEndpoint: %o', newEndpoint);
 
   // We should ensure the call flow is correct (init first -> modify next)
-  if (!hiveChain) {
+  const s = chainSlotState();
+  if (!s.hiveChain) {
     throw new Error('Wax Chain is not initialized yet. Call initChain() first.');
   }
 
-  hiveChain.restApi.endpointUrl = newEndpoint;
+  s.hiveChain.restApi.endpointUrl = newEndpoint;
   window.localStorage.setItem('rest-node-endpoint', JSON.stringify(newEndpoint));
 };
 
@@ -314,18 +432,22 @@ export const setAiEndpoint = (newEndpoint: string): void => {
   logger.info('Changing chain.restApi["hivesense-api"].endpointUrl with newEndpoint: %o', newEndpoint);
 
   // We should ensure the call flow is correct (init first -> modify next)
-  if (!hiveChain) {
+  const s = chainSlotState();
+  if (!s.hiveChain) {
     throw new Error('Wax Chain is not initialized yet. Call initChain() first.');
   }
 
   // Always use the same endpoint as the main API for hivesense-api
-  hiveChain.restApi['hivesense-api'].endpointUrl = newEndpoint;
-  hiveChain.api['search-api'].find_text.endpointUrl = newEndpoint;
+  s.hiveChain.restApi['hivesense-api'].endpointUrl = newEndpoint;
+  s.hiveChain.api['search-api'].find_text.endpointUrl = newEndpoint;
 
   window.localStorage.setItem('ai-search-endpoint', JSON.stringify(newEndpoint));
 };
 
-// This is intentionally non-async method as we don't want any race condition for hiveChainPromise !== undefined check
+// This is intentionally non-async method as we don't want any race condition for
+// hiveChainPromise !== undefined check. The assignment to `s.hiveChainPromise`
+// below still happens synchronously, before any `await`, so that invariant now
+// holds across every module copy sharing the slot, not just within one.
 const setChainClient = (options: Partial<IWaxOptionsChain> = {}): Promise<HiveChain> => {
   const clientOptions = {
     ...getDefaultClientOptions(),
@@ -333,7 +455,16 @@ const setChainClient = (options: Partial<IWaxOptionsChain> = {}): Promise<HiveCh
   };
   logger.info('Creating instance of Wax Chain with options: %o', clientOptions);
 
-  hiveChainPromise = createHiveChain(clientOptions).then((hiveChainInitialized) => {
+  const s = chainSlotState();
+  // ★★★ THE GENERATION THIS ATTEMPT BELONGS TO (2026-09-06 review fix).
+  // `createHiveChain(...)` is a real network/wasm-build call, so this promise
+  // can still be in flight when `resetChain()` runs for a DIFFERENT reason
+  // (another caller hit a WASM error on the chain THIS call has not even
+  // produced yet). Without this guard, the in-flight `.then()` below would
+  // resolve after the reset and reassign `s.hiveChain`/`s.hiveChainPromise` to
+  // the now-superseded chain, silently undoing the reset for every copy.
+  const generationAtStart = s.generation;
+  const promise: Promise<HiveChain> = createHiveChain(clientOptions).then((hiveChainInitialized) => {
     const extended = hiveChainInitialized.extend<ExtendedNodeApi>().extendRest<ExtendedRestApi>({
       'hivesense-api': {
         posts: {
@@ -382,43 +513,67 @@ const setChainClient = (options: Partial<IWaxOptionsChain> = {}): Promise<HiveCh
       }
     });
 
-    hiveChain = extended;
+    // ★ THE GUARD: if `resetChain()` (or a newer `setChainClient()` call it
+    // provoked) ran while `createHiveChain()` above was still in flight, this
+    // attempt is stale — do not let it clobber whatever the reset/rebuild put
+    // in the slot. The caller who started THIS specific call still gets a
+    // perfectly usable chain back; it is just not adopted into the shared slot.
+    if (s.generation !== generationAtStart) {
+      logger.warn('Discarding a stale Wax Chain build superseded by a reset (generation moved on)');
+      return extended;
+    }
 
-    // Initialize asset constants from wax's chain.ASSETS
-    initializeAssetConstants(hiveChain.ASSETS);
+    s.hiveChain = extended;
+
+    // Initialize THIS (creating) copy's asset constants from wax's chain.ASSETS.
+    // An adopting copy — one that never runs this `.then()` because it found
+    // `hiveChainPromise` already in the slot — gets its own turn via
+    // `ensureAssetConstantsFor` in `initChain`/`getChain` below.
+    ensureAssetConstantsFor(extended);
 
     const aiEndpoint = getAIDefaultEndpoint();
 
     // Always use the same endpoint as the main API for hivesense-api
-    hiveChain.restApi['hivesense-api'].endpointUrl = aiEndpoint || clientOptions.restApiEndpoint;
+    extended.restApi['hivesense-api'].endpointUrl = aiEndpoint || clientOptions.restApiEndpoint;
     if (aiEndpoint) {
-      hiveChain.api['search-api'].find_text.endpointUrl = aiEndpoint;
+      extended.api['search-api'].find_text.endpointUrl = aiEndpoint;
     }
 
-    return hiveChain;
+    return extended;
   }).catch((error) => {
-    hiveChainPromise = undefined; // Clear cache so next call retries
-    hiveChain = undefined;
+    // Same guard on the failure path: a stale attempt failing after a reset
+    // must not clear out whatever the reset (or a newer attempt) already put
+    // in the slot.
+    if (s.generation === generationAtStart) {
+      s.hiveChainPromise = undefined; // Clear cache so next call retries
+      s.hiveChain = undefined;
+    }
     throw error;
   });
 
-  return hiveChainPromise;
+  s.hiveChainPromise = promise;
+  return promise;
 };
 
 export const initChain = (): Promise<HiveChain> => {
-  if (hiveChainPromise)
-    return hiveChainPromise;
+  const existing = chainSlotState().hiveChainPromise;
+  if (existing) return existing.then(ensureAssetConstantsFor);
 
   return setChainClient();
 }
 
 export const reuseHiveChain = (): HiveChain | undefined => {
-  return hiveChain;
+  const chain = chainSlotState().hiveChain;
+  // ★ SEE THIS FILE'S HEADER NOTE. A copy that only ever calls
+  // `reuseHiveChain()` still needs ITS OWN `asset-constants.ts` initialised
+  // before a caller does HP/asset maths off the result.
+  if (chain) ensureAssetConstantsFor(chain);
+  return chain;
 };
 
 export const getChain = (): Promise<HiveChain> => {
-  if (hiveChainPromise)
-    return hiveChainPromise;
+  const existing = chainSlotState().hiveChainPromise;
+  if (existing) return existing.then(ensureAssetConstantsFor);
 
   return initChain();
 };

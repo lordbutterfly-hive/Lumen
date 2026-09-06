@@ -4,6 +4,7 @@ import { getCommunitiesCached } from '@/blog/lib/cached-api';
 import { getTrendingTagsCached } from '@/blog/lib/trending-tags';
 import { warmHomeFeedCache } from '@/blog/lib/feed/feed-prefetch';
 import { resolveWorkerIndex, workerCountFromEnv, workerStaggerMs } from '@/blog/lib/feed/topic-warm-offset';
+import { allCacheStats } from '@/blog/lib/cache-registry';
 
 const logger = getLogger('app');
 
@@ -106,10 +107,37 @@ function runWarms(): void {
   const started = performance.now();
   const elapsedMs = (): number => Math.round(performance.now() - started);
 
-  const warm = (name: string, run: () => Promise<unknown>): Promise<void> =>
+  /**
+   * ★★ THE LOG LINE IS NOW EVIDENCE, NOT A CLAIM (2026-09-06, module-copies
+   * build map R4). Before R1, `cache warm: communities ready in 61ms` said only
+   * that the warm's OWN call resolved — it said nothing about whether any
+   * render would ever see what it wrote, and for 12 minutes measured live,
+   * none did (the warm filled the instrument copy; every render read a
+   * separate rsc copy stuck at size 0). Now that a named cache's store is
+   * shared (`server-ttl-cache.ts`), `registryName` is looked up in
+   * `cache-registry.ts` right after the warm resolves and its `size`/`copies`/
+   * `shared` are printed alongside — so the line states what is actually
+   * resident in the ONE store a render would read, rather than asserting it.
+   *
+   * `registryName` is the shared-store name (matches the cache's own `name` in
+   * `cached-api.ts`/`trending-tags.ts`/`feed-prefetch.ts`), which is not always
+   * the same string as `name` here — `name` is this warm TASK's label, kept as
+   * the historical log-line vocabulary ("home-feed" reads better in a log than
+   * "home-trending-prefetch").
+   */
+  const warm = (name: string, registryName: string, run: () => Promise<unknown>): Promise<void> =>
     run().then(
       () => {
-        logger.info('cache warm: %s ready in %dms', name, elapsedMs());
+        const stats = allCacheStats()[registryName];
+        logger.info(
+          'cache warm: %s ready in %dms (store %s: size=%d copies=%d shared=%s)',
+          name,
+          elapsedMs(),
+          registryName,
+          stats?.size ?? -1,
+          stats?.copies ?? 0,
+          String(stats?.shared ?? false)
+        );
       },
       (err) => {
         // Deliberately swallowed — see reason 3 above.
@@ -117,11 +145,13 @@ function runWarms(): void {
       }
     );
 
+  const warmedRegistryNames = ['communities', 'trending-tags', 'home-trending-prefetch'];
+
   // Reason 4 in the header: a synchronous throw here would be an uncaught
   // exception on the delayed (timer) path, and Node exits on those.
   try {
     void Promise.all([
-      warm('communities', () => getCommunitiesCached('rank', null, DEFAULT_OBSERVER)),
+      warm('communities', 'communities', () => getCommunitiesCached('rank', null, DEFAULT_OBSERVER)),
       /*
        * ★ THE RIGHT RAIL'S TOPIC LIST (2026-08-30). Global, identical for every
        * reader, and now PREFETCHED INTO THE HTML by app/layout.tsx — which means a
@@ -130,7 +160,7 @@ function runWarms(): void {
        * Warming it here means they never race it at all. Same argument as the
        * community list above, and the same swallowed failure.
        */
-      warm('trending-tags', () => getTrendingTagsCached()),
+      warm('trending-tags', 'trending-tags', () => getTrendingTagsCached()),
       /*
        * ★ THE HOME FEED ITSELF (2026-08-31). The same argument as trending-tags
        * directly above, on the expensive half: `prefetchHomeFeed` races a 700 ms
@@ -140,9 +170,75 @@ function runWarms(): void {
        * Signed-out readers only — the signed-in feed is per-viewer and there is no
        * way to know whose to warm, the same reasoning that excludes profiles.
        */
-      warm('home-feed', () => warmHomeFeedCache())
+      warm('home-feed', 'home-trending-prefetch', () => warmHomeFeedCache())
     ]);
+    scheduleSharedStoreCheck(warmedRegistryNames);
   } catch (err) {
     logger.warn('cache warm: could not start (%s); the first readers will pay these reads', String(err));
   }
+}
+
+/**
+ * ★★ BEST-EFFORT PROOF THAT THE RENDER COPY IS SEEING WHAT WAS WARMED
+ * (2026-09-06, module-copies build map R4).
+ *
+ * This is the closest a boot-time check can honestly get to "the render copy
+ * saw it": the instrument copy (this process) cannot reach across the rsc
+ * layer's own module instance to ask it directly — that would mean holding a
+ * reference to another webpack layer's copy of a module, exactly what Q6 of the
+ * build map says never to do. What it CAN do cheaply is read the SAME registry
+ * every layer registers into (`cache-registry.ts`) and see whether a second
+ * copy has registered yet.
+ *
+ * ★ WHY THIS IS A DELAYED CHECK, NOT AN IMMEDIATE ONE. Checked the instant the
+ * warm resolves, `copies` is essentially always 1: the rsc copy of
+ * `cached-api.ts`/`trending-tags.ts`/`feed-prefetch.ts` loads on the FIRST
+ * render, which has not happened yet at that point on a fresh worker. A
+ * `DELAY_MS` past boot gives real traffic (the deploy smoke test, the uptime
+ * monitor, a reader arriving in the first minute — see this file's own header
+ * on who that reader is) a chance to have triggered it.
+ *
+ * ★ AND WHY THE WARN IS HEDGED RATHER THAN ASSERTED. A worker with no visitors
+ * at all in that window (a quiet pre-launch box, or DELAY_MS landing before the
+ * one reader who does show up) will legitimately still read `copies: 1` with
+ * nothing wrong — see `RegisteredCacheStats.shared`'s own doc. So this logs a
+ * fact (has a second copy registered within DELAY_MS of boot) and says plainly
+ * that a `false` here is not proof of a bug, only a thing worth a human's
+ * `/api/debug/mem` look if it happens repeatedly.
+ */
+const SHARED_STORE_CHECK_DELAY_MS = 60_000;
+
+function scheduleSharedStoreCheck(registryNames: string[]): void {
+  const timer = setTimeout(() => {
+    for (const registryName of registryNames) {
+      const stats = allCacheStats()[registryName];
+      if (!stats) {
+        // Nothing registered at all yet under this name — the warm itself may
+        // have failed (already logged above) or no copy has loaded.
+        logger.warn(
+          'cache warm: %s has no registry entry %dms after boot — the warm may have failed, or no copy of its module has loaded yet',
+          registryName,
+          SHARED_STORE_CHECK_DELAY_MS
+        );
+        continue;
+      }
+      if (stats.shared) {
+        logger.info(
+          'cache warm: %s store is shared (copies=%d) %dms after boot — the render copy has seen the warmed entry',
+          registryName,
+          stats.copies,
+          SHARED_STORE_CHECK_DELAY_MS
+        );
+      } else {
+        logger.warn(
+          'cache warm: %s store still has copies=1 %dms after boot — either no render has hit this cache yet ' +
+            '(harmless on a quiet worker) or the two layers are not sharing it; check /api/debug/mem if this ' +
+            'persists under real traffic',
+          registryName,
+          SHARED_STORE_CHECK_DELAY_MS
+        );
+      }
+    }
+  }, SHARED_STORE_CHECK_DELAY_MS);
+  if (typeof timer.unref === 'function') timer.unref();
 }

@@ -714,7 +714,14 @@ function blockedKeySetCacheKey(sessionUser: User | undefined): string {
  * viewer, all with a 10s lifetime, and the busiest viewer count this app has
  * is nowhere near that within any 10s window.
  */
+// ★ NAMED (2026-09-06, review fix on the module-copies build map). Shares its
+// store across every webpack layer that imports this file (this build's own
+// R5 static scan found it reachable from instrumentation.ts via
+// warm-server-caches.ts -> feed-prefetch.ts -> block-filter.ts) and registers
+// with cache-registry.ts under the same name — see server-ttl-cache.ts's
+// header note.
 const viewerBlockedKeySetTtl = withTtlCache(computeViewerBlockedKeySet, blockedKeySetCacheKey, {
+  name: 'viewerBlockedKeySet',
   ttlMs: 10_000,
   max: 500
 });

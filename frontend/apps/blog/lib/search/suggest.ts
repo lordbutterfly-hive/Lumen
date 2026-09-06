@@ -27,10 +27,12 @@ const LITE_LOOKUP_LIMIT = 5;
  */
 // Key = the query as the loader reads it (trimmed, lowercased): `Photo` and
 // `photo` are one answer and must be one memo entry (review 2026-09-05).
+// ★ NAMED (2026-09-06, review fix) — see server-ttl-cache.ts's header note.
 export const getSearchSuggestionsCached = withTtlCache(
   loadSuggestions,
   (query: string) => normalizeSearchText(query).toLowerCase(),
   {
+    name: 'searchSuggestions',
     ttlMs: 60_000,
     max: 2000,
     shouldCache: (value) => Boolean(value),

@@ -63,6 +63,15 @@ export const getTrendingTagsCached = withTtlCache(
   (): Promise<ITrendingTag[]> => getTrendingTags(TRENDING_TAGS_LIMIT),
   () => 'trending-tags',
   {
+    // ★ NAMED (2026-09-06, module-copies build map R1). Shares its store between
+    // the rsc layer (this route, `app/layout.tsx`'s prefetch, `search/suggest.ts`)
+    // and the instrument layer (`warm-server-caches.ts`'s boot warm), and
+    // registers itself with `cache-registry.ts` under the same name — see
+    // `server-ttl-cache.ts`'s header note. Before this, the boot warm filled a
+    // copy of this cache that no render ever read: the first root-layout render
+    // after a restart still paid `tagfetch=145-203ms` even though `trending-tags
+    // ready` had already logged.
+    name: 'trending-tags',
     ttlMs: ONE_HOUR_MS,
     staleWhileRevalidateMs: ONE_DAY_MS,
     max: 1,

@@ -237,6 +237,15 @@ const trendingForPrefetch = withTtlCache(
   },
   () => 'home-trending-prefetch',
   {
+    // ★ NAMED (2026-09-06, module-copies build map R1). Shares its store between
+    // the rsc layer (`app/page.js`, this cache's only reader) and the instrument
+    // layer (`warm-server-caches.ts`'s boot warm via `warmHomeFeedCache`), and
+    // registers itself with `cache-registry.ts` under the same name — see
+    // `server-ttl-cache.ts`'s header note. Before this, `home-feed ready` logged
+    // at boot but the first home render after a restart still paid
+    // `trend=214ms`: the warm had filled the instrument copy, and the render
+    // read the rsc copy, which was still cold.
+    name: 'home-trending-prefetch',
     ttlMs: FORTY_FIVE_SECONDS_MS,
     staleWhileRevalidateMs: ONE_HOUR_MS,
     max: 1,

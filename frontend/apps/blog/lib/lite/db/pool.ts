@@ -9,25 +9,49 @@ import { liteConfig } from '../config';
  * it only errors when a query is actually attempted.
  *
  * Server-side only.
+ *
+ * ★★★ ONE POOL PER PROCESS, NOT PER WEBPACK LAYER (2026-09-06, module-copies
+ * build map R3). Next compiles this file once per layer — `rsc` (pages, app
+ * route handlers) and `instrument` (instrumentation.ts and everything it
+ * imports, which reaches this file through `warm-server-caches.ts` ->
+ * `feed-prefetch.ts` -> `engagement-repository.ts`'s `mergeLumenEngagement`
+ * during the home-feed boot warm) — so a module-level `let pool` used to mean
+ * two Pools, each capped at `liteConfig.dbPoolMax`, in the SAME process: proven
+ * live, two Pool instances at `Runtime.queryObjects(Pool.prototype)`, doubling
+ * the worst-case connection budget per worker from `dbPoolMax` to
+ * `2 x dbPoolMax`. `pg` is already loaded as a single external module
+ * (`server-external-packages.json`), so `Pool`'s class identity is already
+ * shared across both copies — only the INSTANCE needs to be.
  */
 
 const logger = getLogger('app');
 
-let pool: Pool | null = null;
+const POOL_SLOT = Symbol.for('lumen.lite.pgPool.v1');
+
+interface PoolSlot {
+  pool: Pool | null;
+}
+
+function poolSlot(): PoolSlot {
+  const carrier = globalThis as typeof globalThis & { [POOL_SLOT]?: PoolSlot };
+  carrier[POOL_SLOT] ??= { pool: null };
+  return carrier[POOL_SLOT];
+}
 
 export function getPool(): Pool {
-  if (pool) return pool;
+  const slot = poolSlot();
+  if (slot.pool) return slot.pool;
   if (!liteConfig.databaseUrl) {
     throw new Error('LITE_DATABASE_URL is not set — lite-account datastore is unconfigured');
   }
-  pool = new Pool({
+  slot.pool = new Pool({
     connectionString: liteConfig.databaseUrl,
     max: liteConfig.dbPoolMax,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000
   });
-  pool.on('error', (err) => logger.error(err, 'Lite DB pool error'));
-  return pool;
+  slot.pool.on('error', (err) => logger.error(err, 'Lite DB pool error'));
+  return slot.pool;
 }
 
 export async function query<T extends QueryResultRow = QueryResultRow>(

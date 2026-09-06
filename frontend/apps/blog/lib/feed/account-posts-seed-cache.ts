@@ -75,10 +75,16 @@ function store(): Map<string, SeedEntry> {
  * across those copies and describe a map neither of them wholly owns. Same slot
  * discipline, same reason.
  *
- * `registered` guards registration for the same arithmetic: `allCacheStats`
- * SUMS every registration under a name, which is right for `withTtlCache`
- * instances (genuinely separate Maps) and would DOUBLE-COUNT this one shared Map
- * if each copy registered. So it registers exactly once.
+ * `registered` guards registration to exactly once per process — NOT because
+ * a repeat registration would be dangerous today (corrected 2026-09-06:
+ * `cache-registry.ts`'s `registerCache` now keeps only the FIRST
+ * registration's `stats` fn under a name and counts every later one as a
+ * `copies` bump rather than summing its numbers in, so a second registration
+ * under one name is harmless for ANY cache, this one included). It stays
+ * anyway as a cheaper second line of defense — it skips even CALLING
+ * `registerCache` a second time — and keeps this file's own accounting
+ * self-contained rather than leaning on the registry's dedup to paper over a
+ * repeat call this file could avoid making in the first place.
  */
 interface SeedCounters {
   sweeps: number;
@@ -177,8 +183,9 @@ export function resetAccountPostsSeedCache(): void {
   c.evictions = 0;
 }
 
-// Registered once per process — see `SeedCounters.registered` for why a guard is
-// required here and not for the `withTtlCache` instances in `cached-api.ts`.
+// Registered once per process — see `SeedCounters.registered` above for why
+// this file still bothers to guard against a repeat `registerCache` call, even
+// though `cache-registry.ts`'s own dedup would now make one harmless.
 if (!counters().registered) {
   counters().registered = true;
   registerCache('accountPostsSeed', accountPostsSeedStats);

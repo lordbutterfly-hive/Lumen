@@ -17,7 +17,6 @@ import {
   type GetCommunityOptions
 } from '@transaction/lib/bridge-api';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
-import { registerCache } from '@/blog/lib/cache-registry';
 
 /**
  * ★★★ THE PER-WORKER BYTE BUDGET OF EVERYTHING IN THIS FILE: ~75 MB at the caps
@@ -85,6 +84,11 @@ import { registerCache } from '@/blog/lib/cache-registry';
  * that way — a 30-second-stale BALANCE is a much worse bug than a slow page.
  */
 const accountFullTtl = withTtlCache(getAccountFull, (username: string) => username, {
+  // ★ NAMED (2026-09-06, module-copies build map R1) — shares its store across
+  // the rsc and instrument webpack layers, and folds this cache's registration
+  // into `cache-registry.ts` under the same name; see server-ttl-cache.ts's
+  // header note.
+  name: 'accountFull',
   ttlMs: 30_000,
   /*
    * ★ 500 -> 100 (2026-09-05, box memory pass). THIS ONE IS NOT ABOUT BYTES.
@@ -255,7 +259,8 @@ export const getPostCached = cache(getPost);
 export const getCommunitiesCached = withTtlCache(
   getCommunities,
   (_sort: string, _query: string | null, observer?: string) => `${_sort}|${_query ?? ''}|${observer ?? ''}`,
-  { ttlMs: 300_000, max: 200, staleWhileRevalidateMs: 300_000 }
+  // ★ NAMED — see accountFullTtl's note above.
+  { name: 'communities', ttlMs: 300_000, max: 200, staleWhileRevalidateMs: 300_000 }
 );
 
 /**
@@ -289,6 +294,8 @@ const accountPostsFirstPageTtl = withTtlCache(
   (sort: string, account: string, observer: string) => getAccountPosts(sort, account, observer, '', ''),
   (sort: string, account: string, observer: string) => `${sort}|${account}|${observer}`,
   {
+    // ★ NAMED — see accountFullTtl's note above.
+    name: 'accountPostsFirstPage',
     ttlMs: 25_000,
     /*
      * ★★★ 500 -> 60: THE SINGLE BIGGEST MAP IN THE PROCESS (2026-09-05, box
@@ -376,7 +383,8 @@ export async function getAccountPostsCached(
 export const getDiscussionCached = withTtlCache(
   getDiscussion,
   (author: string, permlink: string, observer?: string) => `${author}|${permlink}|${observer ?? ''}`,
-  { ttlMs: 30_000, max: 100 }
+  // ★ NAMED — see accountFullTtl's note above.
+  { name: 'discussion', ttlMs: 30_000, max: 100 }
 );
 
 /**
@@ -417,7 +425,8 @@ export const getCommunityCached = withTtlCache(
   getCommunity,
   (name: string, observer?: string, options?: GetCommunityOptions) =>
     `${name}|${observer ?? ''}|${options?.correctSubscribers ?? true}`,
-  { ttlMs: 30_000, max: 100 }
+  // ★ NAMED — see accountFullTtl's note above.
+  { name: 'community', ttlMs: 30_000, max: 100 }
 );
 
 /**
@@ -475,7 +484,8 @@ export const getCommunityCached = withTtlCache(
 export const getFollowListCached = withTtlCache(
   getFollowList,
   (observer: string, follow_type: FollowListType) => `${observer}|${follow_type}`,
-  { ttlMs: 30_000, max: 100 }
+  // ★ NAMED — see accountFullTtl's note above.
+  { name: 'followList', ttlMs: 30_000, max: 100 }
 );
 
 /** Same key shape both `getFollowersCached` and `getFollowingCached` use. */
@@ -508,31 +518,34 @@ const followParamsKey = (params?: Partial<IGetFollowParams>): string =>
  * unchanged — the full param tuple still keys them, so pagination still cannot
  * collide.
  */
-export const getFollowersCached = withTtlCache(getFollowers, followParamsKey, { ttlMs: 30_000, max: 100 });
-export const getFollowingCached = withTtlCache(getFollowing, followParamsKey, { ttlMs: 30_000, max: 100 });
+// ★ NAMED — see accountFullTtl's note above.
+export const getFollowersCached = withTtlCache(getFollowers, followParamsKey, {
+  name: 'followers',
+  ttlMs: 30_000,
+  max: 100
+});
+export const getFollowingCached = withTtlCache(getFollowing, followParamsKey, {
+  name: 'following',
+  ttlMs: 30_000,
+  max: 100
+});
 
 /**
- * ★★★ EVERY CACHE ABOVE, REGISTERED FOR `/api/debug/mem` (2026-09-05, box memory
- * pass). One block rather than a line beside each cache, so that "is anything
- * unregistered?" is answerable by reading twelve lines instead of grepping the
- * file — the failure mode being an instrument that silently omits the one map
- * that is actually growing.
+ * ★★★ EVERY CACHE ABOVE IS REGISTERED FOR `/api/debug/mem`, VIA ITS OWN `name`
+ * (2026-09-06, module-copies build map R1 — previously a `registerCache(...)`
+ * block sat here, one line per cache; folded into `withTtlCache`'s named path in
+ * `server-ttl-cache.ts` so the registry name and the shared-store name cannot
+ * drift apart. "Is anything unregistered?" is now answered by "does it have a
+ * `name`?" in each cache's own definition above, rather than by checking this
+ * block against that list.
  *
- * ★ `accountFullTtl`, NOT `getAccountFullCached`: the export is wrapped in
- * React's `cache()`, which returns a fresh memoizing function that does not
- * carry `.stats` (the same reason that export is cast on its way through
- * `cache()` — see its own note). The TTL instance is the thing holding bytes, so
- * the TTL instance is the thing measured.
+ * ★ `accountFullTtl`, NOT `getAccountFullCached`, IS THE ONE NAMED `accountFull`:
+ * the export is wrapped in React's `cache()`, which returns a fresh memoizing
+ * function that does not carry `.stats` (the same reason that export is cast on
+ * its way through `cache()` — see its own note). The TTL instance is the thing
+ * holding bytes and the thing named, so the TTL instance is the thing measured.
  *
  * Registration happens at module load, so a worker that has served no profile or
  * post page reports nothing at all — see `allCacheStats`'s note on why an empty
  * result is a true answer rather than a broken instrument.
  */
-registerCache('accountFull', accountFullTtl.stats);
-registerCache('accountPostsFirstPage', accountPostsFirstPageTtl.stats);
-registerCache('communities', getCommunitiesCached.stats);
-registerCache('community', getCommunityCached.stats);
-registerCache('discussion', getDiscussionCached.stats);
-registerCache('followList', getFollowListCached.stats);
-registerCache('followers', getFollowersCached.stats);
-registerCache('following', getFollowingCached.stats);

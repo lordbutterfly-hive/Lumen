@@ -47,7 +47,9 @@ const memoKey = (query: string): string => normalizeSearchText(query).toLowerCas
  * TTL; a degraded one for `PEOPLE_PARTIAL_TTL_MS` (see `people-merge.ts` for
  * why a partial answer is memoised at all). Rejections are never stored.
  */
+// ★ NAMED (2026-09-06, review fix) — see server-ttl-cache.ts's header note.
 const peopleByPrefixMemo = withTtlCache(loadPeopleByPrefix, memoKey, {
+  name: 'peopleByPrefix',
   ttlMs: PEOPLE_COMPLETE_TTL_MS,
   max: 500,
   shouldCache: (value) => Boolean(value),
@@ -55,7 +57,9 @@ const peopleByPrefixMemo = withTtlCache(loadPeopleByPrefix, memoKey, {
 });
 
 /** Hivesense is slow (1.8 to 2.7s measured) and its answer for a topic is stable for far longer than a minute. */
+// ★ NAMED (2026-09-06, review fix) — see server-ttl-cache.ts's header note.
 const peopleByTopicMemo = withTtlCache(loadPeopleByTopic, memoKey, {
+  name: 'peopleByTopic',
   ttlMs: TOPIC_COMPLETE_TTL_MS,
   max: 500,
   shouldCache: (value) => Boolean(value),
