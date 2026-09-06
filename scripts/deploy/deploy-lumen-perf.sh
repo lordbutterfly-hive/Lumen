@@ -66,10 +66,11 @@ echo "==> 4/5 install cluster.js (worker slots) + restart"
 # parses, then restart. The old one stays as cluster.js.bak-2026-09-05.
 $SSH "$HOST" 'if [ -f /opt/lumen/cluster.js.new ]; then cp /opt/lumen/cluster.js.new /tmp/cluster-check.js && node --check /tmp/cluster-check.js && cp /opt/lumen/cluster.js.new /opt/lumen/cluster.js && echo "cluster.js installed"; rm -f /tmp/cluster-check.js; fi'
 $SSH "$HOST" systemctl restart lumen
-# ★ 2026-09-05: lumen-publisher.service has Requires=lumen.service, so every stop of
-# lumen tears it down and a restart does not reliably bring it back (it stayed dead
-# from Aug 30 to Sep 5 and three lite posts never reached Hive). Start it explicitly
-# after lumen is up, and assert it below; the watchdog's alerts never leave the box.
+# ★ 2026-09-05: lumen-publisher.service is PartOf=lumen.service and lumen carries a
+# Wants=lumen-publisher.service drop-in (commit 7051e14), so a restart of lumen now
+# brings the publisher up in the same second (before that it stayed dead from Aug 30
+# to Sep 5 and three lite posts never reached Hive). The explicit start below is a
+# harmless belt-and-braces no-op; the assert further down is the real check.
 $SSH "$HOST" 'systemctl start lumen-publisher 2>/dev/null || systemctl restart lumen-publisher'
 # ★ Snappiness phase 2 (2026-09-02): the proxy holds anonymous HTML in memory
 # and that HTML names this build's chunk files by hash. After a deploy those
