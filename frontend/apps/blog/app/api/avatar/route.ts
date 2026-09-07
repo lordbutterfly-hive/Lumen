@@ -22,7 +22,14 @@ import { liteAvatar } from '@/blog/lib/lite/render/lite-identity';
 // budget fix can be unit-tested with a mocked `fetch` — see that module's own doc
 // comment for why (a Route Handler file may only export the HTTP-verb functions
 // Next recognises). Behaviour here is unchanged: same call, same signature.
-import { fetchAsWebp } from '@/blog/lib/fetch-avatar-webp';
+// ★ TWIN HAZARD, SAME FIX (2026-09-07). The lite-avatar branch below made its own
+// two raw `fetch()` calls with no `AbortSignal`, identical in shape to the probe/webp/
+// fallback hops `fetchAsWebp` already had this exact bug fixed for the same day — same
+// unbounded-hang risk, same "a failure here 500s instead of reaching `initialAvatar()`"
+// risk. Reusing this module's own constants/helpers rather than inventing a second
+// budget: `hopSignal`+`TOTAL_BUDGET_MS` bound each hop, `budgetExhausted()` gives the
+// `.catch()` below the same not-ok shape `fetchAsWebp` already returns on failure.
+import { fetchAsWebp, hopSignal, budgetExhausted, TOTAL_BUDGET_MS } from '@/blog/lib/fetch-avatar-webp';
 
 /**
  * Proxy endpoint for user avatars.
@@ -122,19 +129,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           // below (TS re-widens a property to `string | null` across a closure), so
           // capture the checked value as a `string` const the closures can use.
           const imageUrl = lite.imageUrl;
+          // Same per-hop timeout + shared total budget as `fetchAsWebp` above, and for
+          // the identical reason: neither fetch below carried an `AbortSignal`.
+          const deadline = Date.now() + TOTAL_BUDGET_MS;
           const picture = await withRetry(
-            () => fetch(proxifyImageSrc(imageUrl, boxWidth, boxHeight), { headers: { 'User-Agent': 'Mozilla/5.0' } }),
-            { label: `avatar-resized(${username})` }
-          );
+            () => fetch(proxifyImageSrc(imageUrl, boxWidth, boxHeight), { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),
+            { label: `avatar-resized(${username})`, budgetMs: Math.max(0, deadline - Date.now()) }
+          ).catch(() => budgetExhausted());
           // WebP isn't guaranteed for every stored source — fall back to the proxy's
           // own default (source) format rather than turning that into a broken avatar.
           const resolved =
             picture.ok && picture.body
               ? picture
-              : await withRetry(
-                  () => fetch(proxifyImageSrc(imageUrl, boxWidth, boxHeight, 'match'), { headers: { 'User-Agent': 'Mozilla/5.0' } }),
-                  { label: `avatar-resized-fallback(${username})` }
-                );
+              : Date.now() >= deadline
+                ? budgetExhausted()
+                : await withRetry(
+                    () => fetch(proxifyImageSrc(imageUrl, boxWidth, boxHeight, 'match'), { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),
+                    { label: `avatar-resized-fallback(${username})`, budgetMs: Math.max(0, deadline - Date.now()) }
+                  ).catch(() => budgetExhausted());
           if (resolved.ok && resolved.body) {
             return new NextResponse(resolved.body, {
               status: 200,

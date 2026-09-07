@@ -33,7 +33,8 @@
  * from a mock or from `AbortSignal.timeout`'s internals would surface there, not
  * here).
  */
-import { fetchAsWebp, hopSignal, HOP_TIMEOUT_MS, TOTAL_BUDGET_MS } from '../fetch-avatar-webp';
+import { fetchAsWebp, hopSignal, budgetExhausted, HOP_TIMEOUT_MS, TOTAL_BUDGET_MS } from '../fetch-avatar-webp';
+import { withRetry } from '@transaction/lib/retry';
 
 let failures = 0;
 let checks = 0;
@@ -296,6 +297,113 @@ async function main(): Promise<void> {
     }
     check('a non-redirecting probe (e.g. a 404) is returned untouched', response?.status === 404);
     check('no further hop is attempted when there is nothing to resolve', hopsAfterProbe === 0);
+  }
+
+  // ── 8. TWIN 1 — app/api/avatar/route.ts's lite-avatar branch (the resized-image
+  //      fetch and its 'match' fallback, ~line 134-149). Identical hazard to the probe
+  //      hop above — two raw fetches with no AbortSignal — fixed 2026-09-07 the same
+  //      day by reusing this module's own hopSignal/budgetExhausted/TOTAL_BUDGET_MS,
+  //      not a new abstraction. Reproduced verbatim here (a Route Handler file can
+  //      only export GET, so the branch itself can't be imported): the resize hop
+  //      hangs, so it must be abandoned at the budget, and the 'match' fallback must
+  //      never even be attempted once that budget is already spent. ───────────────
+  {
+    let matchHopCalls = 0;
+    const restore = installFetch((url, init) => {
+      if (url.includes('match')) matchHopCalls += 1;
+      return hangsUntilAbortedWithSignal(init?.signal);
+    });
+    let threw: unknown = undefined;
+    let resolved: Response | undefined;
+    let elapsedMs = -1;
+    try {
+      const t = await timed(async () => {
+        const deadline = Date.now() + TOTAL_BUDGET_MS;
+        const picture = await withRetry(
+          () => fetch('https://images.hive.blog/p/deadbeef?width=128&height=128', { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),
+          { label: 'avatar-resized(twin1)', budgetMs: Math.max(0, deadline - Date.now()) }
+        ).catch(() => budgetExhausted());
+        return picture.ok && picture.body
+          ? picture
+          : Date.now() >= deadline
+            ? budgetExhausted()
+            : await withRetry(
+                () =>
+                  fetch('https://images.hive.blog/p/deadbeef?width=128&height=128&match=1', {
+                    headers: { 'User-Agent': 'Mozilla/5.0' },
+                    signal: hopSignal(deadline)
+                  }),
+                { label: 'avatar-resized-fallback(twin1)', budgetMs: Math.max(0, deadline - Date.now()) }
+              ).catch(() => budgetExhausted());
+      });
+      resolved = t.result;
+      elapsedMs = t.elapsedMs;
+    } catch (error) {
+      threw = error;
+    } finally {
+      restore();
+    }
+    check('twin1 (route.ts lite-avatar resize fetch): a permanently-hanging hop does not throw', threw === undefined, String(threw));
+    check(
+      'twin1: abandoned at the budget, not doubled across the resize + match-fallback hops',
+      elapsedMs >= TOTAL_BUDGET_MS - 200 && elapsedMs < 5000,
+      `elapsedMs=${elapsedMs} TOTAL_BUDGET_MS=${TOTAL_BUDGET_MS}`
+    );
+    check('twin1: a spent budget yields a not-ok Response — falls through to initialAvatar(), never a 500', resolved?.ok === false);
+    check(
+      'twin1: the match-fallback hop was never attempted once the resize hop had already spent the budget',
+      matchHopCalls === 0,
+      `matchHopCalls=${matchHopCalls}`
+    );
+  }
+
+  // ── 9. TWIN 2 — app/api/avatar/default/route.ts (the webp fetch and its raw-CID
+  //      fallback, ~line 77-94). Identical hazard, identical fix, reproduced here for
+  //      the same reason as twin1 above. ───────────────────────────────────────────
+  {
+    let rawFallbackCalls = 0;
+    const restore = installFetch((url, init) => {
+      if (url.includes('raw')) rawFallbackCalls += 1;
+      return hangsUntilAbortedWithSignal(init?.signal);
+    });
+    let threw: unknown = undefined;
+    let resolved: Response | undefined;
+    let elapsedMs = -1;
+    try {
+      const t = await timed(async () => {
+        const deadline = Date.now() + TOTAL_BUDGET_MS;
+        const response = await withRetry(
+          () => fetch('https://images.hive.blog/p/default?format=webp', { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),
+          { label: 'avatar-default(twin2)', budgetMs: Math.max(0, deadline - Date.now()) }
+        ).catch(() => budgetExhausted());
+        return response.ok && response.body
+          ? response
+          : Date.now() >= deadline
+            ? budgetExhausted()
+            : await withRetry(
+                () => fetch('https://images.hive.blog/raw-default', { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),
+                { label: 'avatar-default-fallback(twin2)', budgetMs: Math.max(0, deadline - Date.now()) }
+              ).catch(() => budgetExhausted());
+      });
+      resolved = t.result;
+      elapsedMs = t.elapsedMs;
+    } catch (error) {
+      threw = error;
+    } finally {
+      restore();
+    }
+    check('twin2 (default/route.ts webp fetch): a permanently-hanging hop does not throw', threw === undefined, String(threw));
+    check(
+      'twin2: abandoned at the budget, not doubled across the webp + raw-fallback hops',
+      elapsedMs >= TOTAL_BUDGET_MS - 200 && elapsedMs < 5000,
+      `elapsedMs=${elapsedMs} TOTAL_BUDGET_MS=${TOTAL_BUDGET_MS}`
+    );
+    check('twin2: a spent budget yields a not-ok Response — the existing !resolved.ok branch, never an unguarded 500', resolved?.ok === false);
+    check(
+      'twin2: the raw-CID fallback hop was never attempted once the webp hop had already spent the budget',
+      rawFallbackCalls === 0,
+      `rawFallbackCalls=${rawFallbackCalls}`
+    );
   }
 
   // Give any stray microtask from a mock a turn before checking for leaks.

@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { configuredImagesEndpoint } from '@hive/ui/config/public-vars';
 import { proxifyImageSrc } from '@hive/ui/lib/proxify-images';
 import { withRetry } from '@transaction/lib/retry';
+// ★ TWIN HAZARD, SAME FIX (2026-09-07). Same two-raw-fetch, no-`AbortSignal` shape as
+// the sibling `../route.ts` had fixed the same day (see `fetch-avatar-webp.ts`'s doc
+// comment) — reusing its constants/helpers rather than a second budget.
+import { hopSignal, budgetExhausted, TOTAL_BUDGET_MS } from '@/blog/lib/fetch-avatar-webp';
 
 /**
  * Proxy endpoint for the default avatar image.
@@ -68,10 +72,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Fetch the image from the image hoster and stream it to the client
     // ★ A6 retry rollout (2026-08-18): idempotent read of one immutable, content-
     // addressed image — the safest possible retry target in this codebase.
+    // ★ Per-hop timeout + shared total budget (2026-09-07) — same reason and same
+    // constants as `../route.ts`: neither fetch here carried an `AbortSignal`.
+    const deadline = Date.now() + TOTAL_BUDGET_MS;
     const response = await withRetry(
-      () => fetch(webpUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
-      { label: 'avatar-default' }
-    );
+      () => fetch(webpUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),
+      { label: 'avatar-default', budgetMs: Math.max(0, deadline - Date.now()) }
+    ).catch(() => budgetExhausted());
 
     // WebP isn't guaranteed forever from the proxy — fall back to the original raw
     // fetch (today's pre-fix behaviour) rather than turning a proxy hiccup into a
@@ -79,7 +86,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const resolved =
       response.ok && response.body
         ? response
-        : await withRetry(() => fetch(defaultUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }), { label: 'avatar-default-fallback' });
+        : Date.now() >= deadline
+          ? budgetExhausted()
+          : await withRetry(() => fetch(defaultUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }), {
+              label: 'avatar-default-fallback',
+              budgetMs: Math.max(0, deadline - Date.now())
+            }).catch(() => budgetExhausted());
 
     if (!resolved.ok || !resolved.body) {
       return NextResponse.json({ error: 'Failed to fetch default avatar' }, { status: resolved.status });
