@@ -95,23 +95,6 @@ const COPY = {
    * take - for them it is a real studio, not an interstitial.
    */
   launchCta: 'Open the launch wizard →',
-  howTitle: 'How it works',
-  how1: 'Hold a creator’s token.',
-  how2: 'Spend it on a question or session.',
-  /**
-   * ★ D-4, the wording pass the list asked for. The old line opened with "The token
-   * can appreciate", which is a forward-looking statement about price and the first
-   * thing a regulator, or a disappointed holder, would quote back. It also called the
-   * reserve figure a "floor", a word that promises a level the holder cannot actually
-   * sell at, then took the promise back in the same sentence.
-   *
-   * What is left describes only what the contract does. No projection, no floor, and
-   * the illiquidity said plainly rather than as an aside after a dash.
-   */
-  // 2026-08-30 (B3, copy set A): "redeemable against the reserve" read as an
-  // always-open door; Redeem exists only once a market winds down, pays a slice
-  // of what is left less a fee, and is claimed by the holder.
-  how3: 'If a market winds down, a token can be redeemed for a pro-rata slice of what the creator’s reserve holds then, less an early-exit fee. That is not a price you can sell at on demand, and it is not an investment return.'
 };
 
 // The ordering union and the rule about which controls may be OFFERED both live
@@ -299,17 +282,6 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
         >
           {COPY.launchCta}
         </Link>
-      </div>
-      <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
-        <div className="mb-3.5 text-[15px] leading-[24px] font-medium text-ink-2 font-ui">{COPY.howTitle}</div>
-        <div className="flex flex-col gap-3.5">
-          {[COPY.how1, COPY.how2, COPY.how3].map((line, i) => (
-            <div key={i} className="flex gap-3">
-              <span className="text-ink-brand-6 font-num">{i + 1}</span>
-              <span className="text-caption text-ink-7 font-ui">{line}</span>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );
