@@ -121,6 +121,31 @@ function accrueFee(creator: string, feeCreatorBaseUnits: number, feePlatformBase
   if (feePlatformBaseUnits > 0) addTreasury(feePlatformBaseUnits);
 }
 
+/**
+ * exittax.go accrueExitTax, at mock scale. ★ ADDED 2026-09-07 — the mock used
+ * to send 100% of the exit tax to the treasury, citing "RULING J/K: the exit
+ * tax goes to the treasury, never the holder pot". The RULING J half of that
+ * is still right (it never goes to holders) but the DESTINATION changed on
+ * 2026-07-28: the tax rides the trade fee's rail and is split, floor(tax/2) to
+ * the creator's pull-claimable pot and the remainder to the treasury, with no
+ * self-sell exception. So a creator in demo saw a fee pot that was smaller
+ * than the same activity would produce on chain, and any demo-driven check of
+ * the Studio earnings figure was measuring the wrong rule.
+ *
+ * Floor to the creator, remainder to the platform — the same direction as the
+ * trade-fee split, so the two halves always re-sum to `tax` exactly.
+ */
+function accrueExitTax(creator: string, taxBaseUnits: number): void {
+  if (taxBaseUnits <= 0) return;
+  const creatorHalf = Math.floor(taxBaseUnits / 2);
+  const platformHalf = taxBaseUnits - creatorHalf;
+  if (creatorHalf > 0) {
+    const cur = getStorageItem<number>(feeBalKey(creator)) ?? 0;
+    setStorageItem(feeBalKey(creator), cur + creatorHalf, StorageTTL.SESSION);
+  }
+  addTreasury(platformHalf);
+}
+
 function addTreasury(amountBaseUnits: number): void {
   if (amountBaseUnits <= 0) return;
   const cur = getStorageItem<number>(treasuryKey()) ?? 0;
@@ -777,7 +802,7 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     const nextEntry: WalletEntry = { tokens: prior.tokens - input.tokens, heldBlocks: prior.heldBlocks };
     writeWalletEntry(input.creator, input.seller, nextEntry);
 
-    addTreasury(tax); // sell.go RULING J/K: the exit tax goes to the treasury, never the holder pot
+    accrueExitTax(input.creator, tax); // sell.go -> exittax.go accrueExitTax: 50/50 creator/platform, never the holder pot
     accrueFee(input.creator, feeCreatorBaseUnits, feePlatformBaseUnits);
 
     const { netBaseUnits, taxBps: nextTaxBps } =

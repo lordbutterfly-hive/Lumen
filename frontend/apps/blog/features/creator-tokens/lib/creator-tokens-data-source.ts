@@ -80,7 +80,7 @@ export interface CreatorTokensDataSource {
    * that only want the legacy face price are unaffected.
    */
   readQuote(creator: string, offeringId?: number): Promise<Quote>;
-  /** tradefee.go kFeeBal(account) — the account's pull-claimable trade-fee balance (the 5% creator half of every trade fee, RULING F8), in HBD. Rejects on a genuine read failure — same reasoning as readHolderPosition, there is no honest 0-balance-shaped optimistic value. */
+  /** tradefee.go kFeeBal(account) — the account's pull-claimable creator pot, in HBD: the creator half of every trade fee (tradefee.go) PLUS the creator half of every early-exit fee (exittax.go accrueExitTax) — see reads.ts kFeeBal for why both legs must be named wherever this is shown. RULING F8: pull, never pushed. Rejects on a genuine read failure — same reasoning as readHolderPosition, there is no honest 0-balance-shaped optimistic value. */
   readFeeBalance(account: string): Promise<number>;
   /** buy.go QuoteBuy — the read-only preview of Buy, sharing buyCompute with the real trade so the two can never disagree (RULING F: this quote is mandatory UI before signing). Rejects on a genuine read failure OR the same RequireInflowOpen refusal a real Buy would hit (e.g. market frozen/paused/retired, or cap exceeded) — the caller must disable the buy action on rejection, not merely surface an error toast. */
   quoteBuy(creator: string, tokens: number): Promise<BuyQuote>;

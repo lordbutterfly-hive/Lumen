@@ -271,10 +271,31 @@ console.log('\n── 4. NO SENTENCE POINTS AT A FIGURE THAT IS NOT THERE.\n');
   // whose early-exit-fee disclosure the next check is actually about.
   const windDownSites = studio.code.match(/redeem a (pro-rata )?slice of the reserve/g) ?? [];
   check('the wind-down scan found its sites', windDownSites.length === 2, `${windDownSites.length} sites`);
+  // ★ RE-POINTED 2026-09-07. This counted every occurrence of the phrase
+  // "early-exit fee" in the whole studio file and demanded EXACTLY 3, so what
+  // it actually measured was "the file says it three times" — a proxy for the
+  // guarantee, not the guarantee. It broke the moment honest copy elsewhere in
+  // the same file started naming the same fee for a different and correct
+  // reason: the trade-fee Stat now discloses that the creator's claimable pot
+  // holds the creator half of every early-exit fee as well as of every trade
+  // fee (exittax.go accrueExitTax — the pot has always taken both, and the
+  // label used to say only "Your 5% of the token's trades"). An exact count
+  // over a whole file turns any correct addition into a failure, and the
+  // obvious "fix" — relaxing it to >= 3 — would let one of the wind-down
+  // sentences silently drop its disclosure while the total stayed up.
+  //
+  // So it now asserts the thing it means, per SITE: every sentence that tells
+  // a holder they can redeem from the reserve must name the early-exit fee
+  // INSIDE that same sentence. Unrelated honest copy cannot satisfy it, and
+  // cannot break it either.
+  const redeemSentences = [...studio.code.matchAll(/redeem (?:a (?:pro-rata )?slice|their share) of the reserve[^.;]*/g)].map(
+    (m) => m[0]
+  );
+  check('the redeem-sentence scan found all three sites', redeemSentences.length === 3, `${redeemSentences.length} sites`);
   check(
     '★ …and every one of them names the early-exit fee',
-    count(studio.code, 'early-exit fee') === 3,
-    `${count(studio.code, 'early-exit fee')} of 3`
+    redeemSentences.length === 3 && redeemSentences.every((line) => line.includes('early-exit fee')),
+    redeemSentences.map((line) => (line.includes('early-exit fee') ? 'ok' : `MISSING -> "${line.slice(0, 70)}"`)).join(' | ')
   );
 }
 

@@ -1077,7 +1077,19 @@ const CreatorStudio: FC = () => {
                 sub={
                   tradeFeeClaimableUsd === null
                     ? 'Could not be read just now'
-                    : 'Your 5% of the token’s trades'
+                    // ★ CORRECTED 2026-09-07. This read is kFeeBal("fee|<account>"),
+                    // and on chain that pot takes TWO credits, not one:
+                    // tradefee.go accrueTradeFee puts the creator's half of every
+                    // trade fee in it, AND exittax.go accrueExitTax puts the
+                    // creator's half of every EARLY-EXIT fee in the same key
+                    // (floor(tax/2), one rule for every seller since 2026-07-28).
+                    // The label said "Your 5% of the token's trades", so a creator
+                    // reconciling this figure against their trade volume got a
+                    // number that did not add up — and, worse, was told they earn
+                    // less than they do. Proven by core's own
+                    // TestFeeAllocation_SellTakesFeeOutOfThePayout_TaxGoesToTreasury,
+                    // which asserts this pot rises by feeCreator + taxCreator.
+                    : 'Your 5% of trades, plus half of every early-exit fee'
                 }
               />
             </Card>
@@ -1639,7 +1651,10 @@ const CreatorStudio: FC = () => {
                   sub={
                     tradeFeeClaimableUsd === null
                       ? 'Could not be read just now. This is not a zero balance'
-                      : 'Your 5% of your token’s trades'
+                      // ★ Same correction as the overview Stat (2026-09-07): the
+                      // pot is the creator's half of the trade fee AND the
+                      // creator's half of every early-exit fee.
+                      : 'Your 5% of trades, plus half of every early-exit fee'
                   }
                 />
                 {/* ★ The button used to read "Claimed" and sit disabled whenever

@@ -159,10 +159,25 @@ export function kSeq(c: string): string {
 export function kRetiredAt(c: string): string {
   return mk(c, 'rat');
 }
-// keys.go kFeeBal ("fee|<account>") — PULL-claimable trade-fee balance, the
-// creator's 5% half of every trade fee (RULING F8: the fee is NEVER pushed).
-// Keyed by ACCOUNT, not by market: one pot per beneficiary across all their
-// markets. Neither reserve nor treasury — its own resting bucket.
+// keys.go kFeeBal ("fee|<account>") — the PULL-claimable creator pot (RULING
+// F8: nothing here is ever pushed). Keyed by ACCOUNT, not by market: one pot
+// per beneficiary across all their markets. Neither reserve nor treasury — its
+// own resting bucket.
+//
+// ★ IT HOLDS TWO THINGS, NOT ONE (corrected 2026-09-07). This doc used to read
+// "the creator's 5% half of every trade fee", and the Studio label was written
+// from it, so both understated the pot:
+//
+//	tradefee.go accrueTradeFee  -> floor(fee/2), the creator's half of the
+//	                               10% trade fee on every curve buy and sell
+//	exittax.go  accrueExitTax   -> floor(tax/2), the creator's half of every
+//	                               EARLY-EXIT fee, on Sell AND on the
+//	                               wind-down Refund rails (one rule for every
+//	                               seller since the 2026-07-28 ruling deleted
+//	                               the self-sell guard)
+//
+// Anything describing this number to a creator must say both, or the figure
+// cannot be reconciled against trade volume and reads as too small.
 export function kFeeBal(account: string): string {
   return `fee|${toDid(account)}`;
 }

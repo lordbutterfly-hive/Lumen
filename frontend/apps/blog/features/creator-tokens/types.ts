@@ -704,7 +704,7 @@ export interface RetireInput {
   creator: string;
 }
 
-/** tradefee.go ClaimTradeFees — pulls the caller's ENTIRE accrued trade-fee balance (kFeeBal(account), the 5% creator half of every trade fee). No payload fields on the wire — the caller IS the beneficiary. */
+/** tradefee.go ClaimTradeFees — pulls the caller's ENTIRE accrued balance from kFeeBal(account): the creator half of every trade fee AND the creator half of every early-exit fee (see reads.ts kFeeBal). No payload fields on the wire — the caller IS the beneficiary. */
 export interface ClaimTradeFeesInput {
   account: string;
 }
