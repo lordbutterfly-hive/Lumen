@@ -91,14 +91,46 @@ $SSH "$HOST" systemctl restart lumen
 # to Sep 5 and three lite posts never reached Hive). The explicit start below is a
 # harmless belt-and-braces no-op; the assert further down is the real check.
 $SSH "$HOST" 'systemctl start lumen-publisher 2>/dev/null || systemctl restart lumen-publisher'
-# ★ Snappiness phase 2 (2026-09-02): the proxy holds anonymous HTML in memory
-# and that HTML names this build's chunk files by hash. After a deploy those
-# files are gone, so a stale cached page would ask for chunks that no longer
-# exist. Restarting the cache container empties it (its store is in memory);
-# certificates live on the /data volume and survive. About two seconds of
-# refused connections at the edge, once per deploy.
-echo "==> 5/5 purge the edge cache (restart lumen-caddy)"
+# ★★★ THE EDGE CACHE THAT MATTERS IS NOW CLOUDFLARE, NOT THE PROXY (2026-09-08).
+# Until today the proxy (Caddy + the Souin module) held anonymous HTML in memory
+# and restarting the container was the purge. The `cache` directive was removed
+# from /opt/lumen/caddy/Caddyfile because it buffered every response and destroyed
+# the origin's streaming (commit 4464cba; TTFB 654->198 ms). So this restart no
+# longer purges anything -- it is kept only because it is how a Caddyfile change
+# actually lands (Docker bind-mounts that file BY INODE, so an edit plus
+# `caddy reload` silently keeps serving the old config).
+#
+# CLOUDFLARE is what holds anonymous HTML now, at s-maxage=300 with
+# stale-while-revalidate=3600, and it was NEVER being purged on deploy. A stale
+# page names this build's chunk files by content hash; after a deploy those files
+# are gone, so a cached page asks for chunks that no longer exist. Previous builds'
+# static files are kept for 14 days, which softened it, but the honest fix is to
+# purge the CDN. purge_everything, not by-prefix: purge-by-prefix is an Enterprise
+# feature and a hand-written URL list would always miss something. Static assets
+# are content-hashed, so re-fetching them once per deploy is cheap.
+echo "==> 5/6 restart the proxy (lands any Caddyfile change; no longer a cache purge)"
 $SSH "$HOST" docker restart lumen-caddy >/dev/null
+
+echo "==> 6/6 purge the Cloudflare HTML cache"
+# Token: Zone / Cache Purge / Purge, scoped to this zone only. Kept out of the repo.
+# A missing token must NOT abort a deploy that has already shipped the files, but it
+# MUST show up as a red check below, because an unpurged CDN serves the old page for
+# up to s-maxage + stale-while-revalidate.
+CF_TOKEN_FILE=/home/clauderfly/.lumen-secrets/cloudflare-purge.token
+CF_ZONE=ad3489db77f0577ab98b1defc94fd925
+if [ -r "$CF_TOKEN_FILE" ]; then
+  CF_PURGE_RAW="$(curl -sS --max-time 30 -X POST \
+    "https://api.cloudflare.com/client/v4/zones/$CF_ZONE/purge_cache" \
+    -H "Authorization: Bearer $(cat "$CF_TOKEN_FILE")" \
+    -H 'Content-Type: application/json' \
+    --data '{"purge_everything":true}' 2>&1)"
+else
+  CF_PURGE_RAW='{"success":false,"errors":["no token at '"$CF_TOKEN_FILE"'"]}'
+fi
+case "$CF_PURGE_RAW" in
+  *'"success":true'*) CF_PURGED=yes ;;
+  *)                  CF_PURGED=no  ;;
+esac
 set +e
 
 echo "==> waiting for it to answer"
@@ -133,6 +165,8 @@ grep -q 'vsc-testnet' <<<"$ENVJS" && chk "__ENV.js is NOT serving testnet values
 HTML="$(curl -s --max-time 20 -H "$QA_HDR" "https://lumensocial.net/?deploy=$LOCAL_ID")"
 grep -q 'data-testid="right-rail-topics-list"' <<<"$HTML" && chk "topics chips in the LIVE SSR HTML" PASS \
                                                           || chk "topics chips in the LIVE SSR HTML" FAIL
+[ "$CF_PURGED" = yes ] && chk "Cloudflare cache purged" PASS \
+                       || chk "Cloudflare cache purged ($(printf '%s' "$CF_PURGE_RAW" | head -c 120))" FAIL
 grep -q 'data-testid="right-rail-topics-loading"' <<<"$HTML" && chk "no skeleton in the LIVE SSR HTML" FAIL \
                                                              || chk "no skeleton in the LIVE SSR HTML" PASS
 echo
