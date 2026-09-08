@@ -139,7 +139,49 @@ lumensocial.net, www.lumensocial.net {
 		# meant "revalidate at the origin"; same primitive, same treatment.
 		request_header -If-None-Match
 		request_header -If-Modified-Since
-		cache
+		# ★★★ NO `cache` DIRECTIVE HERE ANY MORE (2026-09-08). DO NOT PUT IT BACK
+		# WITHOUT READING THIS.
+		#
+		# The Souin `cache` directive used to sit on this line. It BUFFERS THE WHOLE
+		# RESPONSE: to decide what to store it reads the body to the end before
+		# forwarding any of it, so the origin's progressive render was withheld from
+		# the reader until it had completely finished. Node emits the profile shell
+		# at p50 175 ms and finishes at p50 636 ms; with the cache in front, the
+		# reader saw nothing until the end.
+		#
+		# Isolated to this directive specifically, one variable at a time against a
+		# controlled upstream that flushes every 100 ms: bare reverse_proxy streams
+		# (spread ~1130 ms), `handle_response`/`copy_response` below streams
+		# (~1060 ms, so it is NOT the cause), `cache` alone buffers (spread 0 ms).
+		#
+		# WHY GIVING IT UP IS CHEAP. It was serving 4.2 % of eligible responses
+		# (259 HIT of 6,213 in the access log) because CLOUDFLARE NOW CACHES
+		# ANONYMOUS HTML ITSELF and absorbs the repeats — verified MISS-then-HIT
+		# with an Age header on /@ecency and /@blocktrades. That is the opposite of
+		# what SNAPPINESS-AUDIT-2026-09-02.md assumed when this cache was chosen
+		# ("Cloudflare does NOT cache HTML ... a HIT on HTML is the bug"); the
+		# premise changed, so the decision changed. So it was buffering 100 % of
+		# responses to serve 4.2 % of them.
+		#
+		# MEASURED ON PRODUCTION, cold never-visited profiles: TTFB 824 -> 386 ms,
+		# document delivery spread 52 -> 552 ms (i.e. streaming restored). On an
+		# A/B of two identical Caddy instances differing only in this line, total
+		# render time was UNCHANGED (656 vs 676 ms, CI spanning zero) — the origin
+		# was never made faster, the edge simply stopped withholding finished work.
+		# Through Cloudflare, first paint improved 706 ms (p=0.0067). It does NOT
+		# improve LCP (-100 ms, p=0.65); that is bound by the origin finishing.
+		#
+		# The global `cache { ... }` block and `order cache after request_header`
+		# are LEFT IN PLACE on purpose: with no directive invoking them they are
+		# inert, and keeping them makes restoring this a one-line revert.
+		#
+		# ★ IF YOU EDIT THIS FILE, RESTART THE CONTAINER, DO NOT JUST RELOAD.
+		# Docker bind-mounts a single file BY INODE and `sed -i` writes a new one,
+		# so the container goes on serving the old config and `caddy reload`
+		# reports success while changing nothing. That false success was hit once
+		# already. Verify with:
+		#   md5sum /opt/lumen/caddy/Caddyfile
+		#   docker exec lumen-caddy md5sum /etc/caddy/Caddyfile
 		reverse_proxy 127.0.0.1:3000 {
 			# The app sets its cache policy before it knows the status, so a 404
 			# (any /@name that does not exist) would be stored for 300 s and
