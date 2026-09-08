@@ -1,19 +1,15 @@
-import type { Metadata } from 'next';
-import { redirect } from 'next/navigation';
-import YourTokensView from '@/blog/features/creator-tokens/ui/your-tokens/your-tokens-view';
-import { getServerSessionUser, loginRedirectFor } from '@/blog/lib/server-session';
+import { permanentRedirect } from 'next/navigation';
 
-export const metadata: Metadata = {
-  title: 'Your Meritum tokens',
-  description:
-    'Your portfolio of Meritum tokens on Lumen: value, buy/sell/spend, and the services you’ve spent tokens on.'
-};
-
-// "Your tokens" is a portfolio: there is nothing to render for somebody with no
-// account. Same server-side gate as /wallet and /profile, carrying the way back.
-export default async function YourTokensPage() {
-  const session = await getServerSessionUser();
-  if (!session.isLoggedIn) redirect(loginRedirectFor('/wallet/tokens'));
-
-  return <YourTokensView />;
+/**
+ * ★ `/wallet/tokens` IS NOW THE WALLET'S MERITUM TAB (owner ruling 2026-09-08).
+ *
+ * The portfolio it rendered (`YourTokensView`) lives on `/wallet?tab=meritum`,
+ * one of three in-page tabs, so nobody has to click through to a second page.
+ * Every inbound link in the app was retargeted; this redirect keeps old
+ * bookmarks, the wallet's own untouched "Your Meritum tokens" links
+ * (wallet-content.tsx) and any external link working. Signed-out readers get
+ * the login door from `/wallet` itself, with the tab carried in `?next=`.
+ */
+export default function YourTokensPage() {
+  permanentRedirect('/wallet?tab=meritum');
 }

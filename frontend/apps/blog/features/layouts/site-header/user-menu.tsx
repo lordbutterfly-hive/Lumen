@@ -206,7 +206,7 @@ const AccountMenuContent = ({ user }: { user: User }) => {
             useLivePortfolio, omitted (not rendered as "0 held" or a spinner)
             for as long as the read hasn't confidently answered. */}
         <DropdownMenuItem asChild className={ROW_CLASS}>
-          <Link href="/wallet/tokens" data-testid="user-profile-menu-your-tokens-link">
+          <Link href="/wallet?tab=meritum" data-testid="user-profile-menu-your-tokens-link">
             <span>{LABELS.yourTokens}</span>
             {heldCountKnown ? <span className={META_CLASS}>{portfolio.holdings.length} held</span> : null}
           </Link>

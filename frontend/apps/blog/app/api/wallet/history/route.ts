@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { HiveAccountNotFoundError, accountNotFoundBody, assertHiveAccountExists } from '@/blog/lib/wallet/hive-account-exists';
 import { getLogger } from '@ui/lib/logging';
 import { getChain } from '@transaction/lib/chain';
 import { getDynamicGlobalProperties } from '@transaction/lib/hive-api';
@@ -78,7 +79,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .filter((id): id is number => id !== undefined)
         .join(',');
 
-      const [response, dynamicGlobal] = await Promise.all([
+      // F1 (2026-09-08): a name the chain never registered gets an empty
+      // history back from hivemind, which would render as an honest-looking
+      // empty wallet. One memoised existence read (shared with the summary and
+      // delegations routes within the same 3s) turns that into a 404.
+      const [, response, dynamicGlobal] = await Promise.all([
+        assertHiveAccountExists(username).then(() => undefined),
         withHiveRetry(
           () =>
             chain.restApi['hivemind-api'].accountsOperations({
@@ -101,6 +107,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
     return NextResponse.json(payload, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
+    if (error instanceof HiveAccountNotFoundError) {
+      return NextResponse.json(accountNotFoundBody(error), { status: 404, headers: { 'cache-control': 'private, no-store' } });
+    }
     logger.error(error, 'wallet history failed for %s', username);
     return NextResponse.json({ error: 'wallet_history_unavailable' }, { status: 502 });
   }

@@ -7,6 +7,20 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export async function register() {
   await commonRegister('blog');
+  // ★ NETWORK CONSISTENCY, BEFORE ANYTHING SERVES (2026-09-08). A testnet Magi
+  // beside a mainnet Hive L1 makes the wallet's own dialogs sign real funds under
+  // a testnet banner; see lib/network-consistency.ts. Refuses to boot on that mix
+  // unless LUMEN_ALLOW_MIXED_NETWORKS=yes. Skipped during `next build` (no
+  // server is starting) and on the edge runtime (no process to stop).
+  if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.NEXT_PHASE !== 'phase-production-build') {
+    const { checkNetworkConsistency } = await import('./lib/network-consistency');
+    const verdict = checkNetworkConsistency(process.env);
+    if (!verdict.ok) {
+      console.error(`FATAL ${verdict.message}`);
+      process.exit(1);
+    }
+    console.warn(verdict.message);
+  }
 
   /**
    * ★ ONE TLS HANDSHAKE PER ORIGIN INSTEAD OF ONE PER CALL, WHEN ASKED FOR

@@ -241,3 +241,42 @@ export async function submitWithNonce(account: string, sign: SignForNonce): Prom
     return { ...retried, status };
   }
 }
+
+/**
+ * Wait for a TERMINAL status, not inclusion.
+ *
+ * `waitForInclusion` answers "was it sequenced" — INCLUDED — which is what a
+ * nonce race needs to know. A wallet balance needs the other question:
+ * CONFIRMED (anchored to Hive and executed) or FAILED. INCLUDED is not terminal
+ * (memory: money-path confirmation, 2026-09-01), so the Magi tab's send,
+ * withdraw and swap poll THIS until one of the two terminal states or the
+ * deadline. Works for both rails: an L1 custom_json is addressed by its Hive
+ * trx id (verified: the 2026-09-08 swap 4c428ccf… and deposit b8d7a2d5… both
+ * resolve to CONFIRMED through findTransaction).
+ */
+export type TerminalStatus = 'confirmed' | 'failed' | 'unconfirmed';
+
+export async function waitForTerminal(
+  id: string,
+  timeoutMs: number,
+  onStatus?: (raw: string | null) => void
+): Promise<TerminalStatus> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let status: string | null = null;
+    try {
+      const res = await postProxy<{ findTransaction: Array<{ id: string; status: string }> | null }>(
+        TX_STATUS_OPERATION,
+        { id }
+      );
+      status = res.data?.findTransaction?.[0]?.status ?? null;
+    } catch {
+      // A read blip is not a verdict; keep polling until the deadline.
+    }
+    onStatus?.(status);
+    if (status === 'CONFIRMED') return 'confirmed';
+    if (status === 'FAILED') return 'failed';
+    if (Date.now() + INCLUSION_POLL_MS >= deadline) return 'unconfirmed';
+    await new Promise((resolve) => setTimeout(resolve, INCLUSION_POLL_MS));
+  }
+}

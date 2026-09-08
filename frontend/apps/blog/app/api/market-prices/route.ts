@@ -63,7 +63,9 @@ export async function GET(): Promise<NextResponse> {
       const init = { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), cache: 'no-store' as const };
       const [simple, chart] = await Promise.all([
         fetchCoingecko(
-          `${COINGECKO_BASE}/simple/price?ids=hive,hive_dollar&vs_currencies=usd,btc&include_24hr_change=true`,
+          // `bitcoin` added 2026-09-08 for the wallet's Magi tab (BTC held on Magi is priced
+          // off the same feed as HIVE/HBD); the hook keeps its "never coerce to 0" rule.
+          `${COINGECKO_BASE}/simple/price?ids=hive,hive_dollar,bitcoin&vs_currencies=usd,btc&include_24hr_change=true`,
           'coingecko.simple',
           init
         ),

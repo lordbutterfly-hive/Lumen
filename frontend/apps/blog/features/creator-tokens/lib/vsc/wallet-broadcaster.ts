@@ -81,13 +81,41 @@ export function prepareWalletCall(
     intents: input.intents,
     caller: input.did
   });
+  return prepareWalletOps(
+    { did: input.did, address: input.address, netId: input.netId, rcLimit: input.rcLimit, ops: [op], signTypedData: input.signTypedData },
+    nonce
+  );
+}
 
+/**
+ * A container of ANY ops for one DID (2026-09-08, wallet Magi tab). The Magi
+ * tab's send and withdraw are the node's fixed-cost `transfer` / `withdraw`
+ * ops (container.ts buildTransferOp / buildWithdrawOp), exactly what Altera
+ * signs for an EVM or Bitcoin login (altera-app eth/index.ts:75-92, dispatched
+ * at sendUtils.ts:611-632). Same container, same signing shell, same envelope
+ * as a call — only the op differs — so the call path above is a one-op case of
+ * this and stays byte-identical.
+ */
+export interface WalletOpsInput {
+  did: string;
+  address: string;
+  netId: string;
+  /** Header rc_limit: must cover Σ(per-op static cost) (transaction-pool/utils.go StaticMaxRcCost). */
+  rcLimit: number;
+  ops: ContainerOp[];
+  signTypedData: TypedDataSigner;
+}
+
+export function prepareWalletOps(
+  input: WalletOpsInput,
+  nonce: number
+): { tx: string; typedData: unknown; shellBytes: Uint8Array } {
   const container = buildContainer({
     netId: input.netId,
     nonce,
     rcLimit: input.rcLimit,
     requiredAuths: [input.did],
-    ops: [op]
+    ops: input.ops
   });
 
   // What the node will rebuild and hash: the container with each op payload
@@ -126,6 +154,18 @@ export async function broadcastWalletCall(input: WalletCallInput): Promise<Submi
     const envelope = buildSigEnvelope([{ alg: ALG_EIP712, sig: signature, kid: input.did }]);
     assertEnvelopeMatchesAuths(envelope, [input.did]);
 
+    return { tx, sig: serializeSigEnvelope(envelope) };
+  });
+}
+
+/** EVM-signed container of arbitrary ops; the same flow as broadcastWalletCall with the op list open. */
+export async function broadcastWalletOps(input: WalletOpsInput): Promise<SubmitResult> {
+  return submitWithNonce(input.did, async (nonce): Promise<SubmitInput> => {
+    const { tx, typedData } = prepareWalletOps(input, nonce);
+    const signature = await input.signTypedData(input.address, typedData);
+    assertEvmSignature(signature);
+    const envelope = buildSigEnvelope([{ alg: ALG_EIP712, sig: signature, kid: input.did }]);
+    assertEnvelopeMatchesAuths(envelope, [input.did]);
     return { tx, sig: serializeSigEnvelope(envelope) };
   });
 }
@@ -202,10 +242,19 @@ export function opToWalletCall(op: CustomJsonOp, signTypedData: TypedDataSigner)
     net_id: string;
     contract_id: string;
     action: string;
-    payload: Record<string, unknown>;
+    payload: Record<string, unknown> | string;
     rc_limit: number;
     intents?: Intent[];
   };
+  // ★ A STRING PAYLOAD IS ALREADY THE INNER JSON (2026-09-08). The creator-tokens
+  // `buildOp` writes `payload` as an object, which `buildCallOp` then
+  // stringifies once — the node's double-encoding. The Magi SDK's swap op
+  // (crosschain-core getHiveSwapOp) writes it as a string instead; passing that
+  // through unchanged would stringify it AGAIN and hand the router a JSON
+  // string literal, not an instruction. Parsing it here makes both shapes reach
+  // the container identically. JSON.parse -> JSON.stringify is a faithful
+  // round trip for the flat string/number objects every op here carries.
+  const payload = typeof body.payload === 'string' ? (JSON.parse(body.payload) as Record<string, unknown>) : body.payload;
 
   const did = op.required_auths[0];
   if (!did) throw new Error('wallet-broadcaster: the op carries no required auth');
@@ -220,7 +269,7 @@ export function opToWalletCall(op: CustomJsonOp, signTypedData: TypedDataSigner)
     contractId: body.contract_id,
     netId: body.net_id, // lifted to headers by buildContainer; never in the body
     action: body.action,
-    payload: body.payload,
+    payload,
     rcLimit: body.rc_limit,
     intents: body.intents ?? [],
     signTypedData
@@ -277,6 +326,29 @@ export async function broadcastBtcWalletCall(
   });
 }
 
+/** Bitcoin-signed container of arbitrary ops; the same flow as broadcastBtcWalletCall with the op list open. */
+export async function broadcastBtcWalletOps(
+  input: Omit<WalletOpsInput, 'signTypedData' | 'address'> & { address: string; signMessage: BtcMessageSigner }
+): Promise<SubmitResult> {
+  const addressType = btcAddressType(input.address);
+  if (!addressType) {
+    throw new Error(
+      `wallet-broadcaster: ${input.address} is not an address type the node can verify. ` +
+        'Taproot (bc1p) is refused at DID parse; use a native segwit (bc1q), P2SH (3…) or legacy (1…) address.'
+    );
+  }
+  return submitWithNonce(input.did, async (nonce): Promise<SubmitInput> => {
+    const { tx, shellBytes } = prepareWalletOps({ ...input, address: '', signTypedData: neverSignsTypedData }, nonce);
+    const message = await btcSigningMessage(shellBytes);
+    const raw = await input.signMessage(input.address, message);
+    const signature = normalizeBip137Header(raw);
+    assertBtcSignature(signature, addressType);
+    const envelope = buildSigEnvelope([{ alg: ALG_BIP137, sig: signature, kid: input.did }]);
+    assertEnvelopeMatchesAuths(envelope, [input.did]);
+    return { tx, sig: serializeSigEnvelope(envelope) };
+  });
+}
+
 /**
  * Collapse a confirmed result into the transaction id the broadcaster contract
  * returns — and refuse to do so for anything we could not confirm.
@@ -291,7 +363,7 @@ export async function broadcastBtcWalletCall(
  * warns against a blind retry, because a retry of something that did land is how
  * a user pays twice.
  */
-function requireConfirmed(result: SubmitResult): string {
+export function requireConfirmed(result: SubmitResult): string {
   if (result.status === 'pending') {
     throw new Error(
       `We couldn't confirm this transaction on chain (${result.id}). It may still land. ` +

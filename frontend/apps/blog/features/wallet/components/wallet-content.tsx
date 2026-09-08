@@ -126,7 +126,7 @@ export default function WalletContent() {
    * request whose answer this page's own auth gate had already made
    * redundant.
    */
-  const { account, figures, dynamicGlobal, isError } = useWalletAccount(
+  const { account, figures, dynamicGlobal, isError, error } = useWalletAccount(
     isLite ? '' : identity.username
   );
 
@@ -256,10 +256,17 @@ export default function WalletContent() {
   }
 
   if (isError) {
+    // F1 (2026-09-08): say what is actually known. A 404 from the summary
+    // route is "this name is not on <chain>"; anything else is "we could not
+    // check" — never a hint that funds are gone.
     return (
       <div data-testid="wallet-content-error">
         <PageMasthead title={t('wallet.page_title')}>
-          <p className="text-caption text-destructive">{t('global.something_went_wrong')}</p>
+          <p className="text-caption text-destructive" data-testid="wallet-content-error-copy">
+            {error?.accountNotFound
+              ? t('wallet.errors.account_not_found', { chain: error.chain ?? 'this chain' })
+              : t('wallet.errors.summary_failed')}
+          </p>
         </PageMasthead>
       </div>
     );

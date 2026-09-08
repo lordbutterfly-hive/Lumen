@@ -27,9 +27,38 @@ import type { WalletSummaryWire } from '../lib/wallet-summary-wire';
  * cadence, now costing one request instead of fifteen.
  */
 
+/**
+ * A failed summary read, with enough on it for the page to say something true
+ * (F1, 2026-09-08): a 404 `account_not_found` from the route is "this name is
+ * not on <chain>"; anything else is "we could not check", never "you have no
+ * funds".
+ */
+export class WalletSummaryError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  readonly chain: string | null;
+  constructor(status: number, code: string | null, chain: string | null) {
+    super(`wallet summary request failed: HTTP ${status}${code ? ` (${code})` : ''}`);
+    this.name = 'WalletSummaryError';
+    this.status = status;
+    this.code = code;
+    this.chain = chain;
+  }
+  get accountNotFound(): boolean {
+    return this.status === 404 && this.code === 'account_not_found';
+  }
+}
+
 async function fetchWalletSummary(username: string): Promise<WalletSummaryWire> {
   const res = await fetch(`/api/wallet/summary?username=${encodeURIComponent(username)}`);
-  if (!res.ok) throw new Error(`wallet summary request failed: HTTP ${res.status}`);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: unknown; chain?: unknown } | null;
+    throw new WalletSummaryError(
+      res.status,
+      typeof body?.error === 'string' ? body.error : null,
+      typeof body?.chain === 'string' ? body.chain : null
+    );
+  }
   return (await res.json()) as WalletSummaryWire;
 }
 
@@ -86,6 +115,7 @@ export function useWalletAccount(username: string) {
     pendingClaimedAccounts: data?.pendingClaimedAccounts ?? 0,
     isLoading: summaryQuery.isLoading,
     isError: summaryQuery.isError,
+    error: summaryQuery.error instanceof WalletSummaryError ? summaryQuery.error : null,
     refetch: summaryQuery.refetch
   };
 }

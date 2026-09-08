@@ -173,6 +173,12 @@ importers:
       '@types/sanitize-html':
         specifier: ^2.9.5
         version: 2.13.0
+      '@vsc.eco/crosschain-core':
+        specifier: 0.0.3
+        version: 0.0.3
+      '@vsc.eco/crosschain-sdk':
+        specifier: 0.0.3
+        version: 0.0.3
       big.js:
         specifier: ^6.2.1
         version: 6.2.2
@@ -4693,6 +4699,17 @@ packages:
   '@ungap/structured-clone@1.2.1':
     resolution: {integrity: sha512-fEzPV3hSkSMltkw152tJKNARhOupqbH96MZWyRjNaYZOMIzbrTeQDG+MTc6Mr2pgzFQzFxAfmhGDNP5QK++2ZA==}
     deprecated: Potential CWE-502 - Update to 1.3.1 or higher
+
+  '@vsc.eco/crosschain-core@0.0.3':
+    resolution: {integrity: sha512-ZumGOwoVP04etO5m/3mGd5jbb9oais1OFFMll6sj8RFlE/zfCunRwQ5N3HJS5aXPTSy3248Q4XZkQ/b157Sq8Q==}
+
+  '@vsc.eco/crosschain-sdk@0.0.3':
+    resolution: {integrity: sha512-/8k1n4WoA2JDoKk7/dV8bj8b/DcZApDo5fPdm4HhH+pCsW3j6m8g3Hd8EW8CWGwLhruy5cCKkLZjA3XgF/wYow==}
+    peerDependencies:
+      '@aioha/aioha': ^1.8.0
+    peerDependenciesMeta:
+      '@aioha/aioha':
+        optional: true
 
   '@wallet-standard/app@1.1.0':
     resolution: {integrity: sha512-3CijvrO9utx598kjr45hTbbeeykQrQfKmSnxeWOgU25TOEpvcipD/bYDQWIqUv1Oc6KK4YStokSMu/FBNecGUQ==}
@@ -16528,6 +16545,12 @@ snapshots:
       eslint-visitor-keys: 4.2.1
 
   '@ungap/structured-clone@1.2.1': {}
+
+  '@vsc.eco/crosschain-core@0.0.3': {}
+
+  '@vsc.eco/crosschain-sdk@0.0.3':
+    dependencies:
+      '@vsc.eco/crosschain-core': 0.0.3
 
   '@wallet-standard/app@1.1.0':
     dependencies:

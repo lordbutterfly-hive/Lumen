@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { HiveAccountNotFoundError, accountNotFoundBody, assertHiveAccountExists } from '@/blog/lib/wallet/hive-account-exists';
 import { getLogger } from '@ui/lib/logging';
 import { getChain } from '@transaction/lib/chain';
 import { getDynamicGlobalProperties } from '@transaction/lib/hive-api';
@@ -41,7 +42,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       `wallet:delegations:${username}`,
       DELEGATIONS_MEMO_MS,
       async () => {
-        const [chain, dynamicGlobal] = await Promise.all([getChain(), getDynamicGlobalProperties()]);
+        // F1 (2026-09-08): see history/route.ts — an unregistered name would
+        // otherwise answer an empty, honest-looking list.
+        const [chain, dynamicGlobal] = await Promise.all([
+          getChain(),
+          getDynamicGlobalProperties(),
+          assertHiveAccountExists(username)
+        ]);
         // ★ A6 retry rollout (2026-08-18): idempotent read, previously with no retry
         // of any kind — a single blip on this call was an unconditional 502. Runs
         // AFTER the Promise.all above (already up to ~12s worst case from
@@ -71,6 +78,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
     return NextResponse.json(rows, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
+    if (error instanceof HiveAccountNotFoundError) {
+      return NextResponse.json(accountNotFoundBody(error), { status: 404, headers: { 'cache-control': 'private, no-store' } });
+    }
     logger.error(error, 'wallet delegations failed for %s', username);
     return NextResponse.json({ error: 'wallet_delegations_unavailable' }, { status: 502 });
   }

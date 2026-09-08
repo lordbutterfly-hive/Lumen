@@ -165,6 +165,18 @@ function assertCanSignWithActiveAuthority(op: CustomJsonOp): void {
     );
   }
 
+  assertActiveSignerFor(op.required_auths[0]);
+}
+
+/**
+ * ★ SPLIT OUT, UNCHANGED (2026-09-08, wallet Magi tab). The wallet's Magi deposit
+ * and swap sign a Hive `transfer` (plus, for a swap, this same `vsc.call`
+ * envelope) with the ACTIVE key through the identical signer stack, so they
+ * need exactly this session check without a custom_json op to hand over. The
+ * checks below are the ones that used to sit inline in
+ * assertCanSignWithActiveAuthority; only the account now arrives as a parameter.
+ */
+export function assertActiveSignerFor(account: string): void {
   const signerOptions = transactionService.signerOptions as
     | { username?: string; loginType?: string; keyType?: string }
     | undefined;
@@ -175,7 +187,7 @@ function assertCanSignWithActiveAuthority(op: CustomJsonOp): void {
       'CREATOR_TOKENS_NO_SIGNER: no Hive signer is configured for this session, so nothing can be signed. A lite account has no Hive keys and never reaches this path; if you are on a full account, sign out and back in.'
     );
   }
-  const opSigner = bareAccount(op.required_auths[0]);
+  const opSigner = bareAccount(account);
   const sessionSigner = bareAccount(signerOptions.username);
   if (opSigner !== sessionSigner) {
     throw new Error(

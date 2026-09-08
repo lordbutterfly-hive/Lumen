@@ -5,6 +5,12 @@ export interface HiveMarketPrices {
   hiveBtc: number;
   hiveUsd24hChange: number;
   hbdUsd: number;
+  /**
+   * BTC/USD, for Bitcoin held on Magi (wallet Magi tab, 2026-09-08). Null when
+   * CoinGecko omits it: the HIVE/HBD cards must not fail because one extra id
+   * is missing, and a missing price renders as a dash, never as $0.
+   */
+  btcUsd: number | null;
   /** Last ~22 daily closes (oldest first), for the price-card sparkline. */
   hiveSparkline: number[];
 }
@@ -26,6 +32,7 @@ async function fetchJson(url: string): Promise<unknown> {
 interface SimplePriceResponse {
   hive?: { usd?: number; btc?: number; usd_24h_change?: number };
   hive_dollar?: { usd?: number };
+  bitcoin?: { usd?: number };
 }
 
 interface MarketChartResponse {
@@ -70,6 +77,8 @@ export function useHiveMarketPrices() {
         throw new Error('CoinGecko returned no usable HIVE/HBD price');
       }
       const hiveBtc = simple.hive?.btc ?? 0;
+      const btcRaw = simple.bitcoin?.usd;
+      const btcUsd = typeof btcRaw === 'number' && btcRaw > 0 ? btcRaw : null;
       const hiveUsd24hChange = simple.hive?.usd_24h_change ?? 0;
 
       const points = chart.prices ?? [];
@@ -80,7 +89,7 @@ export function useHiveMarketPrices() {
         .slice(-bucketCount)
         .map(([, price]) => price);
 
-      return { hiveUsd, hiveBtc, hiveUsd24hChange, hbdUsd, hiveSparkline };
+      return { hiveUsd, hiveBtc, hiveUsd24hChange, hbdUsd, btcUsd, hiveSparkline };
     },
     staleTime: 60_000,
     refetchInterval: 60_000,

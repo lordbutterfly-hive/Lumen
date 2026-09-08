@@ -5,6 +5,7 @@ import { getChain } from '@transaction/lib/chain';
 import { cachedRead } from '@/blog/lib/server-read-cache';
 import { deriveWalletFigures } from '@/blog/features/wallet/lib/wallet-derived';
 import { toWalletFiguresWire, WalletFiguresWire } from '@/blog/features/wallet/lib/wallet-figures-wire';
+import { HiveAccountNotFoundError, accountNotFoundBody } from '@/blog/lib/wallet/hive-account-exists';
 
 const logger = getLogger('app');
 
@@ -86,6 +87,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         getFindAccounts(username),
         getChain()
       ]);
+      // ★ 404, NOT 502, FOR A NAME THE CHAIN DOES NOT HAVE (F1, 2026-09-08).
+      // `find_accounts` answered with no such account; `deriveWalletFigures`
+      // used to blow up on the `undefined` and the catch-all turned that into a
+      // 502 that read like an outage. A definite absence is a different fact.
+      if (!account) throw new HiveAccountNotFoundError(username);
       const response: WalletSummaryResponse = {
         account,
         dynamicGlobal,
@@ -96,6 +102,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
     return NextResponse.json(payload, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
+    if (error instanceof HiveAccountNotFoundError) {
+      return NextResponse.json(accountNotFoundBody(error), { status: 404, headers: { 'cache-control': 'private, no-store' } });
+    }
     logger.error(error, 'wallet summary failed for %s', username);
     return NextResponse.json({ error: 'wallet_summary_unavailable' }, { status: 502 });
   }

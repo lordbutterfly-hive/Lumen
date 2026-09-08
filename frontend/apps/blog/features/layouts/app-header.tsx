@@ -40,7 +40,6 @@ import MobileNav from '@/blog/features/layouts/mobile-nav';
 import { SearchInput } from '@/blog/features/search/search-input';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useIntentPrefetch } from '@/blog/components/intent-prefetch';
-import HeaderTokenPill from '@/blog/features/creator-tokens/ui/header-token-pill';
 
 // TODO i18n - move into locales/*/common_blog.json once copy is final
 const LABELS = {
@@ -371,25 +370,13 @@ const AppHeader: FC = () => {
               scopes this whole pass to desktop ("mobile is a separate task"),
               and md/lg are not "mobile" but are not where this fits either —
               xl is the honest floor, not a mobile cutoff by another name. */}
-          {/* ★ ONE CONTROL, NOT TWO (owner, 2026-08-11: "you now have creator
-              tokens next to launch your token — two pills of the same thing
-              next to each other").
-
-              A "Creator Tokens" text link used to sit here, immediately left of
-              this pill. Both pointed at the same feature and, for the common
-              case of an account with no token, they read as one instruction
-              said twice: "Creator Tokens" beside "Launch your token".
-
-              The link is DELETED rather than restyled or moved, because its
-              destination is not orphaned: `/creators` is already a primary
-              nav row in left-rail.tsx:225. The pill is the only header control
-              this feature needs, and it carries the state the link never could
-              — a live price straight to Studio if you have a token, the launch
-              CTA if you do not. The owner's brief asked for exactly one pill in
-              the top right. */}
-          <div className="hidden xl:block">
-            <HeaderTokenPill />
-          </div>
+          {/* ★ THE MERITUM PILL IS GONE (owner, 2026-09-08). It used to sit here,
+              right of the search field at xl+: a live price straight to Studio
+              for a creator, a "Launch your Meritum" CTA for everyone else. The
+              wallet page now carries both on its Meritum tab
+              (features/wallet/components/meritum/meritum-panel.tsx), reached from
+              the rail's Wallet row and the avatar menu, so the header no longer
+              needs a control for it. */}
 
           <TooltipContainer title={LABELS.write}>
             {identity.isLoggedIn ? (

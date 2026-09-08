@@ -4,10 +4,11 @@ import WalletShell from '@/blog/features/wallet/components/wallet-shell';
 import { getServerSessionUser, loginRedirectFor } from '@/blog/lib/server-session';
 import { fetchWalletSummarySeed } from '@/blog/features/wallet/lib/wallet-summary-seed';
 import { WalletSummaryProvider } from '@/blog/features/wallet/lib/wallet-summary-context';
+import { defaultWalletTab, parseWalletTab, walletTabHref } from '@/blog/features/wallet/lib/wallet-tab';
 
 export const metadata: Metadata = {
   title: 'Wallet',
-  description: 'Your Hive balances, transfers and savings on Lumen.'
+  description: 'Your Hive balances, your balances on Magi, and your Meritum tokens, on Lumen.'
 };
 
 /**
@@ -35,9 +36,20 @@ const PREFETCH_BUDGET_MS = 600;
  * server from the session cookie, so there is no flash of an empty wallet first,
  * and `?next=` carries the destination so signing in returns them here.
  */
-export default async function WalletPage() {
+export default async function WalletPage({
+  searchParams
+}: {
+  searchParams?: { [key: string]: string | string[] | undefined };
+}) {
   const session = await getServerSessionUser();
-  if (!session.isLoggedIn) redirect(loginRedirectFor('/wallet'));
+  // ★ TABS (owner ruling 2026-09-08): `?tab=hive|magi|meritum`, else the tab that
+  // carries this account's base money (Hive for a full account, Magi for lite).
+  // Decided here, on the server, so the first paint is already on the right tab
+  // and a shared link reopens on it; the client bar only mirrors later clicks
+  // into the URL (wallet-tabs.tsx).
+  const requestedTab = parseWalletTab(searchParams?.tab);
+  if (!session.isLoggedIn) redirect(loginRedirectFor(requestedTab ? walletTabHref(requestedTab) : '/wallet'));
+  const initialTab = requestedTab ?? defaultWalletTab(session.accountTier);
 
   /**
    * ★★★ THE PAGE ALREADY KNEW THE USERNAME; NOTHING FETCHED WITH IT (T3g,
@@ -56,14 +68,19 @@ export default async function WalletPage() {
    * `fetchWalletSummarySeed`'s own `cachedRead` memo, which a slow read still
    * warms for the client's own imminent `/api/wallet/summary` call.
    */
-  const seed = await Promise.race([
-    fetchWalletSummarySeed(session.username),
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), PREFETCH_BUDGET_MS))
-  ]);
+  // Only the Hive tab consumes the seed, and the Hive panel does not mount while
+  // another tab is showing, so a reader opening Magi or Meritum pays nothing here.
+  const seed =
+    initialTab === 'hive'
+      ? await Promise.race([
+          fetchWalletSummarySeed(session.username),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), PREFETCH_BUDGET_MS))
+        ])
+      : null;
 
   return (
     <WalletSummaryProvider value={seed}>
-      <WalletShell />
+      <WalletShell initialTab={initialTab} />
     </WalletSummaryProvider>
   );
 }

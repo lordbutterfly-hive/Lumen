@@ -283,7 +283,15 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
   );
 };
 
-const YourTokensView: FC = () => {
+/**
+ * ★ SPLIT (2026-09-08, wallet Magi tab). The portfolio body is now
+ * `YourTokensBody`, reused verbatim by the wallet's Meritum tab
+ * (features/wallet/components/meritum/meritum-panel.tsx); `YourTokensView`
+ * keeps wrapping it in the token shell with its own heading and rail for the
+ * `/wallet/tokens` route, which now redirects to the tab. Same hooks, same
+ * rows, same states: nothing about what a holder sees changed.
+ */
+export const YourTokensBody: FC = () => {
   const eligibility = useMeritumEligibility();
   const [tab, setTab] = useState<'holdings' | 'asks'>('holdings');
   const p = useLivePortfolio();
@@ -298,22 +306,8 @@ const YourTokensView: FC = () => {
   const floorTotalUsd = p.holdings.reduce((sum, h) => sum + usdFromHbd(h.floorValueHbd), 0);
   const reclaimable = p.asks.filter((a) => a.status === 'reclaimable').length;
 
-  const rightRail = (
-    <div className="flex flex-col gap-5 pt-[26px]">
-      <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
-        <div className="mb-1.5 font-ui text-lg font-medium text-ink-2">Find more creators</div>
-        <p className="mb-4 font-ui text-[14px] leading-[22px] text-ink-10">Hold their token, spend it on their work.</p>
-        <Link href="/creators" className="block rounded-control bg-surface-brand-12 py-3 text-center text-sm font-medium text-ink-27 font-ui hover:bg-surface-brand-16">
-          Discover creators →
-        </Link>
-      </div>
-    </div>
-  );
-
   return (
-    <TokenShell rightRail={rightRail}>
-      <h1 className="font-ui text-[34px] font-medium tracking-[-0.015em] text-ink-2">Your Meritum tokens</h1>
-
+    <>
       {p.unavailable ? (
         <div className="mt-5">
           <Unavailable>Meritum isn’t available on this build yet.</Unavailable>
@@ -522,6 +516,27 @@ const YourTokensView: FC = () => {
           )}
         </>
       )}
+    </>
+  );
+};
+
+const YourTokensView: FC = () => {
+  const rightRail = (
+    <div className="flex flex-col gap-5 pt-[26px]">
+      <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
+        <div className="mb-1.5 font-ui text-lg font-medium text-ink-2">Find more creators</div>
+        <p className="mb-4 font-ui text-[14px] leading-[22px] text-ink-10">Hold their token, spend it on their work.</p>
+        <Link href="/creators" className="block rounded-control bg-surface-brand-12 py-3 text-center text-sm font-medium text-ink-27 font-ui hover:bg-surface-brand-16">
+          Discover creators →
+        </Link>
+      </div>
+    </div>
+  );
+
+  return (
+    <TokenShell rightRail={rightRail}>
+      <h1 className="font-ui text-[34px] font-medium tracking-[-0.015em] text-ink-2">Your Meritum tokens</h1>
+      <YourTokensBody />
     </TokenShell>
   );
 };

@@ -274,7 +274,12 @@ export const config = {
   // for these paths lives in `next.config.js` `headers()` (public, 1 day, must-
   // revalidate by ETag — NOT `immutable`, because `/fonts` and `/images` are not
   // content-hashed, so a changed font must be able to replace itself).
+  // ★ `api/market-prices` added 2026-09-08 (wallet security review I3). The
+  // FIFTH instance of the same pattern: the route sets its own `public,
+  // max-age=60` (it is a viewer-independent spot price) while this middleware
+  // was still minting a Set-Cookie onto it, which only worked because Next's
+  // header merge lets `no-store` win. Same fix as the four names before it.
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|fonts/|images/|api/avatar|api/trending-tags|api/streak/marks|api/creator-profile).*)'
+    '/((?!_next/static|_next/image|favicon\\.ico|fonts/|images/|api/avatar|api/trending-tags|api/streak/marks|api/creator-profile|api/market-prices).*)'
   ]
 };

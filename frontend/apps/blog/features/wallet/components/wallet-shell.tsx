@@ -1,17 +1,72 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import LeftRail from '@/blog/features/layouts/left-rail';
-import WalletContent from './wallet-content';
+import WalletTabs from './wallet-tabs';
 import WalletRightRail from './wallet-right-rail';
+import { parseWalletTab, type WalletTab } from '../lib/wallet-tab';
 
 /**
  * Wallet page shell — same fixed 3-column grid as
  * features/discovery-feed/home-shell.tsx (200 / 1fr / 312, gap 44, max-width
- * 1720, symmetric 44px gutters, centered, both rails sticky/locked). Reuses
- * the shared LeftRail/RightRail slots but not home-shell itself, since the
- * center content and right rail are entirely different here.
+ * 1720, symmetric 44px gutters, centered, both rails sticky/locked).
+ *
+ * ★ TABS (owner ruling 2026-09-08). The centre column is `WalletTabs`: Hive
+ * (the existing `WalletContent`, untouched), Magi, Meritum. This shell owns the
+ * active tab so it can do the one thing the tab bar cannot: keep the RIGHT RAIL
+ * — the Hive price cards and the Hive-only Advanced Tools card (power up/down,
+ * delegate, claim account, convert) — on the HIVE TAB ONLY. Those are Hive-
+ * account tools; showing them beside the Magi or Meritum panels would be the
+ * regression rule #4 guards against. `WalletContent` and `WalletRightRail`
+ * themselves are byte-identical to before; only WHERE the rail renders changed.
+ *
+ * When the rail is hidden (Magi/Meritum) the grid drops its third column, the
+ * same `rightRail ? …` idiom `ui/token-shell.tsx` already uses, so the panel
+ * gets the full width instead of a 312px gap.
  */
-export default function WalletShell() {
+export default function WalletShell({ initialTab }: { initialTab: WalletTab }) {
+  const [tab, setTab] = useState<WalletTab>(initialTab);
+  const searchParams = useSearchParams();
+
+  const onTabChange = useCallback((next: WalletTab) => {
+    setTab(next);
+    // ★ `pushState`, NOT `replaceState` (tester finding, 2026-09-08): with
+    // replaceState the three tabs shared one history entry, so Back left the
+    // page instead of stepping back a tab. Both are the NATIVE history API,
+    // which Next 14.1+ integrates with the App Router WITHOUT a server round
+    // trip (it is `router.push/replace` that would re-run the page and its
+    // 600ms seed race); useSearchParams updates on both, and on Back/Forward.
+    // Verified empirically on the rebuilt standalone, not assumed: see the
+    // build map, section K.
+    try {
+      const url = new URL(window.location.href);
+      if (next === 'hive') url.searchParams.delete('tab');
+      else url.searchParams.set('tab', next);
+      if (url.toString() !== window.location.href) {
+        window.history.pushState(window.history.state, '', url.toString());
+      }
+    } catch {
+      /* URL update is a convenience; the tab already switched */
+    }
+  }, []);
+
+  // Back/Forward (and any other URL change) drive the tab from the URL. A
+  // click already set the state before pushing the URL, so this is a no-op
+  // for clicks and only ever acts on navigation.
+  useEffect(() => {
+    const fromUrl = parseWalletTab(searchParams?.get('tab')) ?? 'hive';
+    setTab((current) => (current === fromUrl ? current : fromUrl));
+  }, [searchParams]);
+
+  const showRightRail = tab === 'hive';
+
   return (
-    <div className="font-ui relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
+    <div
+      className={`font-ui relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 ${
+        showRightRail ? 'xl:grid-cols-[200px_minmax(0,1fr)_312px]' : ''
+      }`}
+    >
       <div
         className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-surface-26 md:block"
         aria-hidden
@@ -22,12 +77,14 @@ export default function WalletShell() {
       </aside>
 
       <main className="min-w-0">
-        <WalletContent />
+        <WalletTabs tab={tab} onTabChange={onTabChange} />
       </main>
 
-      <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
-        <WalletRightRail />
-      </aside>
+      {showRightRail ? (
+        <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
+          <WalletRightRail />
+        </aside>
+      ) : null}
     </div>
   );
 }

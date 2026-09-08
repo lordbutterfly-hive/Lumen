@@ -3,7 +3,7 @@ import type { IHiveChainInterface } from '@hiveio/wax';
 // ★ createHiveChain is imported LAZILY at its call site below (2026-09-04, perf).
 // A static value import of @hiveio/wax here pulled wax + beekeeper (~100 KB gzip)
 // into the app-wide first-load bundle, because this module is reached from the
-// creator-tokens header pill (HeaderTokenPill -> useTokenPriceChip ->
+// wallet's Meritum tab, formerly the header pill (MeritumPanel -> useTokenPriceChip ->
 // creator-tokens-data-source -> here), which is mounted app-wide even though it
 // renders nothing for signed-out readers. Signed-out visitors never call
 // getCreatorTokensHiveChain(), so the dynamic import() keeps wax out of their

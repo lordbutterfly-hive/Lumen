@@ -250,3 +250,95 @@ export function toBase64(bytes: Uint8Array): string {
   for (const b of bytes) binary += String.fromCharCode(b);
   return typeof btoa === 'function' ? btoa(binary) : Buffer.from(bytes).toString('base64');
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fixed-cost ops: `transfer` and `withdraw` (2026-09-08, wallet Magi tab)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What the node decodes for an L2 `transfer` op: `TxVSCTransfer`
+ * (state-processing/transactions.go:292-301) — from, to, amount, asset, memo.
+ * `net_id` is NOT in the body for this rail: the node fills it from the
+ * container headers (transactions.go L2 decode, `NetId: tx.Headers.NetId`), and
+ * Altera's own L2 builder omits it (altera-app eth/index.ts:69-79). A body-level
+ * net_id would be signed by us and ignored by the node, so it is refused here.
+ */
+export interface BuildTransferOpInput {
+  /** `hive:<name>` or a `did:pkh:…` — must also be the container's required auth. */
+  from: string;
+  /** `hive:<name>` or a `did:pkh:…`. */
+  to: string;
+  /** Decimal string with EXACTLY three places, e.g. "1.250" (common.ParseAssetAmount, precision 3). */
+  amount: string;
+  /** Lower-case ledger asset name. */
+  asset: string;
+  memo?: string;
+}
+
+/** The ledger's transferable set (ledger-system/utils.go:8). */
+export const TRANSFERABLE_ASSETS = ['hive', 'hbd', 'hbd_savings'] as const;
+/** Withdrawals pay out on Hive L1, which only knows these two. */
+export const WITHDRAWABLE_ASSETS = ['hive', 'hbd'] as const;
+
+/** Three-decimal fixed string. The node parses with precision 3 (assets.go:20-21). */
+const MAGI_AMOUNT = /^\d{1,15}\.\d{3}$/;
+
+/** The node's own party rule (transactions.go:321-335): a `did:` or `hive:` prefix, nothing else. */
+function assertMagiParty(value: unknown, label: string): asserts value is string {
+  if (typeof value !== 'string' || value.length === 0 || !(value.startsWith('hive:') || value.startsWith('did:'))) {
+    throw new Error(`container: ${label} must be a hive:<name> or did:… account id`);
+  }
+}
+
+function assertMagiAmount(amount: unknown): asserts amount is string {
+  if (typeof amount !== 'string' || !MAGI_AMOUNT.test(amount)) {
+    throw new Error(`container: amount must be a decimal string with exactly three places, got ${String(amount)}`);
+  }
+  if (Number(amount) <= 0) throw new Error('container: amount must be positive');
+}
+
+function fixedCostBody(input: BuildTransferOpInput, assets: readonly string[]): Record<string, unknown> {
+  assertMagiParty(input.from, 'from');
+  assertMagiParty(input.to, 'to');
+  assertMagiAmount(input.amount);
+  if (!assets.includes(input.asset)) {
+    throw new Error(`container: asset must be one of ${assets.join(', ')}, got ${input.asset}`);
+  }
+  if ('net_id' in (input as unknown as Record<string, unknown>)) {
+    throw new Error('container: net_id belongs in the headers on this rail, not in the op body');
+  }
+  const body: Record<string, unknown> = {
+    from: input.from,
+    to: input.to,
+    amount: input.amount,
+    asset: input.asset
+  };
+  // Present only when set, as Altera sends it (a signed empty memo is harmless
+  // but is not what Altera or the node's own crafter produce).
+  if (typeof input.memo === 'string' && input.memo.length > 0) body.memo = input.memo;
+  assertSignableShape(body, 'payload');
+  return body;
+}
+
+/** One L2 `transfer` op. The ledger refuses a self-transfer ("cannot send to self", ledger_session.go:412), so it is refused here too. */
+export function buildTransferOp(input: BuildTransferOpInput): ContainerOp {
+  if (input.from === input.to) throw new Error('container: transfer to self is refused by the ledger');
+  return { type: 'transfer', payload: encodeDagCbor(fixedCostBody(input, TRANSFERABLE_ASSETS)) };
+}
+
+/**
+ * One L2 `withdraw` op: Magi balance -> Hive L1 account. `to` must name a Hive
+ * account (`hive:<name>`): the gateway pays out on L1, where a DID has no
+ * meaning. The node only checks non-empty (TxVSCWithdraw.ExecuteTx), so the
+ * stricter rule lives here.
+ */
+export function buildWithdrawOp(input: BuildTransferOpInput): ContainerOp {
+  if (!input.to.startsWith('hive:')) {
+    throw new Error('container: a withdrawal pays out on Hive, so `to` must be a hive:<name> account');
+  }
+  return { type: 'withdraw', payload: encodeDagCbor(fixedCostBody(input, WITHDRAWABLE_ASSETS)) };
+}
+
+/** The node's fixed RC charges for these ops (transaction-pool/utils.go:67-68). */
+export const RC_COST_TRANSFER = 100;
+export const RC_COST_WITHDRAW = 200;

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { CONTRACT_QUERY, HEAD_QUERY, STATE_QUERY, STATE_QUERY_HEX } from '@/blog/features/creator-tokens/lib/vsc/reads';
 import { BALANCE_QUERY } from '@/blog/lib/lite/wallet/magi-balance';
+import { MAGI_ASSETS_QUERY } from '@/blog/lib/lite/wallet/magi-assets';
+import { SIMULATE_QUERY } from '@/blog/lib/lite/wallet/magi-simulate';
+import { getServerSessionUser } from '@/blog/lib/server-session';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceMagiGqlRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { consumeLocalGlobal, consumeLocalPerIp } from '@/blog/lib/lite/antispam/local-rate-limit';
@@ -71,7 +74,20 @@ const logger = getLogger('app');
 // CONTRACT_QUERY added 2026-08-31 (A5 lockstep): the read that tells the app
 // which contract rules are deployed (market/contract-rules.ts). Same identity
 // import as the four above, so the proxy and the client cannot drift.
-const ALLOWED_QUERIES = new Set<string>([STATE_QUERY, STATE_QUERY_HEX, HEAD_QUERY, BALANCE_QUERY, CONTRACT_QUERY]);
+// MAGI_ASSETS_QUERY and SIMULATE_QUERY added 2026-09-08 (wallet Magi tab): the
+// wider balance record the Magi tab shows (lib/lite/wallet/magi-assets.ts) and
+// the read-only dry run a swap is gated on (lib/lite/wallet/magi-simulate.ts).
+// Both imported by identity, like every entry above. `simulateContractCalls` is
+// a QUERY on the node's schema: it executes nothing and signs nothing.
+const ALLOWED_QUERIES = new Set<string>([
+  STATE_QUERY,
+  STATE_QUERY_HEX,
+  HEAD_QUERY,
+  BALANCE_QUERY,
+  CONTRACT_QUERY,
+  MAGI_ASSETS_QUERY,
+  SIMULATE_QUERY
+]);
 
 /**
  * Bounds how long this server will hold a connection open for a wedged upstream node.
@@ -113,6 +129,83 @@ const MAX_STATE_KEYS = 100;
  * using the same number keeps the two deliberate mirrors from diverging.
  */
 const MAX_VARIABLES_BYTES = 64 * 1024;
+
+/**
+ * ★ BOUNDS FOR `simulateContractCalls` (security review M2, 2026-09-08). The
+ * `keys` cap below only fires on the state-read shape, so SIMULATE_QUERY's
+ * `input.calls[]` and `rc_limit` were unbounded, and every forwarded call is
+ * REAL WASM execution on the Magi node (rc-budget.ts:44). The route's own
+ * principle applies verbatim: relying on the upstream to refuse an oversized
+ * request means our amplification is bounded only by someone else's
+ * validation. So, for that shape only:
+ *  - exactly ONE call per request: that is all this app ever sends
+ *    (magi-simulate.ts simulateCallViaProxy), so the per-request cost is one
+ *    dry run and the request limiters below count what they think they count;
+ *  - `rc_limit` within the node's own accepted range [1, 100000]
+ *    (the SDK clamps to the same, rc.ts computeSimRcLimit);
+ *  - `contract_id` must be one of THIS deployment's configured contracts: a
+ *    dry run is a swap/creator-tokens preflight, not a general node service;
+ *  - the auth arrays and strings are size-capped, and the caller must be
+ *    SIGNED IN: a dry run is a step of a write only a signed-in reader can make,
+ *    so anonymous traffic has no business here even though the state reads
+ *    above it stay public.
+ */
+const MAX_SIMULATE_CALLS = 1;
+const MAX_SIMULATE_RC_LIMIT = 100_000;
+const MAX_SIMULATE_AUTHS = 2;
+const MAX_SIMULATE_INTENTS = 4;
+const MAX_SIMULATE_PAYLOAD_BYTES = 16 * 1024;
+const MAX_SIMULATE_STRING = 256;
+
+function simulateContractAllowlist(): Set<string> {
+  return new Set(
+    [
+      process.env.REACT_APP_CREATOR_TOKENS_CONTRACT_ID,
+      process.env.REACT_APP_MAGI_DEX_ROUTER_CONTRACT_ID,
+      process.env.REACT_APP_MAGI_BTC_MAPPING_CONTRACT_ID
+    ].filter((v): v is string => typeof v === 'string' && v.length > 0)
+  );
+}
+
+function isStringArray(value: unknown, max: number, maxLen: number): value is string[] {
+  return Array.isArray(value) && value.length <= max && value.every((v) => typeof v === 'string' && v.length > 0 && v.length <= maxLen);
+}
+
+/** Returns an error message, or null when the simulate variables are within bounds. */
+function validateSimulateVariables(variables: Record<string, unknown>): string | null {
+  const input = variables.input;
+  if (typeof input !== 'object' || input === null) return 'input is required';
+  const rec = input as Record<string, unknown>;
+  if (typeof rec.tx_id !== 'string' || rec.tx_id.length === 0 || rec.tx_id.length > 64) return 'tx_id must be a string of at most 64 characters';
+  if (!isStringArray(rec.required_auths, MAX_SIMULATE_AUTHS, 160)) return `required_auths must be 0 to ${MAX_SIMULATE_AUTHS} accounts`;
+  if (!isStringArray(rec.required_posting_auths, MAX_SIMULATE_AUTHS, 160)) return `required_posting_auths must be 0 to ${MAX_SIMULATE_AUTHS} accounts`;
+  const calls = rec.calls;
+  if (!Array.isArray(calls) || calls.length === 0 || calls.length > MAX_SIMULATE_CALLS) return `calls must be an array of 1 to ${MAX_SIMULATE_CALLS} items`;
+  const allowed = simulateContractAllowlist();
+  if (allowed.size === 0) return 'no contract is configured for simulation';
+  for (const call of calls) {
+    if (typeof call !== 'object' || call === null) return 'each call must be an object';
+    const c = call as Record<string, unknown>;
+    if (typeof c.contract_id !== 'string' || !allowed.has(c.contract_id)) return 'contract_id is not one of the configured contracts';
+    if (typeof c.action !== 'string' || c.action.length === 0 || c.action.length > 64) return 'action must be a string of at most 64 characters';
+    if (typeof c.payload !== 'string' || Buffer.byteLength(c.payload, 'utf8') > MAX_SIMULATE_PAYLOAD_BYTES) return `payload must be a string of at most ${MAX_SIMULATE_PAYLOAD_BYTES} bytes`;
+    if (typeof c.rc_limit !== 'number' || !Number.isInteger(c.rc_limit) || c.rc_limit < 1 || c.rc_limit > MAX_SIMULATE_RC_LIMIT) return `rc_limit must be an integer from 1 to ${MAX_SIMULATE_RC_LIMIT}`;
+    const intents = c.intents ?? [];
+    if (!Array.isArray(intents) || intents.length > MAX_SIMULATE_INTENTS) return `intents must be an array of at most ${MAX_SIMULATE_INTENTS} items`;
+    for (const intent of intents) {
+      if (typeof intent !== 'object' || intent === null) return 'each intent must be an object';
+      const i = intent as Record<string, unknown>;
+      if (typeof i.type !== 'string' || i.type.length > MAX_SIMULATE_STRING) return 'intent type must be a short string';
+      if (typeof i.args !== 'object' || i.args === null) return 'intent args must be an object';
+      const args = i.args as Record<string, unknown>;
+      if (Object.keys(args).length > 8) return 'intent args must have at most 8 fields';
+      for (const [k, v] of Object.entries(args)) {
+        if (k.length > MAX_SIMULATE_STRING || typeof v !== 'string' || v.length > MAX_SIMULATE_STRING) return 'intent args must be short strings';
+      }
+    }
+  }
+  return null;
+}
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const gqlUrl = process.env.REACT_APP_CREATOR_TOKENS_GQL_URL;
@@ -178,6 +271,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { errors: [{ message: `keys must be an array of 1 to ${MAX_STATE_KEYS} items` }] },
         { status: 400 }
       );
+    }
+  }
+
+  // The simulate shape carries `input`, never `keys`, so it gets its own bounds
+  // (see MAX_SIMULATE_* above) and a session requirement.
+  if (query === SIMULATE_QUERY) {
+    const session = await getServerSessionUser();
+    if (!session.isLoggedIn) {
+      return NextResponse.json({ errors: [{ message: 'sign in to dry-run a transaction' }] }, { status: 401 });
+    }
+    const problem = validateSimulateVariables(variablesObj);
+    if (problem) {
+      return NextResponse.json({ errors: [{ message: problem }] }, { status: 400 });
     }
   }
 
