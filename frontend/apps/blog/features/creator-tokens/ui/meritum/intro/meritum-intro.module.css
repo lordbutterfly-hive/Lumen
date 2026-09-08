@@ -91,3 +91,144 @@
   flex: 0 1 290px;
   min-width: min(100%, 260px);
 }
+
+/* ============================================================
+   THE DECORATIVE LAUREL IN THE HERO'S EMPTY RIGHT SIDE
+   ============================================================ */
+
+/**
+ * ★ THE HOUSE TREATMENT ALREADY EXISTS, AND THIS IS IT (owner, 2026-09-08).
+ *
+ * The hero's right side was empty from the headline's ragged edge out to the
+ * card's margin, and the owner asked for the Meritum mark there. Lumen already
+ * answers exactly this question on every other hero: `features/layouts/
+ * masthead-glyph.tsx` puts an oversized `text-ink-brand-6/[0.22]` watermark in
+ * the empty corner of `PageMasthead` — the same radial `--masthead-1..4` wash
+ * this card wears. So the colour, the 22% strength, the `z-0` behind `z-10`
+ * content and the "fully visible with air around it, never bled off the corner"
+ * rule are all taken from there rather than invented. `--meritum-ink-brand` is
+ * an alias OF `--ink-brand-6` (globals.css), so this is the same ink the
+ * masthead uses, named in this screen's own vocabulary — and it re-points in
+ * dark mode (#c0392b -> #e59289) with no second asset.
+ *
+ * The mark itself is `CreatorTokenLaurel`, the same traced path the eyebrow
+ * above it, the left rail and the header pill draw. Not a new file, not a
+ * bitmap.
+ *
+ * ★★★ A CONTAINER QUERY, NOT A BREAKPOINT — AND THE VIEWPORT WOULD BE WRONG,
+ * NOT MERELY WORSE. This card sits in the shell's centre column, so its width
+ * is NOT monotonic in the viewport. Measured on the running app:
+ *
+ *      viewport   1920  1600  1440  1280  1180  1024   900   768   390
+ *      card        1032   912   752   592   848   692   568   436   342
+ *
+ * 1280 is NARROWER than 1024 (the right rail appears before the viewport has
+ * grown enough to pay for it). Any `min-width:` media query that shows the mark
+ * at 1024 therefore also shows it at 1280, where there is 100px less room — the
+ * one case it most needs to hide. The same argument the two band columns below
+ * are written from; here it forces a real container. `container-type:
+ * inline-size` is safe on THIS element specifically because the layer is
+ * `position: absolute; inset: 0` — its width is dictated by the card and its
+ * containment cannot feed back into the card's layout.
+ */
+.markLayer {
+  position: absolute;
+  inset: 0;
+  container-type: inline-size;
+  /* Decoration must never eat a click. The layer, not just the mark, so there
+     is no transparent box over the hero at any size. */
+  pointer-events: none;
+}
+
+/**
+ * ★ THE NUMBERS ARE MEASUREMENTS, NOT TASTE. Measured in Chrome:
+ *
+ *   right: ...   ->  see the ★ note below; it starts at the text column's own
+ *                    right margin and walks the mark INTO the gap as the card
+ *                    grows.
+ *   top: 163px   ->  puts the ink's top edge at 73px, i.e. on the content
+ *                    block's own 74px top padding, and its bottom at 255px,
+ *                    22px clear of the tape at 277px. So the mark is bracketed
+ *                    by the two horizontals already in the composition.
+ *
+ * `translate(11.2%, -50%)`: the laurel's ink is 18.61 x 21.23 inside a 24-unit
+ * viewBox (getBBox, not an estimate), i.e. a transparent 11.23% margin each
+ * side. A percentage translate resolves against the ELEMENT's own size, so
+ * 11.2% cancels that margin at every size and lets `right` be stated in ink
+ * rather than in box. -50% centres the box on `top`.
+ *
+ * ★ `width` IS EXPLICIT, AND `width: auto` WOULD BE A SILENT BUG. An SVG is a
+ * REPLACED element, and for an absolutely positioned replaced box `width: auto`
+ * resolves to the INTRINSIC width — it does not stretch between `left` and
+ * `right`. `CreatorTokenLaurel` renders `width="20" height="20"` presentation
+ * attributes, so `auto` here renders a 20px mark and nothing errors. Caught in
+ * the browser, not in review. `height: auto` is fine and is what overrides the
+ * matching attribute, because the square viewBox gives the intrinsic ratio.
+ *
+ * The width shrinks with the CARD: `100cqw - 610px` is the room left once the
+ * headline's ink (it stops at 557px, capped by its own `max-w-[16ch]`) and the
+ * right margin are paid for. 206px is the cap, reached at a 816px card and
+ * above — past that the mark would start crowding the tape rather than the
+ * headline.
+ */
+/**
+ * ★★★ THE MARK SITS IN THE GAP, NOT AGAINST THE RIGHT EDGE (owner, 2026-09-09,
+ * after seeing the first version live: "the logo should be a bit more left").
+ *
+ * The first version pinned the ink's right edge to the text column's right
+ * margin at every width. That is a real alignment, but at the widths where the
+ * gap is large it read as PUSHED AGAINST the far side rather than placed in the
+ * empty space. So the right inset now grows with the card:
+ *
+ *      right = 44px + 0.315 * (card - 816px),  clamped to [44px, 112px]
+ *
+ * Neither end is invented. 44px is the text column's own right margin, i.e.
+ * where the mark started. 112px lands the ink's centre 839px from the card's
+ * left edge on the widest card, which is the centre of the circle the owner
+ * drew on the original screenshot -- so the top of the ramp is his own mark,
+ * measured off his own image, not a taste call. And 816px is not a third
+ * number: it is exactly the card width at which `width` below stops growing
+ * (100cqw - 610px reaches the 206px cap). So the mark grows until it cannot,
+ * and only then starts moving left. One knee, not two.
+ *
+ * ★ WHY THE SHIFT IS ZERO AT A 752px CARD (a 1440 viewport), AND WHY THAT IS
+ * THE RIGHT ANSWER RATHER THAN A LIMITATION. Measured gap between the
+ * headline's ink and the content margin, against the ink the mark needs:
+ *
+ *      card    1032   992   912   848   752
+ *      gap      429   389   309   245   149
+ *      mark     160   160   160   160   109   (width-capped above 816)
+ *      slack    269   229   149    85    40
+ *      shift     68    55    30    10     0
+ *
+ * At 752 the mark already fills all but 40px of the gap it lives in. Moving it
+ * left there does not place it better, it just spends the headline's clearance
+ * -- and crowding the headline is the one outcome that would be worse than the
+ * version this replaces. The ramp bottoms out before that can happen, so the
+ * nudge lands where there is room to land and is a no-op where there is not.
+ */
+.mark {
+  /* Hidden by default: the container query below is the only thing that shows
+     it, so a browser without container queries gets the card exactly as it is
+     today rather than a mark dropped on the headline. */
+  display: none;
+  position: absolute;
+  top: 163px;
+  right: clamp(44px, calc(44px + (100cqw - 816px) * 0.315), 112px);
+  width: min(206px, calc(100cqw - 610px));
+  height: auto;
+  transform: translate(11.2%, -50%);
+}
+
+/**
+ * 730px of CARD, which is the width at which the formula above still leaves a
+ * ~92px mark. Below it the headline has wrapped to three or four lines and the
+ * right side the mark lives in no longer exists, so it is not shrunk — it is
+ * removed. Of the measured widths this shows the mark at 1180, 1440, 1600 and
+ * 1920 and hides it at 1024, 1280 and every phone and tablet width.
+ */
+@container (min-width: 730px) {
+  .mark {
+    display: block;
+  }
+}

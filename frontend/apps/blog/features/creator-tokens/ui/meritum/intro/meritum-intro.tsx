@@ -96,10 +96,40 @@ export default function MeritumIntro() {
     <section
       className={`${styles.card} border border-line-warn-3 accent-rail bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)]`}
     >
+      {/* ★ THE MARK IN THE EMPTY RIGHT SIDE (owner, 2026-09-08). Everything that
+          makes this a watermark rather than an image — the 22% brand ink, the
+          container query that decides whether there is room for it at all, and
+          the two offsets that align it to the composition — lives in
+          `./meritum-intro.module.css`, which is where this folder keeps geometry.
+          Read `.markLayer` there before moving anything here.
+
+          It is the SAME `CreatorTokenLaurel` the eyebrow below draws, one size
+          up and one colour down; `fill="currentColor"` means the 22% tint is set
+          purely by the class, so there is no second asset and dark mode is free.
+
+          `aria-hidden` on the layer AND `pointer-events: none` in the CSS: this
+          is decoration. The eyebrow already says "MERITUM" to a screen reader
+          eighty pixels away, and a mark that swallowed a click on the hero would
+          be a real bug rather than a cosmetic one. */}
+      <div className={styles.markLayer} aria-hidden="true">
+        <CreatorTokenLaurel className={`${styles.mark} text-meritum-ink-brand/[0.22]`} />
+      </div>
+
       {/* `mt-rise` is the 620ms entrance, transform + opacity only, and it is
           on the CONTENT rather than the card so the card's own border does not
-          slide with it. */}
-      <div className="mt-rise px-6 pb-12 pt-14 sm:px-11 sm:pb-[62px] sm:pt-[74px]">
+          slide with it.
+
+          ★ `relative z-10` (2026-09-08) IS WHAT KEEPS THE COPY ON TOP of the mark
+          above, and it is not redundant with `mt-rise`. The animation's transform
+          does create a stacking context — but `prefers-reduced-motion` removes
+          the animation entirely (globals.css), and a static sibling paints BELOW
+          a positioned one. Without this the mark would sit ON the headline for
+          exactly the readers who asked for less motion. Same `z-0`/`z-10` pairing
+          `PageMasthead` uses for its own glyph.
+
+          Safe to add: the only positioned descendant inside is the tape's 1x1
+          clipped `.srOnly` span, which has no offsets and so does not move. */}
+      <div className="mt-rise relative z-10 px-6 pb-12 pt-14 sm:px-11 sm:pb-[62px] sm:pt-[74px]">
         {/* ★ `text-label` (12px), NOT the reference's 11px. The type scale
             deliberately folded 11 into 12 (see `packages/tailwindcss/tailwind.config.js`;
             the class was `text-12` until the 2026-08-19 ladder made `text-label`
