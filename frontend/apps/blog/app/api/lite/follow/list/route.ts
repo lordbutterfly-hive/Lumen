@@ -3,8 +3,11 @@ import { enforceFollowListRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { getLogger } from '@ui/lib/logging';
 import { guardRead } from '@/blog/lib/lite/http/guard';
+import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { listFollowingPeers, listFollowerPeers } from '@/blog/lib/lite/repositories/follow-repository';
 import { findUserByDisplayName, findUsersByIds } from '@/blog/lib/lite/repositories/user-repository';
+import { viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
+import { actorKey } from '@/blog/lib/lite/social/follow-actor';
 
 const logger = getLogger('app');
 
@@ -27,8 +30,19 @@ const logger = getLogger('app');
  * renders, so nothing downstream has to learn about tiers.
  *
  * Public by design: a follower list is public on Hive and public here. No
- * session is read, and nothing is returned that the profile page does not
+ * session is REQUIRED, and nothing is returned that the profile page does not
  * already show.
+ *
+ * ★★★ EXCEPT the VIEWER's OWN blocked accounts (RENDER-07 fix, 2026-09-08).
+ * "Public" describes who may ask this route about whose list; it never meant
+ * that a viewer who blocked someone should still be shown that person's name,
+ * with a working link to their profile, on the one page dedicated to listing
+ * names. Every comparable identity surface in this app already drops a
+ * viewer's own blocks (`/api/account-posts`, `/api/lite/notifications`'s
+ * follow rows, the search people-results, the suggestions rail) — this route
+ * was the omission, not an intentional exception. A session is now read, but
+ * stays OPTIONAL: an anonymous caller (or a signed-in viewer who blocks
+ * nobody) gets the exact same, fully public response as before.
  */
 
 const MAX_LIMIT = 100;
@@ -62,10 +76,31 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (!user) return NextResponse.json({ entries: [], lite: false });
 
     const actor = { userId: user.userId };
-    const peers =
+    const rawPeers =
       type === 'followers'
         ? await listFollowerPeers(actor, { limit })
         : await listFollowingPeers(actor, { limit });
+
+    // ★★★ THE VIEWER'S OWN BLOCK LIST (RENDER-07 fix, 2026-09-08). See the GET
+    // doc comment above: this list stays public for anyone to REQUEST, but a
+    // signed-in viewer must never be shown a name they blocked in it. No
+    // session is required to reach this route at all, so a failed/absent
+    // session simply resolves to an empty block set (identical to the prior,
+    // fully-unfiltered behaviour) rather than a 401.
+    let sessionUser: Awaited<ReturnType<typeof getLiteSession>>['user'] | undefined;
+    try {
+      sessionUser = (await getLiteSession()).user;
+    } catch {
+      sessionUser = undefined;
+    }
+    const blockedKeys = await viewerBlockedKeySet(sessionUser).catch(() => new Set<string>());
+    const peers =
+      blockedKeys.size === 0
+        ? rawPeers
+        : rawPeers.filter((p) => {
+            const key = p.userId ? actorKey({ userId: p.userId }) : p.hive ? actorKey({ hive: p.hive }) : null;
+            return !key || !blockedKeys.has(key);
+          });
 
     // One lookup for every Lumen peer on the page, not one per row. Names are
     // resolved live rather than stored on the edge, so an upgraded account's

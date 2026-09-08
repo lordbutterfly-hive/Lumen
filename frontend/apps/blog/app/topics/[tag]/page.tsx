@@ -60,23 +60,50 @@ const Page = async ({ params }: { params: { tag: string } }) => {
   const { isLoggedIn } = await getServerSessionUser();
   let seed = anonymousTopicSeed(tag);
   if (seed && isLoggedIn) {
+    // ★★★ B-27 FIX (2026-09-08): FAIL CLOSED ON "NO CONFIRMED ANSWER", NOT OPEN.
+    //
+    // The race below used to resolve to a bare `Set<string>` either way, which made
+    // "confirmed: blocks nobody" (a real, resolved, empty answer) and "we do not
+    // know" (the 500ms deadline won, OR the real read threw — most notably the
+    // 2026-09-06 guard in `computeViewerBlockedKeySet` that deliberately THROWS
+    // rather than caching a degraded chain-mute read as a confirmed empty one)
+    // INDISTINGUISHABLE: both are `Set(0)`, and `Set(0)` was read as "safe to seed
+    // unfiltered". A blocked/muted author's post could flash on first paint for the
+    // ~1s window before TopicShell's own client refetch (which DOES wait for and
+    // apply the real answer) replaces it.
+    //
+    // The bounded-latency goal from the original comment below is UNCHANGED — a
+    // direct first-of-session /topics load still must not wait on a cold Hive call
+    // for the seed, so the same 500ms deadline still fires on schedule. What changes
+    // is what "no confirmed answer in time" MEANS: instead of guessing "unfiltered is
+    // probably fine", drop the seed entirely (`seed = null`). That is not a failure
+    // state — it is the exact, already-supported "cold topic, no warm memo" behaviour
+    // this same `anonymousTopicSeed` call above returns for a topic with nothing
+    // cached (see its own header note: "no seed" -> TopicShell fetches client-side,
+    // which DOES wait for and apply the real, resolved block list). A confirmed-empty
+    // answer (the real call actually won the race, size 0) is still served unfiltered,
+    // because that genuinely is safe.
+    const TIMED_OUT = Symbol('viewer-block-lookup-timed-out');
     try {
-      // ★ Bounded: viewerBlockedKeySet can make a cold Hive call (chain mutes);
-      // it is warm after any prior feed read (the usual home->topic path), but a
-      // direct first-of-session /topics load must not wait on Hive for the seed.
-      // Race a short deadline; on timeout seed unfiltered and let the ranked
-      // refetch (refetchOnMount:'always') apply the full filter. Found in review.
-      const blockedKeys = await Promise.race([
+      const raced = await Promise.race([
         viewerBlockedKeySet((await getLiteSession()).user),
-        new Promise<Set<string>>((resolve) => setTimeout(() => resolve(new Set<string>()), 500))
+        new Promise<typeof TIMED_OUT>((resolve) => setTimeout(() => resolve(TIMED_OUT), 500))
       ]);
-      if (blockedKeys.size > 0) {
-        const entries = await filterBlockedForViewer(seed.page.entries, blockedKeys);
+      if (raced === TIMED_OUT) {
+        // No confirmed answer in time. Do not guess -- drop the seed.
+        seed = null;
+      } else if (raced.size > 0) {
+        const entries = await filterBlockedForViewer(seed.page.entries, raced);
         seed = { ...seed, page: { ...seed.page, entries } };
       }
+      // else: raced resolved (won the race, not the timeout) to a genuinely
+      // confirmed empty set -- seed stays as-is, unfiltered, correctly.
     } catch {
-      // Block lookup failed (DB hiccup): show the unfiltered fallback for the
-      // second before the ranked feed replaces it, rather than a 10 s wait.
+      // Block lookup ITSELF failed/threw (DB hiccup, or the 2026-09-06 degraded
+      // chain-mute guard) -- same "no confirmed answer" case as a timeout. Drop
+      // the seed rather than assuming it is safe; TopicShell's client-side fetch
+      // takes over exactly as it already does for a cold topic.
+      seed = null;
     }
   }
   return (

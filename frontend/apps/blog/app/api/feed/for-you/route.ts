@@ -24,6 +24,8 @@ import { tagsForInterests } from '@/blog/lib/lite/interests/taxonomy';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { resolveRankedLiteBatch } from '@/blog/lib/lite/repositories/post-repository';
 import { liteConfig } from '@/blog/lib/lite/config';
+import { getClientIp } from '@/blog/lib/lite/http/ip';
+import { consumeLocalGlobal, consumeLocalPerIp } from '@/blog/lib/lite/antispam/local-rate-limit';
 import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
 import { startTopicWarmer } from '@/blog/lib/feed/topic-warmer';
@@ -401,6 +403,24 @@ function cachePut(key: string, entry: Entry): void {
  * enforced against readers other than the blocker.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  // ★ FIX-DOS, 2026-09-08 (API-02). This route had NO rate limit anywhere in its
+  // 2700+ lines, and is PUBLIC — `GET` degrades to an anonymous fallback rather than
+  // 401ing. In-process only (no new Postgres dependency for the home feed, which
+  // must keep serving readers whether or not the lite backend is provisioned),
+  // matching the same `consumeLocalGlobal`/`consumeLocalPerIp` pair
+  // `app/api/creator-tokens/{gql,submit}` already use. Sized generously: this is the
+  // primary home-feed read, hit on every page load and every infinite-scroll page,
+  // by real anonymous and signed-in readers alike — far above a single-purpose
+  // proxy's budget, but still far below what a legitimate reading session can ever
+  // reach, so it bounds a flood without touching ordinary browsing.
+  const rateIp = getClientIp(req);
+  if (!consumeLocalGlobal('feed_for_you', 20_000)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+  if (!consumeLocalPerIp(rateIp, 'feed_for_you', 300)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
   if (!TRACE_FILE) return handleGet(req);
   const bag: Record<string, number> = {};
   const started = performance.now();

@@ -18,6 +18,19 @@ import { vetNameFormat } from './vetting';
 
 const MAX_NAME = 16;
 
+/**
+ * ★ FIX-DOS, 2026-09-08 (DOS-01). `namesTakenOnChain`'s `fetch` below carried no
+ * `AbortSignal`/timeout/`withRetry`, reachable from `/api/lite/name/suggest`
+ * (IP-rate-limited, but no session required). Proven against a real hung TCP
+ * listener (accepts, never answers): unbounded, past a 4000ms race. 5000ms matches
+ * the sibling creator-tokens GQL proxy's `UPSTREAM_TIMEOUT_MS` — a reasonable single
+ * round-trip bound for a same-class upstream RPC call. `suggestNames`'s own
+ * `catch` already fails closed on any rejection (a name we could not check is a name
+ * we cannot recommend), so a timeout here degrades exactly like any other transport
+ * failure already did — this only bounds how long that failure takes to arrive.
+ */
+const FIND_ACCOUNTS_TIMEOUT_MS = 5_000;
+
 /** Trim a base so `base + suffix` still fits Hive's 16-character limit. */
 function fit(base: string, suffix: string): string {
   return base.slice(0, Math.max(1, MAX_NAME - suffix.length)) + suffix;
@@ -82,7 +95,9 @@ export async function namesTakenOnChain(names: string[]): Promise<Set<string>> {
       method: 'database_api.find_accounts',
       params: { accounts: names },
       id: 1
-    })
+    }),
+    // ★ FIX-DOS, 2026-09-08 (DOS-01). See FIND_ACCOUNTS_TIMEOUT_MS above.
+    signal: AbortSignal.timeout(FIND_ACCOUNTS_TIMEOUT_MS)
   });
   if (!res.ok) throw new Error(`find_accounts failed: HTTP ${res.status}`);
 

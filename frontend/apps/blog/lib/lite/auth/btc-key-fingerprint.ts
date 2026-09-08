@@ -73,12 +73,15 @@ function pubkeyFromWitness(sig: Uint8Array): Uint8Array | null {
 }
 
 /**
- * Fingerprint the key that produced this signature, or null when it cannot be
- * recovered. Callers must treat null as "no fingerprint available" and fall back to
- * the address — never as an authentication failure; the signature itself is verified
- * separately by `verifyBtcSignature`.
+ * Recover the secp256k1 public-key POINT that produced this signature, or null when
+ * it cannot be recovered. Returning the POINT (not a hash) lets callers derive BOTH
+ * the compressed and the uncompressed encodings of the key — which SMS-03 needs, see
+ * `verifiedBtcKeyFingerprint`.
  */
-export function btcKeyFingerprint(message: string, signatureBase64: string): string | null {
+function recoverPubkeyPoint(
+  message: string,
+  signatureBase64: string
+): InstanceType<typeof secp256k1.ProjectivePoint> | null {
   let sig: Uint8Array;
   try {
     sig = Uint8Array.from(Buffer.from(signatureBase64.trim(), 'base64'));
@@ -93,8 +96,7 @@ export function btcKeyFingerprint(message: string, signatureBase64: string): str
       // address flavour, which is exactly what we are trying to ignore here.
       const recovery = (sig[0] - 27) % 4;
       const signature = secp256k1.Signature.fromCompact(sig.subarray(1)).addRecoveryBit(recovery);
-      const pubkey = signature.recoverPublicKey(messageHash(message)).toRawBytes(true);
-      return hash160Hex(pubkey);
+      return signature.recoverPublicKey(messageHash(message));
     } catch {
       return null;
     }
@@ -103,14 +105,32 @@ export function btcKeyFingerprint(message: string, signatureBase64: string): str
   const witnessKey = pubkeyFromWitness(sig);
   if (witnessKey) {
     try {
-      // Normalise to compressed so both forms fingerprint identically.
-      const point = secp256k1.ProjectivePoint.fromHex(Buffer.from(witnessKey).toString('hex'));
-      return hash160Hex(point.toRawBytes(true));
+      return secp256k1.ProjectivePoint.fromHex(Buffer.from(witnessKey).toString('hex'));
     } catch {
       return null;
     }
   }
   return null;
+}
+
+/**
+ * Fingerprint the key that produced this signature, or null when it cannot be
+ * recovered. Callers must treat null as "no fingerprint available" and fall back to
+ * the address — never as an authentication failure; the signature itself is verified
+ * separately by `verifyBtcSignature`.
+ *
+ * The fingerprint is hash160(COMPRESSED pubkey) — canonical, so one key yields one
+ * fingerprint regardless of which encoding was presented.
+ */
+export function btcKeyFingerprint(message: string, signatureBase64: string): string | null {
+  const point = recoverPubkeyPoint(message, signatureBase64);
+  if (!point) return null;
+  try {
+    // Normalise to compressed so every encoding of the same key fingerprints identically.
+    return hash160Hex(point.toRawBytes(true));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -166,12 +186,39 @@ export function verifiedBtcKeyFingerprint(
   signatureBase64: string,
   address: string
 ): string | null {
-  const fp = btcKeyFingerprint(message, signatureBase64);
-  if (!fp) return null;
+  const point = recoverPubkeyPoint(message, signatureBase64);
+  if (!point) return null;
+
+  let fpCompressed: string;
+  let fpUncompressed: string;
+  try {
+    fpCompressed = hash160Hex(point.toRawBytes(true));
+    fpUncompressed = hash160Hex(point.toRawBytes(false));
+  } catch {
+    return null;
+  }
+
   const norm = normalizeBtcAddress(address);
-  return siblingBtcAddresses(fp, btcNetworkKind(address)).some(
-    (a) => normalizeBtcAddress(a) === norm
-  )
-    ? fp
-    : null;
+  const net = btcNetworkKind(address);
+  // ★★★ SMS-03 FIX (2026-09-08): DERIVE THE CANDIDATE SET FROM BOTH KEY ENCODINGS.
+  //
+  // A legacy P2PKH address (`1…`/`m…`/`n…`) can be the hash160 of the UNCOMPRESSED
+  // public key, and hash160(uncompressed) != hash160(compressed). The old code
+  // derived siblings from the compressed encoding ONLY, so an uncompressed-key legacy
+  // login matched none of them: `verifiedBtcKeyFingerprint` returned null, the verify
+  // route wrote `key_fingerprint = undefined`, and Sybil dedup silently fell back to
+  // address-only — one Bitcoin key => two unlinkable Lumen accounts (proven: a NULL
+  // key_fingerprint row can never be matched by findByFingerprint).
+  //
+  // Deriving the candidate set from BOTH encodings makes the uncompressed-key legacy
+  // address a recognised sibling. The RETURNED fingerprint stays CANONICAL —
+  // hash160(compressed) — so whichever encoding proves ownership, the same one key
+  // maps to the same one fingerprint. (The extra uncompressed P2SH/bech32 candidates
+  // are inert: no wallet derives them, and a false match would need a 160-bit hash
+  // collision with a real address.)
+  const candidates = [
+    ...siblingBtcAddresses(fpCompressed, net),
+    ...siblingBtcAddresses(fpUncompressed, net)
+  ];
+  return candidates.some((a) => normalizeBtcAddress(a) === norm) ? fpCompressed : null;
 }

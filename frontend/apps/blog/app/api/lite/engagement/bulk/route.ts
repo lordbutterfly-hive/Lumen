@@ -5,11 +5,65 @@ import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { liveViewerId } from '@/blog/lib/lite/http/actor';
 import { getEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { liteTargetServable } from '@/blog/lib/lite/content/engagement-target';
+import { getClientIp } from '@/blog/lib/lite/http/ip';
+import { consumeLocalGlobal, consumeLocalPerIp } from '@/blog/lib/lite/antispam/local-rate-limit';
 
 const logger = getLogger('app');
 
 /** Hard ceiling on one request's payload. A feed page asks for ~30; a heavy thread more. */
 const MAX_TARGETS = 200;
+
+/**
+ * ★ FIX-DOS, 2026-09-08 (DOS-08). This route's only prior gate was `guardRead()` (a
+ * feature-flag check), reachable with NO session at all — measured: 40 consecutive
+ * anonymous calls, none ever 429; a single 200-target request held 8-10 of the pool's
+ * `dbPoolMax:10` connections concurrently, all by itself.
+ *
+ * Two independent bounds, for two independent risks:
+ *   - `MAX_CONCURRENT_DB_CALLS` below bounds how much of the SHARED pool any ONE
+ *     request can hold at once, regardless of rate limiting.
+ *   - The limiters here bound REPEATED requests over time — the volume-based risk a
+ *     concurrency cap alone does not touch.
+ *
+ * In-process only (no new Postgres dependency for a route that must keep working
+ * whether or not the durable limiter store is provisioned) — the same
+ * `consumeLocalGlobal`/`consumeLocalPerIp` pair `app/api/creator-tokens/{gql,submit}`
+ * already use for the identical class of problem (a public, no-session proxy that
+ * must not become an amplifier). Sized generously for legitimate polling (a feed page
+ * asks for ~30 targets in ONE batched call, not per-card) while still bounding a flood.
+ */
+const BULK_PER_IP_PER_MIN = 120;
+const BULK_GLOBAL_PER_MIN = 4_000;
+
+/**
+ * ★ FIX-DOS, 2026-09-08 (DOS-08). The `Promise.all` fan-out below used to issue every
+ * target's `getEngagement` call at once — up to `MAX_TARGETS` (200) concurrent
+ * queries into a pool capped at `dbPoolMax` (default 10), measured to hold 8-10 of
+ * those 10 connections for the DURATION of one single unauthenticated request. This
+ * caps how many of this ONE request's queries may be in flight simultaneously,
+ * leaving headroom in the shared pool for every other lite-DB route
+ * (`/api/lite/name/check`, `/api/health`, `/api/lite/posts/[id]`, etc.) that depends
+ * on it. DOS-04's new `statement_timeout` (2000ms) already bounds how long any single
+ * stuck query can hold its slot; this bounds how MANY slots one request can hold at
+ * once. 6 leaves at least 4 of the 10 connections free even at this route's own worst
+ * case.
+ */
+const MAX_CONCURRENT_DB_CALLS = 6;
+
+/** Run `items` through `fn`, at most `limit` in flight at once, preserving order. */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+  return results;
+}
 
 /**
  * GET /api/lite/engagement/bulk?targets=<json> — `/api/lite/engagement`, batched.
@@ -52,6 +106,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const blocked = guardRead();
   if (blocked) return blocked;
 
+  // ★ FIX-DOS, 2026-09-08 (DOS-08). See BULK_PER_IP_PER_MIN/BULK_GLOBAL_PER_MIN
+  // above. Global first: it is the only bound that survives a caller with many IPs.
+  const ip = getClientIp(req);
+  if (!consumeLocalGlobal('lite_engagement_bulk', BULK_GLOBAL_PER_MIN)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+  if (!consumeLocalPerIp(ip, 'lite_engagement_bulk', BULK_PER_IP_PER_MIN)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
   const raw = req.nextUrl.searchParams.get('targets');
   if (!raw) return NextResponse.json({ error: 'targets_required' }, { status: 400 });
 
@@ -90,8 +154,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const liveId = await liveViewerId(user, session);
   const userId = liveId && user?.account_tier === 'lite' ? liveId : null;
 
-  const entries = await Promise.all(
-    targets.map(async ({ author, permlink }) => {
+  // ★ FIX-DOS, 2026-09-08 (DOS-08). Was `Promise.all(targets.map(...))` — up to
+  // MAX_TARGETS (200) queries in flight at once against a 10-connection pool. See
+  // MAX_CONCURRENT_DB_CALLS above: bounds how many of THIS request's own queries may
+  // run simultaneously, without changing per-target behaviour (independent settling,
+  // absent-on-failure) at all.
+  const entries = await mapWithConcurrency(targets, MAX_CONCURRENT_DB_CALLS, async ({ author, permlink }) => {
       try {
         // ★ B5, same gate as the single route: a taken-down post must not keep
         // reporting live counts. Keyed on the permlink alone — a lite post reaches
@@ -130,8 +198,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         logger.error('lite engagement bulk: %s/%s failed: %s', author, permlink, String(error));
         return null;
       }
-    })
-  );
+  });
 
   const engagement: Record<string, unknown> = {};
   for (const entry of entries) {

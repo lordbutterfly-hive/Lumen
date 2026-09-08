@@ -9,8 +9,10 @@ import { listFolloweesOf } from '@/blog/lib/lite/repositories/follow-repository'
 import * as posts from '@/blog/lib/lite/repositories/post-repository';
 import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
 import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
+import { filterBlockedForViewer, viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { getAccountPosts } from '@transaction/lib/bridge-api';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
+import type { User } from '@smart-signer/types/common';
 
 const logger = getLogger('app');
 
@@ -81,8 +83,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // Same actor resolution as every other lite route: the cookie is the truth,
   // and a suspended/banned account must not be served a feed.
   let userId: string;
+  // Hoisted so the block-list read below can key on the SAME session that
+  // established the actor, rather than re-reading the cookie — same reasoning
+  // as `/api/lite/notifications`'s own `sessionUser` hoist.
+  let sessionUser: User | undefined;
   try {
     const session = await getLiteSession();
+    sessionUser = session.user;
     const actor = await requireActiveLiteUser(session.user, session);
     if (!actor.ok) return NextResponse.json({ error: 'not_a_lite_session' }, { status: 401 });
     userId = actor.user.userId;
@@ -91,6 +98,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // saying so beats pretending this reader follows nobody.
     return NextResponse.json({ error: 'not_a_lite_session' }, { status: 401 });
   }
+
+  // ★★★ EFFECT (A) — THE VIEWER'S OWN BLOCK LIST (RENDER-01 fix, 2026-09-08).
+  //
+  // This route had NO block/mute enforcement at all — a follower who blocked
+  // someone they still followed (blocking never auto-unfollows; see
+  // `follow-repository.ts`/`block-repository.ts`, two tables that never touch
+  // each other) kept seeing that person's posts in this exact tab, forever.
+  // The sibling tab in the same `feed-tabs.tsx` component, `/api/feed/for-you`,
+  // already computes this same set (`listBlockedKeysOf` + `chainMutedKeysOfActor`,
+  // merged) and applies `filterBlockedForViewer` to its assembled response —
+  // this ports the identical mechanism via the shared, TTL-cached
+  // `viewerBlockedKeySet` helper every other effect-A site already uses
+  // (`/api/account-posts`, `/api/lite/notifications`).
+  //
+  // ★ DEGRADES OPEN, matching every other effect-A site: a Lumen DB hiccup or a
+  // degraded chain-mute read must not blank a reader's Following feed.
+  const blockedKeys = await viewerBlockedKeySet(sessionUser).catch(() => new Set<string>());
 
   const limitParam = Number(req.nextUrl.searchParams.get('limit'));
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 50) : 30;
@@ -109,7 +133,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const cached = refresh ? undefined : cache.get(userId);
   if (cached && Date.now() - cached.at < FRESH_MS) {
-    return NextResponse.json({ entries: cached.entries.slice(0, limit), cache: 'fresh' });
+    // ★ Filtered on the way OUT of the cache, not before going in — the cache
+    // is per-viewer already, and a block/mute made after this feed was cached
+    // must take effect within the SAME 60s window rather than waiting for a
+    // full cache rebuild. `viewerBlockedKeySet` carries its own, much shorter
+    // 10s TTL, so this stays correct without invalidating the feed cache.
+    const cachedEntries = await filterBlockedForViewer(cached.entries.slice(0, limit), blockedKeys);
+    return NextResponse.json({ entries: cachedEntries, cache: 'fresh' });
   }
 
   try {
@@ -194,9 +224,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const liteEntries = liteRows.map((p) => dbPostToEntry(p, names.get(p.postId)));
     const entries = [...liteEntries, ...chainPages.flat()].sort(byCreatedDesc).slice(0, limit);
 
+    // ★ THE CACHE STORES THE RAW (UNFILTERED) PAGE, keyed per-viewer. Filtering
+    // is applied on every read (here and on the cache-hit branch above) rather
+    // than before `cachePut`, so a block made after this feed was cached is
+    // honoured immediately on the reader's NEXT request instead of waiting up
+    // to 60s for the feed cache itself to expire and rebuild.
     cachePut(userId, entries);
+    const filteredEntries = await filterBlockedForViewer(entries, blockedKeys);
     return NextResponse.json({
-      entries,
+      entries: filteredEntries,
       following: followees.length,
       sources: { lumen: liteEntries.length, chain: chainPages.flat().length },
       cache: 'miss'

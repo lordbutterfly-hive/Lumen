@@ -893,7 +893,28 @@ const AskModal: FC<{
    * never spoke to, and it is disclosed rather than hidden behind the posted
    * figure. See askCost.
    */
-  const cost = askCost(usd, q, m.priceUsd);
+  /**
+   * ★★★ PRICE-3 FIX (2026-09-08): PRICE THE ASK OFF THE LIVE SETTLEMENT QUOTE,
+   * NOT OFF SPOT. The chain settles an ask at `min(TWAP_short, TWAP_long, spot)`
+   * and escrows `ceil(tokenLeg / thatRate)` WHOLE tokens (ask.go creditsForAsk).
+   * `serviceQuote(usd, m.priceUsd)` above prices the token leg off `m.priceUsd`,
+   * which is the live SPOT price (live/adapt.ts: `usdFromHbd(spotPriceHbd)`). On
+   * any market trading ABOVE its long TWAP, spot > settlement rate, so the
+   * spot-derived token count is TOO LOW — measured at 13 tokens shown while the
+   * chain escrowed 65 (understated 4.39x), on a screen that otherwise looked
+   * normal. The CORRECT count is already fetched here as
+   * `askQuote.data.creditsRequired` (the contract's own `quote` entrypoint) and
+   * was previously used only to gate the button; render it as the cost instead
+   * of discarding it. The signing path (use-live-token-market.ts) already re-reads
+   * the quote and signs the true credits, so only the DISPLAY and the
+   * affordability check understated the cost — both are corrected here off the
+   * same figure. `q` is still used for the commission (a face×12% HBD leg that
+   * is rate-independent) and as a pre-quote placeholder while the button is
+   * blocked (`priceBlocked`) until the quote lands.
+   */
+  const settlementCredits = askQuote.data?.creditsRequired ?? null;
+  const chainTokens = settlementCredits ?? q.tokens;
+  const cost = askCost(usd, { tokens: chainTokens, commissionUsd: q.commissionUsd }, m.priceUsd);
   const held = m.position?.tokens ?? 0;
   // This mock has no HBD wallet balance to check — a real, wallet-connected
   // build MUST also verify the buyer can cover q.commissionUsd in HBD
@@ -901,7 +922,10 @@ const AskModal: FC<{
   // proves the TOKEN leg is affordable. Never let "canAfford" quietly mean
   // "affords the tokens" once a real HBD balance exists to check — see
   // ask.go's Ask() guard order (maxCredits, then the exact commission match).
-  const canAffordTokens = held >= q.tokens && Number.isFinite(q.tokens);
+  // PRICE-3: the balance must cover what the CHAIN escrows (chainTokens), not the
+  // understated spot-derived count — otherwise a buyer is told they can afford an
+  // ask the contract's maxCredits guard will reject.
+  const canAffordTokens = held >= chainTokens && Number.isFinite(chainTokens);
   // H-FE-2: the commission is a SEPARATE HBD leg (ask.go's commissionHbdPaid), so the
   // buyer must be able to cover it in HBD — the token-leg check alone let an ask be
   // signed that the contract's exact-commission guard rejects for want of HBD, burning

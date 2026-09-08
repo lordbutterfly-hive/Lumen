@@ -51,21 +51,31 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const session = await getLiteSession();
     sessionUser = session.user;
-    const checked = await requireActiveLiteUser(session.user, session);
-    if (checked.ok) actor = { userId: checked.user.userId };
-    else if (hiveParam && session.user?.username === hiveParam) actor = { hive: hiveParam };
+    const u = session.user;
+    // ★★★ AUTH-01 / CHAIN-03 FIX (2026-09-08): APPLY THE SAME LITE-vs-HIVE
+    // DISCRIMINATOR THE OTHER READERS USE (interests/route.ts `whichReader`, and 6
+    // more). A session is a LITE actor when it carries a Lumen `userId` OR
+    // `account_tier: 'lite'`; it is a full HIVE actor only when it has a `username`
+    // and is NEITHER. `username` is a self-chosen display_name for a lite session
+    // but a signature-proven Hive account for a full one — so it may be trusted as a
+    // Hive account ONLY in the full-Hive case.
+    const isLiteActor = !!u && (!!u.userId || u.account_tier === 'lite');
+    if (isLiteActor) {
+      // A lite session resolves ONLY through its actor check, and a refusal is
+      // TERMINAL. The old code fell through on refusal to trust `u.username` as a
+      // Hive account, so a revoked/suspended lite user whose display_name collides
+      // with a real Hive account name (e.g. after an ordinary self-upgrade bumped
+      // the session epoch) read that account's private notifications and DM senders.
+      const checked = await requireActiveLiteUser(u, session);
+      if (checked.ok) actor = { userId: checked.user.userId };
+      // else: no fallback — a refused lite session is signed out for this endpoint.
+    } else if (u?.username && hiveParam && u.username === hiveParam) {
+      // Full Hive session: `username` is proven by signature at login, so it is the
+      // authority on its OWN account — and only its own (bound by `=== hiveParam`).
+      actor = { hive: hiveParam };
+    }
   } catch {
     actor = null;
-  }
-  // A full Hive session is not a lite session; trust the cookie's own username.
-  if (!actor && hiveParam) {
-    try {
-      const session = await getLiteSession();
-      sessionUser = session.user;
-      if (session.user?.username === hiveParam) actor = { hive: hiveParam };
-    } catch {
-      /* fall through to 401 */
-    }
   }
   if (!actor) return NextResponse.json({ error: 'not_signed_in' }, { status: 401 });
 

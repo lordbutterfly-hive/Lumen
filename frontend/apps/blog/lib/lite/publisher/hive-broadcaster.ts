@@ -8,6 +8,18 @@ import { CommentOp, PostBroadcaster, setBroadcaster } from './broadcaster';
 const logger = getLogger('app');
 
 /**
+ * Hard ceiling on the two read-only pre-flight fetches below (`canDelete`,
+ * `postExists`) — DOS-02. Both run on the per-job publish path, and a raw
+ * `await fetch` with no signal hangs forever against a node that accepts the
+ * connection and never answers, stalling the whole shared drain batch. Same order
+ * of magnitude as the avatar path's TOTAL_BUDGET_MS=3000. `canDelete` fails CLOSED
+ * on timeout (its catch -> false -> soft delete); `postExists` lets the AbortError
+ * propagate, which is retriable in the worker — exactly what it already does for a
+ * node error, so a timeout is never mistaken for "not published" (no double-post).
+ */
+const HIVE_READ_TIMEOUT_MS = 3000;
+
+/**
  * The real `PostBroadcaster` (spec §D.2): signs the comment op with the publisher
  * account's POSTING key and broadcasts it to Hive.
  *
@@ -213,7 +225,8 @@ export const hiveBroadcaster: PostBroadcaster = {
           method: 'condenser_api.get_content',
           params: [author, permlink],
           id: 1
-        })
+        }),
+        signal: AbortSignal.timeout(HIVE_READ_TIMEOUT_MS)
       });
       if (!res.ok) return false;
       const data = (await res.json()) as {
@@ -243,7 +256,8 @@ export const hiveBroadcaster: PostBroadcaster = {
         method: 'condenser_api.get_content',
         params: [author, permlink],
         id: 1
-      })
+      }),
+      signal: AbortSignal.timeout(HIVE_READ_TIMEOUT_MS)
     });
     if (!res.ok) throw new Error(`get_content failed: HTTP ${res.status}`);
     const data = (await res.json()) as {

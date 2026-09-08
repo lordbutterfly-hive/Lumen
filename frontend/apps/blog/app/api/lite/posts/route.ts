@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardWrite, guardRead, guardBodySize } from '@/blog/lib/lite/http/guard';
+import { guardWrite, guardRead, readBoundedJson, payloadTooLarge } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { createLitePost, getLiteUserPosts, CreatePostRequest } from '@/blog/lib/lite/content/post-service';
 import { findUserByDisplayName } from '@/blog/lib/lite/repositories/user-repository';
 import { filterPermanentlyFailed } from '@/blog/lib/lite/repositories/post-repository';
 import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
 import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
-import { applyOwnerBlocksToAuthoredEntries } from '@/blog/lib/lite/social/block-filter';
+import {
+  applyOwnerBlocksToAuthoredEntries,
+  filterBlockedForViewer,
+  viewerBlockedKeySet
+} from '@/blog/lib/lite/social/block-filter';
 import { ParentRef } from '@/blog/lib/lite/types';
 import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
@@ -129,12 +133,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
 
-  // Refuse an oversized body before it is buffered and parsed. See guardBodySize.
-  const tooBig = guardBodySize(req);
-  if (tooBig) return tooBig;
-
+  // ★ STREAM-BOUNDED, NOT HEADER-BOUNDED (FIX-DOS, 2026-09-08 — AUTH-02).
+  // `guardWrite` only checks that an `x-csrf-token` header is PRESENT, not its
+  // value, and no actor/session identity is checked before this point either —
+  // so an unauthenticated caller reaches the parse. `guardBodySize` trusted a
+  // caller-optional `content-length`, which a chunked body simply omits;
+  // `readBoundedJson` counts bytes while reading and refuses (413) before an
+  // oversized body is ever fully buffered.
   const session = await getLiteSession();
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const parsed = await readBoundedJson(req);
+  if (parsed === null) return payloadTooLarge();
+  const body = parsed.body;
   if (!body) return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
 
   // A parent that cannot be parsed is an ERROR, not "no parent". Treating it as absent
@@ -279,7 +288,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // nothing. Partial withholds still serve what survived; a total wipe-out is
     // reported as degraded rather than as an empty account.
     const filtered = await applyOwnerBlocksToAuthoredEntries(withParents);
-    const entries = filtered.entries;
+    let entries = filtered.entries;
     if (entries.length === 0 && filtered.withheldUnresolvable > 0) {
       logger.warn(
         'lite author posts fully withheld for %s (kind=%s): %d entries unresolvable',
@@ -288,6 +297,36 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         filtered.withheldUnresolvable
       );
       return NextResponse.json({ entries: [], degraded: 'block_filter_unresolved' });
+    }
+
+    // ★ EFFECT A — THE VIEWER'S OWN BLOCK LIST (RENDER-02 fix, 2026-09-08).
+    //
+    // Everything above is effect (B): the PROFILE OWNER's blocks (does this author's
+    // page owner -- for a reply's parent -- block the reply's author). Effect (A) is
+    // the opposite direction: what the READER chose not to see, and this route never
+    // applied it. `/@user/feed` and `/@user/comments` for a LITE account both fetch
+    // here (the sibling `/api/account-posts`, for a chain account, already applies
+    // this exact pair), so a reader met an account they had blocked on the one
+    // surface where they had gone looking specifically for that person's posts.
+    //
+    // ★ RUNS AFTER THE `withheldUnresolvable` CHECK ABOVE, not before -- same
+    // ordering rule `/api/account-posts` documents: that check distinguishes "we
+    // could not resolve the parents" from "this account has nothing", and a page
+    // that is empty because the READER blocked everyone on it is a real empty
+    // page, not a database outage.
+    //
+    // ★ NO SESSION REQUIRED -- this endpoint stays public-by-design (see the GET
+    // doc comment above): `getLiteSession()` returns an empty session for an
+    // anonymous caller, `viewerBlockedKeySet` resolves that to an empty set, and
+    // `filterBlockedForViewer` is then a no-op, so an anonymous or non-blocking
+    // caller's response is byte-for-byte unchanged.
+    //
+    // ★ DEGRADES OPEN, matching every other effect-A site: a Lumen DB hiccup must
+    // not blank this profile tab.
+    const viewerSession = await getLiteSession();
+    const blockedKeys = await viewerBlockedKeySet(viewerSession.user).catch(() => new Set<string>());
+    if (blockedKeys.size > 0) {
+      entries = await filterBlockedForViewer(entries, blockedKeys);
     }
 
     return NextResponse.json({ entries });

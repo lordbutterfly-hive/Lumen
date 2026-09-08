@@ -1,4 +1,5 @@
-import { query } from '../db/pool';
+import { query, queryWithTimeout } from '../db/pool';
+import { liteConfig } from '../config';
 
 /**
  * THE SERVED LOG (table `lumen_feed_served`, migration 0027).
@@ -395,6 +396,20 @@ export interface ServedSweepResult {
  * low millions of rows) that is cheaper than the machinery to avoid it; if the
  * table ever grows past that, this belongs in a scheduled job with a
  * high-water-mark, not in a sweep fired after a feed write.
+ *
+ * ★ FIX-DOS-04-REVISED, 2026-09-08. DOS-04 gave the shared pool a 2000ms
+ * `statement_timeout` sized for REQUEST-path queries. The two full-table
+ * passes below (`perViewerOverCap`, `overCap`) are exactly the "low millions
+ * of rows" aggregate this function's own comment above already warns about —
+ * under the blanket 2000ms default they would be silently and PERMANENTLY
+ * killed the moment they ever need more than 2s (this call is fire-and-forget
+ * from `feed-cache.ts`'s `maybeSweepServed`, wrapped in a try/catch that only
+ * logs a warning — nothing else would surface the failure, and the table
+ * would grow unbounded). They now run through `queryWithTimeout` with
+ * `liteConfig.dbSweepStatementTimeoutMs` (30s default) instead of the pool
+ * default — see that config value's own doc for the reasoning. `expired`
+ * (a `served_at <` range delete, index-backed) is left on the ordinary
+ * `query()`/2000ms path since it has no documented full-table-scan risk.
  */
 export async function sweepServedFeeds(opts: ServedSweepOptions): Promise<ServedSweepResult> {
   const ttlDays = Math.max(1, Math.trunc(opts.ttlDays));
@@ -408,7 +423,7 @@ export async function sweepServedFeeds(opts: ServedSweepOptions): Promise<Served
     [ttlDays]
   );
 
-  const perViewerOverCap = await query(
+  const perViewerOverCap = await queryWithTimeout(
     `DELETE FROM lumen_feed_served s
       USING (
         SELECT ctid,
@@ -419,15 +434,17 @@ export async function sweepServedFeeds(opts: ServedSweepOptions): Promise<Served
          )
       ) t
       WHERE s.ctid = t.ctid AND t.rn > $1`,
-    [perViewer]
+    [perViewer],
+    liteConfig.dbSweepStatementTimeoutMs
   );
 
-  const overCap = await query(
+  const overCap = await queryWithTimeout(
     `DELETE FROM lumen_feed_served
       WHERE ctid IN (
         SELECT ctid FROM lumen_feed_served ORDER BY served_at DESC OFFSET $1
       )`,
-    [maxRows]
+    [maxRows],
+    liteConfig.dbSweepStatementTimeoutMs
   );
 
   return {

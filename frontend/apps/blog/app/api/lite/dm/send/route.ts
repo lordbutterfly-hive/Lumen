@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardWrite, guardBodySize } from '@/blog/lib/lite/http/guard';
+import { guardWrite, readBoundedJson, payloadTooLarge } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { sendMessage } from '@/blog/lib/lite/dm/dm-service';
 
@@ -24,11 +24,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
 
-  const tooBig = guardBodySize(req);
-  if (tooBig) return tooBig;
-
+  // ★ STREAM-BOUNDED, NOT HEADER-BOUNDED (FIX-DOS, 2026-09-08 — AUTH-02). See
+  // lib/lite/http/guard.ts's readBoundedJson doc: guardWrite only checks that a
+  // CSRF header is PRESENT, not an identity, so an unauthenticated caller reaches
+  // this parse — guardBodySize's caller-optional content-length let a chunked
+  // body bypass it and be buffered whole. readBoundedJson counts bytes as it
+  // reads and refuses (413) before that happens.
   const session = await getLiteSession();
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const parsed = await readBoundedJson(req);
+  if (parsed === null) return payloadTooLarge();
+  const body = parsed.body;
   if (!body) return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
 
   try {

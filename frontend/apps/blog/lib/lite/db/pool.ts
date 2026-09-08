@@ -48,7 +48,16 @@ export function getPool(): Pool {
     connectionString: liteConfig.databaseUrl,
     max: liteConfig.dbPoolMax,
     idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 10_000
+    connectionTimeoutMillis: 10_000,
+    // ★ FIX-DOS, 2026-09-08 (DOS-04). Neither timeout above bounds a statement that is
+    // ALREADY RUNNING on a checked-out connection — `connectionTimeoutMillis` only
+    // bounds waiting for a free connection, `idleTimeoutMillis` only an idle, checked-in
+    // one. `statement_timeout` is sent as a Postgres startup parameter (see `pg`'s own
+    // `connection-parameters.js`), so it applies to every connection this pool ever
+    // opens, before the first query runs on it — not a per-query `SET` that could be
+    // skipped. See `liteConfig.dbStatementTimeoutMs`'s own doc for the measurement and
+    // the reason 2000ms matches this database's existing Python readers.
+    statement_timeout: liteConfig.dbStatementTimeoutMs
   });
   slot.pool.on('error', (err) => logger.error(err, 'Lite DB pool error'));
   return slot.pool;
@@ -59,6 +68,43 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
   params?: unknown[]
 ): Promise<QueryResult<T>> {
   return getPool().query<T>(text, params);
+}
+
+/**
+ * `query`, but with a PER-STATEMENT `statement_timeout` override instead of
+ * the pool's default (`liteConfig.dbStatementTimeoutMs`, 2000ms — see DOS-04
+ * in `getPool()` above).
+ *
+ * ★ FIX-DOS-04-REVISED, 2026-09-08. DOS-04's pool-level cap protects the
+ * request path, but at least one legitimate off-request-path job
+ * (`sweepServedFeeds` in `feed-served-repository.ts`, whose own doc comment
+ * says it "aggregates the whole table" at "low millions of rows") can
+ * genuinely need more than 2s and must not be silently and permanently
+ * broken by the pool default — see `liteConfig.dbSweepStatementTimeoutMs`'s
+ * own doc for why.
+ *
+ * Uses `SET LOCAL` (transaction-scoped) rather than a session-level `SET`:
+ * `SET LOCAL` automatically reverts at COMMIT/ROLLBACK, so there is no way
+ * for an overridden timeout to leak onto the connection once it goes back to
+ * the pool — unlike a bare `SET statement_timeout = …` on a checked-out
+ * client, which `pg` does NOT auto-reset on release, and which a thrown error
+ * (skipping a matching `RESET`) would leave permanently applied to whichever
+ * request next happens to check out that same physical connection.
+ *
+ * `timeoutMs` must be a trusted, internally-controlled number — never
+ * user input — because Postgres's `SET`/`SET LOCAL` do not accept bind
+ * parameters, so the value is interpolated directly into the statement.
+ */
+export async function queryWithTimeout<T extends QueryResultRow = QueryResultRow>(
+  text: string,
+  params: unknown[] | undefined,
+  timeoutMs: number
+): Promise<QueryResult<T>> {
+  const ms = Math.max(0, Math.trunc(timeoutMs));
+  return withTransaction(async (client) => {
+    await client.query(`SET LOCAL statement_timeout = ${ms}`);
+    return client.query<T>(text, params);
+  });
 }
 
 /**

@@ -119,6 +119,136 @@ function normalizeImages(image?: string | string[]): string[] | undefined {
   return list.length > 0 ? list : undefined;
 }
 
+// ============================================================================
+// TX-01 FIX (2026-09-08, REVISED 2026-09-08 after scrutiny): SANITY-BOUND THE
+// UNTRUSTED VESTS/HIVE RATIO TO A FEW x OF THE REAL LIVE RATIO, AND SURFACE A
+// HUMAN-CHECKABLE DISCLOSURE, NOT JUST A RAW VESTS NUMBER.
+//
+// withdraw_vesting / delegate_vesting_shares SIGN a VESTS amount derived from
+// total_vesting_fund_hive / total_vesting_shares, which arrive from a single,
+// unauthenticated get_dynamic_global_properties read off one of several public
+// nodes Lumen does not operate. A node that skews that ratio makes hpToVests emit
+// a wildly different VESTS figure for the same HP input (measured up to ~1000x; a
+// crafted ratio produced 94.99% of a named victim's real VESTS balance for a
+// plausible "10 HP" input). Two defences, both routed through deriveVestingShares:
+//   1. assertSaneVestingRatio THROWS on an implausible ratio before it is signed.
+//   2. The wallet dialogs render the HP typed, the VESTS that will be signed, AND
+//      the implied VESTS/HIVE rate this specific conversion applies
+//      (useSignedVestsPreview) — flagged when it strays from a known-good
+//      reference — so a human sees a number they can actually judge, not just an
+//      opaque VESTS blob.
+//
+// *** BAND CORRECTED 2026-09-08 (scrutiny finding): the first cut of this fix
+// used [1e3, 1e8] on an ASSUMED live ratio of ~1.9e6 VESTS/HIVE. That assumption
+// was never checked against the chain and was wrong by >1000x: the REAL live
+// ratio, read from get_dynamic_global_properties on api.hive.blog on 2026-09-08
+// (total_vesting_shares 347,310,980,569.914746 VESTS / total_vesting_fund_hive
+// 215,548,232.410 HIVE), is ~1,611 VESTS/HIVE — cross-checked against two real
+// mainnet accounts' vesting_shares converting to plausible HP figures
+// (guiltyparties -> ~105,512 HP; blocktrades -> ~16,498,657 HP). Against the
+// REAL ratio the old band had only ~1.6x of headroom below (1611/1000) and an
+// absurd ~62,000x above (1e8/1611) — i.e. it was one bad year of ordinary drift
+// from breaking low, and let a hostile node steer ~62,000x high before being
+// refused, both far worse than the ~52x the original scrutiny computed off the
+// wrong 1.9e6 baseline.
+//
+// Historical direction is DOWN, not up: a real on-chain fill_vesting_withdraw
+// for account guiltyparties on 2020-09-04 (deposited 505.829 HIVE, withdrawn
+// 976483.068876 VESTS) implies a ratio of ~1,930 VESTS/HIVE six years ago vs
+// ~1,611 today — about -3%/year compounded, consistent with genesis's
+// documented 1,000,000 VESTS/HIVE issuance rate having declined monotonically
+// for a decade as network inflation trends toward its 0.95% floor. The ratio
+// has never, in ten years of chain history, drifted upward.
+//
+// New band: [200, 5,000]. Downside headroom (1611/200 ≈ 8x) tolerates roughly
+// 68 YEARS of continued decline at the observed recent ~3%/year rate before a
+// legitimate ratio could ever trip the floor. Upside headroom (5000/1611 ≈
+// 3.1x) caps a hostile/lying node's steer at a "few x" — a real but bounded,
+// non-catastrophic over-conversion — instead of the previous ~62,000x. This is
+// a corruption tripwire, not a precise oracle, and it still needs re-measuring
+// every few years as the live ratio keeps drifting down; the maintenance cost
+// is cheap (one get_dynamic_global_properties read) and cheap deliberately —
+// see REFERENCE_VESTS_PER_HIVE below for the second, independent layer that
+// keeps the disclosure honest even between refreshes.
+// ============================================================================
+
+/** Lower plausibility bound on the VESTS-per-HIVE ratio (display units). */
+export const MIN_VESTS_PER_HIVE = 200;
+/** Upper plausibility bound on the VESTS-per-HIVE ratio (display units). */
+export const MAX_VESTS_PER_HIVE = 5_000;
+
+/**
+ * A recent-measured VESTS/HIVE ratio, used ONLY as a human-facing sanity
+ * anchor for the disclosure below — NOT as a source of truth for conversion
+ * (that stays get_dynamic_global_properties, per the guard above). Measured
+ * live against api.hive.blog on 2026-09-08 (see the block comment above).
+ * Drifts ~-3%/year historically, so this needs refreshing every few years,
+ * not on every deploy; RATIO_WARN_FACTOR gives it slack against being stale.
+ */
+export const REFERENCE_VESTS_PER_HIVE = 1_611;
+/**
+ * How many multiples away from REFERENCE_VESTS_PER_HIVE (either direction)
+ * before the disclosure flags the applied rate as worth double-checking. This
+ * is a SOFT, informational warning layered inside the hard [MIN,MAX] band
+ * above — a within-band lie (up to ~3.1x high) still passes assertSaneVestingRatio,
+ * but a lie past this factor renders visibly, in a unit a human can judge.
+ */
+export const RATIO_WARN_FACTOR = 2;
+
+/** True when `ratio` is more than RATIO_WARN_FACTOR away from the reference. */
+export function ratioLooksOff(ratio: number): boolean {
+  if (!Number.isFinite(ratio)) return true;
+  return ratio > REFERENCE_VESTS_PER_HIVE * RATIO_WARN_FACTOR || ratio < REFERENCE_VESTS_PER_HIVE / RATIO_WARN_FACTOR;
+}
+
+/**
+ * VESTS (display units) per HIVE (display units) implied by the two
+ * global-property assets, or NaN if either is malformed / non-positive.
+ */
+export function vestsPerHiveRatio(fund: NaiAsset, shares: NaiAsset): number {
+  const fundHive = Number(fund?.amount) / 10 ** Number(fund?.precision);
+  const sharesVests = Number(shares?.amount) / 10 ** Number(shares?.precision);
+  if (!Number.isFinite(fundHive) || fundHive <= 0) return NaN;
+  if (!Number.isFinite(sharesVests) || sharesVests <= 0) return NaN;
+  return sharesVests / fundHive;
+}
+
+/**
+ * Throws unless the implied VESTS/HIVE ratio is inside
+ * [MIN_VESTS_PER_HIVE, MAX_VESTS_PER_HIVE]; returns the ratio otherwise. This is
+ * the money-path tripwire against a node returning a corrupt vesting ratio.
+ */
+export function assertSaneVestingRatio(fund: NaiAsset, shares: NaiAsset): number {
+  const ratio = vestsPerHiveRatio(fund, shares);
+  if (!Number.isFinite(ratio)) {
+    throw new Error('Vesting conversion refused: the network returned malformed global properties. Please retry.');
+  }
+  if (ratio < MIN_VESTS_PER_HIVE || ratio > MAX_VESTS_PER_HIVE) {
+    throw new Error(
+      `Vesting conversion refused: implausible VESTS/HIVE ratio (${ratio.toExponential(2)}). ` +
+        'A node may be returning bad data — retry, or switch nodes.'
+    );
+  }
+  return ratio;
+}
+
+/**
+ * The ONE place HP -> VESTS is derived for a signed op. Asserts the ratio, then
+ * converts with the SAME wax call the chain uses. Both the money ops
+ * (withdrawFromVesting / delegateVestingShares) and the UI preview
+ * (useSignedVestsPreview) go through here, so the figure shown is the figure
+ * signed and a corrupt read is refused for both at once.
+ */
+export function deriveVestingShares(
+  chain: Pick<IHiveChainInterface, 'hpToVests'>,
+  hp: IAsset,
+  fund: NaiAsset,
+  shares: NaiAsset
+): IAsset {
+  assertSaneVestingRatio(fund, shares);
+  return chain.hpToVests(hp, fund, shares);
+}
+
 export class TransactionService {
   /**
    * Options for Signer.
@@ -1193,13 +1323,31 @@ export class TransactionService {
     }, transactionOptions);
   }
 
-  async withdrawFromVesting(account: string, hp: IAsset, transactionOptions: TransactionOptions = {}) {
+  /**
+   * TX-01 (REVISED): ratio-checked HP -> VESTS for the signed vesting ops AND
+   * the dialog preview, PLUS the implied VESTS/HIVE ratio this conversion
+   * applied, so the disclosure can show a rate the human can compare against
+   * REFERENCE_VESTS_PER_HIVE (see above) instead of an opaque VESTS blob.
+   * Reads the global properties once, sanity-bounds the implied ratio, and
+   * converts through the shared `deriveVestingShares`. Throws (rather than
+   * signing) when the ratio is implausible, so a corrupt node read can never
+   * be silently broadcast.
+   */
+  async hpToVestsCheckedWithRatio(hp: IAsset): Promise<{ vests: IAsset; ratio: number }> {
     const { total_vesting_fund_hive, total_vesting_shares } = await this.getDynamicGlobalProperties();
-    const vestingShares = (await this.getChain()).hpToVests(
-      hp,
-      total_vesting_fund_hive,
-      total_vesting_shares
-    );
+    const chain = await this.getChain();
+    const ratio = assertSaneVestingRatio(total_vesting_fund_hive, total_vesting_shares);
+    const vests = chain.hpToVests(hp, total_vesting_fund_hive, total_vesting_shares);
+    return { vests, ratio };
+  }
+
+  /** Back-compat callers that only need the VESTS amount (the money ops below). */
+  async hpToVestsChecked(hp: IAsset): Promise<IAsset> {
+    return (await this.hpToVestsCheckedWithRatio(hp)).vests;
+  }
+
+  async withdrawFromVesting(account: string, hp: IAsset, transactionOptions: TransactionOptions = {}) {
+    const vestingShares = await this.hpToVestsChecked(hp);
 
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation({
@@ -1217,12 +1365,7 @@ export class TransactionService {
     hp: IAsset,
     transactionOptions: TransactionOptions = {}
   ) {
-    const { total_vesting_fund_hive, total_vesting_shares } = await this.getDynamicGlobalProperties();
-    const vestingShares = (await this.getChain()).hpToVests(
-      hp,
-      total_vesting_fund_hive,
-      total_vesting_shares
-    );
+    const vestingShares = await this.hpToVestsChecked(hp);
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation({
         delegate_vesting_shares_operation: {

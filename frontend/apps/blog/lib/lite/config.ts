@@ -66,6 +66,49 @@ export const liteConfig = {
   sessionTtlDays: 14,
   dbPoolMax: Number(process.env.LITE_DB_POOL_MAX || 10),
   /**
+   * ★ FIX-DOS, 2026-09-08 (DOS-04). No bound previously existed on how long a
+   * single statement may run once it has a connection checked out — only
+   * `connectionTimeoutMillis` (waiting for a free connection) and
+   * `idleTimeoutMillis` (an idle, checked-in connection) were set. A slow
+   * query (lock contention, a bad plan, table bloat) or a saturating burst of
+   * them (see DOS-08's `/api/lite/engagement/bulk`, which alone can hold all
+   * `dbPoolMax` connections at once) ran uncut and queued every other lite
+   * route behind it — measured: a 6s `pg_sleep()` through `query()` ran the
+   * full 6s, and with the pool saturated an unrelated probe query queued
+   * 24ms -> 4754ms.
+   *
+   * 2000ms matches the SAME lite Postgres's own Python readers
+   * (`recsys/io/lite_engagement.py`, `recsys/io/seen_log.py`, both
+   * `LUMEN_*_STATEMENT_TIMEOUT_MS` defaulting to 2000) — this is the existing,
+   * already-proven-safe bound for this exact database, not a new number
+   * invented for this fix.
+   */
+  dbStatementTimeoutMs: Number(process.env.LITE_DB_STATEMENT_TIMEOUT_MS || 2_000),
+  /**
+   * ★ FIX-DOS-04-REVISED, 2026-09-08. `dbStatementTimeoutMs` above is the right
+   * default for request-path queries, but at least one existing off-request-path
+   * job legitimately needs more room: `sweepServedFeeds`
+   * (`feed-served-repository.ts`), fired (fire-and-forget, throttled to once per
+   * `SWEEP_INTERVAL_MS`) after a feed write. Its own doc comment already flags
+   * why: "the per-viewer pass aggregates the whole table to find which viewers
+   * are over the cap. At the scale this runs at (a 10-minute throttle, low
+   * millions of rows) that is cheaper than the machinery to avoid it." Before
+   * DOS-04 that aggregate could take however long it needed and would always
+   * eventually finish; under DOS-04's blanket 2000ms pool default it would
+   * SILENTLY AND PERMANENTLY fail every cycle the moment it needs more than
+   * 2s — the call is wrapped in a try/catch that only logs a warning
+   * (`feed-cache.ts`'s `maybeSweepServed`), so nothing would surface the
+   * failure beyond a log line, and `lumen_feed_served` would grow unbounded.
+   * `pool.ts`'s `queryWithTimeout` gives this (and any future job like it) a
+   * per-statement override via `SET LOCAL` — transaction-scoped, so it can
+   * never leak back into the shared pool the way a bare session-level `SET`
+   * could. Deliberately generous (30s) since this runs off the request path,
+   * throttled, and holding one connection for up to 30s out of `dbPoolMax`
+   * (default 10) is not a availability risk the way an unbounded/request-path
+   * query would be.
+   */
+  dbSweepStatementTimeoutMs: Number(process.env.LITE_DB_SWEEP_STATEMENT_TIMEOUT_MS || 30_000),
+  /**
    * Hybrid storage: after a post is published to Hive (the source of truth), drop
    * the stored body and keep only the mapping (author/permlink -> user_id). Trades
    * feed speed (more Hive reads) for minimal content-at-rest. Off by default —

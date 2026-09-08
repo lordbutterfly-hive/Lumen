@@ -3,14 +3,36 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getGoogleDriveOAuth2Client } from '../client';
 import { getLogger } from '@ui/lib/logging';
 import { guardBodySize, payloadTooLarge, readBoundedBody } from '@/blog/lib/lite/http/guard';
+import { getClientIp } from '@/blog/lib/lite/http/ip';
+import { consumeLocalGlobal, consumeLocalPerIp } from '@/blog/lib/lite/antispam/local-rate-limit';
 
 const logger = getLogger('google-drive-auth');
+
+/**
+ * ★ FIX-DOS, 2026-09-08 (API-01). This route had NO rate limit of any kind, and no
+ * session/CSRF gate either — fully public, unauthenticated. Measured: 30 consecutive
+ * real POSTs (garbage code, unconfigured deploy), none ever 429. In-process only (no
+ * new Postgres dependency for a route that has never depended on the lite backend),
+ * matching the same `consumeLocalGlobal`/`consumeLocalPerIp` pair
+ * `app/api/creator-tokens/{gql,submit}` already use for the identical class of
+ * problem. Sized tightly: a real caller exchanges an OAuth code once per Google
+ * Drive connect action, not repeatedly.
+ */
+const GOOGLE_DRIVE_AUTH_PER_IP_PER_MIN = 20;
+const GOOGLE_DRIVE_AUTH_GLOBAL_PER_MIN = 500;
 
 /**
  * Proxy endpoint for google drive authentication
  * Usage: POST /api/google-drive/auth
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const ip = getClientIp(req);
+  if (!consumeLocalGlobal('google_drive_auth', GOOGLE_DRIVE_AUTH_GLOBAL_PER_MIN)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+  if (!consumeLocalPerIp(ip, 'google_drive_auth', GOOGLE_DRIVE_AUTH_PER_IP_PER_MIN)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
 
   try {
     // ★ STREAM-BOUNDED, not header-bounded (2026-08-23). Unauthenticated route: the caller

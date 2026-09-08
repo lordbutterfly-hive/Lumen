@@ -44,15 +44,29 @@ const DmComposeModal: FC<{ recipientHandle: string; onClose: () => void }> = ({ 
   const { user, isHydrated } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
 
-  // Strip only the `hive:` prefix; leave bare handles and DIDs for the server to
-  // resolve. Used identically for the key lookup and the send, so the two never drift.
-  const recipientActor = useMemo(
+  // ★★★ IDA-02 FIX (2026-09-08): PRESERVE THE `hive:` PREFIX AS THE `h:` ESCAPE.
+  // A `hive:<name>` handle names a real Hive account. Stripping it to a BARE name
+  // sends it down `resolveDmActor`'s bare-name fallthrough (`resolveFollowTarget`),
+  // which resolves Lumen-FIRST — so a FIRST-CONTACT message to a Hive creator lands
+  // in a name-colliding lite squatter's inbox, and neither the sender nor the real
+  // creator ever learns it went astray. The `h:` escape is `resolveDmActor`'s one
+  // Hive-authoritative branch (`findUserByHiveAccountName` / `hiveAccountExists`, no
+  // Lumen shadowing), so the server is handed `h:<name>` and routes to the real Hive
+  // account. Bare handles and DIDs are unchanged.
+  //
+  // `bareName` (the human-facing name) and `recipientActor` (the server form) are
+  // derived separately so the display and the self-check never see the `h:` escape.
+  const bareName = useMemo(
     () => (recipientHandle.startsWith('hive:') ? recipientHandle.slice('hive:'.length) : recipientHandle),
     [recipientHandle]
   );
-  const displayName = recipientActor;
+  const recipientActor = useMemo(
+    () => (recipientHandle.startsWith('hive:') ? `h:${recipientHandle.slice('hive:'.length)}` : recipientHandle),
+    [recipientHandle]
+  );
+  const displayName = bareName;
 
-  const isSelf = loggedIn && !!user.username && user.username.toLowerCase() === recipientActor.toLowerCase();
+  const isSelf = loggedIn && !!user.username && user.username.toLowerCase() === bareName.toLowerCase();
 
   const registration = useOwnDmRegistration();
   const recipient = useRecipientKey(loggedIn && !isSelf ? recipientActor : null);

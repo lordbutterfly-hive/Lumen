@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { hasCsrfHeader } from '@/blog/lib/lite/http/csrf';
+import { readBoundedBytes } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { enforceHiveUploadRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { liteConfig } from '@/blog/lib/lite/config';
@@ -87,12 +88,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'uploader_unavailable' }, { status: 503 });
   }
 
-  /* Checked BEFORE the body is touched, for the reason the lite route documents:
-     `req.formData()` buffers the whole request in memory, so validating size
-     afterwards lets one account make us buffer arbitrarily large bodies. */
-  const declaredLength = Number(req.headers.get('content-length') ?? '0');
+  /* ★ STREAM-BOUNDED, NOT HEADER-BOUNDED (FIX-DOS, 2026-09-08 — DOS-09), for the
+     reason the lite route documents: `req.formData()` buffers the whole request in
+     memory, so validating size off a caller-optional `content-length` header lets a
+     chunked/streamed request (which simply omits it) bypass the check and be buffered
+     whole. `readBoundedBytes` counts bytes AS it reads and cancels the instant the cap
+     is exceeded, so the limit bounds ALLOCATION rather than trusting a declared header. */
   const maxBytes = liteConfig.maxUploadMb * 1024 * 1024;
-  if (declaredLength > maxBytes + 1024 * 1024) {
+  const bytes = await readBoundedBytes(req, maxBytes + 1024 * 1024);
+  if (bytes === null) {
     return NextResponse.json(
       { error: 'too_large', message: `That image is over ${liteConfig.maxUploadMb} MB.` },
       { status: 413 }
@@ -114,7 +118,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'rate_limited', reason: rate.reason }, { status: 429 });
   }
 
-  const form = await req.formData().catch(() => null);
+  // `readBoundedBytes` already fully consumed the original request's body stream, so
+  // `req.formData()` on `req` itself would throw ("body already used"). Re-parse the
+  // SAME bytes we already hold and bounded, carrying the original multipart
+  // Content-Type header across (the boundary lives there, not in the body).
+  const contentType = req.headers.get('content-type') ?? '';
+  const form = await new Request('http://internal.invalid/upload', {
+    method: 'POST',
+    headers: { 'content-type': contentType },
+    body: bytes
+  })
+    .formData()
+    .catch(() => null);
   const file = form?.get('file');
   if (!(file instanceof File)) {
     return NextResponse.json({ error: 'file_required' }, { status: 400 });

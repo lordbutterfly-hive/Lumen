@@ -52,6 +52,19 @@ const ALLOWED = new Map<string, 'nonce' | 'submit' | 'status'>([
  */
 const MAX_BODY_BYTES = 128 * 1024;
 
+/**
+ * ★ FIX-DOS, 2026-09-08 (DOS-10). Matches the sibling read proxy's
+ * `UPSTREAM_TIMEOUT_MS` (`app/api/creator-tokens/gql/route.ts`) — same upstream
+ * Magi/VSC GQL node, same reasonable bound on how long one HTTP round trip may take.
+ * Before this, the forward `fetch` below carried no `signal` at all: a real hung
+ * TCP listener (accepts, never answers) left the request unresolved past a 4000ms
+ * race in this fix's own proof. This does NOT add a retry — see "NO RETRY ON
+ * SUBMIT" below; it only makes an unbounded wait a bounded one, surfacing through
+ * the SAME `catch` block (502, "the Magi node could not be reached") a hard
+ * connection failure already used.
+ */
+const UPSTREAM_TIMEOUT_MS = 5_000;
+
 /** Per-IP submits per minute. A wallet prompt gates every real one. */
 const SUBMIT_PER_IP_PER_MIN = 20;
 /** Total submits per minute across all callers — the bound that survives many IPs. */
@@ -174,6 +187,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ query, variables }),
+      // ★ FIX-DOS, 2026-09-08 (DOS-10). See UPSTREAM_TIMEOUT_MS above. Bounds the
+      // wait only — still no retry, so a submit that times out after Magi actually
+      // committed it is never silently resent.
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       cache: 'no-store'
     });
     const text = await upstream.text();

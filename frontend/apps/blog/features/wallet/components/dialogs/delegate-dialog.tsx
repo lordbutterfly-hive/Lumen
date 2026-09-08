@@ -10,6 +10,7 @@ import { handleError } from '@ui/lib/handle-error';
 import { getAsset } from '@transaction/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import { useDelegateMutation } from '../../hooks/use-delegate-mutation';
+import { useSignedVestsPreview, formatRatio } from '../../hooks/use-signed-vests-preview';
 import WalletDialogShell from './shared/wallet-dialog-shell';
 import RecipientField from './shared/recipient-field';
 import AmountField from './shared/amount-field';
@@ -53,6 +54,11 @@ export default function DelegateDialog({
   const schema = useMemo(() => buildSchema(maxHp, t), [maxHp, t]);
   const form = useForm<DelegateFormValues>({ resolver: zodResolver(schema), mode: 'onSubmit' });
   const { open, setOpen, onOpenChange } = useWalletDialog(form, defaultOpen);
+  // ★ TX-01: preview the exact VESTS this delegation will SIGN, off the same
+  // ratio-checked derivation the broadcast uses (transactionService.hpToVestsChecked).
+  const watchedAmount = form.watch('amount');
+  const previewAmount = Number.isFinite(watchedAmount) ? Number(watchedAmount) : 0;
+  const vestsPreview = useSignedVestsPreview(previewAmount);
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
@@ -97,6 +103,37 @@ export default function DelegateDialog({
         error={form.formState.errors.amount?.message}
         testId="wallet-delegate-amount"
       />
+      {/* ★ TX-01 (REVISED): the exact VESTS that will be SIGNED, shown alongside
+          the HP the user typed AND the applied VESTS/HIVE rate — a number a
+          human can actually judge, not just an opaque VESTS blob. A corrupt
+          global-properties ratio outside the hard band is refused here
+          instead of silently signing a wildly different amount; a ratio
+          that's merely far from the known-good reference (still inside the
+          hard band) renders a visible warning instead of nothing. */}
+      {vestsPreview.error ? (
+        <p className="text-caption font-medium text-ink-warn-3" data-testid="wallet-delegate-vests-error">
+          {vestsPreview.error}
+        </p>
+      ) : vestsPreview.vests ? (
+        <>
+          <p className="text-caption tabular-nums text-ink-10" data-testid="wallet-delegate-vests">
+            {t('wallet.dialogs.delegate.signed_vests', {
+              hp: vestsPreview.hp,
+              vests: vestsPreview.vests,
+              rate: vestsPreview.ratio != null ? formatRatio(vestsPreview.ratio) : '',
+              defaultValue: `Delegating ${vestsPreview.hp} HP -> signing ${vestsPreview.vests} VESTS (rate: ${vestsPreview.ratio != null ? formatRatio(vestsPreview.ratio) : '?'} VESTS/HIVE).`
+            })}
+          </p>
+          {vestsPreview.ratioLooksOff && (
+            <p className="text-caption font-medium text-ink-warn-3" data-testid="wallet-delegate-rate-warning">
+              {t('wallet.dialogs.common.rate_warning', {
+                defaultValue:
+                  "This rate looks far from the network's recent average — double-check the VESTS amount above before signing, or try a different node."
+              })}
+            </p>
+          )}
+        </>
+      ) : null}
     </WalletDialogShell>
   );
 }

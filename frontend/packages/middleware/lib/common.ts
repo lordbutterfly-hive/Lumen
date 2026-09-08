@@ -74,7 +74,9 @@ export function createMiddleware(config: MiddlewareConfig = {}) {
     }
 
     const mintCookies = !(config.skipCookieMinting && config.skipCookieMinting(request));
-    if (mintCookies) setLoginChallengeCookies(request, res);
+    // SMS-01 (2026-09-08): setLoginChallengeCookies is now async (it SEALS the
+    // server half); await it so the cookies are set before this response returns.
+    if (mintCookies) await setLoginChallengeCookies(request, res);
 
     // Generate session_uid for browser tracking (persists across login/logout)
     if (mintCookies && !request.cookies.has('session_uid')) {

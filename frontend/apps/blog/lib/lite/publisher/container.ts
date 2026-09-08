@@ -25,6 +25,22 @@ export function isContainerPermlink(permlink: string): boolean {
   return permlink.startsWith('lumen-c-');
 }
 
+/**
+ * The outcome of {@link ensureContainerPublished}, which the worker MUST branch on
+ * (PUB-01/PUB-02). The old boolean collapsed two cases that need opposite handling:
+ *
+ *   - 'ready'   the container root is on chain — broadcast the child.
+ *   - 'waiting' a REAL container row exists whose root is not on chain YET (Hive's
+ *               5-minute root-post rule, or a transient node error). It WILL open, so
+ *               the caller waits WITHOUT spending the child's retry budget — the same
+ *               rule the worker already applies to a merely-slow parent.
+ *   - 'absent'  no container row exists (a forged/never-created parentRef) OR one that
+ *               has been retired. It can NEVER open on its own, so the caller must
+ *               re-point to a fresh container, and failing that BOUND the wait by the
+ *               attempt ceiling instead of looping forever (the PUB-01/PUB-02 root).
+ */
+export type ContainerReadiness = 'ready' | 'waiting' | 'absent';
+
 /** Reserve a slot for a new post; returns the parent to publish it under. */
 export async function reserveContainerParent(): Promise<{ author: string; permlink: string }> {
   const author = liteConfig.frontendAccount;
@@ -105,24 +121,27 @@ export async function ensureContainerPublished(
   broadcaster: PostBroadcaster,
   author: string,
   permlink: string
-): Promise<boolean> {
+): Promise<ContainerReadiness> {
   const container = await containers.findByPermlink(author, permlink);
   if (!container) {
+    // No such container row. A forged parentRef pins a `lumen-c-*` permlink that was
+    // never created; this can NEVER open. 'absent' tells the worker to bound the wait
+    // by the attempt ceiling instead of looping on it forever (PUB-01/PUB-02).
     logger.error('Container %s/%s is referenced by a job but missing from the DB', author, permlink);
-    return false;
+    return 'absent';
   }
-  if (container.publishedAt) return true;
+  if (container.publishedAt) return 'ready';
 
   // Crash-after-broadcast guard, same as the post path: it may already be on chain.
   if (await broadcaster.postExists(author, permlink)) {
     await containers.markPublished(container.containerId);
-    return true;
+    return 'ready';
   }
 
   // A retired container is never retried: the children pinned to it are re-pointed by
-  // the caller instead. Without this check the worker re-attempted the doomed root every
-  // 60 seconds — a path that does not consult the attempt ceiling — for every child.
-  if (container.status === 'failed') return false;
+  // the caller instead. Without this the worker re-attempted the doomed root every 60
+  // seconds. It will never open on its own — 'absent' (re-point, else bound).
+  if (container.status === 'failed') return 'absent';
 
   try {
     // The container root counts against the same 3 s interval its children use.
@@ -131,7 +150,7 @@ export async function ensureContainerPublished(
     noteBroadcast();
     await containers.markPublished(container.containerId);
     logger.info('Opened Lumen container %s/%s', author, permlink);
-    return true;
+    return 'ready';
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     // A container that cannot open for a NON-transient reason must be retired, not
@@ -147,10 +166,14 @@ export async function ensureContainerPublished(
         author,
         permlink
       );
-      return false;
+      // Now retired: 'absent' so the child is re-pointed (or bounded) rather than
+      // waiting forever on a root that has been abandoned.
+      return 'absent';
     }
     await containers.recordError(container.containerId, message);
     logger.error(error, 'Could not open container %s/%s', author, permlink);
-    return false;
+    // Transient: the container row still exists and this root can still open on a
+    // later tick. 'waiting' — a legitimate wait that must not burn the child's budget.
+    return 'waiting';
   }
 }

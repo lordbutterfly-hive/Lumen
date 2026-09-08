@@ -376,16 +376,66 @@ export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome
       const { parentAuthor, parentPermlink } = job.payloadSnapshot;
 
       if (parentAuthor === author && isContainerPermlink(parentPermlink)) {
-        const ready = await ensureContainerPublished(broadcaster, parentAuthor, parentPermlink);
-        if (!ready) {
-          // A container that has been RETIRED will never open, so waiting on it is
-          // waiting forever — and this path does not consult the attempt ceiling. Move
-          // the post to a fresh container instead and retry promptly.
+        const readiness = await ensureContainerPublished(broadcaster, parentAuthor, parentPermlink);
+        if (readiness !== 'ready') {
+          // A RETIRED or ABSENT container will never open on its own. Move the post to
+          // a fresh container instead and retry promptly.
           if (await repointToFreshContainer(job.postId)) {
             await jobs.reschedule(job.jobId, 'container retired — re-pointed to a fresh one', 5);
             return 'failed';
           }
-          await jobs.reschedule(job.jobId, 'waiting for container root to publish', 60);
+          if (readiness === 'waiting') {
+            // A REAL container root that Hive has not accepted YET: the container row
+            // exists, its root post is simply not on chain (Hive's 5-minute root-post
+            // rule, or a transient node error). It WILL open — so, exactly like a
+            // merely-slow parent above (resolveParentOnChain's 'wait'), waiting on it
+            // is legitimate and must NOT burn the child's retry budget. Unbounded
+            // transient wait, unchanged: this is the happy path for a container that
+            // is a few minutes behind its children.
+            await jobs.reschedule(job.jobId, 'waiting for container root to publish', 60);
+            return 'failed';
+          }
+          // readiness === 'absent': NO container row exists (a forged parentRef whose
+          // `lumen-c-*` container was never created), or a retired one that could not
+          // be re-pointed. It can NEVER become ready.
+          //
+          // ★ THE BUG THIS FIXES (PUB-01 / PUB-02). This branch used to
+          // `reschedule(...,60)` and `return` UNCONDITIONALLY — a return, not a throw,
+          // so it never reached the catch block's `job.attempts >= job.maxAttempts`
+          // gate that bounds every OTHER failure in this worker. A signed-in user can
+          // POST /api/lite/posts with a parentRef of {type:'chain', author:<this
+          // platform's own publishing account>, permlink:'lumen-c-<anything>'}; intake
+          // pins it permanently, and it looped here every drain cycle FOR LIFE. Because
+          // the job can never reach `markPublished`, its owner's `last_publish_at` is
+          // never stamped — `claimNext` orders by COALESCE(last_publish_at,'epoch'),
+          // so it out-sorts every account that has ever published, and 25 such jobs
+          // consume the drain's entire 25-slot-per-minute batch, stopping ALL
+          // publishing platform-wide, permanently (PUB-02). It also stayed 'pending'
+          // forever, so strandedPosts / listOrphaned / listStranded — which all
+          // exclude a post that still has a live ('pending'/'holding'/'publishing')
+          // job — never saw it (PUB-01: invisible to every recovery/health surface).
+          //
+          // Bound it exactly as the catch block bounds a retriable failure: reschedule
+          // with backoff while there is retry budget (attempts is incremented at claim,
+          // so this mirrors the catch's `job.attempts < job.maxAttempts`), and once the
+          // ceiling is reached mark the job terminally 'failed'. A terminal job stops
+          // holding a claim slot every tick, AND its post becomes visible to
+          // strandedPosts / listOrphaned (their NOT-EXISTS clause is satisfied once no
+          // non-terminal job remains) — so the operator finally sees it.
+          if (job.attempts < job.maxAttempts) {
+            const backoff = BACKOFF_SECONDS[Math.min(job.attempts - 1, BACKOFF_SECONDS.length - 1)];
+            await jobs.reschedule(
+              job.jobId,
+              'container root does not exist yet — waiting for it to publish',
+              backoff
+            );
+          } else {
+            await jobs.markTerminal(
+              job.jobId,
+              'container root never published — the referenced container does not exist',
+              'failed'
+            );
+          }
           return 'failed';
         }
       }

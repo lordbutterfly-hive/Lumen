@@ -5,8 +5,20 @@ import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { liveViewerId } from '@/blog/lib/lite/http/actor';
 import { getEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { liteTargetServable } from '@/blog/lib/lite/content/engagement-target';
+import { getClientIp } from '@/blog/lib/lite/http/ip';
+import { consumeLocalGlobal, consumeLocalPerIp } from '@/blog/lib/lite/antispam/local-rate-limit';
 
 const logger = getLogger('app');
+
+/**
+ * ★ FIX-DOS, 2026-09-08 (DOS-08). Same fix as the bulk route's own doc: this route's
+ * only prior gate was `guardRead()` — measured, 40 consecutive anonymous calls, none
+ * ever 429. One query per call here (no 200x fan-out multiplier — that risk lives in
+ * `bulk/route.ts`), so the ceiling is higher; the point is closing the SAME
+ * unauthenticated, unbounded-volume gap this route shares with its bulk sibling.
+ */
+const SINGLE_PER_IP_PER_MIN = 600;
+const SINGLE_GLOBAL_PER_MIN = 20_000;
 
 /**
  * GET /api/lite/engagement?author=…&permlink=… — the read side of Lumen-local
@@ -25,6 +37,16 @@ const logger = getLogger('app');
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const blocked = guardRead();
   if (blocked) return blocked;
+
+  // ★ FIX-DOS, 2026-09-08 (DOS-08). See SINGLE_PER_IP_PER_MIN/SINGLE_GLOBAL_PER_MIN
+  // above. Global first: it is the only bound that survives a caller with many IPs.
+  const ip = getClientIp(req);
+  if (!consumeLocalGlobal('lite_engagement', SINGLE_GLOBAL_PER_MIN)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+  if (!consumeLocalPerIp(ip, 'lite_engagement', SINGLE_PER_IP_PER_MIN)) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
 
   const author = req.nextUrl.searchParams.get('author');
   const permlink = req.nextUrl.searchParams.get('permlink');

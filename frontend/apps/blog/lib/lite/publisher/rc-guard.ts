@@ -19,6 +19,18 @@ const logger = getLogger('app');
 
 /** Cache so a 25-job drain does not make 25 identical RC queries. */
 const CACHE_MS = 30_000;
+
+/**
+ * Hard ceiling on the RC pre-flight fetch (DOS-02). This call runs on EVERY drain
+ * cycle before any job is claimed, so a Hive node that accepts the connection and
+ * never answers would hang the entire publish pipeline indefinitely — a raw
+ * `await fetch` with a try/catch only helps once the promise SETTLES, and a hang
+ * never settles. Same order of magnitude as the avatar path's TOTAL_BUDGET_MS=3000.
+ * On timeout the AbortError lands in the catch below and this fails OPEN (returns
+ * null -> checkRc allows the broadcast), which is the existing unreachable-node
+ * behaviour: a node hiccup must not halt publishing.
+ */
+const RC_FETCH_TIMEOUT_MS = 3000;
 let cached: { at: number; rc: number } | null = null;
 
 export interface RcStatus {
@@ -39,7 +51,8 @@ async function readRcPercent(account: string): Promise<number | null> {
         method: 'rc_api.find_rc_accounts',
         params: { accounts: [account] },
         id: 1
-      })
+      }),
+      signal: AbortSignal.timeout(RC_FETCH_TIMEOUT_MS)
     });
     if (!res.ok) return null;
     const data = (await res.json()) as {

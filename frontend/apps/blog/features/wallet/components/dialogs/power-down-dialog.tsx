@@ -11,6 +11,7 @@ import { getAsset } from '@transaction/lib/utils';
 import { Slider } from '@ui/components/slider';
 import { useTranslation } from '@/blog/i18n/client';
 import { usePowerDownMutation } from '../../hooks/use-power-mutations';
+import { useSignedVestsPreview, formatRatio } from '../../hooks/use-signed-vests-preview';
 import WalletDialogShell from './shared/wallet-dialog-shell';
 import AmountField from './shared/amount-field';
 import { useWalletDialog } from './shared/use-wallet-dialog';
@@ -66,6 +67,9 @@ export default function PowerDownDialog({
    */
   const watchedAmount = form.watch('amount');
   const amount = Number.isFinite(watchedAmount) ? watchedAmount : 0;
+  // ★ TX-01: preview the exact VESTS this power-down will SIGN, off the same
+  // ratio-checked derivation the broadcast uses (transactionService.hpToVestsChecked).
+  const vestsPreview = useSignedVestsPreview(amount);
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
@@ -125,6 +129,37 @@ export default function PowerDownDialog({
           amount: new Big(amount).div(HIVE_VESTING_WITHDRAW_INTERVALS).toFixed(3)
         })}
       </p>
+      {/* ★ TX-01 (REVISED): the exact VESTS that will be SIGNED, shown alongside
+          the HP the user typed AND the applied VESTS/HIVE rate — a number a
+          human can actually judge, not just an opaque VESTS blob. A corrupt
+          global-properties ratio outside the hard band is refused here
+          instead of silently signing a wildly different amount; a ratio
+          that's merely far from the known-good reference (still inside the
+          hard band) renders a visible warning instead of nothing. */}
+      {vestsPreview.error ? (
+        <p className="text-caption font-medium text-ink-warn-3" data-testid="wallet-power-down-vests-error">
+          {vestsPreview.error}
+        </p>
+      ) : vestsPreview.vests ? (
+        <>
+          <p className="text-caption tabular-nums text-ink-10" data-testid="wallet-power-down-vests">
+            {t('wallet.dialogs.power_down.signed_vests', {
+              hp: vestsPreview.hp,
+              vests: vestsPreview.vests,
+              rate: vestsPreview.ratio != null ? formatRatio(vestsPreview.ratio) : '',
+              defaultValue: `Powering down ${vestsPreview.hp} HP -> signing ${vestsPreview.vests} VESTS (rate: ${vestsPreview.ratio != null ? formatRatio(vestsPreview.ratio) : '?'} VESTS/HIVE).`
+            })}
+          </p>
+          {vestsPreview.ratioLooksOff && (
+            <p className="text-caption font-medium text-ink-warn-3" data-testid="wallet-power-down-rate-warning">
+              {t('wallet.dialogs.common.rate_warning', {
+                defaultValue:
+                  "This rate looks far from the network's recent average — double-check the VESTS amount above before signing, or try a different node."
+              })}
+            </p>
+          )}
+        </>
+      ) : null}
     </WalletDialogShell>
   );
 }

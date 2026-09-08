@@ -10,6 +10,7 @@ import { checkCsrfHeader } from '@smart-signer/lib/csrf-protection';
 import { verifyLoginChallenge } from '@smart-signer/lib/verify-login-challenge';
 import { verifyLogin } from '@smart-signer/lib/verify-login';
 import { getLoginChallengeFromTransactionForLogin } from '@smart-signer/lib/login-operation';
+import { unsealLoginChallenge } from '@smart-signer/lib/challenge-seal';
 import { getLogger } from '@hive/ui/lib/logging';
 import { siteConfig } from '@hive/ui/config/site';
 import { logLoginEvent, getClientIpFromApiRequest } from '@smart-signer/lib/event-logging';
@@ -44,7 +45,15 @@ const logger = getLogger('app');
 export const loginUser: NextApiHandler<User> = async (req, res) => {
   checkCsrfHeader(req);
 
-  const loginChallenge = req.cookies[`${cookieNamePrefix}login_challenge_server`] || '';
+  // SMS-01 (2026-09-08): the "server half" of the challenge is now a SEALED
+  // value (see lib/challenge-seal.ts and the middleware that mints it). Reading
+  // it raw made it caller-forgeable — a non-browser client supplied BOTH sides
+  // of the comparison below, so it gated nothing. Unseal it here; a bad, forged,
+  // tampered or absent seal yields '', which the challenge comparison then
+  // rejects (a real challenge is always truthy).
+  const loginChallenge = await unsealLoginChallenge(
+    req.cookies[`${cookieNamePrefix}login_challenge_server`] || ''
+  );
 
   const data: PostLoginSchema = await postLoginSchema.parseAsync(req.body);
 
@@ -74,6 +83,50 @@ export const loginUser: NextApiHandler<User> = async (req, res) => {
 
   if (JSON.parse(data.txJSON)) {
     const parsedTx = JSON.parse(data.txJSON);
+
+    // SMS-01 (2026-09-08): bind the proof to a single, current, Lumen login op.
+    // Nothing here used to read `expiration`, the operation count, or the op
+    // `id`, so ANY validly-signed custom_json carrying a truthy `challenge` —
+    // one expired years ago, or one already public on chain for an unrelated
+    // app — authenticated, forever. Re-establish the three properties the
+    // legitimate client already builds into every login (see
+    // lib/login-operation.ts `getOperationForLogin` and
+    // components/auth/process.tsx).
+
+    // (a) Exactly one operation. A login proof is a single custom_json; extra
+    //     operations were never inspected and have no business on this path.
+    if (!Array.isArray(parsedTx.operations) || parsedTx.operations.length !== 1) {
+      throw new createHttpError[401]('Invalid login transaction');
+    }
+
+    // (b) The operation must be THIS app's login op for the declared login type
+    //     (`denser_${loginType}`), exactly as `getOperationForLogin` mints it —
+    //     which covers every LoginType (keychain/wif/hbauth/hiveauth/peakvault/
+    //     metamask/google/hivesigner). This refuses an arbitrary custom_json id
+    //     reused as a keyless login proof.
+    if (parsedTx.operations[0]?.value?.id !== `denser_${loginType}`) {
+      throw new createHttpError[401]('Invalid login transaction');
+    }
+
+    // (c) Freshness. Refuse a transaction whose `expiration` has passed (this is
+    //     what turned the proof from a one-shot into a permanent bearer
+    //     credential), and refuse one dated implausibly far into the future.
+    //     Hive expirations are absolute UTC with no offset suffix, so parsing is
+    //     forced to UTC. The legitimate client sets expiration = now + 1h
+    //     (process.tsx), so a live login sits comfortably inside the window
+    //     while a stale or replayed proof does not. Compared to server wall
+    //     time, which tracks head-block time within NTP skew for an absolute
+    //     UTC timestamp — no extra chain round-trip on the login path.
+    const rawFuture = Number(process.env.LOGIN_TX_MAX_FUTURE_SECONDS);
+    const maxFutureMs = (Number.isFinite(rawFuture) && rawFuture > 0 ? rawFuture : 3900) * 1000;
+    const expirationRaw = String(parsedTx.expiration ?? '');
+    const expirationMs = Date.parse(
+      /([zZ]|[+-]\d\d:?\d\d)$/.test(expirationRaw) ? expirationRaw : `${expirationRaw}Z`
+    );
+    const now = Date.now();
+    if (!Number.isFinite(expirationMs) || expirationMs <= now || expirationMs > now + maxFutureMs) {
+      throw new createHttpError[401]('Login transaction has expired');
+    }
 
     // Check whether loginChallenge is correct.
     const reguestLoginChallenge = getLoginChallengeFromTransactionForLogin(parsedTx, keyType);

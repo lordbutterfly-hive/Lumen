@@ -213,3 +213,54 @@ export async function readBoundedJson<T = Record<string, unknown>>(
     return { body: null };
   }
 }
+
+/**
+ * ★ THE BYTE-PRESERVING TWIN OF readBoundedBody (FIX-DOS, 2026-09-08 — DOS-09).
+ *
+ * `readBoundedBody` decodes the stream as UTF-8 text, which is correct for a JSON
+ * body but would corrupt arbitrary binary bytes (an uploaded image). `app/api/upload`
+ * and `app/api/lite/upload` gate size on `Number(req.headers.get('content-length') ??
+ * '0')` — a caller-optional header a chunked/streamed request simply omits, computing
+ * `declaredLength = 0`, which is never `> maxBytes`, so the 413 branch never fires and
+ * `req.formData()` then buffers the whole multipart body regardless of its real size
+ * (measured: a 40 MiB body with no `content-length` -> 79.2 MiB RSS growth, vs 0.00 MiB
+ * for the identical body honestly declared).
+ *
+ * This reads the raw stream, counting bytes exactly like `readBoundedBody`, and cancels
+ * the moment the limit is exceeded — but returns the raw `Uint8Array` rather than a
+ * decoded string, so the caller can rebuild a `Request`/`FormData` from it without any
+ * text-decoding round trip that would mangle non-UTF-8 image bytes. Returns `null` for
+ * "too large"; the caller answers 413. An absent body reads as an empty array.
+ */
+export async function readBoundedBytes(req: NextRequest, maxBytes: number): Promise<Uint8Array | null> {
+  const body = req.body;
+  if (!body) return new Uint8Array(0);
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    // A transport failure mid-read is not an oversized body; treat it as an empty one,
+    // matching readBoundedBody's own posture, and let the caller's own parse-failure
+    // path (an absent `file` field) answer.
+    return new Uint8Array(0);
+  }
+  const joined = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    joined.set(c, offset);
+    offset += c.byteLength;
+  }
+  return joined;
+}
