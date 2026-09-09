@@ -297,20 +297,29 @@ export function rcLimitForAction(action: string): number {
  * credits against a declared 24,058.
  *
  * These are the numbers the GATE and the COPY use. Anchored on that live launch
- * and on mainnet dry runs of the same contract the same day (register 1,903;
- * createOffering 2,240 to 2,464, longer titles cost more), then given the same
- * 25% margin through `rcExpectedForAction`. The declared ceilings stay where
+ * and on mainnet dry runs of the same contract the same day: register 1,903;
+ * createOffering 2,240 for a 9-character title, 2,464 for 17, and 3,836 to
+ * 3,960 for the two 62-character titles of the live launch (the dry run of the
+ * live launch's exact ops sums to 9,699 against the 9,118 charged, so the dry
+ * run is the right instrument). An offering's cost grows about 30 credits per
+ * title character; `createOffering` below is sized for a MAX-length title
+ * (64 characters, about 4,030) so the 25% margin in `rcExpectedForAction`
+ * stays a real margin at the worst case, not 1%. The same three ops dry-run on
+ * the testnet contract at 1,785 / 3,675 / 3,799. The declared ceilings stay where
  * they are on purpose: a ceiling only caps, and a generous cap is what keeps a
  * mis-estimate from ending in an out-of-gas revert that charges the whole budget.
  *
- * ★ RE-MEASURE LIVE AFTER THE PENDING CONTRACT UPDATE ACTIVATES. The new code
- * (cohort ledger, bounded lots) costs more per op; the Stage B table has dry-run
- * figures for it, but the number that matters is what mainnet charges, read the
- * same way as above (frozen credit before and after one real launch).
+ * ★ THE PENDING CONTRACT UPDATE DOES NOT MOVE THESE (measured 2026-09-09 by dry
+ * run against the new code on testnet, contract vsc1BUYhiJhAGoLSS4dKoep6yd547cnrmce8CR,
+ * code bafkreigqsh…): register 1,871; createOffering 2,080 for a 9-character
+ * title, 3,676 and 3,799 for the two 62-character titles. Register and
+ * createOffering do not touch the cohort ledger, so the launch table holds
+ * across activation. Buy, sell and transfer DO (bounded lots), and their rows
+ * are the ones to re-measure live once it activates (see the RC-01 notes).
  */
 export const RC_EXPECTED_BY_ACTION: Readonly<Record<string, number>> = Object.freeze({
   register: 2_700,
-  createOffering: 3_200
+  createOffering: 3_500
 });
 
 /** The credit an action is expected to CHARGE, with the 25% margin; falls back to the declared ceiling for an action without a live measurement. */

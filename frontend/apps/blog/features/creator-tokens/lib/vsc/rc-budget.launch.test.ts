@@ -29,6 +29,9 @@ check('declared register ceiling stays above the expected charge', rcLimitForAct
 check('declared createOffering ceiling stays above the expected charge', rcLimitForAction('createOffering') > OFFER);
 // The one real mainnet launch this is anchored on: register + 2 offerings charged 9,118.
 check('expected charge for register + 2 offerings covers the live 9,118 with margin', REG + 2 * OFFER >= 9_118 * 1.2);
+// Dry run of that launch's exact ops: 1,903 + 3,836 + 3,960 = 9,699; a max-length title costs about 4,030.
+check('expected createOffering charge covers a max-length title (4,030) with margin', OFFER >= 4_030 * 1.05);
+check('expected register charge covers the dry run (1,903) with margin', REG >= 1_903 * 1.2);
 const need = (n: number) => REG + Math.max(1, n) * OFFER;
 
 // ─────────────────────────────────────────────────────────────────────────────
