@@ -207,7 +207,7 @@ export default function MagiSdkSwap() {
               {t('wallet.magi.sdk.wallet_note')}
             </p>
           ) : null}
-          <div className="mt-3 flex justify-center" data-testid="wallet-magi-sdk-widget">
+          <div className="mt-3 w-full" data-testid="wallet-magi-sdk-widget">
             <MagiQuickSwap
               config={config}
               pools={pools}

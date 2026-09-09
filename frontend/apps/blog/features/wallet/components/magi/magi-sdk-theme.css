@@ -29,3 +29,139 @@
   --magi-field-border: rgb(var(--line-11));
   --magi-input-bg: transparent;
 }
+
+/*
+ * Size (2026-09-09, owner: "the SDK should have been made bigger and stretched
+ * a bit. its too small right now"). Reference is PeakD's rendering of the same
+ * widget, which spans its wallet's whole content column.
+ *
+ * Measured before this change (QA :3010, 1440 wide): the widget rendered 338px
+ * wide inside a 1066px column. Two causes, both ours: the wrapper was a
+ * `flex justify-center` box, so the widget shrank to its content width (below
+ * even the SDK's own 420px cap), and at 390 wide the same shrink-wrap made it
+ * 338px inside a 300px column, spilling over the card's padding. The wrapper
+ * is a plain block now and the rule below lets the widget take the column.
+ *
+ * The SDK sizes everything in rem and exposes no size variable
+ * (dist/styles.css), so "bigger" has to be a set of overrides on its class
+ * names. They are scoped under our wrapper, load after the package stylesheet,
+ * and win on specificity (two selectors against the SDK's one). They apply
+ * from 640px up; below that the SDK's own scale stays, and only the width
+ * change applies. Class names are those of @vsc.eco/crosschain-widget 0.0.3
+ * (pinned in package.json); bump the pin, re-check this file.
+ */
+[data-testid='wallet-magi-sdk-widget'] .magi-quickswap {
+  max-width: none;
+  width: 100%;
+}
+
+/*
+ * The SDK's slippage row is a single non-wrapping flex line ("Slippage" plus
+ * five buttons, about 300px). Inside a 390-wide phone the column is 258px, so
+ * without this the last button ran past the widget's border. Wrapping puts the
+ * buttons on their own line, right-aligned; from 640px up the line fits and
+ * the rule changes nothing.
+ */
+[data-testid='wallet-magi-sdk-widget'] .magi-qs-slippage-row {
+  flex-wrap: wrap;
+}
+[data-testid='wallet-magi-sdk-widget'] .magi-qs-slippage-options {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+@media (min-width: 640px) {
+  [data-testid='wallet-magi-sdk-widget'] .magi-quickswap {
+    padding: 1.5rem 1.75rem 1.75rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-header {
+    margin-bottom: 1.25rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-badge-text {
+    font-size: 0.9rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-subtitle {
+    font-size: 0.875rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-powered span {
+    font-size: 0.8rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-field,
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-receiver-input-wrap {
+    padding: 1.125rem 1.375rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-field-label {
+    font-size: 0.875rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-network-tag {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.7rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-token-trigger {
+    gap: 0.5rem;
+    padding: 0.5rem 0.875rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-token-img {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-token-name {
+    font-size: 0.95rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-input-wrap {
+    min-height: 56px;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-input-wrap input {
+    font-size: 1.75rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-balance-label,
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-field-usd {
+    font-size: 0.8rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-max-btn {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.6rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-flip-btn {
+    width: 32px;
+    height: 32px;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-receiver-hint {
+    font-size: 0.8rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-receiver-input-wrap input {
+    font-size: 0.95rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-slippage-row {
+    margin-top: 1rem;
+    font-size: 0.875rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-slippage-options button,
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-custom-slippage input,
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-custom-slippage span {
+    font-size: 0.85rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-slippage-options button {
+    padding: 0.35rem 0.7rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-details {
+    gap: 0.5rem;
+    padding: 1rem 0 0.25rem;
+    margin-top: 0.75rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-detail-label,
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-detail-value {
+    font-size: 0.85rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-status,
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-success,
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-btc-deposit-addr code {
+    font-size: 0.875rem;
+  }
+  [data-testid='wallet-magi-sdk-widget'] .magi-qs-submit {
+    margin-top: 1.125rem;
+    padding: 0.95rem 1.25rem;
+    font-size: 1.05rem;
+  }
+}
