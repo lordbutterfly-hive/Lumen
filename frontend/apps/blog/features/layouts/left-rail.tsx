@@ -11,6 +11,7 @@ import BasePathLink from '../../components/base-path-link';
 import { useTranslation } from '@/blog/i18n/client';
 import DialogLogin from '@/blog/components/dialog-login';
 import { LeagueShowcase } from '@/blog/features/retention/components/league-showcase';
+import { CreatorTokenLaurel } from '@/blog/features/creator-tokens/ui/creator-token-laurel';
 import styles from './left-rail.module.css';
 
 /**
@@ -42,6 +43,25 @@ const labels = (t: (k: string) => string) => ({
 });
 
 type NavIcon = ComponentType<LucideProps>;
+
+/**
+ * ★ THE RAIL AND THE HEADER NOW SHOW THE SAME MARK (2026-08-16, owner). The rail
+ * carried `Icons.creatorTokens` (the ◈ coin) while the header pill carried the
+ * product mark — one product wearing two faces on one screen, which is the exact
+ * twin this codebase keeps clearing out. Both now carry the laurel wreath
+ * (owner's asset, 2026-09-06), which replaced the rocket in all three places it
+ * appeared; see `creator-token-laurel.tsx` for the trace and the sizing.
+ *
+ * An adapter rather than a direct assignment because `NavIcon` is lucide's
+ * `LucideProps`, whose `size` is `string | number`, and the mark takes a
+ * `number` — passing the component straight in does not typecheck.
+ *
+ * `size={22}` matches the `h-[22px] w-[22px]` the row applies below, so the
+ * className cannot fight the prop.
+ */
+const MeritumTokensIcon: NavIcon = ({ className }) => (
+  <CreatorTokenLaurel size={22} className={className} />
+);
 
 /**
  * ★ HOVER IS WARM, AND IT IS THE SAME WARM AS EVERYWHERE ELSE (2026-08-10, owner).
@@ -313,13 +333,20 @@ export default function LeftRail() {
           onNavigate={setPendingHref}
           testId="left-rail-wallet"
         />
-        {/* ★ THE "MERITUM TOKENS" ROW IS GONE (owner, 2026-09-08). It linked to
-            /creators (the Meritum discovery and launch page). With Meritum now a
-            tab of the Wallet page directly above this row, the owner ruled the
-            shortcut redundant. /creators stays reachable from the wallet's
-            Meritum tab (Discover creators / Launch your Meritum), from the
-            portfolio's empty state, from the /meritum redirect and from the
-            avatar menu's Creator Studio. */}
+        {/* Creator Tokens — the creator-token discovery surface (design
+            handoff-v2). Icon: Icons.creatorTokens (custom-icons.tsx) — a coin
+            carrying the product's own ◈ glyph, replacing a lucide `Users`
+            icon the owner flagged as reading like a dollar sign and
+            "shitty" (2026-08-11); see that icon's own doc for the reasoning. */}
+        <InternalNavRow
+          href="/creators"
+          icon={MeritumTokensIcon}
+          label={LABELS.creators}
+          isActive={activeUnder('/creators')}
+          isPending={navigatingTo === '/creators'}
+          onNavigate={setPendingHref}
+          testId="left-rail-creators"
+        />
 
         <li aria-hidden="true">
           <Separator className="mx-[6px] my-[14px] w-auto bg-surface-27" />
