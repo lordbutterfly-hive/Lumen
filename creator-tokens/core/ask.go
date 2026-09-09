@@ -536,10 +536,23 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 	// Only the matured leg needs recording: the maturing leg is whatever the
 	// escrow's credits are not, so storing both would be one number too many
 	// and a chance for the two to disagree.
-	escFromMatured, _ := splitDraw(s, creator, caller, creditsSpent)
+	escFromMatured, escFromMaturing := splitDraw(s, creator, caller, creditsSpent)
 	// Read the clock BEFORE the debit: draining the maturing bucket clears it.
 	// This is the maturing leg's own clock, not a blend of anything.
 	acqAtEscrow := holderAcqBlock(s, creator, caller)
+	// ★ AND READ THE COHORTS, NOT JUST THE CLOCK (2026-09-08). acqAtEscrow above
+	// is the maturing bucket's BLENDED clock, and a maturing bucket can be
+	// heterogeneous: an aged pile plus a fresh slice. debitPosition draws the
+	// maturing leg FRESHEST FIRST (lotsDebit), so what actually leaves is the
+	// fresh cohorts — but crediting them back at the blend on Reclaim / Decline /
+	// Answer re-stamped them with the aged pile's rate. Measured on the pre-fix
+	// tree: one same-block Ask -> Decline turned 18,396 tokens owing 1,414 bps
+	// into a cohort owing 51 bps, destroying 44% of the position's tax capacity,
+	// and Reclaim reaches the same door permissionlessly one deadline later.
+	// Recording the drawn cohorts is the same fix transfer.go took: a slice of
+	// tokens carries its cohorts. Read BEFORE the debit, for the same reason the
+	// clock is.
+	escLots := lotsDrawFreshest(s, creator, caller, escFromMaturing)
 	if err := debitPosition(s, creator, caller, creditsSpent); err != nil {
 		return nil, err // unreachable given the check above; defense-in-depth
 	}
@@ -562,6 +575,10 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 	if escFromMatured.Sign() > 0 {
 		setMoney(s, kEscrowMaturedLeg(creator, seq), escFromMatured)
 	}
+	// The maturing leg's cohorts, keyed to the same escrow. Written only when
+	// there is a maturing leg, and read back as absent — i.e. fall back to
+	// acqAtEscrow — for every escrow written before this key existed.
+	saveEscrowLots(s, creator, seq, escLots)
 	setU64(s, kSeq(creator), seq+1)
 
 	// DEFECT FIX (2026-07-20): the commission is HELD here, in the escrow

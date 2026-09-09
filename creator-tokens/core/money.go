@@ -64,3 +64,31 @@ func mMin(a, b *big.Int) *big.Int {
 	}
 	return new(big.Int).Set(b)
 }
+
+// mMedian3 returns the median of three values (a new value; no input mutated).
+// The median is robust to a SINGLE manipulated or lagging arm: shifting one of
+// the three inputs cannot move the median past the other two, so steering it
+// takes TWO corrupted arms -- unlike min(), which follows any single low arm.
+// Ties are handled by (a+b+c - max - min): two equal values collapse to that
+// value. settlement.go uses min(spot, mMedian3(short,long,spot)) so the rate
+// stays <= spot (no-arbitrage) yet no lone walked/stale TWAP arm can set it.
+func mMedian3(a, b, c *big.Int) *big.Int {
+	hi, lo := a, a
+	if b.Cmp(hi) > 0 {
+		hi = b
+	}
+	if c.Cmp(hi) > 0 {
+		hi = c
+	}
+	if b.Cmp(lo) < 0 {
+		lo = b
+	}
+	if c.Cmp(lo) < 0 {
+		lo = c
+	}
+	med := new(big.Int).Add(a, b)
+	med.Add(med, c)
+	med.Sub(med, hi)
+	med.Sub(med, lo)
+	return med
+}

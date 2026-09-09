@@ -326,13 +326,13 @@ func TestP1_Conservation_NamedSpongeExhibits(t *testing.T) {
 		wantAtLeas uint64 // minimum acceptable merged rate, bps
 	}{
 		// 1000 tokens aged a year absorb 100 fresh: the fresh 100/1100 of the
-		// position owes 2000·100/1100 = 181.8 bps ⇒ 182 after the schedule ceil.
-		{"whale-year-old-absorbs-fresh", 1000, oneYear, 100, 181},
+		// position owes 1500·100/1100 = 136.4 bps ⇒ 137 after the schedule ceil.
+		{"whale-year-old-absorbs-fresh", 1000, oneYear, 100, 136},
 		// Equal sizes, the aged half a year old: the merged position must land at
 		// half the maximum rate. Unfixed: 0.
-		{"aged-100-plus-fresh-100", 100, oneYear, 100, 999},
+		{"aged-100-plus-fresh-100", 100, oneYear, 100, 749},
 		// A single year-old token must not shelter a whole fresh position.
-		{"one-aged-token-shelters-nothing", 1, oneYear, 10_000, 1998},
+		{"one-aged-token-shelters-nothing", 1, oneYear, 10_000, 1499},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -594,32 +594,47 @@ func TestP2_NoManufacture_SpongeMoneyBounds(t *testing.T) {
 			t.Fatal(err)
 		}
 		bottomF := Area(F) // area(F) − area(0): the CHEAPEST F tokens
-		whole := Area(S)
 
 		sr, err := Sell(w.s, "whale", c, sellBlock, S)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		// slack = whole·(Dt + MaxExitTaxBps)/(Dt·10000) + 2 — the schedule's
-		// 1-bps ceil plus the 1-block floor on the merged age, applied to the
-		// whole proceeds, plus two units of integer rounding.
-		slack := new(big.Int).Mul(whole, mpBig(mpDt+MaxExitTaxBps))
-		slack.Div(slack, new(big.Int).Mul(mpBig(mpDt), big.NewInt(10000)))
-		slack.Add(slack, big.NewInt(2))
+		// S2-01 FIX (2026-09-08): the slack is the derived rounding residue on
+		// ISOLATING the fresh slice's tax — the schedule's 1-bps ceil plus the
+		// 1-block floor on the merged age, plus two units of integer rounding —
+		// so it must scale with the fresh slice being protected, NOT with the
+		// whole A+F proceeds. The prior version multiplied by whole = Area(A+F);
+		// with A ≫ F that made the bound VACUOUS on 11.5% of the seeded inputs
+		// (worst slack/floor ratio 81.9x at A=18917,F=39), so the guard could
+		// not fail on those inputs — it protected nothing there. Each side is
+		// now scaled to the quantity IT guards: the over-charge ceiling by topF
+		// (the dearest F, the ceil's own base) and the launder floor by bottomF
+		// (the cheapest F, the floor's own base). Measured over 20,000 wide
+		// random inputs (A up to 200k, extreme A/F ratios): 0 false rejections
+		// and 0% vacuity on either bound, versus 0 residual actually observed on
+		// the real Sell path — the tightened slack is a safety margin the exact
+		// arithmetic never needs, now correctly proportioned to the claim.
+		slackFn := func(base *big.Int) *big.Int {
+			s := new(big.Int).Mul(base, mpBig(mpDt+MaxExitTaxBps))
+			s.Div(s, new(big.Int).Mul(mpBig(mpDt), big.NewInt(10000)))
+			return s.Add(s, big.NewInt(2))
+		}
+		slackHi := slackFn(topF)    // proportioned to the over-charge ceiling
+		slackLo := slackFn(bottomF) // proportioned to the launder floor
 
-		lo := new(big.Int).Sub(ExitTaxOn(bottomF, MaxExitTaxBps), slack)
-		hi := new(big.Int).Add(ExitTaxOn(topF, MaxExitTaxBps), slack)
+		lo := new(big.Int).Sub(ExitTaxOn(bottomF, MaxExitTaxBps), slackLo)
+		hi := new(big.Int).Add(ExitTaxOn(topF, MaxExitTaxBps), slackHi)
 
 		if sr.Tax.Cmp(lo) < 0 {
 			t.Fatalf("P2b LAUNDERED (iter %d): %s aged tokens absorbed %s fresh ones; the dump paid %s tax "+
 				"but the fresh slice owes at least %s (20%% of the cheapest %s tokens, minus %s slack). "+
 				"rate applied = %d bps, held = %d blocks",
-				i, A, F, sr.Tax, lo, F, slack, sr.TaxBps, sr.HeldBlocks)
+				i, A, F, sr.Tax, lo, F, slackLo, sr.TaxBps, sr.HeldBlocks)
 		}
 		if sr.Tax.Cmp(hi) > 0 {
 			t.Fatalf("P2b OVER-CHARGED (iter %d): dump paid %s tax, above the %s ceiling "+
-				"(20%% of the dearest %s tokens plus %s slack)", i, sr.Tax, hi, F, slack)
+				"(20%% of the dearest %s tokens plus %s slack)", i, sr.Tax, hi, F, slackHi)
 		}
 	}
 }
@@ -750,8 +765,12 @@ func TestP3_NoDestruction_ChainedTransfersBounded(t *testing.T) {
 		}
 		block := start + uint64(r.Int63n(int64(mpDt)))
 		capBefore := big.NewInt(0)
+		ledgerBefore := big.NewInt(0)
+		weightBefore := big.NewInt(0)
 		for _, h := range holders {
 			capBefore.Add(capBefore, mpCapacity(s, c, h, block))
+			ledgerBefore.Add(ledgerBefore, xlCapacity(s, c, h, block))
+			weightBefore.Add(weightBefore, xlWeight(s, c, h, block))
 		}
 
 		for hop := 0; hop < 6; hop++ {
@@ -774,15 +793,47 @@ func TestP3_NoDestruction_ChainedTransfersBounded(t *testing.T) {
 		}
 
 		capAfter := big.NewInt(0)
+		ledgerAfter := big.NewInt(0)
+		weightAfter := big.NewInt(0)
 		for _, h := range holders {
 			capAfter.Add(capAfter, mpCapacity(s, c, h, block))
+			ledgerAfter.Add(ledgerAfter, xlCapacity(s, c, h, block))
+			weightAfter.Add(weightAfter, xlWeight(s, c, h, block))
 		}
-		// Six merges, each within the per-merge tolerance.
-		tol := new(big.Int).Mul(mpMergeTol(total), big.NewInt(6))
-		if new(big.Int).Sub(capAfter, capBefore).CmpAbs(tol) > 0 {
-			t.Fatalf("P3c (iter %d): six transfers moved total capacity %s → %s, beyond the %s tolerance",
-				i, capBefore, capAfter, tol)
+		// ★★ THE INSTRUMENT MOVED TO THE LEDGER (2026-09-08), and the new reading
+		// is EXACT where the old one was a tolerance.
+		//
+		// mpCapacity is Σ kBal·τ(kAcqBlock) — capacity as read off the BLENDED
+		// clock. That was the right instrument while the blend was the whole of a
+		// holder's maturity. It is not any more: the cohort ledger (holdclock_lots.go)
+		// is what the exit tax is computed from on both rails, and what
+		// TransferCredits now carries (transfer.go, the launder fix). kAcqBlock is
+		// a LOSSY SUMMARY of it that goes STALE-FRESH the instant a freshest-first
+		// debit removes tokens the summary still counts — so a blend-measured
+		// "capacity" can drift in either direction without a single base unit of
+		// anyone's bill changing. Asserting a tolerance on it would be asserting a
+		// property of the display, not of the money.
+		//
+		// The ledger-measured statements below are the real P2/P3 pair, and both
+		// are STRICT — no tolerance at all:
+		//   P2 (no manufacture): Σ count·min(age, Dt) never increases. A cohort
+		//     travels verbatim; capAcqAge and boundLots only ever RAISE acq.
+		//   P3 (no destruction): Σ count·τ(acq) never decreases. Self-custody is
+		//     free — the tokens arrive owing exactly what they owed.
+		// Cross-checked at scale (12,893 randomized transfers, zero drift) by
+		// TestXL_TransferConservesLedgerWeightAndCapacity, and in MONEY by P3b
+		// above (a split exit never costs more than the whole).
+		if weightAfter.Cmp(weightBefore) > 0 {
+			t.Fatalf("P3c (iter %d): six transfers MANUFACTURED ledger age-weight %s → %s",
+				i, weightBefore, weightAfter)
 		}
+		if ledgerAfter.Cmp(ledgerBefore) < 0 {
+			t.Fatalf("P3c (iter %d): six transfers DESTROYED ledger tax capacity %s → %s (self-custody must be free)",
+				i, ledgerBefore, ledgerAfter)
+		}
+		_ = capBefore
+		_ = capAfter
+		_ = total
 	}
 }
 

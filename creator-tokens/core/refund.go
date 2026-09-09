@@ -167,6 +167,69 @@ func refundPayout(reserve, credits, supply *big.Int) *big.Int {
 	return mMulDiv(reserve, credits, supply) // floor(reserve·credits/supply) — GROSS, pre-tax
 }
 
+// refundMaturingCohortTax is the X3 fix: the NON-DILUTABLE exit tax on the
+// `fromMaturing` maturing tokens of a wind-down Refund whose maturing gross share
+// is `base`, taxed FRESHEST-FIRST at each cohort's OWN rate over the money
+// cluster's per-(creator,holder) cohort ledger (holdclock_lots.go: getLots +
+// lotRateAt — the SAME ledger and per-cohort rate Sell's maturingCohortTax reads).
+//
+// ★ UNIT RECONCILIATION vs Sell's maturingCohortTax. Sell taxes the CURVE
+// marginal slice: its taxable base per cohort is SellProceeds(supply, take) and
+// its own returned `taxable` is SellProceeds(supply, fromMaturing). The refund
+// rail pays a FLAT pro-rata price (refundPayout: floor(R·c/S) per token — marginal
+// == average), so the maturing base is the flat `base = maturingGrossShare(...)`,
+// NOT a curve area. Calling Sell's helper here would tax SellProceeds(supply,
+// fromMaturing) — a number the refund never pays out and which can exceed `base`,
+// driving net = gross − tax negative. So we distribute the FLAT `base` across the
+// same freshest-first cohort draw instead. This is X3's reconstructed helper's
+// intent bound to the assembled tree's REAL ledger primitives.
+//
+// Allocation: each cohort takes its flat share `ceil(base·take/fromMaturing)` of
+// the base, capped by the running remainder so the shares sum to EXACTLY `base`
+// (Σ ceil(...) >= base, so the cap always binds by the last cohort and no base is
+// left unallocated or over-allocated). Ceil + freshest-first keeps it
+// treasury-favouring: the freshest, highest-rate cohorts get the ceil residue and
+// the oldest (lowest-rate) cohort absorbs the remainder. Each cohort's tax
+// ExitTaxOn(share, rate) <= share, so Σ tax <= Σ share == base <= gross ⇒ net >= 0.
+//
+// Single-cohort / legacy: getLots synthesises exactly one cohort at holderAcqBlock
+// whose lotRateAt equals ExitTaxBpsAt(heldBlocksAt(...)); with one cohort the
+// share is `base` and the tax is ExitTaxOn(base, blendRate) — BYTE-IDENTICAL to
+// the pre-fix blend, so honest single-cohort refunds are unchanged (no migration).
+func refundMaturingCohortTax(s Store, c, h string, base, fromMaturing *big.Int, block uint64) *big.Int {
+	tax := mZero()
+	if base == nil || base.Sign() <= 0 || fromMaturing == nil || fromMaturing.Sign() <= 0 {
+		return tax
+	}
+	lots := getLots(s, c, h) // freshest first, with legacy single-cohort synthesis
+	remBase := new(big.Int).Set(base)
+	remTok := new(big.Int).Set(fromMaturing)
+	for _, l := range lots {
+		if remBase.Sign() == 0 || remTok.Sign() == 0 {
+			break
+		}
+		take := l.count
+		if take.Cmp(remTok) > 0 {
+			take = remTok
+		}
+		share := mMulDivCeil(base, take, fromMaturing) // this cohort's flat slice of the refund base
+		if share.Cmp(remBase) > 0 {
+			share = new(big.Int).Set(remBase) // cap so Σ shares == base exactly (ceil never under-fills)
+		}
+		tax = mAdd(tax, ExitTaxOn(share, lotRateAt(l.acq, block)))
+		remBase = new(big.Int).Sub(remBase, share)
+		remTok = new(big.Int).Sub(remTok, take)
+	}
+	// Defensive, mirroring maturingCohortTax's own shortfall clause: if the ledger
+	// somehow under-counts (Σ cohort count < fromMaturing) any unallocated base is
+	// taxed at the MAX rate — treasury-favouring, never an under-charge. Under the
+	// Σ lots == kBal invariant with fromMaturing <= kBal this is unreachable.
+	if remBase.Sign() > 0 {
+		tax = mAdd(tax, ExitTaxOn(remBase, MaxExitTaxBps))
+	}
+	return tax
+}
+
 // RefundPrice is the CURRENT wind-down value of a single token:
 // floor(reserve/supply), in HBD base units. No error return by contract — an
 // unregistered or fully-drained creator simply reads supply == 0 and this
@@ -277,13 +340,56 @@ func Refund(s Store, caller, creator string, block uint64, credits *big.Int, min
 	// by the tax; the tax is a pure carve from the holder's payout, no
 	// aggregate, RULING G-clean.
 	// TWO BUCKETS: only the maturing share of the draw owes tax, apportioned pro
-	// rata by token count (matured tokens are 0% by definition). Same helper,
-	// same fixed matured-first order, and therefore the same number as Sell
-	// charges for an identical position.
-	taxBps := ExitTaxBpsAt(heldBlocksAt(s, creator, caller, block))
+	// rata by token count (matured tokens are 0% by definition). Same fixed
+	// maturing-first order Sell uses (splitDraw), so the taxable BASE is the same
+	// number Sell would charge for an identical position.
+	//
+	// ★ X3 — THE WIND-DOWN RATE IS PER-COHORT, NON-DILUTABLE (PRICE-1 ported to
+	// the refund rail). The tax RATE used to be read from the single BLENDED hold
+	// clock (ExitTaxBpsAt(heldBlocksAt(...))). That was the wind-down twin of the
+	// PRICE-1 launder the money cluster closed on Sell: park an aged pile in the
+	// maturing family, TransferCredits a fresh slice into it (transfer.go carries
+	// the sender's clock and does NOT graduate the recipient, F-C1), so the fresh
+	// slice re-averages the blended clock DOWN to ≈τ·M/(N+M), then Refund ONLY the
+	// fresh slice — paying the diluted blend on tokens that owe the full fresh
+	// rate, while the aged pile stays as a permanent self-regenerating shelter.
+	// Measured X3: 2,565,177 base units avoided on one 4000-aged/400-fresh cycle
+	// at the 2000-bps pin; the money cluster's per-cohort ledger (holdclock_lots.go)
+	// is exactly the state that distinguishes this launderer from an honest holder
+	// whose whole position is genuinely mid-aged.
+	//
+	// THE FIX taxes the drawn maturing tokens at their OWN cohort rates,
+	// FRESHEST-FIRST, over the money cluster's `lots|` ledger (getLots + lotRateAt
+	// — the SAME primitives Sell's maturingCohortTax reads). A matured/aged cohort
+	// (rate 0) can no longer lend its low rate to a fresh slice, because each
+	// cohort is taxed on its OWN flat share of the refund base. Freshest-first is
+	// the treasury-favouring assignment: a partial exit is charged as if it takes
+	// the holder's freshest, highest-rate tokens first, so an aged shelter can
+	// never subsidise a fresh withdrawal.
+	//
+	// ★ WHY PURE COHORT TAX HERE, NOT SELL'S max(blend, cohort) FLOOR. A debit
+	// never re-ages the remainder, so after a partial FRESH exit the blended clock
+	// is left stale-mid-aged while the ledger correctly shows the aged remainder.
+	// Flooring the refund at that stale blend (max(blend, cohort)) would OVER-charge
+	// the genuinely-aged remainder when it later refunds — it truly owes 0. Cohort
+	// tax freshest-first is already the treasury-favouring bound (the max over any
+	// cohort→slice assignment), so it never under-charges the owed tax and needs no
+	// floor. Sell floors at the blend because its base IS the curve marginal slice;
+	// the refund base is the FLAT pro-rata share (maturingGrossShare), a different
+	// unit — so refundMaturingCohortTax distributes THAT flat base per cohort,
+	// rather than calling Sell's curve-priced maturingCohortTax (whose taxable base
+	// is SellProceeds(supply, ·), which the refund never pays out — using it would
+	// mismatch units and can exceed the payout, driving net negative).
+	//
+	// BACKWARD-COMPATIBLE: a single-cohort / legacy (un-ledgered) position taxes
+	// BYTE-IDENTICALLY to the old blend — getLots synthesises exactly one cohort at
+	// holderAcqBlock, whose lotRateAt equals ExitTaxBpsAt(heldBlocksAt(...)) in
+	// every branch — so no migration and every honest single-cohort refund is
+	// unchanged.
 	_, refundFromMaturing := splitDraw(s, creator, caller, credits)
-	tax := ExitTaxOn(maturingGrossShare(gross, refundFromMaturing, credits), taxBps)
-	net := new(big.Int).Sub(gross, tax) // >= 0: tax = ceil(gross·τ/1e4) <= gross for τ <= 2000
+	base := maturingGrossShare(gross, refundFromMaturing, credits)
+	tax := refundMaturingCohortTax(s, creator, caller, base, refundFromMaturing, block)
+	net := new(big.Int).Sub(gross, tax) // >= 0: Σ cohort tax <= base <= gross (each cohort rate <= MaxExitTaxBps < 1e4)
 
 	// ECON-2 RATIFIED (PRUNED 2026-07-22, owner ruling): the wind-down rail
 	// carves ONLY the exit tax — deliberately NO trade fee, unlike Sell
@@ -407,9 +513,28 @@ func Refund(s Store, caller, creator string, block uint64, credits *big.Int, min
 // worst case directly via dosFreshenClock — a maximally-fresh clock written
 // past every public path, precisely because no organic path reaches it any
 // more — and asserts the sweep still fires exactly at the window boundary.
+// ★★ THE GATE READS THE COHORT LEDGER TOO (2026-09-08, same change as the
+// per-cohort charge below). The blend alone is NOT a sufficient consent test,
+// for the mirror-image of the reason it is not a sufficient tax: a
+// heterogeneous maturing bucket reads 0 bps on the blend while individual
+// cohorts are still most of a window young. Left on the blend alone, the
+// now-honest per-cohort charge would fire on exactly those holders — i.e. a
+// STRANGER could force a still-fresh cohort's exit and crystallise up to
+// MaxExitTaxBps of its backing to the treasury against the holder's will, which
+// is precisely the EXITTAX-1 / NOTICE-1 harm this gate exists to forbid. So the
+// gate now refuses while ANY cohort still owes.
+//
+// STRICTLY MORE PROTECTIVE, WITH THE SAME LIVENESS BOUND. The backstop below is
+// untouched and bypasses this test entirely once the market has been winding
+// down for a full ExitTaxDecayBlocks, so an abandoned position is still
+// sweepable at the LATER of its own decay or the market's — and by that block
+// every cohort is matured anyway (every acq is <= windDownOpenBlock; see the
+// F13 proof above), so the sweep fires at exactly the same block it did before.
+// The holder's own Refund pull remains open at all times, so this removes a
+// hostile option and never the holder's own exit.
 func RefundHolderTaxGateBlocked(s Store, creator, holder string, block uint64) bool {
 	taxBps := ExitTaxBpsAt(heldBlocksAt(s, creator, holder, block))
-	if taxBps == 0 {
+	if taxBps == 0 && !holderHasGreenCohort(s, creator, holder, block) {
 		return false
 	}
 	open, ok := windDownOpenBlock(s, creator, block)
@@ -543,13 +668,12 @@ func RefundHolder(s Store, caller, creator, holder string, block uint64) (*big.I
 	// (that is what "matured" means), so the gate correctly opens for them.
 	// heldBlocksAt now reports a graduated position as fully aged (holdclock.go),
 	// so this reads 0 for a wholly-matured holder without a special case here.
-	taxBps := ExitTaxBpsAt(heldBlocksAt(s, creator, holder, block))
 	if RefundHolderTaxGateBlocked(s, creator, holder, block) {
 		return nil, newErr(ErrState, "permissionless refundHolder is only available once the holder's exit tax has fully decayed (held >= ExitTaxDecayBlocks) OR the market has been winding down for a full ExitTaxDecayBlocks; a still-taxed holder must choose their own exit via Refund")
 	}
-	// else: taxBps == 0, or the market-level backstop is open — the push
-	// fires and taxes the holder's LIVE clock below (a possibly-nonzero,
-	// griefer-refreshed rate).
+	// else: the holder owes nothing on ANY cohort, or the market-level backstop
+	// is open — the push fires and taxes the holder's LIVE cohorts below (a
+	// possibly-nonzero, griefer-refreshed rate in the backstop branch).
 
 	supply := getMoney(s, kSupply(creator))
 	if mIsZero(supply) {
@@ -559,17 +683,44 @@ func RefundHolder(s Store, caller, creator, holder string, block uint64) (*big.I
 	}
 	reserve := getMoney(s, kReserve(creator))
 	gross := refundPayout(reserve, bal, supply)
-	// K2 tax, on the pushed holder's OWN hold clock. taxBps is 0 in the common
-	// case (a genuinely-aged abandoned position swept by a keeper) but MAY be
-	// nonzero when the market-level DoS backstop opened the push past a
-	// still-taxed (griefer-refreshed or genuinely-late-OTC) clock — see the gate
-	// above. Either way the carve is exact: tax = ceil(gross·τ/1e4) to the
-	// treasury (RULING K2), net = gross − tax to the holder, and the reserve is
-	// debited the FULL gross so R === area(S) is untouched by the tax.
-	// Pro rata across the two buckets, same rule as Sell and Refund.
+	// K2 tax, on the pushed holder's OWN COHORTS — never the blended clock.
+	//
+	// ★★ MEASURED DIVERGENCE, FIXED 2026-09-08 (REFUNDHOLDER-BLEND). This line
+	// used to charge ExitTaxOn(base, ExitTaxBpsAt(heldBlocksAt(...))) — the
+	// SINGLE BLENDED clock — on the stated ground that the push sweeps the WHOLE
+	// position, so the blend must be exact for it. That was assumed, never
+	// measured, and it is FALSE. The blend is a size-weighted mean whose aged
+	// part is pinned at the maturity floor by capAcqAge and then keeps ageing,
+	// so a heterogeneous bucket reads FULLY MATURED (0 bps) while its fresh
+	// cohorts are still most of a window young. Measured on this tree: an aged
+	// pile plus fresh slices reads 0 bps and paid ZERO here, while the per-cohort
+	// charge on the IDENTICAL tokens at the IDENTICAL block is up to 455 bps of
+	// the maturing base (4.55%, against the 1500-bps ceiling); the two-cohort
+	// closed form is MaxExitTaxBps·p(1−p), i.e. 375 bps at a 50/50 split, and
+	// staged inflows beat it. And RefundHolder is PERMISSIONLESS with `caller`
+	// absent from every key it touches, so the HOLDER pushes THEMSELVES and books
+	// the whole evasion — no accomplice, no waiting, one call, while their own
+	// Refund door on the same position at the same block charges the full
+	// per-cohort tax. That is the PRICE-1 / X3 launder the curve Sell and the
+	// wind-down Refund rails already closed, standing open on the third door.
+	//
+	// The charge is now the SAME rule Refund uses — refundMaturingCohortTax:
+	// pure per-cohort, freshest-first, NO blend floor — over the SAME flat refund
+	// base. The two wind-down doors are therefore identical for the same tokens
+	// at the same block and there is no cheaper one to shop for. A single-cohort
+	// or legacy (un-ledgered) position taxes BYTE-IDENTICALLY to the old blend
+	// (getLots synthesises exactly one cohort at the stored clock, whose
+	// lotRateAt equals ExitTaxBpsAt(heldBlocksAt(...)) in every branch), so no
+	// migration and nothing honest moves.
+	//
+	// The carve is otherwise unchanged: tax to the treasury (RULING K2), net =
+	// gross − tax to the holder, and the reserve is debited the FULL gross so
+	// R === area(S) is untouched by the tax. Pro rata across the two buckets,
+	// same rule as Sell and Refund.
 	_, pushFromMaturing := splitDraw(s, creator, holder, bal)
-	tax := ExitTaxOn(maturingGrossShare(gross, pushFromMaturing, bal), taxBps)
-	net := new(big.Int).Sub(gross, tax)
+	pushBase := maturingGrossShare(gross, pushFromMaturing, bal)
+	tax := refundMaturingCohortTax(s, creator, holder, pushBase, pushFromMaturing, block)
+	net := new(big.Int).Sub(gross, tax) // >= 0: Σ cohort tax <= base <= gross
 
 	// Chokepoint debit, same as Refund: the pushed-out holder's whole position
 	// leaves (amount == bal, both buckets). RULING K deleted the cost basis, so

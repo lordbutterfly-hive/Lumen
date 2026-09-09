@@ -177,12 +177,16 @@ const (
 	//
 	// defaultMaxExitTaxBps mirrors params.go's MaxExitTaxBps (F8, an
 	// adversarial review): the FRESHEST-hold, worst-case K2 exit tax rate
-	// (exittax.go: "tax(t) = 20% * max(0, 1 - t/6weeks)", so t=0 gives
+	// (exittax.go: "tax(t) = 15% * max(0, 1 - t/6weeks)", so t=0 gives
 	// exactly this). ledger.go's CreditsHeldValue uses it as a conservative
 	// upper bound on the tax any holder could ever be charged, since this
 	// package deliberately does not reimplement the per-holder hold clock
 	// (holdclock.go) — see CreditsHeldValue's own field doc for why.
-	defaultMaxExitTaxBps uint64 = 2000
+	// ★ 2026-09-08: kept in lockstep with core/params.go's MaxExitTaxBps
+	// (1000/2000 -> 500/1500 fee change) — this is a DECOUPLED mirror in the
+	// sim/analysis package (does not import core), so it does not auto-follow
+	// the core constant and must be hand-updated whenever that one moves.
+	defaultMaxExitTaxBps uint64 = 1500
 )
 
 func cfgU64(tr *Trace, key string, fallback uint64) uint64 {

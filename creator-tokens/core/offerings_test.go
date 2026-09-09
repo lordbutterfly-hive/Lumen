@@ -209,7 +209,7 @@ func TestOfferings_PriceBandIsTheSameAsFaces(t *testing.T) {
 	}
 	// A relabel must NOT move the price or its band window.
 	before := OfferingPrice(s, c, id)
-	if err := SetOfferingTitle(s, c, c, id, "renamed call"); err != nil {
+	if err := SetOfferingTitle(s, c, c, 2003, id, "renamed call"); err != nil {
 		t.Fatal(err)
 	}
 	if after := OfferingPrice(s, c, id); after.Cmp(before) != 0 {
@@ -325,7 +325,7 @@ func TestOfferings_CreatorOnly(t *testing.T) {
 	if err := SetOfferingPrice(s, "stranger", c, 2001, id, 2000); err == nil {
 		t.Fatal("a stranger repriced someone else's offering")
 	}
-	if err := SetOfferingTitle(s, "stranger", c, id, "hijacked"); err == nil {
+	if err := SetOfferingTitle(s, "stranger", c, 2000, id, "hijacked"); err == nil {
 		t.Fatal("a stranger relabelled someone else's offering")
 	}
 	if err := DeleteOffering(s, "stranger", c, id); err == nil {
@@ -531,7 +531,7 @@ func TestOfferings_RenameCannotLaunderAFreshTitleClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SetOfferingTitle(s, c, c, id, "bar"); err != nil {
+	if err := SetOfferingTitle(s, c, c, 2000, id, "bar"); err != nil {
 		t.Fatal(err)
 	}
 	if err := DeleteOffering(s, c, c, id); err != nil {
@@ -577,7 +577,7 @@ func TestOfferings_RenameOntoAnchoredTitleCannotLaunderThePrice(t *testing.T) {
 	}
 	// THE PROVEN BYPASS: rename the throwaway onto the now-freed, protected
 	// title.
-	if err := SetOfferingTitle(s, c, c, tmp, "custom song"); err == nil {
+	if err := SetOfferingTitle(s, c, c, 2002, tmp, "custom song"); err == nil {
 		t.Fatal("BYPASS: renaming a throwaway onto an anchored title moved an unbanded price in")
 	} else if e, ok := err.(*Err); !ok || e.Symbol != ErrInput {
 		t.Fatalf("want ErrInput, got %v", err)
@@ -610,7 +610,7 @@ func TestOfferings_RenameOntoAnchoredTitleSucceedsWithinBand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SetOfferingTitle(s, c, c, other, "custom song"); err != nil {
+	if err := SetOfferingTitle(s, c, c, 2002, other, "custom song"); err != nil {
 		t.Fatalf("an honest in-band rename onto an anchored title was refused: %v", err)
 	}
 	if got := OfferingTitle(s, c, other); got != "custom song" {
@@ -656,7 +656,7 @@ func TestOfferings_RenameCheckUsesTheTighterOfAnchorAndLastPrice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SetOfferingTitle(s, c, c, tmp, "custom song"); err == nil {
+	if err := SetOfferingTitle(s, c, c, 2002, tmp, "custom song"); err == nil {
 		t.Fatal("BYPASS: an anchor-only check let a price through that the title's real last-known-price band would refuse")
 	} else if e, ok := err.(*Err); !ok || e.Symbol != ErrInput {
 		t.Fatalf("want ErrInput, got %v", err)
@@ -667,7 +667,7 @@ func TestOfferings_RenameCheckUsesTheTighterOfAnchorAndLastPrice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SetOfferingTitle(s, c, c, tmp2, "custom song"); err != nil {
+	if err := SetOfferingTitle(s, c, c, 2003, tmp2, "custom song"); err != nil {
 		t.Fatalf("a price within BOTH possible bands was wrongly refused: %v", err)
 	}
 }
@@ -835,7 +835,7 @@ func TestOfferings_ShopClosesOnRetireButDeleteStillWorks(t *testing.T) {
 	if err := SetOfferingPrice(s, c, c, 2200, id, 1500); err == nil {
 		t.Fatal("repriced an offering on a RETIRED market")
 	}
-	if err := SetOfferingTitle(s, c, c, id, "renamed"); err == nil {
+	if err := SetOfferingTitle(s, c, c, 2200, id, "renamed"); err == nil {
 		t.Fatal("retitled an offering on a RETIRED market")
 	}
 	// THE FIX: delete must still work — the creator's only way to withdraw a
@@ -966,18 +966,18 @@ func TestOfferings_OneLiveOfferingPerTitle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second distinct offering: %v", err)
 	}
-	if err := SetOfferingTitle(s, c, c, other, "custom song"); err == nil {
+	if err := SetOfferingTitle(s, c, c, 2000, other, "custom song"); err == nil {
 		t.Fatal("renaming an offering ONTO a live title was accepted — rename is a second door into the duplicate-title state")
 	}
 
 	// ...but renaming an offering to a cosmetic variant of ITS OWN title must
 	// still work: the rule is one live offering per title, not a ban on
 	// touching your own.
-	if err := SetOfferingTitle(s, c, c, other, "Mixing Session"); err != nil {
+	if err := SetOfferingTitle(s, c, c, 2000, other, "Mixing Session"); err != nil {
 		t.Fatalf("renaming an offering to a variant of its own title must be allowed: %v", err)
 	}
 	// And a genuinely free title is still available.
-	if err := SetOfferingTitle(s, c, c, other, "mastering"); err != nil {
+	if err := SetOfferingTitle(s, c, c, 2000, other, "mastering"); err != nil {
 		t.Fatalf("renaming onto an unused title must be allowed: %v", err)
 	}
 }
@@ -1047,7 +1047,7 @@ func TestOfferings_RenameCannotDonateALooserAnchorForFutureReprices(t *testing.T
 	// Decoy's own [25000,100000] band exactly at the floor) and MUST still
 	// succeed — refusing this would break requirement 1 (honest renames must
 	// keep working), not just close the bug.
-	if err := SetOfferingTitle(s, c, c, real, "Decoy"); err != nil {
+	if err := SetOfferingTitle(s, c, c, 2000, real, "Decoy"); err != nil {
 		t.Fatalf("an honest rename at the edge of the destination's own band was refused: %v", err)
 	}
 	// THE BUG: without the fix, a same-block reprice to 4x the id's true
@@ -1094,7 +1094,7 @@ func TestOfferings_RenameOntoLooseDestinationIsNotTightened(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SetOfferingTitle(s, c, c, id, "Premium Slot"); err != nil {
+	if err := SetOfferingTitle(s, c, c, 2000, id, "Premium Slot"); err != nil {
 		t.Fatalf("an honest rename onto a tighter, already-anchored title was refused: %v", err)
 	}
 	if got := OfferingPrice(s, c, id); got.Cmp(big.NewInt(80_000)) != 0 {
@@ -1118,7 +1118,7 @@ func TestOfferings_RenameToAFreshTitleIsUnaffectedByTheFix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SetOfferingTitle(s, c, c, id, "brand new name"); err != nil {
+	if err := SetOfferingTitle(s, c, c, 2000, id, "brand new name"); err != nil {
 		t.Fatalf("renaming to a never-used title was refused: %v", err)
 	}
 	if got := OfferingTitle(s, c, id); got != "brand new name" {

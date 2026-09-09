@@ -127,23 +127,40 @@ func TestReReg_DelinquencyEscapeIsRefused(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ★★ PINNED RESIDUAL — THE BLENDED CLOCK LAUNDERS, SINGLE-ACCOUNT, NO TRANSFER
+// ★★ WAS "PINNED RESIDUAL", NOW A REGRESSION PIN — THE BLENDED CLOCK NO LONGER
+// LAUNDERS, AND NO LONGER MIS-REPORTS (single account, no transfer)
 // ---------------------------------------------------------------------------
 //
-// This is the ALREADY-ACCEPTED "accelerated maturation" residual, pinned with
-// real numbers because the recorded framing ("1000 matured + 100 fresh => the
-// fresh reach 0% in ~3.8 days") badly understates it, and because a 2026-08-12
-// session briefly mis-attributed it to TransferCredits and shipped a fix that
-// closed only a ONE-BLOCK window before reverting it.
+// THE HISTORY, KEPT IN FULL because this test has been wrong twice and the
+// record is the point of it:
 //
-// THE MECHANISM: a maturing position carries exactly ONE blended clock for the
-// whole balance (holdclock.go — deliberate; per-lot ages would be unbounded
-// attacker-growable state on a never-reject path). Buying fresh tokens into a
-// large, nearly-matured pile therefore drags the fresh tokens' effective age up
-// to the blend. graduate() only fires at age >= ExitTaxDecayBlocks EXACTLY, so
-// it does not help one block below the window.
+//  1. It began as the ALREADY-ACCEPTED "accelerated maturation" residual, pinned
+//     with real numbers because the recorded framing ("1000 matured + 100 fresh
+//     => the fresh reach 0% in ~3.8 days") badly understated it, and because a
+//     2026-08-12 session briefly mis-attributed it to TransferCredits and
+//     shipped a fix that closed only a ONE-BLOCK window before reverting it.
+//  2. THE MECHANISM it recorded: a maturing position carried exactly ONE blended
+//     clock for the whole balance (holdclock.go), so buying fresh tokens into a
+//     large, nearly-matured pile dragged the fresh tokens' effective age up to
+//     the blend. graduate() only fires at age >= ExitTaxDecayBlocks EXACTLY, so
+//     it did not help one block below the window. No transfer, no second
+//     account, no waiting were required.
+//  3. PRICE-1 (2026-09-08) CLOSED THE MONEY with the per-cohort `lots|` ledger:
+//     the fresh cohort is taxed at ITS OWN rate on ITS OWN marginal top slice,
+//     so the aged pile can no longer pull it down. Measured on the fixed tree by
+//     zz_residual_check_test.go: the charge is 395,326,266,413 base units,
+//     EXACTLY ExitTaxOn(taxableGross, MaxExitTaxBps).
+//  4. TAXBPS-DISPLAY (2026-09-08, this change) CLOSED THE LABEL. Step 3 left the
+//     REPORTED rate on the stale blended summary, so this exact position quoted
+//     TaxBps == 2 beside a Tax that was the full 1500 bps — a ~750x
+//     understatement of the rate next to an exactly-correct amount, carried into
+//     the event log, the quoteSell preview and every integrator.
+//     SellResult.TaxBps is now the slice-weighted EFFECTIVE rate
+//     (holdclock_lots.go maturingCohortTax).
 //
-// NO TRANSFER, NO SECOND ACCOUNT, AND NO WAITING ARE REQUIRED.
+// So this test is INVERTED rather than deleted: it now fails if either half ever
+// comes back. Deleting it would have thrown away the only pin on a defect that
+// has already been "fixed" and un-fixed once.
 func TestResidual_BlendedClockLaundersSingleAccount_KNOWN(t *testing.T) {
 	const c, whale = "hive:resid", "hive:whale"
 	const P, F = 1_000_000, 1_000
@@ -166,17 +183,36 @@ func TestResidual_BlendedClockLaundersSingleAccount_KNOWN(t *testing.T) {
 	if q.Gross.Sign() == 0 {
 		t.Fatal("non-vacuity: nothing was quoted")
 	}
-	t.Logf("KNOWN RESIDUAL: pile=%d fresh=%d one block below the window -> %d bps "+
-		"(honest %d) = %.2f%% of the exit tax avoided, single account, no transfer",
-		P, F, q.TaxBps, MaxExitTaxBps,
-		100*(1-float64(q.TaxBps)/float64(MaxExitTaxBps)))
 
-	if q.TaxBps >= MaxExitTaxBps {
-		t.Errorf("the residual appears CLOSED (%d bps) — if that is intentional, delete this "+
-			"test and the per-lot discussion with it; if not, something else changed", q.TaxBps)
+	// NON-VACUITY: the blended clock really is still diluted here — this position
+	// IS the laundering shape, and the test would prove nothing if it were not.
+	blendBps := ExitTaxBpsAt(heldBlocksAt(s, c, whale, at))
+	if blendBps >= MaxExitTaxBps {
+		t.Fatalf("non-vacuity: the blended clock reads %d bps, so the pile is NOT diluting it "+
+			"and this fixture no longer exercises the laundering shape", blendBps)
 	}
-	// Pin the shape: the avoidance is severe, not marginal.
-	if q.TaxBps > 100 {
-		t.Logf("NOTE: residual now %d bps, milder than the 3 bps measured on 2026-08-12", q.TaxBps)
+
+	// HALF 1 — THE MONEY. The whole draw comes from the fresh cohort, so the
+	// charge is the FULL rate on the whole taxable base, to the base unit.
+	wantTax := ExitTaxOn(q.TaxableGross, MaxExitTaxBps)
+	if q.Tax.Cmp(wantTax) != 0 {
+		t.Errorf("PRICE-1 REGRESSION: tax %s, want %s (full %d bps on taxableGross %s); "+
+			"the aged pile is diluting the fresh cohort's charge again",
+			q.Tax, wantTax, MaxExitTaxBps, q.TaxableGross)
 	}
+
+	// HALF 2 — THE LABEL. The reported rate must describe that charge, not the
+	// blended summary it used to be read from.
+	if q.TaxBps != MaxExitTaxBps {
+		t.Errorf("TAXBPS-DISPLAY REGRESSION: reported TaxBps %d, want %d — the whole draw is "+
+			"one maximally-fresh cohort, so the effective rate IS the full rate. "+
+			"(blended clock reads %d bps; if TaxBps has gone back to reading THAT, "+
+			"the quote and the event are lying next to a correct amount again)",
+			q.TaxBps, MaxExitTaxBps, blendBps)
+	}
+
+	t.Logf("CLOSED, both halves: pile=%d fresh=%d one block below the window -> "+
+		"tax=%s on taxableGross=%s (full %d bps), reported TaxBps=%d, "+
+		"while the stale blended clock still reads %d bps",
+		P, F, q.Tax, q.TaxableGross, MaxExitTaxBps, q.TaxBps, blendBps)
 }

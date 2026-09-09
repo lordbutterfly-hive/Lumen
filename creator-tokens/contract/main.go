@@ -1673,8 +1673,16 @@ func Sell(a *string) *string {
 		sdk.Log(core.EvMaturedMoved(creator, caller, caller, "", block, res.MaturedBurned))
 	}
 	sdk.Log(core.EvSold(creator, caller, block, res.Sold, res.Gross, res.Tax, res.Fee, res.Net, res.TaxableGross, res.TaxBps, res.HeldBlocks))
+	// ★ taxableGross is REPORTED, not implied (TAXBPS-DISPLAY, 2026-09-08). With
+	// two buckets and a per-cohort ledger, `gross × taxBps` is NOT the tax — the
+	// base is the maturing top slice, and taxBps is the slice-weighted effective
+	// rate over the cohorts. Shipping the base alongside the rate is what lets a
+	// consumer verify tax == the charge instead of re-deriving a wrong one; the
+	// event (EvSold) has carried it since the two-bucket split and the JSON
+	// return did not.
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","sold":"` + bigStr(res.Sold) +
 		`","gross":"` + bigStr(res.Gross) + `","tax":"` + bigStr(res.Tax) +
+		`","taxableGross":"` + bigStr(res.TaxableGross) +
 		`","net":"` + bigStr(res.Net) + `","taxBps":` + u64s(res.TaxBps) + `}`)
 }
 
@@ -2088,8 +2096,14 @@ func QuoteBuy(a *string) *string {
 // holder's own active auth. Shares core.QuoteSell's sellCompute with Sell, so
 // it can never drift: returns gross (the curve slice), the exit tax to the
 // treasury, the trade fee, Net (== the HBD the seller receives — the number
-// they feed back as `sell`'s minNet floor), and the taxBps/heldBlocks that
-// produced it (so the UI can show WHY the tax is what it is). Same guards as
+// they feed back as `sell`'s minNet floor), the taxableGross the tax was struck
+// on, and the taxBps/heldBlocks that produced it (so the UI can show WHY the tax
+// is what it is). taxBps is the EFFECTIVE rate — slice-weighted over the
+// cohorts the draw consumes, exact for a homogeneous position — NOT the blended
+// hold clock, which understated it ~750x on an aged-pile-plus-fresh-slice
+// position (see SellResult.TaxBps). heldBlocks remains the blended clock and may
+// legitimately disagree with taxBps for a heterogeneous holder.
+// Same guards as
 // Sell, so an over-balance or nonexistent-market preview is the same refusal.
 //
 //go:wasmexport quoteSell
@@ -2110,9 +2124,13 @@ func QuoteSell(a *string) *string {
 		handleErr(err)
 		return nil
 	}
+	// taxableGross: see the `sell` entrypoint's note. A preview that shows a rate
+	// without the base it applies to cannot be checked against the amount beside
+	// it, which is exactly the defect this field closes.
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","holder":"` + jsonEscape(holder) +
 		`","sold":"` + bigStr(res.Sold) + `","gross":"` + bigStr(res.Gross) +
-		`","tax":"` + bigStr(res.Tax) + `","fee":"` + bigStr(res.Fee) +
+		`","tax":"` + bigStr(res.Tax) + `","taxableGross":"` + bigStr(res.TaxableGross) +
+		`","fee":"` + bigStr(res.Fee) +
 		`","net":"` + bigStr(res.Net) + `","taxBps":` + u64s(res.TaxBps) +
 		`,"heldBlocks":` + u64s(res.HeldBlocks) + `}`)
 }
@@ -2240,7 +2258,7 @@ func SetOfferingTitle(a *string) *string {
 	}
 	title := jsonStr(payload, "title")
 
-	if err := core.SetOfferingTitle(store, caller, caller, id, title); err != nil {
+	if err := core.SetOfferingTitle(store, caller, caller, block, id, title); err != nil {
 		handleErr(err)
 		return nil
 	}

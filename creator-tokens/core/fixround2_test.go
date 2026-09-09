@@ -128,6 +128,19 @@ func bounceAssertInert(t *testing.T, s Store, creator, x, y string, block uint64
 func dosFreshenClock(s Store, creator string, block uint64, holders ...string) {
 	for _, h := range holders {
 		setU64(s, kAcqBlock(creator, h), block)
+		// ★ THE COHORT LEDGER IS PART OF "THE CLOCK" NOW (2026-09-08). A holder's
+		// maturity lives in `lots|` (holdclock_lots.go), and every consumer that
+		// decides money — the exit tax on both rails, and TransferCredits, which
+		// carries the SENDER's cohorts rather than a summary of them — reads it
+		// there. Writing kAcqBlock alone therefore no longer produces "a
+		// maximally-fresh holder"; it produces an INCOHERENT one, whose stored
+		// summary says fresh while their actual tokens say six weeks old. The
+		// bounce below would then legitimately hand those genuinely-aged tokens
+		// over and the blend-measured weight would appear to grow out of nothing.
+		// Freshen BOTH, so the fixture means what its name says.
+		if bal := getMoney(s, kBal(creator, h)); bal.Sign() > 0 {
+			setLots(s, creator, h, []mLot{{count: bal, acq: block}})
+		}
 	}
 }
 
@@ -403,7 +416,7 @@ func TestRefundHolder_OUTFLOWK2_TinyPoisonWindowBoundary(t *testing.T) {
 // rail, so no output-protection parameter is warranted for it.
 // ---------------------------------------------------------------------------
 
-func TestSell_OUTFLOWK1_RefutedVictimEnriched(t *testing.T) {
+func TestSell_OUTFLOWK1_SellLaunderClosed_WindDownStillOpen(t *testing.T) {
 	// --- Sell variant (curve rail; market kept ACTIVE) ---
 	sellTotals := func(attack bool) (realizedNet, remainingGross *big.Int) {
 		s := NewMemStore()
@@ -450,16 +463,36 @@ func TestSell_OUTFLOWK1_RefutedVictimEnriched(t *testing.T) {
 	atkTotal := new(big.Int).Add(atkNet, atkRem)
 	t.Logf("SELL  baseline: net=%s + remaining=%s = %s", baseNet, baseRem, baseTotal)
 	t.Logf("SELL  attack  : net=%s + remaining=%s = %s", atkNet, atkRem, atkTotal)
-	// The finding's own "loss": baseNet - atkNet == 79,521,629,065.
-	if drop := new(big.Int).Sub(baseNet, atkNet); drop.Cmp(big.NewInt(79_521_629_065)) != 0 {
-		t.Fatalf("Sell net drop = %s, want the finding's 79,521,629,065", drop)
+	// ★ F-C1 RE-TAKE (owner-approved 2026-09-08, PRICE-1 fix + 15%% exit-tax
+	// ceiling). This test USED to pin the SELL-rail launder's cover story: the
+	// blended clock under-charged the fresh half (drop == the blended
+	// 79,521,629,065), so bob "ended richer" and mallory's 50%%-fresh-into-aged
+	// gift looked like an irrational, self-harming grief. That under-charge WAS
+	// PRICE-1. The non-dilutable cohort floor (holdclock_lots.go) now taxes the
+	// fresh half at FULL FREIGHT on its dear top slice, so on the curve rail:
+	//   (a) the net drop is the full-freight tax, STRICTLY MORE than the old
+	//       blended under-charge (119,282,443,598 at the 15%% ceiling vs 79.5e9);
+	//   (b) bob no longer ends richer: atkTotal < baseTotal — the gift confers no
+	//       advantage. mallory sank ~874,738 HBD to move bob down ~10,215 HBD (a
+	//       21:1-negative ratio) — never a rational grief, only the launder in a
+	//       victim costume (quantified in TestPFK1_AttackerCostVsHarm).
+	// The SELL-rail launder is CLOSED.
+	dropSell := new(big.Int).Sub(baseNet, atkNet)
+	if dropSell.Cmp(big.NewInt(79_521_629_065)) <= 0 {
+		t.Fatalf("SELL launder not closed: net drop %s must EXCEED the old blended under-charge 79,521,629,065", dropSell)
 	}
-	// The refutation: bob's TOTAL wealth is strictly higher under the attack.
-	if atkTotal.Cmp(baseTotal) <= 0 {
-		t.Fatalf("OUTFLOW-K-1 NOT refuted on Sell: attack total %s <= baseline %s", atkTotal, baseTotal)
+	if dropSell.Cmp(big.NewInt(119_282_443_598)) != 0 {
+		t.Fatalf("SELL full-freight net drop = %s, want 119,282,443,598 (fresh half @15%% ceiling, top slice)", dropSell)
+	}
+	if atkTotal.Cmp(baseTotal) >= 0 {
+		t.Fatalf("SELL launder still open: attack total %s >= baseline %s (the fix must make bob poorer)", atkTotal, baseTotal)
 	}
 
-	// --- Refund variant (the LIVE wind-down rail) ---
+	// --- Refund variant (the LIVE wind-down rail) — X3, STILL OPEN ---
+	// The PRICE-1 fix is wired on the CURVE Sell path only; refund.go is untouched
+	// (a flat pro-rata rail where marginal==average, so the cohort floor equals the
+	// blend — nothing to recover). The wind-down launder therefore REMAINS OPEN and
+	// this variant still shows bob ending richer. Flagged (X3), not fixed.
 	// bob and mallory both buy, then the market retires; mallory transfers their
 	// whole position to bob same-block as bob's Refund. bob's Refund tax rises,
 	// but bob inherits mallory's entire stake and can Refund it too — bob ends up
@@ -513,7 +546,8 @@ func TestSell_OUTFLOWK1_RefutedVictimEnriched(t *testing.T) {
 	if atkR.Cmp(baseR) <= 0 {
 		t.Fatalf("OUTFLOW-K-1 NOT refuted on Refund: attack %s <= baseline %s", atkR, baseR)
 	}
-	t.Log("OUTFLOW-K-1 REFUTED: on both rails the 'victim' nets strictly MORE under the attack; mallory is the sole loser")
+	t.Log("OUTFLOW-K-1: SELL launder CLOSED (F-C1 re-take) — bob no longer ends richer on the curve rail. " +
+		"REFUND/wind-down launder REMAINS OPEN (X3): refund.go untouched by the PRICE-1 fix, so on the flat rail the gift still enriches bob — flagged, not fixed.")
 }
 
 // ---------------------------------------------------------------------------

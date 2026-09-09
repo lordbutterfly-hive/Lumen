@@ -19,11 +19,11 @@ func TestExitTax_Schedule_C16(t *testing.T) {
 		want uint64
 	}{
 		{"fresh-pays-max-exactly", 0, MaxExitTaxBps},
-		{"one-block-held", 1, 2000}, // ceil(2000·(Dt−1)/Dt) = 2000 still (rounds up)
-		{"quarter-decayed", dt / 4, 1500},
-		{"half-decayed", dt / 2, 1000},
-		{"three-quarters-decayed", 3 * (dt / 4), 500},
-		{"one-block-short-of-free", dt - 1, 1}, // ceil(2000·1/Dt) = 1 — never 0 early
+		{"one-block-held", 1, 1500}, // ceil(1500·(Dt−1)/Dt) = 1500 still (rounds up)
+		{"quarter-decayed", dt / 4, 1125},
+		{"half-decayed", dt / 2, 750},
+		{"three-quarters-decayed", 3 * (dt / 4), 375},
+		{"one-block-short-of-free", dt - 1, 1}, // ceil(1500·1/Dt) = 1 — never 0 early
 		{"exactly-six-weeks-free", dt, 0},
 		{"beyond-six-weeks-free", dt + 1, 0},
 		{"way-beyond-free", 100 * dt, 0},

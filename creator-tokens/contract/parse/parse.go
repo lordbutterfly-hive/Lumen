@@ -46,22 +46,39 @@ func isJSONSpace(b byte) bool {
 }
 
 // findKey returns the index just after the colon following `"key":` in a flat
-// JSON object, or -1 if not found. Verbatim copy of contract/main.go's
-// original findKey.
+// JSON object, or -1 if not found.
+//
+// F-T2 FIX (2026-09-08): the original bailed with -1 the instant the FIRST
+// occurrence of `"key"` was not followed by a colon. That single early return
+// is the field-shadowing bug: a free-text VALUE equal to the literal text of a
+// later key (e.g. an `ask` payload whose `contentHash` value is the string
+// `offeringId`, sitting AHEAD of the real `"offeringId":7`) contains `"key"`
+// not followed by `:`, so the scan gave up and reported the real key ABSENT —
+// the contract read the legacy face price (0) instead of the signed offering,
+// silently underpaying the creator. The fix RESUMES the scan past every such
+// near-miss until it finds a `"key"` that a colon really does follow, or the
+// payload is exhausted. Resuming from idx+1 (not idx+len(pat)) is deliberate:
+// it can never step over a match whose opening quote is the closing quote of
+// the near-miss just rejected, and `from` still strictly increases each pass,
+// so the loop always terminates.
 func findKey(payload, key string) int {
 	pat := "\"" + key + "\""
-	idx := strings.Index(payload, pat)
-	if idx < 0 {
-		return -1
+	from := 0
+	for {
+		rel := strings.Index(payload[from:], pat)
+		if rel < 0 {
+			return -1
+		}
+		idx := from + rel
+		i := idx + len(pat)
+		for i < len(payload) && isJSONSpace(payload[i]) {
+			i++
+		}
+		if i < len(payload) && payload[i] == ':' {
+			return i + 1
+		}
+		from = idx + 1 // near-miss: resume scanning, do not bail
 	}
-	i := idx + len(pat)
-	for i < len(payload) && isJSONSpace(payload[i]) {
-		i++
-	}
-	if i >= len(payload) || payload[i] != ':' {
-		return -1
-	}
-	return i + 1
 }
 
 // Str extracts a quoted string field's raw contents from a flat JSON object.

@@ -303,6 +303,32 @@ func kEscrowMaturedLeg(c string, seq uint64) string {
 	return "em|" + c + "|" + strconv.FormatUint(seq, 10)
 }
 
+// el|<creator>|<seq> — the MATURING-bucket portion of one escrow's draw, as the
+// COHORT LIST it was actually drawn from (holdclock_lots.go's `lots|` encoding).
+// Absent means "no cohort record", which is exactly how every escrow written
+// before this key existed behaves: the return legs then fall back to the escrow
+// record's single packed acqBlock, i.e. the pre-fix behaviour, so nothing on
+// chain needs migrating.
+//
+// ★ WHY IT EXISTS (2026-09-08). Ask() stored ONE blended clock
+// (`acqAtEscrow := holderAcqBlock(...)`) for a draw that can span many cohorts,
+// and Reclaim / Decline / Answer credited the whole slice back at that single
+// value. That is the SAME lossy projection the transfer leg was laundering
+// through: measured on the pre-fix tree, an Ask -> Decline round trip in ONE
+// block converted 18,396 tokens owing 1,414 bps into a cohort owing 51 bps —
+// 44% of the position's whole tax capacity destroyed, permissionlessly on the
+// Reclaim door and same-block on the Decline door. Recording the cohorts closes
+// it the same way transfer.go does: a slice of tokens carries its cohorts.
+//
+// A SIDE KEY, not a tenth field in the packed record — same reasoning as "em|"
+// above, and doubly so here because this value is variable-length. The prefix is
+// "el|" rather than "e|<c>|<seq>|l" so the "e|<creator>|" prefix scans in
+// harness_test.go and the solvency invariants keep feeding unpackEscrow exactly
+// the records they always did.
+func kEscrowLots(c string, seq uint64) string {
+	return "el|" + c + "|" + strconv.FormatUint(seq, 10)
+}
+
 // ---- ratings (rating.go, USER RULING 2026-07-28) ----
 //
 // Keyed on (creator, seq) — the escrow's own identity. SAFE ACROSS

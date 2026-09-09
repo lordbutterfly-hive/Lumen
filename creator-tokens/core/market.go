@@ -710,6 +710,20 @@ func registerApply(s Store, creator string, block uint64, face, cap int64) {
 	setU64(s, kDelinquentUntil(creator), 0)
 	setU64(s, kMaxOffenceUntil(creator), 0) // same reason: it is per-window state of the DEAD incarnation
 
+	// CT-STATE-01 FIX (2026-09-08): clear the conviction-streak pair too. The
+	// anti-ratchet streak (kConvictionStreak/kLastConvictionEnd, keys.go) raises
+	// the miss FLOOR for a repeat conviction that lands inside the cooldown of
+	// the last sentence. It is per-incarnation accountability state exactly like
+	// the four counters above, but was the ONE such key registerApply did not
+	// reset — so a creator who wound down mid-streak and re-registered ("start
+	// fresh", SPEC §1.7.5) carried the raised floor into the new incarnation,
+	// making its delivery accountability diverge from a decorrelated fresh
+	// market's. Clearing both restores missFloor to the base for the returning
+	// creator, the same value a never-convicted control reads. Same bug class
+	// and same fix shape as the kMissCount/kDeliveredCount resets above.
+	setU64(s, kConvictionStreak(creator), 0)
+	setU64(s, kLastConvictionEnd(creator), 0)
+
 	// THE RATING AGGREGATE IS PER-INCARNATION TOO (defect found 2026-08-12,
 	// owner-ruled the same day). This reset was MISSING while every one of the
 	// keys above was present, which made the carry-over asymmetric in the worst

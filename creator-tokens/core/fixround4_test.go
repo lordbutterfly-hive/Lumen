@@ -125,12 +125,29 @@ func TestOUTFLOWCLIFF1_SellClockFrontRun_GuardStops(t *testing.T) {
 	if drop.Sign() <= 0 {
 		t.Fatalf("post-poison net not reduced (drop=%s): the front-run must lower net", drop)
 	}
-	// Bound it honestly: the extracted tax is exactly ceil(gross * 1bps) — 0.01%,
-	// NOT the invariant-breaking class.
-	wantTax := ExitTaxOn(qAtk.Gross, 1)
-	if qAtk.Tax.Cmp(wantTax) != 0 {
-		t.Fatalf("attack tax = %s, want ceil(gross*1/1e4) = %s", qAtk.Tax, wantTax)
+	// ★ BOUND IT HONESTLY — AND THE BOUND GOT SMALLER (2026-09-08). This used to
+	// assert the extracted tax was EXACTLY ceil(gross · 1 bps): the blended clock
+	// moved 1 block, so the WHOLE of bob's 50,000-token position was re-rated.
+	// With the cohort ledger authoritative (sell.go, PRICE-1 fix) mallory's gift
+	// is taxed on the gift's OWN top slice at its OWN rate and bob's aged pile
+	// still reads 0, so the extraction is now the FULL rate on ONE token instead
+	// of 1 bps on fifty thousand — a strict REDUCTION of the same grief, pinned
+	// here in both directions so it can never silently grow back.
+	blendEra := ExitTaxOn(qAtk.Gross, 1) // what the pre-fix blend charged
+	giftSlice, err := SellProceeds(getMoney(s, kSupply("alice")), big.NewInt(1))
+	if err != nil {
+		t.Fatal(err)
 	}
+	wantTax := ExitTaxOn(giftSlice, MaxExitTaxBps) // the gift's own full-rate value
+	if qAtk.Tax.Cmp(wantTax) != 0 {
+		t.Fatalf("attack tax = %s, want the gift's own full-rate top slice = %s", qAtk.Tax, wantTax)
+	}
+	if qAtk.Tax.Cmp(blendEra) >= 0 {
+		t.Fatalf("the cohort ledger must REDUCE this grief: tax %s >= the pre-fix blend charge %s", qAtk.Tax, blendEra)
+	}
+	t.Logf("OUTFLOWCLIFF1 grief: %s base units (was %s under the blend floor — %.1f%% smaller); "+
+		"the guard below is unchanged and still converts it into a clean revert",
+		qAtk.Tax, blendEra, 100*(1-float64(qAtk.Tax.Int64())/float64(blendEra.Int64())))
 
 	// ---- THE FIX: bob's signed sell carries minNet = his honest quoted net.
 	// The front-run makes execution net fall below it, so the call REVERTS

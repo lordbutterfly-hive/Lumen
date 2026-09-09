@@ -119,12 +119,20 @@ func TestSettlement_RulingJCollapsesRateContradiction(t *testing.T) {
 
 // ---- the min() and its arms ------------------------------------------------
 
-func TestSettlementRate_MinPicksLowestArm(t *testing.T) {
+func TestSettlementRate_MedianArmCappedAtSpot(t *testing.T) {
+	// ★ ORACLE-CLUSTER FIX (2026-09-08): SettlementRate is now
+	// min(spot, median(short, long, spot)), NOT the old three-way min. A lone
+	// low arm (short OR long) is the outlier the median discards, so no single
+	// walked/stale TWAP can drag the rate DOWN (which over-charges askers,
+	// PRICE-3/CT-ORACLE-01); spot remains the no-arbitrage ceiling via the
+	// outer min. Two arms must be corrupted to move the median.
 	// All three fixtures: S=200 (spot 2680, avg_ceil 1827 — C5 quiet for
 	// every rate used here since 4·1500 = 6000 > 1827).
 	const q = uint64(500_000)
 
-	t.Run("ShortIsLowest", func(t *testing.T) {
+	t.Run("ShortIsLowOutlier_Ignored", func(t *testing.T) {
+		// CT-ORACLE-01 defense in a unit: a low short is the outlier.
+		// median(1500,2000,2680)=2000; min(spot 2680, 2000)=2000.
 		s := NewMemStore()
 		curveMarket(s, creator1, 200)
 		stFillShort(s, creator1, q-50, MinObsCount, big.NewInt(1500))
@@ -133,14 +141,16 @@ func TestSettlementRate_MinPicksLowestArm(t *testing.T) {
 		if err != nil {
 			t.Fatalf("SettlementRate: %v", err)
 		}
-		if got.Cmp(big.NewInt(1500)) != 0 {
-			t.Fatalf("rate = %s, want 1500 (the SHORT window, the lowest arm)", got)
+		if got.Cmp(big.NewInt(2000)) != 0 {
+			t.Fatalf("rate = %s, want 2000 (median discards the lone low short; NOT the old min 1500)", got)
 		}
 	})
 
-	t.Run("LongIsLowest", func(t *testing.T) {
-		// C3's regression direction too: the long window BOUNDS a
-		// short-window walk — a short TWAP above the long one never wins.
+	t.Run("LongIsLowOutlier_Ignored", func(t *testing.T) {
+		// Symmetric: a stale-low long (the PRICE-3 / CT-ORACLE-02 lever) is the
+		// outlier the median discards. median(2500,2000,2680)=2500;
+		// min(spot 2680, 2500)=2500. Discarding it means the stale long can
+		// neither over-charge askers nor keep the C5 breaker tripped on growth.
 		s := NewMemStore()
 		curveMarket(s, creator1, 200)
 		stFillShort(s, creator1, q-50, MinObsCount, big.NewInt(2500))
@@ -149,8 +159,8 @@ func TestSettlementRate_MinPicksLowestArm(t *testing.T) {
 		if err != nil {
 			t.Fatalf("SettlementRate: %v", err)
 		}
-		if got.Cmp(big.NewInt(2000)) != 0 {
-			t.Fatalf("rate = %s, want 2000 (the LONG window, the lowest arm)", got)
+		if got.Cmp(big.NewInt(2500)) != 0 {
+			t.Fatalf("rate = %s, want 2500 (median discards the lone low long; NOT the old min 2000)", got)
 		}
 	})
 
@@ -446,30 +456,30 @@ func TestAskRateLong_MinimumHistory(t *testing.T) {
 // ---- RULING C3: one derivation for every token-settled service ------------
 
 func TestSettlement_AskUsesTheRuledDerivation(t *testing.T) {
-	// A divergent-window fixture (short 1500, long 2000, spot 2680): the
-	// min is 1500. Every token-settled service path must use exactly it —
-	// THE PREVIOUS RULED DESIGN (v1 RULING 3c) priced the old spend-to-unlock
-	// feature off the long window ALONE — here that would be 2000 — and that
-	// was backwards: longest = stalest = highest rate = fewest tokens = LEAST
-	// creator-favouring, measured as a permanent 100 HBD entitlement sold
-	// for 12.111 HBD.
+	// ★ ORACLE-CLUSTER FIX: divergent-window fixture (short 2500, long 1500,
+	// spot 2680). The DERIVED settlement rate is min(spot, median(2500,1500,
+	// 2680)) = min(2680, 2500) = 2500 — clearly NEITHER a single naive arm
+	// (the old min / long-alone would both be 1500) NOR spot. Every
+	// token-settled service path must use exactly the derived rate. (v1 RULING
+	// 3c priced off the long window ALONE and that was backwards; the median
+	// derivation, capped at spot, is the current rule.)
 	const q = uint64(500_000)
 	build := func() Store {
 		s := NewMemStore()
 		curveMarket(s, creator1, 200)
-		stFillShort(s, creator1, q-50, MinObsCount, big.NewInt(1500))
-		stFillLong(s, creator1, q-50, stObsCount, big.NewInt(2000))
+		stFillShort(s, creator1, q-50, MinObsCount, big.NewInt(2500))
+		stFillLong(s, creator1, q-50, stObsCount, big.NewInt(1500))
 		activateMarket(s, creator1, q)
 		setMoney(s, kBal(creator1, asker1), big.NewInt(100))
 		return s
 	}
-	want := big.NewInt(1500)
-	face := big.NewInt(1000) // ceil(1000/1500) = 1 credit
+	want := big.NewInt(2500) // min(spot 2680, median(2500,1500,2680)=2500)
+	face := big.NewInt(3000) // tokenLeg 2640 -> ceil(2640/2500) = 2 credits (face in [1420,207579])
 	commission := commissionOwedFor(face)
 
 	s := build()
 	setMoney(s, kFace(creator1), face)
-	askRes, err := askAt0(s, asker1, creator1, q, big.NewInt(1), commission, "cid", MinAskDeadline)
+	askRes, err := askAt0(s, asker1, creator1, q, big.NewInt(2), commission, "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}

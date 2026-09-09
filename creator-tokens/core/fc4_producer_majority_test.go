@@ -147,11 +147,14 @@ func TestTwap_ProducerMajorityBoundedByMedianAndLongRing(t *testing.T) {
 	}
 
 	// -----------------------------------------------------------------------
-	// PHASE 4 — THE BOUND: min(short, long, spot) gives a walked-UP short ring
-	// ZERO settlement value. The producer fully owns the short window (all 32
-	// slots walked to 2000) but has NOT sustained the walk across the 7-day long
-	// window (still honest at 1000). Settlement takes the min, so it settles at
-	// the honest long arm — the walk bought nothing.
+	// PHASE 4 — THE BOUND (★ ORACLE-CLUSTER FIX): min(spot, median(short,long,
+	// spot)) bounds a walked-UP short ring at SPOT (the no-arbitrage ceiling),
+	// never at the walked value. The producer fully owns the short window (all
+	// 32 slots walked to 2000) but has NOT sustained it across the 7-day long
+	// window (honest 1000). median(2000,1000,spot 1813)=1813; min(spot 1813,
+	// 1813)=1813 = SPOT. The walk cannot push settlement above the live spot,
+	// so it still bought nothing beyond the fair marginal price — and, unlike
+	// the old min(), a walked-DOWN short (CT-ORACLE-01) is discarded outright.
 	// -----------------------------------------------------------------------
 	{
 		s := NewMemStore()
@@ -185,11 +188,14 @@ func TestTwap_ProducerMajorityBoundedByMedianAndLongRing(t *testing.T) {
 		if err != nil {
 			t.Fatalf("SettlementRate refused (%v) — expected it to settle at the honest long arm, not error", err)
 		}
-		if settle.Cmp(long) != 0 {
-			t.Fatalf("settlement = %s, want the honest long arm %s — the walked short ring must not raise settlement", settle, long)
+		if settle.Cmp(spot) != 0 {
+			t.Fatalf("settlement = %s, want spot %s — a walked-UP short is bounded by the no-arbitrage ceiling min(spot, median(...)), never the walked value", settle, spot)
 		}
 		if settle.Cmp(short) >= 0 {
-			t.Fatalf("settlement %s reached the walked short rate %s — min(short,long,spot) failed to bound the producer-majority walk", settle, short)
+			t.Fatalf("settlement %s reached the walked short rate %s — min(spot, median(short,long,spot)) failed to bound the producer-majority walk", settle, short)
+		}
+		if settle.Cmp(spot) > 0 {
+			t.Fatalf("settlement %s exceeded spot %s — the no-arbitrage ceiling was breached", settle, spot)
 		}
 	}
 

@@ -1110,7 +1110,7 @@ func (e *Engine) doSetOfferingTitle(creator string, id uint64, newTitle string) 
 	beforePrice := core.OfferingPrice(e.Store, creator, id)
 
 	e.coreCall("setOfferingTitle", ev, func() error {
-		return core.SetOfferingTitle(e.Store, creator, creator, id, newTitle)
+		return core.SetOfferingTitle(e.Store, creator, creator, e.Block, id, newTitle)
 	})
 	if ev.OK {
 		ev.Deltas["offerTitle:"+fmt.Sprintf("%d", id)] = beforeTitle + " -> " + core.OfferingTitle(e.Store, creator, id)

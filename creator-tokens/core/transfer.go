@@ -130,6 +130,19 @@ func TransferCredits(s Store, caller, creator, from, to string, block uint64, am
 	if from == to {
 		return newErr(ErrInput, "from and to must be different accounts")
 	}
+	// CT-STATE-04 / CT-EXEC-02 FIX (2026-09-08): the destination must be an
+	// account that can actually RECEIVE and later be paid out. A credit balance
+	// that lands on a `contract:` or `system:` address can never be moved or
+	// paid again (the holder holds no keys and go-vsc's ledger refuses
+	// `system:` payouts), so supply can never reach zero, the market can never
+	// close, and the creator can never re-register — the HBD backing that slice
+	// locked forever. TransferMatured (doors.go) already refuses these; the
+	// core credit path did not, resting entirely on the wasm wrapper's one
+	// `isPayableAddress(to)` line. This closes the core-side gap so the
+	// guarantee no longer depends on the wrapper never getting that line wrong.
+	if !isPayableDestination(to) {
+		return newErr(ErrInput, "credits can only be sent to a user account (not a contract or system address)")
+	}
 	if amount == nil || amount.Sign() <= 0 {
 		return newErr(ErrInput, "amount must be positive")
 	}
@@ -148,19 +161,6 @@ func TransferCredits(s Store, caller, creator, from, to string, block uint64, am
 		return newErr(ErrBalance, "insufficient balance")
 	}
 
-	// The maturity the moved tokens carry: the SENDER's own clock, read BEFORE
-	// anything moves. debitBalance deliberately does not touch it (the sender's
-	// remainder keeps exactly the clock it had), so the read order is not
-	// load-bearing for correctness — it is written this way so the value being
-	// moved is visibly the sender's pre-transfer state and nothing else.
-	//
-	// An UNSET sender clock (0 — a fixture-seeded or otherwise never-clocked
-	// balance) degrades inside creditInflowAt to `block`, i.e. maximally FRESH:
-	// unclocked tokens carry no maturity to give, which is the treasury-
-	// favouring direction and matches holdclock.go's zero-value convention on
-	// every other path.
-	acqFrom := holderAcqBlock(s, creator, from)
-
 	// ★ THE DEBIT MUST COVER BOTH BUCKETS TOO (2026-07-30, Phase-0 model INV-9).
 	// The guard above was widened to totalBalance while this line still drew
 	// from the maturing family alone — so the comment "unreachable given the
@@ -178,6 +178,27 @@ func TransferCredits(s Store, caller, creator, from, to string, block uint64, am
 	if err != nil {
 		return err // unreachable: fromMaturing <= amount by construction
 	}
+	// ★ THE MATURITY THE MOVED TOKENS CARRY — THEIR OWN COHORTS, read BEFORE
+	// anything moves (2026-09-08, the transfer-hop launder fix).
+	//
+	// WHAT THIS REPLACED, and why it was the whole PRICE-1 / X3 hole: this used
+	// to read `holderAcqBlock(s, creator, from)` — the sender's SINGLE BLENDED
+	// clock — and hand that one number to creditInflowAt, which stamped it as
+	// the recipient's new cohort. A sender holding an aged pile plus a fresh
+	// slice therefore EXPORTED THE BLEND: the fresh tokens arrived at the
+	// recipient carrying the aged pile's diluted rate, in ONE hop, in the same
+	// block, and the sale-side cohort floor could not detect it because at the
+	// recipient the blend and the cohort now agreed. Measured on the pre-fix
+	// tree: 90.87% of the exit tax avoided on a 4,000-token pile and 99.93% on a
+	// 4,000,000-token pile, on BOTH the curve-Sell and the wind-down-Refund
+	// rail, reusable daily against a pile that is never consumed.
+	//
+	// lotsDrawFreshest returns exactly the cohorts the debit below removes
+	// (lotsDebit consumes freshest-first), so the tokens the sender loses and
+	// the tokens the recipient gains are the SAME tokens with the SAME clocks.
+	// A legacy un-ledgered sender synthesises one cohort at their stored clock,
+	// which is byte-for-byte the old behaviour — no migration, no flag day.
+	drawn := lotsDrawFreshest(s, creator, from, fromMaturing)
 	if err := debitPosition(s, creator, from, amount); err != nil {
 		return err // unreachable given the total-balance check above
 	}
@@ -191,13 +212,12 @@ func TransferCredits(s Store, caller, creator, from, to string, block uint64, am
 	if fromMaturing.Sign() == 0 {
 		return nil // nothing maturing moved; the clock legs below have no work
 	}
-	amount = fromMaturing
 	// The recipient's balance grows and the moved tokens' own maturity —
 	// capped at ExitTaxDecayBlocks inside creditInflowAt — re-averages into
-	// whatever they already hold. Maturity travels with the tokens and is
-	// neither created nor destroyed by the move (see the file header; properties
-	// P2/P3). RULING K deleted the cost basis, so nothing else moves with them.
-	// Infallible (holdclock.go).
+	// whatever they already hold, COHORT BY COHORT. Maturity travels with the
+	// tokens and is neither created nor destroyed by the move (see the file
+	// header; properties P2/P3). RULING K deleted the cost basis, so nothing
+	// else moves with them. Infallible (holdclock.go).
 	//
 	// F-C1 DELIBERATELY DOES NOT graduate the recipient here (2026-07-31, USER
 	// RULING).
@@ -223,11 +243,29 @@ func TransferCredits(s Store, caller, creator, from, to string, block uint64, am
 	// sell that gift FIRST at max tax on the EXPENSIVE upper curve slice, relegating
 	// their own tokens to the cheap lower slice — a "poisoned gift" that makes the
 	// recipient worse off on immediate liquidation (verified against
-	// TestSell_OUTFLOWK1 / the OUTFLOWCLIFF1 / P4 grief suite). The pre-existing
-	// bounded-blend model (a gift can raise the recipient's rate by at most the
-	// donated fraction, and never profitably) is the safer contract on this leg, so
-	// the recipient's clock re-averages here exactly as before. F-C8's matured-split
-	// (moved MATURED tokens stay matured) is separate and unaffected.
-	creditInflowAt(s, creator, to, amount, acqFrom, block)
+	// TestSell_OUTFLOWK1 / the OUTFLOWCLIFF1 / P4 grief suite). So no graduate()
+	// call is added here, and F-C8's matured-split (moved MATURED tokens stay
+	// matured) is separate and unaffected.
+	//
+	// ★★ WHAT F-C1's PREMISE ASSUMED, AND WHY CARRYING THE COHORTS DOES NOT
+	// BREAK IT (2026-09-08). The ruling weighed "graduate the recipient" against
+	// "blend the recipient", and chose the blend because its grief is BOUNDED: a
+	// gift can raise the recipient's rate by at most the donated fraction. Both
+	// options were about ONE clock for the whole position. The cohort ledger is a
+	// third option the ruling did not have: the gift arrives as ITS OWN cohort
+	// and therefore CANNOT move the rate of any cohort the recipient already
+	// holds — structurally, not by a bound. The recipient's aged tokens stay
+	// aged, in the maturing bucket, and still owe 0.
+	//
+	// The gift itself is still taxed at its own (fresh) rate on the dear top
+	// slice — that part of the poisoned gift is real, and it is unchanged by THIS
+	// leg: it was already true before this change, because lotsCreditInflow
+	// already stamped the gift as a separate cohort. What this leg changes is
+	// only WHICH clock the gift arrives with, and it can only ever move that
+	// clock toward the already-reachable worst case (an attacker who buys in the
+	// front-run block gifts at MaxExitTaxBps today, at no extra cost). So the
+	// F-C1 grief CEILING is untouched, while the launder that rode the same
+	// blend is closed. Measured both ways in FIX-TRANSFER-LAUNDER.md.
+	creditInflowCohorts(s, creator, to, drawn, block)
 	return nil
 }

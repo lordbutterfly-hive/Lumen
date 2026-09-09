@@ -1360,8 +1360,13 @@ func TestHarness_RefundHolder_PaysHolderNeverCaller(t *testing.T) {
 	// — NOT the caller's own balance (the subject of this proof) and NOT the
 	// treasury (no tax at full decay; the taxed key set is covered by the
 	// pull-side K2 tests). RULING K deleted kBasis, so it is absent here too.
-	want := []string{kBal(creator, target), kSupply(creator), kReserve(creator)}
-	hzAssertExactChangedKeys(t, changed, want, "RefundHolder (0-tax) must touch ONLY holder-bal/supply/reserve")
+	// ★ PRICE-1 CANDIDATE: the debit also maintains the parallel maturing cohort
+	// ledger (holdclock_lots.go), so the holder's lots| key is expected in the
+	// changed set on any maturing debit. It is ours, never read by magi-market,
+	// and carries no money — the treasury/caller-balance assertions above are
+	// unaffected.
+	want := []string{kBal(creator, target), kSupply(creator), kReserve(creator), kLots(creator, target)}
+	hzAssertExactChangedKeys(t, changed, want, "RefundHolder (0-tax) must touch ONLY holder-bal/supply/reserve/lots")
 
 	// Explicitly: the caller's OWN balance in this exact market is untouched.
 	if got := BalanceOf(s, creator, caller); got.Cmp(big.NewInt(50)) != 0 {

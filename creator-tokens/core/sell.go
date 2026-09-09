@@ -143,7 +143,31 @@ type SellResult struct {
 	FeePlatform *big.Int // accrued to kTreasury()
 	Net         *big.Int // p − tax − fee — the wrapper's single transfer
 	//                       to the seller (skipped when 0)
-	TaxBps uint64 // τ actually applied (quote/UI/event)
+	// TaxBps is the EFFECTIVE rate this sale's Tax was actually struck at:
+	// ceil(Σ sliceᵢ·rateᵢ / Σ sliceᵢ) over the cohorts the draw consumed
+	// (holdclock_lots.go maturingCohortTax). It is EXACT for every homogeneous
+	// position — the ordinary single-rate seller sees the schedule rate to the
+	// basis point, at every size — and for a heterogeneous one it is the only
+	// single number that describes the charge.
+	//
+	// ★ IT USED TO BE THE BLENDED CLOCK RATE, ExitTaxBpsAt(HeldBlocks), AND THAT
+	// WAS A LIE NEXT TO A CORRECT AMOUNT (TAXBPS-DISPLAY, 2026-09-08). The
+	// blended clock is a size-weighted summary of the WHOLE maturing bucket; the
+	// cohort ledger is what the tax is actually charged from. A holder with a
+	// 1,000,000-token aged pile plus a 1,000-token fresh slice, selling the fresh
+	// slice one block inside the window, quoted TaxBps == 2 against a Tax of
+	// 395,326,266,413 base units — EXACTLY the full 1500 bps on the same taxable
+	// base. Correct charge, correct launder closure, rate understated ~750x. The
+	// event (events.go EvSold), this quote and every integrator read that field,
+	// so the fix belongs here and not at any one consumer.
+	//
+	// HeldBlocks below is STILL the blended clock, deliberately: it answers "how
+	// long has this position been held on average", which is a real (if lossy)
+	// fact about the bucket, and it is what the maturity/graduation machinery is
+	// keyed on. It is NOT the input TaxBps is derived from any more, and the two
+	// may legitimately disagree for a heterogeneous position — that disagreement
+	// IS the information a single blended clock cannot carry.
+	TaxBps uint64
 	// TaxableGross is the MATURING share of Gross — the base the exit tax was
 	// actually charged on. With two buckets the K1 identity is no longer
 	// tax == ExitTaxOn(Gross, τ), because a matured token's rate is 0 by
@@ -215,8 +239,9 @@ func sellCompute(s Store, caller, creator string, block uint64, deltaS *big.Int)
 		return nil, newErr(ErrState, "reserve below curve area (equality invariant violated — state corrupt); curve trading refused, exit opens via wind-down Refund")
 	}
 
+	// The blended clock. Reported as HeldBlocks and used by the maturity
+	// machinery; NO LONGER the source of the reported rate — see SellResult.TaxBps.
 	h := heldBlocksAt(s, creator, caller, block)
-	taxBps := ExitTaxBpsAt(h)
 
 	// ΔS <= bal <= Σ bal <= S (I3), so SellProceeds' k>S error is
 	// structurally unreachable; propagated anyway (defense-in-depth, and a
@@ -236,8 +261,73 @@ func sellCompute(s Store, caller, creator string, block uint64, deltaS *big.Int)
 	// count, never by letting the matured tokens take the dearest price slice
 	// off the top (see maturingGrossShare for the measured reason).
 	fromMatured, fromMaturing := splitDraw(s, creator, caller, deltaS)
-	taxableGross := maturingGrossShare(p, fromMaturing, deltaS)
-	tax := ExitTaxOn(taxableGross, taxBps)
+	// ★ PRICE-2 FIX (CANDIDATE, 2026-09-08). The taxable base is the MARGINAL
+	// top slice the maturing tokens actually occupy, NOT their pro-rata-by-count
+	// share of the whole gross. splitDraw consumes MATURING FIRST, so the
+	// maturing tokens sit on the DEAREST top `fromMaturing` slice of the curve
+	// (supply [S-fromMaturing, S]); SellProceeds(supply, fromMaturing) is exactly
+	// that area step. Pro-rata by count priced them at the AVERAGE instead, which
+	// is what let a holder BUNDLE a matured pile under a fresh sale to dilute the
+	// fresh tokens' tax base to the curve average (PRICE-2: 56% under-collection,
+	// path-dependent by batching). The marginal slice makes matured+fresh sold in
+	// ONE draw cost exactly what selling the fresh slice ALONE then the matured
+	// pile costs — path-independent, and equal to the intended (higher) figure.
+	// When the whole draw is maturing (matured bucket empty) fromMaturing==deltaS
+	// and this equals p exactly, so the all-maturing paths (incl. the OUTFLOWCLIFF
+	// / P4 / OUTFLOWK1 grief fixtures) are byte-for-byte unchanged.
+	taxableGross, err := SellProceeds(supply, fromMaturing)
+	if err != nil {
+		return nil, err // unreachable: fromMaturing <= deltaS <= supply
+	}
+	// ★ PRICE-1 FIX — THE COHORT LEDGER IS THE TAX. taxBps above is the single
+	// BLENDED clock rate; a heterogeneous maturing bucket (an aged pile that
+	// never graduated, holding fresh transferred-in or bought tokens alongside
+	// it) is exactly the shape one blended rate cannot price. maturingCohortTax
+	// (holdclock_lots.go) prices the SAME top-`fromMaturing` slice per COHORT —
+	// each acquisition cohort at its own rate on its own marginal sub-slice,
+	// freshest cohort on the dearest top slice — so an aged cohort can never pull
+	// a fresh cohort's rate down, and a fresh cohort can never push an aged one's
+	// rate up. It EQUALS the blend exactly for a homogeneous bucket (one cohort,
+	// including every legacy un-ledgered position via getLots' synthesis), so
+	// nothing about the ordinary single-rate path changes.
+	//
+	// ★★ THE max(blend, cohort) FLOOR IS GONE (2026-09-08), and its removal is a
+	// FIX, not a relaxation. The floor could only ever bind when the blend
+	// exceeded the per-cohort truth, and there are exactly two ways that happens,
+	// both of them OVER-charges of an honest holder:
+	//
+	//   1. A partial FRESH exit. debitBalance never re-ages the remainder, so
+	//      after a holder correctly pays full rate on their fresh slice the
+	//      stale blend is left mid-aged while the ledger correctly shows an
+	//      all-aged remainder that owes 0. Measured: 9,227,757 base units, 7.5%
+	//      of gross, confiscated from a holder whose every cohort owed zero.
+	//   2. A dust gift. The blend moves the WHOLE position's rate; the ledger
+	//      charges the gift on the gift's own slice. Measured: a 1-token gift
+	//      cost a matured holder 12,312 units under the floor against the 11,180
+	//      the cohorts actually owe — the floor put ~9% of the F-C1 grief back
+	//      on top of a ledger that had already priced it correctly.
+	//
+	// refund.go:refundMaturingCohortTax already refuses to floor, for exactly
+	// this reason, in words; this rail now agrees with it. The launder direction
+	// is untouched — the cohort tax is >= the blend whenever the bucket is
+	// heterogeneous with the fresh cohorts on top, which is the launder shape —
+	// and the ledger is authoritative because it is maintained at EVERY kBal
+	// write (creditInflowAt / debitBalance / graduate, the complete list) and
+	// its own shortfall clause charges MaxExitTaxBps on anything it cannot
+	// account for.
+	//
+	// ★ THE REPORTED RATE COMES FROM THE SAME CALL AS THE CHARGE (TAXBPS-DISPLAY,
+	// 2026-09-08). maturingCohortTax returns the EFFECTIVE rate alongside the
+	// tax, so the quote, the event and every integrator read a rate that is
+	// derived from the money actually taken rather than from the stale blended
+	// summary. The K1 single-rate identity Tax == ExitTaxOn(TaxableGross, TaxBps)
+	// still holds EXACTLY for every homogeneous position (the weighted mean of
+	// one rate is that rate); for a heterogeneous one the exact statement is the
+	// per-cohort sum, and TaxBps is its slice-weighted mean, rounded UP.
+	tax, _, effBps, err := maturingCohortTax(s, creator, caller, supply, fromMaturing, block)
+	if err != nil {
+		return nil, err
+	}
 	fee, feeC, feeP := tradeFeeOn(p)
 
 	// net = p − tax − fee, >= 0 (proof in the file header). Computed once,
@@ -266,7 +356,7 @@ func sellCompute(s Store, caller, creator string, block uint64, deltaS *big.Int)
 		FeeCreator:    feeC,
 		FeePlatform:   feeP,
 		Net:           net,
-		TaxBps:        taxBps,
+		TaxBps:        effBps,
 		TaxableGross:  taxableGross,
 		MaturedBurned: fromMatured,
 		HeldBlocks:    h,

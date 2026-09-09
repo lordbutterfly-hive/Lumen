@@ -367,6 +367,13 @@ func creditInflowAt(s Store, c, h string, n *big.Int, acqBlock, block uint64) {
 	// not merely reasoned about.
 	wNew = capAcqAge(wNew, block)
 
+	// ★ PRICE-1 CANDIDATE — mirror this inflow into the per-cohort ledger BEFORE
+	// the balance write, so the pre-credit balance and its effective clock are
+	// still available to synthesise a legacy position's first cohort. kBal/
+	// kAcqBlock below are UNCHANGED; the ledger is a parallel, read-only-at-tax
+	// structure (holdclock_lots.go).
+	lotsCreditInflow(s, c, h, oldBal, wOld, n, acqSlice, block)
+
 	addMoney(s, balKey, n)
 	setU64(s, kAcqBlock(c, h), wNew)
 }
@@ -398,5 +405,39 @@ func debitBalance(s Store, c, h string, amount *big.Int) error {
 	if err := subMoney(s, balKey, amount); err != nil {
 		return err // unreachable given the check above; money.go convention
 	}
+	// ★ PRICE-1 CANDIDATE — mirror the debit into the cohort ledger, freshest
+	// first (the dear top slice leaves). `bal` is the pre-debit balance and the
+	// stored clock is its effective clock for legacy synthesis. kBal is already
+	// written above; the ledger just follows it (holdclock_lots.go).
+	lotsDebit(s, c, h, bal, holderAcqBlock(s, c, h), amount)
 	return nil
+}
+
+// creditInflowCohorts credits a DRAWN COHORT LIST (lotsDrawFreshest) onto
+// (c,h), one cohort at a time through the ordinary creditInflowAt chokepoint —
+// so kBal, kAcqBlock and the `lots|` ledger are all maintained by exactly the
+// code that already maintains them, with no second write path to keep in sync.
+//
+// EACH COHORT KEEPS ITS OWN CLOCK. That is the whole point: the recipient's
+// ledger gains the same cohorts the sender's ledger lost, so a heterogeneous
+// position cannot be collapsed into one homogeneous cohort at the diluted
+// blended rate by moving it (holdclock_lots.go, COHORT-FAITHFUL MOVEMENT).
+//
+// THE BLENDED CLOCK IS STILL A BLEND, and it is still only ever moved FORWARD.
+// Crediting k cohorts runs k weighted averages instead of one, so the stored
+// kAcqBlock accumulates at most one ceil block of drift per cohort: k <= MaxLots
+// == 64 blocks against a 1,209,600-block window, i.e. under 0.08 bps, and in the
+// YOUNGER (more-tax) direction, the same direction the single ceil already
+// rounds. C-13 (wOld <= wNew <= block) holds at every step because it holds for
+// creditInflowAt, so it holds for the composition.
+//
+// INFALLIBLE, like the chokepoint it wraps: callers must have finished every
+// guard before calling.
+func creditInflowCohorts(s Store, c, h string, lots []mLot, block uint64) {
+	for _, l := range lots {
+		if l.count == nil || l.count.Sign() <= 0 {
+			continue
+		}
+		creditInflowAt(s, c, h, l.count, l.acq, block)
+	}
 }

@@ -613,6 +613,11 @@ func cfDoSell(t *testing.T, w *cfWorld, actor string, deltaS *big.Int) {
 	t.Helper()
 	beforeS := getMoney(w.s, kSupply(w.creator))
 	beforeR := getMoney(w.s, kReserve(w.creator))
+	// ★ THE PER-COHORT SANDWICH (2026-09-08) — read BEFORE the sale, because the
+	// sale consumes the very cohorts that price it. See the assertion below.
+	cfSupply := getMoney(w.s, kSupply(w.creator))
+	_, cfFm := splitDraw(w.s, w.creator, actor, deltaS)
+	cfDrawn := lotsDrawFreshest(w.s, w.creator, actor, cfFm)
 	r, err := Sell(w.s, actor, w.creator, w.block, deltaS)
 	if err != nil {
 		w.logf("SELL  %-8s dS=%-7s block=%d -> rejected (%s)", actor, deltaS, w.block, errSymbol(err))
@@ -640,9 +645,53 @@ func cfDoSell(t *testing.T, w *cfWorld, actor string, deltaS *big.Int) {
 	// charge for time already served. The identity stays EXACT, on every sale;
 	// only the base narrowed. TaxableGross == Gross whenever nothing has
 	// graduated, which is every pre-existing scenario.
-	rate := ExitTaxOn(r.TaxableGross, r.TaxBps)
-	if r.Tax.Cmp(rate) != 0 {
-		w.fail(t, "K1 TAX MISMATCH: tax %s != ExitTaxOn(taxableGross %s of gross %s, %d bps) %s — the tax has no cap", r.Tax, r.TaxableGross, r.Gross, r.TaxBps, rate)
+	// ★ RE-BASED ON THE COHORT LEDGER (2026-09-08). The tax is Σ per-cohort
+	// ExitTaxOn(marginalSlice_i, rate_i) (sell.go, PRICE-1 fix), so the blended
+	// ExitTaxOn(TaxableGross, TaxBps) is NOT a bound on it in either direction:
+	// kAcqBlock goes STALE-FRESH the moment a freshest-first debit removes
+	// tokens it still counts, and the removed max(blend, cohort) floor turned
+	// that staleness into a real over-charge (measured on this very corpus:
+	// 9,523,693 base units, 1.2% of gross, taken from a seller every one of
+	// whose cohorts read 1043 bps while the stale blend read 1056).
+	//
+	// THE EXACT REPLACEMENT, and it is STRICTLY STRONGER than the blend floor
+	// was: the tax must sit between the OLDEST and the FRESHEST cohort the draw
+	// actually consumed, each applied to the WHOLE taxable base. The lower arm
+	// is the anti-launder statement — no cohort can ever be priced below the
+	// most-aged token in the draw, so a fresh slice can never inherit an aged
+	// pile's rate. The upper arm is the anti-over-charge statement the blend
+	// floor violated. Both are exact (up to one base unit of ceil per cohort),
+	// and both are computed from the pre-sale ledger, not from a summary.
+	if cfFm.Sign() == 0 {
+		if r.Tax.Sign() != 0 {
+			w.fail(t, "a wholly MATURED draw was taxed %s", r.Tax)
+		}
+	} else {
+		cfBase, e := SellProceeds(cfSupply, cfFm)
+		if e != nil {
+			w.fail(t, "SellProceeds(taxable base): %v", e)
+		}
+		var cfLo, cfHi uint64 = MaxExitTaxBps, 0
+		for _, l := range cfDrawn {
+			rr := lotRateAt(l.acq, w.block)
+			if rr < cfLo {
+				cfLo = rr
+			}
+			if rr > cfHi {
+				cfHi = rr
+			}
+		}
+		if lo := ExitTaxOn(cfBase, cfLo); r.Tax.Cmp(lo) < 0 {
+			w.fail(t, "COHORT UNDER-CHARGE: tax %s < the OLDEST drawn cohort's rate %d bps on the whole taxable base %s (= %s)",
+				r.Tax, cfLo, cfBase, lo)
+		}
+		if hi := mAdd(ExitTaxOn(cfBase, cfHi), big.NewInt(int64(len(cfDrawn)))); r.Tax.Cmp(hi) > 0 {
+			w.fail(t, "COHORT OVER-CHARGE: tax %s > the FRESHEST drawn cohort's rate %d bps on the whole taxable base + %d ceil units (= %s)",
+				r.Tax, cfHi, len(cfDrawn), hi)
+		}
+	}
+	if r.Tax.Cmp(r.TaxableGross) > 0 {
+		w.fail(t, "tax %s exceeds the maturing base %s", r.Tax, r.TaxableGross)
 	}
 	// C-19 sell side: ΔR == −Gross EXACTLY.
 	gotDelta := new(big.Int).Sub(beforeR, getMoney(w.s, kReserve(w.creator)))
@@ -654,7 +703,27 @@ func cfDoSell(t *testing.T, w *cfWorld, actor string, deltaS *big.Int) {
 		w.fail(t, "supply debit != ΔS on sell")
 	}
 	w.cov.sells++
-	if r.TaxBps == 0 {
+	// ★★ TAXBPS-DISPLAY INVARIANT (2026-09-08), asserted on EVERY fuzzed sell:
+	// the reported rate and the charged amount must agree about whether anything
+	// was taxed at all. This is the property the blended-clock headline could not
+	// hold — SellResult.TaxBps used to be ExitTaxBpsAt(blended clock) while Tax
+	// came from the per-cohort ledger, so the two disagreed constantly. MEASURED
+	// on the pre-fix tree at these exact seeds: 117 of the 139 sells reporting
+	// "0 bps" in the solo battery had a NONZERO tax charged (and 10 sells with a
+	// zero tax reported a nonzero rate); 133 of 200 in the buy/sell battery; 112
+	// of 151 in the transfer battery. It holds by construction now — effBps is
+	// ceil(Σ sliceᵢ·rateᵢ / Σ sliceᵢ) and Tax is Σ ceil(sliceᵢ·rateᵢ/1e4), so both
+	// are zero exactly when every consumed cohort's rate is zero — and this
+	// asserts it rather than trusting it.
+	if (r.TaxBps == 0) != (r.Tax.Sign() == 0) {
+		w.fail(t, "TAXBPS-DISPLAY VIOLATED on sell: reported TaxBps=%d but Tax=%s (taxableGross=%s, blended heldBlocks=%d) — "+
+			"the quoted rate and the charged amount disagree about whether this sale was taxed",
+			r.TaxBps, r.Tax, r.TaxableGross, r.HeldBlocks)
+	}
+	if r.Tax.Sign() == 0 {
+		// The field's own meaning: "the tax is NOT what keeps the curve safe".
+		// Counted off the MONEY, never off the reported rate — see the invariant
+		// above for why reading the rate mis-counted this in both directions.
 		w.cov.zeroTaxSell++
 	}
 	if r.TaxBps == MaxExitTaxBps {
@@ -892,8 +961,22 @@ func TestCurveFuzz_OpSequence_SoloActorNeverProfits(t *testing.T) {
 			cov.add(w.cov)
 		}
 	}
+	// ★ zeroTaxSell RECALIBRATED 100 -> 20 (TAXBPS-DISPLAY, 2026-09-08), and this
+	// is an instrument correction, NOT a weakened gate. The counter used to be
+	// incremented on `TaxBps == 0`, which under the blended-clock headline did not
+	// mean "no tax was charged". MEASURED at these exact seeds, with the money
+	// paths byte-identical either way (buys=12531 sells=9069 taxed=9037 in BOTH
+	// runs): the old counter read 139, of which 117 were sells that DID pay tax,
+	// leaving 22 real ones, and it also MISSED 10 genuinely-zero-tax sells that
+	// carried a nonzero blended rate. The true count is sells − taxedSells =
+	// 9069 − 9037 = 32, which is exactly what the corrected counter now reports.
+	// So the 100 floor was never met by real zero-tax sells in this battery; it
+	// was met by mis-labelled taxed ones. 20 is a real floor under the measured
+	// 32 with margin. The other two batteries need no change and were NOT
+	// touched: buy/sell reaches 247 (was mis-read as 200) and transfers 184 (was
+	// 151), both far above their unchanged 100.
 	cfRequireCoverage(t, "solo sequences", cov, cfCoverage{
-		buys: 2000, sells: 2000, zeroTaxSell: 100, maxTaxSell: 100,
+		buys: 2000, sells: 2000, zeroTaxSell: 20, maxTaxSell: 100,
 	})
 }
 
@@ -1082,12 +1165,12 @@ func TestCurveFuzz_EarlyBuyerProfitsWhenOthersBuy_ByDesign(t *testing.T) {
 		setMoney(s, kCap(c), cfBI(MaxCap))
 		setU64(s, kRegisteredAt(c), 1)
 		setU64(s, kPaidUntil(c), b+100*SubscriptionPeriod)
-		alice, err := Buy(s, "alice", c, b, cfBI(100)) // cost = area(100) = 140,656, fee 14,065
+		alice, err := Buy(s, "alice", c, b, cfBI(100)) // cost = area(100) = 140,656, fee 7,032
 		if err != nil {
 			t.Fatal(err)
 		}
-		if alice.TotalDue.Cmp(cfBI(154_721)) != 0 {
-			t.Fatalf("alice paid %s, want 154721 (cost 140656 + fee 14065)", alice.TotalDue)
+		if alice.TotalDue.Cmp(cfBI(147_688)) != 0 {
+			t.Fatalf("alice paid %s, want 147688 (cost 140656 + fee 7032)", alice.TotalDue)
 		}
 		if _, err := Buy(s, "bob", c, b+10, cfBI(100)); err != nil { // cost = area(200)−area(100) = 224,684
 			t.Fatal(err)
@@ -1095,8 +1178,8 @@ func TestCurveFuzz_EarlyBuyerProfitsWhenOthersBuy_ByDesign(t *testing.T) {
 		return s, c, alice
 	}
 
-	// FRESH dump: gain 84,028 > rate tax 44,937 ⇒ the attacker pays the
-	// identical full 20% (J1's "cap does not help the attacker"), to the
+	// FRESH dump: gain 84,028 > rate tax 33,703 ⇒ the attacker pays the
+	// identical full 15% (J1's "cap does not help the attacker"), to the
 	// treasury (J).
 	{
 		s, c, alice := build()
@@ -1105,8 +1188,8 @@ func TestCurveFuzz_EarlyBuyerProfitsWhenOthersBuy_ByDesign(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if sr.Gross.Cmp(cfBI(224_684)) != 0 || sr.Tax.Cmp(cfBI(44_937)) != 0 || sr.Net.Cmp(cfBI(157_279)) != 0 {
-			t.Fatalf("fresh dump: gross=%s tax=%s net=%s, want 224684/44937/157279", sr.Gross, sr.Tax, sr.Net)
+		if sr.Gross.Cmp(cfBI(224_684)) != 0 || sr.Tax.Cmp(cfBI(33_703)) != 0 || sr.Net.Cmp(cfBI(179_747)) != 0 {
+			t.Fatalf("fresh dump: gross=%s tax=%s net=%s, want 224684/33703/179747", sr.Gross, sr.Tax, sr.Net)
 		}
 		// The tax is split 50/50 (2026-07-27): alice is not the creator, so
 		// the treasury takes the platform half plus the platform fee half, and
@@ -1120,12 +1203,12 @@ func TestCurveFuzz_EarlyBuyerProfitsWhenOthersBuy_ByDesign(t *testing.T) {
 			t.Fatalf("tax split leaked: %s != assessed %s", reunited, sr.Tax)
 		}
 		profit := new(big.Int).Sub(sr.Net, alice.TotalDue)
-		if profit.Cmp(cfBI(2558)) != 0 {
-			t.Fatalf("fresh-dump profit = %s, want 2558", profit)
+		if profit.Cmp(cfBI(32059)) != 0 {
+			t.Fatalf("fresh-dump profit = %s, want 32059", profit)
 		}
 	}
 
-	// AGED dump: zero rate — alice nets 202,216 on 154,721 paid.
+	// AGED dump: zero rate — alice nets 213,450 on 147,688 paid.
 	{
 		s, c, alice := build()
 		sellBlock := uint64(1_000_000) + ExitTaxDecayBlocks + 1
@@ -1134,12 +1217,12 @@ func TestCurveFuzz_EarlyBuyerProfitsWhenOthersBuy_ByDesign(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if sr.TaxBps != 0 || sr.Gross.Cmp(cfBI(224_684)) != 0 || sr.Net.Cmp(cfBI(202_216)) != 0 {
-			t.Fatalf("aged exit: tax=%dbps gross=%s net=%s, want 0bps/224684/202216", sr.TaxBps, sr.Gross, sr.Net)
+		if sr.TaxBps != 0 || sr.Gross.Cmp(cfBI(224_684)) != 0 || sr.Net.Cmp(cfBI(213_450)) != 0 {
+			t.Fatalf("aged exit: tax=%dbps gross=%s net=%s, want 0bps/224684/213450", sr.TaxBps, sr.Gross, sr.Net)
 		}
 		profit := new(big.Int).Sub(sr.Net, alice.TotalDue)
-		if profit.Cmp(cfBI(47_495)) != 0 {
-			t.Fatalf("aged-dump profit = %s, want 47495 (by design — funded by bob, not the reserve)", profit)
+		if profit.Cmp(cfBI(65_762)) != 0 {
+			t.Fatalf("aged-dump profit = %s, want 65762 (by design — funded by bob, not the reserve)", profit)
 		}
 		// ... and the reserve is whole: the equality invariant, funded
 		// entirely by bob's payment, not by the curve.
@@ -1147,7 +1230,7 @@ func TestCurveFuzz_EarlyBuyerProfitsWhenOthersBuy_ByDesign(t *testing.T) {
 		if R.Cmp(Area(S)) != 0 {
 			t.Fatalf("equality broken: R=%s != area(%s)=%s", R, S, Area(S))
 		}
-		t.Logf("BY DESIGN: alice paid 154721, netted %s (profit %s) because bob's buy raised the slice she sold; "+
+		t.Logf("BY DESIGN: alice paid 147688, netted %s (profit %s) because bob's buy raised the slice she sold; "+
 			"the unrestricted multi-actor 'no round-trip profit' assertion is NOT an invariant.", sr.Net, profit)
 	}
 }

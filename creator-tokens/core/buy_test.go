@@ -31,12 +31,12 @@ func TestBuy_HappyPath_ExactAmounts(t *testing.T) {
 	// cost = area(10) − area(0) = 10·1000 + floor((63000·55 + 21·385)/8000)
 	// = 10000 + floor(434.135…) = 10,434 — the EXACT area step (RULING A /
 	// curve.go L1; the floor is LIVE: ceil gives 10,435 and fails this).
-	// fee = floor(1043.4) = 1043, split 521/522 (odd unit → platform),
-	// total draw 11,477.
-	if r.Cost.Cmp(big.NewInt(10_434)) != 0 || r.Fee.Cmp(big.NewInt(1043)) != 0 ||
-		r.FeeCreator.Cmp(big.NewInt(521)) != 0 || r.FeePlatform.Cmp(big.NewInt(522)) != 0 ||
-		r.TotalDue.Cmp(big.NewInt(11_477)) != 0 || r.Minted.Cmp(big.NewInt(10)) != 0 {
-		t.Fatalf("BuyResult = cost %s fee %s (%s/%s) total %s minted %s, want 10434/1043(521/522)/11477/10",
+	// fee = floor(521.7) = 521, split 260/261 (odd unit → platform),
+	// total draw 10,955.
+	if r.Cost.Cmp(big.NewInt(10_434)) != 0 || r.Fee.Cmp(big.NewInt(521)) != 0 ||
+		r.FeeCreator.Cmp(big.NewInt(260)) != 0 || r.FeePlatform.Cmp(big.NewInt(261)) != 0 ||
+		r.TotalDue.Cmp(big.NewInt(10_955)) != 0 || r.Minted.Cmp(big.NewInt(10)) != 0 {
+		t.Fatalf("BuyResult = cost %s fee %s (%s/%s) total %s minted %s, want 10434/521(260/261)/10955/10",
 			r.Cost, r.Fee, r.FeeCreator, r.FeePlatform, r.TotalDue, r.Minted)
 	}
 
@@ -56,11 +56,11 @@ func TestBuy_HappyPath_ExactAmounts(t *testing.T) {
 	}
 	// RULING K deleted the cost basis (kBasis): the exit tax is gross proceeds
 	// × τ(h), no realized-gain cap, so a buy no longer records what was paid.
-	if got := getMoney(s, kFeeBal(c)); got.Cmp(big.NewInt(521)) != 0 {
-		t.Fatalf("creator fee pot = %s, want 521 (pull, F8)", got)
+	if got := getMoney(s, kFeeBal(c)); got.Cmp(big.NewInt(260)) != 0 {
+		t.Fatalf("creator fee pot = %s, want 260 (pull, F8)", got)
 	}
-	if got := getMoney(s, kTreasury()); got.Cmp(big.NewInt(522)) != 0 {
-		t.Fatalf("treasury = %s, want 522", got)
+	if got := getMoney(s, kTreasury()); got.Cmp(big.NewInt(261)) != 0 {
+		t.Fatalf("treasury = %s, want 261", got)
 	}
 
 	// THE equality invariant (C-9, RULING A): R === area(S), E === 0, after
@@ -95,13 +95,13 @@ func TestBuy_SecondBuy_WorkedExample(t *testing.T) {
 		t.Fatal(err)
 	}
 	// From S=10, buying 5 costs area(15) − area(10) = 15,948 − 10,434 =
-	// 5,514 (the exact area step), fee = floor(551.4) = 551, total 6,065.
+	// 5,514 (the exact area step), fee = floor(275.7) = 275, total 5,789.
 	r, err := Buy(s, "attacker", c, 300, big.NewInt(5))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Cost.Cmp(big.NewInt(5514)) != 0 || r.Fee.Cmp(big.NewInt(551)) != 0 || r.TotalDue.Cmp(big.NewInt(6065)) != 0 {
-		t.Fatalf("second buy = cost %s fee %s total %s, want 5514/551/6065 (RULING I exact-area)", r.Cost, r.Fee, r.TotalDue)
+	if r.Cost.Cmp(big.NewInt(5514)) != 0 || r.Fee.Cmp(big.NewInt(275)) != 0 || r.TotalDue.Cmp(big.NewInt(5789)) != 0 {
+		t.Fatalf("second buy = cost %s fee %s total %s, want 5514/275/5789 (RULING I exact-area)", r.Cost, r.Fee, r.TotalDue)
 	}
 	// Reserve = 10,434 + 5,514 = 15,948 = area(15) EXACTLY — the buys
 	// telescope along the area function with zero dust (RULING A equality).

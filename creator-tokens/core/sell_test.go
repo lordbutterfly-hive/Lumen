@@ -65,9 +65,30 @@ func slAssertSplits(t *testing.T, r *SellResult) {
 	// gross — a matured token's rate is exactly 0, so taxing it would charge for
 	// time already served. The identity is still exact on every sale, and
 	// TaxableGross == Gross whenever nothing has graduated.
-	if want := ExitTaxOn(r.TaxableGross, r.TaxBps); r.Tax.Cmp(want) != 0 {
-		t.Fatalf("tax %s != ExitTaxOn(taxableGross %s of gross %s, %d bps) %s — the tax has no cap",
-			r.Tax, r.TaxableGross, r.Gross, r.TaxBps, want)
+	// ★ RE-BASED ON THE COHORT LEDGER (2026-09-08). The tax is now exactly
+	// Σ per-cohort ExitTaxOn(marginalSlice_i, rate_i) — sell.go, PRICE-1 fix —
+	// and the blended ExitTaxOn(TaxableGross, TaxBps) is NOT a floor on it.
+	// The floor assertion that used to stand here encoded the removed
+	// max(blend, cohort) rule, and it was FALSE in exactly the two shapes that
+	// rule was wrong about: after a partial FRESH exit the stale blend
+	// over-stated the aged remainder's rate (measured 7.5% of gross confiscated),
+	// and after a dust gift it over-stated the whole position's rate (measured
+	// ~9% of the F-C1 grief added back on top of a correct per-cohort charge).
+	// This helper has NO STORE, so the exact per-cohort identity cannot be
+	// checked here; it is pinned WITH store context, on 2,286 randomized taxed
+	// sales, by TestXL_SellTaxSandwichedByCohortRates (the tax is sandwiched
+	// exactly between the OLDEST and the FRESHEST drawn cohort's rate on the
+	// whole taxable base), and exactly for homogeneous positions by
+	// TestXL_HomogeneousStillExactSingleRate. What survives here are the two
+	// store-free bounds, which still pin net >= 0 and no dust.
+	if want := mAdd(ExitTaxOn(r.TaxableGross, MaxExitTaxBps), big.NewInt(MaxLots)); r.Tax.Cmp(want) > 0 {
+		t.Fatalf("tax %s exceeds the MAXIMUM rate on the maturing base (%s) plus per-cohort ceil padding — no cohort can be taxed above MaxExitTaxBps",
+			r.Tax, want)
+	}
+	// Upper bound: the tax can never exceed the maturing base it is charged on
+	// (each cohort's ExitTaxOn(slice, rate) <= slice, so the sum <= TaxableGross).
+	if r.Tax.Cmp(r.TaxableGross) > 0 {
+		t.Fatalf("tax %s exceeds the maturing base %s", r.Tax, r.TaxableGross)
 	}
 	if r.TaxableGross.Cmp(r.Gross) > 0 {
 		t.Fatalf("taxable base %s exceeds gross %s — the maturing share can never be more than the whole",
@@ -86,39 +107,39 @@ func TestSell_WorkedExample_InstantRoundTrip_FullRateTax(t *testing.T) {
 	s, c := slSetupCurveMarket(t) // S=10, R=10,434=area(10), E=0
 
 	// Fresh attacker buys 5 at block 2000: cost = area(15) − area(10) =
-	// 5,514, fee 551 — paid 6,065. R = 15,948 = area(15).
+	// 5,514, fee 275 — paid 5,789. R = 15,948 = area(15).
 	rb, err := Buy(s, "attacker", c, 2000, big.NewInt(5))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rb.TotalDue.Cmp(big.NewInt(6065)) != 0 {
-		t.Fatalf("buy total = %s, want 6065", rb.TotalDue)
+	if rb.TotalDue.Cmp(big.NewInt(5789)) != 0 {
+		t.Fatalf("buy total = %s, want 5789", rb.TotalDue)
 	}
 	treasury0 := getMoney(s, kTreasury())
 
-	// Sells all 5 in the same block (h=0 ⇒ τ=2000 max): p = area(15) − area(10)
-	// = 5,514 (the full slice, no burn); K1 tax = ceil(5,514·0.2) = 1,103 (GROSS
-	// rate, no cap); fee = floor(551.4) = 551 (feeC 275, feeP 276); net =
-	// 5,514 − 1,103 − 551 = 3,860.
+	// Sells all 5 in the same block (h=0 ⇒ τ=1500 max): p = area(15) − area(10)
+	// = 5,514 (the full slice, no burn); K1 tax = ceil(5,514·0.15) = 828 (GROSS
+	// rate, no cap); fee = floor(275.7) = 275 (feeC 137, feeP 138); net =
+	// 5,514 − 828 − 275 = 4,411.
 	rs, err := Sell(s, "attacker", c, 2000, big.NewInt(5))
 	if err != nil {
 		t.Fatal(err)
 	}
 	slAssertSplits(t, rs)
-	if rs.TaxBps != 2000 || rs.HeldBlocks != 0 {
-		t.Fatalf("rate = %d bps at held %d, want 2000 at 0", rs.TaxBps, rs.HeldBlocks)
+	if rs.TaxBps != 1500 || rs.HeldBlocks != 0 {
+		t.Fatalf("rate = %d bps at held %d, want 1500 at 0", rs.TaxBps, rs.HeldBlocks)
 	}
 	if rs.Gross.Cmp(big.NewInt(5514)) != 0 ||
-		rs.Tax.Cmp(big.NewInt(1103)) != 0 || rs.Fee.Cmp(big.NewInt(551)) != 0 ||
-		rs.FeeCreator.Cmp(big.NewInt(275)) != 0 || rs.FeePlatform.Cmp(big.NewInt(276)) != 0 ||
-		rs.Net.Cmp(big.NewInt(3860)) != 0 {
-		t.Fatalf("sell = p %s tax %s fee %s (%s/%s) net %s, want 5514/1103/551(275/276)/3860",
+		rs.Tax.Cmp(big.NewInt(828)) != 0 || rs.Fee.Cmp(big.NewInt(275)) != 0 ||
+		rs.FeeCreator.Cmp(big.NewInt(137)) != 0 || rs.FeePlatform.Cmp(big.NewInt(138)) != 0 ||
+		rs.Net.Cmp(big.NewInt(4411)) != 0 {
+		t.Fatalf("sell = p %s tax %s fee %s (%s/%s) net %s, want 5514/828/275(137/138)/4411",
 			rs.Gross, rs.Tax, rs.Fee, rs.FeeCreator, rs.FeePlatform, rs.Net)
 	}
 
 	// After: S=10, R = 15,948 − 5,514 = 10,434 = area(10) EXACTLY — the
-	// equality invariant. The attacker's round trip LOST 2,205 (paid 6,065,
-	// received 3,860): 1,102 fees + 1,103 tax, 0 to rounding.
+	// equality invariant. The attacker's round trip LOST 1,378 (paid 5,789,
+	// received 4,411): 550 fees + 828 tax, 0 to rounding.
 	if got := getMoney(s, kSupply(c)); got.Cmp(big.NewInt(10)) != 0 {
 		t.Fatalf("supply = %s, want 10", got)
 	}
@@ -130,20 +151,20 @@ func TestSell_WorkedExample_InstantRoundTrip_FullRateTax(t *testing.T) {
 		t.Fatalf("E = %s, want exactly 0 (RULING A)", e)
 	}
 	pnl := new(big.Int).Sub(rs.Net, rb.TotalDue)
-	if pnl.Cmp(big.NewInt(-2205)) != 0 {
-		t.Fatalf("attacker P&L = %s, want −2205 (both fees + the full gross tax)", pnl)
+	if pnl.Cmp(big.NewInt(-1378)) != 0 {
+		t.Fatalf("attacker P&L = %s, want −1378 (both fees + the full gross tax)", pnl)
 	}
-	// Treasury received the PLATFORM HALF of the 1,103 tax plus the platform
+	// Treasury received the PLATFORM HALF of the 828 tax plus the platform
 	// fee half (2026-07-27 split); the creator's claimable pot received the
 	// other tax half. The attacker's P&L above is unaffected — the split moves
 	// where the tax lands, never how much is assessed.
-	taxC, taxP := exitTaxSplit(c, "attacker", big.NewInt(1103))
+	taxC, taxP := exitTaxSplit(c, "attacker", big.NewInt(828))
 	wantTrea := mAdd(mAdd(treasury0, taxP), rs.FeePlatform)
 	if got := getMoney(s, kTreasury()); got.Cmp(wantTrea) != 0 {
 		t.Fatalf("treasury = %s, want %s (platform half of the tax + platform fee half)", got, wantTrea)
 	}
-	if reunited := mAdd(taxC, taxP); reunited.Cmp(big.NewInt(1103)) != 0 {
-		t.Fatalf("tax split leaked: %s != assessed 1103", reunited)
+	if reunited := mAdd(taxC, taxP); reunited.Cmp(big.NewInt(828)) != 0 {
+		t.Fatalf("tax split leaked: %s != assessed 828", reunited)
 	}
 	// The seller's balance went to 0 (full exit); wacq NOT touched by the sell.
 	if got := getMoney(s, kBal(c, "attacker")); !mIsZero(got) {
@@ -166,13 +187,13 @@ func TestSell_WorkedExample_AttackerGain_FullRateTax_ToTreasury(t *testing.T) {
 	c := "creatora"
 
 	// alice (the attacker) buys 100 from S=0: cost = area(100) = 140,656,
-	// fee 14,065 — paid 154,721. Basis 140,656.
+	// fee 7,032 — paid 147,688. Basis 140,656.
 	ra, err := Buy(s, "alice", c, 1000, big.NewInt(100))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ra.TotalDue.Cmp(big.NewInt(154_721)) != 0 {
-		t.Fatalf("alice paid %s, want 154721", ra.TotalDue)
+	if ra.TotalDue.Cmp(big.NewInt(147_688)) != 0 {
+		t.Fatalf("alice paid %s, want 147688", ra.TotalDue)
 	}
 	// bob (the fans) buys 100: cost = area(200) − area(100) = 224,684.
 	if _, err := Buy(s, "bob", c, 1010, big.NewInt(100)); err != nil {
@@ -180,17 +201,17 @@ func TestSell_WorkedExample_AttackerGain_FullRateTax_ToTreasury(t *testing.T) {
 	}
 	treasury0 := getMoney(s, kTreasury())
 
-	// alice dumps her 100 one block later — fresh (τ=2000): p = area(200) −
-	// area(100) = 224,684; K1 tax = ceil(224,684·0.2) = 44,937 (gross, no cap);
-	// fee = 22,468; net = 224,684 − 44,937 − 22,468 = 157,279.
+	// alice dumps her 100 one block later — fresh (τ=1500): p = area(200) −
+	// area(100) = 224,684; K1 tax = ceil(224,684·0.15) = 33,703 (gross, no cap);
+	// fee = 11,234; net = 224,684 − 33,703 − 11,234 = 179,747.
 	rs, err := Sell(s, "alice", c, 1011, big.NewInt(100))
 	if err != nil {
 		t.Fatal(err)
 	}
 	slAssertSplits(t, rs)
 	if rs.Gross.Cmp(big.NewInt(224_684)) != 0 ||
-		rs.Tax.Cmp(big.NewInt(44_937)) != 0 || rs.Net.Cmp(big.NewInt(157_279)) != 0 {
-		t.Fatalf("dump = p %s tax %s net %s, want 224684/44937/157279",
+		rs.Tax.Cmp(big.NewInt(33_703)) != 0 || rs.Net.Cmp(big.NewInt(179_747)) != 0 {
+		t.Fatalf("dump = p %s tax %s net %s, want 224684/33703/179747",
 			rs.Gross, rs.Tax, rs.Net)
 	}
 	// The tax is split 50/50 creator/platform (2026-07-27). What has NOT
@@ -208,14 +229,14 @@ func TestSell_WorkedExample_AttackerGain_FullRateTax_ToTreasury(t *testing.T) {
 	if reunited := mAdd(taxC, taxP); reunited.Cmp(rs.Tax) != 0 {
 		t.Fatalf("tax split leaked: %s != assessed %s", reunited, rs.Tax)
 	}
-	// Honest disclosure, asserted: alice STILL nets a profit (157,279 −
-	// 154,721 = 2,558) — funded entirely by bob's later buy, never by the
+	// Honest disclosure, asserted: alice STILL nets a profit (179,747 −
+	// 147,688 = 32,059) — funded entirely by bob's later buy, never by the
 	// reserve (equality holds below). The curve-leg transfer from late
 	// buyers to early sellers IS the instrument (RULING J residual truth #1);
 	// the tax prices it, it cannot delete it.
 	profit := new(big.Int).Sub(rs.Net, ra.TotalDue)
-	if profit.Cmp(big.NewInt(2558)) != 0 {
-		t.Fatalf("attacker profit = %s, want 2558 (disclosed by-design transfer, post-tax)", profit)
+	if profit.Cmp(big.NewInt(32059)) != 0 {
+		t.Fatalf("attacker profit = %s, want 32059 (disclosed by-design transfer, post-tax)", profit)
 	}
 	if R, S := getMoney(s, kReserve(c)), getMoney(s, kSupply(c)); R.Cmp(Area(S)) != 0 {
 		t.Fatalf("equality broken: R=%s != area(%s)=%s", R, S, Area(S))
@@ -249,28 +270,28 @@ func TestSell_WorkedExample_VictimSellsAtLoss_StillPaysFullTax(t *testing.T) {
 	}
 	treasury0 := getMoney(s, kTreasury())
 
-	// The fan panic-sells all 20 into the bottom, FRESH (τ=2000): p =
+	// The fan panic-sells all 20 into the bottom, FRESH (τ=1500): p =
 	// area(100) − area(80) = 34,685 (a realized LOSS against the 70,186 paid).
-	// K1 tax = ceil(34,685·0.2) = 6,937 (gross, no cap — the loss is NOT
-	// sheltered). fee = 3,468. net = 34,685 − 6,937 − 3,468 = 24,280.
+	// K1 tax = ceil(34,685·0.15) = 5,203 (gross, no cap — the loss is NOT
+	// sheltered). fee = 1,734. net = 34,685 − 5,203 − 1,734 = 27,748.
 	rs, err := Sell(s, "fan", c, 1012, big.NewInt(20))
 	if err != nil {
 		t.Fatal(err)
 	}
 	slAssertSplits(t, rs)
-	if rs.TaxBps != 2000 {
-		t.Fatalf("rate = %d bps, want 2000 (fresh)", rs.TaxBps)
+	if rs.TaxBps != 1500 {
+		t.Fatalf("rate = %d bps, want 1500 (fresh)", rs.TaxBps)
 	}
 	if rs.Gross.Cmp(big.NewInt(34_685)) != 0 ||
-		rs.Tax.Cmp(big.NewInt(6937)) != 0 || rs.Net.Cmp(big.NewInt(24_280)) != 0 {
-		t.Fatalf("victim sell = p %s tax %s net %s, want 34685/6937/24280 (K1: loss is not sheltered)",
+		rs.Tax.Cmp(big.NewInt(5203)) != 0 || rs.Net.Cmp(big.NewInt(27_748)) != 0 {
+		t.Fatalf("victim sell = p %s tax %s net %s, want 34685/5203/27748 (K1: loss is not sheltered)",
 			rs.Gross, rs.Tax, rs.Net)
 	}
 	// Treasury got the PLATFORM HALF of the gross tax + the platform fee half
 	// (2026-07-27 split); the creator's pot got the other tax half. The point
 	// of this test is unchanged: a seller at a LOSS still pays the full gross
 	// tax — it is just no longer all collected by one account.
-	_, taxP := exitTaxSplit(c, "victim", big.NewInt(6937))
+	_, taxP := exitTaxSplit(c, "victim", big.NewInt(5203))
 	wantTrea := mAdd(mAdd(treasury0, taxP), rs.FeePlatform)
 	if got := getMoney(s, kTreasury()); got.Cmp(wantTrea) != 0 {
 		t.Fatalf("treasury = %s, want %s (platform half of gross tax + platform fee half)", got, wantTrea)
@@ -296,11 +317,11 @@ func TestSell_TaxDecay_ZeroAfterSixWeeks(t *testing.T) {
 		t.Fatalf("tax after full decay = %d bps / %s units, want 0/0", rs.TaxBps, rs.Tax)
 	}
 	// Untaxed: p = area(15) − area(10) = 5,514 — EXACTLY what the buyer paid
-	// for this slice (L5 equality). fee 551, net 4,963. Still a loss vs the
-	// 6,065 paid — the 10% fees each way guarantee no free round trip even
+	// for this slice (L5 equality). fee 275, net 5,239. Still a loss vs the
+	// 5,789 paid — the 5% fees each way guarantee no free round trip even
 	// at zero tax.
-	if rs.Gross.Cmp(big.NewInt(5514)) != 0 || rs.Net.Cmp(big.NewInt(4963)) != 0 {
-		t.Fatalf("untaxed sell p %s net %s, want 5514/4963 (exact area step — L5 equality)", rs.Gross, rs.Net)
+	if rs.Gross.Cmp(big.NewInt(5514)) != 0 || rs.Net.Cmp(big.NewInt(5239)) != 0 {
+		t.Fatalf("untaxed sell p %s net %s, want 5514/5239 (exact area step — L5 equality)", rs.Gross, rs.Net)
 	}
 }
 
@@ -317,22 +338,22 @@ func TestSell_TaxDecay_Midpoint_FullRate_ToTreasury(t *testing.T) {
 	setU64(s, kPaidUntil("creatora"), 1000+ExitTaxDecayBlocks+SubscriptionPeriod)
 	treasuryBefore := getMoney(s, kTreasury())
 
-	// Held exactly half the decay window: τ = 1000 bps exactly. Selling 10 of
-	// 30: p = area(30) − area(20) = 12,025; K1 tax = ceil(12,025·0.1) = 1,203
-	// (gross, no cap); fee = floor(1,202.5) = 1,202 (601/601); net = 12,025 −
-	// 1,203 − 1,202 = 9,620.
+	// Held exactly half the decay window: τ = 750 bps exactly. Selling 10 of
+	// 30: p = area(30) − area(20) = 12,025; K1 tax = ceil(12,025·0.075) = 902
+	// (gross, no cap); fee = floor(601.25) = 601 (300/301); net = 12,025 −
+	// 902 − 601 = 10,522.
 	rs, err := Sell(s, "holder", "creatora", 1000+ExitTaxDecayBlocks/2, big.NewInt(10))
 	if err != nil {
 		t.Fatal(err)
 	}
 	slAssertSplits(t, rs)
-	if rs.TaxBps != 1000 || rs.Gross.Cmp(big.NewInt(12_025)) != 0 ||
-		rs.Tax.Cmp(big.NewInt(1203)) != 0 || rs.Net.Cmp(big.NewInt(9620)) != 0 {
-		t.Fatalf("mid-decay sell = τ%d p %s tax %s net %s, want 1000/12025/1203/9620",
+	if rs.TaxBps != 750 || rs.Gross.Cmp(big.NewInt(12_025)) != 0 ||
+		rs.Tax.Cmp(big.NewInt(902)) != 0 || rs.Net.Cmp(big.NewInt(10522)) != 0 {
+		t.Fatalf("mid-decay sell = τ%d p %s tax %s net %s, want 750/12025/902/10522",
 			rs.TaxBps, rs.Gross, rs.Tax, rs.Net)
 	}
 	// Treasury got the platform half of the tax + the platform fee half.
-	_, taxP := exitTaxSplit("creatora", "holder", big.NewInt(1203))
+	_, taxP := exitTaxSplit("creatora", "holder", big.NewInt(902))
 	wantTreasury := mAdd(mAdd(treasuryBefore, taxP), rs.FeePlatform)
 	if got := getMoney(s, kTreasury()); got.Cmp(wantTreasury) != 0 {
 		t.Fatalf("treasury = %s, want %s (platform half of the tax + platform fee half)", got, wantTreasury)
@@ -359,12 +380,12 @@ func TestSell_OneTokenSell_RedeemsFullSlice_FullRateTax(t *testing.T) {
 	}
 	slAssertSplits(t, rs)
 	// p = area(21) − area(20) = 1,166 (the full slice — nothing burned);
-	// K1 tax (fresh, τ=2000) = ceil(1,166·0.2) = 234 (gross, no cap); fee =
-	// floor(116.6) = 116; net = 1,166 − 234 − 116 = 816.
+	// K1 tax (fresh, τ=1500) = ceil(1,166·0.15) = 175 (gross, no cap); fee =
+	// floor(58.3) = 58; net = 1,166 − 175 − 58 = 933.
 	if rs.Gross.Cmp(big.NewInt(1166)) != 0 ||
-		rs.Tax.Cmp(big.NewInt(234)) != 0 || rs.Fee.Cmp(big.NewInt(116)) != 0 ||
-		rs.Net.Cmp(big.NewInt(816)) != 0 {
-		t.Fatalf("1-token sell = p %s tax %s fee %s net %s, want 1166/234/116/816 (full slice, full gross tax)",
+		rs.Tax.Cmp(big.NewInt(175)) != 0 || rs.Fee.Cmp(big.NewInt(58)) != 0 ||
+		rs.Net.Cmp(big.NewInt(933)) != 0 {
+		t.Fatalf("1-token sell = p %s tax %s fee %s net %s, want 1166/175/58/933 (full slice, full gross tax)",
 			rs.Gross, rs.Tax, rs.Fee, rs.Net)
 	}
 	// The reserve returned exactly to area(20) — the slice redeemed in full.

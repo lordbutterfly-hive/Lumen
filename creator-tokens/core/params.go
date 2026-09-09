@@ -48,8 +48,8 @@ const CommissionBps uint64 = 1200
 //
 // Revenue is unchanged and lives elsewhere: SubscriptionFee (below, the
 // liveness gate — the FIRST month is free, so creating is genuinely free),
-// CommissionBps (12% on delivered service) and TradeFeeBps (the 5% platform
-// half of the 10% trade fee).
+// CommissionBps (12% on delivered service) and TradeFeeBps (the 2.5% platform
+// half of the 5% trade fee).
 
 // SubscriptionFee is the recurring charge, in HBD base units, per period.
 const SubscriptionFee int64 = 10_000
@@ -467,8 +467,8 @@ const CurveQuadNum int64 = 21
 // 8000 this is not the case, verified by the parity test).
 const CurveDenom int64 = 8000
 
-// TradeFeeBps is the total trade fee on curve buys AND sells: 10% = 5% creator
-// + 5% platform, friend.tech-style (LOCKED-MECHANISM "Fees & taxes"). The fee
+// TradeFeeBps is the total trade fee on curve buys AND sells: 5% = 2.5% creator
+// + 2.5% platform, friend.tech-style (LOCKED-MECHANISM "Fees & taxes"). The fee
 // is REVENUE, never reserve: skimmed ON TOP of buyCost on buys (buyer pays
 // cost+fee, only cost enters the reserve) and OUT OF the payout on sells
 // (seller receives proceeds−tax−fee; the reserve is debited the full
@@ -487,9 +487,9 @@ const CurveDenom int64 = 8000
 // friend.tech teardown found that a creator whose address cannot receive a
 // pushed fee bricks every buy and sell forever (fee-push + require(success));
 // pull-based accrual makes that failure structurally impossible.
-const TradeFeeBps uint64 = 1000
+const TradeFeeBps uint64 = 500
 
-// MaxExitTaxBps is the exit-tax ceiling: 20% for the freshest holds, decaying
+// MaxExitTaxBps is the exit-tax ceiling: 15% for the freshest holds, decaying
 // linearly to 0 at ExitTaxDecayBlocks (exittax.go).
 //
 // RULING J (RULINGS-v2-2026-07-21, USER-RULED — overturns RULING A's
@@ -510,7 +510,7 @@ const TradeFeeBps uint64 = 1000
 // and both corrections were proven at exact integers:
 //
 //  1. The BURN (original): withheld ceil(ΔS·τ/1e4) tokens with no payout.
-//     Wrong three ways — at the ruled 20% a burn LOWERS the floor R/S
+//     Wrong three ways — at the ruled 15% a burn LOWERS the floor R/S
 //     (ratcheting needs τ >= 50%); the effective full-exit tax was τ² = 4%
 //     (burned tokens are the cheapest slice — regressive); and the
 //     accumulated backing was an unallocated pot any fresh buyer could raid
@@ -525,16 +525,16 @@ const TradeFeeBps uint64 = 1000
 //     seller exclusion) still left whale self-recovery at 97.5% — an aged
 //     keeper account is indistinguishable from an honest holder (the
 //     receiving-side dual of the purchasable-weight lemma). Repointing to
-//     treasury makes the whale's effective rate 20.0%, un-recoverable at
+//     treasury makes the whale's effective rate 15.0%, un-recoverable at
 //     any tranche or account count, and the one-block front-run bot
 //     collects zero.
 //
 // Treasury-destination keeps everything RULING A proved: the tax is money
-// (20% means 20% at every exit size), R === area(S) holds with equality (no
+// (15% means 15% at every exit size), R === area(S) holds with equality (no
 // pot ever forms — the governing theorem closes the drain class), and no
 // accounting aggregate remains that could revert an outflow (RULING G is
 // satisfied structurally).
-const MaxExitTaxBps uint64 = 2000
+const MaxExitTaxBps uint64 = 1500
 
 // ExitTaxDecayBlocks is the hold time at which the exit tax reaches exactly 0:
 // 6 weeks (LOCKED-MECHANISM: "LINEAR decay to 0% at 6 weeks held").

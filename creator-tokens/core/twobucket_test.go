@@ -285,7 +285,16 @@ func TestTwoBucket_MixedEscrowSettlesEachLegOnItsOwnClock(t *testing.T) {
 // A sale spanning both buckets must pay pro rata — NOT by handing the matured
 // tokens the dearest slice of the curve, which is the tax-minimising pairing
 // and was measured at −39% of collections.
-func TestTwoBucket_MixedSaleIsTaxedProRataNotTopSlice(t *testing.T) {
+// ★ UPDATED FOR THE PRICE-2 CANDIDATE FIX (2026-09-08). This test used to pin
+// the PRO-RATA-by-count apportionment (its old name ended "...NotTopSlice") and
+// was, in fact, the test that ENCODED PRICE-2: pro rata prices the maturing
+// tokens at the curve AVERAGE, so bundling a matured pile under a fresh sale
+// diluted the fresh tokens' tax base and under-collected 56%. The fix taxes the
+// maturing tokens at the MARGINAL top slice they actually occupy (splitDraw
+// consumes maturing first == the dearest slice), which is exactly what selling
+// the fresh slice ALONE would cost — path-independent, and the intended figure.
+// The matured pile still pays nothing; it just no longer donates its dear slice.
+func TestTwoBucket_MixedSaleIsTaxedAtTheMarginalMaturingSlice(t *testing.T) {
 	const c, h = "hive:alice", "hive:bob"
 	s := tbMarket(t, c)
 	at := tbMature(t, s, c, h, 400, 1_000_000)
@@ -298,7 +307,9 @@ func TestTwoBucket_MixedSaleIsTaxedProRataNotTopSlice(t *testing.T) {
 		t.Fatalf("expected 400 maturing, got %s", MaturingOf(s, c, h))
 	}
 
-	// Sell the whole 800: half matured (0%), half fresh (full rate).
+	supplyBefore := getMoney(s, kSupply(c))
+
+	// Sell the whole 800: 400 matured (0%), 400 fresh (full rate), maturing first.
 	r, err := Sell(s, h, c, at, big.NewInt(800))
 	if err != nil {
 		t.Fatalf("sell: %v", err)
@@ -306,21 +317,47 @@ func TestTwoBucket_MixedSaleIsTaxedProRataNotTopSlice(t *testing.T) {
 	if r.TaxBps == 0 {
 		t.Fatal("setup invalid: the fresh half should carry a nonzero rate")
 	}
-	// The taxable base is the maturing half of the gross, ±1 for ceil.
+	// The taxable base is EXACTLY the top-400 (maturing) curve slice.
+	topSlice, err := SellProceeds(supplyBefore, big.NewInt(400))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.TaxableGross.Cmp(topSlice) != 0 {
+		t.Fatalf("taxable base %s != the marginal top-400 slice %s", r.TaxableGross, topSlice)
+	}
+	// It is STRICTLY MORE than the old pro-rata half (the dear slice is worth
+	// more than the average) — that gap is the 56% PRICE-2 under-collection now
+	// recovered.
 	half := new(big.Int).Div(r.Gross, big.NewInt(2))
-	diff := new(big.Int).Sub(r.TaxableGross, half)
-	diff.Abs(diff)
-	if diff.Cmp(big.NewInt(1)) > 0 {
-		t.Fatalf("taxable base %s is not the pro-rata half of gross %s (half=%s) — "+
-			"a top-slice apportionment would put it far from here",
-			r.TaxableGross, r.Gross, half)
+	if r.TaxableGross.Cmp(half) <= 0 {
+		t.Fatalf("taxable base %s must exceed the pro-rata half %s (marginal > average)", r.TaxableGross, half)
 	}
 	if r.Tax.Cmp(ExitTaxOn(r.TaxableGross, r.TaxBps)) != 0 {
 		t.Fatal("tax is not the exact rate on the taxable base")
 	}
-	// And it must be strictly less than taxing the whole gross would be.
+	// The matured tokens still owe nothing: taxing the WHOLE gross would be more.
 	if r.Tax.Cmp(ExitTaxOn(r.Gross, r.TaxBps)) >= 0 {
 		t.Fatal("matured tokens were taxed — they owe nothing")
+	}
+
+	// PATH-INDEPENDENCE (the PRICE-2 property): selling the fresh 400 alone then
+	// the matured 400 collects the SAME total tax as the single bundled 800.
+	s2 := tbMarket(t, c)
+	at2 := tbMature(t, s2, c, h, 400, 1_000_000)
+	if _, err := Buy(s2, h, c, at2, big.NewInt(400)); err != nil {
+		t.Fatalf("buy2: %v", err)
+	}
+	rFresh, err := Sell(s2, h, c, at2, big.NewInt(400))
+	if err != nil {
+		t.Fatalf("sell fresh: %v", err)
+	}
+	rMat, err := Sell(s2, h, c, at2, big.NewInt(400))
+	if err != nil {
+		t.Fatalf("sell matured: %v", err)
+	}
+	splitTax := new(big.Int).Add(rFresh.Tax, rMat.Tax)
+	if splitTax.Cmp(r.Tax) != 0 {
+		t.Fatalf("PRICE-2 path dependence: split tax %s != bundled tax %s", splitTax, r.Tax)
 	}
 }
 

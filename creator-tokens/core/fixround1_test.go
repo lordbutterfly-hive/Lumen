@@ -496,29 +496,29 @@ func TestRefundHolder_EXITTAX1_FreshPushRefused(t *testing.T) {
 	}
 
 	// (2) THE HOLDER IS NOT TRAPPED — their own (taxed) self-Refund still works,
-	// at exactly their own hold-clock rate: gross 1,000,000, 20% tax 200,000,
-	// net 800,000. This is the accepted RULING K2 cost of THEIR OWN choice to
+	// at exactly their own hold-clock rate: gross 1,000,000, 15% tax 150,000,
+	// net 850,000. This is the accepted RULING K2 cost of THEIR OWN choice to
 	// exit early; what EXITTAX-1 forbids is a STRANGER imposing it.
 	selfNet, err := Refund(s, victim, creator, pushBlock, big.NewInt(1000))
 	if err != nil {
 		t.Fatalf("EXITTAX-1: the holder's OWN self-Refund must still work: %v", err)
 	}
-	if selfNet.Cmp(big.NewInt(800000)) != 0 {
-		t.Fatalf("self-Refund net = %s, want 800000 (gross 1,000,000 − 20%% tax 200,000)", selfNet)
+	if selfNet.Cmp(big.NewInt(850000)) != 0 {
+		t.Fatalf("self-Refund net = %s, want 850000 (gross 1,000,000 − 15%% tax 150,000)", selfNet)
 	}
 	// Split 50/50 (2026-07-27): the victim is not the creator, so treasury
-	// takes 100,000 and the creator's claimable pot the other 100,000. The
+	// takes 75,000 and the creator's claimable pot the other 75,000. The
 	// point of the assertion is unchanged — the full 200,000 tax was collected
 	// and the victim got none of it back.
-	vTaxC, vTaxP := exitTaxSplit(creator, victim, big.NewInt(200000))
+	vTaxC, vTaxP := exitTaxSplit(creator, victim, big.NewInt(150000))
 	if got := new(big.Int).Sub(getMoney(s, kTreasury()), treaB); got.Cmp(vTaxP) != 0 {
 		t.Fatalf("treasury gained %s on the self-Refund, want the platform half %s", got, vTaxP)
 	}
 	if got := new(big.Int).Sub(getMoney(s, kFeeBal(creator)), feeCB); got.Cmp(vTaxC) != 0 {
 		t.Fatalf("creator pot gained %s on the self-Refund, want the creator half %s", got, vTaxC)
 	}
-	if reunited := mAdd(vTaxC, vTaxP); reunited.Cmp(big.NewInt(200000)) != 0 {
-		t.Fatalf("tax split leaked: %s != assessed 200000", reunited)
+	if reunited := mAdd(vTaxC, vTaxP); reunited.Cmp(big.NewInt(150000)) != 0 {
+		t.Fatalf("tax split leaked: %s != assessed 150000", reunited)
 	}
 }
 
@@ -618,13 +618,13 @@ func TestRefundHolder_NOTICE1_FreshPushRefusedDuringRetireNotice(t *testing.T) {
 	}
 
 	// The fan is NOT trapped — their own self-Refund works during the notice,
-	// taxed at their own clock (their choice): gross 1,000,000, 20% → net 800,000.
+	// taxed at their own clock (their choice): gross 1,000,000, 15% → net 850,000.
 	selfNet, err := Refund(s, victim, creator, noticeBlock, big.NewInt(1000))
 	if err != nil {
 		t.Fatalf("NOTICE-1: the fan's own self-Refund must work during the notice: %v", err)
 	}
-	if selfNet.Cmp(big.NewInt(800000)) != 0 {
-		t.Fatalf("self-Refund net = %s, want 800000 (gross 1,000,000 − 20%% tax)", selfNet)
+	if selfNet.Cmp(big.NewInt(850000)) != 0 {
+		t.Fatalf("self-Refund net = %s, want 850000 (gross 1,000,000 − 15%% tax)", selfNet)
 	}
 }
 

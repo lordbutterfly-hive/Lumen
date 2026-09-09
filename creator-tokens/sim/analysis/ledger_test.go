@@ -57,16 +57,17 @@ func TestLedger_CleanLifecycleCloses(t *testing.T) {
 		t.Fatal("expected a ledger entry for alice")
 	}
 	// F8 (an adversarial review): CreditsHeldValue is now NET of the maximum
-	// possible K2 exit tax (MaxExitTaxBps=2000, i.e. 20%), not gross — the
-	// field's own doc claims it is a realizable FLOOR, and a holder never
-	// actually receives the pre-tax gross refundPayout figure (core/
-	// refund.go). gross=2000 (reserve==supply peg holds: floor(2000*2000/
-	// 2000)=2000); tax=ceil(2000*2000/10000)=400; net=2000-400=1600. This
-	// value MOVED from the pre-fix 2000 (which was a real overstatement, not
-	// a rounding nuance) — see ledger.go's CreditsHeldValue field doc and its
-	// computation site for the full reasoning.
-	if alice.CreditsHeldValue.Cmp(big.NewInt(1600)) != 0 {
-		t.Errorf("alice.CreditsHeldValue = %s, want 1600 (answered credits, reserve==supply peg holds, net of the max 20%% K2 exit tax: 2000-400)", alice.CreditsHeldValue)
+	// possible K2 exit tax (MaxExitTaxBps=1500, i.e. 15% — ★ 2026-09-08 fee
+	// change, was 2000/20%), not gross — the field's own doc claims it is a
+	// realizable FLOOR, and a holder never actually receives the pre-tax
+	// gross refundPayout figure (core/refund.go). gross=2000 (reserve==
+	// supply peg holds: floor(2000*2000/2000)=2000); tax=ceil(2000*1500/
+	// 10000)=300; net=2000-300=1700. This value MOVED from the pre-fix 2000
+	// (which was a real overstatement, not a rounding nuance) — see
+	// ledger.go's CreditsHeldValue field doc and its computation site for
+	// the full reasoning.
+	if alice.CreditsHeldValue.Cmp(big.NewInt(1700)) != 0 {
+		t.Errorf("alice.CreditsHeldValue = %s, want 1700 (answered credits, reserve==supply peg holds, net of the max 15%% K2 exit tax: 2000-300)", alice.CreditsHeldValue)
 	}
 	if alice.Unexplained.Sign() > 0 {
 		t.Errorf("alice.Unexplained = %s, should not be positive (she received real value from answering)", alice.Unexplained)
@@ -151,14 +152,15 @@ func TestLedger_ReclaimReturnsOverpaymentInFull(t *testing.T) {
 	// max K2 exit tax, not gross — the exact SCOPE NOTE item-3 pattern this
 	// package documents and accepts (a healthy, fully-explained holder's
 	// Unexplained reads positive by the appreciation/tax-floor gap, never a
-	// fund-safety concern). gross=refundPayout(5000,5000,5000)=5000;
-	// tax=ceil(5000*2000/10000)=1000; CreditsHeldValue=4000.
+	// fund-safety concern). ★ 2026-09-08 fee change (MaxExitTaxBps 2000 ->
+	// 1500): gross=refundPayout(5000,5000,5000)=5000; tax=ceil(5000*1500/
+	// 10000)=750; CreditsHeldValue=4250.
 	// bob.explained = ReceivedOut(300, the reclaimed commission) +
-	// CreditsHeldValue(4000) = 4300; PaidIn = 5000+300 = 5300;
-	// Unexplained = 5300-4300 = 1000 — entirely the tax-floor gap on bob's
+	// CreditsHeldValue(4250) = 4550; PaidIn = 5000+300 = 5300;
+	// Unexplained = 5300-4550 = 750 — entirely the tax-floor gap on bob's
 	// own still-held balance, not a lost commission (Overpayments above
 	// already proves the excess came back in full).
-	wantUnexplainedReclaim := big.NewInt(1000)
+	wantUnexplainedReclaim := big.NewInt(750)
 	if bob.Unexplained.Cmp(wantUnexplainedReclaim) != 0 {
 		t.Errorf("bob.Unexplained = %s, want %s (full commission incl. the accidental excess was returned; the remainder is CreditsHeldValue's max-tax floor gap on bob's still-held balance, not a loss)", bob.Unexplained, wantUnexplainedReclaim)
 	}
@@ -254,17 +256,18 @@ func TestLedger_UnresolvedEscrowIsHeldNotLost(t *testing.T) {
 	// PendingEscrowCreditsValue above (which is NOT tax-adjusted — F8 is
 	// scoped to the field whose own doc claims to be a realizable
 	// wind-down FLOOR; PendingEscrowCreditsValue makes no such claim, see
-	// its own field doc). gross=refundPayout(5000,3000,5000)=3000;
-	// tax=ceil(3000*2000/10000)=600; CreditsHeldValue=2400.
-	// bob.explained = CreditsHeldValue(2400) + PendingEscrowCommission(240)
-	// + PendingEscrowCreditsValue(2000) = 4640; PaidIn = 5000+240 = 5240;
-	// Unexplained = 600 — entirely CreditsHeldValue's max-tax floor gap on
+	// its own field doc). ★ 2026-09-08 fee change (MaxExitTaxBps 2000 ->
+	// 1500): gross=refundPayout(5000,3000,5000)=3000; tax=ceil(3000*1500/
+	// 10000)=450; CreditsHeldValue=2550.
+	// bob.explained = CreditsHeldValue(2550) + PendingEscrowCommission(240)
+	// + PendingEscrowCreditsValue(2000) = 4790; PaidIn = 5000+240 = 5240;
+	// Unexplained = 450 — entirely CreditsHeldValue's max-tax floor gap on
 	// bob's still-SPENDABLE balance (the SCOPE NOTE item-3 pattern this
 	// package documents and accepts), not any part of the escrow actually
 	// being lost — PendingEscrowCommission/PendingEscrowCreditsValue above
 	// already prove the escrowed leg is fully accounted for at its own
 	// value.
-	wantUnexplained := big.NewInt(600)
+	wantUnexplained := big.NewInt(450)
 	if bob.Unexplained.Cmp(wantUnexplained) != 0 {
 		t.Errorf("bob.Unexplained = %s, want %s (held, not lost — the escrow is fully explained; this is CreditsHeldValue's max-tax floor gap on bob's un-escrowed spendable balance)", bob.Unexplained, wantUnexplained)
 	}
@@ -309,13 +312,14 @@ func TestLedger_DeclineReturnsCommissionInFull(t *testing.T) {
 	// F8 (an adversarial review): identical shape and numbers to
 	// TestLedger_ReclaimReturnsOverpaymentInFull — decline is money-shape-
 	// identical to reclaim (RULING E). CreditsHeldValue is net of the max
-	// K2 exit tax on bob's still-held 5000-credit balance: gross=5000,
-	// tax=ceil(5000*2000/10000)=1000, CreditsHeldValue=4000.
-	// explained=ReceivedOut(300)+CreditsHeldValue(4000)=4300; PaidIn=5300;
-	// Unexplained=1000 — the tax-floor gap on bob's own still-held balance,
+	// K2 exit tax on bob's still-held 5000-credit balance. ★ 2026-09-08 fee
+	// change (MaxExitTaxBps 2000 -> 1500): gross=5000, tax=ceil(5000*1500/
+	// 10000)=750, CreditsHeldValue=4250.
+	// explained=ReceivedOut(300)+CreditsHeldValue(4250)=4550; PaidIn=5300;
+	// Unexplained=750 — the tax-floor gap on bob's own still-held balance,
 	// not a lost commission (the DeclinedCommission/Overpayments checks
 	// above already prove the excess came back in full).
-	wantUnexplainedDecline := big.NewInt(1000)
+	wantUnexplainedDecline := big.NewInt(750)
 	if bob.Unexplained.Cmp(wantUnexplainedDecline) != 0 {
 		t.Errorf("bob.Unexplained = %s, want %s (full commission incl. the accidental excess was returned; the remainder is CreditsHeldValue's max-tax floor gap on bob's still-held balance, not a loss)", bob.Unexplained, wantUnexplainedDecline)
 	}

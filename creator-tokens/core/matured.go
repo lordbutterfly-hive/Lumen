@@ -286,12 +286,26 @@ func returnEscrowToOwner(s Store, c, holder string, seq uint64, credits *big.Int
 		maturing = mZero() // unreachable: escrowMaturedLeg clamps to credits
 	}
 	if maturing.Sign() > 0 {
-		creditInflowAt(s, c, holder, maturing, acqBlock, block)
+		// ★ COHORT-FAITHFUL RETURN (2026-09-08). The escrow records the COHORTS
+		// its maturing leg was drawn from (ask.go / kEscrowLots); replaying them
+		// returns the asker exactly the tokens they escrowed, each with its own
+		// clock. Crediting the whole leg at the single packed acqBlock instead —
+		// which is what this line used to do unconditionally — re-stamped a fresh
+		// slice with the asker's blended rate and laundered it, on a door a
+		// stranger can push (Reclaim) or the creator can push in the same block
+		// (Decline). A pre-fix escrow has no cohort record and falls back to
+		// acqBlock, byte-for-byte the old behaviour.
+		if lots := loadEscrowLots(s, c, seq, maturing); len(lots) > 0 {
+			creditInflowCohorts(s, c, holder, lots, block)
+		} else {
+			creditInflowAt(s, c, holder, maturing, acqBlock, block)
+		}
 	}
 	if matured.Sign() > 0 {
 		setMatured(s, c, holder, mAdd(getMatured(s, c, holder), matured))
 	}
 	consumeEscrowMaturedLeg(s, c, seq)
+	consumeEscrowLots(s, c, seq)
 }
 
 // payEscrowToCreator credits an ANSWERED escrow to the creator, who is a
@@ -317,12 +331,22 @@ func payEscrowToCreator(s Store, c string, seq uint64, credits *big.Int, acqBloc
 		maturing = mZero() // unreachable: escrowMaturedLeg clamps to credits
 	}
 	if maturing.Sign() > 0 {
-		creditInflowAt(s, c, c, maturing, acqBlock, block)
+		// ★ COHORT-FAITHFUL DELIVERY (2026-09-08), same rule as the return legs:
+		// the creator receives the asker's actual cohorts, not a blend of them.
+		// This direction matters for the launder too — the asker chooses both the
+		// ask and (on their own market) the answer, so a blended delivery is an
+		// attacker-controlled re-stamp exactly like a blended reclaim.
+		if lots := loadEscrowLots(s, c, seq, maturing); len(lots) > 0 {
+			creditInflowCohorts(s, c, c, lots, block)
+		} else {
+			creditInflowAt(s, c, c, maturing, acqBlock, block)
+		}
 	}
 	if matured.Sign() > 0 {
 		creditInflowAt(s, c, c, matured, maturityFloorBlock(block), block)
 	}
 	consumeEscrowMaturedLeg(s, c, seq)
+	consumeEscrowLots(s, c, seq)
 }
 
 // consumeEscrowMaturedLeg clears the leg once it has been paid out. The escrow
@@ -398,13 +422,81 @@ func graduate(s Store, c, h string, block uint64) *big.Int {
 		return mZero()
 	}
 	n := getMoney(s, kBal(c, h))
-	// DELETE rather than store "0". A zero left behind is not wrong to read, but
-	// it leaves a dead key on the most-written family for every graduation, and
-	// it keeps the holder visible to prefix scans that look for maturing
-	// positions — which is how a graduated holder ends up listed with a balance
-	// of nothing. setMatured deletes at zero for the same reason.
-	s.Delete(kBal(c, h))
-	s.Delete(kAcqBlock(c, h))
-	setMatured(s, c, h, mAdd(getMatured(s, c, h), n))
-	return n
+
+	// ★★ THE COHORT LEDGER DECIDES WHAT GRADUATES, NOT THE BLEND (2026-09-08).
+	//
+	// WHAT THIS REPLACED, and why it destroyed real tax: this function used to
+	// move the WHOLE maturing balance and call lotsClear() unconditionally, on
+	// the stated claim that "maturedNow only fires once the blended age has
+	// reached the cap, which (every cohort being capped at the window) means
+	// every cohort is at the cap and owes 0". THAT IMPLICATION IS FALSE for a
+	// heterogeneous bucket. The blend is a SIZE-WEIGHTED mean: a large aged pile,
+	// itself pinned at the maturity floor by capAcqAge, drags the mean back over
+	// the cap only Dt·n/(M+n) blocks after a fresh slice of n lands on a pile of
+	// M — while that fresh cohort is still Dt − t blocks young and owes almost
+	// the full rate. Measured on the pre-fix tree: a 1,000-token slice landing on
+	// a 1,000,000-token pile became permanently tax-free 1,209 blocks (ONE HOUR)
+	// after it arrived, its own cohort still reading 1499 of 1500 bps, and one
+	// Graduate call — the holder's own key, no waiting, no privilege — destroyed
+	// 395,062,715,569 base units of owed tax.
+	//
+	// THE RULE NOW: only cohorts that ACTUALLY owe zero graduate. A cohort with
+	// lotRateAt == 0 owes nothing at `block` and at every future block (the
+	// monotonicity argument in collapseMaturedLots), so moving it into the
+	// matured bucket — where the rate is 0 by definition — is exactly
+	// tax-neutral. A cohort that still owes stays in the maturing bucket with its
+	// own clock, and keeps owing.
+	lots := getLots(s, c, h) // freshest first, with legacy single-cohort synthesis
+	_, green, ripe := splitLotsByRate(lots, block)
+
+	if len(green) == 0 {
+		// HOMOGENEOUS — every cohort owes zero. This is the pre-fix path, byte
+		// for byte, and it is the only path a legacy un-ledgered position can
+		// take (its synthesised single cohort sits at the stored clock, which
+		// maturedNow has just proven is at the cap).
+		//
+		// DELETE rather than store "0". A zero left behind is not wrong to read,
+		// but it leaves a dead key on the most-written family for every
+		// graduation, and it keeps the holder visible to prefix scans that look
+		// for maturing positions — which is how a graduated holder ends up listed
+		// with a balance of nothing. setMatured deletes at zero for the same
+		// reason.
+		s.Delete(kBal(c, h))
+		s.Delete(kAcqBlock(c, h))
+		lotsClear(s, c, h)
+		setMatured(s, c, h, mAdd(getMatured(s, c, h), n))
+		return n
+	}
+
+	// PARTIAL GRADUATION. Some cohort still owes, so the bucket cannot be
+	// emptied. Nothing at all graduates when nothing is ripe; otherwise the ripe
+	// cohorts move and the green ones stay.
+	//
+	// WHY PARTIAL AND NOT "REFUSE ENTIRELY". Refusing would be the smaller diff
+	// and it would be a GRIEF: one dust gift would freeze a victim's whole aged
+	// pile out of the matured bucket — and out of TransferMatured — for up to a
+	// full 42-day window, for the price of one token. Partial graduation gives
+	// the attacker nothing: the victim's ripe pile banks exactly as it would
+	// have, and only the attacker's own dust stays behind, owing its own tax.
+	if ripe.Sign() == 0 {
+		return mZero()
+	}
+	rest, err := mSub(n, ripe)
+	if err != nil || rest.Sign() <= 0 {
+		return mZero() // unreachable under Σ lots == kBal; never write on a broken premise
+	}
+	setMoney(s, kBal(c, h), rest)
+	setLots(s, c, h, green)
+	// THE BLEND MUST FOLLOW THE BUCKET. kAcqBlock describes the maturing balance,
+	// and the maturing balance just lost its oldest tokens; leaving the old
+	// average behind would describe a composition that no longer exists and would
+	// read back (heldBlocksAt -> SellResult.TaxBps, the quote UI, maturedNow) as
+	// a matured position that in fact owes tax. Re-deriving it from the surviving
+	// cohorts can only ever move the clock FORWARD (younger => more tax), the
+	// same direction every other clamp in holdclock.go moves it, and it makes the
+	// next maturedNow honest so this function is idempotent rather than firing
+	// forever on a stale mean.
+	setU64(s, kAcqBlock(c, h), lotsBlendAcq(green, block))
+	setMatured(s, c, h, mAdd(getMatured(s, c, h), ripe))
+	return ripe
 }

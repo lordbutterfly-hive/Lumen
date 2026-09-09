@@ -15,12 +15,12 @@ func TestTradeFee_Split_Exact(t *testing.T) {
 		amount          int64
 		fee, feeC, feeP int64
 	}{
-		{"worked-example-54", 54, 5, 2, 3}, // money-math §3.4: odd unit → platform
-		{"even-fee", 100, 10, 5, 5},
+		{"worked-example-54", 54, 2, 1, 1}, // 5% fee floors even; sum equality still holds
+		{"even-fee", 200, 10, 5, 5},
 		{"dust-no-fee", 9, 0, 0, 0},   // floor(0.9) — revenue absorbs the dust, never the reserve
-		{"one-unit-fee", 10, 1, 0, 1}, // odd unit → platform, creator floor 0
+		{"one-unit-fee", 30, 1, 0, 1}, // odd unit → platform, creator floor 0 (floor(30·5%/1)=1)
 		{"zero", 0, 0, 0, 0},
-		{"worked-example-65", 65, 6, 3, 3},
+		{"worked-example-65", 65, 3, 1, 2}, // odd unit → platform
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

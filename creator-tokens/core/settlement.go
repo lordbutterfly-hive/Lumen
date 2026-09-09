@@ -22,7 +22,8 @@ import "math/big"
 //
 // THE RATE (RULING C1):
 //
-//	rate = min( AskRate       — the ~hours window (twap.go),
+//	rate = min( spot, median( AskRate, askRateLong, spot ) ) — see SettlementRate.
+//	             AskRate       — the ~hours window (twap.go),
 //	            askRateLong   — the 7-day window (twap.go),
 //	            SpotRate(S)   — the curve's live marginal price (curve.go) )
 //
@@ -79,7 +80,7 @@ import "math/big"
 // token count a face-priced service costs at it. Both freshly allocated.
 type SettleQuote struct {
 	Credits *big.Int // ceil(tokenLeg/rate) — RULING C keeps the ceil (floor would admit c == 0, a free service)
-	Rate    *big.Int // min(TWAP_short, TWAP_long, spot)
+	Rate    *big.Int // min(spot, median(TWAP_short, TWAP_long, spot)) — robust to one walked/stale arm
 	// CommissionHbd is the HBD leg of the SAME posted face these credits were
 	// derived from (splitFace, ask.go — USER RULING 2026-07-27). It is set
 	// only by settlePosted; a bare settleSpend call leaves it nil, because a
@@ -112,7 +113,21 @@ func SettlementRate(s Store, creator string, block uint64) (*big.Int, error) {
 	}
 	spot := SpotRate(supply) // > 0: supply >= 1 and price(i) >= BasePrice
 
-	rate := mMin(mMin(short, long), spot)
+	// ★ ORACLE-CLUSTER FIX (2026-09-08). Was mMin(mMin(short, long), spot) — a
+	// straight three-way min. That let ANY SINGLE low arm set the rate, which is
+	// how the short-ring dwell-clamp walk (CT-ORACLE-01) steered settlement with
+	// supply restored (short walked ~16%% below an honest long+spot), how the
+	// stale 7-day long arm over-charged askers on a rising market (PRICE-3), and
+	// how that same stale long arm tripped the C5 divergence breaker for ~5.69
+	// days on honest growth (CT-ORACLE-02). The median of the three is robust to
+	// a single corrupted/lagging arm (two must be moved to shift it), and the
+	// outer mMin(spot, ...) PRESERVES the no-arbitrage invariant "never a rate
+	// above live spot" (settlement can never under-charge below the marginal
+	// price). So: honest quiet market -> all three ~equal -> unchanged; short
+	// walked -> median ignores it; rising market -> median picks the fresher
+	// short (less lag) not the stalest long; a genuine falling market -> median
+	// exceeds spot and the outer min clamps back to spot, exactly as before.
+	rate := mMin(spot, mMedian3(short, long, spot))
 	if rate.Sign() <= 0 {
 		// Unreachable: all three arms are positive by their own contracts.
 		// Kept as the same defense-in-depth every "provably can't happen"

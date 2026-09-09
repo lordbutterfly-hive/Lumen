@@ -301,8 +301,32 @@ func normalizeOfferTitle(t string) string {
 	b.Grow(len(t))
 	spacePending := false
 	for _, r := range t {
-		if unicode.Is(unicode.Cf, r) {
-			continue // zero-width/format character: invisible, drop entirely
+		// Drop every character that renders as nothing to a buyer but still
+		// changes the normalized identity a buyer cannot see:
+		//   Cf — format controls (zero-width space, ZWJ, BOM, soft hyphen, ...)
+		//   Mn — nonspacing combining marks. This is the F-T5 FIX (2026-09-08):
+		//        it covers the COMBINING GRAPHEME JOINER (U+034F), every
+		//        VARIATION SELECTOR (U+FE00-FE0F, U+E0100-E01EF) and combining
+		//        diacritics — all category Mn and all invisible-on-their-own.
+		//        Without folding them, a visual twin ("Custom␣Song" carrying an
+		//        invisible U+034F) normalizes to a DISTINCT string, so it dodges
+		//        BOTH the one-live-offering-per-title guard (liveTitleOwner) and
+		//        the per-title price band (applyTitleBandedPrice sees a "virgin"
+		//        title and takes the unconditional initial-posting branch) — the
+		//        proven 17,331x bypass. Folding Mn collapses the twin onto the
+		//        clean title, so the duplicate is refused and the band binds.
+		//   Me — enclosing combining marks, same rationale as Mn.
+		// This is a deliberate over-fold in the SAFE direction: a legitimate
+		// title with a decomposed combining diacritic collapses onto its
+		// unaccented form, which can only ever REFUSE a would-be duplicate,
+		// never admit a bypass. Precomposed letters (é = U+00E9, category Ll)
+		// are real characters and are NOT touched. (NFKC would be the fuller
+		// tool for compatibility confusables, but golang.org/x/text is not a
+		// dependency of this module; folding the invisible mark classes closes
+		// the specific, proven invisible-twin bypass with the standard library
+		// alone.)
+		if unicode.In(r, unicode.Cf, unicode.Mn, unicode.Me) {
+			continue // invisible format/combining character: drop entirely
 		}
 		if unicode.IsSpace(r) {
 			spacePending = true
@@ -540,23 +564,28 @@ func SetOfferingPrice(s Store, caller, creator string, block, id uint64, newPric
 // destination's OWN band (withinTitleBand, checked against BOTH the
 // destination's anchor AND its last known price — see that function's own
 // doc for why checking against only one of the two is not safe) or the
-// rename is refused outright. When it passes, the destination's
-// kOfferTitlePrice is updated to this id's price (so it is no longer stale
-// for whoever reads the title next), but the window's origin
-// (anchor/anchorAt) is left UNTOUCHED — this function's signature carries no
-// block (matched to contract/main.go's existing call site, which this fix
-// does not own), so it cannot correctly tell an active window from an
-// expired one the way applyTitleBandedPrice does, and leaving the origin
-// alone is always the SAFE side of that gap: a later CreateOffering/
-// SetOfferingPrice on the real block re-derives active-vs-expired correctly
-// regardless of what sits here.
+// rename is refused outright.
+//
+// CT-STATE-03 FIX (2026-09-08): this function now TAKES `block` (threaded from
+// contract/main.go, which already computed currentBlock() at the call site).
+// The earlier version could not, so after the withinTitleBand gate it wrote
+// kOfferTitlePrice directly and left the window ORIGIN (anchor/anchorAt)
+// untouched — which was SAFE for an active window but STALE for an expired
+// one: a rename onto an aged-out title left an expired anchorAt in place, and
+// the next same-block SetOfferingPrice re-anchored at the just-laundered price
+// and granted a fresh 2x, a 4x-in-one-block ratchet. With block in hand the
+// carried price is now applied through applyTitleBandedPrice, the same helper
+// every price write uses, so a stale window is re-anchored at the current
+// block and can no longer be re-opened for free by a following reprice. The
+// withinTitleBand gate is kept ahead of it as the (never-looser) admission
+// rule, so no rename that used to be refused is newly admitted.
 //
 // A destination that is virgin (never anchored in this epoch) still inherits
 // this id's CURRENT full band state wholesale — unchanged behaviour from
 // before this fix, just widened to the title's two new fields
 // (kOfferTitlePrice/kOfferTitleSetAt) so a later rename or reprice under that
 // title sees an accurate "last known price", not just an anchor.
-func SetOfferingTitle(s Store, caller, creator string, id uint64, title string) error {
+func SetOfferingTitle(s Store, caller, creator string, block uint64, id uint64, title string) error {
 	if err := requireShopEditable(s, caller, creator); err != nil {
 		return err
 	}
@@ -591,10 +620,34 @@ func SetOfferingTitle(s Store, caller, creator string, id uint64, title string) 
 		setU64(s, newSetAtKey, getU64(s, kOfferSetAt(creator, epoch, id)))
 	} else {
 		// Already-anchored destination: gate the price moving in.
+		//
+		// The withinTitleBand pre-gate (the INTERSECTION of the anchor band and
+		// the last-price band) is kept as the rename's admission rule: it is
+		// never looser than either single band setBandedPrice would apply, and
+		// it preserves the deliberately-conservative refusal pinned by
+		// TestOfferings_RenameCheckUsesTheTighterOfAnchorAndLastPrice.
 		if !withinTitleBand(idPrice, getMoney(s, newAnchorKey), getMoney(s, newPriceKey)) {
 			return newErr(ErrInput, "renaming onto this title would move a price outside its 2x/7-day band (checked against the destination title's own anchor and last known price)")
 		}
-		setMoney(s, newPriceKey, idPrice)
+
+		// CT-STATE-03 FIX (2026-09-08): apply the price being carried onto the
+		// destination through the SAME banded helper every price write uses,
+		// now that `block` is threaded in. Previously this branch wrote
+		// newPriceKey directly and left newAnchorAtKey UNTOUCHED — so a rename
+		// onto a title whose window had already EXPIRED left the window origin
+		// stale, and the very next SetOfferingPrice in the same block hit
+		// setBandedPrice's expired branch, re-anchored at the price this rename
+		// had just laundered in, and granted a fresh 2x on top of it: 4x in one
+		// block (proven, 800 -> honest 1600 -> 3200). Routing through
+		// applyTitleBandedPrice ADVANCES the window origin (anchorAt=block) when
+		// the window has expired, so a following same-block reprice sees an
+		// ACTIVE window and bands against the anchor instead of re-anchoring.
+		// withinTitleBand above has already proven idPrice fits BOTH candidate
+		// bands, so this call cannot fail — it is the exact, block-correct band
+		// the pre-gate conservatively approximated.
+		if err := applyTitleBandedPrice(s, creator, epoch, newNorm, block, idPrice.Int64()); err != nil {
+			return err // unreachable: withinTitleBand is stricter than either single band
+		}
 
 		// DEFECT FIX (F16, 2026-08-19): don't let this id DONATE a wider band
 		// to itself by hopping onto a title whose own anchor happens to be

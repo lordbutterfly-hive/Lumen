@@ -291,19 +291,19 @@ func TestRefund_HappyPath_NoCommission(t *testing.T) {
 	treaBefore := getMoney(s, kTreasury())
 	// I5: no COMMISSION ever taken from a refund (a 12% commission would make
 	// the gross 88). RULING K2: the wind-down DOES carry the exit tax — this
-	// fresh (unclocked) holder pays the full 20%, so gross 100 → tax 20 → net
-	// 80. The reserve still drops by the full gross 100; the tax goes to
+	// fresh (unclocked) holder pays the full 15%, so gross 100 → tax 15 → net
+	// 85. The reserve still drops by the full gross 100; the tax goes to
 	// treasury.
 	wantNet, gross, tax := wdNet(s, creator, "alice", wdBlock, big.NewInt(100))
 	payout, err := Refund(s, "alice", creator, wdBlock, big.NewInt(100))
 	if err != nil {
 		t.Fatalf("Refund: %v", err)
 	}
-	if gross.Cmp(big.NewInt(100)) != 0 || tax.Cmp(big.NewInt(20)) != 0 || wantNet.Cmp(big.NewInt(80)) != 0 {
-		t.Fatalf("K2 split = gross %s tax %s net %s, want 100/20/80", gross, tax, wantNet)
+	if gross.Cmp(big.NewInt(100)) != 0 || tax.Cmp(big.NewInt(15)) != 0 || wantNet.Cmp(big.NewInt(85)) != 0 {
+		t.Fatalf("K2 split = gross %s tax %s net %s, want 100/15/85", gross, tax, wantNet)
 	}
 	if payout.Cmp(wantNet) != 0 {
-		t.Fatalf("payout = %s, want net %s (gross 100 − K2 tax 20; no commission)", payout, wantNet)
+		t.Fatalf("payout = %s, want net %s (gross 100 − K2 tax 15; no commission)", payout, wantNet)
 	}
 	if got := getMoney(s, kBal(creator, "alice")); got.Cmp(big.NewInt(200)) != 0 {
 		t.Fatalf("alice balance = %s, want 200", got)
@@ -341,15 +341,15 @@ func TestRefund_FullBalanceDrainsToZero(t *testing.T) {
 	// derives to FROZEN — which is the phase a refund test should have been
 	// running in all along.
 	const wdBlock = 50 + GraceBlocks + 1
-	// RULING K2: fresh holder → net = gross 250 − tax 50 = 200; the RESERVE
+	// RULING K2: fresh holder → net = gross 250 − tax 38 = 212; the RESERVE
 	// still drains to exactly 0 (it is debited the full gross).
 	wantNet, _, _ := wdNet(s, creator, "alice", wdBlock, big.NewInt(250))
 	payout, err := Refund(s, "alice", creator, wdBlock, big.NewInt(250))
 	if err != nil {
 		t.Fatalf("Refund: %v", err)
 	}
-	if payout.Cmp(wantNet) != 0 || wantNet.Cmp(big.NewInt(200)) != 0 {
-		t.Fatalf("payout = %s, want net %s (== 200: gross 250 − K2 tax 50)", payout, wantNet)
+	if payout.Cmp(wantNet) != 0 || wantNet.Cmp(big.NewInt(212)) != 0 {
+		t.Fatalf("payout = %s, want net %s (== 212: gross 250 − K2 tax 38)", payout, wantNet)
 	}
 	if got := getMoney(s, kSupply(creator)); !mIsZero(got) {
 		t.Fatalf("supply = %s, want 0", got)
@@ -390,9 +390,9 @@ func TestRefund_BulkRefundNotCrippledByPerCreditRounding(t *testing.T) {
 	const wdBlock = 50 + GraceBlocks + 1
 	// The bulk payout reads the whole reserve as GROSS (999, not 0 — the point
 	// of this test). RULING K2 then carves the fresh holder's tax: net = 999 −
-	// ceil(999·0.2) = 999 − 200 = 799. The bulk formula is what makes gross 999
+	// ceil(999·0.15) = 999 − 150 = 849. The bulk formula is what makes gross 999
 	// instead of credits×floor(999/1000)=0.
-	wantNet, gross, _ := wdNet(s, creator, "alice", wdBlock, big.NewInt(1000))
+	wantNet, gross, _ := wdNet(s, creator, "alice", wdBlock, big.NewInt(1000)) //K2:15%
 	payout, err := Refund(s, "alice", creator, wdBlock, big.NewInt(1000))
 	if err != nil {
 		t.Fatalf("Refund: %v", err)
@@ -400,8 +400,8 @@ func TestRefund_BulkRefundNotCrippledByPerCreditRounding(t *testing.T) {
 	if gross.Cmp(big.NewInt(999)) != 0 {
 		t.Fatalf("bulk gross = %s, want 999 (full reserve, not 0 — the per-credit-rounding trap)", gross)
 	}
-	if payout.Cmp(wantNet) != 0 || wantNet.Cmp(big.NewInt(799)) != 0 {
-		t.Fatalf("bulk payout = %s, want net %s (== 799: gross 999 − K2 tax 200)", payout, wantNet)
+	if payout.Cmp(wantNet) != 0 || wantNet.Cmp(big.NewInt(849)) != 0 {
+		t.Fatalf("bulk payout = %s, want net %s (== 849: gross 999 − K2 tax 150)", payout, wantNet)
 	}
 }
 
@@ -429,9 +429,9 @@ func TestRefund_WorksWhileRetiredAndGloballyPaused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Refund must succeed while FROZEN and globally paused: %v", err)
 	}
-	// RULING K2: fresh holder → net = 500 − 100 = 400; reserve still drains to 0.
-	if payout.Cmp(wantNet) != 0 || wantNet.Cmp(big.NewInt(400)) != 0 {
-		t.Fatalf("payout = %s, want net %s (== 400: gross 500 − K2 tax 100)", payout, wantNet)
+	// RULING K2: fresh holder → net = 500 − 75 = 425; reserve still drains to 0.
+	if payout.Cmp(wantNet) != 0 || wantNet.Cmp(big.NewInt(425)) != 0 {
+		t.Fatalf("payout = %s, want net %s (== 425: gross 500 − K2 tax 75)", payout, wantNet)
 	}
 	if got := getMoney(s, kReserve(creator)); !mIsZero(got) {
 		t.Fatalf("reserve = %s, want 0", got)
@@ -1117,13 +1117,13 @@ func TestSolvency_NoParCap_FullUnwindDrainsTheWholeReserve(t *testing.T) {
 	}
 	// The UNCAPPED gross floor(35·10/10) == 35 — the whole reserve, the point of
 	// this test (the deleted PAR cap would have paid 10 and stranded 25). RULING
-	// K2 then carves the fresh holder's tax (ceil(35·0.2)=7) to treasury, so the
-	// holder receives net 28 — but the RESERVE still drains to exactly 0.
-	if gross.Cmp(big.NewInt(35)) != 0 || tax.Cmp(big.NewInt(7)) != 0 || wantNet.Cmp(big.NewInt(28)) != 0 {
-		t.Fatalf("K2 split = gross %s tax %s net %s, want 35/7/28", gross, tax, wantNet)
+	// K2 then carves the fresh holder's tax (ceil(35·0.15)=6) to treasury, so the
+	// holder receives net 29 — but the RESERVE still drains to exactly 0.
+	if gross.Cmp(big.NewInt(35)) != 0 || tax.Cmp(big.NewInt(6)) != 0 || wantNet.Cmp(big.NewInt(29)) != 0 {
+		t.Fatalf("K2 split = gross %s tax %s net %s, want 35/6/29", gross, tax, wantNet)
 	}
 	if payout.Cmp(wantNet) != 0 {
-		t.Fatalf("payout = %s, want net %s (gross 35 − K2 tax 7)", payout, wantNet)
+		t.Fatalf("payout = %s, want net %s (gross 35 − K2 tax 6)", payout, wantNet)
 	}
 	if got := getMoney(s, kSupply(creator)); !mIsZero(got) {
 		t.Fatalf("supply = %s, want 0 (fully drained)", got)
