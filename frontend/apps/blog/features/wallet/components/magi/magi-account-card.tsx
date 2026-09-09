@@ -49,6 +49,7 @@ import type MagiSendDialogComponent from '../dialogs/magi-send-dialog';
 import type MagiWithdrawDialogComponent from '../dialogs/magi-withdraw-dialog';
 import { lazyWalletDialog } from '../dialogs/shared/lazy-wallet-dialog';
 import { isMagiL1Configured } from '../../lib/magi-l1-broadcast';
+import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../dialogs/shared/field-classes';
 
 // ★ LAZY, like every wallet dialog (T3g, 2026-09-04): the form/mutation stack
 // loads on the first click, not with the tab.
@@ -63,10 +64,6 @@ const MagiWithdrawDialog = lazyWalletDialog<ComponentProps<typeof MagiWithdrawDi
 );
 
 const CARD_CLASS = 'mb-3 rounded-panel border border-line-9 bg-surface-1 p-5';
-const PRIMARY_BUTTON_CLASS =
-  'rounded-card bg-surface-brand-12 px-[18px] py-2.5 text-[14px] leading-[22px] font-medium text-ink-27 transition-colors hover:bg-surface-brand-17';
-const SECONDARY_BUTTON_CLASS =
-  'lm-press rounded-card border border-line-11 bg-surface-1 px-4 py-2.5 text-[14px] leading-[22px] font-medium text-ink-7 transition-colors hover:bg-surface-16';
 /** The Hive tab's Send pill, verbatim (hive-token-card.tsx SEND_BUTTON_CLASS), so the two tabs read as one wallet. */
 const SEND_BUTTON_CLASS =
   'flex items-center gap-1.5 rounded-card bg-surface-brand-12 px-[18px] py-2.5 text-[14px] leading-[22px] font-medium text-ink-27 transition-colors hover:bg-surface-brand-17';
@@ -103,7 +100,9 @@ function Row({
   return (
     <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 border-b border-line-2 py-3 last:border-b-0" data-testid={testId}>
       <TokenIcon currency={icon} size={36} />
-      <div className="min-w-0 flex-1">
+      {/* The Hive card's rule (hive-token-card.tsx): the text keeps a floor width and the
+          figure+pill group wraps under it at 390 instead of squeezing the text into a column. */}
+      <div className="min-w-0 flex-[1_1_220px]">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[15px] leading-[24px] font-semibold text-ink-2">{name}</span>
           <span className={`rounded-control px-2 py-[2px] text-caption font-medium ${chipTone === 'green' ? 'bg-surface-ok-5 text-ink-ok-2' : 'bg-surface-23 text-ink-8'}`}>
@@ -112,14 +111,16 @@ function Row({
         </div>
         <div className="font-ui text-caption text-ink-10">{description}</div>
       </div>
-      <div className="text-right">
-        <div className="font-num text-[16px] leading-[24px] font-semibold tabular-nums text-ink-2" data-testid={`${testId}-amount`}>
-          {amount} <span className="font-medium text-ink-10">{unit}</span>
+      <div className="ml-auto flex items-center gap-3.5">
+        <div className="text-right">
+          <div className="font-num text-[16px] leading-[24px] font-semibold tabular-nums text-ink-2" data-testid={`${testId}-amount`}>
+            {amount} <span className="font-medium text-ink-10">{unit}</span>
+          </div>
+          {/* A dash while the price is missing, never a fabricated $0 (estimated-value-strip.tsx:46-53). */}
+          <div className="font-num text-caption tabular-nums text-ink-14">{usd ?? '—'}</div>
         </div>
-        {/* A dash while the price is missing, never a fabricated $0 (estimated-value-strip.tsx:46-53). */}
-        <div className="font-num text-caption tabular-nums text-ink-14">{usd ?? '—'}</div>
+        {action ? <div className="flex items-center">{action}</div> : null}
       </div>
-      {action ? <div className="flex items-center">{action}</div> : null}
     </div>
   );
 }
@@ -322,7 +323,7 @@ export default function MagiAccountCard({
                 action={btcBalance !== null ? sendPill('BTC', btcBalance) : null}
               />
             )}
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-card border border-line-9 bg-surface-5 px-4 py-3">
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-card border border-line-9 bg-surface-5 px-6 py-4">
               <div>
                 <div className="text-[14px] leading-[22px] font-semibold text-ink-2">{t('wallet.magi.value_title')}</div>
                 <div className="font-ui text-caption text-ink-10">{t('wallet.magi.value_description')}</div>

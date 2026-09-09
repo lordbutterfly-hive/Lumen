@@ -1527,7 +1527,11 @@
         "amount_precision": "Amount has too many decimal places",
         "memo_too_long": "Memo is too long (max 2048 characters)",
         "success_title": "Transaction broadcast",
-        "error_title": "Transaction failed"
+        "error_title": "Transaction failed",
+        "recipient_self": "This is your own account.",
+        "recipient_invalid_evm": "That Ethereum address has a bad checksum. Copy it again from the source.",
+        "recipient_invalid_btc": "Enter a Bitcoin address the bridge can pay (bc1q…, 3… or 1…).",
+        "recipient_invalid_any": "Enter a Hive account name, an Ethereum address (0x…) or a Bitcoin address."
       },
       "send": {
         "title": "Send {{currency}}",
@@ -1703,6 +1707,21 @@
     "errors": {
       "summary_failed": "We couldn’t check this account’s balances just now. Nothing is wrong with your funds. Reload in a moment.",
       "account_not_found": "This account does not exist on {{chain}}."
+    },
+    "recipient": {
+      "checking": "Checking on chain…",
+      "hive_account": "Hive account",
+      "evm_address": "Ethereum address",
+      "btc_address": "Bitcoin address",
+      "exists_on_chain": "exists on chain",
+      "checksum_valid": "checksum valid",
+      "ready": "Ready to send",
+      "not_sendable": "Not sendable",
+      "not_found": "No account with this name on Hive.",
+      "check_failed": "Couldn’t check on chain just now. Try again.",
+      "self": "This is your own account.",
+      "suggested": "suggested",
+      "hint": "Suggestions come from the chain. Nothing is sendable until the recipient is found there."
     }
   },
   "profile": {

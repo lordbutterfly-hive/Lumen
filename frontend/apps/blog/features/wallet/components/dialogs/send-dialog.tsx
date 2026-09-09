@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useMemo } from 'react';
+import { ReactNode, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -12,16 +12,18 @@ import { getAsset } from '@transaction/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import { useSendMutation } from '../../hooks/use-send-mutation';
 import WalletDialogShell from './shared/wallet-dialog-shell';
-import RecipientField from './shared/recipient-field';
+import RecipientPicker, { type RecipientResolution } from './shared/recipient-picker';
+import { INPUT_CLASS } from './shared/field-classes';
 import AmountField from './shared/amount-field';
 import { FieldError } from './shared/field-error';
 import { useWalletDialog } from './shared/use-wallet-dialog';
 import { buildRecipientSchema } from './shared/recipient-schema';
 import { buildAmountSchema } from './shared/amount-schema';
 
-const buildSchema = (balance: Big, t: (key: string, opts?: Record<string, unknown>) => string) =>
+const buildSchema = (balance: Big, self: string, t: (key: string, opts?: Record<string, unknown>) => string) =>
   z.object({
-    to: buildRecipientSchema(t),
+    // Self-send refused and both lookup failures block (owner, 2026-09-09; recipient-schema.ts).
+    to: buildRecipientSchema(t, { self }),
     amount: buildAmountSchema({ max: balance }, t),
     // ★ 2048 is Hive's memo cap in BYTES, but `z.string().max()` counts
     // UTF-16 code units — a 2048-char Japanese/Arabic/Russian/Chinese memo
@@ -51,9 +53,12 @@ export default function SendDialog({
   const { t } = useTranslation('common_blog');
   const sendMutation = useSendMutation();
 
-  const schema = useMemo(() => buildSchema(balance, t), [balance, t]);
+  const schema = useMemo(() => buildSchema(balance, username, t), [balance, username, t]);
   const form = useForm<SendFormValues>({ resolver: zodResolver(schema), mode: 'onSubmit' });
   const { open, setOpen, onOpenChange } = useWalletDialog(form, defaultOpen);
+  // The recipient must resolve ON CHAIN before Send is enabled (fail closed).
+  const [recipient, setRecipient] = useState<RecipientResolution>({ status: 'idle' });
+  const toValue = form.watch('to');
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
@@ -83,14 +88,20 @@ export default function SendDialog({
       submitLabel={t('wallet.dialogs.common.next')}
       cancelLabel={t('wallet.dialogs.common.cancel')}
       isSubmitting={sendMutation.isPending}
+      submitDisabled={recipient.status !== 'ok'}
     >
       <div className="flex flex-col gap-1.5">
         <label className="text-caption font-medium text-ink-7">{t('wallet.dialogs.common.from')}</label>
-        <Input disabled defaultValue={username} className="text-ink-7" />
+        <Input disabled defaultValue={username} className={`${INPUT_CLASS} text-ink-7`} />
       </div>
-      <RecipientField
+      <RecipientPicker
+        mode="hive"
         label={t('wallet.dialogs.common.to')}
         register={form.register('to')}
+        value={toValue}
+        self={username}
+        onPick={(name) => form.setValue('to', name, { shouldValidate: true, shouldDirty: true })}
+        onResolved={setRecipient}
         error={form.formState.errors.to?.message}
         testId="wallet-send-to"
       />
@@ -105,7 +116,7 @@ export default function SendDialog({
       />
       <div className="flex flex-col gap-1.5">
         <label className="text-caption font-medium text-ink-7">{t('wallet.dialogs.common.memo')}</label>
-        <Input {...form.register('memo')} placeholder={t('wallet.dialogs.common.memo')} />
+        <Input {...form.register('memo')} placeholder={t('wallet.dialogs.common.memo')} className={INPUT_CLASS} />
         {/* ★ Was missing (map item 4/7). `.max(2048)` DOES enforce — RHF
             never calls onValid, so no mutation is attempted on an over-long
             memo — but with no FieldError element the Send button appeared to

@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useMemo } from 'react';
+import { ReactNode, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -13,7 +13,8 @@ import { getAsset } from '@transaction/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import { useRecurringTransferMutation } from '../../hooks/use-recurring-transfer-mutation';
 import WalletDialogShell from './shared/wallet-dialog-shell';
-import RecipientField from './shared/recipient-field';
+import RecipientPicker, { type RecipientResolution } from './shared/recipient-picker';
+import { INPUT_CLASS } from './shared/field-classes';
 import { FieldError } from './shared/field-error';
 import { useWalletDialog } from './shared/use-wallet-dialog';
 import { buildRecipientSchema } from './shared/recipient-schema';
@@ -56,10 +57,10 @@ type TFn = (key: string, opts?: Record<string, unknown>) => string;
  * validation and then die at the signing boundary with a generic toast
  * instead of an inline field message.
  */
-const buildSchema = (liquidHive: Big, liquidHbd: Big, t: TFn) =>
+const buildSchema = (self: string, liquidHive: Big, liquidHbd: Big, t: TFn) =>
   z
     .object({
-      to: buildRecipientSchema(t),
+      to: buildRecipientSchema(t, { self }),
       amount: z
         .number({ message: t('wallet.dialogs.common.amount_invalid') })
         .positive({ message: t('wallet.dialogs.common.amount_positive') })
@@ -105,13 +106,15 @@ export default function RecurringTransferDialog({
   const { t } = useTranslation('common_blog');
   const recurringMutation = useRecurringTransferMutation();
 
-  const schema = useMemo(() => buildSchema(liquidHive, liquidHbd, t), [liquidHive, liquidHbd, t]);
+  const schema = useMemo(() => buildSchema(username, liquidHive, liquidHbd, t), [username, liquidHive, liquidHbd, t]);
   const form = useForm<RecurringFormValues>({
     resolver: zodResolver(schema),
     mode: 'onSubmit',
     defaultValues: { currency: 'HIVE', recurrence: 24, executions: 2 }
   });
   const { open, setOpen, onOpenChange } = useWalletDialog(form, defaultOpen);
+  const [recipient, setRecipient] = useState<RecipientResolution>({ status: 'idle' });
+  const toValue = form.watch('to');
   const currency = form.watch('currency');
   const currencyBalance = currency === 'HBD' ? liquidHbd : liquidHive;
 
@@ -149,10 +152,16 @@ export default function RecurringTransferDialog({
       submitLabel={t('wallet.dialogs.common.next')}
       cancelLabel={t('wallet.dialogs.common.cancel')}
       isSubmitting={recurringMutation.isPending}
+      submitDisabled={recipient.status !== 'ok'}
     >
-      <RecipientField
+      <RecipientPicker
+        mode="hive"
         label={t('wallet.dialogs.common.to')}
         register={form.register('to')}
+        value={toValue}
+        self={username}
+        onPick={(name) => form.setValue('to', name, { shouldValidate: true, shouldDirty: true })}
+        onResolved={setRecipient}
         error={form.formState.errors.to?.message}
         testId="wallet-recurring-to"
       />
@@ -164,7 +173,7 @@ export default function RecurringTransferDialog({
             type="text"
             inputMode="decimal"
             autoComplete="off"
-            className="tabular-nums"
+            className={`${INPUT_CLASS} font-num`}
             data-testid="wallet-recurring-amount"
           />
           {/* ★ Controlled (map item 5(i)). This Select was uncontrolled
@@ -207,14 +216,14 @@ export default function RecurringTransferDialog({
           <label className="text-caption font-medium text-ink-7">
             {t('wallet.dialogs.recurring.recurrence_hours')}
           </label>
-          <Input {...form.register('recurrence', { valueAsNumber: true })} type="text" inputMode="numeric" autoComplete="off" />
+          <Input {...form.register('recurrence', { valueAsNumber: true })} type="text" inputMode="numeric" autoComplete="off" className={`${INPUT_CLASS} font-num`} />
           <FieldError message={form.formState.errors.recurrence?.message} />
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-caption font-medium text-ink-7">
             {t('wallet.dialogs.recurring.executions')}
           </label>
-          <Input {...form.register('executions', { valueAsNumber: true })} type="text" inputMode="numeric" autoComplete="off" />
+          <Input {...form.register('executions', { valueAsNumber: true })} type="text" inputMode="numeric" autoComplete="off" className={`${INPUT_CLASS} font-num`} />
           <FieldError message={form.formState.errors.executions?.message} />
         </div>
       </div>

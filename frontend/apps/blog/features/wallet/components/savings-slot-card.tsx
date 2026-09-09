@@ -7,6 +7,7 @@ import TokenIcon from './token-icon';
 import type SavingsDepositDialogComponent from './dialogs/savings-deposit-dialog';
 import type SavingsWithdrawDialogComponent from './dialogs/savings-withdraw-dialog';
 import { lazyWalletDialog } from './dialogs/shared/lazy-wallet-dialog';
+import { SECONDARY_BUTTON_SMALL_CLASS } from './dialogs/shared/field-classes';
 
 // ★ LAZY (T3g, 2026-09-04): defers each dialog's react-hook-form/zod/mutation
 // stack until its trigger is actually clicked. See lazy-wallet-dialog.tsx.
@@ -18,10 +19,8 @@ const SavingsWithdrawDialog = lazyWalletDialog<ComponentProps<typeof SavingsWith
 );
 
 // W-2/W-3: Deposit was bg-surface-ok-7 and both were rounded-control.
-const DEPOSIT_BUTTON_CLASS =
-  'rounded-card bg-surface-brand-12 px-[15px] py-2 text-caption font-medium text-ink-27 transition-colors hover:bg-surface-brand-17';
-const WITHDRAW_BUTTON_CLASS =
-  'rounded-card border border-line-11 bg-surface-1 px-[15px] py-2 text-caption font-medium text-ink-7 transition-colors hover:bg-surface-16';
+const DEPOSIT_BUTTON_CLASS = SECONDARY_BUTTON_SMALL_CLASS;
+const WITHDRAW_BUTTON_CLASS = SECONDARY_BUTTON_SMALL_CLASS;
 
 /**
  * One HIVE or HBD row inside the Savings Vault panel. Generic over currency

@@ -12,6 +12,7 @@ import type PowerDownDialogComponent from './dialogs/power-down-dialog';
 import type StopPowerDownAlertComponent from './dialogs/stop-power-down-alert';
 import { lazyWalletDialog } from './dialogs/shared/lazy-wallet-dialog';
 import DelegatedOutPanel from './delegated-out-panel';
+import { SECONDARY_BUTTON_SMALL_CLASS } from './dialogs/shared/field-classes';
 
 // ★ LAZY (T3g, 2026-09-04): defers each dialog's react-hook-form/zod/mutation
 // stack until its trigger is actually clicked. See lazy-wallet-dialog.tsx.
@@ -26,10 +27,8 @@ const StopPowerDownAlert = lazyWalletDialog<ComponentProps<typeof StopPowerDownA
 );
 
 // W-2/W-3: both were rounded-control, and Stake was bg-surface-ok-7.
-const STAKE_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-card bg-surface-brand-12 px-[15px] py-2 text-caption font-medium text-ink-27 transition-colors hover:bg-surface-brand-17';
-const UNSTAKE_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-card border border-line-11 bg-surface-1 px-[15px] py-2 text-caption font-medium text-ink-7 transition-colors hover:bg-surface-16';
+const STAKE_BUTTON_CLASS = SECONDARY_BUTTON_SMALL_CLASS;
+const UNSTAKE_BUTTON_CLASS = SECONDARY_BUTTON_SMALL_CLASS;
 
 export default function StakedHiveBlock({
   username,
@@ -97,7 +96,7 @@ export default function StakedHiveBlock({
                 trigger={
                   <button
                     type="button"
-                    className="shrink-0 rounded-control border border-line-brand-6 bg-surface-1 px-2.5 py-[2px] text-caption font-medium text-ink-brand-6 hover:bg-surface-brand-4"
+                    className={SECONDARY_BUTTON_SMALL_CLASS}
                     data-testid="wallet-stop-power-down"
                   >
                     {t('wallet.staked.stop')}

@@ -2,6 +2,7 @@
 
 import { UseFormRegisterReturn } from 'react-hook-form';
 import { Input } from '@ui/components/input';
+import { INPUT_CLASS, LABEL_CLASS } from './field-classes';
 import { FieldError } from './field-error';
 
 /**
@@ -27,7 +28,7 @@ export default function AmountField({
 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-caption font-medium font-ui text-ink-7">{label}</label>
+      <label className={LABEL_CLASS}>{label}</label>
       <div className="relative">
         <Input
           {...register}
@@ -59,7 +60,7 @@ export default function AmountField({
           autoComplete="off"
           placeholder="0.000"
           data-testid={testId}
-          className="pr-16 font-num"
+          className={`${INPUT_CLASS} pr-16 font-num`}
         />
         <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-caption font-medium font-ui text-ink-14">
           {currency}

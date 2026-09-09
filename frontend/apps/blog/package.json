@@ -92,6 +92,7 @@
     "@vsc.eco/crosschain-widget": "0.0.3",
     "big.js": "^6.2.1",
     "bip322-js": "^2",
+    "bitcoin-address-validation": "^2.2.3",
     "bitcoinjs-lib": "^7",
     "class-variance-authority": "^0.6.1",
     "clsx": "^1.2.1",

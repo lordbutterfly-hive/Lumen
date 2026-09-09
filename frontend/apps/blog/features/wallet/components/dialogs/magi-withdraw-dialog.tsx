@@ -24,16 +24,15 @@ import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
 import { useTranslation } from '@/blog/i18n/client';
 import { toMagiAccountId } from '@/blog/lib/lite/wallet/magi-assets';
 import type { TokenAccount } from '@/blog/features/creator-tokens/live/use-token-accounts';
-import { btcAddressType } from '@/blog/features/creator-tokens/lib/vsc/wallet-broadcaster';
 import { useMagiWithdrawMutation } from '../../hooks/use-magi-withdraw-mutation';
 import { btcToSats, formatMagiAmount, type MagiSendAsset } from '../../lib/magi-ops';
 import WalletDialogShell from './shared/wallet-dialog-shell';
 import AmountField from './shared/amount-field';
-import RecipientField from './shared/recipient-field';
-import { FieldError } from './shared/field-error';
+import RecipientPicker, { type RecipientResolution } from './shared/recipient-picker';
+import { INPUT_CLASS } from './shared/field-classes';
 import { useWalletDialog } from './shared/use-wallet-dialog';
 import { buildAmountSchema } from './shared/amount-schema';
-import { buildRecipientSchema } from './shared/recipient-schema';
+import { buildBtcAddressSchema, buildRecipientSchema } from './shared/recipient-schema';
 
 type TFn = (key: string, opts?: Record<string, unknown>) => string;
 
@@ -44,16 +43,9 @@ const buildBtcAmountSchema = (max: Big, t: TFn) =>
     .refine((v) => new Big(String(v)).round(8, 0).eq(new Big(String(v))), { message: t('wallet.dialogs.common.amount_precision') })
     .refine((v) => new Big(String(v)).lte(max), { message: t('wallet.dialogs.common.amount_exceeds_balance') });
 
-const buildBtcRecipient = (ownDeposit: string | null, t: TFn) =>
-  z
-    .string({ message: t('wallet.dialogs.common.recipient_required') })
-    .trim()
-    .refine((v) => btcAddressType(v) !== null, { message: t('wallet.magi.withdraw.to_btc_invalid') })
-    .refine((v) => ownDeposit === null || v !== ownDeposit, { message: t('wallet.magi.withdraw.to_btc_own_deposit') });
-
 const buildSchema = (asset: MagiSendAsset, balance: Big, ownDeposit: string | null, t: TFn) =>
   z.object({
-    to: asset === 'BTC' ? buildBtcRecipient(ownDeposit, t) : buildRecipientSchema(t),
+    to: asset === 'BTC' ? buildBtcAddressSchema(t, { ownDeposit }) : buildRecipientSchema(t),
     amount: asset === 'BTC' ? buildBtcAmountSchema(balance, t) : buildAmountSchema({ max: balance }, t)
   });
 
@@ -105,6 +97,8 @@ export default function MagiWithdrawDialog({
     defaultValues: { to: account.kind === 'hive' ? account.id : '' }
   });
   const { open, setOpen, onOpenChange } = useWalletDialog(form, defaultOpen);
+  const [recipient, setRecipient] = useState<RecipientResolution>({ status: 'idle' });
+  const toValue = form.watch('to');
 
   useEffect(() => {
     if (!open || asset !== 'BTC' || ownDeposit !== null) return;
@@ -158,6 +152,7 @@ export default function MagiWithdrawDialog({
       submitLabel={t('wallet.magi.withdraw.submit')}
       cancelLabel={t('wallet.dialogs.common.cancel')}
       isSubmitting={withdraw.isPending}
+      submitDisabled={recipient.status !== 'ok'}
     >
       <div className="flex flex-col gap-1.5">
         <span className="text-caption font-medium text-ink-7">{t('wallet.magi.withdraw.asset')}</span>
@@ -181,19 +176,18 @@ export default function MagiWithdrawDialog({
       </div>
       <div className="flex flex-col gap-1.5">
         <label className="text-caption font-medium text-ink-7">{t('wallet.dialogs.common.from')}</label>
-        <Input disabled defaultValue={selfId} className="font-mono text-ink-7" />
+        <Input disabled defaultValue={selfId} className={`${INPUT_CLASS} font-mono text-ink-7`} />
       </div>
-      {asset === 'BTC' ? (
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="magi-withdraw-to-btc" className="text-caption font-medium text-ink-7">
-            {t('wallet.magi.withdraw.to_btc')}
-          </label>
-          <Input id="magi-withdraw-to-btc" placeholder="bc1q…" autoComplete="off" spellCheck={false} className="font-mono" data-testid="magi-withdraw-to" {...form.register('to')} />
-          <FieldError message={form.formState.errors.to?.message} />
-        </div>
-      ) : (
-        <RecipientField label={t('wallet.magi.withdraw.to_hive')} register={form.register('to')} error={form.formState.errors.to?.message} testId="magi-withdraw-to" />
-      )}
+      <RecipientPicker
+        mode={asset === 'BTC' ? 'btc' : 'hive'}
+        label={asset === 'BTC' ? t('wallet.magi.withdraw.to_btc') : t('wallet.magi.withdraw.to_hive')}
+        register={form.register('to')}
+        value={toValue}
+        onPick={(name) => form.setValue('to', name, { shouldValidate: true, shouldDirty: true })}
+        onResolved={setRecipient}
+        error={form.formState.errors.to?.message}
+        testId="magi-withdraw-to"
+      />
       <AmountField
         label={t('wallet.dialogs.common.amount')}
         currency={asset}

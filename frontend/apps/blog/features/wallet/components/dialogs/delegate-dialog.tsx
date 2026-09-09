@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useMemo } from 'react';
+import { ReactNode, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -12,15 +12,15 @@ import { useTranslation } from '@/blog/i18n/client';
 import { useDelegateMutation } from '../../hooks/use-delegate-mutation';
 import { useSignedVestsPreview, formatRatio } from '../../hooks/use-signed-vests-preview';
 import WalletDialogShell from './shared/wallet-dialog-shell';
-import RecipientField from './shared/recipient-field';
+import RecipientPicker, { type RecipientResolution } from './shared/recipient-picker';
 import AmountField from './shared/amount-field';
 import { useWalletDialog } from './shared/use-wallet-dialog';
 import { buildRecipientSchema } from './shared/recipient-schema';
 import { buildAmountSchema } from './shared/amount-schema';
 
-const buildSchema = (maxHp: Big, t: (key: string, opts?: Record<string, unknown>) => string) =>
+const buildSchema = (self: string, maxHp: Big, t: (key: string, opts?: Record<string, unknown>) => string) =>
   z.object({
-    to: buildRecipientSchema(t),
+    to: buildRecipientSchema(t, { self }),
     // 0 is allowed on purpose — delegating 0 HP revokes an existing delegation.
     amount: buildAmountSchema({ max: maxHp, allowZero: true }, t)
   });
@@ -51,9 +51,11 @@ export default function DelegateDialog({
   const { t } = useTranslation('common_blog');
   const delegateMutation = useDelegateMutation();
 
-  const schema = useMemo(() => buildSchema(maxHp, t), [maxHp, t]);
+  const schema = useMemo(() => buildSchema(username, maxHp, t), [username, maxHp, t]);
   const form = useForm<DelegateFormValues>({ resolver: zodResolver(schema), mode: 'onSubmit' });
   const { open, setOpen, onOpenChange } = useWalletDialog(form, defaultOpen);
+  const [recipient, setRecipient] = useState<RecipientResolution>({ status: 'idle' });
+  const toValue = form.watch('to');
   // ★ TX-01: preview the exact VESTS this delegation will SIGN, off the same
   // ratio-checked derivation the broadcast uses (transactionService.hpToVestsChecked).
   const watchedAmount = form.watch('amount');
@@ -87,10 +89,16 @@ export default function DelegateDialog({
       submitLabel={t('wallet.advanced.delegate.label')}
       cancelLabel={t('wallet.dialogs.common.cancel')}
       isSubmitting={delegateMutation.isPending}
+      submitDisabled={recipient.status !== 'ok'}
     >
-      <RecipientField
+      <RecipientPicker
+        mode="hive"
         label={t('wallet.dialogs.common.to')}
         register={form.register('to')}
+        value={toValue}
+        self={username}
+        onPick={(name) => form.setValue('to', name, { shouldValidate: true, shouldDirty: true })}
+        onResolved={setRecipient}
         error={form.formState.errors.to?.message}
         testId="wallet-delegate-to"
       />

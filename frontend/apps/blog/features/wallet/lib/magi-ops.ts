@@ -22,9 +22,18 @@
  *
  * Recipient parsing is Altera's `getDidFromUsername`
  * (altera-app/src/lib/getAccountName.ts:48-62): a Hive name, an 0x address, a
- * Bitcoin address, or an already-qualified `hive:` / `did:pkh:` id.
+ * Bitcoin address, or an already-qualified `hive:` / `did:pkh:` id. Two places
+ * are STRICTER than Altera on purpose (owner, 2026-09-09: "it needs to be safe"):
+ * an Ethereum address is EIP-55 checksummed (viem `isAddress`, strict: a
+ * mixed-case address with the wrong case is refused; all-lowercase is accepted
+ * as the standard allows) where Altera accepts any 42-char 0x string
+ * (sendUtils.ts validateAddress), and a Bitcoin address must pass
+ * bitcoin-address-validation's checksum AND be a type the node can verify
+ * (taproot refused, btc.go:52).
  */
 import Big from 'big.js';
+import { isAddress } from 'viem';
+import { validate as validateBtcAddress, Network as BtcNetwork } from 'bitcoin-address-validation';
 import type { CustomJsonOp } from '@/blog/features/creator-tokens/lib/vsc/op-builders';
 import { btcAddressType, evmAddressFromDid, btcAddressFromDid } from '@/blog/features/creator-tokens/lib/vsc/wallet-broadcaster';
 
@@ -67,14 +76,38 @@ export function parseMagiRecipient(raw: string): MagiRecipient | null {
     return HIVE_NAME.test(name) ? { id: `hive:${name}`, kind: 'hive', hiveName: name } : null;
   }
   if (EVM_ADDRESS.test(bare)) {
+    // EIP-55: a mixed-case address must carry the right checksum; all-lowercase is valid by the standard.
+    if (!isAddress(bare)) return null;
     // Altera lower-cases the address (getAccountName.ts:57); the node compares DIDs as strings.
     return { id: `did:pkh:eip155:1:${bare.toLowerCase()}`, kind: 'evm' };
   }
   const addr = bare.includes(':') ? (bare.split(':').at(-1) ?? bare) : bare;
-  if (btcAddressType(addr)) {
+  if (btcAddressType(addr) && validateBtcAddress(addr, BtcNetwork.mainnet)) {
     return { id: `did:pkh:bip122:${BTC_MAINNET_CAIP2}:${addr}`, kind: 'btc' };
   }
   return null;
+}
+
+/** Why a typed recipient did not parse, for the picker's copy: the shape it looked like, if any. */
+export function recipientShapeHint(raw: string): 'evm' | 'btc' | 'hive' | 'unknown' {
+  const bare = raw.trim().replace(/^@/, '');
+  if (/^0x/i.test(bare)) return 'evm';
+  if (/^(bc1|[13])[a-zA-HJ-NP-Z0-9]{10,}$/.test(bare) || bare.startsWith('did:pkh:bip122')) return 'btc';
+  if (bare.length > 0 && bare.length <= 16) return 'hive';
+  return 'unknown';
+}
+
+/** A Bitcoin address the bridge can pay: checksummed and of a type the node verifies. */
+export function isPayableBtcAddress(addr: string): boolean {
+  return btcAddressType(addr) !== null && validateBtcAddress(addr, BtcNetwork.mainnet);
+}
+
+/** Altera's display rule (getAccountName.ts:20-27): bc1… keeps 8 + 5, 0x… keeps 6 + 4. */
+export function shortenRecipient(id: string): string {
+  const u = bareHiveName(id).split(':').at(-1) ?? id;
+  if (u.length <= 16) return u;
+  if (u.startsWith('bc1')) return `${u.slice(0, 8)}…${u.slice(-5)}`;
+  return `${u.slice(0, 6)}…${u.slice(-4)}`;
 }
 
 /** `hive:alice` -> `alice`; a DID is returned unchanged. */

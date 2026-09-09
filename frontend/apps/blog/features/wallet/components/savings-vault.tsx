@@ -8,6 +8,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { useClaimNow } from '../hooks/use-claim-now';
 import { formatTokenAmount } from '../lib/format-amount';
 import SavingsSlotCard from './savings-slot-card';
+import { SECONDARY_BUTTON_SMALL_CLASS } from './dialogs/shared/field-classes';
 
 function formatLastPayment(iso: string, locale: string): string | null {
   const date = new Date(`${iso}Z`);
@@ -62,7 +63,8 @@ export default function SavingsVault({
         <div className="h-px flex-1 bg-surface-27" />
       </div>
 
-      <div className="mb-[18px] rounded-panel border-2 border-line-13 bg-gradient-to-b from-surface-13 to-surface-2 p-5">
+      {/* Design standard 2026-09-09: the one card grammar. The gradient and the double border went; savings status stays a chip. */}
+      <div className="mb-[18px] rounded-panel border border-line-9 bg-surface-1 p-5">
         <div className="mb-4 flex items-start gap-3.5">
           <span
             className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl bg-surface-info-9"
@@ -132,7 +134,7 @@ export default function SavingsVault({
                   type="button"
                   onClick={handleClaim}
                   disabled={!hasClaimableRewards || isClaiming}
-                  className="rounded-card bg-surface-42 px-4 py-2 text-caption font-medium text-ink-27 transition-colors hover:bg-surface-44 disabled:cursor-not-allowed disabled:opacity-40"
+                  className={SECONDARY_BUTTON_SMALL_CLASS}
                   data-testid="wallet-claim-now-button"
                 >
                   {t('wallet.savings.claim_now')}

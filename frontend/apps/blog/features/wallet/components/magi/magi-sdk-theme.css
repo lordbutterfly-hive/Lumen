@@ -1,0 +1,31 @@
+/*
+ * The Magi SDK swap widget in Lumen's clothes, through the SDK's own theme hooks
+ * and nothing else (README.md:140-166 "Override any --magi-* variable").
+ *
+ * ★ WHY A RULE AND NOT INLINE VARIABLES ON THE WRAPPER (2026-09-09 audit): the
+ * widget declares every --magi-* variable on `.magi-quickswap` itself
+ * (dist/styles.css:5-22), and an element's own declaration beats anything it
+ * would inherit, so values set on a parent never applied (measured: Inter and
+ * indigo survived). The SDK's shipped theme (dist/themes/altera-dark.css) does
+ * exactly this: a `.magi-quickswap { ... }` rule. Scoped under the wallet's
+ * wrapper so it cannot leak to any other embed, and loaded after the package
+ * stylesheet. Every token below exists in packages/tailwindcss/globals.css.
+ */
+[data-testid='wallet-magi-sdk-widget'] .magi-quickswap {
+  --magi-font: var(--font-ui);
+  --magi-card-bg: rgb(var(--surface-1));
+  --magi-card-border: rgb(var(--line-9));
+  --magi-card-shadow: none;
+  --magi-card-radius: 14px;
+  --magi-accent: rgb(var(--surface-brand-12));
+  --magi-accent-hover: rgb(var(--surface-brand-17));
+  --magi-accent-light: rgb(var(--surface-brand-4));
+  --magi-green: rgb(var(--ink-ok-2));
+  --magi-red: rgb(var(--ink-warn-3));
+  --magi-text: rgb(var(--ink-2));
+  --magi-text-secondary: rgb(var(--ink-7));
+  --magi-text-muted: rgb(var(--ink-14));
+  --magi-field-bg: rgb(var(--surface-5));
+  --magi-field-border: rgb(var(--line-11));
+  --magi-input-bg: transparent;
+}

@@ -3,6 +3,7 @@
 import { ReactNode, useRef, useState } from 'react';
 import { CircleSpinner } from 'react-spinners-kit';
 import { Button } from '@ui/components/button';
+import { PRIMARY_BUTTON_CLASS } from './field-classes';
 import {
   Dialog,
   DialogContent,
@@ -150,7 +151,8 @@ export default function WalletDialogShell({
             <Button
               type="submit"
               disabled={busy || submitDisabled}
-              className={cn('rounded-control bg-surface-ok-7 text-ink-27 hover:bg-surface-ok-9')}
+              // Primary tier (design standard 2026-09-09): brand, like every Send pill. Success green now means "succeeded" only.
+              className={cn(PRIMARY_BUTTON_CLASS, 'h-auto')}
             >
               {busy ? <CircleSpinner loading size={16} color="#fff" /> : submitLabel}
             </Button>

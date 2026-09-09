@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { fetchAccountExists } from '@/blog/lib/chain-fetch';
+import { isPayableBtcAddress, parseMagiRecipient, recipientShapeHint } from '../../../lib/magi-ops';
 
 type TFn = (key: string, opts?: Record<string, unknown>) => string;
 
@@ -48,14 +49,20 @@ type TFn = (key: string, opts?: Record<string, unknown>) => string;
  * `wallet-dialog-shell.tsx` also nets any resolver crash that still slips
  * through a different path, as defense in depth.
  */
-export const buildRecipientSchema = (t: TFn) =>
+export const buildRecipientSchema = (t: TFn, opts: { self?: string } = {}) =>
   z
     .string({ message: t('wallet.dialogs.common.recipient_required') })
-    .min(3, { message: t('wallet.dialogs.common.recipient_length') })
-    .max(16, { message: t('wallet.dialogs.common.recipient_length') })
+    .transform((v) => v.trim().replace(/^@/, '').toLowerCase())
+    .pipe(z.string().min(3, { message: t('wallet.dialogs.common.recipient_length') }).max(16, { message: t('wallet.dialogs.common.recipient_length') }))
     .superRefine(async (value, ctx) => {
       if (typeof window === 'undefined') return;
       if (value.length < 3 || value.length > 16) return; // owned by .min/.max above
+      // ★ Self-send refused (owner, 2026-09-09). A transfer to yourself is never
+      // what a person meant on a send form, and on Magi the ledger refuses it.
+      if (opts.self && value === opts.self.toLowerCase()) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: t('wallet.dialogs.common.recipient_self') });
+        return;
+      }
       try {
         const result = await fetchAccountExists(value);
         // Only 'exists' is an accepted recipient. `api_error` is deliberately
@@ -77,3 +84,53 @@ export const buildRecipientSchema = (t: TFn) =>
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: t('wallet.dialogs.common.recipient_check_failed') });
       }
     });
+
+/**
+ * A Magi recipient: a Hive name (checked to exist on chain, exactly as above),
+ * an EIP-55-checksummed Ethereum address, a checksummed Bitcoin address, or a
+ * qualified `hive:` / `did:pkh:` id. FAILS CLOSED on both failure kinds, the
+ * owner's explicit choice over Altera's warn-and-allow (RecipientCard.svelte).
+ */
+export const buildMagiRecipientSchema = (selfId: string, t: TFn) =>
+  z
+    .string({ message: t('wallet.dialogs.common.recipient_required') })
+    .min(1, { message: t('wallet.dialogs.common.recipient_required') })
+    .superRefine(async (value, ctx) => {
+      const parsed = parseMagiRecipient(value);
+      if (!parsed) {
+        const shape = recipientShapeHint(value);
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            shape === 'evm'
+              ? t('wallet.dialogs.common.recipient_invalid_evm')
+              : shape === 'btc'
+                ? t('wallet.dialogs.common.recipient_invalid_btc')
+                : t('wallet.dialogs.common.recipient_invalid_any')
+        });
+        return;
+      }
+      if (parsed.id === selfId) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: t('wallet.dialogs.common.recipient_self') });
+        return;
+      }
+      if (parsed.kind !== 'hive' || typeof window === 'undefined') return;
+      try {
+        const result = await fetchAccountExists(parsed.hiveName ?? '');
+        if (result.status === 'api_error') {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: t('wallet.dialogs.common.recipient_check_failed') });
+        } else if (result.status !== 'exists') {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: t('wallet.dialogs.common.recipient_not_found') });
+        }
+      } catch {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: t('wallet.dialogs.common.recipient_check_failed') });
+      }
+    });
+
+/** A raw Bitcoin address for a withdrawal: checksummed and payable by the bridge; optionally not the account's own deposit address. */
+export const buildBtcAddressSchema = (t: TFn, opts: { ownDeposit?: string | null } = {}) =>
+  z
+    .string({ message: t('wallet.dialogs.common.recipient_required') })
+    .trim()
+    .refine((v) => isPayableBtcAddress(v), { message: t('wallet.dialogs.common.recipient_invalid_btc') })
+    .refine((v) => !opts.ownDeposit || v !== opts.ownDeposit, { message: t('wallet.magi.withdraw.to_btc_own_deposit') });

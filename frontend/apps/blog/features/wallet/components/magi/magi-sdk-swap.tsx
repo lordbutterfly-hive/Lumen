@@ -44,8 +44,10 @@
  *    and on a testnet stack it reads mainnet (no prop to redirect it).
  */
 import '@vsc.eco/crosschain-widget/styles.css';
+// After the package stylesheet on purpose: same selector specificity is decided by order. See magi-sdk-theme.css.
+import './magi-sdk-theme.css';
 import dynamic from 'next/dynamic';
-import { useCallback, useMemo, type CSSProperties } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
@@ -70,23 +72,6 @@ const MagiQuickSwap = dynamic<MagiQuickSwapProps>(() => import('./magi-sdk-widge
 });
 
 const CARD_CLASS = 'mb-3 rounded-panel border border-line-9 bg-surface-1 p-5';
-
-/** The widget's `--magi-*` theme hooks (README.md:150-166) mapped onto Lumen's tokens. Every var below exists in packages/tailwindcss/globals.css (checked 2026-09-09). */
-const THEME: CSSProperties = {
-  ['--magi-card-bg' as string]: 'rgb(var(--surface-1))',
-  ['--magi-card-border' as string]: 'rgb(var(--line-9))',
-  ['--magi-card-shadow' as string]: 'none',
-  ['--magi-accent' as string]: 'rgb(var(--surface-brand-12))',
-  ['--magi-accent-hover' as string]: 'rgb(var(--surface-brand-17))',
-  ['--magi-green' as string]: 'rgb(var(--ink-ok-2))',
-  ['--magi-red' as string]: 'rgb(var(--ink-warn-3))',
-  ['--magi-text' as string]: 'rgb(var(--ink-2))',
-  ['--magi-text-secondary' as string]: 'rgb(var(--ink-7))',
-  ['--magi-text-muted' as string]: 'rgb(var(--ink-14))',
-  ['--magi-field-bg' as string]: 'rgb(var(--surface-5))',
-  ['--magi-field-border' as string]: 'rgb(var(--line-11))',
-  ['--magi-font' as string]: 'var(--font-ui)'
-};
 
 /** The L1 symbol on the widget's transfer tuple (HIVE/HBD, or TESTS/TBD on the testnet) to the wallet's token name. */
 function tokenOf(symbol: string): 'HIVE' | 'HBD' {
@@ -222,7 +207,7 @@ export default function MagiSdkSwap() {
               {t('wallet.magi.sdk.wallet_note')}
             </p>
           ) : null}
-          <div className="mt-3" style={THEME} data-testid="wallet-magi-sdk-widget">
+          <div className="mt-3 flex justify-center" data-testid="wallet-magi-sdk-widget">
             <MagiQuickSwap
               config={config}
               pools={pools}
