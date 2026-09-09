@@ -97,7 +97,6 @@ export default function DelegateDialog({
         register={form.register('to')}
         value={toValue}
         self={username}
-        onPick={(name) => form.setValue('to', name, { shouldValidate: true, shouldDirty: true })}
         onResolved={setRecipient}
         error={form.formState.errors.to?.message}
         testId="wallet-delegate-to"

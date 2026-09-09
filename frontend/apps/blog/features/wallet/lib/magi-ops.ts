@@ -30,6 +30,14 @@
  * (sendUtils.ts validateAddress), and a Bitcoin address must pass
  * bitcoin-address-validation's checksum AND be a type the node can verify
  * (taproot refused, btc.go:52).
+ *
+ * ★ THE SAME GATE ON EVERY FORM (security scrutiny S-1, 2026-09-09). The first
+ * cut applied those checks to bare addresses only; a `did:pkh:` string went
+ * through on regex shape alone, so a one-character typo of a real Bitcoin
+ * address was refused bare and ACCEPTED in DID form, while the card printed
+ * "checksum valid". A qualified id is now unwrapped, run through exactly the
+ * bare-form checks, pinned to the namespaces Magi uses (eip155:1, Bitcoin
+ * mainnet), and re-emitted in canonical form.
  */
 import Big from 'big.js';
 import { isAddress } from 'viem';
@@ -48,6 +56,13 @@ export interface MagiRecipient {
   kind: 'hive' | 'evm' | 'btc';
   /** For a Hive recipient, the bare name (to check it exists before sending). */
   hiveName?: string;
+  /**
+   * True ONLY when a checksum was actually verified on this input: a mixed-case
+   * EIP-55 address, or a Bitcoin address (bech32 / base58check always carry one).
+   * An all-lowercase Ethereum address has no checksum to verify; the UI must not
+   * claim one (security scrutiny S-1, 2026-09-09).
+   */
+  checksummed?: boolean;
 }
 
 const HIVE_NAME = /^[a-z][a-z0-9.-]{2,15}$/;
@@ -66,8 +81,16 @@ export function parseMagiRecipient(raw: string): MagiRecipient | null {
     return HIVE_NAME.test(name) ? { id: `hive:${name}`, kind: 'hive', hiveName: name } : null;
   }
   if (value.startsWith('did:pkh:')) {
-    if (evmAddressFromDid(value)) return { id: value, kind: 'evm' };
-    if (btcAddressFromDid(value)) return { id: value, kind: 'btc' };
+    const evm = evmAddressFromDid(value);
+    if (evm) {
+      // Magi's only EVM namespace is eip155:1 (dids.ParseEthDID); a Polygon or
+      // garbage chain id is not a Magi account, whatever the address.
+      if (!/^did:pkh:eip155:1:0x/.test(value)) return null;
+      if (!isAddress(evm)) return null;
+      return { id: `did:pkh:eip155:1:${evm.toLowerCase()}`, kind: 'evm', checksummed: evm !== evm.toLowerCase() };
+    }
+    const btc = btcAddressFromDid(value);
+    if (btc && isPayableBtcAddress(btc)) return { id: `did:pkh:bip122:${BTC_MAINNET_CAIP2}:${btc}`, kind: 'btc', checksummed: true };
     return null;
   }
   const bare = value.startsWith('@') ? value.slice(1) : value;
@@ -79,11 +102,12 @@ export function parseMagiRecipient(raw: string): MagiRecipient | null {
     // EIP-55: a mixed-case address must carry the right checksum; all-lowercase is valid by the standard.
     if (!isAddress(bare)) return null;
     // Altera lower-cases the address (getAccountName.ts:57); the node compares DIDs as strings.
-    return { id: `did:pkh:eip155:1:${bare.toLowerCase()}`, kind: 'evm' };
+    // An all-lowercase address passes EIP-55 by definition and carries NO checksum to verify.
+    return { id: `did:pkh:eip155:1:${bare.toLowerCase()}`, kind: 'evm', checksummed: bare !== bare.toLowerCase() };
   }
   const addr = bare.includes(':') ? (bare.split(':').at(-1) ?? bare) : bare;
-  if (btcAddressType(addr) && validateBtcAddress(addr, BtcNetwork.mainnet)) {
-    return { id: `did:pkh:bip122:${BTC_MAINNET_CAIP2}:${addr}`, kind: 'btc' };
+  if (isPayableBtcAddress(addr)) {
+    return { id: `did:pkh:bip122:${BTC_MAINNET_CAIP2}:${addr}`, kind: 'btc', checksummed: true };
   }
   return null;
 }

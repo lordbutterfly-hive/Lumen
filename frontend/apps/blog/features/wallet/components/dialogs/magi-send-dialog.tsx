@@ -131,7 +131,6 @@ export default function MagiSendDialog({
         register={form.register('to')}
         value={toValue}
         self={selfId}
-        onPick={(name) => form.setValue('to', name, { shouldValidate: true, shouldDirty: true })}
         onResolved={setRecipient}
         error={form.formState.errors.to?.message}
         testId="magi-send-to"

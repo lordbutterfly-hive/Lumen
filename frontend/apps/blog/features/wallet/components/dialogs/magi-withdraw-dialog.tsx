@@ -183,7 +183,6 @@ export default function MagiWithdrawDialog({
         label={asset === 'BTC' ? t('wallet.magi.withdraw.to_btc') : t('wallet.magi.withdraw.to_hive')}
         register={form.register('to')}
         value={toValue}
-        onPick={(name) => form.setValue('to', name, { shouldValidate: true, shouldDirty: true })}
         onResolved={setRecipient}
         error={form.formState.errors.to?.message}
         testId="magi-withdraw-to"

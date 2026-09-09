@@ -159,8 +159,8 @@ export type AccountExistsResult =
   | { validFormat: true; status: 'not_found' }
   | { validFormat: true; status: 'api_error'; error: string };
 
-export function fetchAccountExists(name: string): Promise<AccountExistsResult> {
-  return fetchJson(`/api/account-exists?name=${encodeURIComponent(name)}`, 'account exists');
+export function fetchAccountExists(name: string, init?: RequestInit): Promise<AccountExistsResult> {
+  return fetchJson(`/api/account-exists?name=${encodeURIComponent(name)}`, 'account exists', init);
 }
 
 export function fetchPostStatus(

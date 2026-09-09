@@ -1720,8 +1720,9 @@
       "not_found": "No account with this name on Hive.",
       "check_failed": "Couldn’t check on chain just now. Try again.",
       "self": "This is your own account.",
-      "suggested": "suggested",
-      "hint": "Suggestions come from the chain. Nothing is sendable until the recipient is found there."
+      "hint": "Type the full account name or address. It is checked on chain before Send is enabled.",
+      "calls_itself": "its profile calls itself “{{name}}”",
+      "no_checksum_form": "lowercase form carries no checksum, copy it again from the source"
     }
   },
   "profile": {

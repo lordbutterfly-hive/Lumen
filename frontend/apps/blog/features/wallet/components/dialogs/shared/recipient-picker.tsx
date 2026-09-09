@@ -23,10 +23,25 @@
  *     it gets a chain badge and its own truncated, monospace text. A fake avatar
  *     would be a claim the app cannot back.
  *
- * Suggestions come from the chain by prefix, as Altera's get_account_reputations
- * lookup does, through the app's existing /api/search/people. Look-alike names
- * are not guarded (Altera has no guard either); the resolved card, picture,
- * display name and @name before Send, is the honest mitigation.
+ * ★ NO SUGGESTIONS ON A SEND FORM (security scrutiny S-2, 2026-09-09). The first
+ * cut offered a prefix dropdown like Altera's; the review showed it is the
+ * attack, not the mitigation: it filtered the exact typed name OUT, ranked the
+ * rest by follower count, and rendered each row's self-chosen profile name and
+ * avatar as bold identity, so a look-alike account could be volunteered while
+ * the real one was guaranteed absent. On a form that moves money, autocomplete
+ * can only move a person away from what they typed. Removed, not tuned.
+ *
+ * ★ THE @NAME IS THE ONLY AUTHORITATIVE FIELD. The display name and the avatar
+ * are whatever the account's owner wrote into its own profile; they are shown,
+ * because the owner asked for the picture, but demoted and labelled as the
+ * account's own claim, never as the headline. Look-alike names are not guarded
+ * (Altera has no guard either); that limitation is stated to the owner, not
+ * papered over by a bolder picture.
+ *
+ * ★ THE LOOKUP IS THROTTLED ON BOTH ENDS (S-3): 500 ms after the last
+ * keystroke, only for a syntactically valid Hive name, one in flight at a time
+ * (the previous request is aborted), against a route that now rate-limits and
+ * length-bounds before it does any work.
  *
  * The form (react-hook-form + zod) still owns validation and the submit gate:
  * the schema refuses both failure kinds (recipient-schema.ts). This component
@@ -50,20 +65,14 @@ export type RecipientResolution =
   | { status: 'idle' }
   | { status: 'checking'; name: string }
   | { status: 'ok'; kind: 'hive'; id: string; name: string; displayName: string | null }
-  | { status: 'ok'; kind: 'evm' | 'btc'; id: string; short: string }
+  | { status: 'ok'; kind: 'evm' | 'btc'; id: string; short: string; checksummed: boolean }
   | { status: 'not_found'; name: string }
   | { status: 'check_failed'; name: string }
   | { status: 'self' }
   | { status: 'invalid'; shape: 'evm' | 'btc' | 'hive' | 'unknown' };
 
-interface Suggestion {
-  name: string;
-  displayName: string;
-  kind: 'hive' | 'lite';
-}
-
 const HIVE_NAME = /^[a-z][a-z0-9.-]{2,15}$/;
-const DEBOUNCE_MS = 350;
+const DEBOUNCE_MS = 500;
 
 function displayNameOf(account: { posting_json_metadata?: string } | undefined): string | null {
   try {
@@ -82,7 +91,6 @@ export default function RecipientPicker({
   value,
   error,
   self,
-  onPick,
   onResolved,
   disabled,
   testId
@@ -96,17 +104,14 @@ export default function RecipientPicker({
   error?: string;
   /** The sender: a bare Hive name (hive mode) or a Magi ledger id (magi mode). A match is refused. */
   self?: string;
-  /** Called when a suggestion is chosen; the dialog writes it into the form. */
-  onPick?: (name: string) => void;
   onResolved?: (resolution: RecipientResolution) => void;
   disabled?: boolean;
   testId?: string;
 }) {
   const { t } = useTranslation('common_blog');
   const [resolution, setResolution] = useState<RecipientResolution>({ status: 'idle' });
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [open, setOpen] = useState(false);
   const seq = useRef(0);
+  const inflight = useRef<AbortController | null>(null);
   const raw = (value ?? '').trim();
 
   // Which kind of thing was typed, before any network call.
@@ -127,14 +132,14 @@ export default function RecipientPicker({
       setResolution(r);
       onResolved?.(r);
     };
+    inflight.current?.abort();
+    inflight.current = null;
     if (!raw) {
       report({ status: 'idle' });
-      setSuggestions([]);
       return;
     }
     if (!parsed) {
       report({ status: 'invalid', shape: mode === 'btc' ? 'btc' : recipientShapeHint(raw) });
-      setSuggestions([]);
       return;
     }
     const selfHit =
@@ -142,32 +147,19 @@ export default function RecipientPicker({
       (parsed.kind === 'hive' ? parsed.hiveName === self.toLowerCase().replace(/^hive:/, '') : parsed.id === self);
     if (selfHit) {
       report({ status: 'self' });
-      setSuggestions([]);
       return;
     }
     if (parsed.kind !== 'hive') {
-      report({ status: 'ok', kind: parsed.kind, id: parsed.id, short: shortenRecipient(parsed.id) });
-      setSuggestions([]);
+      report({ status: 'ok', kind: parsed.kind, id: parsed.id, short: shortenRecipient(parsed.id), checksummed: parsed.checksummed === true });
       return;
     }
     const name = parsed.hiveName ?? bareHiveName(parsed.id);
     report({ status: 'checking', name });
     const timer = window.setTimeout(async () => {
-      // Suggestions and the existence check run together; the check is what gates.
-      void (async () => {
-        try {
-          const res = await fetch(`/api/search/people?q=${encodeURIComponent(name)}`, { cache: 'no-store' });
-          if (!res.ok) return;
-          const people = (await res.json()) as Suggestion[];
-          if (seq.current === mine && Array.isArray(people)) {
-            setSuggestions(people.filter((p) => p.name !== name).slice(0, 5));
-          }
-        } catch {
-          /* suggestions are a convenience; the existence check below is the gate */
-        }
-      })();
+      const controller = new AbortController();
+      inflight.current = controller;
       try {
-        const result = await fetchAccountExists(name);
+        const result = await fetchAccountExists(name, { signal: controller.signal, cache: 'no-store' });
         if (result.status === 'exists') {
           report({ status: 'ok', kind: 'hive', id: `hive:${name}`, name, displayName: displayNameOf(result.data as { posting_json_metadata?: string }) });
         } else if (result.status === 'api_error') {
@@ -175,7 +167,8 @@ export default function RecipientPicker({
         } else {
           report({ status: 'not_found', name });
         }
-      } catch {
+      } catch (error) {
+        if ((error as { name?: string })?.name === 'AbortError') return; // superseded by a newer keystroke
         report({ status: 'check_failed', name });
       }
     }, DEBOUNCE_MS);
@@ -221,8 +214,8 @@ export default function RecipientPicker({
         if (r.kind === 'hive') {
           return row(
             <UserAvatarImg username={r.name} pixelSize={36} className="h-9 w-9 shrink-0 rounded-full" alt="" />,
-            r.displayName ?? `@${r.name}`,
-            `@${r.name} · ${t('wallet.recipient.hive_account')}, ${t('wallet.recipient.exists_on_chain')}`,
+            `@${r.name}`,
+            `${t('wallet.recipient.hive_account')}, ${t('wallet.recipient.exists_on_chain')}${r.displayName ? ` · ${t('wallet.recipient.calls_itself', { name: r.displayName })}` : ''}`,
             stateChip(true, t('wallet.recipient.ready')),
             'ok'
           );
@@ -232,7 +225,7 @@ export default function RecipientPicker({
             {r.kind === 'evm' ? 'ETH' : 'BTC'}
           </span>,
           <span className="font-mono">{r.short}</span>,
-          `${t(r.kind === 'evm' ? 'wallet.recipient.evm_address' : 'wallet.recipient.btc_address')} · ${t('wallet.recipient.checksum_valid')} · ${r.id.startsWith('did:') ? r.id.split(':').slice(0, 3).join(':') : ''}`.replace(/ · $/, ''),
+          `${t(r.kind === 'evm' ? 'wallet.recipient.evm_address' : 'wallet.recipient.btc_address')} · ${r.id.split(':').slice(0, 4).join(':')} · ${r.checksummed ? t('wallet.recipient.checksum_valid') : t('wallet.recipient.no_checksum_form')}`,
           stateChip(true, t('wallet.recipient.ready')),
           'ok'
         );
@@ -272,41 +265,9 @@ export default function RecipientPicker({
           placeholder={placeholder}
           autoComplete="off"
           spellCheck={false}
-          onFocus={() => setOpen(true)}
-          onBlur={(e) => {
-            register.onBlur(e);
-            window.setTimeout(() => setOpen(false), 150);
-          }}
           className={`${INPUT_CLASS} ${showAt ? 'pl-9' : ''} ${looksLikeAddress ? 'font-mono text-[13px]' : ''}`}
           data-testid={testId}
-          aria-autocomplete="list"
         />
-        {open && suggestions.length > 0 && mode !== 'btc' ? (
-          <ul className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-card border border-line-9 bg-surface-1 shadow-lg" role="listbox" data-testid={`${testId ?? 'recipient'}-suggestions`}>
-            {suggestions.map((sug) => (
-              <li key={sug.name}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={false}
-                  className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface-16"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    onPick?.(sug.name);
-                    setOpen(false);
-                  }}
-                >
-                  <UserAvatarImg username={sug.name} pixelSize={32} className="h-8 w-8 shrink-0 rounded-full" alt="" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[14px] leading-[20px] font-semibold text-ink-2">{sug.displayName || `@${sug.name}`}</span>
-                    <span className="block text-caption text-ink-10">@{sug.name} · {t('wallet.recipient.hive_account')}</span>
-                  </span>
-                  <span className="rounded-control bg-surface-23 px-2 py-[2px] text-caption font-medium text-ink-8">{t('wallet.recipient.suggested')}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
       </div>
       {card}
       {resolution.status === 'idle' && mode !== 'btc' ? <p className="text-caption text-ink-14">{t('wallet.recipient.hint')}</p> : null}
