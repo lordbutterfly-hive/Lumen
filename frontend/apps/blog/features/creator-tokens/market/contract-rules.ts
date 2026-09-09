@@ -105,7 +105,8 @@ export const V1_CODE_CID = 'bafkreic2nphgjnwte32nkwix7bga2hjcwx5hfo6n5xrgllczpt7
  */
 export const V2_CODE_CIDS: ReadonlySet<string> = new Set([
   'bafkreiajgng3ozcazro5goha34f2yfs265iylzi6rr5pk6ttent7s5xocu', // v2
-  'bafkreih4eper5br4vqmgip6f5vykwmhuxtor4j2pqaw2ewdtwuirzf5h7y' // fast twin, test fixture (see above)
+  'bafkreih4eper5br4vqmgip6f5vykwmhuxtor4j2pqaw2ewdtwuirzf5h7y', // fast twin, test fixture (see above)
+  'bafkreigqshjvsnoauwq6eeiisibbpqpesw5ysuiyhp36rjl3i7xi4dwqwi' // v2 fee/display update (2026-09-09): TradeFeeBps 1000->500, MaxExitTaxBps 2000->1500, exit-tax launder closed on all four rails, per-cohort `lots|` ledger, SellResult.TaxBps = slice-weighted effective rate
 ]);
 /** The Stage D fixture's CID on its own, so a test can tell the two apart. Same rules as v2; never mainnet. */
 export const V2_FAST_TWIN_CODE_CID = 'bafkreih4eper5br4vqmgip6f5vykwmhuxtor4j2pqaw2ewdtwuirzf5h7y';

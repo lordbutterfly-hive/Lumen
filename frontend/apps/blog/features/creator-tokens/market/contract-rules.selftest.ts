@@ -57,7 +57,7 @@ function check(name: string, condition: boolean, detail?: string): void {
     rulesForCode(V1_CODE_CID) === 'v1' && rulesForCode(v2) === 'v2' && rulesForCode(null) === 'v1' && rulesForCode('') === 'v1' && rulesForCode('bafy-not-a-known-build') === 'v1' && rulesForCode(undefined) === 'v1');
   check('V2_CODE_CIDS never contains the v1 bytecode', !V2_CODE_CIDS.has(V1_CODE_CID));
   check('the Stage D fast twin (same v2 source, short periods) maps to v2, and is a distinct CID from v2 proper',
-    rulesForCode(V2_FAST_TWIN_CODE_CID) === 'v2' && V2_CODE_CIDS.has(V2_FAST_TWIN_CODE_CID) && v2 !== V2_FAST_TWIN_CODE_CID && V2_CODE_CIDS.size === 2);
+    rulesForCode(V2_FAST_TWIN_CODE_CID) === 'v2' && V2_CODE_CIDS.has(V2_FAST_TWIN_CODE_CID) && v2 !== V2_FAST_TWIN_CODE_CID && V2_CODE_CIDS.size === 3);
   check('every listed v2 CID is a CIDv1 raw/base32 string of the same shape as the live v1 one',
     [...V2_CODE_CIDS].every((c) => /^bafkrei[a-z2-7]{52}$/.test(c)) && /^bafkrei[a-z2-7]{52}$/.test(V1_CODE_CID));
 }
