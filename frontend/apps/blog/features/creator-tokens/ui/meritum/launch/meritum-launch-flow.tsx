@@ -463,6 +463,7 @@ const MeritumLaunchFlow: FC = () => {
                 handle={flow.handle}
                 account={account}
                 isLite={flow.block === 'lite'}
+                launchHoldHbd={flow.launchHoldHbd}
                 onConfirm={flow.goNext}
               />
             ) : flow.step === 2 ? (
@@ -492,6 +493,7 @@ const MeritumLaunchFlow: FC = () => {
                 launchUnconfirmed={flow.launchUnconfirmed}
                 spending={flow.spending}
                 launchRcMessage={flow.launchRcMessage}
+                launchHoldHbd={flow.launchHoldHbd}
                 account={account}
                 onHoldBegin={holdFromButton}
                 onHoldRelease={releaseFromButton}

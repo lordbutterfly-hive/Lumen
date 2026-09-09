@@ -250,6 +250,30 @@ export const RC_SAFETY_MARGIN = 1.25;
 export const NODE_MIN_RC_LIMIT = 100;
 
 /**
+ * The free transaction credit every `hive:` account is given on Magi, in the
+ * same base units as HBD (1 HBD of balance = 1,000 credits): go-vsc-node
+ * modules/common/params/params.go `RC_HIVE_FREE_AMOUNT = 10_000`, added to the
+ * balance by `CanConsume` (modules/rc-system/rc-system.go) before frozen credit
+ * is subtracted. Wallet DIDs get none. Used only to tell a creator, up front,
+ * how much HBD they must HOLD on Magi for a launch to send.
+ */
+export const HIVE_FREE_RC_BASE_UNITS = 10_000;
+
+/**
+ * How much HBD a creator must be holding on Magi for a launch with `offerCount`
+ * offers (and an optional first buy) to send: the summed rc_limit reservation
+ * plus the first buy, less the free credit a Hive account gets. Never negative.
+ * The same numbers `checkLaunchRcBudget` gates on, stated before the strike.
+ */
+export function launchHbdToHold(input: { offerCount: number; firstBuyHbdBaseUnits?: number; hiveAccount: boolean }): number {
+  const offerCount = Math.max(1, Math.floor(input.offerCount));
+  const rcNeeded = rcLimitForAction('register') + offerCount * rcLimitForAction('createOffering');
+  const firstBuy = Math.max(0, Math.floor(input.firstBuyHbdBaseUnits ?? 0));
+  const free = input.hiveAccount ? HIVE_FREE_RC_BASE_UNITS : 0;
+  return Math.max(0, rcNeeded + firstBuy - free);
+}
+
+/**
  * The `rc_limit` to declare for one call. Measured cost plus margin, floored at
  * the node's own minimum.
  */
@@ -273,6 +297,8 @@ export interface RcBudget {
   haveBaseUnits?: number;
   /** Launch gate only: what that side needs, base units (the summed reservation, or the first buy). */
   neededBaseUnits?: number;
+  /** Launch gate only: how many offerings the reservation counted. */
+  offerCount?: number;
 }
 
 /**
@@ -325,9 +351,10 @@ export function checkRcBudget(input: {
 }
 
 /** Base units to a human HBD string, e.g. 1802 -> "1.802". */
-function hbd(baseUnits: number): string {
+export function formatHbdBaseUnits(baseUnits: number): string {
   return (Math.ceil(baseUnits) / 1000).toFixed(3);
 }
+const hbd = formatHbdBaseUnits;
 
 /**
  * The warning text, in plain words.
@@ -434,7 +461,8 @@ export function checkLaunchRcBudget(input: {
       blocker: 'not-enough-rc',
       addBaseUnits: rcNeeded - creditPool,
       haveBaseUnits: creditPool,
-      neededBaseUnits: rcNeeded
+      neededBaseUnits: rcNeeded,
+      offerCount
     };
   }
   if (input.balanceBaseUnits < firstBuy) {
@@ -444,7 +472,8 @@ export function checkLaunchRcBudget(input: {
       blocker: 'not-enough-balance',
       addBaseUnits: firstBuy - input.balanceBaseUnits,
       haveBaseUnits: input.balanceBaseUnits,
-      neededBaseUnits: firstBuy
+      neededBaseUnits: firstBuy,
+      offerCount
     };
   }
   return { ok: true, rcLimit: rcNeeded, blocker: 'none', addBaseUnits: 0 };
@@ -458,25 +487,25 @@ export function checkLaunchRcBudget(input: {
 export function describeLaunchRcBudget(budget: RcBudget): string | null {
   if (budget.ok) return null;
   const add = hbd(budget.addBaseUnits);
-  // The real numbers, in HBD (1 HBD of balance is 1,000 credits), so the reader
-  // sees what a launch reserves and what they hold, not just the gap (owner,
-  // 2026-09-09: "how much they actually need").
+  // Plain words, the action first (owner, 2026-09-09: "fix the wrong math you
+  // give people, they don't get it"). The reader needs ONE number: how much HBD
+  // to add on Magi. The why comes after, in HBD, never in "credits".
   const needed = budget.neededBaseUnits !== undefined ? hbd(budget.neededBaseUnits) : null;
   const have = budget.haveBaseUnits !== undefined ? hbd(Math.max(0, budget.haveBaseUnits)) : null;
+  const offers = budget.offerCount !== undefined ? `${budget.offerCount} ${budget.offerCount === 1 ? 'offer' : 'offers'}` : 'these offers';
 
   if (budget.blocker === 'not-enough-rc') {
     return (
+      `Add ${add} HBD to your Magi balance and you can launch. ` +
       (needed !== null && have !== null
-        ? `This launch reserves about ${needed} HBD of transaction credit and you have about ${have} HBD of credit: your HBD on Magi, plus the free credit a Hive account gets, minus credit still cooling from recent transactions. `
-        : `You don't have enough transaction credit to launch. A launch sends your registration and each offering together. `) +
-      `Add at least ${add} HBD to Magi; every 1 HBD you hold gives you 1,000 credits, available straight away, and spent credit refills on its own over about five days.`
+        ? `Launching with ${offers} sets aside about ${needed} HBD as transaction credit for a few days; it is not spent and comes back on its own. You have about ${have} HBD of credit right now: your HBD on Magi, plus the free credit every Hive account gets, minus credit still cooling from recent transactions.`
+        : `A launch sets aside transaction credit for each step; it is not spent and comes back on its own within days.`)
     );
   }
   return (
+    `Add ${add} HBD to your Magi balance, or take fewer tokens, and you can launch. ` +
     (needed !== null && have !== null
-      ? `Your first buy costs about ${needed} HBD and you have ${have} HBD on Magi. `
-      : `Your HBD balance is about ${add} HBD short of your first buy. `) +
-    `The first tokens you take at launch are paid from your HBD on Magi. ` +
-    `Add ${add} HBD, or take fewer tokens, and this will go through.`
+      ? `Your first buy costs ${needed} HBD and you have ${have} HBD on Magi.`
+      : `The first tokens you take at launch are paid from your HBD on Magi.`)
   );
 }

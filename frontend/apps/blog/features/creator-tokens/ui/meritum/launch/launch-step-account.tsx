@@ -27,10 +27,12 @@ export interface LaunchStepAccountProps {
   account: string;
   /** True when this account has no Hive keys and therefore cannot sign. */
   isLite: boolean;
+  /** "6.941": the HBD a launch needs held on Magi (current offers and first buy), told here before the reader writes a single offer. */
+  launchHoldHbd: string;
   onConfirm: () => void;
 }
 
-const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite, onConfirm }) => {
+const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite, launchHoldHbd, onConfirm }) => {
   const eligibility = useMeritumEligibility();
   const { t } = useTranslation('common_blog');
   const known = handle !== '';
@@ -77,7 +79,7 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
         first decides to do this at all, as plain text, not a tooltip.
       */}
       <div className="mt-[26px] border-t border-meritum-line-card pt-[22px] font-ui text-caption text-meritum-ink-muted">
-        <p>{t('meritum_launch.term_launch_value')}</p>
+        <p>{t('meritum_launch.term_launch_value', { hbd: launchHoldHbd })}</p>
         <p className="mt-1.5">
           <span className="font-medium text-meritum-ink-3">{t('meritum_launch.term_listed_label')}:</span>{' '}
           {t('meritum_launch.term_listed_value')}

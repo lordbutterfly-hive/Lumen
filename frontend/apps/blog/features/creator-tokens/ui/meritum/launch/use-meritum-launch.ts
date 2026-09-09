@@ -18,7 +18,7 @@ import { getStorageItem, removeStorageItem, setStorageItem } from '@ui/lib/stora
 import { offerTitleProblem } from '@/blog/features/creator-tokens/lib/vsc/op-builders';
 import { EXECUTION_CONFIRM_TIMEOUT_MS, REGISTER_CONFIRM_TIMEOUT_MS } from '@/blog/features/creator-tokens/lib/vsc-data-source';
 import { useMagiSpendingPower } from '../../../live/use-magi-spending-power';
-import { checkLaunchRcBudget, describeLaunchRcBudget } from '../../../lib/vsc/rc-budget';
+import { checkLaunchRcBudget, describeLaunchRcBudget, formatHbdBaseUnits, launchHbdToHold } from '../../../lib/vsc/rc-budget';
 import { humanToBaseUnits } from '../../../lib/contract-math';
 
 /**
@@ -365,6 +365,8 @@ export interface MeritumLaunchApi {
   spending: ReturnType<typeof useMagiSpendingPower>;
   /** The actionable "add N HBD" remedy when `block === 'insufficient-rc'`, else null. */
   launchRcMessage: string | null;
+  /** How much HBD this launch needs held on Magi (offers + first buy, less the free credit a Hive account gets), as "6.941". Stated on steps 1 and 3 before the strike. */
+  launchHoldHbd: string;
 
   /** Fire the real launch write. Called from the coin's `onCharged`. */
   launch: () => void;
@@ -716,6 +718,10 @@ export function useMeritumLaunch(): MeritumLaunchApi {
   });
   const cannotAffordLaunch = !launchRcBudget.ok;
   const launchRcMessage = describeLaunchRcBudget(launchRcBudget);
+  // Always a Hive account here: a lite account is blocked before the terms step.
+  const launchHoldHbd = formatHbdBaseUnits(
+    launchHbdToHold({ offerCount: offersPriced, firstBuyHbdBaseUnits: firstBuyLegBaseUnits, hiveAccount: true })
+  );
 
   // A title the contract will refuse. Only PRICED offers matter: an empty row is
   // not submitted, and `offer-needs-name` already covers a priced row with none.
@@ -991,6 +997,7 @@ export function useMeritumLaunch(): MeritumLaunchApi {
     firstBuySkipped,
     spending,
     launchRcMessage,
+    launchHoldHbd,
     launch,
     dismissFailure,
     restoredFromDraft,

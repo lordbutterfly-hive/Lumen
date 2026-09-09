@@ -53,6 +53,8 @@ export interface LaunchStepTermsProps {
   spending: MagiSpendingPowerState;
   /** The actionable "add N HBD to launch" remedy, shown on block === 'insufficient-rc'. */
   launchRcMessage: string | null;
+  /** "6.941": the HBD this launch needs held on Magi, for the To-launch term. */
+  launchHoldHbd: string;
   /** The creator's bare account, for the deposit memo in the funding help. */
   account: string;
   onHoldBegin: () => void;
@@ -85,6 +87,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
   launchUnconfirmed,
   spending,
   launchRcMessage,
+  launchHoldHbd,
   account,
   onHoldBegin,
   onHoldRelease,
@@ -93,7 +96,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
   const { t } = useTranslation('common_blog');
 
   const terms = [
-    { id: 'launch', label: t('meritum_launch.term_launch_label'), value: t('meritum_launch.term_launch_value') },
+    { id: 'launch', label: t('meritum_launch.term_launch_label'), value: t('meritum_launch.term_launch_value', { hbd: launchHoldHbd }) },
     { id: 'listed', label: t('meritum_launch.term_listed_label'), value: t('meritum_launch.term_listed_value') },
     { id: 'cut', label: t('meritum_launch.term_cut_label'), value: t('meritum_launch.term_cut_value', { pct: commission }) },
     // ★ TRADING FEE disclosed here (owner, 2026-09-04). 10% on every curve buy
