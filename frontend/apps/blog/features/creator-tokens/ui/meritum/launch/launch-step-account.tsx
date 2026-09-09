@@ -79,7 +79,7 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
         first decides to do this at all, as plain text, not a tooltip.
       */}
       <div className="mt-[26px] border-t border-meritum-line-card pt-[22px] font-ui text-caption text-meritum-ink-muted">
-        <p>{t('meritum_launch.term_launch_value', { hbd: launchHoldHbd })}</p>
+        <p>{(launchHoldHbd === '0.000' ? t('meritum_launch.term_launch_value_covered') : t('meritum_launch.term_launch_value', { hbd: launchHoldHbd }))}</p>
         <p className="mt-1.5">
           <span className="font-medium text-meritum-ink-3">{t('meritum_launch.term_listed_label')}:</span>{' '}
           {t('meritum_launch.term_listed_value')}

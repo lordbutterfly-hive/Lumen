@@ -12,7 +12,7 @@
  * each side, the first-buy leg, the reported Hive-account case, and, the safety
  * property, unknown power NEVER blocks (like Buy).
  */
-import { HIVE_FREE_RC_BASE_UNITS, checkLaunchRcBudget, describeLaunchRcBudget, launchHbdToHold, rcLimitForAction } from './rc-budget';
+import { HIVE_FREE_RC_BASE_UNITS, checkLaunchRcBudget, describeLaunchRcBudget, launchHbdToHold, rcExpectedForAction, rcLimitForAction } from './rc-budget';
 
 let pass = 0;
 let fail = 0;
@@ -22,8 +22,13 @@ function check(name: string, cond: boolean): void {
   cond ? pass++ : fail++;
 }
 
-const REG = rcLimitForAction('register');
-const OFFER = rcLimitForAction('createOffering');
+const REG = rcExpectedForAction('register');
+const OFFER = rcExpectedForAction('createOffering');
+// The declared ceilings only cap the gas budget; they must stay ABOVE what is charged.
+check('declared register ceiling stays above the expected charge', rcLimitForAction('register') > REG);
+check('declared createOffering ceiling stays above the expected charge', rcLimitForAction('createOffering') > OFFER);
+// The one real mainnet launch this is anchored on: register + 2 offerings charged 9,118.
+check('expected charge for register + 2 offerings covers the live 9,118 with margin', REG + 2 * OFFER >= 9_118 * 1.2);
 const need = (n: number) => REG + Math.max(1, n) * OFFER;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -96,8 +101,10 @@ check('0 offers is floored to 1 (a launch always carries at least one offering)'
   const reported = checkLaunchRcBudget({ offerCount: 1, availableRc: 17_351, balanceBaseUnits: 9_121, firstBuyHbdBaseUnits: 0 });
   check('reported Hive account (17,351 credits, 9.121 HBD, no first buy) -> ok', reported.ok && reported.blocker === 'none');
   check('reported case reserves register + 1 offering', reported.rcLimit === need(1));
-  const walletDid = checkLaunchRcBudget({ offerCount: 1, availableRc: 9_121, balanceBaseUnits: 9_121, firstBuyHbdBaseUnits: 0 });
-  check('a wallet DID with the same 9.121 HBD (no free credits) -> not-enough-rc', !walletDid.ok && walletDid.blocker === 'not-enough-rc');
+  const walletDidOk = checkLaunchRcBudget({ offerCount: 1, availableRc: 9_121, balanceBaseUnits: 9_121, firstBuyHbdBaseUnits: 0 });
+  check('a wallet DID with 9.121 HBD (no free credits) can launch one offer', walletDidOk.ok);
+  const walletDidShort = checkLaunchRcBudget({ offerCount: 1, availableRc: 5_000, balanceBaseUnits: 5_000, firstBuyHbdBaseUnits: 0 });
+  check('a wallet DID with 5 HBD (no free credits) -> not-enough-rc', !walletDidShort.ok && walletDidShort.blocker === 'not-enough-rc');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,14 +120,14 @@ check('0 offers is floored to 1 (a launch always carries at least one offering)'
 // gate reserves, less the free credit a Hive account gets, never negative.
 // ─────────────────────────────────────────────────────────────────────────────
 check('free credit constant matches the node (10,000)', HIVE_FREE_RC_BASE_UNITS === 10_000);
-check('Hive, 1 offer, no first buy = need(1) - free', launchHbdToHold({ offerCount: 1, hiveAccount: true }) === need(1) - HIVE_FREE_RC_BASE_UNITS);
+check('Hive, 1 offer, no first buy = max(0, need(1) - free)', launchHbdToHold({ offerCount: 1, hiveAccount: true }) === Math.max(0, need(1) - HIVE_FREE_RC_BASE_UNITS));
 check('Hive, 2 offers = need(2) - free', launchHbdToHold({ offerCount: 2, hiveAccount: true }) === need(2) - HIVE_FREE_RC_BASE_UNITS);
 check('Hive, 1 offer + 5 HBD first buy = need(1) + 5,000 - free', launchHbdToHold({ offerCount: 1, firstBuyHbdBaseUnits: 5_000, hiveAccount: true }) === need(1) + 5_000 - HIVE_FREE_RC_BASE_UNITS);
 check('wallet DID, 1 offer = need(1) (no free credit)', launchHbdToHold({ offerCount: 1, hiveAccount: false }) === need(1));
-check('0 offers floors to 1', launchHbdToHold({ offerCount: 0, hiveAccount: true }) === need(1) - HIVE_FREE_RC_BASE_UNITS);
+check('0 offers floors to 1', launchHbdToHold({ offerCount: 0, hiveAccount: false }) === need(1));
 check('the hold figure is what the gate accepts at exactly that balance (Hive, 2 offers)', checkLaunchRcBudget({ offerCount: 2, availableRc: launchHbdToHold({ offerCount: 2, hiveAccount: true }) + HIVE_FREE_RC_BASE_UNITS, balanceBaseUnits: launchHbdToHold({ offerCount: 2, hiveAccount: true }), firstBuyHbdBaseUnits: 0 }).ok);
 check('one base unit under the hold figure is refused (Hive, 2 offers)', !checkLaunchRcBudget({ offerCount: 2, availableRc: launchHbdToHold({ offerCount: 2, hiveAccount: true }) + HIVE_FREE_RC_BASE_UNITS - 1, balanceBaseUnits: 0, firstBuyHbdBaseUnits: 0 }).ok);
-check('the warning leads with the amount to add', /^Add [0-9.]+ HBD to your Magi balance/.test(describeLaunchRcBudget(checkLaunchRcBudget({ offerCount: 2, availableRc: 18_452, balanceBaseUnits: 8_452, firstBuyHbdBaseUnits: 0 })) ?? ''));
+check('the warning leads with the amount to add', /^Add [0-9.]+ HBD to your Magi balance/.test(describeLaunchRcBudget(checkLaunchRcBudget({ offerCount: 3, availableRc: 10_000, balanceBaseUnits: 0, firstBuyHbdBaseUnits: 0 })) ?? ''));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // describeLaunchRcBudget: a remedy on a block, nothing when ok.

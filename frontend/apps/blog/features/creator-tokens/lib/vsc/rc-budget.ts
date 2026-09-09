@@ -267,7 +267,7 @@ export const HIVE_FREE_RC_BASE_UNITS = 10_000;
  */
 export function launchHbdToHold(input: { offerCount: number; firstBuyHbdBaseUnits?: number; hiveAccount: boolean }): number {
   const offerCount = Math.max(1, Math.floor(input.offerCount));
-  const rcNeeded = rcLimitForAction('register') + offerCount * rcLimitForAction('createOffering');
+  const rcNeeded = rcExpectedForAction('register') + offerCount * rcExpectedForAction('createOffering');
   const firstBuy = Math.max(0, Math.floor(input.firstBuyHbdBaseUnits ?? 0));
   const free = input.hiveAccount ? HIVE_FREE_RC_BASE_UNITS : 0;
   return Math.max(0, rcNeeded + firstBuy - free);
@@ -280,6 +280,44 @@ export function launchHbdToHold(input: { offerCount: number; firstBuyHbdBaseUnit
 export function rcLimitForAction(action: string): number {
   const measured = RC_COST_BY_ACTION[action] ?? RC_COST_FALLBACK;
   return Math.max(NODE_MIN_RC_LIMIT, Math.ceil(measured * RC_SAFETY_MARGIN));
+}
+
+/**
+ * ★ WHAT THE CHAIN ACTUALLY CHARGES, which is NOT the declared limit (2026-09-09,
+ * found on the first Hive creator to launch with under 17 HBD on Magi).
+ *
+ * The node does not reserve an op's `rc_limit`. It caps the gas budget at
+ * `min(available, rc_limit)` and charges the gas actually used
+ * (go-vsc-node modules/state-processing/transactions.go: `gas = min(availableGas,
+ * t.RcLimit)`, then `rcUsed = ceil(res.Gas / CYCLE_GAS_PER_RC)`). So the credit a
+ * launch needs is the sum of what its ops USE, not the sum of their ceilings, and
+ * `rcLimitForAction` above (the ceiling we declare, measured worst case + 25%)
+ * overstated a launch by about 2.6x: a real mainnet launch (register plus two
+ * offerings with 62-character titles, tx d5e78ebc, block 109772894) charged 9,118
+ * credits against a declared 24,058.
+ *
+ * These are the numbers the GATE and the COPY use. Anchored on that live launch
+ * and on mainnet dry runs of the same contract the same day (register 1,903;
+ * createOffering 2,240 to 2,464, longer titles cost more), then given the same
+ * 25% margin through `rcExpectedForAction`. The declared ceilings stay where
+ * they are on purpose: a ceiling only caps, and a generous cap is what keeps a
+ * mis-estimate from ending in an out-of-gas revert that charges the whole budget.
+ *
+ * ★ RE-MEASURE LIVE AFTER THE PENDING CONTRACT UPDATE ACTIVATES. The new code
+ * (cohort ledger, bounded lots) costs more per op; the Stage B table has dry-run
+ * figures for it, but the number that matters is what mainnet charges, read the
+ * same way as above (frozen credit before and after one real launch).
+ */
+export const RC_EXPECTED_BY_ACTION: Readonly<Record<string, number>> = Object.freeze({
+  register: 2_700,
+  createOffering: 3_200
+});
+
+/** The credit an action is expected to CHARGE, with the 25% margin; falls back to the declared ceiling for an action without a live measurement. */
+export function rcExpectedForAction(action: string): number {
+  const expected = RC_EXPECTED_BY_ACTION[action];
+  if (expected === undefined) return rcLimitForAction(action);
+  return Math.max(NODE_MIN_RC_LIMIT, Math.ceil(expected * RC_SAFETY_MARGIN));
 }
 
 export type RcBlocker = 'none' | 'not-enough-rc' | 'not-enough-balance';
@@ -409,8 +447,8 @@ export function describeRcBudget(budget: RcBudget, action: string): string | nul
  *                                              left once the first buy's HBD has
  *                                              left the balance mid transaction
  *   2. `firstBuy <= balance`, the first buy itself is paid in HBD
- * `rcNeeded` uses `rcLimitForAction` (the MEASURED worst case + 25%) per op, so
- * it is the conservative ceiling, never an estimate.
+ * `rcNeeded` uses `rcExpectedForAction` (what the chain CHARGES, live-anchored,
+ * + 25%) per op, not the declared ceilings, which only cap (see that function).
  *
  * ★ THE FULL RESERVATION IS CHECKED AGAINST CREDIT, NOT AGAINST THE HBD BALANCE
  * (2026-09-09, owner ruling after a creator with 9.121 HBD was told he was
@@ -443,7 +481,9 @@ export function checkLaunchRcBudget(input: {
   // zero priced offers), and max(1, …) keeps the sum honest even if a caller
   // passes 0. Whole ops only.
   const offerCount = Math.max(1, Math.floor(input.offerCount));
-  const rcNeeded = rcLimitForAction('register') + offerCount * rcLimitForAction('createOffering');
+  // What the ops will CHARGE (see rcExpectedForAction), not the ceilings the op
+  // payloads declare; those are sent as-is by the op builders and only cap.
+  const rcNeeded = rcExpectedForAction('register') + offerCount * rcExpectedForAction('createOffering');
   const firstBuy = Math.max(0, Math.floor(input.firstBuyHbdBaseUnits ?? 0));
 
   // Unknown never blocks — see the doc above.

@@ -123,7 +123,8 @@
     "error_first_buy_max": "Your first buy can be at most {{max}}.",
     "draft_restored": "Picked up your saved draft at step {{step}} of 3.",
     "draft_start_over": "Start over",
-    "error_launch_in_another_tab": "A launch is already running in another tab. Finish there. Launching twice would spend a second signature on a token you already have."
+    "error_launch_in_another_tab": "A launch is already running in another tab. Finish there. Launching twice would spend a second signature on a token you already have.",
+    "term_launch_value_covered": "Nothing is charged today. Your first month is included. The free transaction credit every Hive account gets covers this launch, so there is nothing to add."
   },
   "global": {
     "no_rewards": "No rewards pending redemption.",

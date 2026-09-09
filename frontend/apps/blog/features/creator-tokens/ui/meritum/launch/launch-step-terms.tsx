@@ -96,7 +96,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
   const { t } = useTranslation('common_blog');
 
   const terms = [
-    { id: 'launch', label: t('meritum_launch.term_launch_label'), value: t('meritum_launch.term_launch_value', { hbd: launchHoldHbd }) },
+    { id: 'launch', label: t('meritum_launch.term_launch_label'), value: (launchHoldHbd === '0.000' ? t('meritum_launch.term_launch_value_covered') : t('meritum_launch.term_launch_value', { hbd: launchHoldHbd })) },
     { id: 'listed', label: t('meritum_launch.term_listed_label'), value: t('meritum_launch.term_listed_value') },
     { id: 'cut', label: t('meritum_launch.term_cut_label'), value: t('meritum_launch.term_cut_value', { pct: commission }) },
     // ★ TRADING FEE disclosed here (owner, 2026-09-04). 10% on every curve buy
