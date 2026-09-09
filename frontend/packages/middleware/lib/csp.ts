@@ -138,6 +138,31 @@ function buildConnectSrcHosts(): Set<string> {
     } catch { /* invalid URL, skip */ }
   }
 
+  // ★★★ THE MAGI SDK SWAP WIDGET (2026-09-09), the one browser client that
+  // talks to the Magi node and the BTC mapping bot DIRECTLY. The wallet's Magi
+  // tab embeds `@vsc.eco/crosschain-widget` under everything (owner: "THE SDK.
+  // NOT HIS ITERATION OF IT"); the SDK dry-runs and rc-checks the swap against
+  // the node itself (crosschain-sdk packages/sdk/src/rc.ts:56-61, appending
+  // /api/v1/graphql to the configured base) and asks the mapping bot for a BTC
+  // deposit address (mappingBot.ts:33). Neither can be routed through the
+  // same-origin proxy: the proxy allowlists exact query strings and lives at a
+  // different path from the one the SDK appends. The 2026-08-11 reason for
+  // dropping the GQL host (no CORS header) no longer holds: on 2026-09-09
+  // api.vsc.eco answered the preflight with Access-Control-Allow-Origin: *
+  // (POST, content-type) and so did btc.magi.milohpr.com. Granted ONLY when the
+  // swap surface is provisioned, derived from the same vars the feature reads,
+  // so an unprovisioned deploy keeps today's tighter policy.
+  if (process.env.REACT_APP_MAGI_DEX_ROUTER_CONTRACT_ID) {
+    const gql = process.env.REACT_APP_CREATOR_TOKENS_GQL_URL;
+    if (gql) {
+      try {
+        hosts.add(new URL(gql).origin);
+      } catch { /* invalid URL, skip */ }
+    }
+    const netId = process.env.REACT_APP_CREATOR_TOKENS_NET_ID;
+    hosts.add(netId === 'vsc-testnet' ? 'https://btc.testnet.magi.milohpr.com' : 'https://btc.magi.milohpr.com');
+  }
+
   // ★★★ COINGECKO — the wallet's own price cards.
   //
   // Found by an exploratory UX tester 2026-08-06: /wallet renders "$1.000" as

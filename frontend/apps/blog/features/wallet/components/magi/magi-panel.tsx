@@ -18,6 +18,7 @@ import { displayHandle } from '@/blog/features/creator-tokens/live/adapt';
 import { useMagiAssets } from '../../hooks/use-magi-assets';
 import { useHiveMarketPrices } from '../../hooks/use-hive-market-prices';
 import MagiAccountCard from './magi-account-card';
+import MagiSdkSwap from './magi-sdk-swap';
 
 const SECONDARY_BUTTON_CLASS =
   'lm-press rounded-card border border-line-11 px-4 py-2 text-caption font-medium text-ink-7 transition-colors hover:bg-surface-16';
@@ -70,21 +71,27 @@ export default function MagiPanel() {
           </div>
         </div>
       ) : (
-        magi.accounts.map((entry) => (
-          <MagiAccountCard
-            key={entry.account.id}
-            entry={entry}
-            prices={prices ?? null}
-            btcUnavailable={magi.btcUnavailable}
-            ownLabel={
-              entry.account.kind === 'hive'
-                ? t('wallet.magi.account_hive', { name: displayHandle(entry.account.id) })
-                : entry.account.kind === 'evm'
-                  ? t('wallet.magi.account_evm')
-                  : t('wallet.magi.account_btc')
-            }
-          />
-        ))
+        <>
+          {magi.accounts.map((entry) => (
+            <MagiAccountCard
+              key={entry.account.id}
+              entry={entry}
+              prices={prices ?? null}
+              btcUnavailable={magi.btcUnavailable}
+              ownLabel={
+                entry.account.kind === 'hive'
+                  ? t('wallet.magi.account_hive', { name: displayHandle(entry.account.id) })
+                  : entry.account.kind === 'evm'
+                    ? t('wallet.magi.account_evm')
+                    : t('wallet.magi.account_btc')
+              }
+            />
+          ))}
+          {/* The Magi SDK's own swap widget, LAST: under the balances, under
+              Deposit, under the estimated value (owner: "PUT THE SDK UNDER
+              EVERYTHING in MAGI TAB. THE SDK. NOT HIS ITERATION OF IT."). */}
+          <MagiSdkSwap />
+        </>
       )}
     </div>
   );

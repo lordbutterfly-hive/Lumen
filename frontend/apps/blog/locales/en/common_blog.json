@@ -1620,8 +1620,6 @@
       "rows": {
         "hbd": "HBD",
         "hbd_sub": "Spendable on Magi. Also pays for sending.",
-        "shbd": "HBD savings",
-        "shbd_sub": "Stays transferable while it earns.",
         "hbd_unstaking": "HBD unstaking",
         "hbd_unstaking_sub": "Leaving savings.",
         "hive": "HIVE",
@@ -1637,11 +1635,7 @@
       "value_description": "USD value of everything this account holds on Magi.",
       "actions": {
         "deposit": "Deposit",
-        "deposit_btc": "Deposit BTC",
-        "swap": "Swap",
-        "swap_altera": "Swap on Altera",
         "send": "Send",
-        "receive": "Receive",
         "withdraw": "Withdraw"
       },
       "deposit": {
@@ -1652,42 +1646,6 @@
         "note": "Signed with your active key. It shows on Magi once the transfer is included, usually within a minute or two.",
         "success_title": "Deposit sent",
         "success_body": "{{amount}} {{currency}} is on its way to Magi."
-      },
-      "btc_deposit": {
-        "title": "Deposit Bitcoin",
-        "description": "Send BTC to this address from any Bitcoin wallet. It arrives on Magi as Bitcoin under this account.",
-        "loading": "Getting your deposit address…",
-        "failed": "Couldn’t get a deposit address just now.",
-        "retry": "Try again",
-        "address": "Your deposit address",
-        "copy": "Copy",
-        "copied": "Copied",
-        "testnet_note": "This is a Bitcoin testnet address. Send testnet BTC only.",
-        "only_btc": "Send only BTC to this address. It is yours to reuse.",
-        "confirmations": "Bitcoin confirmations take a while; the balance appears here once the mapping has seen the deposit."
-      },
-      "swap": {
-        "title": "Swap on Magi",
-        "description": "Trade between HIVE, HBD and BTC from your Magi balance, through the Magi pools. What you receive stays on Magi.",
-        "from": "From",
-        "to": "To",
-        "balance": "Balance on Magi: {{amount}} {{asset}}",
-        "slippage": "Max slippage",
-        "expected": "Expected",
-        "min_received": "Min received",
-        "fee": "Fee",
-        "route": "Route",
-        "same_asset": "Pick two different assets.",
-        "enter_amount": "Enter an amount to see a quote.",
-        "quote_loading": "Getting a quote…",
-        "quote_failed": "Couldn’t reach the Magi pools just now.",
-        "no_pool": "No pool for this pair right now.",
-        "sim_failed": "Magi refused the dry run: {{reason}}",
-        "not_enough_rc": "Not enough resource credits on Magi for this swap. Add about {{hbd}} HBD.",
-        "submit": "Swap",
-        "note": "Every swap is dry-run on Magi first and only sent if it would succeed. Signed with your active key.",
-        "success_title": "Swap sent",
-        "success_body": "{{amountIn}} {{assetIn}} for at least {{minOut}} {{assetOut}}. Transaction {{txId}}."
       },
       "phase": {
         "signing": "Waiting for your wallet to sign…",
@@ -1711,15 +1669,6 @@
         "unconfirmed_title": "Sent, not yet confirmed",
         "unconfirmed_body": "Magi accepted the transaction ({{id}}) but had not confirmed it when we stopped waiting. Check the balance before sending again."
       },
-      "receive": {
-        "title": "Receive on Magi",
-        "description": "Anyone on Magi can send HBD, HIVE or BTC to this address. It is your account id on Magi.",
-        "address": "Your Magi address",
-        "copy": "Copy",
-        "copied": "Copied",
-        "hive_hint": "To move funds from your Hive account onto Magi, use Deposit instead.",
-        "btc_hint": "To bring in Bitcoin from a Bitcoin wallet, use Deposit BTC."
-      },
       "withdraw": {
         "title": "Withdraw from Magi",
         "description": "Moves HBD or HIVE from this Magi account to a Hive account, or Bitcoin to a Bitcoin address. Paid out by the Magi gateway after the transaction is anchored.",
@@ -1733,12 +1682,20 @@
         "note_btc": "The bridge pays the Bitcoin network fee from the amount. Small withdrawals may not cover it.",
         "success_title": "Withdrawal sent",
         "success_body": "{{amount}} {{asset}} is on its way to {{to}}. Transaction {{id}}."
+      },
+      "sdk": {
+        "title": "Swap",
+        "badge": "Magi SDK",
+        "description": "The Magi SDK’s own swap: HIVE, HBD and BTC, mainnet to mainnet, routed through Magi. Signed with your Hive active key.",
+        "wallet_note": "The Magi SDK signs swaps with a Hive account. With a wallet login you can still use the Bitcoin route: pick BTC as the asset you pay with and the SDK gives you a deposit address.",
+        "unavailable": "Swapping isn’t available on this build yet.",
+        "success_title": "Swap sent",
+        "success_body": "Transaction {{txId}}. Balances refresh once Magi confirms it."
       }
     },
     "meritum": {
       "masthead_meta": "Your Meritum tokens: what you hold, the asks you have made, and your own token if you launched one.",
       "discover": "Discover creators",
-      "launch": "Launch your Meritum",
       "own_title": "Your Meritum",
       "own_price": "Price",
       "studio": "Studio"

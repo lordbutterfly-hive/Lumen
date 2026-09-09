@@ -5,9 +5,17 @@
  * card shows (altera-app/src/lib/AccBalance.svelte:50-132), in the wallet's own
  * card grammar (hive-token-card.tsx, savings-slot-card.tsx's chip).
  *
- * Rows: HBD, HBD savings (sHBD), [HBD unstaking], HIVE, [Staked HIVE],
- * [HIVE unstaking], Bitcoin. Bracketed rows appear only when non-zero, as in
- * Altera. Amounts are base-unit integers formatted at the edge (3 decimals for
+ * Rows: HBD, [HBD unstaking], HIVE, [Staked HIVE], [HIVE unstaking], Bitcoin.
+ * Bracketed rows appear only when non-zero, as in Altera. The "HBD savings"
+ * (sHBD) row and the fuel-gauge strip under the estimated value were CUT on
+ * 2026-09-09 (owner: "cut HBD savings SHBD inside the same tab", "12.655 HBD
+ * on Magi ... Available to spend on Meritum ... cut it. we already have HBD
+ * there above"). ★ The sHBD balance is STILL COUNTED in "Estimated value on
+ * Magi": that card's caption promises the USD value of everything the account
+ * holds, and the account does hold its savings; hiding a row must not shrink
+ * a truthful total. Consequence, stated: the tab no longer shows a Magi
+ * savings balance anywhere, and the total can exceed the sum of the rows by
+ * that amount. Amounts are base-unit integers formatted at the edge (3 decimals for
  * HIVE/HBD, 8 for BTC); nothing is put through a float before display.
  *
  * ★ A FAILED READ SAYS "COULDN'T CHECK" AND HIDES THE FIGURES. Never zeros
@@ -15,30 +23,31 @@
  * deposit control right there.
  *
  * ★ EVERY LOGIN GETS THE SAME CONTROLS (owner, 2026-09-08: "BTC and EVM login
- * are all equal to Keychain"). Send pills on the HBD, HIVE and Bitcoin rows,
- * Receive / Withdraw / Swap in the header, for a Hive account and for a wallet
- * DID alike; only what SIGNS differs (lib/magi-rails.ts). Deposit from Hive is
- * the one Hive-only action, because it spends from a Hive L1 balance.
+ * are all equal to Keychain"). Send pills on the HBD, HIVE and Bitcoin rows and
+ * Withdraw in the header, for a Hive account and for a wallet DID alike; only
+ * what SIGNS differs (lib/magi-rails.ts). Deposit from Hive is the one Hive-only
+ * action, because it spends from a Hive L1 balance.
+ *
+ * ★ CUT ON 2026-09-09, INSIDE THE WALLET ONLY (owner: "CUT only this in wallet.
+ * nothign outside the wallet: 1. receive, 2. deposit BTC, ... 5. swap. 6. PUT THE
+ * SDK UNDER EVERYTHING in MAGI TAB. THE SDK. NOT HIS ITERATION OF IT."): the
+ * Receive dialog, the Deposit BTC control and the Swap pill/dialog are gone from
+ * this card. The Bitcoin ROW stays with its Send pill (holding BTC on Magi is not
+ * the retired deposit control). Swapping is the Magi SDK's own widget, embedded
+ * under everything on the tab (magi-sdk-swap.tsx).
  */
 import type { ComponentProps, ReactNode } from 'react';
 import Big from 'big.js';
 import { useTranslation } from '@/blog/i18n/client';
-import { MagiFuelGauge } from '@/blog/features/creator-tokens/live/magi-fuel-gauge';
-import { MAGI_MIN_RC_FOR_A_CALL, type MagiSpendingPowerState } from '@/blog/features/creator-tokens/live/use-magi-spending-power';
-import { toMagiAccountId } from '@/blog/lib/lite/wallet/magi-assets';
 import { formatSats } from '@/blog/lib/lite/wallet/magi-btc-balance';
 import type { MagiAccountAssets } from '../../hooks/use-magi-assets';
 import type { HiveMarketPrices } from '../../hooks/use-hive-market-prices';
 import { formatTokenAmount, formatUsd } from '../../lib/format-amount';
 import TokenIcon, { type TokenIconCurrency } from '../token-icon';
 import type MagiDepositDialogComponent from '../dialogs/magi-deposit-dialog';
-import type MagiBtcDepositDialogComponent from '../dialogs/magi-btc-deposit-dialog';
-import type MagiSwapDialogComponent from '../dialogs/magi-swap-dialog';
 import type MagiSendDialogComponent from '../dialogs/magi-send-dialog';
-import type MagiReceiveDialogComponent from '../dialogs/magi-receive-dialog';
 import type MagiWithdrawDialogComponent from '../dialogs/magi-withdraw-dialog';
 import { lazyWalletDialog } from '../dialogs/shared/lazy-wallet-dialog';
-import { isMagiSwapConfigured } from '../../lib/magi-swap-config';
 import { isMagiL1Configured } from '../../lib/magi-l1-broadcast';
 
 // ★ LAZY, like every wallet dialog (T3g, 2026-09-04): the form/mutation stack
@@ -46,17 +55,8 @@ import { isMagiL1Configured } from '../../lib/magi-l1-broadcast';
 const MagiDepositDialog = lazyWalletDialog<ComponentProps<typeof MagiDepositDialogComponent>>(
   () => import('../dialogs/magi-deposit-dialog')
 );
-const MagiBtcDepositDialog = lazyWalletDialog<ComponentProps<typeof MagiBtcDepositDialogComponent>>(
-  () => import('../dialogs/magi-btc-deposit-dialog')
-);
-const MagiSwapDialog = lazyWalletDialog<ComponentProps<typeof MagiSwapDialogComponent>>(
-  () => import('../dialogs/magi-swap-dialog')
-);
 const MagiSendDialog = lazyWalletDialog<ComponentProps<typeof MagiSendDialogComponent>>(
   () => import('../dialogs/magi-send-dialog')
-);
-const MagiReceiveDialog = lazyWalletDialog<ComponentProps<typeof MagiReceiveDialogComponent>>(
-  () => import('../dialogs/magi-receive-dialog')
 );
 const MagiWithdrawDialog = lazyWalletDialog<ComponentProps<typeof MagiWithdrawDialogComponent>>(
   () => import('../dialogs/magi-withdraw-dialog')
@@ -138,7 +138,6 @@ export default function MagiAccountCard({
 }) {
   const { t } = useTranslation('common_blog');
   const { account, assets, assetsLoading, assetsFailed, btcSats, btcLoading, btcFailed } = entry;
-  const accountId = toMagiAccountId(account.id);
   const isHive = account.kind === 'hive';
   // What signs: a Hive login needs the Magi L1 chain configured; a wallet login signs with its wallet.
   const canSign = isHive ? isMagiL1Configured() : account.canSign;
@@ -162,24 +161,6 @@ export default function MagiAccountCard({
 
   const usdOf = (amount: Big, price: number | null | undefined): string | null =>
     typeof price === 'number' && price > 0 ? formatUsd(amount.toNumber() * price) : null;
-
-  // The fuel gauge is the creator-tokens component, fed from THIS read so the
-  // tab makes no second balance request for it.
-  const fuelState: MagiSpendingPowerState = {
-    power: assets
-      ? {
-          balance: { account: accountId, hbdBaseUnits: assets.hbdBaseUnits, blockHeight: assets.blockHeight },
-          rc: { account: accountId, amount: assets.rc.amount, maxRcs: assets.rc.maxRcs },
-          cannotTransact: assets.rc.amount <= 0
-        }
-      : null,
-    isLoading: assetsLoading,
-    failed: assetsFailed,
-    unavailable: false,
-    cannotTransact: assets !== null && assets.rc.amount < MAGI_MIN_RC_FOR_A_CALL,
-    affordability: () => 'unknown',
-    remedy: () => null
-  };
 
   let total: Big | null = null;
   if (assets && prices) {
@@ -223,8 +204,8 @@ export default function MagiAccountCard({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {/* A Hive login signs Hive L1 transactions on the chain the Magi
-              network reads; without that chain configured, Deposit / Withdraw /
-              Swap are not offered to it (never a fallback to the app default
+              network reads; without that chain configured, Deposit and Withdraw
+              are not offered to it (never a fallback to the app default
               chain, see lib/magi-l1-broadcast.ts). A wallet login signs Magi
               containers with its wallet and needs no L1 chain. */}
           {isHive && isMagiL1Configured() ? (
@@ -237,14 +218,6 @@ export default function MagiAccountCard({
               }
             />
           ) : null}
-          <MagiReceiveDialog
-            account={account}
-            trigger={
-              <button type="button" className={isHive ? SECONDARY_BUTTON_CLASS : PRIMARY_BUTTON_CLASS} data-testid="wallet-magi-receive-button">
-                {t('wallet.magi.actions.receive')}
-              </button>
-            }
-          />
           {canSign ? (
             <MagiWithdrawDialog
               account={account}
@@ -256,24 +229,6 @@ export default function MagiAccountCard({
               }
             />
           ) : null}
-          {canSign && isMagiSwapConfigured() ? (
-            <MagiSwapDialog
-              account={account}
-              trigger={
-                <button type="button" className={SECONDARY_BUTTON_CLASS} data-testid="wallet-magi-swap-button">
-                  {t('wallet.magi.actions.swap')}
-                </button>
-              }
-            />
-          ) : null}
-          <MagiBtcDepositDialog
-            account={accountId}
-            trigger={
-              <button type="button" className={SECONDARY_BUTTON_CLASS} data-testid="wallet-magi-btc-deposit-button">
-                {t('wallet.magi.actions.deposit_btc')}
-              </button>
-            }
-          />
         </div>
       </div>
 
@@ -298,17 +253,6 @@ export default function MagiAccountCard({
               usd={usdOf(units(assets.hbdBaseUnits), prices?.hbdUsd)}
               testId="wallet-magi-row-hbd"
               action={sendPill('HBD', hbdBalance)}
-            />
-            <Row
-              icon="HBD"
-              name={t('wallet.magi.rows.shbd')}
-              chip="sHBD"
-              chipTone="green"
-              description={t('wallet.magi.rows.shbd_sub')}
-              amount={formatTokenAmount(units(assets.hbdSavingsBaseUnits))}
-              unit="HBD"
-              usd={usdOf(units(assets.hbdSavingsBaseUnits), prices?.hbdUsd)}
-              testId="wallet-magi-row-shbd"
             />
             {assets.hbdUnstakingBaseUnits !== 0 ? (
               <Row
@@ -389,7 +333,6 @@ export default function MagiAccountCard({
             </div>
           </>
         )}
-        <MagiFuelGauge state={fuelState} kind={account.kind} className="mt-4 border-t border-line-2 pt-4" />
       </div>
     </div>
   );

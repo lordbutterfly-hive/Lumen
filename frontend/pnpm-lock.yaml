@@ -179,6 +179,9 @@ importers:
       '@vsc.eco/crosschain-sdk':
         specifier: 0.0.3
         version: 0.0.3
+      '@vsc.eco/crosschain-widget':
+        specifier: 0.0.3
+        version: 0.0.3(react-dom@18.3.0(react@18.3.0))(react@18.3.0)
       big.js:
         specifier: ^6.2.1
         version: 6.2.2
@@ -372,7 +375,7 @@ importers:
         version: 8.57.1
       eslint-config-next:
         specifier: latest
-        version: 16.3.1(@typescript-eslint/parser@8.49.0(eslint@8.57.1)(typescript@5.5.3))(eslint@8.57.1)(typescript@5.5.3)
+        version: 16.3.4(@typescript-eslint/parser@8.49.0(eslint@8.57.1)(typescript@5.5.3))(eslint@8.57.1)(typescript@5.5.3)
       eslint-config-prettier:
         specifier: latest
         version: 10.1.8(eslint@8.57.1)
@@ -381,7 +384,7 @@ importers:
         version: 7.37.5(eslint@8.57.1)
       eslint-plugin-turbo:
         specifier: latest
-        version: 2.10.11(eslint@8.57.1)(turbo@2.3.3)
+        version: 2.10.12(eslint@8.57.1)(turbo@2.3.3)
     devDependencies:
       '@typescript-eslint/eslint-plugin':
         specifier: 7.15.0
@@ -2127,8 +2130,8 @@ packages:
   '@next/env@14.2.23':
     resolution: {integrity: sha512-CysUC9IO+2Bh0omJ3qrb47S8DtsTKbFidGm6ow4gXIG6reZybqxbkH2nhdEm1tC8SmgzDdpq3BIML0PWsmyUYA==}
 
-  '@next/eslint-plugin-next@16.3.1':
-    resolution: {integrity: sha512-B4SznlXwVpaLDa7Tbi6zLuueria2d/PmFDhXyDymPGrk2r1n/RMJmcn5FZq1L64k+Jsyte1lKvOr7lP9Xo80mQ==}
+  '@next/eslint-plugin-next@16.3.4':
+    resolution: {integrity: sha512-szW9y2Aumu4z88YXfTzcFsgUAg2k64uzbtcO5L9f1AKS4w/GUKJcbFllRflROVyNPgJtGOnvNxiyp3v6b+prIA==}
 
   '@next/swc-darwin-arm64@14.2.23':
     resolution: {integrity: sha512-WhtEntt6NcbABA8ypEoFd3uzq5iAnrl9AnZt9dXdO+PZLACE32z3a3qA5OoV20JrbJfSJ6Sd6EqGZTrlRnGxQQ==}
@@ -2554,6 +2557,15 @@ packages:
     resolution: {integrity: sha512-QcuYy25pkXM8BJ37wVFBO7Zh34nyRV1GOb2n3lPkkbRYfl4hWl3PTcImP41P0KrzVXfa/45p6eVCos27x3exIg==}
     peerDependencies:
       '@opentelemetry/api': ^1.8
+
+  '@r2wc/core@1.3.1':
+    resolution: {integrity: sha512-x9nMthXsTjqr1alE+boX1Zuzqb6/oFi4wAOdWaWcWKcrwq9M/PATK74c3DFJfRnUOkYWPlsz0e4CsFBXJGStSA==}
+
+  '@r2wc/react-to-web-component@2.1.1':
+    resolution: {integrity: sha512-AXsIdjxK9ALv0ySWjVadUg3uJ5nS8L4H8eZMYaaWuM+9LNj9DP/r4+sMjI+6jZwb7/FqwxRPHQUq8yimQwBfOA==}
+    peerDependencies:
+      react: ^18.0.0 || ^19.0.0
+      react-dom: ^18.0.0 || ^19.0.0
 
   '@radix-ui/number@1.0.1':
     resolution: {integrity: sha512-T5gIdVO2mmPW3NNhjNgEP3cqMXjXL9UbO0BzWcXfvdBs+BohbQxvd/K5hSVKmn9/lbTdsQVKbUcP5WLCwvUbBg==}
@@ -4711,6 +4723,16 @@ packages:
       '@aioha/aioha':
         optional: true
 
+  '@vsc.eco/crosschain-widget@0.0.3':
+    resolution: {integrity: sha512-qCNstfSowb8UqD7+3vlyWJaAq7gD0B+EveFpF/dp9YMetidIpynYHo7A6tE5ceDYSGHFIy5EO6HSB7X8Andh/g==}
+    peerDependencies:
+      '@aioha/aioha': ^1.8.0
+      react: '>=18.0.0'
+      react-dom: '>=18.0.0'
+    peerDependenciesMeta:
+      '@aioha/aioha':
+        optional: true
+
   '@wallet-standard/app@1.1.0':
     resolution: {integrity: sha512-3CijvrO9utx598kjr45hTbbeeykQrQfKmSnxeWOgU25TOEpvcipD/bYDQWIqUv1Oc6KK4YStokSMu/FBNecGUQ==}
     engines: {node: '>=16'}
@@ -6305,8 +6327,8 @@ packages:
     engines: {node: '>=6.0'}
     hasBin: true
 
-  eslint-config-next@16.3.1:
-    resolution: {integrity: sha512-0vtrpwFVHFEkycUgV/DyrG29OS+HSRdah5Yu8YuZoiBMtlAT6NIiWzaLwDkJZxr2kGfx+9LIvfQ7KHAlEs0VsA==}
+  eslint-config-next@16.3.4:
+    resolution: {integrity: sha512-35/8RM10huEL9vlr8hUZMERMENHBrnyHN3ZZkF9efSgzGaqK34jIqry44A956//zriUhUAUW0XSkcolhrryqAA==}
     peerDependencies:
       eslint: '>=9.0.0'
       typescript: '>=3.3.1'
@@ -6453,8 +6475,8 @@ packages:
   eslint-plugin-security@1.7.1:
     resolution: {integrity: sha512-sMStceig8AFglhhT2LqlU5r+/fn9OwsA72O5bBuQVTssPCdQAOQzL+oMn/ZcpeUY6KcNfLJArgcrsSULNjYYdQ==}
 
-  eslint-plugin-turbo@2.10.11:
-    resolution: {integrity: sha512-O8EyyiHpP6sMYVweD1Ix+l9ub21rW3NYE+/VPSuhm2WhPW3AF6mOdlkuJofHA2RMHt6zR3zoiUA4AF15dQPHNA==}
+  eslint-plugin-turbo@2.10.12:
+    resolution: {integrity: sha512-QZ9u3sV3ky4bl3XUpsVG8Ehk11I0omsGV2K7dCDut6sGvaVErFvWbgd46oh5tsnLt/5i+KvuOWgKJneleMqk2Q==}
     peerDependencies:
       eslint: '>6.6.0'
       turbo: '>2.0.0'
@@ -13062,7 +13084,7 @@ snapshots:
 
   '@next/env@14.2.23': {}
 
-  '@next/eslint-plugin-next@16.3.1(eslint@8.57.1)':
+  '@next/eslint-plugin-next@16.3.4(eslint@8.57.1)':
     dependencies:
       '@eslint-community/eslint-utils': 4.9.1(eslint@8.57.1)
       fast-glob: 3.3.1
@@ -13570,6 +13592,14 @@ snapshots:
       '@opentelemetry/instrumentation': 0.208.0(@opentelemetry/api@1.9.0)
     transitivePeerDependencies:
       - supports-color
+
+  '@r2wc/core@1.3.1': {}
+
+  '@r2wc/react-to-web-component@2.1.1(react-dom@18.3.0(react@18.3.0))(react@18.3.0)':
+    dependencies:
+      '@r2wc/core': 1.3.1
+      react: 18.3.0
+      react-dom: 18.3.0(react@18.3.0)
 
   '@radix-ui/number@1.0.1':
     dependencies:
@@ -16515,7 +16545,7 @@ snapshots:
 
   '@typescript-eslint/utils@8.46.2(eslint@8.57.1)(typescript@5.5.3)':
     dependencies:
-      '@eslint-community/eslint-utils': 4.9.0(eslint@8.57.1)
+      '@eslint-community/eslint-utils': 4.9.1(eslint@8.57.1)
       '@typescript-eslint/scope-manager': 8.46.2
       '@typescript-eslint/types': 8.46.2
       '@typescript-eslint/typescript-estree': 8.46.2(typescript@5.5.3)
@@ -16551,6 +16581,15 @@ snapshots:
   '@vsc.eco/crosschain-sdk@0.0.3':
     dependencies:
       '@vsc.eco/crosschain-core': 0.0.3
+
+  '@vsc.eco/crosschain-widget@0.0.3(react-dom@18.3.0(react@18.3.0))(react@18.3.0)':
+    dependencies:
+      '@r2wc/react-to-web-component': 2.1.1(react-dom@18.3.0(react@18.3.0))(react@18.3.0)
+      '@vsc.eco/crosschain-core': 0.0.3
+      '@vsc.eco/crosschain-sdk': 0.0.3
+      bitcoin-address-validation: 2.2.3
+      react: 18.3.0
+      react-dom: 18.3.0(react@18.3.0)
 
   '@wallet-standard/app@1.1.0':
     dependencies:
@@ -18527,9 +18566,9 @@ snapshots:
     optionalDependencies:
       source-map: 0.6.1
 
-  eslint-config-next@16.3.1(@typescript-eslint/parser@8.49.0(eslint@8.57.1)(typescript@5.5.3))(eslint@8.57.1)(typescript@5.5.3):
+  eslint-config-next@16.3.4(@typescript-eslint/parser@8.49.0(eslint@8.57.1)(typescript@5.5.3))(eslint@8.57.1)(typescript@5.5.3):
     dependencies:
-      '@next/eslint-plugin-next': 16.3.1(eslint@8.57.1)
+      '@next/eslint-plugin-next': 16.3.4(eslint@8.57.1)
       eslint: 8.57.1
       eslint-import-resolver-node: 0.3.9
       eslint-import-resolver-typescript: 3.7.0(eslint-plugin-import@2.32.0)(eslint@8.57.1)
@@ -18761,7 +18800,7 @@ snapshots:
     dependencies:
       safe-regex: 2.1.1
 
-  eslint-plugin-turbo@2.10.11(eslint@8.57.1)(turbo@2.3.3):
+  eslint-plugin-turbo@2.10.12(eslint@8.57.1)(turbo@2.3.3):
     dependencies:
       dotenv: 16.0.3
       eslint: 8.57.1

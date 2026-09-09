@@ -1,4 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+/**
+ * ★ REMAINING CALLER (2026-09-09): the "Deposit BTC" dialog this route was built
+ * for is gone (owner: "CUT only this in wallet... 2. deposit BTC"). The route
+ * stays because the BTC WITHDRAW dialog still asks it for the account's own
+ * bridge deposit address, to refuse a withdrawal to that address (Altera's
+ * assertBtcRecipientAllowed: coins sent there return to the vault). That guard
+ * is a no-op when this route cannot answer, so a down bot never blocks a
+ * withdrawal; it only removes one safety net. Limiters still run before the
+ * session lookup (security review L3).
+ */
 import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
 import { getLogger } from '@ui/lib/logging';
 import { getServerSessionUser } from '@/blog/lib/server-session';

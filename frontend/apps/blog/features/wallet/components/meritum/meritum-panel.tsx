@@ -27,8 +27,6 @@ import { usdPrice } from '@/blog/features/creator-tokens/market/format';
 
 const SECONDARY_BUTTON_CLASS =
   'lm-press rounded-card border border-line-11 px-4 py-2 text-caption font-medium text-ink-7 transition-colors hover:bg-surface-16';
-const PRIMARY_BUTTON_CLASS =
-  'rounded-card bg-surface-brand-12 px-4 py-2 text-caption font-medium text-ink-27 transition-colors hover:bg-surface-brand-17';
 
 export default function MeritumPanel() {
   const { t } = useTranslation('common_blog');
@@ -53,11 +51,6 @@ export default function MeritumPanel() {
             <Link href="/creators" className={SECONDARY_BUTTON_CLASS} data-testid="wallet-meritum-discover-link">
               {t('wallet.meritum.discover')} →
             </Link>
-            {chip.status === 'none' ? (
-              <Link href="/creators" className={PRIMARY_BUTTON_CLASS} data-testid="wallet-meritum-launch-link">
-                {t('wallet.meritum.launch')}
-              </Link>
-            ) : null}
           </>
         }
       >
