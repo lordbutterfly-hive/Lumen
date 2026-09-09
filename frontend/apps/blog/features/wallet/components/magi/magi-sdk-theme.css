@@ -165,3 +165,38 @@
     font-size: 1.05rem;
   }
 }
+
+/*
+ * OWNER REQUEST 2026-09-09: compress the whole widget by 30%.
+ *
+ * After the full-width change above the widget reads too large in the Magi
+ * tab. This shrinks EVERYTHING uniformly -- type, padding, controls, the card
+ * itself -- rather than re-tuning the ladder above declaration by declaration.
+ *
+ * `zoom` rather than `transform: scale()` on purpose: zoom reflows layout, so
+ * the surrounding card collapses to the new height and leaves no empty box
+ * behind, and it does not resample text the way a transform can. It also
+ * reaches the SDK's own unoverridden styles, which a rem ladder here cannot:
+ * `rem` resolves against the document root, not this element, which is exactly
+ * why the block above has to override each declaration individually.
+ *
+ * Centred because at 70% it no longer fills the column. To revert, delete this
+ * block; nothing above depends on it.
+ */
+[data-testid='wallet-magi-sdk-widget'] .magi-quickswap {
+  zoom: 0.7;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/*
+ * Fallback for engines without `zoom` (older Firefox). `transform` needs the
+ * height compensated by hand, since a transform does not reflow.
+ */
+@supports not (zoom: 1) {
+  [data-testid='wallet-magi-sdk-widget'] .magi-quickswap {
+    transform: scale(0.7);
+    transform-origin: top center;
+    margin-bottom: -30%;
+  }
+}
