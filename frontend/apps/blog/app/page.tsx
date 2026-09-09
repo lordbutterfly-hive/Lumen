@@ -1,4 +1,30 @@
 import HomeShell from '@/blog/features/discovery-feed/home-shell';
+import type { Metadata } from 'next';
+
+// The same words as app/layout.tsx's SITE_DESC (not exported there), kept
+// identical so the home page reads as the same site as every other page.
+const SITE_DESC =
+  'A calmer place to read and write. Read what is worth your time. Write without chasing an audience.';
+
+/**
+ * ★ THE HOME PAGE NAMES ITS OWN ADDRESS (2026-09-09). The root layout's Open
+ * Graph block carries no `url` and no canonical, so an unfurler had nothing to
+ * key the card on. Declared here on the page, not the layout, because
+ * `alternates` and `openGraph` are replaced wholesale by whichever segment
+ * defines them last: a canonical of `/` on the layout would have leaked onto
+ * every route without one of its own.
+ */
+export const metadata: Metadata = {
+  alternates: { canonical: '/' },
+  openGraph: {
+    type: 'website',
+    url: '/',
+    siteName: 'Lumen',
+    title: 'Lumen',
+    description: SITE_DESC,
+    images: ['/lumen/og-plain.png']
+  }
+};
 import { InitialFeedProvider } from '@/blog/components/observer-provider';
 import { prefetchHomeFeed, newHomeFeedTrace } from '@/blog/lib/feed/feed-prefetch';
 import { renderTimer, renderTimingEnabled } from '@ui/lib/render-timing';

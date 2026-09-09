@@ -80,7 +80,7 @@ export default async function WalletPage({
 
   return (
     <WalletSummaryProvider value={seed}>
-      <WalletShell initialTab={initialTab} />
+      <WalletShell initialTab={initialTab} fallbackTab={defaultWalletTab(session.accountTier)} />
     </WalletSummaryProvider>
   );
 }

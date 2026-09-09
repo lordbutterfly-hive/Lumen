@@ -855,6 +855,15 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       // replayed one would be stale the moment anything moved.
       const rows = await this.indexer.balancesOf(toDid(holder));
       const results = await Promise.all(rows.map((r) => this.readHolderPosition(r.creator, holder).catch(() => null)));
+      // ★ A FAILED READ IS NOT AN EMPTY WALLET (2026-09-09, found by the public
+      // wallet's visual pass). The indexer listed positions but every contract
+      // read of them failed (node down, proxy rate limited): the old code
+      // filtered the nulls away and answered `unavailable: false` with no
+      // positions, and both wallets then said "doesn't hold any Meritum yet" for
+      // an account that does. A null here only ever comes from the catch above,
+      // so all null with rows present means the read failed, not that nothing
+      // is held. A real zero position resolves and is dropped by `tokensHeld > 0`.
+      if (rows.length > 0 && results.every((p) => p === null)) return { positions: [], unavailable: true };
       return { positions: results.filter((p): p is HolderPosition => p !== null && p.tokensHeld > 0), unavailable: false };
     } catch {
       return { positions: [], unavailable: true };

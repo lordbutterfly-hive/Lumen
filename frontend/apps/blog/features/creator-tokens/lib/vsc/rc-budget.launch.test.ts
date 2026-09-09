@@ -4,10 +4,13 @@
  *     '{"module":"commonjs","moduleResolution":"node"}' features/creator-tokens/lib/vsc/rc-budget.launch.test.ts
  *
  * The launch is one ATOMIC transaction whose ops charge RC cumulatively, so the
- * gate must cover the SUM (register + N x createOffering) against available RC,
- * then that sum + the first-buy HBD against balance. These pin the boundaries:
- * 1/2/3 offers, exact-RC, exact-balance, off-by-one on each side, the first-buy
- * leg, and — the safety property — unknown power NEVER blocks (like Buy).
+ * gate must cover the SUM (register + N x createOffering) against the credit
+ * left after the first buy, then the first-buy HBD against balance (2026-09-09:
+ * the balance is no longer asked to back the reservation, the node reserves
+ * against credit, which for a Hive account includes 10,000 free). These pin the
+ * boundaries: 1/2/3 offers, exact credit, exact first-buy balance, off-by-one on
+ * each side, the first-buy leg, the reported Hive-account case, and, the safety
+ * property, unknown power NEVER blocks (like Buy).
  */
 import { checkLaunchRcBudget, describeLaunchRcBudget, rcLimitForAction } from './rc-budget';
 
@@ -55,27 +58,46 @@ check('0 offers is floored to 1 (a launch always carries at least one offering)'
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BALANCE boundary WITH the first-buy leg: balance must cover rcNeeded + firstBuy.
-// (RC ample so only the balance condition is under test.)
+// THE FIRST-BUY LEG: credit must cover rcNeeded AFTER the first buy leaves the
+// balance, and the balance must cover the first buy itself. The balance is NOT
+// asked to back the reservation (that is what credit is for).
 // ─────────────────────────────────────────────────────────────────────────────
 {
   const rcNeeded = need(1);
   const firstBuy = 40_000; // 40 HBD first-buy leg, base units
-  const rcAmple = rcNeeded + 1_000_000;
-  const exactBal = checkLaunchRcBudget({ offerCount: 1, availableRc: rcAmple, balanceBaseUnits: rcNeeded + firstBuy, firstBuyHbdBaseUnits: firstBuy });
-  check('exact-balance (rcNeeded + firstBuy) -> ok', exactBal.ok && exactBal.blocker === 'none');
+  const exactCredit = checkLaunchRcBudget({ offerCount: 1, availableRc: rcNeeded + firstBuy, balanceBaseUnits: firstBuy, firstBuyHbdBaseUnits: firstBuy });
+  check('exact credit (rcNeeded + firstBuy) with balance == firstBuy -> ok', exactCredit.ok && exactCredit.blocker === 'none');
 
-  const belowBal = checkLaunchRcBudget({ offerCount: 1, availableRc: rcAmple, balanceBaseUnits: rcNeeded + firstBuy - 1, firstBuyHbdBaseUnits: firstBuy });
-  check('one below (rcNeeded + firstBuy) -> not-enough-balance', !belowBal.ok && belowBal.blocker === 'not-enough-balance');
+  const belowCredit = checkLaunchRcBudget({ offerCount: 1, availableRc: rcNeeded + firstBuy - 1, balanceBaseUnits: firstBuy, firstBuyHbdBaseUnits: firstBuy });
+  check('one credit below (rcNeeded + firstBuy) -> not-enough-rc', !belowCredit.ok && belowCredit.blocker === 'not-enough-rc');
+  check('not-enough-rc shortfall with a first buy is exactly the gap', belowCredit.addBaseUnits === 1);
+
+  const rcAmple = rcNeeded + 1_000_000;
+  const belowBal = checkLaunchRcBudget({ offerCount: 1, availableRc: rcAmple, balanceBaseUnits: firstBuy - 1, firstBuyHbdBaseUnits: firstBuy });
+  check('balance one below the first buy -> not-enough-balance', !belowBal.ok && belowBal.blocker === 'not-enough-balance');
   check('not-enough-balance shortfall is exactly the gap', belowBal.addBaseUnits === 1);
 
-  // The first-buy leg genuinely moves the balance requirement: the SAME balance
-  // that is enough with no first buy is short once a first buy is added.
-  const enoughNoBuy = checkLaunchRcBudget({ offerCount: 1, availableRc: rcAmple, balanceBaseUnits: rcNeeded, firstBuyHbdBaseUnits: 0 });
-  const shortWithBuy = checkLaunchRcBudget({ offerCount: 1, availableRc: rcAmple, balanceBaseUnits: rcNeeded, firstBuyHbdBaseUnits: firstBuy });
-  check('balance == rcNeeded is ok with no first buy', enoughNoBuy.ok);
-  check('same balance is short once a first buy is added', !shortWithBuy.ok && shortWithBuy.blocker === 'not-enough-balance');
-  check('the added shortfall equals the first-buy leg', shortWithBuy.addBaseUnits === firstBuy);
+  // The first-buy leg genuinely moves the balance requirement: a balance that is
+  // enough with no first buy is short once a first buy bigger than it is added.
+  const enoughNoBuy = checkLaunchRcBudget({ offerCount: 1, availableRc: rcAmple, balanceBaseUnits: 1_000, firstBuyHbdBaseUnits: 0 });
+  const shortWithBuy = checkLaunchRcBudget({ offerCount: 1, availableRc: rcAmple, balanceBaseUnits: 1_000, firstBuyHbdBaseUnits: firstBuy });
+  check('a small balance is ok with no first buy', enoughNoBuy.ok);
+  check('the same balance is short once a first buy is added', !shortWithBuy.ok && shortWithBuy.blocker === 'not-enough-balance');
+  check('the shortfall equals the first buy minus the balance', shortWithBuy.addBaseUnits === firstBuy - 1_000);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE REPORTED CASE (2026-09-09): a Hive account holding 9.121 HBD on Magi with
+// 17,351 credits (balance + 10,000 free, 1,770 frozen) launching one offer with
+// no first buy. The chain reserves 16,941; the old gate demanded the HBD balance
+// alone cover it and said "7.820 HBD short".
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const reported = checkLaunchRcBudget({ offerCount: 1, availableRc: 17_351, balanceBaseUnits: 9_121, firstBuyHbdBaseUnits: 0 });
+  check('reported Hive account (17,351 credits, 9.121 HBD, no first buy) -> ok', reported.ok && reported.blocker === 'none');
+  check('reported case reserves register + 1 offering', reported.rcLimit === need(1));
+  const walletDid = checkLaunchRcBudget({ offerCount: 1, availableRc: 9_121, balanceBaseUnits: 9_121, firstBuyHbdBaseUnits: 0 });
+  check('a wallet DID with the same 9.121 HBD (no free credits) -> not-enough-rc', !walletDid.ok && walletDid.blocker === 'not-enough-rc');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

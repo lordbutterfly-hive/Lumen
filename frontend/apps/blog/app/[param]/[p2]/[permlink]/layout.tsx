@@ -224,10 +224,18 @@ export async function generateMetadata({
     const image =
       post?.json_metadata?.image?.[0] || post?.json_metadata?.images?.[0] || generatedCard;
 
+    // ★ ONE ADDRESS PER POST (2026-09-09). A post is reachable at the category
+    // form and at the short `/@author/permlink` form, which redirects to it,
+    // and the page declared no canonical and no og:url, so an unfurler could
+    // treat the two as two pages. Both now name the category form.
+    const postPath = `/${post?.category || params.param}/@${author}/${permlink}`;
     return {
       title,
       description,
+      alternates: { canonical: postPath },
       openGraph: {
+        type: 'article',
+        url: postPath,
         title,
         description,
         images: [image]

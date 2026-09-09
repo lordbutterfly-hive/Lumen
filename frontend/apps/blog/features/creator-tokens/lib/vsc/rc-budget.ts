@@ -269,6 +269,10 @@ export interface RcBudget {
   blocker: RcBlocker;
   /** HBD base units the user must add to clear the blocker. 0 when ok. */
   addBaseUnits: number;
+  /** Launch gate only: what the reader actually has on the side that fell short (credit, or HBD), base units. */
+  haveBaseUnits?: number;
+  /** Launch gate only: what that side needs, base units (the summed reservation, or the first buy). */
+  neededBaseUnits?: number;
 }
 
 /**
@@ -373,11 +377,25 @@ export function describeRcBudget(budget: RcBudget, action: string): string | nul
  * creator has signed and waited.
  *
  * The two conditions are the launch generalisation of `checkRcBudget`'s:
- *   1. `rcNeeded <= availableRc`          — every op's rc_limit reservation, summed
- *   2. `rcNeeded + firstBuy <= balance`   — the reservations and the first-buy
- *                                           HBD come out of the same balance
+ *   1. `rcNeeded <= availableRc - firstBuy`, every op's rc_limit reservation,
+ *                                              summed, against the credit pool
+ *                                              left once the first buy's HBD has
+ *                                              left the balance mid transaction
+ *   2. `firstBuy <= balance`, the first buy itself is paid in HBD
  * `rcNeeded` uses `rcLimitForAction` (the MEASURED worst case + 25%) per op, so
  * it is the conservative ceiling, never an estimate.
+ *
+ * ★ THE FULL RESERVATION IS CHECKED AGAINST CREDIT, NOT AGAINST THE HBD BALANCE
+ * (2026-09-09, owner ruling after a creator with 9.121 HBD was told he was
+ * "7.820 HBD short"). Condition 2 used to demand `rcNeeded + firstBuy <= balance`,
+ * which quietly required the HBD balance itself to back the whole reservation.
+ * The node does not: `CanConsume` (go-vsc-node modules/rc-system/rc-system.go)
+ * reserves against balance PLUS the 10,000 free credits every `hive:` account is
+ * given, minus what is frozen, and that is exactly the `getAccountRC.amount` the
+ * caller passes here as `availableRc`. So a Hive account with 17,351 credits and
+ * 9,121 HBD was accepted by the chain and refused by this gate. Wallet DIDs get no
+ * free credits, so for them `availableRc` is already balance minus frozen and
+ * condition 1 catches a short balance on its own.
  *
  * ★ UNKNOWN POWER NEVER BLOCKS (like Buy). A read we could not complete
  * (`availableRc` or `balanceBaseUnits` null) resolves `ok`, exactly as the Buy
@@ -406,21 +424,27 @@ export function checkLaunchRcBudget(input: {
     return { ok: true, rcLimit: rcNeeded, blocker: 'none', addBaseUnits: 0 };
   }
 
-  if (input.availableRc < rcNeeded) {
+  // The first buy's HBD leaves the balance inside the same transaction, so the
+  // ops behind it reserve credit against a pool that much smaller.
+  const creditPool = input.availableRc - firstBuy;
+  if (creditPool < rcNeeded) {
     return {
       ok: false,
       rcLimit: rcNeeded,
       blocker: 'not-enough-rc',
-      addBaseUnits: rcNeeded - input.availableRc
+      addBaseUnits: rcNeeded - creditPool,
+      haveBaseUnits: creditPool,
+      neededBaseUnits: rcNeeded
     };
   }
-  const needed = rcNeeded + firstBuy;
-  if (input.balanceBaseUnits < needed) {
+  if (input.balanceBaseUnits < firstBuy) {
     return {
       ok: false,
       rcLimit: rcNeeded,
       blocker: 'not-enough-balance',
-      addBaseUnits: needed - input.balanceBaseUnits
+      addBaseUnits: firstBuy - input.balanceBaseUnits,
+      haveBaseUnits: input.balanceBaseUnits,
+      neededBaseUnits: firstBuy
     };
   }
   return { ok: true, rcLimit: rcNeeded, blocker: 'none', addBaseUnits: 0 };
@@ -434,17 +458,25 @@ export function checkLaunchRcBudget(input: {
 export function describeLaunchRcBudget(budget: RcBudget): string | null {
   if (budget.ok) return null;
   const add = hbd(budget.addBaseUnits);
+  // The real numbers, in HBD (1 HBD of balance is 1,000 credits), so the reader
+  // sees what a launch reserves and what they hold, not just the gap (owner,
+  // 2026-09-09: "how much they actually need").
+  const needed = budget.neededBaseUnits !== undefined ? hbd(budget.neededBaseUnits) : null;
+  const have = budget.haveBaseUnits !== undefined ? hbd(Math.max(0, budget.haveBaseUnits)) : null;
 
   if (budget.blocker === 'not-enough-rc') {
     return (
-      `You don't have enough transaction credit to launch. ` +
-      `A launch sends your registration and each offering together, and credit is backed by your HBD balance. ` +
-      `Add at least ${add} HBD to top it up; every 1 HBD you hold gives you 1,000 credits, available straight away, and spent credit refills on its own over about five days.`
+      (needed !== null && have !== null
+        ? `This launch reserves about ${needed} HBD of transaction credit and you have about ${have} HBD of credit: your HBD on Magi, plus the free credit a Hive account gets, minus credit still cooling from recent transactions. `
+        : `You don't have enough transaction credit to launch. A launch sends your registration and each offering together. `) +
+      `Add at least ${add} HBD to Magi; every 1 HBD you hold gives you 1,000 credits, available straight away, and spent credit refills on its own over about five days.`
     );
   }
   return (
-    `Your HBD balance is about ${add} HBD short of launching. ` +
-    `A launch briefly sets aside part of your balance as transaction credit for each step, and your first buy is paid from the same balance. ` +
-    `Add ${add} HBD and this will go through.`
+    (needed !== null && have !== null
+      ? `Your first buy costs about ${needed} HBD and you have ${have} HBD on Magi. `
+      : `Your HBD balance is about ${add} HBD short of your first buy. `) +
+    `The first tokens you take at launch are paid from your HBD on Magi. ` +
+    `Add ${add} HBD, or take fewer tokens, and this will go through.`
   );
 }

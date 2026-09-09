@@ -371,6 +371,17 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onCode, codeFlow, promptFlow, idTo
     // `ensureInitialized`/`renderRealButton` below re-checks what it individually
     // needs instead.
     if (!googleConfigured()) return;
+    // ★ NO GOOGLE SCRIPT IN THE ID TOKEN FLOW (2026-09-09, reader report: "why am I
+    // reaching Google?"). In this mode the row is our own button and a click opens
+    // Google's OAuth page in a popup (startIdTokenFlow); nothing in this effect is
+    // used. Loading gsi/client here anyway made every open of the login box fetch
+    // accounts.google.com, and a tracker blocker that refused it turned into a red
+    // "Couldn't reach Google" under a button that would have worked. The other
+    // modes still need the script (renderButton, prompt, code client) and keep it.
+    if (idTokenFlow) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     let stopWatching: (() => void) | null = null;
 
@@ -613,7 +624,7 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onCode, codeFlow, promptFlow, idTo
     // run (that run took the same branch, so `loadTarget`/`ownedScript` were
     // never set and cleanup below is a no-op).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nonce, promptFailed]);
+  }, [nonce, promptFailed, idTokenFlow]);
 
   if (!googleConfigured()) return null;
 

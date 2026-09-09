@@ -25,8 +25,15 @@ import { parseWalletTab, type WalletTab } from '../lib/wallet-tab';
  * same `rightRail ? …` idiom `ui/token-shell.tsx` already uses, so the panel
  * gets the full width instead of a 312px gap.
  */
-export default function WalletShell({ initialTab }: { initialTab: WalletTab }) {
+export default function WalletShell({ initialTab, fallbackTab = 'hive' }: { initialTab: WalletTab; fallbackTab?: WalletTab }) {
   const [tab, setTab] = useState<WalletTab>(initialTab);
+  // ★ THE BARE URL MEANS THE TIER'S DEFAULT TAB, NOT ALWAYS HIVE (2026-09-09, found
+  // by the public wallet's visual pass). `/wallet` with no `?tab=` is Magi for a
+  // lite account (app/wallet/page.tsx, `defaultWalletTab`), but this shell hard
+  // coded 'hive' as the bare URL tab in both the URL writer and the URL reader
+  // below, so the effect flipped a lite reader from the server chosen Magi tab
+  // back to Hive on hydration. The page now passes the same default it rendered
+  // with, and both sides key on it. A full account still gets 'hive'.
   const searchParams = useSearchParams();
 
   const onTabChange = useCallback((next: WalletTab) => {
@@ -41,7 +48,7 @@ export default function WalletShell({ initialTab }: { initialTab: WalletTab }) {
     // build map, section K.
     try {
       const url = new URL(window.location.href);
-      if (next === 'hive') url.searchParams.delete('tab');
+      if (next === fallbackTab) url.searchParams.delete('tab');
       else url.searchParams.set('tab', next);
       if (url.toString() !== window.location.href) {
         window.history.pushState(window.history.state, '', url.toString());
@@ -49,15 +56,15 @@ export default function WalletShell({ initialTab }: { initialTab: WalletTab }) {
     } catch {
       /* URL update is a convenience; the tab already switched */
     }
-  }, []);
+  }, [fallbackTab]);
 
   // Back/Forward (and any other URL change) drive the tab from the URL. A
   // click already set the state before pushing the URL, so this is a no-op
   // for clicks and only ever acts on navigation.
   useEffect(() => {
-    const fromUrl = parseWalletTab(searchParams?.get('tab')) ?? 'hive';
+    const fromUrl = parseWalletTab(searchParams?.get('tab')) ?? fallbackTab;
     setTab((current) => (current === fromUrl ? current : fromUrl));
-  }, [searchParams]);
+  }, [searchParams, fallbackTab]);
 
   const showRightRail = tab === 'hive';
 

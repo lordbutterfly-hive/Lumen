@@ -1,0 +1,95 @@
+'use client';
+
+/**
+ * Read-only copy of features/wallet/components/account-history-list.tsx for
+ * the public wallet page. Same read (useAccountHistory by username), same rows
+ * (AccountHistoryRow is reused as is: its labels are third person already),
+ * same error / loading / empty ordering and the same external "view full
+ * history" link. What changed: the error copy reads in the third person (the
+ * private key says "your transaction history") and the testids carry the
+ * public prefix.
+ */
+
+import { useTranslation } from '@/blog/i18n/client';
+import { useAccountHistory } from '@/blog/features/wallet/hooks/use-account-history';
+import { getTransfersUrl } from '@/blog/features/wallet/lib/wallet-endpoint';
+import AccountHistoryRow from '@/blog/features/wallet/components/account-history-row';
+import { EmptyStateIllustration } from '@/blog/components/empty-state-illustration';
+
+const CARD_CLASS = 'rounded-panel border border-line-9 bg-surface-1 p-5 sm:p-6';
+
+/**
+ * "Recent activity", the transaction/account-history list that used to sit
+ * below the balances and stopped rendering when the wallet page was rebuilt
+ * for Lumen (the new wallet-content.tsx never grew a replacement; there was
+ * no failing query to fix, the section itself was never ported). Restored
+ * here as its own card, matching the section-label + card pattern
+ * SavingsVault already uses on this same page, rather than porting
+ * apps/wallet's HistoryTable (a wide `<table>`, wax custom-formatter classes
+ * and a filter bar) into a page that has no other tables.
+ */
+export default function PublicAccountHistoryList({ username }: { username: string }) {
+  const { t, i18n } = useTranslation('common_blog');
+  const lang = i18n.resolvedLanguage ?? 'en';
+  // ★ The rows arrive already described (2026-08-13), see use-account-history.ts
+  // and app/api/wallet/history/route.ts for why the describing had to move to the
+  // server along with the two REST calls it depends on.
+  const { data, isLoading, isError } = useAccountHistory(username, lang);
+  const transfersUrl = getTransfersUrl(username);
+
+  const entries = data?.entries ?? [];
+  const hasMore = (data?.totalOperations ?? 0) > entries.length;
+
+  return (
+    <section id="wallet-history" className="mt-6">
+      <div className="mb-4 flex items-center gap-3.5">
+        <span className="text-label font-medium uppercase tracking-label text-ink-14">
+          {t('wallet.history.label')}
+        </span>
+        <div className="h-px flex-1 bg-surface-27" />
+      </div>
+
+      <div className={CARD_CLASS} data-testid="public-history-card">
+        {isError ? (
+          <p className="py-6 text-center text-[14px] leading-[22px] text-destructive" data-testid="public-history-error">
+            {t('wallet.public.history_error')}
+          </p>
+        ) : isLoading ? (
+          <p className="py-6 text-center text-[14px] leading-[22px] text-ink-14" data-testid="public-history-loading">
+            {t('wallet.history.loading')}
+          </p>
+        ) : entries.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-8 text-center" data-testid="public-history-empty">
+            {/* ★ Drawn empty state (2026-08-18), a new wallet with no history
+                looked identical to a wallet that failed to load. */}
+            <EmptyStateIllustration name="empty-wallet" size={104} />
+            <p className="text-[14px] leading-[22px] text-ink-14">{t('wallet.history.empty')}</p>
+          </div>
+        ) : (
+          <>
+            {/* Rows are discrete 14px blocks now (see account-history-row.tsx),
+                so they need a gap rather than the hairline they used to share. */}
+            <div className="flex flex-col gap-2" data-testid="public-history-rows">
+              {entries.map((entry) => (
+                <AccountHistoryRow key={entry.key} entry={entry} />
+              ))}
+            </div>
+            {hasMore && transfersUrl !== '#' ? (
+              <div className="mt-3 border-t border-line-2 pt-3 text-center">
+                <a
+                  href={transfersUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-caption font-medium text-ink-brand-6 hover:text-ink-brand-4"
+                  data-testid="public-history-view-more"
+                >
+                  {t('wallet.history.view_full')}
+                </a>
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+    </section>
+  );
+}

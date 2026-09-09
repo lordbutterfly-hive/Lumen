@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } 
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { googleConfigured } from '@/blog/features/lite-auth/login/google-signin';
 import { siteConfig } from '@ui/config/site';
+import env from '@beam-australia/react-env';
 import { useTranslation } from '@/blog/i18n/client';
 
 // ★ LumenLogin is loaded LAZILY (2026-09-04, perf). It pulls the whole sign-in
@@ -67,6 +68,10 @@ const DialogLogin = forwardRef<HTMLButtonElement, DialogLoginProps>(function Dia
   // Load Google Sign-In script on demand when dialog opens
   const loadGoogleScript = useCallback(() => {
     if (!siteConfig.googleDrive.clientId) return;
+    // ★ NOT IN THE ID TOKEN FLOW (2026-09-09): that mode never uses gsi/client (see
+    // google-signin.tsx), so warming it here only made every open of this dialog
+    // reach accounts.google.com, which a tracker blocker reports as an error.
+    if (env('LITE_GOOGLE_ID_TOKEN_FLOW') === 'yes') return;
     if (typeof document === 'undefined') return;
     // Use instanceof to prevent DOM clobbering attacks where user content
     // like `<a id="google-gsi-script">` could shadow a legitimate script element

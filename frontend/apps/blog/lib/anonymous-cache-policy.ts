@@ -38,6 +38,14 @@
  * ~3 min old): the feed seed baked into the page carries `initialDataUpdatedAt`
  * and the client never refetches it on its own (found in review), so the page's
  * age IS the feed's age for that reader.
+ *
+ * WALLET CLASS (`/@name/wallet`, `s-maxage=60`, `swr=300`). Shortest window of
+ * any class here because it is money. The SSR balances are only a first
+ * paint: the client's own wallet hook seeds with `initialDataUpdatedAt: 0`
+ * and refetches at once through its own private, no-store API call, so a
+ * cached response never leaves a reader looking at stale figures for long
+ * and the 60 s window exists only so a crawler, or a hundred readers
+ * hitting the same handle, do not each cost a fresh chain render.
  */
 
 export interface CachePolicyInput {
@@ -103,6 +111,7 @@ export function anonymousCachePolicy(input: CachePolicyInput): CachePolicy {
   // /@name and its public sub-pages
   if (ACCOUNT.test(parts[0])) {
     if (parts.length === 1) return policy('profile', 300, 3600);
+    if (parts.length === 2 && parts[1].toLowerCase() === 'wallet') return policy('wallet', 60, 300);
     if (parts.length === 2 && PROFILE_SUBPAGES.has(parts[1].toLowerCase())) return policy('profile-list', 600, 3600);
     return NOT;
   }

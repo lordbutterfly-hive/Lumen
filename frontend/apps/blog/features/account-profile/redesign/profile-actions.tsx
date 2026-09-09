@@ -94,15 +94,25 @@ export default function ProfileActions({
 
   if (!identity.isLoggedIn) {
     return (
-      <DialogLogin>
-        <button
-          type="button"
-          className="rounded-xl bg-surface-42 px-7 py-3 font-sans text-[15px] leading-[24px] font-semibold text-ink-27"
-          data-testid="profile-follow-button"
+      <div className="flex shrink-0 items-center gap-2.5">
+        <Link
+          href={`/@${username}/wallet`}
+          className="flex items-center gap-1.5 rounded-xl border border-line-11 bg-surface-1 px-7 py-3 font-sans text-[15px] leading-[24px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
+          data-testid="profile-wallet-link"
         >
-          {t('user_profile.follow_button')}
-        </button>
-      </DialogLogin>
+          <Icons.wallet className="h-4 w-4" />
+          {t('profile.wallet')}
+        </Link>
+        <DialogLogin>
+          <button
+            type="button"
+            className="rounded-xl bg-surface-42 px-7 py-3 font-sans text-[15px] leading-[24px] font-semibold text-ink-27"
+            data-testid="profile-follow-button"
+          >
+            {t('user_profile.follow_button')}
+          </button>
+        </DialogLogin>
+      </div>
     );
   }
 
@@ -116,6 +126,14 @@ export default function ProfileActions({
   if (identity.username === username) {
     return (
       <div className="flex shrink-0 items-center gap-2.5">
+        <Link
+          href={`/@${username}/wallet`}
+          className="flex items-center gap-1.5 rounded-xl border border-line-11 bg-surface-1 px-7 py-3 font-sans text-[15px] leading-[24px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
+          data-testid="profile-wallet-link"
+        >
+          <Icons.wallet className="h-4 w-4" />
+          {t('profile.wallet')}
+        </Link>
         <Link
           href={`/@${username}/settings`}
           className="flex items-center gap-1.5 rounded-xl border border-line-11 bg-surface-1 px-7 py-3 font-sans text-[15px] leading-[24px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
@@ -205,6 +223,14 @@ export default function ProfileActions({
 
   return (
     <div className="flex shrink-0 items-center gap-2.5">
+      <Link
+        href={`/@${username}/wallet`}
+        className="flex items-center gap-1.5 rounded-xl border border-line-11 bg-surface-1 px-7 py-3 font-sans text-[15px] leading-[24px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
+        data-testid="profile-wallet-link"
+      >
+        <Icons.wallet className="h-4 w-4" />
+        {t('profile.wallet')}
+      </Link>
       {/* ★ E2: A MODERATED ACCOUNT DOES NOT GET A PLAIN "Follow" CTA. Before this,
           @bpcvoter2 — on both lordbutterfly's mute list AND his blacklist — rendered
           the exact same solid-black "Follow" button as any un-followed stranger:
