@@ -20,6 +20,7 @@ import { VoteRemovalDialog } from './vote-removal-dialog';
 import { BladeGlyph, CommitRing, VoteTally, useCommitRing, voteStyles, type VoteSize } from './blade';
 import { splitTally, type MyVote } from './vote-tallies';
 import { FEATURE_INLINE_DOWNVOTE } from './feature-flags';
+import { lookupMyVote } from '@/blog/lib/votes/my-vote-batch';
 // ★ THE VOTER LIST IS BACK, ON THE TALLY (owner, 2026-09-10: "when i hover over
 // vote acount I cant see who voted, i need that there").
 //
@@ -246,13 +247,61 @@ const VotesComponent = ({
   // rendered post/comment the signed-in viewer has already voted on (no click
   // needed) — every `MediumPostCard` on the home feed and both profile tabs,
   // every comment in a post's thread. See `apps/blog/app/api/comment-vote/route.ts`.
+  /**
+   * ★★★ THE GATE USED TO BE THE ANSWER IT WAS LOOKING FOR (2026-09-10, owner: "a
+   * post i voted 20 mins ago, inside my feed doesnt show me a full blade upvote
+   * icon. example, apshalmilton").
+   *
+   * `enabled` was `!!checkVote || !!clickedVoteButton`, and `checkVote` is this
+   * viewer's own row inside `post.active_votes`. So the lookup that exists to
+   * DISCOVER my vote only ran once something else had already discovered it. On a
+   * post page that is harmless -- `bridge.get_discussion` hands over the full vote
+   * list, so `checkVote` is authoritative. On a FEED it is not, and for two separate
+   * reasons, either of which is enough:
+   *
+   *   · the seed is trimmed to the viewer's own vote at BUILD time
+   *     (`lib/feed/seed-trim.ts`), and a stored feed row is re-served to its owner
+   *     for up to 18h (`feed-cache.ts` bands). A vote cast after that row was
+   *     written is not in it. Twenty minutes is well inside that window.
+   *   · a shared/anonymous seed is trimmed with an empty viewer, which keeps
+   *     NOBODY's vote.
+   *
+   * Absence of my vote in `active_votes` is therefore not evidence that I did not
+   * vote, and treating it as evidence is what left the blade hollow until you opened
+   * the post. So the gate now also fires when the entry says SOMEBODY voted
+   * (`stats.total_votes > 0`) while my own row is missing -- the only case where the
+   * question is open. A post with no votes at all needs no lookup, which prunes the
+   * cheapest cards for free.
+   *
+   * ★ THE COST IS ONE REQUEST PER PAGE, NOT PER CARD. `lookupMyVote` coalesces every
+   * card mounting in the same tick into a single POST (`lib/votes/my-vote-batch.ts`),
+   * so a thirty-card feed asks once. That is what keeps this compatible with the
+   * 2026-08-10 payload work, which removed 684 KB of `active_votes` from the feed
+   * precisely because only this one bit of it was ever read.
+   */
+  // ★ "NO STATS" IS UNKNOWN, NOT ZERO. A lite entry built from Lumen's own database
+  // (`lib/lite/render/db-post-to-entry.ts`) carries neither `active_votes` (it is
+  // hardcoded `[]` there) nor a `stats` block, so reading a missing `total_votes` as 0
+  // would send exactly the entries with the LEAST information down the "nothing to
+  // ask" path. Absent means ask.
+  const statsKnown = typeof post.stats?.total_votes === 'number';
+  const totalVotes = Number(post.stats?.total_votes ?? 0);
+  const mayHaveVoted = !!voter && !checkVote && (!statsKnown || totalVotes > 0);
   const { data: userVotes } = useQuery({
     queryKey: ['votes', post.author, post.permlink, voter],
-    queryFn: () =>
-      isLite
-        ? fetchLiteEngagement(post.author, post.permlink)
-        : fetchListVotesByCommentVoter(post.author, post.permlink, voter),
-    enabled: isLite ? !!voter : !!checkVote || !!clickedVoteButton,
+    queryFn: async () => {
+      if (isLite) return fetchLiteEngagement(post.author, post.permlink);
+      // `checkVote` already proves the vote exists, so keep the single-post read that
+      // has always served that case; the batch is for the open question only.
+      if (checkVote || clickedVoteButton) {
+        return fetchListVotesByCommentVoter(post.author, post.permlink, voter);
+      }
+      const row = await lookupMyVote(post.author, post.permlink, voter);
+      // Shaped like `fetchListVotesByCommentVoter`'s reply so `userVote` below reads
+      // one thing, not two.
+      return { votes: row ? [row] : [] };
+    },
+    enabled: isLite ? !!voter : !!checkVote || !!clickedVoteButton || mayHaveVoted,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchOnMount: false
