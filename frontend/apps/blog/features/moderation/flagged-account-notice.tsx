@@ -1,4 +1,4 @@
-import { squatterRecord } from '@/blog/lib/lite/moderation/squatter-list';
+import { ensureSquatterList, squatterRecord } from '@/blog/lib/lite/moderation/squatter-list';
 
 /**
  * ★★★ THE ONE PLACE THE FLAGGED ACCOUNT ACTUALLY SEES IT (2026-09-10, owner: "flags
@@ -14,7 +14,7 @@ import { squatterRecord } from '@/blog/lib/lite/moderation/squatter-list';
  * Everyone else sees nothing: a reader who is not signed in as a flagged account gets
  * `null`, and the flagged account is simply absent from their feeds and threads.
  */
-export function FlaggedAccountNotice({
+export async function FlaggedAccountNotice({
   username,
   accountTier
 }: {
@@ -40,6 +40,17 @@ export function FlaggedAccountNotice({
    * list says about their name.
    */
   if (accountTier !== 'full') return null;
+  /**
+   * ★ AWAITED, AND THAT IS THE DIFFERENCE BETWEEN THIS RENDERING AND NOT (2026-09-10,
+   * owner: "I dont see the warning when i log in with keychain").
+   *
+   * `squatterRecord` is a synchronous read over a list loaded in the background, so on
+   * a worker that has not loaded it yet it returns `null` and this component renders
+   * NOTHING -- silently, with no error, which is the worst possible failure for a
+   * notice whose whole job is to be seen. An async server component can simply wait,
+   * and the wait is free whenever the list is already fresh.
+   */
+  await ensureSquatterList();
   const record = squatterRecord(username);
   if (!record) return null;
   const registered = record.hiveCreated.toISOString().slice(0, 10);
