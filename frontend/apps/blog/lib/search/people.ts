@@ -1,3 +1,4 @@
+import { ensureSquatterList, isSquatterName } from '@/blog/lib/lite/moderation/squatter-list';
 import { getLogger } from '@ui/lib/logging';
 import { isBannedAuthor } from '@ui/config/lists/banned-authors';
 import { getBridgeProfile, lookupAccounts } from '@transaction/lib/hive-api';
@@ -81,10 +82,27 @@ async function loadPeopleByPrefix(query: string): Promise<PeopleAnswer> {
   const [hiveNames, liteLeg] = await Promise.all([lookupAccounts(prefix, PREFIX_HIVE_LIMIT), loadLiteLeg(prefix)]);
   const hiveLeg = await hydrateHiveProfiles(hiveNames);
 
+  /**
+   * ★★★ A SQUATTER'S HIVE CARD NEVER REACHES THE MERGE (2026-09-10).
+   *
+   * Measured before this: `?q=chadmasters` returned ONLY the attacker's Hive card
+   * (reputation 25) and the impersonated lite account was gone from search entirely,
+   * while uncontested controls (`arsha`, `menosoft`) returned their lite rows. Two
+   * separate failures in one result -- the attacker shown, the victim erased -- because
+   * `mergePeople` lets a Hive row hold a name and this file's own import was the
+   * ENV-only predicate, and that list is empty on production.
+   *
+   * Dropped BEFORE the merge, not after, so it also cannot overwrite the lite row the
+   * merge is about to keep. Awaited, because the predicate is synchronous over a list
+   * loaded in the background and a cold worker would filter nobody.
+   */
+  await ensureSquatterList();
+  const hivePeople = hiveLeg.people.filter((person) => !isSquatterName(person.name));
+
   return {
     people: mergePeople({
       prefix,
-      hive: hiveLeg.people,
+      hive: hivePeople,
       bareNames: hiveLeg.bareNames,
       lite: liteLeg.rows.map(liteToPerson)
     }),

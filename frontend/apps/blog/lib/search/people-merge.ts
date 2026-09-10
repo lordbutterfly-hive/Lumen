@@ -191,6 +191,10 @@ export interface MergePeopleInput {
 export function mergePeople(input: MergePeopleInput): PersonResult[] {
   const cap = input.cap ?? PREFIX_RESULT_CAP;
   const byName = new Map<string, PersonResult>();
+  // ★ `input.hive` ARRIVES ALREADY FILTERED. The squatter drop lives in the caller
+  // (`people.ts`), not here: this is a pure merge over its arguments and reaching a
+  // datastore from it would make every consumer -- including its own unit test --
+  // depend on Postgres. See that call site for what is dropped and why.
   for (const person of input.hive) byName.set(person.name, person);
   for (const person of input.lite) {
     const existing = byName.get(person.name);

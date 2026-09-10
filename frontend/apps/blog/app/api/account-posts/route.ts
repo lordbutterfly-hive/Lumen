@@ -10,6 +10,8 @@ import {
 } from '@/blog/lib/lite/social/block-filter';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { trimEntriesForSeed } from '@/blog/lib/feed/seed-trim';
+import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
+import { ensureSquatterList } from '@/blog/lib/lite/moderation/squatter-list';
 import { rememberAccountPostsSeed } from '@/blog/lib/feed/account-posts-seed-cache';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 
@@ -248,6 +250,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // 1's server half): a vote cast through Lumen on a post shown here reverted
     // to the chain-only count on every reload of this exact tab.
     entries = await mergeLumenEngagement(entries);
+
+    // ★ THE VICTIM'S OWN PROFILE WAS SERVING THE SQUATTER'S COMMENTS (2026-09-10).
+    // This endpoint hydrates the Comments tab, and it is asked for by NAME -- so on a
+    // squatted name it returned the Hive account's chain comments under the lite
+    // account's profile. Measured: `?account=chadmasters&sort=comments` returned "Sorry
+    // bro, I am the chadmasters now." The entry-level predicate keeps the victim's own
+    // lite entries (they carry `_lite`) and drops the squatter's.
+    await ensureSquatterList();
+    entries = filterBannedEntries(entries);
 
     // ★ Trim to what a card shows before sending (snappiness phase 3,
     // 2026-09-03): full vote lists and full bodies are the bulk of this payload

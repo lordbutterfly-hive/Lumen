@@ -4,6 +4,8 @@ import { getPostCached, getDiscussionCached, getCommunityCached, getFollowListCa
 import { liteChainCoordinates, liteRecordExists } from '@/blog/lib/lite/render/lite-entry';
 import { attachLiteIdentities, attachLiteIdentitiesToDiscussion } from '@/blog/lib/lite/render/attach-lite';
 import { applyOwnerBlocksToDiscussion } from '@/blog/lib/lite/social/block-filter';
+import { withoutBannedDiscussion } from '@/blog/lib/moderation/banned-authors';
+import { ensureSquatterList } from '@/blog/lib/lite/moderation/squatter-list';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
 import { isLumenPermlink } from '@/blog/lib/lite/render/lite-post-id';
@@ -230,6 +232,12 @@ const PostPage = async ({
     // separately and is what gates the 404 — the reader just gets no comments.
     try {
       discussionData = await attachLiteIdentitiesToDiscussion(discussionData);
+      // ★ THE SSR TWIN OF THE FILTER ON `/api/discussion` (2026-09-10). Patching only
+      // the route left the server-rendered page serving the squatter's reply -- the
+      // audit found the taunt in this page's HTML while the API for the same post
+      // correctly omitted it. Two paths build the same thread; both must filter.
+      await ensureSquatterList();
+      discussionData = withoutBannedDiscussion(discussionData) ?? discussionData;
       discussionData = await applyOwnerBlocksToDiscussion(discussionData);
 
       // ★★★ MERGE LUMEN ENGAGEMENT INTO THE SSR SEED TOO (T3d, 2026-09-04 perf
