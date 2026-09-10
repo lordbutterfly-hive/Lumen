@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { withoutBannedDiscussion } from '@/blog/lib/moderation/banned-authors';
+import { ensureSquatterList } from '@/blog/lib/lite/moderation/squatter-list';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { getDiscussionCached } from '@/blog/lib/cached-api';
 import { attachLiteIdentitiesToDiscussion } from '@/blog/lib/lite/render/attach-lite';
@@ -124,6 +125,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
      * would work too; after it is one less map to walk, since a blocked subtree is
      * already gone.
      */
+    // ★ AWAITED. `isBannedAuthor` is synchronous and the squatter half of it reads an
+    // in-memory list, so a freshly-booted worker answers "not banned" for everyone
+    // until its first load lands. Measured after the previous deploy: the squatter's
+    // reply was STILL being served here. A filter that silently no-ops on a cold
+    // worker is the same vacuous pass as no filter at all.
+    await ensureSquatterList();
     discussion = withoutBannedDiscussion(discussion) ?? null;
 
     // ★ MERGE LUMEN ENGAGEMENT (2026-08-13, O2-votes.md item 2's comment half).

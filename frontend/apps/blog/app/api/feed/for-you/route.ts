@@ -27,6 +27,7 @@ import { liteConfig } from '@/blog/lib/lite/config';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { consumeLocalGlobal, consumeLocalPerIp } from '@/blog/lib/lite/antispam/local-rate-limit';
 import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
+import { ensureSquatterList } from '@/blog/lib/lite/moderation/squatter-list';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
 import { startTopicWarmer } from '@/blog/lib/feed/topic-warmer';
 import { trimEntriesForSeed } from '@/blog/lib/feed/seed-trim';
@@ -1227,6 +1228,9 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     //
     // Filtering on read (rather than purging the table) also means the ban takes
     // effect on the next request, with no migration and no rebuild.
+    // ★ See the same await in /api/discussion: the squatter half of `isBannedAuthor`
+    // is an in-memory list, and a cold worker would filter nobody.
+    await ensureSquatterList();
     const entries = filterBannedEntries(stored.entries).slice(0, limit);
 
     // ★★★ THE COMMON CASE, AND THEREFORE THE ONE THAT MATTERS MOST TO RECORD
