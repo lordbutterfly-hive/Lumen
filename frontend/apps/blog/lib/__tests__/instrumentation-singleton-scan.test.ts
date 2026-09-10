@@ -229,6 +229,22 @@ const ALLOWLIST: Record<string, string[]> = {
   // legitimate cross-copy adoption. This is the one entry in this allowlist
   // for a Map that is correct BECAUSE it is unshared, not despite it.
   'apps/blog/lib/server-ttl-cache.ts': ['localNamedLoaders'],
+  // SAFE, CONVERGENT PER COPY (2026-09-10, squatter ban list). Every copy loads
+  // the SAME rows from the SAME table on the same five-minute TTL, so two copies
+  // hold equal snapshots and neither can hold a value the other could not have
+  // computed -- the identical reasoning as `banned-authors.ts`'s `cached` above,
+  // with Postgres in place of `process.env`. Nothing mutates an entry in place;
+  // a refresh REPLACES the Map wholesale.
+  //
+  // It cannot use `withTtlCache` and is not an oversight: `TtlCache` is an async
+  // loader with no synchronous read, and this backs a SYNCHRONOUS predicate
+  // (`isBannedAuthor`) whose callers are filters over feed pages and comment
+  // trees. The cost of a per-copy cache here is only that a cold copy answers
+  // "not a squatter" until its first load lands, and the two paths where that
+  // answer would be load-bearing rather than cosmetic -- the profile route and
+  // `/api/account`, which decide whose account a URL is -- `await
+  // ensureSquatterList()` instead of taking the sync read.
+  'apps/blog/lib/lite/moderation/squatter-list.ts': ['cache', 'loadedAt', 'inFlight'],
   // SAFE — immutable object/array-literal config, verified by grep for any
   // in-place mutation (`.push`/property reassignment/`NAME =` after
   // declaration) across each file: none found. Built once from hardcoded
