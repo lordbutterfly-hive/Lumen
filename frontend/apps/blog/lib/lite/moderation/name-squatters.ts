@@ -145,3 +145,59 @@ export async function sweepNameSquatters(limit = DEFAULT_LIMIT): Promise<Squatte
 export function squattersOf(findings: SquatterFinding[]): SquatterFinding[] {
   return findings.filter((f) => !f.ours && f.after);
 }
+
+/** How often the sweep runs. `find_accounts` over a handful of names is trivial. */
+const SWEEP_INTERVAL_MS = 5 * 60_000;
+/** First run waits this long, so it never competes with the boot warms. */
+const SWEEP_FIRST_DELAY_MS = 20_000;
+
+let scheduled = false;
+
+/**
+ * ★★★ THE DETECTOR HAD NO CALLER (2026-09-10, adversarial audit F6). Every piece of
+ * the defence was built and shipped -- the guard, the ban list, the entry predicate,
+ * the notice -- and NOTHING ever set the flag they all read. The two squatters live on
+ * production today are flagged because I wrote their rows by hand. A third would have
+ * been invisible to all of it, which means the whole feature was inert for anyone who
+ * had not already been found manually. Exactly the shape of
+ * `feedback_wire_it_live_no_dormant_code`: building includes enabling.
+ *
+ * ★ IT RESETS THE READ CACHE WHEN IT FINDS SOMETHING. `squatter-list.ts` holds its
+ * list on a five-minute TTL, so without this a fresh detection would sit unenforced
+ * for up to another five minutes after the sweep already knew. Only on a find, so a
+ * quiet sweep costs nothing.
+ *
+ * ★ `unref()`, like every other timer this app starts: an interval must never be the
+ * reason a process refuses to exit.
+ */
+export function scheduleNameSquatterSweep(): void {
+  if (scheduled) return;
+  scheduled = true;
+
+  const run = async (): Promise<void> => {
+    try {
+      const findings = await sweepNameSquatters();
+      if (findings.length > 0) {
+        const { resetSquatterList } = await import('./squatter-list');
+        resetSquatterList();
+        logger.warn(
+          'name squatter sweep: %d new conflict(s) flagged, ban list invalidated: %s',
+          findings.length,
+          findings.map((f) => f.name).join(', ')
+        );
+      }
+    } catch (error) {
+      // A sweep that throws must never take the process with it. The rows it did not
+      // reach stay unflagged and the next run re-reads them, because the query selects
+      // on `name_conflict_at IS NULL`.
+      logger.warn(error, 'name squatter sweep: run failed');
+    }
+  };
+
+  const first = setTimeout(() => {
+    void run();
+    const repeat = setInterval(() => void run(), SWEEP_INTERVAL_MS);
+    if (typeof repeat.unref === 'function') repeat.unref();
+  }, SWEEP_FIRST_DELAY_MS);
+  if (typeof first.unref === 'function') first.unref();
+}

@@ -245,6 +245,13 @@ const ALLOWLIST: Record<string, string[]> = {
   // `/api/account`, which decide whose account a URL is -- `await
   // ensureSquatterList()` instead of taking the sync read.
   'apps/blog/lib/lite/moderation/squatter-list.ts': ['cache', 'loadedAt', 'inFlight'],
+  // SAFE, PER COPY BY DESIGN (2026-09-10). `scheduled` is a once-guard around
+  // `setInterval`, and each copy that reaches `register()` genuinely needs its own:
+  // sharing it would let the first copy's flag suppress the timer in a copy that
+  // never started one. Two copies sweeping is idempotent -- `markNameConflict` is
+  // `WHERE name_conflict_at IS NULL`, so the second run writes nothing -- and the
+  // interval is `unref()`d in both.
+  'apps/blog/lib/lite/moderation/name-squatters.ts': ['scheduled'],
   // SAFE — immutable object/array-literal config, verified by grep for any
   // in-place mutation (`.push`/property reassignment/`NAME =` after
   // declaration) across each file: none found. Built once from hardcoded

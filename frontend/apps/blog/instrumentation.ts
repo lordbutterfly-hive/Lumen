@@ -120,6 +120,28 @@ export async function register() {
    * worse, and `warm-server-caches.ts`'s own header states the same rule for
    * a warm that starts but fails partway.
    */
+  /**
+   * ★★★ THE SQUATTER SWEEP, WIRED (2026-09-10). It is the thing that SETS the flag the
+   * name guard, the ban list, the entry filter and the flagged notice all read, and
+   * until now it had no caller at all -- every one of those was enforcing a column
+   * nothing ever wrote. Same `nodejs`-only, dynamic-import, never-throw contract as
+   * the warms below, and its own timers are `unref()`d.
+   */
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    try {
+      const { scheduleNameSquatterSweep } = await import('./lib/lite/moderation/name-squatters');
+      scheduleNameSquatterSweep();
+    } catch (error) {
+      const message = `name squatter sweep: could not schedule (${String(error)}); squatters will not be detected on this worker`;
+      try {
+        const { getLogger } = await import('@ui/lib/logging');
+        getLogger('app').warn(message);
+      } catch {
+        console.warn(message);
+      }
+    }
+  }
+
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     try {
       const { warmServerCaches } = await import('./lib/warm-server-caches');
