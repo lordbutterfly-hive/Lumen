@@ -67,8 +67,8 @@ export async function FlaggedAccountNotice({
         </strong>{' '}
         The Hive account <strong>@{record.name}</strong> was registered on {registered}, after a
         Lumen account had already claimed that name on {claimed}. Registering a name someone is
-        already using here is impersonation, so this account is hidden across Lumen. To appeal or
-        to be removed from the blacklist, come to the Magi Discord:{' '}
+        already using here is impersonation, so this account is hidden across Lumen. You can
+        appeal in the Magi Discord:{' '}
         <a
           className="font-medium underline underline-offset-2 hover:text-destructive"
           href="https://discord.gg/NAdHac8m77"
