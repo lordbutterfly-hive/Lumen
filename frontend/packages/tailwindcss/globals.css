@@ -3236,3 +3236,26 @@ input[data-testid='witnesses-filter-search'] {
 .text-\[14px\].text-ink-12:not(.font-medium):not(.font-semibold):not(.font-bold) {
   font-weight: 600;
 }
+
+/* ── COMMENT BODY WEIGHT (owner, 2026-09-10: "increase thickness from 400 to 420
+   of the font in comments") ────────────────────────────────────────────────────
+
+   ★ WHY `font-variation-settings` AND NOT `font-weight: 420`. next/font emits one
+   @font-face per requested weight with a PINNED `font-weight: 400|500|600|700`
+   descriptor, all four pointing at the SAME variable woff2 (verified on the served
+   build: `5c0c2bcbaa4149ca-s.p.woff2`, fvar+gvar+HVAR present). With a pinned
+   descriptor the browser sets the wght axis to the DESCRIPTOR value, so a computed
+   `font-weight: 420` would select the 400 face and render at exactly 400 — a silent
+   no-op of precisely the kind `feedback_silent_styling_failures` is about. Setting
+   the axis directly is the only spelling that actually moves the glyphs.
+
+   ★ THE `:is()` RESET IS LOAD-BEARING. `font-variation-settings` INHERITS and beats
+   `font-weight`, so without it every <strong>, <b> and in-body heading inside a
+   comment would flatten from 700 to 420 — the change would thin the bold text while
+   thickening the body. Those are handed back explicitly. */
+.lm-comment-weight {
+  font-variation-settings: 'wght' 420;
+}
+.lm-comment-weight :is(strong, b, h1, h2, h3, h4, h5, h6, th) {
+  font-variation-settings: 'wght' 700;
+}

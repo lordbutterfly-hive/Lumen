@@ -146,22 +146,28 @@ export class StaticConfig {
             },
             {
                 // eslint-disable-next-line security/detect-unsafe-regex
-                re: /^(?:https?:)?\/\/(?:3speak\.(?:tv|online|co))\/embed\?v=([^&\s]+)/i,
+                // ★ HOST: `play.3speak.tv` — see ThreeSpeakEmbedder.processEmbed for the
+                // measurement. `3speak.tv/embed` renders the SPA's "PAGE NOT FOUND" screen.
+                // The accepted-input side also learns `play.`/`www.`, because that is the
+                // host `json_metadata.video.url` actually carries and a raw <iframe> written
+                // against it was being dropped outright. Still anchored, still an exact host
+                // set, still rebuilt from a literal.
+                re: /^(?:https?:)?\/\/(?:(?:play|www)\.)?(?:3speak\.(?:tv|online|co))\/embed\?v=([^&\s]+)/i,
                 fn: (src: string) => {
                     if (!src) return null;
                     const match = src.match(/3speak\.(?:tv|online|co)\/embed\?v=([^&\s]+)/i);
                     if (!match || match.length !== 2) return null;
-                    return `https://3speak.tv/embed?v=${match[1]}`;
+                    return `https://play.3speak.tv/embed?v=${match[1]}`;
                 }
             },
             {
                 // eslint-disable-next-line security/detect-unsafe-regex
-                re: /^(?:https?:)?\/\/(?:3speak\.(?:tv|online|co))\/watch\?v=([^&\s]+)/i,
+                re: /^(?:https?:)?\/\/(?:(?:play|www)\.)?(?:3speak\.(?:tv|online|co))\/watch\?v=([^&\s]+)/i,
                 fn: (src: string) => {
                     if (!src) return null;
                     const match = src.match(/3speak\.(?:tv|online|co)\/watch\?v=([^&\s]+)/i);
                     if (!match || match.length !== 2) return null;
-                    return `https://3speak.tv/embed?v=${match[1]}`;
+                    return `https://play.3speak.tv/embed?v=${match[1]}`;
                 }
             },
             {

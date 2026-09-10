@@ -20,6 +20,24 @@ import { VoteRemovalDialog } from './vote-removal-dialog';
 import { BladeGlyph, CommitRing, VoteTally, useCommitRing, voteStyles, type VoteSize } from './blade';
 import { splitTally, type MyVote } from './vote-tallies';
 import { FEATURE_INLINE_DOWNVOTE } from './feature-flags';
+// ★ THE VOTER LIST IS BACK, ON THE TALLY (owner, 2026-09-10: "when i hover over
+// vote acount I cant see who voted, i need that there").
+//
+// It was lost on 2026-08-18 when the post row's SECOND vote count was removed —
+// that span, not the blade, was `DetailsCardVoters`' trigger, and the removal note
+// in `[permlink]/content.tsx` says so in as many words: "That affordance no longer
+// exists anywhere on this row. It is a real loss, not a tidy-up — if it should come
+// back, the place for it is the blade's own tally, not a second number." This is
+// that place, so every surface carrying the blade (post footer, comment card, feed
+// card, drawer) gets it from one edit instead of four.
+//
+// ★ IT COSTS NOTHING UNTIL A HOVER. `VotersDetailsData` — and with it
+// `useActiveVotesQuery` — mounts only inside `HoverCardContent`, which Radix does
+// not render while closed. That is the whole reason the 2026-09-04 perf pass could
+// delete the UNCONDITIONAL `/api/active-votes` fetch from `content.tsx` (~34.6 KB +
+// a chain round trip on every post view) and still leave the route and the hook in
+// place: on-demand was always the correct shape for this data.
+import DetailsCardVoters from '@/blog/features/post-rendering/details-card-voters';
 
 const VOTE_WEIGHT_DROPDOWN_THRESHOLD = 1.0 * 1000.0 * 1000.0;
 
@@ -501,13 +519,26 @@ const VotesComponent = ({
    */
 
   const upTally = (
-    <VoteTally
-      value={tally.up}
-      side="up"
-      mine={vote_upvoted}
-      rollOnMount={upRing}
-      testId="vote-tally-up"
-    />
+    // ★ THE WRAPPER SPAN IS REQUIRED AND IS LAYOUT-NEUTRAL. Required because
+    // `HoverCardTrigger asChild` clones its child and hands it a ref, and
+    // `VoteTally` is a plain function component that does not forward one.
+    // Layout-neutral because `.side` is `inline-flex` and `.tally` is
+    // `inline-block; min-width: 2ch` — an `inline-flex` wrapper with no padding,
+    // margin or border becomes the flex item at exactly the tally's own width, so
+    // the control's box is unchanged (the animation budget in
+    // `vote-control.module.css` — "nothing here animates width, height, margin or
+    // padding" — is untouched: this adds no animated property at all).
+    <DetailsCardVoters post={post}>
+      <span className="inline-flex items-center">
+        <VoteTally
+          value={tally.up}
+          side="up"
+          mine={vote_upvoted}
+          rollOnMount={upRing}
+          testId="vote-tally-up"
+        />
+      </span>
+    </DetailsCardVoters>
   );
   /**
    * ★ ABSENT, NOT HIDDEN. The handoff is explicit that a post with no downvotes

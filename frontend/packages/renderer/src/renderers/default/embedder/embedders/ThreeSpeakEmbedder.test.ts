@@ -113,7 +113,7 @@ describe('ThreeSpeakEmbedder', () => {
             const result = embedder.processEmbed(id, size);
 
             expect(result).to.equal(
-                '<div class="threeSpeakWrapper"><iframe width="500" height="300" src="https://3speak.tv/embed?v=username/video-id" frameborder="0" allowfullscreen></iframe></div>'
+                '<div class="threeSpeakWrapper"><iframe width="500" height="300" src="https://play.3speak.tv/embed?v=username/video-id" frameborder="0" allowfullscreen></iframe></div>'
             );
         });
     });

@@ -12,14 +12,14 @@
  * equality — not startsWith/includes/substring, which fall to suffix
  * `3speak.tv.evil.com`, userinfo `3speak.tv@evil.com`, and substring tricks), the
  * scheme is https, and the `v` id is the Hive handle/permlink shape. Only then is
- * a hardcoded `https://3speak.tv/embed?v=<id>` returned — the same rebuild the
+ * a hardcoded `https://play.3speak.tv/embed?v=<id>` returned — the same rebuild the
  * allowlist would do anyway, so this is defence in depth, not the only gate.
  */
 
 const THREESPEAK_HOSTS = new Set(['3speak.tv', 'play.3speak.tv', '3speak.online', '3speak.co']);
 const V_ID = /^[a-z0-9][a-z0-9.-]{1,15}\/[a-z0-9][a-z0-9-]*$/;
 
-/** A safe `https://3speak.tv/embed?v=<id>` for a valid 3speak video url, else null. */
+/** A safe `https://play.3speak.tv/embed?v=<id>` for a valid 3speak video url, else null. */
 export function threeSpeakEmbedUrl(videoUrl: unknown): string | null {
   if (typeof videoUrl !== 'string' || videoUrl.length === 0 || videoUrl.length > 512) return null;
   let u: URL;
@@ -34,7 +34,9 @@ export function threeSpeakEmbedUrl(videoUrl: unknown): string | null {
   if (!THREESPEAK_HOSTS.has(host)) return null;
   const v = u.searchParams.get('v');
   if (!v || !V_ID.test(v)) return null;
-  return `https://3speak.tv/embed?v=${v}`;
+  // ★ `play.3speak.tv` is where the player actually lives (2026-09-10) — see
+  // ThreeSpeakEmbedder.processEmbed for the Chrome measurement that established it.
+  return `https://play.3speak.tv/embed?v=${v}`;
 }
 
 interface VideoMeta {

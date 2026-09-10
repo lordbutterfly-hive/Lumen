@@ -40,8 +40,26 @@ export class ThreeSpeakEmbedder extends AbstractEmbedder {
         return undefined;
     }
 
+    // ★★★ THE PLAYER LIVES ON `play.3speak.tv`, NOT ON `3speak.tv` (2026-09-10,
+    // owner: "3speak window does not work on Lumne, go find out why").
+    //
+    // MEASURED, not inferred, in Chrome against a real post
+    // (`daveks/bugaboo-falls-695`, whose `json_metadata.video.url` is
+    // `https://play.3speak.tv/embed?v=daveks/hfvwpv7q`):
+    //   https://3speak.tv/embed?v=daveks/hfvwpv7q       -> 200, but the SPA shell
+    //       renders "SORRY! PAGE NOT FOUND". 0 <video> elements. 3speak.tv is now a
+    //       client-routed app that has no /embed route, and its index.html answers
+    //       200 for every path, so nothing upstream of the browser can see the 404.
+    //   https://play.3speak.tv/embed?v=daveks/hfvwpv7q  -> "3speak Video Player",
+    //       2 <video> elements, live `blob:` source. This is the real player.
+    //
+    // The 2026-09-04 hardening that introduced the rebuild was right about the
+    // METHOD (never echo the author's host back; emit one hardcoded literal) and
+    // simply picked the host that has since stopped serving embeds. The security
+    // property is unchanged: still a single hardcoded origin, still only the
+    // charset-checked id from `linkRegex` interpolated into it.
     public processEmbed(id: string, size: {width: number; height: number}): string {
-        const embedUrl = `https://3speak.tv/embed?v=${id}`;
+        const embedUrl = `https://play.3speak.tv/embed?v=${id}`;
         return `<div class="threeSpeakWrapper"><iframe width="${size.width}" height="${size.height}" src="${embedUrl}" frameborder="0" allowfullscreen></iframe></div>`;
     }
 }

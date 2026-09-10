@@ -74,7 +74,7 @@ const baseMiddleware = createMiddleware({
   // The legacy trending feed still lives at /trending.
   csp: {
     // Embedded content whitelist for blog posts
-    // Note: 3speak.online/co removed (compromised/spam), code normalizes to 3speak.tv
+    // Note: 3speak.online/co removed (compromised/spam), code normalizes to play.3speak.tv
     // Note: emb.d.tube removed (subdomain down, no renderer support)
     frameSrc: [
       'https://platform.twitter.com',
@@ -84,6 +84,10 @@ const baseMiddleware = createMiddleware({
       'https://w.soundcloud.com',
       'https://player.twitch.tv',
       'https://open.spotify.com',
+      // ★ `play.3speak.tv` is the host that serves the player; `3speak.tv/embed`
+      // renders the SPA's 404 screen (2026-09-10). Both are listed because the
+      // renderer emits play.* while older cached HTML may still carry the apex.
+      'https://play.3speak.tv',
       'https://3speak.tv',
       'https://odysee.com'
     ],

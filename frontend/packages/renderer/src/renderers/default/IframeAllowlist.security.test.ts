@@ -108,9 +108,9 @@ describe('iframe allowlist security', function () {
     });
 
     describe('3speak', () => {
-        it('renders a bare play.3speak.tv embed URL, rebuilt to the 3speak.tv host', () => {
+        it('renders a bare play.3speak.tv embed URL, rebuilt to the play.3speak.tv host', () => {
             const html = r.render('https://play.3speak.tv/embed?v=badadib/g9sgdk5h');
-            expect(iframeSrcs(html)).to.deep.equal(['https://3speak.tv/embed?v=badadib/g9sgdk5h']);
+            expect(iframeSrcs(html)).to.deep.equal(['https://play.3speak.tv/embed?v=badadib/g9sgdk5h']);
         });
         it('does NOT embed 3speak when the url is only a substring of another link', () => {
             const html = r.render('<a href="https://evil.com/?x=3speak.tv/watch?v=a/b">x</a>');

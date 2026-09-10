@@ -180,7 +180,7 @@ interface CommentListProps {
 // The in-body h1-h4 ramp is untouched: §5.4 gives no target for headings inside
 // a comment, and inventing one to make the string tidy is not a spec.
 export const commentClassName =
-  'font-lora text-[14px] leading-[24px] prose-h1:text-[20px] prose-h1:leading-[22px] prose-h2:text-[18px] prose-h2:leading-[24px] prose-h3:text-[15px] prose-h3:leading-[24px] prose-h4:text-[14px] prose-h4:leading-[22px] sm:text-[15px] sm:leading-[24px] sm:prose-h1:text-[22px] sm:prose-h1:leading-[24px] sm:prose-h2:text-[20px] sm:prose-h2:leading-[26px] sm:prose-h3:text-[16px] sm:prose-h3:leading-[26px] sm:prose-h4:text-[15px] sm:prose-h4:leading-[22px] lg:text-[17px] lg:leading-[26px] lg:prose-h1:text-[24px] lg:prose-h1:leading-[26px] lg:prose-h2:text-[20px] lg:prose-h2:leading-[28px] lg:prose-h3:text-[18px] lg:prose-h3:leading-[28px] lg:prose-h4:text-[16px] lg:prose-h4:leading-[24px] prose-p:mb-[10px] prose-p:mt-[2px] last:prose-p:mb-[4px] prose-img:max-w-full prose-img:h-auto prose-img:max-h-[400px]';
+  'lm-comment-weight font-lora text-[12px] leading-[24px] prose-h1:text-[20px] prose-h1:leading-[22px] prose-h2:text-[18px] prose-h2:leading-[24px] prose-h3:text-[15px] prose-h3:leading-[24px] prose-h4:text-[14px] prose-h4:leading-[22px] sm:text-[13px] sm:leading-[24px] sm:prose-h1:text-[22px] sm:prose-h1:leading-[24px] sm:prose-h2:text-[20px] sm:prose-h2:leading-[26px] sm:prose-h3:text-[16px] sm:prose-h3:leading-[26px] sm:prose-h4:text-[15px] sm:prose-h4:leading-[22px] lg:text-[15px] lg:leading-[26px] lg:prose-h1:text-[24px] lg:prose-h1:leading-[26px] lg:prose-h2:text-[20px] lg:prose-h2:leading-[28px] lg:prose-h3:text-[18px] lg:prose-h3:leading-[28px] lg:prose-h4:text-[16px] lg:prose-h4:leading-[24px] prose-p:mb-[10px] prose-p:mt-[2px] last:prose-p:mb-[4px] prose-img:max-w-full prose-img:h-auto prose-img:max-h-[400px]';
 
 /**
  * ★★★ THE PUBLISH LADDER MOVED TO `lib/publish-badge-state.ts` (2026-08-28,
@@ -954,7 +954,7 @@ const CommentListItem = memo(function CommentListItem({
                         is the only edge now, and CardContent matches the same px-3 py-2
                         token as the header and footer above/below it. */}
                     <CardContent
-                      className="h-fit w-full min-w-0 overflow-hidden px-3 py-2 hover:bg-background-tertiary"
+                      className="h-fit w-full min-w-0 overflow-hidden px-3 pb-1 pt-2"
                       data-testid="comment-card-to-hover"
                     >
                       {legalBlockedUser ? (
@@ -991,7 +991,7 @@ const CommentListItem = memo(function CommentListItem({
                         </>
                       )}
                     </CardContent>
-                    <CardFooter className="px-3 py-2">
+                    <CardFooter className="px-3 pb-1.5 pt-0">
                       {comment._temporary && !comment._optimistic ? null : (
                         <div
                           // ★ item 9: this used to be a single non-wrapping row inside a
@@ -1001,7 +1001,7 @@ const CommentListItem = memo(function CommentListItem({
                           // half-width and the payout vanished past the card's right
                           // edge. flex-wrap means a still-narrow card reflows the row
                           // onto a second line instead of silently cutting it off.
-                          className="flex w-full flex-wrap items-center gap-2.5 pt-1 text-[17px]"
+                          className="flex w-full flex-wrap items-center gap-2.5 pt-0 text-[17px]"
                           data-testid="comment-card-footer"
                         >
                           <VotesComponentWrapper post={comment} type="comment" />
@@ -1054,7 +1054,7 @@ const CommentListItem = memo(function CommentListItem({
                             <button
                               disabled={deleteCommentMutation.isLoading}
                               onClick={() => setReply(!reply)}
-                              className="flex h-9 items-center rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
+                              className="flex h-9 items-center rounded-control px-2.5 py-1.5 text-[15px] font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
                               data-testid="comment-card-footer-reply"
                             >
                               {t('cards.comment_card.reply')}
@@ -1062,7 +1062,7 @@ const CommentListItem = memo(function CommentListItem({
                           ) : (
                             <DialogLogin>
                               <button
-                                className="flex h-9 items-center rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
+                                className="flex h-9 items-center rounded-control px-2.5 py-1.5 text-[15px] font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
                                 data-testid="comment-card-footer-reply"
                               >
                                 {t('post_content.footer.reply')}
