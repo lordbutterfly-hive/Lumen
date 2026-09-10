@@ -14,7 +14,32 @@ import { squatterRecord } from '@/blog/lib/lite/moderation/squatter-list';
  * Everyone else sees nothing: a reader who is not signed in as a flagged account gets
  * `null`, and the flagged account is simply absent from their feeds and threads.
  */
-export function FlaggedAccountNotice({ username }: { username: string | null | undefined }) {
+export function FlaggedAccountNotice({
+  username,
+  accountTier
+}: {
+  username: string | null | undefined;
+  accountTier: 'lite' | 'full' | null;
+}) {
+  /**
+   * ★★★ THE TIER GATE IS THE WHOLE CORRECTNESS OF THIS COMPONENT (2026-09-10, owner,
+   * within the hour of the first version shipping: "the griefing message appears on
+   * the griefed account").
+   *
+   * It did, and it was this. The squatter list is keyed by NAME, because a name is
+   * the only thing the two accounts share -- and the VICTIM's session username IS
+   * that name. `chadmasters` the lite account and `chadmasters` the Hive account are
+   * indistinguishable to `squatterRecord`, so the person who was impersonated was
+   * shown the notice accusing them of impersonation. Exactly backwards, on the one
+   * screen where being wrong is worst.
+   *
+   * The tier is what separates them and it was already on the session. A lite account
+   * is by construction the one that had the name FIRST (signup proved it free on Hive
+   * at that moment); the Hive account of the same name is the one that came after.
+   * So: full accounts only, and a lite reader can never see this no matter what the
+   * list says about their name.
+   */
+  if (accountTier !== 'full') return null;
   const record = squatterRecord(username);
   if (!record) return null;
   const registered = record.hiveCreated.toISOString().slice(0, 10);

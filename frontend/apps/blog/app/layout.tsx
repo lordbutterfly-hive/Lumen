@@ -919,7 +919,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                     name squatter; `null` for everybody else. See the component's own
                     note for why the notice lives here and not on `/@name`, which now
                     belongs to the Lumen account that had the name first. */}
-                <FlaggedAccountNotice username={serverSession.username} />
+                <FlaggedAccountNotice
+                  username={serverSession.username}
+                  accountTier={serverSession.accountTier}
+                />
                 {/* ★ C-B, 2026-09-05: `accountTier` (wallet-content.tsx /
                     wallet-right-rail.tsx) and the rank-tier snapshot
                     (league-showcase.tsx) — see each provider's own doc for why
