@@ -146,10 +146,14 @@ export function squattersOf(findings: SquatterFinding[]): SquatterFinding[] {
   return findings.filter((f) => !f.ours && f.after);
 }
 
-/** How often the sweep runs. `find_accounts` over a handful of names is trivial. */
-const SWEEP_INTERVAL_MS = 5 * 60_000;
+/**
+ * How often the sweep runs. One `find_accounts` over the unflagged lite names plus one
+ * small query -- cheap enough to run every minute, and this interval is also how long
+ * the fleet can disagree about a brand-new squatter (see the reset in `run`).
+ */
+const SWEEP_INTERVAL_MS = 60_000;
 /** First run waits this long, so it never competes with the boot warms. */
-const SWEEP_FIRST_DELAY_MS = 20_000;
+const SWEEP_FIRST_DELAY_MS = 15_000;
 
 let scheduled = false;
 
@@ -177,9 +181,26 @@ export function scheduleNameSquatterSweep(): void {
   const run = async (): Promise<void> => {
     try {
       const findings = await sweepNameSquatters();
+      /**
+       * ★★★ RESET UNCONDITIONALLY, NOT ONLY ON A FIND (2026-09-10, owner's own live
+       * test caught this within minutes of the previous deploy).
+       *
+       * Production runs SEVERAL node workers and each holds its own copy of the ban
+       * list. `markNameConflict` is `WHERE name_conflict_at IS NULL`, so the FIRST
+       * worker to sweep a new squatter is the only one that gets a non-empty
+       * `findings` -- every other worker sweeps, finds nothing, and therefore never
+       * invalidated its own list. Measured: one worker logged "3 name(s) hidden:
+       * chadmasters, luxattack, meritimusdoublus" while a search served by another
+       * still returned the squatter's Hive card.
+       *
+       * So the reset is a property of the TICK, not of this worker's luck. Every
+       * worker reloads from the database on every sweep, which is one small query,
+       * and the whole fleet converges within one interval instead of "whenever your
+       * request happens to land on the worker that swept".
+       */
+      const { resetSquatterList } = await import('./squatter-list');
+      resetSquatterList();
       if (findings.length > 0) {
-        const { resetSquatterList } = await import('./squatter-list');
-        resetSquatterList();
         logger.warn(
           'name squatter sweep: %d new conflict(s) flagged, ban list invalidated: %s',
           findings.length,

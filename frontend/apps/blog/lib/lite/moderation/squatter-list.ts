@@ -4,8 +4,12 @@ import { liteConfig } from '../config';
 
 const logger = getLogger('app');
 
-/** How long a loaded list is trusted. Squatters appear at human speed, not machine speed. */
-const TTL_MS = 5 * 60_000;
+/**
+ * How long a loaded list is trusted. Matched to the sweep interval so a worker that
+ * never happens to be the one that FINDS a squatter still converges on the next tick;
+ * the sweep also resets this outright (see name-squatters.ts).
+ */
+const TTL_MS = 60_000;
 
 export interface SquatterRecord {
   name: string;
