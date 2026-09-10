@@ -1,5 +1,6 @@
 import { User } from '@smart-signer/types/common';
 import * as users from '../repositories/user-repository';
+import { findLiteUserByPublicName } from '../render/public-name';
 
 /**
  * Who is on each end of a Lumen follow edge.
@@ -88,8 +89,13 @@ export async function resolveFollowTarget(name: string): Promise<TargetResolutio
   const clean = name.trim().toLowerCase();
   if (!clean) return { ok: false, error: 'invalid_name' };
 
+  // ★ GUARDED (2026-09-10). Display name used to win outright, so once someone
+  // registered a lite handle on Hive, a follow aimed at the HIVE account landed on
+  // the lite user instead. A contested name resolves to nobody here and falls
+  // through to the ordinary chain path below, which is the correct owner of a name
+  // Hive now holds. See lib/lite/render/public-name.ts.
   const lumen =
-    (await users.findUserByDisplayName(clean)) ?? (await users.findUserByHiveAccountName(clean));
+    (await findLiteUserByPublicName(clean)) ?? (await users.findUserByHiveAccountName(clean));
   if (lumen) {
     // `isLite` is the one that decides WHERE the follow lives: an upgraded Lumen user
     // has a real Hive account, so another Hive user should follow them on chain like

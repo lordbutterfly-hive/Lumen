@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardModerator, guardBodySize } from '@/blog/lib/lite/http/guard';
 import { moderateUser, UserAction } from '@/blog/lib/lite/moderation/moderation-service';
-import { findUserByDisplayName } from '@/blog/lib/lite/repositories/user-repository';
+import { findLiteUserByPublicName } from '@/blog/lib/lite/render/public-name';
 
 const logger = getLogger('app');
 
@@ -36,7 +36,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   let userId = typeof body?.userId === 'string' ? body.userId : '';
   if (!userId && typeof body?.displayName === 'string') {
-    const user = await findUserByDisplayName(body.displayName.trim().toLowerCase());
+    // ★ GUARDED: moderating a contested name would act on the wrong identity.
+    const user = await findLiteUserByPublicName(body.displayName);
     if (!user) return NextResponse.json({ error: 'user_not_found' }, { status: 404 });
     userId = user.userId;
   }

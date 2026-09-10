@@ -1,5 +1,6 @@
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import * as users from '../repositories/user-repository';
+import { findLiteUserByPublicName } from '../render/public-name';
 import { FollowActor, actorKey, TargetResolution } from './follow-actor';
 
 /** Hive's own account-name rule (protocol): 3-16 chars, letter-led, dots and hyphens. */
@@ -75,7 +76,8 @@ export async function resolveBlockTarget(
   if (!clean) return { ok: false, error: 'invalid_name' };
 
   if (kind === 'lumen') {
-    const lumen = await users.findUserByDisplayName(clean);
+    // ★ GUARDED: blocking a contested name would block the wrong identity.
+    const lumen = await findLiteUserByPublicName(clean);
     if (!lumen) return { ok: false, error: 'not_found' };
     return {
       ok: true,
@@ -95,8 +97,10 @@ export async function resolveBlockTarget(
   }
 
   // 'auto' — Lumen first, then a well-formed chain name. Same no-network rule.
+  // ★ GUARDED, same reason as follow-actor: a name Hive now owns is not a lite
+  // identity, so it falls through to the chain branch below.
   const lumen =
-    (await users.findUserByDisplayName(clean)) ?? (await users.findUserByHiveAccountName(clean));
+    (await findLiteUserByPublicName(clean)) ?? (await users.findUserByHiveAccountName(clean));
   if (lumen) {
     return {
       ok: true,
@@ -327,7 +331,8 @@ export async function actorForDisplayedName(
   const clean = name.trim().replace(/^@/, '').toLowerCase();
   if (!clean) return null;
   if (kind === 'lumen') {
-    const lumen = await users.findUserByDisplayName(clean).catch(() => null);
+    // ★ GUARDED, same reason.
+    const lumen = await findLiteUserByPublicName(clean).catch(() => null);
     return lumen ? { userId: lumen.userId } : null;
   }
   const upgraded = await users.findUserByHiveAccountName(clean).catch(() => null);

@@ -1,4 +1,4 @@
-import * as users from '../repositories/user-repository';
+import { findLiteUserByPublicName } from './public-name';
 
 /**
  * Is this name a Lumen lite account rather than a Hive account?
@@ -13,7 +13,9 @@ import * as users from '../repositories/user-repository';
  */
 export async function isLiteDisplayName(name: string): Promise<boolean> {
   try {
-    const user = await users.findUserByDisplayName(name.trim().toLowerCase());
+    // ★ GUARDED (2026-09-10): a Hive account that took this name must never be
+    // served the lite account's picture. See ./public-name.ts.
+    const user = await findLiteUserByPublicName(name);
     return Boolean(user);
   } catch {
     // Never let a datastore hiccup change what a normal Hive avatar request does.
@@ -31,7 +33,9 @@ export async function liteAvatar(
   name: string
 ): Promise<{ isLite: boolean; imageUrl: string | null }> {
   try {
-    const user = await users.findUserByDisplayName(name.trim().toLowerCase());
+    // ★ GUARDED (2026-09-10): a Hive account that took this name must never be
+    // served the lite account's picture. See ./public-name.ts.
+    const user = await findLiteUserByPublicName(name);
     if (!user) return { isLite: false, imageUrl: null };
     const image = user.avatarUrl || user.profile?.profile_image || '';
     return { isLite: true, imageUrl: image || null };

@@ -12,6 +12,9 @@ interface UserRow {
   hive_account_name: string | null;
   trust_score: number;
   status: string;
+  name_conflict_at?: Date | null;
+  name_conflict_creator?: string | null;
+  name_conflict_created?: Date | null;
   suspended_reason: string | null;
   session_epoch: number;
   interests: string[] | null;
@@ -43,7 +46,11 @@ function mapUser(r: UserRow): LumenUser {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     upgradedAt: r.upgraded_at,
-    suspendedAt: r.suspended_at
+    suspendedAt: r.suspended_at,
+    // See migrations/0043_name_conflict.sql. NULL = this name is still ours alone.
+    nameConflictAt: r.name_conflict_at ?? null,
+    nameConflictCreator: r.name_conflict_creator ?? null,
+    nameConflictCreated: r.name_conflict_created ?? null
   };
 }
 
@@ -84,6 +91,49 @@ export async function findUserByHiveAccountName(hiveAccountName: string): Promis
  * The `account_tier = 'lite'` guard makes this idempotent — a second call finds
  * no lite row and returns null. `user_id` never changes (history continuity).
  */
+/**
+ * Names still unchecked (or last checked before `before`) by the squatter sweep.
+ * Oldest first, so a long backlog drains in a stable order instead of re-checking
+ * the same head every run. Upgraded users are excluded: they own their Hive account
+ * by construction, so there is nothing to contest.
+ */
+export async function listNamesForConflictSweep(limit: number): Promise<
+  { userId: string; displayName: string; createdAt: Date }[]
+> {
+  const { rows } = await query<{ user_id: string; display_name: string; created_at: Date }>(
+    `SELECT user_id, display_name, created_at
+       FROM lumen_user
+      WHERE hive_account_name IS NULL
+        AND account_tier = 'lite'
+        AND name_conflict_at IS NULL
+      ORDER BY created_at ASC
+      LIMIT $1`,
+    [limit]
+  );
+  return rows.map((r) => ({ userId: r.user_id, displayName: r.display_name, createdAt: r.created_at }));
+}
+
+/**
+ * Record that someone else now holds this name on Hive. Write-once: a row already
+ * flagged is left alone so the FIRST observation (and its provenance) survives a
+ * later `change_recovery_account`.
+ */
+export async function markNameConflict(
+  userId: string,
+  creator: string | null,
+  hiveCreated: Date | null
+): Promise<void> {
+  await query(
+    `UPDATE lumen_user
+        SET name_conflict_at = now(),
+            name_conflict_creator = $2,
+            name_conflict_created = $3,
+            updated_at = now()
+      WHERE user_id = $1 AND name_conflict_at IS NULL`,
+    [userId, creator, hiveCreated]
+  );
+}
+
 export async function markUpgraded(
   userId: string,
   hiveAccountName: string

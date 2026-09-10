@@ -5,7 +5,8 @@ import { getLogger } from '@ui/lib/logging';
 import { guardRead } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { listFollowingPeers, listFollowerPeers } from '@/blog/lib/lite/repositories/follow-repository';
-import { findUserByDisplayName, findUsersByIds } from '@/blog/lib/lite/repositories/user-repository';
+import { findUsersByIds } from '@/blog/lib/lite/repositories/user-repository';
+import { findLiteUserByPublicName } from '@/blog/lib/lite/render/public-name';
 import { viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { actorKey } from '@/blog/lib/lite/social/follow-actor';
 
@@ -69,7 +70,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!account) return NextResponse.json({ error: 'account_required' }, { status: 400 });
 
   try {
-    const user = await findUserByDisplayName(account);
+    // ★ GUARDED: see lib/lite/render/public-name.ts.
+    const user = await findLiteUserByPublicName(account);
     // Not a Lumen account: an empty list, not a 404. The caller asks this route
     // about every profile it renders, and most of them are ordinary Hive users
     // whose lists come from the chain instead.

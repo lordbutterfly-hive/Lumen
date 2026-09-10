@@ -3,7 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { guardWrite, guardRead, readBoundedJson, payloadTooLarge } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { createLitePost, getLiteUserPosts, CreatePostRequest } from '@/blog/lib/lite/content/post-service';
-import { findUserByDisplayName } from '@/blog/lib/lite/repositories/user-repository';
+import { findLiteUserByPublicName } from '@/blog/lib/lite/render/public-name';
 import { filterPermanentlyFailed } from '@/blog/lib/lite/repositories/post-repository';
 import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
 import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
@@ -232,7 +232,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const kind = kindParam === 'comments' ? 'comments' : kindParam === 'all' ? 'all' : 'posts';
 
   try {
-    const user = await findUserByDisplayName(author.toLowerCase());
+    // ★ GUARDED (2026-09-10). A name Hive now owns must not resolve to a lite
+    // account here -- this is the route that reproduced the inheritance bug.
+    const user = await findLiteUserByPublicName(author);
     // Not a Lumen account: an empty list, not a 404. This route is asked about
     // every profile the reader opens, most of which are ordinary Hive accounts.
     if (!user) return NextResponse.json({ entries: [] });

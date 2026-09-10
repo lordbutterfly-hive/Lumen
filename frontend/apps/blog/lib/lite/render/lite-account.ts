@@ -1,5 +1,5 @@
 import type { FullAccount } from '@hive/common-hiveio-packages/wax';
-import * as users from '../repositories/user-repository';
+import { findLiteUserByPublicName } from './public-name';
 import * as posts from '../repositories/post-repository';
 import * as follows from '../repositories/follow-repository';
 
@@ -30,7 +30,11 @@ const EPOCH = '1970-01-01T00:00:00';
 const ZERO_MANABAR = { current_mana: '0', last_update_time: 0 };
 
 export async function liteAccountAsProfile(displayName: string): Promise<FullAccount | null> {
-  const user = await users.findUserByDisplayName(displayName.trim().toLowerCase());
+  // ★ GUARDED (2026-09-10). The layout tries Hive FIRST and only falls back here, so
+  // a real Hive account already wins the URL -- but a transient chain failure sends
+  // that lookup here too, and without this a squatted name would then render the lite
+  // account as the profile for an account that is not theirs. See ./public-name.ts.
+  const user = await findLiteUserByPublicName(displayName);
   if (!user) return null;
   // An upgraded user has a REAL Hive account; the normal chain lookup owns that case
   // and will have succeeded before we were ever called.

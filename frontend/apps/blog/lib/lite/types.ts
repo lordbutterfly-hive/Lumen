@@ -69,6 +69,19 @@ export interface LumenUser {
   updatedAt: Date;
   upgradedAt: Date | null;
   suspendedAt: Date | null;
+  /**
+   * ★ SOMEONE ELSE NOW OWNS THIS NAME ON HIVE. Set by the squatter sweep when a Hive
+   * account exists for this display name and is NOT this user's own upgrade. While
+   * it is set, `findLiteUserByPublicName` refuses to resolve the name to this user,
+   * which is what stops a newly-registered Hive account inheriting a lite account's
+   * posts, avatar, follow graph and moderation state. See
+   * migrations/0043_name_conflict.sql.
+   */
+  nameConflictAt: Date | null;
+  /** The conflicting Hive account's `recovery_account` (defaults to its creator). */
+  nameConflictCreator: string | null;
+  /** The conflicting Hive account's own creation time. */
+  nameConflictCreated: Date | null;
 }
 
 /** An auth binder (Google passkey or BTC wallet). One user may hold several. */
