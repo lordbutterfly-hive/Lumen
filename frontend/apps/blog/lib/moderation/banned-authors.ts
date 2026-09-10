@@ -3,8 +3,7 @@ import {
   bannedAuthorList,
   hasBannedAuthors,
   isBannedAuthor as envBannedAuthor,
-  withoutBannedAuthors as withoutEnvBannedAuthors,
-  withoutBannedDiscussion
+  withoutBannedAuthors as withoutEnvBannedAuthors
 } from '@ui/config/lists/banned-authors';
 import { isSquatterName } from '@/blog/lib/lite/moderation/squatter-list';
 
@@ -18,7 +17,7 @@ import { isSquatterName } from '@/blog/lib/lite/moderation/squatter-list';
  * app's own routes and server components want. Nothing here re-implements the
  * rule; if you need to know whether a name is banned, it is still one function.
  */
-export { bannedAuthorList, hasBannedAuthors, withoutBannedDiscussion };
+export { bannedAuthorList, hasBannedAuthors };
 
 /**
  * ★★★ TWO SOURCES, ONE PREDICATE (2026-09-10). The env list above is names a human
@@ -73,4 +72,63 @@ export function filterBannedEntries<T extends Entry>(entries: T[] | null | undef
 export function isBannedEntry(entry: Entry | null | undefined): boolean {
   if (!entry) return false;
   return isBannedAuthor(entry.author) || isBannedAuthor(entry._lite?.chainAuthor);
+}
+
+/**
+ * ★★★ THE COMMENT-THREAD FILTER THAT NOTHING HAD EVER CALLED (2026-09-10).
+ *
+ * `withoutBannedDiscussion` was written for exactly this map shape -- it walks
+ * `replies`, prunes a banned author's whole subtree and rewrites the surviving
+ * parents' child lists -- and a grep for its callers returns NOTHING. So the ban
+ * reached feeds (`filterBannedEntries`) and profiles (the layout's `bail`) but never
+ * a comment thread: a banned account's replies rendered normally under every post,
+ * on the surface where a griefer is most visible. Found while checking whether the
+ * squatter ban actually hid a live squatter's reply. It did not, and neither did the
+ * env list, for anyone, ever.
+ *
+ * Reimplemented here rather than fixed upstream for one reason beyond the two
+ * sources: the upstream version early-returns on `!hasBannedAuthors()`, which asks
+ * the ENV list only. With the env list empty -- which is its state on production
+ * today -- it would return the thread untouched no matter how many squatters were in
+ * it. This asks `isBannedAuthor`, which is both sources.
+ *
+ * Same pruning semantics as upstream, deliberately: a banned author's replies go with
+ * them, because a thread that keeps the children of a hidden comment shows answers to
+ * something nobody can see.
+ */
+export function withoutBannedDiscussion<T>(
+  discussion: Record<string, T> | null | undefined
+): Record<string, T> | null | undefined {
+  if (!discussion) return discussion;
+
+  const nodeOf = (key: string): { author?: string; replies?: unknown[] } =>
+    discussion[key] as unknown as { author?: string; replies?: unknown[] };
+  const childKeys = (key: string): string[] =>
+    (nodeOf(key)?.replies ?? []).filter((child): child is string => typeof child === 'string');
+
+  const doomed = new Set<string>();
+  const mark = (key: string): void => {
+    if (doomed.has(key)) return;
+    doomed.add(key);
+    for (const child of childKeys(key)) mark(child);
+  };
+  for (const key of Object.keys(discussion)) {
+    if (isBannedAuthor(nodeOf(key)?.author)) mark(key);
+  }
+  if (doomed.size === 0) return discussion;
+
+  const kept: Record<string, T> = {};
+  for (const key of Object.keys(discussion)) {
+    if (doomed.has(key)) continue;
+    const node = discussion[key];
+    kept[key] = childKeys(key).some((child) => doomed.has(child))
+      ? ({
+          ...(node as object),
+          replies: (nodeOf(key).replies ?? []).filter(
+            (child) => typeof child !== 'string' || !doomed.has(child)
+          )
+        } as T)
+      : node;
+  }
+  return kept;
 }

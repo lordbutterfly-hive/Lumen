@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
+import { withoutBannedDiscussion } from '@/blog/lib/moderation/banned-authors';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { getDiscussionCached } from '@/blog/lib/cached-api';
 import { attachLiteIdentitiesToDiscussion } from '@/blog/lib/lite/render/attach-lite';
@@ -109,6 +110,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // on), blocks second.
     discussion = await attachLiteIdentitiesToDiscussion(discussion);
     discussion = await applyOwnerBlocksToDiscussion(discussion);
+
+    /**
+     * ★★★ THE GLOBAL BAN NOW REACHES COMMENT THREADS (2026-09-10). It never did:
+     * `withoutBannedDiscussion` was written for this exact map and had ZERO callers,
+     * so a banned account's replies rendered normally under every post -- the surface
+     * a griefer is most visible on. Found by checking a live squatter's reply, which
+     * was still being served here after the ban shipped.
+     *
+     * AFTER the identity attach, deliberately: `attachLiteIdentitiesToDiscussion`
+     * rewrites `author` to a Lumen display name, and the blog's predicate is the one
+     * that knows both the env list and the squatter list. Before the block filter
+     * would work too; after it is one less map to walk, since a blocked subtree is
+     * already gone.
+     */
+    discussion = withoutBannedDiscussion(discussion) ?? null;
 
     // ★ MERGE LUMEN ENGAGEMENT (2026-08-13, O2-votes.md item 2's comment half).
     // `getEngagementTotals` had exactly ONE caller in the whole app before this --
