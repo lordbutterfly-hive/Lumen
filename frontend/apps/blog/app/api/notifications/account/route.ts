@@ -5,6 +5,8 @@ import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { hiveNamesByUserId } from '@/blog/lib/lite/social/chain-mute';
 import type { IAccountNotification } from '@hive/common-hiveio-packages/wax';
+import { isBannedAuthor } from '@/blog/lib/moderation/banned-authors';
+import { ensureSquatterList, isSquatterName } from '@/blog/lib/lite/moderation/squatter-list';
 
 const logger = getLogger('app');
 
@@ -106,6 +108,38 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
               const actor = notificationActor(n).toLowerCase();
               return !actor || !hiveKeys.has(actor);
             });
+    }
+
+    /**
+     * ★★★ THE BAN HAD TO REACH THE BELL (2026-09-10, owner: "i commented with
+     * meritimusdoublus on a lordbutterfly post, it dissapeared but lordbutterfly got a
+     * notification").
+     *
+     * Both halves of that are true and only one was intended. The comment is hidden
+     * everywhere Lumen renders, but Hive does not know about our ban, so it still
+     * raised the notification -- and this route passed it straight through. A griefer
+     * therefore kept a working channel to anyone they wanted to bother: the content
+     * was invisible, the ping was not, which is arguably the more annoying half.
+     *
+     * `notificationActor` already exists here for the per-viewer block filter and is
+     * the right reader: `IAccountNotification` carries no author field, so the actor is
+     * parsed out of `msg`/`url`. A bare-name check is correct on THIS surface
+     * specifically -- a lite user's action never appears in a chain notification (their
+     * posts are signed by the shared publisher), so an actor name here is always the
+     * Hive account, which is exactly the identity the squatter list names.
+     *
+     * ★ The unread COUNT is a different upstream call (`bridge.unread_notifications`)
+     * that returns a number with no rows to filter, so it can still exceed what the
+     * panel shows. That is the pre-existing "shows 3 on the bell and there's nothing
+     * inside" shape this file already documents; it needs the count derived from the
+     * filtered list, which is its own change.
+     */
+    await ensureSquatterList();
+    if (Array.isArray(filtered)) {
+      filtered = filtered.filter((n) => {
+        const actor = notificationActor(n);
+        return !isBannedAuthor(actor) && !isSquatterName(actor);
+      });
     }
 
     return NextResponse.json(filtered, { headers: { 'cache-control': 'private, no-store' } });
