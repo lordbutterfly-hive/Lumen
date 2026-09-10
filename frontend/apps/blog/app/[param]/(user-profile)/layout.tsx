@@ -10,6 +10,7 @@ import { getAccountFull, getAccountReputations, getDynamicGlobalProperties } fro
 import { getTwitterInfo, isThirdPartyApiEnabled } from '@transaction/lib/custom-api';
 import { isValidAccountNameFormat } from '@transaction/lib/validation';
 import { isBannedAuthor } from '@/blog/lib/moderation/banned-authors';
+import { ensureSquatterList, isSquatterName } from '@/blog/lib/lite/moderation/squatter-list';
 import { notFound } from 'next/navigation';
 import { getLogger } from '@ui/lib/logging';
 import { renderTimer } from '@ui/lib/render-timing';
@@ -167,7 +168,26 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
   // Note this also covers `generateMetadata` above in practice: a 404 layout
   // renders the not-found page, so no OpenGraph card is ever produced for him
   // and Lumen links to him stop generating share previews.
-  if (isBannedAuthor(username)) {
+  /**
+   * ★★★ A SQUATTED NAME BELONGS TO THE LITE ACCOUNT THAT HAD IT FIRST (2026-09-10).
+   *
+   * `isBannedAuthor` now also answers true for a Hive account registered after a
+   * Lumen lite account of the same name (see lib/lite/moderation/squatter-list.ts),
+   * and for an ordinary ban a 404 is still the right answer. For a SQUATTED name it
+   * is not: the lite account is the rightful owner of that URL on Lumen, and 404ing
+   * it would take the victim's own profile away as well as the attacker's. Measured
+   * on production before this: `/@chadmasters` served the squatter's brand-new Hive
+   * account (reputation 25) while the lite account's two posts sat unreachable.
+   *
+   * So a squatted name skips the chain lookup entirely and falls through to the
+   * lite-account branch below, which `ownsPublicName` now resolves for exactly this
+   * case. The Hive account stays hidden everywhere else by the same predicate.
+   */
+  // AWAITED, not the sync read: see ensureSquatterList for why this one call cannot
+  // be allowed to answer from a cold cache.
+  await ensureSquatterList();
+  const squatted = isSquatterName(username);
+  if (isBannedAuthor(username) && !squatted) {
     bail('banned', username);
   }
 
@@ -197,7 +217,7 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
   // getAccountFullCached is request-memoized (React cache()), so calling it a
   // second time here would just replay the same already-rejected promise —
   // the retry has to bypass the cache and go through the plain getAccountFull.
-  let account = await getAccountFullCached(username).catch(async (error) => {
+  let account = squatted ? null : await getAccountFullCached(username).catch(async (error) => {
     logger.error(error, 'getAccountFullCached failed; retrying once before treating as not-found');
     // Backoff before the retry, trimmed from 600ms (2026-08-12). The retry
     // itself is load-bearing and stays — it fixes a real reported bug where a

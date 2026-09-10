@@ -134,6 +134,37 @@ export async function markNameConflict(
   );
 }
 
+/**
+ * Every Hive name currently classified as a squatter: a lite account holds the name,
+ * a Hive account of the same name appeared AFTER it, and that account did not come
+ * from our own creator. One small query; the caller caches it.
+ */
+export async function listSquattedNames(ourCreator: string): Promise<
+  { name: string; creator: string | null; hiveCreated: Date; liteCreated: Date }[]
+> {
+  const { rows } = await query<{
+    display_name: string;
+    name_conflict_creator: string | null;
+    name_conflict_created: Date;
+    created_at: Date;
+  }>(
+    `SELECT display_name, name_conflict_creator, name_conflict_created, created_at
+       FROM lumen_user
+      WHERE name_conflict_at IS NOT NULL
+        AND name_conflict_created IS NOT NULL
+        AND name_conflict_created > created_at
+        AND (hive_account_name IS NULL OR lower(hive_account_name) <> lower(display_name::text))
+        AND ($1 = '' OR lower(coalesce(name_conflict_creator, '')) <> lower($1))`,
+    [ourCreator]
+  );
+  return rows.map((r) => ({
+    name: String(r.display_name).toLowerCase(),
+    creator: r.name_conflict_creator,
+    hiveCreated: r.name_conflict_created,
+    liteCreated: r.created_at
+  }));
+}
+
 export async function markUpgraded(
   userId: string,
   hiveAccountName: string

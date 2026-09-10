@@ -9,6 +9,7 @@ import SkipToContent from '../features/layouts/skip-to-content';
 import ClientEffects from '../features/layouts/site-header/client-effects';
 import ScrollReset from '../features/layouts/scroll-reset';
 import { ServerSessionProvider } from '../features/layouts/server-session';
+import { FlaggedAccountNotice } from '../features/moderation/flagged-account-notice';
 import { ServerAccountTierProvider } from '../features/wallet/lib/server-account-tier-context';
 import { OwnRankTierProvider } from '../features/retention/lib/own-rank-tier-context';
 import { fetchOwnRankTierSeed } from '../features/retention/lib/own-rank-tier-seed';
@@ -914,6 +915,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 `useRouter()` call site at once. See components/offline-guard.tsx. */}
             <OfflineGuard>
               <ServerSessionProvider value={serverSession}>
+                {/* ★ Renders only for a signed-in account that is itself flagged as a
+                    name squatter; `null` for everybody else. See the component's own
+                    note for why the notice lives here and not on `/@name`, which now
+                    belongs to the Lumen account that had the name first. */}
+                <FlaggedAccountNotice username={serverSession.username} />
                 {/* ★ C-B, 2026-09-05: `accountTier` (wallet-content.tsx /
                     wallet-right-rail.tsx) and the rank-tier snapshot
                     (league-showcase.tsx) — see each provider's own doc for why

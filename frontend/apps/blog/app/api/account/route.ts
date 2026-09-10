@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
+import { ensureSquatterList, isSquatterName } from '@/blog/lib/lite/moderation/squatter-list';
+import { liteAccountAsProfile } from '@/blog/lib/lite/render/lite-account';
 import { getAccountFull } from '@transaction/lib/hive-api';
 import { cachedRead } from '@/blog/lib/server-read-cache';
 
@@ -31,6 +33,27 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!/^[a-z][a-z0-9.-]{1,15}$/.test(username)) {
     return NextResponse.json({ error: 'username_required' }, { status: 400 });
   }
+  /**
+   * ★★★ A SQUATTED NAME RESOLVES TO THE LUMEN ACCOUNT THAT HAD IT FIRST (2026-09-10).
+   *
+   * This route is why fixing the profile LAYOUT alone was not enough, and it was
+   * caught in local verification before ship. `ProfileMain` seeds from the layout's
+   * SSR account but immediately revalidates through here (`initialDataUpdatedAt: 0`),
+   * so the chain account overwrote the lite one on hydration -- the page server-rendered
+   * as the rightful Lumen owner and then visibly became the squatter's Hive account.
+   * One choke point, every client.
+   */
+  await ensureSquatterList();
+  if (isSquatterName(username)) {
+    const lite = await liteAccountAsProfile(username).catch(() => null);
+    if (lite) {
+      return NextResponse.json(lite, { headers: { 'cache-control': 'private, no-store' } });
+    }
+    // Flagged, but no Lumen account to hand the name back to: refuse rather than
+    // serve the account this list exists to hide.
+    return NextResponse.json({ error: 'account_unavailable' }, { status: 404, headers: { 'cache-control': 'private, no-store' } });
+  }
+
   try {
     // ★ 5s SERVER-SIDE MEMO (2026-08-13) — the wire contract above is unchanged.
     // Measured: 933ms on Home, 912ms on a topic page, 1,145ms on /@ecency, and a

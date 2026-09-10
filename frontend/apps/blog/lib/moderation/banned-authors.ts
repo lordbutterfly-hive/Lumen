@@ -2,10 +2,11 @@ import type { Entry } from '@hive/common-hiveio-packages/wax';
 import {
   bannedAuthorList,
   hasBannedAuthors,
-  isBannedAuthor,
-  withoutBannedAuthors,
+  isBannedAuthor as envBannedAuthor,
+  withoutBannedAuthors as withoutEnvBannedAuthors,
   withoutBannedDiscussion
 } from '@ui/config/lists/banned-authors';
+import { isSquatterName } from '@/blog/lib/lite/moderation/squatter-list';
 
 /**
  * Lumen's view of the global author ban list.
@@ -17,13 +18,37 @@ import {
  * app's own routes and server components want. Nothing here re-implements the
  * rule; if you need to know whether a name is banned, it is still one function.
  */
-export {
-  bannedAuthorList,
-  hasBannedAuthors,
-  isBannedAuthor,
-  withoutBannedAuthors,
-  withoutBannedDiscussion
-};
+export { bannedAuthorList, hasBannedAuthors, withoutBannedDiscussion };
+
+/**
+ * ★★★ TWO SOURCES, ONE PREDICATE (2026-09-10). The env list above is names a human
+ * decided to ban. The second source is names the product identifies itself: a Hive
+ * account registered AFTER a Lumen lite account of the same name, by someone other
+ * than our own creator -- squatting, which on this product is impersonation, because
+ * every name-keyed surface used to resolve that name to the lite account's history.
+ * See `lib/lite/moderation/squatter-list.ts` for why that list cannot be an env var
+ * and why this stays synchronous.
+ *
+ * Everything downstream is unchanged: this is still ONE function to ask, and every
+ * existing caller (the profile layout, `filterBannedEntries`, the discussion filter,
+ * search, metadata) picks up the second source without knowing it exists.
+ */
+export function isBannedAuthor(name: string | null | undefined): boolean {
+  return envBannedAuthor(name) || isSquatterName(name);
+}
+
+/**
+ * Same two sources, same shape as the upstream helper it wraps: the caller still says
+ * where the name lives on its own row, and both lists are applied in one pass.
+ */
+export function withoutBannedAuthors<T>(
+  rows: T[] | null | undefined,
+  pick: (row: T) => string | null | undefined
+): T[] {
+  const kept = withoutEnvBannedAuthors(rows, pick);
+  if (kept.length === 0) return kept;
+  return kept.filter((row) => !isSquatterName(pick(row)));
+}
 
 /**
  * Drop every banned author's post from a feed page.
