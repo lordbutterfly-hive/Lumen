@@ -37,6 +37,7 @@ import SuggestionsList from '@/blog/features/suggestions-posts/list';
 import { useTranslation } from '@/blog/i18n/client';
 import { postContainerClasses } from '@/blog/lib/post-layout-classes';
 import sorter, { SortOrder } from '@/blog/lib/sorter';
+import { orderComments, type CommentOrderState } from '@/blog/lib/comment-order';
 import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { getBasePath } from '@ui/lib/path-utils';
 import { useQuery } from '@tanstack/react-query';
@@ -746,6 +747,10 @@ const PostContent = () => {
   const originalAuthorBlocked = isBlockedEntry({ author: originalAuthor }, viewerBlocks);
   const visibleOriginalAuthor = originalAuthorBlocked ? undefined : originalAuthor;
 
+  // The order currently on screen, and the sort selection it was computed for.
+  // See `lib/comment-order.ts`.
+  const commentOrderRef = useRef<CommentOrderState | null>(null);
+
   const discussionState = useMemo(() => {
     if (!discussionData) return undefined;
     const list = [...Object.keys(discussionData).map((key) => discussionData[key])]
@@ -797,8 +802,19 @@ const PostContent = () => {
       }
     }
     const sortType = commentSort as SortOrder;
-    sorter(list, sortType);
-    return list;
+    // ★ The order the reader is looking at is HELD across a vote. `lib/comment-order.ts`
+    // carries the whole reasoning and the cases; the short version is that `sorter`'s
+    // trending key is payout, an upvote moves payout, and re-ranking mid-read made the
+    // comment you just voted on jump (and, once it crossed a page boundary, vanish).
+    //
+    // Writing the ref during render rather than in an effect is deliberate and has
+    // precedent here: `VoteTally` (features/votes/blade.tsx) keeps its change-detector
+    // the same way, because an effect lands AFTER paint and the first render off the new
+    // data would already have used the stale order. It is a pure cache of a value
+    // derived from the arguments, so a double render computes the same thing twice.
+    const { ordered, state } = orderComments(list, sortType, commentOrderRef.current);
+    commentOrderRef.current = state;
+    return ordered;
   }, [discussionData, commentSort, liteReplies, viewerBlocks]);
 
   const paginatedDiscussionState = useMemo(() => {

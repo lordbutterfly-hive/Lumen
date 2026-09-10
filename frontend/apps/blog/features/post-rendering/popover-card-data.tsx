@@ -90,29 +90,73 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
         // No Hive account behind this name, so there is nothing true to show beyond
         // it. Deliberately no follow/mute buttons: those are chain operations and
         // there is no account here to apply them to.
-        <div className="flex items-center gap-3 p-4" data-testid="popover-card-lite-author">
-          <Avatar className="h-10 w-10 ring-2 ring-border">
-            <AvatarImage src={getUserAvatarUrl(liteName, 'medium')} alt={liteName} />
-            <AvatarFallback>{liteName.slice(0, 2).toUpperCase()}</AvatarFallback>
-          </Avatar>
-          <span className="text-sm font-semibold text-foreground">@{liteName}</span>
-          {/* Lumen keeps its own follow graph, which is the only place a follow of
-              this person can live — there is no account on chain to follow. Offered
-              to any signed-in viewer, lite or full; Mute stays hidden because muting
-              IS a chain operation and has no target here. */}
-          {identity.isLoggedIn && identity.username !== liteName ? (
-            <div className="ml-auto flex gap-2">
-              <ButtonsContainer
-                username={liteName}
-                user={user}
-                variant="default"
-                follow={following}
-                mute={mute}
-                hideMute
-                liteTarget
-              />
-            </div>
-          ) : null}
+        /**
+         * ★★★ TWO DEFECTS, BOTH MEASURED ON PRODUCTION (2026-09-10, owner: "when i
+         * click on liteaccount inside comments there is no clickthrough to their
+         * profile and the pop up from clickign their name is broken. clips the
+         * buttons").
+         *
+         * 1. NO WAY THROUGH TO THE PROFILE. This branch contained no <a> at all --
+         *    a plain Avatar and a plain <span> -- so the card a reader opens to find
+         *    out who someone is was a dead end. Measured on the live card for
+         *    @ethuser: `card.querySelectorAll('a')` returned an EMPTY list, while the
+         *    Hive branch below carries three links to the same profile. Lumen lite
+         *    accounts do have a profile page (`GET /@ethuser` answers 200,
+         *    `<title>@ethuser - Lumen</title>`), so there was nothing to point at
+         *    except the omission. The avatar and the handle are both links now, with
+         *    the same `prefetchOnIntent` treatment as the Hive branch.
+         *
+         * 2. THE BUTTONS WERE CLIPPED, and it was the layout, not a stray style. This
+         *    was ONE `flex items-center` row -- avatar, handle, then `ml-auto` for the
+         *    Follow/Block pair -- inside a popover fixed at `w-80`, so 288px of usable
+         *    width after `p-4`. The handle had no `min-w-0`, so it could not shrink
+         *    and the buttons were pushed straight out of the card. Measured on the
+         *    live card with the Follow+Block pair a signed-in viewer actually gets:
+         *    a short handle fits with 17px to spare, `@christina.mercier` puts Block
+         *    40px past the card's right edge, and a longer handle 76px past. It was
+         *    never visible for the short test handles, and broken for real ones.
+         *
+         *    Fixed the way the Hive branch below already solves the same problem:
+         *    avatar, then a `min-w-0 flex-1` column with the handle on one line
+         *    (truncating) and the buttons on their own line underneath. There is no
+         *    handle length that can push them out of a column they sit inside.
+         */
+        <div className="flex items-start gap-3 p-4" data-testid="popover-card-lite-author">
+          <BasePathLink href={`/@${liteName}`} data-testid="popover-card-lite-avatar" prefetchOnIntent>
+            <Avatar className="h-10 w-10 shrink-0 ring-2 ring-border">
+              <AvatarImage src={getUserAvatarUrl(liteName, 'medium')} alt={liteName} />
+              <AvatarFallback>{liteName.slice(0, 2).toUpperCase()}</AvatarFallback>
+            </Avatar>
+          </BasePathLink>
+          <div className="min-w-0 flex-1">
+            <BasePathLink
+              href={`/@${liteName}`}
+              /* Same ink as the trigger that opened this card, and as the Hive
+                 branch's own name link -- see `user-popover-card.tsx` (audit §5.3). */
+              className="block truncate text-sm font-semibold text-ink-2 hover:text-destructive"
+              data-testid="popover-card-lite-name"
+              prefetchOnIntent
+            >
+              @{liteName}
+            </BasePathLink>
+            {/* Lumen keeps its own follow graph, which is the only place a follow of
+                this person can live — there is no account on chain to follow. Offered
+                to any signed-in viewer, lite or full; Mute stays hidden because muting
+                IS a chain operation and has no target here. */}
+            {identity.isLoggedIn && identity.username !== liteName ? (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <ButtonsContainer
+                  username={liteName}
+                  user={user}
+                  variant="default"
+                  follow={following}
+                  mute={mute}
+                  hideMute
+                  liteTarget
+                />
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : account && !isLoading ? (
         <>
