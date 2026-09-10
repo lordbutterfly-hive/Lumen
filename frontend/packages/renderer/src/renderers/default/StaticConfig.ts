@@ -146,13 +146,20 @@ export class StaticConfig {
             },
             {
                 // eslint-disable-next-line security/detect-unsafe-regex
-                // ★ HOST: `play.3speak.tv` — see ThreeSpeakEmbedder.processEmbed for the
-                // measurement. `3speak.tv/embed` renders the SPA's "PAGE NOT FOUND" screen.
-                // The accepted-input side also learns `play.`/`www.`, because that is the
-                // host `json_metadata.video.url` actually carries and a raw <iframe> written
-                // against it was being dropped outright. Still anchored, still an exact host
-                // set, still rebuilt from a literal.
-                re: /^(?:https?:)?\/\/(?:(?:play|www)\.)?(?:3speak\.(?:tv|online|co))\/embed\?v=([^&\s]+)/i,
+                // ★ THE EMITTED HOST IS `play.3speak.tv` — see ThreeSpeakEmbedder.processEmbed
+                // for the measurement; `3speak.tv/embed` renders the SPA's "PAGE NOT FOUND".
+                //
+                // ★★ THE ACCEPTED-INPUT SIDE IS DELIBERATELY *NOT* WIDENED TO `play.`/`www.`
+                // (2026-09-10, after the owner raised tibfox's "iframes by default are a
+                // phishing gate"). It was, briefly, on the reasoning that `play.3speak.tv` is
+                // the host `json_metadata.video.url` carries. It is — but this rule governs a
+                // RAW `<iframe>` an author typed into a post body, and NO real 3speak post
+                // uses one: the body is a bare URL (checked on @badadib/testvid-846 and
+                // @daveks/bugaboo-falls-695), which reaches the page through
+                // ThreeSpeakEmbedder, never through here. Widening it therefore bought
+                // nothing and grew the raw-iframe surface, which is the exact surface the
+                // concern is about. This stays as narrow as it was.
+                re: /^(?:https?:)?\/\/(?:3speak\.(?:tv|online|co))\/embed\?v=([^&\s]+)/i,
                 fn: (src: string) => {
                     if (!src) return null;
                     const match = src.match(/3speak\.(?:tv|online|co)\/embed\?v=([^&\s]+)/i);
@@ -162,7 +169,7 @@ export class StaticConfig {
             },
             {
                 // eslint-disable-next-line security/detect-unsafe-regex
-                re: /^(?:https?:)?\/\/(?:(?:play|www)\.)?(?:3speak\.(?:tv|online|co))\/watch\?v=([^&\s]+)/i,
+                re: /^(?:https?:)?\/\/(?:3speak\.(?:tv|online|co))\/watch\?v=([^&\s]+)/i,
                 fn: (src: string) => {
                     if (!src) return null;
                     const match = src.match(/3speak\.(?:tv|online|co)\/watch\?v=([^&\s]+)/i);

@@ -128,20 +128,64 @@ const RendererContainer = ({
     setOpen(true);
   };
 
+  /**
+   * ★★★ THE THIRD IFRAME PATH, AND IT HAD NO SANDBOX AT ALL (2026-09-10, after the
+   * owner relayed tibfox's "by supporting iframes by default you open up a gate for
+   * phishing").
+   *
+   * The 2026-09-04 hardening put a sandbox on EVERY embed and said so in two places:
+   * `TagTransformingSanitizer` (a raw <iframe> an author typed) and
+   * `AbstractEmbedder.sandboxEmbedIframes` (an iframe the embedder inserts AFTER
+   * sanitize). Both are true. Neither covers THIS file, which builds YouTube iframes
+   * in the BROWSER with `document.createElement('iframe')` and set only
+   * `allowfullscreen` + `frameborder` -- so the one embed a reader sees most often
+   * was the one embed running with the phishing levers (`allow-top-navigation`,
+   * `allow-popups`) fully enabled, because an iframe with no sandbox attribute has
+   * no restrictions whatever. "Sandbox on every embed" was a claim two of three
+   * paths honoured.
+   *
+   * Same token string as the other two, deliberately duplicated rather than imported:
+   * `@hive/renderer`'s copy is a private static on AbstractEmbedder, and this is a
+   * different package. If one moves, grep `allow-scripts allow-same-origin` and move
+   * all three.
+   */
+  const EMBED_SANDBOX = 'allow-scripts allow-same-origin allow-presentation';
+  const EMBED_ALLOW = 'fullscreen; picture-in-picture; encrypted-media';
+
+  /**
+   * The id is re-validated HERE as well as in the renderer, because this function
+   * reads it back out of a `data-` attribute in the live DOM -- a different trust
+   * boundary from the string the renderer validated at render time.
+   *
+   * ★ THE CHARSET IS COPIED FROM `YoutubeEmbedder.idRegex` (`[A-Za-z0-9_-]`), NOT
+   * tightened. A second, stricter rule downstream of a first one is a rule that can
+   * reject something the first accepted, and the failure mode of that is a video
+   * that silently does not render -- with no error, because this path replaces the
+   * facade or leaves it. The job here is to stop a character that could leave the
+   * URL, which the charset alone does; the length cap is only a sanity bound.
+   */
+  const safeYoutubeId = (id: string | undefined): string | null =>
+    id && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : null;
+
+  const youtubeIframe = (videoId: string, width: string, height: string, autoplay: boolean) => {
+    const iframe = document.createElement('iframe');
+    iframe.width = width;
+    iframe.height = height;
+    iframe.src = `https://www.youtube.com/embed/${videoId}${autoplay ? '?autoplay=1' : ''}`;
+    iframe.setAttribute('allowfullscreen', 'allowfullscreen');
+    iframe.setAttribute('frameborder', '0');
+    iframe.setAttribute('sandbox', EMBED_SANDBOX);
+    iframe.setAttribute('allow', autoplay ? `autoplay; ${EMBED_ALLOW}` : EMBED_ALLOW);
+    return iframe;
+  };
+
   const handleYoutubeFacadeClick = (e: Event) => {
     const target = e.currentTarget as HTMLElement;
-    const videoId = target.dataset.youtubeId;
+    const videoId = safeYoutubeId(target.dataset.youtubeId);
     const width = target.dataset.width || '640';
     const height = target.dataset.height || '480';
     if (videoId) {
-      const iframe = document.createElement('iframe');
-      iframe.width = width;
-      iframe.height = height;
-      iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
-      iframe.setAttribute('allowfullscreen', 'allowfullscreen');
-      iframe.setAttribute('allow', 'autoplay; encrypted-media');
-      iframe.setAttribute('frameborder', '0');
-      target.replaceWith(iframe);
+      target.replaceWith(youtubeIframe(videoId, width, height, true));
     }
   };
 
@@ -154,17 +198,11 @@ const RendererContainer = ({
     } else {
       youtubeFacades?.forEach((facade) => {
         const el = facade as HTMLElement;
-        const videoId = el.dataset.youtubeId;
+        const videoId = safeYoutubeId(el.dataset.youtubeId);
         const width = el.dataset.width || '640';
         const height = el.dataset.height || '480';
         if (videoId) {
-          const iframe = document.createElement('iframe');
-          iframe.width = width;
-          iframe.height = height;
-          iframe.src = `https://www.youtube.com/embed/${videoId}`;
-          iframe.setAttribute('allowfullscreen', 'allowfullscreen');
-          iframe.setAttribute('frameborder', '0');
-          el.replaceWith(iframe);
+          el.replaceWith(youtubeIframe(videoId, width, height, false));
         }
       });
     }

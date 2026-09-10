@@ -116,6 +116,42 @@ describe('iframe allowlist security', function () {
             const html = r.render('<a href="https://evil.com/?x=3speak.tv/watch?v=a/b">x</a>');
             expect(iframeSrcs(html)).to.have.length(0);
         });
+
+        /**
+         * ★★★ THE HOST CHANGE MUST NOT HAVE OPENED A DOOR (2026-09-10). The emitted
+         * host moved from `3speak.tv` to `play.3speak.tv`, and every one of these is a
+         * way an author could try to make the new subdomain form resolve to THEIR
+         * server instead. The property under test is the one that makes the whole
+         * allowlist a real defence rather than a filter: NO src an author writes is
+         * ever echoed back -- a match rebuilds the URL from a hardcoded literal, and a
+         * non-match renders no iframe at all. So the assertion is not "these are
+         * rejected", it is "no iframe on this page points anywhere but at a 3speak
+         * host", which stays true even for inputs that DO match.
+         */
+        const hostileThreeSpeak = [
+            'https://play.3speak.tv.evil.com/embed?v=a/b',
+            'https://play.3speak.tv@evil.com/embed?v=a/b',
+            'https://evil.com/play.3speak.tv/embed?v=a/b',
+            'https://play-3speak.tv/embed?v=a/b',
+            'https://playx3speak.tv/embed?v=a/b',
+            'https://www.3speak.tv.evil.com/watch?v=a/b',
+            'javascript:alert(1)//play.3speak.tv/embed?v=a/b',
+            'https://play.3speak.tv/embed?v=a/b"><iframe src="https://evil.com"></iframe>',
+            'https://play.3speak.tv/embed?v=a/b#https://evil.com/embed?v=c/d'
+        ];
+        for (const input of hostileThreeSpeak) {
+            it(`never points an iframe at a non-3speak host for: ${input}`, () => {
+                for (const wrapped of [input, `<iframe src="${input}"></iframe>`]) {
+                    const srcs = iframeSrcs(r.render(wrapped));
+                    for (const src of srcs) {
+                        expect(
+                            /^https:\/\/(?:play\.)?3speak\.tv\//.test(src),
+                            `rendered iframe escaped the allowlist: ${src} (from ${wrapped})`
+                        ).to.equal(true);
+                    }
+                }
+            });
+        }
     });
 
     describe('sandbox', () => {
