@@ -98,9 +98,21 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   // Everything after the wordmark, so a missing community takes its separator
   // with it rather than leaving a stranded middot.
-  const imprintRest = [community ? community.toUpperCase() : '', author ? `@${author.toUpperCase()}` : '']
-    .filter(Boolean)
-    .join('  ·  ');
+  /**
+   * ★ THE COMMUNITY IS OUT OF THE IMPRINT (2026-09-11, owner: "it says on top
+   * Lumen then again lumen").
+   *
+   * A post in the `lumen` community rendered "Lumen · LUMEN · @LORDBUTTERFLY":
+   * the wordmark, then the community, then the author. Reading the brand twice
+   * in three words, once styled as a name and once as a tag, made the line look
+   * like a bug even though every part of it was correct. The community adds
+   * nothing a reader needs on a share card, and it collides with the wordmark
+   * exactly when the post is in our own community, which is most of them.
+   *
+   * `community` stays in the signature and is still parsed, so a caller passing
+   * it is not an error; it simply does not print.
+   */
+  const imprintRest = author ? `@${author.toUpperCase()}` : '';
 
   return new ImageResponse(
     (
