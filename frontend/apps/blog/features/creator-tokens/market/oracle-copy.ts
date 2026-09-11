@@ -26,9 +26,18 @@ import type { QuoteOracleStatus } from '../types';
  * `oracleStatus` the quote returned and the reason it gets back matches the reason
  * the chain would give.
  *
- * ★★ NO PROMISE ABOUT WHEN. Not one of these says when it clears, because none of
- * it depends on anything the creator or the buyer controls — it clears when other
- * people trade the token, and nobody can commit to that on their behalf.
+ * ★★ NO PROMISE ABOUT WHEN, BUT NAME THE MECHANISM (revised 2026-09-11, owner:
+ * the old wording was "your market hasn’t traded enough times yet"). Still no
+ * completion date — it clears when other people trade, which nobody can commit to
+ * on their behalf. But "not enough times" stated the WRONG REMEDY: a creator read
+ * it as a COUNT they could fix with a burst of trades this afternoon, and a burst
+ * does nothing. RecordObs (core/twap.go) samples the long ring at most once per
+ * LongObsSpacing (6,300 blocks, ~5.25h) and DROPS every trade inside that window,
+ * so nine trades in an hour are one observation, not nine. The two refusals below
+ * therefore say what actually moves them: `insufficient_observations` needs trades
+ * in SEPARATE stretches (count >= 8), `insufficient_span` needs the history itself
+ * to be old enough (>= 57,600 blocks = 2 days, a floor no amount of trading beats).
+ * Both floors are facts about the chain, not forecasts, so stating them is honest.
  *
  * ★ ONE PLACE, TWO AUDIENCES. The Creator Studio's Offerings tab and the buyer's
  * Ask dialog describe the same chain refusal from opposite sides, and this
@@ -46,9 +55,9 @@ import type { QuoteOracleStatus } from '../types';
 const CREATOR_NOTICE = {
   ok: null,
   insufficient_observations:
-    'Nobody can buy these yet. A service price is worked out from your token’s own trading history, and your market hasn’t traded enough times yet. Your prices are saved either way.',
+    'Nobody can buy these yet. A service price is worked out from your token’s own trading history, and only one trade counts every few hours, so a burst of them all at once counts as one. It clears once trades have landed in several separate stretches, spread over a couple of days. Your prices are saved either way.',
   insufficient_span:
-    'Nobody can buy these yet. A service price is worked out from your token’s own trading history, and your market’s trades are bunched into too short a stretch of time to price against. Your prices are saved either way.',
+    'Nobody can buy these yet. A service price is worked out from your token’s own trading history, and that history has to cover about two days before anything can be priced against it, however many trades are in it. Your prices are saved either way.',
   stale:
     'Nobody can buy these right now. A service price is worked out from your token’s recent trading, and your market hasn’t traded recently enough. Your prices are saved either way.',
   deviation_capped:
@@ -72,9 +81,9 @@ const CREATOR_NOTICE = {
 const BUYER_NOTICE = {
   ok: null,
   insufficient_observations:
-    'can’t be bought yet. The price comes from the token’s own trading history, and this market hasn’t traded enough times yet.',
+    'can’t be bought yet. The price comes from the token’s own trading history, and only one trade counts every few hours, so a burst of them all at once counts as one. It clears once trades have landed in several separate stretches, spread over a couple of days.',
   insufficient_span:
-    'can’t be bought yet. The price comes from the token’s own trading history, and this market’s trades are bunched into too short a stretch of time to price against.',
+    'can’t be bought yet. The price comes from the token’s own trading history, and that history has to cover about two days before anything can be priced against it, however many trades are in it.',
   stale:
     'can’t be bought right now. The price comes from the token’s recent trading, and this token hasn’t traded recently enough.',
   deviation_capped:
