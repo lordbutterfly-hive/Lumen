@@ -9,7 +9,7 @@ import { useLiveDiscovery } from '../../live/use-live-discovery';
 import { describeLag, useIndexerHealth } from '../../live/use-indexer-health';
 import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
 import type { CreatorSummary } from '../../types';
-import { deliveryMarks, pctLabel, usdCompact, usdMoney, usdPrice } from '../../market/format';
+import { deliveryMarks, pctLabel, usdCompact, usdPrice } from '../../market/format';
 import { resolveDiscoveryControls, type DiscoverySort } from '../../market/discovery-ranking';
 import TokenShell from '../token-shell';
 import OfferingsBoard from '../meritum/board/offerings-board';
@@ -200,9 +200,38 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
       ) : null}
 
       <div className="mt-3.5 flex items-center justify-between gap-3 border-t border-line-2 pt-3.5">
-        <span className="text-caption tabular-nums text-ink-10 font-num">From {usdMoney(usdFromHbd(c.fromPriceHbd))} per task</span>
+        {/* ★★★ MARKET CAP, NOT "FROM $X PER TASK" (owner, 2026-09-11: "I deleted
+            that, there's no such thing as ask a question, we stripped it").
+
+            `fromPriceHbd` is `min(faceHbd, cheapest live offering)` — and the face
+            is the registration-time "ask a question" default, a service this
+            product no longer sells. So the line quoted a price for something a
+            buyer cannot buy, and it did it in the loudest possible way: a creator
+            whose real work is priced at $30 was advertised at "From $1 per task"
+            because their face was still sitting at the $1 it was registered with.
+            The number was never stale; it was answering a question nobody asks
+            any more.
+
+            ★ AND IT IS NOT SHOWN TWICE. The right-hand span already carried
+            `· cap $X`, so putting the cap on the left without removing that would
+            print the same figure at both ends of one row. The right span is now
+            the token price alone, and "not traded yet" moves left with the cap it
+            qualifies — it is a statement about the CAP (no supply, so no cap),
+            not about the price, which is a real curve value from the first block.
+
+            THE MATH: `marketCapHbd` is `displayPricePerToken(supply) × supply`
+            (vsc-data-source.ts), the standard price × supply convention. Stated
+            plainly because it is NOT the money in the market: on a convex bonding
+            curve the reserve is the AREA under it, which is materially less than
+            spot × supply (at supply 1,000 the area is ~$5.8k against a ~$11.5k
+            cap). Cap is what the market is notionally worth; the reserve is what
+            is actually behind it, and the two must never be described in the same
+            words. */}
+        <span className="text-caption tabular-nums text-ink-10 font-num">
+          {c.marketCapHbd > 0 ? `Market cap ${usdCompact(usdFromHbd(c.marketCapHbd))}` : 'Not traded yet'}
+        </span>
         <span className="text-caption tabular-nums text-ink-14 font-num">
-          Token {usdPrice(usdFromHbd(c.priceHbd))} {c.marketCapHbd > 0 ? `· cap ${usdCompact(usdFromHbd(c.marketCapHbd))}` : '· not traded yet'}
+          Token {usdPrice(usdFromHbd(c.priceHbd))}
         </span>
       </div>
     </Link>
@@ -420,7 +449,17 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
                   </div>
                 </div>
                 <div className="text-caption font-medium text-ink-warn-3 font-ui">{COPY.newNothing}</div>
-                <div className="mt-1.5 text-caption tabular-nums text-ink-10 font-num">From {usdMoney(usdFromHbd(c.fromPriceHbd))} per task</div>
+                {/* Same swap as the main card above, for the same reason: this
+                    shelf is "New here", so by construction these creators have
+                    the registration-default face `fromPriceHbd` would have
+                    quoted — the worst possible place to advertise a price for a
+                    service that no longer exists. A brand-new market has no
+                    supply and therefore no cap, so this will usually read "Not
+                    traded yet", which is the honest thing to say about someone
+                    who just arrived. */}
+                <div className="mt-1.5 text-caption tabular-nums text-ink-10 font-num">
+                  {c.marketCapHbd > 0 ? `Market cap ${usdCompact(usdFromHbd(c.marketCapHbd))}` : 'Not traded yet'}
+                </div>
               </Link>
             ))}
           </div>
