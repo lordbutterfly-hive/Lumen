@@ -88,45 +88,91 @@ const PriceInput: FC<{
   problemOf?: (usd: number) => string | null;
 }> = ({ value, onCommit, disabled, onFailure, problemOf }) => {
   const [txt, setTxt] = useState(String(value));
+  const [busy, setBusy] = useState(false);
   useEffect(() => setTxt(String(value)), [value]);
+  const dirty = txt.trim() !== String(value);
+
+  /**
+   * ★★★ IT COMMITS ON A BUTTON NOW, NOT ON BLUR (2026-09-11, owner: "i can't
+   * update the price, i can only remove the service").
+   *
+   * The field was `border-0` and 70px wide inside a bordered box, so it read as
+   * static text with no hint it could be typed in, and its ONLY commit trigger
+   * was `onBlur`. Two consequences, both bad. A creator who typed a new price and
+   * saw nothing obvious happen concluded it did not work — the sole control on
+   * the row that LOOKS like a control is Remove, which is exactly the complaint.
+   * And a creator who typed a price and then clicked Remove fired a signed price
+   * broadcast on the way out of the field, on the row they were deleting.
+   *
+   * `Save` appears only while the value differs from the chain's, Enter does the
+   * same thing, and Escape abandons the draft. Blur no longer commits anything.
+   * The revert-on-refusal behaviour below is unchanged: the field must never show
+   * a price the chain did not accept.
+   */
+  const commit = async () => {
+    const n = parseFloat(txt.replace(/,/g, ''));
+    if (!dirty) return;
+    if (!Number.isFinite(n) || n <= 0) {
+      setTxt(String(value));
+      onFailure?.('Enter a price in dollars, greater than zero.');
+      return;
+    }
+    // Refused locally, so nothing is signed and no RC is spent finding out.
+    const problem = problemOf?.(n) ?? null;
+    if (problem !== null) {
+      setTxt(String(value));
+      onFailure?.(problem);
+      return;
+    }
+    onFailure?.('');
+    setBusy(true);
+    try {
+      await onCommit(n);
+    } catch (error) {
+      setTxt(String(value));
+      // Routed through writeFailureMessage (F7 note) so a machine-coded refusal —
+      // including CREATOR_TOKENS_BUSY — never paints its raw "CODE: " prefix here.
+      onFailure?.(`The price stayed at $${value}. ${writeFailureMessage(error, 'The chain refused the change. A price may only move 2x per 7 days.')}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <input
-      value={txt}
-      disabled={disabled}
-      inputMode="decimal"
-      onChange={(e) => setTxt(e.target.value)}
-      onBlur={async () => {
-        const n = parseFloat(txt.replace(/,/g, ''));
-        if (txt.trim() === String(value)) return;
-        if (!Number.isFinite(n) || n <= 0) {
-          setTxt(String(value));
-          onFailure?.('Enter a price in dollars, greater than zero.');
-          return;
-        }
-        // Refused locally, so nothing is signed and no RC is spent finding out.
-        const problem = problemOf?.(n) ?? null;
-        if (problem !== null) {
-          setTxt(String(value));
-          onFailure?.(problem);
-          return;
-        }
-        onFailure?.('');
-        // The commit is a signed broadcast now, and it can be REFUSED — most
-        // often by the offering's own 2x/7d anti-rug band. Revert the field on
-        // rejection so it never displays a price the chain did not accept.
-        try {
-          await onCommit(n);
-        } catch (error) {
-          setTxt(String(value));
-          // Routed through writeFailureMessage (F7 note) so a machine-coded
-          // refusal — including the new CREATOR_TOKENS_BUSY the F7 double-submit
-          // guard below can now throw — never paints its raw "CODE: " prefix
-          // into this banner.
-          onFailure?.(`The price stayed at $${value}. ${writeFailureMessage(error, 'The chain refused the change. A price may only move 2x per 7 days.')}`);
-        }
-      }}
-      className="ml-1 w-[70px] border-0 text-[15px] leading-[24px] tabular-nums text-ink-2 font-num outline-none focus-visible:outline-none disabled:opacity-60"
-    />
+    <>
+      <input
+        value={txt}
+        disabled={disabled || busy}
+        inputMode="decimal"
+        aria-label="Service price in dollars"
+        onChange={(e) => setTxt(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            void commit();
+          } else if (e.key === 'Escape') {
+            setTxt(String(value));
+          }
+        }}
+        className="ml-1 w-[70px] border-0 bg-transparent text-[15px] leading-[24px] tabular-nums text-ink-2 font-num outline-none focus-visible:outline-none disabled:opacity-60"
+      />
+      {dirty ? (
+        <button
+          type="button"
+          // `onMouseDown`, not `onClick`: clicking a button blurs the input first,
+          // and on a row whose sibling is Remove that ordering has already cost us
+          // one accidental broadcast. Commit on the press, before focus moves.
+          onMouseDown={(e) => {
+            e.preventDefault();
+            void commit();
+          }}
+          disabled={disabled || busy}
+          className="ml-2 rounded-control bg-surface-brand-5 px-2 py-1 text-caption font-semibold text-ink-brand-6 font-ui disabled:opacity-50"
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      ) : null}
+    </>
   );
 };
 
@@ -149,45 +195,69 @@ const TitleInput: FC<{
   onFailure?: (message: string) => void;
 }> = ({ value, onCommit, disabled, onFailure }) => {
   const [txt, setTxt] = useState(value);
+  const [busy, setBusy] = useState(false);
   useEffect(() => setTxt(value), [value]);
+  const next = txt.trim();
+  const dirty = next !== value && next !== '';
+  // The contract's own rule, applied while typing rather than at the signature
+  // (core/offerings.go validOfferTitle: no comma, no pipe, no control bytes, 64
+  // bytes). `NewOfferingRow` has checked this since 2026-08-21; the RENAME field
+  // did not, so a refusable name was broadcast and reverted after the fact.
+  const problem = dirty ? offerTitleProblem(next) : null;
+
+  const commit = async () => {
+    if (!dirty || problem) return;
+    onFailure?.('');
+    setBusy(true);
+    try {
+      await onCommit(next);
+    } catch (error) {
+      setTxt(value);
+      onFailure?.(`The name stayed "${value}". ${writeFailureMessage(error, 'The chain refused the rename.')}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <input
-      value={txt}
-      disabled={disabled}
-      aria-label="Service name"
-      // ★ THE BOX NOW STOPS WHERE THE CONTRACT DOES (2026-09-11, owner: "i can't
-      // edit it"). There was no bound here at all, so a creator could type a name
-      // the chain refuses, blur, and watch it silently revert — the rename had
-      // already cost a broadcast. `NewOfferingRow`'s title field has had this
-      // guard since 2026-08-21 for the same reason; the RENAME field was missed.
-      // Byte-accurate validation still belongs to `offerTitleProblem` below: this
-      // counts UTF-16 units, which only ever stops the box EARLIER than the real
-      // 64-byte rule, never later.
-      maxLength={MAX_OFFER_TITLE_LEN}
-      onChange={(e) => setTxt(e.target.value)}
-      onBlur={async () => {
-        const next = txt.trim();
-        // Unchanged, or emptied: put the old name back rather than broadcasting a
-        // no-op (which still costs resource credits) or an empty title the
-        // contract refuses anyway.
-        if (next === value || next === '') {
-          setTxt(value);
-          return;
-        }
-        onFailure?.('');
-        try {
-          await onCommit(next);
-        } catch (error) {
-          setTxt(value);
-          // Routed through writeFailureMessage (same F7 note as PriceInput
-          // above): a machine-coded refusal — including CREATOR_TOKENS_BUSY,
-          // reachable here too now that every studio write shares one guard —
-          // must not paint its raw "CODE: " prefix into this banner.
-          onFailure?.(`The name stayed "${value}". ${writeFailureMessage(error, 'The chain refused the rename.')}`);
-        }
-      }}
-      className="w-full truncate border-0 bg-transparent text-[14px] leading-[22px] font-medium text-ink-2 font-ui outline-none focus-visible:outline-none focus:underline disabled:opacity-60"
-    />
+    <div className="flex items-center gap-2">
+      <input
+        value={txt}
+        disabled={disabled || busy}
+        aria-label="Service name"
+        aria-invalid={problem !== null}
+        // Stops the box at the contract's own bound. Counts UTF-16 units, which
+        // can only ever stop it EARLIER than the real 64-BYTE rule, never later;
+        // `offerTitleProblem` above is the byte-accurate gate.
+        maxLength={MAX_OFFER_TITLE_LEN}
+        onChange={(e) => setTxt(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            void commit();
+          } else if (e.key === 'Escape') {
+            setTxt(value);
+          }
+        }}
+        className="w-full truncate border-0 bg-transparent text-[14px] leading-[22px] font-medium text-ink-2 font-ui outline-none focus-visible:outline-none focus:underline disabled:opacity-60"
+      />
+      {dirty ? (
+        <button
+          type="button"
+          // See PriceInput's note: commit on the PRESS, because clicking a button
+          // blurs the field first and Remove is its neighbour.
+          onMouseDown={(e) => {
+            e.preventDefault();
+            void commit();
+          }}
+          disabled={disabled || busy || problem !== null}
+          title={problem ?? undefined}
+          className="shrink-0 rounded-control bg-surface-brand-5 px-2 py-1 text-caption font-semibold text-ink-brand-6 font-ui disabled:opacity-50"
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      ) : null}
+    </div>
   );
 };
 
@@ -520,6 +590,18 @@ const OfferingRow: FC<{
   const [desc, setDesc] = useState(description);
   const [savingDesc, setSavingDesc] = useState(false);
   const [descSaved, setDescSaved] = useState(false);
+  /**
+   * ★ THE EDITOR CLOSES, AND THE SAVED WORDS SHOW (2026-09-11, owner: "the
+   * description says saved, but the window for writing it stays open and doesn't
+   * show up under the title"). Both halves were real. The textarea was
+   * unconditional, so "Saved" was the ONLY evidence anything had happened, and
+   * the creator never saw their description in the shape a buyer sees it — under
+   * the service name — which is the only way to judge whether it reads well.
+   * Now the row shows the saved text under the title and opens the box only on
+   * request. (The buyer-facing render was never broken: verified on the live
+   * token page the same day.)
+   */
+  const [editing, setEditing] = useState(false);
   // Re-seed when the stored value arrives or changes, but never over a draft the
   // creator is still typing: `dirty` is what tells those two apart.
   const dirty = desc.trim() !== description.trim();
@@ -550,6 +632,7 @@ const OfferingRow: FC<{
     try {
       await studio.setOfferingDescription({ offeringId: o.offeringId, description: desc });
       setDescSaved(true);
+      setEditing(false);
     } catch (err) {
       setFailure(writeFailureMessage(err, 'The description didn’t save.'));
     } finally {
@@ -579,6 +662,10 @@ const OfferingRow: FC<{
               ? `≈ ${tok(serviceQuote(o.priceHbd, priceUsd).tokens)} tokens at today’s price`
               : 'Token price unavailable'}
           </div>
+          {/* Under the title, exactly where a buyer reads it on the token page. */}
+          {!editing && description.trim() !== '' ? (
+            <p className="mt-1 whitespace-pre-wrap text-caption text-ink-10 font-ui">{description}</p>
+          ) : null}
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           <div className="flex items-center rounded-control border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
@@ -628,38 +715,72 @@ const OfferingRow: FC<{
       </div>
 
       {/* The long description. Buyer-facing on the token page, and nowhere else. */}
-      <div className="mt-3 border-t border-line-2 pt-3">
-        <label className="mb-1 block text-caption font-medium text-ink-10 font-ui" htmlFor={`offer-desc-${o.offeringId}`}>
-          Description <span className="font-normal text-ink-14">· shown on your token page, under the service name</span>
-        </label>
-        <textarea
-          id={`offer-desc-${o.offeringId}`}
-          value={desc}
-          rows={3}
-          disabled={studio.isBusy || removing || savingDesc}
-          onChange={(e) => {
-            setDesc(e.target.value);
-            setDescSaved(false);
-          }}
-          placeholder="What the buyer gets, in your own words."
-          className="w-full rounded-control border border-line-11 bg-transparent px-3 py-2 text-[14px] leading-[22px] text-ink-2 font-ui outline-none focus:border-line-brand-10 disabled:opacity-60"
-        />
-        <div className="mt-1 flex items-center justify-between gap-3">
-          <span className={cn('text-caption font-ui', descProblem ? 'text-ink-warn-1' : 'text-ink-14')}>
-            {descProblem ?? `${words}/${MAX_DESCRIPTION_WORDS} words`}
+      {!editing ? (
+        <div className="mt-3 border-t border-line-2 pt-3 flex items-center justify-between gap-3">
+          <span className="text-caption text-ink-14 font-ui">
+            {description.trim() === ''
+              ? 'No description yet. Buyers see only the title.'
+              : 'Description shown on your token page.'}
           </span>
           <div className="flex items-center gap-2">
-            {descSaved && !dirty ? <span className="text-caption text-ink-ok-4 font-ui">Saved</span> : null}
+            {descSaved ? <span className="text-caption text-ink-ok-4 font-ui">Saved</span> : null}
             <button
-              onClick={() => void saveDesc()}
-              disabled={savingDesc || !dirty || descProblem !== null || studio.isBusy || removing}
+              onClick={() => {
+                setDesc(description);
+                setDescSaved(false);
+                setEditing(true);
+              }}
+              disabled={studio.isBusy || removing}
               className="rounded-control border border-line-11 px-3 py-1.5 text-caption font-medium text-ink-2 font-ui hover:bg-surface-16 disabled:opacity-50"
             >
-              {savingDesc ? 'Saving…' : 'Save description'}
+              {description.trim() === '' ? 'Add description' : 'Edit description'}
             </button>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="mt-3 border-t border-line-2 pt-3">
+          <label className="mb-1 block text-caption font-medium text-ink-10 font-ui" htmlFor={`offer-desc-${o.offeringId}`}>
+            Description <span className="font-normal text-ink-14">· shown on your token page, under the service name</span>
+          </label>
+          <textarea
+            id={`offer-desc-${o.offeringId}`}
+            value={desc}
+            rows={4}
+            autoFocus
+            disabled={studio.isBusy || removing || savingDesc}
+            onChange={(e) => {
+              setDesc(e.target.value);
+              setDescSaved(false);
+            }}
+            placeholder="What the buyer gets, in your own words."
+            className="w-full rounded-control border border-line-11 bg-transparent px-3 py-2 text-[14px] leading-[22px] text-ink-2 font-ui outline-none focus:border-line-brand-10 disabled:opacity-60"
+          />
+          <div className="mt-1 flex items-center justify-between gap-3">
+            <span className={cn('text-caption font-ui', descProblem ? 'text-ink-warn-1' : 'text-ink-14')}>
+              {descProblem ?? `${words}/${MAX_DESCRIPTION_WORDS} words`}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setDesc(description);
+                  setEditing(false);
+                }}
+                disabled={savingDesc}
+                className="rounded-control px-2 py-1.5 text-caption font-medium text-ink-10 font-ui hover:bg-surface-16 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void saveDesc()}
+                disabled={savingDesc || !dirty || descProblem !== null || studio.isBusy || removing}
+                className="rounded-control border border-line-11 px-3 py-1.5 text-caption font-medium text-ink-2 font-ui hover:bg-surface-16 disabled:opacity-50"
+              >
+                {savingDesc ? 'Saving…' : 'Save description'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* THE REFUSAL LANDS HERE, under the row that caused it. */}
       {failure ? (

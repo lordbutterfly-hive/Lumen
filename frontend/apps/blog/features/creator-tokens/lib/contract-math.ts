@@ -181,8 +181,32 @@ export const CURVE_LIN_NUM = 63_000; // params.go CurveLinNum   (a = 63/8)
 export const CURVE_QUAD_NUM = 21; // params.go CurveQuadNum     (b = 21/8000)
 export const CURVE_DENOM = 8_000; // params.go CurveDenom — the ONE rounding site
 
-export const TRADE_FEE_BPS = 1_000; // params.go TradeFeeBps — 10%, split 5/5 creator/platform
-export const MAX_EXIT_TAX_BPS = 2_000; // params.go MaxExitTaxBps — 20% at h == 0
+/**
+ * ★★★ RE-ANCHORED ON THE ACTIVATED CONTRACT (2026-09-11, owner: "the trade fee
+ * when buying a token didn't update to new %").
+ *
+ * The contract update that activated at block 109824076 moved both of these and
+ * the mirror did not follow: TradeFeeBps 1000 -> 500 and MaxExitTaxBps 2000 ->
+ * 1500 (creator-tokens commit 81178b7, "fees 5%/15%"). The CHAIN was right the
+ * whole time — a live buy's own event log reads
+ * `{"cost":"1016","fee":"50","totalDue":"1066"}`, which is 5%, while this file
+ * predicted 101. So every buy preview overstated the fee about 2x and every sell
+ * preview overstated the exit tax by a third.
+ *
+ * The direction was the safe one (we quoted worse than the chain charged, so
+ * nobody was undercharged), but it is not harmless: the buy path sizes its
+ * `transfer.allow` from this number, and an inflated allowance is reserved
+ * against the same HBD the purchase spends — see rc-budget.ts's note on
+ * `insufficient balance` reading like "you are broke". A marginal buyer could be
+ * refused for a fee that does not exist.
+ *
+ * ★ THESE TWO ARE MIRRORS OF core/params.go AND HAVE NO OTHER SOURCE. When a
+ * contract update moves a fee, it moves HERE in the same change, and the
+ * rendered labels must be DERIVED from these (token-modals.tsx) rather than
+ * written out, or the number drifts in a third place next time.
+ */
+export const TRADE_FEE_BPS = 500; // params.go TradeFeeBps — 5%, split 2.5/2.5 creator/platform
+export const MAX_EXIT_TAX_BPS = 1_500; // params.go MaxExitTaxBps — 15% at h == 0
 export const EXIT_TAX_DECAY_BLOCKS = 42 * BLOCKS_PER_DAY; // params.go ExitTaxDecayBlocks — 6 weeks to 0
 
 // ---- money: base-unit integer <-> human 3-decimal number ----

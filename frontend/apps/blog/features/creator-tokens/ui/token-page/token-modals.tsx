@@ -5,6 +5,16 @@ import { useQuery } from '@tanstack/react-query';
 import type { Service } from '../../market/token-detail';
 import { displayHandle, type LiveTokenMarket } from '../../live/adapt';
 import { buyQuote, minBuyUsd, sellQuote, serviceQuote, EXIT_FEE_MAX, MIN_NET_DEFAULT_TOLERANCE_BPS } from '../../market/curve';
+import { TRADE_FEE_BPS } from '../../lib/contract-math';
+
+/**
+ * ★ DERIVED, NEVER TYPED OUT (2026-09-11). Both fee rows below read "Trade fee
+ * (10%)" as a literal while the contract charged 5%, because a contract update
+ * moved the rate and a hand-written label cannot follow one. Rendering it from
+ * the same constant the arithmetic uses means the label and the number under it
+ * can never disagree again.
+ */
+const TRADE_FEE_PCT = `${Number((TRADE_FEE_BPS / 100).toFixed(2))}%`;
 // usdWhole is gone from this file: the Ask card's posted price is now exact
 // (usdPrice), which is what makes the whole-token overshoot checkable.
 import { pctLabel, usdPrice } from '../../market/format';
@@ -260,7 +270,7 @@ const BuyModal: FC<{
             <span className="font-num">{usdPrice(rows.curveCostUsd)}</span>
           </div>
           <div className="mt-1.5 flex justify-between text-caption text-ink-warn-3 font-ui">
-            <span>Trade fee (10%)</span>
+            <span>Trade fee ({TRADE_FEE_PCT})</span>
             <span className="font-num">+{usdPrice(rows.tradeFeeUsd)}</span>
           </div>
           <div className="mt-2 flex justify-between border-t border-line-2 pt-2 text-[15px] leading-[24px]">
@@ -680,7 +690,7 @@ const SellModal: FC<{
               it, so showing it here would be inventing a deduction. */}
           {redeem ? null : (
             <div className="mb-2 flex justify-between text-caption text-ink-warn-3 font-ui">
-              <span>Trade fee (10%)</span>
+              <span>Trade fee ({TRADE_FEE_PCT})</span>
               <span className="font-num">−{usdPrice(rows.tradeFeeUsd)}</span>
             </div>
           )}

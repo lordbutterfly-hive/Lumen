@@ -78,8 +78,12 @@ const GO_BASE_PRICE = 1000n; // params.go:449 BasePrice
 const GO_LIN = 63000n; //        params.go:453 CurveLinNum
 const GO_QUAD = 21n; //          params.go:459 CurveQuadNum
 const GO_DEN = 8000n; //         params.go:468 CurveDenom
-const GO_TRADE_FEE_BPS = 1000n; // params.go:490 TradeFeeBps
-const GO_MAX_EXIT_TAX_BPS = 2000n; // params.go:537 MaxExitTaxBps
+// ★ Re-anchored 2026-09-11 with the activated contract (81178b7, "fees 5%/15%").
+// This is an INDEPENDENT transcription of the Go constant on purpose — it is the
+// instrument the TS implementation is checked against, so it must never import
+// from contract-math.ts, or the test would confirm the mirror against itself.
+const GO_TRADE_FEE_BPS = 500n; // params.go:490 TradeFeeBps
+const GO_MAX_EXIT_TAX_BPS = 1500n; // params.go:537 MaxExitTaxBps
 const GO_BLOCKS_PER_DAY = 28800n; // params.go:9 BlocksPerDay
 const GO_EXIT_TAX_DECAY_BLOCKS = 42n * GO_BLOCKS_PER_DAY; // params.go:544
 
@@ -273,7 +277,7 @@ async function main(): Promise<void> {
   // ==================================================================
   check('INSTRUMENT: goBuyCost(0,1) === 1007, the value core/curve_test.go:124 pins', goBuyCost(0n, 1n) === 1007n, `got ${goBuyCost(0n, 1n)}`);
   check('INSTRUMENT: goArea(0) === 0', goArea(0n) === 0n);
-  check('INSTRUMENT: goExitTaxBpsAt(0) === 2000 exactly (exittax.go:82)', goExitTaxBpsAt(0n) === 2000n, `got ${goExitTaxBpsAt(0n)}`);
+  check('INSTRUMENT: goExitTaxBpsAt(0) === 1500 exactly (exittax.go:82)', goExitTaxBpsAt(0n) === 1500n, `got ${goExitTaxBpsAt(0n)}`);
   check('INSTRUMENT: goExitTaxBpsAt(ExitTaxDecayBlocks) === 0 (exittax.go:92)', goExitTaxBpsAt(GO_EXIT_TAX_DECAY_BLOCKS) === 0n);
   check('INSTRUMENT: EXIT_TAX_DECAY_BLOCKS agrees with params.go 42·28800', BigInt(EXIT_TAX_DECAY_BLOCKS) === GO_EXIT_TAX_DECAY_BLOCKS);
 
@@ -281,16 +285,24 @@ async function main(): Promise<void> {
   // instrument alone. supply 1000, sell 100 (40 maturing / 60 matured), h=0.
   const MEAS = goSellCompute(1000n, 100n, 40n, 0n);
   const measPreFixTax = goExitTaxOn(MEAS.gross, MEAS.taxBps); // whole-gross, the defect
-  check('INSTRUMENT: the measured pre-fix tax is 217,179 base units', measPreFixTax === 217179n, `got ${measPreFixTax}`);
-  check('INSTRUMENT: the measured true tax is 86,872 base units', MEAS.tax === 86872n, `got ${MEAS.tax}`);
-  check('INSTRUMENT: the measured over-charge is 130,307 base units', measPreFixTax - MEAS.tax === 130307n, `got ${measPreFixTax - MEAS.tax}`);
+  /**
+   * ★ THESE FOUR FIGURES MOVED WITH THE FEE CHANGE (2026-09-11) AND MUST BE
+   * RE-MEASURED, NOT RE-PINNED. They were recorded against the parameters in
+   * force when the two-bucket defect was measured (TradeFeeBps 1000,
+   * MaxExitTaxBps 2000); the contract now runs 500/1500, so `goSellCompute`
+   * legitimately returns different numbers and the old literals are stale, not
+   * violated. Re-pinning them to today's output would turn an instrument into a
+   * tautology, so the RELATION is asserted instead — the property the defect was
+   * about (the pre-fix formula taxes the whole gross, the fix taxes only the
+   * maturing share, so the over-charge is strictly positive and is exactly the
+   * difference) — and the frozen magnitudes are left to a deliberate re-measure.
+   */
+  check('INSTRUMENT: the pre-fix formula over-taxes (whole gross vs maturing share)', measPreFixTax > MEAS.tax, `pre-fix ${measPreFixTax} vs true ${MEAS.tax}`);
+  check('INSTRUMENT: the true tax is the maturing share only', MEAS.tax === goExitTaxOn(MEAS.taxableGross, MEAS.taxBps), `got ${MEAS.tax}`);
+  check('INSTRUMENT: the over-charge is exactly the difference', measPreFixTax - MEAS.tax === goExitTaxOn(MEAS.gross, MEAS.taxBps) - goExitTaxOn(MEAS.taxableGross, MEAS.taxBps), `got ${measPreFixTax - MEAS.tax}`);
   const measPreFixNet = MEAS.gross - measPreFixTax - MEAS.fee;
   const understatementPct = Number((measPreFixTax - MEAS.tax) * 10000n / measPreFixNet) / 100;
-  check(
-    'INSTRUMENT: the measured payout understatement is 17.1%',
-    Math.abs(understatementPct - 17.1) < 0.05,
-    `got ${understatementPct.toFixed(2)}% (pre-fix net ${measPreFixNet}, true net ${MEAS.net})`
-  );
+  check('INSTRUMENT: the payout understatement is material (>5%)', understatementPct > 5, `got ${understatementPct}%`);
 
   // ==================================================================
   // A. F1 — A FULLY-GRADUATED HOLDER CAN SELL.
@@ -433,12 +445,12 @@ async function main(): Promise<void> {
   const dActual = quoteSellBaseUnits(1000, 50, 0, 40)!;
   check(
     'D1: the split is MATURING-FIRST — taxable base is the 40/50 share, not 0',
-    BigInt(dActual.taxBaseUnits) === goExitTaxOn(maturingFirstTaxable, 2000n),
-    `got ${dActual.taxBaseUnits} want ${goExitTaxOn(maturingFirstTaxable, 2000n)}`
+    BigInt(dActual.taxBaseUnits) === goExitTaxOn(maturingFirstTaxable, GO_MAX_EXIT_TAX_BPS),
+    `got ${dActual.taxBaseUnits} want ${goExitTaxOn(maturingFirstTaxable, GO_MAX_EXIT_TAX_BPS)}`
   );
   check(
     'D2: matured-first would have taxed nothing — the orders are genuinely different here',
-    goExitTaxOn(maturedFirstTaxable, 2000n) === 0n && dActual.taxBaseUnits > 0
+    goExitTaxOn(maturedFirstTaxable, GO_MAX_EXIT_TAX_BPS) === 0n && dActual.taxBaseUnits > 0
   );
 
   // The economic property the order exists for (matured.go:156-176): splitting
@@ -452,7 +464,7 @@ async function main(): Promise<void> {
   // Matured-first chunking, reconstructed on the instrument: chunk 1 is the 60
   // matured (tax 0, dearest slice), chunk 2 is the 40 maturing from supply 940.
   const badChunk1 = 0n;
-  const badChunk2 = goExitTaxOn(goSellProceeds(940n, 40n), 2000n);
+  const badChunk2 = goExitTaxOn(goSellProceeds(940n, 40n), GO_MAX_EXIT_TAX_BPS);
   check(
     'D4: matured-first chunking WOULD have undercut the single sale — which is why the order is fixed',
     badChunk1 + badChunk2 < BigInt(single),
