@@ -47,6 +47,17 @@ const PAPER = 'rgb(252, 250, 247)';
 const INK = 'rgb(26, 22, 18)';
 const INK_SOFT = 'rgb(110, 100, 90)';
 
+/** The tight editorial leading the card is designed around. */
+const TITLE_LINE = 1.06;
+/**
+ * How far Lora's descenders fall below a 1.06em line box, in em. Lora's natural
+ * line height is about 1.3em; with the box set tighter than that, the overflow
+ * splits above and below, so roughly (1.3 - 1.06) / 2 hangs under the last line.
+ * Rounded up, because a clipped tail is worse than a few unused pixels on a card
+ * with 240px of vertical slack.
+ */
+const DESCENDER_EM = 0.16;
+
 /** Verbatim from the spec: the size ladder, and the floor it never goes below. */
 function titleSize(length: number): number {
   if (length <= 45) return 92;
@@ -57,8 +68,14 @@ function titleSize(length: number): number {
 /** Truncate on a WORD, never mid-word, and only past the last size step. */
 function fitTitle(raw: string): string {
   const title = raw.trim().replace(/\s+/g, ' ');
-  if (title.length <= 124) return title;
-  const cut = title.slice(0, 124);
+  // ★ 96, NOT 124 (2026-09-11). At the 66px floor a line holds roughly 31
+  // characters across the 1024px of content width, so three lines is about 93.
+  // A 124-character title was therefore a FOUR line title that the maxHeight
+  // below then guillotined, which is not truncation, it is damage: the reader
+  // got a fragment with no ellipsis to tell them it was cut. Truncating on a
+  // word with a visible "…" says what happened.
+  if (title.length <= 96) return title;
+  const cut = title.slice(0, 96);
   const lastSpace = cut.lastIndexOf(' ');
   return `${(lastSpace > 40 ? cut.slice(0, lastSpace) : cut).replace(/[.,;:—-]+$/, '')}…`;
 }
@@ -145,11 +162,28 @@ export async function GET(req: NextRequest): Promise<Response> {
             fontFamily: 'Lora',
             fontWeight: 700,
             fontSize: `${size}px`,
-            lineHeight: 1.06,
+            lineHeight: TITLE_LINE,
             letterSpacing: '-0.035em',
             color: INK,
-            // Three lines maximum, per the spec.
-            maxHeight: `${Math.round(size * 1.06 * 3)}px`,
+            /**
+             * ★★★ THREE LINES, WITH ROOM FOR THEIR TAILS (2026-09-11, owner:
+             * "the post card clips the bottom of the title... it bites the lower
+             * part of text").
+             *
+             * This was `size * 1.06 * 3` exactly, and 1.06 is TIGHTER than Lora's
+             * natural line height. A glyph is drawn from its own baseline, not
+             * inside the line box, so every descender (g, y, p, j) hangs below
+             * that box by roughly half the difference. Clipping at exactly three
+             * boxes therefore cut through the tails on the THIRD line every time,
+             * which is why it only showed up on long titles. Reproduced at 66px
+             * with "…Programming Gigs" and fixed against the same render.
+             *
+             * The extra allowance is descender room ONLY. It is deliberately
+             * smaller than a line, so a fourth line can never peek above the cut
+             * as a sliver of letter-tops, and `fitTitle` above now truncates
+             * before four lines are reachable anyway.
+             */
+            maxHeight: `${Math.round(size * (TITLE_LINE * 3 + DESCENDER_EM))}px`,
             overflow: 'hidden'
           }}
         >
