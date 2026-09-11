@@ -117,8 +117,20 @@ async function loadPeopleByTopic(query: string): Promise<PeopleAnswer> {
   const topic = memoKey(query);
   if (!topic) return { people: [], complete: true };
   const names = await hivesenseAuthorsByTopic(topic, TOPIC_LIMIT);
+  /**
+   * ★ THE SIBLING MODE IN THIS SAME FILE WAS FIXED AND THIS ONE WAS NOT (2026-09-11).
+   *
+   * `loadPeopleByPrefix` above awaits `ensureSquatterList()` and drops squatters before
+   * merging, added 2026-09-10 with a comment explaining exactly why. Topic mode kept
+   * calling `hydrateHiveProfiles` straight, and that helper only knows the ENV list,
+   * which is empty on production -- so a squatter who has posted about a topic still
+   * surfaced with their real Hive card, avatar and reputation, under a name that
+   * click-throughs to their victim.
+   */
+  await ensureSquatterList();
+  const clean = names.filter((name) => !isSquatterName(name));
   // Hivesense order is the ranking here; hydration keeps it.
-  const leg = await hydrateHiveProfiles(names);
+  const leg = await hydrateHiveProfiles(clean);
   return { people: leg.people, complete: leg.complete };
 }
 

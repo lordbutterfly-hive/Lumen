@@ -257,7 +257,31 @@ export default function ProfileMain() {
           only textual moderation readout, so this dimming stays what it always
           was underneath the banner: a purely visual cue, not the explanation. */}
       <div className={cn(moderation.isModerated && 'opacity-60 grayscale')} data-testid="profile-moderated-visuals">
-        <ProfileCover username={username} coverImageUrl={getCoverImageUrl(profileData.profile)} />
+        <ProfileCover
+          username={username}
+          coverImageUrl={getCoverImageUrl(profileData.profile)}
+          /**
+           * ★★★ ONLY FOR A LITE ACCOUNT, AND THE CONTROL CAUGHT WHY (2026-09-11).
+           *
+           * First cut passed this for EVERY account. That regressed ordinary Hive
+           * profiles: `profile_image` is an arbitrary URL the account owner put on
+           * chain years ago, and for a meaningful share of Hive history it points at a
+           * host that no longer exists (`/api/avatar`'s own comment says so). Measured
+           * on @blocktrades: its stored image is `s18.postimg.org/...`, which is dead
+           * AND not in our CSP `img-src` allowlist, so `UserAvatarImg` burned through
+           * `direct` -> `proxy` -> `failed`, and at `failed` it removes the <img>
+           * entirely. A real avatar that had always worked became a monogram.
+           *
+           * A LITE account's picture is different in kind: we stored it ourselves
+           * through `/api/lite/upload`, it lives on our own image host, and there is no
+           * name-keyed alternative that is even correct — the direct host would serve
+           * the squatter. So the override is scoped to exactly the case that needs it,
+           * and a Hive account keeps the `images.hive.blog/u/<name>/avatar` path that
+           * was always right for it.
+           */
+          avatarUrl={profileData._temporary ? profileData.profile?.profile_image : undefined}
+          lite={Boolean(profileData._temporary)}
+        />
       </div>
 
       {/* ★ P-1: THE SHELL, AND THE SIX PIXELS.

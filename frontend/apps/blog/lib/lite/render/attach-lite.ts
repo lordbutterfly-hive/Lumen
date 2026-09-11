@@ -1,7 +1,7 @@
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import * as posts from '../repositories/post-repository';
 import { isLumenProxiedEntry, litePostIdOf } from './lite-post-id';
-import { resolvePublicNames } from './current-name';
+import { resolvePublicNames, resolvePublicAvatars } from './current-name';
 
 /**
  * Attach Lumen identities to chain-sourced entries, on the SERVER.
@@ -40,6 +40,8 @@ export async function attachLiteIdentities<T extends Entry>(entries: T[]): Promi
 
     const rows = await posts.getPostsByIds([...byPostId.keys()]);
     const names = await resolvePublicNames(rows);
+    // Same rows, same one query's worth of users — see resolvePublicAvatars.
+    const avatars = await resolvePublicAvatars(rows);
 
     for (const row of rows) {
       // A post hidden or deleted on Lumen keeps whatever the chain still shows; this
@@ -69,6 +71,8 @@ export async function attachLiteIdentities<T extends Entry>(entries: T[]): Promi
           // Our row kept the real one — only the body is pruned after publish.
           title: row.title || entry.title,
           chainAuthor: row.hiveAuthor,
+          // The picture the byline should actually use. See LiteIdentity.avatarUrl.
+          avatarUrl: avatars.get(row.postId),
           // The exact writer. Carried because the two names either side of it are
           // both ambiguous for identity purposes — `author` is a handle, and
           // `chainAuthor` is the SHARED publishing account that signs for everybody.

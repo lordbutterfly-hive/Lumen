@@ -83,12 +83,45 @@ export async function generateMetadata({ params }: { params: { param: string } }
     return { title: FALLBACK_TITLE, description: SITE_DESC };
   }
   try {
-    // Use cached version - deduplicated with Layout's prefetch within the same request
-    const account = await getAccountFullCached(username);
+    /**
+     * ★★★ THE SHARE CARD ASKED THE CHAIN DIRECTLY AND SKIPPED BOTH GUARDS (2026-09-11).
+     *
+     * `generateMetadata` is a separate Next export from `Layout` below, and only
+     * `Layout` learned about squatting. This function checked `isBannedAuthor` -- the
+     * ENV list, which is empty on production and which by design answers "not banned"
+     * for a squatted name -- and then called `getAccountFullCached(username)`
+     * unconditionally, emitting whatever the chain returned as `og:image` and
+     * `og:description`.
+     *
+     * So the page body resolved to the lite victim while its own share card resolved
+     * to the squatter. Measured on production 2026-09-11: `/@chadmasters` emitted
+     * `og:image = https://i.etsystatic.com/...`, an ATTACKER-CONTROLLED off-domain URL
+     * taken from the squatter's Hive `profile_image`. Posting a Lumen profile link in
+     * Discord, Slack or X unfurled a stranger's picture and bio under the victim's
+     * handle -- the most widely-seen surface of the whole bug, and the one the reader
+     * never even visits.
+     *
+     * Same three lines the layout already runs, in the same order, for the same
+     * reason. The lite fallback below is the second half: an uncontested lite account
+     * had no chain record either, so it fell to the generic `og-plain.png` and
+     * "Profile of @X on Hive." -- a card that describes neither them nor the chain
+     * they are not on. Both cases now answer from the identity the rest of the page
+     * already agreed on.
+     */
+    await ensureSquatterList();
+    let account = isSquatterName(username) ? null : await getAccountFullCached(username);
+    if (!account || !account.name) {
+      account = await liteAccountAsProfile(username).catch(() => null);
+    }
     const image = account?.profile?.profile_image || '/lumen/og-plain.png';
     // "on Hive" here is a factual statement about the chain the account lives
     // on (Lumen is a Hive frontend), not a branding mismatch — left as-is.
-    const about = account?.profile?.about || `Profile of @${username} on Hive.`;
+    // ★ NOT "on Hive" FOR AN ACCOUNT THAT IS NOT ON HIVE (2026-09-11). A lite account
+    // has no chain identity; describing it as a Hive profile in every share card was
+    // simply untrue, and it was the only description a lite account ever got.
+    const about =
+      account?.profile?.about ||
+      (account?._temporary ? `@${username} on Lumen.` : `Profile of @${username} on Hive.`);
     // ★ NOT "Blog {username}" ANY MORE (audit item 15). "Blog" was the name of
     // a tab in the legacy two-tab profile header (Blog / Social) that this
     // redesign removed — see the shell's own comment further down this file.

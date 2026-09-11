@@ -61,6 +61,15 @@ export interface IdentityPillProps {
   /** The name a reader sees, and the profile route. */
   handle: string;
   /**
+   * The writer's own picture, when the caller knows it (a Lumen lite author carries it
+   * on `_lite.avatarUrl`). Without it `UserAvatarImg` falls back to the name-keyed Hive
+   * image host, which for a squatted handle serves the squatter's face beside this
+   * person's name. See LiteIdentity.avatarUrl.
+   */
+  avatarUrl?: string;
+  /** This byline is a Lumen identity — see UserAvatarImg's `lite`. */
+  lite?: boolean;
+  /**
    * This author's market, read ONCE FOR THE WHOLE PAGE by the list that mounts
    * these cards — never here.
    *
@@ -86,7 +95,7 @@ export interface IdentityPillProps {
   luminosity?: number;
 }
 
-export default function IdentityPill({ handle, price, luminosity }: IdentityPillProps) {
+export default function IdentityPill({ handle, price, luminosity, avatarUrl, lite }: IdentityPillProps) {
   /*
    * ★★ THREE STATES, AND `unknown` IS NOT `none`. `ready` means there is a market
    * and a figure. `none` means this author has no token. `unknown` means the read
@@ -157,7 +166,7 @@ export default function IdentityPill({ handle, price, luminosity }: IdentityPill
         aria-hidden="true"
         {...profileIntent}
       >
-        <UserAvatarImg username={handle} pixelSize={40} alt="" />
+        <UserAvatarImg username={handle} pixelSize={40} alt="" src={avatarUrl || undefined} lite={lite} />
       </Link>
 
       <span className={cn(styles.idPill, hasMarket && styles.idPillSplit)}>

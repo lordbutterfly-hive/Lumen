@@ -2116,6 +2116,15 @@ async function hydrate(posts: RecsysPost[], observer: string): Promise<Hydrated>
   // A banned author's key is left in `postByKey`; that is harmless, because the
   // lane array is built by walking the ENTRIES, so a lane can only exist for a
   // post that survived to the page.
+  // ★ AWAITED HERE TOO (2026-09-11). `filterBannedEntries` reads a synchronous cache
+  // that answers "nobody is banned" until it has loaded, and the ONLY
+  // `ensureSquatterList()` in this file was scoped to the stored branch of
+  // `serveForYou`. This function is reached from `assembleFeed`, whose output is
+  // WRITTEN to `lumen_feed_store` -- so a cold worker here does not just render one
+  // bad page, it bakes the squatter into a stored feed that the (correctly awaited)
+  // stored branch then serves back, filtered against a list that no longer contains
+  // anything to remove because the entry was already written.
+  await ensureSquatterList();
   return { entries: filterBannedEntries(served.map((p) => p.entry)), postByKey };
 }
 
@@ -2467,8 +2476,27 @@ function loadFallbackPage(sort: string, tag: string, observer: string): Promise<
   return fetchFallbackOnce(cacheKey, async () => {
     const posts = await timed('fb_upstream', () => getRankedPaged(sort, tag, observer, FALLBACK_FETCH_LIMIT));
     const merged = await timed('fb_merge', () => mergeLumenEngagement(posts));
-    if (merged.length > 0) rememberFallback(cacheKey, merged);
-    return merged;
+    /**
+     * ★★★ THE ONE FEED PATH WITH NO BAN FILTER AT ALL (2026-09-11).
+     *
+     * `serveForYou`'s stored branch filters, and `hydrate()` filters. This function
+     * did neither -- `getRankedPaged` goes through `packages/transaction`, which can
+     * only ever see the ENV ban list (empty on production), and nothing here added the
+     * squatter list on top.
+     *
+     * That matters more than its name suggests. This is the ANONYMOUS home page and
+     * every topic page whenever recsys is unavailable, it is warmed at process boot,
+     * and `rememberFallback` CACHES the result -- so an unfiltered page is not one bad
+     * render, it is a bad render served to everyone for the life of the cache entry.
+     *
+     * Filtered BEFORE `rememberFallback` so the cached copy is the clean one; a later
+     * detection still needs the cache to turn over, which is the same bound every other
+     * cached surface here has.
+     */
+    await ensureSquatterList();
+    const visible = filterBannedEntries(merged);
+    if (visible.length > 0) rememberFallback(cacheKey, visible);
+    return visible;
   });
 }
 

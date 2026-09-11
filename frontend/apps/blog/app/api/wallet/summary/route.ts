@@ -6,6 +6,7 @@ import { cachedRead } from '@/blog/lib/server-read-cache';
 import { deriveWalletFigures } from '@/blog/features/wallet/lib/wallet-derived';
 import { toWalletFiguresWire, WalletFiguresWire } from '@/blog/features/wallet/lib/wallet-figures-wire';
 import { HiveAccountNotFoundError, accountNotFoundBody } from '@/blog/lib/wallet/hive-account-exists';
+import { isKeylessLiteName } from '@/blog/lib/lite/render/lite-identity';
 
 const logger = getLogger('app');
 
@@ -56,6 +57,32 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!/^[a-z][a-z0-9.-]{1,15}$/.test(username)) {
     return NextResponse.json({ error: 'username_required' }, { status: 400 });
   }
+
+  /**
+   * ★★★ A KEYLESS LUMEN ACCOUNT HAS NO HIVE WALLET, AND THE ONE UNDER ITS NAME IS
+   * SOMEBODY ELSE'S (2026-09-11).
+   *
+   * These three routes validated the SHAPE of `username` and handed it straight to the
+   * chain. For a squatted name that returns the squatter's real account -- keys,
+   * balances, transaction history -- under the victim's name, on a public
+   * unauthenticated endpoint backing `/@name/wallet`. Measured on production
+   * 2026-09-11: `/api/wallet/summary?username=chadmasters` returned an account object
+   * carrying real populated `key_auths`, while the correctly-guarded `/api/account`
+   * returned `key_auths: []` for the same name. That difference is the whole bug in
+   * one field.
+   *
+   * A wallet reader may be about to send funds. `account_not_found` is the truthful
+   * answer for a name with no chain identity of its own, and it is the answer these
+   * routes already give for an ordinary lite account -- this just stops the squatter's
+   * presence from changing it. Upgraded users keep their real chain wallet.
+   */
+  if (await isKeylessLiteName(username)) {
+    return NextResponse.json(accountNotFoundBody(new HiveAccountNotFoundError(username)), {
+      status: 404,
+      headers: { 'cache-control': 'private, no-store' }
+    });
+  }
+
   try {
     const payload = await cachedRead(`wallet:summary:${username}`, SUMMARY_MEMO_MS, async () => {
       const [account, dynamicGlobal, raw, chain] = await Promise.all([

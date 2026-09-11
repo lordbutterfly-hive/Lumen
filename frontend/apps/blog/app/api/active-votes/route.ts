@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { ensureSquatterList, isSquatterName } from '@/blog/lib/lite/moderation/squatter-list';
 import { getLogger } from '@ui/lib/logging';
 import { getActiveVotes } from '@transaction/lib/hive-api';
 import { withRetry } from '@transaction/lib/retry';
@@ -107,7 +108,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const chainVoters = new Set(chainVotes.map((v) => v.voter.toLowerCase()));
   const votes = [...chainVotes, ...liteVotes.filter((v) => !chainVoters.has(v.voter.toLowerCase()))];
 
-  return NextResponse.json(votes, { headers: { 'cache-control': 'private, no-store' } });
+  /**
+   * ★★★ THE VOTER ROSTER NAMED SQUATTERS AND LINKED TO THEIR VICTIMS (2026-09-11).
+   *
+   * Each row here is rendered as a name with an `/@<voter>` link. A squatter's Hive
+   * account voting on any post put their name in this list, and because `/@<name>` now
+   * resolves a squatted name to the LITE account, clicking it landed on the innocent
+   * account -- crediting the victim with a stranger's vote on a stranger's post.
+   *
+   * Filtered on the raw chain name, which is correct here and NOT the entry-predicate
+   * problem elsewhere in this codebase: a vote carries no lite overlay, so the voter is
+   * unambiguously the chain account. Awaited, or a cold worker filters nobody.
+   */
+  await ensureSquatterList();
+  const visible = Array.isArray(votes) ? votes.filter((vote) => !isSquatterName(vote?.voter)) : votes;
+
+  return NextResponse.json(visible, { headers: { 'cache-control': 'private, no-store' } });
 }
 
 /**

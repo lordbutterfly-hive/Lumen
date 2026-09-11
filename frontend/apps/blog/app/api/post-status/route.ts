@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { getPost } from '@transaction/lib/bridge-api';
 import { isPermlinkValid } from '@/blog/utils/validate-links';
+import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
 
 const logger = getLogger('app');
 
@@ -34,7 +35,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // stacked on top of a stronger one -- doubling this route's worst-case
     // latency on a real outage for no added resilience.
     const post = await getPost(author, permlink, observer).catch(() => null);
-    return NextResponse.json({ post: post ?? null }, { headers: { 'cache-control': 'private, no-store' } });
+    /**
+     * ★★★ THE ONE POST FETCH THAT NEVER GOT ITS IDENTITY OVERLAY (2026-09-11).
+     *
+     * Every other server path that returns an entry runs it through
+     * `attachLiteIdentities` (`/api/discussion`, `/api/account-posts`, the post page,
+     * the feeds). This one returns the raw chain entry, and it feeds `crossPostData`
+     * on the post page -- so a cross-posted Lumen post rendered its byline as the
+     * SHARED PUBLISHING ACCOUNT (`lumen.proxy`) instead of the person who wrote it,
+     * along with that account's reputation and hover card.
+     *
+     * `attachLiteIdentities` is a no-op for an ordinary Hive post (it only touches
+     * entries it can prove are Lumen-proxied, by checking the row's recorded signer
+     * against the entry's author), so this is safe for the poll's normal case and
+     * never throws -- see its own doc.
+     */
+    const [overlaid] = post ? await attachLiteIdentities([post]) : [null];
+    return NextResponse.json({ post: overlaid ?? post ?? null }, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'post status lookup failed for %s/%s', author, permlink);
     return NextResponse.json({ error: 'post_status_unavailable' }, { status: 502 });

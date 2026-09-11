@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { getByText } from '@transaction/lib/hive-api';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
+import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
+import { ensureSquatterList } from '@/blog/lib/lite/moderation/squatter-list';
 import { hivesenseSearchPosts } from '@/blog/lib/search/hivesense-search';
 
 const logger = getLogger('app');
@@ -82,7 +84,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
     }
     const merged = await mergeLumenEngagement(results);
-    return NextResponse.json(merged, { headers: { 'cache-control': 'private, no-store' } });
+    /**
+     * ★★★ THIS FILE IMPORTED NO MODERATION AT ALL (2026-09-11).
+     *
+     * Not "the env list only" -- none. `getByText` (Hivemind `find_text`) and the
+     * Hivesense fallback both returned straight into the response, so a banned or
+     * squatter-authored post surfaced in full-text search even while every feed,
+     * profile and comment thread correctly hid it. The product ruling is "hidden from
+     * everyone", and search is where someone looking for a specific person goes.
+     *
+     * `filterBannedEntries` is the same entry-level predicate the feeds use, so a lite
+     * post by the VICTIM under a contested name is kept and the squatter's own post is
+     * dropped -- the overlay is what tells them apart. Awaited, or a cold worker
+     * filters nobody.
+     */
+    await ensureSquatterList();
+    const visible = filterBannedEntries(merged);
+    return NextResponse.json(visible, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'search lookup failed for "%s"', pattern);
     /**

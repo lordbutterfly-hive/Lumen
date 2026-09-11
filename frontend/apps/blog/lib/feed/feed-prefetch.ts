@@ -3,6 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
+import { ensureSquatterList } from '@/blog/lib/lite/moderation/squatter-list';
 import { filterBlockedForViewer, viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { readViewerFeed, feedBands, feedVersion } from '@/blog/lib/feed/feed-cache';
@@ -267,6 +268,23 @@ const trendingForPrefetch = withTtlCache(
     const posts = await getPostsRanked('trending', '', '', '', DEFAULT_OBSERVER, PREFETCH_LIMIT);
     if (!posts || posts.length === 0) return null;
     const merged = await mergeLumenEngagement(posts);
+    /**
+     * ★★★ THE FIRST `isSquatterName` CALL IN THE PROCESS'S LIFE, AND IT WAS COLD
+     * (2026-09-11).
+     *
+     * `filterBannedEntries` reads a synchronous cache that answers "nobody is banned"
+     * until it has loaded. Boot order in `instrumentation.ts` is
+     * `scheduleNameSquatterSweep()` (the WRITER, which never touches the reader cache)
+     * then `warmServerCaches()` -> `warmHomeFeedCache()` -> here. So this filter ran
+     * against an empty list every single boot.
+     *
+     * And the result is `withTtlCache`d with a one-hour stale-while-revalidate window,
+     * so that one cold computation is served to every anonymous home-page reader for up
+     * to an hour. This is the same defect already fixed in the sibling pipeline
+     * (`app/api/feed/for-you/route.ts`, both `hydrate()` and `loadFallbackPage`); this
+     * module is a SEPARATE path backing `app/page.tsx`, and it was missed.
+     */
+    await ensureSquatterList();
     return trimForSSR(filterBannedEntries(merged));
   },
   () => 'home-trending-prefetch',
@@ -446,6 +464,10 @@ async function finishStoredFeed(
   // A version mismatch means the ranking WEIGHTS changed; the content is stale
   // even though the timestamp looks recent.
   if (stored.version !== feedVersion()) return nothing('stale');
+  // ★ AWAITED (2026-09-11) — same reason as `trendingForPrefetch` above. This is the
+  // signed-in home page's SSR seed, a separate path from the awaited one in
+  // `for-you/route.ts`, and a cold read here puts a squatter straight into the HTML.
+  await ensureSquatterList();
   let entries = filterBannedEntries(stored.entries);
   // Apply the viewer's block list server-side so blocked authors never appear
   // in the SSR HTML. A `getLiteSession()` failure degrades open (unfiltered),

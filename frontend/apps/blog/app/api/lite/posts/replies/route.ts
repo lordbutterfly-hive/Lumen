@@ -3,7 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { guardRead } from '@/blog/lib/lite/http/guard';
 import * as posts from '@/blog/lib/lite/repositories/post-repository';
 import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
-import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
+import { resolvePublicNames, resolvePublicAvatars } from '@/blog/lib/lite/render/current-name';
 import {
   applyOwnerBlocksToReplies,
   resolvePostOwnerActor
@@ -185,6 +185,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Same name resolution the feed and profile use, so a writer who renamed
     // themselves is credited under the name they use NOW, in every surface.
     const names = await resolvePublicNames(matches.map((m) => m.post));
+    // See LiteIdentity.avatarUrl.
+    const avatars = await resolvePublicAvatars(matches.map((m) => m.post));
     const depthByParent = new Map(parents.map((p) => [`${p.author}/${p.permlink}`, p.depth]));
 
     // ★ STAMP EACH ROW'S OWN MATCHED PARENT — NOT THE THREAD ROOT.
@@ -203,7 +205,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // supplied by the caller per parent (see the doc above), since only the
     // caller's own tree knows a comment's true nesting depth.
     const entries: Entry[] = matches.map(({ post, parentAuthor, parentPermlink }) => ({
-      ...dbPostToEntry(post, names.get(post.postId)),
+      ...dbPostToEntry(post, names.get(post.postId), undefined, avatars.get(post.postId)),
       parent_author: parentAuthor,
       parent_permlink: parentPermlink,
       depth: (depthByParent.get(`${parentAuthor}/${parentPermlink}`) ?? 0) + 1

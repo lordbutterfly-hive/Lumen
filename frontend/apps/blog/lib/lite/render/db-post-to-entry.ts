@@ -11,7 +11,17 @@ import { NOTE_METADATA_TYPE } from '@/blog/lib/short-post-note';
  * lite identity is laid over it (see render/lite-entry.ts).
  */
 export function dbPostToEntry(post: LumenPost, publicName?: string,
-  publishFailed?: boolean
+  publishFailed?: boolean,
+  /**
+   * The writer's own picture, when the caller has already resolved it.
+   *
+   * ★ APPENDED, NOT INSERTED (2026-09-11). Three existing call sites pass
+   * `publishFailed` positionally as the third argument; putting the avatar anywhere
+   * but last would have silently re-bound one of them. See LiteIdentity.avatarUrl for
+   * why a byline needs the picture on the overlay rather than guessing it from the
+   * handle.
+   */
+  avatarUrl?: string
 ): Entry {
   // `publicName` is the author's name TODAY (see render/current-name.ts). It differs
   // from the snapshot after an upgrade, when the account has a new Hive name and its
@@ -49,6 +59,7 @@ export function dbPostToEntry(post: LumenPost, publicName?: string,
       author,
       title: post.title,
       chainAuthor: post.hiveAuthor || liteConfig.frontendAccount,
+      avatarUrl,
       // See LiteIdentity.userId — the identity the block filters key on.
       userId: post.userId
     },
@@ -87,7 +98,22 @@ export function dbPostToEntry(post: LumenPost, publicName?: string,
     replies: [],
     title: post.title,
     updated: created,
-    url: `/@${author}/${permlink}`,
+    /**
+     * ★★★ THIS URL 404s (2026-09-11).
+     *
+     * `/@name/<permlink>` is TWO path segments, and there is no two-segment post route:
+     * `app/[param]/[p2]/[permlink]` needs three, and the `[param]/(user-profile)` group
+     * only matches its own named children (followers, wallet, settings, …). Verified
+     * against production: `/@menosoft/lumen-01m23p…` redirects to `/404`, while
+     * `/blog/@menosoft/lumen-01m23p…` answers 200.
+     *
+     * Sibling `lite-entry.ts` already builds the three-segment form
+     * (`/${category}/@${name}/${permlink}`); this one did not, so any consumer that
+     * trusted `entry.url` rather than composing its own href sent the reader to a 404.
+     * Same shape as the sibling now, using the same `category` this object already
+     * computes a few fields above.
+     */
+    url: `/${post.community ?? 'blog'}/@${author}/${permlink}`,
     // ★ TRUTHFUL FLAG (O7 F2a/F2b, 2026-08-13). This was unconditionally `true` —
     // meaning a lite entry that has ALREADY been broadcast to Hive (`hivePermlink`
     // set) still claimed to be "not yet published" forever. Two proven, separate

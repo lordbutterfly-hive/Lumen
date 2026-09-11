@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { ensureSquatterList, isSquatterName } from '@/blog/lib/lite/moderation/squatter-list';
 import { getLogger } from '@ui/lib/logging';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceHivesenseRate } from '@/blog/lib/lite/antispam/rate-limit';
@@ -458,7 +459,42 @@ async function proxy(
     // declared — it does nothing when the declared type is already `text/html`.
     // Sent anyway, as defense in depth for any downstream consumer that ignores
     // the declared type.
-    return new NextResponse(text, {
+    /**
+     * ★★★ THE ONE PLACE THIS PROXY LOOKS INSIDE THE BODY, AND WHY (2026-09-11).
+     *
+     * Everything above is deliberately pass-through; the comment right here argues for
+     * it. This is the single exception, and it is forced by a package boundary:
+     * `packages/transaction/lib/hivesense-api.ts` already applies a ban predicate to
+     * these exact payloads (`withoutBannedAuthors`, at three call sites), but a package
+     * cannot import an app module, so it only ever sees the ENV list -- which is EMPTY
+     * on production. The squatter list lives in `apps/blog` and this route is the only
+     * point that can see both it and the posts.
+     *
+     * Without it, "similar posts" and AI search were the last surfaces still serving a
+     * squatter's content after every feed, profile, thread and search had been closed.
+     *
+     * Written defensively: anything that is not a JSON array of objects with an
+     * `author` is passed through untouched, and a parse failure returns the original
+     * bytes. A recommendation rail must never break because a payload changed shape --
+     * the worst case is that it filters nothing, which is exactly today's behaviour.
+     */
+    let body = text;
+    if (upstream.status >= 200 && upstream.status < 300) {
+      try {
+        const parsed: unknown = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          await ensureSquatterList();
+          const kept = parsed.filter(
+            (post) => !isSquatterName((post as { author?: string } | null)?.author)
+          );
+          if (kept.length !== parsed.length) body = JSON.stringify(kept);
+        }
+      } catch {
+        // Not JSON, or not the shape we expect. Pass the original through.
+      }
+    }
+
+    return new NextResponse(body, {
       status: upstream.status,
       headers: { 'Content-Type': 'application/json; charset=utf-8', 'X-Content-Type-Options': 'nosniff' }
     });

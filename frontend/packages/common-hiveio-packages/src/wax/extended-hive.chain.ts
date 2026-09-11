@@ -129,6 +129,26 @@ export interface LiteIdentity {
   /** The shared publishing account that signed this on chain. Use this to ACT. */
   chainAuthor: string;
   /**
+   * The writer's own picture, as Lumen stores it. Optional: most lite users have not
+   * uploaded one, and the monogram is the correct answer for them.
+   *
+   * ★★★ WHY AN AVATAR BELONGS ON THE IDENTITY OVERLAY (2026-09-11). Every byline in
+   * the app renders its avatar through `UserAvatarImg`, which tries
+   * `images.hive.blog/u/<name>/avatar/<size>` FIRST and only falls back to our own
+   * guarded `/api/avatar` if that errors. For a SQUATTED handle the image host answers
+   * 200 with the squatter's picture, so the fallback never runs and the guard never
+   * gets a say: the feed card, the comment byline and the hover card all showed the
+   * attacker's face over the victim's name. Measured on production 2026-09-11 for
+   * `@chadmasters`.
+   *
+   * The overlay already carries every other field a byline needs to render the right
+   * person; the picture was the one thing it did not, which is exactly why the picture
+   * was the one thing that stayed wrong. A call site that has the overlay can now hand
+   * `UserAvatarImg` a `src` it can trust, and the untrusted name-keyed guess stops
+   * being the first thing tried.
+   */
+  avatarUrl?: string;
+  /**
    * The Lumen account id behind this post — the one identifier that survives a
    * handle change AND an upgrade to a real Hive account.
    *
