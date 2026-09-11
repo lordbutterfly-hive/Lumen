@@ -53,6 +53,7 @@
 
 import { FC, useEffect, useMemo, useRef, useState } from 'react';
 import BasePathLink from '@/blog/components/base-path-link';
+import { UserAvatarImg } from '@ui/components';
 import { cn } from '@ui/lib/utils';
 import { usdPrice } from '../../../market/format';
 import { usdFromHbd, displayHandle, routeHandle } from '../../../live/adapt';
@@ -103,6 +104,53 @@ function useDescription(creator: string, offeringId: number, open: boolean): str
   return text;
 }
 
+/** The shell's own `sticky top-24`, in px. The list can never be taller than what is left below it. */
+const STICKY_TOP_PX = 96;
+/** Breathing room under the list so it never ends flush with the window edge. */
+const BOTTOM_GUTTER_PX = 24;
+
+/**
+ * ★★★ THE CAP IS MEASURED, NOT GUESSED (2026-09-11, owner: "what happens if it's
+ * more than 10? won't it go under the screen and not be accessible").
+ *
+ * The right answer is a scroll container, which this already was — but a scroll
+ * container only helps if the CONTAINER ITSELF is on screen. The first version
+ * capped the list at `100vh - 22rem`, a constant standing in for "the sticky
+ * offset plus the launch card above me". Measured on a 900px viewport with every
+ * row expanded: the box was correctly 548px tall and correctly scrollable, and
+ * its bottom sat at 972px. The last 72px of the scroller — and whatever rows were
+ * in them — were below the fold of a box that does not scroll with the page.
+ * Reachable in the DOM, unreachable with a mouse.
+ *
+ * A constant cannot know how tall the card above it is, and that card's copy can
+ * change. So the list measures its own offset INSIDE the sticky aside and
+ * subtracts that, plus the sticky offset, from the viewport. That expression is
+ * correct at any viewport, with any number of rows, and stays correct if the
+ * launch card grows.
+ *
+ * ★ MEASURED AGAINST THE ASIDE, NOT THE VIEWPORT. Taking `rect.top` directly
+ * would read the UNPINNED position while the page is scrolled to the top, which
+ * is larger than the pinned one, and would cap the list too aggressively until
+ * the reader scrolled. The offset within the aside is the same whether pinned or
+ * not, so `STICKY_TOP_PX + offset` is the pinned top at all times.
+ */
+function useViewportCap(ref: React.RefObject<HTMLElement>): number | undefined {
+  const [cap, setCap] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    const measure = () => {
+      const el = ref.current;
+      const aside = el?.closest('aside');
+      if (!el || !aside) return;
+      const offsetInAside = el.getBoundingClientRect().top - aside.getBoundingClientRect().top;
+      setCap(Math.max(160, window.innerHeight - STICKY_TOP_PX - offsetInAside - BOTTOM_GUTTER_PX));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [ref]);
+  return cap;
+}
+
 const BoardRow: FC<{
   creator: string;
   offerings: { offeringId: number; title: string; priceHbd: number }[];
@@ -140,13 +188,24 @@ const BoardRow: FC<{
 
   return (
     <li className="border-b border-line-2 last:border-0">
-      <div className="flex min-w-0 items-baseline justify-between gap-2 py-2">
+      <div className="flex min-w-0 items-center justify-between gap-2 py-2">
         <BasePathLink
           href={`/creators/${routeHandle(creator)}`}
-          className="min-w-0 flex-1 truncate font-ui text-[13px] leading-[20px] font-semibold text-ink-2 hover:text-ink-brand-6"
+          className="flex min-w-0 flex-1 items-center gap-2 font-ui text-[13px] leading-[20px] font-semibold text-ink-2 hover:text-ink-brand-6"
           title={displayHandle(creator)}
         >
-          {displayHandle(creator)}
+          {/* ★ THE SAME COMPONENT THE BELL AND THE FEED USE. It resolves a lite
+              account through `/api/avatar` to their own initial rather than a
+              shared default picture, and a wallet creator has no Hive avatar at
+              all -- so this must never be a bare <img> pointed at an avatar URL.
+              24px: big enough to recognise a face, small enough that the name
+              beside it still gets most of the row. */}
+          <UserAvatarImg
+            username={routeHandle(creator)}
+            pixelSize={24}
+            alt={`${displayHandle(creator)} profile picture`}
+          />
+          <span className="min-w-0 flex-1 truncate">{displayHandle(creator)}</span>
         </BasePathLink>
         {/* Never truncated: a clipped price is a wrong price. */}
         <span className="shrink-0 font-num text-[13px] leading-[20px] tabular-nums text-ink-10">
@@ -199,6 +258,8 @@ const BoardRow: FC<{
 
 const OfferingsBoard: FC = () => {
   const { rows, isLoading, unavailable } = useOfferingBoard();
+  const listRef = useRef<HTMLUListElement>(null);
+  const cap = useViewportCap(listRef);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [hovered, setHovered] = useState(false);
   const [tabHidden, setTabHidden] = useState(false);
