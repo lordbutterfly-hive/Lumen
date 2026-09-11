@@ -31,6 +31,19 @@ export async function resolvePublicName(post: LumenPost): Promise<string> {
 }
 
 /**
+ * The writer's picture for a SINGLE post. One query, same row as
+ * {@link resolvePublicName}; prefer {@link resolvePublicAvatars} for a list.
+ *
+ * Returns undefined rather than '' when there is no picture, so a caller can spread it
+ * into an overlay without inventing an empty string that later reads as "a picture we
+ * have". See LiteIdentity.avatarUrl for why the overlay needs it at all.
+ */
+export async function resolvePublicAvatar(post: LumenPost): Promise<string | undefined> {
+  const user = await users.findUserById(post.userId).catch(() => null);
+  return user?.avatarUrl || user?.profile?.profile_image || undefined;
+}
+
+/**
  * Whole page of posts in ONE query. Returns a map keyed by post id, so callers do
  * not have to re-derive the pairing.
  */
@@ -41,5 +54,32 @@ export async function resolvePublicNames(list: LumenPost[]): Promise<Map<string,
   const found = await users.findUsersByIds([...new Set(list.map((post) => post.userId))]).catch(() => []);
   const byId = new Map(found.map((user) => [user.userId, user]));
   for (const post of list) out.set(post.postId, publicNameOf(post, byId.get(post.userId)));
+  return out;
+}
+
+/**
+ * The writer's own picture per post id, from the SAME rows `resolvePublicNames` reads.
+ *
+ * ★ SEPARATE FUNCTION, SHARED QUERY (2026-09-11). `attachLiteIdentities` already calls
+ * `resolvePublicNames`, and the avatar comes off the identical `lumen_user` row, so
+ * this takes the map that call already built rather than issuing a second query per
+ * feed page. See `LiteIdentity.avatarUrl` for why a byline needs it: without a picture
+ * on the overlay, every byline falls back to the name-keyed Hive image host, which for
+ * a squatted handle serves the squatter.
+ *
+ * Empty entries are omitted rather than stored as '', so a caller can treat "absent"
+ * as "no picture, use the monogram" without a second falsiness check.
+ */
+export async function resolvePublicAvatars(list: LumenPost[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (list.length === 0) return out;
+
+  const found = await users.findUsersByIds([...new Set(list.map((post) => post.userId))]).catch(() => []);
+  const byId = new Map(found.map((user) => [user.userId, user]));
+  for (const post of list) {
+    const user = byId.get(post.userId);
+    const image = user?.avatarUrl || user?.profile?.profile_image || '';
+    if (image) out.set(post.postId, image);
+  }
   return out;
 }

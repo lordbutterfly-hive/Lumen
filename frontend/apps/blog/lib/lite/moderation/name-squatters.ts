@@ -44,6 +44,43 @@ async function findAccounts(names: string[]): Promise<Map<string, ChainAccount>>
   return out;
 }
 
+/**
+ * Hive account names are a 16-byte `fixed_string` on chain. Anything longer is not a
+ * name the chain can answer about at all -- it raises an assert rather than returning
+ * an empty result. See the block comment in `sweepNameSquatters`.
+ */
+const HIVE_NAME_MAX = 16;
+
+/**
+ * `findAccounts`, but a failing batch is split rather than lost.
+ *
+ * One name the node refuses fails the whole call (see `sweepNameSquatters`). Halving
+ * on failure isolates that name in log2(n) extra round trips -- 7 for a 100-name
+ * batch, and only when something actually failed -- while a genuine outage still ends
+ * up throwing, because every leaf fails too. A single name that fails on its own is
+ * the one case we swallow: it is answered ("we asked, the node refuses this name"),
+ * and returning an empty result for it lets the other names in the batch through.
+ */
+async function findAccountsBisecting(names: string[]): Promise<Map<string, ChainAccount>> {
+  try {
+    return await findAccounts(names);
+  } catch (error) {
+    if (names.length <= 1) {
+      // A single name the node will not answer. Not evidence of a Hive account, and
+      // retrying it forever is exactly the loop this function exists to break.
+      logger.warn(error, 'name squatter sweep: node refuses to answer for "%s"; treating as absent', names[0] ?? '');
+      return new Map();
+    }
+    const mid = Math.ceil(names.length / 2);
+    const [left, right] = await Promise.all([
+      findAccountsBisecting(names.slice(0, mid)),
+      findAccountsBisecting(names.slice(mid))
+    ]);
+    for (const [key, value] of right) left.set(key, value);
+    return left;
+  }
+}
+
 export interface SquatterFinding {
   userId: string;
   name: string;
@@ -88,18 +125,67 @@ export async function sweepNameSquatters(limit = DEFAULT_LIMIT): Promise<Squatte
   const ourCreator = (liteConfig.accountCreatorAccount || '').toLowerCase();
   const findings: SquatterFinding[] = [];
 
-  for (let i = 0; i < candidates.length; i += CHAIN_BATCH) {
-    const slice = candidates.slice(i, i + CHAIN_BATCH);
+  /**
+   * ★★★ ONE UNQUERYABLE NAME USED TO BLIND THE WHOLE BATCH, PERMANENTLY (2026-09-11).
+   *
+   * `find_accounts` takes up to CHAIN_BATCH names in ONE call, and Hive answers the
+   * whole call or none of it. An account name is a 16-byte `fixed_string` on chain,
+   * so asking about a LONGER name does not return "no such account" -- the node
+   * raises `assert_exception: in_len <= sizeof(data)` (fixed_string.hpp) and the
+   * entire request errors. Proven against api.hive.blog 2026-09-11:
+   * `find_accounts(["blocktrades","christina.mercier","chadmasters"])` errors
+   * outright, while the same two real names without the 17-character one return both
+   * accounts fine.
+   *
+   * The old catch below treated that as a transient node failure and `continue`d,
+   * with a comment promising "the next run re-reads exactly these rows". It does --
+   * and fails again, identically, forever: a row that is never answered is never
+   * flagged, so it never leaves the candidate set, so it poisons every subsequent
+   * tick. One bad row silently disables squatter detection for up to 99 other
+   * accounts, fleet-wide, with only a WARN line to show for it.
+   *
+   * Two independent defences, because either alone is not enough:
+   *   1. Never ASK about a name the chain cannot hold. A name longer than
+   *      HIVE_NAME_MAX can never be a Hive account, therefore can never be squatted,
+   *      so the honest verdict is "checked, nothing there" -- recorded, so it leaves
+   *      the queue instead of sitting at the head of it.
+   *   2. If a batch fails anyway (a real outage, or any future assert we have not
+   *      predicted), BISECT it instead of dropping it. A genuine outage fails every
+   *      sub-batch and costs one extra round trip; a single poisonous name is
+   *      isolated to itself and the other 99 get their answer.
+   */
+  const askable: typeof candidates = [];
+  const unaskable: typeof candidates = [];
+  for (const candidate of candidates) {
+    (candidate.displayName.trim().length > HIVE_NAME_MAX ? unaskable : askable).push(candidate);
+  }
+  if (unaskable.length > 0) {
+    logger.warn(
+      'name squatter sweep: %d name(s) are longer than a Hive account name can be and cannot be squatted; recording as checked: %s',
+      unaskable.length,
+      unaskable.map((c) => c.displayName).join(', ')
+    );
+    await users.markNamesChecked(unaskable.map((c) => c.userId));
+  }
+
+  for (let i = 0; i < askable.length; i += CHAIN_BATCH) {
+    const slice = askable.slice(i, i + CHAIN_BATCH);
     let onChain: Map<string, ChainAccount>;
     try {
-      onChain = await findAccounts(slice.map((c) => c.displayName.toLowerCase()));
+      onChain = await findAccountsBisecting(slice.map((c) => c.displayName.toLowerCase()));
     } catch (error) {
-      // A node failure is not evidence that a name is free OR taken. Skip the batch
-      // and leave the flag unset; the next run re-reads exactly these rows because
-      // the query selects on `name_conflict_at IS NULL`.
+      // Every sub-batch failed, down to single names: this is a real node failure, not
+      // one poisonous row. A node failure is not evidence that a name is free OR
+      // taken, so leave both the flag AND the checked-at stamp unset -- the next run
+      // re-reads exactly these rows, and because they are still unstamped they come
+      // back to the FRONT of the queue rather than the back.
       logger.warn(error, 'name squatter sweep: chain batch failed, leaving %d names unchecked', slice.length);
       continue;
     }
+
+    // Answered, so they are checked -- whether or not a Hive account turned up.
+    // Without this the clean ones never leave the candidate set (see markNamesChecked).
+    await users.markNamesChecked(slice.map((c) => c.userId));
 
     for (const candidate of slice) {
       const hit = onChain.get(candidate.displayName.toLowerCase());
@@ -201,6 +287,12 @@ export function scheduleNameSquatterSweep(): void {
       const { resetSquatterList } = await import('./squatter-list');
       resetSquatterList();
       if (findings.length > 0) {
+        // ★ THE ORIGIN IS NOT THE READER (2026-09-11). resetSquatterList() above fixes
+        // every worker; Cloudflare is still holding the pre-detection page. See
+        // ./purge-edge-cache.ts for the window this closes and why it is inert (and
+        // loud) without credentials.
+        const { purgeEdgeCacheForNames } = await import('./purge-edge-cache');
+        await purgeEdgeCacheForNames(findings.map((f) => f.name));
         logger.warn(
           'name squatter sweep: %d new conflict(s) flagged, ban list invalidated: %s',
           findings.length,
@@ -208,6 +300,28 @@ export function scheduleNameSquatterSweep(): void {
         );
       }
     } catch (error) {
+      /**
+       * ★★★ NAME THE DEPLOY-ORDER FAILURE INSTEAD OF LOGGING "run failed" (2026-09-11).
+       *
+       * Migrations here are DELIBERATELY not run at boot (`lib/lite/db/migrate.ts`:
+       * "intentionally NOT wired"), so `pnpm --filter @hive/blog lite:migrate` is an ops
+       * step. If the code ships before migration 0044, every tick throws
+       * `column "name_conflict_checked_at" does not exist`, this catch swallows it, and
+       * squatter detection is silently dead for the whole deployment -- the exact
+       * failure mode this sweep exists to prevent, with nothing but a generic warning to
+       * find it by.
+       *
+       * A missing column is not a transient fault and must not read like one.
+       */
+      const message = error instanceof Error ? error.message : String(error);
+      if (/name_conflict_checked_at/.test(message)) {
+        logger.error(
+          error,
+          'name squatter sweep: DISABLED — migration 0044_name_conflict_checked has not been applied to this database. ' +
+            'Squatter detection is NOT running. Run `pnpm --filter @hive/blog lite:migrate` against this database.'
+        );
+        return;
+      }
       // A sweep that throws must never take the process with it. The rows it did not
       // reach stay unflagged and the next run re-reads them, because the query selects
       // on `name_conflict_at IS NULL`.

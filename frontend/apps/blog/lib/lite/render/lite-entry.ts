@@ -4,7 +4,7 @@ import { LumenPost } from '../types';
 import * as posts from '../repositories/post-repository';
 import { dbPostToEntry } from './db-post-to-entry';
 import { litePostIdOf } from './lite-post-id';
-import { resolvePublicName } from './current-name';
+import { resolvePublicName, resolvePublicAvatar } from './current-name';
 
 /**
  * Server-side resolution of a lite post for rendering — the piece that makes
@@ -51,8 +51,11 @@ export async function liteEntryForPost(
   // differ, and the whole point of keeping `user_id` stable is that the history
   // follows the person to their new Hive name.
   const publicName = await resolvePublicName(post);
+  // The byline's picture, carried on the overlay so it never has to be guessed from
+  // the handle. See LiteIdentity.avatarUrl.
+  const publicAvatar = await resolvePublicAvatar(post);
 
-  if (!post.hiveAuthor || !post.hivePermlink) return dbPostToEntry(post, publicName);
+  if (!post.hiveAuthor || !post.hivePermlink) return dbPostToEntry(post, publicName, undefined, publicAvatar);
 
   let chainEntry: Entry | null = null;
   try {
@@ -94,7 +97,7 @@ export async function liteEntryForPost(
       throw error;
     }
   }
-  if (!chainEntry) return dbPostToEntry(post, publicName);
+  if (!chainEntry) return dbPostToEntry(post, publicName, undefined, publicAvatar);
 
   return {
     ...chainEntry,
@@ -107,6 +110,7 @@ export async function liteEntryForPost(
       author: publicName,
       title: post.title || chainEntry.title,
       chainAuthor: post.hiveAuthor,
+      avatarUrl: publicAvatar,
       // See LiteIdentity.userId — the identity the block filters key on.
       userId: post.userId
     },

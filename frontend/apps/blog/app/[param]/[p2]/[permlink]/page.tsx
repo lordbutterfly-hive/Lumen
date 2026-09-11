@@ -4,7 +4,7 @@ import { getPostCached, getDiscussionCached, getCommunityCached, getFollowListCa
 import { liteChainCoordinates, liteRecordExists } from '@/blog/lib/lite/render/lite-entry';
 import { attachLiteIdentities, attachLiteIdentitiesToDiscussion } from '@/blog/lib/lite/render/attach-lite';
 import { applyOwnerBlocksToDiscussion } from '@/blog/lib/lite/social/block-filter';
-import { withoutBannedDiscussion } from '@/blog/lib/moderation/banned-authors';
+import { withoutBannedDiscussion, isBannedEntry } from '@/blog/lib/moderation/banned-authors';
 import { ensureSquatterList } from '@/blog/lib/lite/moderation/squatter-list';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
@@ -149,6 +149,32 @@ const PostPage = async ({
     // right on first paint too. `liteEntryForPost` already sets `_lite` on the pretty-URL
     // path, so this is skipped whenever that ran.
     if (postData && !postData._lite) await attachLiteIdentities([postData]);
+
+    /**
+     * ★★★ THE THREAD WAS FILTERED AND THE POST ITSELF WAS NOT (2026-09-11).
+     *
+     * Further down this file the comment thread gets `ensureSquatterList()` +
+     * `withoutBannedDiscussion`, with a comment explaining that patching only the API
+     * route left the SSR page serving the squatter's reply. The ROOT post never got
+     * the same treatment: `postData` is fetched, overlaid, engagement-merged and
+     * rendered without ever being tested against `isBannedEntry`.
+     *
+     * For the squatter that mattered at the time it did not show, because their only
+     * content was a reply and a reply lives in the thread. A squatter's own TOP-LEVEL
+     * post has nothing hiding it: the article renders in full, with its title in the
+     * page `<title>` and its text in the HTML, on the canonical URL.
+     *
+     * Placed AFTER `attachLiteIdentities` deliberately. `isSquatterAuthored` is an
+     * ENTRY predicate that reads `_lite` to tell the victim's post from the squatter's
+     * -- the two share a name and the overlay is the only thing that distinguishes
+     * them -- so testing before the overlay is attached would hide the victim instead.
+     * Awaited list for the same reason as the thread below: a cold worker filters
+     * nobody.
+     */
+    if (postData) {
+      await ensureSquatterList();
+      if (isBannedEntry(postData)) postData = null;
+    }
 
     // ★★★ MERGE LUMEN ENGAGEMENT INTO THE SSR SEED (T3d, 2026-09-04 perf pass).
     //

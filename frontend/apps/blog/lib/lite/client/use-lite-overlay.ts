@@ -24,6 +24,17 @@ export interface LiteOverlay {
    * `author`, which is not a Hive account at all.
    */
   chainAuthor: string;
+  /**
+   * The writer's own picture, as Lumen stores it. Optional — most lite users have not
+   * set one and the monogram is right for them.
+   *
+   * ★ MIRRORS `LiteIdentity.avatarUrl` on the server side (2026-09-11). A byline that
+   * does not pass this to `UserAvatarImg` gets the name-keyed Hive image host instead,
+   * which for a squatted handle is the squatter's face over this author's name. This
+   * is the client-side half of the same overlay; the server sets it in
+   * `lib/lite/render/attach-lite.ts`.
+   */
+  avatarUrl?: string;
 }
 
 export function useLiteOverlay(entry?: {
@@ -71,7 +82,7 @@ export function useLiteOverlay(entry?: {
         const res = await fetch(`/api/lite/posts/${encodeURIComponent(postId)}`);
         if (!res.ok) return null;
         const body = (await res.json()) as {
-          entry?: { author?: string; title?: string };
+          entry?: { author?: string; title?: string; _lite?: { avatarUrl?: string } };
           post?: { hiveAuthor?: string | null };
         } | null;
         const author = body?.entry?.author;
@@ -91,7 +102,22 @@ export function useLiteOverlay(entry?: {
         // `render/lite-entry.ts` and `render/db-post-to-entry.ts`) and never reach this
         // request at all. An entry with no author at all is refused rather than trusted.
         if (!chainAuthor || realAuthor.toLowerCase() !== chainAuthor) return null;
-        return { author, title: body?.entry?.title ?? '', chainAuthor: realAuthor };
+        /**
+         * ★ CARRY THE PICTURE THROUGH THIS PATH TOO (2026-09-11).
+         *
+         * This branch runs for entries that arrived from a client-side Hivemind
+         * refetch, which carry no `_lite` of their own — i.e. exactly the entries whose
+         * byline would otherwise fall back to the name-keyed Hive image host and, for a
+         * squatted handle, paint the squatter's face. The served entry already has the
+         * overlay attached (`lib/lite/render/lite-entry.ts`), so this is a read, not a
+         * wider wire contract.
+         */
+        return {
+          author,
+          title: body?.entry?.title ?? '',
+          chainAuthor: realAuthor,
+          avatarUrl: body?.entry?._lite?.avatarUrl
+        };
       } catch {
         return null;
       }

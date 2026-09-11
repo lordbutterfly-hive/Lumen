@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isKeylessLiteName } from '@/blog/lib/lite/render/lite-identity';
 import { getAccount, getActiveVotes } from '@transaction/lib/hive-api';
 import { getAccountPosts } from '@transaction/lib/bridge-api';
 import { computeStreak } from '@/blog/features/retention/lib/compute-streak';
@@ -291,6 +292,29 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
   const user = (params.user || '').toLowerCase();
   if (!USERNAME_RE.test(user)) {
     return NextResponse.json({ error: 'invalid username' }, { status: 400 });
+  }
+
+  /**
+   * ★★★ A LEAGUE STANDING IS A CLAIM ABOUT A PERSON, COMPUTED FROM CHAIN TENURE
+   * (2026-09-11).
+   *
+   * This route resolves the name straight to `getAccount` and then computes AND
+   * PERSISTS a rank from that account's real history (`recordRankMark` writes it to
+   * `lumen_hive_rank`, which `/api/streak/marks` later reads). For a squatted name
+   * that is the SQUATTER's activity, stored and served under the victim's handle, on a
+   * public unauthenticated endpoint. Measured on production 2026-09-11:
+   * `/api/streak/chadmasters` returned tier "spark", rank #1, derived entirely from
+   * the one-day-old squatter account, while the uncontested lite control `arsha`
+   * correctly returned "account not found".
+   *
+   * The profile widget that consumes this happens to be gated on `_temporary` today,
+   * so nothing visibly misattributed it -- but an ungated endpoint that WRITES a
+   * derived identity claim is not something to leave resting on one consumer's
+   * correctness. A keyless account has no chain tenure, so "not found" is the true
+   * answer and it is the one this route already gives an ordinary lite account.
+   */
+  if (await isKeylessLiteName(user)) {
+    return NextResponse.json({ error: 'account not found' }, { status: 404 });
   }
 
   // ★ A WARM CACHE HIT IS ANSWERED BEFORE THE LIMITER, NOT AFTER IT.

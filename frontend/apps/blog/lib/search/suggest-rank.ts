@@ -53,6 +53,14 @@ export interface RankSuggestionsInput {
  * one: `/@name` resolves the chain account first and only falls back to the lite
  * profile when no chain account exists (see `(user-profile)/layout.tsx`), so the
  * Hive row is the one that link would actually open.
+ *
+ * ★ THAT LAST SENTENCE STOPPED BEING TRUE ON 2026-09-10, AND THIS FILE IS NOT WHERE
+ * IT IS FIXED. For a SQUATTED name `/@name` now resolves to the LITE account, so
+ * first-wins here would evict exactly the row the link opens. The squatter is removed
+ * from `hiveNames` by the caller (`suggest.ts`) before this function sees it, which is
+ * the same place and the same reason `lib/search/people.ts` does it. Left as
+ * first-wins on purpose: with squatters already gone, a remaining collision is a name
+ * the chain genuinely owns.
  */
 export function rankSuggestions(input: RankSuggestionsInput): SearchSuggestions {
   const { prefix, tagPrefix } = input;

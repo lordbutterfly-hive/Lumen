@@ -85,6 +85,41 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       imageUrl = `${configuredImagesEndpoint}/u/${username}/avatar/small`;
     }
 
+    /**
+     * ★★★ LITE IS RESOLVED BEFORE THE IMAGE HOST, NOT AFTER IT (2026-09-11).
+     *
+     * This route used to fetch `images.hive.blog/u/<name>/avatar/<size>` FIRST and
+     * only consult `liteAvatar()` when that came back not-ok. That ordering is only
+     * correct while "a Hive account with this name exists" implies "this name is
+     * theirs", and the whole squatting problem is that it does not.
+     *
+     * For a squatted name the image host answers 200 with the SQUATTER's picture, so
+     * the lite branch below was unreachable and the victim's own uploaded photo could
+     * never render. Measured on production 2026-09-11:
+     * `/api/avatar?username=chadmasters` returned the squatter's image, byte-identical
+     * in source to `images.hive.blog/u/chadmasters/avatar/small`, while that lite
+     * account's own stored picture sat unused. Every other guarded surface
+     * (`/api/account`, the profile layout, `/api/lite/posts`) already resolved that
+     * name to the lite owner, so the page showed the victim's name and bio over the
+     * attacker's face.
+     *
+     * Resolving lite first also REMOVES a round trip for every keyless lite account:
+     * the old order asked the image host for a name it demonstrably does not have,
+     * waited for the 500, and only then looked in Postgres. One indexed lookup now
+     * replaces that, and the answer is cached for a day either way.
+     *
+     * `keyless` is what keeps this safe for UPGRADED users: they own both the lite row
+     * and a real Hive account, so their chain picture still wins and their lite
+     * picture stays what it always was -- the fallback. Only an account with no chain
+     * identity at all short-circuits here.
+     */
+    const lite = await liteAvatar(username);
+    if (lite.isLite && lite.keyless) {
+      const served = await serveLiteAvatar(username, lite.imageUrl, size, width, height);
+      if (served) return served;
+      return initialAvatar(username);
+    }
+
     // Fetch the image from the image hoster and stream it to the client.
     // ★ WEBP (2026-09-04, T1b perf). `imageUrl` above is Hive's own
     // `/u/<name>/avatar/<size>` shortcut — verified (curl, 2026-09-04, including
@@ -108,64 +143,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       // background-image showed a blank square. Serve a generated initial-letter
       // avatar instead — the same idea as the feed strip's AvatarFallback, but here so
       // that every consumer of /api/avatar benefits without touching each one.
-      const lite = await liteAvatar(username);
+      // Reached only for a name that is NOT a keyless lite account (that case
+      // short-circuited above): an upgraded user whose chain picture is missing, or a
+      // plain Hive account. Both still deserve the stored-picture fallback.
       if (lite.isLite) {
-        // A picture the user uploaded through /api/lite/upload. It already lives on
-        // the same image host, so hand it back through the host's resizer to keep
-        // avatars a consistent size instead of shipping a full-resolution photo to
-        // every byline.
-        if (lite.imageUrl) {
-          // ★ WEBP (2026-09-04, T1b perf). Unlike the Hive-account branch above, we
-          // already HAVE the source URL here — no redirect to resolve, so this goes
-          // straight through `proxifyImageSrc`, the same resize/format proxy every
-          // other image in the app uses, instead of hand-building the legacy
-          // `/{w}x{h}/<url>` path and hoping the origin picks a small format on its
-          // own (verified 2026-09-04: it does not — that path 301s to the same
-          // `/p/<hash>` proxy and needs `format` set explicitly, exactly like the
-          // shortcut above).
-          const { width: boxWidth, height: boxHeight } = avatarBox(size, width, height);
-          // Narrow once into a const: the `if (lite.imageUrl)` narrowing above is
-          // NOT preserved for the property access inside the `() =>` fetch closures
-          // below (TS re-widens a property to `string | null` across a closure), so
-          // capture the checked value as a `string` const the closures can use.
-          const imageUrl = lite.imageUrl;
-          // Same per-hop timeout + shared total budget as `fetchAsWebp` above, and for
-          // the identical reason: neither fetch below carried an `AbortSignal`.
-          const deadline = Date.now() + TOTAL_BUDGET_MS;
-          const picture = await withRetry(
-            () => fetch(proxifyImageSrc(imageUrl, boxWidth, boxHeight), { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),
-            { label: `avatar-resized(${username})`, budgetMs: Math.max(0, deadline - Date.now()) }
-          ).catch(() => budgetExhausted());
-          // WebP isn't guaranteed for every stored source — fall back to the proxy's
-          // own default (source) format rather than turning that into a broken avatar.
-          const resolved =
-            picture.ok && picture.body
-              ? picture
-              : Date.now() >= deadline
-                ? budgetExhausted()
-                : await withRetry(
-                    () => fetch(proxifyImageSrc(imageUrl, boxWidth, boxHeight, 'match'), { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),
-                    { label: `avatar-resized-fallback(${username})`, budgetMs: Math.max(0, deadline - Date.now()) }
-                  ).catch(() => budgetExhausted());
-          if (resolved.ok && resolved.body) {
-            return new NextResponse(resolved.body, {
-              status: 200,
-              headers: new Headers({
-                'Content-Type': resolved.headers.get('content-type') || 'image/png',
-                'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
-                // ★ 60s -> 1 day + a 7-day revalidate window (2026-08-13). Measured: the
-                // post page makes 14 separate /api/avatar calls at 700-737ms each, and at
-                // max-age=60 every one of them came back a minute later on the next page.
-                // An avatar is the most static thing on a byline; when someone does change
-                // theirs, stale-while-revalidate serves the old one once and refreshes
-                // behind it, so the cost of the longer life is one stale render, not a
-                // broken one.
-                'X-Content-Type-Options': 'nosniff'
-              })
-            });
-          }
-          // Fall through: a broken stored URL must not leave the byline blank.
-        }
+        const served = await serveLiteAvatar(username, lite.imageUrl, size, width, height);
+        if (served) return served;
         return initialAvatar(username);
       }
       // ★ AND THE SAME FOR A HIVE ACCOUNT WHOSE STORED PICTURE IS DEAD.
@@ -200,6 +183,81 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 }
 
+
+/**
+ * Serve a Lumen-stored picture through the image host's resizer.
+ *
+ * Extracted 2026-09-11 so the keyless-lite short-circuit at the top of GET and the
+ * chain-picture-is-dead fallback further down run the SAME code. They were one inline
+ * branch before the reorder; two copies of this much retry/budget handling would
+ * drift. Returns null when there is no stored picture or it cannot be fetched, so the
+ * caller decides between a monogram and whatever else it has left to try.
+ */
+async function serveLiteAvatar(
+  username: string,
+  storedUrl: string | null,
+  size: string | null,
+  width: string | null,
+  height: string | null
+): Promise<NextResponse | null> {
+  // A picture the user uploaded through /api/lite/upload. It already lives on
+  // the same image host, so hand it back through the host's resizer to keep
+  // avatars a consistent size instead of shipping a full-resolution photo to
+  // every byline.
+  if (storedUrl) {
+    // ★ WEBP (2026-09-04, T1b perf). Unlike the Hive-account branch above, we
+    // already HAVE the source URL here — no redirect to resolve, so this goes
+    // straight through `proxifyImageSrc`, the same resize/format proxy every
+    // other image in the app uses, instead of hand-building the legacy
+    // `/{w}x{h}/<url>` path and hoping the origin picks a small format on its
+    // own (verified 2026-09-04: it does not — that path 301s to the same
+    // `/p/<hash>` proxy and needs `format` set explicitly, exactly like the
+    // shortcut above).
+    const { width: boxWidth, height: boxHeight } = avatarBox(size, width, height);
+    // Narrow once into a const: the `if (storedUrl)` narrowing above is
+    // NOT preserved for the property access inside the `() =>` fetch closures
+    // below (TS re-widens a property to `string | null` across a closure), so
+    // capture the checked value as a `string` const the closures can use.
+    const imageUrl = storedUrl;
+    // Same per-hop timeout + shared total budget as `fetchAsWebp` above, and for
+    // the identical reason: neither fetch below carried an `AbortSignal`.
+    const deadline = Date.now() + TOTAL_BUDGET_MS;
+    const picture = await withRetry(
+      () => fetch(proxifyImageSrc(imageUrl, boxWidth, boxHeight), { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),
+      { label: `avatar-resized(${username})`, budgetMs: Math.max(0, deadline - Date.now()) }
+    ).catch(() => budgetExhausted());
+    // WebP isn't guaranteed for every stored source — fall back to the proxy's
+    // own default (source) format rather than turning that into a broken avatar.
+    const resolved =
+      picture.ok && picture.body
+        ? picture
+        : Date.now() >= deadline
+          ? budgetExhausted()
+          : await withRetry(
+              () => fetch(proxifyImageSrc(imageUrl, boxWidth, boxHeight, 'match'), { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),
+              { label: `avatar-resized-fallback(${username})`, budgetMs: Math.max(0, deadline - Date.now()) }
+            ).catch(() => budgetExhausted());
+    if (resolved.ok && resolved.body) {
+      return new NextResponse(resolved.body, {
+        status: 200,
+        headers: new Headers({
+          'Content-Type': resolved.headers.get('content-type') || 'image/png',
+          'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+          // ★ 60s -> 1 day + a 7-day revalidate window (2026-08-13). Measured: the
+          // post page makes 14 separate /api/avatar calls at 700-737ms each, and at
+          // max-age=60 every one of them came back a minute later on the next page.
+          // An avatar is the most static thing on a byline; when someone does change
+          // theirs, stale-while-revalidate serves the old one once and refreshes
+          // behind it, so the cost of the longer life is one stale render, not a
+          // broken one.
+          'X-Content-Type-Options': 'nosniff'
+        })
+      });
+    }
+    // Fall through: a broken stored URL must not leave the byline blank.
+  }
+  return null;
+}
 
 /**
  * Pixel box for the image host's resizer, matching the size names the rest of the app

@@ -1179,7 +1179,13 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
             "does this author have a token" was the real duplication; the visual
             doubling was only the symptom. See `identity-pill.tsx` for the click
             model, the 16px overlap arithmetic and the tab-stop ruling. */}
-        <IdentityPill handle={displayAuthor} price={price} luminosity={luminosity} />
+        <IdentityPill
+          handle={displayAuthor}
+          price={price}
+          luminosity={luminosity}
+          avatarUrl={liteOverlay?.avatarUrl}
+          lite={Boolean(liteOverlay)}
+        />
         </span>
 
         {/* ★ E2, REVISED 2026-08-12 (owner ruling) — THE POST OVERFLOW MENU'S ONE

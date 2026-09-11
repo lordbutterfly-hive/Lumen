@@ -1,5 +1,6 @@
 import { getLogger } from '@ui/lib/logging';
 import { lookupAccounts } from '@transaction/lib/hive-api';
+import { ensureSquatterList, isSquatterName } from '@/blog/lib/lite/moderation/squatter-list';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 import { getTrendingTagsCached } from '@/blog/lib/trending-tags';
 import { liteConfig } from '@/blog/lib/lite/config';
@@ -51,7 +52,28 @@ async function loadSuggestions(query: string): Promise<SearchSuggestions> {
     tagPrefix ? loadBrowsableTags() : Promise.resolve<string[]>([])
   ]);
 
-  return rankSuggestions({ prefix, tagPrefix, hiveNames: hive, liteUsers: lite, trendingTags: trending });
+  /**
+   * ★★★ THE HEADER SEARCH BOX NEVER GOT THE FIX ITS SIBLING GOT (2026-09-11).
+   *
+   * `/api/search/people` drops squatters before merging (see `lib/search/people.ts`,
+   * fixed 2026-09-10 with this same pair of lines). This route -- the typeahead that
+   * runs on every keystroke in the header, and by far the more used of the two -- was
+   * never updated, and `rankSuggestions` explicitly prefers a Hive name over a
+   * colliding lite handle. So typing a squatted name showed ONLY the attacker, and the
+   * impersonated account was unreachable from the product's primary way of finding
+   * people. Measured on production 2026-09-11: `?q=chadmasters` returned
+   * `[{"name":"chadmasters","kind":"hive"}]`, while uncontested controls correctly
+   * returned `kind:"lite"`.
+   *
+   * Dropped BEFORE the rank for the same reason people.ts drops before the merge: the
+   * collision rule in `rankSuggestions` is first-wins, so a squatter left in the Hive
+   * list would still evict the lite row. Awaited, because the predicate reads a cache
+   * that a cold worker has not loaded yet and would otherwise filter nobody.
+   */
+  await ensureSquatterList();
+  const hiveNames = hive.filter((name) => !isSquatterName(name));
+
+  return rankSuggestions({ prefix, tagPrefix, hiveNames, liteUsers: lite, trendingTags: trending });
 }
 
 /**

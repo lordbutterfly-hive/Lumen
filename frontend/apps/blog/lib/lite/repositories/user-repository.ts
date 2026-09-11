@@ -106,11 +106,38 @@ export async function listNamesForConflictSweep(limit: number): Promise<
       WHERE hive_account_name IS NULL
         AND account_tier = 'lite'
         AND name_conflict_at IS NULL
-      ORDER BY created_at ASC
+      ORDER BY name_conflict_checked_at ASC NULLS FIRST, created_at ASC
       LIMIT $1`,
     [limit]
   );
   return rows.map((r) => ({ userId: r.user_id, displayName: r.display_name, createdAt: r.created_at }));
+}
+
+/**
+ * ★★★ THE OTHER HALF OF THE SWEEP'S CURSOR (2026-09-11, migration 0044).
+ *
+ * `listNamesForConflictSweep` above used to order by `created_at ASC` alone, which
+ * only drains if examined rows LEAVE the candidate set. They do not: a clean lite
+ * account is never flagged, so it stayed at the head of that ordering forever and the
+ * sweep re-read the same oldest page every tick. Past `DEFAULT_LIMIT` clean accounts,
+ * nothing newer was ever checked.
+ *
+ * So "I looked at this row" has to be recorded separately from "this row is
+ * contested". This is that record, and it is written for every candidate the sweep
+ * actually got an answer about -- found or not found -- which is what turns the query
+ * above into a round-robin.
+ *
+ * Deliberately NOT written for a batch that failed: an un-answered row must come back
+ * to the front of the queue, not be marked as done. See `sweepNameSquatters`.
+ */
+export async function markNamesChecked(userIds: string[]): Promise<void> {
+  if (userIds.length === 0) return;
+  await query(
+    `UPDATE lumen_user
+        SET name_conflict_checked_at = now()
+      WHERE user_id = ANY($1::text[])`,
+    [userIds]
+  );
 }
 
 /**

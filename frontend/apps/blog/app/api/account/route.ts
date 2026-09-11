@@ -65,6 +65,44 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // clicking through several pages; balances shown in the header can be five blocks
     // behind, which is invisible next to the second it was costing on every route.
     const account = await cachedRead(`account:${username}`, 15_000, () => getAccountFull(username));
+
+    /**
+     * ★★★ AN ORDINARY LITE ACCOUNT IS NOT A MISSING ACCOUNT (2026-09-11).
+     *
+     * The squatter branch above was the ONLY lite fallback this route had, so a lite
+     * user whose name nobody has contested fell through to here — and
+     * `getAccountFull` does not throw for a name the chain has never heard of. It
+     * spreads `getAccounts([name])[0]`, which is `undefined`, so `{...undefined}`
+     * serialises to `{}` and this route answered **HTTP 200 with an empty object**.
+     *
+     * `{}` is truthy, so nothing downstream rejected it. `ProfileMain` seeds the
+     * layout's correct lite account and then revalidates through here with
+     * `initialDataUpdatedAt: 0` (i.e. immediately), so the correct profile was
+     * server-rendered and then overwritten by `{}` on hydration: name, join date,
+     * follower and post counts all became `undefined`, and the Posts tab fell to the
+     * chain error state. Measured on production 2026-09-11 for `@arsha` and
+     * `@menosoft`, and reproduced locally against a seeded lite row.
+     *
+     * The profile LAYOUT has had this exact fallback since lite profiles existed
+     * (`app/[param]/(user-profile)/layout.tsx`, `!account || !account.name`); this
+     * route is the client half of the same question and simply never got it. Same
+     * predicate, same resolver, deliberately word-for-word, so the two halves cannot
+     * drift again.
+     */
+    if (!account || !account.name) {
+      const lite = await liteAccountAsProfile(username).catch((error) => {
+        logger.warn(error, 'account: lite fallback failed for %s', username);
+        return null;
+      });
+      if (lite) {
+        return NextResponse.json(lite, { headers: { 'cache-control': 'private, no-store' } });
+      }
+    }
+
+    // Neither on chain nor in Lumen. Returned UNCHANGED (200, whatever
+    // `getAccountFull` produced) rather than upgraded to a 404: `fetchJson` throws on
+    // any non-2xx, so turning this into an error status would be a wire-contract
+    // change for every existing caller, which is not what this fix is for.
     return NextResponse.json(account, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'account lookup failed for %s', username);

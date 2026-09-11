@@ -131,7 +131,24 @@ const PostListItem = memo(
   // accessible names below (the comment-count link), never rendered as the
   // visible headline, which stays owned by `summary.tsx`.
   const displayTitle = liteOverlay?.title || post.title;
-  const displayReputation = post.original_entry?.author_reputation ?? post.author_reputation;
+  /**
+   * ★★★ A LITE ACCOUNT HAS NO HIVE REPUTATION, AND THE ONE ON THE ENTRY IS THE SHARED
+   * PUBLISHER'S (2026-09-11).
+   *
+   * `displayAuthor` and `displayTitle` above are both overlay-aware; this line was not,
+   * so a Lumen post's card printed the reputation of `lumen.proxy` -- the account that
+   * signs for EVERY lite user -- as if it were this writer's standing. It is the exact
+   * defect `user-popover-card.tsx` was hardened against on 2026-08-16 ("A lite account
+   * never shows a Hive reputation"), left unfixed in the sibling component that renders
+   * the profile Comments tab and the search results.
+   *
+   * `undefined`, not 25: the card's own reputation rendering already treats an absent
+   * value as "do not show a badge", which is the honest output for a number that does
+   * not exist, whereas 25 would assert a real (and unflattering) chain standing.
+   */
+  const displayReputation = liteOverlay
+    ? undefined
+    : (post.original_entry?.author_reputation ?? post.author_reputation);
   const displayCommunity = post.original_entry?.community ?? post.community;
   const displayCommunityTitle = post.original_entry?.community_title ?? post.community_title;
   const displayCategory = post.original_entry?.category ?? post.category;
@@ -201,7 +218,16 @@ const PostListItem = memo(
                   aria-label={t('cards.post_card.author_profile', { author: displayAuthor })}
                   className="mr-3"
                 >
-                  <UserAvatarImg username={displayAuthor} pixelSize={24} />
+                  {/* ★ src FROM THE OVERLAY (2026-09-11). Without it UserAvatarImg tries
+                      `images.hive.blog/u/<handle>/avatar/...` first, which for a
+                      squatted handle is the squatter's face over this author's name.
+                      See LiteIdentity.avatarUrl. */}
+                  <UserAvatarImg
+                    username={displayAuthor}
+                    pixelSize={24}
+                    src={liteOverlay?.avatarUrl || undefined}
+                    lite={Boolean(liteOverlay)}
+                  />
                 </Link>
               ) : null}
               <div className="flex flex-wrap items-center gap-0.5 md:flex-nowrap">
@@ -212,14 +238,20 @@ const PostListItem = memo(
                 >
                   {displayAuthor}
                 </Link>{' '}
-                <span
-                  title={t('post_content.reputation_title')}
-                  aria-label={`${t('post_content.reputation_title')} ${accountReputation(displayReputation)}`}
-                  className="mr-1 block font-normal font-num"
-                  data-testid="post-author-reputation"
-                >
-                  ({accountReputation(displayReputation)})
-                </span>
+                {/* ★ NO BADGE AT ALL FOR A LITE AUTHOR (2026-09-11). The element was
+                    rendered unconditionally, so suppressing the VALUE alone would have
+                    printed an empty "()" beside the name. A reputation a person does
+                    not have is better shown as nothing than as a parenthesis. */}
+                {displayReputation === undefined ? null : (
+                  <span
+                    title={t('post_content.reputation_title')}
+                    aria-label={`${t('post_content.reputation_title')} ${accountReputation(displayReputation)}`}
+                    className="mr-1 block font-normal font-num"
+                    data-testid="post-author-reputation"
+                  >
+                    ({accountReputation(displayReputation)})
+                  </span>
+                )}
                 <PostCardBlacklistMark blacklistCheck={blacklistCheck} blacklists={post.blacklists} />
                 {post.author_role && post.author_role !== 'guest' && isCommunityPage ? (
                   <span className="text-caption md:text-sm">&nbsp;{post.author_role.toUpperCase()}&nbsp;</span>

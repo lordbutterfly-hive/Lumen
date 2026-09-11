@@ -4,6 +4,7 @@ import { getAccountFull } from '@transaction/lib/hive-api';
 import type { FullAccount } from '@hive/common-hiveio-packages/wax';
 import { cachedRead } from '@/blog/lib/server-read-cache';
 import { liteAccountAsProfile } from '@/blog/lib/lite/render/lite-account';
+import { isKeylessLiteName } from '@/blog/lib/lite/render/lite-identity';
 import { isSafeExternalHref } from '@/blog/components/safe-external-link';
 
 const logger = getLogger('app');
@@ -135,7 +136,28 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const bare = handle.startsWith('hive:') ? handle.slice('hive:'.length) : handle;
       const lower = bare.toLowerCase();
 
-      if (HIVE_USERNAME.test(lower)) {
+      /**
+       * ★★★ SAME HIVE-FIRST ORDERING BUG AS `/api/avatar` (2026-09-11).
+       *
+       * The chain lookup ran first and the lite fallback below only fired
+       * `if (!account?.name)` -- which a squatted name never satisfies, because a real
+       * Hive account of that name exists. Measured on production 2026-09-11:
+       * `?handle=chadmasters` returned `displayName: "chadmasters"` (the squatter's
+       * bare handle, their `profile.name` being empty) where the lite account's own
+       * name is "Chad Masters". That name is the discriminator and it proved this route
+       * read the squatter.
+       *
+       * This route backs the creator "work link" that a reader checks BEFORE holding
+       * someone's token, and the `website` it surfaces is attacker-controlled text.
+       * Resolving ownership first is the whole point on a surface whose job is
+       * vouching for an identity.
+       */
+      if (HIVE_USERNAME.test(lower) && (await isKeylessLiteName(lower))) {
+        account = await liteAccountAsProfile(lower).catch((error) => {
+          logger.warn(error, 'creator-profile: lite lookup failed for %s', lower);
+          return null;
+        });
+      } else if (HIVE_USERNAME.test(lower)) {
         try {
           // Same cachedRead memo pattern as `/api/account/route.ts`, but its
           // OWN namespaced key and TTL: reusing `account:${lower}` (that

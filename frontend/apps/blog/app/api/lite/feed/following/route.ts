@@ -8,7 +8,7 @@ import { requireActiveLiteUser } from '@/blog/lib/lite/http/actor';
 import { listFolloweesOf } from '@/blog/lib/lite/repositories/follow-repository';
 import * as posts from '@/blog/lib/lite/repositories/post-repository';
 import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
-import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
+import { resolvePublicNames, resolvePublicAvatars } from '@/blog/lib/lite/render/current-name';
 import { filterBlockedForViewer, viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { getAccountPosts } from '@transaction/lib/bridge-api';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
@@ -221,7 +221,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
 
     const names = await resolvePublicNames(liteRows);
-    const liteEntries = liteRows.map((p) => dbPostToEntry(p, names.get(p.postId)));
+    // See LiteIdentity.avatarUrl.
+    const avatars = await resolvePublicAvatars(liteRows);
+    const liteEntries = liteRows.map((p) => dbPostToEntry(p, names.get(p.postId), undefined, avatars.get(p.postId)));
     const entries = [...liteEntries, ...chainPages.flat()].sort(byCreatedDesc).slice(0, limit);
 
     // ★ THE CACHE STORES THE RAW (UNFILTERED) PAGE, keyed per-viewer. Filtering

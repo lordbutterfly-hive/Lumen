@@ -7,6 +7,7 @@ import { Icons } from '@ui/components/icons';
 import { cn } from '@ui/lib/utils';
 import { extractBodySummary } from '@/blog/lib/utils';
 import { getUserAvatarUrl } from '@ui/lib/avatar-utils';
+import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { find_first_img } from '@/blog/features/list-of-posts/post-img';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
 import { discussionKey, selectTopComment } from './lib/top-comment';
@@ -89,6 +90,14 @@ export default function TopCommentDrawer({
   const { visible } = useVisibleDiscussion(author, permlink, engaged);
 
   const comment = selectTopComment(rootKey, visible);
+  /**
+   * The writer behind a Lumen comment. `comment.author` is the shared publishing
+   * account for every lite user, so it is never the person to show. Hook is called
+   * unconditionally (it tolerates `undefined`) to keep hook order stable across the
+   * early returns further down this component.
+   */
+  const commentOverlay = useLiteOverlay(comment);
+  const commentAuthor = commentOverlay?.author ?? comment?.author ?? '';
 
   /*
    * ★★★ THE FULL REPLY THREAD BENEATH THE TOP COMMENT — DERIVED, NEVER FETCHED
@@ -313,7 +322,7 @@ export default function TopCommentDrawer({
                  router. */
               scroll={false}
               data-testid="post-card-comment-link"
-              aria-label={`Read ${comment.author}'s comment on this post`}
+              aria-label={`Read ${commentAuthor}'s comment on this post`}
             />
             {/* ★★ THE WHOLE BLOCK IS ONE TARGET, so the avatar and the author
                 name are NOT their own links any more (§9: "Comment block, in the
@@ -334,11 +343,24 @@ export default function TopCommentDrawer({
                   the tallest thing in the meta row but not what sets the row
                   height — the 20px text does — so this costs no height, it only
                   stops the avatar out-shouting a 15px name. */}
-              <UserAvatarImg username={comment.author} pixelSize={24} alt="" />
+              {/* ★★★ THE COLLAPSED PREVIEW SHOWED THE PUBLISHER, NOT THE WRITER
+                  (2026-09-11). Its sibling `top-comment-thread.tsx` resolves
+                  `liteOverlay?.author ?? comment.author`; this file had no overlay
+                  import at all, so a Lumen comment previewed under the shared
+                  publishing account's name and — because `UserAvatarImg` falls back to
+                  the name-keyed Hive image host — under whatever face that name
+                  resolves to. The `/api/discussion` data already carries `_lite`. */}
+              <UserAvatarImg
+                username={commentAuthor}
+                pixelSize={24}
+                alt=""
+                src={commentOverlay?.avatarUrl || undefined}
+                lite={Boolean(commentOverlay)}
+              />
             </span>
             <div className={styles.commentBody}>
               <div className={styles.commentMeta}>
-                <span className={styles.commentAuthor}>{comment.author}</span>
+                <span className={styles.commentAuthor}>{commentAuthor}</span>
                 {/* Spec §5 gives the separator its own row in the type table —
                     15px/400 at --ink-4, i.e. a step quieter than both the name it
                     follows and the time it precedes. It is punctuation, not

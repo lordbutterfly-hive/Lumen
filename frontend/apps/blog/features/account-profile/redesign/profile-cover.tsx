@@ -13,7 +13,36 @@ import { UserAvatarImg } from '@ui/components';
  * gradient as the cover sits behind it the whole time instead of a bare
  * default photo that has nothing to do with this account.
  */
-export default function ProfileCover({ username, coverImageUrl }: { username: string; coverImageUrl: string }) {
+/**
+ * ★★★ `avatarUrl` EXISTS BECAUSE THE DIRECT IMAGE HOST CANNOT BE TRUSTED FOR A
+ * CONTESTED NAME (2026-09-11).
+ *
+ * `UserAvatarImg` tries `images.hive.blog/u/<name>/avatar/<size>` FIRST and only falls
+ * back to our own `/api/avatar` when that errors. For a squatted name the host answers
+ * 200 with the SQUATTER's picture, so the fallback never runs and the guard on our
+ * side never gets a say. Measured on production 2026-09-11: `/@chadmasters` rendered
+ * `<img src="https://images.hive.blog/u/chadmasters/avatar/large">` -- the attacker's
+ * image -- at 120px, directly above the lite account's correct name and bio, while
+ * that account's own uploaded picture sat unused in the very same page payload.
+ *
+ * The component already supports being handed a known-good picture; this page is the
+ * one place that unambiguously HAS one, because `profileData` has already been through
+ * the squatter guard (`/api/account` + the profile layout both resolve a contested
+ * name to its lite owner). So we pass it, and the untrusted name-keyed lookup stops
+ * being the first thing tried on the most prominent avatar in the product.
+ */
+export default function ProfileCover({
+  username,
+  coverImageUrl,
+  avatarUrl,
+  lite
+}: {
+  username: string;
+  coverImageUrl: string;
+  avatarUrl?: string;
+  /** This profile is a Lumen account — see UserAvatarImg's `lite`. */
+  lite?: boolean;
+}) {
   return (
     <div className="relative">
       <div className="h-[210px] overflow-hidden rounded-panel border border-line-9 bg-gradient-to-br from-surface-brand-12 to-surface-warn-10">
@@ -22,6 +51,8 @@ export default function ProfileCover({ username, coverImageUrl }: { username: st
       <div className="absolute bottom-[-48px] left-8">
         <UserAvatarImg
           username={username}
+          src={avatarUrl || undefined}
+          lite={lite}
           apiSize="large"
           pixelSize={120}
           radiusClassName="rounded-panel"

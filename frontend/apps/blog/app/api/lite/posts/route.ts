@@ -6,7 +6,7 @@ import { createLitePost, getLiteUserPosts, CreatePostRequest } from '@/blog/lib/
 import { findLiteUserByPublicName } from '@/blog/lib/lite/render/public-name';
 import { filterPermanentlyFailed } from '@/blog/lib/lite/repositories/post-repository';
 import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
-import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
+import { resolvePublicNames, resolvePublicAvatars } from '@/blog/lib/lite/render/current-name';
 import {
   applyOwnerBlocksToAuthoredEntries,
   filterBlockedForViewer,
@@ -243,6 +243,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // than read off the row so an upgraded author's back catalogue shows their new
     // Hive name (see render/current-name.ts).
     const names = await resolvePublicNames(list);
+    // The byline picture, so it is never guessed from the handle. See LiteIdentity.avatarUrl.
+    const avatars = await resolvePublicAvatars(list);
 
     // ★★★ STAMP THE PARENT, THEN APPLY EFFECT (B) (2026-08-12).
     //
@@ -268,7 +270,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const failedIds = await filterPermanentlyFailed(list.map((entry) => entry.postId));
 
     const withParents: Entry[] = list.map((post) => {
-      const entry = dbPostToEntry(post, names.get(post.postId), failedIds.has(post.postId));
+      const entry = dbPostToEntry(post, names.get(post.postId), failedIds.has(post.postId), avatars.get(post.postId));
       if (post.parentRef?.type === 'chain') {
         return { ...entry, parent_author: post.parentRef.author, parent_permlink: post.parentRef.permlink };
       }

@@ -1,6 +1,7 @@
 import type { Entry } from '@hive/common-hiveio-packages/wax';
+import { liteConfig } from '../config';
 import * as users from '../repositories/user-repository';
-import { findLiteUserByPublicName } from '../render/public-name';
+import { findLiteUserByPublicName, ownsPublicName } from '../render/public-name';
 import { FollowActor, actorKey, TargetResolution } from './follow-actor';
 
 /** Hive's own account-name rule (protocol): 3-16 chars, letter-led, dots and hyphens. */
@@ -145,10 +146,26 @@ export async function resolveBlockTargetsBulk(
     else lumenNames.add(clean);
   });
 
-  const [lumenRows, hiveRows] = await Promise.all([
+  /**
+   * ★★★ THE BULK PATH USED THE RAW RESOLVER ITS SINGLE-ITEM SIBLING REFUSES (2026-09-11).
+   *
+   * `resolveBlockTarget` (single) goes through `findLiteUserByPublicName`, which applies
+   * `ownsPublicName`; this one called `users.findUsersByDisplayNames` directly, so a
+   * name the ownership rule says belongs to NOBODY (a Hive account that predates its
+   * lite twin) still resolved to the lite row here. Two resolvers for one question, and
+   * only one of them knew the rule.
+   *
+   * Filtered after the fetch rather than before: the bulk query is the point of this
+   * function, and `ownsPublicName` is a pure predicate over a row we already have, so
+   * this costs no extra round trip.
+   */
+  const [lumenRowsRaw, hiveRows] = await Promise.all([
     lumenNames.size > 0 ? users.findUsersByDisplayNames([...lumenNames]) : Promise.resolve([]),
     hiveNames.size > 0 ? users.findUsersByHiveAccountNames([...hiveNames]) : Promise.resolve([])
   ]);
+  const lumenRows = lumenRowsRaw.filter((row) =>
+    ownsPublicName(row, row.displayName, liteConfig.accountCreatorAccount)
+  );
   const byDisplayName = new Map(lumenRows.map((r) => [r.displayName.toLowerCase(), r]));
   const byHiveName = new Map(hiveRows.map((r) => [(r.hiveAccountName ?? '').toLowerCase(), r]));
 

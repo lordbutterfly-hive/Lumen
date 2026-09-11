@@ -46,6 +46,33 @@ export interface UserAvatarImgProps {
    * monogram fallback chain below is unchanged for a `src` that fails.
    */
   src?: string;
+  /**
+   * ★★★ THIS NAME IS A LUMEN IDENTITY: THE HIVE IMAGE HOST IS NOT AUTHORITATIVE FOR IT
+   * (2026-09-11).
+   *
+   * Stage 1 of the chain below is `getUserAvatarDirectUrl`, a raw
+   * `images.hive.blog/u/<name>/avatar/<size>` built from the handle. That is correct
+   * for a Hive account and WRONG for a Lumen one: a lite handle is by construction a
+   * name that was free on Hive, so anyone can register it later, and from that moment
+   * the host answers 200 with the SQUATTER's picture. A 200 means `onError` never
+   * fires, so the guarded `/api/avatar` fallback is unreachable and the attacker's face
+   * renders permanently.
+   *
+   * Passing a trusted `src` fixes that only when one EXISTS. Measured 2026-09-11 on a
+   * seeded squatted account with no uploaded picture: `src` was undefined, stage 1 fell
+   * straight to the direct host, and the squatter's image loaded at 512x512 on the
+   * profile and 64x64 on the byline. A lite account with no picture is the COMMON case
+   * and the most likely squatting target (new account, new squatter), so
+   * "trusted src when we have one" was exactly backwards as a defence.
+   *
+   * This flag states the fact instead of hoping a value is present: for a Lumen
+   * identity, skip the direct host entirely and start at the proxy, which resolves the
+   * name through the squatter guard and degrades to a generated monogram. The
+   * performance argument for going direct (see `getUserAvatarDirectUrl`) is about Hive
+   * accounts in a 30-card feed; a lite account has no hosted Hive avatar to win anyway,
+   * so going direct for one was always a wasted request as well as a wrong answer.
+   */
+  lite?: boolean;
 }
 
 /**
@@ -150,12 +177,19 @@ export function UserAvatarImg({
   className,
   alt = '',
   loading = 'lazy',
-  src
+  src,
+  lite = false
 }: UserAvatarImgProps) {
   // 'direct' -> images.hive.blog, 'proxy' -> /api/avatar (which itself never
   // hard-fails — see the route), 'failed' -> even that request errored
   // (network down), so stop trying and let the monogram alone stand.
-  const [stage, setStage] = useState<'direct' | 'proxy' | 'failed'>('direct');
+  // ★ A LUMEN IDENTITY SKIPS 'direct' ENTIRELY — see the `lite` prop. A trusted `src`
+  // still wins (it IS the direct stage), so a lite account WITH an uploaded picture
+  // keeps the one-hop path and only a lite account WITHOUT one starts at the proxy,
+  // which is the case that was rendering the squatter.
+  const [stage, setStage] = useState<'direct' | 'proxy' | 'failed'>(
+    lite && !src ? 'proxy' : 'direct'
+  );
   const imgRef = useRef<HTMLImageElement>(null);
 
   /**
