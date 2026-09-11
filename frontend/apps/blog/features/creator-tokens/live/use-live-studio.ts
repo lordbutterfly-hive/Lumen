@@ -18,6 +18,7 @@
 import { useCallback, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
 import { useTokenAccounts } from './use-token-accounts';
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
 import { BLOCKS_PER_DAY } from '../lib/contract-math';
@@ -31,6 +32,10 @@ import { runUnderTxClaim } from './tx-claim';
 const marketKey = (creator: string) => ['creatorTokens', 'live', 'market', creator];
 const asksKey = (creator: string) => ['creatorTokens', 'live', 'creatorAsks', creator];
 const offeringsKey = (creator: string) => ['creatorTokens', 'live', 'offerings', creator];
+// Shared with the buyer-facing hook so a creator's save and their own token page
+// read the SAME cache entry — two keys for one fact is how the Studio and the shop
+// end up disagreeing about what a service says.
+const descriptionsKey = (creator: string) => ['creatorTokens', 'live', 'offeringDescriptions', creator];
 const deliveryKey = (creator: string) => ['creatorTokens', 'live', 'delivery', creator];
 const feeKey = (account: string) => ['creatorTokens', 'live', 'feeBalance', account];
 // The creator's own holding in their own market. Same key SHAPE as
@@ -182,6 +187,15 @@ export interface LiveStudio {
   setOfferingPrice: (input: { offeringId: number; priceUsd: number }) => Promise<void>;
   setOfferingTitle: (input: { offeringId: number; title: string }) => Promise<void>;
   deleteOffering: (offeringId: number) => Promise<void>;
+  /**
+   * The long description for each posted service, keyed by offering id, or null
+   * while unread. NOT a chain value: the contract has one 64-byte title per
+   * offering and charges ~41 RC per byte, so the prose lives in Lumen
+   * (migration 0045). Nothing settles against it.
+   */
+  offeringDescriptions: Map<number, string> | null;
+  /** Save (or, on empty text, clear) one description. A Lumen write — no signature, no RC. */
+  setOfferingDescription: (input: { offeringId: number; description: string }) => Promise<void>;
 
   /**
    * Re-read everything this hook owns. Exists so the "Try again" on a failed
@@ -267,6 +281,28 @@ export function useLiveStudio(): LiveStudio {
     queryKey: offeringsKey(creatorAccount ?? ''),
     queryFn: () => dataSource!.listOfferings(creatorAccount as string),
     enabled: enabled && !readFailed,
+    staleTime: STALE_MS
+  });
+
+  /**
+   * Not gated on `readFailed`: a chain outage says nothing about whether Lumen can
+   * answer, and the creator must still be able to read and fix their own copy while
+   * the chain half of this screen is down. Swallows its own errors — a description
+   * is never a reason for the Studio to show an error state.
+   */
+  const descriptionsQuery = useQuery({
+    queryKey: descriptionsKey(creatorAccount ?? ''),
+    queryFn: async (): Promise<Map<number, string>> => {
+      try {
+        const res = await fetch(`/api/creator-tokens/offering-description?creator=${encodeURIComponent(creatorAccount as string)}`);
+        if (!res.ok) return new Map();
+        const body = (await res.json()) as { descriptions?: Record<string, string> };
+        return new Map(Object.entries(body.descriptions ?? {}).map(([id, text]) => [Number(id), text]));
+      } catch {
+        return new Map();
+      }
+    },
+    enabled: enabled && !!creatorAccount,
     staleTime: STALE_MS
   });
 
@@ -637,6 +673,45 @@ export function useLiveStudio(): LiveStudio {
           await source.deleteOffering({ creator: signer, offeringId });
         }),
       [call]
+    ),
+
+    offeringDescriptions: descriptionsQuery.data ?? null,
+    /**
+     * Deliberately NOT routed through `call()`. That guard exists to stop two
+     * CHAIN broadcasts racing (its own note: "another action is still in
+     * progress"), and it is shared by every signing op. This write touches no
+     * chain, costs no RC and needs no signature, so putting it behind the same
+     * single-flight lock would make saving a paragraph of text refuse while a
+     * price change is confirming, for no reason at all.
+     */
+    setOfferingDescription: useCallback(
+      async (input: { offeringId: number; description: string }) => {
+        if (!creatorAccount) throw new Error('CREATOR_TOKENS_SESSION_UNAVAILABLE: we couldn’t verify you’re signed in just now. Try again in a moment.');
+        const res = await fetch('/api/creator-tokens/offering-description', {
+          method: 'POST',
+          // ★ `guardWrite` REFUSES A POST WITHOUT THIS (403 missing_csrf_header).
+          // Every other client write in this codebase sends it from the same
+          // constant — a hand-written 'x-csrf-token' string here would break
+          // silently the day the header name changes.
+          headers: { 'content-type': 'application/json', [csrfHeaderName]: '1' },
+          body: JSON.stringify({ creator: creatorAccount, offeringId: input.offeringId, description: input.description })
+        });
+        if (!res.ok) {
+          // The route answers `message` for the one refusal a creator can act on
+          // (too long); everything else is a status they cannot fix by editing.
+          const body = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+          throw new Error(
+            body.message ??
+              (body.error === 'not_your_market'
+                ? 'That market is not yours to edit.'
+                : body.error === 'not_signed_in'
+                  ? 'Sign in again to save this.'
+                  : 'The description did not save.')
+          );
+        }
+        await queryClient.invalidateQueries({ queryKey: descriptionsKey(creatorAccount) });
+      },
+      [creatorAccount, queryClient]
     ),
 
     retry: () => {

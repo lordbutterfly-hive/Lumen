@@ -19,7 +19,8 @@ import { writeFailureMessage } from '../write-failure';
 import { MAX_HASH_LEN, hashFieldProblem } from '../../lib/vsc/payload-contract';
 import { MAX_CAP_CREDITS_BASE_UNITS, MAX_OFFERINGS } from '../../lib/contract-math';
 import ModalShell from '../modal-shell';
-import { offerTitleProblem } from '../../lib/vsc/op-builders';
+import { MAX_OFFER_TITLE_LEN, offerTitleProblem } from '../../lib/vsc/op-builders';
+import { MAX_DESCRIPTION_WORDS, descriptionProblem } from '../../lib/offering-description';
 import WorkLinkField from '../work-link-field';
 import { creatorOracleNotice } from '../../market/oracle-copy';
 import { lapseNoticeFor, lapseStateOf, shouldOfferRenewNow } from '../../market/lapse';
@@ -154,6 +155,15 @@ const TitleInput: FC<{
       value={txt}
       disabled={disabled}
       aria-label="Service name"
+      // ★ THE BOX NOW STOPS WHERE THE CONTRACT DOES (2026-09-11, owner: "i can't
+      // edit it"). There was no bound here at all, so a creator could type a name
+      // the chain refuses, blur, and watch it silently revert — the rename had
+      // already cost a broadcast. `NewOfferingRow`'s title field has had this
+      // guard since 2026-08-21 for the same reason; the RENAME field was missed.
+      // Byte-accurate validation still belongs to `offerTitleProblem` below: this
+      // counts UTF-16 units, which only ever stops the box EARLIER than the real
+      // 64-byte rule, never later.
+      maxLength={MAX_OFFER_TITLE_LEN}
       onChange={(e) => setTxt(e.target.value)}
       onBlur={async () => {
         const next = txt.trim();
@@ -473,6 +483,194 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
  * re-render the whole studio on every keystroke — and so the create path reads
  * as its own thing rather than a footnote to the list.
  */
+/**
+ * ★★★ ONE POSTED SERVICE, WITH ITS OWN FEEDBACK (2026-09-11, owner: "removing a
+ * service doesn't work, and i can't edit it").
+ *
+ * Neither control was missing and neither was broken on chain. `deleteOffering`
+ * ran the full confirm-execution path and the rename committed on blur. What was
+ * missing was any sign of either happening AT THE ROW: every failure went to
+ * `actionFailure`, a banner rendered ~400 lines of JSX further up the page, and a
+ * creator clicking Remove at the bottom of their service list saw nothing change
+ * and no error — because the error was off-screen. A remove also takes a
+ * broadcast plus `awaitExecution` to confirm, several seconds during which the
+ * row sat there looking untouched.
+ *
+ * So this row owns its own state: the button says what it is doing, the refusal
+ * lands under the row that caused it, and a confirm step makes "Remove" a
+ * decision rather than a misclick. The shared banner is still fed, for the reader
+ * who is looking at the top of the page.
+ *
+ * It also carries the DESCRIPTION editor. The chain has no room for one: an
+ * offering's single free-form field is the 64-byte title at ~41 RC per byte, so
+ * the prose is a Lumen write (migration 0045) with no signature and no RC, and it
+ * renders on the token page only — the title carries the service everywhere a
+ * short label is what is wanted.
+ */
+const OfferingRow: FC<{
+  offering: { offeringId: number; title: string; priceHbd: number };
+  studio: LiveStudio;
+  priceUsd: number;
+  cap: number;
+  description: string;
+}> = ({ offering: o, studio, priceUsd, cap, description }) => {
+  const [failure, setFailure] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [desc, setDesc] = useState(description);
+  const [savingDesc, setSavingDesc] = useState(false);
+  const [descSaved, setDescSaved] = useState(false);
+  // Re-seed when the stored value arrives or changes, but never over a draft the
+  // creator is still typing: `dirty` is what tells those two apart.
+  const dirty = desc.trim() !== description.trim();
+  useEffect(() => {
+    setDesc(description);
+  }, [description]);
+
+  const descProblem = descriptionProblem(desc);
+  const words = desc.trim() === '' ? 0 : desc.trim().split(/\s+/).length;
+
+  const remove = async () => {
+    setFailure(null);
+    setRemoving(true);
+    try {
+      await studio.deleteOffering(o.offeringId);
+      setConfirming(false);
+    } catch (err) {
+      setFailure(writeFailureMessage(err, 'Removing that service didn’t go through.'));
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  const saveDesc = async () => {
+    if (descProblem) return;
+    setFailure(null);
+    setSavingDesc(true);
+    try {
+      await studio.setOfferingDescription({ offeringId: o.offeringId, description: desc });
+      setDescSaved(true);
+    } catch (err) {
+      setFailure(writeFailureMessage(err, 'The description didn’t save.'));
+    } finally {
+      setSavingDesc(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-line-11 px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <TitleInput
+            value={o.title}
+            disabled={studio.isBusy || removing}
+            onCommit={(title) => studio.setOfferingTitle({ offeringId: o.offeringId, title })}
+            onFailure={(m) => setFailure(m || null)}
+          />
+          {/* ★ A THIRD, WRONG WAY TO QUOTE THE SAME OFFERING (found 2026-08-21).
+              This was a raw `price / tokenPrice`: no 12% commission carve-out and
+              no rounding up, while both the buyer-facing paths use `serviceQuote`,
+              which applies both. On a real market (supply 31, token $1.255) a $60
+              service read 47.81 tokens HERE and 43 on the page a buyer actually
+              sees, an 11% gap on the creator's own pricing screen. One quote
+              function, or the two screens disagree. */}
+          <div className="text-caption tabular-nums text-ink-14 font-ui">
+            {priceUsd > 0
+              ? `≈ ${tok(serviceQuote(o.priceHbd, priceUsd).tokens)} tokens at today’s price`
+              : 'Token price unavailable'}
+          </div>
+        </div>
+        <div className="flex flex-shrink-0 items-center gap-2">
+          <div className="flex items-center rounded-control border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
+            <span className="text-ink-14 font-num">$</span>
+            <PriceInput
+              value={o.priceHbd}
+              onCommit={(usd) => studio.setOfferingPrice({ offeringId: o.offeringId, priceUsd: usd })}
+              problemOf={(usd) => serviceSupplyShareProblem(usd, priceUsd, cap)}
+              disabled={studio.isBusy || removing}
+              onFailure={(m) => setFailure(m || null)}
+            />
+          </div>
+          {/* Two clicks, because the first one is irreversible and sits next to a
+              price field somebody is editing. The confirm is inline rather than a
+              modal: the row it destroys stays visible while the question is asked. */}
+          {confirming ? (
+            <>
+              <button
+                onClick={() => void remove()}
+                disabled={removing}
+                className="rounded-control border border-line-warn-2 bg-surface-warn-4 px-3 py-2 text-caption font-medium text-ink-warn-1 font-ui disabled:opacity-50"
+              >
+                {removing ? 'Removing…' : 'Confirm'}
+              </button>
+              <button
+                onClick={() => setConfirming(false)}
+                disabled={removing}
+                className="rounded-control px-2 py-2 text-caption font-medium text-ink-10 font-ui hover:bg-surface-16 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => {
+                setFailure(null);
+                setConfirming(true);
+              }}
+              disabled={studio.isBusy || removing}
+              title="Delist this service. Asks already made against it are unaffected."
+              className="rounded-control border border-line-11 px-3 py-2 text-caption font-medium text-ink-10 font-ui hover:bg-surface-16 disabled:opacity-50"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* The long description. Buyer-facing on the token page, and nowhere else. */}
+      <div className="mt-3 border-t border-line-2 pt-3">
+        <label className="mb-1 block text-caption font-medium text-ink-10 font-ui" htmlFor={`offer-desc-${o.offeringId}`}>
+          Description <span className="font-normal text-ink-14">· shown on your token page, under the service name</span>
+        </label>
+        <textarea
+          id={`offer-desc-${o.offeringId}`}
+          value={desc}
+          rows={3}
+          disabled={studio.isBusy || removing || savingDesc}
+          onChange={(e) => {
+            setDesc(e.target.value);
+            setDescSaved(false);
+          }}
+          placeholder="What the buyer gets, in your own words."
+          className="w-full rounded-control border border-line-11 bg-transparent px-3 py-2 text-[14px] leading-[22px] text-ink-2 font-ui outline-none focus:border-line-brand-10 disabled:opacity-60"
+        />
+        <div className="mt-1 flex items-center justify-between gap-3">
+          <span className={cn('text-caption font-ui', descProblem ? 'text-ink-warn-1' : 'text-ink-14')}>
+            {descProblem ?? `${words}/${MAX_DESCRIPTION_WORDS} words`}
+          </span>
+          <div className="flex items-center gap-2">
+            {descSaved && !dirty ? <span className="text-caption text-ink-ok-4 font-ui">Saved</span> : null}
+            <button
+              onClick={() => void saveDesc()}
+              disabled={savingDesc || !dirty || descProblem !== null || studio.isBusy || removing}
+              className="rounded-control border border-line-11 px-3 py-1.5 text-caption font-medium text-ink-2 font-ui hover:bg-surface-16 disabled:opacity-50"
+            >
+              {savingDesc ? 'Saving…' : 'Save description'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* THE REFUSAL LANDS HERE, under the row that caused it. */}
+      {failure ? (
+        <div className="mt-2 rounded-control border border-line-warn-2 bg-surface-warn-4 px-3 py-2 text-caption text-ink-warn-1 font-ui">
+          {failure}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
 const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
   const [title, setTitle] = useState('');
   const [price, setPrice] = useState('');
@@ -1336,62 +1534,14 @@ const CreatorStudio: FC = () => {
                 </p>
               ) : (
                 studio.offerings.map((o) => (
-                  <div
+                  <OfferingRow
                     key={o.offeringId}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-line-11 px-4 py-3"
-                  >
-                    <div className="min-w-0">
-                      <TitleInput
-                        value={o.title}
-                        disabled={studio.isBusy}
-                        onCommit={(title) => studio.setOfferingTitle({ offeringId: o.offeringId, title })}
-                        onFailure={(m) => setActionFailure(m || null)}
-                      />
-                      {/* ★ A THIRD, WRONG WAY TO QUOTE THE SAME OFFERING (found
-                          2026-08-21). This was a raw `price / tokenPrice`: no 12%
-                          commission carve-out and no rounding up, while both the
-                          buyer-facing paths use `serviceQuote`, which applies
-                          both. On a real market (supply 31, token $1.255) a $60
-                          service read 47.81 tokens HERE and 43 on the page a
-                          buyer actually sees, an 11% gap on the creator's own
-                          pricing screen. `serviceQuote` matches what a live ask
-                          settles at, verified against `creditsForAskBaseUnits`
-                          at the contract's settlement rate for four offerings.
-                          One quote function, or the two screens disagree. */}
-                      <div className="text-caption tabular-nums text-ink-14 font-ui">
-                        {market.priceUsd > 0
-                          ? `≈ ${tok(serviceQuote(o.priceHbd, market.priceUsd).tokens)} tokens at today’s price`
-                          : 'Token price unavailable'}
-                      </div>
-                    </div>
-                    <div className="flex flex-shrink-0 items-center gap-2">
-                      <div className="flex items-center rounded-control border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
-                        <span className="text-ink-14 font-num">$</span>
-                        <PriceInput
-                          value={o.priceHbd}
-                          onCommit={(usd) =>
-                            studio.setOfferingPrice({ offeringId: o.offeringId, priceUsd: usd })
-                          }
-                          problemOf={(usd) => serviceSupplyShareProblem(usd, market.priceUsd, market.cap)}
-                          disabled={studio.isBusy}
-                          onFailure={(m) => setActionFailure(m || null)}
-                        />
-                      </div>
-                      <button
-                        onClick={() =>
-                          void runStudioAction(
-                            () => studio.deleteOffering(o.offeringId),
-                            'Removing that service didn’t go through.'
-                          )
-                        }
-                        disabled={studio.isBusy}
-                        title="Delist this service. Asks already made against it are unaffected."
-                        className="rounded-control border border-line-11 px-3 py-2 text-caption font-medium text-ink-10 font-ui hover:bg-surface-16 disabled:opacity-50"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
+                    offering={o}
+                    studio={studio}
+                    priceUsd={market.priceUsd}
+                    cap={market.cap}
+                    description={studio.offeringDescriptions?.get(o.offeringId) ?? ''}
+                  />
                 ))
               )}
             </div>

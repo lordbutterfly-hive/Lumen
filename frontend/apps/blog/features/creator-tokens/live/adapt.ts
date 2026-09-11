@@ -268,11 +268,21 @@ function typicalResponseLabel(responseBlocks: number[]): string {
  * definition (offerings.go refuses an ask against a deleted or zero-priced id,
  * and listOfferings already filters those out).
  */
-export function adaptOfferings(offerings: Offering[]): Service[] {
+export function adaptOfferings(offerings: Offering[], descriptions?: Map<number, string> | null): Service[] {
   return offerings.map((o) => ({
     key: String(o.offeringId),
     name: o.title,
-    desc: '',
+    // ★ THE CREATOR'S OWN WORDS, OR NOTHING (2026-09-11). This was a hard-coded
+    // `''` and the comment above still explains why: a fabricated description of
+    // somebody's paid work is exactly the detail a reader would believe the
+    // creator wrote. That reasoning is unchanged — the slot is now filled ONLY
+    // from `/api/creator-tokens/offering-description`, which only that creator can
+    // write. A missing or failed read leaves it empty, exactly as before.
+    //
+    // The chain cannot hold this: an offering's one free-form field is the title,
+    // bounded at 64 BYTES at ~41 RC per byte (lib/vsc/rc-budget.ts:137), so 100
+    // words on chain would cost ~25,000 RC per createOffering against 5,693.
+    desc: descriptions?.get(o.offeringId) ?? '',
     usd: usdFromHbd(o.priceHbd),
     status: 'live' as const,
     cta: 'Request'
@@ -329,9 +339,15 @@ export function adaptMarket(input: {
    * gets here that information is gone, so it has to be carried alongside.
    */
   priceTrades?: number | null;
+  /**
+   * The creator's own long descriptions, keyed by offering id, from
+   * `/api/creator-tokens/offering-description`. Optional and nullable on purpose:
+   * it is a Lumen read beside a chain read, and the shop must render without it.
+   */
+  descriptions?: Map<number, string> | null;
 }): LiveTokenMarket {
-  const { creator, market, position, offerings, delivery, priceHistory, priceTrades } = input;
-  const services = offerings.length > 0 ? adaptOfferings(offerings) : faceAsService(market.faceHbd);
+  const { creator, market, position, offerings, delivery, priceHistory, priceTrades, descriptions } = input;
+  const services = offerings.length > 0 ? adaptOfferings(offerings, descriptions) : faceAsService(market.faceHbd);
   // Derived ONCE in the data source under the contract rules the chain
   // reports (types.ts Market.windingDown, 2026-08-31 A5); this line used to
   // restate the v1 predicate inline, then call market-health's copy of it.

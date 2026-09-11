@@ -70,6 +70,12 @@ export type LiveMarketStatus =
 export const creatorMarketKey = (creator: string) => ['creatorTokens', 'live', 'market', creator];
 const positionKey = (creator: string, holder?: string) => ['creatorTokens', 'live', 'position', creator, holder];
 const offeringsKey = (creator: string) => ['creatorTokens', 'live', 'offerings', creator];
+/**
+ * The creator's long service descriptions. A LUMEN read beside the chain reads —
+ * the contract has no room for them (one 64-byte title per offering at ~41 RC per
+ * byte), so the prose lives in Lumen and the chain keeps the identity.
+ */
+export const offeringDescriptionsKey = (creator: string) => ['creatorTokens', 'live', 'offeringDescriptions', creator];
 const deliveryKey = (creator: string) => ['creatorTokens', 'live', 'delivery', creator];
 const historyKey = (creator: string) => ['creatorTokens', 'live', 'priceHistory', creator];
 
@@ -255,6 +261,28 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
     staleTime: STALE_MS
   });
 
+  /**
+   * DEGRADES OPEN, and the `enabled` flag is deliberately NOT tied to `readFailed`:
+   * the chain read failing has nothing to do with whether Lumen can answer, and a
+   * description is never a reason to fail a shop. `queryFn` swallows its own errors
+   * into an empty map so a 502 here can never surface as a broken token page.
+   */
+  const descriptionsQuery = useQuery({
+    queryKey: offeringDescriptionsKey(creator),
+    queryFn: async (): Promise<Map<number, string>> => {
+      try {
+        const res = await fetch(`/api/creator-tokens/offering-description?creator=${encodeURIComponent(creator)}`);
+        if (!res.ok) return new Map();
+        const body = (await res.json()) as { descriptions?: Record<string, string> };
+        return new Map(Object.entries(body.descriptions ?? {}).map(([id, text]) => [Number(id), text]));
+      } catch {
+        return new Map();
+      }
+    },
+    enabled: enabled && !!creator,
+    staleTime: STALE_MS
+  });
+
   const deliveryQuery = useQuery({
     queryKey: deliveryKey(creator),
     queryFn: () => dataSource!.readDeliveryRecord(creator),
@@ -351,6 +379,10 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
           // (adaptMarket does that when the list is empty), which is a real,
           // buyable service rather than an empty shop.
           offerings: offeringsQuery.data ?? [],
+          // null, never an empty map, while the read is still in flight: an empty
+          // map is "this creator wrote no descriptions" and would flash the blank
+          // state under every service before the real prose arrives.
+          descriptions: descriptionsQuery.data ?? null,
           delivery: deliveryQuery.data ?? null,
           // null (not []) when the history could not be read — adapt.ts turns
           // that into "no chart", and an empty array would draw a flat line,
