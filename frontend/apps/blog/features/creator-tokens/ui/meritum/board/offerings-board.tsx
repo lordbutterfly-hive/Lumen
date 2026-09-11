@@ -213,10 +213,22 @@ const BoardRow: FC<{
         </span>
       </div>
 
-      <div className="flex min-w-0 items-center gap-1 pb-2">
+      {/* ★ THE TITLE WRAPS, IT DOES NOT TRUNCATE (owner, 2026-09-11: "the titles
+          cannot be read they get ..."). It was `truncate`, borrowed from the 200px
+          left rail this board first shipped in. A service title is up to 64 bytes
+          of the creator's own words and it is the whole reason the row exists —
+          "Reviewing your post giving feed…" tells a reader nothing and gives them
+          nothing to click toward. Names and prices still hold one line: a handle
+          is short, and a clipped price is a wrong price. Only this field wraps,
+          onto as many lines as it needs.
+
+          `items-start` so the chevron stays level with the FIRST line of a title
+          that now runs to two or three, rather than drifting to the vertical
+          middle of a growing block. */}
+      <div className="flex min-w-0 items-start gap-1 pb-2">
         <span
           className={cn(
-            'min-w-0 flex-1 truncate font-ui text-caption text-ink-10 transition-all motion-reduce:transition-none',
+            'min-w-0 flex-1 break-words font-ui text-caption text-ink-10 transition-all motion-reduce:transition-none',
             // The flap: the outgoing title lifts and fades, the incoming one
             // settles. `motion-reduce` drops it to a plain swap rather than
             // removing the change, which would hide the update entirely.
