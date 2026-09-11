@@ -1,16 +1,34 @@
 'use client';
 
-import { ReactNode, forwardRef, useState } from 'react';
+import { ReactNode, forwardRef, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CircleSpinner } from 'react-spinners-kit';
 import { Popover, PopoverContent, PopoverTrigger } from '@ui/components/popover';
 import { fetchAccountNotifications } from '@/blog/lib/chain-fetch';
-import NotificationList from '@/blog/features/activity-log/list';
+import NotificationListItem from '@/blog/features/activity-log/list-item';
+import { CreatorTokenLaurel } from '@/blog/features/creator-tokens/ui/creator-token-laurel';
+
+/**
+ * ★★★ CHAIN DATES ARE NAIVE UTC AND MUST BE SAID SO BEFORE THEY ARE COMPARED.
+ *
+ * `bridge.account_notifications` returns "2026-09-11T13:14:06" — no marker — and
+ * `new Date()` reads an unmarked string as BROWSER-LOCAL, so in UTC+2 every chain
+ * row would sort two hours earlier than it happened. Lumen's own rows carry a real
+ * `Z`. Merging the two without this makes the order wrong by the reader's own
+ * offset, which is invisible in London and obvious in Sydney. Same normalisation
+ * `features/proposals/lib/proposals-format.ts parseChainDate` already applies for
+ * the same reason.
+ */
+const notifiedAt = (d: string): number => {
+  const zoned = d.indexOf('.') !== -1 || d.indexOf('+') !== -1 || d.endsWith('Z');
+  return new Date(zoned ? d : `${d}.000Z`).getTime();
+};
 import { useMarkAllNotificationsAsReadMutation } from '@/blog/features/activity-log/hooks/use-notifications-read-mutation';
 import BasePathLink from '@/blog/components/base-path-link';
 import TimeAgo from '@ui/components/time-ago';
 import { UserAvatarImg } from '@ui/components';
 import type { LumenNotification } from './use-lumen-notifications';
+import type { IAccountNotification } from '@hive/common-hiveio-packages/wax';
 import { handleError } from '@ui/lib/handle-error';
 import { useTranslation } from '@/blog/i18n/client';
 
@@ -102,6 +120,7 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
   // reader who opens the bell. See
   // `apps/blog/app/api/notifications/account/route.ts`.
   const enabled = open && !!username && chainAccount;
+
   /**
    * ★★★ A FAILED LIST RENDERED AS AN EMPTY ONE (2026-08-18, owner: "shows 3 on
    * the bell and there's nothing inside").
@@ -133,6 +152,21 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
     enabled,
     retry: 1
   });
+
+  /**
+   * ★ ONE FEED, ONE ORDERING. Lumen rows (follows, DMs, buys of your Meritum) and
+   * chain rows are interleaved by TIME. See the render's own note on why they used
+   * to be two stacked lists and what that did to a six-week-old follow.
+   */
+  const merged = useMemo(() => {
+    const rows: Array<
+      { kind: 'lumen'; at: number; item: LumenNotification } | { kind: 'chain'; at: number; item: IAccountNotification & { rep?: number } }
+    > = [];
+    for (const item of lumenItems) rows.push({ kind: 'lumen', at: notifiedAt(item.date), item });
+    for (const item of notifications ?? []) rows.push({ kind: 'chain', at: notifiedAt(item.date), item });
+    return rows.sort((a, b) => b.at - a.at);
+  }, [lumenItems, notifications]);
+
 
   // ★★ LUMEN-NATIVE NOTIFICATIONS (2026-08-09, tester BASELINE-03). Following
   // someone on Lumen never reached the person followed: this bell had ONE data
@@ -220,52 +254,78 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
           ) : null}
         </div>
         <div className="max-h-[420px] overflow-y-auto">
-          {/* Lumen's own events first: they are the ones this reader can act on
-              inside Lumen, and for a lite account they are the ONLY ones there
-              will ever be. Rendered as their own rows rather than coerced into
-              the chain notification type, which carries chain-only fields. */}
-          {lumenItems.length > 0 ? (
-            <ul data-testid="lumen-notifications">
-              {lumenItems.map((n, i) => (
-                <li key={`${n.url}-${n.date}-${i}`} className="border-b border-line-9 last:border-0">
-                  <BasePathLink
-                    href={`/${n.url}`}
-                    className="flex items-center gap-3 px-4 py-3 font-sans text-sm hover:bg-surface-21"
-                  >
-                    {/* ★ THE SAME FACE THE CHAIN ROWS SHOW (2026-08-16, owner).
-                        These rows were text only, sitting directly above 40px
-                        avatars from `activity-log/list-item.tsx`, so one list
-                        rendered the same kind of event two different ways and a
-                        new follower arrived anonymous. `UserAvatarImg` is that
-                        exact component, and it already resolves a lite account
-                        through `/api/avatar` to the reader's own initial rather
-                        than a shared default picture. */}
-                    <UserAvatarImg
-                      username={n.actor ?? n.url.replace(/^@/, '')}
-                      pixelSize={40}
-                      alt={`${n.actor ?? n.url.replace(/^@/, '')} profile picture`}
-                    />
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="text-ink-2">{n.msg}</span>
-                      <span className="text-caption text-ink-10">
-                        {/* Same single format as the chain rows below. */}
-                        <TimeAgo date={n.date} numeric="always" />
-                      </span>
-                    </span>
-                  </BasePathLink>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          {/* ★★★ ONE LIST, SORTED BY TIME (2026-09-11, owner: "chadmasters follow
+              is stuck on top of my notifications forever... it doesn't go in the
+              list, it's stuck on top").
+
+              It was not stuck and it was not the lite account: Lumen's own rows
+              were rendered in their OWN <ul> ABOVE the chain list, unconditionally.
+              A follow from six weeks ago therefore outranked a reply from a minute
+              ago forever, because the two lists never compared dates with each
+              other — position encoded SOURCE, which the reader has no reason to
+              care about, instead of TIME, which is the only thing a notification
+              feed is ordered by.
+
+              Now both are merged and sorted newest-first, and a Lumen row falls
+              down the list as it ages exactly like a chain row. The renderers stay
+              separate — a follow carries no score, no permalink and no chain id —
+              but they live in one ordered list. */}
           {showSpinner ? (
             <div className="flex items-center justify-center gap-2 py-10 text-sm text-ink-10">
               <CircleSpinner loading size={16} color="#71717a" />
               {t('global.loading')}
             </div>
-          ) : notifications && notifications.length > 0 ? (
-            // The bell only ever renders for the signed-in reader, so this list
-            // is always theirs — which the row itself has no way to know.
-            <NotificationList data={notifications} lastRead={lastRead} isOwner />
+          ) : merged.length > 0 ? (
+            <div className="flex flex-col divide-y divide-border-secondary" data-testid="lumen-notifications">
+              {merged.map((row) =>
+                row.kind === 'lumen' ? (
+                  <BasePathLink
+                    key={`lumen-${row.item.url}-${row.item.date}`}
+                    href={`/${row.item.url}`}
+                    className="flex items-center gap-3 px-4 py-3 font-sans text-sm hover:bg-surface-21"
+                  >
+                    {/* ★ THE SAME FACE THE CHAIN ROWS SHOW (2026-08-16, owner).
+                        `UserAvatarImg` resolves a lite account through /api/avatar
+                        to their own initial rather than a shared default. */}
+                    <UserAvatarImg
+                      username={row.item.actor ?? row.item.url.replace(/^@/, '')}
+                      pixelSize={40}
+                      alt={`${row.item.actor ?? row.item.url.replace(/^@/, '')} profile picture`}
+                    />
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="text-ink-2">{row.item.msg}</span>
+                      <span className="flex items-center gap-1.5 text-caption text-ink-10">
+                        {/* The Meritum mark, at the 16px the timestamp line can
+                            carry — the same glyph the left rail uses for the
+                            feature, so a buy row is recognisable as one at a
+                            glance the way a vote or a reply already is. Only on
+                            BUY rows: a follow is not a Meritum event. */}
+                        {row.item.type === 'buy' ? (
+                          <CreatorTokenLaurel size={16} className="shrink-0 text-ink-brand-6" />
+                        ) : null}
+                        <TimeAgo date={row.item.date} numeric="always" />
+                      </span>
+                    </span>
+                  </BasePathLink>
+                ) : (
+                  <NotificationListItem
+                    key={`chain-${row.item.id}-${row.item.type}`}
+                    date={row.item.date}
+                    msg={row.item.msg}
+                    rep={row.item.rep}
+                    score={row.item.score}
+                    type={row.item.type}
+                    url={row.item.url}
+                    id={row.item.id}
+                    lastRead={lastRead}
+                    // The bell only ever renders for the signed-in reader, so this
+                    // list is always theirs — which the row cannot work out itself.
+                    isOwner
+                  />
+                )
+              )}
+            </div>
+
           ) : isError || (unreadCount > 0 && !notifications && lumenItems.length === 0) ? (
             /* ★★★ THE PANEL MAY NEVER CONTRADICT ITS OWN BADGE (2026-08-18).
                The reported bug was "3 unread" over "No notifications yet", and

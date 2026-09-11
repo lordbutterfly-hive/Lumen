@@ -33,7 +33,8 @@ import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with
  * deliberate act, or the badge clears itself for a reader who never looked.
  */
 export interface LumenNotification {
-  type: 'follow' | 'dm';
+  /** `buy` = somebody bought this reader's Meritum (chain event, via the indexer). */
+  type: 'follow' | 'dm' | 'buy';
   msg: string;
   url: string;
   date: string;

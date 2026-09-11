@@ -220,9 +220,15 @@ interface CreatorsViewProps {
    * marketing card that a different screen may want to omit.
    */
   intro?: ReactNode;
+  /**
+   * The left rail's offerings board. Threaded through rather than imported here,
+   * for the same reason `intro` is: this view is the Meritum landing page AND
+   * the plain creators directory, and only the landing route wants it.
+   */
+  navBoard?: ReactNode;
 }
 
-const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
+const CreatorsView: FC<CreatorsViewProps> = ({ intro, navBoard }) => {
   const { t } = useTranslation('common_blog');
   const [sort, setSort] = useState<Sort>('reliable');
   const [showNew, setShowNew] = useState(true);
@@ -287,7 +293,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
   );
 
   return (
-    <TokenShell rightRail={rightRail}>
+    <TokenShell rightRail={rightRail} navBoard={navBoard}>
       {/* `mb-7` is the masthead's own bottom margin, applied HERE rather than
           inside the intro so the intro stays a card and not a page section —
           the two blocks sit the same distance apart as every other pair on the

@@ -810,6 +810,19 @@ export interface IndexerHealth {
   blocksBehind: number | null;
 }
 
+/**
+ * One creator's live shop, for the Meritum landing page's left-rail board.
+ *
+ * Deliberately NOT `CreatorSummary & Offering[]`: the board needs the creator's
+ * name and their offerings' titles and prices, and nothing else. Carrying the
+ * whole summary would invite the board to start ranking, which is the discovery
+ * view's job and is done in SQL on purpose (see use-live-discovery.ts).
+ */
+export interface BoardCreator {
+  creator: string;
+  offerings: Offering[];
+}
+
 export interface CreatorSummary {
   creator: string;
   /** null when nothing has resolved yet. NOT 0 — a creator nobody has asked has no completion rate, and 0% reads as "fails everything". */

@@ -1,5 +1,5 @@
 import env from '@beam-australia/react-env';
-import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, ContractRules, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RenewSubscriptionInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../types';
+import type { AnswerInput, Ask, AskInput, BoardCreator, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, ContractRules, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RenewSubscriptionInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../types';
 import { MockCreatorTokensDataSource } from './mock/mock-data-source';
 import { hiveTransactionBroadcaster, hiveTransactionBundleBroadcaster } from './vsc/broadcaster';
 import { routingBroadcaster } from './vsc/wallet-broadcaster';
@@ -159,6 +159,13 @@ export interface CreatorTokensDataSource {
   setOfferingTitle(input: SetOfferingTitleInput): Promise<void>;
   /** offerings.go DeleteOffering — delists only; escrows already asked against this offering are untouched. */
   deleteOffering(input: DeleteOfferingInput): Promise<void>;
+  /**
+   * Every live offering for a list of creators, batched — the Meritum landing
+   * page's left-rail board. Three reads total, not three per creator; see the
+   * implementation's note on why a `listOfferings` loop was rejected.
+   */
+  readOfferingBoard(creators: string[]): Promise<BoardCreator[]>;
+
   /** read.go WithdrawTreasury — owner-gated; the UI must keep this behind an owner-only surface (the contract also refuses a non-owner caller). Resolves the HBD amount actually withdrawn. */
   withdrawTreasury(input: WithdrawTreasuryInput): Promise<number>;
 }

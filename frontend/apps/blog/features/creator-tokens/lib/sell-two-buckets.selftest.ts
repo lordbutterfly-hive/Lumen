@@ -10,6 +10,14 @@
  * Run:
  *   cd apps/blog && npx tsx features/creator-tokens/lib/sell-two-buckets.selftest.ts
  *
+ * `tsx` is not installed in this workspace; the equivalent that IS runnable here
+ * (path aliases resolved from tsconfig.json) is:
+ *
+ *   cd apps/blog && TS_NODE_PROJECT=tsconfig.json TS_NODE_TRANSPILE_ONLY=true \
+ *     TS_NODE_COMPILER_OPTIONS='{"module":"commonjs","moduleResolution":"node","jsx":"react-jsx","esModuleInterop":true}' \
+ *     ./node_modules/.bin/ts-node -r tsconfig-paths/register \
+ *     features/creator-tokens/lib/sell-two-buckets.selftest.ts
+ *
  * ---------------------------------------------------------------------------
  * WHAT THIS PROVES
  * ---------------------------------------------------------------------------
@@ -168,6 +176,28 @@ function goSellCompute(supply: bigint, deltaS: bigint, maturing: bigint, heldBlo
 }
 
 /**
+ * ★ THE MEASURED CASE, DERIVED RATHER THAN FROZEN (2026-09-11).
+ *
+ * The over-charge this whole suite is about was recorded by hand as 130,307 base
+ * units — true under the parameters in force when it was measured (TradeFeeBps
+ * 1000, MaxExitTaxBps 2000). The activated contract runs 500/1500, so that figure
+ * is now STALE, not violated: the defect is identical and its magnitude scales
+ * with the tax rate. Two checks below pinned the literal and began failing the
+ * moment the mirror was re-anchored.
+ *
+ * Re-pinning them to today's output would make the instrument agree with itself.
+ * So the quantity is computed ONCE here from the independent Go transcription,
+ * and the checks assert that the TypeScript under test moves by exactly the same
+ * amount — which is a STRONGER claim than the literal ever made, because it ties
+ * the implementation's delta to the reference's delta at whatever the parameters
+ * happen to be.
+ */
+const MEASURED_CASE = goSellCompute(1000n, 100n, 40n, 0n);
+const MEASURED_OVERCHARGE = Number(
+  goExitTaxOn(MEASURED_CASE.gross, MEASURED_CASE.taxBps) - goExitTaxOn(MEASURED_CASE.taxableGross, MEASURED_CASE.taxBps)
+);
+
+/**
  * THE PRE-FIX FORMULA, reconstructed verbatim from the code this change
  * replaces (contract-math.ts:414-429 before 2026-08-27): the tax on the FULL
  * gross. Present only so the fixtures can be proven discriminating — if a
@@ -238,7 +268,18 @@ function sourceFor(f: Fixture, head: number | null = HEAD, sent?: CustomJsonOp[]
   const gql = {
     getStateByKeys: async (_c: string, keys: string[]) => Object.fromEntries(keys.map((k) => [k, f.state[k] ?? null])),
     getStateByKeysHex: async (_c: string, keys: string[]) => Object.fromEntries(keys.map((k) => [k, f.hex[k] ?? null])),
-    getHeadBlock: async () => head
+    // ★ BOTH HEAD READERS, AND THAT IS THE POINT (2026-09-11). This stub carried
+    // `getHeadBlock` only. The data source later moved its three read paths onto
+    // `getHeadBlockCached` (vsc-data-source.ts:568, :645, :795) and nothing here
+    // followed, so every check past the first fixture died on
+    // `this.gql.getHeadBlockCached is not a function` and the suite reported
+    // VACUOUS — 12 of 95 checks — rather than a pass or a fail. A stub is an
+    // unaudited claim about its dependency's SHAPE as much as its behaviour; when
+    // the real interface grows a method, a stub that does not grow with it turns
+    // the whole suite off silently. Both are answered from the same `head` so the
+    // cached and uncached paths can never disagree inside a test.
+    getHeadBlock: async () => head,
+    getHeadBlockCached: async () => head
   } as unknown as CreatorTokensGqlClient;
   return new VscCreatorTokensDataSource({
     config: { contractId: 'vsc1selftest', netId: 'selftest', gqlUrl: 'http://unused.invalid' },
@@ -415,8 +456,8 @@ async function main(): Promise<void> {
   }
   check('GUARD C: at least 5 cases actually separate the fixed formula from the pre-fix one', discriminating >= 5, `separating cases: ${discriminating}`);
   check(
-    'GUARD C: the measured case separates by exactly 130,307 base units',
-    preFixTaxBaseUnits(1000, 100, 0) - quoteSellBaseUnits(1000, 100, 0, 40)!.taxBaseUnits === 130307,
+    `GUARD C: the measured case separates by exactly ${MEASURED_OVERCHARGE} base units (the reference's own delta)`,
+    preFixTaxBaseUnits(1000, 100, 0) - quoteSellBaseUnits(1000, 100, 0, 40)!.taxBaseUnits === MEASURED_OVERCHARGE,
     `got ${preFixTaxBaseUnits(1000, 100, 0) - quoteSellBaseUnits(1000, 100, 0, 40)!.taxBaseUnits}`
   );
 
@@ -481,7 +522,11 @@ async function main(): Promise<void> {
   check('E2: sellQuote receive matches sell.go net exactly', toBase(eq.receiveUsd) === Number(MEAS.net), `got ${toBase(eq.receiveUsd)} want ${MEAS.net}`);
   const eqLegacy = sellQuote(100, { supply: 1000, cap: 100_000, position: { tokens: 100 } }, 0);
   check('E3: WITHOUT the split, sellQuote is bit-for-bit its pre-fix self (conservative)', toBase(eqLegacy.exitFeeUsd) === Number(measPreFixTax), `got ${toBase(eqLegacy.exitFeeUsd)} want ${measPreFixTax}`);
-  check('E4: and that pre-fix number over-charges by the measured 130,307', toBase(eqLegacy.exitFeeUsd) - toBase(eq.exitFeeUsd) === 130307);
+  check(
+    `E4: and that pre-fix number over-charges by the measured ${MEASURED_OVERCHARGE}`,
+    toBase(eqLegacy.exitFeeUsd) - toBase(eq.exitFeeUsd) === MEASURED_OVERCHARGE,
+    `got ${toBase(eqLegacy.exitFeeUsd) - toBase(eq.exitFeeUsd)}`
+  );
   // A matured-only position: nothing to tax whatever the clock says.
   const eqMatured = sellQuote(100, { supply: 1000, cap: 100_000, position: { tokens: 100, maturingTokens: 0 } }, 0);
   check('E5: a matured-only position is quoted 0 exit tax even at a 0-day clock', toBase(eqMatured.exitFeeUsd) === 0);

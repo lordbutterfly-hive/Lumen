@@ -1,0 +1,259 @@
+'use client';
+
+/**
+ * ★★★ THE DEPARTURES BOARD — the Meritum landing page's left rail.
+ *
+ * Up to ten creators, each row showing ONE of that creator's live offerings and
+ * flipping to the next on a timer, the way an airport board cycles a flight.
+ * Fewer than ten creators is not a degraded state, it is the honest one while
+ * the product is early: the board renders however many exist, and renders
+ * NOTHING at all when there are none — a landing page's rail has no room to
+ * explain an empty box, and an empty box reads as broken.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE FOUR LAYOUT CONSTRAINTS, each for a real failure:
+ *
+ * 1. IT LIVES ONLY ON THIS PAGE. `TokenShell` is shared by the token page, the
+ *    Studio and the launch wizard. The board reaches the rail through an
+ *    OPTIONAL `navBoard` prop that only `app/creators/page.tsx` passes, so it
+ *    cannot leak onto a screen where a rotating advert would sit beside someone
+ *    editing their own prices.
+ *
+ * 2. IT STAYS PUT WHEN THE PAGE SCROLLS. The shell's left `<aside>` is already
+ *    `sticky top-24 h-fit`, so this inherits that for free — and must not fight
+ *    it. Nothing here sets its own `position`.
+ *
+ * 3. IT CANNOT CLIP. A sticky box taller than the viewport is unreachable at the
+ *    bottom: the page scrolls, the box does not, and the last rows can never be
+ *    read. So the LIST caps at the space actually available
+ *    (`calc(100vh - 8.5rem)` leaves the shell's `top-24` plus the rail above it)
+ *    and scrolls internally. Expanding a description grows the list inside that
+ *    cap rather than pushing the sticky box off-screen.
+ *
+ * 4. IT FITS 200px. The rail column is exactly 200px and the shell draws a
+ *    divider at 244px, so anything wider bleeds across it. Every row is
+ *    `min-w-0` with truncation on the two free-text fields (the creator's name
+ *    and the offering title); the price is `tabular-nums` and never truncates,
+ *    because a clipped price is a wrong price.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE ROTATION RULE THE OWNER ASKED FOR, STATED EXACTLY: the list may not
+ * rotate while a description is open. Not "the open row pauses" — the WHOLE
+ * board freezes, because the rows below an open row move when anything above
+ * them flips, and reading a description while the paragraph under your eyes
+ * slides is the bug. `paused` is derived from `expanded.size > 0`, so it is
+ * impossible for a row to be open and the timer to be running.
+ *
+ * It also pauses on hover and whenever the tab is hidden — the first so a
+ * reader can aim at a row without it changing under the cursor, the second
+ * because animating a board nobody is looking at is pure battery.
+ */
+
+import { FC, useEffect, useMemo, useRef, useState } from 'react';
+import BasePathLink from '@/blog/components/base-path-link';
+import { cn } from '@ui/lib/utils';
+import { usdPrice } from '../../../market/format';
+import { usdFromHbd, displayHandle, routeHandle } from '../../../live/adapt';
+import { useOfferingBoard } from '../../../live/use-offering-board';
+
+/** How long one offering holds the row before flipping. Staggered per row below. */
+const DWELL_MS = 5_200;
+/** The flap itself: short enough to read as a change, not an animation. */
+const FLAP_MS = 260;
+
+/**
+ * A creator's description is fetched only when their row is OPENED, never up
+ * front. Ten creators' prose on a landing page would be ten requests for text
+ * nobody has asked to read yet.
+ */
+function useDescription(creator: string, offeringId: number, open: boolean): string | null {
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    setText(null);
+    // ★★★ `routeHandle`, NOT THE RAW DISCOVERY KEY (caught on the first live
+    // render, 2026-09-11). Discovery returns the contract's own account id,
+    // `hive:godfish`; descriptions are stored under the key the STUDIO writes,
+    // which is `creatorAccount` — a BARE Hive name, or a full `did:pkh:…` for a
+    // wallet creator. Asking for `hive:godfish` matches no row and returns an
+    // empty map, so every row would have read "No description yet." forever,
+    // with no error anywhere: the read succeeds, it just finds nothing. This is
+    // the silent-zero identity drift this codebase has now been bitten by four
+    // times (see use-live-studio.ts's own note on a Studio keyed to the display
+    // name finding no market). `routeHandle` is the SAME normaliser the link
+    // above uses and the same one `/creators/[handle]` resolves back, so the
+    // three agree by construction rather than by coincidence.
+    fetch(`/api/creator-tokens/offering-description?creator=${encodeURIComponent(routeHandle(creator))}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body: { descriptions?: Record<string, string> } | null) => {
+        if (!live) return;
+        setText(body?.descriptions?.[String(offeringId)] ?? '');
+      })
+      .catch(() => {
+        // Degrades to "no description", never to an error in a 200px rail.
+        if (live) setText('');
+      });
+    return () => {
+      live = false;
+    };
+  }, [creator, offeringId, open]);
+  return text;
+}
+
+const BoardRow: FC<{
+  creator: string;
+  offerings: { offeringId: number; title: string; priceHbd: number }[];
+  index: number;
+  paused: boolean;
+  open: boolean;
+  onToggle: () => void;
+}> = ({ creator, offerings, index, paused, open, onToggle }) => {
+  const [slot, setSlot] = useState(0);
+  const [flapping, setFlapping] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const current = offerings[slot % offerings.length];
+  const description = useDescription(creator, current.offeringId, open);
+
+  useEffect(() => {
+    // One offering never flips, and a paused board never flips. Both are
+    // absences of a timer rather than a timer that does nothing, so a paused
+    // board costs no wakeups at all.
+    if (paused || offerings.length < 2) return;
+    // Staggered: rows must not flip in unison, or it reads as the page
+    // re-rendering rather than a board updating.
+    const delay = DWELL_MS + index * 420;
+    timer.current = setTimeout(() => {
+      setFlapping(true);
+      setTimeout(() => {
+        setSlot((s) => s + 1);
+        setFlapping(false);
+      }, FLAP_MS);
+    }, delay);
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, [paused, offerings.length, index, slot]);
+
+  return (
+    <li className="border-b border-line-2 last:border-0">
+      <div className="flex min-w-0 items-baseline justify-between gap-2 py-2">
+        <BasePathLink
+          href={`/creators/${routeHandle(creator)}`}
+          className="min-w-0 flex-1 truncate font-ui text-[13px] leading-[20px] font-semibold text-ink-2 hover:text-ink-brand-6"
+          title={displayHandle(creator)}
+        >
+          {displayHandle(creator)}
+        </BasePathLink>
+        {/* Never truncated: a clipped price is a wrong price. */}
+        <span className="shrink-0 font-num text-[13px] leading-[20px] tabular-nums text-ink-10">
+          {usdPrice(usdFromHbd(current.priceHbd))}
+        </span>
+      </div>
+
+      <div className="flex min-w-0 items-center gap-1 pb-2">
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate font-ui text-caption text-ink-10 transition-all motion-reduce:transition-none',
+            // The flap: the outgoing title lifts and fades, the incoming one
+            // settles. `motion-reduce` drops it to a plain swap rather than
+            // removing the change, which would hide the update entirely.
+            flapping ? '-translate-y-1 opacity-0' : 'translate-y-0 opacity-100'
+          )}
+          style={{ transitionDuration: `${FLAP_MS}ms` }}
+          title={current.title}
+        >
+          {current.title}
+        </span>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-label={open ? `Hide what ${displayHandle(creator)} offers` : `Show what ${displayHandle(creator)} offers`}
+          className="shrink-0 rounded px-1 text-ink-14 transition-colors hover:text-ink-2"
+        >
+          <span aria-hidden className={cn('inline-block transition-transform', open ? 'rotate-180' : '')}>
+            ▾
+          </span>
+        </button>
+      </div>
+
+      {/* In normal flow, so it PUSHES the rows below down rather than covering
+          them — the behaviour asked for, and the one that keeps the board
+          readable at 200px where an overlay would have nowhere to go. */}
+      {open ? (
+        <p className="pb-3 font-ui text-caption leading-[18px] text-ink-14">
+          {description === null
+            ? 'Loading…'
+            : description === ''
+              ? 'No description yet.'
+              : description}
+        </p>
+      ) : null}
+    </li>
+  );
+};
+
+const OfferingsBoard: FC = () => {
+  const { rows, isLoading, unavailable } = useOfferingBoard();
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [hovered, setHovered] = useState(false);
+  const [tabHidden, setTabHidden] = useState(false);
+
+  useEffect(() => {
+    const onVis = () => setTabHidden(document.hidden);
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
+  // THE RULE: any open description freezes the entire board. See the file note.
+  const paused = expanded.size > 0 || hovered || tabHidden;
+
+  const toggle = useMemo(
+    () => (creator: string) =>
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(creator)) next.delete(creator);
+        else next.add(creator);
+        return next;
+      }),
+    []
+  );
+
+  // Nothing to say and no room to say it in: render nothing rather than a box.
+  if (unavailable || (!isLoading && rows.length === 0)) return null;
+
+  return (
+    <section className="mt-6 border-t border-line-9 pt-4" data-testid="meritum-offerings-board">
+      <h2 className="mb-2 font-ui text-caption font-semibold uppercase tracking-wide text-ink-14">
+        Meritum board
+      </h2>
+      {isLoading && rows.length === 0 ? (
+        <p className="font-ui text-caption text-ink-14">Loading…</p>
+      ) : (
+        <ul
+          // Constraint 3: bounded to the viewport and scrolled internally, so an
+          // expanded description can never carry the sticky rail off-screen.
+          className="max-h-[calc(100vh-8.5rem)] overflow-y-auto overscroll-contain"
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+        >
+          {rows.map((row, i) => (
+            <BoardRow
+              key={row.creator}
+              creator={row.creator}
+              offerings={row.offerings}
+              index={i}
+              paused={paused}
+              open={expanded.has(row.creator)}
+              onToggle={() => toggle(row.creator)}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+};
+
+export default OfferingsBoard;

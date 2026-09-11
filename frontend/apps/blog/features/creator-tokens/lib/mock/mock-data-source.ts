@@ -44,7 +44,7 @@ import {
 } from './fixtures';
 import { marketHealthOf, windingDownOf } from '../../market/market-health';
 import { closesIfDrainedUnder, renewGateUnder } from '../../market/contract-rules';
-import type { ContractRules } from '../../types';
+import type { BoardCreator, ContractRules } from '../../types';
 
 /**
  * The contract rules the DEMO simulates (market/contract-rules.ts). 'v2' is
@@ -234,6 +234,16 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     const next = [...offerings];
     next[idx] = { ...next[idx], title: input.title };
     this.writeOfferings(input.creator, next);
+  }
+
+  /** Mirrors the live reader's shape: every creator asked for comes back, empty shop included. */
+  async readOfferingBoard(creators: string[]): Promise<BoardCreator[]> {
+    return Promise.all(
+      Array.from(new Set(creators.filter((c) => !!c))).map(async (creator) => ({
+        creator,
+        offerings: await this.listOfferings(creator)
+      }))
+    );
   }
 
   async deleteOffering(input: DeleteOfferingInput): Promise<void> {

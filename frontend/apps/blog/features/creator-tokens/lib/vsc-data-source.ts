@@ -39,7 +39,7 @@ import type {
   MarketPrice,
   IndexerHealth,
 } from '../types';
-import type { ContractRules, CreatorAsksResult, RenewRefusal } from '../types';
+import type { BoardCreator, ContractRules, CreatorAsksResult, RenewRefusal } from '../types';
 import type { CreatorTokensConfig, CreatorTokensDataSource } from './creator-tokens-data-source';
 import {
   MAX_ASK_DEADLINE_BLOCKS,
@@ -2192,6 +2192,65 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       },
       ...trades
     ];
+  }
+
+  /**
+   * Every live offering for a LIST of creators, in THREE batched reads total
+   * rather than three per creator.
+   *
+   * ★ WHY NOT JUST CALL `listOfferings` IN A LOOP. It is three sequential
+   * round trips each (epoch, then ids, then price+title), so ten creators would
+   * be thirty requests fired from a landing page's left rail — the exact shape
+   * the `/api/notifications/account` work existed to remove elsewhere in this
+   * codebase. `readDiscovery` already proves the batched shape on these same
+   * keys; this reuses it and additionally reads the TITLE, which discovery
+   * fetches nothing of (it keeps only the minimum price).
+   *
+   * A price of 0 means deleted or never set — the contract REFUSES an ask
+   * against it rather than falling back to the face price — so those are
+   * dropped. Listing one would advertise a service nobody can buy, which is the
+   * same rule `listOfferings` and `readDiscovery` both already apply.
+   *
+   * Creators with no live offering come back with an empty array rather than
+   * being omitted, so the caller decides whether an empty shop is worth a row.
+   */
+  async readOfferingBoard(creators: string[]): Promise<BoardCreator[]> {
+    const names = Array.from(new Set(creators.filter((c) => !!c)));
+    if (names.length === 0) return [];
+
+    const epochState = await this.gql.getStateByKeys(this.config.contractId, names.map(kOfferEpoch));
+    const epochOf = (c: string) => toU64(epochState[kOfferEpoch(c)]);
+
+    const idsState = await this.gql.getStateByKeys(
+      this.config.contractId,
+      names.map((c) => kOfferIds(c, epochOf(c)))
+    );
+    const idsOf = (c: string) => parseOfferIds(idsState[kOfferIds(c, epochOf(c))]);
+
+    const detailKeys = names.flatMap((c) =>
+      idsOf(c).flatMap((id) => [kOfferPrice(c, epochOf(c), id), kOfferTitle(c, epochOf(c), id)])
+    );
+    const detailState = detailKeys.length
+      ? await this.gql.getStateByKeys(this.config.contractId, detailKeys)
+      : {};
+
+    return names.map((c) => {
+      const epoch = epochOf(c);
+      const offerings: Offering[] = [];
+      for (const id of idsOf(c)) {
+        const priceBaseUnits = toU64(detailState[kOfferPrice(c, epoch, id)]);
+        if (priceBaseUnits <= 0) continue;
+        const title = (detailState[kOfferTitle(c, epoch, id)] ?? '').trim();
+        if (title === '') continue; // a titleless offering has nothing to show
+        offerings.push({
+          offeringId: id,
+          title,
+          priceHbd: baseUnitsToHuman(priceBaseUnits),
+          priceBaseUnits
+        });
+      }
+      return { creator: c, offerings };
+    });
   }
 
   async listOfferings(creator: string): Promise<Offering[]> {
