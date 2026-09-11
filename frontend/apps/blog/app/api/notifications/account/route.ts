@@ -7,6 +7,7 @@ import { hiveNamesByUserId } from '@/blog/lib/lite/social/chain-mute';
 import type { IAccountNotification } from '@hive/common-hiveio-packages/wax';
 import { isBannedAuthor } from '@/blog/lib/moderation/banned-authors';
 import { ensureSquatterList, isSquatterName } from '@/blog/lib/lite/moderation/squatter-list';
+import { reputationsFor } from '@/blog/lib/hive-reputations';
 
 const logger = getLogger('app');
 
@@ -142,7 +143,34 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       });
     }
 
-    return NextResponse.json(filtered, { headers: { 'cache-control': 'private, no-store' } });
+    /**
+     * ★★★ THE "REP" PILL NOW CARRIES A REPUTATION (2026-09-11, owner: "REP in
+     * notifications is not working properly").
+     *
+     * The row renderer labelled `notification.score` "Rep". That field is
+     * hivemind's notification IMPORTANCE score, not a reputation — a vote row is
+     * scored from the vote's payout (so an ordinary vote reads 25 whoever cast
+     * it) and a reply row uses a different curve than the displayed reputation.
+     * See `lib/hive-reputations.ts` for the measurements. The number is resolved
+     * here, on the server, in ONE batched call for the whole list, because the
+     * actor is already parsed here for the two filters above.
+     *
+     * `rep` is ADDED, `score` is left untouched: nothing else reads it today, but
+     * overwriting an upstream field with a different meaning is how the next
+     * reader inherits this same bug. A row whose actor could not be resolved gets
+     * no `rep` and the renderer draws no pill.
+     */
+    const reps = await reputationsFor(
+      Array.isArray(filtered) ? filtered.map((n) => notificationActor(n)) : []
+    ).catch(() => new Map<string, number>());
+    const withRep = Array.isArray(filtered)
+      ? filtered.map((n) => {
+          const rep = reps.get(notificationActor(n).toLowerCase());
+          return rep === undefined ? n : { ...n, rep };
+        })
+      : filtered;
+
+    return NextResponse.json(withRep, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'account notifications lookup failed for %s', account);
     return NextResponse.json({ error: 'account_notifications_unavailable' }, { status: 502 });

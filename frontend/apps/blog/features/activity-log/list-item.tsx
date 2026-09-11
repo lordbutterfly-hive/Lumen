@@ -8,6 +8,9 @@ import { Link } from '@hive/ui';
 import { cn } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
+// The app's ONLY reputation formatter — the feed byline and the profile badge
+// call it too, so the bell cannot print a different number for the same person.
+import { accountReputation, accountReputationPrecise } from '@ui/lib/reputation';
 
 const usernamePattern = /\B@[a-z0-9.-]+/gi;
 
@@ -56,13 +59,23 @@ function getNotificationIcon(type: string) {
 const NotificationListItem = ({
   date,
   msg,
-  score,
+  rep,
   type,
   url,
   lastRead,
   isOwner: isOwnerProp
 }: IAccountNotification & {
   lastRead: Date;
+  /**
+   * The actor's REAL reputation, resolved server-side by
+   * `/api/notifications/account` (see `lib/hive-reputations.ts`). `score` — the
+   * field this pill used to render — is hivemind's notification importance
+   * score, not a reputation: a vote row is scored from the vote's payout, so it
+   * reads 25 for a voter of reputation 80. Undefined when the actor could not be
+   * resolved, and then NO pill is drawn: a missing reputation is honest, a wrong
+   * one is the bug this replaced.
+   */
+  rep?: number;
   /**
    * ★ THE READ/UNREAD STATE CANNOT BE READ OFF THE URL (2026-08-10, owner
    * item Q-3).
@@ -160,36 +173,44 @@ const NotificationListItem = ({
         </span>
       </div>
 
-      {/* ★ THIS NUMBER IS A REPUTATION, AND IT NOW SAYS SO (2026-08-10, owner
-          item Q-2). It rendered as a bare figure in a filled pill on the right
-          edge of every row — the exact shape and position of an unread counter —
-          so a list of 50 notifications showed 50 unexplained badges reading 25,
-          43, 50, 67, 70. Its only explanation was a hover tooltip, which a
-          touch device never sees and a screen reader was never offered: the
-          element carried no `aria-label` and no `title`, so it announced as the
-          digits alone. Now it is labelled text, not a count-shaped chip. */}
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div
-              className="flex shrink-0 items-center gap-1 font-sans text-caption text-ink-10"
-              data-testid="notification-reputation-badge"
-              title={t('navigation.profile_notifications_tab_navbar.reputation_at_time')}
-              aria-label={`${t('navigation.profile_notifications_tab_navbar.reputation_label')} ${score}`}
-            >
-              <span aria-hidden className="uppercase tracking-wide">
-                {t('navigation.profile_notifications_tab_navbar.reputation_label')}
-              </span>
-              <span aria-hidden className="font-semibold tabular-nums text-ink-2">
-                {score}
-              </span>
-            </div>
-          </TooltipTrigger>
-          <TooltipContent side="left">
-            <p>{t('navigation.profile_notifications_tab_navbar.reputation_at_time')}</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      {/* ★ IT IS LABELLED "REP", SO IT HAS TO BE A REPUTATION (2026-09-11, owner:
+          "REP in notifications is not working properly"). It was
+          `notification.score` — hivemind's notification IMPORTANCE score, which
+          is payout-derived for a vote row (reading 25 for a voter of reputation
+          80) and on a different curve than the displayed reputation for a reply
+          row. The real number is resolved server-side; see
+          `/api/notifications/account` and `lib/hive-reputations.ts`. No `rep`,
+          no pill: a missing reputation is honest, a wrong one is the bug.
+          (Earlier, 2026-08-10 owner item Q-3: labelled text, not a
+          count-shaped chip, so it is not mistaken for an unread counter and a
+          screen reader announces more than the digits.) */}
+      {typeof rep === 'number' ? (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div
+                className="flex shrink-0 items-center gap-1 font-sans text-caption text-ink-10"
+                data-testid="notification-reputation-badge"
+                title={t('navigation.profile_notifications_tab_navbar.reputation_label')}
+                aria-label={`${t('navigation.profile_notifications_tab_navbar.reputation_label')} ${accountReputation(rep)}`}
+              >
+                <span aria-hidden className="uppercase tracking-wide">
+                  {t('navigation.profile_notifications_tab_navbar.reputation_label')}
+                </span>
+                <span aria-hidden className="font-semibold tabular-nums text-ink-2">
+                  {accountReputation(rep)}
+                </span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              <p>
+                {t('navigation.profile_notifications_tab_navbar.reputation_label')}{' '}
+                {accountReputationPrecise(rep)}
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : null}
     </div>
   );
 };
