@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import CreatorsView from '@/blog/features/creator-tokens/ui/creators/creators-view';
 import MeritumIntro from '@/blog/features/creator-tokens/ui/meritum/intro/meritum-intro';
-import OfferingsBoard from '@/blog/features/creator-tokens/ui/meritum/board/offerings-board';
 
 export const metadata: Metadata = {
   // The page now LEADS with the Meritum intro, so the title names the product
@@ -38,8 +37,5 @@ export const metadata: Metadata = {
  * here?", and the page needs both.
  */
 export default function CreatorsPage() {
-  // ★ THE BOARD IS PASSED HERE AND NOWHERE ELSE. `TokenShell`'s `navBoard` is
-  // optional precisely so this stays true: the token page, the Studio and the
-  // launch wizard share that shell and must not grow a rotating rail.
-  return <CreatorsView intro={<MeritumIntro />} navBoard={<OfferingsBoard />} />;
+  return <CreatorsView intro={<MeritumIntro />} />;
 }

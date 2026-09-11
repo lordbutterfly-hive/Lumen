@@ -39,23 +39,11 @@ import BasePathLink from '@/blog/components/base-path-link';
 export default function TokenShell({
   children,
   rightRail,
-  back,
-  navBoard
+  back
 }: {
   children: ReactNode;
   rightRail?: ReactNode;
   back?: { href: string; label: string };
-  /**
-   * Extra content for the LEFT rail, under the nav.
-   *
-   * ★ OPTIONAL, AND THAT IS THE POINT. This shell is shared by the token page,
-   * the Creator Studio and the launch wizard; only the Meritum landing page
-   * (`app/creators/page.tsx`) passes anything, so a surface built for that page
-   * cannot appear beside someone editing their own prices. Adding it to the
-   * shell rather than to `LeftRail` keeps the nav itself identical on every
-   * screen — `LeftRail` is shared far more widely than this grid is.
-   */
-  navBoard?: ReactNode;
 }) {
   return (
     <div
@@ -69,7 +57,6 @@ export default function TokenShell({
       />
       <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
         <LeftRail />
-        {navBoard}
       </aside>
       <main className="min-w-0">
         {back ? (

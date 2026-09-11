@@ -13,28 +13,30 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * THE FOUR LAYOUT CONSTRAINTS, each for a real failure:
  *
- * 1. IT LIVES ONLY ON THIS PAGE. `TokenShell` is shared by the token page, the
- *    Studio and the launch wizard. The board reaches the rail through an
- *    OPTIONAL `navBoard` prop that only `app/creators/page.tsx` passes, so it
- *    cannot leak onto a screen where a rotating advert would sit beside someone
- *    editing their own prices.
+ * 1. IT LIVES ONLY ON THIS PAGE. It is rendered inside `CreatorsView`'s own
+ *    `rightRail`, which `app/creators/page.tsx` is the only route to mount. The
+ *    left rail is shared navigation on every creator-token screen and was where
+ *    this shipped first -- wrong twice over: a rotating advert does not belong
+ *    beside someone editing their own prices in the Studio, and 200px is not
+ *    enough for a name, a price and a title without all three fighting. The
+ *    right rail is 312px and already holds "Launch your Meritum", so the two
+ *    read as one column of offers.
  *
- * 2. IT STAYS PUT WHEN THE PAGE SCROLLS. The shell's left `<aside>` is already
- *    `sticky top-24 h-fit`, so this inherits that for free — and must not fight
+ * 2. IT STAYS PUT WHEN THE PAGE SCROLLS. The shell's right `<aside>` is already
+ *    `sticky top-24 h-fit`, so this inherits that for free -- and must not fight
  *    it. Nothing here sets its own `position`.
  *
  * 3. IT CANNOT CLIP. A sticky box taller than the viewport is unreachable at the
  *    bottom: the page scrolls, the box does not, and the last rows can never be
- *    read. So the LIST caps at the space actually available
- *    (`calc(100vh - 8.5rem)` leaves the shell's `top-24` plus the rail above it)
- *    and scrolls internally. Expanding a description grows the list inside that
- *    cap rather than pushing the sticky box off-screen.
+ *    read. So the LIST caps at the space actually available and scrolls
+ *    internally. Expanding a description grows the list inside that cap rather
+ *    than pushing the sticky box off-screen -- and the cap must account for the
+ *    launch card ABOVE it, which is why it is not simply `100vh - top`.
  *
- * 4. IT FITS 200px. The rail column is exactly 200px and the shell draws a
- *    divider at 244px, so anything wider bleeds across it. Every row is
- *    `min-w-0` with truncation on the two free-text fields (the creator's name
- *    and the offering title); the price is `tabular-nums` and never truncates,
- *    because a clipped price is a wrong price.
+ * 4. TEXT TRUNCATES, THE PRICE NEVER DOES. Both free-text fields (the creator's
+ *    name and the offering title) are `min-w-0` with truncation; the price is
+ *    `tabular-nums` and always rendered whole, because a clipped price is a
+ *    wrong price.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * THE ROTATION RULE THE OWNER ASKED FOR, STATED EXACTLY: the list may not
@@ -225,17 +227,26 @@ const OfferingsBoard: FC = () => {
   if (unavailable || (!isLoading && rows.length === 0)) return null;
 
   return (
-    <section className="mt-6 border-t border-line-9 pt-4" data-testid="meritum-offerings-board">
-      <h2 className="mb-2 font-ui text-caption font-semibold uppercase tracking-wide text-ink-14">
-        Meritum board
-      </h2>
+    <section
+      // The launch card's own chrome, verbatim, so the two sit as siblings
+      // rather than as a card and a loose list.
+      className="rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]"
+      data-testid="meritum-offerings-board"
+    >
+      <div className="mb-1.5 font-ui text-lg font-medium text-ink-2">Meritum board</div>
+      <p className="mb-3 font-ui text-[14px] leading-[22px] text-ink-10">
+        What creators are selling right now.
+      </p>
       {isLoading && rows.length === 0 ? (
         <p className="font-ui text-caption text-ink-14">Loading…</p>
       ) : (
         <ul
           // Constraint 3: bounded to the viewport and scrolled internally, so an
           // expanded description can never carry the sticky rail off-screen.
-          className="max-h-[calc(100vh-8.5rem)] overflow-y-auto overscroll-contain"
+          // `top-24` (6rem) + the launch card and this card's own chrome above the
+          // list. Generous rather than exact: too small only costs an early
+          // scrollbar, too large puts rows below the fold with no way to reach them.
+          className="max-h-[calc(100vh-22rem)] overflow-y-auto overscroll-contain"
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
         >

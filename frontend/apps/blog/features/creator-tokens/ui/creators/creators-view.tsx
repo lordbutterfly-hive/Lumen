@@ -12,6 +12,7 @@ import type { CreatorSummary } from '../../types';
 import { deliveryMarks, pctLabel, usdCompact, usdMoney, usdPrice } from '../../market/format';
 import { resolveDiscoveryControls, type DiscoverySort } from '../../market/discovery-ranking';
 import TokenShell from '../token-shell';
+import OfferingsBoard from '../meritum/board/offerings-board';
 
 // TODO i18n — staged copy; move to locales/*/common_blog.json once final.
 const COPY = {
@@ -220,15 +221,9 @@ interface CreatorsViewProps {
    * marketing card that a different screen may want to omit.
    */
   intro?: ReactNode;
-  /**
-   * The left rail's offerings board. Threaded through rather than imported here,
-   * for the same reason `intro` is: this view is the Meritum landing page AND
-   * the plain creators directory, and only the landing route wants it.
-   */
-  navBoard?: ReactNode;
 }
 
-const CreatorsView: FC<CreatorsViewProps> = ({ intro, navBoard }) => {
+const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
   const { t } = useTranslation('common_blog');
   const [sort, setSort] = useState<Sort>('reliable');
   const [showNew, setShowNew] = useState(true);
@@ -289,11 +284,20 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro, navBoard }) => {
           {COPY.launchCta}
         </Link>
       </div>
+      {/* ★ UNDER THE LAUNCH PILL, IN THE RIGHT RAIL (owner, 2026-09-11). It shipped
+          in the LEFT rail first, which was wrong twice over: that rail is shared
+          navigation on every creator-token screen, and it is 200px, which is not
+          enough room for a name, a price and a title without all three fighting.
+          Here it is a sibling card to "Launch your Meritum" in a 312px column —
+          the two read as one column of offers, which is what they are. The board
+          renders NOTHING when there is nothing to show, so the rail degrades back
+          to the single launch card rather than leaving a gap. */}
+      <OfferingsBoard />
     </div>
   );
 
   return (
-    <TokenShell rightRail={rightRail} navBoard={navBoard}>
+    <TokenShell rightRail={rightRail}>
       {/* `mb-7` is the masthead's own bottom margin, applied HERE rather than
           inside the intro so the intro stays a card and not a page section —
           the two blocks sit the same distance apart as every other pair on the
