@@ -11,8 +11,9 @@ import (
 //
 // Ask spends credits (never HBD) at the prevailing settlement rate
 // (settleSpend — settlement.go, RULING C) into an escrow record. The creator either Answers
-// before the deadline (the creator's 88% releases to them and the platform's
-// 12% releases to the owner account — delivered service) or, past
+// before the deadline (the creator's share releases to them and the platform's
+// 12% of the same credits releases to the owner account — delivered service)
+// or, past
 // deadline+ReclaimGrace, Reclaim pays the credits back to the asker (SPEC
 // §1.7.2 rule 4 / I5 — see Reclaim's own doc, and MissReclaimSliceBps for the
 // one ruled slice a MISS keeps).
@@ -40,11 +41,18 @@ import (
 //
 // Rule 4 (API.md) — "the billing state must never gate funds" — means Answer
 // and Reclaim call NEITHER Phase NOR RequireInflowOpen. Only Ask (a new
-// inflow) is gated. This is deliberate, not an oversight: SPEC §1.7.5 is
-// explicit that "a creator mid-answer when their subscription lapses still
-// gets paid for finishing the work," and reclaim must work in every phase
-// including FROZEN and CLOSED so nobody's refund is ever held hostage by an
-// unpaid invoice (§1.7.2 guardrail #1).
+// inflow) is gated. This is deliberate, not an oversight: SPEC §1.7.5 ruled
+// that "a creator mid-answer when their subscription lapses still gets paid for
+// finishing the work," and reclaim must work in every phase including FROZEN
+// and CLOSED so nobody's refund is ever held hostage (§1.7.2 guardrail #1).
+//
+// ★ THE BILLING STATE IT SPOKE OF IS GONE, THE RULE IS NOT (2026-09-12). There
+// is no subscription to lapse and no invoice to be unpaid, so §1.7.5's own
+// example is now unreachable. The rule survives it because the guardrail was
+// never really about billing: it is "no state a creator can fall into may
+// strand money already committed to a job", and the states that CAN still
+// happen — retired, closed, delinquent on delivery, globally paused — are
+// exactly the ones this un-gating protects against.
 
 // AskResult / AnswerResult — API.md's shapes, plus RateUsed (added by the
 // 2026-07-20 fix below): Ask no longer takes a rate parameter, so the caller
@@ -187,15 +195,15 @@ const (
 // gain cap, so an escrow no longer needs to preserve a basis across a reclaim
 // (there is no basis anywhere). Only the age clock is conserved.
 type escrowRec struct {
-	asker         string
-	credits       *big.Int
-	deadline      uint64
-	status        string
-	contentHash   string
-	answerHash    string
+	asker             string
+	credits           *big.Int
+	deadline          uint64
+	status            string
+	contentHash       string
+	answerHash        string
 	commissionCredits *big.Int
 	acqBlock          uint64 // the asker's wacq at escrow-out (0 == unclocked)
-	offeringID    uint64 // which named service this ask bought (0 == the legacy `face` price)
+	offeringID        uint64 // which named service this ask bought (0 == the legacy `face` price)
 }
 
 // Packed layout: asker|credits|deadline|status|commissionCredits|acqBlock|offeringID|contentHash|answerHash.
@@ -406,8 +414,11 @@ func commissionOwedFor(n *big.Int) *big.Int {
 // future — who forgets to pass the TWAP correctly. maxCredits (added the
 // same day, an exploiter-scrutinizer finding) is the asker's own signed cap
 // on how many credits this ask may cost, mirroring what transfer.allow
-// already is for the commission's HBD leg — see the guard below for why it
-// is needed even though rate itself is now tamper-resistant.
+// already is for a buy's HBD leg — see the guard below for why it is needed
+// even though rate itself is now tamper-resistant. (Until 2026-09-12 the
+// mirror was closer than that: the commission WAS an HBD leg on this rail,
+// bounded by its own transfer.allow. maxCredits now bounds the whole price,
+// which is strictly stronger than the pair it replaced.)
 func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, contentHash string, deadlineBlocks uint64, offeringID uint64) (*AskResult, error) {
 	if !validAccount(caller) {
 		return nil, newErr(ErrInput, "invalid caller")
@@ -453,9 +464,9 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, con
 	// this ask is denominated in".
 	//
 	// The lookup is LIVE, at execution, for the same reason the face read was:
-	// the slippage caps below (maxCredits on the token leg, the exact-match
-	// commission on the HBD leg) are what bound a price that moved between the
-	// asker signing and this call executing. A deleted offering reads 0 and is
+	// the slippage cap below (maxCredits, which since 2026-09-12 bounds the
+	// WHOLE price rather than only a token leg) is what bounds a price that
+	// moved between the asker signing and this call executing. A deleted offering reads 0 and is
 	// refused here, so a withdrawn service can never be bought.
 	var face *big.Int
 	if offeringID == 0 {
@@ -621,8 +632,11 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, con
 
 // Answer pays the creator and resolves the escrow. Creator-only; escrow
 // must be PENDING; legal ONLY while block <= deadline — the answer half of
-// the I6 disjoint window. Deliberately consults NO phase/subscription
-// state: legal in every phase including FROZEN (SPEC §1.7.5, API.md rule 4).
+// the I6 disjoint window. Deliberately consults NO phase or delivery state:
+// legal in every phase including FROZEN (SPEC §1.7.5, API.md rule 4). (It read
+// "NO phase/subscription state" until 2026-09-12; there is no subscription to
+// consult any more, and the rule was always the wider one — a job already paid
+// for is finished and paid out whatever state the market has fallen into.)
 //
 // Pays the commission held in the escrow (Ask, above) to the platform OWNER
 // HERE, on delivery — never earlier. This is the "delivered service" half of
@@ -729,9 +743,11 @@ func Answer(s Store, caller, creator string, block, seq uint64, answerHash strin
 // commission is EVER charged on a reclaim (I5, SPEC §1.7.2 rule 4: "the
 // asker gets 100% back. We are paid for delivered service only"). Escrow
 // must be PENDING; legal ONLY while block > deadline+ReclaimGrace — the
-// reclaim half of the I6 disjoint window. Deliberately consults NO phase/
-// subscription state: legal in every phase including FROZEN and CLOSED
-// (SPEC §1.7.2 guardrail #1: non-payment must never touch funds).
+// reclaim half of the I6 disjoint window. Deliberately consults NO phase or
+// delivery state: legal in every phase including FROZEN and CLOSED
+// (SPEC §1.7.2 guardrail #1, which read "non-payment must never touch funds"
+// and since 2026-09-12 has nothing left to be non-payment OF - the guarantee
+// now rests on the wider statement that no market state may strand a refund).
 //
 // H1 DEFECT FIX (2026-07-21): PERMISSIONLESS once the reclaim window is
 // open — no longer asker-only. `caller` plays NO role in any key this

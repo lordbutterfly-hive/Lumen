@@ -4,7 +4,7 @@ Per-creator token on a bonding curve. You buy a creator's token, spend it on
 their services, and the price moves with supply.
 
 > **2026-09-12 — ONE UPDATE, FOUR CHANGES, BUILT AND PROVEN BY EXECUTION. NOT
-> DEPLOYED.** New CID `bafkreigngtcrsw6uuhriwmzvioynbcknzcrche7gc3oanvtcivgrf7drsa`
+> DEPLOYED.** New CID `bafkreighvwezdaaatz6fhmtoboxxdp2hnknmljk6o3qaojim5ekhprfdzu`
 > (160,097 B, reproducible: two clean builds, byte for byte).
 >
 > 1. **Commission in tokens.** The 12% is 12% of the TOKENS, carved out inside

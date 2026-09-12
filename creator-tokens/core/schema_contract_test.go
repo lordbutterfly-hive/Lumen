@@ -181,9 +181,10 @@ func TestSchemaContract_Registered(t *testing.T) {
 
 // (TestSchemaContract_Renewed is gone with EvRenewed and core.Renew — the 10 HBD
 // subscription was removed on 2026-09-12, core/params.go. The indexer's
-// RenewedEvent mapping is now dead wire: no `renewed` event can be produced, and
-// its contribution to Index.TreasuryHbd must be dropped rather than left summing
-// a stream that stopped.)
+// RenewedEvent mapping is now dead wire: no `renewed` event can be produced. It
+// fed nothing that needs repairing — the `Index.TreasuryHbd` aggregate this note
+// used to name does not exist in creator_tokens_views.yaml, which defines six
+// views and no HBD treasury total (checked 2026-09-12).)
 
 func TestSchemaContract_FaceChanged(t *testing.T) {
 	const evName = "faceChanged"
@@ -217,30 +218,15 @@ func TestSchemaContract_CapChanged(t *testing.T) {
 	scWantFieldCount(t, evName, m, 7, ref)
 }
 
-func TestSchemaContract_Prepaid(t *testing.T) {
-	const evName = "prepaid"
-	const ref = "magi-indexer/creator_tokens_mappings.yaml (PrepaidEvent)"
-	out := EvPrepaid("aliceperry", "holderone", 12_600_000, big.NewInt(250_000), big.NewInt(250_000))
-	m := scDecode(t, out)
-
-	scWantStr(t, evName, m, "type", "prepaid", "magi-indexer/creator_tokens_mappings.yaml (KindPrepaid)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (PrepaidEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "holderone", "magi-indexer/creator_tokens_mappings.yaml (PrepaidEvent.Actor)")
-	scWantNum(t, evName, m, "block", 12_600_000, "magi-indexer/creator_tokens_mappings.yaml (PrepaidEvent.Block)")
-	scWantStr(t, evName, m, "hbdPaid", "250000", "magi-indexer/creator_tokens_mappings.yaml (PrepaidEvent.HbdPaid)")
-	scWantStr(t, evName, m, "creditsMinted", "250000", "magi-indexer/creator_tokens_mappings.yaml (PrepaidEvent.CreditsMinted)")
-	scWantFieldCount(t, evName, m, 7, ref)
-
-	// index.go's own fold (KindPrepaid case) does m.addBal(p.Actor, credits)
-	// — it credits the RECEIVER (the caller, per Prepay's own "mints to
-	// caller, never creator" rule), never a separate "to" field this event
-	// doesn't have. Pin that shape assumption explicitly: this event has NO
-	// "to"/"holder" field, unlike Transferred/RefundPushed below.
-	if _, present := m["to"]; present {
-		t.Fatalf("%s: unexpected \"to\" field — index.go's KindPrepaid fold credits p.Actor directly, there is no separate recipient field for this event", evName)
-	}
-}
+// (TestSchemaContract_Prepaid is gone with the EvPrepaid builder, which
+// outlived its own entrypoint: core/prepay.go and the `prepay` wasmexport were
+// deleted with the PAR mint (RULING A, RULINGS-v2-2026-07-21) while the builder
+// and this schema pin stayed behind, asserting the wire shape of something
+// nothing could emit. A pin on an unreachable builder is not coverage, it is a
+// test that can never fail for a real reason. Removed 2026-09-12, the same call
+// this file already made for the renewed event. The indexer's PrepaidEvent
+// mapping is dead wire in exactly the sense RenewedEvent is: it must keep
+// decoding HISTORY, and nothing new will ever arrive on it.)
 
 func TestSchemaContract_Transferred(t *testing.T) {
 	const evName = "transferred"
@@ -794,7 +780,7 @@ func TestSchemaContract_EveryConstructorIsPinned(t *testing.T) {
 		// format rather than freedom to choose ours.
 		"init_magi_nft": true, "tokenCreated": true, "TransferSingle": true, "Approval": true, "maturedMoved": true,
 		"registered": true, "faceChanged": true, "capChanged": true,
-		"prepaid": true, "transferred": true, "asked": true, "answered": true,
+		"transferred": true, "asked": true, "answered": true,
 		"reclaimed": true, "declined": true, "refunded": true, "refundPushed": true,
 		"closed": true, "bought": true, "sold": true, "rated": true,
 		"offeringCreated": true, "offeringUpdated": true, "offeringDeleted": true,

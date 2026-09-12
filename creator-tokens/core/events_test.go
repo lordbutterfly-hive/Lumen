@@ -177,16 +177,6 @@ func TestEvCapChanged(t *testing.T) {
 	wantStr(t, m, "newCap", "2000")
 }
 
-func TestEvPrepaid(t *testing.T) {
-	out := EvPrepaid("alice", "bob", 400, big.NewInt(2500), big.NewInt(2500))
-	m := decode(t, out)
-	wantStr(t, m, "type", "prepaid")
-	wantStr(t, m, "creator", "alice")
-	wantStr(t, m, "actor", "bob")
-	wantStr(t, m, "hbdPaid", "2500")
-	wantStr(t, m, "creditsMinted", "2500")
-}
-
 func TestEvTransferred(t *testing.T) {
 	out := EvTransferred("alice", "bob", "carol", 500, big.NewInt(100))
 	m := decode(t, out)
@@ -317,7 +307,6 @@ func TestEvAmountFieldsAreAlwaysStrings(t *testing.T) {
 		{"registered", EvRegistered("c", "a", 1, 1, 1, big.NewInt(1)), []string{"face", "cap", "feePaid"}},
 		{"faceChanged", EvFaceChanged("c", "a", 1, 1, 2), []string{"oldFace", "newFace"}},
 		{"capChanged", EvCapChanged("c", "a", 1, 1, 2), []string{"oldCap", "newCap"}},
-		{"prepaid", EvPrepaid("c", "a", 1, big.NewInt(1), big.NewInt(1)), []string{"hbdPaid", "creditsMinted"}},
 		{"transferred", EvTransferred("c", "a", "b", 1, big.NewInt(1)), []string{"amount"}},
 		{"asked", EvAsked("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, "h", 0), []string{"creditsSpent", "commissionCredits", "rate"}},
 		{"answered", EvAnswered("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "o", "h"), []string{"creditsToCreator", "commissionCredits"}},
@@ -489,7 +478,6 @@ func TestEvSchemaVersionIsStableAcrossAllEvents(t *testing.T) {
 		EvRegistered("c", "a", 1, 1, 1, big.NewInt(1)),
 		EvFaceChanged("c", "a", 1, 1, 2),
 		EvCapChanged("c", "a", 1, 1, 2),
-		EvPrepaid("c", "a", 1, big.NewInt(1), big.NewInt(1)),
 		EvTransferred("c", "a", "b", 1, big.NewInt(1)),
 		EvAsked("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, "h", 0),
 		EvAnswered("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "o", "h"),
@@ -514,9 +502,13 @@ func TestEvSchemaVersionIsStableAcrossAllEvents(t *testing.T) {
 		EvPaused("a"),
 		EvUnpaused("a"),
 	}
-	// 23, not 24: EvRenewed was deleted with the subscription on 2026-09-12.
-	if len(outs) != 23 {
-		t.Fatalf("this sweep must cover EVERY constructor in events.go; it has %d and there are 23. Add the missing one rather than leaving the name a lie.", len(outs))
+	// 22, down from 24 on 2026-09-12: EvRenewed went with the subscription and
+	// EvPrepaid went with prepay.go's entrypoint, which it had outlived since
+	// 2026-07-21. The count is spelled out rather than derived so that ADDING a
+	// constructor without adding it here fails loudly; the name of this test is
+	// a promise about coverage and a silent 22-of-23 would break it quietly.
+	if len(outs) != 22 {
+		t.Fatalf("this sweep must cover EVERY constructor in events.go; it has %d and there are 22. Add the missing one rather than leaving the name a lie.", len(outs))
 	}
 	for _, out := range outs {
 		m := decode(t, out)

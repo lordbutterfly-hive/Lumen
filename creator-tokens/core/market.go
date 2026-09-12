@@ -391,7 +391,12 @@ func RequireInflowOpen(s Store, creator string, block uint64) error {
 	if delinquent, until := DeliveryStanding(s, creator, block); delinquent {
 		// ErrDelinquent, not ErrState: this is the one refusal downstream
 		// consumers must be able to identify without reading the wording.
-		return newErr(ErrDelinquent, "creator is delinquent on delivery: new purchases are closed until block "+evU64(until)+" (every payout, and paying the subscription, stays open)")
+		// ★ THE PARENTHESIS NAMED A BILL THAT NO LONGER EXISTS (2026-09-12).
+		// It read "(every payout, and paying the subscription, stays open)",
+		// which after the subscription was deleted told a reader to go and pay
+		// something they cannot pay. This is a LIVE, on-chain, user-visible
+		// string; the clause now lists the payouts it was always about.
+		return newErr(ErrDelinquent, "creator is delinquent on delivery: new purchases are closed until block "+evU64(until)+" (every payout stays open: selling, refunding, reclaiming, and answering an ask already in flight)")
 	}
 	return nil
 }
@@ -598,7 +603,7 @@ func registerCheck(s Store, caller, creator string, block uint64, face, cap int6
 	// against the current block, so a creator returning after any real absence
 	// registers exactly as before.
 	if until := getU64(s, kDelinquentUntil(creator)); until > block {
-		return newErr(ErrState, "a delinquency penalty from the previous incarnation is still active; re-registration is refused until it lapses")
+		return newErr(ErrState, "a delinquency penalty from the previous incarnation is still active; re-registration is refused until it expires")
 	}
 	return nil
 }

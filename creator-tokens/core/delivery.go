@@ -1,12 +1,23 @@
 package core
 
 // delivery.go — the DELIVERY GATE (RULING E, built 2026-07-27 on a USER
-// RULING). The subscription proves a creator is still THERE; this proves they
-// are still DELIVERING.
+// RULING). It proves a creator is still DELIVERING.
 //
-// THE HOLE THIS FILLS. Until this file existed, a creator could pay the
-// subscription forever, never answer a single ask, and face no consequence
-// whatsoever: every unanswered ask was simply reclaimed by its asker, the
+// ★★ IT IS NOW THE ONLY LIVENESS SIGNAL THIS CONTRACT HAS (2026-09-12). This
+// header opened "The subscription proves a creator is still THERE; this proves
+// they are still DELIVERING" — a division of labour that ended the day the 10
+// HBD subscription was deleted. Nothing now proves a creator is THERE. What
+// this file still does, and does alone, is stop a creator who takes paying
+// customers and ignores them from taking more: crossing the miss threshold
+// refuses new buys and new asks for a penalty window. So the gap the deletion
+// left is narrower than "nothing reaps an abandoned market" — a creator who
+// takes asks and abandons them IS stopped. What is genuinely unreaped is a
+// market whose creator never trades and never receives an ask at all: it has
+// no misses, so this gate has nothing to fire on. That is a discovery-ranking
+// question, not a solvency one, and it is the owner's open decision.
+//
+// THE HOLE THIS FILLS. Until this file existed, a creator could hold a market
+// open forever, never answer a single ask, and face no consequence whatsoever: every unanswered ask was simply reclaimed by its asker, the
 // creator earned nothing from it, and the market went on selling tokens and
 // accepting new asks as if nothing were wrong. Nobody was robbed — but the one
 // mechanism that was supposed to make this product different from friend.tech
@@ -22,9 +33,14 @@ package core
 // asker's money in full, so the asker (or anyone) is motivated to call it.
 //
 // WHY GRIEFING DOES NOT WORK. A hostile asker who wants to manufacture misses
-// must pay for each ask (credits plus a real HBD commission) and then wait out
-// the deadline. The creator can kill every one of them for free with Decline —
-// a full refund including the commission, explicitly NOT a miss. So the only
+// must lock the WHOLE posted price in credits for each ask (since 2026-09-12
+// there is no second HBD leg; the commission is carved out of those same
+// credits) and then wait out the deadline. The creator can kill every one of
+// them for free with Decline — a full refund of the entire escrow, commission
+// included, explicitly NOT a miss. The deterrent did not weaken when the HBD
+// leg went: the griefer's refundable outlay went UP, from 88% of the posted
+// price in tokens to all of it, and the only cost either side actually bears
+// on a decline is still the transaction. So the only
 // way to accumulate misses is to ignore paying customers, which is precisely
 // the behaviour being penalised. A miss is negligence, never bad luck.
 //

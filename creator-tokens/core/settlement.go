@@ -79,7 +79,7 @@ import "math/big"
 // SettleQuote is what settleSpend derives: the rate used and the exact
 // token count a face-priced service costs at it. Both freshly allocated.
 type SettleQuote struct {
-	Credits *big.Int // ceil(tokenLeg/rate) — RULING C keeps the ceil (floor would admit c == 0, a free service)
+	Credits *big.Int // ceil(face/rate) — the WHOLE posted price since 2026-09-12, not an 88% token leg. RULING C keeps the ceil (floor would admit c == 0, a free service)
 	Rate    *big.Int // min(spot, median(TWAP_short, TWAP_long, spot)) — robust to one walked/stale arm
 	// CommissionCredits is the platform's slice OF `Credits` — the same tokens,
 	// not a second asset (OWNER RULING 2026-09-12, CommissionBps). It is set

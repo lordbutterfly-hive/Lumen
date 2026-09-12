@@ -151,9 +151,10 @@ func ExitTaxOn(p *big.Int, taxBps uint64) *big.Int {
 // a 1%-of-supply fan paid the full 19.9%. Neither of those is reopened here.
 //
 // What J never weighed is that treasury made the exit tax a PLATFORM TRADING
-// FEE of up to 20% — a fourth revenue line that appears nowhere in the locked
-// revenue model (10 HBD/month subscription + 12% service commission + the 5%
-// platform trade fee), arrived as a side effect of a security fix, and is the
+// FEE of up to MaxExitTaxBps — a fourth revenue line that appears nowhere in the
+// revenue model that was locked at the time (10 HBD/month subscription + 12%
+// service commission + the platform trade fee), arrived as a side effect of a
+// security fix, and is the
 // single worst fact for the securities question, since transaction-based
 // compensation to the platform is exactly what the zero-trading-fee ruling
 // existed to avoid. Splitting it in half moves the larger share of the skim

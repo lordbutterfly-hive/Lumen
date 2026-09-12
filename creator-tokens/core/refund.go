@@ -319,7 +319,12 @@ func Refund(s Store, caller, creator string, block uint64, credits *big.Int, min
 	// RETIRED market (including its notice, RULING K3) or a stored CLOSED one.
 	// A natural FROZEN is neither (A1, 2026-08-30): the holder sells.
 	if !inWindDown(s, creator, block) {
-		return nil, newErr(ErrState, "pro-rata refund opens only at wind-down (retired/closed); while the market trades — including a lapsed, FROZEN one — exit via Sell, the curve rail is open in exactly those states")
+		// ★ "A LAPSED, FROZEN ONE" IS UNREACHABLE NOW (2026-09-12). Nothing
+		// lapses: naturalPhase is constant ACTIVE and the only road to FROZEN
+		// is Retire, which IS a wind-down, so the state this clause pointed at
+		// cannot occur. Naming it here invited a holder to look for a rail that
+		// does not exist. The rule is unchanged and the reason is kept.
+		return nil, newErr(ErrState, "pro-rata refund opens only at wind-down (retired or closed); while the market is still trading, exit via Sell - the curve rail is open in exactly those states")
 	}
 
 	supply := getMoney(s, kSupply(creator))
@@ -552,7 +557,7 @@ func RefundHolder(s Store, caller, creator, holder string, block uint64) (*big.I
 		return nil, newErr(ErrInput, "invalid holder")
 	}
 	if !inWindDown(s, creator, block) {
-		return nil, newErr(ErrState, "refundHolder is only available once wind-down opens (retired/closed); the holder may still exit via Sell on the live curve, lapsed or not")
+		return nil, newErr(ErrState, "refundHolder is only available once wind-down opens (retired or closed); until then the holder exits via Sell on the live curve")
 	}
 
 	// BOTH BUCKETS — the push sweeps the holder's WHOLE position, or an

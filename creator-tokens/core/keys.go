@@ -12,7 +12,7 @@ import "strconv"
 // ---- global ----
 
 func kOwner() string    { return "owner" }    // platform owner (bound to contract.owner at init)
-func kTreasury() string { return "treasury" } // where commission + subscription land
+func kTreasury() string { return "treasury" } // the platform's HBD: the trade-fee half and the exit-tax half. NOT the commission (tokens since 2026-09-12) and NOT a subscription (deleted the same day).
 func kPaused() string   { return "paused" }   // global inbound pause (outflows never pause)
 
 // kPendingOwner — F19 DEFECT FIX (2026-08-19): the 2-step ownership-transfer

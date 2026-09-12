@@ -42,20 +42,34 @@ import (
 // place that history is created; ../indexer is the only place it is read
 // back and folded into queryable aggregates.
 //
-// Twelve events, one per fund/state-changing core.go entrypoint (API.md's
-// 11 exported mutators, plus Reclaim/Answer both resolving one escrow):
+// One event per fund/state-changing core.go entrypoint (plus Reclaim/Answer,
+// which both resolve one escrow):
+//
+// ★ THIS TABLE IS THE ONLY PLACE THE WIRE SHAPES ARE WRITTEN DOWN, so a stale
+// row here is an indexer built against a field that does not exist. It had gone
+// stale twice by 2026-09-12: `prepaid` survived the deletion of prepay.go, and
+// the three escrow rows still carried `commissionHbd` months after Ask stopped
+// having an HBD leg. Both corrected below; if you change an Ev* builder, change
+// its row in the same edit.
 //
 //	Register        -> {"type":"registered","v":1,"creator":"...","actor":"...","block":N,"face":"...","cap":"...","feePaid":"..."}
 //	SetFace         -> {"type":"faceChanged","v":1,"creator":"...","actor":"...","block":N,"oldFace":"...","newFace":"..."}
 //	SetCap          -> {"type":"capChanged","v":1,"creator":"...","actor":"...","block":N,"oldCap":"...","newCap":"..."}
-//	Prepay          -> {"type":"prepaid","v":1,"creator":"...","actor":"...","block":N,"hbdPaid":"...","creditsMinted":"..."}
 //	TransferCredits -> {"type":"transferred","v":1,"creator":"...","actor":"...","to":"...","block":N,"amount":"..."}
-//	Ask             -> {"type":"asked","v":1,"creator":"...","actor":"...","block":N,"seq":N,"creditsSpent":"...","commissionHbd":"...","rate":"...","deadlineBlocks":N,"contentHash":"..."}
-//	Answer          -> {"type":"answered","v":1,"creator":"...","actor":"...","block":N,"seq":N,"creditsToCreator":"...","commissionHbd":"...","answerHash":"..."}
-//	Reclaim         -> {"type":"reclaimed","v":1,"creator":"...","actor":"...","block":N,"seq":N,"credits":"...","commissionHbd":"..."}
+//	Ask             -> {"type":"asked","v":1,"creator":"...","actor":"...","block":N,"seq":N,"creditsSpent":"...","commissionCredits":"...","rate":"...","deadlineBlocks":N,"contentHash":"...","offeringId":N}
+//	Answer          -> {"type":"answered","v":1,"creator":"...","actor":"...","block":N,"seq":N,"creditsToCreator":"...","commissionCredits":"...","commissionTo":"...","answerHash":"..."}
+//	Reclaim         -> {"type":"reclaimed","v":1,"creator":"...","actor":"...","block":N,"seq":N,"credits":"...","commissionRetainedCredits":"...","retainedTo":"...","asker":"..."}
+//	Decline         -> {"type":"declined","v":1,"creator":"...","actor":"...","block":N,"seq":N,"credits":"...","asker":"..."}
 //	Refund          -> {"type":"refunded","v":1,"creator":"...","actor":"...","block":N,"credits":"...","payout":"..."}
 //	RefundHolder    -> {"type":"refundPushed","v":1,"creator":"...","actor":"...","holder":"...","block":N,"creditsBurned":"...","payout":"..."}
 //	CloseIfDrained  -> {"type":"closed","v":1,"creator":"...","actor":"...","block":N}
+//
+// THERE IS NO `prepaid` ROW. core/prepay.go and the `prepay` entrypoint were
+// deleted with the PAR mint (RULING A, RULINGS-v2-2026-07-21); nothing can emit
+// one, so the builder went too (2026-09-12), the same call this file already
+// made for EvRenewed when the subscription was removed. Historical `prepaid`
+// rows in the indexer are untouched - they are chain history, and this file
+// only ever WRITES events.
 //
 // Four fields every single event carries: "type"/"v" (the discriminator pair),
 // "creator" (which market), "actor" (who initiated this state change —
@@ -235,21 +249,6 @@ func EvCapChanged(creator, actor string, block uint64, oldCap, newCap int64) str
 		`,"newCap":"` + evI64(newCap) + `"}`
 }
 
-// EvPrepaid — Prepay (prepay.go, [AGENT 2]). actor is the caller, who
-// receives creditsMinted directly (Prepay mints to caller, never to
-// creator — "the creator receives nothing at issuance," API.md). hbdPaid
-// and creditsMinted are always numerically identical at PAR (prepay.go:
-// "Prepay performs NO division — credits are an exact copy of hbdPaid") —
-// both are still carried explicitly so the log is self-describing without
-// requiring a reader to know PAR==1 by convention, and so a future change
-// to the PAR mapping (were one ever made) leaves every historical log
-// entry correctly self-documenting instead of silently reinterpreted.
-func EvPrepaid(creator, actor string, block uint64, hbdPaid, creditsMinted *big.Int) string {
-	return evOpen("prepaid", creator, actor, block) +
-		`,"hbdPaid":"` + evMoney(hbdPaid) + `"` +
-		`,"creditsMinted":"` + evMoney(creditsMinted) + `"}`
-}
-
 // EvTransferred — TransferCredits (prepay.go). actor is the sender (`from`
 // in TransferCredits' own signature); `to` is the receiving holder. Note
 // core.TransferCredits itself takes no `caller` parameter at all and
@@ -308,19 +307,26 @@ func EvAsked(creator, actor string, block, seq uint64, creditsSpent, commissionC
 // commissionHbd (M4 fix, 2026-07-21 — PRUNED-ADJUDICATION-2026-07-21.md) was
 // the HBD commission Answer booked to kTreasury() in the very same call that
 // produced this event. It existed so the indexer could cross-check kTreasury()
-// (SPEC §1.7.3, "where commission + subscription land") — see
-// ../magi-indexer/creator_tokens_views.yaml's Index.TreasuryHbd, which folded
-// it together with EvRegistered's feePaid and EvRenewed's paid.
+// (SPEC §1.7.3, "where commission + subscription land") against an indexer
+// aggregate that folded it together with EvRegistered's feePaid and
+// EvRenewed's paid.
 //
 // ALL THREE OF THOSE INPUTS ARE NOW GONE OR ZERO: registration is free
 // (RegistrationFee deleted 2026-07-21), Renew no longer exists (2026-09-12) and
 // the commission is tokens (2026-09-12). kTreasury() itself is NOT dead — it
 // still accrues the platform half of every trade fee (tradefee.go) and the
 // platform half of every exit tax (exittax.go), both of which carry their own
-// events — but Index.TreasuryHbd must be rebuilt on THOSE two inputs, because
-// the three it was written against no longer produce anything. Left as-is it
-// reports a figure that can only ever decrease (WithdrawTreasury) while the real
-// balance rises.
+// events.
+//
+// ★ AND THERE IS NO `Index.TreasuryHbd` TO REBUILD (checked 2026-09-12). Three
+// comments in this repo, and one line of the deploy runbook, sent a reader to
+// "creator_tokens_views.yaml's Index.TreasuryHbd". That view does not exist and
+// on the evidence never did: the file defines exactly six views —
+// lumen_ct_balances, _price_history, _delivery_record, _my_asks,
+// _creator_earnings, _discovery — and none of them sums an HBD treasury. So
+// nothing is currently reporting a wrong treasury figure, and nothing needs
+// fixing before this deploy. If a platform-revenue view is ever wanted, its
+// inputs are the two event streams named above, never these three.
 //
 // ★ commissionCredits AND commissionTo REPLACED commissionHbd (OWNER RULING
 // 2026-09-12). The commission is now 12% of the escrow's TOKENS credited to the
