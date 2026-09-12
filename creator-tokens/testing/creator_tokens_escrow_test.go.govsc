@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"vsc-node/lib/test_utils"
-	ledgerDb "vsc-node/modules/db/vsc/ledger"
 	"vsc-node/modules/db/vsc/contracts"
+	ledgerDb "vsc-node/modules/db/vsc/ledger"
 	stateEngine "vsc-node/modules/state-processing"
 )
 
@@ -33,7 +33,17 @@ import (
 // the artifact executes and the money is conserved; it does not prove anything
 // about Hive L1, the deploy queue, or a real node's RC ceiling.
 
-const ctWasmPath = "/mnt/o/Lumen/creator-tokens/bin/main.wasm"
+// ★ OVERRIDABLE, SO THIS TEST CAN BE RUN AS A NEGATIVE CONTROL. The default is
+// the deploy candidate, which is the point: this loads the ACTUAL binary that
+// goes to chain, never a rebuild of it. Set CREATOR_TOKENS_WASM to aim it at a
+// different build — the way to prove the test is sensitive to the contract at
+// all is to point it at the PREVIOUS one and watch it fail.
+var ctWasmPath = func() string {
+	if p := os.Getenv("CREATOR_TOKENS_WASM"); p != "" {
+		return p
+	}
+	return "/mnt/o/Lumen/creator-tokens/bin/main.wasm"
+}()
 
 type ctEnv struct {
 	t   *testing.T

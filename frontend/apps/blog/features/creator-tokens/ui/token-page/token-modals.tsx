@@ -236,13 +236,18 @@ const BuyModal: FC<{
                refusal.
             2. "Average price" and "Price after your buy" were shown as a pair
                with no basis named. avgPrice is totalUsd/tokens and so carries the
-               10% trade fee; priceAfter is a bare curve price. At $10 on this
-               market that read "~$1.57" above "~$1.46" — an average ABOVE the
-               ending price, which a rising curve makes impossible. Both labels
-               now say which basis they are on; ex-fee the average is $1.43, below
-               $1.46, and the itemisation below shows where the difference went.
-            3. The fee was named in prose ("Includes a 10% trade fee") but never
-               itemised, so nothing on screen reconciled to the amount charged.
+               trade fee; priceAfter is a bare curve price. At $10 on this market
+               that read "~$1.57" above "~$1.46" — an average ABOVE the ending
+               price, which a rising curve makes impossible. Both labels now say
+               which basis they are on, and the itemisation below shows where the
+               difference went. (The cents moved when TradeFeeBps halved on
+               2026-09-09: the same $10 now reads "~$1.50" above "~$1.46". The
+               inversion IS the fee, so a smaller fee narrowed the gap without
+               closing it. Re-measured in market/buy-preview.selftest.ts; never
+               quote a rate here, the row label reads TRADE_FEE_PCT.)
+            3. The fee was named in prose ("Includes a 10% trade fee" — the rate
+               of the day) but never itemised, so nothing on screen reconciled to
+               the amount charged.
                The sell side has itemised its fees since it was written; this is
                the same treatment on the buy side, ending in the one figure the
                CTA repeats. */}
@@ -687,9 +692,11 @@ const SellModal: FC<{
               ) : null}
             </>
           )}
-          {/* The 10% trade fee is a CURVE-rail charge (sell.go). The wind-down
-              rail (refund.go) is a pro-rata slice of the reserve and does not pay
-              it, so showing it here would be inventing a deduction. */}
+          {/* The trade fee is a CURVE-rail charge (sell.go), at whatever
+              params.go TradeFeeBps says — the row label reads TRADE_FEE_PCT and
+              never a typed number. The wind-down rail (refund.go) is a pro-rata
+              slice of the reserve and does not pay it, so showing it here would
+              be inventing a deduction. */}
           {redeem ? null : (
             <div className="mb-2 flex justify-between text-caption text-ink-warn-3 font-ui">
               <span>Trade fee ({TRADE_FEE_PCT})</span>

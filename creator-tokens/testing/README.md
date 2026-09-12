@@ -15,6 +15,31 @@ It loads `/mnt/o/Lumen/creator-tokens/bin/main.wasm` directly, so it tests the
 DEPLOY CANDIDATE and not a rebuild of it. Build the wasm first
 (`bash ../build-wasm.sh`) or it will certify whatever binary happens to be there.
 
+## The negative control, and why it matters more than the green run
+
+`CREATOR_TOKENS_WASM` overrides the path. A green test proves nothing until you
+have watched it go red for the right reason, so point it at the PREVIOUS
+contract and check that it fails where the change is:
+
+```
+cd /mnt/o/Lumen && git archive b38d0bb^ creator-tokens | tar -x -C /tmp/old
+cd /tmp/old/creator-tokens && bash build-wasm.sh      # CID will mismatch, expected
+CREATOR_TOKENS_WASM=/tmp/old/creator-tokens/bin/main.wasm \
+  go test ./modules/wasm/e2e/ -run TestCreatorTokens_EscrowFiveStepPath -v
+```
+
+Run 2026-09-12 it failed at the first divergence, which is exactly the change:
+the old contract's `quote` returns `creditsPerAsk 38` and
+`commissionOwedHbd 30000` (the 88/12 split with an HBD leg), there is no
+`commissionCredits` field, and the vacuity guard fires. The new one returns 43
+credits with 5 of them commission.
+
+That run also produced a useful cross-check: building `b38d0bb^` reproduces
+`bafkreigqshjvsnoauwq6eeiisibbpqpesw5ysuiyhp36rjl3i7xi4dwqwi`, the CID
+`V2_CODE_CIDS` labels "v2 fee/display update (2026-09-09)" and the one activated
+on chain at block 109824076. So the pre-change source IS the deployed contract,
+and this update's diff is exactly deployed-to-candidate with nothing in between.
+
 ## Why this and not a testnet
 
 A testnet proof of the escrow path needs about three days of chain clock: the
