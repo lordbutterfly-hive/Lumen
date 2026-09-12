@@ -26,14 +26,14 @@ func TestZZVerifyExpiry_Boundary_ExactAndAround(t *testing.T) {
 	taxable, _ := SellProceeds(supply, big.NewInt(500)) // whole maturing draw
 
 	type row struct {
-		block      uint64
+		block       uint64
 		wantMatured bool
-		wantBps    uint64
+		wantBps     uint64
 	}
 	for _, r := range []row{
-		{T - 1, false, 1},           // one block BEFORE: not matured, ceil-min 1 bps
-		{T, true, 0},                // exactly AT the window: matured, 0 bps
-		{T + 1, true, 0},            // one block AFTER: matured (capped), 0 bps
+		{T - 1, false, 1}, // one block BEFORE: not matured, ceil-min 1 bps
+		{T, true, 0},      // exactly AT the window: matured, 0 bps
+		{T + 1, true, 0},  // one block AFTER: matured (capped), 0 bps
 	} {
 		if got := maturedNow(s, c, h, r.block); got != r.wantMatured {
 			t.Fatalf("block %d: maturedNow=%v want %v", r.block, got, r.wantMatured)

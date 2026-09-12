@@ -140,12 +140,12 @@ func mustBig(t *testing.T, s string) *big.Int {
 // care about the commission leg pass 0.
 func mkPendingEscrow(s Store, creator string, seq uint64, asker string, credits int64, deadline uint64, contentHash string, commissionHbd int64) {
 	saveEscrow(s, creator, seq, escrowRec{
-		asker:         asker,
-		credits:       big.NewInt(credits),
-		deadline:      deadline,
-		status:        askPending,
-		contentHash:   contentHash,
-		answerHash:    "",
+		asker:             asker,
+		credits:           big.NewInt(credits),
+		deadline:          deadline,
+		status:            askPending,
+		contentHash:       contentHash,
+		answerHash:        "",
 		commissionCredits: big.NewInt(commissionHbd),
 	})
 }

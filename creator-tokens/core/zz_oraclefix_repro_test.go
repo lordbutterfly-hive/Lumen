@@ -93,8 +93,8 @@ func TestOF_CTORACLE02_HonestGrowthKeepsShopOpen(t *testing.T) {
 	curveMarket(s, c, grown) // supply=4000, reserve=Area(4000)
 	activateMarket(s, c, 0)
 	q := uint64(2_000_000)
-	spot := SpotRate(big.NewInt(grown))          // ~74,500 (the grown marginal)
-	stale := SpotRate(big.NewInt(400))            // ~4,570 (the pre-growth long-ring rate)
+	spot := SpotRate(big.NewInt(grown)) // ~74,500 (the grown marginal)
+	stale := SpotRate(big.NewInt(400))  // ~4,570 (the pre-growth long-ring rate)
 	// SHORT ring caught up to the grown rate (creator/organic trades feed it every 40 blocks).
 	short := make([]*big.Int, 32)
 	for i := range short {

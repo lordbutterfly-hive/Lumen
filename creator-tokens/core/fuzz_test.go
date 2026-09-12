@@ -354,13 +354,13 @@ type fzWorld struct {
 
 func fzNewWorld() *fzWorld {
 	w := &fzWorld{
-		s:              NewMemStore(),
-		escrowed:       map[string]*big.Int{},
-		paidIn:         map[string]*big.Int{},
-		received:       map[string]*big.Int{},
-		totalHBDIn:     big.NewInt(0),
-		totalHBDOut:    big.NewInt(0),
-		refunded:       map[string]bool{},
+		s:           NewMemStore(),
+		escrowed:    map[string]*big.Int{},
+		paidIn:      map[string]*big.Int{},
+		received:    map[string]*big.Int{},
+		totalHBDIn:  big.NewInt(0),
+		totalHBDOut: big.NewInt(0),
+		refunded:    map[string]bool{},
 	}
 	for _, c := range fzCreators {
 		w.escrowed[c] = big.NewInt(0)

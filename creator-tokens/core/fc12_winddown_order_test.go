@@ -98,12 +98,12 @@ func TestWindDown_PayoutOrderIndependent(t *testing.T) {
 	// so the floor actually discards dust — a clean-dividing fixture would make
 	// the test vacuously pass.
 	fixtures := []fixture{
-		{"three-equal-fractional", 1000, []int64{333, 333, 334}},        // R>S, near-equal
-		{"whale-beside-two-dust", 1500, []int64{1, 1, 1000}},            // a whale next to dust holders
-		{"reserve-below-supply", 700, []int64{300, 300, 401}},          // R<S (the general C-23 bound)
-		{"four-mixed-magnitudes", 10007, []int64{1, 10, 100, 9000}},    // spread of magnitudes, R>S
+		{"three-equal-fractional", 1000, []int64{333, 333, 334}},    // R>S, near-equal
+		{"whale-beside-two-dust", 1500, []int64{1, 1, 1000}},        // a whale next to dust holders
+		{"reserve-below-supply", 700, []int64{300, 300, 401}},       // R<S (the general C-23 bound)
+		{"four-mixed-magnitudes", 10007, []int64{1, 10, 100, 9000}}, // spread of magnitudes, R>S
 		{"five-holders-fractional", 12345, []int64{7, 77, 777, 3000, 5000}},
-		{"three-coprime-reserve", 101, []int64{10, 10, 11}},            // tiny, maximally fractional
+		{"three-coprime-reserve", 101, []int64{10, 10, 11}}, // tiny, maximally fractional
 	}
 
 	var globalMaxSpread int64

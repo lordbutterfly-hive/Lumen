@@ -59,10 +59,10 @@ func lnAssertSameStore(t *testing.T, a, b *MemStore, what string) {
 // re-derived, which is exactly how a curve implementation drifts.
 func TestLaunch_IsExactlyRegisterThenBuy(t *testing.T) {
 	const (
-		creator      = "launchcreator"
-		block        = uint64(500_000)
-		face   int64 = 1000
-		capVal int64 = 1_000_000
+		creator       = "launchcreator"
+		block         = uint64(500_000)
+		face    int64 = 1000
+		capVal  int64 = 1_000_000
 	)
 	for _, n := range []int64{1, 2, 7, 100, 1000, 12345} {
 		atomicStore := NewMemStore()
@@ -95,10 +95,10 @@ func TestLaunch_IsExactlyRegisterThenBuy(t *testing.T) {
 // (nil and an explicit zero), must be byte-identical to a plain Register.
 func TestLaunch_NoFirstBuyIsExactlyRegister(t *testing.T) {
 	const (
-		creator      = "plaincreator"
-		block        = uint64(9_000)
-		face   int64 = 1000 // any valid face; LIVE-1 raised MinFace 500->508, so 500 is no longer registrable
-		capVal int64 = 5_000
+		creator       = "plaincreator"
+		block         = uint64(9_000)
+		face    int64 = 1000 // any valid face; LIVE-1 raised MinFace 500->508, so 500 is no longer registrable
+		capVal  int64 = 5_000
 	)
 	plain := NewMemStore()
 	if err := Register(plain, creator, creator, block, face, capVal); err != nil {
@@ -126,10 +126,10 @@ func TestLaunch_NoFirstBuyIsExactlyRegister(t *testing.T) {
 
 func TestLaunch_CreatorPaysFullCurveCost_NoPremine(t *testing.T) {
 	const (
-		creator      = "paysfull"
-		block        = uint64(1_000)
-		face   int64 = 1000
-		capVal int64 = 1_000_000
+		creator       = "paysfull"
+		block         = uint64(1_000)
+		face    int64 = 1000
+		capVal  int64 = 1_000_000
 	)
 	n := big.NewInt(100)
 	s := NewMemStore()

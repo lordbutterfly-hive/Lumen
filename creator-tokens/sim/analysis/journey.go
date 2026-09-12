@@ -115,12 +115,12 @@ import (
 // function of block/deadline/ReclaimGrace, none of which touch the rate),
 // only how precisely the report can describe what was being held.
 type ReclaimGapWindow struct {
-	Creator       string
-	Seq           uint64
-	Asker         string
+	Creator           string
+	Seq               uint64
+	Asker             string
 	CommissionCredits *big.Int
-	Credits       *big.Int // nil if not resolved from the trace
-	CreditsApprox bool
+	Credits           *big.Int // nil if not resolved from the trace
+	CreditsApprox     bool
 
 	Deadline uint64
 	GapStart uint64 // deadline+1: the first block where neither answer nor reclaim is legal
@@ -140,7 +140,7 @@ type UnclaimedEscrow struct {
 	Creator           string
 	Seq               uint64
 	Asker             string
-	CommissionCredits     *big.Int
+	CommissionCredits *big.Int
 	ReclaimEligibleAt uint64 // deadline+ReclaimGrace+1
 	TraceEndBlock     uint64
 }
@@ -317,12 +317,12 @@ func (r DeadEndReport) render(b *strings.Builder) {
 }
 
 type journeyEscrow struct {
-	asker         string
+	asker             string
 	commissionCredits *big.Int
-	credits       *big.Int
-	creditsApprox bool
-	deadline      uint64
-	status        string // "PENDING" | "ANSWERED" | "RECLAIMED" | "DECLINED"
+	credits           *big.Int
+	creditsApprox     bool
+	deadline          uint64
+	status            string // "PENDING" | "ANSWERED" | "RECLAIMED" | "DECLINED"
 }
 
 // resolveCreditsSpent lives in report.go — shared with ledger.go, which needs

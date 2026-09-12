@@ -16,8 +16,8 @@ func TestZZVerifyExpiry_NoOrphanNoDoubleCount(t *testing.T) {
 	s := tbMarket(t, c)
 
 	b1 := uint64(1_000_000)
-	t1 := b1 + tbWindow      // h1,h2 matured here; h3 not yet
-	t2 := t1 + tbWindow      // h1's fresh cohort + h3 matured here
+	t1 := b1 + tbWindow // h1,h2 matured here; h3 not yet
+	t2 := t1 + tbWindow // h1's fresh cohort + h3 matured here
 	tbKeepPaid(t, s, c, b1, t2)
 
 	// ---- Phase A: initial buys ----
@@ -74,8 +74,8 @@ func TestZZVerifyExpiry_NoOrphanNoDoubleCount(t *testing.T) {
 
 	// ---- Final: sell everyone out; all zero-tax; clean full drain ----
 	for _, w := range []struct {
-		h    string
-		amt  int64
+		h   string
+		amt int64
 	}{{h1, 600}, {h2, 150}, {h3, 350}} {
 		supplyBefore := new(big.Int).Set(Supply(s, c))
 		r, err := Sell(s, w.h, c, t2, big.NewInt(w.amt))

@@ -630,8 +630,7 @@ func TestRetire_B_FromActiveGoesOverdueThenFrozenAndNeverBack(t *testing.T) {
 	}
 }
 
-
-//	refused — no free perpetual service — and the wind-down is terminal.
+// refused — no free perpetual service — and the wind-down is terminal.
 func TestRetire_C_RevenueBypassClosed(t *testing.T) {
 	s := NewMemStore()
 	const creator = "retirebypass"

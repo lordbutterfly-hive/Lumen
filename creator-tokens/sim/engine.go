@@ -300,8 +300,8 @@ type DelinquencyStats struct {
 	// the exact identity refused+other == attempted (i.e. NOTHING got
 	// through) without conflating "refused" with "refused for this reason".
 	PurchaseRefusedOther int
-	OutflowAttempts               int // payout/renew/shop-config actions attempted against an ALREADY-delinquent creator
-	OutflowSucceeded              int // ... and did NOT fail for a delinquency reason (succeeded, or failed for something unrelated)
+	OutflowAttempts      int // payout/renew/shop-config actions attempted against an ALREADY-delinquent creator
+	OutflowSucceeded     int // ... and did NOT fail for a delinquency reason (succeeded, or failed for something unrelated)
 }
 
 // DeliveryGuardrailExercised reports whether THIS run actually tested the
@@ -327,26 +327,26 @@ func NewEngine(cfg Config) *Engine {
 	}
 
 	e := &Engine{
-		Store:               core.NewMemStore(),
-		Block:               genesisBlock,
-		Seed:                cfg.Seed,
-		pop:                 pop,
-		creators:            map[string]*creatorState{},
-		creatorNames:        append([]string{}, pop.CreatorNames...),
-		holderFavorites:     map[string][]string{},
-		holderSlippageBps:   map[string]int64{},
-		holderOrder:         map[string][]string{},
-		holderSeen:          map[string]map[string]bool{},
-		escrows:             map[string]*EscrowShadow{},
-		pendingByCreator:    map[string][]string{},
-		pendingByAsker:      map[string][]string{},
-		oracleWalks:         map[string]*oracleWalkState{},
-		treasuryShadow: zeroBig(),
-		totalHbdIn:          zeroBig(),
-		totalHbdOut:         zeroBig(),
-		keeperProfile:       keeperProfile,
-		adversarialOrder:    cfg.AdversarialOrder,
-		verbose:             cfg.Verbose,
+		Store:             core.NewMemStore(),
+		Block:             genesisBlock,
+		Seed:              cfg.Seed,
+		pop:               pop,
+		creators:          map[string]*creatorState{},
+		creatorNames:      append([]string{}, pop.CreatorNames...),
+		holderFavorites:   map[string][]string{},
+		holderSlippageBps: map[string]int64{},
+		holderOrder:       map[string][]string{},
+		holderSeen:        map[string]map[string]bool{},
+		escrows:           map[string]*EscrowShadow{},
+		pendingByCreator:  map[string][]string{},
+		pendingByAsker:    map[string][]string{},
+		oracleWalks:       map[string]*oracleWalkState{},
+		treasuryShadow:    zeroBig(),
+		totalHbdIn:        zeroBig(),
+		totalHbdOut:       zeroBig(),
+		keeperProfile:     keeperProfile,
+		adversarialOrder:  cfg.AdversarialOrder,
+		verbose:           cfg.Verbose,
 	}
 
 	// Bind the platform owner exactly the way contract/main.go's Init does —

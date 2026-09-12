@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-
 // TestValidAccount_AcceptsEveryIdentityMagiCanProduce pins the account bound
 // against the REAL identity shapes the chain hands a contract as `caller`,
 // including the ones Magi does not accept YET.

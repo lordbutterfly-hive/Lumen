@@ -31,7 +31,7 @@ func TestGenEscrowFixtures(t *testing.T) {
 			contentHash: "c", answerHash: "a",
 		}},
 		{"did-asker-and-big-offering", escrowRec{
-			asker:  "did:pkh:bip122:000000000019d6689c085ae165831e93:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+			asker:   "did:pkh:bip122:000000000019d6689c085ae165831e93:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
 			credits: big.NewInt(999999), deadline: 18446744073709551615,
 			status: askDeclined, commissionCredits: big.NewInt(123456789),
 			acqBlock: 123456, offeringID: 4294967295,
@@ -57,7 +57,7 @@ func TestGenEscrowFixtures(t *testing.T) {
 			"asker": c.rec.asker, "credits": c.rec.credits.String(),
 			"deadline": c.rec.deadline, "status": c.rec.status,
 			"commissionHbd": c.rec.commissionCredits.String(),
-			"acqBlock": c.rec.acqBlock, "offeringID": c.rec.offeringID,
+			"acqBlock":      c.rec.acqBlock, "offeringID": c.rec.offeringID,
 			"contentHash": c.rec.contentHash, "answerHash": c.rec.answerHash,
 		})
 	}

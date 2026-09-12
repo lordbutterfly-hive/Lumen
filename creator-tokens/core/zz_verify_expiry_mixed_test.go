@@ -12,10 +12,10 @@ func TestZZVerifyExpiry_MixedThenFullyMatured(t *testing.T) {
 	const c, h = "hive:alice", "hive:bob"
 	s := tbMarket(t, c)
 
-	b1 := uint64(1_000_000)       // aged cohort acquired here
-	b2 := b1 + 100_000            // fresh cohort, still 100k blocks younger
-	at := b2 + tbWindow           // BOTH cohorts are past the window here
-	tbKeepPaid(t, s, c, b1, at)   // keep ACTIVE across the whole span
+	b1 := uint64(1_000_000)     // aged cohort acquired here
+	b2 := b1 + 100_000          // fresh cohort, still 100k blocks younger
+	at := b2 + tbWindow         // BOTH cohorts are past the window here
+	tbKeepPaid(t, s, c, b1, at) // keep ACTIVE across the whole span
 
 	if _, err := Buy(s, h, c, b1, big.NewInt(400)); err != nil {
 		t.Fatalf("buy aged cohort: %v", err)
