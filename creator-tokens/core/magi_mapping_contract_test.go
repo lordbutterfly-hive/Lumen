@@ -109,7 +109,6 @@ func magiSamples() map[string]string {
 	one := scOne()
 	return map[string]string{
 		"registered":        EvRegistered("c", "a", 1, MinFace, MinCap, one),
-		"renewed":           EvRenewed("c", "a", 1, 1, one),
 		"faceChanged":       EvFaceChanged("c", "a", 1, 1, 2),
 		"capChanged":        EvCapChanged("c", "a", 1, 1, 2),
 		"retired":           EvRetired("c", "a", 1),
@@ -121,9 +120,9 @@ func magiSamples() map[string]string {
 		"refunded":          EvRefunded("c", "a", 1, one, one),
 		"refundPushed":      EvRefundPushed("c", "a", "h", 1, one, one),
 		"asked":             EvAsked("c", "a", 1, 1, one, one, one, 1, "h", 0),
-		"answered":          EvAnswered("c", "a", 1, 1, one, one, "h"),
-		"reclaimed":         EvReclaimed("c", "a", 1, 1, one, one, one, "k"),
-		"declined":          EvDeclined("c", "a", 1, 1, one, one, "k"),
+		"answered":          EvAnswered("c", "a", 1, 1, one, one, "o", "h"),
+		"reclaimed":         EvReclaimed("c", "a", 1, 1, one, one, "o", "k"),
+		"declined":          EvDeclined("c", "a", 1, 1, one, "k"),
 		"rated":             EvRated("c", "a", 1, 1, 5),
 		"offeringCreated":   EvOfferingCreated("c", "a", 1, 1, "t", one),
 		"offeringUpdated":   EvOfferingUpdated("c", "a", 1, 1, "t", one, one),

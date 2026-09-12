@@ -92,16 +92,14 @@ func boolStr(b bool) string {
 	return "false"
 }
 
-// ceilDivBig / bpsFloorBig mirror contract/main.go's own ceilDiv/bpsFloor —
-// themselves documented duplicates of ask.go's PRIVATE creditsForAsk/
-// commissionOwedFor helpers. Every real caller (a wallet, this simulator)
-// has to independently compute a preview/commission BEFORE calling
-// core.Ask, since core.Ask takes maxCredits and commissionHbdPaid as
-// caller-supplied inputs, not something it derives for the caller. As
-// contract/main.go's own comment states: a drift here can only make a
-// PREVIEW stale, never move a wrong amount of money — core.Ask recomputes
-// the real, binding numbers internally regardless of what this simulator
-// guessed.
+// ceilDivBig / bpsFloorBig mirror ask.go's PRIVATE creditsForAsk /
+// commissionOwedFor helpers. A real caller (a wallet, this simulator) still has
+// to compute a PREVIEW before calling core.Ask, because maxCredits is a
+// caller-supplied cap core.Ask does not derive for it. A drift here can only
+// make that preview stale, never move a wrong amount of money — core.Ask
+// recomputes the real, binding numbers internally regardless of what this
+// simulator guessed. (The commission was a second caller-supplied input until
+// the 2026-09-12 ruling; it is derived inside core now.)
 func ceilDivBig(a, b *big.Int) *big.Int {
 	num := new(big.Int).Add(a, subBig(b, big.NewInt(1)))
 	return num.Div(num, b)
@@ -112,25 +110,22 @@ func bpsFloorBig(total *big.Int, bps uint64) *big.Int {
 	return p.Div(p, big.NewInt(10000))
 }
 
-// tokenLegOf mirrors ask.go's splitFace's token leg exactly (USER RULING
-// 2026-07-27, the commission carve-out): tokenLeg = face - commission,
-// commission = floor(face*CommissionBps/10000) via the exported
-// core.CommissionOwedFor. This is the amount settlement.go's settleSpend
-// actually prices in credits (ceil(tokenLeg/rate)) — the commission leg is
-// billed separately in HBD, never in credits. Every credits-needed ESTIMATE
-// in this file (askIntent/ensureCreditsForAsk/oneShotSequence) must divide
-// THIS by rate, never the bare posted face: dividing the full face was the
-// PRE-CARVE-OUT model (the token leg used to be the full face, with the
-// commission drawn on top) and now systematically over-estimates the
-// credits a real ask will actually spend by ~CommissionBps, understating how
-// many actors this simulator lets attempt an ask they could genuinely
-// afford — core.Ask itself is unaffected (it derives the real, binding
-// number from settlePosted internally regardless of what this simulator
-// estimates), but a stale estimate here still means the sim proves a
-// population behaviour ("X% of asks were skipped as unaffordable") that
-// does not match what would actually happen on-chain.
+// tokenLegOf is the amount settlement.go's settleSpend prices in credits for a
+// given POSTED face — which, since the OWNER RULING of 2026-09-12, is the whole
+// posted face. It kept its name and its single job through that ruling on
+// purpose: every credits-needed ESTIMATE in this file
+// (askIntent/ensureCreditsForAsk/oneShotSequence) divides THIS by rate, and
+// routing them all through one function is what let the model follow the ruling
+// in one line instead of four.
+//
+// WHAT IT USED TO BE: face − floor(face·CommissionBps/10000), the 88% token leg
+// of the 2026-07-27 carve-out, with the 12% billed separately in HBD. Under- or
+// over-estimating here never moved a wrong amount of money (core.Ask derives the
+// real, binding number from settlePosted internally), but it did change which
+// actors this simulator believes can afford an ask — so the population behaviour
+// it proves would not have matched the chain.
 func tokenLegOf(face *big.Int) *big.Int {
-	return subBig(face, core.CommissionOwedFor(face))
+	return new(big.Int).Set(face)
 }
 
 // mulDivFloorBig mirrors core/money.go's private mMulDiv exactly —
@@ -204,36 +199,13 @@ func (e *Engine) doRegister(name string) {
 	e.recordEvent(ev)
 }
 
-// doRenew: SPEC §1.7.5 / core/market.go — permissionless, so `caller` need
-// not be `creator` (a fan keeping a favourite creator alive routes through
-// here exactly like the creator renewing themselves).
-func (e *Engine) doRenew(caller, creator string, periods uint64) {
-	actor := e.pop.Actors[caller]
-	cost := new(big.Int).Mul(big.NewInt(int64(periods)), big.NewInt(core.SubscriptionFee))
-	if cmpBig(actor.HBD, cost) < 0 {
-		return
-	}
-
-	ev := e.newEvent("renew", caller, creator)
-	ev.Args["periods"] = fmt.Sprintf("%d", periods)
-	ev.Args["paid"] = bigStr(cost)
-	e.captureDelinquent(ev, creator) // standing guardrail: Renew must never be blocked by delinquency (requireMarketAcceptsMoney deliberately skips the delivery gate)
-
-	beforePaidUntil := core.PaidUntil(e.Store, creator)
-	e.coreCall("renew", ev, func() error {
-		return core.Renew(e.Store, caller, creator, e.Block, periods, cost)
-	})
-	if ev.OK {
-		actor.HBD = subBig(actor.HBD, cost)
-		e.totalHbdIn = addBig(e.totalHbdIn, cost)
-		e.treasuryShadow = addBig(e.treasuryShadow, cost)
-		afterPaidUntil := core.PaidUntil(e.Store, creator)
-		ev.Deltas["wallet:"+caller] = "-" + bigStr(cost)
-		ev.Deltas["treasuryShadow"] = "+" + bigStr(cost)
-		ev.Deltas["paidUntil"] = fmt.Sprintf("%d -> %d", beforePaidUntil, afterPaidUntil)
-	}
-	e.recordEvent(ev)
-}
+// THERE IS NO doRenew. It modelled core.Renew — a permissionless 10 HBD
+// subscription payment that pushed a market's paid_until forward. The whole
+// subscription was removed on 2026-09-12 (OWNER RULING; core/params.go), so
+// there is no call to model, no HBD leaving an actor's wallet for it, and no
+// treasuryShadow credit from it. Markets no longer lapse, which means the
+// FROZEN rung is now reachable only through Retire — see creatorTick and
+// fanTick, whose renewal branches went with this function.
 
 func (e *Engine) doSetFace(creator string, newFace int64) {
 	ev := e.newEvent("setFace", creator, creator)
@@ -422,8 +394,8 @@ func (e *Engine) pickAskTarget(actor *Actor, creator string) askTarget {
 // at (its caller-supplied askTarget: either a named offering or the legacy
 // face — see pickAskTarget): it reads the current rate to build a quote,
 // sets maxCredits as that quote plus the asker's own slippage buffer
-// (holderSlippageBps), pays the commission owed against THAT quote, and
-// schedules the actual Ask call a short, random number of blocks later —
+// (holderSlippageBps), and schedules the actual Ask call a short, random number
+// of blocks later —
 // sign-then-broadcast latency. Any face/rate movement in that gap (a
 // price_mover's SetFace, an oracle RecordObs, or the offering itself being
 // repriced/deleted) is exactly the drift ask.go's own maxCredits/offeringID
@@ -436,12 +408,12 @@ func (e *Engine) pickAskTarget(actor *Actor, creator string) askTarget {
 // step it built `at` in (fanTick), that snapshot is only microseconds
 // stale and harmless. But oneShotSequence schedules its OWN call to
 // askIntent up to 3*BlocksPerDay later (~3 days), passing the SAME `at` it
-// captured at t=0 — so the commission this function computed could be
-// signed against a price up to 3 days old. core.Ask's H2 exact-commission
-// guard requires commissionHbdPaid to EXACTLY equal commissionOwedFor(the
-// LIVE face) at execution — a legitimate 2x/7d-band-legal SetFace, or any
-// offering reprice, in that 3-day gap made the stale-quoted ask reject
-// outright. The fix re-derives the CURRENT price from `at.OfferingID`
+// captured at t=0 — so the quote this function computed could be signed
+// against a price up to 3 days old, and a legitimate 2x/7d-band-legal SetFace
+// or offering reprice in that gap made the stale-quoted ask reject outright.
+// (At the time the binding guard was core.Ask's H2 exact-commission check;
+// since 2026-09-12 it is maxCredits alone, which fails the same way on a stale
+// quote.) The fix re-derives the CURRENT price from `at.OfferingID`
 // (the stable identity — WHICH service — pickAskTarget decided) every time
 // this function actually runs, rather than trusting whatever `at.Face` was
 // when the caller built it: core.OfferingPrice(id) already handles both
@@ -466,8 +438,8 @@ func (e *Engine) askIntent(asker, creator string, at askTarget) {
 	if err != nil {
 		return
 	}
-	// tokenLegOf, not the bare face: settlement prices only the token leg
-	// (face - commission) in credits — see tokenLegOf's doc.
+	// tokenLegOf is what settlement prices — the whole posted face since the
+	// 2026-09-12 ruling; see its doc for why the indirection is kept.
 	creditsEstimate := ceilDivBig(tokenLegOf(face), rate)
 	if creditsEstimate.Sign() <= 0 {
 		return
@@ -485,10 +457,10 @@ func (e *Engine) askIntent(asker, creator string, at askTarget) {
 	buffer := new(big.Int).Div(new(big.Int).Mul(creditsEstimate, big.NewInt(bufferBps)), big.NewInt(10000))
 	maxCredits := addBig(creditsEstimate, buffer)
 
-	commission := bpsFloorBig(face, core.CommissionBps)
-	if cmpBig(actor.HBD, commission) < 0 {
-		return
-	}
+	// (An HBD-balance check used to sit here: the asker had to hold the 12%
+	// commission in HBD as well as the tokens. That was the whole problem the
+	// 2026-09-12 ruling fixed — a token holder could not buy a service with the
+	// token they held — and it is gone with the HBD leg.)
 
 	deadline := core.MinAskDeadline + uint64(actor.RNG.Int63n(int64(4*core.MinAskDeadline))) // ~1-5 days
 	contentHash := fmt.Sprintf("cid-%s-%d", asker, actor.RNG.Int63())
@@ -498,19 +470,17 @@ func (e *Engine) askIntent(asker, creator string, at askTarget) {
 
 	offeringID := at.OfferingID
 	e.schedule(execBlock, "ask-execute", func(eng *Engine) {
-		eng.doAskExecute(asker, creator, maxCredits, commission, contentHash, deadline, offeringID)
+		eng.doAskExecute(asker, creator, maxCredits, contentHash, deadline, offeringID)
 	})
 }
 
-func (e *Engine) doAskExecute(asker, creator string, maxCredits, commission *big.Int, contentHash string, deadlineBlocks uint64, offeringID uint64) {
-	actor := e.pop.Actors[asker]
-	if cmpBig(actor.HBD, commission) < 0 {
-		return // wallet drained by something else in the gap; a real wallet would refuse to even sign
-	}
-
+// doAskExecute no longer takes or checks a commission (OWNER RULING
+// 2026-09-12). The asker's HBD wallet is not consulted at all on this path any
+// more: an ask is a pure token spend, and maxCredits — which now bounds the
+// WHOLE price including the platform's 12% — is the only cap there is.
+func (e *Engine) doAskExecute(asker, creator string, maxCredits *big.Int, contentHash string, deadlineBlocks uint64, offeringID uint64) {
 	ev := e.newEvent("ask", asker, creator)
 	ev.Args["maxCredits"] = bigStr(maxCredits)
-	ev.Args["commissionHbdPaid"] = bigStr(commission)
 	ev.Args["deadlineBlocks"] = fmt.Sprintf("%d", deadlineBlocks)
 	ev.Args["contentHash"] = contentHash
 	ev.Args["offeringID"] = fmt.Sprintf("%d", offeringID)
@@ -521,26 +491,22 @@ func (e *Engine) doAskExecute(asker, creator string, maxCredits, commission *big
 	var res *core.AskResult
 	e.coreCall("ask", ev, func() error {
 		var err error
-		res, err = core.Ask(e.Store, asker, creator, e.Block, maxCredits, commission, contentHash, deadlineBlocks, offeringID)
+		res, err = core.Ask(e.Store, asker, creator, e.Block, maxCredits, contentHash, deadlineBlocks, offeringID)
 		return err
 	})
 	if ev.OK {
-		actor.HBD = subBig(actor.HBD, commission)
-		e.totalHbdIn = addBig(e.totalHbdIn, commission)
-
 		deadline := e.Block + deadlineBlocks
 		e.addEscrow(&EscrowShadow{
 			Creator: creator, Seq: res.Seq, Asker: asker,
-			Credits: res.CreditsSpent, CommissionHbd: res.CommissionHbd,
+			Credits: res.CreditsSpent, CommissionCredits: res.CommissionCredits,
 			Deadline: deadline, Status: escrowPending, OfferingID: offeringID,
 		})
 
 		ev.Args["seq"] = fmt.Sprintf("%d", res.Seq)
 		ev.Args["rateUsed"] = res.RateUsed.String()
 		ev.Args["creditsSpent"] = bigStr(res.CreditsSpent)
-		ev.Deltas["wallet:"+asker] = "-" + bigStr(commission)
+		ev.Args["commissionCredits"] = bigStr(res.CommissionCredits)
 		ev.Deltas["balance:"+asker] = deltaStr(beforeBal, core.BalanceOf(e.Store, creator, asker))
-		ev.Deltas["heldCommissionTotal"] = "+" + bigStr(res.CommissionHbd)
 
 		e.scheduleAnswerAndReclaim(creator, res.Seq, deadline, deadlineBlocks)
 	}
@@ -640,14 +606,20 @@ func (e *Engine) doAnswer(creator string, seq uint64, answerHash string) {
 		return err
 	})
 	if ev.OK {
-		rec := e.resolveEscrow(creator, seq, escrowAnswered)
+		e.resolveEscrow(creator, seq, escrowAnswered)
 		e.addHolder(creator, creator)
-		if rec != nil {
-			e.treasuryShadow = addBig(e.treasuryShadow, rec.CommissionHbd)
-			ev.Deltas["treasuryShadow"] = "+" + bigStr(rec.CommissionHbd)
-			ev.Deltas["heldCommissionTotal"] = "-" + bigStr(rec.CommissionHbd)
+		// The platform's 12% is now a TOKEN credit to the owner's position on
+		// this market (OWNER RULING 2026-09-12), not an HBD booking to the
+		// treasury — so nothing HBD-side moves here at all. The owner is recorded
+		// as a holder so the invariant sweep counts its balance, and both legs go
+		// into the event args so the ledger analyser can prove they sum to the
+		// escrow.
+		if res.Owner != "" && res.CommissionToOwner.Sign() > 0 {
+			e.addHolder(creator, res.Owner)
 		}
 		ev.Args["creditsToCreator"] = bigStr(res.CreditsToCreator)
+		ev.Args["commissionCredits"] = bigStr(res.CommissionToOwner)
+		ev.Args["commissionTo"] = res.Owner
 		ev.Deltas["balance:"+creator] = deltaStr(beforeBal, core.BalanceOf(e.Store, creator, creator))
 	}
 	e.recordEvent(ev)
@@ -678,34 +650,22 @@ func (e *Engine) doReclaim(caller, asker, creator string, seq uint64) {
 		return err
 	})
 	if ev.OK {
-		rec := e.resolveEscrow(creator, seq, escrowReclaimed)
+		e.resolveEscrow(creator, seq, escrowReclaimed)
 		payee := res.Asker // core pays the escrow's own asker, never the caller
-		if actor, ok := e.pop.Actors[payee]; ok && res.CommissionHbd != nil && res.CommissionHbd.Sign() > 0 {
-			actor.HBD = addBig(actor.HBD, res.CommissionHbd)
-		}
-		if res.CommissionHbd != nil && res.CommissionHbd.Sign() > 0 {
-			e.totalHbdOut = addBig(e.totalHbdOut, res.CommissionHbd)
-		}
-		// USER RULING 1 (2026-07-28): a MISS reclaim splits the held commission
-		// — the net leaves (totalHbdOut, above) and the slice STAYS, booked to
-		// the treasury. resolveEscrow released the FULL held amount out of
-		// heldCommissionTotal, so without this the slice would be released from
-		// one bucket and land in none, and the conservation identity would
-		// short by exactly the retained amount on every miss. (It did: this is
-		// what the -race run caught the moment the ruling landed.)
-		if res.CommissionRetainedHbd != nil && res.CommissionRetainedHbd.Sign() > 0 {
-			e.treasuryShadow = addBig(e.treasuryShadow, res.CommissionRetainedHbd)
-			ev.Deltas["treasuryShadow"] = "+" + bigStr(res.CommissionRetainedHbd)
+		// NO HBD MOVES ON THIS PATH ANY MORE (OWNER RULING 2026-09-12). The
+		// escrow is tokens end to end: core returns CreditsReturned to the asker
+		// and, on a MISS, credits CommissionRetainedCredits to the owner's own
+		// token position. The two sum to the escrow by construction, so nothing
+		// can be released from one bucket and land in none — the failure the HBD
+		// version of this bookkeeping had to be patched for (USER RULING 1,
+		// 2026-07-28) is structurally impossible here.
+		if res.Owner != "" && res.CommissionRetainedCredits.Sign() > 0 {
+			e.addHolder(creator, res.Owner)
 		}
 		ev.Args["creditsReturned"] = bigStr(res.CreditsReturned)
-		ev.Args["commissionRefundedHbd"] = bigStr(res.CommissionHbd)
-		ev.Args["commissionRetainedHbd"] = bigStr(res.CommissionRetainedHbd)
+		ev.Args["commissionRetainedCredits"] = bigStr(res.CommissionRetainedCredits)
+		ev.Args["retainedTo"] = res.Owner
 		ev.Deltas["balance:"+payee] = deltaStr(beforeBal, core.BalanceOf(e.Store, creator, payee))
-		ev.Deltas["wallet:"+payee] = "+" + bigStr(res.CommissionHbd)
-		if rec != nil {
-			// The FULL held amount left the escrow bucket, not just the net.
-			ev.Deltas["heldCommissionTotal"] = "-" + bigStr(rec.CommissionHbd)
-		}
 	}
 	e.recordEvent(ev)
 }
@@ -743,17 +703,11 @@ func (e *Engine) doDecline(creator string, seq uint64) {
 	if ev.OK {
 		e.resolveEscrow(creator, seq, escrowDeclined)
 		payee := res.Asker // core pays the escrow's own asker — decline is creator-only to CALL, but the payout target is fixed by the escrow, same shape as Reclaim
-		if actor, ok := e.pop.Actors[payee]; ok && res.CommissionHbd != nil && res.CommissionHbd.Sign() > 0 {
-			actor.HBD = addBig(actor.HBD, res.CommissionHbd)
-		}
-		if res.CommissionHbd != nil && res.CommissionHbd.Sign() > 0 {
-			e.totalHbdOut = addBig(e.totalHbdOut, res.CommissionHbd)
-		}
+		// Nothing HBD-side, and nothing retained: a decline returns the whole
+		// escrow in tokens (OWNER RULING 2026-09-12 + RULING E's "we are paid
+		// for delivered service only").
 		ev.Args["creditsReturned"] = bigStr(res.CreditsReturned)
-		ev.Args["commissionRefundedHbd"] = bigStr(res.CommissionHbd)
 		ev.Deltas["balance:"+payee] = deltaStr(beforeBal, core.BalanceOf(e.Store, creator, payee))
-		ev.Deltas["wallet:"+payee] = "+" + bigStr(res.CommissionHbd)
-		ev.Deltas["heldCommissionTotal"] = "-" + bigStr(res.CommissionHbd)
 	}
 	e.recordEvent(ev)
 }
@@ -1268,24 +1222,12 @@ func (e *Engine) creatorTick(name string) {
 		}
 	}
 
-	paidUntil := core.PaidUntil(e.Store, name)
-	switch cs.Role {
-	case RoleCreatorReliable, RoleCreatorPriceMover, RoleCreatorAbandoner:
-		if e.Block+3*core.BlocksPerDay >= paidUntil {
-			periods := uint64(1 + actor.RNG.Intn(2))
-			e.doRenew(name, name, periods)
-			if e.haltErr != nil {
-				return
-			}
-		}
-	case RoleCreatorFlaky:
-		if e.Block >= paidUntil && actor.RNG.Float64() < 0.20 {
-			e.doRenew(name, name, 1)
-			if e.haltErr != nil {
-				return
-			}
-		}
-	}
+	// THE RENEWAL BRANCH IS GONE (OWNER RULING 2026-09-12). Reliable creators
+	// used to renew ahead of their paid_until and flaky ones used to let it
+	// lapse, which is how this model produced naturally-FROZEN markets. There is
+	// no subscription any more, so no role renews and no market lapses: the only
+	// route to FROZEN is Retire, which RoleCreatorAbandoner and the
+	// VoluntaryRetireBlock branch above both still drive.
 
 	if cs.Role == RoleCreatorPriceMover {
 		if actor.RNG.Float64() < 0.50 {
@@ -1372,8 +1314,8 @@ func (e *Engine) shopTick(creator string) {
 		// uniformly across the FULL protocol range (up to MaxFace, 10,000
 		// HBD) is routinely far beyond what any simulated actor's wallet
 		// (walletRangeBase, actors.go — a fan holds 60-300 HBD) can ever
-		// afford, so askIntent's own affordability guards (bal<
-		// creditsEstimate / actor.HBD<commission) silently skipped the ask
+		// afford, so askIntent's own affordability guard (bal <
+		// creditsEstimate — and, until 2026-09-12, an HBD check too) silently skipped the ask
 		// almost every time — offeringID != 0 was being PICKED but
 		// essentially never actually EXECUTED. A range comparable to
 		// InitialFace's keeps a fresh offering priced like an ordinary
@@ -1487,11 +1429,12 @@ func (e *Engine) fanTick(name string) {
 			return
 		}
 		e.askIntent(name, target, at)
-	case roll < 0.80: // occasionally keep a favourite creator alive
-		paidUntil := core.PaidUntil(e.Store, target)
-		if e.Block+2*core.BlocksPerDay >= paidUntil {
-			e.doRenew(name, target, 1)
-		}
+	case roll < 0.80: // (was: occasionally renew a favourite creator's subscription)
+		// Nothing to do — there is no subscription to pay since 2026-09-12. The
+		// branch is KEPT rather than collapsed so the roll distribution across
+		// every other fan action is unchanged from the runs this model's
+		// baselines were measured on; removing it would silently re-weight
+		// buy/ask/sell against each other and move every headline number.
 	case roll < 0.85: // notices the market froze; redeems what they can
 		// A1 (2026-08-30): on a natural FROZEN the open exit is the curve Sell,
 		// not Refund (which refuses outside wind-down). The holder takes

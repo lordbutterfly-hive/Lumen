@@ -14,8 +14,7 @@ import (
 // rtDelivered drives one full ask -> answered cycle and returns the escrow seq.
 func rtDelivered(t *testing.T, s Store, at uint64, asker string) uint64 {
 	t.Helper()
-	commission := commissionOwedFor(big.NewInt(9090))
-	res, err := askAt0(s, asker, creator1, at, big.NewInt(1000), commission, "cid", MinAskDeadline)
+	res, err := askAt0(s, asker, creator1, at, big.NewInt(1000), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -70,10 +69,9 @@ func TestRating_OnlyTheBuyerCanRate(t *testing.T) {
 
 func TestRating_OnlyDeliveredJobsAreRateable(t *testing.T) {
 	s, at := dgSetup(t)
-	commission := commissionOwedFor(big.NewInt(9090))
 
 	// PENDING — nothing has happened yet.
-	pending, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), commission, "cid", MinAskDeadline)
+	pending, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -94,7 +92,7 @@ func TestRating_OnlyDeliveredJobsAreRateable(t *testing.T) {
 
 	// DECLINED — the creator said no and handed everything back. Nothing was
 	// delivered, so there is nothing to rate.
-	declined, err := askAt0(s, asker1, creator1, reclaimAt+1, big.NewInt(1000), commission, "cid2", MinAskDeadline)
+	declined, err := askAt0(s, asker1, creator1, reclaimAt+1, big.NewInt(1000), "cid2", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask 2: %v", err)
 	}
@@ -137,8 +135,7 @@ func TestRating_NeverGatesAnyFundPath(t *testing.T) {
 		t.Fatalf("a 1-star rating closed inflows: %v", err)
 	}
 	// A new ask still works...
-	commission := commissionOwedFor(big.NewInt(9090))
-	if _, err := askAt0(s, asker1, creator1, at+10, big.NewInt(1000), commission, "cid3", MinAskDeadline); err != nil {
+	if _, err := askAt0(s, asker1, creator1, at+10, big.NewInt(1000), "cid3", MinAskDeadline); err != nil {
 		t.Fatalf("a 1-star rating blocked a new ask: %v", err)
 	}
 	// ...and so does the holder's exit.

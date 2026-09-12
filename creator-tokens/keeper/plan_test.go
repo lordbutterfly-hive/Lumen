@@ -7,6 +7,14 @@ import (
 	"creator-tokens/core"
 )
 
+// kpLongGap is an arbitrary LONG block gap these fixtures use to place a
+// wind-down far from registration. It was spelled core.SubscriptionPeriod (30
+// days) until the subscription was removed on 2026-09-12 (OWNER RULING;
+// core/params.go) — no fixture depended on it MEANING anything, only on its
+// size, so keeping the same number under an honest name leaves every fixture's
+// block geometry exactly what it was when these expectations were measured.
+const kpLongGap uint64 = 30 * core.BlocksPerDay
+
 func bi(n int64) *big.Int { return big.NewInt(n) }
 
 // A1 (owner ruling 2026-08-30): Plan sweeps RETIRED markets only. A naturally
@@ -322,12 +330,15 @@ func TestPlan_RealCore_NoRefundHolderOpInsideExitTaxWindow(t *testing.T) {
 		// (the subject) is then measured from the retire block, which is the
 		// same block the natural freeze used to anchor to, so every timing in
 		// this test is unchanged.
-		if err := core.Retire(s, creator, creator, registeredBlock+core.SubscriptionPeriod+core.GraceBlocks); err != nil {
+		// The retire lands a full notice earlier since 2026-09-12, so `lapse`
+		// below (which the exit-tax window is measured from, unchanged) is the
+		// block the market actually reaches FROZEN at.
+		if err := core.Retire(s, creator, creator, registeredBlock+kpLongGap); err != nil {
 			t.Fatalf("Retire: %v", err)
 		}
 		return s
 	}
-	lapse := registeredBlock + core.SubscriptionPeriod + core.GraceBlocks
+	lapse := registeredBlock + kpLongGap + core.GraceBlocks
 	viewAt := func(s *core.MemStore, block uint64) MarketView {
 		_, retired := core.RetiredAt(s, creator)
 		return MarketView{

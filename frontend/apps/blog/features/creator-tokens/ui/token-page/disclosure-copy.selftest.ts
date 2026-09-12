@@ -56,8 +56,6 @@ import {
   exitRoutesNote,
   honestNote,
   interstitialLines,
-  overdueBanner,
-  overdueFigures,
   positionLine,
   positionSegments
 } from './disclosure-copy';
@@ -270,15 +268,10 @@ console.log('\n── 6. THE 0 ÷ 0, AND THE THREE STATES IT WAS COLLAPSING.\n')
     buyRiskNote(backingPerTokenValue(1.203, 50), true).includes('Backing per token ($1.20) is')
   );
 
-  // The overdue banner interpolates that value, so it must not end "(currently  a token)".
-  check('the overdue banner quotes the figure when there is one', overdueBanner(overdueFigures('$1.20', 1.408, true), 'v2').includes('(currently $1.20 a token before your early-exit fee, against $1.41 now)'));
-  check(
-    '★ …and quotes nothing at all when there is not, rather than an empty parenthesis',
-    overdueBanner(overdueFigures('None yet', 1.007, true), 'v2').endsWith('if the creator renews.') &&
-      !overdueBanner(overdueFigures('None yet', 1.007, true), 'v2').includes('('),
-    `got: ${overdueBanner(overdueFigures('None yet', 1.007, true), 'v2')}`
-  );
-  check('…same for an unreadable one', overdueFigures('Unavailable', 1.4, true) === '');
+  // (The overdue banner interpolated that value and had to avoid ending
+  // "(currently  a token)". It is gone with the subscription — OWNER RULING
+  // 2026-09-12 — along with overdueFigures, which existed only to guard that
+  // interpolation.)
 }
 
 console.log('\n── 6b. THE POSITION ROW NAMES BOTH FIGURES FOR WHAT THEY ARE.\n');
@@ -389,7 +382,14 @@ console.log('\n── 7. WIRING. The components really render this, and no longe
   check('the closing note is the shared one', body.includes('{honestNote()}'));
   check('…and the old paragraph is gone', !view.includes('The floor above is what the reserve would pay out'));
   check('the wind-down banner is the shared one', body.includes('{WIND_DOWN_BANNER}'));
-  check('the overdue banner is built from the guarded figure', body.includes('overdueBanner(overdueFigures(backingPerTokenValue(market.floorUsd, market.supply), market.priceUsd), market.rules)'));
+  // ★ THE OVERDUE BANNER IS GONE (OWNER RULING 2026-09-12). It warned a buyer
+  // that a LAPSING market's grace was running out and quoted the backing figure
+  // so the reader could see what the coming freeze would cost them. Nothing
+  // lapses any more — OVERDUE is only the retire notice, which the wind-down
+  // banner above owns — so what has to be asserted is that no surface still
+  // quotes that figure outside the guard, which backing-visibility.selftest.ts
+  // now pins at exactly one site.
+  check('the overdue banner and its figure are gone with the subscription', !body.includes('overdueBanner(') && !body.includes('overdueFigures('));
   check('the position row renders segments so it keeps its emphasis', body.includes('positionSegments(tok(market.position.tokens)') && body.includes('<strong key={i}'));
   check('…and the old "worth / floor value" row is gone', !view.includes('· floor value') && !view.includes('· worth'));
   check('the how-it-works rail uses the rewritten line', view.includes('HOW_IT_WORKS_RESERVE_LINE'));
@@ -456,13 +456,15 @@ console.log('\n── 8. THE LAUNCH HIDE (owner 2026-08-27). No sentence points 
     HONEST_NOTE_BACKING_HIDDEN,
     ...INTERSTITIAL_LINES_BACKING_HIDDEN,
     buyRiskNote('$1.20', false),
-    buyRiskNote(backingPerTokenValue(0, 0), false),
-    overdueBanner(overdueFigures('$1.20', 1.408, false), 'v2')
+    buyRiskNote(backingPerTokenValue(0, 0), false)
   ];
 
   // ── Non-vacuity. A sweep of nothing must FAIL, and a detector that cannot
   //    fire proves nothing about the strings it passed over.
-  check('the hidden-branch sweep collected copy to inspect', hiddenCopy.length >= 7 && hiddenCopy.join('').length > 700, `${hiddenCopy.join('').length} bytes across ${hiddenCopy.length} strings`);
+  // 6 strings / >700 bytes since 2026-09-12: the overdue banner's hidden branch
+  // was the seventh, and it went with the banner. The floor is still what makes
+  // this non-vacuous — a sweep of nothing must fail — and it still binds.
+  check('the hidden-branch sweep collected copy to inspect', hiddenCopy.length >= 6 && hiddenCopy.join('').length > 700, `${hiddenCopy.join('').length} bytes across ${hiddenCopy.length} strings`);
   check('★ the pointer detector fires on the copy it was written for', POINTERS.some((ph) => HONEST_NOTE.includes(ph)) && POINTERS.some((ph) => INTERSTITIAL_LINES[2].includes(ph)));
 
   const dangling = hiddenCopy.filter((t) => POINTERS.some((ph) => t.includes(ph)));
@@ -480,14 +482,6 @@ console.log('\n── 8. THE LAUNCH HIDE (owner 2026-08-27). No sentence points 
   check('…and its first line is untouched', INTERSTITIAL_LINES_BACKING_HIDDEN[0] === INTERSTITIAL_LINES[0]);
   check('★ exactly one line was dropped, not a rewrite of the set', INTERSTITIAL_LINES_BACKING_HIDDEN.length === INTERSTITIAL_LINES.length - 1);
 
-  // ── The overdue banner. The warning must survive; only the figure goes.
-  const overdueHidden = overdueBanner(overdueFigures('$1.20', 1.408, false), 'v2');
-  check(
-    '★ the overdue banner still warns that buying stops, with no figure in it',
-    overdueHidden.includes('stops taking new buyers') && !overdueHidden.includes('$1.20'),
-    overdueHidden
-  );
-
   // ── The selectors follow the flag, in both directions. A selector that
   //    ignored its argument would pass every assertion above by accident.
   check('★ honestNote(true) is the original paragraph, verbatim', honestNote(true) === HONEST_NOTE);
@@ -503,35 +497,26 @@ console.log('\n── 8. THE LAUNCH HIDE (owner 2026-08-27). No sentence points 
   );
   check('★ interstitialLines follows its argument too', interstitialLines(true) === INTERSTITIAL_LINES && interstitialLines(false) === INTERSTITIAL_LINES_BACKING_HIDDEN);
   check('★ buyRiskNote follows its argument', buyRiskNote('$1.20', true) !== buyRiskNote('$1.20', false));
-  check('★ overdueFigures follows its argument', overdueFigures('$1.20', 1.408, true) !== '' && overdueFigures('$1.20', 1.408, false) === '');
 
   // ── And the DEFAULT is the flag, which is what actually ships. Written
   //    against the flag rather than against `false` so this keeps testing the
   //    real wiring after the owner flips it back on.
-  check('★ every selector defaults to SHOW_BACKING_FIGURES, so the page renders what the flag says', honestNote() === honestNote(SHOW_BACKING_FIGURES) && interstitialLines() === interstitialLines(SHOW_BACKING_FIGURES) && buyRiskNote('$1.20') === buyRiskNote('$1.20', SHOW_BACKING_FIGURES) && overdueFigures('$1.20', 1.408) === overdueFigures('$1.20', 1.408, SHOW_BACKING_FIGURES));
+  check('★ every selector defaults to SHOW_BACKING_FIGURES, so the page renders what the flag says', honestNote() === honestNote(SHOW_BACKING_FIGURES) && interstitialLines() === interstitialLines(SHOW_BACKING_FIGURES) && buyRiskNote('$1.20') === buyRiskNote('$1.20', SHOW_BACKING_FIGURES));
   check('the flag is off for launch, which is the state being shipped', SHOW_BACKING_FIGURES === false);
 }
 
 
-console.log('\n── THE OVERDUE BANNER IS GATED ON THE CHAIN OWN RULES ────────────');
-{
-  const v2 = overdueBanner('', 'v2');
-  const v1 = overdueBanner('', 'v1');
-  // POSITIVE controls: each branch states its own truth.
-  check('★ v2 says the curve sell stays open', /still sell on the curve/i.test(v2), v2);
-  check('★ v1 says the market winds down to a redeem', /winds down/i.test(v1) && /redeem/i.test(v1), v1);
-  // NEGATIVE controls, which are the half that makes this a test. A copy check
-  // asserting only the presence of its own words passes just as happily on a
-  // sentence that ALSO contains the opposite claim.
-  check('★ v2 never claims a wind-down', !/winds down/i.test(v2), v2);
-  check('★ v1 never claims the curve stays open', !/still sell on the curve/i.test(v1), v1);
-  check('★ the two branches are genuinely different strings', v1 !== v2);
-  check(
-    '★ the quoted figure survives both branches, so gating did not drop it',
-    overdueBanner(overdueFigures('$1.20', 1.408, true), 'v1').includes('$1.20') &&
-      overdueBanner(overdueFigures('$1.20', 1.408, true), 'v2').includes('$1.20')
-  );
-}
+// ── THE OVERDUE BANNER'S RULES GATE IS GONE WITH THE BANNER (2026-09-12).
+//
+// This block proved the lapse sentence branched on the chain's own reported
+// rules, with NEGATIVE controls on both sides — v2 must never claim a wind-down,
+// v1 must never claim the curve stays open — because a copy check asserting only
+// the presence of its own words passes just as happily on a sentence that also
+// contains the opposite claim. There is no lapse to describe any more.
+//
+// ★ THE NEGATIVE-CONTROL RULE IT ESTABLISHED APPLIES TO EVERY rules-GATED
+// SENTENCE STILL IN THIS MODULE, and is the reason it is written down here
+// rather than deleted silently.
 
 console.log(`\n${checks - failures}/${checks} checks passed`);
 if (failures > 0) {

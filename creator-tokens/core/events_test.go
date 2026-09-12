@@ -158,16 +158,8 @@ func TestEvRegistered_NilFeePaid(t *testing.T) {
 	wantStr(t, m, "feePaid", "0")
 }
 
-func TestEvRenewed(t *testing.T) {
-	out := EvRenewed("alice", "fan1", 200, 3, big.NewInt(30_000))
-	m := decode(t, out)
-	wantStr(t, m, "type", "renewed")
-	wantStr(t, m, "creator", "alice")
-	wantStr(t, m, "actor", "fan1") // deliberately NOT alice — Renew is permissionless
-	wantNum(t, m, "block", 200)
-	wantNum(t, m, "periods", 3)
-	wantStr(t, m, "paid", "30000")
-}
+// (TestEvRenewed is gone with EvRenewed: the 10 HBD subscription was removed on
+// 2026-09-12 — core/params.go — so no `renewed` event can ever be emitted again.)
 
 func TestEvFaceChanged(t *testing.T) {
 	out := EvFaceChanged("alice", "alice", 300, 5000, 9000)
@@ -211,45 +203,54 @@ func TestEvAsked(t *testing.T) {
 	wantStr(t, m, "actor", "bob")
 	wantNum(t, m, "seq", 7)
 	wantStr(t, m, "creditsSpent", "42")
-	wantStr(t, m, "commissionHbd", "1200")
+	wantStr(t, m, "commissionCredits", "1200")
 	wantStr(t, m, "rate", "1000000")
 	wantNum(t, m, "deadlineBlocks", 28800)
 	wantStr(t, m, "contentHash", "abc123hash")
 }
 
 func TestEvAnswered(t *testing.T) {
-	out := EvAnswered("alice", "alice", 700, 7, big.NewInt(42), big.NewInt(504), "answerhash1")
+	out := EvAnswered("alice", "alice", 700, 7, big.NewInt(42), big.NewInt(6), "platform1", "answerhash1")
 	m := decode(t, out)
 	wantStr(t, m, "type", "answered")
 	wantNum(t, m, "seq", 7)
 	wantStr(t, m, "creditsToCreator", "42")
-	wantStr(t, m, "commissionHbd", "504")
+	// commissionCredits + commissionTo replaced commissionHbd on 2026-09-12: the
+	// platform is paid in the creator's token, on a named account, so an indexer
+	// must be able to credit the right holder rather than a global HBD pot.
+	wantStr(t, m, "commissionCredits", "6")
+	wantStr(t, m, "commissionTo", "platform1")
 	wantStr(t, m, "answerHash", "answerhash1")
 }
 
 func TestEvAnswered_NilCommissionRendersZero(t *testing.T) {
 	// Defense-in-depth mirror of TestEvHelpers_MoneyNilRendersZero: a caller
-	// passing nil (should never happen — Answer's rec.commissionHbd is never
+	// passing nil (should never happen — Answer's rec.commissionCredits is never
 	// nil) must still render "0", not panic or emit a bare JSON null.
-	out := EvAnswered("alice", "alice", 700, 7, big.NewInt(42), nil, "answerhash1")
+	out := EvAnswered("alice", "alice", 700, 7, big.NewInt(42), nil, "", "answerhash1")
 	m := decode(t, out)
-	wantStr(t, m, "commissionHbd", "0")
+	wantStr(t, m, "commissionCredits", "0")
+	wantStr(t, m, "commissionTo", "")
 }
 
 func TestEvReclaimed(t *testing.T) {
-	out := EvReclaimed("alice", "bob", 800, 7, big.NewInt(42), big.NewInt(504), big.NewInt(168), "carol")
+	out := EvReclaimed("alice", "bob", 800, 7, big.NewInt(40), big.NewInt(2), "platform1", "carol")
 	m := decode(t, out)
 	wantStr(t, m, "type", "reclaimed")
 	wantStr(t, m, "actor", "bob")
 	wantNum(t, m, "seq", 7)
-	wantStr(t, m, "credits", "42")
-	wantStr(t, m, "commissionHbd", "504")
+	// `credits` is the NET the asker got back and commissionRetainedCredits the
+	// slice the platform kept; together they are the whole escrow (2026-09-12).
+	wantStr(t, m, "credits", "40")
+	wantStr(t, m, "commissionRetainedCredits", "2")
+	wantStr(t, m, "retainedTo", "platform1")
+	wantStr(t, m, "asker", "carol")
 }
 
 func TestEvReclaimed_NilCommissionRendersZero(t *testing.T) {
-	out := EvReclaimed("alice", "bob", 800, 7, big.NewInt(42), nil, nil, "carol")
+	out := EvReclaimed("alice", "bob", 800, 7, big.NewInt(42), nil, "", "carol")
 	m := decode(t, out)
-	wantStr(t, m, "commissionHbd", "0")
+	wantStr(t, m, "commissionRetainedCredits", "0")
 }
 
 func TestEvRefunded(t *testing.T) {
@@ -314,14 +315,13 @@ func TestEvAmountFieldsAreAlwaysStrings(t *testing.T) {
 		fields []string
 	}{
 		{"registered", EvRegistered("c", "a", 1, 1, 1, big.NewInt(1)), []string{"face", "cap", "feePaid"}},
-		{"renewed", EvRenewed("c", "a", 1, 1, big.NewInt(1)), []string{"paid"}},
 		{"faceChanged", EvFaceChanged("c", "a", 1, 1, 2), []string{"oldFace", "newFace"}},
 		{"capChanged", EvCapChanged("c", "a", 1, 1, 2), []string{"oldCap", "newCap"}},
 		{"prepaid", EvPrepaid("c", "a", 1, big.NewInt(1), big.NewInt(1)), []string{"hbdPaid", "creditsMinted"}},
 		{"transferred", EvTransferred("c", "a", "b", 1, big.NewInt(1)), []string{"amount"}},
-		{"asked", EvAsked("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, "h", 0), []string{"creditsSpent", "commissionHbd", "rate"}},
-		{"answered", EvAnswered("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "h"), []string{"creditsToCreator", "commissionHbd"}},
-		{"reclaimed", EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), "k"), []string{"credits", "commissionHbd", "commissionRetainedHbd"}},
+		{"asked", EvAsked("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, "h", 0), []string{"creditsSpent", "commissionCredits", "rate"}},
+		{"answered", EvAnswered("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "o", "h"), []string{"creditsToCreator", "commissionCredits"}},
+		{"reclaimed", EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "o", "k"), []string{"credits", "commissionRetainedCredits"}},
 		{"refunded", EvRefunded("c", "a", 1, big.NewInt(1), big.NewInt(1)), []string{"credits", "payout"}},
 		{"refundPushed", EvRefundPushed("c", "a", "h", 1, big.NewInt(1), big.NewInt(1)), []string{"creditsBurned", "payout"}},
 		// Added 2026-07-28: this table covered 11 of the 24 constructors, and
@@ -330,7 +330,7 @@ func TestEvAmountFieldsAreAlwaysStrings(t *testing.T) {
 		// was not checking. bought/sold matter most — they are the curve's
 		// only issuance and redemption path, and they already shipped
 		// unrecognised by the indexer once.
-		{"declined", EvDeclined("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "k"), []string{"credits", "commissionHbd"}},
+		{"declined", EvDeclined("c", "a", 1, 1, big.NewInt(1), "k"), []string{"credits"}},
 		{"bought", EvBought("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1)), []string{"minted", "cost", "fee", "totalDue"}},
 		{"sold", EvSold("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, 1), []string{"sold", "gross", "tax", "fee", "net"}},
 		{"offeringCreated", EvOfferingCreated("c", "a", 1, 1, "t", big.NewInt(1)), []string{"price"}},
@@ -487,14 +487,13 @@ func TestRegisterWithFirstBuy_PlainRegistration_FirstBuyResultIsNil(t *testing.T
 func TestEvSchemaVersionIsStableAcrossAllEvents(t *testing.T) {
 	outs := []string{
 		EvRegistered("c", "a", 1, 1, 1, big.NewInt(1)),
-		EvRenewed("c", "a", 1, 1, big.NewInt(1)),
 		EvFaceChanged("c", "a", 1, 1, 2),
 		EvCapChanged("c", "a", 1, 1, 2),
 		EvPrepaid("c", "a", 1, big.NewInt(1), big.NewInt(1)),
 		EvTransferred("c", "a", "b", 1, big.NewInt(1)),
 		EvAsked("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, "h", 0),
-		EvAnswered("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "h"),
-		EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), "k"),
+		EvAnswered("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "o", "h"),
+		EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "o", "k"),
 		EvRefunded("c", "a", 1, big.NewInt(1), big.NewInt(1)),
 		EvRefundPushed("c", "a", "h", 1, big.NewInt(1), big.NewInt(1)),
 		EvClosed("c", "a", 1),
@@ -502,7 +501,7 @@ func TestEvSchemaVersionIsStableAcrossAllEvents(t *testing.T) {
 		// covering 12 of 24. The envelope is shared by three different
 		// builders now (evOpen, evOpenActor, and EvInit's inline literal), so
 		// "all events carry v:1" is a claim about all three, not just evOpen.
-		EvDeclined("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "k"),
+		EvDeclined("c", "a", 1, 1, big.NewInt(1), "k"),
 		EvBought("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1)),
 		EvSold("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, 1),
 		EvOfferingCreated("c", "a", 1, 1, "t", big.NewInt(1)),
@@ -515,8 +514,9 @@ func TestEvSchemaVersionIsStableAcrossAllEvents(t *testing.T) {
 		EvPaused("a"),
 		EvUnpaused("a"),
 	}
-	if len(outs) != 24 {
-		t.Fatalf("this sweep must cover EVERY constructor in events.go; it has %d and there are 24. Add the missing one rather than leaving the name a lie.", len(outs))
+	// 23, not 24: EvRenewed was deleted with the subscription on 2026-09-12.
+	if len(outs) != 23 {
+		t.Fatalf("this sweep must cover EVERY constructor in events.go; it has %d and there are 23. Add the missing one rather than leaving the name a lie.", len(outs))
 	}
 	for _, out := range outs {
 		m := decode(t, out)

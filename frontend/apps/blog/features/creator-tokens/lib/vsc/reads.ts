@@ -654,8 +654,6 @@ export function unknownMarket(creator: string): Market {
     capTokens: 0,
     supplyTokens: 0,
     reserveHbd: 0,
-    paidUntilBlock: 0,
-    paidUntilAt: Date.now(),
     registeredAtBlock: 0,
     phase: 'UNKNOWN',
     // The contract-rules defaults, exactly as for a failed code read: v1, no
@@ -664,16 +662,9 @@ export function unknownMarket(creator: string): Market {
     rules: 'v1',
     headBlock: null,
     windingDown: false,
-    renewRefusal: null,
-    graceExpiresAtBlock: 0,
-    graceExpiresAt: Date.now(),
     globalInflowPaused: false,
     canBuy: false,
     canAsk: false,
-    // ★ false on an UNKNOWN market, like the other two: a failed read is not
-    // evidence that a subscription payment would be accepted. The caller must
-    // treat this as "cannot tell", never as "renew is open".
-    canRenew: false,
     // null, not 0: on an UNKNOWN market we make no claim about delivery
     // standing either. The actions are disabled by canBuy/canAsk being false,
     // and the UI must attribute that to the failed read, never to the creator.

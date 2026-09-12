@@ -369,18 +369,16 @@ export function askCostSegments(cost: AskCost): CostSegment[] {
   return [
     { text: 'This costs ', strong: false },
     { text: `${cost.tokens} token${plural}`, strong: true },
-    { text: ' from your balance, worth about ', strong: false },
-    { text: usdAmount(cost.tokenLegUsd), strong: true },
-    { text: ' at today\u2019s price, plus a separate ', strong: false },
-    { text: usdAmount(cost.commissionUsd), strong: true },
-    { text: ' platform commission paid in HBD. That is about ', strong: false },
+    { text: ' from your balance and nothing else, worth about ', strong: false },
     { text: usdAmount(cost.totalUsd), strong: true },
-    { text: ' in all, against a posted price of ', strong: false },
+    { text: ' at today\u2019s price, against a posted price of ', strong: false },
     // usdAmount, never a whole-dollar rounding: the sentence exists so the reader
     // can reconcile the gap between the posted price and the real cost, and a
     // posted $12.50 printed as "$13" makes that gap un-checkable.
     { text: usdAmount(cost.postedUsd), strong: true },
-    { text: '. Tokens are whole, so the last one rounds up.', strong: false }
+    { text: '. Tokens are whole, so the last one rounds up. Lumen\u2019s ', strong: false },
+    { text: usdAmount(cost.commissionUsd), strong: true },
+    { text: ' commission comes out of those tokens, not on top of them.', strong: false }
   ];
 }
 
@@ -389,16 +387,27 @@ export function askCostLine(cost: AskCost): string {
   return askCostSegments(cost).map((s) => s.text).join('');
 }
 
+/**
+ * ★ ONE ASSET, ONE TOTAL (OWNER RULING 2026-09-12). `tokens` is now the WHOLE
+ * cost: the platform's commission is carved out of those same tokens inside the
+ * escrow, not drawn separately in HBD. So totalUsd == tokenLegUsd, and
+ * commissionUsd is a SHARE of it — reported so the split is visible on the
+ * receipt, never added to it.
+ *
+ * The previous shape summed a token leg and an HBD leg, which is exactly the
+ * addition a reader must NOT do now; keeping `tokenLegUsd` as a field that
+ * equals `totalUsd` would invite it back, so the two are stated once.
+ */
 export function askCost(usdPosted: number, q: { tokens: number; commissionUsd: number }, priceUsd: number): AskCost {
   const tokens = Number.isFinite(q.tokens) ? Math.max(0, Math.floor(q.tokens)) : 0;
   const rate = Number.isFinite(priceUsd) && priceUsd > 0 ? priceUsd : 0;
-  const commissionUsd = Number.isFinite(q.commissionUsd) ? Math.max(0, q.commissionUsd) : 0;
-  const tokenLegUsd = tokens * rate;
+  const totalUsd = tokens * rate;
+  const commissionUsd = Number.isFinite(q.commissionUsd) ? Math.min(Math.max(0, q.commissionUsd), totalUsd) : 0;
   return {
     tokens,
-    tokenLegUsd,
+    tokenLegUsd: totalUsd,
     commissionUsd,
-    totalUsd: tokenLegUsd + commissionUsd,
+    totalUsd,
     postedUsd: Number.isFinite(usdPosted) ? usdPosted : 0
   };
 }

@@ -306,7 +306,6 @@ func TestSell_TaxDecay_ZeroAfterSixWeeks(t *testing.T) {
 	}
 	// Keep the subscription alive across the six-week hold — the market
 	// must be ACTIVE/OVERDUE for the curve rail.
-	setU64(s, kPaidUntil(c), 2000+ExitTaxDecayBlocks+SubscriptionPeriod)
 
 	rs, err := Sell(s, "patient", c, 2000+ExitTaxDecayBlocks, big.NewInt(5))
 	if err != nil {
@@ -335,7 +334,6 @@ func TestSell_TaxDecay_Midpoint_FullRate_ToTreasury(t *testing.T) {
 	if _, err := Buy(s, "holder", "creatora", 1000, big.NewInt(30)); err != nil {
 		t.Fatal(err) // cost = area(30) = 33,686
 	}
-	setU64(s, kPaidUntil("creatora"), 1000+ExitTaxDecayBlocks+SubscriptionPeriod)
 	treasuryBefore := getMoney(s, kTreasury())
 
 	// Held exactly half the decay window: τ = 750 bps exactly. Selling 10 of
@@ -580,17 +578,21 @@ func TestSell_Guards(t *testing.T) {
 			t.Fatalf("stranger err = %v, want %s", err, ErrBalance)
 		}
 	})
-	// A1 (owner ruling 2026-08-30): a natural FROZEN no longer closes the curve
-	// rail — non-payment is an inflow stop, not a wind-down, so the holder's
-	// exit stays exactly where it was. Retire is what closes it (next case).
-	t.Run("frozen-rail-open", func(t *testing.T) {
+	// ★ WAS "frozen-rail-open" (A1, owner ruling 2026-08-30): a market frozen by
+	// a subscription LAPSE kept its curve rail, because non-payment was an inflow
+	// stop and not a wind-down. That state cannot be built any more — the
+	// subscription was removed on 2026-09-12 and Retire is the only road to
+	// FROZEN, which always opens a wind-down. The surviving half of A1's claim is
+	// that a market nobody retired keeps its curve exit no matter how long it
+	// sits untouched, which is what this now asserts.
+	t.Run("unretired-rail-open-forever", func(t *testing.T) {
 		s, c := slSetupCurveMarket(t)
-		setU64(s, kPaidUntil(c), 2000)
-		if Phase(s, c, 2000+GraceBlocks) != StateFrozen {
-			t.Fatal("fixture: want FROZEN")
+		late := uint64(2000) + 365*BlocksPerDay
+		if Phase(s, c, late) != StateActive {
+			t.Fatal("fixture: a market nobody retired must be ACTIVE at every height")
 		}
-		if _, err := Sell(s, "hodler", c, 2000+GraceBlocks, big.NewInt(1)); err != nil {
-			t.Fatalf("A1: Sell on a naturally FROZEN market must work (curve rail open): %v", err)
+		if _, err := Sell(s, "hodler", c, late, big.NewInt(1)); err != nil {
+			t.Fatalf("Sell on an untouched ACTIVE market must work (curve rail open): %v", err)
 		}
 	})
 	t.Run("retired-rail-closed", func(t *testing.T) {
@@ -611,7 +613,6 @@ func TestSell_Guards(t *testing.T) {
 	})
 	t.Run("overdue-rail-open", func(t *testing.T) {
 		s, c := slSetupCurveMarket(t)
-		setU64(s, kPaidUntil(c), 2000)
 		if _, err := Sell(s, "hodler", c, 2100, big.NewInt(1)); err != nil {
 			t.Fatalf("OVERDUE sell failed: %v — grace is fully functional", err)
 		}
@@ -749,7 +750,6 @@ func TestSell_NetNeverNegative_Property(t *testing.T) {
 		c := "creatora"
 		setupMarket(s, c, 100, MaxCap)
 		block := uint64(1000)
-		setU64(s, kPaidUntil(c), block+200*SubscriptionPeriod)
 		n := big.NewInt(int64(r.Intn(50) + 1))
 		if _, err := Buy(s, "h", c, block, n); err != nil {
 			t.Fatal(err)
@@ -783,7 +783,6 @@ func TestGoverningTheorem_EndToEnd_FreshBuyerNeverProfitsAtWindDown(t *testing.T
 		c := "creatora"
 		setupMarket(s, c, 100, MaxCap)
 		block := uint64(1000)
-		setU64(s, kPaidUntil(c), block+100*SubscriptionPeriod)
 
 		// Random prior market shape: background buys, sometimes partial
 		// background sells (which keep R === area(S) exactly either way).
@@ -809,7 +808,6 @@ func TestGoverningTheorem_EndToEnd_FreshBuyerNeverProfitsAtWindDown(t *testing.T
 		// Any wait (0 .. beyond the decay window), then the market winds
 		// down and the buyer refunds their whole position pro-rata.
 		block += uint64(r.Int63n(int64(ExitTaxDecayBlocks * 2)))
-		setU64(s, kPaidUntil(c), block+SubscriptionPeriod) // keep alive until the retire
 		if err := Retire(s, c, c, block); err != nil {
 			t.Fatal(err)
 		}
@@ -846,7 +844,6 @@ func TestSellBuy_Property_EqualityLedgerTreasury(t *testing.T) {
 		block := uint64(r.Intn(10000) + 1)
 		// Keep the subscription alive for the whole run: the suite tests the
 		// trading phase; wind-down rails have their own suite (refund_test).
-		setU64(s, kPaidUntil(c), block+100*SubscriptionPeriod)
 
 		sumCosts := mZero() // Σ buyCost   (curve legs in)
 		sumGross := mZero() // Σ p         (curve legs out)
@@ -966,7 +963,6 @@ func TestSell_RoundTripNeverProfits_Property(t *testing.T) {
 		setupMarket(s, c, 100, MaxCap)
 		// Random pre-existing curve depth.
 		block := uint64(1000)
-		setU64(s, kPaidUntil(c), block+200*SubscriptionPeriod)
 		if pre := r.Intn(2000); pre > 0 {
 			if _, err := Buy(s, "background", c, block, big.NewInt(int64(pre))); err != nil {
 				t.Fatal(err)

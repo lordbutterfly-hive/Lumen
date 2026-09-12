@@ -15,7 +15,6 @@ func TestPFK1_AttackerCostVsHarm(t *testing.T) {
 	}
 	t0 := uint64(2000)
 	t1 := t0 + ExitTaxDecayBlocks
-	setU64(s, kPaidUntil(c), t1+SubscriptionPeriod)
 	if _, err := Buy(s, bob, c, t0, big.NewInt(50000)); err != nil {
 		t.Fatal(err)
 	}

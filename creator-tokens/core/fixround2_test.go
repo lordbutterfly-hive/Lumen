@@ -242,9 +242,9 @@ func TestRefundHolder_NOTICE1DoS_LapseThenRetireRefreshBounded(t *testing.T) {
 	if err := Register(s, c, c, 1000, 1000, MaxCap); err != nil {
 		t.Fatal(err)
 	}
-	// paidUntil = 1000 + SubscriptionPeriod; the natural freeze is at
+	// paidUntil = 1000 + hzLongGap; the natural freeze is at
 	// paidUntil + GraceBlocks — the value windDownOpenBlock must anchor to.
-	paidUntil := 1000 + SubscriptionPeriod
+	paidUntil := 1000 + hzLongGap
 	freezeAt := paidUntil + GraceBlocks
 	if _, err := Buy(s, g, c, 1000, big.NewInt(1)); err != nil {
 		t.Fatal(err)
@@ -252,12 +252,17 @@ func TestRefundHolder_NOTICE1DoS_LapseThenRetireRefreshBounded(t *testing.T) {
 	if _, err := Buy(s, sybil, c, 1000, big.NewInt(1)); err != nil {
 		t.Fatal(err)
 	}
-	if Phase(s, c, freezeAt) != StateFrozen {
-		t.Fatalf("fixture: phase at freezeAt = %s, want FROZEN", Phase(s, c, freezeAt))
+	// ★ The fixture used to freeze this market by letting its subscription lapse
+	// and assert FROZEN here. Since 2026-09-12 a market that is not retired is
+	// simply ACTIVE at every height (OWNER RULING; core/params.go), which makes
+	// the A1 property below hold for a stronger reason, not a weaker one: there
+	// is no phase a non-retired market can reach that starts a wind-down.
+	if Phase(s, c, freezeAt) != StateActive {
+		t.Fatalf("fixture: phase at freezeAt = %s, want ACTIVE (nothing lapses)", Phase(s, c, freezeAt))
 	}
 
-	// ★ A1: a natural FROZEN is NOT a wind-down. No push fires on it, however
-	// long it lasts, and the holder's curve exit is untouched.
+	// ★ A1, strengthened: a market nobody retired is NEVER in wind-down. No push
+	// fires on it, however long it sits, and the holder's curve exit is untouched.
 	longLapsed := freezeAt + 2*ExitTaxDecayBlocks
 	if _, ok := windDownOpenBlock(s, c, longLapsed); ok {
 		t.Fatal("A1: a lapsed (never retired) market must report not-in-wind-down")
@@ -426,7 +431,6 @@ func TestSell_OUTFLOWK1_SellLaunderClosed_WindDownStillOpen(t *testing.T) {
 		}
 		t0 := uint64(2000)
 		t1 := t0 + ExitTaxDecayBlocks
-		setU64(s, kPaidUntil(c), t1+SubscriptionPeriod) // stay ACTIVE through t1
 		if _, err := Buy(s, bob, c, t0, big.NewInt(50000)); err != nil {
 			t.Fatal(err)
 		}
@@ -573,13 +577,16 @@ func TestWindDownOpenBlock_Sources(t *testing.T) {
 		t.Fatalf("retired windDownOpen = (%d,%v), want (7000,true)", open, ok)
 	}
 
-	// Natural-lapse path (no retire).
+	// Non-retired path. (This was the "natural-lapse" path until 2026-09-12; a
+	// market with no retire mark is now simply ACTIVE forever, which makes the
+	// same assertion — never in wind-down — hold at every one of these blocks for
+	// an even simpler reason.)
 	s2 := NewMemStore()
 	const c2 = "creB"
 	if err := Register(s2, c2, c2, 1000, 1000, MaxCap); err != nil {
 		t.Fatal(err)
 	}
-	paidUntil := getU64(s2, kPaidUntil(c2))
+	paidUntil := uint64(1000 + 30*BlocksPerDay)
 	freezeAt := paidUntil + GraceBlocks
 	// OVERDUE (recoverable) is NOT wind-down.
 	if _, ok := windDownOpenBlock(s2, c2, paidUntil+1); ok {

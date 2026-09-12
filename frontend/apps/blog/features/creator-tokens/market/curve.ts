@@ -10,7 +10,7 @@ import {
   quoteBuyBaseUnits,
   quoteSellBaseUnits,
   spotRateBaseUnits,
-  splitFaceBaseUnits,
+  commissionOwedForBaseUnits,
   tokensAffordableForBudget
 } from '../lib/contract-math';
 
@@ -353,24 +353,30 @@ export interface ServiceQuote {
   tokens: number;
   /** The 12% platform commission — a SEPARATE HBD payment, never tokens. */
   commissionUsd: number;
-  /** The token leg's USD value + commissionUsd — reconstructs the posted `usd` face, up to the floor/ceil residue. */
+  /** The posted `usd` face, echoed back — what the buyer parts with, in one asset. */
   totalUsd: number;
 }
 
 /**
- * The true cost of a USD-priced service (ask.go splitFace + creditsForAsk,
- * USER RULING 2026-07-27): the posted `usd` is the buyer's TOTAL, not a
- * token-only price. 12% is carved off as a SEPARATE HBD commission leg
- * (splitFaceBaseUnits); only the remaining 88% (the token leg) is what's
- * actually escrowed in tokens, ceil-divided by the live price — CEIL, and the
- * rounding favours the reserve, so a client that floors (or that divides
- * floats) quotes the buyer fewer tokens than the chain will actually escrow
- * and the ask trips their own maxCredits cap.
+ * The true cost of a USD-priced service (ask.go creditsForAsk + commissionOwedFor):
+ * the posted `usd` is the buyer's TOTAL, and they pay ALL of it in the creator's
+ * token. The count is ceil(face/rate) — CEIL, and the rounding favours the
+ * reserve, so a client that floors (or that divides floats) quotes the buyer
+ * fewer tokens than the chain will actually escrow and the ask trips their own
+ * maxCredits cap.
  *
- * Replaces the old serviceTokens(usd, priceUsd), which priced the FULL posted
- * amount in tokens while the commission was ALSO drawn as a separate HBD
- * leg — a posted "200" cost the buyer 224 with no line item ever showing the
- * extra 24 (splitFaceBaseUnits's own doc has the full autopsy).
+ * ★ THE WHOLE FACE IS PRICED IN TOKENS (OWNER RULING 2026-09-12). Between
+ * 2026-07-27 and that ruling this priced only an 88% "token leg" and reported
+ * the other 12% as a separate HBD commission the buyer also had to pay — which
+ * meant a customer holding the creator's token still could not buy that
+ * creator's service without HBD. The buyer's TOTAL is unchanged (the 2026-07-27
+ * ruling still holds: nothing is ever added on top of the posted price); what
+ * changed is that it is now one asset, and the platform's 12% is carved out of
+ * the tokens inside the escrow. `tokens` therefore reads ~13.6%% higher than it
+ * did, for the same money.
+ *
+ * commissionUsd is the platform's share of that one payment, reported so a
+ * receipt can show the split — never to be added to `tokens`.
  *
  * `priceUsd` here stands in for the settlement rate. The REAL rate is
  * min(TWAP_short, TWAP_long, spot) and the contract REFUSES when it cannot
@@ -382,12 +388,12 @@ export function serviceQuote(usd: number, priceUsd: number): ServiceQuote {
     return { tokens: 0, commissionUsd: 0, totalUsd: 0 };
   }
   const faceBaseUnits = usdToBaseUnits(usd);
-  const { tokenLegBaseUnits, commissionBaseUnits } = splitFaceBaseUnits(faceBaseUnits);
   const rateBaseUnits = Math.max(1, Math.round(priceUsd * HBD_PER_USD * SCALE));
+  const tokens = creditsForAskBaseUnits(faceBaseUnits, rateBaseUnits);
   return {
-    tokens: creditsForAskBaseUnits(tokenLegBaseUnits, rateBaseUnits),
-    commissionUsd: baseUnitsToUsd(commissionBaseUnits),
-    totalUsd: baseUnitsToUsd(tokenLegBaseUnits + commissionBaseUnits)
+    tokens,
+    commissionUsd: baseUnitsToUsd(commissionOwedForBaseUnits(tokens) * rateBaseUnits),
+    totalUsd: baseUnitsToUsd(faceBaseUnits)
   };
 }
 

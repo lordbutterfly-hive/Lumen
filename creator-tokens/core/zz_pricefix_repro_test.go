@@ -17,7 +17,6 @@ func pfMarket(t *testing.T, s *MemStore, c string, activeUntil uint64) {
 	}
 	// Keep the market ACTIVE through activeUntil so Buy is permitted at the
 	// distant blocks the maturity window forces.
-	setU64(s, kPaidUntil(c), activeUntil+SubscriptionPeriod)
 }
 
 func pfBuy(t *testing.T, s *MemStore, who, c string, block uint64, n int64) {

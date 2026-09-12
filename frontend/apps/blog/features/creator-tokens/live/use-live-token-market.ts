@@ -160,11 +160,6 @@ export interface LiveTokenMarketResult {
    */
   servicesOracleStatus: QuoteOracleStatus | null;
 
-  /** market.go Renew — pays `periods` months of the subscription. Resolves only once the chain has recorded it. */
-  renew: (periods: number) => Promise<void>;
-  /** True while a renewal is in flight, including the confirmation wait. */
-  isRenewing: boolean;
-
   /** Buys `tokens` whole tokens. `maxTotalUsd` becomes the signed transfer.allow cap — the buyer's ONLY slippage protection. */
   buy: (tokens: number, maxTotalUsd?: number) => Promise<void>;
   sell: (tokens: number, minNetUsd?: number) => Promise<void>;
@@ -488,13 +483,10 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
    * reachable — the contract itself allows any caller, so the two are kept as
    * separate arguments rather than collapsed.
    */
-  const renewMutation = useMutation({
-    mutationFn: async ({ periods }: { periods: number }) => {
-      const { source, signer } = requireSigner();
-      await runUnderTxClaim(creator, signer, () => source.renewSubscription({ creator, caller: signer, periods }));
-    },
-    onSuccess: invalidate
-  });
+  // THERE IS NO renewMutation. It paid the market's subscription from the token
+  // page. The subscription was removed from the contract on 2026-09-12 (OWNER
+  // RULING; creator-tokens/core/params.go) — a market is ACTIVE from
+  // registration until its creator retires it.
 
   const askMutation = useMutation({
     mutationFn: async (input: { offeringId: number; contentHash: string; deadlineDays: number; maxCostUsd: number }) => {
@@ -609,8 +601,6 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
     ask: useCallback((input: { offeringId: number; contentHash: string; deadlineDays: number; maxCostUsd: number }) => askMutation.mutateAsync(input), [askMutation]),
     transfer: useCallback((to: string, tokens: number) => transferMutation.mutateAsync({ to, tokens }), [transferMutation]),
 
-    renew: useCallback((periods: number) => renewMutation.mutateAsync({ periods }).then(() => undefined), [renewMutation]),
-    isRenewing: renewMutation.isLoading,
 
     isBuying: buyMutation.isLoading,
     retry: () => {

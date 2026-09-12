@@ -113,17 +113,29 @@ func TestKeeperAbsentFailSafesHold(t *testing.T) {
 	// Confirm the keeper genuinely never acted: RefundHolder and CloseIfDrained
 	// are keeper-only in this simulator, so there must be zero of them.
 	//
-	// ★ A1 (owner ruling 2026-08-30) re-shapes the fail-safe this proves. It
-	// used to be "holders self-REFUND without a keeper", because a lapsed
-	// market froze into wind-down and the pull rail was the only exit. A lapse
-	// is an inflow stop now: the holder's exit on a naturally FROZEN market is
-	// the curve Sell, and the pro-rata Refund exists only after a Retire. So
-	// the fail-safe is "holders still EXIT without a keeper", counted on the
-	// rail core actually has open in the phase the exit ran in (the wrappers
-	// record `phase` for exactly this): curve sells on FROZEN markets, plus
-	// refunds on retired ones. Sells in ACTIVE are not counted — they would
-	// make the assertion vacuous.
-	refunds, frozenSells := 0, 0
+	// ★ THE FAIL-SAFE HAS BEEN RE-SHAPED TWICE, AND THIS IS WHAT IT MEANS NOW.
+	// Originally it was "holders self-REFUND without a keeper", because a lapsed
+	// market froze into a wind-down and the pull rail was the only exit. A1
+	// (2026-08-30) made a lapse an inflow stop instead, so the exit became the
+	// curve Sell and the count moved to sells on FROZEN markets. The OWNER
+	// RULING of 2026-09-12 removed the subscription entirely: markets do not
+	// lapse at all, so FROZEN is reachable only by a creator's own Retire and
+	// "sells on a FROZEN market" is now a count of something that cannot happen
+	// on an abandoned market.
+	//
+	// The property itself never changed: A HOLDER CAN GET OUT WHEN THE CREATOR
+	// HAS WALKED AWAY AND NOBODY IS KEEPING THE LIGHTS ON. So the count is sells
+	// on markets whose creator has actually abandoned them (past their own
+	// AbandonBlock, read from the engine's population rather than guessed), plus
+	// refunds on retired ones. Sells on a live, attended market are still NOT
+	// counted — that is what would make this vacuous.
+	abandonedAt := map[string]uint64{}
+	for name, cs := range eng.creators {
+		if cs.AbandonBlock != 0 {
+			abandonedAt[name] = cs.AbandonBlock
+		}
+	}
+	refunds, abandonedSells := 0, 0
 	for _, ev := range eng.Trace.Events {
 		switch ev.Action {
 		case "refundHolder", "closeIfDrained":
@@ -133,14 +145,20 @@ func TestKeeperAbsentFailSafesHold(t *testing.T) {
 				refunds++
 			}
 		case "sell":
-			if ev.OK && ev.Args["phase"] == core.StateFrozen {
-				frozenSells++
+			if !ev.OK {
+				continue
+			}
+			if b, ok := abandonedAt[ev.Creator]; ok && ev.Block >= b {
+				abandonedSells++
 			}
 		}
 	}
-	t.Logf("keeper-absent exits: %d curve sells on FROZEN markets, %d pro-rata refunds on retired ones", frozenSells, refunds)
-	if refunds+frozenSells == 0 {
-		t.Error("expected holders to still exit without a keeper (sell on a lapsed market, or refund on a retired one) — the fail-safe")
+	t.Logf("keeper-absent exits: %d curve sells on ABANDONED markets, %d pro-rata refunds on retired ones", abandonedSells, refunds)
+	if len(abandonedAt) == 0 {
+		t.Fatal("fixture produced no abandoned creator at all — this run proves nothing about the fail-safe")
+	}
+	if refunds+abandonedSells == 0 {
+		t.Error("expected holders to still exit without a keeper (sell on an abandoned market, or refund on a retired one) — the fail-safe")
 	}
 
 	path := filepath.Join(t.TempDir(), "trace.json")
@@ -167,14 +185,26 @@ func TestKeeperAbsentFailSafesHold(t *testing.T) {
 	}
 }
 
-// TestH2SetFaceDropSandwichRejected — Upgrade 3(b). Drives the exact H2
-// sandwich through the sim's own wrappers, in a single block: the asker pays
-// the commission owed at the OLD face, a band-legal SetFace then DROPS the
-// face, and the ask executes. The H2 exact-commission fix must reject it
-// (commissionHbdPaid must EXACTLY equal commissionOwedFor(face_at_execution)),
-// while the same commission paid against the UNCHANGED face succeeds — proving
-// the guard rejects the sandwich specifically, not asks in general.
-func TestH2SetFaceDropSandwichRejected(t *testing.T) {
+// TestFaceSpikeSandwichRejected — Upgrade 3(b). Drives a same-block face
+// sandwich through the sim's own wrappers and proves the asker's signed cap
+// stops it.
+//
+// ★ THIS WAS TestH2SetFaceDropSandwichRejected, AND THE DIRECTION FLIPPED WITH
+// THE MONEY MODEL (OWNER RULING 2026-09-12). The H2 guard it drove required
+// commissionHbdPaid to EXACTLY equal commissionOwedFor(face at execution), so
+// the dangerous sandwich was a band-legal face DROP: the asker had already paid
+// the commission owed at the higher face, and the surplus would have been held
+// and then booked to a treasury with no exit. There is no separate commission
+// amount any more — the 12% is carved out of the credits — so a face drop is now
+// simply a cheaper ask and is correctly ACCEPTED.
+//
+// The sandwich that still matters is the SPIKE: a creator raising their face
+// between the asker signing and the ask executing, under producer-chosen
+// intra-block ordering. maxCredits — the asker's own signed ceiling, which now
+// bounds the WHOLE price rather than one of two legs — is what refuses it, and
+// that is what this test drives. The control proves the refusal is about the
+// spike and not about asks in general at the new face.
+func TestFaceSpikeSandwichRejected(t *testing.T) {
 	cfg := Config{Seed: 7, Days: 5, NumCreators: 4, NumActors: 8, AdversarialOrder: true}
 	eng := NewEngine(cfg)
 	eng.endBlock = genesisBlock + uint64(cfg.Days)*core.BlocksPerDay
@@ -263,49 +293,57 @@ func TestH2SetFaceDropSandwichRejected(t *testing.T) {
 		t.Fatalf("asker credits = %s, want 200 (the warm-up/top-up buys did not land)", got)
 	}
 
-	oldOwed := bpsFloorBig(big.NewInt(4000), core.CommissionBps) // 480
-	maxCredits := big.NewInt(80000)
+	// The asker quotes at face 4000 and signs a cap of exactly what that costs.
+	// Derived from the live settlement, not guessed, so the cap is the tightest
+	// legitimate one rather than a generous round number.
+	q, err := core.SettleSpend(eng.Store, creator, eng.Block, big.NewInt(4000))
+	if err != nil {
+		t.Fatalf("quote at face 4000: %v", err)
+	}
+	signedCap := new(big.Int).Set(q.Credits)
 
-	// CONTROL: correct commission at the current (unchanged) face -> succeeds.
-	eng.doAskExecute(asker, creator, maxCredits, oldOwed, "cid-control", core.MinAskDeadline, 0)
+	// CONTROL: the ask executes against the face it was quoted at -> succeeds.
+	eng.doAskExecute(asker, creator, signedCap, "cid-control", core.MinAskDeadline, 0)
 	control := eng.Trace.Events[len(eng.Trace.Events)-1]
 	if control.Action != "ask" || !control.OK {
-		t.Fatalf("control ask should succeed (commission %s matches owed at face 4000), got OK=%v err=%s/%s", oldOwed, control.OK, control.ErrSym, control.ErrMsg)
+		t.Fatalf("control ask should succeed at the quoted face 4000 with cap %s, got OK=%v err=%s/%s", signedCap, control.OK, control.ErrSym, control.ErrMsg)
 	}
 
-	// SANDWICH: band-legal drop 4000 -> 3000 (within the 2x band), same block.
-	eng.doSetFace(creator, 3000)
+	// SANDWICH: band-legal SPIKE 4000 -> 8000 (exactly the 2x band), same block.
+	eng.doSetFace(creator, 8000)
 	sf := eng.Trace.Events[len(eng.Trace.Events)-1]
 	if sf.Action != "setFace" || !sf.OK {
-		t.Fatalf("band-legal face drop 4000->3000 should succeed, got OK=%v err=%s/%s", sf.OK, sf.ErrSym, sf.ErrMsg)
+		t.Fatalf("band-legal face spike 4000->8000 should succeed, got OK=%v err=%s/%s", sf.OK, sf.ErrSym, sf.ErrMsg)
 	}
 
-	// The asker's already-signed ask still pays the OLD 480; owed at 3000 is
-	// now 360. The H2 exact-commission guard must reject it.
-	eng.doAskExecute(asker, creator, maxCredits, oldOwed, "cid-sandwich", core.MinAskDeadline, 0)
+	// The asker's already-signed cap was quoted at 4000. maxCredits must refuse.
+	eng.doAskExecute(asker, creator, signedCap, "cid-sandwich", core.MinAskDeadline, 0)
 	sandwich := eng.Trace.Events[len(eng.Trace.Events)-1]
 	if sandwich.Action != "ask" {
 		t.Fatalf("expected the last event to be the sandwich ask, got %q", sandwich.Action)
 	}
 	if sandwich.OK {
-		t.Fatal("H2 VIOLATION: the sandwich ask (paid 480 owed at old face 4000, executes against dropped face 3000 owed 360) was ACCEPTED — the exact-commission guard did not fire")
+		t.Fatal("SANDWICH VIOLATION: an ask signed against face 4000 executed against a spiked face 8000 — the maxCredits cap did not fire")
 	}
-	if sandwich.ErrSym != "BALANCE" || !strings.Contains(sandwich.ErrMsg, "commission must exactly equal") {
-		t.Errorf("expected the H2 exact-commission rejection, got %s: %s", sandwich.ErrSym, sandwich.ErrMsg)
+	if sandwich.ErrSym != "INPUT" || !strings.Contains(sandwich.ErrMsg, "creditsSpent exceeds maxCredits") {
+		t.Errorf("expected the maxCredits slippage rejection, got %s: %s", sandwich.ErrSym, sandwich.ErrMsg)
 	}
 
-	// PROOF the guard is rejecting the MISMATCH specifically, not the ask in
-	// general once the face has moved (the fixture's oracle history could in
-	// principle still be one settlement guard away from failing on ANY ask
-	// executed at the new face — this rules that out): the CORRECT commission
-	// at the current, dropped face (owed = floor(3000*1200/10000) = 360) must
-	// succeed at the same block, against the same asker, same oracle state.
-	newOwed := bpsFloorBig(big.NewInt(3000), core.CommissionBps) // 360
-	eng.doAskExecute(asker, creator, maxCredits, newOwed, "cid-honest-at-new-face", core.MinAskDeadline, 0)
+	// PROOF the cap is rejecting the SPIKE specifically, not the ask in general
+	// once the face has moved (the fixture's oracle history could in principle
+	// still be one settlement guard away from failing on ANY ask at the new
+	// face — this rules that out): an asker who re-quotes at the CURRENT face
+	// and signs the cap that price actually costs succeeds at the same block,
+	// against the same asker and the same oracle state.
+	q2, err := core.SettleSpend(eng.Store, creator, eng.Block, big.NewInt(8000))
+	if err != nil {
+		t.Fatalf("re-quote at face 8000: %v", err)
+	}
+	eng.doAskExecute(asker, creator, q2.Credits, "cid-honest-at-new-face", core.MinAskDeadline, 0)
 	honest := eng.Trace.Events[len(eng.Trace.Events)-1]
 	if honest.Action != "ask" || !honest.OK {
-		t.Fatalf("an ask paying the CORRECT commission (360) at the dropped face (3000) should succeed — if it doesn't, the sandwich rejection above proves nothing about the H2 guard specifically; got OK=%v err=%s/%s",
-			honest.OK, honest.ErrSym, honest.ErrMsg)
+		t.Fatalf("an ask re-quoted at the CURRENT face (8000, cap %s) should succeed — if it doesn't, the sandwich rejection above proves nothing about the cap specifically; got OK=%v err=%s/%s",
+			q2.Credits, honest.OK, honest.ErrSym, honest.ErrMsg)
 	}
 }
 

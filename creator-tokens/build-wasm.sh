@@ -18,7 +18,7 @@ IMAGE="tinygo/tinygo:0.41.1"
 OUT="${1:-bin/main.wasm}"
 # The CID the frontend's V2_CODE_CIDS allow-lists for v2. If you INTEND to change
 # the contract, this line and that allow-list move together, in that order.
-EXPECTED_CID=bafkreigqshjvsnoauwq6eeiisibbpqpesw5ysuiyhp36rjl3i7xi4dwqwi
+EXPECTED_CID=bafkreidk6c4b24wllm5fbxpnxmshxi2gx5yeqi2v64lasi5dx2lb3rwo3q
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ★ THE TINYGO CACHE MUST LIVE ON A REAL LINUX FILESYSTEM. This repo is on a

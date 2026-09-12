@@ -3,6 +3,14 @@
 Per-creator token on a bonding curve. You buy a creator's token, spend it on
 their services, and the price moves with supply.
 
+> **2026-09-12 — COMMISSION + SUBSCRIPTION UPDATE BUILT, NOT DEPLOYED.** The 12%
+> commission is now 12% of the TOKENS, credited to the owner account on delivery
+> (no HBD on the ask rail at all), and the 10 HBD monthly subscription is REMOVED
+> whole — no Renew, no paid_until, no lapse. New CID
+> `bafkreidk6c4b24wllm5fbxpnxmshxi2gx5yeqi2v64lasi5dx2lb3rwo3q`. Full report,
+> deploy order and the still-undone testnet escrow proof:
+> `/mnt/o/LUMEN-DOCS/MERITUM-CONTRACT-UPDATE-BUILT-2026-09-12.md`.
+
 > **Deployment status, corrected 2026-08-19 (audit anomaly AN-01).** This line
 > used to read "Nothing is deployed." It is deployed on Magi **testnet** as
 > `vsc1BcaD8JrwJPAAN5cU1cHKCBdZrd7jz2WGt8` (`REACT_APP_CREATOR_TOKENS_NET_ID=vsc-testnet`)

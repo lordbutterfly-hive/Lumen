@@ -264,12 +264,16 @@ func TestHalfYearRunGhostsStayFrozenUnderA1(t *testing.T) {
 		if _, retired := core.RetiredAt(eng.Store, name); retired {
 			continue
 		}
-		if eng.Block < core.PaidUntil(eng.Store, name)+core.GraceBlocks {
-			continue // not past grace yet; says nothing either way
-		}
 		ghosts++
-		if got := core.Phase(eng.Store, name, eng.Block); got != core.StateFrozen {
-			t.Errorf("A1: ghost creator %s ended the run %s, want FROZEN (a lapse must never close a market)", name, got)
+		// ★ A GHOST CREATOR'S MARKET STAYS ACTIVE NOW (OWNER RULING 2026-09-12).
+		// This used to wait for the creator's paid_until + grace to elapse and
+		// then assert FROZEN — A1's claim that a lapse closes inflows without
+		// closing the market. There is no lapse: a creator who simply walks away
+		// leaves an ACTIVE market whose holders keep their curve exit forever,
+		// which is A1's guarantee reached by a shorter road and is the whole
+		// reason removing the subscription was safe for holders.
+		if got := core.Phase(eng.Store, name, eng.Block); got != core.StateActive {
+			t.Errorf("ghost creator %s ended the run %s, want ACTIVE (an abandoned market must never close itself)", name, got)
 		}
 		sells := 0
 		for _, ev := range eng.Trace.Events {

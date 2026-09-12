@@ -18,28 +18,37 @@
  *
  * ★★ WHAT THIS FILE USED TO PROVE, AND WHY IT NO LONGER DOES (2026-08-30, B2).
  * Until today the guard also refused OVER-SHARE, a service above 10% of the cap,
- * and this file asserted that a $15 service on the live 30-cap market (14 tokens,
- * 47%) was refused. The owner reported that refusal as an error "that should
+ * and this file asserted that a $15 service on the live 30-cap market (14 tokens
+ * then, 15 now — see the 2026-09-12 note below; 47%%, now 50%%) was refused. The owner reported that refusal as an error "that should
  * never fire", and it was proven on the live testnet state (all 13 discovery
  * markets through the real function) to fire on his own `hive:hbd-temp` market
- * (cap 30, supply 30, face $25 -> 18 tokens = 60%) for every service price at or
+ * (cap 30, supply 30, face $25 -> 18 tokens then, 21 now = 60%% -> 70%%) for every service price at or
  * above $4.26. The 10% heuristic was removed; see market/curve.ts. The sections
  * below are rewritten to the narrower contract. Section 1 now asserts the
- * OPPOSITE of what it did: the 47% case is ALLOWED, and this file would fail if
+ * OPPOSITE of what it did: the 50%% case is ALLOWED, and this file would fail if
  * the heuristic ever came back unannounced.
  *
  * The live numbers (deployed contract vsc1BcaD8JrwJPAAN5cU1cHKCBdZrd7jz2WGt8,
  * read 2026-08-27 and re-read 2026-08-30):
  *
  *   hive:hbd-temp                  cap 30,      supply 30, face 25.000 HBD, no offerings
+ *
+ * ★★ EVERY TOKEN COUNT IN THIS FILE ROSE ~13.6%% ON 2026-09-12 (OWNER RULING;
+ * core/params.go). The buyer used to pay 88%% of a posted price in tokens and the
+ * other 12%% in HBD; they now pay ALL of it in tokens, and the platform's share is
+ * carved out of those tokens inside the escrow. The buyer's TOTAL is unchanged —
+ * it is the same money in one asset instead of two — so every share-of-supply
+ * figure here moved with it: the $15 service went 14 -> 15 tokens (47%% -> 50%% of
+ * a 30 cap), and hbd-temp's $25 face went 18 -> 21. The numbers below are the
+ * NEW live ones; the guard's contract is unchanged.
  *   did:pkh:eip155:1:0xB41f…980B   cap 30,      supply 0,  offering #1 = 15.000 HBD
  *   did:pkh:eip155:1:0xc965…Cb6a   cap 500,     supply 0,  face 20.000 HBD, no offerings
  *   hive:lumen.beat                cap 100,000, supply 50, offerings 55.000 / 12.000 HBD
  *
- * VACUOUS-PASS GUARD. Section 0 asserts the fixture itself still costs 14 tokens
+ * VACUOUS-PASS GUARD. Section 0 asserts the fixture itself still costs 15 tokens
  * against a 30 cap before anything is checked about the guard. If the curve, the
  * commission split or the opening price ever move so that this input is no
- * longer 47% of supply, this file FAILS rather than quietly testing a case that
+ * longer 50% of supply, this file FAILS rather than quietly testing a case that
  * no longer exists.
  */
 
@@ -73,13 +82,13 @@ const OPENING = displayPriceUsd(0);
 //       assertion below is testing a case that no longer exists.
 const live30 = serviceQuote(15, OPENING).tokens;
 check(
-  'fixture: the live 30-cap market’s $15 service really does cost 14 tokens',
-  live30 === 14,
-  `serviceQuote(15, ${OPENING}).tokens = ${live30}, expected 14 (the figure the token page renders)`
+  'fixture: the live 30-cap market’s $15 service really does cost 15 tokens',
+  live30 === 15,
+  `serviceQuote(15, ${OPENING}).tokens = ${live30}, expected 15 (the figure the token page renders)`
 );
 check(
-  'fixture: 14 of 30 really is ~47% of total supply',
-  Math.round((live30 / 30) * 100) === 47,
+  'fixture: 15 of 30 really is 50% of total supply',
+  Math.round((live30 / 30) * 100) === 50,
   `got ${Math.round((live30 / 30) * 100)}%`
 );
 
@@ -89,7 +98,7 @@ check(
 const thirtyCap = serviceSupplyShare(15, OPENING, 30);
 check('30-cap / $15 service is judged at all (not null)', thirtyCap !== null);
 check('30-cap / $15 service is NOT unfillable: 14 tokens of 30 can exist', thirtyCap?.unfillable === false);
-check('30-cap / $15 share is still reported, informationally, as 4667 bps', thirtyCap?.shareBps === 4667, `got ${thirtyCap?.shareBps}`);
+check('30-cap / $15 share is still reported, informationally, as 5000 bps', thirtyCap?.shareBps === 5000, `got ${thirtyCap?.shareBps}`);
 check(
   '★ the creation-time guard does NOT refuse it (this refusal is what the owner saw flashing)',
   serviceSupplyShareProblem(15, OPENING, 30) === null,
@@ -99,7 +108,7 @@ check(
   // hbd-temp exactly as read on 2026-08-30: cap 30, supply 30 (price at supply 30), face $25.
   const hbdTempPrice = displayPriceUsd(30);
   const face = serviceSupplyShare(25, hbdTempPrice, 30);
-  check('hbd-temp: the $25 face costs 18 tokens of 30 at supply 30', face?.tokens === 18, `tokens=${face?.tokens}`);
+  check('hbd-temp: the $25 face costs 21 tokens of 30 at supply 30', face?.tokens === 21, `tokens=${face?.tokens}`);
   check('hbd-temp: the $25 face is ALLOWED (it used to be refused at 60%)', serviceSupplyShareProblem(25, hbdTempPrice, 30) === null);
   // Sweep every price a person can type on that market; only prices whose token
   // cost exceeds the cap may be refused, and every one of those MUST be.
@@ -117,7 +126,7 @@ check(
 }
 
 // ── 2. UNFILLABLE is the one fault that survives. A $100 service on the same
-//       30-token market costs 88 tokens — more than can ever exist, so no buyer
+//       30-token market costs 100 tokens — more than can ever exist, so no buyer
 //       can reach it at any supply, and buy.go will not mint past the cap.
 const unfillable = serviceSupplyShare(100, OPENING, 30);
 check('$100 on a 30-cap market is unfillable', unfillable?.unfillable === true, `tokens=${unfillable?.tokens}`);
@@ -125,7 +134,7 @@ check(
   'the unfillable refusal says nobody could buy it, and names the creator’s own numbers',
   (() => {
     const msg = serviceSupplyShareProblem(100, OPENING, 30) ?? '';
-    return msg.includes('nobody could buy it') && msg.includes('88') && msg.includes('30');
+    return msg.includes('nobody could buy it') && msg.includes('100') && msg.includes('30');
   })(),
   `got: ${serviceSupplyShareProblem(100, OPENING, 30)}`
 );
@@ -213,8 +222,8 @@ for (const [usd, price, cap] of [
 //       claim to. (Whether that label should survive the cap ruling at all is a
 //       separate, open question for the token page; see the studio checklist.)
 check(
-  'the 30-cap service label reads 47%',
-  pctLabel(serviceQuote(15, OPENING).tokens, 30) === '47%',
+  'the 30-cap service label reads 50%',
+  pctLabel(serviceQuote(15, OPENING).tokens, 30) === '50%',
   `got ${pctLabel(serviceQuote(15, OPENING).tokens, 30)}`
 );
 check(

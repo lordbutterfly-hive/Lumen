@@ -924,32 +924,31 @@ const AskModal: FC<{
    */
   const settlementCredits = askQuote.data?.creditsRequired ?? null;
   const chainTokens = settlementCredits ?? q.tokens;
-  const cost = askCost(usd, { tokens: chainTokens, commissionUsd: q.commissionUsd }, m.priceUsd);
+  // The commission is a SHARE of the tokens above (OWNER RULING 2026-09-12), so
+  // it is priced off the same count and the same rate — never off the posted
+  // face, which would report a figure the escrow does not hold.
+  const commissionTokens = askQuote.data?.commissionCredits ?? null;
+  const commissionUsd = commissionTokens === null ? q.commissionUsd : commissionTokens * m.priceUsd;
+  const cost = askCost(usd, { tokens: chainTokens, commissionUsd }, m.priceUsd);
   const held = m.position?.tokens ?? 0;
-  // This mock has no HBD wallet balance to check — a real, wallet-connected
-  // build MUST also verify the buyer can cover q.commissionUsd in HBD
-  // (ask.go's commissionHbdPaid leg) before enabling this button; this only
-  // proves the TOKEN leg is affordable. Never let "canAfford" quietly mean
-  // "affords the tokens" once a real HBD balance exists to check — see
-  // ask.go's Ask() guard order (maxCredits, then the exact commission match).
   // PRICE-3: the balance must cover what the CHAIN escrows (chainTokens), not the
   // understated spot-derived count — otherwise a buyer is told they can afford an
   // ask the contract's maxCredits guard will reject.
+  //
+  // ★ THE TOKEN BALANCE IS NOW THE WHOLE CHECK (OWNER RULING 2026-09-12). An
+  // H-FE-2 HBD affordability gate used to sit beside it, because the commission
+  // was a separate HBD leg the buyer also had to cover — an ask signed without
+  // it was rejected by the contract's exact-commission guard and burned the
+  // caller's RC. There is no HBD leg to cover: a buyer holding enough of the
+  // creator's token can buy the service, which is the entire point of the
+  // ruling. The RESOURCE-CREDIT check stays — every write still costs RC.
   const canAffordTokens = held >= chainTokens && Number.isFinite(chainTokens);
-  // H-FE-2: the commission is a SEPARATE HBD leg (ask.go's commissionHbdPaid), so the
-  // buyer must be able to cover it in HBD — the token-leg check alone let an ask be
-  // signed that the contract's exact-commission guard rejects for want of HBD, burning
-  // the caller's RC. Same payer resolution + spending gauge BuyModal uses; HBD is
-  // dollar-pegged, so the USD commission is its base-unit amount ×1000.
   const askTokenAccounts = useTokenAccounts();
   // Same reasoning as `payer` above: check the balance of whoever signs.
   const askPayer = askTokenAccounts.accounts.find((a) => a.canSign) ?? askTokenAccounts.accounts[0] ?? null;
   const askSpending = useMagiSpendingPower(askPayer?.id ?? null);
-  const commissionBaseUnits = Math.round(q.commissionUsd * 1000);
-  const commissionAffordability = askSpending.affordability(commissionBaseUnits, 'ask');
-  const blockedByCommission =
-    commissionAffordability === 'no_resource_credits' || commissionAffordability === 'insufficient_hbd';
-  const canAsk = canAffordTokens && !blockedByCommission && !priceBlocked;
+  const blockedByCredits = askSpending.affordability(0, 'ask') === 'no_resource_credits';
+  const canAsk = canAffordTokens && !blockedByCredits && !priceBlocked;
   return (
     <ModalShell width={500} onClose={onClose} title={`Ask @${displayHandle(m.handle)}`}>
       <ModalHead title={`Ask @${displayHandle(m.handle)}`} onClose={onClose} />
@@ -1047,8 +1046,10 @@ const AskModal: FC<{
         {/* ★ Suppress the deposit remedy when the ORACLE is the binding constraint:
             depositing HBD does not make an unpriceable market purchasable, only more
             trading does, so stacking it under an oracle refusal points at a fix that
-            is not one (43, 2026-08-31). Shown only when commission is the real block. */}
-        {blockedByCommission && askPayer && !priceBlocked ? (
+            is not one (43, 2026-08-31). Shown only when RESOURCE CREDITS are the real
+            block — since 2026-09-12 an ask costs no HBD, so a deposit is the remedy
+            for the RC floor alone, never for a commission. */}
+        {blockedByCredits && askPayer && !priceBlocked ? (
           <MagiFundingHelp kind={askPayer.kind} account={askPayer.id} className="mb-3" />
         ) : null}
         <button
@@ -1090,9 +1091,9 @@ const AskModal: FC<{
                   ? 'Price unavailable'
                   : !canAffordTokens
               ? `You need ${cost.tokens} @${displayHandle(m.handle)} tokens. Buy some first`
-              : blockedByCommission
-                ? `You need ${usdPrice(q.commissionUsd)} in HBD for the commission`
-                : `Send question for ${cost.tokens} tokens + ${usdPrice(q.commissionUsd)} HBD`}
+              : blockedByCredits
+                ? 'You need a little HBD on Magi for the network fee'
+                : `Send question for ${cost.tokens} tokens`}
         </button>
         {/* ★ CONFIRMING INDICATOR (2026-09-01), the token-page twin of the Studio's
             sticky banner. Every money write now WAITS for the chain to confirm

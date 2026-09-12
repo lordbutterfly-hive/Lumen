@@ -90,8 +90,11 @@ func FeeBalanceOf(s Store, account string) *big.Int {
 	return getMoney(s, kFeeBal(account))
 }
 
-// PaidUntil returns the block through which the subscription is paid.
-func PaidUntil(s Store, creator string) uint64 { return getU64(s, kPaidUntil(creator)) }
+// THERE IS NO PaidUntil. It returned the block through which the subscription
+// was paid. The subscription was removed whole on 2026-09-12 (OWNER RULING;
+// see params.go and core/keys.go) and there is no clock left to read — a market
+// is ACTIVE from registration until its creator retires it. Phase() and
+// RetiredAt() are the two lifecycle reads a wallet or indexer needs now.
 
 // RegisteredAt returns the block the market was registered, or 0 if never.
 func RegisteredAt(s Store, creator string) uint64 { return getU64(s, kRegisteredAt(creator)) }
@@ -100,21 +103,24 @@ func RegisteredAt(s Store, creator string) uint64 { return getU64(s, kRegistered
 // also the count of asks ever opened. An indexer pages escrow records with it.
 func EscrowSeq(s Store, creator string) uint64 { return getU64(s, kSeq(creator)) }
 
-// CommissionOwedFor returns the EXACT HBD commission owed on one ask against
-// `face` — floor(face * CommissionBps / 10000), the same value ask.go's
-// commissionOwedFor computes.
+// CommissionOwedFor returns the platform's slice of `n` — floor(n *
+// CommissionBps / 10000), the same value ask.go's commissionOwedFor computes.
 //
-// DEFECT 5 fix (2026-07-21): exported so the wasm wrapper's `ask`/`quote`
-// entrypoints compute the commission from ONE formula core owns, instead of
-// hand-copying core/money.go's mMulBpsDiv. This is not cosmetic drift
-// prevention: core.Ask (ask.go, the H2 fix) now requires commissionHbdPaid to
-// EXACTLY equal this amount at execution — not merely be >= it — so any drift
-// between a wrapper-side duplicate and core's own math would reject (brick)
-// EVERY ask. Delegating to ask.go's private commissionOwedFor — the single
-// source of truth core.Ask itself uses — makes the exported wrapper and the
-// internal Ask guard incapable of disagreeing by construction.
-func CommissionOwedFor(face *big.Int) *big.Int {
-	return commissionOwedFor(face)
+// ★ IT TAKES A TOKEN COUNT, NOT AN HBD FACE (OWNER RULING 2026-09-12). The
+// commission used to be a separate HBD leg the wrapper drew from the buyer with
+// sdk.HiveDraw, so this was called on the posted face in HBD base units. There
+// is no HBD leg any more: the buyer pays the whole posted price in tokens, and
+// this carves the owner's 12% out of the CREDITS that price settled at. The
+// formula is unchanged, the unit is not — the one caller that still passes a
+// face would compute a number with no meaning, so nothing does.
+//
+// DEFECT 5 fix (2026-07-21), still the reason it is exported: the wasm wrapper's
+// `quote` entrypoint shows the split, and it must come from the ONE formula core
+// owns rather than a hand-copied core/money.go mMulBpsDiv. settlement.go's
+// settlePosted is the single door that actually applies it (the quote and the
+// settlement are then the same number by construction, not by coincidence).
+func CommissionOwedFor(n *big.Int) *big.Int {
+	return commissionOwedFor(n)
 }
 
 // WithdrawTreasury is the ONE mutator in this otherwise read-only file — C2's

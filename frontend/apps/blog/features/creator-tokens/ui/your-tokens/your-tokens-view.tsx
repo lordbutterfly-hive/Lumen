@@ -187,34 +187,67 @@ const askStyle: Record<string, { label: string; cls: string }> = {
  * only recourse: marking a job delivered is unilateral and pays the creator
  * immediately, so nothing but this records whether the work was real.
  */
+const RATING_WORDS = ['Poor', 'Fair', 'Good', 'Great', 'Excellent'] as const;
+
 const RateStrip: FC<{ onRate: (score: number) => Promise<void>; busy: boolean }> = ({ onRate, busy }) => {
   const [failure, setFailure] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  // Which star the pointer or keyboard focus is on, so the row fills up to it
+  // the way every star rating a person has ever used does. null = nothing
+  // hovered, which is the resting state; the control is stateless otherwise,
+  // because a rating is written once and the chain is the record.
+  const [hover, setHover] = useState<number | null>(null);
   if (done) return <div className="mt-3 text-caption font-medium text-ink-ok-2 font-ui">Thanks. Your rating is recorded on-chain.</div>;
   return (
     <div className="mt-3 border-t border-line-2 pt-3">
       <div className="mb-2 text-caption text-ink-10 font-ui">How did it go? Your rating is the creator’s public record.</div>
-      <div className="flex items-center gap-1.5">
-        {[1, 2, 3, 4, 5].map((score) => (
-          <button
-            key={score}
-            disabled={busy}
-            onClick={async () => {
-              setFailure(null);
-              try {
-                await onRate(score);
-                setDone(true);
-              } catch (err) {
-                // The REAL reason, not a guess. See ../write-failure.ts.
-                setFailure(writeFailureMessage(err, 'Your rating didn’t go through.'));
-              }
-            }}
-            className="h-8 w-8 rounded-control border border-line-11 bg-surface-1 text-caption text-ink-7 font-num hover:bg-surface-23 disabled:opacity-50"
-          >
-            {score}
-          </button>
-        ))}
-        <span className="ml-1 text-caption text-ink-14 font-num">1 = poor · 5 = excellent</span>
+      {/*
+        ★ STARS, NOT NUMBERED BUTTONS (owner, 2026-09-12: "rate is fine, should
+        be stars"). The five 1–5 buttons this replaces were accurate and unread:
+        a numeric keypad asks the reader to decode a scale, where a star row is
+        the one rating idiom nobody has to be taught.
+        ★ IT IS STILL A RADIOGROUP, NOT DECORATION. Each star is a real button
+        with its own accessible name ("3 of 5, Good"), so the control is
+        operable and announced exactly as the numbered one was — the glyph
+        changed, the semantics did not. aria-checked marks the hovered/focused
+        star so a screen reader follows the same fill the eye does.
+      */}
+      <div className="flex items-center gap-1" role="radiogroup" aria-label="Rate this job from 1 to 5 stars" onMouseLeave={() => setHover(null)}>
+        {[1, 2, 3, 4, 5].map((score) => {
+          const filled = hover !== null && score <= hover;
+          return (
+            <button
+              key={score}
+              type="button"
+              role="radio"
+              aria-checked={hover === score}
+              aria-label={`${score} of 5, ${RATING_WORDS[score - 1]}`}
+              title={RATING_WORDS[score - 1]}
+              disabled={busy}
+              onMouseEnter={() => setHover(score)}
+              onFocus={() => setHover(score)}
+              onBlur={() => setHover(null)}
+              onClick={async () => {
+                setFailure(null);
+                try {
+                  await onRate(score);
+                  setDone(true);
+                } catch (err) {
+                  // The REAL reason, not a guess. See ../write-failure.ts.
+                  setFailure(writeFailureMessage(err, 'Your rating didn’t go through.'));
+                }
+              }}
+              className={`h-8 w-8 rounded-control text-[20px] leading-none transition-colors disabled:opacity-50 ${
+                filled ? 'text-ink-warn-3' : 'text-ink-14 hover:text-ink-warn-3'
+              }`}
+            >
+              <span aria-hidden="true">{filled ? '★' : '☆'}</span>
+            </button>
+          );
+        })}
+        <span className="ml-2 text-caption text-ink-14 font-ui" aria-hidden="true">
+          {hover === null ? '1 star = poor · 5 = excellent' : RATING_WORDS[hover - 1]}
+        </span>
       </div>
       {failure ? (
         <div className="mt-2 text-caption font-medium text-ink-brand-6 font-ui">{failure}</div>

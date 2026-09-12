@@ -24,7 +24,6 @@ func zbMarket(t *testing.T, s *MemStore, c string, until uint64) {
 	if err := Register(s, c, c, 1000, 1000, MaxCap); err != nil {
 		t.Fatalf("Register(%s): %v", c, err)
 	}
-	setU64(s, kPaidUntil(c), until+SubscriptionPeriod)
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
-import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchOfferingResult, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RenewSubscriptionInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../../types';
+import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchOfferingResult, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../../types';
 import type { CreatorTokensDataSource } from '../creator-tokens-data-source';
 import {
   BLOCKS_PER_DAY,
@@ -11,7 +11,6 @@ import {
   creditsForAskBaseUnits,
   deriveAskStatus,
   deriveFaceBandBaseUnits,
-  deriveGraceExpiresAtBlock,
   derivePhase,
   exitTaxBpsAt,
   exitTaxOnBaseUnits,
@@ -25,7 +24,7 @@ import {
   settlementRateBaseUnits,
   spotRateBaseUnits,
   displayPricePerTokenBaseUnits,
-  splitFaceBaseUnits,
+  commissionOwedForBaseUnits,
   tradeFeeOn,
   type AskRateEstimate
 } from '../contract-math';
@@ -43,7 +42,7 @@ import {
   type MarketSeed
 } from './fixtures';
 import { marketHealthOf, windingDownOf } from '../../market/market-health';
-import { closesIfDrainedUnder, renewGateUnder } from '../../market/contract-rules';
+import { closesIfDrainedUnder } from '../../market/contract-rules';
 import type { BoardCreator, ContractRules } from '../../types';
 
 /**
@@ -262,15 +261,13 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
 
   private buildMarket(creator: string, seed: MarketSeed): Market {
     const head = mockHeadBlock();
-    const paidUntilBlock = head + seed.paidUntilDeltaBlocks;
-    const registeredAtBlock = head + seed.registeredAtDeltaBlocks;
+      const registeredAtBlock = head + seed.registeredAtDeltaBlocks;
     const faceSetAtBlock = head + seed.faceSetAtDeltaBlocks;
     // market.go Phase(): MAX(naturalPhase, retiredPhase). seed.retiredAtBlock
     // is an ABSOLUTE block (fixtures.ts's own doc explains why, unlike the
     // *DeltaBlocks fields above), passed straight through as derivePhase's
     // 4th arg.
-    const phase = derivePhase(seed.closedStored, paidUntilBlock, head, seed.retiredAtBlock);
-    const graceExpiresAtBlock = deriveGraceExpiresAtBlock(paidUntilBlock);
+    const phase = derivePhase(seed.closedStored, head, seed.retiredAtBlock);
     // deriveFaceBandBaseUnits' anchor pair (kFaceAnchor/kFaceAnchorAt) has no
     // fixture field (none of the seeded scenarios exercise a second SetFace
     // call inside the same 7-day window), so 0/0 is passed, which makes the
@@ -290,19 +287,11 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     // under MOCK_CONTRACT_RULES instead of a chain read.
     const rules = MOCK_CONTRACT_RULES;
     const windingDown = windingDownOf({ phase, retiredAtBlock: seed.retiredAtBlock, rules });
-    const renewGate = renewGateUnder(rules, {
-      phase,
-      retiredAtBlock: seed.retiredAtBlock,
-      globalInflowPaused,
-      supplyTokens: seed.supplyTokens,
-      reserveBaseUnits: seed.reserveBaseUnits
-    });
     return {
       creator,
       rules,
       headBlock: head,
       windingDown,
-      renewRefusal: renewGate.renewRefusal,
       delinquentUntilBlock: null,
       faceHbd: baseUnitsToHuman(seed.faceBaseUnits),
       faceSetAtBlock,
@@ -316,19 +305,11 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       capTokens: seed.capTokens,
       supplyTokens: seed.supplyTokens,
       reserveHbd: baseUnitsToHuman(seed.reserveBaseUnits),
-      paidUntilBlock,
-      paidUntilAt: blockToEpochMs(paidUntilBlock, head),
       registeredAtBlock,
       phase,
-      graceExpiresAtBlock,
-      graceExpiresAt: blockToEpochMs(graceExpiresAtBlock, head),
       globalInflowPaused,
       canBuy: canFlow,
       canAsk: canFlow,
-      // The mock has no delivery gate, so canBuy and the renew gate differ
-      // only where the contract rules make them differ (a v2 FROZEN market:
-      // no buying, renew admitted). See canRenew's doc in types.ts.
-      canRenew: renewGate.canRenew,
       retiredAtBlock: seed.retiredAtBlock,
       floorPriceHbd: baseUnitsToHuman(floorPricePerTokenBaseUnits(seed.reserveBaseUnits, seed.supplyTokens)),
       spotPriceHbd: baseUnitsToHuman(displayPricePerTokenBaseUnits(seed.supplyTokens)),
@@ -537,19 +518,16 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     const seed = this.seed(creator);
     const head = mockHeadBlock();
     const faceBaseUnits = seed?.faceBaseUnits ?? 0;
-    // ask.go splitFace (USER RULING 2026-07-27), mirrors
-    // VscCreatorTokensDataSource.readQuote()'s identical fix: the posted face
-    // is the buyer's TOTAL, so the token leg (tokenLegBaseUnits) — never the
-    // raw face — is what creditsForAsk must price below.
-    const { tokenLegBaseUnits, commissionBaseUnits } = splitFaceBaseUnits(faceBaseUnits);
-    const commissionHbd = baseUnitsToHuman(commissionBaseUnits);
+    // ★ Mirrors VscCreatorTokensDataSource.readQuote() exactly (OWNER RULING
+    // 2026-09-12): the WHOLE posted face is priced in tokens and the platform's
+    // 12%% is a slice of the resulting credits, null until a rate exists.
     const unpriced = (oracleStatus: Quote['oracleStatus']): Quote => ({
       creator,
       faceHbd: baseUnitsToHuman(faceBaseUnits),
       rate: null,
       creditsRequired: null,
       creditsRequiredBaseUnits: null,
-      commissionHbd,
+      commissionCredits: null,
       oracleStatus,
       asOfBlock: head
     });
@@ -577,7 +555,7 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     if (settlement.rateBaseUnits === null) {
       return unpriced(settlement.status);
     }
-    const creditsRequiredBaseUnits = creditsForAskBaseUnits(tokenLegBaseUnits, settlement.rateBaseUnits);
+    const creditsRequiredBaseUnits = creditsForAskBaseUnits(faceBaseUnits, settlement.rateBaseUnits);
     return {
       creator,
       faceHbd: baseUnitsToHuman(faceBaseUnits),
@@ -587,7 +565,7 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       // creditsRequiredBaseUnits, never baseUnitsToHuman'd.
       creditsRequired: creditsRequiredBaseUnits,
       creditsRequiredBaseUnits,
-      commissionHbd,
+      commissionCredits: commissionOwedForBaseUnits(creditsRequiredBaseUnits),
       oracleStatus: settlement.status,
       asOfBlock: head
     };
@@ -666,7 +644,6 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       capTokens: input.capTokens,
       supplyTokens: firstBuyTokens,
       reserveBaseUnits,
-      paidUntilDeltaBlocks: 30 * BLOCKS_PER_DAY,
       registeredAtDeltaBlocks: 0,
       faceSetAtDeltaBlocks: 0,
       closedStored: false,
@@ -703,18 +680,9 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     return { txId: `mock-launch-${input.register.creator}`, registered: true, offerings };
   }
 
-  async renewSubscription(input: RenewSubscriptionInput): Promise<Market> {
-    await delay(400);
-    const seed = this.seed(input.creator);
-    if (!seed) throw new Error(`MockCreatorTokensDataSource: no such market ${input.creator}`);
-    const head = mockHeadBlock();
-    const currentPaidUntil = head + seed.paidUntilDeltaBlocks;
-    const base = Math.max(currentPaidUntil, head);
-    const newPaidUntil = base + input.periods * 30 * BLOCKS_PER_DAY;
-    const next: MarketSeed = { ...seed, paidUntilDeltaBlocks: newPaidUntil - head };
-    setStorageItem(marketKey(input.creator), next, StorageTTL.SESSION);
-    return this.buildMarket(input.creator, next);
-  }
+  // THERE IS NO renewSubscription — the demo mirrors the contract, and the 10
+  // HBD monthly subscription was removed on 2026-09-12 (OWNER RULING;
+  // creator-tokens/core/params.go).
 
   async setFace(input: SetFaceInput): Promise<Market> {
     await delay(300);

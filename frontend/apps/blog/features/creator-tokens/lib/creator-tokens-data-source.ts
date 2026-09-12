@@ -1,5 +1,5 @@
 import env from '@beam-australia/react-env';
-import type { AnswerInput, Ask, AskInput, BoardCreator, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, ContractRules, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RenewSubscriptionInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../types';
+import type { AnswerInput, Ask, AskInput, BoardCreator, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, ContractRules, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../types';
 import { MockCreatorTokensDataSource } from './mock/mock-data-source';
 import { hiveTransactionBroadcaster, hiveTransactionBundleBroadcaster } from './vsc/broadcaster';
 import { routingBroadcaster } from './vsc/wallet-broadcaster';
@@ -124,7 +124,9 @@ export interface CreatorTokensDataSource {
    * unconfirmed timeout. See VscCreatorTokensDataSource.launchMarket.
    */
   launchMarket(input: LaunchMarketInput): Promise<LaunchResult>;
-  renewSubscription(input: RenewSubscriptionInput): Promise<Market>;
+  // THERE IS NO renewSubscription. The 10 HBD monthly subscription was removed
+  // from the contract on 2026-09-12 (OWNER RULING; creator-tokens/core/params.go)
+  // and there is no `renew` entrypoint to call.
   setFace(input: SetFaceInput): Promise<Market>;
   setCap(input: SetCapInput): Promise<Market>;
   /** buy.go Buy — mints input.tokens whole tokens to input.buyer at the exact curve cost. Replaces the deleted prepay()/core.Prepay (the PAR mint). */

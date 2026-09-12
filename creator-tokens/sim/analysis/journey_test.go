@@ -86,8 +86,8 @@ func TestDeadEnds_ReclaimedAskAlwaysSpendsTheFullGap(t *testing.T) {
 	if w.Resolution != "reclaimed" {
 		t.Errorf("gap window resolution = %q, want %q", w.Resolution, "reclaimed")
 	}
-	if w.CommissionHbd.Cmp(big.NewInt(240)) != 0 {
-		t.Errorf("gap window commission = %s, want 240", w.CommissionHbd)
+	if w.CommissionCredits.Cmp(big.NewInt(240)) != 0 {
+		t.Errorf("gap window commission = %s, want 240", w.CommissionCredits)
 	}
 	if w.Credits == nil || w.Credits.Cmp(big.NewInt(2000)) != 0 {
 		t.Errorf("gap window credits = %v, want 2000", w.Credits)

@@ -46,11 +46,13 @@ contracts:
         parse: "json"
         fields: { creator: "$.creator", actor: "$.actor", block: "$.block", face: "$.face", cap: "$.cap", fee_paid: "$.feePaid" }
 
-      - log_type: "renewed"
-        table: "lumen_ct_renewed_events"
-        schema: { creator: string, actor: string, block: numeric, periods: numeric, paid: string }
-        parse: "json"
-        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", periods: "$.periods", paid: "$.paid" }
+      # THERE IS NO "renewed" MAPPING. The 10 HBD monthly subscription was removed
+      # from the contract on 2026-09-12 (core/params.go, "THERE IS NO
+      # SubscriptionFee"), taking core.Renew, the `renew` entrypoint and the
+      # EvRenewed constructor with it. No `renewed` log can ever be emitted again,
+      # so a mapping for it would be a table that can only ever stay empty and a
+      # standing invitation to sum a stream that stopped. Existing rows in
+      # lumen_ct_renewed_events are history and are left alone.
 
       - log_type: "faceChanged"
         table: "lumen_ct_face_changed_events"
@@ -170,30 +172,48 @@ contracts:
 
       - log_type: "asked"
         table: "lumen_ct_asked_events"
-        schema: { creator: string, actor: string, block: numeric, seq: numeric, credits_spent: string, commission_hbd: string, rate: string, deadline_blocks: numeric, content_hash: string, offering_id: numeric }
+        # ★ commission_credits REPLACED commission_hbd (2026-09-12). The platform's
+        # 12% is a slice OF credits_spent, in the creator's own token — NOT a second
+        # HBD leg the buyer also paid. credits_spent is the WHOLE of what the buyer
+        # parted with; adding the commission to it double-counts. The column and the
+        # JSON key were both renamed so a consumer written against the old money
+        # model fails loudly instead of quietly summing the wrong thing.
+        schema: { creator: string, actor: string, block: numeric, seq: numeric, credits_spent: string, commission_credits: string, rate: string, deadline_blocks: numeric, content_hash: string, offering_id: numeric }
         parse: "json"
-        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", seq: "$.seq", credits_spent: "$.creditsSpent", commission_hbd: "$.commissionHbd", rate: "$.rate", deadline_blocks: "$.deadlineBlocks", content_hash: "$.contentHash", offering_id: "$.offeringId" }
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", seq: "$.seq", credits_spent: "$.creditsSpent", commission_credits: "$.commissionCredits", rate: "$.rate", deadline_blocks: "$.deadlineBlocks", content_hash: "$.contentHash", offering_id: "$.offeringId" }
 
       - log_type: "answered"
         table: "lumen_ct_answered_events"
-        schema: { creator: string, actor: string, block: numeric, seq: numeric, credits_to_creator: string, commission_hbd: string, answer_hash: string }
+        # credits_to_creator + commission_credits are the two halves of the escrow
+        # and sum to exactly it. commission_to NAMES THE ACCOUNT the platform's
+        # tokens were credited to (the contract owner) — an indexer must move that
+        # balance onto that holder, where the old commission_hbd was folded into a
+        # single global treasury total. It is "" when no owner was bound, in which
+        # case commission_credits is 0 and the creator took the whole escrow.
+        schema: { creator: string, actor: string, block: numeric, seq: numeric, credits_to_creator: string, commission_credits: string, commission_to: string, answer_hash: string }
         parse: "json"
-        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", seq: "$.seq", credits_to_creator: "$.creditsToCreator", commission_hbd: "$.commissionHbd", answer_hash: "$.answerHash" }
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", seq: "$.seq", credits_to_creator: "$.creditsToCreator", commission_credits: "$.commissionCredits", commission_to: "$.commissionTo", answer_hash: "$.answerHash" }
 
       # asker, NOT actor: reclaim is permissionless, so actor may be a keeper or
       # any stranger pushing an abandoned escrow, while the chain always pays the
       # escrow's own asker. Crediting actor is a real bug we already made once.
       - log_type: "reclaimed"
         table: "lumen_ct_reclaimed_events"
-        schema: { creator: string, actor: string, asker: string, block: numeric, seq: numeric, credits: string, commission_hbd: string, commission_retained_hbd: string }
+        # `credits` is the NET returned to the asker and commission_retained_credits
+        # the miss slice the protocol kept (USER RULING 1); together they are the
+        # whole escrow. retained_to names the account the slice was credited to.
+        # Both are TOKENS since 2026-09-12 — no HBD moves on this rail at all.
+        schema: { creator: string, actor: string, asker: string, block: numeric, seq: numeric, credits: string, commission_retained_credits: string, retained_to: string }
         parse: "json"
-        fields: { creator: "$.creator", actor: "$.actor", asker: "$.asker", block: "$.block", seq: "$.seq", credits: "$.credits", commission_hbd: "$.commissionHbd", commission_retained_hbd: "$.commissionRetainedHbd" }
+        fields: { creator: "$.creator", actor: "$.actor", asker: "$.asker", block: "$.block", seq: "$.seq", credits: "$.credits", commission_retained_credits: "$.commissionRetainedCredits", retained_to: "$.retainedTo" }
 
       - log_type: "declined"
         table: "lumen_ct_declined_events"
-        schema: { creator: string, actor: string, asker: string, block: numeric, seq: numeric, credits: string, commission_hbd: string }
+        # A decline returns the WHOLE escrow and retains nothing, so there is one
+        # money column, not two (the commission_hbd leg went with the HBD in 2026-09-12).
+        schema: { creator: string, actor: string, asker: string, block: numeric, seq: numeric, credits: string }
         parse: "json"
-        fields: { creator: "$.creator", actor: "$.actor", asker: "$.asker", block: "$.block", seq: "$.seq", credits: "$.credits", commission_hbd: "$.commissionHbd" }
+        fields: { creator: "$.creator", actor: "$.actor", asker: "$.asker", block: "$.block", seq: "$.seq", credits: "$.credits" }
 
       # ---- the buyer's rating. `Answer` is a unilateral "this is done" that
       # pays the creator, so this is the only signal that says whether the work

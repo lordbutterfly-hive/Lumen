@@ -22,7 +22,8 @@ import (
 //     claimable fee pot, and the creator's own token balance are byte-identical
 //     before and after the whole flood+conviction;
 //  2. costs the ATTACKER, not the victim — each manufactured miss retains a
-//     slice of the attacker's own commission to the treasury (RULING 1);
+//     slice of the attacker's own escrowed tokens and credits it to the platform
+//     owner (RULING 1; tokens rather than HBD since 2026-09-12);
 //  3. leaves every OUTFLOW rail open while frozen (answer an in-flight ask,
 //     sell, claim fees) — the creator is never trapped; and
 //  4. SELF-RESTORES: inflows reopen automatically at the end of the penalty
@@ -44,8 +45,7 @@ func TestFC13_FloodedCreatorFundsUntouched(t *testing.T) {
 	// be in flight when the creator is frozen — the realistic straddle. It is an
 	// inflow, so it must be accepted here, while the creator is still in good
 	// standing.
-	commission := commissionOwedFor(big.NewInt(9090))
-	inflight, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), commission, "realcustomer", MaxAskDeadline)
+	inflight, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), "realcustomer", MaxAskDeadline)
 	if err != nil {
 		t.Fatalf("in-flight customer ask (pre-flood): %v", err)
 	}
@@ -56,6 +56,7 @@ func TestFC13_FloodedCreatorFundsUntouched(t *testing.T) {
 	feeBefore := getMoney(s, kFeeBal(creator1))
 	ownBalBefore := getMoney(s, kBal(creator1, creator1))
 	treasuryBefore := getMoney(s, kTreasury())
+	ownerBefore := totalBalance(s, creator1, platform1)
 
 	// THE FLOOD. Three junk asks by the hostile asker, each ignored to deadline
 	// and reclaimed — the cheapest attack that trips the gate (MinMissesForDelinquency).
@@ -85,11 +86,15 @@ func TestFC13_FloodedCreatorFundsUntouched(t *testing.T) {
 	}
 
 	// (2) THE ATTACKER BORE THE COST. Each manufactured miss retained a slice of
-	// the ATTACKER's commission to the treasury — the treasury strictly grew, and
-	// not one unit of it reached the creator (checked via the untouched fee pot
-	// above). The flood is a self-funded nuisance, not an extraction.
-	if got := getMoney(s, kTreasury()); got.Cmp(treasuryBefore) <= 0 {
-		t.Fatalf("treasury did not grow (%s -> %s) — a flood that costs the attacker nothing would make this cheaper than LOW", treasuryBefore, got)
+	// the ATTACKER's own escrowed tokens and credited it to the platform owner —
+	// the owner's position strictly grew, and not one unit of it reached the
+	// creator (checked via the untouched fee pot and own balance above). The flood
+	// is a self-funded nuisance, not an extraction.
+	if got := totalBalance(s, creator1, platform1); got.Cmp(ownerBefore) <= 0 {
+		t.Fatalf("the platform's position did not grow (%s -> %s) — a flood that costs the attacker nothing would make this cheaper than LOW", ownerBefore, got)
+	}
+	if got := getMoney(s, kTreasury()); got.Cmp(treasuryBefore) != 0 {
+		t.Fatalf("treasury moved (%s -> %s) — no HBD moves on the escrow rail", treasuryBefore, got)
 	}
 
 	// CLEAN SHEET ON CONVICTION. The penalty is served once, not re-triggered by
@@ -114,13 +119,12 @@ func TestFC13_FloodedCreatorFundsUntouched(t *testing.T) {
 		t.Fatalf("frozen creator could not CLAIM their fee pot — an outflow was gated by delinquency: %v", err)
 	}
 
-	// (4) SELF-RESTORE. The subscription stays paid across the whole window
-	// (dgSetup paid it far into the future), so nothing but block height changes:
-	// at the window's own end block the gate lifts on its own with a clean sheet.
-	paidUntil := getU64(s, kPaidUntil(creator1))
-	if until >= paidUntil {
-		t.Fatalf("test premise broken: penalty window end %d is not strictly before the subscription expiry %d, so self-restore would be confounded by a lapse", until, paidUntil)
-	}
+	// (4) SELF-RESTORE. Nothing but block height changes across the window — the
+	// market cannot lapse (there is no subscription since 2026-09-12) and nobody
+	// retires it — so at the window's own end block the gate lifts on its own with
+	// a clean sheet. The "is the penalty window inside the paid period?" premise
+	// check that used to guard this is gone with the paid period itself: there is
+	// no expiry left that could confound the restore.
 	// One block before the end: still frozen.
 	if delinquent, _ := DeliveryStanding(s, creator1, until-1); !delinquent {
 		t.Fatalf("penalty lifted early at %d (window ends %d)", until-1, until)

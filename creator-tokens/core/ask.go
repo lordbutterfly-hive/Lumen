@@ -11,11 +11,22 @@ import (
 //
 // Ask spends credits (never HBD) at the prevailing settlement rate
 // (settleSpend — settlement.go, RULING C) into an escrow record. The creator either Answers
-// before the deadline (credits release to them, and the HBD commission held
-// in escrow books to the treasury — delivered service) or, past
-// deadline+ReclaimGrace, Reclaim pays them back to the asker in full:
-// credits AND the commission (SPEC §1.7.2 rule 4 / I5 — see Reclaim's own
-// doc). Reclaim is PERMISSIONLESS once that window opens (H1 defect fix,
+// before the deadline (the creator's 88% releases to them and the platform's
+// 12% releases to the owner account — delivered service) or, past
+// deadline+ReclaimGrace, Reclaim pays the credits back to the asker (SPEC
+// §1.7.2 rule 4 / I5 — see Reclaim's own doc, and MissReclaimSliceBps for the
+// one ruled slice a MISS keeps).
+//
+// ★ THERE IS NO HBD ANYWHERE ON THIS RAIL ANY MORE (OWNER RULING 2026-09-12).
+// The 12% commission used to be a SECOND leg the buyer paid in HBD, drawn by
+// the wrapper with sdk.HiveDraw and held in the escrow record until Answer
+// booked it to kTreasury(). A customer therefore needed two assets to buy a
+// service with the token they already held, which defeated the product's own
+// core loop. The commission is now 12% OF THE TOKENS: the buyer is debited the
+// whole posted price in credits, the escrow holds all of it, and on delivery
+// 12% is credited to the platform owner's position on that same market. The
+// owner sells it on the curve like any other holder, paying the ordinary trade
+// fee and exit tax — the contract itself never sells anything. Reclaim is PERMISSIONLESS once that window opens (H1 defect fix,
 // 2026-07-21) — anyone may push it, but it can only ever pay the asker,
 // never the caller, the same shape refund.go's RefundHolder already has.
 //
@@ -40,56 +51,75 @@ import (
 // (the wasm wrapper's `ask`/`quote` entrypoints) needs this to know what was
 // actually used, for event logging and for the response it returns.
 type AskResult struct {
-	Seq           uint64
-	CreditsSpent  *big.Int
-	CommissionHbd *big.Int
-	RateUsed      *big.Int
+	Seq          uint64
+	CreditsSpent *big.Int
+	// CommissionCredits is the platform's slice OF CreditsSpent, held inside the
+	// same escrow until it settles. It is not a second payment and not a second
+	// asset — CreditsSpent is the whole of what left the buyer.
+	CommissionCredits *big.Int
+	RateUsed          *big.Int
 }
 
-// AnswerResult — CreditsToCreator plus CommissionHbd (added 2026-07-21, at
-// the indexer agent's request): Answer books rec.commissionHbd to
-// kTreasury() as the "delivered service" leg of I5, but until this field
-// existed the caller had no way to learn what that booked amount actually
-// was — the indexer's EvAnswered event couldn't reconstruct the
-// answered->treasury HBD flow from the event stream alone, mirroring the
-// identical gap ReclaimResult.CommissionHbd already closed on the reclaim
-// side. The wasm wrapper reads this to populate EvAnswered's own
-// commissionHbd argument; core itself still never moves HBD — Answer's own
-// addMoney(kTreasury(), rec.commissionHbd) already IS the actual booking,
-// this field is purely informational for the caller/event log.
+// AnswerResult — what each party actually received. CreditsToCreator and
+// CommissionToOwner are the two halves of the escrow's credits and always sum
+// to exactly it, so an indexer can reconstruct the whole settlement from the
+// EvAnswered event alone (that is why the second field exists at all — added
+// 2026-07-21 at the indexer agent's request, when it was still an HBD figure).
+//
+// CommissionToOwner is what was ACTUALLY credited, not what was owed: it is
+// zero when no owner is bound (Owner(s) == "", pre-Init state), in which case
+// the whole escrow goes to the creator. Reporting the owed figure there would
+// let an indexer book tokens to an account that never received any.
 type AnswerResult struct {
-	CreditsToCreator *big.Int
-	CommissionHbd    *big.Int
+	CreditsToCreator  *big.Int
+	CommissionToOwner *big.Int
+	// OwnerGraduated is how much of the OWNER's own previously-maturing position
+	// on this market crossed into the MATURED bucket when this answer banked it
+	// before the commission credit landed (F-C1/F-C8), for the same reason
+	// ReclaimResult.Graduated exists: the wrapper cannot measure a delta on an
+	// account that is neither its caller nor its creator. Zero when nothing aged
+	// out, which is the ordinary case.
+	OwnerGraduated *big.Int
+	// Owner is WHO the commission was credited to, or "" when none was bound.
+	// The wrapper needs it to emit the mint against the right account.
+	Owner string
 }
 
-// ReclaimResult — the credits in full, plus the held commission MINUS the miss
-// slice. I5 (SPEC §1.7.2 rule 4: "No commission on refunds...We are paid for
+// ReclaimResult — the credits returned to the asker, and (on a MISS) the slice
+// kept. I5 (SPEC §1.7.2 rule 4: "No commission on refunds...We are paid for
 // delivered service only") held without exception until USER RULING 1
 // (2026-07-28) carved one, because a 100% refund made griefing free; see
-// MissReclaimSliceBps in params.go. Decline still refunds everything, and the
-// credits are still returned whole on both paths.
-// CommissionHbd is HBD, which core itself
-// never moves — the wasm wrapper is responsible for actually paying it back
-// via sdk.HiveTransfer (see contract/main.go's `reclaim` entrypoint), the
-// same division of responsibility Refund's own HBD payout already has.
+// MissReclaimSliceBps in params.go. Decline still refunds everything.
+//
+// ★ BOTH FIGURES ARE TOKENS NOW (OWNER RULING 2026-09-12). The miss slice used
+// to be taken out of a separate HBD commission leg, leaving the CREDITS whole
+// on every path; there is no HBD leg left, so the slice is taken out of the
+// commission portion of the credits themselves. CreditsReturned is therefore
+// the NET figure — what the asker actually gets back — and core has already
+// moved both halves internally. The wrapper moves NOTHING on this path any
+// more: no HiveTransfer, no HiveDraw.
 //
 // Asker (added by the H1 defect fix, 2026-07-21: permissionless reclaim —
 // see Reclaim's own doc) names WHO actually got paid, which is no longer
-// guaranteed to be the caller. The wrapper must pay CreditsReturned/
-// CommissionHbd's real-world HBD leg to THIS account, never to whoever
-// happened to submit the transaction.
+// guaranteed to be the caller. It is the account core credited; the wrapper
+// must emit against THIS account, never whoever happened to submit the
+// transaction.
 type ReclaimResult struct {
 	CreditsReturned *big.Int
-	CommissionHbd   *big.Int
-	// CommissionRetainedHbd is the slice kept by the protocol because this
+	// CommissionRetainedCredits is the slice kept by the protocol because this
 	// reclaim was a MISS (USER RULING 1, 2026-07-28 — see MissReclaimSliceBps).
-	// It is already booked to kTreasury() by Reclaim itself; the wrapper must
-	// NOT move it. It is reported only so the emitted event carries both halves
-	// of the split and a replaying indexer can still account for every unit of
-	// the commission that was held. Always zero on a self-dealt escrow, which
-	// is not a miss. CommissionHbd above is the NET figure to pay the asker.
-	CommissionRetainedHbd *big.Int
-	Asker                 string
+	// Reclaim itself has already credited it to the platform owner's position on
+	// this market; the wrapper must NOT move it. It is reported so the emitted
+	// event carries both halves of the split and a replaying indexer can account
+	// for every unit. Always zero on a self-dealt escrow (not a miss), on a
+	// Decline, and when no owner is bound.
+	CommissionRetainedCredits *big.Int
+	// Owner is who that slice was credited to, or "" when none was bound or
+	// nothing was retained. OwnerGraduated is that account's own graduation
+	// delta, for the same reason AnswerResult.OwnerGraduated exists.
+	Owner          string
+	OwnerGraduated *big.Int
+	Asker          string
 	// Graduated is how much of the asker's OWN previously-maturing position
 	// crossed into the MATURED bucket when this reclaim/decline banked it before
 	// re-crediting (F-C1/F-C8). The wrapper needs it to emit the matured-mint
@@ -116,15 +146,22 @@ const (
 
 // escrowRec is the unpacked form of one e|<creator>|<seq> record.
 //
-// commissionHbd (added by the 2026-07-20 defect fix) is the HBD commission
-// leg HELD against this specific ask, not booked to the treasury until
-// Answer succeeds. Before this field existed, Ask booked the commission to
-// kTreasury() immediately on open, and Reclaim had nowhere to read it back
-// from — an asker who was never answered permanently forfeited 12% of face,
-// directly contradicting SPEC §1.7.2 rule 4 ("the asker gets 100% back") and
-// this file's own I5 invariant. Holding it here, keyed to the escrow that
-// earned it, is what makes both Answer's booking and Reclaim's refund exact
-// and idempotent — see Ask/Answer/Reclaim below.
+// commissionCredits (added by the 2026-07-20 defect fix, re-denominated from
+// HBD to tokens by the OWNER RULING 2026-09-12) is the platform's slice OF
+// `credits` — a partition of the escrow, not an extra charge on top of it —
+// HELD against this specific ask and paid to nobody until it settles. Before
+// this field existed, Ask booked the commission immediately on open and Reclaim
+// had nowhere to read it back from, so an asker who was never answered
+// permanently forfeited 12% of face, directly contradicting SPEC §1.7.2 rule 4
+// ("the asker gets 100% back") and this file's own I5 invariant. Recording it
+// here, keyed to the escrow that earned it, is what makes Answer's payout and
+// Reclaim's refund exact and idempotent — see Ask/Answer/Reclaim below.
+//
+// IT IS RECORDED, NOT RECOMPUTED, at settlement time. Recomputing 12% of
+// `credits` on the Answer path would give the same number today, but the escrow
+// is the receipt for a price agreed at ASK time and a future commission ruling
+// must not be able to reach backwards into an ask already in flight — the same
+// argument offeringID's doc below makes about repricing an offering.
 // acqBlock (the hold-clock half of the ET-2 fix, adversarial fix round 1,
 // 2026-07-22) is the escrowed slice's OWN weighted-average acquisition block
 // at the instant Ask took the tokens out of the holder's balance. It
@@ -156,14 +193,22 @@ type escrowRec struct {
 	status        string
 	contentHash   string
 	answerHash    string
-	commissionHbd *big.Int
-	acqBlock      uint64 // the asker's wacq at escrow-out (0 == unclocked)
+	commissionCredits *big.Int
+	acqBlock          uint64 // the asker's wacq at escrow-out (0 == unclocked)
 	offeringID    uint64 // which named service this ask bought (0 == the legacy `face` price)
 }
 
-// Packed layout: asker|credits|deadline|status|commissionHbd|acqBlock|offeringID|contentHash|answerHash.
+// Packed layout: asker|credits|deadline|status|commissionCredits|acqBlock|offeringID|contentHash|answerHash.
 //
-// asker/status/credits/deadline/commissionHbd/acqBlock/offeringID are all closed
+// ★ THE LAYOUT AND THE FIELD COUNT ARE UNCHANGED across the 2026-09-12
+// commission ruling, deliberately. Field 5 changed UNIT (HBD base units ->
+// credits) but not position, type or validation (a non-negative decimal
+// integer), so every reader — parser, fixtures, indexer — keeps working byte
+// for byte and the migration carries no re-encoding step. No PENDING escrow has
+// ever existed on mainnet, so no in-flight record is being reinterpreted; if one
+// ever had, the unit change would have had to be a field ADDITION instead.
+//
+// asker/status/credits/deadline/commissionCredits/acqBlock/offeringID are all closed
 // alphabets (validAccount, the 3 status consts, decimal digits) that
 // structurally cannot contain "|". contentHash and answerHash are the only free-form
 // fields — Ask and Answer both reject a "|" in them at the door (see
@@ -171,7 +216,7 @@ type escrowRec struct {
 // before commissionHbd was added: SplitN's final element absorbs anything
 // remaining, so even if a future caller ever failed to validate one of them,
 // only answerHash (the true last field) could silently swallow a stray "|",
-// never a money field. commissionHbd, acqBlock and offeringID are all inserted
+// never a money field. commissionCredits, acqBlock and offeringID are all inserted
 // between status and contentHash rather than appended at the end so this
 // ordering is preserved. This format round-trips exactly with no escaping needed —
 // matching the rest of the codebase (errors.go, keys.go concatenate fields
@@ -180,7 +225,7 @@ type escrowRec struct {
 // offeringID (2026-07-27) records WHICH named service the ask was opened
 // against — 0 meaning the legacy single `face` price (offerings.go). It is
 // recorded at Ask time and never re-read for money: the escrow's own `credits`
-// and `commissionHbd` are what Answer and Reclaim settle, so deleting or
+// and `commissionCredits` are what Answer and Reclaim settle, so deleting or
 // repricing an offering afterwards cannot move a single base unit of an ask
 // already in flight. It exists so the delivery record and the buyer's receipt
 // can name the service that was bought.
@@ -194,7 +239,7 @@ type escrowRec struct {
 func packEscrow(r escrowRec) string {
 	return r.asker + "|" + r.credits.String() + "|" +
 		strconv.FormatUint(r.deadline, 10) + "|" + r.status + "|" +
-		r.commissionHbd.String() + "|" +
+		r.commissionCredits.String() + "|" +
 		strconv.FormatUint(r.acqBlock, 10) + "|" +
 		strconv.FormatUint(r.offeringID, 10) + "|" +
 		r.contentHash + "|" + r.answerHash
@@ -213,8 +258,8 @@ func unpackEscrow(v string) (escrowRec, bool) {
 	if err != nil {
 		return escrowRec{}, false
 	}
-	commissionHbd, ok := new(big.Int).SetString(p[4], 10)
-	if !ok || commissionHbd.Sign() < 0 {
+	commissionCredits, ok := new(big.Int).SetString(p[4], 10)
+	if !ok || commissionCredits.Sign() < 0 {
 		return escrowRec{}, false
 	}
 	acqBlock, err := strconv.ParseUint(p[5], 10, 64)
@@ -227,7 +272,7 @@ func unpackEscrow(v string) (escrowRec, bool) {
 	}
 	return escrowRec{
 		asker: p[0], credits: credits, deadline: deadline,
-		status: p[3], commissionHbd: commissionHbd,
+		status: p[3], commissionCredits: commissionCredits,
 		acqBlock:    acqBlock,
 		offeringID:  offeringID,
 		contentHash: p[7], answerHash: p[8],
@@ -294,42 +339,31 @@ func creditsForAsk(face, rate *big.Int) *big.Int {
 	return mMulDivCeil(face, big.NewInt(1), rate)
 }
 
-// commissionOwedFor = floor(face * CommissionBps / 10000) — the minimum HBD
-// commission leg (SPEC §1.7.3) a payment against face must carry.
-func commissionOwedFor(face *big.Int) *big.Int {
-	return mMulBpsDiv(face, CommissionBps)
+// commissionOwedFor = floor(n * CommissionBps / 10000) — the platform's slice
+// of a settled payment (SPEC §1.7.3).
+//
+// `n` is a CREDIT COUNT since the OWNER RULING 2026-09-12; it was an HBD face
+// before. The formula is identical, which is exactly why the unit has to be
+// stated: the only caller is settlement.go's settlePosted, which applies it to
+// the credits a posted face settled at, and the creator takes the REMAINDER so
+// the floor can only ever round in the creator's favour.
+func commissionOwedFor(n *big.Int) *big.Int {
+	return mMulBpsDiv(n, CommissionBps)
 }
 
-// splitFace divides a creator's POSTED price into the two legs a buyer pays:
-// the token leg that reaches the creator, and the HBD commission leg that
-// reaches the platform.
+// THERE IS NO splitFace. It divided a creator's POSTED price into a token leg
+// (88%, priced through settleSpend) and an HBD commission leg (12%, drawn from
+// the buyer by the wrapper) — USER RULING 2026-07-27, "the price on the screen
+// is the price the buyer pays", which was and remains correct.
 //
-// USER RULING 2026-07-27 — THE PRICE ON THE SCREEN IS THE PRICE THE BUYER
-// PAYS. A creator who posts "custom song — 200 HBD" means the buyer parts with
-// 200 HBD of value in total; the platform's 12% is CARVED OUT of that, never
-// added on top. This restores what SPEC §1.7.3 always specified ("the asker
-// signs one transaction carrying both a transfer.allow intent for the 12% in
-// HBD and the token spend for the creator's 88%"). The code had drifted to
-// settling the token leg at the FULL posted face while ALSO drawing the 12%
-// separately, so a posted "200" actually cost the buyer 224 — a surcharge that
-// appeared in no quote, on no screen, and in no spec.
-//
-// THE TWO LEGS SUM TO EXACTLY THE POSTED FACE, always: commission is
-// floor(face·CommissionBps/10000) and the token leg takes the REMAINDER, so
-// the integer division can only ever round in the CREATOR's favour, by at most
-// one base unit, and never against the buyer. This mirrors accrueExitTax's
-// floor-then-remainder split (exittax.go) for the same reason: two independent
-// roundings would create or destroy dust, one rounding plus a remainder
-// cannot.
-//
-// Callers must never split a face themselves — settlement.go's settlePosted is
-// the single door, so a quote can never disagree with the settlement it
-// previews.
-func splitFace(face *big.Int) (tokenLeg, commission *big.Int) {
-	commission = commissionOwedFor(face)
-	tokenLeg = new(big.Int).Sub(face, commission)
-	return tokenLeg, commission
-}
+// The OWNER RULING of 2026-09-12 keeps that guarantee and drops the second
+// currency: the whole posted price is priced in tokens and the commission is
+// carved out of the resulting CREDITS instead (settlement.go's settlePosted).
+// So the split moved one step downstream, from face-into-two-faces to
+// credits-into-two-credits, and there is no longer anything here to split. The
+// two inverse searches that grossed the C4/C2 bounds back up through this
+// function (minPostedForTokenLeg / maxPostedForTokenLeg) went with it, and
+// MinFace lost its 577 gross-up and is the plain C4 floor again (params.go).
 
 // SettlementRate MOVED to settlement.go and CHANGED SHAPE (RULING C,
 // RULINGS-v2-2026-07-21): it now returns (rate, error) and REFUSES when no
@@ -350,16 +384,21 @@ func splitFace(face *big.Int) (tokenLeg, commission *big.Int) {
 // min-price guards, all of it shared verbatim by Ask below.
 
 // Ask opens an escrowed ask against creator: creditsForAsk(face, rate)
-// credits move out of the caller's balance into a new escrow record, and a
-// separate HBD commission leg is checked and HELD in that same record (not
-// booked to the treasury yet — see the file-level comment and Answer/
-// Reclaim below). The contract never holds a unit of the creator's token
-// for its own account — only HBD passes through kTreasury (SPEC §1.7.3),
-// and only once it is actually earned.
+// credits — the WHOLE posted price — move out of the caller's balance into a
+// new escrow record, and the platform's 12% slice of them is recorded in that
+// same record, paid to nobody until the escrow settles (see the file-level
+// comment and Answer/Reclaim below).
 //
-// commissionHbdPaid must EXACTLY equal commissionOwedFor(face) at the block
-// this call executes (H2 defect fix, 2026-07-21 — see the guard below):
-// this is a binding amount, not a cap and not a minimum.
+// ★ THERE IS NO commissionHbdPaid PARAMETER ANY MORE (OWNER RULING
+// 2026-09-12). It used to be a binding amount the wrapper had already drawn
+// from the buyer in HBD, which this function re-derived and required to match
+// EXACTLY (H2 defect fix, 2026-07-21) so a face change between signing and
+// execution could not be used to overcharge the HBD leg. With the commission
+// carved out of the tokens there is only ONE leg and only one cap left to
+// enforce: maxCredits, the asker's own signed ceiling on the total, which
+// bounds the commission implicitly because the commission is part of it. The
+// H2 sandwich is closed by that same cap rather than by a second guard, so
+// nothing is weakened — there is simply no second amount to disagree about.
 //
 // rate is NEVER a parameter here (removed 2026-07-20, see SettlementRate's
 // doc): Ask derives its own settlement rate internally so SPEC §1.3b's
@@ -369,7 +408,7 @@ func splitFace(face *big.Int) (tokenLeg, commission *big.Int) {
 // on how many credits this ask may cost, mirroring what transfer.allow
 // already is for the commission's HBD leg — see the guard below for why it
 // is needed even though rate itself is now tamper-resistant.
-func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, commissionHbdPaid *big.Int, contentHash string, deadlineBlocks uint64, offeringID uint64) (*AskResult, error) {
+func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, contentHash string, deadlineBlocks uint64, offeringID uint64) (*AskResult, error) {
 	if !validAccount(caller) {
 		return nil, newErr(ErrInput, "invalid caller")
 	}
@@ -393,9 +432,6 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 		// absent maxCredits is exactly the bug this parameter exists to
 		// close (see the guard below).
 		return nil, newErr(ErrInput, "maxCredits must be > 0")
-	}
-	if commissionHbdPaid == nil || commissionHbdPaid.Sign() < 0 {
-		return nil, newErr(ErrInput, "invalid commission amount")
 	}
 	if deadlineBlocks < MinAskDeadline || deadlineBlocks > MaxAskDeadline {
 		return nil, newErr(ErrInput, "deadline out of band")
@@ -469,31 +505,22 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 		return nil, newErr(ErrInput, "creditsSpent exceeds maxCredits")
 	}
 
-	// Commission is a separate HBD leg (SPEC §1.7.3): the asker's signed
-	// transfer.allow intent is what actually moves this HBD (wasm layer's
-	// job); this just gates the ask on the amount already proven paid.
+	// The commission is a PARTITION of creditsSpent, taken off the SAME quote
+	// the credits came from (settlePosted, settlement.go) rather than recomputed
+	// here, so the quote the asker saw, the escrow that is written and the payout
+	// that eventually happens are one number split one way, once.
 	//
-	// H2 DEFECT FIX (2026-07-21): this used to be a lower bound
-	// (commissionHbdPaid >= owed), which HELD whatever was actually paid —
-	// so a band-legal SetFace drop between the asker signing their quote and
-	// this call executing (intra-block order is producer-chosen, not
-	// consensus-enforced; see the maxCredits guard's identical ordering
-	// argument above) meant the asker overpaid the commission on the OLD,
-	// higher face, and the surplus got held here and then booked to the
-	// treasury in full on Answer — up to 4x the true commission, with no
-	// path back (C2: the treasury had no exit either). The fix makes this an
-	// EXACT match: only the amount actually owed on the face in effect AT
-	// THIS CALL may ever be held. The wrapper is responsible for drawing
-	// only that amount (bounded by the asker's own signed transfer.allow
-	// cap) — this is the credit leg's maxCredits cap, mirrored onto the HBD
-	// leg.
-	// The owed amount comes off the SAME quote the credits came from
-	// (settlePosted, settlement.go) rather than being recomputed from `face`
-	// here: the two legs must always be the two halves of one split, so that a
-	// future change to the commission model cannot move one leg and leave the
-	// other reading a stale face.
-	if commissionHbdPaid.Cmp(q.CommissionHbd) != 0 {
-		return nil, newErr(ErrBalance, "commission must exactly equal commissionOwedFor(face) at execution (not more, not less)")
+	// It is not separately gated: maxCredits above already bounds the total, and
+	// the commission cannot exceed the total it is a fraction of. It IS clamped
+	// defensively below — a commission larger than the escrow would let Answer
+	// pay out more than was taken in, which is the one shape this record must
+	// structurally forbid.
+	commission := q.CommissionCredits
+	if commission == nil || commission.Sign() < 0 {
+		return nil, newErr(ErrArith, "settlement returned no commission split") // unreachable: settlePosted always sets it
+	}
+	if commission.Cmp(creditsSpent) > 0 {
+		return nil, newErr(ErrArith, "commission exceeds the credits it is carved from") // unreachable at CommissionBps < 10000
 	}
 
 	// BOTH BUCKETS (2026-07-30). An asker whose position has wholly matured
@@ -565,9 +592,9 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 	saveEscrow(s, creator, seq, escrowRec{
 		asker: caller, credits: creditsSpent, deadline: deadline,
 		status: askPending, contentHash: contentHash, answerHash: "",
-		commissionHbd: commissionHbdPaid,
-		acqBlock:      acqAtEscrow,
-		offeringID:    offeringID,
+		commissionCredits: commission,
+		acqBlock:          acqAtEscrow,
+		offeringID:        offeringID,
 	})
 	// The matured leg, keyed to the escrow that holds it. Written only when it
 	// is non-zero so a wholly-maturing ask costs no extra state, and read back
@@ -581,15 +608,15 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 	saveEscrowLots(s, creator, seq, escLots)
 	setU64(s, kSeq(creator), seq+1)
 
-	// DEFECT FIX (2026-07-20): the commission is HELD here, in the escrow
-	// record, NOT booked to kTreasury() yet. SPEC §1.7.2 rule 4 is verbatim:
-	// "No commission on refunds. When an ask is reclaimed unanswered, the
-	// asker gets 100% back. We are paid for delivered service only." Booking
-	// it here, before the creator has done anything, contradicted that rule
-	// and this file's own I5 invariant — Answer (below) books it on
-	// delivery; Reclaim (below) returns it in full.
+	// DEFECT FIX (2026-07-20): the commission is HELD here, inside the escrow
+	// record, and paid to NOBODY yet. SPEC §1.7.2 rule 4 is verbatim: "No
+	// commission on refunds. When an ask is reclaimed unanswered, the asker gets
+	// 100% back. We are paid for delivered service only." Settling it here,
+	// before the creator has done anything, contradicted that rule and this
+	// file's own I5 invariant — Answer (below) pays it on delivery; Reclaim and
+	// Decline (below) return it, net of the one ruled miss slice.
 
-	return &AskResult{Seq: seq, CreditsSpent: creditsSpent, CommissionHbd: commissionHbdPaid, RateUsed: rate}, nil
+	return &AskResult{Seq: seq, CreditsSpent: creditsSpent, CommissionCredits: commission, RateUsed: rate}, nil
 }
 
 // Answer pays the creator and resolves the escrow. Creator-only; escrow
@@ -597,14 +624,28 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 // the I6 disjoint window. Deliberately consults NO phase/subscription
 // state: legal in every phase including FROZEN (SPEC §1.7.5, API.md rule 4).
 //
-// Books the HBD commission held in the escrow (Ask, above) to kTreasury()
-// HERE, on delivery — never earlier. This is the "delivered service" half
-// of SPEC §1.7.2 rule 4: the platform earns its 12% only once the creator
-// has actually answered, proven by this call succeeding, not by the ask
-// merely having been opened. Runs exactly once per escrow: Answer requires
-// status == PENDING and immediately flips it to ANSWERED before returning,
-// so a second call on the same seq is rejected before it ever reaches this
-// line — see TestAnswerBooksCommissionExactlyOnce.
+// Pays the commission held in the escrow (Ask, above) to the platform OWNER
+// HERE, on delivery — never earlier. This is the "delivered service" half of
+// SPEC §1.7.2 rule 4: the platform earns its 12% only once the creator has
+// actually answered, proven by this call succeeding, not by the ask merely
+// having been opened. Runs exactly once per escrow: Answer requires status ==
+// PENDING and immediately flips it to ANSWERED before returning, so a second
+// call on the same seq is rejected before it ever reaches this line — see
+// TestAnswerBooksCommissionExactlyOnce.
+//
+// ★ THE COMMISSION IS TOKENS AND IT GOES TO AN ACCOUNT, NOT TO A BUCKET (OWNER
+// RULING 2026-09-12). It used to be addMoney(kTreasury(), rec.commissionHbd) —
+// an HBD credit to the contract's own treasury balance, withdrawable only by
+// the owner-gated WithdrawTreasury. It is now a token credit to the owner
+// account's ordinary position on THIS creator's market (Owner(s), read.go), so
+// the platform holds the same instrument its customers do and exits the same
+// way they do: Sell on the curve, paying the ordinary trade fee and exit tax.
+// The contract never sells anything on the platform's behalf.
+//
+// WHEN NO OWNER IS BOUND (Owner(s) == "", i.e. Init has not run) the whole
+// escrow goes to the creator and AnswerResult reports a zero commission. That
+// is the only safe reading: the alternative is burning 12% of a paying
+// customer's tokens into an account that does not exist.
 func Answer(s Store, caller, creator string, block, seq uint64, answerHash string) (*AnswerResult, error) {
 	if caller != creator {
 		return nil, newErr(ErrAuth, "creator only")
@@ -662,14 +703,26 @@ func Answer(s Store, caller, creator string, block, seq uint64, answerHash strin
 	// by the fresh inflow and becomes taxable again — the recipient "rides an aged
 	// pile". graduate() is infallible and a no-op when nothing has aged out.
 	graduate(s, creator, creator, block)
-	payEscrowToCreator(s, creator, seq, rec.credits, rec.acqBlock, block)
-	addMoney(s, kTreasury(), rec.commissionHbd)
+	owner := Owner(s)
+	toCreator, toOwner, ownerGraduated := payEscrowToCreator(s, creator, owner, seq, rec.credits, rec.commissionCredits, rec.acqBlock, block)
 	rec.status = askAnswered
 	rec.answerHash = answerHash
 	saveEscrow(s, creator, seq, rec)
 	recordDelivery(s, creator, rec.asker) // delivery gate (delivery.go) — counters only
 
-	return &AnswerResult{CreditsToCreator: rec.credits, CommissionHbd: rec.commissionHbd}, nil
+	// Report the account that was ACTUALLY credited, never the one that was
+	// merely bound: a caller emitting a mint against an owner who received
+	// nothing would put tokens on an indexer's books that no holder holds.
+	paidOwner := ""
+	if toOwner.Sign() > 0 {
+		paidOwner = owner
+	}
+	return &AnswerResult{
+		CreditsToCreator:  toCreator,
+		CommissionToOwner: toOwner,
+		OwnerGraduated:    ownerGraduated,
+		Owner:             paidOwner,
+	}, nil
 }
 
 // Reclaim returns the asker's credits AND the held commission in full — no
@@ -702,21 +755,21 @@ func Answer(s Store, caller, creator string, block, seq uint64, answerHash strin
 // trigger), mirroring RefundHolder's identical treatment of its own
 // `caller` parameter for the identical reason.
 //
-// DEFECT FIX (2026-07-20): the commission was previously booked to
-// kTreasury() the instant Ask opened, and this function had no field to
-// read it back from — an unanswered ask permanently cost the asker 12% of
-// face, contradicting SPEC §1.7.2 rule 4 verbatim. Now the commission is
-// only ever HELD in the escrow record (Ask) and only ever BOOKED on Answer,
-// so Reclaim has nothing to reverse in the treasury — it hands the held
-// amount back net of the miss slice it books to the treasury itself
+// DEFECT FIX (2026-07-20): the commission was previously settled the instant
+// Ask opened, and this function had no field to read it back from — an
+// unanswered ask permanently cost the asker 12% of face, contradicting SPEC
+// §1.7.2 rule 4 verbatim. Now the commission is only ever HELD in the escrow
+// record (Ask) and only ever PAID on Answer, so Reclaim has nothing to reverse
+// — it hands the escrow back net of the one ruled miss slice
 // (MissReclaimSliceBps), exactly once (status flips to RECLAIMED before
-// returning, so a second call is rejected before reaching here). core
-// itself never moves HBD: the caller (contract/main.go's `reclaim`
-// entrypoint) is responsible for actually paying CommissionHbd back via
-// sdk.HiveTransfer TO ReclaimResult.Asker (never to whoever submitted the
-// transaction), mutating state first (this call) and transferring second —
-// CEI ordering, the same pattern `refund`/`refundHolder` already use for
-// their own HBD payouts.
+// returning, so a second call is rejected before reaching here).
+//
+// ★ THE WRAPPER MOVES NOTHING ON THIS PATH ANY MORE (OWNER RULING 2026-09-12).
+// It used to pay ReclaimResult.CommissionHbd back to the asker via
+// sdk.HiveTransfer, state-first-transfer-second. The commission is tokens now
+// and lives inside the same credits this function already returns internally,
+// so there is no external leg left to order against — one fewer money call on a
+// permissionless door.
 func Reclaim(s Store, caller, creator string, block, seq uint64) (*ReclaimResult, error) {
 	if caller == "" {
 		return nil, newErr(ErrAuth, "empty caller")
@@ -753,7 +806,25 @@ func Reclaim(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 	// out of the exit tax cannot be re-aged (and re-taxed) by this inflow. The
 	// graduated figure rides back in the result so the wrapper can emit the mint.
 	graduated := graduate(s, creator, rec.asker, block)
-	returnEscrowToOwner(s, creator, rec.asker, seq, rec.credits, rec.acqBlock, block)
+
+	// USER RULING 1 (2026-07-28), the ONLY exception to I5's "no commission on
+	// refunds": on a miss the protocol keeps MissReclaimSliceBps of the HELD
+	// commission so that manufacturing a miss is not free (params.go carries the
+	// full reasoning, including why the cost lands on the asker and why the
+	// slice can never go to the creator). It is computed BEFORE the return so
+	// the two are one partition of one escrow rather than a credit followed by a
+	// debit — and it is taken in TOKENS, out of the commission portion of the
+	// credits, because the HBD leg it used to come out of no longer exists
+	// (OWNER RULING 2026-09-12).
+	//
+	// A SELF-DEALT escrow is not a miss (recordMiss returns immediately on
+	// asker==creator), and the same condition governs the slice here, so the two
+	// can never disagree about whether this was an offence.
+	slice := mZero()
+	if rec.asker != creator && rec.commissionCredits != nil && rec.commissionCredits.Sign() > 0 {
+		slice = mMulDivCeil(rec.commissionCredits, new(big.Int).SetUint64(MissReclaimSliceBps), big.NewInt(10000))
+	}
+	returned, retained, ownerGraduated := returnEscrowToOwner(s, creator, rec.asker, Owner(s), seq, rec.credits, slice, rec.acqBlock, block)
 	rec.status = askReclaimed
 	saveEscrow(s, creator, seq, rec)
 	// Delivery gate (delivery.go): reaching this line IS the definition of a
@@ -768,30 +839,17 @@ func Reclaim(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 	offence := rec.deadline + ReclaimGrace
 	recordMiss(s, creator, rec.asker, offence)
 
-	// USER RULING 1 (2026-07-28), the ONLY exception to I5's "no commission on
-	// refunds": on a miss the protocol keeps MissReclaimSliceBps of the HELD
-	// commission so that manufacturing a miss is not free (params.go carries
-	// the full reasoning, including why the cost lands on the asker and why the
-	// slice can never go to the creator). The CREDITS are untouched — they went
-	// back whole, above, before this line runs.
-	//
-	// Booked to kTreasury() here rather than by the wrapper because core owns
-	// every HBD balance the contract holds; the wrapper only ever moves the NET
-	// figure this returns, so the two cannot drift.
-	returned := rec.commissionHbd
-	retained := big.NewInt(0)
-	if rec.asker != creator && returned != nil && returned.Sign() > 0 {
-		retained = mMulDivCeil(returned, new(big.Int).SetUint64(MissReclaimSliceBps), big.NewInt(10000))
-		returned = new(big.Int).Sub(returned, retained)
-		addMoney(s, kTreasury(), retained)
+	paidOwner := ""
+	if retained.Sign() > 0 {
+		paidOwner = Owner(s)
 	}
-
 	return &ReclaimResult{
-		CreditsReturned:       rec.credits,
-		CommissionHbd:         returned,
-		CommissionRetainedHbd: retained,
-		Asker:                 rec.asker,
-		Graduated:             graduated,
+		CreditsReturned:           returned,
+		CommissionRetainedCredits: retained,
+		Owner:                     paidOwner,
+		OwnerGraduated:            ownerGraduated,
+		Asker:                     rec.asker,
+		Graduated:                 graduated,
 	}, nil
 }
 
@@ -813,7 +871,8 @@ func Reclaim(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 // SPEC §1.7.2 rule 4 — "we are paid for delivered service only"): nothing was
 // delivered here, so the platform takes nothing. A commission retained on
 // decline would be a fee for saying no, and would quietly re-create the
-// incentive to ignore asks instead.
+// incentive to ignore asks instead. That is why the slice passed to
+// returnEscrowToOwner below is nil and the owner is not even read.
 //
 // IT IS NEUTRAL IN THE GATE — NEITHER A DELIVERY NOR A MISS (see the full
 // reasoning inline below, at the point the code actually enforces it). An
@@ -825,9 +884,9 @@ func Reclaim(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 // because this is the doc comment the next reader sees first: Decline never
 // calls recordDelivery or recordMiss.
 //
-// The wasm wrapper pays CommissionHbd back to Result.Asker (never to whoever
-// submitted the transaction), state first and transfer second — the same CEI
-// ordering `reclaim` already uses.
+// The wasm wrapper moves no money at all on this path (OWNER RULING
+// 2026-09-12): the credits go back internally, here, and the HBD commission
+// refund it used to pay to Result.Asker no longer exists.
 func Decline(s Store, caller, creator string, block, seq uint64) (*ReclaimResult, error) {
 	if caller != creator {
 		return nil, newErr(ErrAuth, "creator only")
@@ -858,7 +917,7 @@ func Decline(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 	// (and re-tax) a pile that had already earned its way out. graduate() is
 	// infallible and a no-op when nothing has aged out.
 	graduated := graduate(s, creator, rec.asker, block)
-	returnEscrowToOwner(s, creator, rec.asker, seq, rec.credits, rec.acqBlock, block)
+	returned, _, _ := returnEscrowToOwner(s, creator, rec.asker, "", seq, rec.credits, nil, rec.acqBlock, block)
 	rec.status = askDeclined
 	saveEscrow(s, creator, seq, rec)
 	// A DECLINE IS NEUTRAL IN THE GATE: it is neither a delivery nor a miss.
@@ -885,5 +944,10 @@ func Decline(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 	// reputation signal for a buyer to weigh, not a solvency question for the
 	// contract to enforce.
 
-	return &ReclaimResult{CreditsReturned: rec.credits, CommissionHbd: rec.commissionHbd, Asker: rec.asker, Graduated: graduated}, nil
+	return &ReclaimResult{
+		CreditsReturned:           returned,
+		CommissionRetainedCredits: mZero(),
+		Asker:                     rec.asker,
+		Graduated:                 graduated,
+	}, nil
 }

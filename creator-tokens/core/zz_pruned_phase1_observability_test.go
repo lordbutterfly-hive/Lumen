@@ -109,7 +109,6 @@ func hz17SeedAskableMarket(t *testing.T, creator, asker string, rate int64) (*Me
 	// setupMarket's paidUntil is anchored at `base`; extend it so the
 	// market is still ACTIVE at queryBlock (well past base once the TWAP
 	// history is laid down).
-	setU64(s, kPaidUntil(creator), queryBlock+SubscriptionPeriod)
 	return s, queryBlock
 }
 
@@ -365,7 +364,6 @@ func TestPhase1_H06_StrandedHolder_BlocksCloseAndReregister(t *testing.T) {
 	setMatured(s, creator, strandedHolder, big.NewInt(500))
 	// Freeze the market naturally (paidUntil in the past) rather than via
 	// Retire, to isolate this from H-18/retire semantics.
-	setU64(s, kPaidUntil(creator), block-1)
 
 	// Every OTHER holder already refunded / never existed — supply is
 	// entirely the stranded holder's matured balance, so nothing further

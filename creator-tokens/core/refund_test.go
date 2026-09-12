@@ -27,27 +27,32 @@ import (
 // already reads FROZEN with no other key involved (there used to be a second
 // write here, to a kFrozenAt key that nothing in this package ever read —
 // deleted, see keys.go).
+// forceFrozen puts a market into FROZEN the only way that is now possible: a
+// retire mark at block 50, so Phase reads OVERDUE through 50+GraceBlocks-1 and
+// FROZEN from 50+GraceBlocks on.
+//
+// ★ IT USED TO WRITE kPaidUntil = 50 AND NOTHING ELSE — a subscription lapse,
+// which under A1 (2026-08-30) reached FROZEN without entering a wind-down. That
+// distinction is gone: the subscription was removed on 2026-09-12 (OWNER
+// RULING; core/params.go) and Retire is the only road to FROZEN, so every
+// fixture that wanted "this market is frozen" now necessarily also gets "this
+// market is winding down". The BLOCK BOUNDARY is deliberately unchanged (50 +
+// GraceBlocks), so every fixture's wdBlock arithmetic is bit-for-bit what it
+// was; only the reason it is frozen moved.
 func forceFrozen(s Store, creator string) {
-	setU64(s, kPaidUntil(creator), 50)
+	setU64(s, kRetiredAt(creator), 50+1) // kRetiredAt's "0 means never" encoding
 }
 
 // forceWindDown puts a market into WIND-DOWN, which since A1 (owner ruling
 // 2026-08-30, market.go inWindDown) is reachable by exactly one road: Retire.
-// A natural lapse is an inflow stop now, not a wind-down — a lapsed market
-// keeps its curve Sell and its Renew, and the pro-rata Refund rails refuse on
-// it. So every fixture in this file whose SUBJECT is the refund/pro-rata
-// arithmetic (not the ladder) enters wind-down the way a real market does,
-// with a retire mark, instead of by letting the subscription lapse. The mark
-// is kRetiredAt = block+1 (kRetiredAt's "0 means never" encoding), placed at
-// block 1 so every wdBlock these fixtures use (50+GraceBlocks+1 and later) is
-// past the retire notice and reads FROZEN via Phase's MAX fold, exactly as
-// before. forceFrozen (the paidUntil write) is kept alongside so the natural
-// ladder still reads FROZEN too; the tests that assert the ladder itself
-// (TestRefundHolder_RegressionActiveRevertsLapseRefusesRetiredPays and the
-// A1 tests in a1_lapse_test.go) use forceFrozen alone on purpose.
+// Since 2026-09-12 it is IDENTICAL to forceFrozen, because the two states have
+// merged: Retire is the only road to FROZEN and Retire is what opens a
+// wind-down, so nothing can be one without being the other. Both names are kept
+// so each fixture still says which property it actually depends on — the phase
+// or the rail — and so a future paid tier that re-separated them would have two
+// honest call sites to fix rather than one ambiguous helper.
 func forceWindDown(s Store, creator string) {
 	forceFrozen(s, creator)
-	setU64(s, kRetiredAt(creator), 1+1)
 }
 
 // wdNet computes the NET wind-down payout a holder receives under RULING K2:
@@ -497,14 +502,17 @@ func TestRefundHolder_RegressionActiveRevertsLapseRefusesRetiredPays(t *testing.
 		t.Fatalf("self-Sell net = %s, want > 0", rs.Net)
 	}
 
-	// OVERDUE — the grace window — is also still refused; the fix is a
-	// FROZEN-or-CLOSED allowlist, not merely "not ACTIVE".
-	overdueBlock := regBlock + SubscriptionPeriod + 10
-	if got := Phase(s, creator, overdueBlock); got != StateOverdue {
-		t.Fatalf("sanity: phase = %s, want OVERDUE", got)
+	// A market nobody retired stays ACTIVE at every height since 2026-09-12, so
+	// the push is refused arbitrarily far out — the OVERDUE-after-a-lapse case
+	// that used to sit here cannot be built any more (the OVERDUE rung is now
+	// reachable only INSIDE a retire notice, where the push is refused for the
+	// separate and still-tested reason that the notice has not expired).
+	lateBlock := regBlock + hzLongGap + 10
+	if got := Phase(s, creator, lateBlock); got != StateActive {
+		t.Fatalf("sanity: phase = %s, want ACTIVE (nothing lapses)", got)
 	}
-	if _, err := RefundHolder(s, pusher, creator, holder, overdueBlock); err == nil || errSymbol(err) != ErrState {
-		t.Fatalf("RefundHolder in OVERDUE: err=%v, want ErrState", err)
+	if _, err := RefundHolder(s, pusher, creator, holder, lateBlock); err == nil || errSymbol(err) != ErrState {
+		t.Fatalf("RefundHolder on a long-untouched ACTIVE market: err=%v, want ErrState", err)
 	}
 
 	// FROZEN: RefundHolder now works — but only for a FULLY-DECAYED holder
@@ -514,19 +522,23 @@ func TestRefundHolder_RegressionActiveRevertsLapseRefusesRetiredPays(t *testing.
 	// freeze, by which point their hold clock has decayed to τ = 0 and the sweep
 	// is a harmless, untaxed pro-rata. (A push at the earlier, still-taxable block
 	// is rejected — see TestRefundHolder_EXITTAX1_FreshPushRefused.)
-	frozenBlock := regBlock + SubscriptionPeriod + GraceBlocks + 10 + ExitTaxDecayBlocks
+	frozenBlock := regBlock + hzLongGap + GraceBlocks + 10 + ExitTaxDecayBlocks
+	// ★ A1 (2026-08-30) proved the push REFUSED on a market frozen by a LAPSE,
+	// because a lapse was an inflow stop and not a wind-down. That state is
+	// unbuildable since 2026-09-12, so the refusal is asserted one step earlier
+	// instead (the long-untouched ACTIVE market above) and what remains here is
+	// the other half: once the creator retires and the notice expires, the push
+	// pays. Phase is asserted AFTER the retire because the retire is now what
+	// makes this block FROZEN at all.
+	if got := Phase(s, creator, frozenBlock); got != StateActive {
+		t.Fatalf("sanity: phase before the retire = %s, want ACTIVE", got)
+	}
+	// Retire a full notice before the push block, so frozenBlock reads FROZEN.
+	if err := Retire(s, creator, creator, frozenBlock-GraceBlocks); err != nil {
+		t.Fatalf("Retire must be legal on an ACTIVE market: %v", err)
+	}
 	if got := Phase(s, creator, frozenBlock); got != StateFrozen {
-		t.Fatalf("sanity: phase = %s, want FROZEN", got)
-	}
-	// ★ A1 (2026-08-30): a NATURAL FROZEN is an inflow stop, not a wind-down.
-	// The push must REFUSE here — the holder's exit is still the curve — and
-	// only a deliberate Retire opens the pro-rata rail. This is the assertion
-	// that fails on the pre-A1 code (it paid here).
-	if _, err := RefundHolder(s, pusher, creator, holder, frozenBlock); err == nil || errSymbol(err) != ErrState {
-		t.Fatalf("A1: RefundHolder on a natural FROZEN must be refused (no wind-down on lapse), err=%v", err)
-	}
-	if err := Retire(s, creator, creator, frozenBlock); err != nil {
-		t.Fatalf("Retire on a lapsed market must be legal: %v", err)
+		t.Fatalf("sanity: phase after the retire notice = %s, want FROZEN", got)
 	}
 	remaining := getMoney(s, kBal(creator, holder))
 	// Under the curve, TOKENS and HBD are different units — the payout is
@@ -870,20 +882,38 @@ func TestCloseIfDrained_Idempotent(t *testing.T) {
 // documents (market.go): FROZEN begins AT block == paidUntil+GraceBlocks, not
 // strictly after it. One block earlier must still be OVERDUE.
 //
-// ★ A1 (owner ruling 2026-08-30) changes what the boundary DOES: a natural
-// FROZEN is an inflow stop, not a wind-down, so CloseIfDrained is a NO-OP on
-// it at every block (refund.go CloseIfDrained's marketRetired check) — a
-// lapsed market whose holders all sold on the now-open curve must stay
-// recoverable by Renew. Only a RETIRED market's FROZEN completes a wind-down,
-// and for that the retire mark is placed at the SAME block as paidUntil so the
-// retired ladder's boundary coincides with the natural one and the
-// one-block-early / at-the-block pair is pinned on both ladders at once.
+// ★ TWO THINGS MOVED UNDER THIS TEST AND IT KEPT ITS SUBJECT. A1 (2026-08-30)
+// made CloseIfDrained a no-op on a market that had merely LAPSED (a lapse is an
+// inflow stop, not a wind-down), so the test grew a second half proving only a
+// RETIRED market's FROZEN closes. The 2026-09-12 ruling then deleted the
+// subscription entirely, so the lapsed half cannot be constructed at all — a
+// market that is not retired never leaves ACTIVE, and CloseIfDrained's
+// marketRetired check refuses it for a simpler reason than before.
+//
+// What is left, and is what this test was always about, is the boundary itself:
+// FROZEN begins AT retiredAt+GraceBlocks and a drained market closes exactly
+// there, not one block earlier.
 func TestCloseIfDrained_ExactFrozenBoundary(t *testing.T) {
 	s := NewMemStore()
 	creator := "closecreatore"
 	setupMarket(s, creator, 100, MaxCap)
-	forceFrozen(s, creator) // kPaidUntil = 50, NOT retired
 
+	// A market nobody retired: ACTIVE forever, and CloseIfDrained refuses it at
+	// every height however drained it is.
+	for _, b := range []uint64{100, 50 + GraceBlocks, 50 + GraceBlocks + 10*ExitTaxDecayBlocks} {
+		if got := Phase(s, creator, b); got != StateActive {
+			t.Fatalf("never-retired market at %d: phase = %s, want ACTIVE", b, got)
+		}
+		if CloseIfDrained(s, creator, b) {
+			t.Fatalf("CloseIfDrained at block %d closed a market nobody retired", b)
+		}
+	}
+	if got := getStr(s, kState(creator)); got == StateClosed {
+		t.Fatal("kState was set to CLOSED on a market nobody retired")
+	}
+
+	// Retired at block 50: OVERDUE until 50+GraceBlocks, FROZEN from it.
+	forceFrozen(s, creator)
 	boundary := uint64(50 + GraceBlocks)
 	if got := Phase(s, creator, boundary-1); got != StateOverdue {
 		t.Fatalf("one block before the boundary: phase = %s, want OVERDUE", got)
@@ -891,18 +921,6 @@ func TestCloseIfDrained_ExactFrozenBoundary(t *testing.T) {
 	if got := Phase(s, creator, boundary); got != StateFrozen {
 		t.Fatalf("at the boundary: phase = %s, want FROZEN", got)
 	}
-	// A1: never closes on a natural FROZEN — not at the boundary, not ever.
-	for _, b := range []uint64{boundary - 1, boundary, boundary + 10*ExitTaxDecayBlocks} {
-		if CloseIfDrained(s, creator, b) {
-			t.Fatalf("A1: CloseIfDrained at block %d closed a lapsed (never retired) market", b)
-		}
-	}
-	if got := getStr(s, kState(creator)); got == StateClosed {
-		t.Fatal("kState was set to CLOSED on a lapsed market")
-	}
-
-	// Retired at block 50: the retired ladder freezes at 50+GraceBlocks too.
-	setU64(s, kRetiredAt(creator), 50+1)
 	if CloseIfDrained(s, creator, boundary-1) {
 		t.Fatal("one block before the boundary a retired market is still in its OVERDUE notice; must not close")
 	}

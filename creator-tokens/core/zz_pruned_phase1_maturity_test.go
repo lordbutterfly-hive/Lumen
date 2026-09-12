@@ -63,7 +63,6 @@ const (
 func zp3Market(s Store, supply int64, block uint64) {
 	setU64(s, kRegisteredAt(zp3Creator), 1)
 	setStr(s, kState(zp3Creator), StateActive)
-	setU64(s, kPaidUntil(zp3Creator), block+1000*SubscriptionPeriod)
 	setMoney(s, kCap(zp3Creator), big.NewInt(MaxCap))
 	setMoney(s, kFace(zp3Creator), big.NewInt(MinFace))
 	setMoney(s, kSupply(zp3Creator), big.NewInt(supply))
@@ -142,7 +141,7 @@ func zp3EscrowRoundTrip(t *testing.T, s Store, credits *big.Int, askBlock, resol
 	// stored acqBlock is what Decline actually reads back ---
 	rec := escrowRec{
 		asker: zp3Holder, credits: credits, deadline: askBlock + MinAskDeadline,
-		status: askPending, commissionHbd: big.NewInt(0), acqBlock: acqAtEscrow,
+		status: askPending, commissionCredits: big.NewInt(0), acqBlock: acqAtEscrow,
 	}
 	packed := packEscrow(rec)
 	back, ok := unpackEscrow(packed)
@@ -655,7 +654,6 @@ func TestZP1_H12_EndToEnd_AskDeclineThroughPublicAPI(t *testing.T) {
 		t.Fatalf("Buy: %v", err)
 	}
 	matureBlock := ExitTaxDecayBlocks + 100
-	setU64(s, kPaidUntil(c), matureBlock+1000*SubscriptionPeriod)
 	if n := Graduate(s, c, h, matureBlock); n.Cmp(big.NewInt(1_000)) != 0 {
 		t.Fatalf("Graduate moved %s, want 1000 — the position did not mature as expected", n)
 	}
@@ -672,7 +670,6 @@ func TestZP1_H12_EndToEnd_AskDeclineThroughPublicAPI(t *testing.T) {
 
 	// Drive a REAL Ask -> Decline.
 	askBlock := zp1SeedObs(s, c, matureBlock+1)
-	setU64(s, kPaidUntil(c), askBlock+1000*SubscriptionPeriod)
 	lo, _, err := ServiceFaceRange(s, c, askBlock)
 	if err != nil {
 		t.Fatalf("ServiceFaceRange: %v", err)
@@ -686,7 +683,7 @@ func TestZP1_H12_EndToEnd_AskDeclineThroughPublicAPI(t *testing.T) {
 	maturedBefore := getMatured(s, c, h)
 	heldBefore := heldBlocksAt(s, c, h, askBlock)
 
-	ar, err := Ask(s, h, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(10)), q.CommissionHbd, "cid", MinAskDeadline, 0)
+	ar, err := Ask(s, h, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(10)), "cid", MinAskDeadline, 0)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -758,7 +755,6 @@ func TestZP1_H12_EndToEnd_EscrowRoundTripAcceleratesMaturity(t *testing.T) {
 		}
 	}
 	matureBlock := ExitTaxDecayBlocks + 100
-	setU64(s, kPaidUntil(c), matureBlock+100_000*SubscriptionPeriod)
 	for _, h := range []string{attacker, control} {
 		if n := Graduate(s, c, h, matureBlock); n.Cmp(big.NewInt(aged)) != 0 {
 			t.Fatalf("Graduate(%s) moved %s, want %d", h, n, aged)
@@ -769,7 +765,6 @@ func TestZP1_H12_EndToEnd_EscrowRoundTripAcceleratesMaturity(t *testing.T) {
 	}
 
 	askBlock := zp1SeedObs(s, c, matureBlock+1)
-	setU64(s, kPaidUntil(c), askBlock+100_000*SubscriptionPeriod)
 
 	// Post the LARGEST legal face, so the ask escrows as many credits as the
 	// depth ceiling and the 5%-of-supply spend cap allow. That cap is what
@@ -808,7 +803,7 @@ func TestZP1_H12_EndToEnd_EscrowRoundTripAcceleratesMaturity(t *testing.T) {
 			"straddle both buckets and this test would be vacuous", q.Credits, maturingBefore)
 	}
 
-	ar, err := Ask(s, attacker, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(2)), q.CommissionHbd, "cid", MaxAskDeadline, 0)
+	ar, err := Ask(s, attacker, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(2)), "cid", MaxAskDeadline, 0)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -924,7 +919,6 @@ func TestZP1_H12_EndToEnd_ZeroCostSelfAskLaunder(t *testing.T) {
 		}
 	}
 	matureBlock := ExitTaxDecayBlocks + 100
-	setU64(s, kPaidUntil(c), matureBlock+100_000*SubscriptionPeriod)
 	for _, h := range []string{c, control} {
 		if n := Graduate(s, c, h, matureBlock); n.Cmp(big.NewInt(aged)) != 0 {
 			t.Fatalf("Graduate(%s) moved %s", h, n)
@@ -935,7 +929,6 @@ func TestZP1_H12_EndToEnd_ZeroCostSelfAskLaunder(t *testing.T) {
 	}
 
 	askBlock := zp1SeedObs(s, c, matureBlock+1)
-	setU64(s, kPaidUntil(c), askBlock+100_000*SubscriptionPeriod)
 	lo, hi, err := ServiceFaceRange(s, c, askBlock)
 	if err != nil {
 		t.Fatalf("ServiceFaceRange: %v", err)
@@ -968,7 +961,7 @@ func TestZP1_H12_EndToEnd_ZeroCostSelfAskLaunder(t *testing.T) {
 	treasuryBefore := getMoney(s, kTreasury())
 	// The CREATOR is the asker. Legal — ask.go's own self-deal filters exist
 	// precisely because this case is expected.
-	ar, err := Ask(s, c, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(2)), q.CommissionHbd, "cid", MaxAskDeadline, 0)
+	ar, err := Ask(s, c, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(2)), "cid", MaxAskDeadline, 0)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}

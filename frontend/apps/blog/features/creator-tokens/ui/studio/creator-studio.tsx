@@ -23,7 +23,6 @@ import { MAX_OFFER_TITLE_LEN, offerTitleProblem } from '../../lib/vsc/op-builder
 import { MAX_DESCRIPTION_WORDS, descriptionProblem } from '../../lib/offering-description';
 import WorkLinkField from '../work-link-field';
 import { creatorOracleNotice } from '../../market/oracle-copy';
-import { lapseNoticeFor, lapseStateOf, shouldOfferRenewNow } from '../../market/lapse';
 import DmInboxPanel from '@/blog/features/direct-messages/ui/dm-inbox-panel';
 import { useOwnDmRegistration, useDmUnread } from '@/blog/features/direct-messages/live/use-direct-messages';
 
@@ -931,7 +930,6 @@ const CreatorStudio: FC = () => {
     inboxOlderNotScanned,
     positionUnavailable,
     servicesOracleStatus,
-    subDaysLeft,
     tradeFeeClaimableUsd,
     commissionEarnedUsd,
     status
@@ -990,15 +988,15 @@ const CreatorStudio: FC = () => {
   // used `void studio.X()`, silently swallowing a rejected write — the user clicked and
   // nothing happened, with no reason shown. Route them through here so a failure surfaces
   // via the same write-failure.ts messaging the modals already use.
-  // S4 (2026-08-30): set only by a renew whose payment Hive accepted but Magi
-  // has not yet recorded; renders the read-only "Check again" beside the banner.
-  const [renewUnconfirmed, setRenewUnconfirmed] = useState(false);
+  // (An S4 `renewUnconfirmed` flag used to live here: set when Hive accepted a
+  // subscription payment Magi had not yet recorded, it rendered a READ-ONLY
+  // "Check again" rather than a retry, because Renew stacked periods and a second
+  // broadcast bought a second month. No payment, no flag — 2026-09-12.)
   const runStudioAction = async (fn: () => Promise<unknown>, fallback: string): Promise<void> => {
     setActionFailure(null);
     try {
       await fn();
     } catch (err) {
-      if (err instanceof Error && err.message.startsWith('CREATOR_TOKENS_RENEW_UNCONFIRMED:')) setRenewUnconfirmed(true);
       setActionFailure(writeFailureMessage(err, fallback));
     }
   };
@@ -1115,16 +1113,15 @@ const CreatorStudio: FC = () => {
    * from the chain, and returns `unknown` rather than inventing a state — so a
    * failed read now says NOTHING instead of saying something false.
    */
-  const lapse = lapseStateOf({
-    phase: market.phase,
-    paidUntilBlock: market.paidUntilBlock,
-    graceExpiresAtBlock: market.graceExpiresAtBlock,
-    headBlock: market.headBlock,
-    windingDown: market.windingDown
-  });
-  const overdue = lapse.kind === 'grace' || lapse.kind === 'delisted';
-  /** The head or the phase could not be read. Show a dash, never a number. */
-  const subUnknown = lapse.kind === 'unknown';
+  // THERE IS NO LAPSE STATE HERE ANY MORE (OWNER RULING 2026-09-12). This block
+  // derived `lapse`/`overdue`/`subUnknown` from block comparisons against a
+  // chain head, precisely so a failed read said NOTHING rather than telling a
+  // creator their livelihood had been delisted. The 10 HBD monthly subscription
+  // was removed from the contract (creator-tokens/core/params.go), so there is
+  // no paid_until to compare against and no lapse to be in: a market is ACTIVE
+  // from registration until its creator RETIRES it. `market.windingDown` is the
+  // one remaining state this screen has to speak to, and it has always had its
+  // own copy.
   const held = market.position?.tokens ?? 0;
 
   // F5 fix: "Cash out" preview + default floor, same math and same shape as
@@ -1170,54 +1167,18 @@ const CreatorStudio: FC = () => {
    * exactly "the contract would accept a payment right now", which is the only
    * honest precondition for offering a pay button.
    */
-  const canRenewNow = market.renewRefusal === null;
-  /**
-   * ★★★ THE CONTROL GATE, DELIBERATELY NOT `canRenewNow` (2026-08-31).
-   *
-   * `canRenewNow` means "the chain would accept a payment" and is what the COPY
-   * branches on. It is TRUE during a RENEW_UNCONFIRMED — the market is still
-   * ACTIVE and the contract would take the money — which is exactly when a pay
-   * button must NOT be on screen: `renew` STACKS from max(paidUntil, block), so
-   * a second broadcast does not retry the first, it buys a SECOND MONTH.
-   *
-   * This file already knew that: it says so in the S4 comment beside the
-   * read-only "Check again", and then left BOTH primary pay controls live next
-   * to it. Third instance of that pattern in this feature (F1's launch claim,
-   * the banner-vs-Billing renew gate, now this), so the answer is one predicate
-   * that every pay control on this screen reads.
-   */
-  const payControlAllowed = shouldOfferRenewNow({ renewRefusal: market.renewRefusal, renewUnconfirmed });
-  const lapseHeadline = market.windingDown
-    ? 'This token is winding down. It will not take buyers again, and renewing cannot reopen it.'
-    : // ★★ AND IT MUST NOT SAY "RENEW" WHEN THE CHAIN WOULD REFUSE THE PAYMENT
-      // (2026-08-31). The CTA beside it was already gated on `renewRefusal`, but
-      // the SENTENCE was not — so a creator whose market the contract will not
-      // reactivate read "Renew to stay in discovery" next to no button, which is
-      // an instruction that cannot be followed and no explanation of why.
-      // `lapseNoticeFor` carries one distinct, true sentence per refusal reason,
-      // including the road out where renewal is not it. The `??` is unreachable:
-      // this banner only renders on `grace`, `delisted` or `windingDown`, and
-      // the first two always produce a sentence.
-      !canRenewNow
-      ? (lapseNoticeFor(lapse, market.renewRefusal) ?? 'Your market is not taking buyers.')
-      : market.phase === 'FROZEN'
-      ? 'Your market has stopped taking buyers. Renew to start taking them again. Answering and cashing out still work.'
-      : 'Your listing has lapsed. Renew to stay in discovery. Answering and cashing out still work.';
-  const banner =
-    overdue || market.windingDown ? (
-      <div className="mb-5 flex items-center justify-between gap-3 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5">
-        <span className="text-[14px] leading-[22px] font-medium text-ink-warn-3 font-ui">{lapseHeadline}</span>
-        {payControlAllowed ? (
-          <button
-            onClick={() => void runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.')}
-            disabled={studio.isBusy}
-            className="rounded-control bg-surface-warn-11 px-4 py-2 text-caption font-medium text-ink-27 font-ui disabled:opacity-50"
-          >
-            Renew ~$10
-          </button>
-        ) : null}
-      </div>
-    ) : null;
+  // THE PAY CONTROL AND ITS BANNER ARE GONE WITH THE BILL. `payControlAllowed`
+  // existed because `renew` STACKED periods from max(paidUntil, block), so a
+  // second broadcast bought a SECOND MONTH rather than retrying the first — the
+  // third instance in this feature of a hazard guarded on one control and left
+  // live on the one beside it. There is no payment to double-charge now.
+  const banner = market.windingDown ? (
+    <div className="mb-5 flex items-center justify-between gap-3 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5">
+      <span className="text-[14px] leading-[22px] font-medium text-ink-warn-3 font-ui">
+        This token is winding down. It will not take buyers again.
+      </span>
+    </div>
+  ) : null;
 
   return (
     <TokenShell back={{ href: '/creators', label: '← All creators' }}>
@@ -1349,40 +1310,11 @@ const CreatorStudio: FC = () => {
                 }
               />
             </Card>
-            <Card>
-              <Stat
-                label="Subscription"
-                /* ★ A WOUND-DOWN MARKET IS NOT "LAPSED", AND RENEWING CANNOT SAVE
-                   IT (2026-08-31). This read "Lapsed / Renew to stay listed" on a
-                   CLOSED market, where the chain refuses a renewal outright — so
-                   the stat named the wrong state and prescribed a remedy that does
-                   not exist. Same fault as the banner CTA above, in a stat. */
-                value={
-                  market.windingDown
-                    ? 'Ended'
-                    : overdue
-                      ? 'Lapsed'
-                      : /* A failed read reported "0 days left", which is a
-                           deadline, not a missing value. */
-                        subUnknown
-                        ? '—'
-                        : `${subDaysLeft} days left`
-                }
-                sub={
-                  market.windingDown
-                    ? 'This token is winding down'
-                    : overdue
-                      ? /* Same rule as the banner: never prescribe a payment the
-                           contract would refuse. */
-                        canRenewNow
-                        ? 'Renew to stay listed'
-                        : 'Renewing is not available'
-                      : subUnknown
-                        ? 'We couldn’t read your subscription just now'
-                        : `Renew ~$10`
-                }
-              />
-            </Card>
+            {/* THE "SUBSCRIPTION" STAT CARD IS GONE (OWNER RULING 2026-09-12).
+                It read "Paid up · N days left" / "Lapsed · Renew to stay listed",
+                off a paid_until clock the contract no longer keeps. There is no
+                subscription: a market is ACTIVE from registration until its
+                creator RETIRES it, and Billing below says so. */}
             <Card>
               {/* ★ A FAILED READ IS NOT A ZERO BALANCE (2026-08-10). This read
                   `usdWhole(tradeFeeClaimableUsd)` on a value that collapsed a
@@ -1815,82 +1747,21 @@ const CreatorStudio: FC = () => {
 
         {section === 'billing' ? (
           <Card>
-            <div className="mb-1 font-ui text-lg font-medium text-ink-2">Subscription</div>
-            <div className="mb-4 text-[14px] leading-[22px] text-ink-8 font-ui">
-              {market.windingDown
-                ? 'This token is winding down, so the subscription no longer applies.'
-                : overdue
-                  ? canRenewNow
-                    ? 'Lapsed. Renew to stay listed.'
-                    : 'Lapsed, and it cannot be reactivated by paying right now.'
-                  : subUnknown
-                    ? 'We couldn’t read your subscription just now.'
-                    : `Paid up · ${subDaysLeft} days left.`}{' '}
-              Staying
-              listed is ~$10/month. First month’s on the house.
-            </div>
-            {/* ★ THE SECOND DEAD RENEW (2026-08-31). The banner CTA above was
-                gated on `renewRefusal`; this one was not, so a CLOSED market
-                still offered "Renew ~$10" in Billing — the chain refuses it
-                ('closed'), so it could only ever fail. Gated on the same
-                condition, so there is one answer to "may this creator pay
-                right now" and both controls read it. */}
-            {payControlAllowed ? (
-            <button
-              onClick={() =>
-                void (async () => {
-                  setRenewUnconfirmed(false);
-                  await runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.');
-                })()
-              }
-              disabled={studio.isBusy}
-              className="rounded-control bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-medium text-ink-27 font-ui hover:bg-surface-brand-17 disabled:opacity-50"
-            >
-              Renew ~$10
-            </button>
-            ) : null}
-            {/* ★ S4 (2026-08-30): when Hive accepted the payment but Magi has not
-                recorded it inside the window (vsc-data-source renewSubscription
-                throws CREATOR_TOKENS_RENEW_UNCONFIRMED), the way out is a
-                READ-ONLY re-read of the market, never a second broadcast:
-                Renew stacks from max(paidUntil, block), so "Try again" here
-                would buy a second month. `studio.retry` only refetches. */}
-            {renewUnconfirmed ? (
-              <button
-                onClick={() => {
-                  setActionFailure(null);
-                  setRenewUnconfirmed(false);
-                  studio.retry();
-                }}
-                className="ml-2 rounded-control border border-line-11 px-4 py-2.5 text-[14px] leading-[22px] font-medium text-ink-7 font-ui hover:bg-surface-16"
-                data-testid="renew-check-again"
-              >
-                Check again
-              </button>
-            ) : null}
-            {/* ★★★ H-D: THIS TOLD EVERY CREATOR THAT LAPSING REFUNDS THEIR HOLDERS,
-                UNCONDITIONALLY, ON THE SCREEN WHERE THEY DECIDE WHETHER TO PAY
-                (2026-08-31, found in the browser on the demo build).
-                Every clause was the v1 wind-down story: holders refunded, delivery
-                record reset, "coming back means a new token". Under v2 all four are
-                false — a lapse is an inflow stop, holders keep their tokens and can
-                still sell, the record survives, and a renewal reopens the SAME
-                token. 57's own on-chain lifecycle proved exactly that (Buy refused,
-                Sell accepted, Refund refused, Renew accepted on a natural FROZEN).
-                It also contradicted the Studio's own banner two tabs away and the
-                wind-down line immediately below it, which says "nobody is refunded
-                automatically" — two adjacent sentences, opposite claims.
-                It is the one lapse-sensitive string that never got the `rules`
-                treatment, so it flipped from true to false the moment A1 shipped.
-                Now gated on the chain's own answer like the rest.
-                ★ THE v1 BRANCH IS ALSO CORRECTED, not merely preserved: holders
-                were never refunded AUTOMATICALLY even under v1 — Refund and
-                RefundHolder are pull rails somebody has to call. "can redeem"
-                is what was always true. */}
-            <p className="mt-4 text-caption text-ink-14 font-ui">
-              {market.rules === 'v2'
-                ? 'If you stop paying, your market stops taking new buyers. Holders keep their tokens and can still sell, your delivery record is unaffected, and renewing reopens buying on the same token. Answering and cashing out are never blocked by billing.'
-                : 'If you stop paying, your token’s market winds down: holders can redeem their share of the reserve, less any early-exit fee, your delivery record resets, and coming back means a new token. Answering and cashing out are never blocked by billing.'}
+            <div className="mb-1 font-ui text-lg font-medium text-ink-2">Billing</div>
+            {/* ★★ THERE IS NOTHING TO PAY (OWNER RULING 2026-09-12). This card
+                used to carry the subscription: a "Paid up / Lapsed" line, a
+                "Renew ~$10" button, the S4 read-only "Check again" for a payment
+                Hive had accepted and Magi had not yet recorded, and a paragraph
+                about what lapsing does to holders. The 10 HBD monthly charge was
+                removed from the contract (creator-tokens/core/params.go), so all
+                of it is gone: there is no bill, no lapse, and no payment that can
+                be double-charged.
+                ★ WHAT SURVIVES IS THE ONE TRUE SENTENCE THIS CARD ALWAYS OWED A
+                CREATOR — what ENDING their token does to the people holding it —
+                and the control that does it, both directly below. */}
+            <p className="mb-4 text-[14px] leading-[22px] text-ink-8 font-ui">
+              Your market stays listed for as long as you want it. There is no subscription and nothing to renew.
+              Answering and cashing out are never blocked.
             </p>
             <div className="mt-5 border-t border-line-2 pt-4">
               {market.windingDown ? (

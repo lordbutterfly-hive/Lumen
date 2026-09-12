@@ -99,7 +99,6 @@ func zp2Store(t *testing.T, supply, maturing, matured int64, heldBlocks uint64, 
 	if windDown {
 		forceFrozen(s, zp2Creator)
 	} else {
-		setU64(s, kPaidUntil(zp2Creator), zp2Block+100*SubscriptionPeriod)
 	}
 	return s
 }

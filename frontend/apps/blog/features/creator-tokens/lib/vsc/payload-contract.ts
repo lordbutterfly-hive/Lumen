@@ -126,11 +126,10 @@ export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
     // (BasePrice does that work) — never describe it as one in the UI.
     firstBuy: { type: 'moneyString', optional: true }
   },
-  renew: {
-    creator: 'string', // main.go Renew
-    periods: 'number', // main.go Renew
-    paid: 'moneyString' // main.go Renew
-  },
+  // THERE IS NO `renew` SHAPE. main.go dropped the `renew` wasmexport on
+  // 2026-09-12 with the 10 HBD subscription itself (OWNER RULING;
+  // creator-tokens/core/params.go), so there is no payload for this table to
+  // describe and no op the frontend may build.
   setFace: {
     newFace: 'number' // main.go SetFace
   },

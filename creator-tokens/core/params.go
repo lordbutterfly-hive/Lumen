@@ -11,6 +11,15 @@ const BlocksPerDay uint64 = 28800
 // ---- revenue (SPEC §1.7, ruled by the user 2026-07-20) ----
 
 // CommissionBps is taken from every payment that reaches a creator. 12%.
+//
+// ★ IT IS DENOMINATED IN THE CREATOR'S OWN TOKEN, NOT IN HBD (OWNER RULING
+// 2026-09-12). The buyer pays the whole posted price in tokens; 12% of those
+// tokens are carved out and credited to the platform owner account, which then
+// sells them on the curve like any other holder, paying the ordinary trade fee
+// and exit tax. Before this ruling the buyer ALSO had to hold HBD and sign a
+// second transfer.allow leg for the 12%, which meant a token-holding customer
+// could not buy a service with the tokens they held — the product's own core
+// loop needed a currency the product does not use.
 // Charged ONLY on delivered service — never on a refund.
 const CommissionBps uint64 = 1200
 
@@ -46,25 +55,41 @@ const CommissionBps uint64 = 1200
 // later, and the class an audit is supposed to find. Registration cannot
 // charge anything if there is nothing to charge.
 //
-// Revenue is unchanged and lives elsewhere: SubscriptionFee (below, the
-// liveness gate — the FIRST month is free, so creating is genuinely free),
-// CommissionBps (12% on delivered service) and TradeFeeBps (the 2.5% platform
-// half of the 5% trade fee).
+// Revenue lives elsewhere: CommissionBps (12% of the TOKENS on delivered
+// service) and TradeFeeBps (the 2.5% platform half of the 5% trade fee).
 
-// SubscriptionFee is the recurring charge, in HBD base units, per period.
-const SubscriptionFee int64 = 10_000
+// THERE IS NO SubscriptionFee, SubscriptionPeriod OR MaxPrepaidPeriods, AND
+// NO Renew (OWNER RULING 2026-09-12 — "remove the 10 HBD monthly cost").
+//
+// WHAT WAS HERE: `const SubscriptionFee int64 = 10_000`, a 10 HBD charge every
+// `SubscriptionPeriod` (30 days), enforced by core.Renew and by the paid_until
+// ladder naturalPhase derived ACTIVE -> OVERDUE -> FROZEN from. A market that
+// stopped paying stopped taking inflows.
+//
+// THE CONSTANTS ARE DELETED, NOT ZEROED, and the whole payment rail with them
+// — the same ruling this file already applied to RegistrationFee and
+// MaxCommissionBps above: a named, exported protocol parameter that nothing
+// enforces is a dead safety parameter, and the enforcement that would
+// re-animate it is exactly the thing that gets re-wired by accident later. A
+// zero fee with a live Renew, a live paid_until clock and a live FROZEN rung
+// would have been all four of those hazards at once.
+//
+// WHAT REPLACES IT: nothing. Registration is one-time and a market stays ACTIVE
+// until its creator RETIRES it. Nothing is trapped by that — a natural FROZEN
+// was never a wind-down (A1, 2026-08-30: inWindDown fires only on Retire or a
+// stored CLOSED), so no holder's exit ever depended on the lapse ladder; Sell
+// on the curve was open throughout it and still is. What an abandoned market
+// now does is sit there: a liveness reaper, if one is ever wanted, is a
+// separate ruling and a separate mechanism, not a bill.
 
-// SubscriptionPeriod is one month.
-const SubscriptionPeriod uint64 = 30 * BlocksPerDay
+// ---- the retire notice (SPEC §1.7.5) ----
 
-// MaxPrepaidPeriods caps how far ahead a creator may pay, so a lapsed market
-// can never be resurrected from an ancient prepayment.
-const MaxPrepaidPeriods uint64 = 12
-
-// ---- the lapse ladder (SPEC §1.7.5) ----
-
-// GraceBlocks is the fully-functional warning window after the subscription
-// lapses. 5 days. Nothing changes functionally until it expires.
+// GraceBlocks is the fully-functional notice window after a creator RETIRES
+// their market. 5 days. Nothing changes functionally until it expires.
+//
+// It used to ALSO be the subscription's post-lapse grace; that ladder is gone
+// (see above) and this constant now has exactly one job, which is the retire
+// notice Phase()/windDownOpenBlock measure.
 const GraceBlocks uint64 = 5 * BlocksPerDay
 
 // ---- ask pricing band (SPEC §1.3b) ----
@@ -108,14 +133,15 @@ const FaceBandWindow uint64 = 7 * BlocksPerDay
 // price is quadratic in supply), so a face legal at launch can still go dead
 // as the market appreciates — see settlement.go's ServiceFaceRange, which
 // exports the live window, and the honest product limit recorded there.
-// MinFace is a POSTED price, and only 100%-CommissionBps of a posted price
-// reaches the token leg the C4 floor actually measures (splitFace, ask.go —
-// USER RULING 2026-07-27). 508 was the reachable C4 floor at S==2 in token-leg
-// terms; grossed up it is 577, the smallest posted face whose token leg still
-// clears it (577-floor(577*1200/10000) = 577-69 = 508; 576 gives 507 and is
-// therefore dead on arrival). TestSettlement_SET2_MinFaceClearsC4Floor pins
-// the two together so they can never drift apart again.
-const MinFace int64 = 577        // LIVE-1 (PRUNED 2026-07-22) grossed up for the commission carve-out (2026-07-27)
+// ★ THE GROSS-UP IS GONE (OWNER RULING 2026-09-12). Between 2026-07-27 and
+// that ruling the commission was a SEPARATE HBD leg, so only 88% of a posted
+// price reached the token leg the C4 floor measures, and MinFace was grossed up
+// to 577 to compensate. The commission is now carved out of the TOKENS after
+// pricing (CommissionBps), so the WHOLE posted face is what settleSpend prices
+// and what the C4 floor measures — MinFace is back to the floor itself, 508.
+// TestSettlement_SET2_MinFaceClearsC4Floor pins the two together so they can
+// never drift apart again.
+const MinFace int64 = 508        // LIVE-1 (PRUNED 2026-07-22): the reachable C4 floor at S==2
 const MaxFace int64 = 10_000_000 // 10,000.000 HBD
 
 // THERE IS NO MinTip, and there is no tip.go. `const MinTip int64 = 100`
@@ -241,13 +267,21 @@ const ReclaimGrace uint64 = 1200 // ~1 hour
 // nonzero — there is no way to charge only the malicious asker, because the
 // contract cannot tell them apart from an unlucky one.
 //
-// It goes to kTreasury(), NEVER to the creator. Paying the creator here would
-// pay them for going silent, which is the exact behaviour the gate punishes.
+// It goes to the platform OWNER's token position, NEVER to the creator. Paying
+// the creator here would pay them for going silent, which is the exact
+// behaviour the gate punishes. (It was kTreasury() in HBD until the commission
+// became token-denominated — OWNER RULING 2026-09-12, CommissionBps above.)
 //
-// 25% of a 12% commission = 3% of the posted face per junk ask, so the grief
-// cost scales with the price of the creator being griefed rather than with a
-// protocol-wide constant an attacker could shop around. Rounded UP (mMulDivCeil)
-// so no dust-priced escrow can round the deterrent away to zero.
+// 25% of a 12% commission = 3% of the escrowed tokens per junk ask, so the
+// grief cost scales with the price of the creator being griefed rather than
+// with a protocol-wide constant an attacker could shop around. Rounded UP
+// (mMulDivCeil) so no dust-priced escrow can round the deterrent away to zero.
+//
+// SINCE 2026-09-12 it is charged in TOKENS, out of the commission slice the
+// escrow already holds, because there is no HBD leg left to charge it against
+// (CommissionBps above). The CREDITS the asker gets back are therefore the
+// escrow's credits MINUS this slice, where they used to be the whole escrow;
+// the slice is the same 3% of the same posted price either way.
 const MissReclaimSliceBps uint64 = 2500
 
 // ---- TWAP (SPEC §1.3b) ----

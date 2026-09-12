@@ -96,7 +96,12 @@ func TestGoldenCrossCheck_FrontendPayloadsParse(t *testing.T) {
 	// The shop/decline/rate writes are covered too, via the auth-tier
 	// cross-check in auth_tier_crosscheck_test.go, which derives the required
 	// set from main.go rather than restating it here.
-	wantActions := []string{"register", "renew", "setFace", "setCap", "buy", "sell", "ask", "answer", "reclaim", "retire", "transfer", "refund", "refundHolder", "claimTradeFees"}
+	// "renew" is NOT in this list since 2026-09-12: the 10 HBD monthly
+	// subscription was removed (OWNER RULING; core/params.go), main.go dropped the
+	// `renew` wasmexport, and the frontend no longer builds the op — so a fixture
+	// carrying one would mean the client had regressed, not that coverage was
+	// complete.
+	wantActions := []string{"register", "setFace", "setCap", "buy", "sell", "ask", "answer", "reclaim", "retire", "transfer", "refund", "refundHolder", "claimTradeFees"}
 	seen := map[string]bool{}
 	for _, fx := range doc.Fixtures {
 		seen[fx.Action] = true

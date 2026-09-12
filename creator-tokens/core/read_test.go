@@ -187,14 +187,16 @@ func TestWithdrawTreasury_EndToEnd_RevenueNoLongerPermanentlyLocked(t *testing.T
 	if err := Register(s, creator, creator, regBlock, 1000, MaxCap); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if err := Renew(s, "afan", creator, regBlock+1, 1, big.NewInt(SubscriptionFee)); err != nil {
-		t.Fatalf("Renew: %v", err)
-	}
-	// RULING A: Buy on the curve is the only issuance path. The buy's 10%
-	// trade fee splits 5/5, and the PLATFORM half accrues to kTreasury()
-	// (RULING F8 — one platform-revenue pot, one audited exit), so it is a
-	// third treasury source alongside the registration and subscription
-	// fees and must be counted below.
+	// RULING A: Buy on the curve is the only issuance path. The buy's trade fee
+	// splits 5/5, and the PLATFORM half accrues to kTreasury() (RULING F8 — one
+	// platform-revenue pot, one audited exit).
+	//
+	// ★ IT IS NOW THE ONLY TREASURY SOURCE ON THIS PATH. Registration was already
+	// free; the subscription renewal that used to be bought here and the ask
+	// commission that used to be booked on Answer are both gone (OWNER RULING
+	// 2026-09-12 — the commission is tokens paid to the owner's own position, not
+	// HBD into the treasury). The exit tax, tested elsewhere, is the other
+	// remaining source.
 	buyRes, err := Buy(s, "asker", creator, regBlock+2, big.NewInt(5000))
 	if err != nil {
 		t.Fatalf("Buy: %v", err)
@@ -205,8 +207,7 @@ func TestWithdrawTreasury_EndToEnd_RevenueNoLongerPermanentlyLocked(t *testing.T
 	// a face of 10,000 set below. ceil(10,000/15,000) = 1 credit.
 	setMoney(s, kFace(creator), big.NewInt(10_000))
 	askBlock := seedSettleObs(s, creator, regBlock+10, big.NewInt(15_000))
-	commission := commissionOwedFor(big.NewInt(10_000))
-	askRes, err := askAt0(s, "asker", creator, askBlock, big.NewInt(1), commission, "cid", MinAskDeadline)
+	askRes, err := askAt0(s, "asker", creator, askBlock, big.NewInt(1), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -214,14 +215,17 @@ func TestWithdrawTreasury_EndToEnd_RevenueNoLongerPermanentlyLocked(t *testing.T
 		t.Fatalf("Answer: %v", err)
 	}
 
-	// Registration is FREE (LOCKED-MECHANISM "Revenue"): the treasury's
-	// inflows here are the subscription renewal, the service commission and
-	// the platform half of the buy's trade fee — no registration fee exists.
-	wantTreasury := big.NewInt(SubscriptionFee)
-	wantTreasury.Add(wantTreasury, commission)
-	wantTreasury.Add(wantTreasury, buyRes.FeePlatform) // the buy's platform fee half (F8)
+	// The treasury's ONLY inflow on this path is the platform half of the buy's
+	// trade fee: registration is free, there is no subscription, and the ask
+	// commission is tokens on the owner's position rather than HBD here.
+	wantTreasury := new(big.Int).Set(buyRes.FeePlatform)
 	if got := getMoney(s, kTreasury()); got.Cmp(wantTreasury) != 0 {
-		t.Fatalf("sanity: treasury = %s, want %s (SubscriptionFee+commission+platform trade-fee half; registration is FREE)", got, wantTreasury)
+		t.Fatalf("sanity: treasury = %s, want %s (the platform trade-fee half alone)", got, wantTreasury)
+	}
+	// ...and the commission really did land on the OWNER as tokens, which is what
+	// replaced the treasury booking.
+	if got := totalBalance(s, creator, owner); got.Cmp(askRes.CommissionCredits) != 0 {
+		t.Fatalf("owner token position = %s, want the answered commission %s", got, askRes.CommissionCredits)
 	}
 
 	// Before C2's fix, this revenue had no exit anywhere in the package —

@@ -179,22 +179,11 @@ func TestSchemaContract_Registered(t *testing.T) {
 	scWantFieldCount(t, evName, m, 8, ref)
 }
 
-func TestSchemaContract_Renewed(t *testing.T) {
-	const evName = "renewed"
-	const ref = "magi-indexer/creator_tokens_mappings.yaml (RenewedEvent)"
-	// actor deliberately != creator: Renew is permissionless (a fan pays).
-	out := EvRenewed("aliceperry", "fanwriter1", 12_400_000, 3, big.NewInt(30_000))
-	m := scDecode(t, out)
-
-	scWantStr(t, evName, m, "type", "renewed", "magi-indexer/creator_tokens_mappings.yaml (KindRenewed)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (RenewedEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "fanwriter1", "magi-indexer/creator_tokens_mappings.yaml (RenewedEvent.Actor)")
-	scWantNum(t, evName, m, "block", 12_400_000, "magi-indexer/creator_tokens_mappings.yaml (RenewedEvent.Block)")
-	scWantNum(t, evName, m, "periods", 3, "magi-indexer/creator_tokens_mappings.yaml (RenewedEvent.Periods)")
-	scWantStr(t, evName, m, "paid", "30000", "magi-indexer/creator_tokens_mappings.yaml (RenewedEvent.Paid)")
-	scWantFieldCount(t, evName, m, 7, ref)
-}
+// (TestSchemaContract_Renewed is gone with EvRenewed and core.Renew — the 10 HBD
+// subscription was removed on 2026-09-12, core/params.go. The indexer's
+// RenewedEvent mapping is now dead wire: no `renewed` event can be produced, and
+// its contribution to Index.TreasuryHbd must be dropped rather than left summing
+// a stream that stopped.)
 
 func TestSchemaContract_FaceChanged(t *testing.T) {
 	const evName = "faceChanged"
@@ -272,7 +261,7 @@ func TestSchemaContract_Transferred(t *testing.T) {
 func TestSchemaContract_Asked(t *testing.T) {
 	const evName = "asked"
 	const ref = "magi-indexer/creator_tokens_mappings.yaml (AskedEvent)"
-	out := EvAsked("aliceperry", "holderone", 12_700_000, 3, big.NewInt(42), big.NewInt(120), big.NewInt(2000), 28800, "cid-realistic-hash-abc123", 3)
+	out := EvAsked("aliceperry", "holderone", 12_700_000, 3, big.NewInt(42), big.NewInt(5), big.NewInt(2000), 28800, "cid-realistic-hash-abc123", 3)
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "asked", "magi-indexer/creator_tokens_mappings.yaml (KindAsked)")
@@ -282,7 +271,10 @@ func TestSchemaContract_Asked(t *testing.T) {
 	scWantNum(t, evName, m, "block", 12_700_000, "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.Block)")
 	scWantNum(t, evName, m, "seq", 3, "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.Seq)")
 	scWantStr(t, evName, m, "creditsSpent", "42", "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.CreditsSpent)")
-	scWantStr(t, evName, m, "commissionHbd", "120", "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.CommissionHbd)")
+	// ★ commissionCredits, and it is a PARTITION of creditsSpent (2026-09-12):
+	// 42 credits left the buyer, 5 of which are the platform's. An indexer that
+	// adds the two together bills the buyer twice.
+	scWantStr(t, evName, m, "commissionCredits", "5", "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.CommissionCredits)")
 	scWantStr(t, evName, m, "rate", "2000", "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.Rate)")
 	scWantNum(t, evName, m, "deadlineBlocks", 28800, "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.DeadlineBlocks)")
 	scWantStr(t, evName, m, "contentHash", "cid-realistic-hash-abc123", "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.ContentHash)")
@@ -307,9 +299,12 @@ func TestSchemaContract_Asked(t *testing.T) {
 func TestSchemaContract_Answered(t *testing.T) {
 	const evName = "answered"
 	const ref = "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent)"
-	// M4 fix (2026-07-21): commissionHbd added — the HBD Answer books to
-	// kTreasury() in the same call, previously invisible to any replay.
-	out := EvAnswered("aliceperry", "aliceperry", 12_710_000, 3, big.NewInt(42), big.NewInt(504), "ans-realistic-hash-1")
+	// M4 fix (2026-07-21) added a commission field so the settlement was not
+	// invisible to a replay. ★ SINCE 2026-09-12 IT IS TWO FIELDS AND A DIFFERENT
+	// ASSET: commissionCredits (12%% of the escrow's TOKENS) and commissionTo (the
+	// owner account credited). An indexer must move those tokens onto that
+	// holder's balance, where it used to add HBD to a global treasury total.
+	out := EvAnswered("aliceperry", "aliceperry", 12_710_000, 3, big.NewInt(42), big.NewInt(6), "lumencontracts", "ans-realistic-hash-1")
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "answered", "magi-indexer/creator_tokens_mappings.yaml (KindAnswered)")
@@ -319,17 +314,19 @@ func TestSchemaContract_Answered(t *testing.T) {
 	scWantNum(t, evName, m, "block", 12_710_000, "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.Block)")
 	scWantNum(t, evName, m, "seq", 3, "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.Seq)")
 	scWantStr(t, evName, m, "creditsToCreator", "42", "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.CreditsToCreator)")
-	scWantStr(t, evName, m, "commissionHbd", "504", "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.CommissionHbd)")
+	scWantStr(t, evName, m, "commissionCredits", "6", "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.CommissionCredits)")
+	scWantStr(t, evName, m, "commissionTo", "lumencontracts", "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.CommissionTo)")
 	scWantStr(t, evName, m, "answerHash", "ans-realistic-hash-1", "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.AnswerHash)")
-	scWantFieldCount(t, evName, m, 9, ref)
+	scWantFieldCount(t, evName, m, 10, ref)
 }
 
 func TestSchemaContract_Reclaimed(t *testing.T) {
 	const evName = "reclaimed"
 	const ref = "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent)"
-	// M4 fix (2026-07-21): commissionHbd added — the HBD Reclaim hands back
-	// to the asker in full (I5), previously invisible to any replay.
-	out := EvReclaimed("aliceperry", "holderthree", 12_720_000, 4, big.NewInt(60), big.NewInt(54), big.NewInt(18), "holderthree")
+	// ★ credits is the NET returned and commissionRetainedCredits the miss slice
+	// kept, both in TOKENS since 2026-09-12; together they are the whole escrow.
+	// retainedTo names the account credited with the slice.
+	out := EvReclaimed("aliceperry", "holderthree", 12_720_000, 4, big.NewInt(58), big.NewInt(2), "lumencontracts", "holderthree")
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "reclaimed", "magi-indexer/creator_tokens_mappings.yaml (KindReclaimed)")
@@ -338,15 +335,14 @@ func TestSchemaContract_Reclaimed(t *testing.T) {
 	scWantStr(t, evName, m, "actor", "holderthree", "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_720_000, "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.Block)")
 	scWantNum(t, evName, m, "seq", 4, "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.Seq)")
-	scWantStr(t, evName, m, "credits", "60", "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.Credits)")
-	scWantStr(t, evName, m, "commissionHbd", "54", "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.CommissionHbd)")
-	// commissionRetainedHbd (USER RULING 1, 2026-07-28) — the miss slice the
-	// protocol KEPT. It is a SEPARATE field, not a shrunken commissionHbd,
-	// because the indexer folds the two in OPPOSITE directions: the returned
-	// leg into reclaimOutflowHbd, this one into treasuryHbd. Drop it from the
-	// wire and every miss reclaim silently under-credits the treasury by the
-	// slice, forever, with no error anywhere.
-	scWantStr(t, evName, m, "commissionRetainedHbd", "18", "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.CommissionRetainedHbd)")
+	scWantStr(t, evName, m, "credits", "58", "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.Credits)")
+	// commissionRetainedCredits (USER RULING 1, 2026-07-28; tokens since
+	// 2026-09-12) — the miss slice the protocol KEPT. It is a SEPARATE field, not
+	// a shrunken `credits`, because the indexer folds the two to DIFFERENT
+	// HOLDERS: `credits` back to the asker, this one onto the owner's position.
+	// Drop it from the wire and every miss reclaim silently loses the slice.
+	scWantStr(t, evName, m, "commissionRetainedCredits", "2", "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.CommissionRetainedCredits)")
+	scWantStr(t, evName, m, "retainedTo", "lumencontracts", "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.RetainedTo)")
 	// asker (2026-07-27) — WHO WAS PAID, which is not `actor`: reclaim is
 	// permissionless, so actor may be a keeper pushing an abandoned escrow. The
 	// indexer folds the credits to THIS field; dropping it would silently
@@ -393,7 +389,7 @@ func TestSchemaContract_Rated(t *testing.T) {
 func TestSchemaContract_Declined(t *testing.T) {
 	const evName = "declined"
 	const ref = "magi-indexer/creator_tokens_mappings.yaml (DeclinedEvent)"
-	out := EvDeclined("aliceperry", "aliceperry", 12_725_000, 5, big.NewInt(60), big.NewInt(72), "holderthree")
+	out := EvDeclined("aliceperry", "aliceperry", 12_725_000, 5, big.NewInt(60), "holderthree")
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "declined", "magi-indexer/creator_tokens_mappings.yaml (KindDeclined)")
@@ -402,10 +398,11 @@ func TestSchemaContract_Declined(t *testing.T) {
 	scWantStr(t, evName, m, "actor", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (DeclinedEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_725_000, "magi-indexer/creator_tokens_mappings.yaml (DeclinedEvent.Block)")
 	scWantNum(t, evName, m, "seq", 5, "magi-indexer/creator_tokens_mappings.yaml (DeclinedEvent.Seq)")
+	// A decline returns the WHOLE escrow and retains nothing, so there is one
+	// money field, not two (the commissionHbd leg went with the HBD, 2026-09-12).
 	scWantStr(t, evName, m, "credits", "60", "magi-indexer/creator_tokens_mappings.yaml (DeclinedEvent.Credits)")
-	scWantStr(t, evName, m, "commissionHbd", "72", "magi-indexer/creator_tokens_mappings.yaml (DeclinedEvent.CommissionHbd)")
 	scWantStr(t, evName, m, "asker", "holderthree", "magi-indexer/creator_tokens_mappings.yaml (DeclinedEvent.Asker)")
-	scWantFieldCount(t, evName, m, 9, ref)
+	scWantFieldCount(t, evName, m, 8, ref)
 }
 
 // The five pins below close the rest of a gap found 2026-07-28: `bought`,
@@ -796,7 +793,7 @@ func TestSchemaContract_EveryConstructorIsPinned(t *testing.T) {
 		// magi_nft, not by us, so the pin asserts conformance to THEIR wire
 		// format rather than freedom to choose ours.
 		"init_magi_nft": true, "tokenCreated": true, "TransferSingle": true, "Approval": true, "maturedMoved": true,
-		"registered": true, "renewed": true, "faceChanged": true, "capChanged": true,
+		"registered": true, "faceChanged": true, "capChanged": true,
 		"prepaid": true, "transferred": true, "asked": true, "answered": true,
 		"reclaimed": true, "declined": true, "refunded": true, "refundPushed": true,
 		"closed": true, "bought": true, "sold": true, "rated": true,

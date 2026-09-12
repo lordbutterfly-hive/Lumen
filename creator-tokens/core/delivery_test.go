@@ -13,17 +13,28 @@ import (
 
 // dgSetup builds an ACTIVE market with a settleable rate and a funded asker.
 // Returns the block asks may be made at.
+// dgSetup builds the delivery-gate fixture. A market nobody retires is ACTIVE
+// at every block these tests use, so the ONLY thing that can ever close an
+// inflow here is delivery standing — which is the point.
+//
+// ★ THE FACE IS 90,000, NOT 9,090 (OWNER RULING 2026-09-12). The commission is
+// now floor(credits * 1200 / 10000) and the old fixture settled at ceil(9090 /
+// 2000) = 5 credits, whose 12%% floors to ZERO — every miss-slice assertion in
+// this file would have passed while asserting nothing. 90,000 settles at 45
+// credits (commission 5, miss slice 2), inside the 5%%-of-supply spend cap at
+// S=1000 (50) and well under the depth ceiling.
+//
+// The platform owner is bound because the miss slice is credited to that
+// account's token position now, where it used to be HBD in kTreasury().
 func dgSetup(t *testing.T) (Store, uint64) {
 	t.Helper()
 	s := NewMemStore()
+	bindOwner(s)
 	curveMarket(s, creator1, 1000)
-	setMoney(s, kFace(creator1), big.NewInt(9090))
+	setMoney(s, kFace(creator1), big.NewInt(90_000))
 	setMoney(s, kBal(creator1, asker1), big.NewInt(500_000))
 	askBlock := seedSettleObs(s, creator1, 1000, big.NewInt(2000))
 	activateMarket(s, creator1, askBlock)
-	// Keep the subscription paid far past every block these tests use, so the
-	// ONLY thing that can ever close an inflow here is delivery standing.
-	setU64(s, kPaidUntil(creator1), askBlock+1_000_000)
 	return s, askBlock
 }
 
@@ -31,8 +42,7 @@ func dgSetup(t *testing.T) (Store, uint64) {
 // block the reclaim happened at.
 func dgMiss(t *testing.T, s Store, at uint64) uint64 {
 	t.Helper()
-	commission := commissionOwedFor(big.NewInt(9090))
-	res, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), commission, "cid", MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask at %d: %v", at, err)
 	}
@@ -89,8 +99,7 @@ func TestDelivery_DelinquencyNeverGatesAnyPayout(t *testing.T) {
 
 	// An ask placed BEFORE the creator falls foul of the gate, so there is a
 	// live escrow straddling the conviction — the realistic case.
-	commission := commissionOwedFor(big.NewInt(9090))
-	inflight, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), commission, "inflight", MaxAskDeadline)
+	inflight, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), "inflight", MaxAskDeadline)
 	if err != nil {
 		t.Fatalf("in-flight Ask: %v", err)
 	}
@@ -125,11 +134,10 @@ func TestDelivery_DelinquencyNeverGatesAnyPayout(t *testing.T) {
 
 func TestDelivery_DeclineIsNotAMiss(t *testing.T) {
 	s, at := dgSetup(t)
-	commission := commissionOwedFor(big.NewInt(9090))
 	balBefore := getMoney(s, kBal(creator1, asker1))
 
 	for i := 0; i < 5; i++ {
-		res, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), commission, "cid", MinAskDeadline)
+		res, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), "cid", MinAskDeadline)
 		if err != nil {
 			t.Fatalf("Ask %d: %v", i, err)
 		}
@@ -140,8 +148,8 @@ func TestDelivery_DeclineIsNotAMiss(t *testing.T) {
 		if dec.CreditsReturned.Cmp(res.CreditsSpent) != 0 {
 			t.Fatalf("Decline returned %s credits, want the escrowed %s", dec.CreditsReturned, res.CreditsSpent)
 		}
-		if dec.CommissionHbd.Cmp(commission) != 0 {
-			t.Fatalf("Decline returned %s commission, want the full %s — we are paid for delivered service only", dec.CommissionHbd, commission)
+		if dec.CommissionRetainedCredits.Sign() != 0 {
+			t.Fatalf("Decline retained %s, want 0 — we are paid for delivered service only", dec.CommissionRetainedCredits)
 		}
 		if dec.Asker != asker1 {
 			t.Fatalf("Decline pays %s, want the asker %s", dec.Asker, asker1)
@@ -171,9 +179,8 @@ func TestDelivery_DeclineIsNotAMiss(t *testing.T) {
 func TestDelivery_JudgesTheRateNotTheCount(t *testing.T) {
 	s, at := dgSetup(t)
 	// 20 clean deliveries first.
-	commission := commissionOwedFor(big.NewInt(9090))
 	for i := 0; i < 20; i++ {
-		res, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), commission, "cid", MinAskDeadline)
+		res, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), "cid", MinAskDeadline)
 		if err != nil {
 			t.Fatalf("Ask %d: %v", i, err)
 		}
@@ -219,10 +226,9 @@ func TestDelivery_PenaltyExpiresWithACleanSheet(t *testing.T) {
 
 func TestDecline_WindowAndAuth(t *testing.T) {
 	s, at := dgSetup(t)
-	commission := commissionOwedFor(big.NewInt(9090))
 
 	// Not the creator.
-	res, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), commission, "cid", MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -270,15 +276,20 @@ func TestDelivery_PenaltyNeverBlocksPayingTheSubscription(t *testing.T) {
 	if err := RequireInflowOpen(s, creator1, at); err == nil {
 		t.Fatal("delinquency did not close purchases")
 	}
-	// Paying the bill must still work. This is the difference between a
-	// penalty and a trap.
-	if err := Renew(s, creator1, creator1, at, 1, big.NewInt(SubscriptionFee)); err != nil {
-		t.Fatalf("a delinquent creator could not pay their subscription: %v", err)
-	}
-	// And a third party may still rescue the market, since Renew is
-	// permissionless by design.
-	if err := Renew(s, "randomfan", creator1, at+1, 1, big.NewInt(SubscriptionFee)); err != nil {
-		t.Fatalf("a fan could not renew a delinquent creator's market: %v", err)
+	// ★ THE "PAYING THE BILL MUST STILL WORK" HALF IS GONE WITH THE BILL (OWNER
+	// RULING 2026-09-12). Two clauses used to sit here: a delinquent creator
+	// could still Renew (the difference between a penalty and a trap — a 7-day
+	// delinquency that outlived the 5-day grace used to destroy a market
+	// permanently), and a fan could rescue them, since Renew was permissionless.
+	// There is no subscription to pay and no lapse to be trapped by, so the trap
+	// this guarded has no mechanism left. What still has to hold is the OTHER
+	// half of the same rule — delinquency gates PURCHASES and never payouts —
+	// and that is asserted across every outflow by the standing guardrail tests
+	// below and by the simulator's captureDelinquent sweep.
+	//
+	// The payout rail stays open while delinquent, proven directly:
+	if _, err := ClaimTradeFees(s, creator1); err != nil {
+		t.Fatalf("a delinquent creator could not claim their fee pot: %v", err)
 	}
 }
 
@@ -292,11 +303,10 @@ func TestDelivery_PenaltyNeverBlocksPayingTheSubscription(t *testing.T) {
 func TestDelivery_SelfDealtEscrowsCountForNeitherSide(t *testing.T) {
 	s, at := dgSetup(t)
 	setMoney(s, kBal(creator1, creator1), big.NewInt(500_000))
-	commission := commissionOwedFor(big.NewInt(9090))
 
 	// The creator asks their OWN market and declines, repeatedly.
 	for i := 0; i < 10; i++ {
-		res, err := askAt0(s, creator1, creator1, at, big.NewInt(1000), commission, "self", MinAskDeadline)
+		res, err := askAt0(s, creator1, creator1, at, big.NewInt(1000), "self", MinAskDeadline)
 		if err != nil {
 			t.Fatalf("self-ask %d: %v", i, err)
 		}
@@ -398,12 +408,15 @@ func missSliceFor(commission *big.Int) *big.Int {
 // which was false. This measures the cost and asserts it is strictly positive.
 func TestDelivery_GriefingCostsTheAskerTheMissSlice(t *testing.T) {
 	s, at := dgSetup(t)
-	commission := commissionOwedFor(big.NewInt(9090))
-	slice := missSliceFor(commission)
+	// The grief cost is now paid in TOKENS out of the escrow itself (OWNER
+	// RULING 2026-09-12), not in HBD out of a separate commission leg.
+	credits := creditsForAsk(big.NewInt(90_000), big.NewInt(2000))
+	slice := missSliceFor(commissionOwedFor(credits))
 	if slice.Sign() <= 0 {
-		t.Fatalf("miss slice on a %s commission is %s — griefing would still be free", commission, slice)
+		t.Fatalf("miss slice on a %s-credit ask is %s — griefing would still be free", credits, slice)
 	}
 
+	ownerBefore := totalBalance(s, creator1, platform1)
 	treasuryBefore := getMoney(s, kTreasury())
 	balBefore := getMoney(s, kBal(creator1, asker1))
 
@@ -411,19 +424,30 @@ func TestDelivery_GriefingCostsTheAskerTheMissSlice(t *testing.T) {
 		at = dgMiss(t, s, at) + 1
 	}
 
-	// The CREDITS are still returned whole — RULING 1 charges the HBD leg only.
-	if bal := getMoney(s, kBal(creator1, asker1)); bal.Cmp(balBefore) != 0 {
-		t.Fatalf("asker token balance %s -> %s; credits must always come back whole", balBefore, bal)
+	// ★ THE ASKER IS NOW OUT THREE SLICES OF TOKENS, and that is the whole
+	// point: the cost of manufacturing a miss is visible in the griefer's own
+	// balance. Before 2026-09-12 the credits came back whole and the cost was
+	// charged against a separate HBD leg instead; the amount is the same 3%% of
+	// the posted price either way.
+	wantBal := new(big.Int).Sub(balBefore, new(big.Int).Mul(slice, big.NewInt(3)))
+	if bal := getMoney(s, kBal(creator1, asker1)); bal.Cmp(wantBal) != 0 {
+		t.Fatalf("asker token balance %s -> %s, want %s (three %s-credit miss slices)", balBefore, bal, wantBal, slice)
 	}
-	// Three misses, three slices, all of it in the treasury and none of it
-	// anywhere near the creator (paying the creator for going silent would pay
-	// for the exact behaviour the gate punishes).
-	wantTreasury := new(big.Int).Add(treasuryBefore, new(big.Int).Mul(slice, big.NewInt(3)))
-	if treas := getMoney(s, kTreasury()); treas.Cmp(wantTreasury) != 0 {
-		t.Fatalf("treasury = %s, want %s (3 misses x %s)", treas, wantTreasury, slice)
+	// Three misses, three slices, all of it on the platform owner's position and
+	// none of it anywhere near the creator (paying the creator for going silent
+	// would pay for the exact behaviour the gate punishes).
+	wantOwner := new(big.Int).Add(ownerBefore, new(big.Int).Mul(slice, big.NewInt(3)))
+	if got := totalBalance(s, creator1, platform1); got.Cmp(wantOwner) != 0 {
+		t.Fatalf("owner position = %s, want %s (3 misses x %s)", got, wantOwner, slice)
+	}
+	if treas := getMoney(s, kTreasury()); treas.Cmp(treasuryBefore) != 0 {
+		t.Fatalf("treasury moved %s -> %s — no HBD moves on the escrow rail at all", treasuryBefore, treas)
 	}
 	if fee := getMoney(s, kFeeBal(creator1)); fee.Sign() != 0 {
 		t.Fatalf("creator fee balance = %s, want 0 — the miss slice must never reach the creator", fee)
+	}
+	if bal := totalBalance(s, creator1, creator1); bal.Sign() != 0 {
+		t.Fatalf("creator token balance = %s, want 0 — the miss slice must never reach the creator", bal)
 	}
 	if delinquent, _ := DeliveryStanding(s, creator1, at); !delinquent {
 		t.Fatalf("sanity: the three misses should have convicted")
@@ -437,10 +461,9 @@ func TestDelivery_GriefingCostsTheAskerTheMissSlice(t *testing.T) {
 func TestDelivery_SelfDealtReclaimIsNotAMissAndPaysNoSlice(t *testing.T) {
 	s, at := dgSetup(t)
 	setMoney(s, kBal(creator1, creator1), big.NewInt(500_000))
-	commission := commissionOwedFor(big.NewInt(9090))
 	treasuryBefore := getMoney(s, kTreasury())
 
-	res, err := askAt0(s, creator1, creator1, at, big.NewInt(1000), commission, "cid", MinAskDeadline)
+	res, err := askAt0(s, creator1, creator1, at, big.NewInt(1000), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("self Ask: %v", err)
 	}
@@ -448,11 +471,11 @@ func TestDelivery_SelfDealtReclaimIsNotAMissAndPaysNoSlice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("self Reclaim: %v", err)
 	}
-	if rres.CommissionRetainedHbd.Sign() != 0 {
-		t.Fatalf("retained %s on a self-dealt reclaim, want 0 (not a miss)", rres.CommissionRetainedHbd)
+	if rres.CommissionRetainedCredits.Sign() != 0 {
+		t.Fatalf("retained %s on a self-dealt reclaim, want 0 (not a miss)", rres.CommissionRetainedCredits)
 	}
-	if rres.CommissionHbd.Cmp(commission) != 0 {
-		t.Fatalf("CommissionHbd = %s, want the full %s back", rres.CommissionHbd, commission)
+	if rres.CreditsReturned.Cmp(res.CreditsSpent) != 0 {
+		t.Fatalf("CreditsReturned = %s, want the whole escrow %s back", rres.CreditsReturned, res.CreditsSpent)
 	}
 	if treas := getMoney(s, kTreasury()); treas.Cmp(treasuryBefore) != 0 {
 		t.Fatalf("treasury moved on a self-dealt reclaim: %s -> %s", treasuryBefore, treas)
@@ -470,12 +493,11 @@ func TestDelivery_SelfDealtReclaimIsNotAMissAndPaysNoSlice(t *testing.T) {
 // deadline+ReclaimGrace makes such a conviction arrive already spent.
 func TestDelivery_StaleOffencesConvictForAnAlreadyExpiredWindow(t *testing.T) {
 	s, at := dgSetup(t)
-	commission := commissionOwedFor(big.NewInt(9090))
 
 	// Three asks that all expire early, and are then left alone.
 	seqs := make([]uint64, 0, 3)
 	for i := 0; i < 3; i++ {
-		res, err := askAt0(s, asker1, creator1, at+uint64(i), big.NewInt(1000), commission, "cid", MinAskDeadline)
+		res, err := askAt0(s, asker1, creator1, at+uint64(i), big.NewInt(1000), "cid", MinAskDeadline)
 		if err != nil {
 			t.Fatalf("Ask %d: %v", i, err)
 		}
@@ -511,7 +533,6 @@ func TestDelivery_StaleOffencesConvictForAnAlreadyExpiredWindow(t *testing.T) {
 // already over, freshest-last for the full seven days. Our own keeper chooses
 // that order. Every permutation must convict identically.
 func TestDelivery_PenaltyWindowIsIndependentOfReclaimOrder(t *testing.T) {
-	commission := commissionOwedFor(big.NewInt(9090))
 	// Three permutations of the same three offences, oldest-first through
 	// newest-first.
 	orders := [][]int{{0, 1, 2}, {2, 1, 0}, {1, 2, 0}}
@@ -527,7 +548,7 @@ func TestDelivery_PenaltyWindowIsIndependentOfReclaimOrder(t *testing.T) {
 			// Spread the asks a day apart so the offences are genuinely
 			// different blocks; otherwise the test proves nothing.
 			askAt := at + uint64(i)*BlocksPerDay
-			res, err := askAt0(s, asker1, creator1, askAt, big.NewInt(1000), commission, "cid", MinAskDeadline)
+			res, err := askAt0(s, asker1, creator1, askAt, big.NewInt(1000), "cid", MinAskDeadline)
 			if err != nil {
 				t.Fatalf("Ask %d: %v", i, err)
 			}
@@ -633,7 +654,6 @@ func TestDelivery_RepeatFloorDecaysAfterTheCooldown(t *testing.T) {
 
 	// Wait out the whole cooldown, quietly.
 	at = until + ConvictionCooldownBlocks + 1
-	setU64(s, kPaidUntil(creator1), at+1_000_000)
 
 	for i := 0; i < 3; i++ {
 		at = dgMiss(t, s, at) + 1

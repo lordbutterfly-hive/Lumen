@@ -24,14 +24,16 @@ func tbMarket(t *testing.T, c string) *MemStore {
 	return s
 }
 
-// tbKeepPaid renews the creator's subscription enough times to cover [from, to]
-// with headroom, so the market is ACTIVE for the whole span.
+// tbKeepPaid is a NO-OP kept as a call site marker. It renewed the creator's
+// subscription enough times to cover [from, to] so the market stayed ACTIVE for
+// the whole span; since 2026-09-12 there is no subscription and a registered
+// market is ACTIVE forever, so every caller's precondition holds for free. The
+// function is kept rather than deleted so the fixtures still say out loud which
+// span they need ACTIVE — the requirement is real even though nothing has to be
+// done to meet it.
 func tbKeepPaid(t *testing.T, s *MemStore, c string, from, to uint64) {
 	t.Helper()
-	periods := (to-from)/SubscriptionPeriod + 2
-	if err := Renew(s, c, c, from, periods, big.NewInt(SubscriptionFee*int64(periods))); err != nil {
-		t.Fatalf("renew: %v", err)
-	}
+	_, _, _ = s, from, to
 }
 
 // tbMature buys and then graduates, leaving the holder wholly matured.
@@ -128,7 +130,7 @@ func TestTwoBucket_MaturedHolderCanAsk(t *testing.T) {
 	}
 
 	face := Face(s, c)
-	_, err := Ask(s, h, c, at, big.NewInt(5000), CommissionOwedFor(face), "contenthash", 864000, 0)
+	_, err := Ask(s, h, c, at, big.NewInt(5000), "contenthash", 864000, 0)
 
 	// Scoped deliberately: an Ask also needs a settlement rate, and building the
 	// oracle history for one is a fixture concern unrelated to buckets. What
@@ -195,7 +197,7 @@ func TestTwoBucket_EscrowRoundTripPreservesMaturedBucket(t *testing.T) {
 	}
 
 	// Exactly what Reclaim and Decline do.
-	returnEscrowToOwner(s, c, h, 0, big.NewInt(500), acq, at)
+	returnEscrowToOwner(s, c, h, "", 0, big.NewInt(500), nil, acq, at)
 
 	if got := getMatured(s, c, h); got.Cmp(big.NewInt(500)) != 0 {
 		t.Fatalf("matured bucket holds %s after the round trip, want 500 — the escrow "+
@@ -243,7 +245,7 @@ func TestTwoBucket_MixedEscrowSettlesEachLegOnItsOwnClock(t *testing.T) {
 	// a frozen mean aged as one pool, so the fresh half came back older than it
 	// had any right to be.
 	later := at + ExitTaxDecayBlocks/2
-	returnEscrowToOwner(s, c, h, 0, big.NewInt(800), acq, later)
+	returnEscrowToOwner(s, c, h, "", 0, big.NewInt(800), nil, acq, later)
 
 	if got := getMatured(s, c, h); got.Cmp(fromMatured) != 0 {
 		t.Fatalf("matured leg came back as %s, want %s", got, fromMatured)

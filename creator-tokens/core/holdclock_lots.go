@@ -784,6 +784,49 @@ func loadEscrowLots(s Store, c string, seq uint64, credits *big.Int) []mLot {
 	return out
 }
 
+// lotsDropFreshest removes the `n` FRESHEST tokens from a freshest-first lot
+// list and returns what is left — the oldest cohorts, in the same order.
+//
+// It exists for the escrow commission split (matured.go's settleEscrowLegs,
+// OWNER RULING 2026-09-12). An answered escrow now pays two parties out of one
+// recorded cohort list: the platform's 12% and the creator's remainder. The
+// platform's slice is credited with a FRESH clock whatever cohorts it came
+// from, so its provenance is economically irrelevant; the creator's is not.
+// Handing the creator the OLDEST cohorts is the same direction every other
+// rounding on this path takes — in the creator's favour — and it is the exact
+// complement of lotsDebit's freshest-first draw, so the two halves of one
+// escrow can never both claim the same cohort.
+//
+// Pure: it allocates a new slice and never touches the store. n <= 0 returns the
+// list unchanged; n >= the total returns nil.
+func lotsDropFreshest(lots []mLot, n *big.Int) []mLot {
+	if n == nil || n.Sign() <= 0 {
+		return lots
+	}
+	remaining := new(big.Int).Set(n)
+	out := make([]mLot, 0, len(lots))
+	for _, l := range lots {
+		if l.count == nil || l.count.Sign() <= 0 {
+			continue
+		}
+		if remaining.Sign() == 0 {
+			out = append(out, mLot{count: new(big.Int).Set(l.count), acq: l.acq})
+			continue
+		}
+		if l.count.Cmp(remaining) <= 0 {
+			remaining = new(big.Int).Sub(remaining, l.count)
+			continue
+		}
+		kept := new(big.Int).Sub(l.count, remaining)
+		remaining = big.NewInt(0)
+		out = append(out, mLot{count: kept, acq: l.acq})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // consumeEscrowLots clears the cohort record once the escrow has settled — the
 // same second-lock reasoning consumeEscrowMaturedLeg documents.
 func consumeEscrowLots(s Store, c string, seq uint64) {

@@ -141,7 +141,6 @@ export interface LiveStudio {
    */
   offerings: Offering[] | null;
   /** Whole days until the subscription lapses; negative once overdue. */
-  subDaysLeft: number;
   /** NULL when the fee balance could not be read — NOT a zero balance. See `offerings`. */
   tradeFeeClaimableUsd: number | null;
   /**
@@ -168,7 +167,6 @@ export interface LiveStudio {
   }) => Promise<LaunchResult>;
   answer: (input: { seq: number; deadlineBlock: number; answerHash: string }) => Promise<void>;
   decline: (input: { seq: number; deadlineBlock: number }) => Promise<void>;
-  renew: (periods: number) => Promise<void>;
   setCap: (newCapTokens: number) => Promise<void>;
   /** market.go SetFace — the posted base price, banded to at most 2x in any 7 days. */
   setFace: (newPriceUsd: number) => Promise<void>;
@@ -440,7 +438,6 @@ export function useLiveStudio(): LiveStudio {
   const inbox = market ? rawInbox.map((a) => adaptAsk(a, market.priceUsd)) : [];
   const expiredInbox = market ? rawExpired.map((a) => adaptAsk(a, market.priceUsd)) : [];
 
-  const subDaysLeft = chainMarket ? blocksToDays(Math.max(0, chainMarket.paidUntilBlock - headOf(chainMarket))) : 0;
 
   const invalidate = useCallback(() => {
     // Guards and depends on `creatorAccount`, not `creator`: after a write we must
@@ -489,7 +486,7 @@ export function useLiveStudio(): LiveStudio {
   });
   // F7 fix (2026-08-19): EVERY studio write funnels through `call()` —
   // register, answer, decline, setCap, setFace, claimTradeFees, sell, retire,
-  // createOffering, setOfferingPrice, setOfferingTitle, deleteOffering, renew
+  // createOffering, setOfferingPrice, setOfferingTitle, deleteOffering
   // — so guarding ONCE, here, protects all of them at the choke point instead
   // of duplicating a guard at every button (Raise cap, Sell, Claim, Renew,
   // Remove offering, the two PriceInput commits, …). `run.isLoading` (below,
@@ -545,7 +542,6 @@ export function useLiveStudio(): LiveStudio {
     // interface doc. A quote that failed to load must not read as a working shop.
     servicesOracleStatus: quoteQuery.data?.oracleStatus ?? null,
     offerings: collapseRead(offeringsQuery),
-    subDaysLeft,
     tradeFeeClaimableUsd: ((hbd) => (hbd === null ? null : usdFromHbd(hbd)))(collapseRead(feeQuery)),
     commissionEarnedUsd: null,
 
@@ -594,18 +590,13 @@ export function useLiveStudio(): LiveStudio {
         }),
       [call]
     ),
-    renew: useCallback(
-      (periods: number) =>
-        call(async ({ source, signer }) => {
-          // Cross-tab guard, same (market, signer) key as the token-page renew
-          // (here creator === signer), so a duplicate across Studio and the token
-          // page interlocks. renew STACKS periods from max(paidUntil, block), so
-          // an un-interlocked duplicate is a real second ~$10 charge, not a
-          // harmless retry — and renew has no on-chain backstop. See tx-claim.
-          await runUnderTxClaim(signer, signer, () => source.renewSubscription({ creator: signer, caller: signer, periods }));
-        }),
-      [call]
-    ),
+    // THERE IS NO renew. It broadcast the subscription payment under a
+    // cross-tab tx claim, because renew STACKED periods from max(paidUntil,
+    // block) and a duplicate across the Studio and the token page was a real
+    // second ~$10 charge with no on-chain backstop. The 10 HBD monthly
+    // subscription was removed on 2026-09-12 (OWNER RULING;
+    // creator-tokens/core/params.go): there is no payment, so there is nothing
+    // to double-charge and nothing to interlock.
     setCap: useCallback(
       (newCapTokens: number) =>
         call(async ({ source, signer }) => {
@@ -732,17 +723,10 @@ export function useLiveStudio(): LiveStudio {
   };
 }
 
-/**
- * The head block the Market was built against. Market carries derived
- * timestamps rather than the raw head, and graceExpiresAtBlock is
- * paidUntilBlock + GRACE_BLOCKS exactly, so the head is recoverable from the
- * pair without a second chain read — this keeps "days until lapse" consistent
- * with the phase the very same read produced, instead of racing a fresh head
- * against a stale market.
- */
-function headOf(market: Market): number {
-  const msUntilPaidUntil = market.paidUntilAt - Date.now();
-  return market.paidUntilBlock - Math.round(msUntilPaidUntil / 3000);
-}
+// THERE IS NO headOf. It recovered the head block the Market was built against
+// from paidUntilAt/paidUntilBlock, so "days until lapse" could not race a fresh
+// head against a stale market. Both fields are gone with the subscription
+// (2026-09-12, OWNER RULING); `Market.headBlock` is the head, directly.
 
-export const STUDIO_GRACE_DAYS = 5 * BLOCKS_PER_DAY;
+// THERE IS NO STUDIO_GRACE_DAYS — the subscription grace it measured is gone
+// with the subscription (2026-09-12, OWNER RULING; core/params.go).

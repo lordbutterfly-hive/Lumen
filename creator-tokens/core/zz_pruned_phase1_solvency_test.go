@@ -137,10 +137,10 @@ func zp1Sweep(t *testing.T, s *MemStore) *zp1Buckets {
 				b.Unknown = append(b.Unknown, k+"  (escrow record failed to unpack)")
 				continue
 			}
-			b.EscrowAll.Add(b.EscrowAll, rec.commissionHbd)
+			b.EscrowAll.Add(b.EscrowAll, rec.commissionCredits)
 			if rec.status == askPending {
 				b.NPendEscrows++
-				b.EscrowPend.Add(b.EscrowPend, rec.commissionHbd)
+				b.EscrowPend.Add(b.EscrowPend, rec.commissionCredits)
 			}
 		case p[0] == "em" && len(p) == 3:
 			// em|<creator>|<seq> — the MATURED-bucket portion of one escrow's
@@ -452,7 +452,7 @@ func zp1Step(t *testing.T, rng *rand.Rand, w *zp1World) {
 		commission := q.CommissionHbd
 		maxCredits := new(big.Int).Mul(q.Credits, big.NewInt(4))
 		dl := MinAskDeadline + uint64(rng.Intn(int(MaxAskDeadline-MinAskDeadline)))
-		r, err := Ask(w.s, a, c, w.block, maxCredits, commission, fmt.Sprintf("cid%d-%d", w.block, rng.Int63()), dl, 0)
+		r, err := Ask(w.s, a, c, w.block, maxCredits, fmt.Sprintf("cid%d-%d", w.block, rng.Int63()), dl, 0)
 		if err == nil {
 			w.hit("Ask")
 			if commission.Sign() > 0 {
@@ -787,7 +787,6 @@ func TestZP1_H10_MinimalWitness_PendingEscrowIsUncounted(t *testing.T) {
 	in.Add(in, r.TotalDue)
 
 	askBlock := zp1SeedObs(s, c, 200)
-	setU64(s, kPaidUntil(c), askBlock+SubscriptionPeriod)
 
 	lo, hi, err := ServiceFaceRange(s, c, askBlock)
 	if err != nil {
@@ -802,7 +801,7 @@ func TestZP1_H10_MinimalWitness_PendingEscrowIsUncounted(t *testing.T) {
 		t.Fatalf("SettleSpend: %v", err)
 	}
 	before := zp1Sweep(t, s)
-	ar, err := Ask(s, asker, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(4)), q.CommissionHbd, "cid", MinAskDeadline, 0)
+	ar, err := Ask(s, asker, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(4)), "cid", MinAskDeadline, 0)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}

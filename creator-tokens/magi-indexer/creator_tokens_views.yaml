@@ -216,7 +216,7 @@ views:
              a.actor AS asker,
              a.seq,
              a.credits_spent,
-             a.commission_hbd,
+             a.commission_credits,
              a.offering_id,
              a.deadline_blocks,
              a.indexer_block_height AS asked_block,
@@ -237,9 +237,12 @@ views:
   # -------------------------------------------------------------------------
   # CREATOR EARNINGS — the Studio's income panel.
   #
-  # Service income is the TOKEN leg paid on answer (credits_to_creator); the
-  # commission is the platform's, never the creator's, and is deliberately not
-  # summed into their total. Trade fees are claimed separately and are HBD.
+  # Service income is what the creator actually received on answer
+  # (credits_to_creator); the commission is the platform's, never the creator's,
+  # and is deliberately not summed into their total. Since 2026-09-12 that
+  # commission is TOKENS on the owner's own position rather than HBD in the
+  # treasury, so it never belonged in an HBD total either way. Trade fees are
+  # claimed separately and are HBD.
   # -------------------------------------------------------------------------
   - name: lumen_ct_creator_earnings
     sql: |

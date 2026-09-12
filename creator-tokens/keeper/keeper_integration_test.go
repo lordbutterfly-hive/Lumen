@@ -125,7 +125,13 @@ func TestIntegration_DoubleSubmitRefundHolderIsHarmless(t *testing.T) {
 		t.Fatalf("Buy: %v", err)
 	}
 
-	freezeBlock := registeredBlock + core.SubscriptionPeriod + core.GraceBlocks + 10
+	// The retire lands a full notice BEFORE freezeBlock: since 2026-09-12 the
+	// retire ladder is the ONLY thing that can make a block FROZEN, where the
+	// (now deleted) subscription lapse used to already have done so.
+	freezeBlock := registeredBlock + kpLongGap + core.GraceBlocks + 10
+	if err := core.Retire(store, creator, creator, freezeBlock-core.GraceBlocks-1); err != nil {
+		t.Fatalf("setup Retire: %v", err)
+	}
 	if phase := core.Phase(store, creator, freezeBlock); phase != core.StateFrozen {
 		t.Fatalf("phase at freezeBlock = %s, want FROZEN", phase)
 	}
@@ -147,15 +153,12 @@ func TestIntegration_DoubleSubmitRefundHolderIsHarmless(t *testing.T) {
 	// full ExitTaxDecayBlocks past the buy clears the holder's OWN clock, so
 	// the ordinary (non-backstop) branch fires -- the realistic case for a
 	// buy-and-hold holder who simply never rushed to self-refund.
-	// A1 (owner ruling 2026-08-30): a natural lapse is an inflow stop, not a
-	// wind-down, so the keeper has nothing to sweep on it (core.RefundHolder
-	// refuses; Plan skips non-retired markets). The wind-down these tests
-	// exercise is entered the one way that still leads there: the creator
-	// retires at the freeze. The subject of each test (double-submit
+	// A1 (owner ruling 2026-08-30): the keeper has nothing to sweep on a market
+	// that is not winding down (core.RefundHolder refuses; Plan skips non-retired
+	// markets), so these fixtures enter the wind-down the one way that leads
+	// there — the creator retires, which the setup above already did a full
+	// notice before freezeBlock. The subject of each test (double-submit
 	// harmlessness, resume-mid-sweep, close-waits-for-escrow) is unchanged.
-	if err := core.Retire(store, creator, creator, freezeBlock); err != nil {
-		t.Fatalf("Retire: %v", err)
-	}
 	refundBlock := registeredBlock + 1 + core.ExitTaxDecayBlocks + 1000
 	if phase := core.Phase(store, creator, refundBlock); phase != core.StateFrozen {
 		t.Fatalf("phase at refundBlock = %s, want still FROZEN", phase)
@@ -246,7 +249,13 @@ func TestIntegration_ResumeMidSweepNoDoublePayNoSkip(t *testing.T) {
 	// HBD the reserve now holds.
 	reserveTotal := new(big.Int).Set(core.Reserve(store, creator))
 
-	freezeBlock := registeredBlock + core.SubscriptionPeriod + core.GraceBlocks + 10
+	// The retire lands a full notice BEFORE freezeBlock: since 2026-09-12 the
+	// retire ladder is the ONLY thing that can make a block FROZEN, where the
+	// (now deleted) subscription lapse used to already have done so.
+	freezeBlock := registeredBlock + kpLongGap + core.GraceBlocks + 10
+	if err := core.Retire(store, creator, creator, freezeBlock-core.GraceBlocks-1); err != nil {
+		t.Fatalf("setup Retire: %v", err)
+	}
 	if phase := core.Phase(store, creator, freezeBlock); phase != core.StateFrozen {
 		t.Fatalf("phase = %s, want FROZEN", phase)
 	}
@@ -257,15 +266,12 @@ func TestIntegration_ResumeMidSweepNoDoublePayNoSkip(t *testing.T) {
 	// FROZEN -- core.RefundHolder's EXITTAX-1 gate refuses a still-taxed
 	// holder's push outright, and a naturally-lapsed market can never clear
 	// that gate right at its own freeze point (35-day grace < 42-day decay).
-	// A1 (owner ruling 2026-08-30): a natural lapse is an inflow stop, not a
-	// wind-down, so the keeper has nothing to sweep on it (core.RefundHolder
-	// refuses; Plan skips non-retired markets). The wind-down these tests
-	// exercise is entered the one way that still leads there: the creator
-	// retires at the freeze. The subject of each test (double-submit
+	// A1 (owner ruling 2026-08-30): the keeper has nothing to sweep on a market
+	// that is not winding down (core.RefundHolder refuses; Plan skips non-retired
+	// markets), so these fixtures enter the wind-down the one way that leads
+	// there — the creator retires, which the setup above already did a full
+	// notice before freezeBlock. The subject of each test (double-submit
 	// harmlessness, resume-mid-sweep, close-waits-for-escrow) is unchanged.
-	if err := core.Retire(store, creator, creator, freezeBlock); err != nil {
-		t.Fatalf("Retire: %v", err)
-	}
 	refundBlock := registeredBlock + 1 + core.ExitTaxDecayBlocks + 1000
 
 	snapshot := func() MarketView {
@@ -462,27 +468,32 @@ func TestIntegration_CloseIfDrainedWaitsForOutstandingEscrow(t *testing.T) {
 	}
 	askBlock := lastObs + 50
 
-	// commissionOwed (H2 defect fix, 2026-07-21): core.Ask requires
-	// commissionHbdPaid to EXACTLY equal commissionOwedFor(face) — floor(face
-	// * CommissionBps / 10000), not merely be >= it. face=1000 * 1200bps /
-	// 10000 = 120.
-	commissionOwed := new(big.Int).Mul(big.NewInt(face), big.NewInt(int64(core.CommissionBps)))
-	commissionOwed.Div(commissionOwed, big.NewInt(10000))
-	// maxCredits=1: tokenLeg(880)/rate(1000) settles to exactly 1 credit
-	// (ceil(880/1000) == 1), so 1 is the asker's own tight slippage cap, not
-	// an arbitrary round number.
-	askResult, err := core.Ask(store, holder, creator, askBlock, big.NewInt(1), commissionOwed, "content-hash-1", core.MinAskDeadline, 0)
+	// NO COMMISSION ARGUMENT since the OWNER RULING of 2026-09-12: the 12%% is
+	// carved out of the escrowed credits by core, so maxCredits is the only cap
+	// the caller supplies.
+	//
+	// maxCredits=1: the whole posted face (1000) at rate 1000 settles to exactly
+	// 1 credit (ceil(1000/1000) == 1), so 1 is the asker's own tight slippage
+	// cap, not an arbitrary round number. (Until the ruling this priced an 880
+	// token leg instead, which also ceiled to 1.)
+	askResult, err := core.Ask(store, holder, creator, askBlock, big.NewInt(1), "content-hash-1", core.MinAskDeadline, 0)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
-	// tokenLeg=880, rate=1000 -> creditsForAsk = ceil(880/1000) = 1 credit
+	// face=1000, rate=1000 -> creditsForAsk = ceil(1000/1000) = 1 credit
 	// moves into escrow: the holder's LIQUID balance drops to 599, but Supply
 	// (I3) stays 600 -- the escrowed 1 credit is still outstanding.
 	if got := core.BalanceOf(store, creator, holder); got.Cmp(big.NewInt(599)) != 0 {
 		t.Fatalf("holder balance after ask = %s, want 599", got)
 	}
 
-	freezeBlock := registeredBlock + core.SubscriptionPeriod + core.GraceBlocks + 10
+	// The retire lands a full notice BEFORE freezeBlock: since 2026-09-12 the
+	// retire ladder is the ONLY thing that can make a block FROZEN, where the
+	// (now deleted) subscription lapse used to already have done so.
+	freezeBlock := registeredBlock + kpLongGap + core.GraceBlocks + 10
+	if err := core.Retire(store, creator, creator, freezeBlock-core.GraceBlocks-1); err != nil {
+		t.Fatalf("setup Retire: %v", err)
+	}
 	if phase := core.Phase(store, creator, freezeBlock); phase != core.StateFrozen {
 		t.Fatalf("phase at freezeBlock = %s, want FROZEN", phase)
 	}
@@ -492,15 +503,12 @@ func TestIntegration_CloseIfDrainedWaitsForOutstandingEscrow(t *testing.T) {
 	// ExitTaxDecayBlocks past the buy (registeredBlock+1) -- core.RefundHolder's
 	// EXITTAX-1 gate refuses a still-taxed holder's push outright, and this
 	// naturally-lapsed market cannot clear that gate right at freezeBlock.
-	// A1 (owner ruling 2026-08-30): a natural lapse is an inflow stop, not a
-	// wind-down, so the keeper has nothing to sweep on it (core.RefundHolder
-	// refuses; Plan skips non-retired markets). The wind-down these tests
-	// exercise is entered the one way that still leads there: the creator
-	// retires at the freeze. The subject of each test (double-submit
+	// A1 (owner ruling 2026-08-30): the keeper has nothing to sweep on a market
+	// that is not winding down (core.RefundHolder refuses; Plan skips non-retired
+	// markets), so these fixtures enter the wind-down the one way that leads
+	// there — the creator retires, which the setup above already did a full
+	// notice before freezeBlock. The subject of each test (double-submit
 	// harmlessness, resume-mid-sweep, close-waits-for-escrow) is unchanged.
-	if err := core.Retire(store, creator, creator, freezeBlock); err != nil {
-		t.Fatalf("Retire: %v", err)
-	}
 	refundBlock := registeredBlock + 1 + core.ExitTaxDecayBlocks + 1000
 	if phase := core.Phase(store, creator, refundBlock); phase != core.StateFrozen {
 		t.Fatalf("phase at refundBlock = %s, want still FROZEN", phase)

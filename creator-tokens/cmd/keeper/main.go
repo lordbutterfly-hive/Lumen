@@ -194,20 +194,26 @@ func buildDemoScenario() (*core.MemStore, map[string][]string, uint64) {
 
 	const (
 		registeredBlock = uint64(1_000_000)
-		// face was 500 until the 2026-07-27 commission carve-out: MinFace is now
-		// 577 (params.go — grossed up so the POST-COMMISSION token leg still
-		// clears the C4 settlement floor), so 500 is no longer a legal posted
-		// price and every core.Register call below reverted with "face out of
-		// range [MinFace, MaxFace]" — this demo PANICKED at startup (must()
-		// wraps every core.* error) until this fix. 1000 is comfortably above
-		// MinFace and matches BasePrice, so it reads as an obviously-valid
-		// round number rather than a value chosen to just barely clear the
-		// floor.
+		// face was 500 until the 2026-07-27 commission carve-out pushed MinFace
+		// to 577 and made 500 illegal, panicking this demo at startup (must()
+		// wraps every core.* error). MinFace is back to 508 since the carve-out
+		// moved downstream (OWNER RULING 2026-09-12, params.go), but 1000 stays:
+		// it is comfortably above the floor and matches BasePrice, so it reads as
+		// an obviously-valid round number rather than one chosen to just barely
+		// clear a floor that has now moved twice.
 		face      = int64(1000)
 		marketCap = int64(1_000_000)
 	)
-	lapseBlock := registeredBlock + core.SubscriptionPeriod + core.GraceBlocks // FROZEN begins here
-	demoBlock := lapseBlock + 500                                              // "now": comfortably into wind-down for the lapsed markets
+	// ★ THESE MARKETS ARE RETIRED, NOT LAPSED (OWNER RULING 2026-09-12). This
+	// used to read `registeredBlock + core.SubscriptionPeriod + core.GraceBlocks`
+	// — the block a market that stopped paying its 10 HBD a month crossed into
+	// FROZEN. There is no subscription and no lapse any more, so the ONLY route
+	// into a wind-down is a creator's own Retire, and the demo drives it
+	// explicitly (see `retire` below). retireBlock sits after every buy and
+	// after danerin's ask, because Retire closes inflows on the mark.
+	retireBlock := registeredBlock + 300_000
+	lapseBlock := retireBlock + core.GraceBlocks // FROZEN begins here
+	demoBlock := lapseBlock + 500                // "now": comfortably into wind-down for the retired markets
 
 	register := func(creator string) {
 		must(core.Register(store, creator, creator, registeredBlock, face, marketCap))
@@ -231,11 +237,20 @@ func buildDemoScenario() (*core.MemStore, map[string][]string, uint64) {
 		noteHolder(creator, holder)
 	}
 
+	// retire starts the irreversible wind-down (core.Retire, market.go). At
+	// retireBlock+GraceBlocks the market is FROZEN whatever else is true of it,
+	// and from the mark itself inflows are closed and exits route to the flat
+	// pro-rata Refund rail — which is exactly the state this keeper demo needs.
+	retire := func(creator string) {
+		must(core.Retire(store, creator, creator, retireBlock))
+	}
+
 	// aliceart: FROZEN, three holders still owed a refund -- the ordinary case.
 	register("aliceart")
 	buy("aliceart", "patron1", 90)
 	buy("aliceart", "patron2", 30)
 	buy("aliceart", "patron3", 10)
+	retire("aliceart")
 
 	// bobmusic: registered RECENTLY (relative to demoBlock) -- still ACTIVE,
 	// nothing due. Demonstrates Plan skipping a market outright.
@@ -251,6 +266,7 @@ func buildDemoScenario() (*core.MemStore, map[string][]string, uint64) {
 	// empty. Demonstrates Plan emitting ONLY closeIfDrained.
 	register("carlwrites")
 	buy("carlwrites", "onlyfan1", 20)
+	retire("carlwrites")
 	selfRefundBlock := lapseBlock + 50
 	payout := must2(core.Refund(store, "onlyfan1", "carlwrites", selfRefundBlock, big.NewInt(20)))
 	log(core.EvRefunded("carlwrites", "onlyfan1", selfRefundBlock, big.NewInt(20), payout))
@@ -267,13 +283,14 @@ func buildDemoScenario() (*core.MemStore, map[string][]string, uint64) {
 	// 12 constant-rate observations spaced core.LongObsSpacing apart. The
 	// marker rate 1000 sits in the coherent band for this market (S=600:
 	// C5 tripwire needs rate >= ceil(area/S)/4 = 921; spot(600) = 6670 stays
-	// the ceiling). The C4 minimum-price guard needs rate <= 2·tokenLeg —
-	// tokenLeg, NOT the raw posted face, since the 2026-07-27 commission
-	// carve-out (ask.go's splitFace): the buyer's posted face is the TOTAL
-	// they pay, split into an 88% token leg and the 12% HBD commission
-	// BEFORE settlement ever sees it. At face=1000, tokenLeg = 1000 − 120 =
-	// 880, so C4 needs rate <= 1760 — 1000 clears it — and the ask costs
-	// ceil(tokenLeg/rate) = ceil(880/1000) = 1 credit. So settlement =
+	// the ceiling). The C4 minimum-price guard needs rate <= 2·face — the RAW
+	// posted face again, since the OWNER RULING of 2026-09-12 moved the
+	// commission carve downstream of pricing: settlement prices the whole posted
+	// price in tokens and the 12% is taken out of the resulting credits. At
+	// face=1000 C4 needs rate <= 2000 — 1000 clears it — and the ask costs
+	// ceil(face/rate) = ceil(1000/1000) = 1 credit. (Between 2026-07-27 and that
+	// ruling this measured the 880 token leg instead, needing rate <= 1760.)
+	// So settlement =
 	// min(1000, 1000, 6670) = 1000. THE PREVIOUS VERSION recorded nothing
 	// and relied on PAR — under RULING C that ask would refuse and this
 	// demo would panic at startup.
@@ -294,13 +311,12 @@ func buildDemoScenario() (*core.MemStore, map[string][]string, uint64) {
 		core.RecordObs(store, "danerin", lastObs, obsRate)
 	}
 	askBlock := lastObs + 50
-	// commissionOwed (H2 defect fix, 2026-07-21): core.Ask requires
-	// commissionHbdPaid to EXACTLY equal commissionOwedFor(face) — floor(face
-	// * CommissionBps / 10000), not merely be >= it.
-	commissionOwed := new(big.Int).Mul(big.NewInt(face), big.NewInt(int64(core.CommissionBps)))
-	commissionOwed.Div(commissionOwed, big.NewInt(10000))
-	askResult := must2(core.Ask(store, "reader1", "danerin", askBlock, big.NewInt(1), commissionOwed, "demo-content-hash", core.MinAskDeadline, 0))
-	log(core.EvAsked("danerin", "reader1", askBlock, askResult.Seq, askResult.CreditsSpent, askResult.CommissionHbd, askResult.RateUsed, core.MinAskDeadline, "demo-content-hash", 0))
+	// NO COMMISSION ARGUMENT (OWNER RULING 2026-09-12): the 12% is carved out of
+	// the credits inside the escrow, so core.Ask takes only the asker's own
+	// maxCredits cap.
+	askResult := must2(core.Ask(store, "reader1", "danerin", askBlock, big.NewInt(1), "demo-content-hash", core.MinAskDeadline, 0))
+	log(core.EvAsked("danerin", "reader1", askBlock, askResult.Seq, askResult.CreditsSpent, askResult.CommissionCredits, askResult.RateUsed, core.MinAskDeadline, "demo-content-hash", 0))
+	retire("danerin")
 
 	// carlwrites' only holder self-refunded above, so they are no longer owed
 	// anything — but they STAY in the candidate list on purpose. That is the

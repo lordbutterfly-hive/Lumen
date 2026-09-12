@@ -238,31 +238,16 @@ func hzSumEscrowedCredits(s *MemStore, creator string) *big.Int {
 	return total
 }
 
-// hzSumEscrowedCommission is hzSumEscrowedCredits's twin for the HBD
-// commission leg (2026-07-20 defect fix): Ask now HOLDS the commission in
-// the escrow record rather than booking it to the treasury immediately —
-// Answer books it, Reclaim returns it (see ask.go's Ask/Answer/Reclaim
-// doc). This is a THIRD resting state for HBD, alongside a market's reserve
-// and the global treasury, that hzAssertConservation below must account for
-// or an outstanding, unanswered ask looks like unaccounted-for HBD.
-func hzSumEscrowedCommission(s *MemStore, creator string) *big.Int {
-	prefix := "e|" + creator + "|"
-	total := big.NewInt(0)
-	for _, k := range s.Keys() {
-		if !strings.HasPrefix(k, prefix) {
-			continue
-		}
-		v, _ := s.Get(k)
-		rec, ok := unpackEscrow(v)
-		if !ok {
-			continue
-		}
-		if rec.status == askPending {
-			total.Add(total, rec.commissionHbd)
-		}
-	}
-	return total
-}
+// THERE IS NO hzSumEscrowedCommission. It summed the HBD commission held in
+// every PENDING escrow — a third resting state for HBD alongside a market's
+// reserve and the global treasury, which hzAssertConservation below had to
+// account for or an unanswered ask looked like HBD that had vanished.
+//
+// The commission is TOKENS now (OWNER RULING 2026-09-12, core/ask.go): it is a
+// partition of the escrow's own credits, which hzSumEscrowedCredits already
+// counts for I3, and no HBD enters or leaves the contract on ask, answer,
+// reclaim or decline at all. So the term is not zero — it does not exist, and a
+// helper that returned zero forever would assert a flow that cannot happen.
 
 // hzAssertI3 — supply(c) == Σ bal(c, holder) + credits currently escrowed.
 func hzAssertI3(t *testing.T, s *MemStore, creator, label string) {
@@ -419,30 +404,46 @@ func hzAssertReserveDeltas(t *testing.T, s Store, creators []string, before map[
 // leaves the contract. See contract/main.go's `reclaim` entrypoint, which
 // sdk.HiveTransfers exactly the net back to the asker and moves the slice not
 // at all.
-func hzReclaimNetOfMissSlice(t *testing.T, s Store, caller, creator string, block, seq uint64, label string) (credits, commission, retained *big.Int) {
+// ★ SINCE 2026-09-12 THE MISS SLICE IS TOKENS, so this asserts two things
+// instead of one: the treasury must not move AT ALL on a reclaim (there is no
+// HBD leg left to book), and the owner's token position on this market must
+// grow by exactly the reported slice and by nothing else.
+func hzReclaimNetOfMissSlice(t *testing.T, s Store, caller, creator string, block, seq uint64, label string) (credits, retained *big.Int) {
 	t.Helper()
 	treasuryBefore := getMoney(s, kTreasury())
+	owner := Owner(s)
+	ownerBefore := big.NewInt(0)
+	if owner != "" {
+		ownerBefore = totalBalance(s, creator, owner)
+	}
 	res, err := Reclaim(s, caller, creator, block, seq)
 	hzMustOK(t, err, label+" (Reclaim)")
-	treasuryAfter := getMoney(s, kTreasury())
-	wantAfter := new(big.Int).Add(treasuryBefore, res.CommissionRetainedHbd)
-	if treasuryAfter.Cmp(wantAfter) != 0 {
-		t.Fatalf("%s: I5 VIOLATED — treasury moved %s -> %s on a Reclaim; want exactly %s (the reported %s miss slice, nothing more)",
-			label, treasuryBefore, treasuryAfter, wantAfter, res.CommissionRetainedHbd)
+	if treasuryAfter := getMoney(s, kTreasury()); treasuryAfter.Cmp(treasuryBefore) != 0 {
+		t.Fatalf("%s: I5 VIOLATED — treasury moved %s -> %s on a Reclaim; a reclaim must move no HBD at all",
+			label, treasuryBefore, treasuryAfter)
 	}
-	return res.CreditsReturned, res.CommissionHbd, res.CommissionRetainedHbd
+	if owner != "" {
+		wantOwner := new(big.Int).Add(ownerBefore, res.CommissionRetainedCredits)
+		if got := totalBalance(s, creator, owner); got.Cmp(wantOwner) != 0 {
+			t.Fatalf("%s: owner token position moved %s -> %s on a Reclaim; want exactly %s (the reported %s miss slice, nothing more)",
+				label, ownerBefore, got, wantOwner, res.CommissionRetainedCredits)
+		}
+	}
+	return res.CreditsReturned, res.CommissionRetainedCredits
 }
 
 // ---- money-conservation identity -------------------------------------------
 
-// hzAssertConservation: Σ HBD in (registration + subscription + prepay +
-// commission) == Σ HBD out (refunds) + Σ reserve(c) across every market in
-// creators + the single global treasury + Σ commission currently HELD in
-// escrow (2026-07-20 defect fix: Ask no longer books the commission to the
-// treasury immediately — see hzSumEscrowedCommission's doc, and ask.go's
-// Ask/Answer/Reclaim). Without that fourth term, any market with an
-// outstanding, unanswered ask would look like it had lost HBD that is
-// actually just held, not gone. hbdIn/hbdOut are accumulated by the caller
+// hzAssertConservation: Σ HBD in (prepay + trades) == Σ HBD out (refunds) +
+// Σ reserve(c) across every market in creators + the single global treasury +
+// Σ unclaimed trade-fee pots.
+//
+// ★ THE heldCommission TERM IS GONE (OWNER RULING 2026-09-12). Between the
+// 2026-07-20 defect fix and that ruling, Ask HELD the commission in HBD inside
+// the escrow record instead of booking it to the treasury, which made an
+// outstanding unanswered ask a fourth resting state this identity had to name.
+// The commission is tokens now and never leaves the escrow's credits, so there
+// is no HBD to rest anywhere. hbdIn/hbdOut are accumulated by the caller
 // from the actual amounts passed into/returned by each real call, so this
 // checks live state against an independently-tracked ledger — it is not a
 // tautology.
@@ -468,22 +469,20 @@ func hzAssertConservation(t *testing.T, s Store, creators []string, hbdIn, hbdOu
 	if !ok {
 		t.Fatalf("%s: hzAssertConservation requires a *MemStore (to scan escrow records), got %T", label, s)
 	}
+	_ = ms
 	reserves := big.NewInt(0)
-	heldCommission := big.NewInt(0)
 	feePots := big.NewInt(0)
 	for _, c := range creators {
 		reserves.Add(reserves, Reserve(s, c))
-		heldCommission.Add(heldCommission, hzSumEscrowedCommission(ms, c))
 		feePots.Add(feePots, getMoney(s, kFeeBal(c)))
 	}
 	treasury := getMoney(s, kTreasury())
 	rhs := new(big.Int).Add(hbdOut, reserves)
 	rhs.Add(rhs, treasury)
-	rhs.Add(rhs, heldCommission)
 	rhs.Add(rhs, feePots)
 	if hbdIn.Cmp(rhs) != 0 {
-		t.Fatalf("%s: MONEY CONSERVATION VIOLATED — Σin=%s != Σout(%s)+Σreserves(%s)+treasury(%s)+heldCommission(%s)+feePots(%s)=%s",
-			label, hbdIn, hbdOut, reserves, treasury, heldCommission, feePots, rhs)
+		t.Fatalf("%s: MONEY CONSERVATION VIOLATED — Σin=%s != Σout(%s)+Σreserves(%s)+treasury(%s)+feePots(%s)=%s",
+			label, hbdIn, hbdOut, reserves, treasury, feePots, rhs)
 	}
 }
 
@@ -593,19 +592,12 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 	}
 	hzAssertConservation(t, s, creators, hbdIn, hbdOut, "post-Register(both)")
 
-	// ---- RENEW (a fan pays for alice; anyone may) ----
-	renewBlock := regBlock + 10
-	renewPaid := big.NewInt(SubscriptionFee)
-	beforeRenew := hzReserves(s, creators)
-	hzMustOK(t, Renew(s, "fanrenews1", alice, renewBlock, 1, renewPaid), "Renew(alice)")
-	hbdIn.Add(hbdIn, renewPaid)
-	hzAssertReserveDeltas(t, s, creators, beforeRenew, nil, "post-Renew")
-	hzAssertI3(t, s, alice, "post-Renew")
-	hzAssertConservation(t, s, creators, hbdIn, hbdOut, "post-Renew")
-
-	// alice's paid_until is now regBlock+SubscriptionPeriod (from Register)
-	// extended by one more period (Renew's base = max(cur, block) = cur here).
-	alicePaidUntil := regBlock + 2*SubscriptionPeriod
+	// ---- (was: RENEW — a fan pays alice's 10 HBD subscription) ----
+	// The subscription was removed on 2026-09-12 (OWNER RULING; core/params.go),
+	// so there is no Renew to exercise and no HBD enters here. alice stays ACTIVE
+	// from registration onward with nothing paid, which is the whole point of the
+	// ruling; the ladder she used to climb is asserted dead in
+	// TestMarket_NoLapse_MarketStaysActiveForever (market_test.go).
 
 	// ---- BUY (several holders, both markets) ----
 	// RULING A: the PAR mint is deleted; Buy on the curve is the only
@@ -679,9 +671,13 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 	}
 
 	// ---- ASK (four asks: two will be Answered, two will be Reclaimed) ----
+	// ★ NO HBD LEG (OWNER RULING 2026-09-12): the buyer pays the WHOLE posted
+	// face in tokens and the platform's 12% is carved out of those credits
+	// inside the escrow. wantCredits is therefore ceil(face/rate) on the RAW
+	// face, where it used to be ceil(tokenLeg/rate) on 88% of it.
 	faceBig := big.NewInt(face)
-	commission := commissionOwedFor(faceBig)
 	wantCredits := creditsForAsk(faceBig, rate)
+	wantCommission := commissionOwedFor(wantCredits)
 
 	type askRec struct {
 		asker string
@@ -696,17 +692,17 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 		// SettlementRate == rate at every block this loop asks at — see the
 		// RECORD OBSERVATIONS step above), making this the tightest
 		// legitimate cap, not a generous one.
-		res, err := askAt0(s, asker, alice, block, wantCredits, commission, tag, deadlineBlocks)
+		res, err := askAt0(s, asker, alice, block, wantCredits, tag, deadlineBlocks)
 		hzMustOK(t, err, "Ask("+tag+")")
 		if res.CreditsSpent.Cmp(wantCredits) != 0 {
 			t.Fatalf("Ask(%s): spent %s credits, want %s", tag, res.CreditsSpent, wantCredits)
 		}
-		if res.CommissionHbd.Cmp(commission) != 0 {
-			t.Fatalf("Ask(%s): commission %s, want %s", tag, res.CommissionHbd, commission)
+		if res.CommissionCredits.Cmp(wantCommission) != 0 {
+			t.Fatalf("Ask(%s): commission %s credits, want %s", tag, res.CommissionCredits, wantCommission)
 		}
-		hbdIn.Add(hbdIn, res.CommissionHbd)
-		// Ask never touches ANY market's reserve — only credits (bal->escrow)
-		// and the HBD commission leg into the global treasury.
+		// NOTHING is added to hbdIn: an ask moves no HBD at all since the
+		// 2026-09-12 ruling. Ask never touches ANY market's reserve either —
+		// only credits (bal -> escrow).
 		hzAssertReserveDeltas(t, s, creators, before, nil, "post-Ask("+tag+")")
 		hzAssertI3(t, s, alice, "post-Ask("+tag+")")
 		hzAssertI1Solvency(t, s, alice, block, "post-Ask("+tag+")", true)
@@ -726,8 +722,18 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 		before := hzReserves(s, creators)
 		res, err := Answer(s, alice, alice, answerBlock, a.res.Seq, "answer-for-"+a.asker)
 		hzMustOK(t, err, fmt.Sprintf("Answer(seq=%d)", a.res.Seq))
-		if res.CreditsToCreator.Cmp(a.res.CreditsSpent) != 0 {
-			t.Fatalf("Answer(seq=%d): paid creator %s credits, want %s", a.res.Seq, res.CreditsToCreator, a.res.CreditsSpent)
+		// ★ THE CREATOR GETS THE ESCROW MINUS THE PLATFORM'S SLICE (OWNER RULING
+		// 2026-09-12), and the two halves must sum to EXACTLY what was escrowed —
+		// that exhaustiveness is what keeps the token side conserved now that the
+		// commission lives inside the credits.
+		wantCreator := new(big.Int).Sub(a.res.CreditsSpent, a.res.CommissionCredits)
+		if res.CreditsToCreator.Cmp(wantCreator) != 0 {
+			t.Fatalf("Answer(seq=%d): paid creator %s credits, want %s (escrow %s − commission %s)",
+				a.res.Seq, res.CreditsToCreator, wantCreator, a.res.CreditsSpent, a.res.CommissionCredits)
+		}
+		if sum := new(big.Int).Add(res.CreditsToCreator, res.CommissionToOwner); sum.Cmp(a.res.CreditsSpent) != 0 {
+			t.Fatalf("Answer(seq=%d): creator %s + owner %s = %s, want exactly the escrowed %s",
+				a.res.Seq, res.CreditsToCreator, res.CommissionToOwner, sum, a.res.CreditsSpent)
 		}
 		// I4, emphasised: Answer pays the creator in CREDITS. It must NEVER
 		// touch the reserve, for alice OR bob.
@@ -736,23 +742,25 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 	}
 	hzAssertConservation(t, s, creators, hbdIn, hbdOut, "post-Answer(both)")
 
-	// ---- RECLAIM (past deadline+grace; I5: no commission; 100% back) ----
+	// ---- RECLAIM (past deadline+grace; I5, net of the ruled miss slice) ----
 	reclaimBlock := askBlock + 30 + MinAskDeadline + ReclaimGrace + 1
 	for _, a := range []askRec{ask3, ask4} {
-		got, gotCommission, gotRetained := hzReclaimNetOfMissSlice(t, s, a.asker, alice, reclaimBlock, a.res.Seq, fmt.Sprintf("post-Reclaim(seq=%d)", a.res.Seq))
-		if got.Cmp(a.res.CreditsSpent) != 0 {
-			t.Fatalf("Reclaim(seq=%d): returned %s credits, want exactly %s (100%% back, I5)", a.res.Seq, got, a.res.CreditsSpent)
+		got, gotRetained := hzReclaimNetOfMissSlice(t, s, a.asker, alice, reclaimBlock, a.res.Seq, fmt.Sprintf("post-Reclaim(seq=%d)", a.res.Seq))
+		// The split is exhaustive: every credit escrowed at Ask is either
+		// returned or retained, and that identity is now the whole of the token
+		// conservation on this path (the HBD ledger no longer moves at all).
+		if sum := new(big.Int).Add(got, gotRetained); sum.Cmp(a.res.CreditsSpent) != 0 {
+			t.Fatalf("Reclaim(seq=%d): returned %s + retained %s = %s, want exactly the escrowed %s", a.res.Seq, got, gotRetained, sum, a.res.CreditsSpent)
 		}
-		// The split is exhaustive: every unit held at Ask is either paid back
-		// or retained. That identity is what keeps the conservation ledger
-		// below honest under USER RULING 1.
-		if sum := new(big.Int).Add(gotCommission, gotRetained); sum.Cmp(a.res.CommissionHbd) != 0 {
-			t.Fatalf("Reclaim(seq=%d): returned %s + retained %s = %s, want exactly the held %s", a.res.Seq, gotCommission, gotRetained, sum, a.res.CommissionHbd)
+		// USER RULING 1 (2026-07-28): this IS a miss (asker != creator, window
+		// blown), so the slice is exactly ceil(commission * MissReclaimSliceBps
+		// / 10000) and the asker gets the rest.
+		wantRetained := mMulDivCeil(a.res.CommissionCredits, new(big.Int).SetUint64(MissReclaimSliceBps), big.NewInt(10000))
+		if gotRetained.Cmp(wantRetained) != 0 {
+			t.Fatalf("Reclaim(seq=%d): retained %s, want %s (%d bps of the %s commission)", a.res.Seq, gotRetained, wantRetained, MissReclaimSliceBps, a.res.CommissionCredits)
 		}
-		// The commission is a REAL HBD outflow a real `reclaim` entrypoint
-		// pays back to the asker (contract/main.go) — track it in the same
-		// ledger every other HBD-out call in this test uses.
-		hbdOut.Add(hbdOut, gotCommission)
+		// NOTHING is added to hbdOut: a reclaim moves no HBD at all since the
+		// 2026-09-12 ruling.
 		hzAssertI3(t, s, alice, "post-Reclaim")
 	}
 	hzAssertConservation(t, s, creators, hbdIn, hbdOut, "post-Reclaim(both)")
@@ -763,19 +771,25 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 	hzAssertReserveDeltas(t, s, creators, beforeTransfer, nil, "post-TransferCredits")
 	hzAssertI3(t, s, alice, "post-TransferCredits")
 
-	// ---- SUBSCRIPTION LAPSES: ACTIVE -> OVERDUE ----
-	overdueBlock := alicePaidUntil + 1000
-	hzAssertPhase(t, s, alice, overdueBlock, StateOverdue, "lapse")
+	// ---- TIME PASSES AND NOTHING LAPSES (OWNER RULING 2026-09-12) ----
+	// This used to be "SUBSCRIPTION LAPSES: ACTIVE -> OVERDUE", asserting the
+	// market fell to OVERDUE at alice's paid_until + 1000 and then proving a buy
+	// still landed there. There is no paid_until and no lapse any more, so the
+	// assertion is INVERTED rather than deleted: two full subscription periods
+	// past registration, with nothing ever paid, alice is still ACTIVE.
+	lateBlock := regBlock + 2*hzLongGap + 1000
+	hzAssertPhase(t, s, alice, lateBlock, StateActive, "no lapse: a market never falls out of ACTIVE on its own")
 
-	// OVERDUE is still fully functional — prove a NEW buy still lands.
+	// ...and a NEW buy still lands there, which is what the OVERDUE-era buy
+	// below used to prove about the grace window.
 	beforeODBuy := hzReserves(s, creators)
-	odRes := hzBuy(t, s, "holderfive", alice, overdueBlock, 200)
+	odRes := hzBuy(t, s, "holderfive", alice, lateBlock, 200)
 	hbdIn.Add(hbdIn, odRes.TotalDue)
-	hzAssertReserveDeltas(t, s, creators, beforeODBuy, map[string]*big.Int{alice: odRes.Cost}, "post-Buy(OVERDUE)")
-	hzAssertI3(t, s, alice, "post-Buy(OVERDUE)")
-	hzAssertConservation(t, s, creators, hbdIn, hbdOut, "post-Buy(OVERDUE)")
+	hzAssertReserveDeltas(t, s, creators, beforeODBuy, map[string]*big.Int{alice: odRes.Cost}, "post-Buy(late, still ACTIVE)")
+	hzAssertI3(t, s, alice, "post-Buy(late)")
+	hzAssertConservation(t, s, creators, hbdIn, hbdOut, "post-Buy(late)")
 
-	// ---- OVERDUE -> FROZEN ----
+	// ---- ACTIVE -> RETIRED -> FROZEN ----
 	// EXITTAX-1/NOTICE-1 (2026-07-22): the wind-down sweep below uses the
 	// permissionless RefundHolder push, which now refuses a still-taxed holder,
 	// so the freeze/wind-down block is placed a full ExitTaxDecayBlocks past the
@@ -783,13 +797,13 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 	// buyer holderfive) has decayed to τ = 0 and every push is a 0-tax sweep. The
 	// market is FROZEN for every block from the boundary onward, so this only
 	// moves WHEN the frozen-phase assertions and the sweep run, not whether.
-	frozenBlock := alicePaidUntil + GraceBlocks + ExitTaxDecayBlocks
-	hzAssertPhase(t, s, alice, frozenBlock, StateFrozen, "freeze")
+	frozenBlock := lateBlock + GraceBlocks + ExitTaxDecayBlocks
 	// A1 (2026-08-30): the wind-down sweep below needs the Refund rails OPEN,
-	// and a lapse alone no longer opens them — the creator retires. Every
-	// FROZEN-phase assertion around this block is unchanged (retired phase folds
-	// to FROZEN here too); only the ROAD into wind-down moved.
-	hzMustOK(t, Retire(s, alice, alice, frozenBlock-1), "Retire (A1: wind-down is reached only by Retire)")
+	// and only Retire opens them. Since 2026-09-12 Retire is also the only road
+	// to FROZEN at all, so it must come BEFORE the phase assertion rather than
+	// after it — the retire mark is what makes this block FROZEN.
+	hzMustOK(t, Retire(s, alice, alice, frozenBlock-GraceBlocks-1), "Retire (the only road into wind-down, and now the only road to FROZEN)")
+	hzAssertPhase(t, s, alice, frozenBlock, StateFrozen, "freeze")
 
 	// A NEW buy is now rejected (inflows blocked) — and nothing is mutated.
 	beforeRejBuy := hzReserves(s, creators)
@@ -890,18 +904,18 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 	if got := Supply(s, bob); got.Cmp(big.NewInt(800)) != 0 {
 		t.Fatalf("bob's supply after alice's wind-down = %s, want untouched 800 tokens", got)
 	}
-	// bob's PHASE, unlike his money, is not "untouched" — Phase() is lazily
+	// ★ bob's PHASE IS NOW UNTOUCHED TOO, AND THAT IS THE INVERSION (OWNER
+	// RULING 2026-09-12). This used to assert the opposite: Phase() is lazily
 	// derived from block height alone (API.md rule 1), never stored, so it
-	// drifts forward for EVERY market as blocks pass, independent of
-	// whether anyone ever calls anything against that market again. bob was
-	// registered at the same block as alice but never renewed, so by
-	// alice's frozenBlock — 1,008,000 blocks after bob's own paid_until —
-	// bob has independently lapsed all the way to FROZEN too, purely from
-	// elapsed height, with zero state ever written to bob's market. That is
-	// the correct, intended behaviour (not a bug): it is what proves Phase
-	// is genuinely computed per-call from (block, paidUntil), never copied
-	// or influenced by another creator's activity.
-	hzAssertPhase(t, s, bob, frozenBlock, StateFrozen, "bob's own lapse, purely from elapsed blocks, zero state written")
+	// drifted forward for EVERY market as blocks passed — bob, registered
+	// alongside alice and never renewed, had independently lapsed all the way to
+	// FROZEN by alice's frozenBlock with zero state ever written to his market.
+	// With the subscription gone there is nothing for height alone to move him
+	// through: a market leaves ACTIVE only when its own creator retires it. bob
+	// never did, so he is still ACTIVE a million blocks later. Phase is still
+	// computed per-call and still never stored — this asserts the same laziness
+	// against the new ladder.
+	hzAssertPhase(t, s, bob, frozenBlock, StateActive, "bob never retired: elapsed blocks alone can no longer move a market's phase")
 
 	hzAssertConservation(t, s, creators, hbdIn, hbdOut, "FINAL")
 	t.Logf("FULL LIFECYCLE OK: Σin=%s Σout=%s reserve(alice)=0 reserve(bob)=%s treasury=%s — conserved, alice CLOSED, bob untouched.",
@@ -939,8 +953,14 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 	)
 	regBlock := uint64(2_000_000)
 	hzMustOK(t, Register(s, creator, creator, regBlock, face, capVal), "Register")
-	paidUntil := regBlock + SubscriptionPeriod
-	frozenStart := paidUntil + GraceBlocks
+	// ★ FROZEN IS REACHED BY RETIRE, NOT BY A LAPSE (OWNER RULING 2026-09-12).
+	// This used to be `paidUntil := regBlock + SubscriptionPeriod; frozenStart :=
+	// paidUntil + GraceBlocks` — the block a market that stopped paying crossed
+	// into FROZEN. There is no lapse any more, so the fixture retires the market
+	// explicitly (below, after the asks are opened) and the same GraceBlocks
+	// notice runs from THAT mark. Every assertion in this test is about what a
+	// FROZEN market does, not about how it got there, so only the road moved.
+	obsAnchor := regBlock + 12*LongObsSpacing + 1000
 
 	// Funded on the CURVE (Buy is the only issuance path). Token counts,
 	// re-denominated deliberately from the deleted PAR amounts.
@@ -960,7 +980,7 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 	// (face·2 = 60,000 >= 56,000).
 	hzResetObs(s, creator) // see hzResetObs: the funding Buys already fed both rings
 	obsRate := big.NewInt(56_000)
-	lastObs := paidUntil + 900 // early OVERDUE; RecordObs has no phase gate at all
+	lastObs := obsAnchor // well inside ACTIVE; RecordObs has no phase gate at all
 	obsBlocks := make([]uint64, stObsCount)
 	for i := range obsBlocks {
 		obsBlocks[i] = lastObs - uint64(stObsCount-1-i)*LongObsSpacing
@@ -968,8 +988,6 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 	for _, ob := range obsBlocks {
 		RecordObs(s, creator, ob, obsRate)
 	}
-
-	commission := commissionOwedFor(big.NewInt(face))
 
 	// An ask whose deadline reaches well past the FROZEN block we'll test at
 	// — this is the "creator mid-answer when the subscription lapses" case
@@ -981,7 +999,7 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 	// state, then used to compute the tightest legitimate maxCredits.
 	inFlightRate, err := AskRate(s, creator, inFlightBlock)
 	hzMustOK(t, err, "AskRate (in-flight ask)")
-	askInFlight, err := askAt0(s, "holdera", creator, inFlightBlock, creditsForAsk(big.NewInt(face), inFlightRate), commission, "inflight-1", MaxAskDeadline)
+	askInFlight, err := askAt0(s, "holdera", creator, inFlightBlock, creditsForAsk(big.NewInt(face), inFlightRate), "inflight-1", MaxAskDeadline)
 	hzMustOK(t, err, "Ask(inflight)")
 
 	// A second ask whose window will already have closed by the time we
@@ -989,9 +1007,17 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 	toReclaimBlock := inFlightBlock + 10
 	toReclaimRate, err := AskRate(s, creator, toReclaimBlock)
 	hzMustOK(t, err, "AskRate (to-reclaim ask)")
-	askToReclaim, err := askAt0(s, "holderb", creator, toReclaimBlock, creditsForAsk(big.NewInt(face), toReclaimRate), commission, "reclaim-me-1", MinAskDeadline)
+	askToReclaim, err := askAt0(s, "holderb", creator, toReclaimBlock, creditsForAsk(big.NewInt(face), toReclaimRate), "reclaim-me-1", MinAskDeadline)
 	hzMustOK(t, err, "Ask(to-reclaim)")
 
+	// The creator retires right after both asks are open — the only road into
+	// FROZEN since 2026-09-12, and the same road A1 (2026-08-30) already made the
+	// only road into a wind-down. Both facts now arrive together, which is why
+	// the two "naturally FROZEN but not winding down" subtests that used to sit
+	// below are gone: that state no longer exists anywhere in the system.
+	retireBlock := toReclaimBlock + 100
+	hzMustOK(t, Retire(s, creator, creator, retireBlock), "Retire (the only road to FROZEN)")
+	frozenStart := retireBlock + GraceBlocks
 	frozenTestBlock := frozenStart + 2000
 	hzAssertPhase(t, s, creator, frozenTestBlock, StateFrozen, "precondition")
 	// Sanity: askInFlight's deadline must still be open at frozenTestBlock,
@@ -1014,39 +1040,28 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 		}
 	})
 
-	// THE OUTFLOW HALF OF THE SAME GUARDRAIL, A1 edition (owner ruling
-	// 2026-08-30): a natural FROZEN is an INFLOW stop, not a wind-down, so the
-	// holder's exit is the curve Sell, exactly as in ACTIVE — and the pro-rata
-	// Refund rails REFUSE, because nothing is winding down. This is the
-	// inverse of the pre-A1 pairing ("Sell routed to Refund"), and it is the
-	// assertion that fails on the pre-A1 code.
-	t.Run("Sell_isOpen_onNaturalFrozen", func(t *testing.T) {
-		hzAssertPhase(t, s, creator, frozenTestBlock, StateFrozen, "precondition")
-		bal := BalanceOf(s, creator, "holdera")
-		if bal.Sign() <= 0 {
-			t.Fatal("test setup: holdera must still hold tokens here")
-		}
-		_, err := Sell(s, "holdera", creator, frozenTestBlock, big.NewInt(1))
-		hzMustOK(t, err, "Sell while naturally FROZEN (A1: curve exit intact)")
-		if got := BalanceOf(s, creator, "holdera"); new(big.Int).Sub(bal, got).Cmp(big.NewInt(1)) != 0 {
-			t.Fatalf("holdera balance moved by %s, want -1", new(big.Int).Sub(got, bal))
-		}
-	})
-	t.Run("Refund_refused_onNaturalFrozen", func(t *testing.T) {
+	// THE OUTFLOW HALF OF THE SAME GUARDRAIL. Two subtests used to sit here —
+	// Sell_isOpen_onNaturalFrozen and Refund_refused_onNaturalFrozen — pinning
+	// A1's (2026-08-30) distinction between a market frozen by a LAPSE (inflows
+	// stopped, curve exit intact, pro-rata refunds refused) and one frozen by a
+	// RETIRE (winding down, curve exit closed, pro-rata refunds open). With the
+	// subscription removed on 2026-09-12 the first of those two states cannot be
+	// constructed at all: nothing but Retire reaches FROZEN. The subtests are
+	// therefore DELETED rather than adapted — an "inverted" version of them would
+	// just be re-asserting the retired behaviour the siblings below already
+	// prove, dressed up as a distinction that no longer exists. A1's OTHER
+	// assertion, that a lapse is not a wind-down, is now vacuously true.
+	//
+	// What replaces them is the one honest statement left: while winding down,
+	// the curve rail is CLOSED and the pro-rata rail is the exit (THM-1/K3).
+	t.Run("Sell_isClosed_whileWindingDown", func(t *testing.T) {
 		hzAssertPhase(t, s, creator, frozenTestBlock, StateFrozen, "precondition")
 		before := hzSnapshotAll(s)
-		_, err := Refund(s, "holderc", creator, frozenTestBlock, big.NewInt(1))
-		hzMustErr(t, err, ErrState, "Refund while naturally FROZEN (A1: no wind-down on lapse)")
+		_, err := Sell(s, "holdera", creator, frozenTestBlock, big.NewInt(1))
+		hzMustErr(t, err, ErrState, "Sell while retired/winding down (K3: curve rail dropped)")
 		if changed := hzChangedKeys(before, hzSnapshotAll(s)); len(changed) != 0 {
-			t.Fatalf("rejected Refund mutated state: %v", changed)
+			t.Fatalf("rejected Sell mutated state: %v", changed)
 		}
-	})
-	// From here the guardrail's wind-down half needs a wind-down: the creator
-	// retires. Phase at frozenTestBlock still reads FROZEN (the retired ladder
-	// folds to it), so every sibling precondition below is unchanged.
-	t.Run("Retire_opensWindDown", func(t *testing.T) {
-		hzMustOK(t, Retire(s, creator, creator, frozenTestBlock-1), "Retire (A1: wind-down is reached only by Retire)")
-		hzAssertPhase(t, s, creator, frozenTestBlock, StateFrozen, "post-retire")
 	})
 
 	t.Run("NewAsk_isBlocked", func(t *testing.T) {
@@ -1055,7 +1070,7 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 		// maxCredits=1500 is an arbitrary valid (positive) cap — this call is
 		// rejected by RequireInflowOpen (FROZEN) before it ever reaches the
 		// maxCredits guard, so its exact value doesn't matter here.
-		_, err := askAt0(s, "holderc", creator, frozenTestBlock, big.NewInt(1500), commission, "should-be-rejected", MinAskDeadline)
+		_, err := askAt0(s, "holderc", creator, frozenTestBlock, big.NewInt(1500), "should-be-rejected", MinAskDeadline)
 		hzMustErr(t, err, ErrState, "Ask while FROZEN")
 		after := hzSnapshotAll(s)
 		if changed := hzChangedKeys(before, after); len(changed) != 0 {
@@ -1107,12 +1122,9 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 
 	t.Run("Reclaim_stillWorks", func(t *testing.T) {
 		hzAssertPhase(t, s, creator, frozenTestBlock, StateFrozen, "precondition")
-		got, gotCommission, gotRetained := hzReclaimNetOfMissSlice(t, s, "holderb", creator, frozenTestBlock, askToReclaim.Seq, "Reclaim while FROZEN")
-		if got.Cmp(askToReclaim.CreditsSpent) != 0 {
-			t.Fatalf("Reclaim while FROZEN returned %s, want exactly %s (100%% back)", got, askToReclaim.CreditsSpent)
-		}
-		if sum := new(big.Int).Add(gotCommission, gotRetained); sum.Cmp(askToReclaim.CommissionHbd) != 0 {
-			t.Fatalf("Reclaim while FROZEN returned %s + retained %s = %s, want exactly the held %s (DEFECT 1 FIX + RULING 1 split)", gotCommission, gotRetained, sum, askToReclaim.CommissionHbd)
+		got, gotRetained := hzReclaimNetOfMissSlice(t, s, "holderb", creator, frozenTestBlock, askToReclaim.Seq, "Reclaim while FROZEN")
+		if sum := new(big.Int).Add(got, gotRetained); sum.Cmp(askToReclaim.CreditsSpent) != 0 {
+			t.Fatalf("Reclaim while FROZEN returned %s + retained %s = %s, want exactly the escrowed %s (DEFECT 1 FIX + RULING 1 split)", got, gotRetained, sum, askToReclaim.CreditsSpent)
 		}
 	})
 
@@ -1207,8 +1219,12 @@ func TestHarness_FullWindDown_RandomOrderMixedRefundStyles(t *testing.T) {
 	// to τ = 0 and every push is a 0-tax sweep. Reserve bookkeeping under test
 	// (Σgross drained == Σcurve costs, zero dust) is on the GROSS and so is
 	// tax-independent.
-	refundBlock := regBlock + SubscriptionPeriod + GraceBlocks + ExitTaxDecayBlocks
-	hzMustOK(t, Retire(s, creator, creator, refundBlock-1), "Retire (A1: wind-down is reached only by Retire)")
+	refundBlock := regBlock + hzLongGap + GraceBlocks + ExitTaxDecayBlocks
+	// The retire lands a full notice BEFORE refundBlock, not one block before it:
+	// since 2026-09-12 the retire ladder is the ONLY thing that can make this
+	// block FROZEN, where the (now deleted) subscription lapse used to already
+	// have done so and Phase's MAX folded the two.
+	hzMustOK(t, Retire(s, creator, creator, refundBlock-GraceBlocks-1), "Retire (the only road into wind-down, and now the only road to FROZEN)")
 	hzAssertPhase(t, s, creator, refundBlock, StateFrozen, "wind-down precondition")
 
 	// RULING K2: the wind-down is taxed, so a holder receives net (gross − tax)
@@ -1320,8 +1336,8 @@ func TestHarness_RefundHolder_PaysHolderNeverCaller(t *testing.T) {
 	// decayed to τ = 0 there and the sweep is untaxed. This test proves WHICH
 	// keys the push touches; the fresh-holder-rejected case is
 	// TestRefundHolder_EXITTAX1_FreshPushRefused (refund_test.go).
-	pushBlock := regBlock + SubscriptionPeriod + GraceBlocks + 100 + ExitTaxDecayBlocks
-	hzMustOK(t, Retire(s, creator, creator, pushBlock-1), "Retire (A1: wind-down is reached only by Retire)")
+	pushBlock := regBlock + hzLongGap + GraceBlocks + 100 + ExitTaxDecayBlocks
+	hzMustOK(t, Retire(s, creator, creator, pushBlock-GraceBlocks-1), "Retire (the only road into wind-down, and now the only road to FROZEN)")
 	hzAssertPhase(t, s, creator, pushBlock, StateFrozen, "precondition")
 	reserve := Reserve(s, creator)
 	supply := Supply(s, creator)
@@ -1421,7 +1437,7 @@ func TestHarness_ReRegistration_AfterClosed(t *testing.T) {
 
 	regBlock := uint64(5_000_000)
 	hzMustOK(t, Register(s, creator, creator, regBlock, 1000, 1_000_000), "Register (old life)")
-	paidUntil := regBlock + SubscriptionPeriod
+	paidUntil := regBlock + hzLongGap
 	frozenStart := paidUntil + GraceBlocks
 
 	hzBuy(t, s, oldHolder, creator, regBlock+10, 1000)
@@ -1452,7 +1468,7 @@ func TestHarness_ReRegistration_AfterClosed(t *testing.T) {
 	oldAskBlock := lastOldObs + 50 // still OVERDUE: paidUntil < oldAskBlock < frozenStart
 	oldRateGot, err := AskRate(s, creator, oldAskBlock)
 	hzMustOK(t, err, "AskRate (old life)")
-	oldAsk, err := askAt0(s, oldHolder, creator, oldAskBlock, creditsForAsk(big.NewInt(1000), oldRateGot), commissionOwedFor(big.NewInt(1000)), "old-life-ask", MinAskDeadline)
+	oldAsk, err := askAt0(s, oldHolder, creator, oldAskBlock, creditsForAsk(big.NewInt(1000), oldRateGot), "old-life-ask", MinAskDeadline)
 	hzMustOK(t, err, "Ask (old life)")
 	if oldAsk.Seq != 0 {
 		t.Fatalf("old life's first ask got seq %d, want 0", oldAsk.Seq)
@@ -1469,7 +1485,7 @@ func TestHarness_ReRegistration_AfterClosed(t *testing.T) {
 	// freeze) are both fully decayed to τ = 0 there. The old-life obs history and
 	// asks above still sit near frozenStart (unchanged); only the sweep moves.
 	closeBlock := frozenStart + ExitTaxDecayBlocks
-	hzMustOK(t, Retire(s, creator, creator, closeBlock-1), "Retire (A1: wind-down is reached only by Retire)")
+	hzMustOK(t, Retire(s, creator, creator, closeBlock-GraceBlocks-1), "Retire (the only road into wind-down, and now the only road to FROZEN)")
 	hzAssertPhase(t, s, creator, closeBlock, StateFrozen, "old life, precondition")
 	_, err = RefundHolder(s, "hzkeeper", creator, oldHolder, closeBlock)
 	hzMustOK(t, err, "wind-down RefundHolder(oldHolder)")
@@ -1607,14 +1623,24 @@ func TestHarness_ReRegistration_AfterClosed(t *testing.T) {
 	})
 }
 
+// hzLongGap is an arbitrary LONG block gap the fixtures in this package use to
+// place a wind-down, a re-registration or a decayed exit far away from
+// registration. It was spelled `SubscriptionPeriod` (30 days) until the
+// subscription was removed on 2026-09-12 (OWNER RULING; core/params.go) — no
+// fixture ever depended on it MEANING anything, only on its size, so keeping
+// the same number under an honest name leaves every fixture's block geometry
+// bit-for-bit what it was when these assertions were measured. Changing it would
+// silently move dozens of maturity, decay and TWAP-window boundaries at once.
+const hzLongGap uint64 = 30 * BlocksPerDay
+
 // askAt0 is the pre-offering-catalogue Ask, pinned at offering id 0 — the
 // legacy single `face` price (offerings.go, 2026-07-27). Every test written
 // before the catalogue existed calls this, which is exactly the point: id 0 is
 // specified to be the byte-for-byte old behaviour, so the whole pre-existing
 // ask suite passing UNCHANGED through this shim is the evidence for that claim.
 // Offering-specific behaviour is tested against nonzero ids in offerings_test.go.
-func askAt0(s Store, caller, creator string, block uint64, maxCredits, commissionHbdPaid *big.Int, contentHash string, deadlineBlocks uint64) (*AskResult, error) {
-	return Ask(s, caller, creator, block, maxCredits, commissionHbdPaid, contentHash, deadlineBlocks, 0)
+func askAt0(s Store, caller, creator string, block uint64, maxCredits *big.Int, contentHash string, deadlineBlocks uint64) (*AskResult, error) {
+	return Ask(s, caller, creator, block, maxCredits, contentHash, deadlineBlocks, 0)
 }
 
 // exitTaxSplit mirrors accrueExitTax's destination rule (exittax.go, USER

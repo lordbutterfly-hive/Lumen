@@ -9,7 +9,7 @@ import { useLiveDiscovery } from '../../live/use-live-discovery';
 import { describeLag, useIndexerHealth } from '../../live/use-indexer-health';
 import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
 import type { CreatorSummary } from '../../types';
-import { deliveryMarks, pctLabel, usdCompact, usdPrice } from '../../market/format';
+import { deliveryMarks, pctLabel, ratingStars, usdCompact, usdPrice } from '../../market/format';
 import { resolveDiscoveryControls, type DiscoverySort } from '../../market/discovery-ranking';
 import TokenShell from '../token-shell';
 import OfferingsBoard from '../meritum/board/offerings-board';
@@ -158,6 +158,8 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
           </div>
           {c.avgRating !== null ? (
             <div className="mt-1 text-caption tabular-nums text-ink-10 font-ui">
+              {/* Stars for the shape, the number for the fact — see ratingStars. */}
+              <span className="mr-1 text-ink-warn-3" aria-hidden="true">{ratingStars(c.avgRating)}</span>
               Rated {c.avgRating}/5 by {c.ratingCount} buyer{c.ratingCount === 1 ? '' : 's'}
             </div>
           ) : null}

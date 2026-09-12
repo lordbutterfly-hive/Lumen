@@ -109,15 +109,11 @@ export type MarketHealth = 'open' | 'lapsed' | 'delisted' | 'closed' | 'paused';
  */
 export type ContractRules = 'v1' | 'v2';
 
-/**
- * Why `Market.canRenew` is false, in the contract's own terms, so the Studio
- * can say the true sentence instead of a generic one. `lapsed-terminal` is a
- * v1 FROZEN (the chain refuses the payment forever); `surplus` and `deficit`
- * are v2's revival check (reserve above / below the curve's area, so the
- * market cannot be revived: Retire, then re-register). Named here, worded in
- * market/lapse.ts.
- */
-export type RenewRefusal = 'paused' | 'retired' | 'closed' | 'lapsed-terminal' | 'surplus' | 'deficit';
+// THERE IS NO RenewRefusal. It named why a renewal would be refused — paused,
+// retired, closed, a v1 terminal lapse, or v2's surplus/deficit revival check —
+// so the Studio could print the true sentence rather than a generic one. The 10
+// HBD monthly subscription was removed from the contract on 2026-09-12 (OWNER
+// RULING; creator-tokens/core/params.go): there is no renewal to refuse.
 
 export interface Market {
   creator: string;
@@ -137,19 +133,17 @@ export interface Market {
   supplyTokens: number;
   /** core/keys.go kReserve — the HBD backing this market. R === Area(supplyTokens) WITH EQUALITY at every reachable trading state (curve.go's governing invariant); see reserveCoverage below for that as a ratio. */
   reserveHbd: number;
-  paidUntilBlock: number;
-  paidUntilAt: number;
+  // THERE IS NO paidUntilBlock/paidUntilAt. They were `m|<creator>|pu` and its
+  // epoch estimate — the subscription clock, deleted from the contract on
+  // 2026-09-12 (OWNER RULING). ★ The KEY still holds a stale value on the three
+  // markets registered before that date, which is exactly why it is not read:
+  // deriving a phase from it would show an ACTIVE market as FROZEN.
   registeredAtBlock: number;
   phase: MarketPhase;
-  /**
-   * paidUntilBlock + GraceBlocks — the block OVERDUE turns into FROZEN.
-   * core/keys.go declares a kFrozenAt key but no module in the read core
-   * ever writes it, so "when did this freeze" is not stored state — it is
-   * this exact arithmetic, always defined, meaningful only once the market
-   * has actually lapsed.
-   */
-  graceExpiresAtBlock: number;
-  graceExpiresAt: number;
+  // THERE IS NO graceExpiresAtBlock/graceExpiresAt. They were paidUntilBlock +
+  // GraceBlocks — the block a LAPSED market crossed into FROZEN. Nothing lapses
+  // any more; the retire notice has its own clock (retiredAtBlock + GraceBlocks,
+  // derived in contract-math.ts's derivePhase).
   /** kPaused (keys.go) — global inbound pause, independent of this market's own phase. */
   globalInflowPaused: boolean;
   /**
@@ -187,40 +181,19 @@ export interface Market {
   canBuy: boolean;
   /** Same RequireInflowOpen gate as canBuy — ask.go's Ask() calls the identical chokepoint. See canBuy's own doc for the RULING K3 retired-notice caveat, which applies here too. */
   canAsk: boolean;
+  // THERE IS NO canRenew/renewRefusal. Renew had its OWN gate —
+  // requireMarketAcceptsMoney, not RequireInflowOpen — because the delivery
+  // penalty ran 7 days while the subscription grace ran 5, so a penalty landing
+  // near a renewal date outlived the grace, the market hit FROZEN where Renew
+  // was illegal forever, and a self-clearing penalty became PERMANENT
+  // destruction of the market. "An attacker only had to time three junk asks."
+  // Blocking a debtor from paying you is not a penalty, it is a trap.
+  //
+  // The 10 HBD monthly subscription was removed on 2026-09-12 (OWNER RULING;
+  // creator-tokens/core/params.go), so there is no bill and no trap. The LESSON
+  // survives the field: if a paid tier ever returns, its gate is NOT canBuy.
   /**
-   * ★★★ RENEW HAS ITS OWN GATE, AND IT IS NOT canBuy (2026-08-30, adversarial review).
-   *
-   * `core.Renew` calls `requireMarketAcceptsMoney`, NOT `RequireInflowOpen`
-   * (market.go:795-800). The difference is the DELIVERY gate: paused, retired
-   * and phase only, with no delinquency term. That difference is deliberate and
-   * the contract records why, at market.go's own doc for that function — a
-   * defect found 2026-07-27 and called fatal there:
-   *
-   *   the delivery penalty runs 7 days (DelinquencyBlocks) while the
-   *   subscription grace runs 5 (GraceBlocks), so a penalty landing near a
-   *   renewal date outlives the grace. The market crosses into FROZEN, where
-   *   Renew is illegal forever, and a self-clearing 7-day penalty becomes
-   *   PERMANENT destruction of the market, taking every holder onto the flat
-   *   pro-rata wind-down rail. "An attacker only had to time three junk asks."
-   *
-   * The contract fixed that. This client had put it back: `renewSubscription`
-   * threw on `!canBuy`, and canBuy carries the delinquency term, so our own UI
-   * refused to let exactly those creators pay their bill. Blocking a debtor
-   * from paying you is not a penalty, it is a trap.
-   *
-   * So: `canRenew` is `canBuy` WITHOUT the delivery gate. Never collapse the
-   * two back into one boolean, however tempting the symmetry looks.
-   */
-  canRenew: boolean;
-  /**
-   * Why canRenew is false (null when it is true). Under v2 this is what turns
-   * "cannot renew" into the true sentence: a FROZEN market carrying a v1
-   * pro-rata surplus is refused as `surplus`, and the road is Retire then
-   * re-register, not "try again". market/contract-rules.ts renewGateUnder.
-   */
-  renewRefusal: RenewRefusal | null;
-  /**
-   * delivery.go DeliveryStanding — the block the creator's delivery penalty
+   * delivery.go DeliveryStanding
    * ends, or null when their standing is clear. Non-null means canBuy/canAsk
    * are false FOR THIS REASON specifically, which the UI must say out loud: a
    * dead Buy button with no explanation reads as a broken page, and the honest
@@ -598,8 +571,23 @@ export interface Quote {
    * `maxCreditsBaseUnits`. Same non-null rule as `rate`.
    */
   creditsRequiredBaseUnits: number | null;
-  /** floor(faceHbd * CommissionBps / 10000) — the separate HBD leg (SPEC §1.7.3). Always computable; does not need rate. */
-  commissionHbd: number;
+  /**
+   * floor(creditsRequiredBaseUnits * CommissionBps / 10000) — the platform's
+   * share OF the credits above, in the creator's own token (SPEC §1.7.3, OWNER
+   * RULING 2026-09-12).
+   *
+   * ★ IT IS A PARTITION OF `creditsRequired`, NOT AN ADDITION TO IT. A surface
+   * that adds the two together double-bills the buyer. It replaced
+   * `commissionHbd`, a separate HBD leg the buyer paid alongside the tokens;
+   * the field was RENAMED rather than re-pointed so a consumer written against
+   * the old money model fails to compile instead of quietly showing the wrong
+   * total.
+   *
+   * NULL exactly when `rate` is null: the commission is a fraction of the
+   * credits, and without a rate there are no credits. Zero would read as "the
+   * platform takes nothing", which is a different and false statement.
+   */
+  commissionCredits: number | null;
   /**
    * Why `rate` above is null or non-'ok' — ask.go's SettlementRate/AskRate
    * refusal reasons (settlement.go/twap.go). 'ok' means a real rate was
@@ -634,11 +622,7 @@ export interface RegisterMarketInput {
   firstBuyTokens?: number;
 }
 
-export interface RenewSubscriptionInput {
-  creator: string;
-  caller: string;
-  periods: number;
-}
+// THERE IS NO RenewSubscriptionInput — see the Market.canRenew note above.
 
 export interface SetFaceInput {
   creator: string;

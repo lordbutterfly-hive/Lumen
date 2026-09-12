@@ -16,7 +16,7 @@ import { useCreatorProfileLink } from '../../live/use-creator-profile-link';
 import { SafeExternalLink, safeHostname } from '@/blog/components/safe-external-link';
 import { Link } from '@hive/ui';
 import { MarketLoading, MarketMissing, MarketRateLimited, MarketReadFailed, MarketUnavailable } from '../../live/market-states';
-import { avatarGradient, pctLabel, usdMoney, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
+import { avatarGradient, pctLabel, ratingStars, usdMoney, usdPrice, usdWholeNonZero } from '../../market/format';
 import { priceChangeLabel } from '../../market/price-change';
 // ★★ THE RESERVE / BACKING FIGURES ARE HIDDEN FOR LAUNCH (owner, 2026-08-27).
 // One flag, every surface, JSX preserved and not rendered. See the module for
@@ -25,8 +25,6 @@ import { SHOW_BACKING_FIGURES } from '../../backing-visibility';
 import TokenShell from '../token-shell';
 import PriceChart from './price-chart';
 import TokenModals, { type TokenDialog } from './token-modals';
-import LapseBanner from './lapse-banner';
-import { lapseStateOf, DELISTED_READER_NOTICE } from '../../market/lapse';
 import { marketHealthOf, healthWordFor } from '../../market/market-health';
 import { buyerOracleNotice } from '../../market/oracle-copy';
 // ★★★ EVERY SENTENCE ON THIS PAGE THAT MAKES A CLAIM ABOUT MONEY (2026-08-27).
@@ -46,8 +44,6 @@ import {
   WIND_DOWN_BANNER,
   backingPerTokenValue,
   honestNote,
-  overdueBanner,
-  overdueFigures,
   positionSegments
 } from './disclosure-copy';
 import { MeritumEligibilityNotice, useMeritumEligibility } from '../meritum-eligibility';
@@ -523,22 +519,13 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           `lapseStateOf` returns `unknown` for a failed or unanswered read and the
           banner draws nothing for it: a creator must never be told their market is
           delisted because one read failed. */}
-      {isOwner ? (
-        <LapseBanner
-          state={lapseStateOf({
-            phase: market.phase,
-            paidUntilBlock: market.paidUntilBlock,
-            graceExpiresAtBlock: market.graceExpiresAtBlock,
-            headBlock: market.headBlock,
-            windingDown: market.windingDown
-          })}
-          renewRefusal={market.renewRefusal}
-          creator={handle}
-          paidUntilBlock={market.paidUntilBlock}
-          onRenew={() => live.renew(1)}
-          busy={live.isRenewing}
-        />
-      ) : null}
+      {/* THERE IS NO LAPSE BANNER. It told the OWNER their listing was running
+          out, had run out, or had been delisted, and carried the pay control.
+          The 10 HBD monthly subscription was removed from the contract on
+          2026-09-12 (OWNER RULING; creator-tokens/core/params.go): a market is
+          ACTIVE from registration until its creator RETIRES it, so none of the
+          three states it spoke to can occur. The retire notice has its own
+          banner, below, which is now the only thing that can close a market. */}
 
       {/* Wind-down banner (design brief ui-prompts/tokens/1-TOKEN-PAGE.md,
           WIND-DOWN/FROZEN state): tells a visitor WHY buying/asking is closed
@@ -548,59 +535,14 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         <div className="mb-4 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5 text-[14px] leading-[22px] font-medium text-ink-warn-3 font-ui">
           {WIND_DOWN_BANNER}
         </div>
-      ) : market.phase === 'OVERDUE' ? (
-        // ★ OVERDUE WAS COMPLETELY SILENT TO A BUYER.
-        //
-        // The page was textually and functionally identical to a healthy market:
-        // Buy enabled, no banner, no badge. The only place this state appeared
-        // anywhere in the product was the creator's OWN dashboard — which a
-        // buyer has no reason to open. Yet it is the one state where the
-        // downside is about to change shape: when grace runs out the market
-        // FREEZES, the curve closes, and the only exit becomes a redeem at the
-        // floor. On the fixture that surfaced this the spot price was $3.04 and
-        // the floor $2.00 — a third of the position, turning on a clock nobody
-        // was shown. This page already discloses wind-down and delinquency
-        // plainly; overdue is the state that most needs it.
-        <div className="mb-4 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5 text-[14px] leading-[22px] font-medium text-ink-warn-3 font-ui">
-          {/* ★ The quoted figure is the GROSS pro-rata share (2026-08-27): it is
-              what the reserve holds per token, before the holder's own
-              early-exit fee, so the clause says so. `overdueFigures` returns ''
-              when there is no number to quote, which is how the sentence avoids
-              ending "(currently  a token)" on an untraded market. */}
-          {overdueBanner(overdueFigures(backingPerTokenValue(market.floorUsd, market.supply), market.priceUsd), market.rules)}
-        </div>
-      ) : health === 'delisted' && !isOwner ? (
-        // ★ NOT FOR THE OWNER. Measured on the demo build: with both mounted, a
-        // creator on their own delisted page got two stacked amber blocks saying
-        // the same thing in two voices — theirs ("Your market is not taking
-        // buyers. Renew to reactivate it.", with the pay button) and this one,
-        // addressed to a visitor. The owner's is the actionable one, so this
-        // yields to it. They cannot both be absent: `marketHealthOf` and
-        // `lapseStateOf` agree on this state by construction (both key
-        // 'delisted' off a natural FROZEN), which is the agreement 59's
-        // 24-cell check pins.
-        // ★★★ THE BUYER HALF OF DELISTING (2026-08-30). We built the creator's
-        // notice and left the reader with nothing: a disabled Buy, a state badge,
-        // and no sentence anywhere saying why — observed on the running demo
-        // build, where the word "Delisted" appeared nowhere on the page and the
-        // nearest explanation was "Sign in to trade", which masks the real reason
-        // with a different one. That is the dead-control fault this feature has
-        // already fixed on six other surfaces.
-        //
-        // Reachable ONLY under the A1 rules, which is what makes the sentence
-        // safe: `health === 'delisted'` is market-health.ts's natural-FROZEN case,
-        // and a natural FROZEN is a wind-down under v1 — so under v1 the
-        // wind-down banner above fires instead and this never renders. That is
-        // also why it can say selling is unaffected: on the only rules where this
-        // is reachable, the curve sell rail is open.
-        //
-        // It says NOTHING about what a lapse does to money already held. See
-        // DELISTED_READER_NOTICE's own doc: that answer differs between the two
-        // contracts, so a sentence would be wrong in one direction or the other.
-        <div className="mb-4 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5 text-[14px] leading-[22px] font-medium text-ink-warn-3 font-ui">
-          {DELISTED_READER_NOTICE}
-        </div>
-      ) : market.delinquentUntilBlock !== null ? (
+      ) : /* THE OVERDUE AND DELISTED BRANCHES ARE GONE (2026-09-12). OVERDUE
+             warned a BUYER that the grace window was running out and the curve
+             was about to close; `delisted` told a reader why a lapsed market had
+             stopped taking buyers. Neither state exists any more: OVERDUE is now
+             only the retire notice, which the wind-down banner above already owns
+             and fires first on, and a market cannot be delisted by a lapse at
+             all. Both sentences were about a clock that no longer runs. */
+      market.delinquentUntilBlock !== null ? (
         // delivery.go: RequireInflowOpen also refuses while a creator is
         // DELINQUENT. Without this the Buy button would simply be dead with no
         // reason given, which reads as a broken page — and saying it out loud is
@@ -916,6 +858,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               /* The buyer's protection made visible at the buy point (feedback audit
                  2026-08-31): the rating rail was fully wired but shown only on the grid. */
               <div className="mt-1.5 text-caption text-ink-4 font-ui">
+                <span className="mr-1 text-ink-warn-3" aria-hidden="true">{ratingStars(d.avgRating)}</span>
                 Rated <strong className="font-num">{d.avgRating.toFixed(1)}/5</strong> by {d.ratingCount} {d.ratingCount === 1 ? 'buyer' : 'buyers'}
                 {d.declinedCount > 0 ? <> · declined {d.declinedCount}</> : null}
               </div>

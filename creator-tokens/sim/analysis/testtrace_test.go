@@ -60,18 +60,18 @@ func prepayEv(block uint64, actor, creator string, hbdPaid int64) Event {
 	return newEv(block, actor, "prepay", creator).argN("hbdPaid", hbdPaid).build()
 }
 
-// askEv builds a standard "ask" event. commissionHbdPaid is computed by the
-// caller (tests exercise both the exact-owed and overpaid cases directly),
-// deadlineBlocks defaults to a 7-day window (well inside [MinAskDeadline,
-// MaxAskDeadline]). creditsSpent is echoed into Args, matching the real
+// askEv builds a standard "ask" event. `commission` is the platform's slice OF
+// creditsSpent (tokens, not HBD — OWNER RULING 2026-09-12), passed by the caller
+// so a fixture can state it explicitly; deadlineBlocks defaults to a 7-day
+// window (well inside [MinAskDeadline, MaxAskDeadline]). creditsSpent is echoed into Args, matching the real
 // engine's own convention confirmed by reading sim/actions.go's
 // doAskExecute (added after this package's initial build): Args["seq"],
 // Args["rateUsed"] and Args["creditsSpent"] are all appended to Args on a
 // successful ask, alongside the true call inputs.
-func askEv(block uint64, actor, creator string, commissionHbdPaid int64, deadlineBlocks uint64, creditsSpent int64) Event {
+func askEv(block uint64, actor, creator string, commission int64, deadlineBlocks uint64, creditsSpent int64) Event {
 	return newEv(block, actor, "ask", creator).
 		argN("maxCredits", 1_000_000).
-		argN("commissionHbdPaid", commissionHbdPaid).
+		argN("commissionCredits", commission).
 		arg("contentHash", "hash1").
 		arg("deadlineBlocks", big.NewInt(int64(deadlineBlocks)).String()).
 		argN("creditsSpent", creditsSpent).

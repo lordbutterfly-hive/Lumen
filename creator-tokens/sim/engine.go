@@ -69,18 +69,24 @@ const (
 // core type. core exposes no reader for escrow records (by design: they are
 // an internal implementation detail of ask.go), so the simulator keeps its
 // own shadow copy, populated from the exact values core.Ask/Answer/Reclaim
-// returned or were called with. It backs three things: (a) the I3 escrowed-
-// credits term, (b) the held-commission HBD term, and (c) letting creator/
-// asker actors know which of their own escrows are still open.
+// returned or were called with. It backs two things: (a) the I3 escrowed-
+// credits term, and (b) letting creator/asker actors know which of their own
+// escrows are still open. It used to back a third — a held-commission HBD term
+// in the conservation identity — which the OWNER RULING of 2026-09-12 removed
+// along with the HBD leg itself.
 type EscrowShadow struct {
-	Creator       string
-	Seq           uint64
-	Asker         string
-	Credits       *big.Int
-	CommissionHbd *big.Int
-	Deadline      uint64
-	Status        string // PENDING / ANSWERED / RECLAIMED / DECLINED
-	OfferingID    uint64 // which named service this ask targeted (0 == the legacy `face` price, offerings.go)
+	Creator string
+	Seq     uint64
+	Asker   string
+	Credits *big.Int
+	// CommissionCredits is the platform's slice OF Credits (tokens, not HBD).
+	// It is recorded for the trace and the ledger analyser only: it moves no HBD
+	// and appears in no conservation identity, because it never leaves the
+	// escrow's own credits.
+	CommissionCredits *big.Int
+	Deadline          uint64
+	Status            string // PENDING / ANSWERED / RECLAIMED / DECLINED
+	OfferingID        uint64 // which named service this ask targeted (0 == the legacy `face` price, offerings.go)
 }
 
 func escrowKey(creator string, seq uint64) string {
@@ -234,10 +240,19 @@ type Engine struct {
 
 	oracleWalks map[string]*oracleWalkState // oracle actor name -> its running synthetic price state
 
-	treasuryShadow      *big.Int // registration + subscription fees + booked (answered) commissions + the platform half of every K2 exit tax (Refund/RefundHolder)
-	heldCommissionTotal *big.Int // commission HELD in open escrows (Ask'd, not yet Answered or Reclaimed)
-	totalHbdIn          *big.Int // every HBD unit ever pulled from an actor's wallet into the contract
-	totalHbdOut         *big.Int // every HBD unit ever paid from the contract back to an actor
+	// treasuryShadow: the platform half of every trade fee, plus the platform
+	// half of every K2 exit tax (Refund/RefundHolder). It used to also carry
+	// registration fees (deleted 2026-07-21), subscription payments and booked
+	// ask commissions (both deleted 2026-09-12) — those three entry points are
+	// gone, and the two that remain are the whole of it.
+	//
+	// THERE IS NO heldCommissionTotal. It tracked the HBD commission held in
+	// open escrows, and it was a term in the conservation identity below. The
+	// commission is tokens now (OWNER RULING 2026-09-12) and never leaves the
+	// escrow's own credits, so there is no HBD to hold and no bucket to balance.
+	treasuryShadow *big.Int
+	totalHbdIn     *big.Int // every HBD unit ever pulled from an actor's wallet into the contract
+	totalHbdOut    *big.Int // every HBD unit ever paid from the contract back to an actor
 
 	heap       eventHeap
 	seqCounter uint64
@@ -326,8 +341,7 @@ func NewEngine(cfg Config) *Engine {
 		pendingByCreator:    map[string][]string{},
 		pendingByAsker:      map[string][]string{},
 		oracleWalks:         map[string]*oracleWalkState{},
-		treasuryShadow:      zeroBig(),
-		heldCommissionTotal: zeroBig(),
+		treasuryShadow: zeroBig(),
 		totalHbdIn:          zeroBig(),
 		totalHbdOut:         zeroBig(),
 		keeperProfile:       keeperProfile,
@@ -660,13 +674,15 @@ func (e *Engine) addEscrow(rec *EscrowShadow) {
 	e.escrows[key] = rec
 	e.pendingByCreator[rec.Creator] = append(e.pendingByCreator[rec.Creator], key)
 	e.pendingByAsker[rec.Asker] = append(e.pendingByAsker[rec.Asker], key)
-	e.heldCommissionTotal = addBig(e.heldCommissionTotal, rec.CommissionHbd)
 }
 
-// resolveEscrow marks an escrow ANSWERED or RECLAIMED and moves its held
-// commission out of heldCommissionTotal — into treasuryShadow (answered) or
-// back out to the asker's wallet, which the caller (actions.go) handles
-// separately since it also needs to touch totalHbdOut.
+// resolveEscrow marks an escrow ANSWERED, RECLAIMED or DECLINED.
+//
+// It used to also move the escrow's held HBD commission out of
+// heldCommissionTotal, into treasuryShadow (answered) or back to the asker's
+// wallet. Since 2026-09-12 the commission is tokens inside the escrow's own
+// credits, so settling one moves no HBD at any door and there is nothing left
+// here but the status flip.
 func (e *Engine) resolveEscrow(creator string, seq uint64, status string) *EscrowShadow {
 	key := escrowKey(creator, seq)
 	rec := e.escrows[key]
@@ -674,7 +690,6 @@ func (e *Engine) resolveEscrow(creator string, seq uint64, status string) *Escro
 		return nil // should be unreachable: only called right after a successful core.Answer/Reclaim
 	}
 	rec.Status = status
-	e.heldCommissionTotal = subBig(e.heldCommissionTotal, rec.CommissionHbd)
 	return rec
 }
 
@@ -902,18 +917,26 @@ func (e *Engine) checkInvariants(triggerEv *Event) {
 	// kFeeBal, which is neither reserve nor treasury and is drawn from the
 	// buyer's wallet all the same — so every trade made the check fail by
 	// exactly that half. Global solvency is:
-	//   in == out + Σ reserve + treasury + Σ heldCommission + Σ feePots
+	//   in == out + Σ reserve + treasury + Σ feePots
+	//
+	// THE heldCommission TERM IS GONE (OWNER RULING 2026-09-12). An open escrow
+	// used to hold real HBD, so it was a fourth resting bucket the identity had
+	// to name; the commission is tokens inside the escrow's credits now, which
+	// the I3 supply invariant already accounts for, and no HBD enters or leaves
+	// the contract on ask/answer/reclaim/decline at all. A term that is
+	// identically zero would not be wrong here — it would be a dead parameter
+	// asserting a flow that cannot happen.
 	feePotsTotal := zeroBig()
 	for _, cname := range e.creatorNames {
 		reserveTotal = addBig(reserveTotal, core.Reserve(e.Store, cname))
 		feePotsTotal = addBig(feePotsTotal, core.FeeBalanceOf(e.Store, cname))
 	}
-	rhs := addBig(addBig(e.totalHbdOut, reserveTotal), addBig(e.treasuryShadow, e.heldCommissionTotal))
+	rhs := addBig(addBig(e.totalHbdOut, reserveTotal), e.treasuryShadow)
 	rhs = addBig(rhs, feePotsTotal)
 	if cmpBig(e.totalHbdIn, rhs) != 0 {
 		e.halt(fmt.Sprintf(
-			"HBD-CONSERVATION VIOLATION: totalHbdIn=%s != totalHbdOut(%s)+Sigma(reserve)(%s)+treasury(%s)+heldCommission(%s)+feePots(%s) = %s",
-			bigStr(e.totalHbdIn), bigStr(e.totalHbdOut), bigStr(reserveTotal), bigStr(e.treasuryShadow), bigStr(e.heldCommissionTotal), bigStr(feePotsTotal), bigStr(rhs),
+			"HBD-CONSERVATION VIOLATION: totalHbdIn=%s != totalHbdOut(%s)+Sigma(reserve)(%s)+treasury(%s)+feePots(%s) = %s",
+			bigStr(e.totalHbdIn), bigStr(e.totalHbdOut), bigStr(reserveTotal), bigStr(e.treasuryShadow), bigStr(feePotsTotal), bigStr(rhs),
 		), triggerEv)
 		return
 	}
@@ -1066,15 +1089,14 @@ func (e *Engine) Summary() string {
 	fmt.Fprintf(&b, "  Sigma(reserve)      = %s\n", bigStr(reserveTotal))
 	fmt.Fprintf(&b, "  treasuryShadow      = %s (live core treasury; owner-withdrawable, C2)\n", bigStr(e.treasuryShadow))
 	fmt.Fprintf(&b, "  ownerWithdrawnTotal = %s (accrued to owner-1 via WithdrawTreasury)\n", bigStr(e.pop.Actors[e.pop.OwnerName].HBD))
-	fmt.Fprintf(&b, "  heldCommissionTotal = %s\n", bigStr(e.heldCommissionTotal))
 	feePotsTotal := zeroBig()
 	for _, name := range e.creatorNames {
 		feePotsTotal = addBig(feePotsTotal, core.FeeBalanceOf(e.Store, name))
 	}
 	fmt.Fprintf(&b, "  feePotsTotal        = %s (creators' pull-claimable trade-fee halves, F8)\n", bigStr(feePotsTotal))
-	rhs := addBig(addBig(e.totalHbdOut, reserveTotal), addBig(e.treasuryShadow, e.heldCommissionTotal))
+	rhs := addBig(addBig(e.totalHbdOut, reserveTotal), e.treasuryShadow)
 	rhs = addBig(rhs, feePotsTotal)
-	fmt.Fprintf(&b, "  in == out+reserve+treasury+held+feePots? %v  (%s == %s)\n", cmpBig(e.totalHbdIn, rhs) == 0, bigStr(e.totalHbdIn), bigStr(rhs))
+	fmt.Fprintf(&b, "  in == out+reserve+treasury+feePots? %v  (%s == %s)\n", cmpBig(e.totalHbdIn, rhs) == 0, bigStr(e.totalHbdIn), bigStr(rhs))
 	fmt.Fprintln(&b)
 
 	// ---- delivery-gate standing guardrail (core/delivery.go) ----

@@ -50,9 +50,14 @@ export const COMMISSION_BPS = 1_200; // 12%
 // than zeroed: a caller that still sent a feePaid field would now be REJECTED
 // by main.go's register entrypoint (it no longer reads that key, and
 // assertPayloadShape treats an unread key as a violation).
-export const SUBSCRIPTION_FEE_BASE_UNITS = 10_000;
-export const SUBSCRIPTION_PERIOD_BLOCKS = 30 * BLOCKS_PER_DAY;
-export const MAX_PREPAID_PERIODS = 12;
+// THERE IS NO SUBSCRIPTION_FEE_BASE_UNITS, SUBSCRIPTION_PERIOD_BLOCKS OR
+// MAX_PREPAID_PERIODS. They mirrored core/params.go's SubscriptionFee (10 HBD),
+// SubscriptionPeriod (30 days) and MaxPrepaidPeriods (12). The whole
+// subscription was removed from the contract on 2026-09-12 (OWNER RULING;
+// creator-tokens/core/params.go deleted the constants rather than zeroing them,
+// for the reason this file mirrors: an exported parameter nothing enforces is a
+// dead safety parameter). A market is ACTIVE from registration until its creator
+// RETIRES it.
 
 export const GRACE_BLOCKS = 5 * BLOCKS_PER_DAY; // OVERDUE -> FROZEN
 
@@ -562,32 +567,47 @@ export function tokensAffordableForBudget(supplyTokens: number, budgetBaseUnits:
 
 const PHASE_RANK: Record<Exclude<MarketPhase, 'UNKNOWN'>, number> = { ACTIVE: 0, OVERDUE: 1, FROZEN: 2, CLOSED: 3 };
 
-/** market.go naturalPhase — the subscription ladder alone, with no retire input. */
-function naturalPhase(paidUntilBlock: number, block: number): Exclude<MarketPhase, 'UNKNOWN'> {
-  if (block <= paidUntilBlock) return 'ACTIVE';
-  if (block < paidUntilBlock + GRACE_BLOCKS) return 'OVERDUE';
-  return 'FROZEN';
+/**
+ * market.go naturalPhase — CONSTANT ACTIVE since 2026-09-12.
+ *
+ * ★★★ THIS IS THE ONE PORT WHOSE STALENESS WOULD HAVE BEEN VISIBLY WRONG. It
+ * read `block <= paidUntilBlock ? ACTIVE : block < paidUntilBlock + GRACE ?
+ * OVERDUE : FROZEN`. The contract deleted that ladder with the subscription
+ * (OWNER RULING; core/market.go naturalPhase), but the three markets live on
+ * mainnet still carry a STALE `m|<creator>|pu` value written at their
+ * registration — so a client still running this ladder would compute FROZEN for
+ * a market the chain says is ACTIVE, disable Buy on it, and show its holders a
+ * wind-down that is not happening. The key is not read any more and this
+ * function does not branch.
+ */
+function naturalPhase(): Exclude<MarketPhase, 'UNKNOWN'> {
+  return 'ACTIVE';
 }
 
 /**
  * market.go Phase(), the 4 real contract values only — UNKNOWN is assigned by
  * the caller on read failure, never by this function.
  *
- * ★ RULING D (2026-07-21), MISSING FROM THIS PORT UNTIL NOW: Phase is
- * MAX(naturalPhase, retiredPhase) over ACTIVE < OVERDUE < FROZEN < CLOSED,
- * where a retired market is OVERDUE for its 5-day notice window and FROZEN
- * after. The MAX is load-bearing on the contract side (retiring may only ever
- * make a market MORE frozen, never un-freeze it); here it is what stops the
- * UI showing a retired market as tradeable ACTIVE and inviting a buy that
- * core.Buy's own RequireInflowOpen gate would revert.
+ * ★ RULING D (2026-07-21): Phase is MAX(naturalPhase, retiredPhase) over
+ * ACTIVE < OVERDUE < FROZEN < CLOSED, where a retired market is OVERDUE for its
+ * 5-day notice window and FROZEN after. The MAX is load-bearing on the contract
+ * side (retiring may only ever make a market MORE frozen, never un-freeze it);
+ * here it is what stops the UI showing a retired market as tradeable ACTIVE and
+ * inviting a buy that core.Buy's own RequireInflowOpen gate would revert.
+ *
+ * ★ SINCE 2026-09-12 THE NATURAL TERM IS CONSTANT ACTIVE (naturalPhase above),
+ * so the MAX always resolves to the retire ladder and `retiredAtBlock === null`
+ * always means ACTIVE. The shape is kept rather than collapsed because it is a
+ * faithful port of Phase()'s own shape, and because a second term returning
+ * would be one function body here rather than a rewrite.
  *
  * `retiredAtBlock` is the DECODED height (0/null when never retired) — note
  * the chain stores block+1 so that 0 can mean "never"; see reads.ts's
  * decodeRetiredAt.
  */
-export function derivePhase(closedStored: boolean, paidUntilBlock: number, block: number, retiredAtBlock: number | null = null): Exclude<MarketPhase, 'UNKNOWN'> {
+export function derivePhase(closedStored: boolean, block: number, retiredAtBlock: number | null = null): Exclude<MarketPhase, 'UNKNOWN'> {
   if (closedStored) return 'CLOSED';
-  const natural = naturalPhase(paidUntilBlock, block);
+  const natural = naturalPhase();
   if (retiredAtBlock === null) return natural;
   const forced: Exclude<MarketPhase, 'UNKNOWN'> = block < retiredAtBlock + GRACE_BLOCKS ? 'OVERDUE' : 'FROZEN';
   return PHASE_RANK[forced] > PHASE_RANK[natural] ? forced : natural;
@@ -598,10 +618,10 @@ export function canInflowOpen(phase: MarketPhase, globalInflowPaused: boolean): 
   return !globalInflowPaused && (phase === 'ACTIVE' || phase === 'OVERDUE');
 }
 
-/** paidUntilBlock + GraceBlocks — the block OVERDUE becomes FROZEN. Always defined; only meaningful once the market has actually lapsed. No kFrozenAt read needed (see types.ts Market.graceExpiresAtBlock doc: the key exists in keys.go but no core module ever writes it). */
-export function deriveGraceExpiresAtBlock(paidUntilBlock: number): number {
-  return paidUntilBlock + GRACE_BLOCKS;
-}
+// THERE IS NO deriveGraceExpiresAtBlock. It returned paidUntilBlock +
+// GraceBlocks — the block a LAPSED market crossed from OVERDUE into FROZEN.
+// Nothing lapses since 2026-09-12. GRACE_BLOCKS itself survives: it is still the
+// length of the RETIRE notice (derivePhase above, core/market.go Phase).
 
 /**
  * market.go SetFace's anti-rug band, in base units — mirrors market.go:303-331
@@ -810,36 +830,25 @@ export function creditsForAskBaseUnits(faceBaseUnits: number, rateBaseUnitsPerCr
   return mulDivCeil(faceBaseUnits, 1, rateBaseUnitsPerCredit);
 }
 
-/** ask.go commissionOwedFor: floor(face * CommissionBps / 10000). */
-export function commissionOwedForBaseUnits(faceBaseUnits: number): number {
-  return mulBpsFloor(faceBaseUnits, COMMISSION_BPS);
-}
-
-export interface FaceSplit {
-  /** What creditsForAsk actually prices — NEVER the raw face. */
-  tokenLegBaseUnits: number;
-  /** The 12% platform commission — a SEPARATE HBD leg, paid alongside the token leg, never added on top of it. */
-  commissionBaseUnits: number;
-}
-
 /**
- * ask.go splitFace (USER RULING 2026-07-27): the posted face is the buyer's
- * TOTAL, not a token-only price. commission = floor(face·CommissionBps/10000);
- * the token leg is the REMAINDER, so the two always re-sum to the posted face
- * exactly — the rounding can only ever favour the CREATOR (at most 1 base
- * unit), never overcharge the buyer.
+ * ask.go commissionOwedFor: floor(n * CommissionBps / 10000).
  *
- * THE BUG THIS CLOSES: callers used to feed the raw `faceBaseUnits` straight
- * into creditsForAskBaseUnits (pricing the FULL posted amount in tokens)
- * while the commission was ALSO drawn as a separate HBD leg — so a posted
- * "200" cost the buyer 224 (200 in tokens + 24 in HBD), a surcharge that
- * appeared on no screen and in no spec (ask.go's own splitFace doc). Every
- * caller that needs "how many tokens does this ask cost" must split first and
- * price tokenLegBaseUnits — never the raw face.
+ * ★ `n` IS A CREDIT COUNT, NOT AN HBD FACE (OWNER RULING 2026-09-12). The
+ * commission used to be a separate HBD leg computed off the posted price and
+ * drawn from the buyer with a transfer.allow intent. It is now 12% of the TOKENS
+ * the ask settles at, carved out of the escrow by the contract — so the buyer
+ * signs one intent, needs no HBD, and this is applied to `creditsRequired`.
+ *
+ * THERE IS NO splitFaceBaseUnits. It split a posted face into an 88% token leg
+ * (which creditsForAsk priced) and a 12% HBD leg, and it existed to close the
+ * "posted 200 cost the buyer 224" surcharge — the token leg priced at the FULL
+ * face while the commission was ALSO drawn on top. That guarantee still holds
+ * and is now structural rather than arithmetic: there is only one leg, so there
+ * is nothing to add on top of it. The WHOLE posted face is what
+ * creditsForAskBaseUnits prices.
  */
-export function splitFaceBaseUnits(faceBaseUnits: number): FaceSplit {
-  const commissionBaseUnits = commissionOwedForBaseUnits(faceBaseUnits);
-  return { tokenLegBaseUnits: faceBaseUnits - commissionBaseUnits, commissionBaseUnits };
+export function commissionOwedForBaseUnits(nBaseUnits: number): number {
+  return mulBpsFloor(nBaseUnits, COMMISSION_BPS);
 }
 
 /**

@@ -8,7 +8,7 @@
  * WHAT THIS PROVES AND WHAT IT DOES NOT. It proves the pure functions say what
  * market/contract-rules.ts's header says the contract does, that the v1 column
  * is the pre-A5 client formula unchanged, that the health vocabulary and
- * market/lapse.ts agree on every phase, and that the reserve comparison is
+ * the reader-facing vocabulary is consistent, and that the reserve comparison is
  * exact where it matters. It does NOT prove agreement with the Go core: that
  * is the phase-ladder twin (Go dumps the grid, the compiled client is run over
  * it; findings/59-P25-seam-family.md), which must be re-run whenever either
@@ -18,20 +18,18 @@
  * condition, and rulesForCode discriminates its inputs, so a constant function
  * could not pass the sections below by accident.
  */
-import { areaBaseUnitsBig, derivePhase, GRACE_BLOCKS } from '../lib/contract-math';
+import { areaBaseUnitsBig } from '../lib/contract-math';
 import type { ContractRules, MarketPhase } from '../types';
 import {
   V1_CODE_CID,
   V2_CODE_CIDS,
   V2_FAST_TWIN_CODE_CID,
   closesIfDrainedUnder,
-  renewGateUnder,
   reserveVersusCurve,
   rulesForCode,
   windingDownUnder
 } from './contract-rules';
 import { buyWordFor, healthWordFor, marketHealthOf, windingDownOf } from './market-health';
-import { lapseStateOf } from './lapse';
 
 let passed = 0;
 const failures: string[] = [];
@@ -57,7 +55,12 @@ function check(name: string, condition: boolean, detail?: string): void {
     rulesForCode(V1_CODE_CID) === 'v1' && rulesForCode(v2) === 'v2' && rulesForCode(null) === 'v1' && rulesForCode('') === 'v1' && rulesForCode('bafy-not-a-known-build') === 'v1' && rulesForCode(undefined) === 'v1');
   check('V2_CODE_CIDS never contains the v1 bytecode', !V2_CODE_CIDS.has(V1_CODE_CID));
   check('the Stage D fast twin (same v2 source, short periods) maps to v2, and is a distinct CID from v2 proper',
-    rulesForCode(V2_FAST_TWIN_CODE_CID) === 'v2' && V2_CODE_CIDS.has(V2_FAST_TWIN_CODE_CID) && v2 !== V2_FAST_TWIN_CODE_CID && V2_CODE_CIDS.size === 3);
+    rulesForCode(V2_FAST_TWIN_CODE_CID) === 'v2' && V2_CODE_CIDS.has(V2_FAST_TWIN_CODE_CID) && v2 !== V2_FAST_TWIN_CODE_CID && V2_CODE_CIDS.size === 4);
+  // ★ THE SIZE IS PINNED, AND IT MOVES ONLY WITH A REAL BUILD. 4 since
+  // 2026-09-12: the commission/subscription update's CID was added here BEFORE
+  // the contract was deployed, which is the order this module's own header
+  // demands (frontend first — an unlisted CID pins every client to v1 rules
+  // silently and forever).
   check('every listed v2 CID is a CIDv1 raw/base32 string of the same shape as the live v1 one',
     [...V2_CODE_CIDS].every((c) => /^bafkrei[a-z2-7]{52}$/.test(c)) && /^bafkrei[a-z2-7]{52}$/.test(V1_CODE_CID));
 }
@@ -83,36 +86,19 @@ for (const rules of ['v1', 'v2'] as ContractRules[]) {
     windingDownOf({ phase: 'FROZEN', retiredAtBlock: null, rules: 'v1' }) === true && windingDownOf({ phase: 'FROZEN', retiredAtBlock: null, rules: 'v2' }) === false);
 }
 
-// ---- 2. the renew gate ----
+// ---- 2. THE RENEW GATE IS GONE ----
+//
+// This section proved renewGateUnder cell by cell: ACTIVE/OVERDUE admitted,
+// CLOSED/retired/paused refused with the right reason, v1's terminal FROZEN,
+// and v2's revival check (reserve == area admitted, +1 surplus, −1 deficit),
+// plus a 16-cell agreement with the pre-A5 client formula. The 10 HBD monthly
+// subscription was removed from the contract on 2026-09-12 (OWNER RULING;
+// creator-tokens/core/params.go), taking core.Renew and renewGateUnder with it.
+// reserveVersusCurve — the surplus/deficit comparison the revival check used —
+// SURVIVES and is still proven exactly, in section 3 immediately below.
+
 const SUPPLY = 95;
 const AREA = Number(areaBaseUnitsBig(SUPPLY));
-const base = { retiredAtBlock: null as number | null, globalInflowPaused: false, supplyTokens: SUPPLY, reserveBaseUnits: AREA };
-for (const rules of ['v1', 'v2'] as ContractRules[]) {
-  check(`${rules} ACTIVE renews`, renewGateUnder(rules, { ...base, phase: 'ACTIVE' }).canRenew === true);
-  check(`${rules} OVERDUE renews (inside grace)`, renewGateUnder(rules, { ...base, phase: 'OVERDUE' }).canRenew === true);
-  check(`${rules} CLOSED refused: closed`, renewGateUnder(rules, { ...base, phase: 'CLOSED' }).renewRefusal === 'closed');
-  check(`${rules} retired refused: retired, and it outranks the pause`, renewGateUnder(rules, { ...base, phase: 'ACTIVE', retiredAtBlock: 7, globalInflowPaused: true }).renewRefusal === 'retired');
-  check(`${rules} paused refused: paused`, renewGateUnder(rules, { ...base, phase: 'ACTIVE', globalInflowPaused: true }).renewRefusal === 'paused');
-  check(`${rules} a refusal never reports canRenew`, (['CLOSED'] as MarketPhase[]).every((phase) => renewGateUnder(rules, { ...base, phase }).canRenew === false));
-}
-check('v1 FROZEN refused: lapsed-terminal (requireMarketAcceptsMoney admits ACTIVE/OVERDUE only)', renewGateUnder('v1', { ...base, phase: 'FROZEN' }).renewRefusal === 'lapsed-terminal');
-check('v1 FROZEN refused even with reserve == area (the reserve is irrelevant under v1)', renewGateUnder('v1', { ...base, phase: 'FROZEN', reserveBaseUnits: AREA }).canRenew === false);
-check('v2 FROZEN with reserve == area(supply): ADMITTED (the revival check passes)', renewGateUnder('v2', { ...base, phase: 'FROZEN' }).canRenew === true && renewGateUnder('v2', { ...base, phase: 'FROZEN' }).renewRefusal === null);
-check('v2 FROZEN with reserve == area + 1: refused as surplus (H16, partial pro-rata refunds under v1)', renewGateUnder('v2', { ...base, phase: 'FROZEN', reserveBaseUnits: AREA + 1 }).renewRefusal === 'surplus');
-check('v2 FROZEN with reserve == area - 1: refused as deficit (corrupt state)', renewGateUnder('v2', { ...base, phase: 'FROZEN', reserveBaseUnits: AREA - 1 }).renewRefusal === 'deficit');
-check('v2 FROZEN at supply 0 / reserve 0: admitted (genesis equality)', renewGateUnder('v2', { ...base, phase: 'FROZEN', supplyTokens: 0, reserveBaseUnits: 0 }).canRenew === true);
-check('v2 retired FROZEN: refused as retired, never consulted the reserve', renewGateUnder('v2', { ...base, phase: 'FROZEN', retiredAtBlock: 9, reserveBaseUnits: AREA + 1 }).renewRefusal === 'retired');
-check('v2 UNKNOWN phase is a refusal, not an admission', renewGateUnder('v2', { ...base, phase: 'UNKNOWN' }).canRenew === false);
-// the pre-A5 client canRenew (acceptsMoney = canInflowOpen && !retired) is the v1 column, all cells
-{
-  let same = 0, cells = 0;
-  for (const phase of PHASES) for (const retiredAtBlock of [null, 5]) for (const globalInflowPaused of [false, true]) {
-    cells++;
-    const legacy = !globalInflowPaused && (phase === 'ACTIVE' || phase === 'OVERDUE') && retiredAtBlock === null;
-    if (legacy === renewGateUnder('v1', { ...base, phase, retiredAtBlock, globalInflowPaused }).canRenew) same++;
-  }
-  check(`v1 canRenew is the pre-A5 client formula, all ${cells} cells`, same === cells && cells === 16);
-}
 
 // ---- 3. the reserve comparison is exact where it is used ----
 {
@@ -144,21 +130,24 @@ check('both: CLOSED is already closed; FROZEN with supply does not close', (['v1
   check('ACTIVE, delinquent (canBuy false) -> paused', health('v2', 'ACTIVE', null, false) === 'paused');
   check('ACTIVE, buyable -> open', health('v2', 'ACTIVE', null, true) === 'open');
   check('the words: Delisted / Lapsed / Closed / Paused / Buy', buyWordFor('delisted') === 'Delisted' && buyWordFor('lapsed') === 'Lapsed' && buyWordFor('closed') === 'Closed' && buyWordFor('paused') === 'Paused' && buyWordFor('open') === 'Buy' && healthWordFor('open') === null && healthWordFor('delisted') === 'Delisted');
-  // market/lapse.ts (creator-facing, clauderfly-43) and this vocabulary (reader-facing) must name the same fact.
-  const head = 1_000_000;
-  let agree = 0, cells = 0;
-  for (const rules of ['v1', 'v2'] as ContractRules[]) for (const paidOff of [-1, 0, 1, GRACE_BLOCKS - 1, GRACE_BLOCKS, GRACE_BLOCKS + 5]) for (const retiredAtBlock of [null, head - 10]) {
-    cells++;
-    const paidUntilBlock = head - paidOff;
-    const phase = derivePhase(false, paidUntilBlock, head, retiredAtBlock);
-    const windingDown = windingDownUnder(rules, { phase, retiredAtBlock });
-    const canBuy = !windingDown && (phase === 'ACTIVE' || phase === 'OVERDUE') && retiredAtBlock === null;
-    const h = marketHealthOf({ phase, canBuy, windingDown });
-    const l = lapseStateOf({ phase, paidUntilBlock, graceExpiresAtBlock: paidUntilBlock + GRACE_BLOCKS, headBlock: head, windingDown });
-    const same = (h === 'delisted') === (l.kind === 'delisted') && (h === 'closed') === (l.kind === 'winding-down');
-    if (same) agree++; else console.log(`      disagree: ${rules} paidOff=${paidOff} retired=${retiredAtBlock !== null} phase=${phase} health=${h} lapse=${l.kind}`);
+  // ★ THE 24-CELL AGREEMENT WITH market/lapse.ts IS GONE WITH THAT MODULE. It
+  // proved the creator-facing lapse vocabulary and this reader-facing one named
+  // the same fact in every phase/paid-offset/retired combination. Nothing
+  // lapses since 2026-09-12 (OWNER RULING), so market/lapse.ts was deleted and
+  // there is no second vocabulary to agree with.
+  //
+  // What replaces it is the statement that matters now: 'delisted' and 'lapsed'
+  // are UNREACHABLE on the new contract, because the only road to FROZEN or
+  // OVERDUE is Retire and a retired market is winding down, which the first
+  // branch of marketHealthOf catches. They are kept in the union — and asserted
+  // here — because this client still serves the OLD contract during the flip
+  // window, where a market genuinely can lapse.
+  {
+    const retired = windingDownUnder('v2', { phase: 'FROZEN', retiredAtBlock: 1 });
+    check('a retired FROZEN market is winding down, so it reads closed, never delisted', retired === true && health('v2', 'FROZEN', 1, false) === 'closed');
+    check('a retired OVERDUE market (the notice) reads closed too, never lapsed', health('v2', 'OVERDUE', 1, false) === 'closed');
+    check('the delisted/lapsed words still exist for the OLD contract this client may still be reading', buyWordFor('delisted') === 'Delisted' && buyWordFor('lapsed') === 'Lapsed');
   }
-  check(`market-health and market/lapse.ts agree on delisted and winding-down, all ${cells} cells`, agree === cells && cells === 24);
 }
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

@@ -264,7 +264,6 @@ func gradEscrowWorld(t *testing.T, aged, fresh int64) (*MemStore, string, string
 	}
 	t0 := uint64(10)
 	t1 := t0 + ExitTaxDecayBlocks
-	setU64(s, kPaidUntil(c), t1+1000*SubscriptionPeriod)
 	if _, err := Buy(s, h, c, t0, big.NewInt(aged)); err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +274,6 @@ func gradEscrowWorld(t *testing.T, aged, fresh int64) (*MemStore, string, string
 		t.Fatal(err)
 	}
 	askBlock := erSeedObs(s, c, t1+1)
-	setU64(s, kPaidUntil(c), askBlock+1000*SubscriptionPeriod)
 	return s, c, h, askBlock
 }
 
@@ -321,8 +319,7 @@ func TestGRAD_4_EscrowRailMoney(t *testing.T) {
 					}
 				}
 				setMoney(st, kFace(c), face)
-				ar, err := Ask(st, h, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(1_000_000)),
-					q.CommissionHbd, "cid", MinAskDeadline, 0)
+				ar, err := Ask(st, h, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(1_000_000)), "cid", MinAskDeadline, 0)
 				if err != nil {
 					t.Fatal(err)
 				}

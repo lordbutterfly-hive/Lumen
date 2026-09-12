@@ -46,11 +46,10 @@ func fr4Setup(t *testing.T, cap int64) *MemStore {
 	if err := Register(s, "alice", "alice", 1000, 1000, cap); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	// Keep the market ACTIVE well past ExitTaxDecayBlocks so the curve rail is
-	// open at t1 for the Sell subcases (mirrors verify2's extendSub).
-	if err := Renew(s, "alice", "alice", 1000, 4, big.NewInt(4*SubscriptionFee)); err != nil {
-		t.Fatalf("Renew: %v", err)
-	}
+	// The market is ACTIVE well past ExitTaxDecayBlocks with nothing paid, so the
+	// curve rail is open at t1 for the Sell subcases. (Four prepaid subscription
+	// periods used to be bought here to guarantee that; there is no subscription
+	// since 2026-09-12 and a market never lapses.)
 	return s
 }
 

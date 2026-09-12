@@ -118,22 +118,31 @@ func Phase(s Store, creator string, block uint64) string {
 	return maxPhase(natural, forced)
 }
 
-// naturalPhase is the subscription ladder alone — the lazy paid_until
-// derivation, with no retire input. Split out of Phase so the MAX above has
-// two independent, separately-testable terms.
+// naturalPhase is the non-retire term of Phase, and it is now CONSTANT ACTIVE.
+//
+// ★ THE LAPSE LADDER IS GONE (OWNER RULING 2026-09-12). This used to read
+// kPaidUntil and derive ACTIVE (block <= paidUntil) -> OVERDUE (inside the
+// GraceBlocks window) -> FROZEN, i.e. a market that stopped paying its 10 HBD a
+// month stopped taking inflows. The subscription was removed whole (params.go's
+// "THERE IS NO SubscriptionFee", keys.go's deleted kPaidUntil, and the deleted
+// Renew above), so there is nothing left to lapse: a registered market is
+// ACTIVE until its creator retires it, and Retire is the only door into a
+// wind-down.
+//
+// NOTHING BECAME UNREACHABLE BY MONEY. A natural FROZEN was never a wind-down
+// (A1, 2026-08-30: inWindDown fires on Retire or a stored CLOSED and on nothing
+// else), so no holder's exit ever ran through this ladder — Sell on the curve
+// was open across the whole of it. What is genuinely gone is the automatic
+// reaping of an abandoned market; that is a liveness question, not a solvency
+// one, and it is deliberately left open rather than papered over with a bill.
+//
+// It is kept as a FUNCTION, not folded into Phase, so the MAX in Phase above
+// still has two independent terms and the retire ladder stays separately
+// testable — and so re-introducing a second term later is a change to one
+// function body rather than to Phase's shape.
 func naturalPhase(s Store, creator string, block uint64) string {
-	paidUntil := getU64(s, kPaidUntil(creator))
-	if block <= paidUntil {
-		return StateActive
-	}
-	// OVERDUE spans (paidUntil, paidUntil+GraceBlocks) — grace is fully
-	// consumed only once block reaches paidUntil+GraceBlocks, matching SPEC
-	// §1.7.5's ladder ("OVERDUE: lapse -> lapse+5 days" / "FROZEN: lapse+5
-	// days"): FROZEN begins AT the +GraceBlocks boundary, not after it.
-	if block < paidUntil+GraceBlocks {
-		return StateOverdue
-	}
-	return StateFrozen
+	_, _ = creator, block
+	return StateActive
 }
 
 // phaseRank orders the lifecycle ACTIVE < OVERDUE < FROZEN < CLOSED (RULING
@@ -312,14 +321,16 @@ func windDownOpenBlock(s Store, creator string, block uint64) (uint64, bool) {
 		return retiredAt, true
 	}
 	// Stored CLOSED with no retire mark. refund.go:640 writes CLOSED only from
-	// inside a wind-down, which now requires Retire, so this branch is
-	// unreachable on state written by this code. It is kept for state written
-	// by the PREVIOUS ladder (a market that naturally froze and fully wound
-	// down before this change shipped): anchor to the block its grace expired,
-	// which is where that old wind-down began. Nothing is pushed early — a
-	// closed market has no live supply to push.
-	paidUntil := getU64(s, kPaidUntil(creator))
-	return paidUntil + GraceBlocks, true
+	// inside a wind-down, which requires Retire, so this branch is unreachable
+	// on state written by this code. It is kept for state written by the
+	// PREVIOUS ladder (a market that naturally froze and fully wound down before
+	// the A1 change shipped). It used to anchor to paidUntil+GraceBlocks, the
+	// block that old grace expired; kPaidUntil is deleted (2026-09-12), so it
+	// anchors to the registration block instead — the earliest honest anchor,
+	// which can only make the force-push window OPEN sooner, never later.
+	// Nothing is pushed early regardless: a closed market has no live supply to
+	// push, which is why this branch has never executed.
+	return getU64(s, kRegisteredAt(creator)), true
 }
 
 // RetiredAt is the exported read of the retire mark for the wasm wrapper,
@@ -424,61 +435,26 @@ func requireMarketAcceptsMoney(s Store, creator string, block uint64) error {
 	}
 }
 
-// requireMarketAcceptsRenewal is Renew's own gate (A1, 2026-08-30): the global
-// pause and a retire mark refuse exactly as requireMarketAcceptsMoney does,
-// but FROZEN is ADMITTED, because a natural FROZEN is now an inflow stop the
-// subscription payment is meant to lift (inWindDown's doc). CLOSED still
-// refuses: a closed market has wound down and re-registers instead. Kept as a
-// separate function rather than a flag on requireMarketAcceptsMoney so that
-// Buy and Ask can never inherit the FROZEN admission by accident — that
-// admission is the one thing that would remove the reason anyone renews.
-func requireMarketAcceptsRenewal(s Store, creator string, block uint64) error {
-	if globalInflowPaused(s) {
-		return newErr(ErrPaused, "inflows are globally paused")
-	}
-	if marketRetired(s, creator) {
-		return newErr(ErrState, "market is retiring: new inflows are closed (exits remain open via flat pro-rata Refund)")
-	}
-	switch Phase(s, creator, block) {
-	case StateActive, StateOverdue:
-		return nil
-	case StateFrozen:
-		// ★★★ THE REVIVAL CHECK (PRUNED 2026-08-30 H16, found by clauderfly-43;
-		// placed here by clauderfly-59). Reviving a FROZEN market is the ONLY
-		// transition from "inflows closed" back to "Buy admitted": paidUntil is
-		// written by nothing but Renew and Register, and Register refuses a
-		// non-CLOSED market. So this branch, not Buy and not Phase, is where a
-		// market that froze under the PREVIOUS rules re-enters trading. Under
-		// those rules a natural FROZEN was a wind-down and flat pro-rata
-		// Refund/RefundHolder were OPEN on it; pro-rata pays the AVERAGE R/S
-		// while the curve's top slice is worth more, so a partial refund leaves
-		// R > area(S), an unallocated surplus that belonged to the remaining
-		// holders' backing. Reviving that market reopens Buy against a reserve
-		// the curve does not account for: a buyer enters at area prices and
-		// exits into the surplus (43 measured raider net +21,104 on a 500-token
-		// market with 450 refunded). The A1 argument "no holder can have been
-		// refunded out of a frozen market" is true only for markets frozen
-		// under A1; this check is what makes it true for every market.
-		// REFUSAL SHAPE, decided rather than defaulted: refuse revival, name the
-		// reason, point at the road that still exists (Retire, whose pro-rata
-		// wind-down pays the surplus to the remaining holders, the people it
-		// belongs to, then re-register). Sweeping the surplus to the treasury
-		// would take the remaining holders' backing; distributing it needs a
-		// payout mechanism the contract does not have; silently reviving hands
-		// it to a raider. Both directions are refused: a deficit (R < area)
-		// is corrupt state and sell.go already refuses to trade on it.
-		supply := getMoney(s, kSupply(creator))
-		reserve := getMoney(s, kReserve(creator))
-		if c := reserve.Cmp(Area(supply)); c > 0 {
-			return newErr(ErrState, "market cannot be revived: it carries a wind-down surplus from partial refunds under the previous rules (reserve above curve area); retire it so the surplus is paid out pro-rata to its holders, then re-register")
-		} else if c < 0 {
-			return newErr(ErrState, "market cannot be revived: reserve below curve area (equality invariant violated, state corrupt)")
-		}
-		return nil
-	default:
-		return newErr(ErrState, "market is closed; re-register instead")
-	}
-}
+// THERE IS NO requireMarketAcceptsRenewal, AND NO Renew (OWNER RULING
+// 2026-09-12 — the 10 HBD monthly subscription was removed whole; see
+// params.go's "THERE IS NO SubscriptionFee" block).
+//
+// WHAT WAS HERE: Renew's own phase gate. It refused on the global pause and on
+// a retire mark exactly as requireMarketAcceptsMoney does, ADMITTED a naturally
+// FROZEN market (A1, 2026-08-30 — a lapse was an inflow stop the payment was
+// meant to lift), and carried the H16 REVIVAL CHECK: reviving a market that had
+// been partially refunded under the pre-A1 rules would reopen Buy against a
+// reserve above curve area, and a raider could enter at area prices and exit
+// into that surplus (measured +21,104 on a 500-token market with 450 refunded).
+//
+// IT IS GONE BECAUSE ITS PRECONDITION IS GONE, not because the hazard was
+// judged away. Nothing lapses any more: naturalPhase is constant ACTIVE, so
+// there is no natural FROZEN to revive FROM, and Renew — the only door that
+// ever performed a revival — no longer exists. Register still refuses a
+// non-CLOSED market, and CLOSED is reachable only through Retire's wind-down,
+// which pays the surplus out pro-rata to the holders it belongs to before
+// closing. So the surplus-raid path has no entrance left at all. If a paid tier
+// is ever re-introduced, this check must come back WITH it, in the same commit.
 
 // globalInflowPaused reads the single global inbound-pause switch (kPaused,
 // keys.go: "global inbound pause"). "1" = paused, anything else (including
@@ -750,7 +726,6 @@ func registerApply(s Store, creator string, block uint64, face, cap int64) {
 	setU64(s, kRatingSum(creator), 0)
 	setU64(s, kRatingCount(creator), 0)
 
-	setU64(s, kPaidUntil(creator), block+SubscriptionPeriod)
 	setMoney(s, kFace(creator), big.NewInt(face)) // kFace is money-typed, see SetFace
 	setU64(s, kFaceSetAt(creator), block)         // the posted face counts as the first "set", starting the anti-rug clock immediately
 	setMoney(s, kCap(creator), big.NewInt(cap))   // kCap is money-typed — prepay.go reads it via getMoney
@@ -830,101 +805,14 @@ func registerApply(s Store, creator string, block uint64, face, cap int64) {
 //     is sufficient and is what twap.go's AskRate derives its live set from;
 //     the stale slot VALUES are unreachable until overwritten.
 
-// Renew pays to extend paid_until. ANYONE may call it ("a fan can keep a
-// creator alive") — there is no creator-only gate here, deliberately.
-//
-// paid_until is extended from max(now, current paid_until): a market that
-// has already lapsed resumes counting from `block`, not from its stale
-// paid_until, so a lapsed renewal doesn't "waste" the gap and doesn't let a
-// creator stack periods on top of a paid_until that's already in the past.
-//
-// CRITICAL (SPEC §1.7.5): renewal is legal in ACTIVE and OVERDUE, and illegal
-// in FROZEN/CLOSED — wind-down is terminal, a returning creator re-registers
-// instead of renewing a frozen/closed market back to life. This is enforced
-// by routing through RequireInflowOpen, the same phase+pause gate Prepay
-// uses, so a renewal and a prepay are gated identically by construction.
-func Renew(s Store, caller, creator string, block uint64, periods uint64, paid *big.Int) error {
-	if caller == "" {
-		return newErr(ErrAuth, "empty caller")
-	}
-	if !validAccount(caller) {
-		return newErr(ErrInput, "invalid caller account")
-	}
-	if getU64(s, kRegisteredAt(creator)) == 0 {
-		return newErr(ErrNotFound, "no such market")
-	}
-	// RULING D consequence, and the ONE inflow this file closes during the
-	// retire notice. The notice phase is genuinely OVERDUE, so
-	// RequireInflowOpen below would admit a renewal — but Phase takes the MAX
-	// of the natural and retired ladders, so no amount of subscription can
-	// lift a retired market back above OVERDUE, and at retiredAt+GraceBlocks
-	// it is FROZEN whatever paidUntil says. Accepting the payment would
-	// therefore be taking 10 HBD for something the mechanism structurally
-	// cannot deliver — from the creator (who would gain nothing) or, worse,
-	// from a well-meaning fan renewing a market they did not notice was
-	// retiring. Refuse before RequireInflowOpen so the error names the actual
-	// reason instead of a generic phase error. This also keeps the property
-	// the instant-freeze version had: a retired wind-down is TERMINAL, and a
-	// returning creator re-registers rather than renewing back to life.
-	if marketRetired(s, creator) {
-		return newErr(ErrState, "market is retiring; the wind-down is terminal and cannot be renewed back to life (re-register after it closes)")
-	}
-	// requireMarketAcceptsRenewal, NOT requireMarketAcceptsMoney and NOT
-	// RequireInflowOpen (A1, 2026-08-30). Renew has its own gate because it is
-	// the ONE inflow a FROZEN market must accept: a lapse is an inflow stop
-	// that the creator lifts by paying, so refusing the payment on the phase
-	// the payment exists to cure made "pay to reactivate" a lie on the very
-	// screen that says it (the memo A1-DECISION-MEMO-2026-08-30.md has the
-	// lines). The delivery-penalty reasoning is unchanged: a delinquency must
-	// never stop a creator paying their subscription (the 7-day penalty that
-	// outlived the 5-day grace and destroyed a market permanently).
-	if err := requireMarketAcceptsRenewal(s, creator, block); err != nil {
-		return err
-	}
-
-	// periods is bounded at MaxPrepaidPeriods before any arithmetic runs, both
-	// because SPEC caps prepayment there ("a lapsed market can never be
-	// resurrected from an ancient prepayment") and, just as importantly, as
-	// defense-in-depth against a uint64 overflow in periods*SubscriptionPeriod
-	// below (mirrors hive-price-market's create.go, which bounds every input
-	// BEFORE summing it into a block-height arithmetic expression).
-	if periods < 1 || periods > MaxPrepaidPeriods {
-		return newErr(ErrInput, "periods out of range [1, MaxPrepaidPeriods]")
-	}
-	if paid == nil {
-		return newErr(ErrInput, "nil paid")
-	}
-	required := new(big.Int).Mul(new(big.Int).SetUint64(periods), big.NewInt(SubscriptionFee))
-	if mLt(paid, required) {
-		return newErr(ErrBalance, "paid below periods*SubscriptionFee")
-	}
-
-	cur := getU64(s, kPaidUntil(creator))
-	base := cur
-	if block > base {
-		base = block
-	}
-	newPaidUntil := base + periods*SubscriptionPeriod
-
-	// Reject (never silently clamp) an extension that would land further than
-	// MaxPrepaidPeriods ahead of now — a payer who overshoots gets their whole
-	// call refused rather than quietly short-changed on what their HBD bought.
-	// This must be the LAST check before any state write: every guard above
-	// this point is pure validation, so a rejected call here mutates nothing —
-	// in particular the treasury booking below must never fire on a call that
-	// is about to be refused.
-	maxAllowed := block + MaxPrepaidPeriods*SubscriptionPeriod
-	if newPaidUntil > maxAllowed {
-		return newErr(ErrInput, "extension exceeds MaxPrepaidPeriods ahead of now")
-	}
-
-	// Subscription fee lands at treasury only once every guard has passed —
-	// same accrual key and full-amount-booked convention as Register's
-	// registration fee and Ask's commission leg (see the comment in Register).
-	addMoney(s, kTreasury(), paid)
-	setU64(s, kPaidUntil(creator), newPaidUntil)
-	return nil
-}
+// THERE IS NO Renew. It took (caller, creator, block, periods, paid), charged
+// periods*SubscriptionFee to the treasury and pushed paid_until forward from
+// max(now, paid_until); anyone could call it ("a fan can keep a creator
+// alive"). The whole subscription was removed on 2026-09-12 (OWNER RULING) —
+// params.go carries the reasoning, keys.go the deleted kPaidUntil, and
+// naturalPhase below is the ladder it fed. A market now stays ACTIVE from
+// registration until its creator RETIRES it, and Retire (below) remains the
+// only door into a wind-down.
 
 // Retire is M2's fix for permissionless-renew griefing: Renew is
 // deliberately open to ANYONE ("a fan can keep a creator alive" — see

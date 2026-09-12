@@ -20,10 +20,9 @@ func rgMarket(t *testing.T, s *MemStore, c string, block uint64) {
 	if err := Register(s, c, c, block, MinFace, 1_000_000_000); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	const periods = uint64(6)
-	if err := Renew(s, c, c, block, periods, big.NewInt(SubscriptionFee*int64(periods))); err != nil {
-		t.Fatalf("renew: %v", err)
-	}
+	// (Six prepaid subscription periods used to be bought here to keep the market
+	// ACTIVE across the whole fixture. Since 2026-09-12 registration alone does
+	// that, permanently.)
 }
 
 // A new incarnation must start genuinely unrated.
@@ -42,7 +41,7 @@ func TestReReg_RatingsDoNotSurviveReRegistration(t *testing.T) {
 	}
 
 	setStr(s, kState(c), StateClosed) // wound down
-	later := uint64(t0) + 10*SubscriptionPeriod
+	later := uint64(t0) + 10*hzLongGap
 	if err := Register(s, c, c, later, MinFace, 1_000_000_000); err != nil {
 		t.Fatalf("re-register: %v", err)
 	}
@@ -70,7 +69,7 @@ func TestReReg_RatingResetIsBypassableByDeferral_KNOWN(t *testing.T) {
 	s := NewMemStore()
 	rgMarket(t, s, c, t0)
 	setStr(s, kState(c), StateClosed)
-	later := uint64(t0) + 10*SubscriptionPeriod
+	later := uint64(t0) + 10*hzLongGap
 	if err := Register(s, c, c, later, MinFace, 1_000_000_000); err != nil {
 		t.Fatalf("re-register: %v", err)
 	}

@@ -124,6 +124,28 @@ export const pctMoveLabel = (pct: number): string | null => {
  * route handle) — the two used to hash different strings and reshuffle colors
  * per page (UX review 2026-08-31, the id-string-drift class). One copy, greppable.
  */
+/**
+ * A 5-slot star row for an AVERAGE rating (owner, 2026-09-12: "rate is fine,
+ * should be stars"). Returns the glyphs; the caller supplies the numeric beside
+ * them, because the number is the precise fact and the stars are the shape a
+ * reader takes in at a glance.
+ *
+ * ★ IT ROUNDS TO THE NEAREST HALF AND SAYS SO, using a distinct half glyph
+ * rather than rounding a 4.4 up to five full stars. Rounding a rating in the
+ * creator's favour on the screen a buyer decides from is the kind of small lie
+ * this feature has a file of; the numeric printed alongside is what settles it.
+ *
+ * Returns '' for a null/NaN average — a creator with no ratings shows no row,
+ * never five empty stars, which would read as "rated, badly".
+ */
+export function ratingStars(avg: number | null): string {
+  if (avg === null || !Number.isFinite(avg)) return '';
+  const halves = Math.max(0, Math.min(10, Math.round(avg * 2)));
+  const full = Math.floor(halves / 2);
+  const half = halves % 2;
+  return '★'.repeat(full) + (half ? '⯨' : '') + '☆'.repeat(5 - full - half);
+}
+
 export function avatarGradient(handle: string): string {
   const key = handle.startsWith('hive:') ? handle.slice('hive:'.length) : handle;
   let h = 0;

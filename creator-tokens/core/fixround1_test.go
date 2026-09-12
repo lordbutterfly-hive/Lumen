@@ -187,7 +187,6 @@ func TestAsk_ET2_UnansweredEscrowPreservesClock(t *testing.T) {
 		if err := Register(s, c, c, base, 9065, 1_000_000_000); err != nil {
 			t.Fatal(err)
 		}
-		setU64(s, kPaidUntil(c), base+100*SubscriptionPeriod)
 		if _, err := Buy(s, "whale", c, base, big.NewInt(100)); err != nil {
 			t.Fatal(err)
 		}
@@ -201,7 +200,7 @@ func TestAsk_ET2_UnansweredEscrowPreservesClock(t *testing.T) {
 		}
 		rq := q + 1 + MinAskDeadline + ReclaimGrace + 1
 		if ask {
-			ar, err := askAt0(s, "fan", c, q+1, big.NewInt(5), CommissionOwedFor(getMoney(s, kFace(c))), "cid", MinAskDeadline)
+			ar, err := askAt0(s, "fan", c, q+1, big.NewInt(5), "cid", MinAskDeadline)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -248,7 +247,6 @@ func TestAsk_ET2_ClockConservedThroughReclaim(t *testing.T) {
 	if err := Register(s, c, c, base, 9065, 1_000_000_000); err != nil {
 		t.Fatal(err)
 	}
-	setU64(s, kPaidUntil(c), base+100*SubscriptionPeriod)
 	Buy(s, "whale", c, base, big.NewInt(100))
 	resetObsRings(s, c)
 	for i := uint64(1); i < 16; i++ {
@@ -260,7 +258,7 @@ func TestAsk_ET2_ClockConservedThroughReclaim(t *testing.T) {
 
 	// Ask escrows everything, then RECLAIM (unanswered): the clock returns
 	// exactly (age-neutral).
-	ar, err := askAt0(s, "fan", c, q+1, big.NewInt(5), CommissionOwedFor(getMoney(s, kFace(c))), "cid", MinAskDeadline)
+	ar, err := askAt0(s, "fan", c, q+1, big.NewInt(5), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +283,6 @@ func TestSettlement_SET1_BusyMarketStillPrices(t *testing.T) {
 	if err := Register(s, c, c, base, 1_000_000, 1_000_000_000); err != nil {
 		t.Fatal(err)
 	}
-	setU64(s, kPaidUntil(c), base+100*SubscriptionPeriod)
 	// A market at a stable supply with a constant price history — so the ONLY
 	// thing under test is the SPAN condition (the SET-1 bug), never the
 	// median-deviation guard (a separate, legitimate refusal).
@@ -358,7 +355,6 @@ func TestSettlement_SET2_MinFaceClearsC4Floor(t *testing.T) {
 	if err := Register(s, c, c, base, 1000, 1_000_000_000); err != nil {
 		t.Fatal(err)
 	}
-	setU64(s, kPaidUntil(c), base+100*SubscriptionPeriod)
 	curveMarket(s, c, 100)
 	q := seedSettleObs(s, c, base, SpotRate(big.NewInt(100)))
 	loSmall, hiSmall, err := ServiceFaceRange(s, c, q)
@@ -404,7 +400,6 @@ func TestSettlement_SET3_SmallSupplyStillPrices(t *testing.T) {
 		if err := Register(s, c, c, base, 1_000_000, 1_000_000_000); err != nil {
 			t.Fatal(err)
 		}
-		setU64(s, kPaidUntil(c), base+100*SubscriptionPeriod)
 		curveMarket(s, c, S)
 		rate := SpotRate(big.NewInt(S))
 		seedSettleObs(s, c, base, rate)
@@ -435,7 +430,6 @@ func TestSettlement_SET3_SmallSupplyStillPrices(t *testing.T) {
 	if err := Register(s, c, c, base, 1_000_000, 1_000_000_000); err != nil {
 		t.Fatal(err)
 	}
-	setU64(s, kPaidUntil(c), base+100*SubscriptionPeriod)
 	curveMarket(s, c, 20)
 	rate := SpotRate(big.NewInt(20))
 	seedSettleObs(s, c, base, rate)

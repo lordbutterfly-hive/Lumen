@@ -372,7 +372,6 @@ type mpWorld struct {
 func mpNewWorld(c string, start uint64) *mpWorld {
 	s := NewMemStore()
 	setU64(s, kRegisteredAt(c), 1)
-	setU64(s, kPaidUntil(c), start+100_000*SubscriptionPeriod) // never lapses inside a run
 	setMoney(s, kCap(c), big.NewInt(MaxCap))
 	return &mpWorld{s: s, c: c, block: start}
 }

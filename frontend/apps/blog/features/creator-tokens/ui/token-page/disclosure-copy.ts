@@ -1,4 +1,3 @@
-import type { ContractRules } from '../../types';
 /**
  * WHAT THE TOKEN PAGE IS ALLOWED TO CLAIM ABOUT MONEY (2026-08-27).
  *
@@ -323,62 +322,19 @@ export const WIND_DOWN_BANNER =
  * shape. `figures` is the already-formatted "(currently X a token ...)" clause,
  * or an empty string when the market has no backing figure to quote.
  */
-/**
- * ★★★ GATED ON THE CONTRACT THE CHAIN ACTUALLY REPORTS (2026-08-31).
- *
- * This sentence describes what happens to a READER'S MONEY when a creator's
- * listing lapses, and that answer is DIFFERENT under the two rulesets:
- *
- *   v1  the lapse becomes a wind-down. The curve sell closes and the only exit
- *       is the flat pro-rata redeem against the reserve.
- *   v2  the lapse is an inflow stop. Buying closes, the curve sell stays OPEN,
- *       and a renewal reopens buying on the SAME token.
- *
- * It was hard-set to the v2 text, which is the right sentence on the contract we
- * are shipping toward and the WRONG one on the contract deployed today — so on a
- * v1 chain it told a holder their exit was open when it was not. There is no
- * single true wording, which is precisely why it takes `rules` and why there is
- * NO DEFAULT: a default is how this came to state one contract's truth
- * unconditionally in the first place, and a caller that forgets the argument
- * should fail the build rather than quietly pick a ruleset.
- *
- * `rules` comes from `Market.rules`, derived in the data source from the code
- * CID the chain reports — so the sentence follows the chain rather than a flag
- * anyone has to remember to flip at deploy time.
- */
-export function overdueBanner(figures: string, rules: ContractRules): string {
-  const consequence =
-    rules === 'v2'
-      ? // ★ "ANY TIME" WAS A PROMISE THE CHAIN CAN REFUSE (2026-08-31). Renewal
-        // is gated on `renewRefusal`, which is non-null for a paused registry, a
-        // reserve/supply mismatch and a v1 terminal lapse — so "the creator can
-        // renew any time" is told to a HOLDER deciding whether to sit tight, in
-        // states where it is simply false. A condition, never a promise, is the
-        // rule this module's sibling already follows: `DELISTED_READER_NOTICE`
-        // says "if they renew it", and this said something stronger.
-        'If it isn’t renewed the market stops taking new buyers, but you can still sell on the curve, and buying reopens if the creator renews.'
-      : 'If it isn’t renewed the market winds down: the curve closes and the only way out is redeeming your share of the reserve, less your early-exit fee.';
-  return `This creator’s listing has lapsed. ${consequence}${figures}`;
-}
-
-/**
- * The parenthetical inside `overdueBanner`. Empty when there is nothing to
- * quote, so the sentence never ends "(currently  a token)".
- */
-export function overdueFigures(
-  backingPerToken: string,
-  priceUsd: number,
-  showBacking: boolean = SHOW_BACKING_FIGURES
-): string {
-  // ★ The banner is the one place the backing figure appeared OUTSIDE the stats
-  // row, so hiding the stat and not this would have left the number on the page
-  // in the single state where it is most alarming. The banner itself stays: the
-  // lapse, the freeze and "Redeem is the only way out" are the warning, and none
-  // of the three needs the figure to land.
-  if (!showBacking) return '';
-  if (backingPerToken === 'None yet' || backingPerToken === 'Unavailable') return '';
-  return ` (currently ${backingPerToken} a token before your early-exit fee, against ${usdPrice(priceUsd)} now)`;
-}
+// THERE IS NO overdueBanner/overdueFigures. They told a BUYER that a creator's
+// listing had lapsed, what the coming freeze would do to their exit (a different
+// sentence on each contract, which is why the function took `rules` and had no
+// default), and quoted the backing figure so the reader could see the cost.
+//
+// The 10 HBD monthly subscription was removed from the contract on 2026-09-12
+// (OWNER RULING; creator-tokens/core/params.go): a market never lapses, so the
+// OVERDUE rung is now only the retire notice and the wind-down banner owns it.
+//
+// ★ THE RULE THAT PRODUCED THEM SURVIVES AND IS WHY THIS NOTE IS HERE: a
+// sentence about what happens to a holder's money must take `rules` and must
+// have NO DEFAULT, because the two contracts answer differently and a default is
+// how this module once stated one contract's truth unconditionally on the other.
 
 /**
  * The holder's own position line.
@@ -455,14 +411,6 @@ export function allPublishedCopy(): string[] {
     // today's branch would certify half the module.
     buyRiskNote('$1.20', true),
     buyRiskNote('$1.20', false),
-    // ★ BOTH RULESETS, for this block's own stated reason: a v1 chain publishes
-    // the v1 sentence, so a sweep that only saw v2 would certify half of it.
-    overdueBanner(overdueFigures('$1.20', 1.408, true), 'v2'),
-    overdueBanner(overdueFigures('None yet', 1.007, true), 'v2'),
-    overdueBanner(overdueFigures('$1.20', 1.408, false), 'v2'),
-    overdueBanner(overdueFigures('$1.20', 1.408, true), 'v1'),
-    overdueBanner(overdueFigures('None yet', 1.007, true), 'v1'),
-    overdueBanner(overdueFigures('$1.20', 1.408, false), 'v1'),
     positionLine('12.00', 16.9, 14.44),
     backingPerTokenValue(1.203, 50),
     backingPerTokenValue(0, 0),

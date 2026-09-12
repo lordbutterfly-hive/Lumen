@@ -267,6 +267,99 @@ func escrowMaturedLeg(s Store, c string, seq uint64, credits *big.Int) *big.Int 
 	return leg
 }
 
+// ---------------------------------------------------------------------------
+// THE COMMISSION CARVE (OWNER RULING 2026-09-12)
+// ---------------------------------------------------------------------------
+//
+// Every escrow settlement now pays at most TWO parties out of ONE recorded pair
+// of legs: a MAIN recipient (the creator on Answer, the asker on Reclaim and
+// Decline) and a carved SLICE for the platform owner (the 12% commission on
+// Answer; the miss slice of that commission on a Reclaim that is a miss; zero
+// on a Decline). Before this ruling the platform's money was HBD, held
+// alongside the tokens and settled by a different mechanism entirely, so there
+// was exactly one token recipient and nothing to divide.
+//
+// escrowSliceSplit is the ONE place that division happens, so the two payouts
+// can never both claim the same cohort or the same matured token.
+//
+// ★ THE SLICE DRAWS MATURING-FIRST, FRESHEST-FIRST. That is the same order
+// every debit in this package uses (splitDraw's maturing-first, lotsDebit's
+// freshest-first), and it is the creator-favourable direction: the main
+// recipient keeps the matured leg and the OLDEST cohorts, i.e. the lowest exit
+// tax, while the slice takes the youngest tokens — which costs the platform
+// nothing it can measure, because the slice is credited with a FRESH clock
+// regardless of what it was drawn from (see settleEscrowSlice). Consistency
+// with the debit order is the point: an escrow's two halves partition the same
+// recorded legs, and a partition that used a different order than the draw
+// could double-count a cohort at the boundary.
+//
+// Returns the four quantities the callers need, all freshly allocated:
+// how much of the slice is maturing vs matured (the caller does not care, but
+// the sums must be exact), and the main recipient's own two legs plus the
+// cohort list to credit them with (nil => fall back to the packed acqBlock,
+// exactly as a pre-cohort escrow does).
+func escrowSliceSplit(s Store, c string, seq uint64, credits, slice *big.Int) (
+	mainMaturing, mainMatured *big.Int, mainLots []mLot,
+) {
+	maturedTotal := escrowMaturedLeg(s, c, seq, credits)
+	maturingTotal, err := mSub(credits, maturedTotal)
+	if err != nil {
+		maturingTotal = mZero() // unreachable: escrowMaturedLeg clamps to credits
+	}
+	lots := loadEscrowLots(s, c, seq, maturingTotal)
+
+	if slice == nil || slice.Sign() <= 0 {
+		return maturingTotal, maturedTotal, lots
+	}
+	sliceMaturing := new(big.Int).Set(slice)
+	if sliceMaturing.Cmp(maturingTotal) > 0 {
+		sliceMaturing = new(big.Int).Set(maturingTotal)
+	}
+	sliceMatured, err := mSub(slice, sliceMaturing)
+	if err != nil {
+		sliceMatured = mZero() // unreachable: sliceMaturing <= slice by the clamp
+	}
+	mainMaturing, err = mSub(maturingTotal, sliceMaturing)
+	if err != nil {
+		mainMaturing = mZero() // unreachable: sliceMaturing <= maturingTotal
+	}
+	mainMatured, err = mSub(maturedTotal, sliceMatured)
+	if err != nil {
+		mainMatured = mZero() // unreachable: the caller clamps slice <= credits
+	}
+	if len(lots) > 0 {
+		lots = lotsDropFreshest(lots, sliceMaturing)
+	}
+	return mainMaturing, mainMatured, lots
+}
+
+// settleEscrowSlice credits the platform owner with the carved slice and reports
+// what the owner's own position graduated on the way in.
+//
+// ★ ALWAYS A FRESH CLOCK, never the escrow's. The platform is an ordinary
+// holder of this token from here on and must pay the full exit tax when it
+// sells it back into the curve (OWNER RULING 2026-09-12: "I'll sell them into
+// the curve, I'll pay fee, everything applies"). A fresh clock is also the only
+// direction that is structurally safe: it is the maximum-tax reading, so no
+// sequence of asks can ever be used to manufacture aged tokens on an account
+// the protocol itself controls.
+//
+// Returns (credited, graduated). credited is zero — and NOTHING is written —
+// when no owner is bound (Init has not run) or the slice is empty, which is
+// what makes the callers' "whole escrow to the main recipient" fallback exact.
+func settleEscrowSlice(s Store, c, owner string, slice *big.Int, block uint64) (credited, graduated *big.Int) {
+	if slice == nil || slice.Sign() <= 0 || owner == "" || !validAccount(owner) {
+		return mZero(), mZero()
+	}
+	// F-C1/F-C8, the same reason every other credit door graduates first: bank
+	// the owner's OWN cleared position into MATURED before this fresh inflow
+	// re-averages into it, or an aged pile that has earned its way out of the
+	// exit tax gets pulled back toward `block` and becomes taxable again.
+	graduated = graduate(s, c, owner, block)
+	creditInflow(s, c, owner, slice, block)
+	return new(big.Int).Set(slice), graduated
+}
+
 // returnEscrowToOwner puts an escrow's credits back into the SAME holder's
 // position — Reclaim and Decline, the two doors where nothing was delivered and
 // the correct outcome is "as if it never happened".
@@ -276,14 +369,24 @@ func escrowMaturedLeg(s Store, c string, seq uint64, credits *big.Int) *big.Int 
 // which is what the ET-2 fix meant by age-neutral and what the blend broke. The
 // maturing leg goes back through creditInflowAt carrying the clock it left with
 // (see Ask), so its own age is neither restarted nor extended.
-func returnEscrowToOwner(s Store, c, holder string, seq uint64, credits *big.Int, acqBlock, block uint64) {
+//
+// `slice` is the miss slice a Reclaim keeps (zero on a Decline, zero on a
+// self-dealt escrow, zero when no owner is bound). It is carved off BEFORE the
+// return, maturing-first and freshest-first, so what comes back to the holder is
+// the older, cheaper end of exactly what they escrowed — see escrowSliceSplit.
+// Returns what was actually returned and what the owner was actually credited,
+// which always sum to `credits`.
+func returnEscrowToOwner(s Store, c, holder, owner string, seq uint64, credits, slice *big.Int, acqBlock, block uint64) (returned, retained, ownerGraduated *big.Int) {
 	if credits == nil || credits.Sign() <= 0 {
-		return
+		consumeEscrowMaturedLeg(s, c, seq)
+		consumeEscrowLots(s, c, seq)
+		return mZero(), mZero(), mZero()
 	}
-	matured := escrowMaturedLeg(s, c, seq, credits)
-	maturing, err := mSub(credits, matured)
+	retained, ownerGraduated = settleEscrowSlice(s, c, owner, slice, block)
+	maturing, matured, lots := escrowSliceSplit(s, c, seq, credits, retained)
+	returned, err := mSub(credits, retained)
 	if err != nil {
-		maturing = mZero() // unreachable: escrowMaturedLeg clamps to credits
+		returned = mZero() // unreachable: the caller clamps slice <= credits
 	}
 	if maturing.Sign() > 0 {
 		// ★ COHORT-FAITHFUL RETURN (2026-09-08). The escrow records the COHORTS
@@ -295,7 +398,7 @@ func returnEscrowToOwner(s Store, c, holder string, seq uint64, credits *big.Int
 		// stranger can push (Reclaim) or the creator can push in the same block
 		// (Decline). A pre-fix escrow has no cohort record and falls back to
 		// acqBlock, byte-for-byte the old behaviour.
-		if lots := loadEscrowLots(s, c, seq, maturing); len(lots) > 0 {
+		if len(lots) > 0 {
 			creditInflowCohorts(s, c, holder, lots, block)
 		} else {
 			creditInflowAt(s, c, holder, maturing, acqBlock, block)
@@ -306,6 +409,7 @@ func returnEscrowToOwner(s Store, c, holder string, seq uint64, credits *big.Int
 	}
 	consumeEscrowMaturedLeg(s, c, seq)
 	consumeEscrowLots(s, c, seq)
+	return returned, retained, ownerGraduated
 }
 
 // payEscrowToCreator credits an ANSWERED escrow to the creator, who is a
@@ -321,14 +425,22 @@ func returnEscrowToOwner(s Store, c, holder string, seq uint64, credits *big.Int
 // would have carried. The maturing leg carries its own recorded clock, as
 // before. Delivery still transfers maturity rather than incinerating it (the
 // 2026-07-27 ruling), it just can no longer transfer more than a transfer could.
-func payEscrowToCreator(s Store, c string, seq uint64, credits *big.Int, acqBlock, block uint64) {
+// `slice` is the platform's commission (OWNER RULING 2026-09-12), carved off
+// before the creator is paid — maturing-first and freshest-first, so the creator
+// keeps the matured leg and the oldest cohorts (escrowSliceSplit). Returns what
+// each party actually received, which always sum to `credits`, plus the owner's
+// own graduation delta so the wrapper can emit its mint.
+func payEscrowToCreator(s Store, c, owner string, seq uint64, credits, slice *big.Int, acqBlock, block uint64) (toCreator, toOwner, ownerGraduated *big.Int) {
 	if credits == nil || credits.Sign() <= 0 {
-		return
+		consumeEscrowMaturedLeg(s, c, seq)
+		consumeEscrowLots(s, c, seq)
+		return mZero(), mZero(), mZero()
 	}
-	matured := escrowMaturedLeg(s, c, seq, credits)
-	maturing, err := mSub(credits, matured)
+	toOwner, ownerGraduated = settleEscrowSlice(s, c, owner, slice, block)
+	maturing, matured, lots := escrowSliceSplit(s, c, seq, credits, toOwner)
+	toCreator, err := mSub(credits, toOwner)
 	if err != nil {
-		maturing = mZero() // unreachable: escrowMaturedLeg clamps to credits
+		toCreator = mZero() // unreachable: the caller clamps slice <= credits
 	}
 	if maturing.Sign() > 0 {
 		// ★ COHORT-FAITHFUL DELIVERY (2026-09-08), same rule as the return legs:
@@ -336,7 +448,7 @@ func payEscrowToCreator(s Store, c string, seq uint64, credits *big.Int, acqBloc
 		// This direction matters for the launder too — the asker chooses both the
 		// ask and (on their own market) the answer, so a blended delivery is an
 		// attacker-controlled re-stamp exactly like a blended reclaim.
-		if lots := loadEscrowLots(s, c, seq, maturing); len(lots) > 0 {
+		if len(lots) > 0 {
 			creditInflowCohorts(s, c, c, lots, block)
 		} else {
 			creditInflowAt(s, c, c, maturing, acqBlock, block)
@@ -347,6 +459,7 @@ func payEscrowToCreator(s Store, c string, seq uint64, credits *big.Int, acqBloc
 	}
 	consumeEscrowMaturedLeg(s, c, seq)
 	consumeEscrowLots(s, c, seq)
+	return toCreator, toOwner, ownerGraduated
 }
 
 // consumeEscrowMaturedLeg clears the leg once it has been paid out. The escrow

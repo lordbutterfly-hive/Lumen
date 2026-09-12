@@ -87,12 +87,11 @@ func TestOfferings_AskSettlesAtTheOfferingPrice(t *testing.T) {
 	// long ring samples at most once per LongObsSpacing) — seedSettleObs
 	// builds one and returns the block to query at.
 	qb := seedSettleObs(s, c, 2000, SpotRate(getMoney(s, kSupply(c))))
-	setU64(s, kPaidUntil(c), qb+SubscriptionPeriod)
-	cheapRes, err := Ask(s, "buyer", c, qb, big.NewInt(1_000_000), commissionOwedFor(big.NewInt(50_000)), "q1", MinAskDeadline, cheap)
+	cheapRes, err := Ask(s, "buyer", c, qb, big.NewInt(1_000_000), "q1", MinAskDeadline, cheap)
 	if err != nil {
 		t.Fatalf("ask against the cheap offering: %v", err)
 	}
-	dearRes, err := Ask(s, "buyer", c, qb, big.NewInt(1_000_000), commissionOwedFor(big.NewInt(800_000)), "q2", MinAskDeadline, dear)
+	dearRes, err := Ask(s, "buyer", c, qb, big.NewInt(1_000_000), "q2", MinAskDeadline, dear)
 	if err != nil {
 		t.Fatalf("ask against the dear offering: %v", err)
 	}
@@ -100,9 +99,16 @@ func TestOfferings_AskSettlesAtTheOfferingPrice(t *testing.T) {
 		t.Fatalf("dear ask spent %s credits, cheap spent %s — the offering price is not being used",
 			dearRes.CreditsSpent, cheapRes.CreditsSpent)
 	}
-	// The commission leg follows the offering price too, not the face.
-	if got := commissionOwedFor(big.NewInt(800_000)); dearRes.CommissionHbd.Cmp(got) != 0 {
-		t.Fatalf("dear ask commission = %s, want commissionOwedFor(800000) = %s", dearRes.CommissionHbd, got)
+	// The commission follows the offering price too, not the face — and since
+	// 2026-09-12 it is a carve out of the CREDITS that price settled at, so it is
+	// derived from dearRes.CreditsSpent rather than from the posted 800,000.
+	if got := commissionOwedFor(dearRes.CreditsSpent); dearRes.CommissionCredits.Cmp(got) != 0 {
+		t.Fatalf("dear ask commission = %s, want commissionOwedFor(%s credits) = %s", dearRes.CommissionCredits, dearRes.CreditsSpent, got)
+	}
+	// ...and it is strictly bigger than the cheap offering's, which is the real
+	// claim: a dearer service pays the platform more.
+	if dearRes.CommissionCredits.Cmp(cheapRes.CommissionCredits) <= 0 {
+		t.Fatalf("dear commission %s is not above cheap commission %s", dearRes.CommissionCredits, cheapRes.CommissionCredits)
 	}
 }
 
@@ -115,7 +121,7 @@ func TestOfferings_AskAgainstUnknownOrDeletedIsRefused(t *testing.T) {
 	}
 
 	// Never created.
-	_, err := Ask(s, "buyer", c, 2100, big.NewInt(1_000_000), commissionOwedFor(big.NewInt(600)), "q", MinAskDeadline, 99)
+	_, err := Ask(s, "buyer", c, 2100, big.NewInt(1_000_000), "q", MinAskDeadline, 99)
 	if err == nil {
 		t.Fatal("ask against a never-created offering succeeded, want refusal")
 	}
@@ -134,7 +140,7 @@ func TestOfferings_AskAgainstUnknownOrDeletedIsRefused(t *testing.T) {
 	if got := OfferingPrice(s, c, id); got.Sign() != 0 {
 		t.Fatalf("deleted offering still prices at %s, want 0", got)
 	}
-	if _, err := Ask(s, "buyer", c, 2100, big.NewInt(1_000_000), commissionOwedFor(big.NewInt(600)), "q", MinAskDeadline, id); err == nil {
+	if _, err := Ask(s, "buyer", c, 2100, big.NewInt(1_000_000), "q", MinAskDeadline, id); err == nil {
 		t.Fatal("ask against a deleted offering succeeded, want refusal")
 	}
 }
@@ -151,8 +157,7 @@ func TestOfferings_DeleteDoesNotStrandAnEscrow(t *testing.T) {
 		t.Fatal(err)
 	}
 	qb := seedSettleObs(s, c, 2000, SpotRate(getMoney(s, kSupply(c))))
-	setU64(s, kPaidUntil(c), qb+SubscriptionPeriod)
-	res, err := Ask(s, "buyer", c, qb, big.NewInt(1_000_000), commissionOwedFor(big.NewInt(5000)), "make me a video", MinAskDeadline, id)
+	res, err := Ask(s, "buyer", c, qb, big.NewInt(1_000_000), "make me a video", MinAskDeadline, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -893,7 +898,7 @@ func TestOfferings_EscrowRoundTripsTheOfferingID(t *testing.T) {
 	// answerHash on every read.
 	in := escrowRec{
 		asker: "buyer", credits: big.NewInt(1234), deadline: 999,
-		status: askPending, commissionHbd: big.NewInt(56),
+		status: askPending, commissionCredits: big.NewInt(56),
 		acqBlock: 4321, offeringID: 7,
 		contentHash: "question-hash", answerHash: "answer-hash",
 	}
@@ -902,7 +907,7 @@ func TestOfferings_EscrowRoundTripsTheOfferingID(t *testing.T) {
 		t.Fatal("unpackEscrow refused a record packEscrow produced")
 	}
 	if out.asker != in.asker || out.credits.Cmp(in.credits) != 0 || out.deadline != in.deadline ||
-		out.status != in.status || out.commissionHbd.Cmp(in.commissionHbd) != 0 ||
+		out.status != in.status || out.commissionCredits.Cmp(in.commissionCredits) != 0 ||
 		out.acqBlock != in.acqBlock || out.offeringID != in.offeringID ||
 		out.contentHash != in.contentHash || out.answerHash != in.answerHash {
 		t.Fatalf("round trip lost or shifted a field:\n in  %+v\n out %+v", in, out)

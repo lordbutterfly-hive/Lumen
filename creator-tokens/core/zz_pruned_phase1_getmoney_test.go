@@ -299,7 +299,6 @@ func TestZP1_GetMoney_BlastRadiusOfACorruptValue(t *testing.T) {
 		if err := Register(s, c, c, 1, MinFace+5000, MaxCap); err != nil {
 			t.Fatalf("Register: %v", err)
 		}
-		setU64(s, kPaidUntil(c), 100*SubscriptionPeriod)
 		if _, err := Buy(s, h, c, 10, big.NewInt(10_000)); err != nil {
 			t.Fatalf("Buy: %v", err)
 		}

@@ -20,7 +20,7 @@
 //
 // WHAT THIS PROVES: one representative payload per write action, built via
 // the SAME pure builder functions vsc-data-source.ts's real write methods
-// call (op-builders.ts's registerPayload/renewPayload/.../
+// call (op-builders.ts's registerPayload/setFacePayload/.../
 // transferCreditsPayload — never a hand-duplicated fixture that could drift
 // from the real code), checked against ACTION_PAYLOAD_SPECS
 // (payload-contract.ts) via the same assertPayloadShape() buildOp() calls on
@@ -50,7 +50,6 @@ import {
   refundHolderPayload,
   refundPayload,
   registerPayload,
-  renewPayload,
   retirePayload,
   sellPayload,
   setCapPayload,
@@ -74,7 +73,6 @@ function representativeCases(): Case[] {
     // exactly where an "omit vs send" mistake would hide.
     { action: 'register', payload: registerPayload(2_500, 1_000) },
     { action: 'register', payload: registerPayload(2_500, 1_000, 25) },
-    { action: 'renew', payload: renewPayload('alice', 3, 30_000) },
     { action: 'setFace', payload: setFacePayload(3_000) },
     { action: 'setCap', payload: setCapPayload(2_000) },
     // The curve rails. Both optional-minNet shapes, same reasoning as above.

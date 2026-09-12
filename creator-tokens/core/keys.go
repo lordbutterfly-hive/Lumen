@@ -38,10 +38,21 @@ func kFaceAnchorAt(c string) string { return mk(c, "faa") }  // block the curren
 func kCap(c string) string          { return mk(c, "cap") }  // max credits outstanding
 func kSupply(c string) string       { return mk(c, "sup") }  // credits outstanding
 func kReserve(c string) string      { return mk(c, "res") }  // HBD held for this market
-func kPaidUntil(c string) string    { return mk(c, "pu") }   // subscription expiry, block height
 func kState(c string) string        { return mk(c, "st") }   // MarketState
 func kRegisteredAt(c string) string { return mk(c, "reg") }  // block of registration
 func kSeq(c string) string          { return mk(c, "seq") }  // escrow sequence counter
+
+// THERE IS NO kPaidUntil. `func kPaidUntil(c string) string { return mk(c,
+// "pu") }` — "subscription expiry, block height" — used to sit in the list
+// above, written by Register and Renew and read by naturalPhase to derive the
+// ACTIVE -> OVERDUE -> FROZEN lapse ladder. The 10 HBD monthly subscription was
+// REMOVED whole on 2026-09-12 (OWNER RULING; see params.go's "THERE IS NO
+// SubscriptionFee" block for the reasoning and for why the constants were
+// deleted rather than zeroed), so nothing writes this key and nothing derives
+// anything from it: a market is ACTIVE from registration until its creator
+// retires it. Deleted per this file's own precedent rather than left as a
+// builder no caller uses. The tag "pu" is free; the three live mainnet markets
+// carry a stale "pu" value from their registration which no code path reads.
 
 // THERE IS NO kFrozenAt. `func kFrozenAt(c string) string { return mk(c,
 // "fz") }` — "block the freeze took effect" — used to sit here. Nothing in
@@ -54,7 +65,9 @@ func kSeq(c string) string          { return mk(c, "seq") }  // escrow sequence 
 // write did something — it did not; both fixtures reach FROZEN purely via
 // their own kPaidUntil write, at any query block >= paidUntil+GraceBlocks,
 // exactly like every other FROZEN fixture in this package that never touched
-// this key at all. DELETED per this file's own precedent (see keys.go's
+// this key at all. (Both that key and that ladder are themselves gone now —
+// see the kPaidUntil block above; the reasoning below is kept because it is the
+// precedent the deletion above follows.) DELETED per this file's own precedent (see keys.go's
 // bonding-curve section above for the RULING A4/J/K deletions): an unused key
 // builder, kept alongside a comment asserting a write that never happens, is
 // the same class of defect as an unenforced exported constant — it reads as
@@ -66,12 +79,12 @@ func kSeq(c string) string          { return mk(c, "seq") }  // escrow sequence 
 
 // ---- delivery standing (RULING E's delivery gate, built 2026-07-27) ----
 //
-// The subscription proves a creator is still THERE; these three keys prove
-// they are still DELIVERING. Kept deliberately separate from the payment
-// ladder (kPaidUntil/kState): payment and delivery are two independent facts
-// about a creator, and folding them into one state string would make it
-// impossible to say "paid up but not delivering" — which is exactly the
-// creator this gate exists to catch. See delivery.go.
+// These three keys prove a creator is still DELIVERING. Kept deliberately separate from the payment
+// ladder (kState): payment and delivery were two independent facts about a
+// creator, and folding them into one state string would have made it impossible
+// to say "paid up but not delivering" — which is exactly the creator this gate
+// exists to catch. The payment half is gone (see the kPaidUntil block above);
+// the separation is why its removal touched nothing here. See delivery.go.
 //
 // Both counters are per ASSESSMENT WINDOW, not lifetime: crossing the
 // threshold serves a penalty window and then resets them, so a creator can

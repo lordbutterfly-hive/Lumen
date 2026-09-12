@@ -63,7 +63,7 @@
  * the Go twin harness against identical inputs.
  */
 
-import type { ContractRules, MarketPhase, RenewRefusal } from '../types';
+import type { ContractRules, MarketPhase } from '../types';
 import { areaBaseUnitsBig } from '../lib/contract-math';
 
 /**
@@ -106,7 +106,8 @@ export const V1_CODE_CID = 'bafkreic2nphgjnwte32nkwix7bga2hjcwx5hfo6n5xrgllczpt7
 export const V2_CODE_CIDS: ReadonlySet<string> = new Set([
   'bafkreiajgng3ozcazro5goha34f2yfs265iylzi6rr5pk6ttent7s5xocu', // v2
   'bafkreih4eper5br4vqmgip6f5vykwmhuxtor4j2pqaw2ewdtwuirzf5h7y', // fast twin, test fixture (see above)
-  'bafkreigqshjvsnoauwq6eeiisibbpqpesw5ysuiyhp36rjl3i7xi4dwqwi' // v2 fee/display update (2026-09-09): TradeFeeBps 1000->500, MaxExitTaxBps 2000->1500, exit-tax launder closed on all four rails, per-cohort `lots|` ledger, SellResult.TaxBps = slice-weighted effective rate
+  'bafkreigqshjvsnoauwq6eeiisibbpqpesw5ysuiyhp36rjl3i7xi4dwqwi', // v2 fee/display update (2026-09-09): TradeFeeBps 1000->500, MaxExitTaxBps 2000->1500, exit-tax launder closed on all four rails, per-cohort `lots|` ledger, SellResult.TaxBps = slice-weighted effective rate
+  'bafkreidk6c4b24wllm5fbxpnxmshxi2gx5yeqi2v64lasi5dx2lb3rwo3q' // v2 commission + subscription update (2026-09-12, OWNER RULING): the 12% commission is 12% of the TOKENS, credited to the owner account on delivery (no HBD leg on ask/answer/decline/reclaim at all), and the 10 HBD monthly subscription is REMOVED — no Renew, no paid_until, no lapse; a market is ACTIVE from registration until its creator retires it
 ]);
 /** The Stage D fixture's CID on its own, so a test can tell the two apart. Same rules as v2; never mainnet. */
 export const V2_FAST_TWIN_CODE_CID = 'bafkreih4eper5br4vqmgip6f5vykwmhuxtor4j2pqaw2ewdtwuirzf5h7y';
@@ -142,40 +143,17 @@ export function reserveVersusCurve(reserveBaseUnits: number, supplyTokens: numbe
   return reserve < area ? -1 : reserve > area ? 1 : 0;
 }
 
-/**
- * core.Renew's gate under each rule set, with the reason it refuses.
- * v1: Renew's own retire guard, then requireMarketAcceptsMoney.
- * v2: Renew's own retire guard, then requireMarketAcceptsRenewal, whose
- * FROZEN branch is the revival check. The reason is what the Studio and the
- * delisting copy branch on (market/lapse.ts is creator-facing and owns the
- * sentences; this only names the fact).
- */
-export function renewGateUnder(
-  rules: ContractRules,
-  m: { phase: MarketPhase; retiredAtBlock: number | null; globalInflowPaused: boolean; supplyTokens: number; reserveBaseUnits: number }
-): { canRenew: boolean; renewRefusal: RenewRefusal | null } {
-  const refuse = (renewRefusal: RenewRefusal): { canRenew: false; renewRefusal: RenewRefusal } => ({ canRenew: false, renewRefusal });
-  if (m.retiredAtBlock !== null) return refuse('retired');
-  if (m.globalInflowPaused) return refuse('paused');
-  switch (m.phase) {
-    case 'ACTIVE':
-    case 'OVERDUE':
-      return { canRenew: true, renewRefusal: null };
-    case 'FROZEN': {
-      if (rules === 'v1') return refuse('lapsed-terminal');
-      const c = reserveVersusCurve(m.reserveBaseUnits, m.supplyTokens);
-      if (c > 0) return refuse('surplus');
-      if (c < 0) return refuse('deficit');
-      return { canRenew: true, renewRefusal: null };
-    }
-    case 'CLOSED':
-      return refuse('closed');
-    default:
-      // UNKNOWN: the read failed. Not a refusal the chain made, and not an
-      // admission either; callers gate on phase !== 'UNKNOWN' before this.
-      return refuse('closed');
-  }
-}
+// THERE IS NO renewGateUnder. It answered "would the chain accept a renewal on
+// this market, and if not, why" — the retire guard, the global pause, then v1's
+// terminal-FROZEN refusal or v2's revival check (a FROZEN market carrying a
+// pro-rata surplus cannot be revived, because a fresh buyer would take that
+// surplus from the holders still in). The 10 HBD monthly subscription was
+// removed from the contract on 2026-09-12 (OWNER RULING;
+// creator-tokens/core/params.go), so there is no renewal to gate.
+//
+// ★ reserveVersusCurve ABOVE IS KEPT AND IS STILL USED — it is the surplus /
+// deficit comparison itself, which the wind-down surfaces read. Only the
+// renewal question that consumed it is gone.
 
 /** core/refund.go CloseIfDrained's phase gate under each rule set (the supply === 0 term included). */
 export function closesIfDrainedUnder(rules: ContractRules, m: { phase: MarketPhase; retiredAtBlock: number | null; supplyTokens: number }): boolean {

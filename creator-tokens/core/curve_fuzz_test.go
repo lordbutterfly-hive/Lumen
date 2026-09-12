@@ -476,7 +476,6 @@ func cfSeedMarket(s *MemStore, creator string, block uint64, holders []string, b
 	setMoney(s, kReserve(creator), mAdd(Area(supply), excess))
 	setMoney(s, kCap(creator), cfBI(MaxCap))
 	setU64(s, kRegisteredAt(creator), 1)
-	setU64(s, kPaidUntil(creator), block+100*SubscriptionPeriod)
 }
 
 func cfNewWorld(t *testing.T, seed int64, seqIdx int, s *MemStore, creator string, actors []string, block uint64) *cfWorld {
@@ -786,7 +785,6 @@ func cfRandStart(r *rand.Rand, actors []string) (*MemStore, string, uint64, bool
 		setMoney(s, kReserve(creator), mZero())
 		setMoney(s, kCap(creator), cfBI(MaxCap))
 		setU64(s, kRegisteredAt(creator), 1)
-		setU64(s, kPaidUntil(creator), block+100*SubscriptionPeriod)
 	case 1: // seeded, mild excess
 		bals := make([]*big.Int, len(actors))
 		wacqs := make([]uint64, len(actors))
@@ -927,7 +925,6 @@ func TestCurveFuzz_OpSequence_SoloActorNeverProfits(t *testing.T) {
 			block := uint64(2_000_000)
 			setMoney(s, kCap(creator), cfBI(MaxCap))
 			setU64(s, kRegisteredAt(creator), 1)
-			setU64(s, kPaidUntil(creator), block+100*SubscriptionPeriod)
 			actors := []string{"solo"}
 			w := cfNewWorld(t, seed, seq, s, creator, actors, block)
 
@@ -1016,7 +1013,6 @@ func TestCurveFuzz_SellAfterTransferIn_WAUnderflowLocksTheExit(t *testing.T) {
 	c := "creatora"
 	setMoney(s, kCap(c), cfBI(MaxCap))
 	setU64(s, kRegisteredAt(c), 1)
-	setU64(s, kPaidUntil(c), 10_000_000)
 
 	// alice buys 100 at block 1000; bob buys 100 at block 5000.
 	if _, err := Buy(s, "alice", c, 1000, cfBI(100)); err != nil {
@@ -1103,7 +1099,6 @@ func TestCurveFuzz_AtomicRoundTripNeverProfits(t *testing.T) {
 				sellBlock := block
 				if aged {
 					sellBlock = block + ExitTaxDecayBlocks + 1
-					setU64(s, kPaidUntil(creator), sellBlock+SubscriptionPeriod)
 				}
 				sr, err := Sell(s, attacker, creator, sellBlock, n)
 				if err != nil {
@@ -1164,7 +1159,6 @@ func TestCurveFuzz_EarlyBuyerProfitsWhenOthersBuy_ByDesign(t *testing.T) {
 		b := uint64(1_000_000)
 		setMoney(s, kCap(c), cfBI(MaxCap))
 		setU64(s, kRegisteredAt(c), 1)
-		setU64(s, kPaidUntil(c), b+100*SubscriptionPeriod)
 		alice, err := Buy(s, "alice", c, b, cfBI(100)) // cost = area(100) = 140,656, fee 7,032
 		if err != nil {
 			t.Fatal(err)
@@ -1212,7 +1206,6 @@ func TestCurveFuzz_EarlyBuyerProfitsWhenOthersBuy_ByDesign(t *testing.T) {
 	{
 		s, c, alice := build()
 		sellBlock := uint64(1_000_000) + ExitTaxDecayBlocks + 1
-		setU64(s, kPaidUntil(c), sellBlock+SubscriptionPeriod)
 		sr, err := Sell(s, "alice", c, sellBlock, cfBI(100))
 		if err != nil {
 			t.Fatal(err)

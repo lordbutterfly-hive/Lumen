@@ -155,8 +155,13 @@ func TestBuy_Guards(t *testing.T) {
 		}
 	})
 	t.Run("frozen-rejected", func(t *testing.T) {
+		// FROZEN is reached by Retire + the notice — the only road since
+		// 2026-09-12 (the subscription lapse that used to freeze this market at
+		// 100+GraceBlocks is gone; core/params.go).
 		s, c := mk()
-		setU64(s, kPaidUntil(c), 100)
+		if err := Retire(s, c, c, 100); err != nil {
+			t.Fatalf("setup Retire: %v", err)
+		}
 		if _, err := Buy(s, "alice", c, 100+GraceBlocks, big.NewInt(1)); errSymbol(err) != ErrState {
 			t.Fatalf("err = %v, want %s", err, ErrState)
 		}
@@ -184,7 +189,6 @@ func TestBuy_Guards(t *testing.T) {
 	})
 	t.Run("overdue-still-open", func(t *testing.T) {
 		s, c := mk()
-		setU64(s, kPaidUntil(c), 100)
 		if _, err := Buy(s, "alice", c, 150, big.NewInt(1)); err != nil {
 			t.Fatalf("OVERDUE buy failed: %v — grace is fully functional", err)
 		}

@@ -46,7 +46,6 @@ import (
 // 11 exported mutators, plus Reclaim/Answer both resolving one escrow):
 //
 //	Register        -> {"type":"registered","v":1,"creator":"...","actor":"...","block":N,"face":"...","cap":"...","feePaid":"..."}
-//	Renew           -> {"type":"renewed","v":1,"creator":"...","actor":"...","block":N,"periods":N,"paid":"..."}
 //	SetFace         -> {"type":"faceChanged","v":1,"creator":"...","actor":"...","block":N,"oldFace":"...","newFace":"..."}
 //	SetCap          -> {"type":"capChanged","v":1,"creator":"...","actor":"...","block":N,"oldCap":"...","newCap":"..."}
 //	Prepay          -> {"type":"prepaid","v":1,"creator":"...","actor":"...","block":N,"hbdPaid":"...","creditsMinted":"..."}
@@ -207,22 +206,14 @@ func EvRegistered(creator, actor string, block uint64, face, cap int64, feePaid 
 		`,"feePaid":"` + evMoney(feePaid) + `"}`
 }
 
-// EvRenewed — Renew (market.go). actor is the PAYER, who need not be the
-// creator at all — Renew is deliberately permissionless ("a fan can keep a
-// creator alive," market.go). periods/paid are exactly Renew's own inputs;
-// the resulting paid_until is NOT included here, deliberately: SPEC §2.5
-// routes subscription status through a direct chain read
-// (getStateByKeys), not through this indexer, and duplicating
-// SubscriptionPeriod's arithmetic here would create a second copy of core's
-// own billing math that could silently drift from it — see market.go's own
-// Renew doc for why paid_until's computation is more subtle than
-// `block+periods*SubscriptionPeriod` (it resumes from max(now, current
-// paid_until)).
-func EvRenewed(creator, actor string, block, periods uint64, paid *big.Int) string {
-	return evOpen("renewed", creator, actor, block) +
-		`,"periods":` + evU64(periods) +
-		`,"paid":"` + evMoney(paid) + `"}`
-}
+// THERE IS NO EvRenewed. It logged Renew (market.go) — periods and the HBD
+// paid, by whoever paid it. The 10 HBD monthly subscription was removed whole
+// on 2026-09-12 (OWNER RULING; see params.go), Renew went with it, and an event
+// builder for a call that cannot happen is the same dead-surface defect this
+// package deletes constants for. The `renewed` event type is retired: no new
+// one can ever be emitted, and the indexer view that folded `paid` into its
+// treasury total loses one of its three inputs (see EvAnswered below, which
+// loses another).
 
 // EvFaceChanged — SetFace (market.go). oldFace MUST be read by the caller
 // (a Store.Get(kFace(creator)) via whatever accessor the wasm layer has)
@@ -292,11 +283,18 @@ func EvTransferred(creator, actor, to string, block uint64, amount *big.Int) str
 // used the price that was posted at the time. State has no memory of a
 // resolved ask (ask.go), so if this event omits it the attribution is gone for
 // good.
-func EvAsked(creator, actor string, block, seq uint64, creditsSpent, commissionHbd, rate *big.Int, deadlineBlocks uint64, contentHash string, offeringID uint64) string {
+// ★ commissionCredits REPLACED commissionHbd (OWNER RULING 2026-09-12). The
+// commission is 12% OF creditsSpent, in the creator's own token, not a separate
+// HBD leg the buyer also paid — so `creditsSpent` is now the whole of what left
+// the buyer and this field is a PARTITION of it, never an addition to it. An
+// indexer that adds the two together double-counts the platform's slice. The
+// KEY was renamed rather than reused precisely so a consumer written against
+// the old shape fails loudly instead of quietly summing the wrong model.
+func EvAsked(creator, actor string, block, seq uint64, creditsSpent, commissionCredits, rate *big.Int, deadlineBlocks uint64, contentHash string, offeringID uint64) string {
 	return evOpen("asked", creator, actor, block) +
 		`,"seq":` + evU64(seq) +
 		`,"creditsSpent":"` + evMoney(creditsSpent) + `"` +
-		`,"commissionHbd":"` + evMoney(commissionHbd) + `"` +
+		`,"commissionCredits":"` + evMoney(commissionCredits) + `"` +
 		`,"rate":"` + evMoney(rate) + `"` +
 		`,"deadlineBlocks":` + evU64(deadlineBlocks) +
 		`,"offeringId":` + evU64(offeringID) +
@@ -307,27 +305,38 @@ func EvAsked(creator, actor string, block, seq uint64, creditsSpent, commissionH
 // creator-only), kept as actor for the same uniform-shape reason as
 // EvRegistered. seq matches the EvAsked this event resolves.
 //
-// commissionHbd (M4 fix, 2026-07-21 — PRUNED-ADJUDICATION-2026-07-21.md):
-// the HBD commission Answer books to kTreasury() in the very same call that
-// produces this event, never previously logged anywhere. Before this fix
-// the event stream could reconstruct every CREDIT-side move a call made but
-// never the HBD side of an answer — Answer moves real money (commission ->
-// treasury) and the indexer had no way to see it, so it could never serve
-// as a solvency cross-check against kTreasury() (SPEC §1.7.3, "where
-// commission + subscription land"). See ../magi-indexer/creator_tokens_views.yaml's
-// Index.TreasuryHbd, which folds this field — together with EvRegistered's
-// feePaid and EvRenewed's paid, the other two treasury-crediting entry
-// points core has — into one GLOBAL running total, matching kTreasury()
-// itself being a single global key (keys.go:15), not scoped per market.
+// commissionHbd (M4 fix, 2026-07-21 — PRUNED-ADJUDICATION-2026-07-21.md) was
+// the HBD commission Answer booked to kTreasury() in the very same call that
+// produced this event. It existed so the indexer could cross-check kTreasury()
+// (SPEC §1.7.3, "where commission + subscription land") — see
+// ../magi-indexer/creator_tokens_views.yaml's Index.TreasuryHbd, which folded
+// it together with EvRegistered's feePaid and EvRenewed's paid.
 //
-// CALLER NOTE: see the file-level "KNOWN GAPS" comment above for where the
-// wasm wrapper must source this value from — core.AnswerResult does not
-// return it today.
-func EvAnswered(creator, actor string, block, seq uint64, creditsToCreator, commissionHbd *big.Int, answerHash string) string {
+// ALL THREE OF THOSE INPUTS ARE NOW GONE OR ZERO: registration is free
+// (RegistrationFee deleted 2026-07-21), Renew no longer exists (2026-09-12) and
+// the commission is tokens (2026-09-12). kTreasury() itself is NOT dead — it
+// still accrues the platform half of every trade fee (tradefee.go) and the
+// platform half of every exit tax (exittax.go), both of which carry their own
+// events — but Index.TreasuryHbd must be rebuilt on THOSE two inputs, because
+// the three it was written against no longer produce anything. Left as-is it
+// reports a figure that can only ever decrease (WithdrawTreasury) while the real
+// balance rises.
+//
+// ★ commissionCredits AND commissionTo REPLACED commissionHbd (OWNER RULING
+// 2026-09-12). The commission is now 12% of the escrow's TOKENS credited to the
+// platform owner's position on this market, so the event has to name both the
+// amount and the ACCOUNT: an indexer folding it into a global treasury total,
+// as the old HBD field's doc instructed, would show tokens nobody holds while
+// the owner's real balance moved with no event behind it. creditsToCreator and
+// commissionCredits are the two halves of the escrow and sum to exactly it.
+// commissionTo is "" when no owner was bound, in which case commissionCredits
+// is zero and the creator received the whole escrow.
+func EvAnswered(creator, actor string, block, seq uint64, creditsToCreator, commissionCredits *big.Int, commissionTo, answerHash string) string {
 	return evOpen("answered", creator, actor, block) +
 		`,"seq":` + evU64(seq) +
 		`,"creditsToCreator":"` + evMoney(creditsToCreator) + `"` +
-		`,"commissionHbd":"` + evMoney(commissionHbd) + `"` +
+		`,"commissionCredits":"` + evMoney(commissionCredits) + `"` +
+		`,"commissionTo":"` + evJSONEscape(commissionTo) + `"` +
 		`,"answerHash":"` + evJSONEscape(answerHash) + `"}`
 }
 
@@ -360,19 +369,20 @@ func EvAnswered(creator, actor string, block, seq uint64, creditsToCreator, comm
 // indexer folding `actor` as the recipient credits the wrong account every time
 // a third party reclaims — and it cannot recover the right one from its own
 // escrow map either, since an index that started mid-stream never saw the Ask.
-// commissionRetainedHbd (USER RULING 1, 2026-07-28) is the slice of the held
-// commission the protocol KEPT because this reclaim was a miss; commissionHbd
-// is what the asker was actually paid. The two must be carried separately or a
-// replaying indexer cannot balance the books: before this field existed the
-// whole held amount was an outflow, and quietly shrinking commissionHbd while
-// booking the difference to the treasury would have made every miss look like
-// money that vanished. Zero on a self-dealt escrow (not a miss).
-func EvReclaimed(creator, actor string, block, seq uint64, credits, commissionHbd, commissionRetainedHbd *big.Int, asker string) string {
+// commissionRetainedCredits (USER RULING 1, 2026-07-28; re-denominated from HBD
+// to tokens by the OWNER RULING 2026-09-12) is the slice the protocol KEPT
+// because this reclaim was a miss, and `credits` is the NET the asker actually
+// got back. The two must be carried separately or a replaying indexer cannot
+// balance the books — together they are the whole escrow. retainedTo names the
+// account credited with the slice, for the same reason EvAnswered's commissionTo
+// exists: the slice is tokens on a real account now, not a global HBD bucket.
+// Both are zero/"" on a self-dealt escrow (not a miss).
+func EvReclaimed(creator, actor string, block, seq uint64, credits, commissionRetainedCredits *big.Int, retainedTo, asker string) string {
 	return evOpen("reclaimed", creator, actor, block) +
 		`,"seq":` + evU64(seq) +
 		`,"credits":"` + evMoney(credits) + `"` +
-		`,"commissionHbd":"` + evMoney(commissionHbd) + `"` +
-		`,"commissionRetainedHbd":"` + evMoney(commissionRetainedHbd) + `"` +
+		`,"commissionRetainedCredits":"` + evMoney(commissionRetainedCredits) + `"` +
+		`,"retainedTo":"` + evJSONEscape(retainedTo) + `"` +
 		`,"asker":"` + evJSONEscape(asker) + `"}`
 }
 
@@ -391,17 +401,16 @@ func EvRated(creator, actor string, block, seq, score uint64) string {
 }
 
 // EvDeclined — Decline (ask.go, RULING E's delivery gate, 2026-07-27). Same
-// money shape as EvReclaimed (credits and the whole commission go back to the
-// asker) but a DIFFERENT event, deliberately: a reclaim means the creator went
+// money shape as EvReclaimed except that NOTHING is ever retained, so `credits`
+// is always the whole escrow going back to the asker but a DIFFERENT event, deliberately: a reclaim means the creator went
 // silent until the window closed, a decline means they answered promptly with
 // "no". Only one of those is a black mark, and an indexer that could not tell
 // them apart would show a conscientious creator the same delivery record as an
 // absent one. actor is always == creator (Decline is creator-only).
-func EvDeclined(creator, actor string, block, seq uint64, credits, commissionHbd *big.Int, asker string) string {
+func EvDeclined(creator, actor string, block, seq uint64, credits *big.Int, asker string) string {
 	return evOpen("declined", creator, actor, block) +
 		`,"seq":` + evU64(seq) +
 		`,"credits":"` + evMoney(credits) + `"` +
-		`,"commissionHbd":"` + evMoney(commissionHbd) + `"` +
 		`,"asker":"` + evJSONEscape(asker) + `"}`
 }
 

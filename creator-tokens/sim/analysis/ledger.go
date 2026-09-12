@@ -368,7 +368,6 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 		return rpt
 	}
 
-	commissionBps := commissionBpsFor(tr)
 	subPeriod := subscriptionPeriodFor(tr)
 
 	reserve := map[string]*big.Int{}
@@ -581,52 +580,34 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 			a.ReceivedOut = new(big.Int).Add(a.ReceivedOut, net)
 
 		case "ask":
-			commissionPaid, ok := argBig(ev, "commissionHbdPaid")
-			if !ok {
-				rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d (ask by %s): missing Args.commissionHbdPaid, skipped in ledger", i, ev.Actor))
-				continue
-			}
+			// ★ AN ASK MOVES NO HBD (OWNER RULING 2026-09-12). It used to read
+			// Args.commissionHbdPaid, count it into `entered`, and hold it against
+			// the escrow until answer/decline/reclaim moved it. The commission is
+			// a slice of the escrow's own CREDITS now, so this path touches the
+			// HBD ledger not at all — it only records the credits the asker put
+			// into escrow, which the credit-side accounting below still needs.
 			seq := nextSeq[c]
 			nextSeq[c] = seq + 1
 			credits, okCred := resolveCreditsSpent(ev)
 			if escrows[c] == nil {
 				escrows[c] = map[uint64]*escrowHold{}
 			}
-			escrows[c][seq] = &escrowHold{asker: ev.Actor, commissionHbd: commissionPaid, credits: credits, creditsApprox: !okCred}
+			escrows[c][seq] = &escrowHold{asker: ev.Actor, credits: credits, creditsApprox: !okCred}
 			if okCred {
 				addBal(c, ev.Actor, new(big.Int).Neg(credits))
 			}
 
-			entered = new(big.Int).Add(entered, commissionPaid)
-			sits = new(big.Int).Add(sits, commissionPaid)
-			rpt.Entered.CommissionHeld = new(big.Int).Add(rpt.Entered.CommissionHeld, commissionPaid)
-			a := getActor(ev.Actor)
-			a.PaidIn = new(big.Int).Add(a.PaidIn, commissionPaid)
-
-			if faceKnown[c] {
-				owed := bpsFloor(face[c], commissionBps)
-				if commissionPaid.Cmp(owed) > 0 {
-					op := Overpayment{
-						Creator: c, Seq: seq, Asker: ev.Actor,
-						Owed: owed, Paid: commissionPaid,
-						Excess:     new(big.Int).Sub(commissionPaid, owed),
-						Resolution: "pending",
-					}
-					rpt.Overpayments = append(rpt.Overpayments, op)
-					overpaymentIdx[key2(c, seq)] = len(rpt.Overpayments) - 1
-				}
-			} else {
-				found := false
-				for _, cc := range rpt.OverpaymentsSkipped {
-					if cc == c {
-						found = true
-						break
-					}
-				}
-				if !found {
-					rpt.OverpaymentsSkipped = append(rpt.OverpaymentsSkipped, c)
-				}
-			}
+			// ★ THE OVERPAYMENT SCAN IS GONE WITH THE AMOUNT IT SCANNED (OWNER
+			// RULING 2026-09-12). It compared each ask's commissionHbdPaid
+			// against floor(face * CommissionBps / 10000) and flagged any excess,
+			// because before the H2 fix an overpaid commission was silently HELD
+			// and then booked to a treasury with no exit. There is no
+			// caller-supplied commission any more — core derives it from the same
+			// quote it derives the credits from — so an overpayment is not
+			// merely unflagged, it is unconstructible. rpt.Overpayments therefore
+			// stays empty, and the resolution bookkeeping below is dead but
+			// harmless (a pre-ruling trace replayed through this analyser still
+			// gets its resolutions filled in).
 
 		case "answer":
 			seq, okSeq := argU64(ev, "seq")
@@ -639,14 +620,16 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 				rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d (answer by %s on %s seq %d): no matching PENDING escrow in replay — trace may start mid-market or seq numbering diverges from this package's own counter", i, ev.Actor, c, seq))
 				continue
 			}
-			treasury = new(big.Int).Add(treasury, hold.commissionHbd)
-			// internal move only (escrow-hold -> treasury): sits total unchanged.
+			// No treasury move: the commission is TOKENS on the owner's position
+			// since 2026-09-12, not HBD. The credits release to the creator, less
+			// the platform's slice — which this replay folds into the same
+			// creator credit for the HBD-side accounting, because both land
+			// inside the same market's token supply and neither moves HBD.
 			if hold.credits != nil {
 				addBal(c, c, hold.credits) // credits release to the creator's own balance
 			}
 			delete(escrows[c], seq)
 			asker := getActor(hold.asker)
-			asker.CommissionOnAnsweredAsks = new(big.Int).Add(asker.CommissionOnAnsweredAsks, hold.commissionHbd)
 			if hold.credits != nil {
 				// F1: reserve-backed HBD value at THIS event's own block —
 				// reserve[c]/supply[c] are this replay's running shadow state,
@@ -685,18 +668,12 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 				rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d (decline by %s on %s seq %d): no matching PENDING escrow in replay", i, ev.Actor, c, seq))
 				continue
 			}
-			left = new(big.Int).Add(left, hold.commissionHbd)
-			sits = new(big.Int).Sub(sits, hold.commissionHbd)
-			rpt.Left.DeclinedCommission = new(big.Int).Add(rpt.Left.DeclinedCommission, hold.commissionHbd)
+			// No HBD move: a decline returns the escrow's CREDITS and nothing else
+			// since 2026-09-12.
 			if hold.credits != nil {
 				addBal(c, hold.asker, hold.credits)
 			}
 			delete(escrows[c], seq)
-			// core.Decline is creator-only to CALL, but the payout target is
-			// fixed by the escrow — the asker, never ev.Actor — same shape as
-			// Reclaim's identical payee rule (ask.go).
-			a := getActor(hold.asker)
-			a.ReceivedOut = new(big.Int).Add(a.ReceivedOut, hold.commissionHbd)
 			if idx, ok := overpaymentIdx[key2(c, seq)]; ok {
 				rpt.Overpayments[idx].Resolution = "declined"
 			}
@@ -712,21 +689,15 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 				rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d (reclaim by %s on %s seq %d): no matching PENDING escrow in replay", i, ev.Actor, c, seq))
 				continue
 			}
-			left = new(big.Int).Add(left, hold.commissionHbd)
-			sits = new(big.Int).Sub(sits, hold.commissionHbd)
-			rpt.Left.ReclaimedCommission = new(big.Int).Add(rpt.Left.ReclaimedCommission, hold.commissionHbd)
+			// No HBD move: a reclaim returns the escrow's CREDITS net of the miss
+			// slice since 2026-09-12, all of it inside the same token supply.
+			// core.Reclaim ALWAYS pays rec.asker, NEVER the caller (H1
+			// permissionless-reclaim fix, API.md rule 2), even when a third party
+			// (keeper/samaritan) pushed it on their behalf (ev.Actor != hold.asker).
 			if hold.credits != nil {
 				addBal(c, hold.asker, hold.credits)
 			}
 			delete(escrows[c], seq)
-			// core.Reclaim ALWAYS pays rec.asker, NEVER the caller (H1
-			// permissionless-reclaim fix, API.md rule 2) — so the payee is the
-			// escrow's own asker, even when a third party (keeper/samaritan)
-			// pushed this reclaim on their behalf (ev.Actor != hold.asker).
-			// Attributing ReceivedOut to hold.asker, not ev.Actor, keeps this
-			// correct for both self- and permissionless reclaims.
-			a := getActor(hold.asker)
-			a.ReceivedOut = new(big.Int).Add(a.ReceivedOut, hold.commissionHbd)
 			if idx, ok := overpaymentIdx[key2(c, seq)]; ok {
 				rpt.Overpayments[idx].Resolution = "reclaimed"
 			}
@@ -970,15 +941,11 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 		}
 		rpt.Sits.ReserveTotal = new(big.Int).Add(rpt.Sits.ReserveTotal, r)
 	}
-	for c, m := range escrows {
-		for _, h := range m {
-			if rpt.Sits.EscrowHeldByCreator[c] == nil {
-				rpt.Sits.EscrowHeldByCreator[c] = zeroBig()
-			}
-			rpt.Sits.EscrowHeldByCreator[c] = new(big.Int).Add(rpt.Sits.EscrowHeldByCreator[c], h.commissionHbd)
-			rpt.Sits.EscrowHeldTotal = new(big.Int).Add(rpt.Sits.EscrowHeldTotal, h.commissionHbd)
-		}
-	}
+	// EscrowHeld* stays ZERO since 2026-09-12: an open escrow holds tokens, not
+	// HBD, so it is no longer a resting place for HBD and cannot be a term in
+	// this identity. The fields are kept (rather than deleted) so a pre-ruling
+	// trace replayed through this analyser still balances — it is the REPLAY,
+	// not the contract, that has to speak both money models.
 	for c, p := range feePots {
 		if p.Sign() != 0 {
 			rpt.Sits.FeePotsByCreator[c] = p
@@ -1061,14 +1028,17 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 			a.CreditsHeldValue = new(big.Int).Add(a.CreditsHeldValue, net)
 		}
 	}
-	// Commission still held on this actor's own PENDING asks. (Any escrow
-	// still present here is, by construction, still PENDING — answer/reclaim
-	// both delete their entry above — so its Overpayment record, if any, is
-	// already correctly left at its default "pending" Resolution.)
+	// Credits still held on this actor's own PENDING asks. (Any escrow still
+	// present here is, by construction, still PENDING — answer/reclaim both
+	// delete their entry above.)
+	//
+	// PendingEscrowCommission stays ZERO since 2026-09-12: there is no HBD held
+	// against an open escrow any more. The escrowed CREDITS are still valued,
+	// below, which is the number that actually matters to an actor's "where did
+	// my money go" reconciliation.
 	for c, m := range escrows {
 		for _, h := range m {
 			a := getActor(h.asker)
-			a.PendingEscrowCommission = new(big.Int).Add(a.PendingEscrowCommission, h.commissionHbd)
 			if h.credits != nil {
 				// F1: reserve-backed HBD value at TRACE END — this escrow is
 				// still open, so there is no single resolving block to price

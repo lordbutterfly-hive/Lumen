@@ -65,6 +65,22 @@ class FakeGql extends CreatorTokensGqlClient {
     return this;
   }
 
+  /**
+   * ★ MODEL THE CHAIN EXECUTING (2026-09-12). Every money write in the data
+   * source now CONFIRMS — registerMarket polls kRegisteredAt for an ADVANCE,
+   * the escrow rails poll the escrow record, the rest poll tx status — because
+   * a Hive broadcast resolves at L1-accept, before the L2 contract has run.
+   * This harness's broadcaster deliberately never transmits, so nothing ever
+   * advanced and registerMarket (the FIRST call in the journey) threw
+   * CREATOR_TOKENS_REGISTER_UNCONFIRMED, taking the whole fixture generation
+   * with it. The stub has to answer the confirmation the way an executed chain
+   * would, or the harness can only ever test the failure path.
+   */
+  advance(key: string, value: string): this {
+    this.state.set(key, value);
+    return this;
+  }
+
   rawGet(key: string): string | null {
     const v = this.state.get(key);
     return v === undefined ? null : v;
@@ -74,6 +90,34 @@ class FakeGql extends CreatorTokensGqlClient {
     this.queries.push([...keys]);
     const out: Record<string, string | null> = {};
     for (const k of keys) out[k] = this.rawGet(k);
+    return out;
+  }
+
+  /**
+   * The matured-bucket read (F-C5) asks the node to hex-encode, and the base
+   * class routes it through the same private readState that does a real fetch —
+   * which in Node is an unparseable relative URL. Seeded values are plain
+   * decimal here, so the stub answers with the LE-hex the decoder expects,
+   * built from the same value the decimal read would give. An absent key stays
+   * null, which decodes as "no matured bucket", the honest default.
+   */
+  override async getStateByKeysHex(_contractId: string, keys: string[]): Promise<Record<string, string | null>> {
+    this.queries.push([...keys]);
+    const out: Record<string, string | null> = {};
+    for (const k of keys) {
+      const raw = this.rawGet(k);
+      if (raw === null) {
+        out[k] = null;
+        continue;
+      }
+      let n = BigInt(raw);
+      let hex = '';
+      for (let i = 0; i < 8; i++) {
+        hex += (n & 0xffn).toString(16).padStart(2, '0');
+        n >>= 8n;
+      }
+      out[k] = hex;
+    }
     return out;
   }
 
@@ -98,9 +142,13 @@ interface CapturedOp {
 class CapturingBroadcaster {
   readonly ops: CapturedOp[] = [];
 
+  /** Set by run() so a captured op can model the chain having executed it. */
+  onExecuted: ((action: string) => void) | null = null;
+
   broadcast = async (op: CustomJsonOp): Promise<string> => {
     const body = JSON.parse(op.json) as { action: string; payload: Record<string, unknown> };
     this.ops.push({ action: body.action, op, payloadJson: JSON.stringify(body.payload), payload: body.payload });
+    this.onExecuted?.(body.action);
     return `e2e-txid-${this.ops.length}`;
   };
 
@@ -134,6 +182,12 @@ const chOfferPrice = (creator: string, epoch: number, id: number): string => `m|
 const chAcq = (creator: string, holder: string): string => `acq|hive:${creator}|hive:${holder}`;
 const chObs = (creator: string, i: number): string => `tw|hive:${creator}|${i}`;
 const chObsIdx = (creator: string): string => `tw|hive:${creator}|n`;
+// keys.go kObsLong — the 7-day settlement ring. Seeding it is not optional:
+// settlement is min(TWAP_short, TWAP_long, spot) and REFUSES when either arm
+// cannot price (RULING C / F-C3), so a harness that seeds only the short ring
+// can never reach a successful ask.
+const chObsLong = (creator: string, i: number): string => `twl|hive:${creator}|${i}`;
+const chObsLongIdx = (creator: string): string => `twl|hive:${creator}|n`;
 
 const config: CreatorTokensConfig = {
   contractId: 'creator-tokens-e2e',
@@ -161,7 +215,14 @@ const HEAD = 5_000_000;
  * journey is against this SAME static seed).
  */
 function seedActiveMarket(gql: FakeGql, creator: string): void {
-  const supplyTokens = 50;
+  // ★ 50 -> 200 (2026-09-12). settlement.go's spend cap refuses an ask costing
+  // more than 5% of supply, which at 50 tokens is 2 credits. The posted 2.5 HBD
+  // face now settles at the WHOLE face rather than an 88% token leg (OWNER
+  // RULING; the 12% is carved out of the credits inside the escrow), so it costs
+  // ceil(2500/1200) = 3 and tripped the cap. 200 tokens allows 10 and leaves
+  // every other guard clear: SpotRate(200) = 2680 is still above the 1200
+  // marker, the C5 tripwire needs >= 457, and C2's depth ceiling is 182,670.
+  const supplyTokens = 200;
   gql
     .seed(chM(creator, 'reg'), '4000000') // registeredAt > 0
     .seed(chM(creator, 'face'), '2500') // 2.5 HBD
@@ -182,6 +243,17 @@ function seedActiveMarket(gql: FakeGql, creator: string): void {
     gql.seed(chObs(creator, i), `${4_998_000 + i * 200}|1200`);
   }
   gql.seed(chObsIdx(creator), '8');
+  // 8 LONG-ring observations (LongMinObsCount) spaced 9,000 blocks apart — NOT
+  // the 6,300 LongObsSpacing, which is the minimum GAP between samples and not
+  // the window the arm needs: 8 samples at 6,300 span only 44,100 blocks and the
+  // long arm refuses below LongMinObsBlocks (57,600) with `insufficient_span`.
+  // 9,000 spans 63,000, clears it, and still ends 600 blocks before head.
+  // Same flat 1200 rate as the short ring, so min(short, long, spot) resolves to
+  // the marker either way and the ask settles at a rate this file can predict.
+  for (let i = 0; i < 8; i++) {
+    gql.seed(chObsLong(creator, i), `${4_936_400 + i * 9_000}|1200`);
+  }
+  gql.seed(chObsLongIdx(creator), '8');
   // kState/paused/rat(retired)/acq deliberately unseeded: absent -> not
   // CLOSED, not paused, never retired, and every holder's clock reads as
   // maximally fresh (holdclock.go's own zero-value convention).
@@ -231,20 +303,56 @@ async function run(): Promise<void> {
   const capture = new CapturingBroadcaster();
   seedActiveMarket(gql, 'alice');
   // Escrows the answer/reclaim journeys re-read after broadcast (literal keys).
-  // ★ EIGHT fields (ask.go packEscrow, verified at source 2026-07-24):
-  //   asker|credits|deadline|status|commissionHbd|acqBlock|contentHash|answerHash
-  // These seeds carried the OLD seven-field layout (no acqBlock), which the
-  // seven-field parser accepted by silently shifting contentHash into
-  // answerHash. The parser now demands eight, so a stale seed fails to parse
-  // outright — which is exactly the loud failure the old layout never gave.
-  gql.seed(chEscrow('alice', 0), 'hive:bob|2500|5500000|ANSWERED|300|4900000|QmContentHash123|QmAnswerHash');
-  gql.seed(chEscrow('alice', 1), 'hive:bob|2500|100000|RECLAIMED|300|4900000|QmContentHash123|');
+  // ★ NINE fields (ask.go packEscrow):
+  //   asker|credits|deadline|status|commissionCredits|acqBlock|offeringID|contentHash|answerHash
+  // These seeds carried EIGHT (no offeringID) and the parser demands an exact
+  // nine, so every escrow read returned null and the answer/decline/reclaim
+  // confirmations could never see a status — the same class of silent staleness
+  // the eight-field note below was written about, one field along.
+  //
+  // `credits` is a TOKEN COUNT (3 — what a 2.5 HBD face costs at the seeded
+  // 1200 rate), not an HBD amount, and field 5 is the platform's slice OF those
+  // credits (OWNER RULING 2026-09-12), not a separate HBD leg.
+  gql.seed(chEscrow('alice', 0), 'hive:bob|3|5500000|ANSWERED|0|4900000|0|QmContentHash123|QmAnswerHash');
+  gql.seed(chEscrow('alice', 1), 'hive:bob|3|100000|RECLAIMED|0|4900000|0|QmContentHash123|');
+  // Seq 2 is PENDING and is what the journey DECLINES. It used to decline seq 0,
+  // on the reasoning that the broadcaster never executes so only the OP was
+  // being captured — true until decline grew its own confirmation, which now
+  // reads seq 0 back as ANSWERED and refuses. A decline needs a PENDING escrow
+  // of its own, and the capture flips it below exactly as the chain would.
+  gql.seed(chEscrow('alice', 2), 'hive:bob|3|5500000|PENDING|0|4900000|0|QmContentHash123|');
   // One posted service, so the offering-targeted ask below prices against the
-  // OFFERING's own price rather than kFace. 200.000 HBD in base units.
-  gql.seed(chOfferPrice('alice', 0, 1), '200000');
+  // OFFERING's own price rather than kFace. 10.000 HBD in base units.
+  //
+  // ★ 200.000 -> 10.000 (2026-09-12). The WHOLE posted price is priced in tokens
+  // now (OWNER RULING), not an 88% token leg, so a 200 HBD offering costs
+  // ceil(200000/1200) = 167 credits and trips BOTH of settlement's C2 guards at
+  // this fixture's supply: the depth ceiling (50% of area(200) = 182,670, which
+  // the old 176,000 token leg squeaked under) and the 5%-of-supply spend cap
+  // (10 credits). 10 HBD costs 9 credits and clears both with room.
+  gql.seed(chOfferPrice('alice', 0, 1), '10000');
 
   // THE REAL DATA SOURCE — not the mock. Both deps injected via the real ctor.
-  const ds = new VscCreatorTokensDataSource({ config, gql, broadcaster: capture.broadcast });
+  // The chain "executes" what the capture records: a register advances
+  // kRegisteredAt (what registerMarket polls for), and every tx reads back
+  // CONFIRMED (what awaitExecution polls for, via the injection point the data
+  // source exposes precisely for a Node caller). Without these two the journey
+  // cannot get past its first call — see FakeGql.advance's doc.
+  capture.onExecuted = (action) => {
+    // +1, NOT the head: the LONG TWAP ring drops every observation before
+    // kRegisteredAt (twap.go askRateLong's epoch filter), so advancing this to
+    // "now" would orphan the seeded price history and every ask would refuse
+    // with insufficient_observations. An advance of one block is all
+    // awaitRegisteredAdvance asks for, and it leaves the history intact.
+    if (action === 'register') gql.advance(chM('alice', 'reg'), '4000001');
+    if (action === 'decline') gql.advance(chEscrow('alice', 2), 'hive:bob|3|5500000|DECLINED|0|4900000|0|QmContentHash123|');
+  };
+  const ds = new VscCreatorTokensDataSource({
+    config,
+    gql,
+    broadcaster: capture.broadcast,
+    txStatusReader: async () => 'CONFIRMED'
+  });
 
   section('Journey: register -> renew -> setFace -> setCap -> buy -> sell -> ask -> answer -> reclaim -> retire -> transfer -> decline -> the offerings shop');
 
@@ -260,7 +368,6 @@ async function run(): Promise<void> {
   // that is ACTUALLY frozen, not merely "retire() was called at some earlier
   // line".
   await ds.registerMarket({ creator: 'alice', faceHbd: 2.5, capTokens: 1000 });
-  await ds.renewSubscription({ creator: 'alice', caller: 'alice', periods: 1 });
   await ds.setFace({ creator: 'alice', newFaceHbd: 3.0 });
   await ds.setCap({ creator: 'alice', newCapTokens: 2000 });
   await ds.buy({ creator: 'alice', buyer: 'bob', tokens: 5 });
@@ -285,7 +392,7 @@ async function run(): Promise<void> {
   // present as an UNQUOTED integer. Proving only the omitted form would leave
   // the entire shop's purchase path uncross-checked.
   await ds.ask({ creator: 'alice', asker: 'bob', contentHash: 'QmContentHash123', deadlineBlocks: 28_800, maxCreditsBaseUnits: 10_000, offeringId: 1 });
-  await ds.decline({ creator: 'alice', seq: 0, deadlineBlock: 5_500_000 });
+  await ds.decline({ creator: 'alice', seq: 2, deadlineBlock: 5_500_000 });
   // The buyer's rating — the only recourse against a creator who marks a job
   // delivered without delivering it, so its payload must be cross-checked like
   // any money op.
@@ -302,7 +409,6 @@ async function run(): Promise<void> {
 
   const expectedActions = [
     'register',
-    'renew',
     'setFace',
     'setCap',
     'buy',
@@ -572,9 +678,15 @@ async function run(): Promise<void> {
       .seed(chM('alice', 'cap'), '1000000')
       .seed(chM('alice', 'sup'), String(supplyTokens))
       .seed(chM('alice', 'res'), String(areaBaseUnits(supplyTokens)))
-      .seed(chM('alice', 'pu'), '2000000') // paidUntil(2,000,000) + GraceBlocks(144,000) << head(5,000,000) -> naturally FROZEN, not via Retire
+      // ★ RETIRED, not lapsed (2026-09-12). This seeded kPaidUntil far in the
+      // past to reach a "natural" FROZEN. There is no subscription and no lapse
+      // since the OWNER RULING (creator-tokens/core/params.go): the only road
+      // into a wind-down is Retire, and kRetiredAt stores block+1 so a stored 0
+      // can mean "never". 1,000,001 puts the retire at block 1,000,000, a long
+      // way past its GraceBlocks notice by head 5,000,000.
+      .seed(chM('alice', 'rat'), '1000001')
       .seed(chBal('alice', 'bob'), '20');
-    const dsFrozen = new VscCreatorTokensDataSource({ config, gql: gqlFrozen, broadcaster: captureFrozen.broadcast });
+    const dsFrozen = new VscCreatorTokensDataSource({ config, gql: gqlFrozen, broadcaster: captureFrozen.broadcast, txStatusReader: async () => 'CONFIRMED' });
 
     await dsFrozen.refund({ creator: 'alice', holder: 'bob', tokens: 5 });
     check('refund() captured an op once the market is FROZEN', captureFrozen.byAction('refund') !== undefined);

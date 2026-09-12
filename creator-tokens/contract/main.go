@@ -713,50 +713,17 @@ func Register(a *string) *string {
 		`,"firstBuyMinted":"` + minted + `","totalDue":"` + res.TotalDue.String() + `"}`)
 }
 
-// Payload: {"creator":"<hive-account>","periods":<uint64>,"paid":"<decimal
-// big.Int HBD string>"}. PERMISSIONLESS — "a fan can keep a creator alive"
-// (SPEC §1.7.5), so unlike register/setFace/setCap, `creator` here is
-// legitimate payload data (which market's subscription to extend), not an
-// identity claim about the caller: core.Renew itself never requires
-// caller==creator. Draws paid (MONEY IN) BEFORE calling core.Renew.
+// THERE IS NO `renew` ENTRYPOINT. It drew periods*SubscriptionFee in HBD and
+// called core.Renew to push a market's paid_until forward. The 10 HBD monthly
+// subscription was removed whole on 2026-09-12 (OWNER RULING; core/params.go
+// carries the reasoning), so core.Renew, core.SubscriptionFee and the paid_until
+// clock are all gone and this wrapper has nothing to call. A market is ACTIVE
+// from registration until its creator retires it.
 //
-//go:wasmexport renew
-func Renew(a *string) *string {
-	payload := payloadStr(a)
-	caller := currentCaller()
-	if err := requireActiveAuth(caller); err != nil {
-		handleErr(err)
-		return nil
-	}
-	block := currentBlock()
-
-	creator := jsonStr(payload, "creator")
-	periods := jsonU64(payload, "periods")
-	paid, ok := parseBigDecimal(jsonStr(payload, "paid"))
-	if !ok {
-		handleErr(inputErr("invalid paid"))
-		return nil
-	}
-	// F-C9(9b): bound the raw payload amount with a CLEAN TYPED rejection BEFORE
-	// the pull, mirroring Buy's BUY-INT64 guard. `paid` is a caller-supplied
-	// amount that flows straight into nativeInt64 at the SDK boundary; without
-	// this, an int64-overflowing `paid` hits nativeInt64's hard Abort (a
-	// host-level crash, not a recoverable business rejection) and a non-positive
-	// `paid` would attempt a ≤0 HiveDraw. core.Renew still re-validates the exact
-	// fee below; this only keeps a malformed amount from ever reaching the draw.
-	if paid.Sign() <= 0 || !paid.IsInt64() {
-		handleErr(inputErr("paid must be a positive amount within int64 range"))
-		return nil
-	}
-
-	sdk.HiveDraw(nativeInt64(paid), sdk.AssetHbd) // pull FIRST
-	if err := core.Renew(store, caller, creator, block, periods, paid); err != nil {
-		handleErr(err)
-		return nil
-	}
-	sdk.Log(core.EvRenewed(creator, caller, block, periods, paid))
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","periods":` + u64s(periods) + `}`)
-}
+// ★ THE EXPORT IS REMOVED, NOT STUBBED. A wasmexport that exists and always
+// aborts is worse than one that is absent: a stale client calling it gets a
+// contract error instead of a clean "no such entrypoint", and the export list is
+// how the frontend's own payload self-test enumerates what may be called.
 
 // Payload: {"newFace":<int64 HBD base units>}. Creator-only (core.SetFace
 // checks caller==creator via requireOpenCreatorMarket), so — same reasoning
@@ -1141,23 +1108,23 @@ func CreatorTokenBalance(a *string) *string {
 // ordering, a manipulation surface none of SPEC §1.3b's rate-only
 // mitigations touch. See core.Ask's own doc for the attack and the guard.
 //
-// `commissionHbdPaid` is NO LONGER read from the payload at all (H2 defect
-// fix, 2026-07-21 — PRUNED-ADJUDICATION-2026-07-21.md). core.Ask now
-// requires commissionHbdPaid to be EXACTLY commissionOwedFor(face) at
-// execution, not merely >=, so trusting a payload amount here could only
-// ever cause a spurious reject (too high/low) — never a legitimate reason
-// to draw anything other than the true owed amount. This entrypoint computes
-// `owed` itself using the exported core.CommissionOwedFor (core/read.go,
-// DEFECT 5 fix) — the SINGLE formula core.Ask's own exact-equality guard uses,
-// the same one `quote` now previews with — so the wrapper can no longer drift
-// from core's floor math and brick a legitimate ask. It draws exactly that via
-// HiveDraw and passes `owed` — not any caller-supplied number — into core.Ask.
-// The asker's own signed transfer.allow limit still bounds this draw: a face
-// rise past their limit fails the draw (asker protected); a face drop charges
-// less (asker saves), exactly the guarantee H2's fix requires. It also guards
-// face<=0 BEFORE the draw (DEFECT 4 fix) so a market with no posted face
-// surfaces core.Ask's precise "creator has no face price set" STATE error,
-// never an opaque HiveDraw(0) revert.
+// ★ THIS ENTRYPOINT DRAWS NO HBD AT ALL (OWNER RULING 2026-09-12). It used to
+// compute `owed = core.CommissionOwedFor(face)` and pull exactly that in HBD
+// with sdk.HiveDraw before calling core.Ask, because the 12% commission was a
+// separate leg in a separate currency (H2/DEFECT-5 fixes, 2026-07-21). The
+// commission is now 12% of the TOKENS the ask settles at, carved out inside the
+// escrow by core, so the buyer signs ONE intent — the token spend — and needs
+// no HBD balance and no transfer.allow to buy a service.
+//
+// WHAT BOUNDS THE ASK NOW: maxCredits alone, the asker's own signed ceiling on
+// the total credits. It is a strictly stronger cap than the pair it replaces,
+// because the commission is a fraction OF the number it caps rather than a
+// second amount beside it — the H2 sandwich (a band-legal SetFace between
+// signing and execution, under producer-chosen intra-block ordering) is refused
+// by that one comparison. The face<=0 guard below is KEPT (DEFECT 4 fix): it
+// no longer protects a draw, it still gives the asker core's precise "creator
+// has no face price set" / "no such offering" error instead of a generic
+// settlement refusal.
 //
 //go:wasmexport ask
 func Ask(a *string) *string {
@@ -1209,18 +1176,8 @@ func Ask(a *string) *string {
 		}
 		return nil
 	}
-	// H2 + DEFECT 5 FIX (2026-07-21): draw only the EXACT commission owed on
-	// the face in effect right now — never a payload-supplied amount —
-	// computed via core.CommissionOwedFor, the ONE formula core.Ask's own
-	// exact-equality guard (ask.go's commissionOwedFor) uses. This replaces a
-	// hand-copied bpsFloor duplicate: since core.Ask requires commissionHbdPaid
-	// to EXACTLY equal commissionOwedFor(face), any drift between a wrapper
-	// copy and core's math would brick every ask outright.
-	owed := core.CommissionOwedFor(face)
-
-	sdk.HiveDraw(nativeInt64(owed), sdk.AssetHbd) // commission leg, pull FIRST, EXACTLY owed
 	maturedBefore := core.MaturedOf(store, creator, caller)
-	res, err := core.Ask(store, caller, creator, block, maxCredits, owed, contentHash, deadlineBlocks, offeringID)
+	res, err := core.Ask(store, caller, creator, block, maxCredits, contentHash, deadlineBlocks, offeringID)
 	if err != nil {
 		handleErr(err)
 		return nil
@@ -1229,8 +1186,8 @@ func Ask(a *string) *string {
 	// and every change to that bucket must emit or the shared explorer tables
 	// overstate the holder's tradable balance permanently (scrutiny F2).
 	emitMaturedDelta(creator, caller, caller, block, maturedBefore)
-	sdk.Log(core.EvAsked(creator, caller, block, res.Seq, res.CreditsSpent, res.CommissionHbd, res.RateUsed, deadlineBlocks, contentHash, offeringID))
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(res.Seq) + `,"creditsSpent":"` + bigStr(res.CreditsSpent) + `","commissionHbd":"` + bigStr(res.CommissionHbd) + `","rate":"` + res.RateUsed.String() + `"}`)
+	sdk.Log(core.EvAsked(creator, caller, block, res.Seq, res.CreditsSpent, res.CommissionCredits, res.RateUsed, deadlineBlocks, contentHash, offeringID))
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(res.Seq) + `,"creditsSpent":"` + bigStr(res.CreditsSpent) + `","commissionCredits":"` + bigStr(res.CommissionCredits) + `","rate":"` + res.RateUsed.String() + `"}`)
 }
 
 // Payload: {"seq":<uint64>,"answerHash":"<string>"}. Creator-only
@@ -1271,11 +1228,20 @@ func Answer(a *string) *string {
 		return nil
 	}
 	emitMaturedDelta(caller, caller, caller, block, maturedBefore)
-	// M4: EvAnswered now also carries the commission booked to treasury
-	// (AnswerResult.CommissionHbd), so the indexer's event stream can
-	// reconstruct the HBD money model.
-	sdk.Log(core.EvAnswered(caller, caller, block, seq, res.CreditsToCreator, res.CommissionHbd, answerHash))
-	return strPtr(`{"creator":"` + jsonEscape(caller) + `","seq":` + u64s(seq) + `,"creditsToCreator":"` + bigStr(res.CreditsToCreator) + `"}`)
+	// The platform's 12% is a TOKEN credit to an account this wrapper's caller is
+	// not (OWNER RULING 2026-09-12), so its graduation delta cannot be measured
+	// here the way the creator's is — core returns it instead. Same emit pair
+	// decline/reclaim already use for the asker's graduation. Skipped entirely
+	// when no owner is bound, in which case the creator received the whole escrow.
+	if res.Owner != "" && res.OwnerGraduated != nil && res.OwnerGraduated.Sign() > 0 {
+		sdk.Log(core.EvTransferSingle(caller, "", res.Owner, caller, res.OwnerGraduated))
+		sdk.Log(core.EvMaturedMoved(caller, caller, "", res.Owner, block, res.OwnerGraduated))
+	}
+	// M4: EvAnswered carries BOTH halves of the escrow — what the creator got and
+	// what the platform got, and who the platform is — so the indexer can
+	// reconstruct the whole settlement from this one event.
+	sdk.Log(core.EvAnswered(caller, caller, block, seq, res.CreditsToCreator, res.CommissionToOwner, res.Owner, answerHash))
+	return strPtr(`{"creator":"` + jsonEscape(caller) + `","seq":` + u64s(seq) + `,"creditsToCreator":"` + bigStr(res.CreditsToCreator) + `","commissionToOwner":"` + bigStr(res.CommissionToOwner) + `","commissionTo":"` + jsonEscape(res.Owner) + `"}`)
 }
 
 // Payload: {"creator":"<hive-account>","seq":<uint64>}. `creator` IS payload
@@ -1350,9 +1316,6 @@ func Decline(a *string) *string {
 		handleErr(err)
 		return nil
 	}
-	if res.CommissionHbd != nil && res.CommissionHbd.Sign() > 0 {
-		sdk.HiveTransfer(sdk.Address(res.Asker), nativeInt64(res.CommissionHbd), sdk.AssetHbd) // THEN pay the commission back to the ASKER
-	}
 	// F-C1/F-C8: if core.Decline banked the asker's aged position into MATURED
 	// before returning the credits, emit the mint. The recipient is the asker —
 	// which this wrapper's caller is NOT (the caller is the creator) — so we emit
@@ -1361,8 +1324,8 @@ func Decline(a *string) *string {
 		sdk.Log(core.EvTransferSingle(caller, "", res.Asker, creator, res.Graduated))
 		sdk.Log(core.EvMaturedMoved(creator, caller, "", res.Asker, block, res.Graduated))
 	}
-	sdk.Log(core.EvDeclined(creator, caller, block, seq, res.CreditsReturned, res.CommissionHbd, res.Asker))
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + bigStr(res.CreditsReturned) + `","commissionRefundedHbd":"` + bigStr(res.CommissionHbd) + `"}`)
+	sdk.Log(core.EvDeclined(creator, caller, block, seq, res.CreditsReturned, res.Asker))
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + bigStr(res.CreditsReturned) + `"}`)
 }
 
 //go:wasmexport rate
@@ -1429,21 +1392,22 @@ func Reclaim(a *string) *string {
 		handleErr(err)
 		return nil
 	}
-	if res.CommissionHbd != nil && res.CommissionHbd.Sign() > 0 {
-		// CRITICAL: pay res.Asker, NEVER caller — reclaim is permissionless
-		// (H1), so caller may be an unrelated third party pushing someone
-		// else's abandoned escrow. Paying caller here would let a stranger
-		// steal the commission out of an escrow they have no claim to.
-		sdk.HiveTransfer(sdk.Address(res.Asker), nativeInt64(res.CommissionHbd), sdk.AssetHbd) // THEN pay the commission back to the ASKER
+	// NO HiveTransfer HERE ANY MORE (OWNER RULING 2026-09-12). This used to pay
+	// res.CommissionHbd back to res.Asker — never to `caller`, because reclaim is
+	// permissionless (H1) and caller may be an unrelated third party pushing
+	// someone else's abandoned escrow. The commission is tokens now and core
+	// returns it internally to res.Asker's own position, so there is no external
+	// leg left for a stranger to redirect: this door moves no HBD at all.
+	//
+	// `caller` is still logged as actor (the permissionless pusher/keeper,
+	// matching EvRefundPushed's identical actor-vs-recipient shape), never as who
+	// was paid. CommissionRetainedCredits (USER RULING 1, 2026-07-28) is NOT
+	// moved here either — core already credited it to res.Owner. It is logged so
+	// the money model still balances: escrow == returned + retained.
+	if res.Owner != "" && res.OwnerGraduated != nil && res.OwnerGraduated.Sign() > 0 {
+		sdk.Log(core.EvTransferSingle(caller, "", res.Owner, creator, res.OwnerGraduated))
+		sdk.Log(core.EvMaturedMoved(creator, caller, "", res.Owner, block, res.OwnerGraduated))
 	}
-	// M4: EvReclaimed now also carries the commission returned to the
-	// asker, so the indexer's event stream can reconstruct the HBD money
-	// model. `caller` is logged as actor (the permissionless pusher/keeper,
-	// matching EvRefundPushed's identical actor-vs-recipient shape), never
-	// as who was paid.
-	// CommissionRetainedHbd (USER RULING 1, 2026-07-28) is NOT transferred here
-	// — core already booked it to the treasury. It is logged so the money model
-	// still balances: held == paid-to-asker + retained.
 	// F-C1/F-C8: if core.Reclaim banked the asker's aged position into MATURED
 	// before returning the credits, emit the mint from the returned figure.
 	// Reclaim is permissionless, so caller may be a third-party keeper — the
@@ -1452,8 +1416,8 @@ func Reclaim(a *string) *string {
 		sdk.Log(core.EvTransferSingle(caller, "", res.Asker, creator, res.Graduated))
 		sdk.Log(core.EvMaturedMoved(creator, caller, "", res.Asker, block, res.Graduated))
 	}
-	sdk.Log(core.EvReclaimed(creator, caller, block, seq, res.CreditsReturned, res.CommissionHbd, res.CommissionRetainedHbd, res.Asker))
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + bigStr(res.CreditsReturned) + `","commissionRefundedHbd":"` + bigStr(res.CommissionHbd) + `","commissionRetainedHbd":"` + bigStr(res.CommissionRetainedHbd) + `"}`)
+	sdk.Log(core.EvReclaimed(creator, caller, block, seq, res.CreditsReturned, res.CommissionRetainedCredits, res.Owner, res.Asker))
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + bigStr(res.CreditsReturned) + `","commissionRetainedCredits":"` + bigStr(res.CommissionRetainedCredits) + `","retainedTo":"` + jsonEscape(res.Owner) + `"}`)
 }
 
 // Payload: {"creator":"<hive-account>","credits":"<decimal big.Int credits
@@ -2045,14 +2009,17 @@ func Quote(a *string) *string {
 	}
 
 	// The commission comes off the SAME quote as the credits (settlePosted,
-	// settlement.go) rather than being recomputed here: the two legs a buyer
-	// pays must always be the two halves of ONE split of ONE posted face, or a
-	// preview can quote a total the settlement will not charge. Identical value
-	// to core.CommissionOwedFor(face) today — this makes it identical by
-	// construction rather than by coincidence.
-	commissionOwed := q.CommissionHbd
-
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","rate":"` + q.Rate.String() + `","face":"` + face.String() + `","creditsPerAsk":"` + q.Credits.String() + `","commissionOwedHbd":"` + commissionOwed.String() + `","phase":"` + jsonEscape(phase) + `","inflowsOpen":` + boolStr(inflowsOpen) + `}`)
+	// settlement.go) rather than being recomputed here: it is a PARTITION of
+	// creditsPerAsk, not a second charge, and a preview that recomputed it could
+	// quote a split the settlement will not make.
+	//
+	// ★ creditsPerAsk IS THE WHOLE PRICE THE BUYER PAYS, and commissionCredits is
+	// the platform's share OF it (OWNER RULING 2026-09-12). A client must show
+	// creditsPerAsk as the cost and must NOT add the commission to it — the field
+	// was renamed from commissionOwedHbd for exactly that reason. There is no HBD
+	// leg to quote any more, so a client no longer needs to check the buyer's HBD
+	// balance or build a transfer.allow intent for an ask.
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","rate":"` + q.Rate.String() + `","face":"` + face.String() + `","creditsPerAsk":"` + q.Credits.String() + `","commissionCredits":"` + q.CommissionCredits.String() + `","creditsToCreator":"` + new(big.Int).Sub(q.Credits, q.CommissionCredits).String() + `","phase":"` + jsonEscape(phase) + `","inflowsOpen":` + boolStr(inflowsOpen) + `}`)
 }
 
 // Payload: {"creator":"<hive-account>","tokens":"<decimal big.Int token

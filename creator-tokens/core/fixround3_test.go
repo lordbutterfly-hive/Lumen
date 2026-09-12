@@ -47,15 +47,20 @@ func TestWindDownOpenBlock_LapseThenRetire_AnchorsAtRetire(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	paidUntil := reg + SubscriptionPeriod    // 1,864,000
+	// naturalFreeze WAS the block this market's subscription lapse reached
+	// FROZEN at. Since 2026-09-12 there is no lapse (OWNER RULING;
+	// core/params.go), so the market is ACTIVE here and the name is kept only as
+	// the block marker the rest of this fixture is measured against.
+	paidUntil := reg + hzLongGap             // 1,864,000
 	naturalFreeze := paidUntil + GraceBlocks // 2,008,000
-	if Phase(s, c, naturalFreeze) != StateFrozen {
-		t.Fatalf("fixture: phase at naturalFreeze = %s, want FROZEN", Phase(s, c, naturalFreeze))
+	if Phase(s, c, naturalFreeze) != StateActive {
+		t.Fatalf("fixture: phase at naturalFreeze = %s, want ACTIVE (nothing lapses)", Phase(s, c, naturalFreeze))
 	}
 
-	// Long past the freeze. Under the OLD ladder the market had been winding
-	// down since naturalFreeze and a push would fire here. Under A1 nothing is
-	// winding down: no anchor, no push, curve exit intact.
+	// Long past that block. Under the ORIGINAL ladder the market had been
+	// winding down since naturalFreeze and a push would fire here; under A1 a
+	// lapse was not a wind-down; and now there is no lapse at all. All three
+	// readings agree on the assertion: no anchor, no push, curve exit intact.
 	past := naturalFreeze + ExitTaxDecayBlocks + 10 // 3,217,610
 	if open, ok := windDownOpenBlock(s, c, past); ok {
 		t.Fatalf("A1: lapsed market reports wind-down open at %d; must be (0,false)", open)

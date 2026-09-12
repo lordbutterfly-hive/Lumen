@@ -27,7 +27,6 @@ import type {
   RefundHolderInput,
   RefundInput,
   RegisterMarketInput,
-  RenewSubscriptionInput,
   RetireInput,
   SellInput,
   SellQuote,
@@ -39,20 +38,17 @@ import type {
   MarketPrice,
   IndexerHealth,
 } from '../types';
-import type { BoardCreator, ContractRules, CreatorAsksResult, RenewRefusal } from '../types';
+import type { BoardCreator, ContractRules, CreatorAsksResult } from '../types';
 import type { CreatorTokensConfig, CreatorTokensDataSource } from './creator-tokens-data-source';
 import {
   MAX_ASK_DEADLINE_BLOCKS,
   MAX_CAP_CREDITS_BASE_UNITS,
   MAX_FACE_BASE_UNITS,
-  MAX_PREPAID_PERIODS,
   MIN_ASK_DEADLINE_BLOCKS,
   MIN_CAP_CREDITS_BASE_UNITS,
   MIN_FACE_BASE_UNITS,
   OBS_WINDOW,
   RECLAIM_GRACE_BLOCKS,
-  SUBSCRIPTION_FEE_BASE_UNITS,
-  SUBSCRIPTION_PERIOD_BLOCKS,
   askRateFromObservations,
   LONG_RING_CFG,
   baseUnitsToHuman,
@@ -62,7 +58,6 @@ import {
   creditsForAskBaseUnits,
   decodeObservationRing,
   deriveFaceBandBaseUnits,
-  deriveGraceExpiresAtBlock,
   derivePhase,
   floorPricePerTokenBaseUnits,
   humanToBaseUnits,
@@ -75,7 +70,6 @@ import {
   BLOCKS_PER_DAY,
   EXIT_TAX_DECAY_BLOCKS,
   displayPricePerTokenBaseUnits,
-  splitFaceBaseUnits,
   type AskRateEstimate
 } from './contract-math';
 import {
@@ -95,7 +89,6 @@ import {
   refundHolderPayload,
   refundPayload,
   registerPayload,
-  renewPayload,
   retirePayload,
   sellPayload,
   setCapPayload,
@@ -164,7 +157,7 @@ import {
   STATE_CLOSED, assertTransferDestination } from './vsc/reads';
 import { displayPriceUsd } from '../market/curve';
 import { marketHealthOf, windingDownOf } from '../market/market-health';
-import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, renewGateUnder, rulesForCode, windingDownUnder } from '../market/contract-rules';
+import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, rulesForCode, windingDownUnder } from '../market/contract-rules';
 // ★ EXECUTION CONFIRMATION (2026-08-31, seventeen-unconfirmed-writes finding).
 // The money-moving writes confirm by polling the tx's own terminal status
 // through the SAME findTransaction query the wallet rail already runs
@@ -376,7 +369,6 @@ interface BuildMarketState {
   capTokens: number;
   supplyTokens: number;
   reserveBaseUnits: number;
-  paidUntilBlock: number;
   closedStored: boolean;
   globalInflowPaused: boolean;
   registeredAtBlock: number;
@@ -385,29 +377,9 @@ interface BuildMarketState {
   delinquentUntilBlock: number;
 }
 
-/**
- * The pre-signature refusal for renewSubscription, one sentence per reason
- * (types.ts RenewRefusal), each carrying a stable code the Studio can match
- * on the way CREATOR_TOKENS_RENEW_UNCONFIRMED is matched. The creator-facing
- * wording lives in market/lapse.ts; these are the data source's own errors.
- */
-function renewRefusalMessage(reason: RenewRefusal | null): string {
-  switch (reason) {
-    case 'lapsed-terminal':
-      return 'CREATOR_TOKENS_RENEW_REFUSED_LAPSED: this market lapsed past its grace, and the deployed contract does not accept a renewal for it';
-    case 'surplus':
-      return 'CREATOR_TOKENS_RENEW_REFUSED_SURPLUS: this market cannot be relisted; it carries a surplus from refunds made under the previous rules. Retire it, then register again';
-    case 'deficit':
-      return 'CREATOR_TOKENS_RENEW_REFUSED_DEFICIT: this market cannot be relisted; its reserve is below the curve';
-    case 'retired':
-      return 'CREATOR_TOKENS_RENEW_REFUSED_RETIRED: this market is retiring and cannot be renewed';
-    case 'paused':
-      return 'CREATOR_TOKENS_RENEW_REFUSED_PAUSED: payments into markets are paused right now';
-    case 'closed':
-    default:
-      return 'CREATOR_TOKENS_RENEW_REFUSED_CLOSED: this market is closed; register again instead';
-  }
-}
+// THERE IS NO renewRefusalMessage. It turned a RenewRefusal into a coded,
+// creator-facing sentence before a renewal was signed. The 10 HBD monthly
+// subscription was removed on 2026-09-12 (OWNER RULING).
 
 export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   private readonly config: CreatorTokensConfig;
@@ -608,7 +580,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         // either AND away; see Market.canBuy's doc in types.ts for which race
         // each one closes.
         const retiredAtBlock = decodeRetiredAt(state[kRetiredAt(did)]);
-        const phase = derivePhase(marketState === STATE_CLOSED, toU64(state[kPaidUntil(did)]), head, retiredAtBlock);
+        const phase = derivePhase(marketState === STATE_CLOSED, head, retiredAtBlock);
         const delinquent = toU64(state[kDelinquentUntil(did)]) > head;
         const canBuy = canInflowOpen(phase, globalInflowPaused) && retiredAtBlock === null && !delinquent;
         const health = marketHealthOf({ phase, canBuy, windingDown: windingDownOf({ phase, retiredAtBlock, rules }) });
@@ -671,7 +643,6 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         capTokens: toU64(state[kCap(creator)]),
         supplyTokens: toU64(state[kSupply(creator)]),
         reserveBaseUnits: toU64(state[kReserve(creator)]),
-        paidUntilBlock: toU64(state[kPaidUntil(creator)]),
         closedStored: state[kState(creator)] === STATE_CLOSED,
         globalInflowPaused: state[kPaused()] === '1',
         registeredAtBlock,
@@ -693,8 +664,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // derivePhase takes retiredAtBlock as its 4th arg and reproduces the fold
     // exactly — a retired market can never display as ACTIVE even during its
     // still-technically-OVERDUE 5-day notice window.
-    const phase = derivePhase(s.closedStored, s.paidUntilBlock, head, s.retiredAtBlock);
-    const graceExpiresAtBlock = deriveGraceExpiresAtBlock(s.paidUntilBlock);
+    const phase = derivePhase(s.closedStored, head, s.retiredAtBlock);
     const faceBandRaw = deriveFaceBandBaseUnits(s.faceBaseUnits, s.faceSetAtBlock, s.faceAnchorBaseUnits, s.faceAnchorAtBlock, head);
 
     // market.go RequireInflowOpen (the shared gate buy.go's Buy and ask.go's
@@ -734,14 +704,6 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // took from the chain's own report of the deployed bytecode. Under 'v1'
     // every one of these is byte-for-byte what this function computed before.
     const windingDown = windingDownOf({ phase, retiredAtBlock: s.retiredAtBlock, rules });
-    const renewGate = renewGateUnder(rules, {
-      phase,
-      retiredAtBlock: s.retiredAtBlock,
-      globalInflowPaused: s.globalInflowPaused,
-      supplyTokens: s.supplyTokens,
-      reserveBaseUnits: s.reserveBaseUnits
-    });
-
     return {
       creator,
       faceHbd: baseUnitsToHuman(s.faceBaseUnits),
@@ -756,19 +718,13 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       capTokens: s.capTokens,
       supplyTokens: s.supplyTokens,
       reserveHbd: baseUnitsToHuman(s.reserveBaseUnits),
-      paidUntilBlock: s.paidUntilBlock,
-      paidUntilAt: blockToEpochMs(s.paidUntilBlock, head),
       registeredAtBlock: s.registeredAtBlock,
       phase,
-      graceExpiresAtBlock,
-      graceExpiresAt: blockToEpochMs(graceExpiresAtBlock, head),
       globalInflowPaused: s.globalInflowPaused,
       rules,
       headBlock: head,
       canBuy: canFlow,
       canAsk: canFlow,
-      canRenew: renewGate.canRenew,
-      renewRefusal: renewGate.renewRefusal,
       delinquentUntilBlock: delinquent ? s.delinquentUntilBlock : null,
       retiredAtBlock: s.retiredAtBlock,
       windingDown,
@@ -1059,23 +1015,25 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (offeringId !== undefined && offeringId > 0) {
       faceBaseUnits = await this.readOfferingPriceBaseUnits(creator, offeringId);
     }
-    // ask.go splitFace (USER RULING 2026-07-27): the posted face is the
-    // buyer's TOTAL — commission is carved OUT of it, never drawn on top.
-    // tokenLegBaseUnits (never the raw face) is what creditsForAsk must
-    // price; see splitFaceBaseUnits's own doc (contract-math.ts) for the
-    // "posted 200 cost 224" autopsy this closes.
-    const { tokenLegBaseUnits, commissionBaseUnits } = splitFaceBaseUnits(faceBaseUnits);
-    const commissionHbd = baseUnitsToHuman(commissionBaseUnits);
-    const base: Omit<Quote, 'rate' | 'creditsRequired' | 'creditsRequiredBaseUnits' | 'oracleStatus' | 'asOfBlock'> = {
+    // ★ THE WHOLE POSTED FACE IS PRICED IN TOKENS (OWNER RULING 2026-09-12).
+    // The posted face is still the buyer's TOTAL — the 2026-07-27 ruling is
+    // untouched — but the platform's 12%% is carved out of the RESULTING CREDITS
+    // inside the escrow instead of being drawn as a second HBD leg, so there is
+    // no token leg to compute here and no HBD for the buyer to hold.
+    const base: Omit<Quote, 'rate' | 'creditsRequired' | 'creditsRequiredBaseUnits' | 'commissionCredits' | 'oracleStatus' | 'asOfBlock'> = {
       creator,
-      faceHbd: baseUnitsToHuman(faceBaseUnits),
-      commissionHbd
+      faceHbd: baseUnitsToHuman(faceBaseUnits)
     };
+    // commissionCredits is NULL on an unpriced quote, deliberately: it is a
+    // fraction of the credits, and without a rate there are no credits. Showing
+    // 0 there would read as "the platform takes nothing", which is a different
+    // and false statement.
     const unpriced = (oracleStatus: Quote['oracleStatus'], asOfBlock: number): Quote => ({
       ...base,
       rate: null,
       creditsRequired: null,
       creditsRequiredBaseUnits: null,
+      commissionCredits: null,
       oracleStatus,
       asOfBlock
     });
@@ -1120,13 +1078,13 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (settlement.rateBaseUnits === null) {
       return unpriced(settlement.status, head);
     }
-    const creditsRequiredBaseUnits = creditsForAskBaseUnits(tokenLegBaseUnits, settlement.rateBaseUnits);
+    const creditsRequiredBaseUnits = creditsForAskBaseUnits(faceBaseUnits, settlement.rateBaseUnits);
     // ★ H1 (2026-08-31): the rate passed above; now run settleSpend's OWN guards
     // (min-price, depth ceiling, spend cap, market-too-small). These fire on
     // healthy markets when the posted face is outside the window that moves with
     // supply, and without this a green quote led to a signed ask the chain
     // refused only at settlement. Same order the contract enforces.
-    const spend = settleSpendStatus(tokenLegBaseUnits, settlement.rateBaseUnits, supplyTokens, creditsRequiredBaseUnits);
+    const spend = settleSpendStatus(faceBaseUnits, settlement.rateBaseUnits, supplyTokens, creditsRequiredBaseUnits);
     if (spend !== 'ok') return unpriced(spend, head);
     return {
       ...base,
@@ -1138,6 +1096,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       // by 1000 here — see types.ts's Quote.creditsRequired doc).
       creditsRequired: creditsRequiredBaseUnits,
       creditsRequiredBaseUnits,
+      commissionCredits: commissionOwedForBaseUnits(creditsRequiredBaseUnits),
       oracleStatus: settlement.status,
       asOfBlock: head
     };
@@ -1164,9 +1123,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // pause + not-retired), THEN the cap check. Mirrored client-side so a
     // doomed call fails fast rather than spending RC on a guaranteed revert.
     const closedStored = state[kState(creator)] === STATE_CLOSED;
-    const paidUntilBlock = toU64(state[kPaidUntil(creator)]);
     const retiredAtBlock = decodeRetiredAt(state[kRetiredAt(creator)]);
-    const phase = derivePhase(closedStored, paidUntilBlock, head, retiredAtBlock);
+    const phase = derivePhase(closedStored, head, retiredAtBlock);
     const globalInflowPaused = state[kPaused()] === '1';
     if (!(canInflowOpen(phase, globalInflowPaused) && retiredAtBlock === null)) {
       throw new Error('VscCreatorTokensDataSource: market inflow is not open (frozen, closed, retiring, or globally paused)');
@@ -1248,9 +1206,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // no: A1 made a lapse an inflow stop), which is why the predicate is the
     // shared rules-aware one and not the inline v1 shape that used to be here.
     const closedStored = state[kState(creator)] === STATE_CLOSED;
-    const paidUntilBlock = toU64(state[kPaidUntil(creator)]);
     const retiredAtBlock = decodeRetiredAt(state[kRetiredAt(creator)]);
-    const phase = derivePhase(closedStored, paidUntilBlock, head, retiredAtBlock);
+    const phase = derivePhase(closedStored, head, retiredAtBlock);
     if (windingDownOf({ phase, retiredAtBlock, rules })) {
       throw new Error('VscCreatorTokensDataSource: curve sell is closed while the market winds down; exit via refund() instead');
     }
@@ -1378,9 +1335,6 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
           // kReserve" rule) — firstBuyQuote.costBaseUnits, never totalDue.
           supplyTokens: firstBuyTokens,
           reserveBaseUnits: firstBuyQuote?.costBaseUnits ?? 0,
-          // core.Register grants the first subscription period (mock parity:
-          // paidUntil = head + SubscriptionPeriod).
-          paidUntilBlock: head + SUBSCRIPTION_PERIOD_BLOCKS,
           closedStored: false,
           globalInflowPaused: false,
           registeredAtBlock: head,
@@ -1506,136 +1460,20 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     return { txId, registered: true, offerings };
   }
 
-  async renewSubscription(input: RenewSubscriptionInput): Promise<Market> {
-    this.assertBroadcaster();
-    // market.go Renew: periods bounded before any arithmetic, exactly
-    // mirroring core's own ordering (this check runs before core computes
-    // newPaidUntil).
-    if (input.periods < 1 || input.periods > MAX_PREPAID_PERIODS) {
-      throw new Error('VscCreatorTokensDataSource: periods out of range [1, MaxPrepaidPeriods]');
-    }
-    // market.go Renew -> RequireInflowOpen — the SAME phase+pause+not-retired
-    // gate Buy/Ask already read the market for. Renew is permissionless (any
-    // fan may pay), but the MARKET must still be able to accept inflows — a
-    // lapsed-past-grace, CLOSED, or RETIRING market cannot be "renewed" back
-    // to life (market.go Renew's own marketRetired guard; SPEC §1.7.5 routes
-    // a genuine lapse through Register instead). Skipped — never blocked —
-    // when the market can't be read or was never registered, same "band
-    // check only, not an existence check" reasoning as every other guard in
-    // this file that reads a fresh Market.
-    //
-    // ★★★ CORRECTED 2026-08-30 — THIS COMMENT AND THIS GUARD WERE BOTH WRONG.
-    // The claim above that "Renew -> RequireInflowOpen" is false. core.Renew
-    // calls requireMarketAcceptsMoney (market.go:795-800), and the contract
-    // says why in its own words, having found this exact defect on 2026-07-27
-    // and called it fatal: the delivery penalty runs 7 days while the grace
-    // runs 5, so a penalty near a renewal date outlives the grace, the market
-    // hits FROZEN where Renew is illegal forever, and a self-clearing penalty
-    // becomes PERMANENT destruction of the market with every holder dumped on
-    // the pro-rata rail. "An attacker only had to time three junk asks."
-    // The contract fixed it; this client had re-introduced it by gating on
-    // canBuy, which carries the delivery term. Blocking a debtor from paying
-    // you is not a penalty, it is a trap. Gate on canRenew, never canBuy.
-    const [market, head] = await Promise.all([this.readMarket(input.creator), this.gql.getHeadBlockCached()]);
-    if (market && market.phase !== 'UNKNOWN') {
-      if (!market.canRenew) {
-        throw new Error(renewRefusalMessage(market.renewRefusal));
-      }
-      if (head !== null) {
-        const base = Math.max(market.paidUntilBlock, head);
-        const newPaidUntil = base + input.periods * SUBSCRIPTION_PERIOD_BLOCKS;
-        const maxAllowed = head + MAX_PREPAID_PERIODS * SUBSCRIPTION_PERIOD_BLOCKS;
-        if (newPaidUntil > maxAllowed) {
-          throw new Error('VscCreatorTokensDataSource: extension exceeds MaxPrepaidPeriods ahead of now');
-        }
-      }
-    }
-    const paidBaseUnits = SUBSCRIPTION_FEE_BASE_UNITS * input.periods;
-    const op = buildOp({
-      netId: this.config.netId,
-      contractId: this.config.contractId,
-      action: 'renew',
-      payload: renewPayload(toDid(input.creator), input.periods, paidBaseUnits),
-      hbdLegBaseUnits: paidBaseUnits,
-      activeAuth: input.caller,
-      rcLimit: this.config.rcLimit
-    });
-    await this.broadcast(op);
-    // ★★★ S4 (studio checklist, 2026-08-30): "PAID" MUST MEAN THE CHAIN MOVED.
-    // The Hive rail (lib/vsc/broadcaster.ts) resolves the moment Hive accepts
-    // the custom_json ENVELOPE, before Magi has executed it, so this used to
-    // return "paid" for a payment the contract had not yet seen and might
-    // still refuse (paused, retired, a stale nonce) — which is literally the
-    // "they pay and get delisted anyway" case. The wallet rail never had the
-    // hole: it awaits `waitForInclusion` (lib/lite/wallet/vsc-tx/submit.ts).
-    // Both rails now converge on ONE proof that does not need a tx id at all:
-    // the state itself. kPaidUntil is the single key Renew writes
-    // (market.go:843 setU64(kPaidUntil)), so polling it until it moves past
-    // the pre-broadcast value is exactly "Magi executed our renew", on either
-    // rail. MEASURED, not assumed (57, 2026-08-30, a real signed setCap on a
-    // wallet-DID market through this same proxy): INCLUDED at +0 s, state
-    // still the OLD value at +6 s, the new value at +21 s. Inclusion is not
-    // execution and execution is not immediately readable, which is why the
-    // cadence below is 3 s over 90 s and not one read after the receipt.
-    // Bounded (same window the wallet rail uses); on timeout this THROWS
-    // rather than returning a pending market, because a "paid" that is not
-    // paid is the fault being fixed — the message tells the creator to CHECK,
-    // never to pay again (Renew stacks from max(paidUntil, block), so a blind
-    // retry buys a second month).
-    const before = market && market.phase !== 'UNKNOWN' ? market.paidUntilBlock : null;
-    const confirmed = await this.awaitPaidUntilAdvance(input.creator, before);
-    if (!confirmed) {
-      throw new Error(
-        'CREATOR_TOKENS_RENEW_UNCONFIRMED: Hive accepted the payment, but Magi has not recorded it yet. It may still land in a moment. Check again rather than paying again, or you could pay for a second month.'
-      );
-    }
-    // Confirmed on chain: return the REAL post-execution market, not a
-    // projection. A failed re-read falls through to the projection below with
-    // pending: true, which the UI shows as unconfirmed — never a fabricated value.
-    const fresh = await this.readMarket(input.creator);
-    if (fresh && fresh.phase !== 'UNKNOWN') return fresh;
-    // Optimistic PENDING result (see registerMarket): project the extended
-    // paidUntil locally from the pre-broadcast read rather than re-reading
-    // PRE-execution state. If the pre-read was unusable (null/UNKNOWN/no head)
-    // we cannot project it — surface an UNKNOWN pending market so the UI shows
-    // "unconfirmed", never a fabricated value.
-    if (!market || market.phase === 'UNKNOWN' || head === null) {
-      return { ...(market ?? unknownMarket(input.creator)), pending: true };
-    }
-    const newPaidUntilBlock = Math.max(market.paidUntilBlock, head) + input.periods * SUBSCRIPTION_PERIOD_BLOCKS;
-    const renewedPhase = derivePhase(false, newPaidUntilBlock, head, market.retiredAtBlock);
-    const graceExpiresAtBlock = deriveGraceExpiresAtBlock(newPaidUntilBlock);
-    // ★ The same two-gate split as buildMarket (2026-08-30). This projection had
-    // silently DROPPED the delivery term from canBuy, so an optimistic renew
-    // re-opened the Buy button for a delinquent creator until the next refetch.
-    // canRenew correctly ignores delivery; canBuy correctly keeps it.
-    const acceptsMoney = canInflowOpen(renewedPhase, market.globalInflowPaused) && market.retiredAtBlock === null;
-    const canFlow = acceptsMoney && market.delinquentUntilBlock === null;
-    // Same lockstep as buildMarket, under the rules this market was read with.
-    const renewGate = renewGateUnder(market.rules, {
-      phase: renewedPhase,
-      retiredAtBlock: market.retiredAtBlock,
-      globalInflowPaused: market.globalInflowPaused,
-      supplyTokens: market.supplyTokens,
-      reserveBaseUnits: humanToBaseUnits(market.reserveHbd)
-    });
-    return {
-      ...market,
-      paidUntilBlock: newPaidUntilBlock,
-      paidUntilAt: blockToEpochMs(newPaidUntilBlock, head),
-      graceExpiresAtBlock,
-      graceExpiresAt: blockToEpochMs(graceExpiresAtBlock, head),
-      phase: renewedPhase,
-      headBlock: head,
-      windingDown: windingDownOf({ phase: renewedPhase, retiredAtBlock: market.retiredAtBlock, rules: market.rules }),
-      canBuy: canFlow,
-      canAsk: canFlow,
-      canRenew: renewGate.canRenew,
-      renewRefusal: renewGate.renewRefusal,
-      pending: true
-    };
-  }
-
+  // THERE IS NO renewSubscription. It broadcast the `renew` op — periods
+  // bounded, the canRenew gate checked, the HBD leg attached, and then the S4
+  // proof that "paid" meant the chain had actually moved kPaidUntil. The 10 HBD
+  // monthly subscription was removed from the contract on 2026-09-12 (OWNER
+  // RULING; creator-tokens/core/params.go), taking core.Renew, the `renew`
+  // wasmexport and the paid_until clock with it. A market is ACTIVE from
+  // registration until its creator retires it, so there is no bill to pay and no
+  // state for this method to advance.
+  //
+  // ★ THE S4 LESSON OUTLIVES THE METHOD and is why this note is here rather than
+  // a silent deletion: "paid" must mean the chain moved, and the Hive rail
+  // resolves on ENVELOPE ACCEPTANCE, not execution. Every other money write in
+  // this file confirms against state or awaitExecution for that reason; if a
+  // paid tier is ever re-introduced, its confirmation must too.
   async setFace(input: SetFaceInput): Promise<Market> {
     this.assertBroadcaster();
     const newFaceBaseUnits = humanToBaseUnits(input.newFaceHbd);
@@ -1901,15 +1739,13 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // BOTH new inflows AND the curve Sell rail close IMMEDIATELY, not just
     // once the notice expires to FROZEN.
     const retiredAtBlock = head;
-    const retiredPhase = derivePhase(false, priorMarket.paidUntilBlock, head, retiredAtBlock);
+    const retiredPhase = derivePhase(false, head, retiredAtBlock);
     return {
       ...priorMarket,
       retiredAtBlock,
       phase: retiredPhase,
       canBuy: false,
       canAsk: false,
-      // requireMarketAcceptsMoney refuses a retired market too (market.go:408).
-      canRenew: false,
       pending: true
     };
   }
@@ -2063,7 +1899,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         const phase =
           head === null
             ? ('UNKNOWN' as const)
-            : derivePhase(state[kState(r.creator)] === STATE_CLOSED, toU64(state[kPaidUntil(r.creator)]), head, retiredAtBlock);
+            : derivePhase(state[kState(r.creator)] === STATE_CLOSED, head, retiredAtBlock);
         // ★ WINDING DOWN vs a RECOVERABLE PAUSE (2026-09-01). The grid used to
         // label every FROZEN market "Delisted", a v2-only word meaning a
         // recoverable pause, so a RETIRED or v1-frozen (permanent) wind-down read
@@ -2333,29 +2169,28 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (quote.creditsRequiredBaseUnits > input.maxCreditsBaseUnits) {
       throw new Error('VscCreatorTokensDataSource: settlement price exceeds maxCreditsBaseUnits');
     }
-    // H2 fix (kept): the wrapper computes the EXACT commission itself via
-    // core.CommissionOwedFor — main.go's `ask` entrypoint no longer reads a
-    // commissionHbdPaid payload field at all (askPayload lost that parameter
-    // with the pivot), so this is the intents-only HBD leg, never a wire field.
-    const commissionBaseUnits = commissionOwedForBaseUnits(humanToBaseUnits(quote.faceHbd));
+    // ★ NO HBD LEG (OWNER RULING 2026-09-12). This used to attach an
+    // intents-only HBD leg of core.CommissionOwedFor(face) — the 12% commission
+    // the `ask` entrypoint drew with sdk.HiveDraw. The commission is carved out
+    // of the escrowed TOKENS now, so an ask is a pure token spend: the buyer
+    // signs one intent, holds no HBD, and needs no transfer.allow.
     const op = buildOp({
       netId: this.config.netId,
       contractId: this.config.contractId,
       action: 'ask',
       payload: askPayload(toDid(input.creator), input.contentHash, input.deadlineBlocks, input.maxCreditsBaseUnits, input.offeringId),
-      hbdLegBaseUnits: commissionBaseUnits,
       activeAuth: input.asker,
       rcLimit: this.config.rcLimit
     });
     const txId = await this.broadcast(op);
-    // ★ CONFIRM EXECUTION (2026-08-31). An ask escrows the asker's tokens and
-    // charges the HBD commission; a refusal (settlement-spend cap, a closed
+    // ★ CONFIRM EXECUTION (2026-08-31). An ask escrows the asker's tokens; a
+    // refusal (settlement-spend cap, a closed
     // window, the delivery gate) used to return an optimistic 'awaiting' Ask as
     // though the escrow had opened. It is the escrow op that OPENS one, so its
     // three siblings (answer/decline/reclaim) confirm and this did not.
     const outcome = await this.awaitExecution(txId);
     if (outcome === 'failed') {
-      throw new Error('CREATOR_TOKENS_ASK_REFUSED: the chain refused this request, so nothing was escrowed and no commission was charged.');
+      throw new Error('CREATOR_TOKENS_ASK_REFUSED: the chain refused this request, so nothing was escrowed.');
     }
     if (outcome === 'timeout') {
       throw new Error(

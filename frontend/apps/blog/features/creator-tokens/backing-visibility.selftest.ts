@@ -123,10 +123,16 @@ console.log('\n── 3. EVERY SITE IS BEHIND IT. Enumerated, and counted.\n');
   check('★ the backing-per-token stat is inside it', guarded.includes('{BACKING_PER_TOKEN_LABEL}') && guarded.includes('{backingPerTokenValue(market.floorUsd, market.supply)}'));
   check('★ …and so are both `?` explainers, which are nodes a reader could otherwise still focus', guarded.includes('title={BACKING_TOTAL_NOTE}') && guarded.includes('aria-label={BACKING_PER_TOKEN_ARIA}') && count(view.code, 'role="note"') === 2);
   check('★ each stat label is rendered exactly once, so nothing was duplicated outside the guard', count(view.code, '{BACKING_TOTAL_LABEL}') === 1 && count(view.code, '{BACKING_PER_TOKEN_LABEL}') === 1);
+  // ★ RE-POINTED 2026-09-12. The OVERDUE banner was the only other site that
+  // quoted the backing figure, and it is gone with the subscription (OWNER
+  // RULING; core/params.go): OVERDUE is now only the retire notice, which the
+  // wind-down banner owns and which carries no figure. So the figure appears
+  // exactly ONCE, inside the guard — which is a stronger statement than the one
+  // this check used to make, not a weaker one.
   check(
-    '★ the only OTHER use of the figure is the overdue banner, which self-guards inside overdueFigures',
-    count(view.code, 'backingPerTokenValue(market.floorUsd, market.supply)') === 2 &&
-      view.code.includes('overdueBanner(overdueFigures(backingPerTokenValue(market.floorUsd, market.supply), market.priceUsd), market.rules)')
+    '★ the figure now appears ONCE, inside the guard — the overdue banner that also quoted it is gone with the subscription',
+    count(view.code, 'backingPerTokenValue(market.floorUsd, market.supply)') === 1 &&
+      !view.code.includes('overdueBanner(')
   );
   check('★ it is not rendered and then hidden with CSS', !guarded.includes('display:none') && !guarded.includes('hidden ') && !view.code.includes('SHOW_BACKING_FIGURES ? "" :'));
 
@@ -245,11 +251,17 @@ console.log('\n── 4. NO SENTENCE POINTS AT A FIGURE THAT IS NOT THERE.\n');
   // (Refund/RefundHolder are pull rails somebody has to call), so "can redeem"
   // is what was always true. The assertion now pins the GATE rather than the
   // wording it was holding in place.
+  // ★ RE-POINTED 2026-09-12. This pinned the Billing tab's "if you stop paying…"
+  // sentence to the chain's own rules, because the unconditional v1 version had
+  // been telling every creator that lapsing refunds their holders. There is no
+  // lapse and no bill since the OWNER RULING (core/params.go), so the sentence
+  // is gone rather than gated — and what has to be asserted instead is that
+  // NOTHING on that tab claims there is one.
   check(
-    '★ the billing lapse sentence is GATED on the chain rules, not hard-set to one contract',
-    studio.code.includes("market.rules === 'v2'") &&
-      count(studio.code, 'stops taking new buyers') >= 1 &&
-      count(studio.code, 'can redeem their share of the reserve') === 1
+    '★ the Billing tab makes no subscription claim at all — there is no bill to describe',
+    count(studio.code, 'stop paying') === 0 &&
+      count(studio.code, 'Renew ~$10') === 0 &&
+      studio.code.includes('There is no subscription and nothing to renew')
   );
   check(
     '★ …and the false "holders are refunded" claim is gone from the studio entirely',
@@ -291,10 +303,16 @@ console.log('\n── 4. NO SENTENCE POINTS AT A FIGURE THAT IS NOT THERE.\n');
   const redeemSentences = [...studio.code.matchAll(/redeem (?:a (?:pro-rata )?slice|their share) of the reserve[^.;]*/g)].map(
     (m) => m[0]
   );
-  check('the redeem-sentence scan found all three sites', redeemSentences.length === 3, `${redeemSentences.length} sites`);
+  // TWO sites since 2026-09-12, not three: the third was the Billing tab's
+  // "if you stop paying… holders can redeem their share of the reserve" line,
+  // which went with the subscription itself. The two that remain are both
+  // wind-down sentences, and the guarantee is unchanged — every sentence that
+  // tells a holder they can redeem from the reserve names the early-exit fee
+  // inside that same sentence.
+  check('the redeem-sentence scan found both remaining sites', redeemSentences.length === 2, `${redeemSentences.length} sites`);
   check(
     '★ …and every one of them names the early-exit fee',
-    redeemSentences.length === 3 && redeemSentences.every((line) => line.includes('early-exit fee')),
+    redeemSentences.length === 2 && redeemSentences.every((line) => line.includes('early-exit fee')),
     redeemSentences.map((line) => (line.includes('early-exit fee') ? 'ok' : `MISSING -> "${line.slice(0, 70)}"`)).join(' | ')
   );
 }
@@ -304,7 +322,8 @@ console.log('\n── 5. THE COPY MODULE IS WIRED THROUGH ITS SELECTORS, NOT ITS
   check('★ the closing note goes through honestNote()', view.code.includes('{honestNote()}') && !view.code.includes('{HONEST_NOTE}'));
   check('★ the interstitial goes through interstitialLines()', modals.code.includes('interstitialLines().map') && !modals.code.includes('INTERSTITIAL_LINES.map'));
   check('★ the buy dialog still passes the figure, so nothing has to be rewired when the flag flips', modals.code.includes('{buyRiskNote(backingPerTokenValue(m.floorUsd, m.supply))}'));
-  check('★ the overdue banner still passes it too', view.code.includes('overdueFigures(backingPerTokenValue(market.floorUsd, market.supply), market.priceUsd)'));
+  // (The overdue banner used to pass the figure through overdueFigures() too;
+  // it is gone with the subscription — see the re-pointed check in section 2.)
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed`);

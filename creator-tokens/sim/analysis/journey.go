@@ -118,7 +118,7 @@ type ReclaimGapWindow struct {
 	Creator       string
 	Seq           uint64
 	Asker         string
-	CommissionHbd *big.Int
+	CommissionCredits *big.Int
 	Credits       *big.Int // nil if not resolved from the trace
 	CreditsApprox bool
 
@@ -140,7 +140,7 @@ type UnclaimedEscrow struct {
 	Creator           string
 	Seq               uint64
 	Asker             string
-	CommissionHbd     *big.Int
+	CommissionCredits     *big.Int
 	ReclaimEligibleAt uint64 // deadline+ReclaimGrace+1
 	TraceEndBlock     uint64
 }
@@ -255,7 +255,7 @@ func (r DeadEndReport) render(b *strings.Builder) {
 				}
 			}
 			fmt.Fprintf(b, "  %s seq=%d asker=%-12s commission=%s credits=%s gap=[%d,%d] resolution=%s\n",
-				w.Creator, w.Seq, w.Asker, w.CommissionHbd, credits, w.GapStart, w.GapEnd, w.Resolution)
+				w.Creator, w.Seq, w.Asker, w.CommissionCredits, credits, w.GapStart, w.GapEnd, w.Resolution)
 			shown++
 		}
 	}
@@ -318,7 +318,7 @@ func (r DeadEndReport) render(b *strings.Builder) {
 
 type journeyEscrow struct {
 	asker         string
-	commissionHbd *big.Int
+	commissionCredits *big.Int
 	credits       *big.Int
 	creditsApprox bool
 	deadline      uint64
@@ -458,7 +458,7 @@ func AnalyzeDeadEnds(tr *Trace) DeadEndReport {
 							})
 							rpt.Persistent = append(rpt.Persistent, PersistentDeadEnd{
 								Actor: ev.Actor, Creator: c, Block: ev.Block,
-								Holding: fmt.Sprintf("escrow seq %d (%s commission)", seq, esc.commissionHbd), AttemptedAction: "reclaim",
+								Holding: fmt.Sprintf("escrow seq %d (%s commission)", seq, esc.commissionCredits), AttemptedAction: "reclaim",
 								Reason: ev.ErrSym + ": " + ev.ErrMsg, EventIndex: i,
 							})
 						}
@@ -516,9 +516,19 @@ func AnalyzeDeadEnds(tr *Trace) DeadEndReport {
 			}
 		case "ask":
 			deadlineBlocks, okD := argU64(ev, "deadlineBlocks")
-			commissionPaid, okC := argBig(ev, "commissionHbdPaid")
-			if !okD || !okC {
-				rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d (ask by %s): missing Args.deadlineBlocks/commissionHbdPaid, escrow not tracked", i, ev.Actor))
+			// commissionCredits replaced commissionCreditsPaid on 2026-09-12 (the
+			// commission is a slice of the escrow's own tokens now). It is
+			// OPTIONAL here, unlike the old field: a missing one costs the report
+			// one descriptive number, where a missing deadline means the escrow's
+			// whole lifecycle is untrackable. Gating the escrow on it — which the
+			// old code did — is what silently stopped every escrow being tracked
+			// at all the first time this field was renamed.
+			commissionPaid, okC := argBig(ev, "commissionCredits")
+			if !okC {
+				commissionPaid = zeroBig()
+			}
+			if !okD {
+				rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d (ask by %s): missing Args.deadlineBlocks, escrow not tracked", i, ev.Actor))
 				continue
 			}
 			seq := nextSeq[c]
@@ -528,7 +538,7 @@ func AnalyzeDeadEnds(tr *Trace) DeadEndReport {
 				escrows[c] = map[uint64]*journeyEscrow{}
 			}
 			escrows[c][seq] = &journeyEscrow{
-				asker: ev.Actor, commissionHbd: commissionPaid,
+				asker: ev.Actor, commissionCredits: commissionPaid,
 				credits: credits, creditsApprox: !okCred,
 				deadline: ev.Block + deadlineBlocks, status: "PENDING",
 			}
@@ -593,7 +603,7 @@ func AnalyzeDeadEnds(tr *Trace) DeadEndReport {
 				permissionlessByCreator[c] = true
 			}
 			gap := ReclaimGapWindow{
-				Creator: c, Seq: seq, Asker: esc.asker, CommissionHbd: esc.commissionHbd,
+				Creator: c, Seq: seq, Asker: esc.asker, CommissionCredits: esc.commissionCredits,
 				Credits: esc.credits, CreditsApprox: esc.creditsApprox,
 				Deadline: esc.deadline, GapStart: esc.deadline + 1, GapEnd: esc.deadline + reclaimGrace,
 				Resolution: "reclaimed",
@@ -635,7 +645,7 @@ func AnalyzeDeadEnds(tr *Trace) DeadEndReport {
 				// still within the answer window — in progress, not a dead end.
 			case traceEndBlock <= reclaimAt:
 				gap := ReclaimGapWindow{
-					Creator: c, Seq: seq, Asker: esc.asker, CommissionHbd: esc.commissionHbd,
+					Creator: c, Seq: seq, Asker: esc.asker, CommissionCredits: esc.commissionCredits,
 					Credits: esc.credits, CreditsApprox: esc.creditsApprox,
 					Deadline: esc.deadline, GapStart: esc.deadline + 1, GapEnd: reclaimAt,
 					Resolution: "unresolved-at-trace-end",
@@ -647,7 +657,7 @@ func AnalyzeDeadEnds(tr *Trace) DeadEndReport {
 				// escrow still PENDING, nobody resolved it. Per ACTOR this is
 				// only a UX/awareness signal — Reclaim was legally available.
 				rpt.UnclaimedEligible = append(rpt.UnclaimedEligible, UnclaimedEscrow{
-					Creator: c, Seq: seq, Asker: esc.asker, CommissionHbd: esc.commissionHbd,
+					Creator: c, Seq: seq, Asker: esc.asker, CommissionCredits: esc.commissionCredits,
 					ReclaimEligibleAt: reclaimAt + 1, TraceEndBlock: traceEndBlock,
 				})
 				// Per MARKET, though, if that market is FROZEN this same escrow

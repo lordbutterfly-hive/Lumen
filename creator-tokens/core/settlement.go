@@ -81,13 +81,22 @@ import "math/big"
 type SettleQuote struct {
 	Credits *big.Int // ceil(tokenLeg/rate) — RULING C keeps the ceil (floor would admit c == 0, a free service)
 	Rate    *big.Int // min(spot, median(TWAP_short, TWAP_long, spot)) — robust to one walked/stale arm
-	// CommissionHbd is the HBD leg of the SAME posted face these credits were
-	// derived from (splitFace, ask.go — USER RULING 2026-07-27). It is set
-	// only by settlePosted; a bare settleSpend call leaves it nil, because a
-	// raw token leg has no posted face to take a commission from. Ask gates
-	// on THIS value rather than recomputing the commission, so the
-	// credit leg and the HBD leg can never be derived from two different faces.
-	CommissionHbd *big.Int
+	// CommissionCredits is the platform's slice OF `Credits` — the same tokens,
+	// not a second asset (OWNER RULING 2026-09-12, CommissionBps). It is set
+	// only by settlePosted; a bare settleSpend call leaves it nil, because a raw
+	// token count has no posted face to take a commission from.
+	//
+	// ★ IT USED TO BE CommissionHbd, A SECOND LEG IN A SECOND CURRENCY. The
+	// buyer paid 88% of the posted face in tokens and signed a separate
+	// transfer.allow for 12% of it in HBD, which the wrapper drew with
+	// sdk.HiveDraw. That made the product's own core loop — hold a creator's
+	// token, spend it on that creator's services — impossible for anyone who
+	// held only tokens. Now Credits is the WHOLE posted price in tokens and this
+	// is 12% of it, carved out at settlement and paid to the owner account on
+	// delivery. Ask records THIS value in the escrow rather than recomputing it,
+	// so the quote, the escrow and the payout can never be three different
+	// numbers.
+	CommissionCredits *big.Int
 }
 
 // SettlementRate derives the rate (HBD base units per token) every service
@@ -291,78 +300,17 @@ func ServiceFaceRange(s Store, creator string, block uint64) (minFace, maxFace *
 	if err != nil {
 		return nil, nil, err
 	}
+	// ★ NO GROSS-UP ANY MORE (OWNER RULING 2026-09-12). serviceFaceBounds bounds
+	// exactly what settleSpend prices, and settleSpend now prices the WHOLE
+	// posted face (settlePosted below) instead of an 88% token leg, so these
+	// bounds ARE the posted-face window. The two inverse searches that used to
+	// gross lo and hi up through splitFace — minPostedForTokenLeg /
+	// maxPostedForTokenLeg — are deleted with splitFace itself.
 	lo, hi := serviceFaceBounds(rate, getMoney(s, kSupply(creator)))
 	if lo.Cmp(hi) > 0 {
 		return nil, nil, newErr(ErrState, "market too small to price any service: no face satisfies both the minimum-price guard and the depth ceiling at this supply")
 	}
-	// serviceFaceBounds bounds the TOKEN LEG (what settleSpend prices). A
-	// creator posts a GROSS price, of which only 100%-CommissionBps reaches
-	// the token leg (splitFace, USER RULING 2026-07-27), so the window shown
-	// to a creator must be grossed up — otherwise a creator posts a price this
-	// function called legal and the settlement refuses it.
-	minPosted := minPostedForTokenLeg(lo)
-	maxPosted := maxPostedForTokenLeg(hi)
-	if minPosted.Cmp(maxPosted) > 0 {
-		// The gross-up is monotone, so this can only fire where lo and hi were
-		// already within one base unit of each other — report it as the same
-		// honest "no legal price exists" state rather than an inverted range.
-		return nil, nil, newErr(ErrState, "market too small to price any service: no face satisfies both the minimum-price guard and the depth ceiling at this supply")
-	}
-	return minPosted, maxPosted, nil
-}
-
-// minPostedForTokenLeg / maxPostedForTokenLeg invert splitFace's token leg:
-// given a bound on the token leg they return the tightest POSTED face that
-// satisfies it. splitFace's token leg is monotone non-decreasing in the posted
-// face (each step of +1 adds 0 or 1 to the leg), so both searches start from
-// the exact rational estimate and can only ever be off by the single base unit
-// the floor division discards — the correction loops below therefore run at
-// most a couple of iterations, never a scan.
-func minPostedForTokenLeg(lo *big.Int) *big.Int {
-	den := big.NewInt(10000 - int64(CommissionBps))
-	p := mMulDivCeil(lo, big.NewInt(10000), den)
-	if p.Sign() <= 0 {
-		p = big.NewInt(1)
-	}
-	one := big.NewInt(1)
-	for {
-		leg, _ := splitFace(p)
-		if leg.Cmp(lo) >= 0 {
-			break
-		}
-		p = new(big.Int).Add(p, one)
-	}
-	for p.Cmp(one) > 0 {
-		prev := new(big.Int).Sub(p, one)
-		leg, _ := splitFace(prev)
-		if leg.Cmp(lo) < 0 {
-			break
-		}
-		p = prev
-	}
-	return p
-}
-
-func maxPostedForTokenLeg(hi *big.Int) *big.Int {
-	den := big.NewInt(10000 - int64(CommissionBps))
-	p := mMulDiv(hi, big.NewInt(10000), den)
-	one := big.NewInt(1)
-	for p.Sign() > 0 {
-		leg, _ := splitFace(p)
-		if leg.Cmp(hi) <= 0 {
-			break
-		}
-		p = new(big.Int).Sub(p, one)
-	}
-	for {
-		next := new(big.Int).Add(p, one)
-		leg, _ := splitFace(next)
-		if leg.Cmp(hi) > 0 {
-			break
-		}
-		p = next
-	}
-	return p
+	return lo, hi, nil
 }
 
 // SettleSpend is the exported preview of settleSpend for the wasm wrapper's
@@ -374,40 +322,48 @@ func SettleSpend(s Store, creator string, block uint64, face *big.Int) (*SettleQ
 }
 
 // settlePosted is the ONE door between a creator's POSTED price and a
-// settlement. It splits the posted face into its token leg and its HBD
-// commission leg (splitFace, ask.go — USER RULING 2026-07-27: the price on the
-// screen is the price the buyer pays), prices ONLY the token leg through
-// settleSpend, and carries the commission back out on the quote so the caller
-// gates on the same number the same face produced.
+// settlement. It prices the WHOLE posted face through settleSpend and then
+// carves the platform's commission out of the RESULTING TOKENS, so the caller
+// gates on the same two numbers the same face produced.
 //
-// WHY THE SPLIT LIVES HERE AND NOT IN THE CALLERS. Ask and the
-// wasm `quote` preview all funnel through this function, so there is exactly
-// one place where a posted face becomes two legs. A caller that split its own
-// face could drift from the preview by a base unit — or, far worse, forget to
-// split at all and silently re-open the 12% surcharge this ruling closed. The
-// same argument settleSpend's own doc makes for the rate, one level up.
+// ★ WHAT CHANGED, AND WHY (OWNER RULING 2026-09-12). This function used to
+// split the posted face into an 88% token leg and a 12% HBD leg (splitFace,
+// USER RULING 2026-07-27) and price only the token leg; the wrapper drew the
+// HBD leg from the buyer with sdk.HiveDraw. That kept "the price on the screen
+// is the price the buyer pays" — the 2026-07-27 ruling, which still holds — but
+// it demanded the buyer hold TWO assets, so a customer holding a creator's
+// token could not actually buy that creator's service with it. The buyer now
+// pays the whole posted price in tokens and the platform takes 12% OF THOSE
+// TOKENS, which it sells on the curve itself like any other holder.
 //
-// EVERY C-GUARD STILL BINDS, and binds on the leg that actually moves tokens:
-// the C4 minimum-price floor, the C2 depth ceiling and the spend cap all
-// measure the token leg, which is what the reserve actually pays out against.
-// ServiceFaceRange grosses those same bounds back up into posted-face terms so
-// a creator is never shown a price window their posted price cannot sit in.
+// THE ORDER IS PRICE-THEN-SPLIT, NOT SPLIT-THEN-PRICE, and that is deliberate:
+// splitting first would round the face twice (once into legs, once into
+// credits) and let the two legs disagree with the total by a base unit. Pricing
+// first makes `Credits` the single quantity the buyer is debited, and the
+// commission a partition of it — floor for the platform, REMAINDER for the
+// creator, so the rounding can only ever favour the creator and the two legs
+// sum to exactly what was taken. That is the same floor-then-remainder shape
+// accrueExitTax (exittax.go) and the old splitFace both used.
+//
+// WHY THE SPLIT LIVES HERE AND NOT IN THE CALLERS. Ask and the wasm `quote`
+// preview both funnel through this function, so there is exactly one place
+// where a posted face becomes a total and a commission. A caller that split its
+// own total could drift from the preview by a base unit, or forget to split at
+// all.
+//
+// EVERY C-GUARD STILL BINDS, and now binds on the whole amount the buyer
+// actually spends: the C4 minimum-price floor, the C2 depth ceiling and the
+// spend cap all measure `postedFace`/`Credits`, which is what leaves the
+// buyer's position. ServiceFaceRange reports those same bounds directly — there
+// is no leg left to gross them up through.
 func settlePosted(s Store, creator string, block uint64, postedFace *big.Int) (*SettleQuote, error) {
 	if postedFace == nil || postedFace.Sign() <= 0 {
 		return nil, newErr(ErrInput, "face must be positive")
 	}
-	tokenLeg, commission := splitFace(postedFace)
-	if tokenLeg.Sign() <= 0 {
-		// Unreachable at any face >= MinFace (the commission is 12%, so the
-		// token leg is ~88% of a face floored well above zero); defense in
-		// depth so a future commission ruling cannot silently price a service
-		// at zero tokens.
-		return nil, newErr(ErrInput, "posted face too small to carry its commission")
-	}
-	q, err := settleSpend(s, creator, block, tokenLeg)
+	q, err := settleSpend(s, creator, block, postedFace)
 	if err != nil {
 		return nil, err
 	}
-	q.CommissionHbd = commission
+	q.CommissionCredits = commissionOwedFor(q.Credits)
 	return q, nil
 }

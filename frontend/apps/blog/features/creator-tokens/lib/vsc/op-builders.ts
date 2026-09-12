@@ -16,14 +16,14 @@
 // back to; a caller cannot even accidentally construct a posting-signed
 // write, because the type signature no longer offers that option. (An
 // EARLIER version of this file split by whether an action drew HBD
-// — prepay/ask/register/renew got active auth, the other seven got posting
+// — prepay/ask/register got active auth, the other seven got posting
 // — which was wrong: HBD-drawing is irrelevant to what authority level a
 // STATE-MUTATING call needs, and every one of those seven state mutations
 // (moving credits, changing a price, resolving an escrow) is exactly the
 // kind of action a posting key must never be able to authorize alone.)
 //
 // Every `payload` object below is built by the pure functions further down
-// this file (registerPayload, renewPayload, ...) — one per main.go
+// this file (registerPayload, setFacePayload, ...) — one per main.go
 // entrypoint, each producing EXACTLY the key set/JSON shape
 // ./payload-contract.ts's ACTION_PAYLOAD_SPECS says main.go's jsonU64/jsonStr
 // reader expects (money amounts as QUOTED base-10 integer strings, never a
@@ -283,11 +283,13 @@ export function unpausePayload(): Record<string, unknown> {
   return {};
 }
 
-/** main.go Renew (main.go:451-479). */
-export function renewPayload(creator: string, periods: number, paidBaseUnits: number): Record<string, unknown> {
-  return { creator, periods, paid: moneyStr(paidBaseUnits) };
-}
-
+/**
+ * THERE IS NO renewPayload. main.go has no `renew` wasmexport since 2026-09-12
+ * (OWNER RULING — the 10 HBD monthly subscription was removed whole;
+ * creator-tokens/core/params.go). An op built here would dispatch to an
+ * entrypoint that does not exist, which the contract's own
+ * TestAuthTier_FrontendOpsMatchTheContractGate cross-check refuses.
+ */
 /** main.go SetFace (main.go:481-504). */
 export function setFacePayload(newFaceBaseUnits: number): Record<string, unknown> {
   return { newFace: newFaceBaseUnits };

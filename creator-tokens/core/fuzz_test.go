@@ -252,7 +252,7 @@ func fzRescanEscrowedCommission(s Store, creator string) *big.Int {
 	for seq := uint64(0); seq < seqMax; seq++ {
 		rec, ok := loadEscrow(s, creator, seq)
 		if ok && rec.status == askPending {
-			total = mAdd(total, rec.commissionHbd)
+			total = mAdd(total, rec.commissionCredits)
 		}
 	}
 	return total
@@ -311,12 +311,16 @@ func (tr *fzTrace) dump(t *testing.T, tail int) {
 // ---------------------------------------------------------------------------
 
 type fzEscrowRef struct {
-	creator       string
-	seq           uint64
-	asker         string
-	deadline      uint64
-	credits       *big.Int
-	commissionHbd *big.Int // HBD held against this escrow — see fzWorld.heldCommission
+	creator  string
+	seq      uint64
+	asker    string
+	deadline uint64
+	credits  *big.Int
+	// commissionCredits is the platform's slice OF credits (tokens, not HBD)
+	// since the OWNER RULING of 2026-09-12. It is tracked so the walk can assert
+	// the settlement split is exhaustive; it is NOT an HBD bucket and appears in
+	// no HBD identity.
+	commissionCredits *big.Int
 }
 
 type fzWorld struct {
@@ -325,17 +329,15 @@ type fzWorld struct {
 
 	escrowed map[string]*big.Int // creator -> Σ credits PENDING in escrow (incremental, O(1))
 
-	// heldCommission — creator -> Σ HBD commission PENDING in escrow
-	// (incremental, O(1)), the 2026-07-20 defect fix's new resting state
-	// for HBD: Ask HOLDS the commission here instead of booking it to the
-	// treasury immediately; Answer moves it to treasury, Reclaim returns
-	// it to the asker (see ask.go). The global HBD identity check
-	// (fzCheckSolvencyCore) needs this as a THIRD bucket alongside
-	// reserve/treasury, or a market with any outstanding, unanswered ask
-	// looks like it lost HBD that is actually just held, not gone.
-	heldCommission map[string]*big.Int
+	// THERE IS NO heldCommission MAP. It tracked the HBD commission pending in
+	// escrow — a third resting state for HBD that the global identity in
+	// fzCheckSolvencyCore had to name, because Ask drew it from the asker and
+	// neither a reserve nor the treasury held it yet. Since the OWNER RULING of
+	// 2026-09-12 the commission is a partition of the escrow's own CREDITS and
+	// no HBD moves on ask/answer/reclaim/decline at all, so there is nothing to
+	// hold and no bucket to balance.
 
-	paidIn   map[string]*big.Int // actor -> Σ HBD it has paid IN (Register fee + Renew paid + Buy TotalDue + Ask commission)
+	paidIn   map[string]*big.Int // actor -> Σ HBD it has paid IN (Buy TotalDue, mainly)
 	received map[string]*big.Int // actor -> Σ HBD it has received OUT (Sell net, fee claims, Refund/RefundHolder payouts, credited to the true payee)
 
 	totalHBDIn  *big.Int
@@ -354,7 +356,6 @@ func fzNewWorld() *fzWorld {
 	w := &fzWorld{
 		s:              NewMemStore(),
 		escrowed:       map[string]*big.Int{},
-		heldCommission: map[string]*big.Int{},
 		paidIn:         map[string]*big.Int{},
 		received:       map[string]*big.Int{},
 		totalHBDIn:     big.NewInt(0),
@@ -363,7 +364,6 @@ func fzNewWorld() *fzWorld {
 	}
 	for _, c := range fzCreators {
 		w.escrowed[c] = big.NewInt(0)
-		w.heldCommission[c] = big.NewInt(0)
 	}
 	for _, a := range fzAllActors {
 		w.paidIn[a] = big.NewInt(0)
@@ -593,18 +593,11 @@ func fzActRegister(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) {
 	}
 }
 
-func fzActRenew(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) {
-	c := fzCreators[rng.Intn(len(fzCreators))]
-	payer := fzHolders[rng.Intn(len(fzHolders))]
-	periods := uint64(fzBoundaryInt64(rng, 1, int64(MaxPrepaidPeriods)))
-	paid := fzFeeLike(rng, SubscriptionFee*int64(periods))
-
-	err := Renew(w.s, payer, c, w.block, periods, paid)
-	tr.add("Renew(payer=%s creator=%s block=%d periods=%d paid=%v) -> err=%v", payer, c, w.block, periods, paid, err)
-	if err == nil {
-		w.pay(payer, paid)
-	}
-}
+// THERE IS NO fzActRenew. It fuzzed core.Renew — periods in
+// [1, MaxPrepaidPeriods], a fee-like paid amount, a random payer — and was one
+// of the sixteen actions the random walk drew from. The 10 HBD subscription was
+// removed on 2026-09-12 (core/params.go), so there is no call left to fuzz. The
+// two dispatch tables below lost a case each and now draw from 15 and 14.
 
 // fzActBuy — the ONLY issuance path (Buy on the curve; the PAR Prepay this
 // action replaced is deleted with its mechanism). The amount fuzzed is the
@@ -693,7 +686,7 @@ func fzActAsk(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) {
 	deadline := fzBoundaryUint64(rng, MinAskDeadline, MaxAskDeadline)
 	contentHash := fmt.Sprintf("cid-%d-%d", w.block, rng.Int63())
 
-	res, err := askAt0(w.s, asker, c, w.block, maxCredits, commission, contentHash, deadline)
+	res, err := askAt0(w.s, asker, c, w.block, maxCredits, contentHash, deadline)
 	tr.add("Ask(asker=%s creator=%s block=%d maxCredits=%v commission=%v deadline=%d face=%s) -> res=%+v err=%v",
 		asker, c, w.block, maxCredits, commission, deadline, face, res, err)
 
@@ -701,15 +694,11 @@ func fzActAsk(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) {
 		return
 	}
 
-	w.pay(asker, commission)
+	// NO w.pay HERE ANY MORE: an ask draws no HBD from the asker since the
+	// 2026-09-12 ruling, so nothing enters the HBD ledger on this path.
 	w.escrowed[c] = mAdd(w.escrowed[c], res.CreditsSpent)
-	// heldCommission (2026-07-20 fix): the commission is HELD against this
-	// escrow, not booked to treasury yet — see fzWorld.heldCommission's doc
-	// and fzCheckSolvencyCore's global HBD identity, which needs this as a
-	// third resting-state bucket.
-	w.heldCommission[c] = mAdd(w.heldCommission[c], res.CommissionHbd)
 	w.pendingEscrows = append(w.pendingEscrows, fzEscrowRef{
-		creator: c, seq: res.Seq, asker: asker, deadline: w.block + deadline, credits: res.CreditsSpent, commissionHbd: res.CommissionHbd,
+		creator: c, seq: res.Seq, asker: asker, deadline: w.block + deadline, credits: res.CreditsSpent, commissionCredits: res.CommissionCredits,
 	})
 
 	// Property #4, checked live on EVERY successful ask across every test in
@@ -748,12 +737,14 @@ func fzActAnswer(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) {
 
 	if err == nil {
 		w.escrowed[ref.creator] = new(big.Int).Sub(w.escrowed[ref.creator], ref.credits)
-		// The commission moves from "held in escrow" to the treasury
-		// (core.Answer's own addMoney(kTreasury(), ...)) — treasury is read
-		// live from state by fzCheckSolvencyCore, so it self-updates; this
-		// just retires the now-resolved escrow from the heldCommission
-		// bucket so it isn't double-counted.
-		w.heldCommission[ref.creator] = new(big.Int).Sub(w.heldCommission[ref.creator], ref.commissionHbd)
+		// THE SPLIT MUST BE EXHAUSTIVE on every single answer in the walk: the
+		// creator's credits plus the platform's commission are exactly the
+		// escrow, or tokens were created or destroyed at settlement.
+		if sum := mAdd(res.CreditsToCreator, res.CommissionToOwner); sum.Cmp(ref.credits) != 0 {
+			tr.dump(t, 200)
+			t.Fatalf("ANSWER SPLIT NOT EXHAUSTIVE: creator=%s + owner=%s = %s, want the escrowed %s",
+				res.CreditsToCreator, res.CommissionToOwner, sum, ref.credits)
+		}
 		w.pendingEscrows = append(w.pendingEscrows[:idx], w.pendingEscrows[idx+1:]...)
 	}
 }
@@ -772,16 +763,15 @@ func fzActReclaim(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) {
 
 	if err == nil {
 		w.escrowed[ref.creator] = new(big.Int).Sub(w.escrowed[ref.creator], ref.credits)
-		w.heldCommission[ref.creator] = new(big.Int).Sub(w.heldCommission[ref.creator], ref.commissionHbd)
-		// core.Reclaim now ALSO returns the held commission (2026-07-20
-		// defect fix — SPEC §1.7.2 rule 4: 100% back on an unanswered ask).
-		// core itself never moves HBD, but a real wasm `reclaim` entrypoint
-		// DOES sdk.HiveTransfer this back to the asker (see
-		// contract/main.go's Reclaim entrypoint) — a genuine outflow this
-		// model must record, exactly like a Refund payout, or the global
-		// HBD identity would see it vanish from heldCommission with nowhere
-		// else to land.
-		w.receive(ref.asker, res.CommissionHbd)
+		// Same exhaustiveness claim as Answer, on the other settlement rail: the
+		// asker's refund plus the retained miss slice are exactly the escrow. No
+		// w.receive: a reclaim moves no HBD since the 2026-09-12 ruling, where it
+		// used to sdk.HiveTransfer the held commission back to the asker.
+		if sum := mAdd(res.CreditsReturned, res.CommissionRetainedCredits); sum.Cmp(ref.credits) != 0 {
+			tr.dump(t, 200)
+			t.Fatalf("RECLAIM SPLIT NOT EXHAUSTIVE: returned=%s + retained=%s = %s, want the escrowed %s",
+				res.CreditsReturned, res.CommissionRetainedCredits, sum, ref.credits)
+		}
 		w.pendingEscrows = append(w.pendingEscrows[:idx], w.pendingEscrows[idx+1:]...)
 	}
 }
@@ -857,7 +847,7 @@ func fzActAdvanceBlock(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) {
 	case 2, 3, 4:
 		delta = uint64(1 + rng.Intn(2000))
 	case 5, 6:
-		delta = SubscriptionPeriod
+		delta = hzLongGap
 	case 7:
 		delta = GraceBlocks
 	case 8:
@@ -870,11 +860,9 @@ func fzActAdvanceBlock(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) {
 }
 
 func fzApplyRandomAction(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) {
-	switch rng.Intn(16) {
+	switch rng.Intn(15) {
 	case 0:
 		fzActRegister(t, rng, w, tr)
-	case 1:
-		fzActRenew(t, rng, w, tr)
 	case 2:
 		fzActBuy(t, rng, w, tr)
 	case 3:
@@ -910,11 +898,9 @@ func fzApplyRandomAction(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) 
 // TransferCredits — used only by TestFuzzNoFreeMoney/RandomWalk (see the
 // call site's comment for why).
 func fzApplyRandomActionExceptTransfer(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) {
-	switch rng.Intn(15) {
+	switch rng.Intn(14) {
 	case 0:
 		fzActRegister(t, rng, w, tr)
-	case 1:
-		fzActRenew(t, rng, w, tr)
 	case 2:
 		fzActBuy(t, rng, w, tr)
 	case 3:
@@ -1003,13 +989,11 @@ func fzCheckSolvencyCore(t *testing.T, w *fzWorld, tr *fzTrace, step int) {
 
 	treasury := getMoney(w.s, kTreasury())
 	reserveSum := big.NewInt(0)
-	heldCommissionSum := big.NewInt(0)
 
 	for _, c := range fzCreators {
 		reserve := getMoney(w.s, kReserve(c))
 		supply := getMoney(w.s, kSupply(c))
 		reserveSum = mAdd(reserveSum, reserve)
-		heldCommissionSum = mAdd(heldCommissionSum, w.heldCommission[c])
 
 		// THE CURVE INVARIANT's equality half (file header): until this
 		// incarnation's first wind-down refund, R == area(S) EXACTLY — any
@@ -1074,25 +1058,25 @@ func fzCheckSolvencyCore(t *testing.T, w *fzWorld, tr *fzTrace, step int) {
 	// Global HBD accounting identity — exact. The reserve legs move by exact
 	// area steps and pro-rata payouts, the fee/tax legs by their exact split
 	// amounts, so the identity has zero tolerance:
-	//   total HBD in == total HBD out + Σ reserve + treasury
-	//                   + Σ heldCommission + Σ kFeeBal
-	// heldCommission: a pending ask's commission has been drawn from the
-	// asker (counted in totalHBDIn via w.pay at Ask time) but is neither in
-	// a market's reserve nor booked to the treasury yet. kFeeBal: the
-	// creators' pull-claimable trade-fee halves (F8) — drawn from buyers /
-	// carved from sellers, resting until ClaimTradeFees pays them out. The
-	// treasury (read live) self-accounts the platform fee halves, the
-	// RULING-J exit taxes, registration/renewal fees and delivered
-	// commissions.
+	//   total HBD in == total HBD out + Σ reserve + treasury + Σ kFeeBal
+	// kFeeBal: the creators' pull-claimable trade-fee halves (F8) — drawn from
+	// buyers / carved from sellers, resting until ClaimTradeFees pays them out.
+	// The treasury (read live) self-accounts the platform fee halves and the
+	// RULING-J exit taxes.
+	//
+	// ★ THE heldCommission TERM IS GONE (OWNER RULING 2026-09-12). A pending
+	// ask's commission used to be HBD drawn from the asker that rested in
+	// neither a reserve nor the treasury. It is tokens inside the escrow's own
+	// credits now, which the I3 supply invariant already covers.
 	feeBalSum := big.NewInt(0)
 	for _, a := range fzAllActors {
 		feeBalSum = mAdd(feeBalSum, getMoney(w.s, kFeeBal(a)))
 	}
-	rhs := mAdd(mAdd(mAdd(mAdd(w.totalHBDOut, reserveSum), treasury), heldCommissionSum), feeBalSum)
+	rhs := mAdd(mAdd(mAdd(w.totalHBDOut, reserveSum), treasury), feeBalSum)
 	if w.totalHBDIn.Cmp(rhs) != 0 {
 		tr.dump(t, 200)
-		t.Fatalf("%s: GLOBAL HBD IDENTITY VIOLATED: in=%s, out=%s + reserve=%s + treasury=%s + heldCommission=%s + feeBals=%s = %s",
-			label, w.totalHBDIn, w.totalHBDOut, reserveSum, treasury, heldCommissionSum, feeBalSum, rhs)
+		t.Fatalf("%s: GLOBAL HBD IDENTITY VIOLATED: in=%s, out=%s + reserve=%s + treasury=%s + feeBals=%s = %s",
+			label, w.totalHBDIn, w.totalHBDOut, reserveSum, treasury, feeBalSum, rhs)
 	}
 }
 
@@ -1162,11 +1146,13 @@ func TestFuzzSolvencyUnderAnySequence(t *testing.T) {
 					tr.dump(t, 200)
 					t.Fatalf("step %d: escrow-model drift for %s: incremental=%s, ground-truth rescan=%s", i, c, w.escrowed[c], got)
 				}
-				gotCommission := fzRescanEscrowedCommission(w.s, c)
-				if gotCommission.Cmp(w.heldCommission[c]) != 0 {
-					tr.dump(t, 200)
-					t.Fatalf("step %d: heldCommission-model drift for %s: incremental=%s, ground-truth rescan=%s", i, c, w.heldCommission[c], gotCommission)
-				}
+				// The commission's own ground-truth rescan used to sit here,
+				// checking the incremental heldCommission model against a scan of
+				// every PENDING escrow's field 5. There is no HBD model to drift
+				// any more (2026-09-12): field 5 is a partition of `credits`,
+				// which the escrowed rescan directly above already covers, and
+				// every settlement asserts its own split is exhaustive at the
+				// moment it happens (fzActAnswer / fzActReclaim).
 			}
 		}
 	}
@@ -1364,16 +1350,6 @@ func fzBuildOrderingCandidates(rng *rand.Rand, w *fzWorld) []fzOpCandidate {
 				return "", err
 			}
 			return fmt.Sprintf("due=%v", res.TotalDue), nil
-		})
-	}
-
-	{
-		c := fzCreators[rng.Intn(len(fzCreators))]
-		payer := fzHolders[rng.Intn(len(fzHolders))]
-		periods := uint64(1 + rng.Intn(3))
-		paid := new(big.Int).Mul(big.NewInt(int64(periods)), big.NewInt(SubscriptionFee))
-		add(fmt.Sprintf("renew:%s:%s:%d", c, payer, periods), func(s *MemStore, block uint64) (string, error) {
-			return "", Renew(s, payer, c, block, periods, paid)
 		})
 	}
 
@@ -1684,14 +1660,14 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 			// range of rates.
 			askBlock := seedSettleObs(s, creator, regBlock+10, rate)
 
-			owed := commissionOwedFor(big.NewInt(face))
-			// USER RULING 2026-07-27: the posted face is the buyer's TOTAL, so
-			// only face minus the commission settles in tokens. Recomputed here
-			// from first principles (not via splitFace) so this stays an
-			// INDEPENDENT model of what the contract should charge.
-			tokenLeg := new(big.Int).Sub(big.NewInt(face), owed)
+			// ★ THE WHOLE POSTED FACE SETTLES IN TOKENS (OWNER RULING
+			// 2026-09-12). Between 2026-07-27 and that ruling only face minus the
+			// commission did, with the 12%% drawn separately in HBD. Kept as an
+			// INDEPENDENT model of what the contract should charge — the face
+			// itself, ceiled by the rate, with no leg arithmetic at all.
+			tokenLeg := big.NewInt(face)
 			maxCredits := fzCeilDiv(tokenLeg, rate) // the asker's own cap == the exact expected spend
-			res, err := askAt0(s, asker, creator, askBlock, maxCredits, owed, "cid", MinAskDeadline)
+			res, err := askAt0(s, asker, creator, askBlock, maxCredits, "cid", MinAskDeadline)
 			if err != nil {
 				t.Fatalf("iter %d: Ask(face=%d rate=%s): %v", i, face, rate, err)
 			}
@@ -1704,12 +1680,18 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 				t.Fatalf("iter %d: ROUNDING VIOLATION: face=%d (tokenLeg=%s) rate=%s got CreditsSpent=%s, independent ceil(tokenLeg/rate)=%s",
 					i, face, tokenLeg, rate, res.CreditsSpent, want)
 			}
-			// The buyer's two legs must re-sum to the posted face EXACTLY —
-			// the whole point of the ruling. No dust may be created or lost by
-			// the split at any face in the fuzzed range.
-			if sum := new(big.Int).Add(tokenLeg, owed); sum.Cmp(big.NewInt(face)) != 0 {
-				t.Fatalf("iter %d: SPLIT LOST VALUE: tokenLeg=%s + commission=%s = %s, want face=%d",
-					i, tokenLeg, owed, sum, face)
+			// The settlement's two legs must re-sum to the CREDITS taken, exactly
+			// — the whole point of the ruling, one level downstream of where it
+			// used to be checked (it was tokenLeg + commission == face while the
+			// commission was HBD). No dust may be created or lost by the split at
+			// any face in the fuzzed range.
+			toCreator := new(big.Int).Sub(res.CreditsSpent, res.CommissionCredits)
+			if sum := new(big.Int).Add(toCreator, res.CommissionCredits); sum.Cmp(res.CreditsSpent) != 0 {
+				t.Fatalf("iter %d: SPLIT LOST VALUE: creator=%s + commission=%s = %s, want the %s credits taken",
+					i, toCreator, res.CommissionCredits, sum, res.CreditsSpent)
+			}
+			if res.CommissionCredits.Cmp(commissionOwedFor(res.CreditsSpent)) != 0 {
+				t.Fatalf("iter %d: commission %s != floor(%s * %d / 10000)", i, res.CommissionCredits, res.CreditsSpent, CommissionBps)
 			}
 			// The defining ceiling property, checked directly: spending one
 			// FEWER credit must always undershoot face.
@@ -1915,8 +1897,7 @@ func TestFuzzBoundarySweep(t *testing.T) {
 			if v < 0 {
 				deadline = 0
 			}
-			owed := commissionOwedFor(big.NewInt(10_000))
-			_, err := askAt0(s, "fzbadasker", creator, askBlock, big.NewInt(1_000_000), owed, "cid", deadline)
+			_, err := askAt0(s, "fzbadasker", creator, askBlock, big.NewInt(1_000_000), "cid", deadline)
 			inBand := deadline >= MinAskDeadline && deadline <= MaxAskDeadline
 			if inBand && err != nil {
 				t.Fatalf("Ask.deadline: v=%d INSIDE [%d,%d] but rejected: %v", deadline, MinAskDeadline, MaxAskDeadline, err)
@@ -1930,40 +1911,14 @@ func TestFuzzBoundarySweep(t *testing.T) {
 				}
 			}
 
-		case 5: // Renew.periods
-			s := NewMemStore()
-			creator := fmt.Sprintf("fzbrp%d", i)
-			if err := Register(s, creator, creator, 100, 1000, MaxCap); err != nil {
-				t.Fatalf("setup: %v", err)
-			}
-			// Register itself already grants ONE free SubscriptionPeriod
-			// (kPaidUntil = block+SubscriptionPeriod), so a Renew attempted
-			// AT the registration block only has [1, MaxPrepaidPeriods-1] of
-			// real headroom before "extension exceeds MaxPrepaidPeriods ahead
-			// of now" fires — that guard is a SEPARATE, correct rejection,
-			// not the [1,MaxPrepaidPeriods] bound this case sweeps. Renewing
-			// exactly AT paidUntil (base==block, no pre-existing headroom
-			// consumed) isolates the periods bound cleanly.
-			renewBlock := uint64(100) + SubscriptionPeriod
-			v := pick(1, int64(MaxPrepaidPeriods))
-			periods := uint64(v)
-			if v < 0 {
-				periods = 0
-			}
-			paid := new(big.Int).Mul(big.NewInt(int64(periods)), big.NewInt(SubscriptionFee))
-			err := Renew(s, "fzbrpayer", creator, renewBlock, periods, paid)
-			inBand := periods >= 1 && periods <= MaxPrepaidPeriods
-			if inBand && err != nil {
-				t.Fatalf("Renew.periods: v=%d INSIDE [1,%d] but rejected: %v", periods, MaxPrepaidPeriods, err)
-			}
-			if !inBand {
-				if err == nil {
-					t.Fatalf("Renew.periods: v=%d OUTSIDE [1,%d] but accepted", periods, MaxPrepaidPeriods)
-				}
-				if sym := fzErrSym(err); sym != ErrInput {
-					t.Fatalf("Renew.periods: v=%d OUTSIDE bound, rejected with symbol %q, want %q: %v", periods, sym, ErrInput, err)
-				}
-			}
+		case 5: // (was Renew.periods — the bound, and the call, are gone)
+			// This case swept core.Renew's `periods` bound, [1, MaxPrepaidPeriods],
+			// proving both that in-band values were accepted and that out-of-band
+			// ones were rejected with ErrInput. The 10 HBD subscription was removed
+			// on 2026-09-12 (core/params.go) and Renew with it, so there is no
+			// bound left to sweep. The case index is KEPT rather than renumbered so
+			// every other case in this table still receives the same `i % N` draws
+			// it did when these sweeps were measured.
 
 		case 6: // Buy.n — 0/1/huge, no protocol ceiling besides the market cap
 			s := NewMemStore()
@@ -2023,10 +1978,10 @@ func TestFuzzBoundarySweep(t *testing.T) {
 			// block where the rail is actually open, or every draw would
 			// reject on the phase instead.
 			// A1 (2026-08-30): a lapse no longer opens the Refund rail; Retire does.
-			if err := Retire(s, creator, creator, uint64(100)+SubscriptionPeriod+GraceBlocks); err != nil {
+			if err := Retire(s, creator, creator, uint64(100)+hzLongGap+GraceBlocks); err != nil {
 				t.Fatalf("setup: Retire: %v", err)
 			}
-			wdBlock := uint64(100) + SubscriptionPeriod + GraceBlocks + 1
+			wdBlock := uint64(100) + hzLongGap + GraceBlocks + 1
 			amt := fzAmount(rng)
 			_, err := Refund(s, "fzbrfholder", creator, wdBlock, amt)
 			validAmt := amt != nil && amt.Sign() > 0 && amt.Cmp(big.NewInt(1000)) <= 0

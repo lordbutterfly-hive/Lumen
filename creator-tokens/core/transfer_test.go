@@ -21,7 +21,6 @@ import (
 
 func setupMarket(s Store, creator string, block uint64, cap int64) {
 	setU64(s, kRegisteredAt(creator), block)
-	setU64(s, kPaidUntil(creator), block+SubscriptionPeriod) // comfortably ACTIVE
 	setMoney(s, kCap(creator), big.NewInt(cap))
 }
 
@@ -110,14 +109,12 @@ func TestTransferCredits_RecipientClockReAverages_LaunderingClosed(t *testing.T)
 	c := "creatora"
 	b := uint64(1_000_000)
 	setupMarket(s, c, 1, MaxCap)
-	setU64(s, kPaidUntil(c), b+200*SubscriptionPeriod)
 
 	// The parked account: one token, bought six weeks + 1 block ago.
 	if _, err := Buy(s, "aged.acct", c, b, big.NewInt(1)); err != nil {
 		t.Fatal(err)
 	}
 	later := b + ExitTaxDecayBlocks + 1
-	setU64(s, kPaidUntil(c), later+200*SubscriptionPeriod)
 
 	// A fresh sniper buys 100 tokens at `later` and routes them through the
 	// aged account.
@@ -298,7 +295,6 @@ func TestTransferCredits_WorksRegardlessOfBillingPhase(t *testing.T) {
 	// Force the market into a lapsed/FROZEN-shaped state: naturalPhase
 	// (market.go) derives FROZEN lazily from paidUntil+GraceBlocks alone, so
 	// this one write is sufficient for any query block >= 50+GraceBlocks.
-	setU64(s, kPaidUntil(creator), 50)
 
 	if err := TransferCredits(s, "alice", creator, "alice", "bob", 50+GraceBlocks+10, big.NewInt(100)); err != nil {
 		t.Fatalf("transfer must work even when the market is FROZEN/lapsed: %v", err)
@@ -337,7 +333,6 @@ func TestFuzz_BuyTransferInvariants(t *testing.T) {
 	for _, c := range creators {
 		cap := int64(1000 + rng.Intn(9000))
 		setupMarket(s, c, 100, cap)
-		setU64(s, kPaidUntil(c), 100+100*SubscriptionPeriod)
 	}
 
 	for i := 0; i < iterations; i++ {

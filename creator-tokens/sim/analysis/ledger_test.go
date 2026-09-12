@@ -10,7 +10,7 @@ func TestLedger_CleanLifecycleCloses(t *testing.T) {
 	tr := &Trace{Seed: 1, Events: []Event{
 		registerEv(100, "alice", 2000, 1_000_000),
 		prepayEv(200, "bob", "alice", 5000),
-		askEv(300, "bob", "alice", 240 /* owed = floor(2000*1200/10000) */, 28800, 2000),
+		askEv(300, "bob", "alice", 240 /* 12%% of the 2000 credits escrowed */, 28800, 2000),
 		answerEv(310, "alice", "alice", 0),
 		refundEv(400, "bob", "alice", 3000), // bob's remaining balance: 5000-2000
 	}}
@@ -24,7 +24,9 @@ func TestLedger_CleanLifecycleCloses(t *testing.T) {
 		t.Fatalf("Closes=true but FirstBadEvent=%d, want -1", rpt.FirstBadEvent)
 	}
 
-	wantEntered := big.NewInt(10000 + 5000 + 240)
+	// ★ NO ASK COMMISSION TERM (OWNER RULING 2026-09-12): an ask moves no HBD,
+	// so `entered` is the registration fee plus the prepay and nothing else.
+	wantEntered := big.NewInt(10000 + 5000)
 	if rpt.Entered.Total.Cmp(wantEntered) != 0 {
 		t.Errorf("Entered.Total = %s, want %s", rpt.Entered.Total, wantEntered)
 	}
@@ -32,8 +34,9 @@ func TestLedger_CleanLifecycleCloses(t *testing.T) {
 	if rpt.Left.Total.Cmp(wantLeft) != 0 {
 		t.Errorf("Left.Total = %s, want %s", rpt.Left.Total, wantLeft)
 	}
-	// Sits = treasury(10000+240) + reserve(5000-3000) + escrowHeld(0, answered) = 10240+2000+0
-	wantSits := big.NewInt(10240 + 2000)
+	// Sits = treasury(10000) + reserve(5000-3000) + escrowHeld(0 — always, since
+	// an escrow holds tokens not HBD) = 10000+2000
+	wantSits := big.NewInt(10000 + 2000)
 	if rpt.Sits.Total.Cmp(wantSits) != 0 {
 		t.Errorf("Sits.Total = %s, want %s", rpt.Sits.Total, wantSits)
 	}
@@ -45,8 +48,8 @@ func TestLedger_CleanLifecycleCloses(t *testing.T) {
 	if bob == nil {
 		t.Fatal("expected a ledger entry for bob")
 	}
-	if bob.PaidIn.Cmp(big.NewInt(5240)) != 0 {
-		t.Errorf("bob.PaidIn = %s, want 5240", bob.PaidIn)
+	if bob.PaidIn.Cmp(big.NewInt(5000)) != 0 {
+		t.Errorf("bob.PaidIn = %s, want 5000 (the prepay alone — an ask costs no HBD)", bob.PaidIn)
 	}
 	if bob.Unexplained.Sign() != 0 {
 		t.Errorf("bob.Unexplained = %s, want 0", bob.Unexplained)
@@ -101,69 +104,6 @@ func TestLedger_NegativeReserveBreaksIdentity(t *testing.T) {
 		t.Error("expected a non-nil Divergence once Closes is false")
 	}
 	t.Logf("reason: %s", rpt.FirstBadReason)
-}
-
-func TestLedger_CommissionOverpaymentTrackedAndClassified(t *testing.T) {
-	tr := &Trace{Seed: 3, Events: []Event{
-		registerEv(100, "alice", 2000, 1_000_000), // owed commission = floor(2000*1200/10000) = 240
-		prepayEv(200, "bob", "alice", 5000),
-		askEv(300, "bob", "alice", 300, 28800, 2000), // paid 300, owed 240 -> excess 60
-		answerEv(310, "alice", "alice", 0),
-	}}
-
-	rpt := AnalyzeLedger(tr)
-	if !rpt.Closes {
-		t.Fatalf("expected identity to close, reason=%q", rpt.FirstBadReason)
-	}
-	if len(rpt.Overpayments) != 1 {
-		t.Fatalf("expected 1 overpayment, got %d: %+v", len(rpt.Overpayments), rpt.Overpayments)
-	}
-	op := rpt.Overpayments[0]
-	if op.Owed.Cmp(big.NewInt(240)) != 0 || op.Paid.Cmp(big.NewInt(300)) != 0 || op.Excess.Cmp(big.NewInt(60)) != 0 {
-		t.Errorf("overpayment = %+v, want owed=240 paid=300 excess=60", op)
-	}
-	if op.Resolution != "answered" {
-		t.Errorf("overpayment.Resolution = %q, want %q (the excess is permanently lost to treasury on answer)", op.Resolution, "answered")
-	}
-}
-
-func TestLedger_ReclaimReturnsOverpaymentInFull(t *testing.T) {
-	// Same overpayment, but this time the ask times out and is reclaimed —
-	// I5 says the FULL held amount (including the accidental excess) comes
-	// back, so this should NOT show up as any kind of loss.
-	tr := &Trace{Seed: 4, Events: []Event{
-		registerEv(100, "alice", 2000, 1_000_000),
-		prepayEv(200, "bob", "alice", 5000),
-		askEv(300, "bob", "alice", 300, 28800 /* 1 day */, 2000),
-		reclaimEv(300+28800+1200+1, "bob", "alice", 0), // past deadline+ReclaimGrace
-	}}
-
-	rpt := AnalyzeLedger(tr)
-	if !rpt.Closes {
-		t.Fatalf("expected identity to close, reason=%q", rpt.FirstBadReason)
-	}
-	if len(rpt.Overpayments) != 1 || rpt.Overpayments[0].Resolution != "reclaimed" {
-		t.Fatalf("expected 1 reclaimed overpayment, got %+v", rpt.Overpayments)
-	}
-	bob := rpt.PerActor["bob"]
-	// F8 (an adversarial review): bob's full 5000-credit balance is back
-	// (reclaim returned the escrowed 2000 on top of his un-escrowed 3000),
-	// but CreditsHeldValue now prices that STILL-HELD balance net of the
-	// max K2 exit tax, not gross — the exact SCOPE NOTE item-3 pattern this
-	// package documents and accepts (a healthy, fully-explained holder's
-	// Unexplained reads positive by the appreciation/tax-floor gap, never a
-	// fund-safety concern). ★ 2026-09-08 fee change (MaxExitTaxBps 2000 ->
-	// 1500): gross=refundPayout(5000,5000,5000)=5000; tax=ceil(5000*1500/
-	// 10000)=750; CreditsHeldValue=4250.
-	// bob.explained = ReceivedOut(300, the reclaimed commission) +
-	// CreditsHeldValue(4250) = 4550; PaidIn = 5000+300 = 5300;
-	// Unexplained = 5300-4550 = 750 — entirely the tax-floor gap on bob's
-	// own still-held balance, not a lost commission (Overpayments above
-	// already proves the excess came back in full).
-	wantUnexplainedReclaim := big.NewInt(750)
-	if bob.Unexplained.Cmp(wantUnexplainedReclaim) != 0 {
-		t.Errorf("bob.Unexplained = %s, want %s (full commission incl. the accidental excess was returned; the remainder is CreditsHeldValue's max-tax floor gap on bob's still-held balance, not a loss)", bob.Unexplained, wantUnexplainedReclaim)
-	}
 }
 
 func TestLedger_TransferIsNotAnUnintendedLoss(t *testing.T) {
@@ -227,9 +167,10 @@ func TestLedger_RegistrationAndSubscriptionAreIntendedCosts(t *testing.T) {
 }
 
 func TestLedger_UnresolvedEscrowIsHeldNotLost(t *testing.T) {
-	// An ask that is still PENDING at the end of the trace: bob's commission
-	// and credits are held, not lost — this must not appear as an
-	// unintended loss, and Sits must include the held commission.
+	// An ask that is still PENDING at the end of the trace: bob's CREDITS are
+	// held, not lost. Since the OWNER RULING of 2026-09-12 there is no HBD held
+	// against an escrow at all, so Sits.EscrowHeldTotal is structurally zero and
+	// the whole claim rests on the credits being valued and explained.
 	tr := &Trace{Seed: 7, Events: []Event{
 		registerEv(100, "alice", 2000, 1_000_000),
 		prepayEv(200, "bob", "alice", 5000),
@@ -240,12 +181,12 @@ func TestLedger_UnresolvedEscrowIsHeldNotLost(t *testing.T) {
 	if !rpt.Closes {
 		t.Fatalf("expected identity to close, reason=%q", rpt.FirstBadReason)
 	}
-	if rpt.Sits.EscrowHeldTotal.Cmp(big.NewInt(240)) != 0 {
-		t.Errorf("Sits.EscrowHeldTotal = %s, want 240", rpt.Sits.EscrowHeldTotal)
+	if rpt.Sits.EscrowHeldTotal.Sign() != 0 {
+		t.Errorf("Sits.EscrowHeldTotal = %s, want 0 — an open escrow holds tokens, not HBD", rpt.Sits.EscrowHeldTotal)
 	}
 	bob := rpt.PerActor["bob"]
-	if bob.PendingEscrowCommission.Cmp(big.NewInt(240)) != 0 {
-		t.Errorf("bob.PendingEscrowCommission = %s, want 240", bob.PendingEscrowCommission)
+	if bob.PendingEscrowCommission.Sign() != 0 {
+		t.Errorf("bob.PendingEscrowCommission = %s, want 0 — no HBD is held against an escrow", bob.PendingEscrowCommission)
 	}
 	if bob.PendingEscrowCreditsValue.Cmp(big.NewInt(2000)) != 0 {
 		t.Errorf("bob.PendingEscrowCreditsValue = %s, want 2000", bob.PendingEscrowCreditsValue)
@@ -259,8 +200,8 @@ func TestLedger_UnresolvedEscrowIsHeldNotLost(t *testing.T) {
 	// its own field doc). ★ 2026-09-08 fee change (MaxExitTaxBps 2000 ->
 	// 1500): gross=refundPayout(5000,3000,5000)=3000; tax=ceil(3000*1500/
 	// 10000)=450; CreditsHeldValue=2550.
-	// bob.explained = CreditsHeldValue(2550) + PendingEscrowCommission(240)
-	// + PendingEscrowCreditsValue(2000) = 4790; PaidIn = 5000+240 = 5240;
+	// bob.explained = CreditsHeldValue(2550) + PendingEscrowCreditsValue(2000)
+	// = 4550; PaidIn = 5000 (the prepay alone — an ask costs no HBD);
 	// Unexplained = 450 — entirely CreditsHeldValue's max-tax floor gap on
 	// bob's still-SPENDABLE balance (the SCOPE NOTE item-3 pattern this
 	// package documents and accepts), not any part of the escrow actually
@@ -276,61 +217,49 @@ func TestLedger_UnresolvedEscrowIsHeldNotLost(t *testing.T) {
 	}
 }
 
-// TestLedger_DeclineReturnsCommissionInFull — RULING E (ask.go's Decline,
-// wired into the engine 2026-07-28). Same overpayment shape as
-// TestLedger_ReclaimReturnsOverpaymentInFull, but resolved via the
-// creator's free "no" instead of a timeout. The FULL commission (including
-// any accidental excess) must come back, exactly like Reclaim, but tracked
-// in its OWN bucket — DeclinedCommission, never ReclaimedCommission — proving
-// ledger.go's case "decline" (added the same session) actually moves the
-// money and does not silently fall through to the no-op default case.
-func TestLedger_DeclineReturnsCommissionInFull(t *testing.T) {
+// TestLedger_DeclineReturnsTheEscrowedCredits — RULING E (ask.go's Decline,
+// wired into the engine 2026-07-28). The creator's free "no" must return the
+// whole escrow, and the replay must MOVE it rather than silently falling
+// through to the no-op default case (which would leave `sits` overstated and
+// break the Entered==Left+Sits identity from the first decline onward).
+//
+// ★ IT NO LONGER MOVES ANY HBD (OWNER RULING 2026-09-12). The old version
+// asserted Left.DeclinedCommission — a bucket for the HBD commission a decline
+// handed back — and an Overpayment resolution, both of which belonged to a
+// commission model that does not exist. What a decline returns now is CREDITS,
+// so that is what is asserted: the escrow leaves Sits, the asker's balance is
+// whole again, and no HBD bucket moves at all.
+func TestLedger_DeclineReturnsTheEscrowedCredits(t *testing.T) {
 	tr := &Trace{Seed: 8, Events: []Event{
 		registerEv(100, "alice", 2000, 1_000_000),
 		prepayEv(200, "bob", "alice", 5000),
-		askEv(300, "bob", "alice", 300, 28800, 2000), // paid 300, owed 240 -> excess 60
-		declineEv(310, "alice", 0),                   // well inside the answer window
+		askEv(300, "bob", "alice", 240, 28800, 2000),
+		declineEv(310, "alice", 0), // well inside the answer window
 	}}
 
 	rpt := AnalyzeLedger(tr)
 	if !rpt.Closes {
 		t.Fatalf("expected identity to close, reason=%q divergence=%v", rpt.FirstBadReason, rpt.Divergence)
 	}
-	if rpt.Left.DeclinedCommission.Cmp(big.NewInt(300)) != 0 {
-		t.Errorf("Left.DeclinedCommission = %s, want 300", rpt.Left.DeclinedCommission)
+	if rpt.Left.DeclinedCommission.Sign() != 0 {
+		t.Errorf("Left.DeclinedCommission = %s, want 0 — a decline moves no HBD", rpt.Left.DeclinedCommission)
 	}
 	if rpt.Left.ReclaimedCommission.Sign() != 0 {
-		t.Errorf("Left.ReclaimedCommission = %s, want 0 (this was a decline, not a reclaim — the two buckets must never blur)", rpt.Left.ReclaimedCommission)
-	}
-	if len(rpt.Overpayments) != 1 || rpt.Overpayments[0].Resolution != "declined" {
-		t.Fatalf("expected 1 declined overpayment, got %+v", rpt.Overpayments)
+		t.Errorf("Left.ReclaimedCommission = %s, want 0", rpt.Left.ReclaimedCommission)
 	}
 	if rpt.Sits.EscrowHeldTotal.Sign() != 0 {
-		t.Errorf("Sits.EscrowHeldTotal = %s, want 0 (the escrow resolved)", rpt.Sits.EscrowHeldTotal)
+		t.Errorf("Sits.EscrowHeldTotal = %s, want 0 (the escrow resolved, and held no HBD in any case)", rpt.Sits.EscrowHeldTotal)
 	}
 	bob := rpt.PerActor["bob"]
-	// F8 (an adversarial review): identical shape and numbers to
-	// TestLedger_ReclaimReturnsOverpaymentInFull — decline is money-shape-
-	// identical to reclaim (RULING E). CreditsHeldValue is net of the max
-	// K2 exit tax on bob's still-held 5000-credit balance. ★ 2026-09-08 fee
-	// change (MaxExitTaxBps 2000 -> 1500): gross=5000, tax=ceil(5000*1500/
-	// 10000)=750, CreditsHeldValue=4250.
-	// explained=ReceivedOut(300)+CreditsHeldValue(4250)=4550; PaidIn=5300;
-	// Unexplained=750 — the tax-floor gap on bob's own still-held balance,
-	// not a lost commission (the DeclinedCommission/Overpayments checks
-	// above already prove the excess came back in full).
-	wantUnexplainedDecline := big.NewInt(750)
-	if bob.Unexplained.Cmp(wantUnexplainedDecline) != 0 {
-		t.Errorf("bob.Unexplained = %s, want %s (full commission incl. the accidental excess was returned; the remainder is CreditsHeldValue's max-tax floor gap on bob's still-held balance, not a loss)", bob.Unexplained, wantUnexplainedDecline)
+	// The whole point: the declined escrow is back in bob's spendable balance,
+	// so nothing is pending against him any more.
+	if bob.PendingEscrowCreditsValue.Sign() != 0 {
+		t.Errorf("bob.PendingEscrowCreditsValue = %s, want 0 (the decline resolved the escrow)", bob.PendingEscrowCreditsValue)
+	}
+	if bob.PaidIn.Cmp(big.NewInt(5000)) != 0 {
+		t.Errorf("bob.PaidIn = %s, want 5000 (the prepay alone)", bob.PaidIn)
 	}
 }
-
-// TestLedger_ClaimTradeFeesMovesFeePotToLeft — RULING F8's pull half
-// (core/tradefee.go's ClaimTradeFees, wired into the engine 2026-07-28).
-// alice accrues a creator-half trade fee from bob's buy, then claims it in
-// full. The identity must still close, the claimed amount must land in
-// Left.TradeFeesClaimed, and it must disappear from Sits.FeePotsTotal —
-// mirroring withdrawTreasury's identical role for kTreasury.
 func TestLedger_ClaimTradeFeesMovesFeePotToLeft(t *testing.T) {
 	tr := &Trace{Seed: 9, Events: []Event{
 		registerEv(100, "alice", 2000, 1_000_000),

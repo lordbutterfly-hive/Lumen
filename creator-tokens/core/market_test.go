@@ -28,10 +28,6 @@ func mustRegister(t *testing.T, s Store, creator string, block uint64, face, cap
 	}
 }
 
-func subFee(periods uint64) *big.Int {
-	return new(big.Int).Mul(big.NewInt(int64(periods)), big.NewInt(SubscriptionFee))
-}
-
 // ---------------------------------------------------------------------------
 // Register
 // ---------------------------------------------------------------------------
@@ -49,8 +45,11 @@ func TestRegister_HappyPath(t *testing.T) {
 	if got := getU64(s, kRegisteredAt("goodcreator")); got != block {
 		t.Fatalf("registeredAt = %d, want %d", got, block)
 	}
-	if got := getU64(s, kPaidUntil("goodcreator")); got != block+SubscriptionPeriod {
-		t.Fatalf("paidUntil = %d, want %d", got, block+SubscriptionPeriod)
+	// (There is no paidUntil assertion here any more: registration writes no
+	// subscription clock since 2026-09-12 — core/keys.go's "THERE IS NO
+	// kPaidUntil". The phase assertion below is what registration now promises.)
+	if got := Phase(s, "goodcreator", block+100*BlocksPerDay); got != StateActive {
+		t.Fatalf("phase long after registration = %s, want ACTIVE (registration is one-time)", got)
 	}
 	if got := getMoney(s, kFace("goodcreator")); got.Cmp(big.NewInt(1000)) != 0 {
 		t.Fatalf("face = %s, want 1000 (kFace must be money-typed)", got)
@@ -116,8 +115,6 @@ func TestRegister_CallerMustEqualCreator(t *testing.T) {
 func TestRegister_DuplicateRejected(t *testing.T) {
 	s := NewMemStore()
 	mustRegister(t, s, "dupcreator", 100, 1000, 1000)
-	paidUntilBefore := getU64(s, kPaidUntil("dupcreator"))
-
 	err := Register(s, "dupcreator", "dupcreator", 200, 2000, 2000)
 	if err == nil {
 		t.Fatal("expected rejection: already registered")
@@ -126,9 +123,6 @@ func TestRegister_DuplicateRejected(t *testing.T) {
 		t.Fatalf("want ErrState, got %v", err)
 	}
 	// the second, rejected call must not have perturbed the live market.
-	if got := getU64(s, kPaidUntil("dupcreator")); got != paidUntilBefore {
-		t.Fatalf("paidUntil mutated by a rejected duplicate registration: %d != %d", got, paidUntilBefore)
-	}
 	if got := getMoney(s, kFace("dupcreator")); got.Cmp(big.NewInt(1000)) != 0 {
 		t.Fatalf("face mutated by a rejected duplicate registration: %s", got)
 	}
@@ -325,8 +319,7 @@ func TestRegister_ReRegisterAfterAbandonedEscrowResolvedByThirdParty(t *testing.
 	// observation is cleared first so the constant marker series owns both
 	// windows — resetObsRings/seedSettleObs, ask_test.go).
 	askBlock := seedSettleObs(s, creator, regBlock+10, big.NewInt(15_000))
-	commission := commissionOwedFor(big.NewInt(10_000))
-	askRes, err := askAt0(s, asker, creator, askBlock, big.NewInt(1), commission, "abandoned-ask", MinAskDeadline)
+	askRes, err := askAt0(s, asker, creator, askBlock, big.NewInt(1), "abandoned-ask", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -345,15 +338,16 @@ func TestRegister_ReRegisterAfterAbandonedEscrowResolvedByThirdParty(t *testing.
 	// past the freeze — the asker's reclaimed credit carries its pre-escrow clock
 	// (near regBlock+10, ET-2), which is fully decayed to τ = 0 there. The market
 	// is FROZEN and the reclaim window long-open at every block from here on.
-	frozenBlock := regBlock + SubscriptionPeriod + GraceBlocks + 10 + ExitTaxDecayBlocks
+	// A1 (2026-08-30): the wind-down (and its Refund rail) opens on Retire, not
+	// on a lapse — and since 2026-09-12 there is no lapse at all, so the retire
+	// must come a full notice BEFORE the block this fixture needs FROZEN. The
+	// escrow time-bomb under test is unchanged by which road opened the wind-down.
+	frozenBlock := regBlock + hzLongGap + GraceBlocks + 10 + ExitTaxDecayBlocks
+	if err := Retire(s, creator, creator, frozenBlock-GraceBlocks-1); err != nil {
+		t.Fatalf("fixture: Retire: %v", err)
+	}
 	if got := Phase(s, creator, frozenBlock); got != StateFrozen {
 		t.Fatalf("sanity: phase = %s, want FROZEN", got)
-	}
-	// A1 (2026-08-30): the wind-down (and its Refund rail) opens on Retire, not
-	// on the lapse. The escrow time-bomb under test is unchanged by which road
-	// opened the wind-down.
-	if err := Retire(s, creator, creator, frozenBlock-1); err != nil {
-		t.Fatalf("fixture: Retire: %v", err)
 	}
 	if got := Supply(s, creator); got.Cmp(big.NewInt(5000)) != 0 {
 		t.Fatalf("sanity: supply = %s, want 5000 (still pinned by the PENDING escrow)", got)
@@ -440,10 +434,14 @@ func TestRegister_StillRejectedWhileActive_EvenIfLapsedIntoOverdueOrFrozen(t *te
 	// lazily lapsed into OVERDUE/FROZEN — only an explicit stored CLOSED
 	// permits it (Phase's "only stored state that wins" contract). OVERDUE
 	// and FROZEN never touch kState, so the raw stored value stays ACTIVE.
+	// (The markets below no longer LAPSE at all since 2026-09-12 — they are
+	// simply ACTIVE at every one of these blocks, which makes the refusal even
+	// more obviously correct. The loop is kept, at the same block offsets, so the
+	// re-registration guard is still exercised at the heights it always was.)
 	for _, lapse := range []uint64{1, GraceBlocks, GraceBlocks + 1000} {
 		s := NewMemStore()
 		mustRegister(t, s, "lapsedcreator", 100, 1000, 1000)
-		block := getU64(s, kPaidUntil("lapsedcreator")) + lapse
+		block := 100 + 30*BlocksPerDay + lapse
 		err := Register(s, "lapsedcreator", "lapsedcreator", block, 2000, 2000)
 		if err == nil {
 			t.Fatalf("lapse=%d: re-registration over a live (if lapsed) market must be rejected", lapse)
@@ -454,314 +452,77 @@ func TestRegister_StillRejectedWhileActive_EvenIfLapsedIntoOverdueOrFrozen(t *te
 	}
 }
 
-// TestRegisterRenewNeverTouchReserveOrSupply is a light I4/I1 friendliness
-// check from this file's own side: kReserve/kSupply are exclusively
-// Prepay/Refund's business (prepay.go, refund.go). Register/Renew must never
-// write either key, in any state, including on re-registration.
-func TestRegisterRenewNeverTouchReserveOrSupply(t *testing.T) {
+// TestRegisterNeverTouchesReserveOrSupply is a light I4/I1 friendliness check
+// from this file's own side: kReserve/kSupply are exclusively Buy/Sell/Refund's
+// business. Register must never write either key, in any state, including on
+// re-registration. (It was "Register AND Renew" until 2026-09-12; Renew is
+// gone with the subscription — core/params.go.)
+func TestRegisterNeverTouchesReserveOrSupply(t *testing.T) {
 	s := NewMemStore()
 	mustRegister(t, s, "moneyhandsoff", 100, 1000, 1000)
-	if err := Renew(s, "afan", "moneyhandsoff", 200, 1, subFee(1)); err != nil {
-		t.Fatalf("Renew: %v", err)
-	}
 	if got := getMoney(s, kReserve("moneyhandsoff")); !mIsZero(got) {
-		t.Fatalf("kReserve touched by Register/Renew: %s (I4 violation)", got)
+		t.Fatalf("kReserve touched by Register: %s (I4 violation)", got)
 	}
 	if got := getMoney(s, kSupply("moneyhandsoff")); !mIsZero(got) {
-		t.Fatalf("kSupply touched by Register/Renew: %s", got)
+		t.Fatalf("kSupply touched by Register: %s", got)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Renew
+// THE RENEW SUITE IS DELETED (OWNER RULING 2026-09-12)
 // ---------------------------------------------------------------------------
-
-func TestRenew_HappyPathFromActive(t *testing.T) {
-	s := NewMemStore()
-	mustRegister(t, s, "rencreator1", 100, 1000, 1000)
-	before := getU64(s, kPaidUntil("rencreator1"))
-
-	if err := Renew(s, "rencreator1", "rencreator1", 150, 3, subFee(3)); err != nil {
-		t.Fatalf("Renew: %v", err)
-	}
-	want := before + 3*SubscriptionPeriod
-	if got := getU64(s, kPaidUntil("rencreator1")); got != want {
-		t.Fatalf("paidUntil = %d, want %d", got, want)
-	}
-}
-
-// TestRenew_AnyoneMayPay proves "a fan can keep a creator alive" — Renew has
-// no creator-only gate.
-func TestRenew_AnyoneMayPay(t *testing.T) {
-	s := NewMemStore()
-	mustRegister(t, s, "rencreator2", 100, 1000, 1000)
-	if err := Renew(s, "arandomfan", "rencreator2", 150, 1, subFee(1)); err != nil {
-		t.Fatalf("a non-creator fan should be able to renew: %v", err)
-	}
-}
-
-// TestRenew_FromLapsedOverdueResumesFromNow is the explicit "renewal from
-// lapsed state" case: paid_until extends from max(now, paid_until), so a
-// lapsed market resumes counting from the renewal block, not from its stale
-// (already-past) paid_until.
-func TestRenew_FromLapsedOverdueResumesFromNow(t *testing.T) {
-	s := NewMemStore()
-	mustRegister(t, s, "lapsedrenew", 100, 1000, 1000)
-	paidUntil0 := getU64(s, kPaidUntil("lapsedrenew"))
-
-	// Jump well past paid_until but still inside grace -> OVERDUE, still
-	// fully functional per SPEC §1.7.5.
-	block := paidUntil0 + GraceBlocks/2
-	if got := Phase(s, "lapsedrenew", block); got != StateOverdue {
-		t.Fatalf("test setup: Phase = %q, want OVERDUE at block %d", got, block)
-	}
-
-	if err := Renew(s, "afan", "lapsedrenew", block, 2, subFee(2)); err != nil {
-		t.Fatalf("Renew while OVERDUE should succeed: %v", err)
-	}
-	want := block + 2*SubscriptionPeriod // base == block (now), NOT paidUntil0
-	if got := getU64(s, kPaidUntil("lapsedrenew")); got != want {
-		t.Fatalf("paidUntil = %d, want %d (base should resume from now, not the stale paid_until)", got, want)
-	}
-	if got := Phase(s, "lapsedrenew", block); got != StateActive {
-		t.Fatalf("Phase after renewal = %q, want ACTIVE (resumed cleanly)", got)
-	}
-}
-
-// TestRenew_AcceptedWhenFrozen — A1 (owner ruling 2026-08-30) INVERTS the
-// former TestRenew_RefusedWhenFrozen. A natural FROZEN is an inflow stop that
-// the subscription payment exists to lift, so Renew has its own gate
-// (requireMarketAcceptsRenewal) that admits FROZEN. "Pay to reactivate" is
-// true on the screen that says it. Retired and CLOSED still refuse (the two
-// tests below, unchanged).
-func TestRenew_AcceptedWhenFrozen(t *testing.T) {
-	s := NewMemStore()
-	mustRegister(t, s, "frozenrenew", 100, 1000, 1000)
-	paidUntil0 := getU64(s, kPaidUntil("frozenrenew"))
-	block := paidUntil0 + GraceBlocks + 3*SubscriptionPeriod // long frozen
-	if got := Phase(s, "frozenrenew", block); got != StateFrozen {
-		t.Fatalf("test setup: Phase = %q, want FROZEN", got)
-	}
-	// Frozen means no new money: Buy refuses on the same block Renew accepts.
-	if _, err := Buy(s, "wouldbuy", "frozenrenew", block, big.NewInt(1)); errSymbol(err) != ErrState {
-		t.Fatalf("Buy while FROZEN must stay refused (inflow stop), got %v", err)
-	}
-	treasuryBefore := getMoney(s, kTreasury())
-
-	if err := Renew(s, "afan", "frozenrenew", block, 1, subFee(1)); err != nil {
-		t.Fatalf("A1: Renew while FROZEN must be accepted: %v", err)
-	}
-	if got, want := getU64(s, kPaidUntil("frozenrenew")), block+SubscriptionPeriod; got != want {
-		t.Fatalf("paidUntil = %d, want %d (resumes from now, not from the stale paid_until)", got, want)
-	}
-	if got := Phase(s, "frozenrenew", block); got != StateActive {
-		t.Fatalf("Phase after renewal = %q, want ACTIVE (reactivated)", got)
-	}
-	if got := new(big.Int).Sub(getMoney(s, kTreasury()), treasuryBefore); got.Cmp(subFee(1)) != 0 {
-		t.Fatalf("treasury gained %s, want the fee %s", got, subFee(1))
-	}
-	// And the inflow stop lifts with it.
-	if _, err := Buy(s, "wouldbuy", "frozenrenew", block+1, big.NewInt(1)); err != nil {
-		t.Fatalf("Buy after reactivation must work: %v", err)
-	}
-}
-
-// TestRenew_RefusedWhenRetired — the retire mark is terminal for Renew (RULING
-// D), unchanged by A1: a retired market is winding down and re-registers.
-func TestRenew_RefusedWhenRetired(t *testing.T) {
-	s := NewMemStore()
-	mustRegister(t, s, "retiredrenew", 100, 1000, 1000)
-	if err := Retire(s, "retiredrenew", "retiredrenew", 200); err != nil {
-		t.Fatal(err)
-	}
-	paidUntil0 := getU64(s, kPaidUntil("retiredrenew"))
-	if err := Renew(s, "afan", "retiredrenew", 201, 1, subFee(1)); err == nil || errSymbol(err) != ErrState {
-		t.Fatalf("Renew on a retired market must be refused with ErrState, got %v", err)
-	}
-	if got := getU64(s, kPaidUntil("retiredrenew")); got != paidUntil0 {
-		t.Fatalf("paidUntil moved on a refused Renew: %d -> %d", paidUntil0, got)
-	}
-}
-
-func TestRenew_RefusedWhenClosed(t *testing.T) {
-	s := NewMemStore()
-	mustRegister(t, s, "closedrenew", 100, 1000, 1000)
-	setStr(s, kState("closedrenew"), StateClosed)
-
-	err := Renew(s, "afan", "closedrenew", 200, 1, subFee(1))
-	if err == nil {
-		t.Fatal("Renew on a CLOSED market must be rejected")
-	}
-	if sym := errSymbol(err); sym != ErrState {
-		t.Fatalf("want ErrState, got %v", err)
-	}
-}
-
-func TestRenew_NoSuchMarket(t *testing.T) {
-	s := NewMemStore()
-	err := Renew(s, "afan", "nosuchcreator", 100, 1, subFee(1))
-	if err == nil {
-		t.Fatal("expected rejection for an unregistered creator")
-	}
-	if sym := errSymbol(err); sym != ErrNotFound {
-		t.Fatalf("want ErrNotFound, got %v", err)
-	}
-}
-
-func TestRenew_EmptyOrInvalidCallerRejected(t *testing.T) {
-	s := NewMemStore()
-	mustRegister(t, s, "callercreator", 100, 1000, 1000)
-
-	if err := Renew(s, "", "callercreator", 200, 1, subFee(1)); err == nil || errSymbol(err) != ErrAuth {
-		t.Fatalf("empty caller: want ErrAuth, got %v", err)
-	}
-	if err := Renew(s, "A|B", "callercreator", 200, 1, subFee(1)); err == nil || errSymbol(err) != ErrInput {
-		t.Fatalf("key-delimiter caller: want ErrInput, got %v", err)
-	}
-}
-
-func TestRenew_PeriodsOutOfRangeRejected(t *testing.T) {
-	s := NewMemStore()
-	mustRegister(t, s, "periodscreator", 100, 1000, 1000)
-
-	if err := Renew(s, "afan", "periodscreator", 200, 0, big.NewInt(0)); err == nil || errSymbol(err) != ErrInput {
-		t.Fatalf("periods=0: want ErrInput, got %v", err)
-	}
-	if err := Renew(s, "afan", "periodscreator", 200, MaxPrepaidPeriods+1, subFee(MaxPrepaidPeriods+1)); err == nil || errSymbol(err) != ErrInput {
-		t.Fatalf("periods > MaxPrepaidPeriods: want ErrInput, got %v", err)
-	}
-}
-
-func TestRenew_PaymentInsufficientRejected(t *testing.T) {
-	s := NewMemStore()
-	mustRegister(t, s, "paycreator", 100, 1000, 1000)
-
-	underpaid := new(big.Int).Sub(subFee(2), big.NewInt(1))
-	if err := Renew(s, "afan", "paycreator", 200, 2, underpaid); err == nil || errSymbol(err) != ErrBalance {
-		t.Fatalf("underpaid: want ErrBalance, got %v", err)
-	}
-	if err := Renew(s, "afan", "paycreator", 200, 2, nil); err == nil || errSymbol(err) != ErrInput {
-		t.Fatalf("nil paid: want ErrInput, got %v", err)
-	}
-	// exact boundary succeeds.
-	if err := Renew(s, "afan", "paycreator", 200, 2, subFee(2)); err != nil {
-		t.Fatalf("paid == exactly periods*SubscriptionFee should succeed: %v", err)
-	}
-}
-
-// TestRenew_CappedAtMaxPrepaidPeriodsAhead proves paid_until can never be
-// pushed further than MaxPrepaidPeriods*SubscriptionPeriod beyond `block`
-// (the renewal call's own "now"), and that an over-request is REJECTED
-// outright rather than silently clamped (the payer's HBD must never be
-// quietly short-changed).
-func TestRenew_CappedAtMaxPrepaidPeriodsAhead(t *testing.T) {
-	s := NewMemStore()
-	const block0 = uint64(100000)
-	mustRegister(t, s, "capaheadcreator", block0, 1000, 1000)
-	// Register already consumed one SubscriptionPeriod of headroom, so a
-	// same-block renewal of the full MaxPrepaidPeriods would land one period
-	// beyond the ahead-of-now ceiling and must be rejected.
-	if err := Renew(s, "afan", "capaheadcreator", block0, MaxPrepaidPeriods, subFee(MaxPrepaidPeriods)); err == nil {
-		t.Fatal("expected rejection: total would exceed MaxPrepaidPeriods ahead of now")
-	} else if sym := errSymbol(err); sym != ErrInput {
-		t.Fatalf("want ErrInput, got %v", err)
-	}
-	// Registration is FREE, so the treasury is still EMPTY here: a rejected
-	// renewal must book nothing, and nothing was booked before it either.
-	if got := getMoney(s, kTreasury()); !mIsZero(got) {
-		t.Fatalf("treasury = %s, want 0 (registration is free and a rejected renewal must not book payment)", got)
-	}
-
-	// exactly one period fewer lands ON the boundary and must succeed.
-	if err := Renew(s, "afan", "capaheadcreator", block0, MaxPrepaidPeriods-1, subFee(MaxPrepaidPeriods-1)); err != nil {
-		t.Fatalf("boundary renewal should succeed: %v", err)
-	}
-	want := block0 + MaxPrepaidPeriods*SubscriptionPeriod
-	if got := getU64(s, kPaidUntil("capaheadcreator")); got != want {
-		t.Fatalf("paidUntil = %d, want %d (exactly at the ahead-of-now cap)", got, want)
-	}
-
-	// now sitting exactly at the cap: even 1 more period must be refused.
-	if err := Renew(s, "afan", "capaheadcreator", block0, 1, subFee(1)); err == nil {
-		t.Fatal("expected rejection: already exactly at the ahead-of-now cap")
-	}
-}
-
-func TestRenew_TreasuryBooksFullPaidAmount(t *testing.T) {
-	s := NewMemStore()
-	mustRegister(t, s, "rentreasury", 100, 1000, 1000)
-	before := getMoney(s, kTreasury())
-
-	overpaid := new(big.Int).Add(subFee(1), big.NewInt(999))
-	if err := Renew(s, "afan", "rentreasury", 200, 1, overpaid); err != nil {
-		t.Fatalf("Renew: %v", err)
-	}
-	want := mAdd(before, overpaid)
-	if got := getMoney(s, kTreasury()); got.Cmp(want) != 0 {
-		t.Fatalf("treasury = %s, want %s (full paid amount booked, matching Ask's convention)", got, want)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Retire — M2 fix: a creator-only escape hatch from permissionless-renew
-// griefing. Renew is deliberately open to anyone ("a fan can keep a
-// creator alive"), which a stranger can weaponize by renewing a victim's
-// market indefinitely, blocking the creator's own wind-down forever.
-// ---------------------------------------------------------------------------
-
-// DEFECT 1 (2026-07-21): the M2 fix used to set kPaidUntil = block, which for
-// an already-lapsed (OVERDUE/FROZEN) market RAISES paidUntil and flips the
-// market back to ACTIVE — the opposite of retire, and a permanent
-// subscription-dodge.
 //
-// ★★ UPDATED 2026-07-21 for RULING D (RULINGS-v2) — WHAT CHANGED AND WHY. ★★
+// Fourteen tests lived here and pinned core.Renew: the happy path from ACTIVE,
+// permissionless payment ("a fan can keep a creator alive"), resuming from
+// max(now, paidUntil) after a lapse, admission while FROZEN (A1) and refusal
+// while RETIRED or CLOSED, the no-such-market / empty-caller / periods-range /
+// underpayment rejections, the MaxPrepaidPeriods reach cap, and the treasury
+// booking the full paid amount.
 //
-// The instant freeze these tests used to assert is GONE. Retire now stamps a
-// HEIGHT and Phase derives MAX(naturalPhase, retiredPhase) on ACTIVE <
-// OVERDUE < FROZEN < CLOSED, with retiredPhase = OVERDUE for GraceBlocks
-// (5 days) and FROZEN after. That is not a relaxation for convenience: an
-// instant freeze was MEASURED as the creator-whale's escape hatch around the
-// entire exit tax, because the wind-down rail pays flat pro-rata with NO exit
-// tax and NO trade fee while the curve rail pays marginal minus both — 205.53
-// HBD via instant Retire versus 180.62 HBD via a taxed curve exit for a fresh
-// dominant creator. The five-day notice is what lets fans exit on the curve
-// rail first, and RULING J makes it a HARD PREREQUISITE for shipping the tax.
+// The 10 HBD monthly subscription was removed whole — core/params.go's "THERE
+// IS NO SubscriptionFee" carries the reasoning — so core.Renew, SubscriptionFee,
+// SubscriptionPeriod, MaxPrepaidPeriods and kPaidUntil are all gone and there is
+// nothing left for any of those fourteen to call.
 //
-// EVERY PROPERTY THE OLD TESTS PROTECTED IS STILL ASSERTED BELOW, because the
-// MAX preserves them all: retire never un-freezes (A, B/frozen), retire never
-// yields ACTIVE (A, B), the subscription dodge stays closed (B/dodge-loop),
-// the wind-down is terminal (C), and the mark does not survive
-// re-registration (ReRegisterAfterWindDown). What changed is only WHEN FROZEN
-// begins — and every test now pins BOTH ends of the notice window, so a
-// regression in either direction fails.
+// ★ WHAT THEY WERE REALLY PROTECTING, AND WHERE IT LIVES NOW. Only one of the
+// fourteen guarded a property that outlives the fee: M2's anti-griefing rule,
+// that a hostile stranger's prepayment must never be able to block a creator's
+// own wind-down. Renew was the griefing lever, so removing it removes the
+// attack — but the OVERRIDE that answered it, Retire, is still here and still
+// tested, immediately below (TEST A, rewritten for a market nobody can prepay).
+// The lapse ladder those tests drove is covered by a1_lapse_test.go, which is
+// now its own inverse.
 
-// TEST A — the M2 case must STILL hold: a stranger renews the victim's market
-// far into the future, the creator calls Retire, and the market goes OVERDUE
-// immediately and FROZEN at retiredAt+GraceBlocks — regardless of the
-// stranger's prepayment, and never ACTIVE again. paidUntil is left untouched
-// (the stranger's fee was real, not refunded), which is precisely why the OLD
-// paidUntil-poke mechanism could not express this: the market's paidUntil is
-// FAR in the future here, yet Phase must read OVERDUE then FROZEN.
-func TestRetire_A_OverridesHostileRenewReachesFrozenNotActive(t *testing.T) {
+// TEST A — M2's OVERRIDE must still hold, with its attack retired.
+//
+// The original case was: a hostile stranger renews the victim's market
+// MaxPrepaidPeriods into the future (Renew was permissionless), so the market
+// can never lapse and the creator can never reach the CLOSED state a
+// re-registration needs. Retire was the creator's override — it drives the
+// market OVERDUE immediately and FROZEN at retiredAt+GraceBlocks whatever
+// paidUntil says, because Phase takes the MAX of the two ladders.
+//
+// ★ THE ATTACK IS GONE, THE OVERRIDE IS NOT (OWNER RULING 2026-09-12). With no
+// subscription there is no Renew to grief with and no paidUntil to push — every
+// market is permanently ACTIVE, which is the griefer's goal reached for free and
+// harmlessly. What still has to hold, and is what this test now pins, is that
+// Retire overrides a market that is ACTIVE and would otherwise stay ACTIVE
+// forever: OVERDUE on the mark, FROZEN at the mark plus the notice, never ACTIVE
+// again. That is the same assertion with the same mechanism; only the reason the
+// market was ACTIVE changed.
+func TestRetire_A_OverridesAPermanentlyActiveMarketReachesFrozenNotActive(t *testing.T) {
 	s := NewMemStore()
 	const creator = "griefedcreator"
 	regBlock := uint64(1000)
 	mustRegister(t, s, creator, regBlock, 1000, 1000)
 
-	// THE ATTACK: a stranger renews the market MaxPrepaidPeriods ahead — the
-	// maximum griefing reach Renew's own bound allows.
 	hostileBlock := regBlock + 1
-	if err := Renew(s, "hostilestranger", creator, hostileBlock, MaxPrepaidPeriods-1, subFee(MaxPrepaidPeriods-1)); err != nil {
-		t.Fatalf("setup (hostile Renew): %v", err)
-	}
-	farFuturePaidUntil := getU64(s, kPaidUntil(creator))
-	wantFarFuture := regBlock + MaxPrepaidPeriods*SubscriptionPeriod
-	if farFuturePaidUntil != wantFarFuture {
-		t.Fatalf("sanity: paidUntil after hostile renew = %d, want %d", farFuturePaidUntil, wantFarFuture)
+	if got := Phase(s, creator, hostileBlock+100*BlocksPerDay); got != StateActive {
+		t.Fatalf("sanity: a market with nothing paid is ACTIVE forever, got %s", got)
 	}
 	// Confirm the market really is ACTIVE deep into what should have been its
 	// own natural lapse window, purely because of the stranger's renewal.
-	naturalLapseBlock := regBlock + SubscriptionPeriod + 10
+	naturalLapseBlock := regBlock + hzLongGap + 10
 	if got := Phase(s, creator, naturalLapseBlock); got != StateActive {
 		t.Fatalf("sanity: phase at the natural lapse point = %s, want ACTIVE (griefed by the hostile renewal)", got)
 	}
@@ -790,154 +551,86 @@ func TestRetire_A_OverridesHostileRenewReachesFrozenNotActive(t *testing.T) {
 	if got := Phase(s, creator, retireBlock+GraceBlocks); got != StateFrozen {
 		t.Fatalf("phase AT retiredAt+GraceBlocks = %s, want FROZEN", got)
 	}
-	// And still FROZEN far past where the stranger's paidUntil would keep it
-	// ACTIVE — the MAX must win over paidUntil forever.
-	if got := Phase(s, creator, wantFarFuture-1); got != StateFrozen {
-		t.Fatalf("phase deep inside the stranger's prepaid window = %s, want FROZEN (the retire mark must win over paidUntil)", got)
+	// And still FROZEN arbitrarily far out — a market that would otherwise be
+	// ACTIVE forever must never climb back.
+	farFuture := retireBlock + 365*BlocksPerDay
+	if got := Phase(s, creator, farFuture-1); got != StateFrozen {
+		t.Fatalf("phase a year after the retire = %s, want FROZEN (the retire mark is terminal)", got)
 	}
 	// The load-bearing negative: ACTIVE is unreachable at every block from
 	// the retire onward, which is what "retire may only make a market MORE
 	// frozen" means operationally.
 	for _, b := range []uint64{retireBlock, retireBlock + 1, retireBlock + GraceBlocks - 1,
-		retireBlock + GraceBlocks, wantFarFuture - 1, wantFarFuture, wantFarFuture + 1} {
+		retireBlock + GraceBlocks, farFuture - 1, farFuture, farFuture + 1} {
 		if got := Phase(s, creator, b); got == StateActive {
 			t.Fatalf("phase at block %d = ACTIVE after Retire — retire must never make a market LESS frozen", b)
 		}
 	}
 
-	// Retire moves no funds: paidUntil untouched, treasury unchanged.
-	if got := getU64(s, kPaidUntil(creator)); got != wantFarFuture {
-		t.Fatalf("paidUntil mutated by Retire = %d, want unchanged %d (Retire must never touch the timestamp)", got, wantFarFuture)
-	}
-	if got := getMoney(s, kTreasury()); got.Cmp(subFee(MaxPrepaidPeriods-1)) != 0 {
+	// Retire moves no funds.
+	if got := getMoney(s, kTreasury()); got.Sign() != 0 {
 		t.Fatalf("treasury changed by Retire itself: %s", got)
 	}
 }
 
-// TEST B — THE BUG: a NORMALLY-lapsed market that is currently OVERDUE or
-// FROZEN. Under the old mechanism, Retire's `paidUntil = block` RAISED
-// paidUntil to now and flipped the market back to ACTIVE. It must NEVER be
-// ACTIVE again — which under RULING D means OVERDUE (the notice) at worst,
-// and FROZEN as soon as EITHER ladder reaches it, whichever is sooner. That
-// "whichever is sooner" is the MAX, and it is exactly why a lapsed market
-// cannot buy itself five more days by retiring.
-func TestRetire_B_LapsedOverdueOrFrozenGoesFrozenNotActive(t *testing.T) {
-	// Sub-case 1: retire while OVERDUE (past paidUntil, still inside grace).
-	t.Run("overdue", func(t *testing.T) {
-		s := NewMemStore()
-		const creator = "retireoverdue"
-		regBlock := uint64(100)
-		mustRegister(t, s, creator, regBlock, 1000, 1000)
+// TEST B — RETIRE IS MONOTONE: it may only ever make a market MORE frozen.
+//
+// ★ WHAT THIS TEST USED TO BE. Retire's first implementation expressed the
+// freeze as `paidUntil = block`, which for a market that had ALREADY lapsed
+// RAISED paidUntil and flipped it straight back to ACTIVE — a creator could
+// retire to reset the clock and keep trading for free. RULING D replaced the
+// poke with a MAX over two independent ladders (the subscription's and the
+// retire mark's), and this test drove a market down the SUBSCRIPTION ladder to
+// OVERDUE and to FROZEN and then retired it from each rung, plus a third
+// sub-case proving a retired market could not be renewed back to life.
+//
+// THERE IS ONLY ONE LADDER NOW (OWNER RULING 2026-09-12). With the subscription
+// removed, naturalPhase is constant ACTIVE, so "retire from OVERDUE" and
+// "retire from FROZEN" are unconstructible states and the renew-dodge has no
+// Renew to perform it. What survives, and is what the MAX was really for, is the
+// monotonicity itself: from the only reachable starting rung, Retire moves the
+// market DOWN and it never comes back. That is asserted here and, across an
+// exhaustive block sweep, in TestPhase_RetireIsMonotone_NeverLessFrozen below.
+func TestRetire_B_FromActiveGoesOverdueThenFrozenAndNeverBack(t *testing.T) {
+	s := NewMemStore()
+	const creator = "retirefromactive"
+	regBlock := uint64(100)
+	mustRegister(t, s, creator, regBlock, 1000, 1000)
 
-		overdueBlock := regBlock + SubscriptionPeriod + 10
-		if got := Phase(s, creator, overdueBlock); got != StateOverdue {
-			t.Fatalf("sanity: phase = %s, want OVERDUE", got)
-		}
-		if err := Retire(s, creator, creator, overdueBlock); err != nil {
-			t.Fatalf("Retire while OVERDUE: %v", err)
-		}
-		// The bug was: this flips to ACTIVE. It must stay OVERDUE (both
-		// ladders read OVERDUE here) and must NEVER read ACTIVE.
-		if got := Phase(s, creator, overdueBlock); got != StateOverdue {
-			t.Fatalf("phase on the retire block = %s, want OVERDUE (old bug flipped an OVERDUE market back to ACTIVE)", got)
-		}
-		if got := Phase(s, creator, overdueBlock+1); got != StateOverdue {
-			t.Fatalf("phase one block after Retire = %s, want OVERDUE, NEVER ACTIVE", got)
-		}
-		// THE MAX IS LOAD-BEARING: the market freezes on the NATURAL
-		// schedule (regBlock+SubscriptionPeriod+GraceBlocks), which lands
-		// BEFORE the retire notice would have expired
-		// (overdueBlock+GraceBlocks). Retiring bought no extra life.
-		naturalFreeze := regBlock + SubscriptionPeriod + GraceBlocks
-		if naturalFreeze >= overdueBlock+GraceBlocks {
-			t.Fatalf("test setup no longer exercises the MAX: naturalFreeze=%d, retire notice ends at %d", naturalFreeze, overdueBlock+GraceBlocks)
-		}
-		if got := Phase(s, creator, naturalFreeze); got != StateFrozen {
-			t.Fatalf("phase at the NATURAL freeze block = %s, want FROZEN — retiring must never delay a lapse", got)
-		}
-	})
+	// The only reachable starting rung, at an arbitrary height — a market with
+	// nothing paid is ACTIVE at every block until someone retires it.
+	retireBlock := regBlock + 30*BlocksPerDay + 10
+	if got := Phase(s, creator, retireBlock); got != StateActive {
+		t.Fatalf("sanity: phase = %s, want ACTIVE (nothing lapses any more)", got)
+	}
+	if err := Retire(s, creator, creator, retireBlock); err != nil {
+		t.Fatalf("Retire: %v", err)
+	}
 
-	// Sub-case 2: retire while already past grace (naturally FROZEN).
-	t.Run("frozen", func(t *testing.T) {
-		s := NewMemStore()
-		const creator = "retirealreadyfrozen"
-		regBlock := uint64(100)
-		mustRegister(t, s, creator, regBlock, 1000, 1000)
-
-		frozenBlock := regBlock + SubscriptionPeriod + GraceBlocks + 10
-		if got := Phase(s, creator, frozenBlock); got != StateFrozen {
-			t.Fatalf("sanity: phase = %s, want FROZEN (naturally lapsed past grace)", got)
+	if got := Phase(s, creator, retireBlock); got != StateOverdue {
+		t.Fatalf("phase on the retire block = %s, want OVERDUE (the notice)", got)
+	}
+	if got := Phase(s, creator, retireBlock+GraceBlocks-1); got != StateOverdue {
+		t.Fatalf("phase on the LAST notice block = %s, want OVERDUE", got)
+	}
+	if got := Phase(s, creator, retireBlock+GraceBlocks); got != StateFrozen {
+		t.Fatalf("phase AT retiredAt+GraceBlocks = %s, want FROZEN", got)
+	}
+	// NEVER ACTIVE again, at any height — the property the MAX exists to give.
+	for _, b := range []uint64{retireBlock, retireBlock + 1, retireBlock + GraceBlocks - 1,
+		retireBlock + GraceBlocks, retireBlock + 365*BlocksPerDay} {
+		if got := Phase(s, creator, b); got == StateActive {
+			t.Fatalf("phase at block %d = ACTIVE after Retire — retire must never make a market LESS frozen", b)
 		}
-		if err := Retire(s, creator, creator, frozenBlock); err != nil {
-			t.Fatalf("Retire while FROZEN: %v", err)
-		}
-		// The most direct form of the dodge: retiring a FROZEN market used to
-		// un-freeze it straight back to ACTIVE. It must stay FROZEN — this is
-		// the MAX(FROZEN, OVERDUE) = FROZEN case, the single most important
-		// reason RULING D specifies a MAX and not an assignment.
-		if got := Phase(s, creator, frozenBlock); got != StateFrozen {
-			t.Fatalf("phase on the retire block = %s, want FROZEN (retire must never un-freeze)", got)
-		}
-		if got := Phase(s, creator, frozenBlock+1); got != StateFrozen {
-			t.Fatalf("phase one block after Retire = %s, want FROZEN, NEVER ACTIVE", got)
-		}
-	})
-
-	// Sub-case 3: the perpetual-subscription-dodge loop is closed. A creator
-	// who retires while OVERDUE cannot then renew back to ACTIVE — the whole
-	// point of the exploit (retire to reset, then continue for free).
-	t.Run("dodge-loop-closed", func(t *testing.T) {
-		s := NewMemStore()
-		const creator = "retiredodger"
-		regBlock := uint64(100)
-		mustRegister(t, s, creator, regBlock, 1000, 1000)
-
-		overdueBlock := regBlock + SubscriptionPeriod + 10
-		if err := Retire(s, creator, creator, overdueBlock); err != nil {
-			t.Fatalf("Retire: %v", err)
-		}
-		// The dodger now tries to keep the market alive by paying — must
-		// fail. Under RULING D the notice phase is OVERDUE, which
-		// RequireInflowOpen would ADMIT, so Renew carries its own explicit
-		// refusal on the retire mark (market.go): a subscription cannot lift
-		// a retired market past the MAX, so taking the payment would be
-		// charging for something the mechanism structurally cannot deliver.
-		err := Renew(s, creator, creator, overdueBlock+1, 1, subFee(1))
-		if err == nil || errSymbol(err) != ErrState {
-			t.Fatalf("Renew of a retired market: err=%v, want ErrState (the dodge loop must be closed)", err)
-		}
-		if got := Phase(s, creator, overdueBlock+1); got != StateOverdue {
-			t.Fatalf("phase after a rejected renew = %s, want OVERDUE (inside the notice)", got)
-		}
-		// A rejected renewal books nothing.
-		if got := getMoney(s, kTreasury()); !mIsZero(got) {
-			t.Fatalf("treasury = %s, want 0 — a refused renewal must not take the payer's money", got)
-		}
-		// And the dodge is closed for good: FROZEN on the natural schedule,
-		// never ACTIVE again at any height.
-		for _, b := range []uint64{overdueBlock, overdueBlock + 1,
-			regBlock + SubscriptionPeriod + GraceBlocks,
-			overdueBlock + GraceBlocks, overdueBlock + 10*GraceBlocks} {
-			if got := Phase(s, creator, b); got == StateActive {
-				t.Fatalf("phase at block %d = ACTIVE after Retire — the perpetual-subscription dodge is open again", b)
-			}
-		}
-	})
+	}
+	// Retiring twice is refused, so the notice cannot be restarted to buy more
+	// OVERDUE time (the shape the old dodge-loop sub-case was really guarding).
+	if err := Retire(s, creator, creator, retireBlock+1); err == nil {
+		t.Fatal("a second Retire must be refused — the notice cannot be restarted")
+	}
 }
 
-// TEST C — revenue bypass closed, and the RULING-K3 SHAPE OF THE NOTICE. Two
-// phases, both asserted:
-//
-//	DURING the notice (Phase() still OVERDUE, but marketRetired ⇒ inWindDown):
-//	Buy and Ask are CLOSED (RULING K3 drops the curve rail and closes inflows
-//	the instant a market retires — that was THM-1's first-mover race). Exits
-//	route through the flat pro-rata Refund. Only the exits stay open; no NEW
-//	money may enter.
-//
-//	Renew is refused throughout, from the retire block on: a subscription
-//	cannot lift a retired market back to life.
-//
-//	AFTER retiredAt+GraceBlocks (FROZEN): every new-inflow path is still
+
 //	refused — no free perpetual service — and the wind-down is terminal.
 func TestRetire_C_RevenueBypassClosed(t *testing.T) {
 	s := NewMemStore()
@@ -973,19 +666,12 @@ func TestRetire_C_RevenueBypassClosed(t *testing.T) {
 	if _, err := Buy(s, "buyer", creator, inNotice, big.NewInt(500)); err == nil || errSymbol(err) != ErrState {
 		t.Fatalf("Buy inside the notice: err=%v, want ErrState (K3 drops the curve rail; exits route through Refund)", err)
 	}
-	// Renew is refused from the retire block onward, by anyone. Snapshot the
-	// treasury FIRST so this asserts exactly one thing: a refused renewal books
-	// nothing (and there is no buy fee to confound it now that Buy is closed).
-	treasuryBefore := getMoney(s, kTreasury())
-	if err := Renew(s, creator, creator, inNotice, 1, subFee(1)); err == nil || errSymbol(err) != ErrState {
-		t.Fatalf("Renew inside the notice: err=%v, want ErrState (a retired market can never be renewed back to life)", err)
-	}
-	if err := Renew(s, "somefan", creator, inNotice, 1, subFee(1)); err == nil || errSymbol(err) != ErrState {
-		t.Fatalf("a fan's Renew inside the notice: err=%v, want ErrState", err)
-	}
-	if got := getMoney(s, kTreasury()); got.Cmp(treasuryBefore) != 0 {
-		t.Fatalf("treasury = %s, want unchanged at %s — refused renewals must not book the payer's money", got, treasuryBefore)
-	}
+	// (Three Renew refusals used to sit here — the creator's, a fan's, and the
+	// treasury-books-nothing check — proving a retired market could never be
+	// bought back to life. Renew was deleted with the subscription on 2026-09-12;
+	// there is no payment that can lift a retire mark because there is no payment
+	// at all. The Buy and RequireInflowOpen refusals above are what close that
+	// door now.)
 	// And the exit rail IS open during the notice: earlyfan can Refund now.
 	if _, err := Refund(s, "earlyfan", creator, inNotice, big.NewInt(100)); err != nil {
 		t.Fatalf("Refund inside the notice: %v — the flat pro-rata exit must be open while a retired market winds down (K3)", err)
@@ -1005,11 +691,8 @@ func TestRetire_C_RevenueBypassClosed(t *testing.T) {
 		t.Fatalf("Buy after the notice: err=%v, want ErrState", err)
 	}
 	// Ask refuses (the inflow gate is the only phase check in ask.go).
-	if _, err := askAt0(s, "buyer", creator, probe, big.NewInt(1000), big.NewInt(0), "cid", MinAskDeadline); err == nil || errSymbol(err) != ErrState {
+	if _, err := askAt0(s, "buyer", creator, probe, big.NewInt(1000), "cid", MinAskDeadline); err == nil || errSymbol(err) != ErrState {
 		t.Fatalf("Ask after the notice: err=%v, want ErrState", err)
-	}
-	if err := Renew(s, creator, creator, probe, 1, subFee(1)); err == nil || errSymbol(err) != ErrState {
-		t.Fatalf("Renew after the notice: err=%v, want ErrState (wind-down is terminal)", err)
 	}
 }
 
@@ -1253,8 +936,7 @@ func TestSetFace_WorksWhileOverdueOrFrozen(t *testing.T) {
 	for _, lapse := range []uint64{1, GraceBlocks} { // OVERDUE, FROZEN
 		s := NewMemStore()
 		mustRegister(t, s, "faceduringlapse", 100, 1000, 1000)
-		paidUntil := getU64(s, kPaidUntil("faceduringlapse"))
-		block := paidUntil + lapse + FaceBandWindow + 1 // also clear of the face band
+		block := 100 + 30*BlocksPerDay + lapse + FaceBandWindow + 1 // clear of the face band
 		if err := SetFace(s, "faceduringlapse", "faceduringlapse", block, 2000); err != nil {
 			t.Fatalf("lapse=%d: SetFace should work regardless of billing phase: %v", lapse, err)
 		}
@@ -1423,8 +1105,7 @@ func TestSetCap_WorksWhileOverdueOrFrozen(t *testing.T) {
 	for _, lapse := range []uint64{1, GraceBlocks} {
 		s := NewMemStore()
 		mustRegister(t, s, "capduringlapse", 100, 1000, 1000)
-		paidUntil := getU64(s, kPaidUntil("capduringlapse"))
-		block := paidUntil + lapse
+		block := 100 + 30*BlocksPerDay + lapse
 		if err := SetCap(s, "capduringlapse", "capduringlapse", block, 5000); err != nil {
 			t.Fatalf("lapse=%d: SetCap should work regardless of billing phase: %v", lapse, err)
 		}
@@ -1432,54 +1113,66 @@ func TestSetCap_WorksWhileOverdueOrFrozen(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase — table-driven boundary walk, exactly the block points named in the
-// task, plus StateClosed's override and the never-registered fallthrough.
+// Phase — table-driven boundary walk over the RETIRE notice, plus StateClosed's
+// override and the never-registered fallthrough.
+//
+// ★ THE WALK MOVED LADDERS (OWNER RULING 2026-09-12). It used to walk the
+// SUBSCRIPTION ladder around a stored paid_until: ACTIVE at paid_until
+// inclusive, OVERDUE for the next GraceBlocks, FROZEN from paid_until+GraceBlocks
+// on. That ladder is gone — naturalPhase is constant ACTIVE — and the identical
+// boundary convention now hangs off the retire mark instead: OVERDUE from the
+// mark inclusive, FROZEN AT mark+GraceBlocks. The five block points, the
+// inclusive/exclusive edges and the off-by-one they exist to catch are all
+// preserved; only what starts the clock changed.
 // ---------------------------------------------------------------------------
 
 func TestPhase_BlockBoundaries(t *testing.T) {
-	const paidUntil = uint64(1_000_000)
+	const regBlock = uint64(900_000)
+	const retiredAt = uint64(1_000_000)
 
 	cases := []struct {
 		name  string
 		block uint64
 		want  string
 	}{
-		{"at paid_until: still ACTIVE (inclusive)", paidUntil, StateActive},
-		{"paid_until + 1: first lapsed block, OVERDUE begins", paidUntil + 1, StateOverdue},
-		{"paid_until + GraceBlocks - 1: last OVERDUE block", paidUntil + GraceBlocks - 1, StateOverdue},
-		{"paid_until + GraceBlocks: grace fully consumed, FROZEN begins", paidUntil + GraceBlocks, StateFrozen},
-		{"paid_until + GraceBlocks + 1: still FROZEN", paidUntil + GraceBlocks + 1, StateFrozen},
+		// (No "one block before the retire" case: Phase is a pure function of
+		// CURRENT state, so querying a past height against a market that is
+		// already retired reads the retired ladder — retiredAt-1 is inside
+		// retiredAt+GraceBlocks and therefore OVERDUE. That is pre-existing and
+		// correct; a market's ACTIVE past is asserted by
+		// TestPhase_AdditionalBoundaryCoverage on a market that never retired.)
+		{"at the retire mark: OVERDUE begins (inclusive)", retiredAt, StateOverdue},
+		{"retiredAt + GraceBlocks - 1: last OVERDUE block", retiredAt + GraceBlocks - 1, StateOverdue},
+		{"retiredAt + GraceBlocks: notice fully consumed, FROZEN begins", retiredAt + GraceBlocks, StateFrozen},
+		{"retiredAt + GraceBlocks + 1: still FROZEN", retiredAt + GraceBlocks + 1, StateFrozen},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			s := NewMemStore()
-			setStr(s, kState("phasecreator"), StateActive)
-			setU64(s, kPaidUntil("phasecreator"), paidUntil)
-
+			mustRegister(t, s, "phasecreator", regBlock, 1000, 1000)
+			if err := Retire(s, "phasecreator", "phasecreator", retiredAt); err != nil {
+				t.Fatalf("Retire: %v", err)
+			}
 			got := Phase(s, "phasecreator", c.block)
 			if got != c.want {
-				t.Fatalf("Phase at block %d (paidUntil=%d) = %q, want %q", c.block, paidUntil, got, c.want)
+				t.Fatalf("Phase at block %d (retiredAt=%d) = %q, want %q", c.block, retiredAt, got, c.want)
 			}
 		})
 	}
 }
 
-// Extra boundary coverage beyond the 5 points the task named explicitly:
-// well before paid_until, and deep into FROZEN.
+// Extra boundary coverage beyond the 5 points above: a market that was never
+// retired is ACTIVE at every height, including absurdly large ones. That is the
+// inverse of what this test used to assert (deep into FROZEN) and is the single
+// most consequential behaviour change of the 2026-09-12 ruling.
 func TestPhase_AdditionalBoundaryCoverage(t *testing.T) {
-	const paidUntil = uint64(1_000_000)
 	s := NewMemStore()
-	setStr(s, kState("phasecreator2"), StateActive)
-	setU64(s, kPaidUntil("phasecreator2"), paidUntil)
+	mustRegister(t, s, "phasecreator2", 100, 1000, 1000)
 
-	if got := Phase(s, "phasecreator2", paidUntil-1); got != StateActive {
-		t.Fatalf("well before paid_until: got %q, want ACTIVE", got)
-	}
-	if got := Phase(s, "phasecreator2", 0); got != StateActive {
-		t.Fatalf("block 0 with a future paid_until: got %q, want ACTIVE", got)
-	}
-	if got := Phase(s, "phasecreator2", paidUntil+GraceBlocks+10_000_000); got != StateFrozen {
-		t.Fatalf("deep into FROZEN: got %q, want FROZEN", got)
+	for _, b := range []uint64{0, 100, 1_000_000, 1_000_000 + GraceBlocks + 10_000_000} {
+		if got := Phase(s, "phasecreator2", b); got != StateActive {
+			t.Fatalf("never-retired market at block %d: got %q, want ACTIVE", b, got)
+		}
 	}
 }
 
@@ -1489,29 +1182,38 @@ func TestPhase_AdditionalBoundaryCoverage(t *testing.T) {
 func TestPhase_ClosedIsTheOnlyStoredStateThatWins(t *testing.T) {
 	s := NewMemStore()
 	setStr(s, kState("closedwins"), StateClosed)
-	setU64(s, kPaidUntil("closedwins"), 999_999_999) // would otherwise derive ACTIVE at any sane block
 
 	if got := Phase(s, "closedwins", 100); got != StateClosed {
 		t.Fatalf("Phase = %q, want CLOSED regardless of a future paid_until", got)
 	}
 }
 
-// TestPhase_NeverRegisteredFallsThroughToLazyDerivation documents and locks
-// in the behaviour refund.go's CloseIfDrained explicitly relies on (and
-// guards against with its own kRegisteredAt check): Phase has only 4 legal
-// return values by its own signature, so a creator whose kState was never
-// written at all is NOT a special 5th "unknown" case — it falls through to
-// the same paid_until/GraceBlocks arithmetic as anyone else, which for a
-// zero paid_until eventually reads FROZEN. This is why every OTHER function
-// in this package that needs a genuine "does this market exist" answer
-// checks kRegisteredAt directly rather than trusting Phase() for it.
-func TestPhase_NeverRegisteredFallsThroughToLazyDerivation(t *testing.T) {
+// TestPhase_NeverRegisteredReadsActive documents the behaviour refund.go's
+// CloseIfDrained relies on (and guards against with its own kRegisteredAt
+// check): Phase has only 4 legal return values by its own signature, so a
+// creator whose kState was never written is NOT a special 5th "unknown" case.
+//
+// ★ IT NOW FALLS THROUGH TO ACTIVE, NOT FROZEN (OWNER RULING 2026-09-12). With
+// the paid_until ladder gone, an unknown creator has no retire mark either, so
+// naturalPhase's constant ACTIVE is what it reads — at every height, where it
+// used to read FROZEN past GraceBlocks because paidUntil defaulted to 0.
+//
+// THIS IS THE MORE PERMISSIVE DIRECTION, AND IT IS WHY THE kRegisteredAt CHECKS
+// MATTER MORE THAN BEFORE. Any caller that used Phase() as a proxy for "does
+// this market exist" and relied on an unknown creator eventually reading FROZEN
+// would now admit it instead. Every such caller in this package checks
+// kRegisteredAt directly — CloseIfDrained, Renew (deleted), registerCheck — and
+// that is what this test exists to keep true.
+func TestPhase_NeverRegisteredReadsActive(t *testing.T) {
 	s := NewMemStore()
-	if got := Phase(s, "totallyunknown", GraceBlocks+1); got != StateFrozen {
-		t.Fatalf("Phase for a never-registered creator at a late block = %q, want FROZEN (paidUntil defaults to 0)", got)
+	for _, b := range []uint64{0, GraceBlocks + 1, 10_000_000} {
+		if got := Phase(s, "totallyunknown", b); got != StateActive {
+			t.Fatalf("Phase for a never-registered creator at block %d = %q, want ACTIVE", b, got)
+		}
 	}
-	if got := Phase(s, "totallyunknown", 0); got != StateActive {
-		t.Fatalf("Phase for a never-registered creator at block 0 = %q, want ACTIVE (0 <= paidUntil(0))", got)
+	// ...and the guard that actually answers "does this market exist" still says no.
+	if RegisteredAt(s, "totallyunknown") != 0 {
+		t.Fatal("an unregistered creator must have no registration block")
 	}
 }
 
@@ -1522,22 +1224,26 @@ func TestPhase_NeverRegisteredFallsThroughToLazyDerivation(t *testing.T) {
 func TestRequireInflowOpen_ActiveAndOverdueOpen(t *testing.T) {
 	s := NewMemStore()
 	mustRegister(t, s, "inflowcreator", 100, 1000, 1000)
-	paidUntil := getU64(s, kPaidUntil("inflowcreator"))
 
-	if err := RequireInflowOpen(s, "inflowcreator", paidUntil); err != nil {
+	if err := RequireInflowOpen(s, "inflowcreator", 100+30*BlocksPerDay); err != nil {
 		t.Fatalf("ACTIVE should be open: %v", err)
 	}
-	if err := RequireInflowOpen(s, "inflowcreator", paidUntil+1); err != nil {
-		t.Fatalf("OVERDUE should be open: %v", err)
-	}
+	// The OVERDUE rung is reachable only through Retire since 2026-09-12, and a
+	// retired market has inflows CLOSED from the mark (K3) — so the "OVERDUE is
+	// open to inflows" clause that used to sit here is now self-contradictory and
+	// is asserted in its true form by the retire-notice tests above. ACTIVE, the
+	// rung every live market sits on, is what this test pins.
 }
 
 func TestRequireInflowOpen_FrozenAndClosedBlocked(t *testing.T) {
 	s := NewMemStore()
 	mustRegister(t, s, "inflowcreator2", 100, 1000, 1000)
-	paidUntil := getU64(s, kPaidUntil("inflowcreator2"))
-
-	if err := RequireInflowOpen(s, "inflowcreator2", paidUntil+GraceBlocks); err == nil {
+	// FROZEN is reached by Retire + the notice (the only road since 2026-09-12).
+	retireAt := uint64(100 + 30*BlocksPerDay)
+	if err := Retire(s, "inflowcreator2", "inflowcreator2", retireAt); err != nil {
+		t.Fatalf("Retire: %v", err)
+	}
+	if err := RequireInflowOpen(s, "inflowcreator2", retireAt+GraceBlocks); err == nil {
 		t.Fatal("FROZEN should be closed to inflow")
 	} else if sym := errSymbol(err); sym != ErrState {
 		t.Fatalf("want ErrState, got %v", err)
@@ -1583,19 +1289,19 @@ func TestPhase_RetireIsMonotone_NeverLessFrozen(t *testing.T) {
 	probes := []uint64{
 		regBlock,
 		regBlock + 1,
-		regBlock + SubscriptionPeriod,
-		regBlock + SubscriptionPeriod + 1,
-		regBlock + SubscriptionPeriod + GraceBlocks - 1,
-		regBlock + SubscriptionPeriod + GraceBlocks,
-		regBlock + SubscriptionPeriod + 10*GraceBlocks,
+		regBlock + hzLongGap,
+		regBlock + hzLongGap + 1,
+		regBlock + hzLongGap + GraceBlocks - 1,
+		regBlock + hzLongGap + GraceBlocks,
+		regBlock + hzLongGap + 10*GraceBlocks,
 	}
 	// Retire heights spanning "before the lapse" to "long after the freeze".
 	retires := []uint64{
 		regBlock,
 		regBlock + 10,
-		regBlock + SubscriptionPeriod,
-		regBlock + SubscriptionPeriod + GraceBlocks,
-		regBlock + SubscriptionPeriod + 5*GraceBlocks,
+		regBlock + hzLongGap,
+		regBlock + hzLongGap + GraceBlocks,
+		regBlock + hzLongGap + 5*GraceBlocks,
 	}
 
 	for _, retireAt := range retires {
@@ -1659,10 +1365,9 @@ func TestRetire_OnceOnly_NoticeCannotBeRestarted(t *testing.T) {
 	mustRegister(t, s, creator, regBlock, 1000, 1000)
 	// A fan renews far ahead, so the NATURAL ladder stays ACTIVE and only the
 	// retire mark drives the phase — the configuration where a re-arm would
-	// actually un-freeze the market.
-	if err := Renew(s, "afan", creator, regBlock+1, MaxPrepaidPeriods-1, subFee(MaxPrepaidPeriods-1)); err != nil {
-		t.Fatalf("setup renew: %v", err)
-	}
+	// actually un-freeze the market. (A hostile far-future Renew used to be the
+	// setup here; with no subscription the market is ACTIVE forever on its own,
+	// which is the same configuration reached for free.)
 	if err := Retire(s, creator, creator, regBlock+2); err != nil {
 		t.Fatalf("Retire: %v", err)
 	}

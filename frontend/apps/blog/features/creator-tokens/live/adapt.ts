@@ -19,7 +19,7 @@
  * yet" is not.
  */
 
-import type { Ask, ContractRules, DeliveryRecord as ChainDeliveryRecord, HolderPosition as ChainHolderPosition, Market, Offering, RenewRefusal } from '../types';
+import type { Ask, ContractRules, DeliveryRecord as ChainDeliveryRecord, HolderPosition as ChainHolderPosition, Market, Offering } from '../types';
 
 import type { DeliveryRecord as UiDeliveryRecord } from '../market/types';
 import type { PortfolioAsk } from '../market/portfolio';
@@ -174,12 +174,11 @@ export interface LiveTokenMarket {
    * because the chain's own `phase` decides those.
    */
   headBlock: number | null;
-  /** market.go kPaidUntil — the block the subscription runs to. Also keys the warning's dismissal, so paying dismisses it. */
-  paidUntilBlock: number;
-  /** paidUntilBlock + GraceBlocks — the block a lapsed market stops taking buyers. */
-  graceExpiresAtBlock: number;
-  /** NULL when the chain would accept a subscription payment; otherwise why it would not. See market/lapse.ts. */
-  renewRefusal: RenewRefusal | null;
+  // THERE IS NO paidUntilBlock/graceExpiresAtBlock/renewRefusal. They carried
+  // the subscription clock and the reason a renewal would be refused. The 10 HBD
+  // monthly charge was removed from the contract on 2026-09-12 (OWNER RULING;
+  // creator-tokens/core/params.go), so a market never lapses and there is no
+  // renewal to refuse.
   canAsk: boolean;
   /** Non-null = inflows are shut because the creator ignored too many asks. The UI must say so; a dead button with no reason reads as a broken page. */
   delinquentUntilBlock: number | null;
@@ -389,9 +388,6 @@ export function adaptMarket(input: {
     canBuy: market.canBuy,
     canAsk: market.canAsk,
     headBlock: market.headBlock,
-    paidUntilBlock: market.paidUntilBlock,
-    graceExpiresAtBlock: market.graceExpiresAtBlock,
-    renewRefusal: market.renewRefusal,
     delinquentUntilBlock: market.delinquentUntilBlock,
     phase: market.phase
   };

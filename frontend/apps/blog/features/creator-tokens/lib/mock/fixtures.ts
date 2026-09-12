@@ -9,7 +9,7 @@ import { BLOCKS_PER_DAY, EXIT_TAX_DECAY_BLOCKS, MS_PER_BLOCK, RECLAIM_GRACE_BLOC
 // prediction-market/lib/market-data-source.ts's MockMarketDataSource.
 export const MOCK_ACTIVE = 'mock-active';
 export const MOCK_OVERDUE = 'mock-overdue';
-/** ACTIVE with 3 days of subscription left: inside market/lapse.ts's 7-day LAPSE_WARNING_BLOCKS window, so the creator-facing "expiring" warning (and its dismiss, keyed on paidUntilBlock) can be put on a screen. Added 2026-08-31 for 43's screen proof. */
+/** ACTIVE. This fixture existed to put the creator-facing "your listing expires in 3 days" warning on a screen; there is no subscription since 2026-09-12 (OWNER RULING), so it is now simply a healthy market and is kept for the rest of its shape. */
 export const MOCK_EXPIRING = 'mock-expiring';
 export const MOCK_FROZEN = 'mock-frozen';
 export const MOCK_EMPTY = 'mock-empty';
@@ -56,7 +56,8 @@ export interface MarketSeed {
    * reads kReserve directly rather than re-deriving it from kSupply.
    */
   reserveBaseUnits: number;
-  paidUntilDeltaBlocks: number; // relative to head; negative = lapsed
+  // THERE IS NO paidUntilDeltaBlocks — the subscription clock it seeded was
+  // removed from the contract on 2026-09-12 (OWNER RULING; core/params.go).
   registeredAtDeltaBlocks: number; // negative = in the past
   faceSetAtDeltaBlocks: number; // negative = in the past
   closedStored: boolean;
@@ -85,7 +86,6 @@ export const MARKET_SEEDS: Record<string, MarketSeed> = {
     capTokens: 5_000,
     supplyTokens: 620,
     reserveBaseUnits: areaBaseUnits(620), // R === Area(S), exactly, at seed time
-    paidUntilDeltaBlocks: 20 * BLOCKS_PER_DAY,
     registeredAtDeltaBlocks: -90 * BLOCKS_PER_DAY,
     faceSetAtDeltaBlocks: -2 * BLOCKS_PER_DAY,
     closedStored: false,
@@ -106,7 +106,6 @@ export const MARKET_SEEDS: Record<string, MarketSeed> = {
     capTokens: 5_000,
     supplyTokens: 310,
     reserveBaseUnits: areaBaseUnits(310), // R === Area(S), exactly, at seed time
-    paidUntilDeltaBlocks: 3 * BLOCKS_PER_DAY,
     registeredAtDeltaBlocks: -57 * BLOCKS_PER_DAY,
     faceSetAtDeltaBlocks: -2 * BLOCKS_PER_DAY,
     closedStored: false,
@@ -118,7 +117,6 @@ export const MARKET_SEEDS: Record<string, MarketSeed> = {
     capTokens: 2_000,
     supplyTokens: 240,
     reserveBaseUnits: areaBaseUnits(240),
-    paidUntilDeltaBlocks: -Math.floor(4.2 * BLOCKS_PER_DAY),
     registeredAtDeltaBlocks: -40 * BLOCKS_PER_DAY,
     faceSetAtDeltaBlocks: -20 * BLOCKS_PER_DAY,
     closedStored: false,
@@ -134,7 +132,6 @@ export const MARKET_SEEDS: Record<string, MarketSeed> = {
     capTokens: 1_500,
     supplyTokens: 95, // part of an original larger supply already refunded out
     reserveBaseUnits: areaBaseUnits(95),
-    paidUntilDeltaBlocks: -10 * BLOCKS_PER_DAY,
     registeredAtDeltaBlocks: -120 * BLOCKS_PER_DAY,
     faceSetAtDeltaBlocks: -60 * BLOCKS_PER_DAY,
     closedStored: false,
@@ -149,7 +146,6 @@ export const MARKET_SEEDS: Record<string, MarketSeed> = {
     capTokens: 1_000,
     supplyTokens: 0,
     reserveBaseUnits: areaBaseUnits(0),
-    paidUntilDeltaBlocks: 29 * BLOCKS_PER_DAY,
     registeredAtDeltaBlocks: -1 * BLOCKS_PER_DAY,
     faceSetAtDeltaBlocks: -1 * BLOCKS_PER_DAY,
     closedStored: false,
@@ -164,7 +160,6 @@ export const MARKET_SEEDS: Record<string, MarketSeed> = {
     capTokens: 800,
     supplyTokens: 0,
     reserveBaseUnits: 0,
-    paidUntilDeltaBlocks: -200 * BLOCKS_PER_DAY,
     registeredAtDeltaBlocks: -260 * BLOCKS_PER_DAY,
     faceSetAtDeltaBlocks: -200 * BLOCKS_PER_DAY,
     closedStored: true,

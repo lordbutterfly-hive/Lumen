@@ -475,11 +475,10 @@ func TestSettlement_AskUsesTheRuledDerivation(t *testing.T) {
 	}
 	want := big.NewInt(2500) // min(spot 2680, median(2500,1500,2680)=2500)
 	face := big.NewInt(3000) // tokenLeg 2640 -> ceil(2640/2500) = 2 credits (face in [1420,207579])
-	commission := commissionOwedFor(face)
 
 	s := build()
 	setMoney(s, kFace(creator1), face)
-	askRes, err := askAt0(s, asker1, creator1, q, big.NewInt(2), commission, "cid", MinAskDeadline)
+	askRes, err := askAt0(s, asker1, creator1, q, big.NewInt(2), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -528,12 +527,11 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 	// A working settlement window while the market is alive (S=2500:
 	// avg_ceil 16,320 so marker 15,000 clears C5 by 4x; spot 37,093 above).
 	askBlock := seedSettleObs(s, creator, regBlock+10, big.NewInt(15_000))
-	commission := commissionOwedFor(big.NewInt(10_000))
-	askA, err := askAt0(s, holder1, creator, askBlock, big.NewInt(1), commission, "to-answer", MaxAskDeadline)
+	askA, err := askAt0(s, holder1, creator, askBlock, big.NewInt(1), "to-answer", MaxAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask(to-answer): %v", err)
 	}
-	askR, err := askAt0(s, holder2, creator, askBlock, big.NewInt(1), commission, "to-reclaim", MinAskDeadline)
+	askR, err := askAt0(s, holder2, creator, askBlock, big.NewInt(1), "to-reclaim", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask(to-reclaim): %v", err)
 	}
@@ -543,7 +541,7 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 	// stopped refusing at all and "quiet" became a plain far-future offset
 	// that just happened to reuse MaxStaleBlocks' old (3-day) scale. Now that
 	// MaxStaleBlocks is wired again (twap.go) AND widened to 6 weeks, reusing
-	// it here would carry `quiet` past the market's own SubscriptionPeriod +
+	// it here would carry `quiet` past the market's own hzLongGap +
 	// GraceBlocks and freeze the market — a second, unwanted refusal source
 	// this test is not trying to exercise. The property THIS test exists to
 	// pin is unchanged and still valuable: *whatever* makes settlement
@@ -554,7 +552,7 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 	// all, so `quiet` is now a small fixed offset instead — large enough to
 	// clear askR's own Reclaim window (MinAskDeadline + ReclaimGrace =
 	// 28,800 + 1,200 = 30,000) with margin, small enough to stay well inside
-	// the market's SubscriptionPeriod so it remains ACTIVE (checked below).
+	// the market's hzLongGap so it remains ACTIVE (checked below).
 	quiet := askBlock + 40_000
 	setU64(s, kObsIdx(creator), 0)
 	setU64(s, kObsLongIdx(creator), 0)
@@ -562,12 +560,12 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 		t.Fatal("premise broken: settlement still prices with a below-bootstrap ring")
 	}
 	// New service inflows are refused now — that is ALL the refusal gates.
-	if _, err := askAt0(s, holder1, creator, quiet, big.NewInt(10), commission, "refused", MinAskDeadline); err == nil {
+	if _, err := askAt0(s, holder1, creator, quiet, big.NewInt(10), "refused", MinAskDeadline); err == nil {
 		t.Fatal("premise broken: Ask succeeded while settlement refuses")
 	}
 
 	// Every outflow, while settlement is refusing (market still ACTIVE —
-	// paidUntil = regBlock + SubscriptionPeriod > quiet):
+	// paidUntil = regBlock + hzLongGap > quiet):
 	if got := Phase(s, creator, quiet); got != StateActive {
 		t.Fatalf("fixture: phase at quiet = %s, want ACTIVE (quiet=%d)", got, quiet)
 	}
@@ -598,10 +596,10 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 	// FROZEN and the oracle still refusing at this block (both proven below).
 	// A1 (2026-08-30): the wind-down rails open on Retire, not on the lapse.
 	// The oracle is still refusing and the phase still FROZEN at `frozen`.
-	if err := Retire(s, creator, creator, regBlock+SubscriptionPeriod+GraceBlocks+10); err != nil {
+	if err := Retire(s, creator, creator, regBlock+hzLongGap+GraceBlocks+10); err != nil {
 		t.Fatalf("fixture: Retire: %v", err)
 	}
-	frozen := regBlock + SubscriptionPeriod + GraceBlocks + 10 + ExitTaxDecayBlocks
+	frozen := regBlock + hzLongGap + GraceBlocks + 10 + ExitTaxDecayBlocks
 	if got := Phase(s, creator, frozen); got != StateFrozen {
 		t.Fatalf("fixture: phase = %s, want FROZEN", got)
 	}
