@@ -73,9 +73,13 @@ export function sanitizeMoneyInput(raw: string): string {
   const cleaned = (raw ?? '').replace(/[^\d.]/g, '');
   const [whole, ...rest] = cleaned.split('.');
   // ★ THREE decimals, not two (2026-08-07). HBD carries 3dp and the contract's
-  // own minimum posted price is 577 base units = $0.577 — at 2dp a creator
-  // could not type the legal minimum at all; `0.577` silently became `0.57`,
-  // which is BELOW the floor and would be rejected on chain after signing.
+  // own minimum posted price is not a round number of cents - 508 base units,
+  // $0.508, since the commission gross-up was removed on 2026-09-12, and 577
+  // before that. At 2dp a creator could not type the legal minimum at all:
+  // `0.508` silently became `0.50`, which is BELOW the floor and would be
+  // rejected on chain after signing. The argument is the same whichever of the
+  // two the floor happens to be, which is why the figure is not the point and
+  // MIN_PRICE_USD below is derived rather than typed.
   return rest.length ? `${whole}.${rest.join('').slice(0, 3)}` : whole;
 }
 

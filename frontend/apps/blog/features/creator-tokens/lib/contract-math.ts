@@ -63,15 +63,33 @@ export const GRACE_BLOCKS = 5 * BLOCKS_PER_DAY; // OVERDUE -> FROZEN
 
 export const FACE_BAND_NUMERATOR = 2; // 2x/7d anti-rug band
 export const FACE_BAND_WINDOW_BLOCKS = 7 * BLOCKS_PER_DAY;
-// MinFace was raised 100 -> 500 (SET-2) -> 508 (LIVE-1) -> 577 (2026-07-27,
-// grossed up for the commission carve-out): it is pinned to the GLOBAL-MINIMUM
-// reachable settlement floor (the C4 face*2 >= rate guard at S == 2), grossed up so
-// that only 100%-CommissionBps of the posted price still clears it. A client that
-// validates against a STALE lower value lets a creator sign a `register`/`setFace`
-// the contract rejects, burning their RC for a guaranteed revert.
-// F-C5: kept in lockstep with Go core/params.go `MinFace int64 = 577`; a face in
-// 508–576 passed this client and reverted on chain.
-export const MIN_FACE_BASE_UNITS = 577;
+// MinFace: 100 -> 500 (SET-2) -> 508 (LIVE-1) -> 577 (2026-07-27, grossed up for
+// the commission) -> 508 again (2026-09-12, the gross-up removed). It is pinned
+// to the GLOBAL-MINIMUM reachable settlement floor: the C4 `face*2 >= rate` guard
+// at S == 2, where ceil(SpotRate(2)/2) = 508.
+//
+// ★★★ THIS MIRROR WENT STALE IN THE WRONG DIRECTION AND NOBODY NOTICED
+// (found 2026-09-12 by a second scrutinizer pass, after the update was already
+// committed). The 577 was a GROSS-UP: while the 12% commission was a separate
+// HBD leg only 88% of a posted price reached the token leg the C4 floor
+// measures, so the floor had to be raised to compensate. The owner ruling of
+// 2026-09-12 made the WHOLE face the thing that gets priced, params.go went
+// back to 508 the same day, and this line did not move with it - so for the
+// length of that session the client REFUSED a posted price in 508-576 that the
+// chain would have accepted. Nobody's money was at risk (it fails closed, the
+// safe direction) but a creator pricing a service at 0.51 HBD was told it was
+// too low by an app that was simply wrong.
+//
+// The original F-C5 note below is kept because its lesson is the reason this
+// one exists, and it points the other way: a client that validates against a
+// STALE LOWER value lets a creator sign a `register`/`setFace` the contract
+// rejects, burning their RC for a guaranteed revert. Both directions are
+// defects; only one of them costs RC.
+//
+// F-C5: kept in lockstep with Go core/params.go `MinFace int64 = 508`.
+// contract-math.selftest.ts asserts the pair, so it cannot drift silently a
+// third time.
+export const MIN_FACE_BASE_UNITS = 508;
 export const MAX_FACE_BASE_UNITS = 10_000_000;
 
 export const MIN_CAP_CREDITS_BASE_UNITS = 1;

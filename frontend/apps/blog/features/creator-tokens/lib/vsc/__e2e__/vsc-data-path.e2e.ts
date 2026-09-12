@@ -34,6 +34,16 @@ import { VscCreatorTokensDataSource } from '../../vsc-data-source';
 import { areaBaseUnits } from '../../contract-math';
 import { CreatorTokensGqlClient, kBal, kEscrow, kRegisteredAt, kSeq, toDid } from '../reads';
 import { ACTION_PAYLOAD_SPECS, MAX_HASH_LEN, WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH, assertHashField, type JsonFieldType } from '../payload-contract';
+import {
+  BLOCKS_PER_DAY,
+  COMMISSION_BPS,
+  MAX_CAP_CREDITS_BASE_UNITS,
+  MAX_EXIT_TAX_BPS,
+  MAX_FACE_BASE_UNITS,
+  MIN_CAP_CREDITS_BASE_UNITS,
+  MIN_FACE_BASE_UNITS,
+  TRADE_FEE_BPS
+} from '../../contract-math';
 import { VSC_CALL_ID, type CustomJsonOp } from '../op-builders';
 
 // ======================================================================
@@ -576,6 +586,32 @@ async function run(): Promise<void> {
     if (declared !== null) {
       eq('MAX_HASH_LEN matches core/params.go MaxHashLen', MAX_HASH_LEN, declared);
     }
+
+    // ★★★ EVERY NUMERIC MIRROR, NOT JUST THE ONE THAT BIT US. MIN_FACE_BASE_UNITS
+    // sat at 577 for a whole session after core/params.go reverted MinFace to
+    // 508 (the commission gross-up was removed on 2026-09-12), so this client
+    // refused a posted price in 508-576 that the chain would have accepted. It
+    // failed CLOSED, which is the safe direction and exactly why nothing caught
+    // it. Each pair below is read out of the Go source at run time; a mirror
+    // that cannot be found in params.go is reported as unverified rather than
+    // passed over.
+    for (const [tsName, tsValue, goName] of [
+      ['MIN_FACE_BASE_UNITS', MIN_FACE_BASE_UNITS, 'MinFace'],
+      ['MAX_FACE_BASE_UNITS', MAX_FACE_BASE_UNITS, 'MaxFace'],
+      ['TRADE_FEE_BPS', TRADE_FEE_BPS, 'TradeFeeBps'],
+      ['MAX_EXIT_TAX_BPS', MAX_EXIT_TAX_BPS, 'MaxExitTaxBps'],
+      ['COMMISSION_BPS', COMMISSION_BPS, 'CommissionBps'],
+      ['BLOCKS_PER_DAY', BLOCKS_PER_DAY, 'BlocksPerDay'],
+      ['MIN_CAP_CREDITS_BASE_UNITS', MIN_CAP_CREDITS_BASE_UNITS, 'MinCap'],
+      ['MAX_CAP_CREDITS_BASE_UNITS', MAX_CAP_CREDITS_BASE_UNITS, 'MaxCap']
+    ] as Array<[string, number, string]>) {
+      const go = paramFromContractSource(goName);
+      check(
+        `${tsName} mirrors core/params.go ${goName}`,
+        go !== null && go === tsValue,
+        go === null ? `${goName} not found in params.go - mirror UNVERIFIED` : `client ${tsValue} vs contract ${go}`
+      );
+    }
     const tooLong = 'a'.repeat(MAX_HASH_LEN + 1);
     await expectReject('ask() rejects a contentHash over MaxHashLen before signing', () => ds.ask({ creator: 'alice', asker: 'bob', contentHash: tooLong, deadlineBlocks: 28_800, maxCreditsBaseUnits: 10_000 }), 'at most');
     // The pipe guard already lived at the data source (vsc-data-source.ts:1176,
@@ -827,11 +863,19 @@ interface GatedEntrypoints {
 const DEFAULT_CORE_PARAMS = '/mnt/o/Lumen/creator-tokens/core/params.go';
 
 /**
- * Read `const MaxHashLen int = N` out of core/params.go. Returns null (never
- * throws, never guesses) when the file is unreachable, so the caller reports a
- * named unverified check rather than a silent pass.
+ * Read a `const <Name> <type> = N` integer out of core/params.go. Returns null
+ * (never throws, never guesses) when the file is unreachable or the constant is
+ * not declared in that exact shape, so the caller reports a named unverified
+ * check rather than a silent pass.
+ *
+ * ★ GENERALISED 2026-09-12, AFTER A MIRROR DRIFTED THE OTHER WAY. Only
+ * MaxHashLen was read here, and MIN_FACE_BASE_UNITS - a mirror of the same
+ * file - sat at 577 for a whole session after params.go went back to 508,
+ * refusing posted prices the chain would have taken. One constant being checked
+ * and the rest being trusted is not a policy, it is an accident of which one
+ * someone got burned by first.
  */
-function maxHashLenFromContractSource(): number | null {
+function paramFromContractSource(name: string): number | null {
   const path = process.env.CREATOR_TOKENS_CORE_PARAMS ?? resolve(DEFAULT_CORE_PARAMS);
   let text: string;
   try {
@@ -839,8 +883,17 @@ function maxHashLenFromContractSource(): number | null {
   } catch {
     return null;
   }
-  const m = /^const\s+MaxHashLen\s+int\s*=\s*(\d+)\s*$/m.exec(text);
-  return m ? Number(m[1]) : null;
+  // Go writes big literals with underscores (`MaxFace int64 = 10_000_000`), so
+  // the digit class has to admit them and they have to come back out before
+  // Number() sees them. Reading 10_000_000 as "10" is exactly the kind of
+  // half-working check that reports a drift that is not there and trains a
+  // reader to ignore the row.
+  const m = new RegExp(`^const\\s+${name}\\s+\\w+\\s*=\\s*([\\d_]+)`, 'm').exec(text);
+  return m ? Number(m[1].replace(/_/g, '')) : null;
+}
+
+function maxHashLenFromContractSource(): number | null {
+  return paramFromContractSource('MaxHashLen');
 }
 
 /**
