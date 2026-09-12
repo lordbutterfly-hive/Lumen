@@ -180,6 +180,58 @@ func setLots(s Store, c, h string, lots []mLot) {
 // unbounded before.
 const MaxLots = 64
 
+// MaxSettlementLots is the SEPARATE, much tighter cap on how many cohorts one
+// ESCROW SETTLEMENT may replay — the cohort-count escape for the R3 stranding
+// finding (2026-09-07 audit, HIGH, built 2026-09-12).
+//
+// ★★★ WHY AN ESCROW NEEDS ITS OWN CAP AND MaxLots IS NOT ENOUGH. Answer,
+// Decline and Reclaim all credit the escrow's recorded cohorts back through
+// creditInflowCohorts, which calls creditInflowAt once PER COHORT — and each of
+// those reads, rewrites and re-serialises the recipient's WHOLE lot ledger. So
+// one settlement costs O(cohorts x ledger), which at MaxLots on both sides is
+// 64 x 64 units of work in a single call, where an ordinary transfer costs one
+// pass. If that exceeds the node's per-call ceiling then EVERY settlement path
+// for that escrow fails the same way — Answer, Decline AND Reclaim — and the
+// escrow sits PENDING forever with no alternate rail. Its credits stay counted
+// in kSupply (I3), so CloseIfDrained can never fire and the creator's
+// identity-bound market cannot even be re-registered. That is a permanently
+// trapped holder, which is the one thing this contract's invariants exist to
+// forbid, and it is why H1 made Reclaim permissionless in the first place.
+//
+// ★ THE ESCAPE IS A BOUND, NOT A NEW RAIL, and it reuses boundLots's own proven
+// merge: the free, exactly tax-neutral collapse of already-matured cohorts
+// first, then — only if still over — cheapest-adjacent merges AT THE YOUNGER
+// ACQ, which can only ever RAISE the tax the returned tokens owe and can
+// therefore never be used to launder maturity. See mergeCheapestAdjacentLot for
+// both proofs; nothing here weakens them, it applies them at a lower threshold
+// on one path.
+//
+// WHY 8. It makes the worst-case settlement 8 ledger passes instead of 64 — an
+// 8x cut on the exact quantity that blows the ceiling — while leaving an honest
+// asker untouched: an escrow's cohorts are only ever the slice ONE ask drew
+// from ONE holder (lotsDrawFreshest at Ask time), so reaching 9 requires that
+// holder to have acquired on 9+ separate blocks AND to spend across all of them
+// in a single ask. Below the cap this is a no-op and the path is byte-identical.
+//
+// ★ THE NUMBER IS A BOUND, NOT A MEASUREMENT. 8 is chosen from the cost
+// arithmetic above, not from an observed per-call ceiling; confirm it against a
+// real node before trusting it as a limit rather than as a large safety margin.
+const MaxSettlementLots = 8
+
+// boundSettlementLots is boundLots at the MaxSettlementLots threshold — the same
+// two-stage collapse, applied to the cohort list ONE escrow settlement will
+// replay. Pure: it returns a new list and never touches the store.
+func boundSettlementLots(lots []mLot, block uint64) []mLot {
+	if len(lots) <= MaxSettlementLots {
+		return lots
+	}
+	lots = collapseMaturedLots(lots, block)
+	for len(lots) > MaxSettlementLots {
+		lots = mergeCheapestAdjacentLot(lots)
+	}
+	return lots
+}
+
 // collapseMaturedLots merges every cohort that is ALREADY MATURED at `block`
 // (lotRateAt == 0) into ONE cohort carrying the YOUNGEST of their acqs.
 //

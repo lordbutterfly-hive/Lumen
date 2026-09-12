@@ -44,6 +44,7 @@ import { usdPrice } from '../../market/format';
 // surface at once, from one flag. This screen led with one, carried one per row
 // and explained it in a closing paragraph; all three are behind the flag below.
 import { SHOW_BACKING_FIGURES } from '../../backing-visibility';
+import { TRADE_FEE_BPS } from '../../lib/contract-math';
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
 import { MeritumEligibilityNotice, useMeritumEligibility } from '../meritum-eligibility';
@@ -52,6 +53,14 @@ import { MeritumEligibilityNotice, useMeritumEligibility } from '../meritum-elig
 // This file alone printed 30.0 where the other three print 30.00 for the same balance,
 // so the same holding read as two different numbers depending on which screen you were on.
 const tok = (n: number) => n.toFixed(2);
+
+/**
+ * ★ THE RATE IS DERIVED, NEVER TYPED (2026-09-12). Both paragraphs below said
+ * "10% trade fee" for three days after params.go TradeFeeBps went 1000 -> 500.
+ * A percentage written into prose has no compiler; this one is read from the
+ * contract mirror, so the page cannot promise a rate the chain does not charge.
+ */
+const TRADE_FEE_PCT = `${Number((TRADE_FEE_BPS / 100).toFixed(2))}%`;
 
 /**
  * THE CLOSING EXIT DISCLOSURE, in both branches of the launch flag.
@@ -70,7 +79,7 @@ const tok = (n: number) => n.toFixed(2);
  * and that one carries none.
  */
 const EXIT_NOTE_WITH_BACKING =
-  'Token prices float and you can lose money. You can exit two ways: sell on the curve while the market is open, at the curve’s price, after a 10% trade fee and any early-exit fee; or, once a market winds down, redeem at the floor. The floor value is what the reserve would pay out then; it is not a price you can sell at while the market is running.';
+  `Token prices float and you can lose money. You can exit two ways: sell on the curve while the market is open, at the curve’s price, after a ${TRADE_FEE_PCT} trade fee and any early-exit fee; or, once a market winds down, redeem at the floor. The floor value is what the reserve would pay out then; it is not a price you can sell at while the market is running.`;
 
 /**
  * The same disclosure with every reference to the hidden figure gone.
@@ -83,7 +92,7 @@ const EXIT_NOTE_WITH_BACKING =
 // ★ 2026-08-30 (B3, copy set A): "redeem your share of the reserve" -> a pro-rata
 // slice of whatever it holds then, less the fee, and below what you paid.
 const EXIT_NOTE_BACKING_HIDDEN =
-  'Token prices float and you can lose money. You can exit two ways: sell on the curve while the market is open, at the curve’s price, after a 10% trade fee and any early-exit fee; or, if a market winds down, redeem a pro-rata slice of whatever the reserve holds then, less any early-exit fee. Neither is a fixed price, and neither is a refund of what you paid.';
+  `Token prices float and you can lose money. You can exit two ways: sell on the curve while the market is open, at the curve’s price, after a ${TRADE_FEE_PCT} trade fee and any early-exit fee; or, if a market winds down, redeem a pro-rata slice of whatever the reserve holds then, less any early-exit fee. Neither is a fixed price, and neither is a refund of what you paid.`;
 
 const Unavailable: FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="rounded-card border border-dashed border-line-11 px-5 py-6 text-center text-[14px] leading-[22px] text-ink-14 font-ui">{children}</div>

@@ -3,12 +3,28 @@
 Per-creator token on a bonding curve. You buy a creator's token, spend it on
 their services, and the price moves with supply.
 
-> **2026-09-12 — COMMISSION + SUBSCRIPTION UPDATE BUILT, NOT DEPLOYED.** The 12%
-> commission is now 12% of the TOKENS, credited to the owner account on delivery
-> (no HBD on the ask rail at all), and the 10 HBD monthly subscription is REMOVED
-> whole — no Renew, no paid_until, no lapse. New CID
-> `bafkreidk6c4b24wllm5fbxpnxmshxi2gx5yeqi2v64lasi5dx2lb3rwo3q`. Full report,
-> deploy order and the still-undone testnet escrow proof:
+> **2026-09-12 — ONE UPDATE, FOUR CHANGES, BUILT AND PROVEN BY EXECUTION. NOT
+> DEPLOYED.** New CID `bafkreigngtcrsw6uuhriwmzvioynbcknzcrche7gc3oanvtcivgrf7drsa`
+> (160,097 B, reproducible: two clean builds, byte for byte).
+>
+> 1. **Commission in tokens.** The 12% is 12% of the TOKENS, carved out inside
+>    the escrow and credited to the owner account on delivery. ask, answer,
+>    decline and reclaim move NO HBD at all.
+> 2. **No subscription.** The 10 HBD monthly charge is deleted, not zeroed. No
+>    Renew, no paid_until, no lapse: a market is ACTIVE from registration until
+>    its creator retires it.
+> 3. **Escrow stranding.** A settlement spanning more than MaxSettlementLots (8)
+>    cohorts now collapses and merges them instead of refusing, so an escrow can
+>    never strand a holder against MaxLots.
+> 4. **Graduation gate.** `graduate()` gates on the cohort ledger rather than the
+>    blended matured balance.
+>
+> **The escrow rail has now been RUN, end to end, against this exact bytecode**
+> in go-vsc-node's real wasm runtime — order to escrow, decline returns
+> everything, answer splits 38/5 of 43 credits, deadline expires and reclaim
+> pays the asker 41 with 2 retained. It had never been run on any chain.
+> Harness: `go-vsc-node/modules/wasm/e2e/creator_tokens_escrow_test.go`.
+> Full report, RC figures and deploy order:
 > `/mnt/o/LUMEN-DOCS/MERITUM-CONTRACT-UPDATE-BUILT-2026-09-12.md`.
 
 > **Deployment status, corrected 2026-08-19 (audit anomaly AN-01).** This line
@@ -32,12 +48,15 @@ to it. What remains is deployment, not code.**
 |---|---|
 | `go vet` | clean (core, keeper, sim, sim/analysis, cmd, contract/parse) |
 | `go test -race` | green, all packages |
-| Core tests | 391 |
-| TinyGo wasm | 135,407 B, **29 entrypoints**, exit 0 |
+| Core tests | 546 top-level, 701 including subtests |
+| TinyGo wasm | 160,097 B, **43 exports**, exit 0, CID reproducible |
+| Real-wasm execution | 5-step escrow path green in go-vsc-node's runtime |
 | Frontend `tsc` | clean across the whole blog app |
 | Frontend `eslint` | 0 errors |
+| Frontend selftests | 24 files, ALL green (7 were red before 2026-09-12) |
 | Payload self-test | green |
-| End-to-end harness | 232 assertions |
+| End-to-end harness | 272 assertions, all passing |
+| `pnpm --filter @hive/blog build` | green |
 | TS→Go golden cross-check | all 18 write actions parse under the contract's own parser |
 
 `go build ./...` fails on the wasm-only `contract`→`runtime` package. That is

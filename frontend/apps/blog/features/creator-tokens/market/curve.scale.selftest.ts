@@ -52,7 +52,9 @@ import {
   quoteBuyBaseUnits,
   quoteSellBaseUnits,
   tokensAffordableForBudget,
-  refundPayoutBaseUnits
+  refundPayoutBaseUnits,
+  TRADE_FEE_BPS,
+  MAX_EXIT_TAX_BPS
 } from '../lib/contract-math';
 import { buyQuote } from './curve';
 
@@ -119,23 +121,32 @@ function refSpot(s: bigint): bigint {
 // N; also fixes the reported figures so a future change to any of them is
 // visible rather than shrugged at.
 {
+  // ★ THE BUDGET FIGURE MOVED WHEN THE FEE DID, AND THE CURVE FIGURES DID NOT.
+  // This section is the only one in the file that depends on the fee schedule:
+  // the bisection spends budget on cost + fee, so halving TradeFeeBps (1000 ->
+  // 500 on 2026-09-09) leaves more budget for curve and the same $1e9 now
+  // reaches 101,382 tokens instead of 99,799. Sections 1, 4 and 8 below still
+  // speak about supply 99,799 ON PURPOSE — those are statements about the CURVE
+  // (the quadratic/linear ratio, the area identity, the linear-only negative
+  // control), they were true before the fee changed and are true after, and
+  // re-anchoring them would throw away the hand-checked arithmetic for nothing.
   const budgetBaseUnits = 1_000_000_000 * 1000; // $1e9, at HBD's 3 decimals
   const n = tokensAffordableForBudget(0, budgetBaseUnits);
-  check('a $1e9 budget on an empty market buys exactly 99,799 whole tokens', n === 99_799, `got ${n}`);
+  check('a $1e9 budget on an empty market buys exactly 101,382 whole tokens', n === 101_382, `got ${n}`);
 
   const q = quoteBuyBaseUnits(0, n);
-  check('its curve cost is exactly 909,064,484,028 base units', q.costBaseUnits === 909_064_484_028, `got ${q.costBaseUnits}`);
-  check('its 10% fee is exactly 90,906,448,402 base units', q.feeBaseUnits === 90_906_448_402, `got ${q.feeBaseUnits}`);
+  check('its curve cost is exactly 952,367,281,469 base units', q.costBaseUnits === 952_367_281_469, `got ${q.costBaseUnits}`);
+  check(`its ${TRADE_FEE_BPS / 100}% fee is exactly 47,618,364,073 base units`, q.feeBaseUnits === 47_618_364_073 && q.feeBaseUnits === Math.floor((q.costBaseUnits * TRADE_FEE_BPS) / 10_000), `got ${q.feeBaseUnits}`);
   check('totalDue fits inside the budget, as the bisection promises', q.totalDueBaseUnits <= budgetBaseUnits, `${q.totalDueBaseUnits} vs ${budgetBaseUnits}`);
   check('one more token would NOT fit — the bisection lands on the true boundary', quoteBuyBaseUnits(0, n + 1).totalDueBaseUnits > budgetBaseUnits);
 
   const priceAfter = displayPricePerTokenBaseUnits(n);
   check(
-    'the post-buy price is exactly 26,932,030 base units = $26,932.03/token — the observed figure',
-    priceAfter === 26_932_030,
+    'the post-buy price is exactly 27,780,487 base units = $27,780.49/token — the observed figure',
+    priceAfter === 27_780_487,
     `got ${priceAfter}`
   );
-  check('the oracle spot at that supply is 26,931,498 base units', spotRateBaseUnits(n) === 26_931_498, `got ${spotRateBaseUnits(n)}`);
+  check('the oracle spot at that supply is 27,779,946 base units', spotRateBaseUnits(n) === 27_779_946, `got ${spotRateBaseUnits(n)}`);
 
   // The straight line through the only region anyone has ever seen.
   const p31 = displayPricePerTokenBaseUnits(31);
@@ -144,8 +155,8 @@ function refSpot(s: bigint): bigint {
   const linearPrediction = p50 + slope * (n - 50);
   const multiple = priceAfter / linearPrediction;
   check(
-    'a line through S=31..50 predicts ~$804.65 and is wrong by 33.4x — the reported ~32x is REAL',
-    multiple > 33 && multiple < 34,
+    'a line through S=31..50 predicts ~$817.40 and is wrong by 34.0x — the reported ~32x is REAL',
+    multiple > 33 && multiple < 34.5,
     `p31=${p31} p50=${p50} slope=${slope} prediction=${linearPrediction} actual=${priceAfter} multiple=${multiple.toFixed(4)}`
   );
   // And it is the curve, not the quote path: the production number equals the
@@ -236,7 +247,10 @@ function refSpot(s: bigint): bigint {
   const S = 99_799, N = 50_000;
   const C = buyCostBaseUnits(S, N);
   const loss = quoteBuyBaseUnits(S, N).totalDueBaseUnits - quoteSellBaseUnits(S + N, N, 0)!.netBaseUnits;
-  const expected = 2 * Math.floor(C / 10) + Math.ceil((C * 2000) / 10_000);
+  // Derived from the live constants, never from a copied rate: this line used to
+  // read `2 * floor(C / 10) + ceil(C * 2000 / 1e4)` and went stale the day
+  // params.go moved to TradeFeeBps 500 / MaxExitTaxBps 1500.
+  const expected = 2 * Math.floor((C * TRADE_FEE_BPS) / 10_000) + Math.ceil((C * MAX_EXIT_TAX_BPS) / 10_000);
   check(
     'a 50,000-token round trip at supply 99,799 loses exactly the stated fees',
     loss === expected,

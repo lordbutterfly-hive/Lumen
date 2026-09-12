@@ -136,8 +136,8 @@ func TestX3_RefundLaunder_ClosedAtBothCeilings(t *testing.T) {
 	}
 	blend2000 := exitBpsAtCeiling(held, 2000)
 	blendTax2000 := ExitTaxOn(base2, blend2000)
-	honestTax2000 := ExitTaxOn(base2, 2000)     // fresh cohort at the 2000 ceiling
-	cohortTax2000 := honestTax2000              // single fresh cohort => cohort == honest
+	honestTax2000 := ExitTaxOn(base2, 2000) // fresh cohort at the 2000 ceiling
+	cohortTax2000 := honestTax2000          // single fresh cohort => cohort == honest
 	avoidedBefore2000 := new(big.Int).Sub(honestTax2000, blendTax2000)
 	avoidedAfter2000 := new(big.Int).Sub(honestTax2000, cohortTax2000)
 	t.Logf("X3 @ pristine 2000-bps ceiling (parametric): blend=%d bps blendTax=%s honestTax=%s", blend2000, blendTax2000, honestTax2000)
@@ -197,8 +197,16 @@ func splitDrawSolo(s Store, c string, amount *big.Int) (fromMatured, fromMaturin
 func TestX3_AgedRemainderNotOverCharged(t *testing.T) {
 	const N, M = int64(4000), int64(400)
 	s, c, blk := x3Build(t, N, M)
-	if _, err := Refund(s, "whale", c, blk, big.NewInt(M)); err != nil { // launder attempt: refund only the fresh M
-		t.Fatalf("Refund M: %v", err)
+	// ★ TRANSFER THE FRESH M OUT, don't Refund it (2026-09-08, after graduate()
+	// became cohort-gated). Refund graduates the caller, and the cohort gate now
+	// moves the ripe aged N into the MATURED bucket on the way out — so the
+	// stale blend this test contrasts against no longer exists on that path.
+	// TransferCredits performs the same freshest-first debit of exactly the M
+	// cohort and does NOT graduate, so the remainder-with-a-stale-blend state
+	// this test is about is preserved, and it is still reachable in production
+	// by exactly this route.
+	if err := TransferCredits(s, "whale", c, "whale", "sink", blk, big.NewInt(M)); err != nil {
+		t.Fatalf("TransferCredits M: %v", err)
 	}
 	// Now refund the aged remainder N.
 	reserve := getMoney(s, kReserve(c))

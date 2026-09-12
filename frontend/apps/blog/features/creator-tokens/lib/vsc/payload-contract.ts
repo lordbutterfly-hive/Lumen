@@ -336,7 +336,13 @@ function hashProblemOf(fieldName: 'contentHash' | 'answerHash', value: string): 
   if (value.includes('|')) {
     return {
       human: `${noun} can't contain the "|" character. Remove it and it will send.`,
-      diagnostic: `payload-contract: ${fieldName} contains a "|" — the escrow record is packed as a pipe-delimited string (core/ask.go:157).`
+      // ★ THE WORDING IS THE ONE THIS MODULE'S OWN HEADER PROMISES, and the
+      // one vsc-data-source.ts's contentHash guard already uses: "must not
+      // contain '|'". It read `contains a "|"` here, so the SAME fault
+      // reported two different sentences depending on which of the two hash
+      // fields carried it — and anything matching on the message (the data-path
+      // e2e does) passed on ask and failed on answer.
+      diagnostic: `payload-contract: ${fieldName} must not contain '|' — the escrow record is packed as a pipe-delimited string (core/ask.go:157).`
     };
   }
   // ★★ CONTROL CHARACTERS. core/ask.go validEventHash refuses ANY byte < 0x20

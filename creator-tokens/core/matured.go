@@ -131,6 +131,14 @@ func setMatured(s Store, c, h string, v *big.Int) {
 // capped value equals the window exactly when the real holding time has reached
 // it. An unset clock reads as 0 (maximally fresh), so a never-clocked balance is
 // never treated as matured.
+//
+// ★ NO LONGER THE GRADUATION GATE (2026-09-08). graduate() decides on the COHORT
+// LEDGER now — see its own gate for why the blend was up to 42 days late — so
+// this function has no production caller left and survives as the blend-side
+// oracle the maturity tests measure against. It is deliberately NOT deleted: the
+// tests that pin the blend's own boundary behaviour read it, and it is the
+// reference the cohort gate is proven strictly-more-permissive against
+// (zz_gradfix_prop_test.go).
 func maturedNow(s Store, c, h string, block uint64) bool {
 	if getMoney(s, kBal(c, h)).Sign() == 0 {
 		return false
@@ -298,7 +306,7 @@ func escrowMaturedLeg(s Store, c string, seq uint64, credits *big.Int) *big.Int 
 // the sums must be exact), and the main recipient's own two legs plus the
 // cohort list to credit them with (nil => fall back to the packed acqBlock,
 // exactly as a pre-cohort escrow does).
-func escrowSliceSplit(s Store, c string, seq uint64, credits, slice *big.Int) (
+func escrowSliceSplit(s Store, c string, seq uint64, credits, slice *big.Int, block uint64) (
 	mainMaturing, mainMatured *big.Int, mainLots []mLot,
 ) {
 	maturedTotal := escrowMaturedLeg(s, c, seq, credits)
@@ -309,7 +317,7 @@ func escrowSliceSplit(s Store, c string, seq uint64, credits, slice *big.Int) (
 	lots := loadEscrowLots(s, c, seq, maturingTotal)
 
 	if slice == nil || slice.Sign() <= 0 {
-		return maturingTotal, maturedTotal, lots
+		return maturingTotal, maturedTotal, boundSettlementLots(lots, block)
 	}
 	sliceMaturing := new(big.Int).Set(slice)
 	if sliceMaturing.Cmp(maturingTotal) > 0 {
@@ -330,7 +338,7 @@ func escrowSliceSplit(s Store, c string, seq uint64, credits, slice *big.Int) (
 	if len(lots) > 0 {
 		lots = lotsDropFreshest(lots, sliceMaturing)
 	}
-	return mainMaturing, mainMatured, lots
+	return mainMaturing, mainMatured, boundSettlementLots(lots, block)
 }
 
 // settleEscrowSlice credits the platform owner with the carved slice and reports
@@ -383,7 +391,7 @@ func returnEscrowToOwner(s Store, c, holder, owner string, seq uint64, credits, 
 		return mZero(), mZero(), mZero()
 	}
 	retained, ownerGraduated = settleEscrowSlice(s, c, owner, slice, block)
-	maturing, matured, lots := escrowSliceSplit(s, c, seq, credits, retained)
+	maturing, matured, lots := escrowSliceSplit(s, c, seq, credits, retained, block)
 	returned, err := mSub(credits, retained)
 	if err != nil {
 		returned = mZero() // unreachable: the caller clamps slice <= credits
@@ -437,7 +445,7 @@ func payEscrowToCreator(s Store, c, owner string, seq uint64, credits, slice *bi
 		return mZero(), mZero(), mZero()
 	}
 	toOwner, ownerGraduated = settleEscrowSlice(s, c, owner, slice, block)
-	maturing, matured, lots := escrowSliceSplit(s, c, seq, credits, toOwner)
+	maturing, matured, lots := escrowSliceSplit(s, c, seq, credits, toOwner, block)
 	toCreator, err := mSub(credits, toOwner)
 	if err != nil {
 		toCreator = mZero() // unreachable: the caller clamps slice <= credits
@@ -531,10 +539,10 @@ func Graduate(s Store, creator, holder string, block uint64) *big.Int {
 }
 
 func graduate(s Store, c, h string, block uint64) *big.Int {
-	if !maturedNow(s, c, h, block) {
+	n := getMoney(s, kBal(c, h))
+	if n.Sign() == 0 {
 		return mZero()
 	}
-	n := getMoney(s, kBal(c, h))
 
 	// ★★ THE COHORT LEDGER DECIDES WHAT GRADUATES, NOT THE BLEND (2026-09-08).
 	//
@@ -561,6 +569,31 @@ func graduate(s Store, c, h string, block uint64) *big.Int {
 	// own clock, and keeps owing.
 	lots := getLots(s, c, h) // freshest first, with legacy single-cohort synthesis
 	_, green, ripe := splitLotsByRate(lots, block)
+	// ★★ THE COHORT LEDGER DECIDES WHETHER ANYTHING GRADUATES, NOT THE BLEND
+	// (2026-09-08). This gate used to be `if !maturedNow(...) { return 0 }` —
+	// the BLENDED clock — while the body below already moved only ripe cohorts.
+	// The two disagree on exactly one shape and in exactly one direction: a
+	// fresh inflow re-averages the blend young, so a cohort that is genuinely
+	// ripe (rate 0, now and at every future block) stays locked in the maturing
+	// bucket until the BLEND catches up — measured at up to Dt−1 = 1,209,599
+	// blocks (42.00 days) late, 41.96 days on a 1,000-old / 999,000-fresh
+	// position. During that window balanceOf (the ERC-6909 door magi-market
+	// reads) reports 0 for a holder who demonstrably owns ripe tokens,
+	// safeTransferFrom refuses them with "insufficient matured balance", and
+	// graduate() answers 0. No money moves either way — measured across Sell,
+	// Refund, RefundHolder, TransferCredits and all three escrow legs: reserve,
+	// supply, treasury, feeBal, gross, tax, fee and net are IDENTICAL — so this
+	// is a liveness/visibility fix, not a money fix.
+	//
+	// STRICTLY MORE GRADUATION, NEVER LESS. A ripe cohort owes 0 at `block` and
+	// at every later block (the monotonicity argument in collapseMaturedLots),
+	// so moving it is exactly tax-neutral; and the old gate can never fire where
+	// this one does not, because a ripe blend implies a ripe cohort (w is a mean
+	// of acqs raised, never lowered, by capAcqAge, and every draw consumes
+	// freshest-first so ripe cohorts are never the ones removed).
+	if ripe.Sign() == 0 {
+		return mZero()
+	}
 
 	if len(green) == 0 {
 		// HOMOGENEOUS — every cohort owes zero. This is the pre-fix path, byte
@@ -591,9 +624,6 @@ func graduate(s Store, c, h string, block uint64) *big.Int {
 	// full 42-day window, for the price of one token. Partial graduation gives
 	// the attacker nothing: the victim's ripe pile banks exactly as it would
 	// have, and only the attacker's own dust stays behind, owing its own tax.
-	if ripe.Sign() == 0 {
-		return mZero()
-	}
 	rest, err := mSub(n, ripe)
 	if err != nil || rest.Sign() <= 0 {
 		return mZero() // unreachable under Σ lots == kBal; never write on a broken premise

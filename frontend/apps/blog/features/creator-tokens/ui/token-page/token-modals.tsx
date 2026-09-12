@@ -15,6 +15,8 @@ import { TRADE_FEE_BPS } from '../../lib/contract-math';
  * can never disagree again.
  */
 const TRADE_FEE_PCT = `${Number((TRADE_FEE_BPS / 100).toFixed(2))}%`;
+/** The creator's half and Lumen's half of it, derived the same way — tradefee.go splits floor(fee/2) to the creator and the odd base unit to the platform. */
+const TRADE_FEE_HALF_PCT = `${Number((TRADE_FEE_BPS / 200).toFixed(2))}%`;
 // usdWhole is gone from this file: the Ask card's posted price is now exact
 // (usdPrice), which is what makes the whole-token overshoot checkable.
 import { pctLabel, usdPrice } from '../../market/format';
@@ -297,7 +299,7 @@ const BuyModal: FC<{
             })()
           : null}
         <div className="mb-3 rounded-control bg-surface-16 px-3.5 py-3 text-caption text-ink-10 font-ui">
-          The 10% trade fee is on the token cost, not your budget (5% to @{displayHandle(m.handle)}, 5% to Lumen).
+          The {TRADE_FEE_PCT} trade fee is on the token cost, not your budget ({TRADE_FEE_HALF_PCT} to @{displayHandle(m.handle)}, {TRADE_FEE_HALF_PCT} to Lumen).
         </div>
         {/* ★★ HIDDEN FOR LAUNCH: `buyRiskNote` defaults to SHOW_BACKING_FIGURES
             and returns the standalone variant while it is false, so this

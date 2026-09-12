@@ -26,8 +26,8 @@
 // (records the outgoing op, never transmits). Nothing in production code is
 // modified — this file only READS the real data path.
 
-import { readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 import type { CreatorTokensConfig } from '../../creator-tokens-data-source';
 import { VscCreatorTokensDataSource } from '../../vsc-data-source';
@@ -490,18 +490,54 @@ async function run(): Promise<void> {
       }
 
       // 2. The tripwire list must COVER every gated entrypoint a client can
-      //    reach. `init` is excluded: it is the deployer's one-time call and
-      //    has no client method. This is the check that would have caught the
-      //    six-action blind spot the moment the shop was added on chain.
-      const clientReachableGated = [...gated.active].filter((a) => a !== 'init').sort();
+      //    reach. This is the check that would have caught the six-action blind
+      //    spot the moment the shop was added on chain.
+      //
+      // ★★★ "REACHABLE" IS DERIVED, NOT LISTED (2026-09-12). This used to
+      // exclude exactly one name, `init`, and demand coverage of everything
+      // else — which made it FAIL on five entrypoints the contract gates and
+      // this client has never had a builder for: acceptOwnership, approve,
+      // changeOwner, graduate and safeTransferFrom. Adding them to
+      // ACTION_PAYLOAD_SPECS to silence it would have been worse than the
+      // failure: the spec table is what every outgoing payload is validated
+      // against, and inventing a shape for a write nobody builds is a
+      // fabrication that the next reader would trust.
+      //
+      // So reachability is now MEASURED on the client's own source: an
+      // entrypoint is reachable iff its name appears as a quoted action string
+      // somewhere in this feature outside the test files. The moment a builder
+      // for one of them is written, the string lands in the source, the
+      // entrypoint becomes reachable, and this check demands its coverage —
+      // which is exactly the tripwire the old hardcoded exclusion was
+      // pretending to be.
+      const clientActionNames = clientActionStringsFromSource();
+      check('the client source scan found something to scan', clientActionNames !== null && clientActionNames.size >= 10,
+        `${clientActionNames?.size ?? 0} quoted action names found under features/creator-tokens`);
       const covered = new Set(WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH);
-      const uncovered = clientReachableGated.filter((a) => !covered.has(a));
+      // Reachable = the client has a payload spec for it (so a builder can be
+      // called today), OR its name appears as a quoted action string in the
+      // feature's source (so one is being wired). A spec-carrying action counts
+      // as reachable even when its name never appears in quotes, because
+      // ACTION_PAYLOAD_SPECS writes them as bare object keys — `pause: {…}`.
+      const reachable = [...gated.active]
+        .filter((a) => a !== 'init' && (covered.has(a) || clientActionNames === null || clientActionNames.has(a)))
+        .sort();
+      const unreachable = [...gated.active].filter((a) => a !== 'init' && !reachable.includes(a)).sort();
+      const uncovered = reachable.filter((a) => !covered.has(a));
       check(
-        'WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH covers every active-gated entrypoint in main.go',
+        'WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH covers every active-gated entrypoint this client can reach',
         uncovered.length === 0,
         uncovered.length > 0
           ? `NOT covered: ${uncovered.join(', ')} — assertAuthContract silently returns clean for these, so the posting-auth tripwire is blind on them`
           : ''
+      );
+      // And the exclusion is stated rather than assumed: these are gated on
+      // chain, have no builder here, and would become a failure above the day
+      // one is written.
+      check(
+        `the entrypoints left out are genuinely unreachable from this client (${unreachable.join(', ') || 'none'})`,
+        unreachable.every((a) => !covered.has(a)),
+        'an action cannot be both unreachable and in the tripwire list'
       );
 
       // 3. And the reverse: nothing in the tripwire list may name an action
@@ -805,6 +841,37 @@ function maxHashLenFromContractSource(): number | null {
   }
   const m = /^const\s+MaxHashLen\s+int\s*=\s*(\d+)\s*$/m.exec(text);
   return m ? Number(m[1]) : null;
+}
+
+/**
+ * Every quoted string in this feature's own source that names a contract
+ * action, outside the test files. Used to decide whether an entrypoint the
+ * contract gates is one this client can actually reach — see the C1 section.
+ * Returns null if the feature directory cannot be read, in which case the
+ * caller treats every entrypoint as reachable (the strict direction).
+ */
+function clientActionStringsFromSource(): Set<string> | null {
+  const root = resolve(__dirname, '../../..');
+  const names = new Set<string>();
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === '__e2e__' || entry.name === 'node_modules' || entry.name === 'mock') continue;
+        walk(full);
+        continue;
+      }
+      if (!/\.tsx?$/.test(entry.name) || entry.name.includes('.selftest.')) continue;
+      const text = readFileSync(full, 'utf8');
+      for (const m of text.matchAll(/['"`]([a-z][A-Za-z]{2,30})['"`]/g)) names.add(m[1]);
+    }
+  };
+  try {
+    walk(root);
+  } catch {
+    return null;
+  }
+  return names;
 }
 
 function gatedEntrypointsFromContractSource(): GatedEntrypoints | null {

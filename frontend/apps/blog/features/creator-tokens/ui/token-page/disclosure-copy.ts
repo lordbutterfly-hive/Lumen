@@ -87,6 +87,7 @@
  */
 
 import { SHOW_BACKING_FIGURES } from '../../backing-visibility';
+import { TRADE_FEE_BPS } from '../../lib/contract-math';
 import { usdPrice } from '../../market/format';
 
 /** The right-rail card: the whole reserve, in dollars. */
@@ -211,17 +212,30 @@ export function buyRiskNote(backingPerToken: string, showBacking: boolean = SHOW
 }
 
 /**
+ * ★★★ THE RATE IS READ FROM params.go's MIRROR, NEVER TYPED (2026-09-12).
+ * These two paragraphs said "10% fee (5% to the creator, 5% to Lumen)" for
+ * three days after TradeFeeBps went 1000 -> 500 on 2026-09-09. The contract
+ * charged 5%, the page promised 10%, and nothing failed: a rate written as
+ * PROSE has no compiler and no test that knows it is a number. Every fee
+ * percentage in this module is now derived from TRADE_FEE_BPS, so the only way
+ * to change what a reader is told is to change what the chain charges.
+ */
+const FEE_PCT = `${Number((TRADE_FEE_BPS / 100).toFixed(2))}%`;
+/** The creator's half and Lumen's half: tradefee.go splits floor(fee/2) to the creator, the odd base unit to the platform. */
+const FEE_HALF_PCT = `${Number((TRADE_FEE_BPS / 200).toFixed(2))}%`;
+
+/**
  * THE PAGE'S CLOSING DISCLOSURE, and the only place all four fee and price
  * behaviours are stated together.
  *
  * Every clause is a measured fact, not a hedge:
- *   10% on the curve      tradeFeeOn, both directions (buy and sell)
- *   no fee on a wind-down refundNetBaseUnits, "Unlike Sell there is NO trade fee here"
- *   6 weeks               EXIT_FEE_DAYS = 42, decaying from 20%
- *   the price falls       $1.401 for the first token out at supply 50, $1.007 for the last
+ *   TradeFeeBps on the curve  tradeFeeOn, both directions (buy and sell)
+ *   no fee on a wind-down     refundNetBaseUnits, "Unlike Sell there is NO trade fee here"
+ *   6 weeks                   EXIT_FEE_DAYS = 42, decaying from MaxExitTaxBps
+ *   the price falls           $1.401 for the first token out at supply 50, $1.007 for the last
  */
 export const HONEST_NOTE =
-  'This token’s price floats. It can go up or down, and you can lose money. Every trade on the curve pays a 10% fee (5% to the creator, 5% to Lumen), and selling soon after buying adds an early-exit fee on top, which fades to zero over 6 weeks. Backing per token, shown above, is the reserve divided by the tokens issued: what a wind-down would pay before your early-exit fee, with no trade fee on that route. It is not a price you can sell at. Selling into the curve pays the curve’s price, and that price falls as you sell, so the last holder out gets less than the first.';
+  `This token’s price floats. It can go up or down, and you can lose money. Every trade on the curve pays a ${FEE_PCT} fee (${FEE_HALF_PCT} to the creator, ${FEE_HALF_PCT} to Lumen), and selling soon after buying adds an early-exit fee on top, which fades to zero over 6 weeks. Backing per token, shown above, is the reserve divided by the tokens issued: what a wind-down would pay before your early-exit fee, with no trade fee on that route. It is not a price you can sell at. Selling into the curve pays the curve’s price, and that price falls as you sell, so the last holder out gets less than the first.`;
 
 /**
  * The same paragraph with the two sentences about the hidden stat removed, and
@@ -231,11 +245,11 @@ export const HONEST_NOTE =
  * The sentences it introduced went with it rather than being reworded to
  * describe an invisible number, which is what the owner's "shit people won't
  * understand" is about. Every fee fact survives, in the same words, in the same
- * order: the 10% and its split, the 6-week decay, and the cascade that the price
- * falls as you sell.
+ * order: the trade fee and its split, the 6-week decay, and the cascade that the
+ * price falls as you sell.
  */
 export const HONEST_NOTE_BACKING_HIDDEN =
-  'This token’s price floats. It can go up or down, and you can lose money. Every trade on the curve pays a 10% fee (5% to the creator, 5% to Lumen), and selling soon after buying adds an early-exit fee on top, which fades to zero over 6 weeks. Selling into the curve pays the curve’s price, and that price falls as you sell, so the last holder out gets less than the first.';
+  `This token’s price floats. It can go up or down, and you can lose money. Every trade on the curve pays a ${FEE_PCT} fee (${FEE_HALF_PCT} to the creator, ${FEE_HALF_PCT} to Lumen), and selling soon after buying adds an early-exit fee on top, which fades to zero over 6 weeks. Selling into the curve pays the curve’s price, and that price falls as you sell, so the last holder out gets less than the first.`;
 
 /** The closing disclosure the page actually renders. */
 export function honestNote(showBacking: boolean = SHOW_BACKING_FIGURES): string {

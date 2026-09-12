@@ -117,7 +117,7 @@ export function MagiFuelGauge({
                 ★ "and no fee" REMOVED 2026-08-28 (false-text audit, sibling of
                 F1). The clause was true of SENDING and false of what the reader
                 is here to do: this gauge appears when someone cannot afford
-                their first PURCHASE, and that purchase pays a 10% trade fee
+                their first PURCHASE, and that purchase pays the trade fee
                 (core/params.go TradeFeeBps) plus an early-exit fee if sold
                 soon. "No separate gas token" carries the whole point of the
                 sentence — HBD is the gas — without the reader concluding the

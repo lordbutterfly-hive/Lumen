@@ -43,6 +43,7 @@ function check(name: string, condition: boolean, detail?: string): void {
 
 const { readFileSync } = require('fs') as typeof import('fs');
 const { join } = require('path') as typeof import('path');
+import { TRADE_FEE_BPS } from '../features/creator-tokens/lib/contract-math';
 
 const ROOT = join(__dirname, '..');
 /** The ★ notes quote the retired copy verbatim, so every scan runs on stripped source. */
@@ -127,7 +128,14 @@ console.log('\n── 0. THE INSTRUMENT. A scan that read nothing, or that read 
       notifications.code.includes('<NotificationsTabFooter') &&
       communityLayout.code.includes("queryKey: ['AccountNotification', community]") &&
       login.code.includes('createReassure:') &&
-      loginDialog.code.includes('<LumenLogin embedded />') &&
+      // ★ THE LANDMARK LOST ITS SELF-CLOSING SLASH, and this negative control
+      // failed for a prop it does not care about: the tag grew
+      // `googleConfiguredInitially={googleConfigured()}` on 2026-09-04 and
+      // `<LumenLogin embedded />` stopped matching. Same lesson the stripper
+      // control above already carries in its own ★ note: anchor on the part
+      // that cannot change without the FEATURE changing. The opening tag is
+      // that part; the prop list is not.
+      loginDialog.code.includes('<LumenLogin embedded') &&
       creatorsPage.code.includes('<CreatorsView intro={<MeritumIntro />} />') &&
       helpMd.raw.includes('## Will I earn anything?')
   );
@@ -235,7 +243,15 @@ console.log('\n── 2. F1: the help page no longer says creator-token trading 
   );
   check('…the free thing is now scoped to SENDING the transaction', /sending\s*\n?\s*the transaction still costs nothing/.test(help));
   // params.go TradeFeeBps = 1000 (10%), MaxExitTaxBps = 2000 decaying over ExitTaxDecayBlocks = 42 days.
-  check('…and the 10% trade fee is stated', /every\s*\n?\s*buy and sell on the curve pays a 10% fee/.test(help), 'params.go TradeFeeBps = 1000');
+  // ★ 5%, NOT 10% (2026-09-12). params.go halved TradeFeeBps to 500 on
+  // 2026-09-09 and this line, the help page it guards, and four other copy
+  // sites all kept promising 10% — a rate the chain had stopped charging. The
+  // help page is where a reader goes to look the number up, so it is the worst
+  // place to be three days stale. Read from the contract mirror now, so the
+  // sentence and the assertion move together the next time a rate does.
+  check(`…and the ${TRADE_FEE_BPS / 100}% trade fee is stated`,
+    new RegExp(`every\\s*\\n?\\s*buy and sell on the curve pays a ${TRADE_FEE_BPS / 100}% fee`).test(help),
+    `params.go TradeFeeBps = ${TRADE_FEE_BPS}`);
   check('…and the early-exit fee is stated with its 6-week decay', /early-exit fee on top, which fades to zero over 6 weeks/.test(help), 'params.go MaxExitTaxBps = 2000, ExitTaxDecayBlocks = 42 days');
   check(
     '★ …in the SAME vocabulary the buyer-facing token page already uses',

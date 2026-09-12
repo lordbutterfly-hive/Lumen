@@ -27,7 +27,7 @@
  * lib/contract-math.ts:386 quoteBuyBaseUnits):
  *
  *     C        = BuyCost(S,n) = Area(S+n) − Area(S)        exact integer area step (L1)
- *     feeBuy   = floor(C · TradeFeeBps / 10000) = floor(C/10)   tradefee.go, FLOOR
+ *     feeBuy   = floor(C · TradeFeeBps / 10000) = floor(C/20)   tradefee.go, FLOOR
  *     totalDue = C + feeBuy                                 fee sits ON TOP of the curve leg
  *
  * Sell the same n back, now at supply S+n (core/sell.go sellCompute, ported at
@@ -35,12 +35,12 @@
  *
  *     p        = SellProceeds(S+n, n) = Area(S+n) − Area(S) = C   the SAME area step (L5)
  *     tax      = ceil(p · tau / 10000)                      exittax.go, CEIL
- *     feeSell  = floor(p · TradeFeeBps / 10000) = floor(C/10)     tradefee.go, FLOOR
+ *     feeSell  = floor(p · TradeFeeBps / 10000) = floor(C/20)     tradefee.go, FLOOR
  *     net      = p − tax − feeSell                          fee comes OUT OF the payout
  *
  * So the round-trip loss is
  *
- *     loss = totalDue − net = 2·floor(C/10) + ceil(C·tau/10000)
+ *     loss = totalDue − net = 2·floor(C/20) + ceil(C·tau/10000)
  *
  * and NOT floor(2C/10) + anything: the two trade-fee floors are taken
  * separately, one per leg, and they do not merge. This script asserts that
@@ -180,7 +180,7 @@ const HOLDS = [
 }
 
 // ── 3. THE ROUND-TRIP LOSS IS EXACTLY THE STATED FEES — the whole point of
-// this file. loss === 2·floor(C/10) + ceil(C·tau/1e4), asserted as an integer
+// this file. loss === 2·floor(C/20) + ceil(C·tau/1e4), asserted as an integer
 // equality against the independent derivation, with NO tolerance anywhere.
 // CATCHES: a fee direction flipped (floor -> ceil) on either leg; the exit tax
 // floored instead of ceiled; the tax applied to the post-fee remainder instead
@@ -233,7 +233,7 @@ const HOLDS = [
     }
   }
   check(
-    `round-trip loss === 2·floor(C/10) + ceil(C·tau/1e4) EXACTLY, ${cases} cases, zero residual`,
+    `round-trip loss === 2·floor(C·${TRADE_FEE_BPS}/1e4) + ceil(C·tau/1e4) EXACTLY, ${cases} cases, zero residual`,
     mismatches.length === 0,
     mismatches.slice(0, 6).join('\n      ')
   );
@@ -251,8 +251,9 @@ const HOLDS = [
 
 // ── 4. THE TWO TRADE-FEE FLOORS DO NOT CANCEL, AND THAT IS LOAD-BEARING.
 // A reader (or a refactor) may assume the buy fee and the sell fee merge into
-// one floor(2C/10). They do not: each leg floors on its own, and the pair
-// exceeds the merged figure by one base unit whenever C mod 10 >= 5.
+// one floor(2C·TradeFeeBps/1e4). They do not: each leg floors on its own, and
+// the pair falls one base unit SHORT of the merged figure whenever the two
+// halves each drop a fraction that would have carried when added first.
 // CATCHES: exactly that "simplification". Without this check the section-3
 // identity could be rewritten with a single floor and still pass on the ~60%
 // of inputs where the two happen to agree.
@@ -274,10 +275,13 @@ const HOLDS = [
     `they agreed in all ${compared} swept cases, which would make the per-leg rule untested`
   );
   // The canonical single case, spelled out so the arithmetic is auditable by eye.
-  // S=0, N=1: C = 1007. floor(1007/10) = 100 per leg -> 200. floor(2014/10) = 201.
+  // S=0, N=1: C = 1007. floor(1007·500/1e4) = 50 per leg -> 100. floor(2014·500/1e4) = 100.
+  // At THIS C the two agree, so the canonical disagreement is taken at the
+  // smallest swept C where they do not — found by the sweep above, which is
+  // what makes the per-leg rule tested rather than assumed.
   check(
-    'S=0 N=1: per-leg fees are 100+100=200 where a merged floor would be 201',
-    2 * Math.floor(1007 / 10) === 200 && Math.floor(2014 / 10) === 201
+    'S=0 N=1: per-leg fees are 50+50=100, and the merged floor is 100 too — this C is NOT the discriminating one',
+    2 * Math.floor((1007 * TRADE_FEE_BPS) / 10_000) === 100 && Math.floor((2014 * TRADE_FEE_BPS) / 10_000) === 100
   );
 }
 
@@ -286,7 +290,7 @@ const HOLDS = [
 // the contract ceils, or a schedule that does not reach exactly 0 and exactly
 // MaxExitTaxBps at its endpoints.
 {
-  check('h=0 is exactly MaxExitTaxBps (2000)', exitTaxBpsAt(0) === MAX_EXIT_TAX_BPS, `got ${exitTaxBpsAt(0)}`);
+  check(`h=0 is exactly MaxExitTaxBps (${MAX_EXIT_TAX_BPS})`, exitTaxBpsAt(0) === MAX_EXIT_TAX_BPS, `got ${exitTaxBpsAt(0)}`);
   check('h = decay−1 is exactly 1 bps, still taxed', exitTaxBpsAt(EXIT_TAX_DECAY_BLOCKS - 1) === 1, `got ${exitTaxBpsAt(EXIT_TAX_DECAY_BLOCKS - 1)}`);
   check('h = decay is exactly 0 — the boundary is inclusive', exitTaxBpsAt(EXIT_TAX_DECAY_BLOCKS) === 0, `got ${exitTaxBpsAt(EXIT_TAX_DECAY_BLOCKS)}`);
   check('h past decay stays 0', exitTaxBpsAt(EXIT_TAX_DECAY_BLOCKS * 10) === 0);
@@ -316,7 +320,7 @@ const HOLDS = [
     }
   }
   check(
-    'a fully-matured round trip loses EXACTLY 2·floor(C/10) and nothing else',
+    'a fully-matured round trip loses EXACTLY 2·floor(C·TradeFeeBps/1e4) and nothing else',
     taxFreeMismatch.length === 0,
     taxFreeMismatch.slice(0, 5).join('\n      ')
   );
@@ -329,14 +333,24 @@ const HOLDS = [
   // without running anything: C = Area(1) = 1000 + floor(63021/8000) = 1007.
   const firstBuy = quoteBuyBaseUnits(0, 1);
   const firstSell = quoteSellBaseUnits(1, 1, 0)!;
+  // ★ THESE EIGHT NUMBERS ARE WRITTEN OUT, AND THEN RE-DERIVED FROM THE
+  // CONSTANTS ON THE SAME LINE. Hand-written figures are what makes this
+  // section auditable by eye; deriving them as well is what stops the section
+  // from rotting when a rate moves. It HAD rotted: these lines still carried
+  // the pre-2026-09-09 schedule (TradeFeeBps 1000, MaxExitTaxBps 2000) months
+  // after params.go went to 500 and 1500, so the file failed six checks while
+  // the code under it was correct. A stale test that fails is not harmless —
+  // it is a permanent red that teaches a reader to ignore the run.
+  const feeOf = (c: number) => Math.floor((c * TRADE_FEE_BPS) / 10_000);
+  const taxOf = (c: number) => Math.ceil((c * MAX_EXIT_TAX_BPS) / 10_000);
   check('S=0 N=1: cost is exactly 1007 base units', firstBuy.costBaseUnits === 1007, `got ${firstBuy.costBaseUnits}`);
-  check('S=0 N=1: buy fee is floor(1007/10) = 100', firstBuy.feeBaseUnits === 100, `got ${firstBuy.feeBaseUnits}`);
-  check('S=0 N=1: totalDue is 1107', firstBuy.totalDueBaseUnits === 1107, `got ${firstBuy.totalDueBaseUnits}`);
+  check(`S=0 N=1: buy fee is floor(1007·${TRADE_FEE_BPS}/1e4) = 50`, firstBuy.feeBaseUnits === 50 && feeOf(1007) === 50, `got ${firstBuy.feeBaseUnits}`);
+  check('S=0 N=1: totalDue is 1057', firstBuy.totalDueBaseUnits === 1057 && 1007 + feeOf(1007) === 1057, `got ${firstBuy.totalDueBaseUnits}`);
   check('S=0 N=1: sell gross is the same 1007 (L5)', firstSell.grossBaseUnits === 1007, `got ${firstSell.grossBaseUnits}`);
-  check('S=0 N=1 h=0: tax is ceil(1007·2000/10000) = 202', firstSell.taxBaseUnits === 202, `got ${firstSell.taxBaseUnits}`);
-  check('S=0 N=1: sell fee is floor(1007/10) = 100', firstSell.feeBaseUnits === 100, `got ${firstSell.feeBaseUnits}`);
-  check('S=0 N=1: net is 1007 − 202 − 100 = 705', firstSell.netBaseUnits === 705, `got ${firstSell.netBaseUnits}`);
-  check('S=0 N=1: round-trip loss is exactly 402 base units', firstBuy.totalDueBaseUnits - firstSell.netBaseUnits === 402);
+  check(`S=0 N=1 h=0: tax is ceil(1007·${MAX_EXIT_TAX_BPS}/1e4) = 152`, firstSell.taxBaseUnits === 152 && taxOf(1007) === 152, `got ${firstSell.taxBaseUnits}`);
+  check(`S=0 N=1: sell fee is floor(1007·${TRADE_FEE_BPS}/1e4) = 50`, firstSell.feeBaseUnits === 50 && feeOf(1007) === 50, `got ${firstSell.feeBaseUnits}`);
+  check('S=0 N=1: net is 1007 − 152 − 50 = 805', firstSell.netBaseUnits === 805 && 1007 - taxOf(1007) - feeOf(1007) === 805, `got ${firstSell.netBaseUnits}`);
+  check('S=0 N=1: round-trip loss is exactly 252 base units', firstBuy.totalDueBaseUnits - firstSell.netBaseUnits === 252 && 2 * feeOf(1007) + taxOf(1007) === 252);
 
   // S = 1, N = 1.
   const s1 = quoteBuyBaseUnits(1, 1);

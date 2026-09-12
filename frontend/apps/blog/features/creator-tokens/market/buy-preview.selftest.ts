@@ -40,8 +40,16 @@
  *
  * THE MARKET USED. supply 50, cap 100,000 — the state of the live market the
  * four defects were measured on, chosen because every reported figure
- * reproduces on it exactly: $10 quotes 6 tokens at an "average" of $1.57 above
- * a "price after" of $1.46, and $12.34 quotes 7 tokens for $11.03.
+ * reproduces on it exactly: $10 quotes 6 tokens at an "average" of $1.50 above
+ * a "price after" of $1.46, and $12.34 quotes 8 tokens for $12.07.
+ *
+ * ★ THE CENTS MOVED ON 2026-09-12, THE DEFECTS DID NOT. Every figure in this
+ * file was measured at TradeFeeBps 1000. params.go halved it to 500 on
+ * 2026-09-09 and this file was not revisited, so it failed 16 checks against
+ * correct code. Re-measured throughout. The four defects it pins are all
+ * structural (a label priced off the wrong value, a decimal formatter on an
+ * integer, two price rows on different fee bases, a live button under a
+ * zero-token quote) and every one of them still reproduces.
  */
 
 import { buyQuote, minBuyUsd, type CurveMarketInput } from './curve';
@@ -71,28 +79,40 @@ const tokOld = (n: number): string => n.toFixed(2);
 
 console.log('── FIX A — the CTA must name the amount charged, not the budget typed\n');
 {
-  // Measured: typing 12.34 buys 7 whole tokens; the button said "$12".
+  // Measured: typing 12.34 buys 8 whole tokens; the button said "$12".
   const usd = 12.34;
   const q = buyQuote(usd, MARKET);
-  check('12.34 on this market quotes 7 whole tokens', q.tokens === 7, `got ${q.tokens}`);
+  check('12.34 on this market quotes 8 whole tokens', q.tokens === 8, `got ${q.tokens}`);
   check(
     'TotalDue is strictly LESS than the typed budget (tokens are integers)',
-    q.totalUsd < usd && near(q.totalUsd, 11.033),
+    q.totalUsd < usd && near(q.totalUsd, 12.07),
     `totalUsd=${q.totalUsd} budget=${usd}`
   );
 
   const oldLabel = `Buy — ${usdWhole(usd)}`; // the expression this fix removes
   const newLabel = `Buy — ${usdPrice(q.totalUsd)}`;
   check(
-    'THE DEFECT: the old label ("$12") is not the amount charged ($11.03)',
-    oldLabel !== newLabel && oldLabel === 'Buy — $12' && newLabel === 'Buy — $11.03',
+    'THE DEFECT: the old label ("$12") is not the amount charged ($12.07)',
+    oldLabel !== newLabel && oldLabel === 'Buy — $12' && newLabel === 'Buy — $12.07',
     `old=${JSON.stringify(oldLabel)} new=${JSON.stringify(newLabel)}`
   );
-  check(
-    'the overstatement is more than a rounding artefact — over a dollar here',
-    usd - q.totalUsd > 1,
-    `overstated by $${(usd - q.totalUsd).toFixed(3)}`
-  );
+  // ★ THE GAP IS TAKEN WHERE IT IS WIDEST, NOT WHERE IT HAPPENS TO BE NARROW.
+  // At a 5% fee the leftover on $12.34 is 27 cents, which a reader could shrug
+  // off as rounding. The worst case on this market inside $1-$20 is $19.89: it
+  // buys 12 tokens for $18.31 and the old label said "$20". Swept, not guessed.
+  {
+    let worst = { budget: 0, gap: 0, total: 0 };
+    for (let cents = 100; cents <= 2_000; cents += 1) {
+      const b = cents / 100;
+      const gap = b - buyQuote(b, MARKET).totalUsd;
+      if (gap > worst.gap) worst = { budget: b, gap, total: buyQuote(b, MARKET).totalUsd };
+    }
+    check(
+      'the overstatement is more than a rounding artefact — over a dollar at the worst budget',
+      worst.gap > 1 && worst.budget === 19.89 && usdWhole(worst.budget) === '$20' && usdPrice(worst.total) === '$18.31',
+      `worst budget $${worst.budget}: label ${usdWhole(worst.budget)}, charged ${usdPrice(worst.total)}, overstated by $${worst.gap.toFixed(3)}`
+    );
+  }
 
   // ★ ONE VALUE, NOT TWO. token-market-view.tsx's handleBuy recomputes the same
   // buyQuote(usd, market) and sends `local.tokens` to live.buy(); the chain
@@ -142,8 +162,8 @@ console.log('\n── FIX B — a whole-token quantity must not print decimals\n
   const q = buyQuote(12.34, MARKET);
   check('the quote is an integer count (the curve mints integers only)', Number.isInteger(q.tokens));
   check(
-    'THE DEFECT: the old formatter printed "7.00" for 7 tokens',
-    tokOld(q.tokens) === '7.00' && `${q.tokens}` === '7',
+    'THE DEFECT: the old formatter printed "8.00" for 8 tokens',
+    tokOld(q.tokens) === '8.00' && `${q.tokens}` === '8',
     `old=${tokOld(q.tokens)}`
   );
   // Every budget/supply pair must be an integer, or "print it bare" would be
@@ -160,21 +180,22 @@ console.log('\n── FIX B — a whole-token quantity must not print decimals\n
   const one = buyQuote(1.55, MARKET);
   check('1.55 buys exactly one token here', one.tokens === 1, `got ${one.tokens}`);
   check(
-    'singular reads "1 token", plural reads "7 tokens"',
+    'singular reads "1 token", plural reads "8 tokens"',
     `${one.tokens} token${one.tokens === 1 ? '' : 's'}` === '1 token' &&
-      `${q.tokens} token${q.tokens === 1 ? '' : 's'}` === '7 tokens'
+      `${q.tokens} token${q.tokens === 1 ? '' : 's'}` === '8 tokens'
   );
 }
 
 console.log('\n── FIX C — average price and price-after must not sit on different fee bases\n');
 {
-  // The reported measurement, exactly: "Average price ~$1.57" above "Price
-  // after your buy ~$1.46".
+  // The reported measurement, exactly: "Average price ~$1.50" above "Price
+  // after your buy ~$1.46". (It read $1.57 at the old 10% fee; the inversion is
+  // the fee, so halving the fee narrowed the gap without closing it.)
   const q = buyQuote(10, MARKET);
   check('$10 on this market quotes 6 tokens', q.tokens === 6, `got ${q.tokens}`);
   check(
-    'the reported pair reproduces: ~$1.57 shown above ~$1.46',
-    usdPrice(q.avgPrice) === '$1.57' && usdPrice(q.priceAfter) === '$1.46',
+    'the reported pair reproduces: ~$1.50 shown above ~$1.46',
+    usdPrice(q.avgPrice) === '$1.50' && usdPrice(q.priceAfter) === '$1.46',
     `avg=${usdPrice(q.avgPrice)} after=${usdPrice(q.priceAfter)}`
   );
   check(
@@ -201,12 +222,12 @@ console.log('\n── FIX C — average price and price-after must not sit on di
   );
   check(
     'the fee row is a real, nonzero deduction here — not an always-blank line',
-    q.tradeFeeUsd > 0 && usdPrice(q.tradeFeeUsd) === '$0.86',
+    q.tradeFeeUsd > 0 && usdPrice(q.tradeFeeUsd) === '$0.43',
     `fee=${usdPrice(q.tradeFeeUsd)}`
   );
   check(
     'as rendered, the three rows reconcile to the CTA figure',
-    `${usdPrice(q.curveCostUsd)} +${usdPrice(q.tradeFeeUsd)} = ${usdPrice(q.totalUsd)}` === '$8.57 +$0.86 = $9.43',
+    `${usdPrice(q.curveCostUsd)} +${usdPrice(q.tradeFeeUsd)} = ${usdPrice(q.totalUsd)}` === '$8.57 +$0.43 = $9.00',
     `${usdPrice(q.curveCostUsd)} +${usdPrice(q.tradeFeeUsd)} = ${usdPrice(q.totalUsd)}`
   );
   // A zero-token quote must not claim a fee it will never charge.
@@ -217,7 +238,7 @@ console.log('\n── FIX C — average price and price-after must not sit on di
 console.log('\n── FIX D — a quote of zero tokens must disable the button, and say why\n');
 {
   const minBuy = minBuyUsd(MARKET);
-  check('the minimum on this market is $1.55', near(minBuy, 1.55), `got ${minBuy}`);
+  check('the minimum on this market is $1.48', near(minBuy, 1.48), `got ${minBuy}`);
   check(
     'the printed minimum is a budget that ACTUALLY works (ceil to the cent, not round)',
     buyQuote(minBuy, MARKET).tokens >= 1,
@@ -232,8 +253,9 @@ console.log('\n── FIX D — a quote of zero tokens must disable the button, 
   // 3-decimal HBD integer, so whenever its last digit is 1-4 a round-to-nearest
   // minimum names a budget a cent SHORT of the real boundary — a printed
   // minimum that buys nothing, which is the same class of lie as the enabled
-  // button this fix exists to remove. (It does NOT bite at supply 50: 1548
-  // rounds up to $1.55 anyway. It bites at the supplies below.)
+  // button this fix exists to remove. (It does NOT bite at supply 50: TotalDue
+  // for one token there is 1480 base units, which round and ceil agree on at
+  // $1.48. It bites at the supplies below.)
   const roundWouldUndershoot: number[] = [];
   for (let supply = 0; supply <= 2_000; supply += 1) {
     const totalDue = quoteBuyBaseUnits(supply, 1).totalDueBaseUnits;
@@ -279,7 +301,7 @@ console.log('\n── FIX D — a quote of zero tokens must disable the button, 
     check(`the NEW expression disables it at $${usd}`, newDisabled === true, `newDisabled=${newDisabled}`);
     check(
       `and the reader is told why: "Minimum buy is ${usdPrice(minBuy)}"`,
-      q.tokens <= 0 && minBuy > 0 && `Minimum buy is ${usdPrice(minBuy)}` === 'Minimum buy is $1.55'
+      q.tokens <= 0 && minBuy > 0 && `Minimum buy is ${usdPrice(minBuy)}` === 'Minimum buy is $1.48'
     );
   }
   // A budget above the minimum must NOT be disabled by the new clause — a guard
@@ -290,7 +312,7 @@ console.log('\n── FIX D — a quote of zero tokens must disable the button, 
   // hardcoded: the same button must show a different number as the curve rises.
   const mins = [0, 50, 500, 5_000].map((supply) => minBuyUsd({ supply, cap: 100_000, position: null }));
   check('the minimum rises with supply (derived, not a constant)', mins.every((v, i) => i === 0 || v > mins[i - 1]), mins.join(' < '));
-  check('at supply 0 the minimum is $1.11, not $1.55 — a hardcoded figure would be wrong there', near(mins[0], 1.11), `got ${mins[0]}`);
+  check('at supply 0 the minimum is $1.06, not $1.48 — a hardcoded figure would be wrong there', near(mins[0], 1.06), `got ${mins[0]}`);
   check(
     'a sold-out market has no minimum at all (cap headroom 0)',
     minBuyUsd({ supply: 100_000, cap: 100_000, position: null }) === 0
@@ -320,7 +342,10 @@ console.log('\n── WIRING — the modal really renders these, and no longer r
   check('BuyModal was located and sliced', buy.length > 2_000, `${buy.length} bytes between BuyModal and SellModal`);
   check(
     'the slice really is BuyModal (it contains the buy CTA and the affordability gauge)',
-    buy.includes('onBuy(usd, maxTotalUsd)') && buy.includes('MagiFuelGauge')
+    // ★ THE CALL LOST ITS SECOND ARGUMENT. BuyModal stopped passing a separate
+    // ceiling to onBuy, so the landmark is `onBuy(usd)`; the property this
+    // control exists for (the slice really is the buy dialog) is unchanged.
+    buy.includes('await onBuy(usd);') && buy.includes('MagiFuelGauge')
   );
   check(
     'comment stripping did not eat the code (the sell CTA below still scans intact)',
@@ -366,8 +391,11 @@ console.log('\n── WIRING — the modal really renders these, and no longer r
   // ── FIX C
   check('C: both price rows name their fee basis', buy.includes('Average price (incl. fees)') && buy.includes('Curve price after your buy'));
   check('C: neither unlabelled row survives', !buy.includes('>Average price<') && !buy.includes('>Price after your buy<'));
-  check('C: the fee is itemised, mirroring the Sell modal', buy.includes('Trade fee (10%)') && buy.includes('usdPrice(rows.tradeFeeUsd)'));
-  check('C: the itemisation ends in the charged total', buy.includes('Total charged') && buy.includes('usdPrice(rows.curveCostUsd)'));
+  // ★ THE RATE IN THE ROW LABEL IS DERIVED NOW (2026-09-11), so this scans for
+  // the expression rather than for "10%" — which is exactly the literal that
+  // went stale in every other file when TradeFeeBps halved.
+  check('C: the fee is itemised, mirroring the Sell modal', buy.includes('Trade fee ({TRADE_FEE_PCT})') && buy.includes('usdPrice(rows.tradeFeeUsd)'));
+  check('C: the itemisation ends in the charged total', buy.includes('usdPrice(rows.totalUsd)') && buy.includes('usdPrice(rows.curveCostUsd)'));
 
   // ── FIX D
   check('D: the disabled attribute refuses a zero-token quote', /disabled=\{[^}]*q\.tokens <= 0/.test(buy));

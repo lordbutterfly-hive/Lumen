@@ -315,9 +315,14 @@ export interface AskCost {
   tokens: number;
   /** Those tokens' value at the rate the quote was struck at. */
   tokenLegUsd: number;
-  /** The 12% platform commission, a SEPARATE HBD leg. */
+  /**
+   * The 12% platform commission, VALUED IN USD BUT PAID IN THE SAME TOKENS
+   * (owner ruling 2026-09-12). It is a SHARE of totalUsd, never an addition to
+   * it: there is no HBD leg on the ask rail any more. It is floor(credits x
+   * 12%) x rate, so it is exactly 0 below 9 credits.
+   */
   commissionUsd: number;
-  /** tokenLegUsd + commissionUsd — what actually leaves the buyer. */
+  /** What actually leaves the buyer: the whole escrow, commission included. Equals tokenLegUsd. */
   totalUsd: number;
   /** The creator's posted price, for comparison. */
   postedUsd: number;
@@ -331,19 +336,20 @@ export interface AskCost {
  * is the whole defect: a token leg worth $13.20 cannot buy 1.15 tokens, it buys
  * 2. MEASURED, on a $15 service:
  *
- *     supply    50   10 tokens ($14.00) + $1.80 commission = $15.80   vs "$15"  (+5.3%)
- *     supply  1000    2 tokens ($23.00) + $1.80 commission = $24.80   vs "$15"  (+65.3%)
+ *     supply    50   11 tokens = $15.40   vs "$15"  (+2.7%)
+ *     supply  1000    2 tokens = $23.00   vs "$15"  (+53.3%)
  *
  * The gap grows with the token price, because one indivisible token is a larger
  * and larger overshoot of the posted amount.
  *
- * ★ THIS DOES NOT DISTURB THE USER RULING OF 2026-07-27 ("the posted USD price
- * is the buyer's TOTAL — 12% is a SEPARATE HBD platform commission, never
- * tokens"). That ruling is about the SPLIT, and the split is unchanged and still
- * named. What it never spoke to is the whole-token ceiling, which is where the
- * overshoot comes from — so the posted price stays on screen as the posted
- * price, and the overshoot is disclosed beside it instead of being hidden
- * behind it.
+ * ★ RE-MEASURED 2026-09-12 UNDER THE ONE-ASSET RULING. The figures above used
+ * to read "10 tokens ($14.00) + $1.80 commission = $15.80" and "+65.3%",
+ * because 12% of the posted price was drawn separately in HBD and only the
+ * remaining 88% was bought in tokens. The buyer now pays the WHOLE face in
+ * tokens and the commission is carved out of those same credits, so there is
+ * one leg and one total. The DEFECT this function exists for is untouched: the
+ * whole-token ceiling still overshoots the posted price, and that overshoot is
+ * still what the sentence has to disclose.
  */
 /** One run of the sentence, `strong` where the figure carries emphasis. Same shape as disclosure-copy.ts's CopySegment. */
 export interface CostSegment {
@@ -376,9 +382,19 @@ export function askCostSegments(cost: AskCost): CostSegment[] {
     // can reconcile the gap between the posted price and the real cost, and a
     // posted $12.50 printed as "$13" makes that gap un-checkable.
     { text: usdAmount(cost.postedUsd), strong: true },
-    { text: '. Tokens are whole, so the last one rounds up. Lumen\u2019s ', strong: false },
-    { text: usdAmount(cost.commissionUsd), strong: true },
-    { text: ' commission comes out of those tokens, not on top of them.', strong: false }
+    { text: '. Tokens are whole, so the last one rounds up.', strong: false },
+    // ★ A ZERO COMMISSION MUST NOT BE ANNOUNCED. floor(credits x 12%) is 0 below
+    // 9 credits, and a small ask on an expensive market really does buy 2 or 3
+    // credits — so this clause would have rendered "Lumen's $0.00 commission
+    // comes out of those tokens", which is a sentence about nothing and reads
+    // like a bug. When there is no commission the sentence simply ends.
+    ...(cost.commissionUsd > 0
+      ? [
+          { text: ' Lumen\u2019s ', strong: false },
+          { text: usdAmount(cost.commissionUsd), strong: true },
+          { text: ' commission comes out of those tokens, not on top of them.', strong: false }
+        ]
+      : [])
   ];
 }
 
@@ -416,7 +432,28 @@ export function askCost(usdPosted: number, q: { tokens: number; commissionUsd: n
 // F-G — AN ITEMISATION THAT ADDS UP
 // =====================================================================
 
-const cents = (usd: number): number => (Number.isFinite(usd) ? Math.round(usd * 100) : 0);
+/**
+ * ★★★ CENTS AS THE SCREEN ROUNDS THEM, NOT AS THE FLOAT ROUNDS THEM.
+ *
+ * This read `Math.round(usd * 100)`, which disagrees with what the reader is
+ * shown on every exact half-cent. `usdPrice` renders through `toLocaleString`,
+ * and Intl rounds the SHORTEST DECIMAL form of the number (9.565 -> "$9.57"),
+ * while `usd * 100` rounds the exact BINARY value (9.565 is really 9.56499…,
+ * so it floors to 956 -> "$9.56"). The CTA reads the raw quote and the
+ * itemisation reads these rows, so one cent of disagreement put two different
+ * totals on one screen. MEASURED over 8,970 sell previews: 448 of them, 5.0%.
+ *
+ * Rounding the RENDERED STRING back is the only definition that cannot drift
+ * from the render — the same instrument argument trade-preview.selftest.ts
+ * section 5 makes about its own measurement. `toFixed(2)` is NOT a substitute:
+ * it rounds the binary value too, and reproduces the same 448 disagreements.
+ *
+ * FOUND 2026-09-12, when the trade-fee cut moved the sell figures onto those
+ * boundaries; it was always reachable, the old rates just landed there less
+ * often.
+ */
+const cents = (usd: number): number =>
+  Number.isFinite(usd) ? Math.round(parseFloat(usdAmount(usd).replace(/[$,]/g, '')) * 100) : 0;
 
 export interface BuyRows {
   curveCostUsd: number;

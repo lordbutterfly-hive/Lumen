@@ -5,30 +5,11 @@ import (
 	"testing"
 )
 
-// zz_gradgate_measure_test.go — THE GRADUATION GATE, MEASURED (2026-09-08).
-//
-// graduate() decides WHETHER to run on maturedNow — the BLENDED clock — while
-// its body moves only RIPE COHORTS. The two disagree on one shape and in one
-// direction: a fresh inflow re-averages the blend young, so a cohort that is
-// genuinely ripe stays locked in the maturing bucket until the blend catches
-// up. Measured here: up to Dt−1 = 1,209,599 blocks (42.00 days) late, 41.96
-// days on a 1,000-old / 999,000-fresh position; balanceOf (the ERC-6909 door
-// magi-market reads) answers 0 for a holder who owns ripe tokens,
-// safeTransferFrom refuses them, graduate() answers 0.
-//
-// ★ THESE TESTS PIN THE CURRENT (BLEND-GATED) BEHAVIOUR ON PURPOSE. The
-// cohort-gated alternative is a PROPOSAL, not applied to this tree — see
-// /mnt/o/LUMEN-AUDIT-2026-09-07/fixes/FIX-REFUNDHOLDER-AND-GRADUATION.md and
-// its FIX-GRADUATION-GATE.patch. If that proposal is ever applied, TestGRAD_1's
-// expectation FLIPS (the ripe cohort graduates at t1) and two existing fixtures
-// need the adjustments the patch carries; the patch contains the flipped
-// version of this file. A failure here after applying it is that flip, not a
-// regression.
-//
-// TestGRAD_3 / TestGRAD_4 are the MONEY verdict and hold either way: with the
-// ripe cohort stuck or graduated, reserve, supply, treasury, feeBal, gross,
-// tax, fee and net are identical to the base unit on Sell, Refund,
-// RefundHolder, TransferCredits and all three escrow legs.
+// zz_gradgate_measure_test.go — THE GRADUATION GATE, with graduate() gated on
+// the COHORT LEDGER. TestGRAD_1 is the flipped expectation (the ripe cohort
+// graduates at t1 instead of up to 42 days later); TestGRAD_3 / TestGRAD_4 are
+// the MONEY verdict and are unchanged from the blend-gated tree — every money
+// term is identical either way.
 
 // gradForceRipe is EXACTLY what a cohort-gated graduate() would do — the same
 // body, with the blend gate replaced by "any ripe cohort". Used to build the
@@ -96,30 +77,25 @@ func TestGRAD_1_StuckRipeCohort(t *testing.T) {
 		maturedNow(s, c, "whale", t1), heldBlocksAt(s, c, "whale", t1),
 		ExitTaxBpsAt(heldBlocksAt(s, c, "whale", t1)))
 
-	if got := Graduate(s, c, "whale", t1); got.Sign() != 0 {
-		t.Fatalf("expected graduation to be refused, moved %s", got)
-	}
-	t.Logf("  Graduate() at t1 -> 0 (refused)")
-	if err := TransferMatured(s, c, "whale", "bob", "whale", big.NewInt(1)); err == nil {
-		t.Fatalf("TransferMatured unexpectedly succeeded")
-	} else {
-		t.Logf("  safeTransferFrom/TransferMatured(1) -> %v", err)
-	}
-
-	// when does it actually graduate?
+	// WITH THE COHORT-GATED graduate(): the ripe cohort moves at t1 itself.
 	w := holderAcqBlock(s, c, "whale")
-	first := w + ExitTaxDecayBlocks
-	clone := hzCloneStore(s)
-	if got := Graduate(clone, c, "whale", first-1); got.Sign() != 0 {
-		t.Fatalf("graduated one block early")
+	blendWouldBe := w + ExitTaxDecayBlocks
+	if got := Graduate(s, c, "whale", t1); got.Cmp(big.NewInt(aged)) != 0 {
+		t.Fatalf("expected %d to graduate at t1, moved %s", aged, got)
 	}
-	if got := Graduate(clone, c, "whale", first); got.Cmp(big.NewInt(aged)) != 0 {
-		t.Fatalf("at the blend block expected %d to graduate, got %s", aged, got)
+	t.Logf("  Graduate() at t1 -> %d (the ripe cohort)", aged)
+	if got := MaturedOf(s, c, "whale"); got.Cmp(big.NewInt(aged)) != 0 {
+		t.Fatalf("balanceOf still %s after graduating", got)
 	}
-	delay := first - t1
-	t.Logf("STUCK for %d blocks = %.2f days (blend acq=%d, blend matures at t1+%d); "+
-		"a cohort-gated graduate would have moved them at t1 itself",
-		delay, float64(delay)*3.0/86400.0, w, delay)
+	if err := TransferMatured(s, c, "whale", "bob", "whale", big.NewInt(1)); err != nil {
+		t.Fatalf("TransferMatured still refused: %v", err)
+	}
+	t.Logf("  ABI balanceOf now = %s ; safeTransferFrom(1) SUCCEEDS", MaturedOf(s, c, "whale"))
+	t.Logf("  the BLEND would not have released them until t1+%d = %.2f days later",
+		blendWouldBe-t1, float64(blendWouldBe-t1)*3.0/86400.0)
+	if getMoney(s, kSupply(c)).Cmp(big.NewInt(aged+fresh)) != 0 {
+		t.Fatalf("supply moved on a graduation: %s", getMoney(s, kSupply(c)))
+	}
 }
 
 func TestGRAD_2_DelayCurve(t *testing.T) {

@@ -36,6 +36,7 @@
  */
 
 import { SHOW_BACKING_FIGURES } from '../../backing-visibility';
+import { TRADE_FEE_BPS } from '../../lib/contract-math';
 import {
   BACKING_PER_TOKEN_ARIA,
   BACKING_PER_TOKEN_LABEL,
@@ -59,6 +60,12 @@ import {
   positionLine,
   positionSegments
 } from './disclosure-copy';
+
+/** params.go's rate, spelled the way the copy modules spell it, so an assertion
+ * about the rendered text is an assertion about the contract's number. */
+const FEE_PCT = `${Number((TRADE_FEE_BPS / 100).toFixed(2))}%`;
+const FEE_HALF_PCT = `${Number((TRADE_FEE_BPS / 200).toFixed(2))}%`;
+
 
 let failures = 0;
 let checks = 0;
@@ -171,10 +178,20 @@ console.log('\n── 3. THE GROSS FIGURE IS LABELLED AS GROSS (defect 2).\n');
   );
   check(
     '★ …and scopes the 10% to the curve, where it is actually charged',
-    HONEST_NOTE.includes('Every trade on the curve pays a 10% fee'),
+    HONEST_NOTE.includes(`Every trade on the curve pays a ${FEE_PCT} fee`),
     `got: ${HONEST_NOTE}`
   );
-  check('the closing note still names the fee split', HONEST_NOTE.includes('(5% to the creator, 5% to Lumen)'));
+  check('the closing note still names the fee split', HONEST_NOTE.includes(`(${FEE_HALF_PCT} to the creator, ${FEE_HALF_PCT} to Lumen)`));
+  // ★ AND THE RATE IT NAMES IS THE CHAIN'S. Asserting the sentence against the
+  // same constant the sentence is built from would be circular, so this pins the
+  // rendered TEXT against params.go's number read independently: at TradeFeeBps
+  // 500 the paragraph must literally read "5% fee (2.5% to the creator, 2.5% to
+  // Lumen)". This is the check that would have caught the three-day 10% lie.
+  check(
+    `★ the rendered rate IS params.go's TradeFeeBps (${TRADE_FEE_BPS} bps), spelled out`,
+    HONEST_NOTE.includes('pays a 5% fee (2.5% to the creator, 2.5% to Lumen)') && TRADE_FEE_BPS === 500,
+    HONEST_NOTE.slice(HONEST_NOTE.indexOf('Every trade'), HONEST_NOTE.indexOf('Every trade') + 70)
+  );
   check('…and the 6-week decay, which is EXIT_FEE_DAYS = 42', HONEST_NOTE.includes('fades to zero over 6 weeks'));
 }
 
@@ -435,7 +452,11 @@ console.log('\n── 7. WIRING. The components really render this, and no longe
    * the ceiling that binds. See trade-preview.ts buyCeilingNote.
    */
   check('★ the Buy CTA is marked as the estimate it is', modal.includes('`Buy for ~${usdPrice(q.totalUsd)}`'));
-  check('★ …and the button names the ceiling that actually binds', modal.includes('buyCeilingNote(maxTotalUsd ?? usd, maxTotalUsd !== undefined)'));
+  // ★ THE CEILING IS NOW THE TYPED BUDGET ITSELF. BuyModal stopped passing a
+  // separate maxTotalUsd to onBuy, so `usd` IS the ceiling that binds and the
+  // note is built from it. The property is unchanged: the line under the button
+  // must name the amount that can actually be charged, not the label's estimate.
+  check('★ …and the button names the ceiling that actually binds', modal.includes('buyCeilingNote(usd, false)') && !modal.includes('onBuy(usd, maxTotalUsd)'));
   check(
     'the unreadable-balance sentence lost its dash too',
     !readFileSync(join(__dirname, 'sell-empty-state.ts'), 'utf8').includes('safe on-chain —')
@@ -473,7 +494,7 @@ console.log('\n── 8. THE LAUNCH HIDE (owner 2026-08-27). No sentence points 
 
   // ── What must SURVIVE the hide. Removing a disclosure is the failure mode on
   //    the other side, and it is the one that costs someone money.
-  check('★ the closing note keeps the 10% fee and its split', HONEST_NOTE_BACKING_HIDDEN.includes('Every trade on the curve pays a 10% fee (5% to the creator, 5% to Lumen)'));
+  check('★ the closing note keeps the trade fee and its split', HONEST_NOTE_BACKING_HIDDEN.includes(`Every trade on the curve pays a ${FEE_PCT} fee (${FEE_HALF_PCT} to the creator, ${FEE_HALF_PCT} to Lumen)`) && HONEST_NOTE_BACKING_HIDDEN.includes('pays a 5% fee (2.5% to the creator, 2.5% to Lumen)'));
   check('★ …and the 6-week early-exit decay', HONEST_NOTE_BACKING_HIDDEN.includes('fades to zero over 6 weeks'));
   check('★ …and the cascade, which is the real downside a price alone hides', HONEST_NOTE_BACKING_HIDDEN.includes('that price falls as you sell, so the last holder out gets less than the first'));
   check('★ …and it still opens by saying you can lose money', HONEST_NOTE_BACKING_HIDDEN.startsWith('This token’s price floats. It can go up or down, and you can lose money.'));

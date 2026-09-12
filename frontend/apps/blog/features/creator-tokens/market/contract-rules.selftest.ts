@@ -60,7 +60,12 @@ function check(name: string, condition: boolean, detail?: string): void {
   // 2026-09-12: the commission/subscription update's CID was added here BEFORE
   // the contract was deployed, which is the order this module's own header
   // demands (frontend first — an unlisted CID pins every client to v1 rules
-  // silently and forever).
+  // silently and forever). It stayed 4 when that entry was REPLACED later the
+  // same day: the escrow-stranding and graduation-gate fixes went into the same
+  // single deploy, moving the bytecode and therefore the CID, and the build it
+  // replaced had never been broadcast to any chain. See the exemption spelled
+  // out over V2_CODE_CIDS — a listed-but-never-deployed CID is the ONLY kind
+  // that may be replaced rather than appended.
   check('every listed v2 CID is a CIDv1 raw/base32 string of the same shape as the live v1 one',
     [...V2_CODE_CIDS].every((c) => /^bafkrei[a-z2-7]{52}$/.test(c)) && /^bafkrei[a-z2-7]{52}$/.test(V1_CODE_CID));
 }

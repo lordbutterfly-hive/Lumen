@@ -125,10 +125,23 @@ func TestZZBound_MaturedTailCollapsesOnLivePosition(t *testing.T) {
 
 	// Phase 3 — 40 more distinct-block inflows, past the window for phase 1 but
 	// not for the blend. This crosses MaxLots and triggers the bound.
+	// ★ TRANSFERS, NOT BUYS (2026-09-08, after graduate() became cohort-gated).
+	// A Buy graduates the buyer, and with the cohort gate that now drains the
+	// phase-1 tail out of the ledger the moment it ripens — which is the FIX
+	// working, and which would leave this test with no matured tail to observe.
+	// TransferCredits does NOT graduate the recipient (F-C1, USER RULING
+	// 2026-07-31), and it carries the sender's own fresh cohort, so the ledger
+	// shape is identical to the pre-fix fixture while the tail survives. The
+	// collapse this test pins is still reachable in production by exactly this
+	// route: a holder who only ever RECEIVES.
 	liveStart := t0 + ExitTaxDecayBlocks + 100
 	for i := 0; i < 40; i++ {
-		if _, err := Buy(s, h, c, liveStart+uint64(i), big.NewInt(10)); err != nil {
+		blk := liveStart + uint64(i)
+		if _, err := Buy(s, "src", c, blk, big.NewInt(10)); err != nil {
 			t.Fatalf("phase-3 buy #%d: %v", i, err)
+		}
+		if err := TransferCredits(s, "src", c, "src", h, blk, big.NewInt(10)); err != nil {
+			t.Fatalf("phase-3 transfer #%d: %v", i, err)
 		}
 	}
 	at := liveStart + 39

@@ -81,6 +81,17 @@ export const V1_CODE_CID = 'bafkreic2nphgjnwte32nkwix7bga2hjcwx5hfo6n5xrgllczpt7
  * CID on every network, so one entry normally covers testnet and mainnet.
  * ★ ADD, NEVER REPLACE: a CID that was ever deployed stays listed, or a node
  * that still reports it flips the app back to v1 rules against a v2 chain.
+ * ★ THE ONE EXEMPTION, AND ITS EXACT SHAPE. The rule protects DEPLOYED bytecode.
+ * A build that was listed here in anticipation and then superseded BEFORE it
+ * ever reached a chain has no node anywhere reporting it, so replacing that
+ * entry costs nothing and keeps the list from filling with fiction. That is what
+ * happened on 2026-09-12: bafkreidk6c4b24wllm5fbxpnxmshxi2gx5yeqi2v64lasi5dx2lb3rwo3q
+ * was the commission/subscription build, listed here the same day under this
+ * module's frontend-first order, and superseded hours later when the
+ * escrow-stranding and graduation-gate fixes were folded into the SAME deploy
+ * (one update, 10 HBD, owner ruling). It was never broadcast to testnet or
+ * mainnet. Before you ever replace a line here again: prove the CID was never
+ * deployed by asking the chain, exactly as item 2 above says.
  * ★ THE MAPPING IS ABOUT RULES, NOT ABOUT WHICH BUILD IS BLESSED. A bytecode
  * belongs here iff it carries the v2 rules (inWindDown, Renew's gate,
  * CloseIfDrained as the header describes). That is why the test fixture is
@@ -107,7 +118,7 @@ export const V2_CODE_CIDS: ReadonlySet<string> = new Set([
   'bafkreiajgng3ozcazro5goha34f2yfs265iylzi6rr5pk6ttent7s5xocu', // v2
   'bafkreih4eper5br4vqmgip6f5vykwmhuxtor4j2pqaw2ewdtwuirzf5h7y', // fast twin, test fixture (see above)
   'bafkreigqshjvsnoauwq6eeiisibbpqpesw5ysuiyhp36rjl3i7xi4dwqwi', // v2 fee/display update (2026-09-09): TradeFeeBps 1000->500, MaxExitTaxBps 2000->1500, exit-tax launder closed on all four rails, per-cohort `lots|` ledger, SellResult.TaxBps = slice-weighted effective rate
-  'bafkreidk6c4b24wllm5fbxpnxmshxi2gx5yeqi2v64lasi5dx2lb3rwo3q' // v2 commission + subscription update (2026-09-12, OWNER RULING): the 12% commission is 12% of the TOKENS, credited to the owner account on delivery (no HBD leg on ask/answer/decline/reclaim at all), and the 10 HBD monthly subscription is REMOVED — no Renew, no paid_until, no lapse; a market is ACTIVE from registration until its creator retires it
+  'bafkreigngtcrsw6uuhriwmzvioynbcknzcrche7gc3oanvtcivgrf7drsa' // v2 commission + subscription + escrow-stranding + graduation-gate update (2026-09-12, OWNER RULING), 160,097 B. FOUR changes in ONE deploy: (a) the 12% commission is 12% of the TOKENS, credited to the owner account on delivery (no HBD leg on ask/answer/decline/reclaim at all); (b) the 10 HBD monthly subscription is REMOVED — no Renew, no paid_until, no lapse, a market is ACTIVE from registration until its creator retires it; (c) a settlement that spans more than MaxSettlementLots cohorts now collapses and merges them instead of refusing, so an escrow can never strand a holder past MaxLots; (d) graduate() gates on the cohort ledger rather than the blended matured balance. Proven by execution, not by reading: the five-step escrow path (order → escrow → decline → answer → deadline+reclaim) runs against THIS bytecode in go-vsc-node's real wasm runtime (modules/wasm/e2e/creator_tokens_escrow_test.go)
 ]);
 /** The Stage D fixture's CID on its own, so a test can tell the two apart. Same rules as v2; never mainnet. */
 export const V2_FAST_TWIN_CODE_CID = 'bafkreih4eper5br4vqmgip6f5vykwmhuxtor4j2pqaw2ewdtwuirzf5h7y';

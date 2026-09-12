@@ -80,7 +80,7 @@ to manage**:
   spending them sets aside part of your balance for a while, and it comes back
   on its own over about five days. Adding HBD raises it again straight away. One
   purchase needs roughly 2 HBD of credit. The trade itself is not free: every
-  buy and sell on the curve pays a 10% fee, and selling soon after buying adds
+  buy and sell on the curve pays a 5% fee, and selling soon after buying adds
   an early-exit fee on top, which fades to zero over 6 weeks.
 * **Keys / master password / owner key** — how a Hive account proves itself. A
   Lumen account has none: you sign in with Google or a wallet instead.

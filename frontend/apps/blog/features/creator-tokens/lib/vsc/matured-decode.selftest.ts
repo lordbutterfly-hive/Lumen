@@ -38,11 +38,11 @@ interface Vector {
 }
 
 const VECTORS: Vector[] = [
-  { tokens: 1000, hex: '00', maturing: 1000, matured: 0, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 10000, net: 40000, taxBps: 2000 },
-  { tokens: 1000, hex: 'e803', maturing: 0, matured: 1000, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 0, net: 50000, taxBps: 2000 },
-  { tokens: 1000, hex: 'f401', maturing: 500, matured: 500, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 5000, net: 45000, taxBps: 2000 },
-  { tokens: 1000, hex: 'fa', maturing: 750, matured: 250, reserve: 123457, supply: 9991, heldBlocks: 100, gross: 12356, tax: 1854, net: 10502, taxBps: 2000 },
-  { tokens: 1000, hex: 'e703', maturing: 1, matured: 999, reserve: 999983, supply: 100003, heldBlocks: 0, gross: 9999, tax: 2, net: 9997, taxBps: 2000 },
+  { tokens: 1000, hex: '00', maturing: 1000, matured: 0, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 7500, net: 42500, taxBps: 1500 },
+  { tokens: 1000, hex: 'e803', maturing: 0, matured: 1000, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 0, net: 50000, taxBps: 1500 },
+  { tokens: 1000, hex: 'f401', maturing: 500, matured: 500, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 3750, net: 46250, taxBps: 1500 },
+  { tokens: 1000, hex: 'fa', maturing: 750, matured: 250, reserve: 123457, supply: 9991, heldBlocks: 100, gross: 12356, tax: 1391, net: 10965, taxBps: 1500 },
+  { tokens: 1000, hex: 'e703', maturing: 1, matured: 999, reserve: 999983, supply: 100003, heldBlocks: 0, gross: 9999, tax: 2, net: 9997, taxBps: 1500 },
   { tokens: 1000, hex: 'f401', maturing: 500, matured: 500, reserve: 500000, supply: 10000, heldBlocks: 1209600, gross: 50000, tax: 0, net: 50000, taxBps: 0 }
 ];
 
@@ -97,7 +97,13 @@ for (const v of VECTORS) {
 const oldWay = refundNetBaseUnits(500000, 1000, 10000, 0); // no maturing arg = all-maturing
 const newWay = refundNetBaseUnits(500000, 1000, 10000, 0, 0); // fully matured
 check('all-matured holder is untaxed under the fix', newWay.taxBaseUnits === 0);
-check('the old all-maturing path is unchanged (back-compat)', oldWay.taxBaseUnits === 10000);
+// ★ THE GOLDEN VECTORS ABOVE AND THIS FIGURE ARE AT MaxExitTaxBps = 1500.
+// They were written at 2000 and were never revisited when params.go halved the
+// trade fee and cut the exit-tax ceiling on 2026-09-09, so this file failed 12
+// checks against correct code for three days. Recomputed 2026-09-12 from the
+// same formula the contract uses: share = ceil(gross x maturing / tokens),
+// tax = ceil(share x taxBps / 1e4), taxBps = ceil(1500 x (decay - held) / decay).
+check('the old all-maturing path is unchanged (back-compat)', oldWay.taxBaseUnits === 7500);
 check('the fix actually changes the number', oldWay.netBaseUnits !== newWay.netBaseUnits);
 
 // ── 5. Apportionment shortcuts, ported from maturingGrossShare.

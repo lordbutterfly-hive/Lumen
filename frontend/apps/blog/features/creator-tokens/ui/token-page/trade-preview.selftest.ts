@@ -9,12 +9,27 @@
  * TYPESCRIPT UNDER TEST. Asserting a TypeScript port against another TypeScript
  * port proves the two agree, which is exactly what a port defect looks like from
  * the inside. Every REFUND, BUY, SPOT, ASK and TAXBPS row below was PRINTED by
- * `core.Refund`, `core.QuoteBuy`, `core.SpotRate`, `core.splitFace` /
- * `core.creditsForAsk` and `core.ExitTaxBpsAt` running as compiled Go against
- * `/mnt/o/Lumen/creator-tokens/core/*.go` (go1.22.2, 2026-08-27). To regenerate:
- * copy `core/*.go` into a scratch module, drop in a `package core` test that
- * sets up a MemStore market and prints these tab-separated rows, and paste the
- * block between GOLDEN_BEGIN and GOLDEN_END.
+ * `core.refundPayout` + `core.ExitTaxOn`, `core.BuyCost` + `core.tradeFeeOn`,
+ * `core.SpotRate`, `core.creditsForAsk` + `core.commissionOwedFor` and
+ * `core.ExitTaxBpsAt` running as compiled Go against
+ * `/mnt/o/Lumen/creator-tokens/core/*.go`. To regenerate:
+ *
+ *     cd /mnt/o/Lumen/creator-tokens
+ *     go test ./core/ -run TestGenerateTradePreviewGoldens -v
+ *
+ * and paste the block it prints between GOLDEN_BEGIN and GOLDEN_END. The
+ * generator lives in the CONTRACT repo, at core/zz_goldens_tradepreview_test.go,
+ * and it asserts every row it prints before printing it.
+ *
+ * ★★★ REGENERATED 2026-09-12, AND THE ASK ROWS CHANGED SHAPE. The previous
+ * table was printed on 2026-08-27 at TradeFeeBps 1000 / MaxExitTaxBps 2000 and
+ * nobody reprinted it when params.go halved the fee and cut the tax ceiling on
+ * 2026-09-09, so this file asserted correct code against three-day-old numbers
+ * and crashed on the first lookup. The ASK rows also lost their HBD leg: the
+ * posted price used to split 88% tokens / 12% HBD (core.splitFace, now deleted)
+ * and since the owner ruling of 2026-09-12 the whole face is paid in tokens
+ * with the commission carved out of those same credits. The row is now
+ * supply, face, rate, credits, commissionCredits, creditsValue.
  *
  * ★ AND EVERY SECTION CARRIES ITS OWN FALSIFICATION. Each defect's OLD code is
  * reimplemented here verbatim and asserted to DISAGREE with the golden by the
@@ -41,6 +56,7 @@ import {
 } from './trade-preview';
 import { buyQuote, sellQuote, serviceQuote } from '../../market/curve';
 import { pctLabel, usdPrice } from '../../market/format';
+import { MAX_EXIT_TAX_BPS, TRADE_FEE_BPS } from '../../lib/contract-math';
 
 let failures = 0;
 let checks = 0;
@@ -60,94 +76,184 @@ function check(name: string, condition: boolean, detail?: string): void {
 // =====================================================================
 
 const GOLDEN = `
-REFUND	120000	1000	100	40	0	1	120	24	96	2000
-REFUND	120000	1000	100	40	0	10	1200	240	960	2000
-REFUND	120000	1000	100	40	0	39	4680	936	3744	2000
-REFUND	120000	1000	100	40	0	40	4800	960	3840	2000
-REFUND	120000	1000	100	40	0	41	4920	960	3960	2000
-REFUND	120000	1000	100	40	0	80	9600	960	8640	2000
-REFUND	120000	1000	100	40	0	99	11880	960	10920	2000
-REFUND	120000	1000	100	40	0	100	12000	960	11040	2000
-REFUND	120000	1000	100	100	0	10	1200	240	960	2000
-REFUND	120000	1000	100	100	0	50	6000	1200	4800	2000
-REFUND	120000	1000	100	100	0	100	12000	2400	9600	2000
-REFUND	120000	1000	100	1	0	1	120	24	96	2000
-REFUND	120000	1000	100	1	0	50	6000	24	5976	2000
-REFUND	120000	1000	100	1	0	100	12000	24	11976	2000
-REFUND	60153	50	50	20	0	1	1203	241	962	2000
-REFUND	60153	50	50	20	0	5	6015	1203	4812	2000
-REFUND	60153	50	50	20	0	20	24061	4813	19248	2000
-REFUND	60153	50	50	20	0	35	42107	4813	37294	2000
-REFUND	60153	50	50	20	0	50	60153	4813	55340	2000
-REFUND	60153	50	50	20	604800	1	1203	121	1082	1000
-REFUND	60153	50	50	20	604800	20	24061	2407	21654	1000
-REFUND	60153	50	50	20	604800	50	60153	2407	57746	1000
+REFUND	120000	1000	100	40	0	1	120	18	102	1500
+REFUND	120000	1000	100	40	0	10	1200	180	1020	1500
+REFUND	120000	1000	100	40	0	39	4680	702	3978	1500
+REFUND	120000	1000	100	40	0	40	4800	720	4080	1500
+REFUND	120000	1000	100	40	0	41	4920	720	4200	1500
+REFUND	120000	1000	100	40	0	80	9600	720	8880	1500
+REFUND	120000	1000	100	40	0	99	11880	720	11160	1500
+REFUND	120000	1000	100	40	0	100	12000	720	11280	1500
+REFUND	120000	1000	100	100	0	10	1200	180	1020	1500
+REFUND	120000	1000	100	100	0	50	6000	900	5100	1500
+REFUND	120000	1000	100	100	0	100	12000	1800	10200	1500
+REFUND	120000	1000	100	1	0	1	120	18	102	1500
+REFUND	120000	1000	100	1	0	50	6000	18	5982	1500
+REFUND	120000	1000	100	1	0	100	12000	18	11982	1500
+REFUND	60153	50	50	20	0	1	1203	181	1022	1500
+REFUND	60153	50	50	20	0	5	6015	903	5112	1500
+REFUND	60153	50	50	20	0	20	24061	3610	20451	1500
+REFUND	60153	50	50	20	0	35	42107	3610	38497	1500
+REFUND	60153	50	50	20	0	50	60153	3610	56543	1500
+REFUND	60153	50	50	20	604800	1	1203	91	1112	750
+REFUND	60153	50	50	20	604800	20	24061	1805	22256	750
+REFUND	60153	50	50	20	604800	50	60153	1805	58348	750
 REFUND	60153	50	50	20	1209600	1	1203	0	1203	0
 REFUND	60153	50	50	20	1209600	20	24061	0	24061	0
 REFUND	60153	50	50	20	1209600	50	60153	0	60153	0
-REFUND	999999	777	333	111	201600	1	1287	215	1072	1667
-REFUND	999999	777	333	111	201600	111	142857	23815	119042	1667
-REFUND	999999	777	333	111	201600	222	285714	23815	261899	1667
-REFUND	999999	777	333	111	201600	333	428571	23815	404756	1667
-BUY	0	1	1007	100	1107
-BUY	0	2	2023	202	2225
-BUY	0	4	4078	407	4485
-BUY	0	8	8284	828	9112
-BUY	0	15	15948	1594	17542
-BUY	0	39	45196	4519	49715
-BUY	0	70	89875	8987	98862
-BUY	10	1	1087	108	1195
-BUY	10	2	2181	218	2399
-BUY	10	4	4395	439	4834
-BUY	10	8	8918	891	9809
-BUY	10	15	17139	1713	18852
-BUY	10	39	48318	4831	53149
-BUY	10	70	95537	9553	105090
-BUY	50	1	1408	140	1548
-BUY	50	2	2825	282	3107
-BUY	50	4	5683	568	6251
-BUY	50	8	11496	1149	12645
-BUY	50	15	21984	2198	24182
-BUY	50	39	61013	6101	67114
-BUY	50	70	118550	11855	130405
-BUY	100	1	1823	182	2005
-BUY	100	2	3653	365	4018
-BUY	100	4	7339	733	8072
-BUY	100	8	14813	1481	16294
-BUY	100	15	28218	2821	31039
-BUY	100	39	77343	7734	85077
-BUY	100	70	148144	14814	162958
-BUY	500	1	5604	560	6164
-BUY	500	2	11219	1121	12340
-BUY	500	4	22480	2248	24728
-BUY	500	8	45128	4512	49640
-BUY	500	15	85169	8516	93685
-BUY	500	39	226400	22640	249040
-BUY	500	70	417961	41796	459757
-BUY	1000	1	11513	1151	12664
-BUY	1000	2	23039	2303	25342
-BUY	1000	4	46131	4613	50744
-BUY	1000	8	92473	9247	101720
-BUY	1000	15	174078	17407	191485
-BUY	1000	39	458791	45879	504670
-BUY	1000	70	837922	83792	921714
+REFUND	999999	777	333	111	201600	1	1287	161	1126	1250
+REFUND	999999	777	333	111	201600	111	142857	17858	124999	1250
+REFUND	999999	777	333	111	201600	222	285714	17858	267856	1250
+REFUND	999999	777	333	111	201600	333	428571	17858	410713	1250
+BUY	0	1	1007	50	1057
+BUY	0	2	2023	101	2124
+BUY	0	3	3047	152	3199
+BUY	0	4	4078	203	4281
+BUY	0	5	5118	255	5373
+BUY	0	6	6165	308	6473
+BUY	0	7	7220	361	7581
+BUY	0	8	8284	414	8698
+BUY	0	9	9355	467	9822
+BUY	0	10	10434	521	10955
+BUY	0	11	11521	576	12097
+BUY	0	12	12615	630	13245
+BUY	0	13	13718	685	14403
+BUY	0	14	14829	741	15570
+BUY	0	15	15948	797	16745
+BUY	0	16	17074	853	17927
+BUY	0	17	18209	910	19119
+BUY	0	18	19352	967	20319
+BUY	0	19	20502	1025	21527
+BUY	0	20	21661	1083	22744
+BUY	0	39	45196	2259	47455
+BUY	0	70	89875	4493	94368
+BUY	10	1	1087	54	1141
+BUY	10	2	2181	109	2290
+BUY	10	3	3284	164	3448
+BUY	10	4	4395	219	4614
+BUY	10	5	5514	275	5789
+BUY	10	6	6640	332	6972
+BUY	10	7	7775	388	8163
+BUY	10	8	8918	445	9363
+BUY	10	9	10068	503	10571
+BUY	10	10	11227	561	11788
+BUY	10	11	12393	619	13012
+BUY	10	12	13568	678	14246
+BUY	10	13	14750	737	15487
+BUY	10	14	15941	797	16738
+BUY	10	15	17139	856	17995
+BUY	10	16	18346	917	19263
+BUY	10	17	19560	978	20538
+BUY	10	18	20783	1039	21822
+BUY	10	19	22014	1100	23114
+BUY	10	20	23252	1162	24414
+BUY	10	39	48318	2415	50733
+BUY	10	70	95537	4776	100313
+BUY	50	1	1408	70	1478
+BUY	50	2	2825	141	2966
+BUY	50	3	4250	212	4462
+BUY	50	4	5683	284	5967
+BUY	50	5	7124	356	7480
+BUY	50	6	8573	428	9001
+BUY	50	7	10030	501	10531
+BUY	50	8	11496	574	12070
+BUY	50	9	12970	648	13618
+BUY	50	10	14452	722	15174
+BUY	50	11	15942	797	16739
+BUY	50	12	17440	872	18312
+BUY	50	13	18947	947	19894
+BUY	50	14	20461	1023	21484
+BUY	50	15	21984	1099	23083
+BUY	50	16	23515	1175	24690
+BUY	50	17	25055	1252	26307
+BUY	50	18	26602	1330	27932
+BUY	50	19	28158	1407	29565
+BUY	50	20	29722	1486	31208
+BUY	50	39	61013	3050	64063
+BUY	50	70	118550	5927	124477
+BUY	100	1	1823	91	1914
+BUY	100	2	3653	182	3835
+BUY	100	3	5492	274	5766
+BUY	100	4	7339	366	7705
+BUY	100	5	9195	459	9654
+BUY	100	6	11060	553	11613
+BUY	100	7	12932	646	13578
+BUY	100	8	14813	740	15553
+BUY	100	9	16703	835	17538
+BUY	100	10	18601	930	19531
+BUY	100	11	20507	1025	21532
+BUY	100	12	22422	1121	23543
+BUY	100	13	24346	1217	25563
+BUY	100	14	26278	1313	27591
+BUY	100	15	28218	1410	29628
+BUY	100	16	30167	1508	31675
+BUY	100	17	32124	1606	33730
+BUY	100	18	34090	1704	35794
+BUY	100	19	36064	1803	37867
+BUY	100	20	38047	1902	39949
+BUY	100	39	77343	3867	81210
+BUY	100	70	148144	7407	155551
+BUY	500	1	5604	280	5884
+BUY	500	2	11219	560	11779
+BUY	500	3	16844	842	17686
+BUY	500	4	22480	1124	23604
+BUY	500	5	28126	1406	29532
+BUY	500	6	33783	1689	35472
+BUY	500	7	39450	1972	41422
+BUY	500	8	45128	2256	47384
+BUY	500	9	50817	2540	53357
+BUY	500	10	56516	2825	59341
+BUY	500	11	62225	3111	65336
+BUY	500	12	67945	3397	71342
+BUY	500	13	73676	3683	77359
+BUY	500	14	79417	3970	83387
+BUY	500	15	85169	4258	89427
+BUY	500	16	90932	4546	95478
+BUY	500	17	96705	4835	101540
+BUY	500	18	102488	5124	107612
+BUY	500	19	108282	5414	113696
+BUY	500	20	114087	5704	119791
+BUY	500	39	226400	11320	237720
+BUY	500	70	417961	20898	438859
+BUY	1000	1	11513	575	12088
+BUY	1000	2	23039	1151	24190
+BUY	1000	3	34579	1728	36307
+BUY	1000	4	46131	2306	48437
+BUY	1000	5	57697	2884	60581
+BUY	1000	6	69276	3463	72739
+BUY	1000	7	80868	4043	84911
+BUY	1000	8	92473	4623	97096
+BUY	1000	9	104091	5204	109295
+BUY	1000	10	115723	5786	121509
+BUY	1000	11	127368	6368	133736
+BUY	1000	12	139025	6951	145976
+BUY	1000	13	150696	7534	158230
+BUY	1000	14	162381	8119	170500
+BUY	1000	15	174078	8703	182781
+BUY	1000	16	185789	9289	195078
+BUY	1000	17	197513	9875	207388
+BUY	1000	18	209250	10462	219712
+BUY	1000	19	221000	11050	232050
+BUY	1000	20	232764	11638	244402
+BUY	1000	39	458791	22939	481730
+BUY	1000	70	837922	41896	879818
 SPOT	0	0
 SPOT	10	1079
 SPOT	50	1400
 SPOT	100	1813
 SPOT	500	5593
 SPOT	1000	11500
-ASK	50	15000	1400	13200	1800	10	14000
-ASK	50	25000	1400	22000	3000	16	22400
-ASK	50	200000	1400	176000	24000	126	176400
-ASK	1000	15000	11500	13200	1800	2	23000
-ASK	1000	25000	11500	22000	3000	2	23000
-ASK	1000	200000	11500	176000	24000	16	184000
-TAXBPS	0	2000
-TAXBPS	1	1953
-TAXBPS	7	1667
-TAXBPS	21	1000
-TAXBPS	41	48
+ASK	50	15000	1400	11	1	15400
+ASK	50	25000	1400	18	2	25200
+ASK	50	200000	1400	143	17	200200
+ASK	1000	15000	11500	2	0	23000
+ASK	1000	25000	11500	3	0	34500
+ASK	1000	200000	11500	18	2	207000
+TAXBPS	0	1500
+TAXBPS	1	1465
+TAXBPS	7	1250
+TAXBPS	21	750
+TAXBPS	41	36
 TAXBPS	42	0
 TAXBPS	43	0
 `;
@@ -165,8 +271,8 @@ const REFUND = rows('REFUND').map(([reserve, supply, held, maturing, heldBlocks,
 }));
 const BUY = rows('BUY').map(([supply, n, cost, fee, total]) => ({ supply, n, cost, fee, total }));
 const SPOT = new Map(rows('SPOT').map(([supply, rate]) => [supply, rate]));
-const ASK = rows('ASK').map(([supply, face, rate, tokenLeg, commission, credits, legValue]) => ({
-  supply, face, rate, tokenLeg, commission, credits, legValue
+const ASK = rows('ASK').map(([supply, face, rate, credits, commissionCredits, legValue]) => ({
+  supply, face, rate, credits, commissionCredits, legValue
 }));
 const TAXBPS = rows('TAXBPS').map(([days, bps]) => ({ days, bps }));
 
@@ -193,7 +299,7 @@ function mustGet<K, V>(map: Map<K, V>, key: K, what: string): V {
 // ── NON-VACUITY. A table with nothing in it must FAIL, never pass silently.
 console.log('\n── 0. THE GOLDENS LOADED.\n');
 check('the REFUND goldens parsed', REFUND.length === 29, `${REFUND.length} rows`);
-check('the BUY goldens parsed', BUY.length === 42, `${BUY.length} rows`);
+check('the BUY goldens parsed', BUY.length === 132, `${BUY.length} rows`);
 check('the SPOT goldens parsed', SPOT.size === 6, `${SPOT.size} rows`);
 check('the ASK goldens parsed', ASK.length === 6, `${ASK.length} rows`);
 check('the TAXBPS goldens parsed', TAXBPS.length === 7, `${TAXBPS.length} rows`);
@@ -279,8 +385,13 @@ function oldRedeemUsd(floorValueUsd: number, tokens: number, held: number): numb
   const g1 = mustFind(REFUND, (r) => r.maturing === 1 && r.n === 1, 'maturing=1 n=1');
   const oldAt1 = (usd(g100.net) * 1) / 100 * 1000;
   const errPct = ((oldAt1 - g1.net) / g1.net) * 100;
-  check('★ the worst measured over-quote is the 1/(1−τ) bound: +24.75% at maturing/held = 1/100',
-    errPct > 24 && errPct < 25, `+${errPct.toFixed(2)}% (old ${oldAt1.toFixed(1)} vs chain ${g1.net})`);
+  // The bound is 1/(1−τ) − 1, so it MOVES WITH τ: 24.75% at MaxExitTaxBps 2000,
+  // 17.47% at 1500. Asserted against the live constant rather than a
+  // remembered percentage, and still two-sided so a collapsed bound fails.
+  const bound = (1 / (1 - MAX_EXIT_TAX_BPS / 10_000) - 1) * 100;
+  check(`★ the worst measured over-quote is the 1/(1−τ) bound: +${errPct.toFixed(2)}% at maturing/held = 1/100`,
+    errPct > bound - 1 && errPct <= bound + 1e-9 && errPct > 10,
+    `+${errPct.toFixed(2)}% vs bound +${bound.toFixed(2)}% (old ${oldAt1.toFixed(1)} vs chain ${g1.net})`);
 }
 
 {
@@ -365,9 +476,9 @@ console.log('\n── 2. F-C. The cap must be compared on the basis buy.go charg
   // ruling, so it is asserted rather than asserted about.
   check('★ the golden proves TotalDue carries the trade fee (it is not the bare curve cost)',
     BUY.every((r) => r.total > r.cost) && BUY.every((r) => r.fee > 0));
-  check('★ …and the fee is the 10% the modal names',
-    BUY.every((r) => r.fee === Math.floor((r.cost * 1000) / 10_000)),
-    'params.go TradeFeeBps = 1000');
+  check(`★ …and the fee is the ${TRADE_FEE_BPS / 100}% the modal names`,
+    BUY.every((r) => r.fee === Math.floor((r.cost * TRADE_FEE_BPS) / 10_000)),
+    `params.go TradeFeeBps = ${TRADE_FEE_BPS}`);
 
   // THE OLD COMPARISON, verbatim: cap = 1.05 × SpotRate(S), ceiling = cap × n,
   // checked against TotalDue. Reproduced on the Go goldens.
@@ -405,9 +516,12 @@ console.log('\n── 2. F-C. The cap must be compared on the basis buy.go charg
     liveRefusedWhenTooLow === BUY.length, `${liveRefusedWhenTooLow}/${BUY.length} refused`);
 
   // And the reason, in one line of algebra the goldens confirm: TotalDue is at
-  // least 1.10 × spot(S) × n, which is above 1.05 × spot(S) × n for every row.
-  check('★ the arithmetic reason: TotalDue >= 1.10 × spot(S) × n on every golden row',
-    BUY.filter((r) => mustGet(SPOT, r.supply, 'spot') > 0).every((r) => r.total >= 1.10 * mustGet(SPOT, r.supply, 'spot') * r.n));
+  // least (1 + TradeFeeBps) × spot(S) × n, which is above spot(S) × n for every
+  // row. (It read 1.10 when TradeFeeBps was 1000; the multiplier is derived now,
+  // so the algebra follows params.go instead of a remembered rate.)
+  const FEE_MULT = 1 + TRADE_FEE_BPS / 10_000;
+  check(`★ the arithmetic reason: TotalDue >= ${FEE_MULT.toFixed(2)} × spot(S) × n on every golden row`,
+    BUY.filter((r) => mustGet(SPOT, r.supply, 'spot') > 0).every((r) => r.total >= FEE_MULT * mustGet(SPOT, r.supply, 'spot') * r.n));
 }
 
 {
@@ -437,9 +551,19 @@ console.log('\n── 2. F-C. The cap must be compared on the basis buy.go charg
 
   // ★ The two-sided proof the fix is really a BASIS change: the same cap value
   // read on the OLD basis and the NEW one gives opposite answers.
-  const oldBasisWouldRefuse = q.totalUsd > parseFloat(defaultMaxPriceText(q.priceAfter)) * q.tokens;
+  //
+  // ★ THE OLD BASIS IS THE PRE-BUY SPOT, and this line used to approximate it
+  // with `q.priceAfter` — the curve price AFTER the buy. That approximation
+  // held only while the trade fee (10%) exceeded the default headroom (5%);
+  // at TradeFeeBps 500 the curve's own rise covers the fee and the
+  // approximation passes, which made a correct client look broken. Taken on the
+  // real old basis now, verbatim what the block above reproduces from the Go
+  // goldens: cap = 1.05 x SpotRate(S), ceiling = cap x n.
+  const spotBeforeUsd = mustGet(SPOT, 50, 'spot at supply 50') / 1000;
+  const oldBasisWouldRefuse = q.totalUsd > parseFloat(defaultMaxPriceText(spotBeforeUsd)) * q.tokens;
   check('★ the SAME 5% headroom over the BARE CURVE price still refuses — so it is the basis, not the slack',
-    oldBasisWouldRefuse === true);
+    oldBasisWouldRefuse === true,
+    `total ${q.totalUsd} vs old ceiling ${parseFloat(defaultMaxPriceText(spotBeforeUsd)) * q.tokens}`);
 }
 
 {
@@ -520,26 +644,41 @@ console.log('\n── 4. F-D. The posted price is not the total.\n');
     check(`the preview escrows the same whole token count ask.go does (supply ${g.supply}, face ${usd(g.face)})`,
       q.tokens === g.credits, `got ${q.tokens}, Go says ${g.credits}`);
     const cost = askCost(usd(g.face), q, priceUsd);
-    check(`…and values that leg exactly as Go does`,
-      Math.round(cost.tokenLegUsd * 1000) === g.legValue, `got ${cost.tokenLegUsd * 1000}, Go says ${g.legValue}`);
-    check(`…and the commission matches splitFace`,
-      Math.round(cost.commissionUsd * 1000) === g.commission);
+    check(`…and values the whole escrow exactly as Go does`,
+      Math.round(cost.totalUsd * 1000) === g.legValue, `got ${cost.totalUsd * 1000}, Go says ${g.legValue}`);
+    // ONE ASSET: the commission is a SHARE of the escrow, not a second leg, so
+    // the golden carries it in CREDITS and its USD value is credits x rate.
+    check(`…and the commission is the golden's ${g.commissionCredits} credits, valued at the same rate`,
+      Math.round(cost.commissionUsd * 1000) === g.commissionCredits * g.rate,
+      `got ${Math.round(cost.commissionUsd * 1000)}, Go says ${g.commissionCredits} credits x ${g.rate} = ${g.commissionCredits * g.rate}`);
+    check(`…and it is never added on top: total === the token leg (supply ${g.supply}, face ${usd(g.face)})`,
+      cost.totalUsd === cost.tokenLegUsd && cost.commissionUsd <= cost.totalUsd);
     const errPct = ((cost.totalUsd - usd(g.face)) / usd(g.face)) * 100;
     worstErrPct = Math.max(worstErrPct, errPct);
     check(`★ the real total is at or above the posted price, never below (supply ${g.supply}, face ${usd(g.face)})`,
       cost.totalUsd >= usd(g.face) - 1e-9, `${cost.totalUsd} vs ${usd(g.face)}`);
   }
-  check('★ THE OLD CLAIM UNDERSTATED THE COST BY UP TO 65% — this is the defect',
-    worstErrPct > 65, `worst understatement ${worstErrPct.toFixed(1)}%`);
+  // ★ 53%, NOT 65%. The worst overshoot across the goldens fell when the HBD leg
+  // went away (the buyer no longer pays a commission ON TOP of a ceiled token
+  // leg), and it is re-measured here rather than re-asserted from memory. It is
+  // still an overshoot of more than half the posted price, which is the point.
+  check('★ THE OLD CLAIM UNDERSTATED THE COST BY MORE THAN HALF — this is the defect',
+    worstErrPct > 53 && worstErrPct < 54, `worst understatement ${worstErrPct.toFixed(1)}%`);
 
   const g = mustFind(ASK, (r) => r.supply === 1000 && r.face === 15000, 'ask supply 1000 face 15000');
   const q = serviceQuote(15, usd(g.rate));
   const cost = askCost(15, q, usd(g.rate));
-  check('★ the reproduced case: a $15 service at supply 1000 really costs $24.80',
-    Math.abs(cost.totalUsd - 24.8) < 1e-9, `${cost.totalUsd}`);
+  check('★ the reproduced case: a $15 service at supply 1000 really costs $23.00',
+    Math.abs(cost.totalUsd - 23) < 1e-9, `${cost.totalUsd}`);
   check('★ …and the old line would have called it "$15"', `$${Math.round(15)}` === '$15');
   check('★ the token count is an integer, not "2.00"',
     Number.isInteger(cost.tokens) && String(cost.tokens) === '2');
+  // ★ AND AT 2 CREDITS THE COMMISSION IS GENUINELY ZERO. floor(2 x 12%) = 0.
+  // This is the honest limit of a commission taken in whole tokens, pinned here
+  // so it is a known property and not a surprise on a live market.
+  check('★ a 2-credit ask owes no commission at all, and the sentence does not announce one',
+    cost.commissionUsd === 0 && g.commissionCredits === 0 && !askCostLine(cost).includes('commission'),
+    askCostLine(cost));
 
   /**
    * ★★★ THE WHOLE SENTENCE, CHARACTER FOR CHARACTER. This is not belt and
@@ -550,17 +689,22 @@ console.log('\n── 4. F-D. The posted price is not the total.\n');
    * linted, and every substring scan passed. Only comparing the assembled
    * sentence catches a defect that lives in the whitespace.
    */
+  // The sentence is asserted on a case whose commission is NOT zero, so every
+  // run of it is exercised: supply 50, a $200 service, 143 credits of which 17
+  // are the platform's.
+  const gBig = mustFind(ASK, (r) => r.supply === 50 && r.face === 200000, 'ask supply 50 face 200000');
+  const costBig = askCost(usd(gBig.face), serviceQuote(usd(gBig.face), usd(gBig.rate)), usd(gBig.rate));
   const LINE =
-    'This costs 2 tokens from your balance, worth about $23.00 at today\u2019s price, ' +
-    'plus a separate $1.80 platform commission paid in HBD. That is about $24.80 in all, ' +
-    'against a posted price of $15.00. Tokens are whole, so the last one rounds up.';
-  check('★ the ask sentence reads exactly as intended, whitespace included', askCostLine(cost) === LINE,
-    `got: ${askCostLine(cost)}`);
+    'This costs 143 tokens from your balance and nothing else, worth about $200.20 at today\u2019s price, ' +
+    'against a posted price of $200.00. Tokens are whole, so the last one rounds up. ' +
+    'Lumen\u2019s $23.80 commission comes out of those tokens, not on top of them.';
+  check('★ the ask sentence reads exactly as intended, whitespace included', askCostLine(costBig) === LINE,
+    `got: ${askCostLine(costBig)}`);
   check('★ …and no two runs are glued together (the JSX-comment defect that would have shipped)',
-    !askCostLine(cost).includes('aposted') && !/\w\$/.test(askCostLine(cost)));
-  check('★ …and none are doubled up either', !askCostLine(cost).includes('  '));
+    !askCostLine(costBig).includes('aposted') && !/\w\$/.test(askCostLine(costBig)));
+  check('★ …and none are doubled up either', !askCostLine(costBig).includes('  '));
   check('the emphasis falls on the figures, not the prose',
-    askCostSegments(cost).filter((x) => x.strong).map((x) => x.text).join('|') === '2 tokens|$23.00|$1.80|$24.80|$15.00');
+    askCostSegments(costBig).filter((x) => x.strong).map((x) => x.text).join('|') === '143 tokens|$200.20|$200.00|$23.80');
   check('a single token is singular', askCostSegments(askCost(5, { tokens: 1, commissionUsd: 0.6 }, 1)).some((x) => x.text === '1 token'));
   check('the segments reassemble into the line exactly',
     askCostSegments(cost).map((x) => x.text).join('') === askCostLine(cost));
@@ -575,7 +719,12 @@ console.log('\n── 4. F-D. The posted price is not the total.\n');
 // =====================================================================
 console.log('\n── 5. F-G. Everything on screen reconciles.\n');
 
-const cents = (n: number) => Math.round(n * 100);
+// THERE IS NO LOCAL `cents` ANY MORE. It was `Math.round(n * 100)`, which
+// rounds the BINARY value while the screen rounds the shortest DECIMAL one, so
+// it disagreed with the render on every exact half-cent. Every measurement in
+// this section now goes through `shown` below, which reads the rendered string
+// back — the instrument the section's own header argues for, and the same
+// definition trade-preview.ts's own `cents` was changed to on 2026-09-12.
 
 /**
  * ★★★ THE INSTRUMENT, NAMED. The claim under test is "the rows the reader sees
@@ -592,10 +741,10 @@ const same = (a: number, b: number) => Math.abs(a - b) < 1e-9;
 {
   check('the instrument reads a rendered figure back, not the float behind it',
     shown(11.4751) === 11.48 && usdPrice(11.4751) === '$11.48');
-  check('★ the reproduced example: supply 0, $12 budget, $10.43 + $1.04 under a $11.48 total',
+  check('★ the reproduced example: supply 0, $12 budget, $10.43 + $0.52 under a $10.96 total',
     (() => {
       const q = buyQuote(12, { supply: 0, cap: 1_000_000, position: null });
-      return usdPrice(q.curveCostUsd) === '$10.43' && usdPrice(q.tradeFeeUsd) === '$1.04' && usdPrice(q.totalUsd) === '$11.48';
+      return usdPrice(q.curveCostUsd) === '$10.43' && usdPrice(q.tradeFeeUsd) === '$0.52' && usdPrice(q.totalUsd) === '$10.96';
     })());
   check('★ …and the fixed rows make that very screen add up',
     (() => {
@@ -617,8 +766,8 @@ const same = (a: number, b: number) => Math.abs(a - b) < 1e-9;
     }
   }
   check('the buy sweep had something to sweep', buyN > 1_500, `${buyN} quotes`);
-  check('★ THE OLD BUY ROWS DID NOT SUM on 26.5% of previews — this is the defect',
-    buyBadOld / buyN > 0.25 && buyBadOld / buyN < 0.28, `${buyBadOld}/${buyN} = ${((buyBadOld / buyN) * 100).toFixed(1)}%`);
+  check('★ THE OLD BUY ROWS DID NOT SUM on 23.7% of previews — this is the defect',
+    buyBadOld / buyN > 0.22 && buyBadOld / buyN < 0.28, `${buyBadOld}/${buyN} = ${((buyBadOld / buyN) * 100).toFixed(1)}%`);
   check('★ …and the fixed rows sum on every single one', buyBadNew === 0, `${buyBadNew}/${buyN} still broken`);
 
   let sellBadOld = 0;
@@ -637,8 +786,8 @@ const same = (a: number, b: number) => Math.abs(a - b) < 1e-9;
     }
   }
   check('the sell sweep had something to sweep', sellN > 2_000, `${sellN} quotes`);
-  check('★ THE OLD SELL ROWS DID NOT SUM on 37.2% of previews',
-    sellBadOld / sellN > 0.36 && sellBadOld / sellN < 0.39, `${sellBadOld}/${sellN} = ${((sellBadOld / sellN) * 100).toFixed(1)}%`);
+  check('★ THE OLD SELL ROWS DID NOT SUM on 36.0% of previews',
+    sellBadOld / sellN > 0.34 && sellBadOld / sellN < 0.39, `${sellBadOld}/${sellN} = ${((sellBadOld / sellN) * 100).toFixed(1)}%`);
   check('★ …and the fixed rows sum on every single one', sellBadNew === 0, `${sellBadNew}/${sellN} still broken`);
 }
 
@@ -652,8 +801,14 @@ const same = (a: number, b: number) => Math.abs(a - b) < 1e-9;
       const q = buyQuote(budget, { supply, cap: 1_000_000, position: null });
       if (q.tokens <= 0) continue;
       const r = buyRows(q);
-      if (cents(r.totalUsd) !== cents(q.totalUsd)) anchorMoved += 1;
-      residue = Math.max(residue, Math.abs(cents(r.curveCostUsd) - cents(q.curveCostUsd)));
+      // ★ MEASURED ON THE RENDERED FIGURE, not on the float. `cents` here is
+      // `Math.round(n * 100)`, which rounds the BINARY value, while the screen
+      // rounds the shortest decimal — they disagree on exact half-cents, and
+      // since trade-preview.ts started rounding through the render (so the CTA
+      // and the rows can never print two different totals) this comparison has
+      // to be taken the same way or it reports a defect that is not on screen.
+      if (shown(r.totalUsd) !== shown(q.totalUsd)) anchorMoved += 1;
+      residue = Math.max(residue, Math.abs(Math.round((shown(r.curveCostUsd) - shown(q.curveCostUsd)) * 100)));
     }
   }
   check('★ the CHARGED total is never moved by the reconciliation', anchorMoved === 0);
@@ -667,8 +822,8 @@ const same = (a: number, b: number) => Math.abs(a - b) < 1e-9;
         const q = sellQuote(t, { supply, cap: 1_000_000, position: { tokens: supply, maturingTokens: supply } }, days);
         if (q.curveProceedsUsd <= 0) continue;
         const r = sellRows(q);
-        if (cents(r.receiveUsd) !== cents(q.receiveUsd)) netMoved += 1;
-        grossResidue = Math.max(grossResidue, Math.abs(cents(r.curveProceedsUsd) - cents(q.curveProceedsUsd)));
+        if (shown(r.receiveUsd) !== shown(q.receiveUsd)) netMoved += 1;
+        grossResidue = Math.max(grossResidue, Math.abs(Math.round((shown(r.curveProceedsUsd) - shown(q.curveProceedsUsd)) * 100)));
       }
     }
   }
@@ -695,8 +850,19 @@ console.log('\n── 6. F-F. The percentage on the label is the percentage of t
   const r = sellRows(q);
   const headline = pctLabel(q.exitFeePct, 1) ?? '0%';
   const effective = pctLabel(effectiveExitFeePct(r.exitFeeUsd, r.curveProceedsUsd), 1) ?? '0%';
-  check('★ THE OLD LABEL SAID 20% BESIDE A DEDUCTION OF 8% — this is the defect',
-    headline === '20%' && effective === '8%', `headline ${headline}, effective ${effective}`);
+  // ★ 15% AND 6%, not 20% and 8%: MaxExitTaxBps went 2000 -> 1500 on
+  // 2026-09-09 and both numbers moved together. The DEFECT is the gap between
+  // them, so it is asserted as the gap — the headline is the contract's
+  // ceiling, the effective rate is the maturing share of it, and they must not
+  // be the same number on a mixed position.
+  check(`★ THE OLD LABEL SAID ${headline} BESIDE A DEDUCTION OF ${effective} — this is the defect`,
+    headline === `${MAX_EXIT_TAX_BPS / 100}%` &&
+      effective === '6%' &&
+      // The gap itself, as numbers rather than as two labels — TypeScript
+      // narrows the two strings to literal types and would reject `!==` on them
+      // as a comparison that cannot hold.
+      effectiveExitFeePct(r.exitFeeUsd, r.curveProceedsUsd) < q.exitFeePct,
+    `headline ${headline}, effective ${effective}`);
   check('★ the effective rate really is what the two visible figures stand in',
     Math.abs(r.exitFeeUsd / r.curveProceedsUsd - effectiveExitFeePct(r.exitFeeUsd, r.curveProceedsUsd)) < 1e-12);
   check('★ …so the reader can multiply the row above and land on the row below',
@@ -707,7 +873,7 @@ console.log('\n── 6. F-F. The percentage on the label is the percentage of t
   const allMaturing = sellQuote(100, { supply: 1000, cap: 1_000_000, position: { tokens: 100, maturingTokens: 100 } }, 0);
   const ar = sellRows(allMaturing);
   check('★ an all-maturing holder still sees the headline rate (nothing moved for them)',
-    (pctLabel(effectiveExitFeePct(ar.exitFeeUsd, ar.curveProceedsUsd), 1) ?? '') === '20%');
+    (pctLabel(effectiveExitFeePct(ar.exitFeeUsd, ar.curveProceedsUsd), 1) ?? '') === `${MAX_EXIT_TAX_BPS / 100}%`);
 
   check('a real but tiny deduction reads "<1%", never a flat "0%"',
     pctLabel(effectiveExitFeePct(0.001, 100), 1) === '<1%');
@@ -732,11 +898,12 @@ console.log('\n── 6. F-F. The percentage on the label is the percentage of t
 console.log('\n── 7. F-E. The label is an estimate; the ceiling is the guarantee.\n');
 
 {
-  // The drift, on the contract's own numbers. A $25 budget at supply 50 buys 15
-  // whole tokens, which the golden table prices directly.
+  // The drift, on the contract's own numbers. A $25 budget at supply 50 buys 16
+  // whole tokens, which the golden table prices directly. (It bought 15 at the
+  // old 10% fee; the count moved with the fee, the property did not.)
   const BUDGET = 25;
   const local = buyQuote(BUDGET, { supply: 50, cap: 1_000_000, position: null });
-  check('the drift case is the one the golden prices', local.tokens === 15, `${local.tokens} tokens`);
+  check('the drift case is the one the golden prices', local.tokens === 16, `${local.tokens} tokens`);
   const goldenAtQuote = usd(mustFind(BUY, (r) => r.supply === 50 && r.n === local.tokens, `buy supply 50 n=${local.tokens}`).total);
   check('★ the label agrees with the contract at the un-drifted supply',
     Math.abs(local.totalUsd - goldenAtQuote) < 1e-9, `label $${local.totalUsd} vs Go $${goldenAtQuote}`);
@@ -754,8 +921,14 @@ console.log('\n── 7. F-E. The label is an estimate; the ceiling is the guara
   check('the curve is live at the drifted supply', driftedCharge);
   check('★ the label sits strictly BELOW the ceiling that is actually signed',
     local.totalUsd < BUDGET, `label $${local.totalUsd.toFixed(2)} under a $${BUDGET} budget`);
-  check('★ …by enough to matter: the unlabelled slack here is over 80 cents',
-    BUDGET - local.totalUsd > 0.8, `$${(BUDGET - local.totalUsd).toFixed(2)} of unnamed headroom`);
+  // ★ 31 CENTS, NOT 80. The slack is whatever the whole-token ceiling leaves
+  // under the budget, and a cheaper fee buys one more token and leaves less
+  // behind. It is still real money that the label never names, which is the
+  // whole point of the ceiling line; the threshold is stated as a QUARTER of a
+  // token's price so it tracks the market rather than a remembered figure.
+  check('★ …by enough to matter: the unlabelled slack here is over 1% of the budget',
+    BUDGET - local.totalUsd > BUDGET * 0.01 && BUDGET - local.totalUsd < local.priceAfter,
+    `$${(BUDGET - local.totalUsd).toFixed(2)} of unnamed headroom on a $${BUDGET} budget, where a token costs $${local.priceAfter.toFixed(2)}`);
 
   check('★ the ceiling line names the budget when no cap is set',
     buyCeilingNote(50, false).includes('$50.00') && buyCeilingNote(50, false).includes('budget'));
@@ -794,12 +967,24 @@ console.log('\n── 8. WIRING.\n');
   check('★ F-A: and the linear scale is gone',
     !modal.includes('floorValueUsd ?? 0) * tokens) / held'));
   check('★ F-B: the amount field refuses instead of stripping', modal.includes('acceptAmountText(amt, e.target.value)'));
-  check('★ F-B: the price cap field is guarded too', modal.includes('acceptAmountText(maxPriceValue, e.target.value)'));
-  check('★ F-C: the cap is resolved on the all-in basis', modal.includes('resolveMaxPriceCap(adv ? maxPriceValue : \'\', q)'));
+  // ★★★ THE BUY DIALOG'S SEPARATE "MAX PRICE" FIELD IS GONE, AND THE CEILING
+  // IT EXISTED FOR IS STRONGER WITHOUT IT. F-B and F-C were written when the
+  // buyer could open Advanced and type a per-token cap, and the defect then was
+  // that the cap was compared on the bare curve price instead of the all-in
+  // one. BuyModal now signs `onBuy(usd)` with no second argument, and
+  // token-market-view.tsx handleBuy takes `cap = maxTotalUsd ?? usd` — so the
+  // TYPED BUDGET is the signed ceiling, and the dialog refuses before signing
+  // if the authoritative quote exceeds it. That is the same protection with
+  // nothing left to misconfigure, and it is what these four lines now assert.
+  // resolveMaxPriceCap/defaultMaxPriceText survive as helpers and are still
+  // proven cell by cell in section 2 above; only the field that fed them went.
+  check('★ F-B: the amount field is guarded (the one input this dialog still takes)',
+    modal.includes('acceptAmountText(amt, e.target.value)'));
+  check('★ F-C: the ceiling is the typed budget, signed as-is',
+    modal.includes('await onBuy(usd);') && !modal.includes('onBuy(usd, maxTotalUsd)'));
   check('★ F-C: …and the bare-curve comparison is gone', !modal.includes('q.priceAfter > maxP'));
-  check('★ F-C: the pre-filled cap tracks the live quote', modal.includes('defaultMaxPriceText(q.avgPrice)'));
-  check('★ F-C: …and the frozen spot-based default is gone', !modal.includes('(m.priceUsd * 1.05).toFixed(2)'));
-  check('★ F-D: the ask card prices the real cost', modal.includes('askCost(usd, q, m.priceUsd)'));
+  check('★ F-C: …and so is the frozen spot-based default', !modal.includes('(m.priceUsd * 1.05).toFixed(2)'));
+  check('★ F-D: the ask card prices the real cost', modal.includes('askCost(usd, { tokens: chainTokens, commissionUsd }, m.priceUsd)'));
   check('★ F-D: …and renders it from segments, so no comment can land inside the sentence',
     modal.includes('askCostSegments(cost).map('));
   check('★ F-D: …and no longer calls the posted price the total',
@@ -809,7 +994,8 @@ console.log('\n── 8. WIRING.\n');
     modal.includes('tok('));
   check('★ F-D: the token count is an integer everywhere in the ask dialog', !modal.includes('tok(q.tokens)'));
   check('★ F-E: the CTA is marked as an estimate', modal.includes('`Buy for ~${usdPrice(q.totalUsd)}`'));
-  check('★ F-E: …and the ceiling is named', modal.includes('buyCeilingNote(maxTotalUsd ?? usd, maxTotalUsd !== undefined)'));
+  check('★ F-E: …and the ceiling is named, from the budget that is actually signed',
+    modal.includes('buyCeilingNote(usd, false)'));
   check('★ F-F: the itemised row carries the effective rate', modal.includes('effectiveExitFeePct(rows.exitFeeUsd, rows.curveProceedsUsd)'));
   check('★ F-F: …and the strip says "rate" and names its base',
     modal.includes('Early-exit fee rate:') && modal.includes('exitFeeBaseNote(held, m.position?.maturingTokens)'));

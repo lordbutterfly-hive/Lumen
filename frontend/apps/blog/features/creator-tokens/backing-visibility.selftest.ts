@@ -36,6 +36,13 @@
  */
 
 import { SHOW_BACKING_FIGURES } from './backing-visibility';
+import { TRADE_FEE_BPS } from './lib/contract-math';
+
+/** params.go's rate, spelled the way the copy modules spell it, so an assertion
+ * about the rendered text is an assertion about the contract's number. */
+const FEE_PCT = `${Number((TRADE_FEE_BPS / 100).toFixed(2))}%`;
+const FEE_HALF_PCT = `${Number((TRADE_FEE_BPS / 200).toFixed(2))}%`;
+
 
 let failures = 0;
 let checks = 0;
@@ -159,7 +166,12 @@ console.log('\n── 3. EVERY SITE IS BEHIND IT. Enumerated, and counted.\n');
   check('★ studio: those four are ALL of them, and every one is guarded', count(studio.code, 'market.floorUsd') === 3 && count(studio.code, 'market.reserveUsd') === 1 && count(studio.code, 'SHOW_BACKING_FIGURES') === 5);
 
   // ── WALLET. Headline total, per-row figure, and the sentence that defined it.
-  check('★ wallet: the per-row figure', wallet.code.includes('{SHOW_BACKING_FIGURES ? ( <div className="text-caption text-ink-14">floor {usdPrice(usdFromHbd(h.floorValueHbd))}</div> ) : null}'));
+  // ★ THE LANDMARK CARRIES A TYPOGRAPHY CLASS NOW (`font-num`, the 2026-09-02
+  // numerals sweep). The PROPERTY under test is the guard, not the class list, so
+  // the assertion is split: the row is inside SHOW_BACKING_FIGURES, and it is the
+  // floor figure. Written this way a restyle cannot fail it, and removing the
+  // guard still does.
+  check('★ wallet: the per-row figure', wallet.code.includes('{SHOW_BACKING_FIGURES ? (') && wallet.code.includes('floor {usdPrice(usdFromHbd(h.floorValueHbd))}</div>'));
   check('★ wallet: the headline total AND its label together', wallet.code.includes('{p.holdingsUnavailable ? \'—\' : usdPrice(floorTotalUsd)}') && wallet.code.includes('Floor value: what the reserve would pay out if the market wound down'));
   const wStart = wallet.code.indexOf('{SHOW_BACKING_FIGURES ? ( <div className="mt-4 flex flex-wrap items-end');
   const wEnd = wallet.code.indexOf(') : null}', wStart);
@@ -228,10 +240,15 @@ console.log('\n── 4. NO SENTENCE POINTS AT A FIGURE THAT IS NOT THERE.\n');
   // them; the shown branch is the original, verbatim.
   check('★ the wallet keeps both branches of its exit disclosure', wallet.code.includes('const EXIT_NOTE_WITH_BACKING =') && wallet.code.includes('const EXIT_NOTE_BACKING_HIDDEN ='));
   check('★ …and renders whichever the flag selects', wallet.code.includes('{SHOW_BACKING_FIGURES ? EXIT_NOTE_WITH_BACKING : EXIT_NOTE_BACKING_HIDDEN}'));
-  const hiddenNote = /const EXIT_NOTE_BACKING_HIDDEN =\s*'([^']*)'/.exec(strip(wallet.raw))?.[1] ?? '';
+  // ★ THE NOTE IS A TEMPLATE LITERAL NOW, because its fee rate is derived from
+  // TRADE_FEE_BPS instead of typed (2026-09-12). The extractor accepts either
+  // quoting and then resolves the one interpolation it can contain, so the
+  // assertions below still read the sentence a user is actually shown.
+  const hiddenNote = (/const EXIT_NOTE_BACKING_HIDDEN =\s*[`']([^`']*)[`']/.exec(strip(wallet.raw))?.[1] ?? '')
+    .replace(/\$\{TRADE_FEE_PCT\}/g, FEE_PCT);
   check('the hidden exit note was extracted', hiddenNote.length > 150, `${hiddenNote.length} bytes`);
   check('★ …it names neither the floor nor the backing', !/floor/i.test(hiddenNote) && !/backing/i.test(hiddenNote), hiddenNote);
-  check('★ …it still names BOTH exit routes and BOTH fees, which is the disclosure that had to survive', hiddenNote.includes('sell on the curve') && hiddenNote.includes('redeem a pro-rata slice') && hiddenNote.includes('10% trade fee') && hiddenNote.includes('early-exit fee'));
+  check('★ …it still names BOTH exit routes and BOTH fees, which is the disclosure that had to survive', hiddenNote.includes('sell on the curve') && hiddenNote.includes('redeem a pro-rata slice') && hiddenNote.includes(`${FEE_PCT} trade fee`) && hiddenNote.includes('5% trade fee') && hiddenNote.includes('early-exit fee'));
   check('★ …and it keeps the audited "neither is a fixed price" claim', hiddenNote.includes('Neither is a fixed price'));
   check('★ …with no em or en dash, since it is copy written today', !/[—–]/.test(hiddenNote), hiddenNote);
 
