@@ -3599,7 +3599,37 @@ class SeenConfig:
     #: overtakes a brand-new post; 25% sits just above that band, so a
     #: resurrection is a post that would have out-ranked fresh content on merit
     #: anyway. Set to 0.0 for pure-absolute behaviour.
-    resurrect_relative: float = 0.25
+    #:
+    #: ★ HALVED TO 0.125 (2026-09-13, owner). At 0.25 a post with 277 engagers
+    #: needed +70 NEW DISTINCT PEOPLE to come back, which on this network's
+    #: current volume is close to never — the rule was effectively "suppressed
+    #: forever" for anything popular, which is not what a resurrection rule is
+    #: for. 0.125 makes the same post need +35. The absolute floor of 2 still
+    #: governs small posts, so a 4-engager post is unchanged.
+    #:
+    #: An engager is a DISTINCT ACCOUNT, not a vote: voters, commenters and
+    #: rebloggers unioned and deduplicated, author excluded
+    #: (`core/exploration.py::post_engagers`). Reading this as "70 votes" would
+    #: badly understate the bar it sets.
+    resurrect_relative: float = 0.125
+
+    #: ★★★ HOW MANY NEVER-SEEN POSTS MAY TAKE THE HEAD OF ONE BUILD (owner,
+    #: 2026-09-13: "not flip but push down the list and add on top").
+    #:
+    #: Suppression alone produced a FLIP: when the pool held more unseen posts
+    #: than a page, every slot was new and the reader lost their place entirely.
+    #: This caps the fresh head so the rest of the page is carried over from what
+    #: they already saw — new arrivals on top, everything else sliding down.
+    #:
+    #: ★ IT IS A CAP, NOT A QUOTA, and it NEVER shortens a page. It only applies
+    #: when there are repeats to fill the remainder with; a reader with no
+    #: history (a first visit) has none, so their page is built exactly as
+    #: before. If the repeats run short, the fresh posts that lost their slot are
+    #: put back rather than serving a stub — see the `carried_over` restore in
+    #: `rank_feed`.
+    #:
+    #: 0 disables the cap and restores the pre-2026-09-13 behaviour exactly.
+    max_new_per_build: int = 15
 
     #: ★★★ THE WINDOW — 7 DAYS, AND THE C9 RECONCILIATION IS DELIBERATE.
     #: `HistoryWindows.sourcing_freshness_days` is 3 and governs every discovery

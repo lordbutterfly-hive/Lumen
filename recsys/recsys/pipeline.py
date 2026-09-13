@@ -3111,6 +3111,30 @@ def rank_feed(
     # is, sharing `feed_counters` so author spacing still accounts for them.
     floor = max(settings.fallback.min_feed_size, serve_limit or 0)
     valve_fired = 0
+
+    # ★★★ THE FRESH-HEAD CAP (owner, 2026-09-13). Suppression alone FLIPPED the
+    # page: with more unseen posts than a page holds, every slot was new and the
+    # reader lost their place. Capping the fresh head means new arrivals land on
+    # top and everything else slides down instead of vanishing.
+    #
+    # IT RUNS HERE, with the valve, and that placement is the whole safety
+    # argument. Both reserved seats and the protected head are already placed
+    # (exploration at 13, popular at 6, freshness at 7) and every one of them
+    # sits INSIDE a cap of 15, so truncating the head cannot evict a seat or
+    # shift an index the protected-head swap just fixed.
+    #
+    # ★ IT NEVER SHORTENS A PAGE, which is the regression this would otherwise
+    # be. It is gated on `repeats` being non-empty, so a reader with no history
+    # — a first visit — is built exactly as before. The displaced fresh posts are
+    # held in `carried_over` and put back below if the repeats run short, so the
+    # floor is still whatever it was. They were never served, so they stay
+    # `fresh` and simply take the head on the next build.
+    head_cap = settings.seen.max_new_per_build
+    carried_over: list = []
+    if head_cap > 0 and repeats and len(ranked) > head_cap:
+        carried_over = ranked[head_cap:]
+        ranked = ranked[:head_cap]
+
     if repeats and len(ranked) < floor:
         take = repeats[: floor - len(ranked)]
         ranked = ranked + _score(
@@ -3128,6 +3152,17 @@ def rank_feed(
             floor,
             len(ranked) - valve_fired,
         )
+
+    # The repeats could not fill what the cap gave up: put the displaced fresh
+    # posts back rather than serve a short page. Ordered as they were ranked, so
+    # this is the pre-cap page with a seen block spliced into the middle.
+    # ★ ALL of them, not "up to the floor" — a 400-cell sweep caught that version
+    # returning a SHORTER page than the uncapped code whenever the fresh pool
+    # alone already exceeded the floor (48 fresh gave 45). The displaced posts
+    # always go back, below the seen block; `top_k` does the truncating, exactly
+    # as it did before the cap existed.
+    if carried_over:
+        ranked = ranked + carried_over
 
     delivered = ranked[: settings.diversity.top_k]
 
