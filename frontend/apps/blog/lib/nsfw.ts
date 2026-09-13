@@ -34,13 +34,34 @@ import type { Entry } from '@hive/common-hiveio-packages/wax';
  * (measured: `lilip`'s post is reachable that way while carrying no `nsfw`
  * entry in its own tags array).
  */
+/**
+ * ★ ADULT TAGS (2026-09-13, owner: remove nsfw AND nude from every feed).
+ *
+ * It was the single literal 'nsfw' here and the same literal in the ranker
+ * (`recsys/io/hafsql.py`), so a post tagged `nude` was adult to neither. A SET
+ * makes adding a tag one edit in each of the two places that must agree.
+ *
+ * MEMBERSHIP IS EXACT, NOT SUBSTRING, and that is deliberate: a substring test
+ * hides innocent tags that merely contain the letters — `nudelsuppe` (German for
+ * noodle soup) is a real Hive food tag and would vanish from every feed.
+ *
+ * KEEP IN SYNC with `ADULT_TAGS` in `recsys/recsys/io/hafsql.py`. This file's own
+ * header exists because the ranker and the renderer once disagreed about what
+ * NSFW meant; two lists that drift reproduce exactly that bug.
+ */
+export const ADULT_TAGS: ReadonlySet<string> = new Set([
+  'nsfw', 'nude', 'nudes', 'nudity', 'porn', 'porno', 'xxx', 'adult', 'erotic', 'erotica', 'sex'
+]);
+
+function isAdultTag(value: unknown): boolean {
+  return typeof value === 'string' && ADULT_TAGS.has(value.trim().toLowerCase());
+}
+
 export function isNsfwPost(post: Pick<Entry, 'json_metadata' | 'category'>): boolean {
   const meta = post.json_metadata as { tags?: unknown } | undefined;
   const tags = Array.isArray(meta?.tags) ? meta!.tags : [];
-  if (tags.some((tag) => typeof tag === 'string' && tag.trim().toLowerCase() === 'nsfw')) {
-    return true;
-  }
-  return typeof post.category === 'string' && post.category.trim().toLowerCase() === 'nsfw';
+  if (tags.some(isAdultTag)) return true;
+  return isAdultTag(post.category);
 }
 
 /**
@@ -85,11 +106,30 @@ export function isNsfwPost(post: Pick<Entry, 'json_metadata' | 'category'>): boo
  * `useNsfwPreference()`, and the filtering — which needs no hook at all — is
  * done by `filterVisiblePosts` wherever the data is ready.
  */
+/**
+ * ★★★ ADULT POSTS ARE REMOVED FROM EVERY FEED, NOT OFFERED AS A PREFERENCE
+ * (2026-09-13, owner: "from all feeds remove all posts as well with nsfw, nude
+ * tags").
+ *
+ * `preference` is now IGNORED for list surfaces. It used to gate the filter, so
+ * `warn` and `show` both left adult posts in every feed — and `show` is a
+ * setting a reader can pick once and then forget while browsing in public. The
+ * owner's rule is that a feed never carries this content regardless of who is
+ * looking, so the filter is unconditional here.
+ *
+ * WHAT THIS DOES NOT CHANGE: the single-post PAGE
+ * (`app/[param]/[p2]/[permlink]/content.tsx`) still honours the preference
+ * behind its reveal gate. Someone who followed a direct link to a specific post
+ * has asked for that post by name; a FEED never asked for anything. The two are
+ * deliberately different questions and only the feed one is being answered here.
+ *
+ * The parameter is kept rather than removed so every existing call site stays
+ * valid and no caller silently loses its filtering during the change.
+ */
 export function filterVisiblePosts<T extends Pick<Entry, 'json_metadata' | 'category'>>(
   entries: T[],
-  preference: Preferences['nsfw']
+  _preference?: Preferences['nsfw']
 ): T[] {
-  if (preference !== 'hide') return entries;
   return entries.filter((entry) => !isNsfwPost(entry));
 }
 

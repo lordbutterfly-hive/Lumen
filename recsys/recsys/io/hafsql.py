@@ -157,6 +157,21 @@ _LITE_PUBLISHER_ACCOUNTS_ENV = LITE_PUBLISHER_ACCOUNTS_ENV
 _LITE_FRONTEND_ACCOUNT_ENVS: tuple[str, ...] = LITE_FRONTEND_ACCOUNT_ENVS
 
 
+# ★ ADULT TAGS — the one list every surface filters on (2026-09-13, owner).
+#
+# It was a single literal "nsfw" here and the same literal again in the client's
+# `lib/nsfw.ts`, so a post tagged `nude` was adult to neither. Widened to a SET so
+# adding a tag is one edit in each of the two places that must agree, and the
+# membership test is exact rather than a substring — `substring` would swallow
+# innocent tags that merely contain the letters (e.g. "nudelsuppe", German for
+# noodle soup, is a real Hive food tag).
+#
+# Kept in sync with `frontend/apps/blog/lib/nsfw.ts`'s ADULT_TAGS by the comment in
+# both files; the ranker and the renderer disagreeing is exactly the defect that
+# file's own header was written about.
+ADULT_TAGS = frozenset({"nsfw", "nude", "nudes", "nudity", "porn", "porno", "xxx", "adult", "erotic", "erotica", "sex"})
+
+
 def _lite_config_from_env() -> LiteConfig:
     """A13: build a :class:`LiteConfig` from the environment.
 
@@ -1770,7 +1785,7 @@ def _build_post(
         author_reputation=_reputation_display(reputation_raw),
         tags=tag_tuple,
         votes=tuple(votes_by_key.get(key, ())),
-        is_nsfw=any(tag.lower() == "nsfw" for tag in tag_tuple),
+        is_nsfw=any(tag.lower().strip() in ADULT_TAGS for tag in tag_tuple),
         commenters=tuple(sorted(comment_counts)),
         rebloggers=rebloggers,
         lite_rebloggers=(lite_rebloggers_by_key or {}).get(key, ()),
