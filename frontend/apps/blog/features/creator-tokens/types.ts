@@ -106,8 +106,22 @@ export type MarketHealth = 'open' | 'lapsed' | 'delisted' | 'closed' | 'paused';
  * the contract live on both networks on 2026-08-31; 'v2' is the A1 lapse
  * change (a natural FROZEN is an inflow stop, not a wind-down; Renew admits
  * it behind a reserve check). Every default and every failed read is 'v1'.
+ *
+ * ★★★ 'v3' IS THE NO-SUBSCRIPTION BYTECODE (2026-09-12 OWNER RULING, deployed
+ * separately). It exists as its own rule set for ONE reason: the update is
+ * TIMELOCKED, so between the frontend shipping and the contract activating,
+ * the chain is still charging the 10 HBD month and the client must keep
+ * saying so. Folding the new CID into 'v2' (where it briefly sat) made the
+ * launch wizard promise a renewal that the activated bytecode cannot perform,
+ * in the terms step the creator explicitly accepts.
+ *
+ * v3 IS v2 IN EVERY RULE EXCEPT BILLING. Both `windingDownUnder` and
+ * `closesIfDrainedUnder` branch on `=== 'v1'`, so v3 inherits the v2 path
+ * there by construction. Any NEW branch that means "modern rules" must be
+ * written `!== 'v1'`, never `=== 'v2'` — that exact shape is what this change
+ * had to repair in two places.
  */
-export type ContractRules = 'v1' | 'v2';
+export type ContractRules = 'v1' | 'v2' | 'v3';
 
 // THERE IS NO RenewRefusal. It named why a renewal would be refused — paused,
 // retired, closed, a v1 terminal lapse, or v2's surplus/deficit revival check —

@@ -117,8 +117,41 @@ export const V1_CODE_CID = 'bafkreic2nphgjnwte32nkwix7bga2hjcwx5hfo6n5xrgllczpt7
 export const V2_CODE_CIDS: ReadonlySet<string> = new Set([
   'bafkreiajgng3ozcazro5goha34f2yfs265iylzi6rr5pk6ttent7s5xocu', // v2
   'bafkreih4eper5br4vqmgip6f5vykwmhuxtor4j2pqaw2ewdtwuirzf5h7y', // fast twin, test fixture (see above)
-  'bafkreigqshjvsnoauwq6eeiisibbpqpesw5ysuiyhp36rjl3i7xi4dwqwi', // v2 fee/display update (2026-09-09): TradeFeeBps 1000->500, MaxExitTaxBps 2000->1500, exit-tax launder closed on all four rails, per-cohort `lots|` ledger, SellResult.TaxBps = slice-weighted effective rate
-  'bafkreighvwezdaaatz6fhmtoboxxdp2hnknmljk6o3qaojim5ekhprfdzu' // v2 commission + subscription + escrow-stranding + graduation-gate update (2026-09-12, OWNER RULING), 160,097 B. FOUR changes in ONE deploy: (a) the 12% commission is 12% of the TOKENS, credited to the owner account on delivery (no HBD leg on ask/answer/decline/reclaim at all); (b) the 10 HBD monthly subscription is REMOVED — no Renew, no paid_until, no lapse, a market is ACTIVE from registration until its creator retires it; (c) a settlement that spans more than MaxSettlementLots cohorts now collapses and merges them instead of refusing, so an escrow can never strand a holder past MaxLots; (d) graduate() gates on the cohort ledger rather than the blended matured balance. Proven by execution, not by reading: the five-step escrow path (order → escrow → decline → answer → deadline+reclaim) runs against THIS bytecode in go-vsc-node's real wasm runtime (modules/wasm/e2e/creator_tokens_escrow_test.go)
+  'bafkreigqshjvsnoauwq6eeiisibbpqpesw5ysuiyhp36rjl3i7xi4dwqwi' // v2 fee/display update (2026-09-09): TradeFeeBps 1000->500, MaxExitTaxBps 2000->1500, exit-tax launder closed on all four rails, per-cohort `lots|` ledger, SellResult.TaxBps = slice-weighted effective rate
+]);
+
+/**
+ * ★★★ THE NO-SUBSCRIPTION BYTECODE. Its own rule set, NOT a member of
+ * `V2_CODE_CIDS` — it sat there briefly and that was a defect, because the
+ * launch wizard's "stop" term branches on the rule set and under v2 it
+ * promises "Renewing reopens buying on the same token". The activated
+ * bytecode has no `renew` export, no `paid_until` and no lapse, so that
+ * sentence would have been false in the terms a creator accepts.
+ *
+ * THE SPLIT ALSO COVERS THE TIMELOCK WINDOW, which is the real reason it
+ * cannot just be a copy edit. The frontend must ship BEFORE the contract (an
+ * unlisted CID pins every client to v1 forever), so there is a live interval
+ * where this code is deployed and NOT yet active. During it the chain still
+ * charges the 10 HBD month and still lapses a market, and the client reads
+ * the ACTIVE code CID — so it correctly stays on v2 and keeps telling
+ * creators the truth. The copy flips by itself the moment activation lands.
+ *
+ * FOUR changes in ONE deploy (2026-09-12, OWNER RULING), 160,097 B:
+ * (a) the 12% commission is 12% of the TOKENS, credited to the owner account
+ *     on delivery — no HBD leg on ask/answer/decline/reclaim at all;
+ * (b) the 10 HBD monthly subscription is REMOVED — no Renew, no paid_until,
+ *     no lapse; a market is ACTIVE from registration until its creator
+ *     retires it;
+ * (c) a settlement spanning more than MaxSettlementLots cohorts collapses and
+ *     merges them instead of refusing, so an escrow can never strand a holder;
+ * (d) graduate() gates on the cohort ledger, not the blended matured balance.
+ *
+ * Proven by execution, not by reading: the five-step escrow path (order →
+ * escrow → decline → answer → deadline+reclaim) runs against THIS bytecode in
+ * go-vsc-node's real wasm runtime (modules/wasm/e2e/creator_tokens_escrow_test.go).
+ */
+export const V3_CODE_CIDS: ReadonlySet<string> = new Set([
+  'bafkreighvwezdaaatz6fhmtoboxxdp2hnknmljk6o3qaojim5ekhprfdzu' // v3: commission-in-tokens + subscription REMOVED + escrow-stranding + graduation-gate (2026-09-12)
 ]);
 /** The Stage D fixture's CID on its own, so a test can tell the two apart. Same rules as v2; never mainnet. */
 export const V2_FAST_TWIN_CODE_CID = 'bafkreih4eper5br4vqmgip6f5vykwmhuxtor4j2pqaw2ewdtwuirzf5h7y';
@@ -128,9 +161,16 @@ export const RULES_TTL_MS = 60_000;
 /** How long a FAILED code read is remembered as v1 before retrying. Short, so a blip cannot pin v1 for a whole TTL. */
 export const RULES_RETRY_MS = 15_000;
 
-/** The chain's answer to "which bytecode is deployed", mapped to a rule set. Anything unlisted is v1 (header). */
+/**
+ * The chain's answer to "which bytecode is deployed", mapped to a rule set.
+ * Anything unlisted is v1 (header). v3 is tested FIRST because it is the
+ * narrower set; the two sets are disjoint, so the order is defensive rather
+ * than load-bearing, and it stays correct if a CID is ever listed twice.
+ */
 export function rulesForCode(code: string | null | undefined): ContractRules {
-  return typeof code === 'string' && V2_CODE_CIDS.has(code) ? 'v2' : 'v1';
+  if (typeof code !== 'string') return 'v1';
+  if (V3_CODE_CIDS.has(code)) return 'v3';
+  return V2_CODE_CIDS.has(code) ? 'v2' : 'v1';
 }
 
 /** core/market.go inWindDown under each rule set. The rail switch: true routes a holder's exit to Refund, false to Sell. */

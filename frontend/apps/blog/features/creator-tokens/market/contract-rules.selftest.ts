@@ -24,6 +24,7 @@ import {
   V1_CODE_CID,
   V2_CODE_CIDS,
   V2_FAST_TWIN_CODE_CID,
+  V3_CODE_CIDS,
   closesIfDrainedUnder,
   reserveVersusCurve,
   rulesForCode,
@@ -51,28 +52,39 @@ function check(name: string, condition: boolean, detail?: string): void {
   failures.pop();
   check('instrument: check() detects false', caught);
   const v2 = [...V2_CODE_CIDS][0];
-  check('rulesForCode discriminates: v1 cid -> v1, v2 cid -> v2, null/empty/garbage -> v1',
-    rulesForCode(V1_CODE_CID) === 'v1' && rulesForCode(v2) === 'v2' && rulesForCode(null) === 'v1' && rulesForCode('') === 'v1' && rulesForCode('bafy-not-a-known-build') === 'v1' && rulesForCode(undefined) === 'v1');
+  const v3 = [...V3_CODE_CIDS][0];
+  check('rulesForCode discriminates: v1 cid -> v1, v2 cid -> v2, v3 cid -> v3, null/empty/garbage -> v1',
+    rulesForCode(V1_CODE_CID) === 'v1' && rulesForCode(v2) === 'v2' && rulesForCode(v3) === 'v3' && rulesForCode(null) === 'v1' && rulesForCode('') === 'v1' && rulesForCode('bafy-not-a-known-build') === 'v1' && rulesForCode(undefined) === 'v1');
   check('V2_CODE_CIDS never contains the v1 bytecode', !V2_CODE_CIDS.has(V1_CODE_CID));
   check('the Stage D fast twin (same v2 source, short periods) maps to v2, and is a distinct CID from v2 proper',
-    rulesForCode(V2_FAST_TWIN_CODE_CID) === 'v2' && V2_CODE_CIDS.has(V2_FAST_TWIN_CODE_CID) && v2 !== V2_FAST_TWIN_CODE_CID && V2_CODE_CIDS.size === 4);
-  // ★ THE SIZE IS PINNED, AND IT MOVES ONLY WITH A REAL BUILD. 4 since
-  // 2026-09-12: the commission/subscription update's CID was added here BEFORE
-  // the contract was deployed, which is the order this module's own header
-  // demands (frontend first — an unlisted CID pins every client to v1 rules
-  // silently and forever). It stayed 4 when that entry was REPLACED later the
-  // same day: the escrow-stranding and graduation-gate fixes went into the same
-  // single deploy, moving the bytecode and therefore the CID, and the build it
-  // replaced had never been broadcast to any chain. See the exemption spelled
-  // out over V2_CODE_CIDS — a listed-but-never-deployed CID is the ONLY kind
-  // that may be replaced rather than appended.
-  check('every listed v2 CID is a CIDv1 raw/base32 string of the same shape as the live v1 one',
-    [...V2_CODE_CIDS].every((c) => /^bafkrei[a-z2-7]{52}$/.test(c)) && /^bafkrei[a-z2-7]{52}$/.test(V1_CODE_CID));
+    rulesForCode(V2_FAST_TWIN_CODE_CID) === 'v2' && V2_CODE_CIDS.has(V2_FAST_TWIN_CODE_CID) && v2 !== V2_FAST_TWIN_CODE_CID && V2_CODE_CIDS.size === 3);
+  // ★ THE SIZE IS PINNED, AND IT MOVES ONLY WITH A REAL BUILD. It was 4 on
+  // 2026-09-12, when the commission/subscription update's CID was added here
+  // BEFORE the contract was deployed — the order this module's own header
+  // demands (frontend first: an unlisted CID pins every client to v1 rules
+  // silently and forever).
+  //
+  // ★★★ IT IS 3 AGAIN because that CID was MOVED OUT to V3_CODE_CIDS, not
+  // removed. Listing it as v2 was a defect with a reader-facing consequence:
+  // the launch wizard's "stop" term branches on the rule set, so under v2 the
+  // no-subscription bytecode promised "Renewing reopens buying on the same
+  // token" in the terms a creator accepts, against a contract with no `renew`
+  // export at all. The move is not a copy edit — it also keeps the TIMELOCK
+  // window honest, because the client reads the ACTIVE code and so stays on v2,
+  // still charging and still lapsing, until activation lands.
+  check('V3_CODE_CIDS is disjoint from V2 and from v1: no CID can answer to two rule sets',
+    [...V3_CODE_CIDS].every((c) => !V2_CODE_CIDS.has(c) && c !== V1_CODE_CID) && V3_CODE_CIDS.size === 1);
+  check('every listed v2 and v3 CID is a CIDv1 raw/base32 string of the same shape as the live v1 one',
+    [...V2_CODE_CIDS, ...V3_CODE_CIDS].every((c) => /^bafkrei[a-z2-7]{52}$/.test(c)) && /^bafkrei[a-z2-7]{52}$/.test(V1_CODE_CID));
 }
 
 // ---- 1. wind-down: core/market.go inWindDown under each rule set ----
 const PHASES: MarketPhase[] = ['ACTIVE', 'OVERDUE', 'FROZEN', 'CLOSED'];
-for (const rules of ['v1', 'v2'] as ContractRules[]) {
+// v3 is iterated here, not assumed: `windingDownUnder` branches on `=== 'v1'`,
+// so v3 inherits the v2 column by construction — but "by construction" is the
+// claim this loop exists to check, and the same assumption written as
+// `=== 'v2'` is exactly what had to be repaired in profile-token-card.tsx.
+for (const rules of ['v1', 'v2', 'v3'] as ContractRules[]) {
   for (const phase of PHASES) {
     const natural = windingDownUnder(rules, { phase, retiredAtBlock: null });
     const retired = windingDownUnder(rules, { phase, retiredAtBlock: 123 });
@@ -121,7 +133,9 @@ const AREA = Number(areaBaseUnitsBig(SUPPLY));
 check('v1: natural FROZEN with zero supply closes', closesIfDrainedUnder('v1', { phase: 'FROZEN', retiredAtBlock: null, supplyTokens: 0 }) === true);
 check('v2: natural FROZEN with zero supply does NOT close (a recoverable lapse must never become terminal by accident)', closesIfDrainedUnder('v2', { phase: 'FROZEN', retiredAtBlock: null, supplyTokens: 0 }) === false);
 check('v2: retired FROZEN with zero supply closes', closesIfDrainedUnder('v2', { phase: 'FROZEN', retiredAtBlock: 3, supplyTokens: 0 }) === true);
-check('both: CLOSED is already closed; FROZEN with supply does not close', (['v1', 'v2'] as ContractRules[]).every((r) => closesIfDrainedUnder(r, { phase: 'CLOSED', retiredAtBlock: null, supplyTokens: 4 }) && !closesIfDrainedUnder(r, { phase: 'FROZEN', retiredAtBlock: 3, supplyTokens: 1 })));
+check('v3 tracks v2 exactly here: natural FROZEN zero-supply does not close, retired does',
+  closesIfDrainedUnder('v3', { phase: 'FROZEN', retiredAtBlock: null, supplyTokens: 0 }) === false && closesIfDrainedUnder('v3', { phase: 'FROZEN', retiredAtBlock: 3, supplyTokens: 0 }) === true);
+check('all three: CLOSED is already closed; FROZEN with supply does not close', (['v1', 'v2', 'v3'] as ContractRules[]).every((r) => closesIfDrainedUnder(r, { phase: 'CLOSED', retiredAtBlock: null, supplyTokens: 4 }) && !closesIfDrainedUnder(r, { phase: 'FROZEN', retiredAtBlock: 3, supplyTokens: 1 })));
 
 // ---- 5. the health vocabulary, and its agreement with market/lapse.ts ----
 {
@@ -152,6 +166,15 @@ check('both: CLOSED is already closed; FROZEN with supply does not close', (['v1
     check('a retired FROZEN market is winding down, so it reads closed, never delisted', retired === true && health('v2', 'FROZEN', 1, false) === 'closed');
     check('a retired OVERDUE market (the notice) reads closed too, never lapsed', health('v2', 'OVERDUE', 1, false) === 'closed');
     check('the delisted/lapsed words still exist for the OLD contract this client may still be reading', buyWordFor('delisted') === 'Delisted' && buyWordFor('lapsed') === 'Lapsed');
+    // ★ AND THE SAME UNREACHABILITY, NAMED UNDER v3 ITSELF. Every road to
+    // FROZEN/OVERDUE on the no-subscription contract runs through Retire, and a
+    // retired market is winding down, so both words are closed out. Asserted
+    // rather than argued, because profile-token-card.tsx still has a 'lapsed'
+    // branch and this is what says that branch cannot fire on v3.
+    check('v3: a retired market reads closed in both phases, so delisted/lapsed are unreachable',
+      health('v3', 'FROZEN', 1, false) === 'closed' && health('v3', 'OVERDUE', 1, false) === 'closed');
+    check('v3: an ACTIVE buyable market is open, which is the only state the contract can natually produce',
+      health('v3', 'ACTIVE', null, true) === 'open');
   }
 }
 

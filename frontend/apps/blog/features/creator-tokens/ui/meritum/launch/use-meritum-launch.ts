@@ -1,12 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { useRouter, usePathname } from 'next/navigation';
 import { useTranslation } from '@/blog/i18n/client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useLiveStudio } from '../../../live/use-live-studio';
-import { getCreatorTokensDataSource } from '../../../lib/creator-tokens-data-source';
+import { useContractRules } from '../../../live/use-contract-rules';
 import type { ContractRules } from '../../../types';
 import { buyQuote, displayPriceUsd, serviceSupplyShareProblem } from '../../../market/curve';
 import { COMMISSION_BPS, MAX_CAP_CREDITS_BASE_UNITS, MIN_CAP_CREDITS_BASE_UNITS } from '../../../lib/contract-math';
@@ -394,22 +393,17 @@ export function useMeritumLaunch(): MeritumLaunchApi {
   const identity = useSessionIdentity();
 
   /**
-   * The chain's live rule set (v1/v2), for the step-3 wind-down copy. There is
-   * no market yet at launch, so this is the CONTRACT-level answer (readRules
-   * reads the deployed bytecode's CID and caches it), not a market's `rules`.
-   * It defaults to v1 until the chain answers, the safe direction: v1 is the
-   * harsher wind-down story, and being briefly over-cautious there is
-   * recoverable, while asserting v2 against a v1 chain is the one direction
-   * contract-rules.ts warns costs someone (its header, item 4).
+   * The chain's live rule set (v1/v2/v3), for the step-1 and step-3 billing and
+   * wind-down copy. There is no market yet at launch, so this is the
+   * CONTRACT-level answer, not a market's `rules`.
+   *
+   * ★ MOVED TO `live/use-contract-rules.ts` 2026-09-12, behaviour unchanged
+   * (same query key, same staleTime, same 'v1' default — the reasoning is now
+   * in that file). It moved because Creator Studio's empty state needs the same
+   * answer for the same billing sentence, and two separate reads of "which
+   * contract is live" is how two screens end up disagreeing.
    */
-  const rulesDataSource = getCreatorTokensDataSource();
-  const rulesQuery = useQuery({
-    queryKey: ['meritum', 'contract-rules'],
-    queryFn: () => rulesDataSource!.readRules(),
-    enabled: rulesDataSource !== null,
-    staleTime: 60_000
-  });
-  const rules: ContractRules = rulesQuery.data ?? 'v1';
+  const rules: ContractRules = useContractRules();
 
   const [step, setStep] = useState<MeritumLaunchStep>(1);
   const [furthestStep, setFurthestStep] = useState<MeritumLaunchStep>(1);

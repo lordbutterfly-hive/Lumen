@@ -6,6 +6,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { displayHandle, dueLabelFor } from '../../live/adapt';
 import { FC, useState, useEffect, useRef } from 'react';
 import { useLiveStudio, type LiveStudio } from '../../live/use-live-studio';
+import { useContractRules } from '../../live/use-contract-rules';
 import { MarketLoading, MarketRateLimited, MarketReadFailed, MarketSessionUnavailable, MarketUnavailable } from '../../live/market-states';
 import type { Ask } from '../../types';
 import { pctLabel, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
@@ -913,6 +914,9 @@ const CreatorStudio: FC = () => {
   // rather than adding a second, untranslated one beside a translated one.
   const { t } = useTranslation('common_blog');
   const studio = useLiveStudio();
+  // The CONTRACT's rule set, for the empty-state CTA's billing sentence. Shares
+  // the launch wizard's query key, so the two screens read one cached answer.
+  const rules = useContractRules();
   // ★ DISCOVERABILITY (2026-09-05). A creator's messaging key used to register only when
   // they found and clicked the Messages sub-tab, so most creators were unreachable and
   // had no way to know. Registering on Studio open (any section) means a creator becomes
@@ -1070,15 +1074,32 @@ const CreatorStudio: FC = () => {
         <div className="mx-auto max-w-[560px] pt-16 text-center">
           <h1 className="font-ui text-3xl font-medium text-ink-2">Launch your Meritum</h1>
           {/* ★ "FREE TO LAUNCH" ALONE READ AS A BAIT (2026-08-23, journey run). It is true,
-              and so is "About $10 a month" at step 1 of the wizard and "~$10/month" in the
+              and so was "About $10 a month" at step 1 of the wizard and "~$10/month" in the
               Subscription card below - the reader met the free claim first and the cost
-              second, on a different screen. Both facts now sit in the same breath, which
-              costs one sentence and removes the reveal. Figures match `term_listed_value`
-              ("About $10 a month.") and the Subscription card verbatim; if either moves,
-              move all three. */}
+              second, on a different screen. Both facts were put in the same breath, which
+              cost one sentence and removed the reveal. That comment ended "if either moves,
+              move all three".
+
+              ★★★ ONE OF THE THREE MOVED AND THIS DID NOT (2026-09-12). The Subscription
+              card went when the 10 HBD month left the contract, and the wizard's two
+              strings are now rule-set branched, because the update is TIMELOCKED and the
+              charge is real until it activates.
+
+              THIS LINE TAKES THE SAME BRANCH, off `useContractRules()` — the CONTRACT's
+              rule set, not a market's, because the empty state is by definition the
+              no-market case. It shares the wizard's query key, so the CTA and step 1
+              cannot print different billing facts about the same chain, not even mid-flip.
+
+              The alternative considered and rejected was one sentence true under both
+              ("the wizard shows every cost"). It is honest, but it silently drops the
+              recurring cost from this screen for as long as the old contract is live,
+              and surfacing that cost HERE is the whole reason the 2026-08-23 journey run
+              added it. A screen that stops disclosing a real charge to avoid a stale
+              string is the same defect wearing the other mask. */}
           <p className="mt-3 font-ui text-[15px] leading-[24px] text-ink-10">
-            One token, bound to your account, that trades on a live market and is spent on your services. Free
-            to launch, then about $10 a month to stay listed. First month’s on the house.
+            {rules === 'v3'
+              ? 'One token, bound to your account, that trades on a live market and is spent on your services. Free to launch, no monthly fee, and it stays listed until you retire it.'
+              : 'One token, bound to your account, that trades on a live market and is spent on your services. Free to launch, then about $10 a month to stay listed. First month’s on the house.'}
           </p>
           <a
             href="/creators/launch"

@@ -464,6 +464,7 @@ const MeritumLaunchFlow: FC = () => {
                 account={account}
                 isLite={flow.block === 'lite'}
                 launchHoldHbd={flow.launchHoldHbd}
+                rules={flow.rules}
                 onConfirm={flow.goNext}
               />
             ) : flow.step === 2 ? (

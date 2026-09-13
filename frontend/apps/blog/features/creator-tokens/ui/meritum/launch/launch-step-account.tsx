@@ -5,6 +5,7 @@ import { UserAvatarImg } from '@ui/components';
 import { useTranslation } from '@/blog/i18n/client';
 import { PrimaryAction } from './launch-controls';
 import { MeritumEligibilityNotice, useMeritumEligibility } from '../../meritum-eligibility';
+import type { ContractRules } from '@/blog/features/creator-tokens/types';
 
 /**
  * STEP 1 — the bound account.
@@ -29,10 +30,18 @@ export interface LaunchStepAccountProps {
   isLite: boolean;
   /** "6.941": the HBD a launch needs held on Magi (current offers and first buy), told here before the reader writes a single offer. */
   launchHoldHbd: string;
+  /**
+   * The DEPLOYED rule set, threaded in 2026-09-12 for one reason: the recurring
+   * cost disclosed below does not exist under v3. This screen reuses step 3's
+   * billing strings verbatim (see the block comment at the disclosure), so it
+   * has to reuse step 3's rule-set branch too, or the wizard states two
+   * different billing facts about the same contract on two screens.
+   */
+  rules: ContractRules;
   onConfirm: () => void;
 }
 
-const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite, launchHoldHbd, onConfirm }) => {
+const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite, launchHoldHbd, rules, onConfirm }) => {
   const eligibility = useMeritumEligibility();
   const { t } = useTranslation('common_blog');
   const known = handle !== '';
@@ -80,9 +89,14 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
       */}
       <div className="mt-[26px] border-t border-meritum-line-card pt-[22px] font-ui text-caption text-meritum-ink-muted">
         <p>{(launchHoldHbd === '0.000' ? t('meritum_launch.term_launch_value_covered') : t('meritum_launch.term_launch_value', { hbd: launchHoldHbd }))}</p>
+        {/* ★★★ UNDER v3 THE RECURRING COST IS GONE, so the defect this block was
+            written to fix inverts: there is no late reveal to bring forward,
+            and repeating "About $10 a month" here would be the bait the
+            comment above is guarding against, pointed the other way. Same
+            branch as step 3's terms ledger, reading the same two strings. */}
         <p className="mt-1.5">
           <span className="font-medium text-meritum-ink-3">{t('meritum_launch.term_listed_label')}:</span>{' '}
-          {t('meritum_launch.term_listed_value')}
+          {rules === 'v3' ? t('meritum_launch.term_listed_value_v3') : t('meritum_launch.term_listed_value')}
         </p>
       </div>
 

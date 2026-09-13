@@ -136,7 +136,14 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
     const health = marketHealthOf(market);
     const healthLine =
       health === 'lapsed'
-        ? (market.rules === 'v2' ? COPY.lapsed : COPY.lapsedWindDown)
+        // `!== 'v1'`, NOT `=== 'v2'` (2026-09-12). This meant "modern rules"
+        // and was written as an equality against the only modern set that
+        // existed, so adding v3 would have silently routed it to the v1
+        // WIND-DOWN sentence — telling a holder the whole curve closes when it
+        // does not. Under v3 the branch is unreachable anyway (naturalPhase is
+        // constant ACTIVE, so nothing is ever 'lapsed'), but an unreachable
+        // branch that lies if it is ever reached is still a defect.
+        ? (market.rules !== 'v1' ? COPY.lapsed : COPY.lapsedWindDown)
         : health === 'delisted'
           ? COPY.delisted
         : health === 'closed'

@@ -97,7 +97,13 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
 
   const terms = [
     { id: 'launch', label: t('meritum_launch.term_launch_label'), value: (launchHoldHbd === '0.000' ? t('meritum_launch.term_launch_value_covered') : t('meritum_launch.term_launch_value', { hbd: launchHoldHbd })) },
-    { id: 'listed', label: t('meritum_launch.term_listed_label'), value: t('meritum_launch.term_listed_value') },
+    // ★★★ THE BILLING ROW IS RULE-SET DEPENDENT (2026-09-12). Under v3 there is
+    // no monthly charge at all, so "About $10 a month." is not a stale figure
+    // to refresh — the whole TERM is gone and the row states the opposite fact.
+    // This is the terms ledger a creator accepts, so it gets the v3 sentence,
+    // not a deleted row: "there is no recurring cost" is itself a term, and
+    // silence would read as an omission to anyone comparing the two versions.
+    { id: 'listed', label: t('meritum_launch.term_listed_label'), value: rules === 'v3' ? t('meritum_launch.term_listed_value_v3') : t('meritum_launch.term_listed_value') },
     { id: 'cut', label: t('meritum_launch.term_cut_label'), value: t('meritum_launch.term_cut_value', { pct: commission }) },
     // ★ TRADING FEE disclosed here (owner, 2026-09-04). 10% on every curve buy
     // and sell, split 5% creator + 5% platform (core/params.go TradeFeeBps=1000,
@@ -128,7 +134,23 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
       is the confirmation (see this file's header) — it is just no longer
       narrated in a sentence that misleads about transferability.
     */
-    { id: 'stop', label: t('meritum_launch.term_stop_label'), value: rules === 'v2' ? t('meritum_launch.term_stop_value_v2') : t('meritum_launch.term_stop_value') }
+    // ★★★ THE "STOP" TERM UNDER v3 IS NOT A BILLING EVENT AT ALL (2026-09-12).
+    // v1 and v2 both answer "what happens if you stop PAYING". v3 has no
+    // payment to stop, so the only way a market stops taking buyers is the
+    // creator retiring it deliberately — which is what the v3 string says.
+    // Written as an explicit three-way, not `rules === 'v2' ? … : …` widened
+    // by accident: each rule set owns a different FACT here, so falling
+    // through to either neighbour would be wrong rather than merely stale.
+    {
+      id: 'stop',
+      label: t('meritum_launch.term_stop_label'),
+      value:
+        rules === 'v3'
+          ? t('meritum_launch.term_stop_value_v3')
+          : rules === 'v2'
+            ? t('meritum_launch.term_stop_value_v2')
+            : t('meritum_launch.term_stop_value')
+    }
   ];
 
   return (
