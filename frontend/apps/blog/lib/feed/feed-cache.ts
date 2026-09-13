@@ -461,7 +461,26 @@ export async function writeViewerFeed(input: WriteViewerFeedInput): Promise<void
  * not the position the build gave it. A post with no lane is still recorded,
  * with `source: null` — an unknown lane must never cost an impression count.
  */
-export function recordFeedServe(viewer: string, entries: Entry[], lanes: FeedLane[]): void {
+/**
+ * ★★★ AWAITED, NOT FIRE-AND-FORGET (2026-09-13).
+ *
+ * This was `void`-called immediately before `return feedJson(...)`, leaving the
+ * INSERT as a floating promise the route no longer had a reference to. Measured
+ * consequence on production: `lumen_feed_served` recorded NOTHING from
+ * 2026-09-11 onward while feeds were demonstrably being built and served, with
+ * zero write errors logged — the write never got the chance to fail, because it
+ * never ran to completion after the response was returned.
+ *
+ * That silence is not cosmetic. Seen-suppression demotes a post only once it has
+ * been RECORDED as served twice, so with the log frozen the ranker never learns
+ * what a reader has already been shown and the same post wins the top slot
+ * forever. That is the `meno` symptom the owner reported: a week on top of one
+ * feed, unmovable, because the mechanism that rotates it had no data.
+ *
+ * It is one INSERT against a local Postgres on the same box; paying for it
+ * inline is cheaper than the class of bug that not paying for it produced.
+ */
+export async function recordFeedServe(viewer: string, entries: Entry[], lanes: FeedLane[]): Promise<void> {
   if (!viewer || entries.length === 0 || !storeEnabled()) return;
 
   const laneByKey = new Map(lanes.map((lane) => [lane.key, lane]));
@@ -486,7 +505,7 @@ export function recordFeedServe(viewer: string, entries: Entry[], lanes: FeedLan
   // is byte-identical to its pre-2026-08-15 self — which matters because
   // migrations here are an explicit ops step, not a boot step.
   const withSeen = seenRecordEnabled();
-  void recordServedPage({
+  await recordServedPage({
     viewer,
     items,
     minIntervalMs: servedMinIntervalMs(),

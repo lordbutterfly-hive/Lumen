@@ -1251,7 +1251,9 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // recorded thirty impressions each time for a page the reader is shown none
     // of. This is the whole C-2 fix, and it is one line because the boundary was
     // already in the right place — it was just being crossed by machine traffic.
-    if (!probe) recordFeedServe(viewer, entries, stored.lanes);
+    // Awaited: see recordFeedServe's header — the floating version silently
+    // recorded nothing from 2026-09-11 and froze seen-suppression.
+    if (!probe) await recordFeedServe(viewer, entries, stored.lanes);
 
     return feedJson({
       entries,
@@ -1361,7 +1363,8 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // the warmer depends on: it uses this same build function and therefore
     // cannot record anything, because the recording lives out here, on the
     // branch that hands a page to a person.
-    if (!probe) recordFeedServe(viewer, served, outcome.value.lanes);
+    // Awaited: see recordFeedServe's header.
+    if (!probe) await recordFeedServe(viewer, served, outcome.value.lanes);
     return feedJson({
       entries: served, lanes: outcome.value.lanes, source: 'recsys', ranked: outcome.value.ranked,
       served: served.length, cache: 'miss',
