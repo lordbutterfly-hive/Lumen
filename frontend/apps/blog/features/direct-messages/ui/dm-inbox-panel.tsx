@@ -25,6 +25,9 @@ const COPY = {
   undecryptable: "Couldn't decrypt on this device",
   noPreview: 'No messages yet',
   registering: 'Setting up your private messaging…',
+  otherDevice:
+    'Your messages are set up on another device or browser. Your key stays on the device that made it, so this one cannot read them. ' +
+    'Open Lumen there to read your conversations. We have not created a new key here, because doing that would make your existing messages unreadable everywhere, permanently.',
   keystoreBlocked:
     "Private messaging needs local storage this browser has turned off, so you can't receive messages here.",
   signedOut: 'Sign in to read your messages.'
@@ -43,7 +46,7 @@ const DmInboxPanel: FC = () => {
   // Register this creator's public key on mount (idempotent). Without it, other
   // users see "hasn't set up messaging yet" on this creator's Message button.
   useEffect(() => {
-    if (loggedIn && !registration.ready && !registration.registering) void registration.ensure();
+    if (loggedIn && !registration.ready && !registration.registering && !registration.orphaned) void registration.ensure();
     // ensure is stable per loggedIn; intentionally not re-run on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggedIn]);
@@ -62,7 +65,14 @@ const DmInboxPanel: FC = () => {
 
   return (
     <div className="flex flex-col gap-2.5" data-testid="dm-inbox-panel">
-      {registration.error ? (
+      {registration.orphaned ? (
+        // ★ NOT an error, and deliberately ranked above one: nothing failed. This
+        // browser simply does not hold the key, and the honest thing is to say so
+        // rather than mint a new one and silently end the existing conversations.
+        <div className="rounded-panel border border-line-warn-1 bg-surface-warn-2 px-5 py-3 font-ui text-caption font-medium text-ink-warn-3">
+          {COPY.otherDevice}
+        </div>
+      ) : registration.error ? (
         <div className="rounded-panel border border-line-warn-1 bg-surface-warn-2 px-5 py-3 font-ui text-caption font-medium text-ink-warn-3">
           {COPY.keystoreBlocked}
         </div>

@@ -21,7 +21,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
-import { decrypt, encrypt, getOrCreateKeypair, getPublicKeyBase64 } from '../lib/dm-crypto';
+import { decrypt, encrypt, getOrCreateKeypair, getPublicKeyBase64, hasStoredKeypair } from '../lib/dm-crypto';
 
 // Actor keys whose public key this browser has already registered in this session, so
 // repeated compose/inbox mounts don't each re-POST (see useOwnDmRegistration). Cleared
@@ -97,6 +97,13 @@ export interface OwnDmRegistration {
   ready: boolean;
   registering: boolean;
   error: boolean;
+  /**
+   * A key is registered for this identity but the private half is not in THIS
+   * browser, so messaging is set up somewhere else. Registering here would append
+   * a new key version and make the existing messages unreadable to their owner,
+   * so it is refused and surfaced instead of done silently.
+   */
+  orphaned: boolean;
   loggedIn: boolean;
   sessionUnavailable: boolean;
   /** Retry / force a registration attempt (e.g. after a failure). */
@@ -113,7 +120,7 @@ export function useOwnDmRegistration(): OwnDmRegistration {
   const { user, isHydrated, sessionUnavailable } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
   const actorKey = loggedIn ? actorKeyOf(user) : null;
-  const [state, setState] = useState<'idle' | 'registering' | 'ready' | 'error'>('idle');
+  const [state, setState] = useState<'idle' | 'registering' | 'ready' | 'error' | 'orphaned'>('idle');
 
   const ensure = useCallback(async (): Promise<boolean> => {
     if (!loggedIn || !actorKey) return false;
@@ -124,6 +131,37 @@ export function useOwnDmRegistration(): OwnDmRegistration {
     }
     setState('registering');
     try {
+      // ★★★ NEVER MINT OVER AN EXISTING REGISTRATION (2026-09-13).
+      //
+      // `getPublicKeyBase64` creates and stores a keypair when this browser has
+      // none. On a second device, a cleared profile or a private window that is
+      // ALWAYS true, so the old flow generated a fresh key and registered it —
+      // appending a version and leaving every earlier message unreadable to its
+      // own owner, silently and with no undo. Production, 2026-09-13 06:12:
+      // `daveks` did exactly that, and it broke the history for the people who
+      // had messaged them as well as for them.
+      //
+      // So ask first, and only in the case that matters: no local private half,
+      // but a key already registered under this identity. A read failure is not
+      // a licence to overwrite — `hasStoredKeypair` returns false when it cannot
+      // tell, and the lookup failing leaves `registered` null, which falls
+      // through to the normal path rather than blocking a first-time user.
+      const hasLocal = await hasStoredKeypair(actorKey);
+      // Hive actors only: the lookup route resolves a HANDLE, and a lite `u:<id>`
+      // has no handle form. Pure-lite accounts hold no user-held secret either, so
+      // cross-device keys are impossible for them by construction and there is no
+      // second device whose history this could protect.
+      if (!hasLocal && actorKey.startsWith('h:')) {
+        const registered = await fetch(`/api/lite/dm/keys?actor=${encodeURIComponent(actorKey.slice(2))}`)
+          .then((r) => (r.ok ? (r.json() as Promise<{ public_key: string | null }>) : null))
+          .catch(() => null);
+        if (registered && registered.public_key !== null) {
+          // Their messages are readable on the device that holds the key. Minting
+          // here would end that, so refuse and let the UI say so.
+          setState('orphaned');
+          return false;
+        }
+      }
       const publicKey = await getPublicKeyBase64(actorKey);
       const res = await fetch('/api/lite/dm/keys', {
         method: 'POST',
@@ -148,6 +186,7 @@ export function useOwnDmRegistration(): OwnDmRegistration {
 
   return {
     ready: state === 'ready',
+    orphaned: state === 'orphaned',
     registering: state === 'registering',
     error: state === 'error',
     loggedIn,

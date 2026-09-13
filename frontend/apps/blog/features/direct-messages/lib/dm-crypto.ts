@@ -236,6 +236,30 @@ export async function deriveSeedFromSignature(signature: string): Promise<Uint8A
 }
 
 /** The only value that may cross the network. Base64 of the 32-byte X25519 public key. */
+/**
+ * Does THIS browser already hold the private half for this identity?
+ *
+ * Deliberately a READ, with no create branch: `getOrCreateKeypair` mints and stores
+ * one when the slot is empty, which is exactly the behaviour the caller needs to
+ * decide about BEFORE it happens. Minting when a key is already registered
+ * server-side is what silently orphans a history — the new pair appends a version
+ * and every earlier message becomes unreadable to its own owner, with no warning
+ * and no undo. Measured on production: `daveks` did that on 2026-09-13 at 06:12.
+ *
+ * A failed IndexedDB read (private window, blocked storage) returns false, which is
+ * the safe direction here: the caller treats "cannot tell" the same as "no local
+ * key" and asks rather than overwrites.
+ */
+export async function hasStoredKeypair(actorKey: string): Promise<boolean> {
+  if (!actorKey) return false;
+  if (cached.has(actorKey)) return true;
+  try {
+    return (await idbGet(selfKeyId(actorKey))) !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 export async function getPublicKeyBase64(actorKey: string, opts?: KeypairOptions): Promise<string> {
   const { publicKey } = await getOrCreateKeypair(actorKey, opts);
   return bytesToBase64(publicKey);
