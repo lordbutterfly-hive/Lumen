@@ -126,13 +126,46 @@ async function hive(method, params) {
   return j.result;
 }
 
+// ★★★ KEYCHAIN IS INJECTED ASYNCHRONOUSLY, SO ONE CHECK ON LOAD RACES IT.
+// The first version of this page tested `window.hive_keychain` once at script
+// end and then not again for 60 seconds, so a browser WITH Keychain installed
+// sat on "Hive Keychain not found" for a full minute and looked broken. The
+// app's own detector already carries this scar - features/lite-auth/login/
+// keychain-signin.tsx: "Extensions inject after load; one check on mount can
+// race them" - and re-checks at 1200ms. This polls instead, because a fixed
+// delay is a guess about somebody else's startup time.
+//
+// The shape test is the defensive one from packages/smart-signer/lib/signer/
+// signer-keychain.ts: page content like `<a id="hive_keychain">` would shadow
+// the extension object, so "the property exists" is not the question. The
+// question is whether the FUNCTION THIS PAGE CALLS is there.
+function keychain() {
+  const k = window.hive_keychain;
+  return (typeof k === 'object' && k !== null && typeof k.requestBroadcast === 'function') ? k : null;
+}
+const KC_DEADLINE = Date.now() + 15000;
+function pollKeychain() {
+  if (keychain()) {
+    row('kc','Hive Keychain is available','requestBroadcast will be used, with Active authority','ok');
+    runChecks();
+    return;
+  }
+  if (Date.now() < KC_DEADLINE) {
+    row('kc','Looking for Hive Keychain...','Extensions inject after page load, so this waits up to 15 seconds','warn');
+    setTimeout(pollKeychain, 250);
+    return;
+  }
+  row('kc','Hive Keychain not found','Checked for 15 seconds. It must be ENABLED for this site: some builds ask per-site, and http:// pages are the usual thing they are not enabled for. Open the extension, allow this origin, then reload. A file:// URL never works - Keychain injects on http(s) only.','bad');
+  runChecks();
+}
+
 async function runChecks() {
   state.ok = true;
   const fail = (id,t,d) => { row(id,t,d,'bad'); state.ok = false; };
 
-  // 1. Keychain present. It injects on http(s) only, never file://.
-  if (window.hive_keychain) row('kc','Hive Keychain is available','requestBroadcast will be used, with Active authority','ok');
-  else fail('kc','Hive Keychain not found','Open this page over http://127.0.0.1, not as a file:// URL, and make sure the extension is enabled');
+  // 1. Keychain present - the row is owned by pollKeychain above; this only
+  //    decides whether the button may enable.
+  if (!keychain()) { state.ok = false; }
 
   // 2. The chain still runs the code we think it does.
   try {
@@ -162,13 +195,15 @@ async function runChecks() {
   } catch (e) { fail('bal','Could not read the account balance', String(e.message||e)); }
 
   goEl.disabled = !state.ok;
-  goEl.textContent = state.ok ? ('Sign and broadcast - pay ' + CFG.fee) : 'Blocked - see the checks above';
+  if (state.ok) goEl.textContent = 'Sign and broadcast - pay ' + CFG.fee;
+  else if (!keychain() && Date.now() < KC_DEADLINE) goEl.textContent = 'Looking for Keychain...';
+  else goEl.textContent = 'Blocked - see the checks above';
 }
 
 goEl.addEventListener('click', () => {
   goEl.disabled = true; goEl.textContent = 'Waiting for Keychain...';
   resEl.innerHTML = '<div class="note">Approve the transaction in the Keychain popup. It carries BOTH operations.</div>';
-  window.hive_keychain.requestBroadcast(CFG.account, CFG.ops, 'Active', async (r) => {
+  keychain().requestBroadcast(CFG.account, CFG.ops, 'Active', async (r) => {
     if (!r.success) {
       resEl.innerHTML = '<div class="check"><div class="dot bad"></div><div class="t"><div class="big">Not broadcast</div><div class="d">' +
         (r.message || 'Keychain refused or you cancelled') + '</div></div></div>';
@@ -204,6 +239,7 @@ goEl.addEventListener('click', () => {
   });
 });
 
+pollKeychain();
 runChecks();
 setInterval(runChecks, 60000);
 </script></body></html>
