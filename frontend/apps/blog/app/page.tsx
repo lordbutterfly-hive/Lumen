@@ -27,6 +27,7 @@ export const metadata: Metadata = {
 };
 import { InitialFeedProvider } from '@/blog/components/observer-provider';
 import { prefetchHomeFeed, newHomeFeedTrace } from '@/blog/lib/feed/feed-prefetch';
+import { recordFeedServe } from '@/blog/lib/feed/feed-cache';
 import { renderTimer, renderTimingEnabled } from '@ui/lib/render-timing';
 import { getServerSessionUser } from '@/blog/lib/server-session';
 
@@ -107,6 +108,32 @@ export default async function HomePage() {
   // `renderTimingEnabled()` is one env property read, no allocation.
   const trace = renderTimingEnabled() ? newHomeFeedTrace() : undefined;
   const feed = await prefetchHomeFeed(viewer, timer, trace);
+  // ★★★ THE SSR PATH IS A DELIVERY, AND NOTHING WAS RECORDING IT (2026-09-13).
+  //
+  // `recordFeedServe` lived ONLY in `/api/feed/for-you`, on the reasoning that
+  // recording belongs on "the branch that hands a page to a person". That
+  // reasoning is right and the placement had simply gone stale: this page hands
+  // the reader their feed server-side, and `feed-tabs.tsx` takes it as React
+  // Query `initialData` with `refetchOnMount: false` unless `awaitingRank` — so
+  // for a reader whose ranked feed WAS ready, the API route is never called and
+  // the impression was never written.
+  //
+  // Measured: `lumen_feed_served` recorded nothing from 2026-09-11 onward while
+  // feeds were demonstrably being built and served, with zero write errors,
+  // because the write was never reached. Seen-suppression demotes a post only
+  // after it has been RECORDED as served twice, so the ranker never learned what
+  // a reader had already seen and the same post held the top slot for a week.
+  //
+  // ★ `awaitingRank` IS EXCLUDED, and that is the whole correctness argument.
+  // That flag means this seed is a trending FALLBACK and the client will fetch
+  // the ranked feed on mount — which goes through the API route, which records.
+  // Recording here too would count one reading twice and suppress a post the
+  // reader saw once. Exactly one of the two paths records for any given load.
+  //
+  // Anonymous readers have no `viewer` and are not recorded, same as before.
+  if (viewer && feed && !feed.page.awaitingRank && feed.page.entries.length > 0) {
+    await recordFeedServe(viewer, feed.page.entries, []);
+  }
   // ★ ONE LINE PER RENDER, e.g.
   //   render-timing: home user=bozz stored=hit ranked=true source=recsys count=20
   //   read=6ms block=3ms trim=9ms session=11ms race=21ms total=33ms
