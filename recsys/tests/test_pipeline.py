@@ -3130,6 +3130,10 @@ def test_a_container_post_can_never_win_the_popularity_lane() -> None:
     The fixture is deliberately rigged FOR the containers — each has far more
     commenters and rebloggers than the real post. If the filter were removed
     they would take every slot, so this test cannot pass by accident.
+
+    ★ TWO RULES SINCE 2026-09-13, and the block at the end pins both: the
+    ACCOUNT list (author alone, for the three that have never published anything
+    else) and the MARKER list (author AND prefix, for anyone who might).
     """
     from recsys.config import DEFAULT_SETTINGS, PopularConfig
     from recsys.core.popular import is_container_post, select_popular
@@ -3189,16 +3193,55 @@ def test_a_container_post_can_never_win_the_popularity_lane() -> None:
     ):
         assert is_container_post(post, cfg, publishers), f"{why} not detected"
 
-    # And the converse: author alone must NOT condemn a genuine post, or a real
-    # article by one of those accounts would be silently unrankable.
-    genuine_by_a_container_account = make_attributed_post(
+    # ★★★ THE AUTHOR ALONE NOW CONDEMNS, AND THAT IS A DELIBERATE REVERSAL
+    # (2026-09-13, owner: "that account always posts the containers... always
+    # hidden, not only specific posts" / "these container posts should not be
+    # worked around ever").
+    #
+    # This block used to assert the OPPOSITE: that a post by `peak.snaps` under
+    # some other permlink was NOT a container, on the reasoning that "a real
+    # article by one of those accounts would be silently unrankable". The
+    # reasoning was sound and the premise was not. Paginated
+    # `bridge.get_account_posts` over the root posts of all three accounts,
+    # 2026-09-13:
+    #
+    #     @ecency.waves   240 posts back to 2025-12-16   0 non-container
+    #     @peak.snaps     240 posts back to 2026-03-24   0 non-container
+    #     @leothreads     240 posts back to 2026-02-28   0 non-container
+    #
+    # There is no genuine article to protect. What the old rule did protect was
+    # a third party's permlink SCHEME: rename `waves-…` to `w-…` and the pair
+    # stops matching, silently, because a filter that matches nothing looks
+    # exactly like a filter with nothing to match. Measured the same day, the
+    # cost of that going unnoticed: `ecency.waves` was the number one trending
+    # post on Hive and `peak.snaps` was seventh in hot.
+    renamed_scheme = make_attributed_post(
         author="peak.snaps", permlink="announcing-something-real", commenters=crowd(5, "f")
     )
-    assert not is_container_post(genuine_by_a_container_account, cfg, publishers)
+    assert is_container_post(renamed_scheme, cfg, publishers), (
+        "a container ACCOUNT posting under any other name must still be caught - "
+        "that is the whole point of container_accounts, and the only thing that "
+        "survives a third party renaming their permlinks"
+    )
+
+    # ★ AND THE TWO PROTECTIONS THAT MUST SURVIVE THE REVERSAL, or it has gone
+    # from too narrow to too wide.
     assert not is_container_post(real, cfg, publishers)
-    # A stranger who names a post `waves-…` is not a container either.
+    # A STRANGER who happens to name a post `waves-…` is not a container. This is
+    # why `container_markers` still requires author AND prefix, and why the
+    # account list was added beside it rather than replacing it.
     impostor = make_attributed_post(author="nobody", permlink="waves-of-the-sea")
     assert not is_container_post(impostor, cfg, publishers)
+    # Our OWN publisher is not on the account list, only the `lumen-c-` prefix -
+    # putting it there would delete the entire lite product, since every lite
+    # post is published by the same account.
+    our_lite_post = make_attributed_post(
+        author="hbd-temp", permlink="lumen-01kzj8284fmc7tp1f549mc7zef"
+    )
+    assert not is_container_post(our_lite_post, cfg, publishers), (
+        "a Lumen Lite post was read as a container - our publisher must be "
+        "matched by the lumen-c- PREFIX only, never by account"
+    )
 
 
 def test_container_roots_are_hidden_feed_wide_but_lite_posts_survive() -> None:

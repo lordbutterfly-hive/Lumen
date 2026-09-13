@@ -3414,10 +3414,55 @@ class PopularConfig:
     #: Matched on author AND permlink prefix together. Author alone would
     #: exclude a genuine post by those accounts; prefix alone would exclude
     #: anyone who happens to name a post that way.
+    #:
+    #: ★★★ THE PREFIX IS A THIRD PARTY'S IMPLEMENTATION DETAIL, WHICH IS WHY
+    #: `container_accounts` EXISTS BELOW (2026-09-13, owner: "that account
+    #: always posts the containers, see if its forever in the list of feed
+    #: removed accounts... always hidden, not only specific posts").
+    #:
+    #: Nothing stops Ecency renaming `waves-…` to `w-…` tomorrow. If they do,
+    #: this pair silently stops matching and the containers walk straight back
+    #: into every lane - and the failure is invisible, because a filter that
+    #: matches nothing looks exactly like a filter with nothing to match.
+    #: Measured on the live chain 2026-09-13: `ecency.waves` was the **number
+    #: one trending post on Hive** and `peak.snaps` was seventh in hot.
+    #:
+    #: So this list is now for accounts that MIGHT publish something real, and
+    #: the account-level list below is for the ones that demonstrably never do.
     container_markers: tuple[tuple[str, str], ...] = (
         ("peak.snaps", "snap-container-"),
         ("ecency.waves", "waves-"),
         ("leothreads", "leothread-"),
+    )
+    #: ★★★ ACCOUNTS THAT PUBLISH NOTHING BUT CONTAINERS - hidden whatever they
+    #: name the post (2026-09-13).
+    #:
+    #: These are not people. They are the publishing endpoints three frontends
+    #: use to open a new short-form thread, on a fixed schedule, forever. The
+    #: prefix rule above already catches today's naming; this catches the post
+    #: that gets named something else, which is the only way that rule fails.
+    #:
+    #: EVIDENCE, not assumption. Paginated `bridge.get_account_posts` over the
+    #: root posts of all three on 2026-09-13:
+    #:
+    #:     @ecency.waves   240 posts back to 2025-12-16   0 non-container
+    #:     @peak.snaps     240 posts back to 2026-03-24   0 non-container
+    #:     @leothreads     240 posts back to 2026-02-28   0 non-container
+    #:
+    #: WHY NOT `banned_authors.txt`, which is the existing account-level list.
+    #: Because a ban means two things (recsys/core/banned.py): they cannot be
+    #: seen, AND their votes, comments and reblogs mint no breadth for anyone.
+    #: The second half is aimed at a troll voting from behind a curtain. These
+    #: accounts are infrastructure, and quietly rewriting how their engagement
+    #: counts - as a side effect of wanting their containers out of the feed -
+    #: would be a change nobody asked for hiding inside one that was. Two
+    #: different problems keep two different lists.
+    #:
+    #: ADDING ONE: the bar is the evidence above. An account that has EVER
+    #: published something a reader would want belongs in `container_markers`
+    #: with its prefix, not here.
+    container_accounts: frozenset[str] = frozenset(
+        {"peak.snaps", "ecency.waves", "leothreads"}
     )
     #: Our own containers, matched against `LiteConfig.publisher_accounts` so a
     #: new publisher account is covered the day it is configured, with no second

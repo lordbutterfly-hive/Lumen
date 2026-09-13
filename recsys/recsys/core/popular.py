@@ -77,9 +77,19 @@ def is_container_post(
     a conversation-ranked lane: they collect commenters structurally, so they
     beat every real post without being about anything.
 
-    Author AND prefix must both match — `peak.snaps` may publish a genuine post,
-    and a stranger may name a post `waves-something`.
+    Two rules, and they answer different failure modes.
+
+    ``container_accounts`` is matched on the AUTHOR ALONE: these accounts have
+    never published anything else and exist only to open threads, so whatever
+    they name the post, it is a container. This is what survives a third party
+    renaming their permlink scheme, which is the one way the prefix rule fails
+    and fails silently.
+
+    ``container_markers`` needs author AND prefix — `peak.snaps` may one day
+    publish a genuine post, and a stranger may name a post `waves-something`.
     """
+    if post.author in popular.container_accounts:
+        return True
     for author, prefix in popular.container_markers:
         if post.author == author and post.permlink.startswith(prefix):
             return True

@@ -27,6 +27,7 @@ import { liteConfig } from '@/blog/lib/lite/config';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { consumeLocalGlobal, consumeLocalPerIp } from '@/blog/lib/lite/antispam/local-rate-limit';
 import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
+import { filterContainerEntries } from '@/blog/lib/moderation/container-posts';
 import { ensureSquatterList } from '@/blog/lib/lite/moderation/squatter-list';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
 import { startTopicWarmer } from '@/blog/lib/feed/topic-warmer';
@@ -1231,7 +1232,7 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // ★ See the same await in /api/discussion: the squatter half of `isBannedAuthor`
     // is an in-memory list, and a cold worker would filter nobody.
     await ensureSquatterList();
-    const entries = filterBannedEntries(stored.entries).slice(0, limit);
+    const entries = filterContainerEntries(filterBannedEntries(stored.entries)).slice(0, limit);
 
     // ★★★ THE COMMON CASE, AND THEREFORE THE ONE THAT MATTERS MOST TO RECORD
     // (2026-08-08, ruling §7). Almost every delivery of the For You page comes
@@ -2125,7 +2126,7 @@ async function hydrate(posts: RecsysPost[], observer: string): Promise<Hydrated>
   // stored branch then serves back, filtered against a list that no longer contains
   // anything to remove because the entry was already written.
   await ensureSquatterList();
-  return { entries: filterBannedEntries(served.map((p) => p.entry)), postByKey };
+  return { entries: filterContainerEntries(filterBannedEntries(served.map((p) => p.entry))), postByKey };
 }
 
 /**
@@ -2494,7 +2495,14 @@ function loadFallbackPage(sort: string, tag: string, observer: string): Promise<
      * cached surface here has.
      */
     await ensureSquatterList();
-    const visible = filterBannedEntries(merged);
+    // ★★★ AND THE CONTAINERS (2026-09-13, owner: "these container posts should
+    // not be worked around ever"). The ranker drops them at its own gate, but
+    // THIS path is what serves the feed when the ranker is not there - and on
+    // the day this was written `ecency.waves` was the number one trending post
+    // on Hive, so the degraded home page led with an empty shell. Same argument
+    // as the ban filter above, one rule along: filtered BEFORE the cache, so the
+    // stored copy is the clean one.
+    const visible = filterContainerEntries(filterBannedEntries(merged));
     if (visible.length > 0) rememberFallback(cacheKey, visible);
     return visible;
   });
