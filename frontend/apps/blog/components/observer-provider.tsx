@@ -154,6 +154,15 @@ export interface InitialFeedPage {
   nextCursor?: { author: string; permlink: string } | null;
   /** Signed-in fallback seed: the client should fetch the ranked feed on mount and swap it in. Absent on anonymous (trending is final) and on a personalised stored seed. */
   awaitingRank?: boolean;
+  /**
+   * The lane assignment for each entry, carried so the SSR delivery can record a
+   * REAL impression (2026-09-13). `recordFeedServe` derives `ranked_key` and
+   * `engagers_at_last_serve` from these; without them both columns are written
+   * NULL, and a NULL engager baseline makes the ranker's `resurrects()` return
+   * true unconditionally — so every suppressed post comes straight back and
+   * seen-suppression is permanently inert. Server-only: never read by the client.
+   */
+  lanes?: unknown[];
 }
 
 export interface InitialFeedSeed {

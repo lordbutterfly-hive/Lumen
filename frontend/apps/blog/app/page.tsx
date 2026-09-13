@@ -132,7 +132,15 @@ export default async function HomePage() {
   //
   // Anonymous readers have no `viewer` and are not recorded, same as before.
   if (viewer && feed && !feed.page.awaitingRank && feed.page.entries.length > 0) {
-    await recordFeedServe(viewer, feed.page.entries, []);
+    // ★ LANES, NOT `[]`. `recordFeedServe` derives `ranked_key` and
+    // `engagers_at_last_serve` from the lane for each entry. Passing an empty
+    // array writes both as NULL, and a NULL engager baseline makes the ranker's
+    // `resurrects()` return true unconditionally ("growth cannot be evaluated,
+    // do not suppress"), so every suppressed post returns on the next build and
+    // suppression never takes effect. Its docstring says the rule "self-heals on
+    // the very next serve, which writes a real baseline" — that only holds if the
+    // serve actually writes one.
+    await recordFeedServe(viewer, feed.page.entries, (feed.page.lanes ?? []) as Parameters<typeof recordFeedServe>[2]);
   }
   // ★ ONE LINE PER RENDER, e.g.
   //   render-timing: home user=bozz stored=hit ranked=true source=recsys count=20

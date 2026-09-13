@@ -501,7 +501,12 @@ async function finishStoredFeed(
     entries: trimForSSR(entries),
     source: 'recsys',
     personalised: true,
-    nextCursor: cursorOf(entries)
+    nextCursor: cursorOf(entries),
+    // Carried for the impression write in `app/page.tsx` only — see
+    // `InitialFeedPage.lanes`. `trimForSSR` strips the ENTRIES for the wire; the
+    // lanes ride along untrimmed because the recorder needs the engager counts
+    // that make the resurrection rule measurable.
+    lanes: stored.lanes
   };
   const trimMs = elapsedOf(trimWatch);
   return { seed: { page, at: stored.at }, outcome: 'hit', readMs, blockMs, trimMs };
