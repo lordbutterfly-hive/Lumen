@@ -7,6 +7,7 @@ import { displayHandle, dueLabelFor } from '../../live/adapt';
 import { FC, useState, useEffect, useRef } from 'react';
 import { useLiveStudio, type LiveStudio } from '../../live/use-live-studio';
 import { useContractRules } from '../../live/use-contract-rules';
+import { useMagiSpendingPower } from '../../live/use-magi-spending-power';
 import { MarketLoading, MarketRateLimited, MarketReadFailed, MarketSessionUnavailable, MarketUnavailable } from '../../live/market-states';
 import type { Ask } from '../../types';
 import { pctLabel, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
@@ -833,8 +834,41 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
   // the cap rather than broadcast a doomed call. `offerings === null` is an
   // unread market, not a full one, so it does not gate.
   const atOfferingCap = (studio.offerings?.length ?? 0) >= MAX_OFFERINGS;
+  /**
+   * ★★★ THE RC PRE-CHECK (2026-09-13). The fourth guard in this row, and it is
+   * here for the same reason as the other three: the chain refuses AFTER the
+   * signature, and the refusal is invisible.
+   *
+   * MEASURED, not hypothesised. Five `createOffering`/`deleteOffering` calls
+   * failed on mainnet between 09-11 and 09-13 across two creators. Every
+   * contract gate passed on both — market ACTIVE, titles clean and well under
+   * 64 bytes, catalogues at 1-2 of 20, no duplicate title, no persistent title
+   * band, prices inside [MinFace, MaxFace]. What they had in common was RC:
+   * `createOffering` declares `rc_limit` 7,117 and gas is
+   * `min(availableRc, rc_limit)`, so at 4 RC and 2,307 RC respectively both
+   * aborted on gas. A gas abort returns an EMPTY result, which the client then
+   * reported as "the chain refused this service" — pointing two creators at
+   * their title and price for two days while the real answer was their balance.
+   *
+   * The budget helper and its remedy sentence already existed and were wired
+   * into the LAUNCH path only (`use-meritum-launch.ts`). This row never asked.
+   * `hbdLeg` is 0 because creating a service spends no HBD; the only cost is
+   * the RC reservation itself.
+   */
+  const spending = useMagiSpendingPower(studio.creator);
+  const rcRemedy = spending.remedy(0, 'createOffering');
+  // A read that FAILED is not a zero balance (see MagiSpendingPowerState): an
+  // unreadable balance must block nothing, exactly like `studio.market === null`
+  // blocks nothing in the supply guard above.
+  const rcProblem = spending.failed || spending.unavailable ? null : rcRemedy;
   const valid =
-    title.trim().length > 0 && titleProblem === null && Number.isFinite(usd) && usd > 0 && supplyProblem === null && !atOfferingCap;
+    title.trim().length > 0 &&
+    titleProblem === null &&
+    Number.isFinite(usd) &&
+    usd > 0 &&
+    supplyProblem === null &&
+    !atOfferingCap &&
+    rcProblem === null;
   return (
     <div className="mt-4 border-t border-line-2 pt-4">
       <div className="mb-2 text-caption font-medium text-ink-10 font-ui">Add a service</div>
@@ -842,6 +876,11 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
         <p className="mb-2 text-caption text-ink-warn-3 font-ui">
           You’ve reached the limit of {MAX_OFFERINGS} services. Delete one to add another.
         </p>
+      ) : rcProblem ? (
+        // Above the inputs, like the cap notice and unlike the field-level
+        // problems below: this one is true before a single character is typed,
+        // and it is the whole reason the Add button is disabled.
+        <p className="mb-2 text-caption text-ink-warn-3 font-ui">{rcProblem}</p>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <input
@@ -880,8 +919,18 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
               setTitle('');
               setPrice('');
             } catch (err) {
-              // The REAL reason, not a guess. See ../write-failure.ts.
-              setFailure(writeFailureMessage(err, 'That didn’t go through.'));
+              // ★ A GAS ABORT IS NOT A CONTRACT REFUSAL (2026-09-13). The chain
+              // returns an EMPTY result when a call runs out of gas, which at
+              // this layer is indistinguishable from a rule the contract
+              // enforced — so `CREATOR_TOKENS_OFFERING_REFUSED` was shown for
+              // both, and for five real mainnet failures it was ALWAYS the gas
+              // one. Re-read the budget at the moment of failure (the
+              // pre-check's read can be up to 20s stale, and the attempt has
+              // just spent credit) and prefer the remedy when it is short.
+              // Anything else keeps the generic text: inventing an RC story for
+              // a genuine rule violation is the same defect pointed the other way.
+              const shortfall = spending.failed || spending.unavailable ? null : spending.remedy(0, 'createOffering');
+              setFailure(shortfall ?? writeFailureMessage(err, 'That didn’t go through.'));
             }
           }}
           disabled={!valid || studio.isBusy}

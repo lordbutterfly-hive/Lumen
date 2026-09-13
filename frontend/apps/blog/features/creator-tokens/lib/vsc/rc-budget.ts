@@ -413,13 +413,37 @@ const hbd = formatHbdBaseUnits;
  *
  * Deliberately free of jargon: no "rc_limit", no "base units", no "gas".
  */
+/**
+ * The action key as a VERB PHRASE, because `describeRcBudget` drops it straight
+ * into a sentence. It read correctly only by luck: the one caller passed 'buy',
+ * and 'buy' is already a verb. The first caller to pass a real action key
+ * (`createOffering`, 2026-09-13) would have rendered "enough transaction credit
+ * left to createOffering." Anything unmapped falls back to the key itself,
+ * which is exactly today's behaviour, so no existing string moves.
+ */
+const ACTION_VERB: Readonly<Record<string, string>> = Object.freeze({
+  buy: 'buy',
+  sell: 'sell',
+  transfer: 'send tokens',
+  register: 'launch your market',
+  createOffering: 'add a service',
+  setOfferingPrice: 'change that price',
+  setOfferingTitle: 'rename that service',
+  deleteOffering: 'remove that service',
+  setFace: 'change your posted price',
+  setCap: 'change your cap',
+  retire: 'retire your market',
+  claimTradeFees: 'claim your fees'
+});
+
 export function describeRcBudget(budget: RcBudget, action: string): string | null {
   if (budget.ok) return null;
   const add = hbd(budget.addBaseUnits);
+  const verb = ACTION_VERB[action] ?? action;
 
   if (budget.blocker === 'not-enough-rc') {
     return (
-      `You don't have enough transaction credit left to ${action}. ` +
+      `You don't have enough transaction credit left to ${verb}. ` +
       `Credit is backed by your HBD balance, and it refills on its own over about five days after you spend it. ` +
       `You can also top it up right now by adding at least ${add} HBD. Every 1 HBD you hold gives you 1,000 credits, available straight away.`
     );
