@@ -17,10 +17,12 @@ const H = 118;
  * from the REAL series — the same `chart` array the change is derived from
  * (`live/adapt.ts`), so the number and the picture cannot disagree.
  *
- * ★ NEVER PAYOUT GREEN. The token page's chart turns green when the line
- * goes up; the handoff (§7) reserves green for money the creator received,
- * so here up is ink, down is brand, and the line is always brand. Colour is
- * not the only signal either way: the label carries a glyph and a sentence.
+ * ★ UP IS PAYOUT GREEN (owner, 2026-09-15: "+2.4% increase in the chart put
+ * that number always green like the green from payouts. same color green").
+ * The change figure uses the same `--ink-payout` token as a post's payout;
+ * down stays brand, flat stays muted, and the line itself stays brand. Colour
+ * is not the only signal either way: the label carries a sign and a sentence.
+ * (This overrides the handoff §7 rule that reserved green for money received.)
  *
  * ★ ONE TRADE DRAWS ONE POINT, not a flat line claiming the price held.
  * `chartGeometry` returns null below two readable points; the single-point
@@ -50,7 +52,7 @@ const CurvePanel: FC<{ market: LiveTokenMarket; historyUnavailable: boolean }> =
         </span>
         {change && changeText ? (
           <span
-            className={`text-[15px] leading-none font-medium font-num ${change.direction === 'up' ? 'text-ink-2' : change.direction === 'down' ? 'text-ink-brand-6' : 'text-ink-10'}`}
+            className={`text-[15px] leading-none font-medium font-num ${change.direction === 'up' ? 'text-[color:rgb(var(--ink-payout))]' : change.direction === 'down' ? 'text-ink-brand-6' : 'text-ink-10'}`}
             data-testid="meritum-price-change"
           >
             <span aria-hidden="true">{changeText}</span>
