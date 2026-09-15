@@ -1,4 +1,4 @@
-import type { AskStatus, FaceBand, MarketPhase, QuoteOracleStatus } from '../types';
+import type { AskStatus, CohortLot, FaceBand, MarketPhase, QuoteOracleStatus } from '../types';
 
 // Faithful ports of the pure logic in /mnt/o/CREATOR-TOKENS/core/*.go. Both
 // mock and vsc data sources call these; neither re-implements them, for the
@@ -526,18 +526,91 @@ export interface SellQuoteBaseUnits {
  * no split to give still means; the whole-gross path is preserved bit-for-bit by
  * maturingGrossShareBaseUnits' fromMaturing === total shortcut.
  */
-export function quoteSellBaseUnits(supplyTokens: number, tokens: number, heldBlocks: number, maturingTokens?: number): SellQuoteBaseUnits | null {
+/**
+ * ★ COHORTS (2026-09-15). holdclock_lots.go sortLotsFreshestFirst: newest
+ * acquisition first; stable, so equal ages keep their order.
+ */
+export function sortLotsFreshestFirst(lots: readonly CohortLot[]): CohortLot[] {
+  return [...lots].sort((a, b) => b.acqBlock - a.acqBlock);
+}
+
+/** holdclock_lots.go lotRateAt: one cohort's exit-tax rate at `block`; an unset or future clock is maximally fresh. */
+export function lotRateBpsAt(acqBlock: number, block: number): number {
+  if (!Number.isFinite(acqBlock) || acqBlock <= 0 || acqBlock >= block) return MAX_EXIT_TAX_BPS;
+  const held = Math.min(block - acqBlock, EXIT_TAX_DECAY_BLOCKS);
+  return exitTaxBpsAt(held);
+}
+
+export interface CohortTax {
+  taxBaseUnits: number;
+  taxableBaseUnits: number;
+  /** ceil(Σ slice·rate / Σ slice): the one rate that reproduces the total tax on this sale. */
+  effBps: number;
+}
+
+/**
+ * holdclock_lots.go maturingCohortTax, ported line for line. The maturing
+ * tokens sold come off the TOP of the curve (the dearest slices), freshest
+ * cohort first; each slice is taxed at its own cohort's rate with the
+ * contract's ceil; anything the cohorts do not cover is taxed at the maximum.
+ * Pinned to vectors generated from the Go code in
+ * lib/__tests__/meritum-cohort-tax.test.ts. Null when the curve refuses the
+ * draw (more tokens than supply).
+ */
+export function cohortExitTaxBaseUnits(supplyTokens: number, fromMaturing: number, lots: readonly CohortLot[], block: number): CohortTax | null {
+  let tax = 0;
+  let taxable = 0;
+  let weighted = 0;
+  let remaining = Math.max(0, Math.trunc(fromMaturing));
+  let curTop = Math.trunc(supplyTokens);
+  if (remaining === 0) return { taxBaseUnits: 0, taxableBaseUnits: 0, effBps: 0 };
+  for (const lot of sortLotsFreshestFirst(lots)) {
+    if (remaining === 0) break;
+    const take = Math.min(Math.max(0, Math.trunc(lot.tokens)), remaining);
+    if (take === 0) continue;
+    const slice = sellProceedsBaseUnits(curTop, take);
+    if (slice === null) return null;
+    const rate = lotRateBpsAt(lot.acqBlock, block);
+    tax += exitTaxOnBaseUnits(slice, rate);
+    taxable += slice;
+    weighted += slice * rate;
+    curTop -= take;
+    remaining -= take;
+  }
+  if (remaining > 0) {
+    const slice = sellProceedsBaseUnits(curTop, remaining);
+    if (slice === null) return null;
+    tax += exitTaxOnBaseUnits(slice, MAX_EXIT_TAX_BPS);
+    taxable += slice;
+    weighted += slice * MAX_EXIT_TAX_BPS;
+  }
+  const effBps = taxable > 0 ? Math.ceil(weighted / taxable) : 0;
+  return { taxBaseUnits: tax, taxableBaseUnits: taxable, effBps };
+}
+
+export function quoteSellBaseUnits(
+  supplyTokens: number,
+  tokens: number,
+  heldBlocks: number,
+  maturingTokens?: number,
+  /** ★ COHORTS (2026-09-15): with the position's cohort ledger and the block it was read at, the tax is exact per cohort (freshest first); without them the blended clock applies as before. */
+  cohorts?: { lots: readonly CohortLot[]; block: number }
+): SellQuoteBaseUnits | null {
   const grossBaseUnits = sellProceedsBaseUnits(supplyTokens, tokens);
   if (grossBaseUnits === null) return null;
-  const taxBps = exitTaxBpsAt(heldBlocks);
-  // The same integer count the gross was priced on — sellProceedsBaseUnits
-  // truncates internally, so the split must truncate identically or the pro-rata
-  // denominator and the numerator would be measured on different lattices.
   const soldTokens = Math.trunc(tokens);
   const maturing = maturingTokens === undefined ? soldTokens : Math.trunc(maturingTokens);
   const fromMaturing = Math.min(soldTokens, Math.max(0, maturing)); // splitDraw, maturing-first
-  const taxableBaseUnits = maturingGrossShareBaseUnits(grossBaseUnits, fromMaturing, soldTokens);
-  const taxBaseUnits = exitTaxOnBaseUnits(taxableBaseUnits, taxBps);
+  let taxBps = exitTaxBpsAt(heldBlocks);
+  let taxableBaseUnits = maturingGrossShareBaseUnits(grossBaseUnits, fromMaturing, soldTokens);
+  let taxBaseUnits = exitTaxOnBaseUnits(taxableBaseUnits, taxBps);
+  if (cohorts && cohorts.lots.length > 0 && fromMaturing > 0) {
+    const cohort = cohortExitTaxBaseUnits(supplyTokens, fromMaturing, cohorts.lots, cohorts.block);
+    if (cohort === null) return null;
+    taxBps = cohort.effBps;
+    taxableBaseUnits = cohort.taxableBaseUnits;
+    taxBaseUnits = cohort.taxBaseUnits;
+  }
   const { feeBaseUnits } = tradeFeeOn(grossBaseUnits);
   return {
     tokens: soldTokens,

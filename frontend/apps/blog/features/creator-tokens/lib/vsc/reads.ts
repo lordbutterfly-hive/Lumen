@@ -1,5 +1,5 @@
-import type { Ask, Market } from '../../types';
-import { RECLAIM_GRACE_BLOCKS, baseUnitsToHuman, blockToEpochMs, deriveAskStatus, parseStrictBaseUnits } from '../contract-math';
+import type { Ask, CohortLot, Market } from '../../types';
+import { RECLAIM_GRACE_BLOCKS, baseUnitsToHuman, blockToEpochMs, deriveAskStatus, parseStrictBaseUnits, sortLotsFreshestFirst } from '../contract-math';
 
 // getStateByKeys plumbing and decoding — mirrors how
 // features/prediction-market/lib/vsc-gql.ts (the GQL client) and
@@ -133,6 +133,33 @@ export function kFaceAnchorAt(c: string): string {
 export function kCap(c: string): string {
   return mk(c, 'cap');
 }
+/**
+ * ★ COHORTS (2026-09-15): holdclock_lots.go kLots, the maturing cohort ledger
+ * of one (creator, holder) position: "count,acqBlock;count,acqBlock", freshest
+ * first. Ours alone (never read across the ABI). Absent for a position from
+ * before the ledger, which the contract treats as one cohort on the blended
+ * clock (getLots' synthesis, mirrored in readHolderPosition).
+ */
+export function kLots(c: string, holder: string): string {
+  return `lots|${toDid(c)}|${toDid(holder)}`;
+}
+
+/** getLots' parser: malformed parts are skipped, the rest sorted freshest first; null when the key is absent or empty. */
+export function parseLots(raw: unknown): CohortLot[] | null {
+  if (typeof raw !== 'string' || raw === '') return null;
+  const lots: CohortLot[] = [];
+  for (const part of raw.split(';')) {
+    if (part === '') continue;
+    const fields = part.split(',');
+    if (fields.length !== 2 || !/^\d+$/.test(fields[0]) || !/^\d+$/.test(fields[1])) continue;
+    const tokens = Number(fields[0]);
+    const acqBlock = Number(fields[1]);
+    if (!Number.isSafeInteger(tokens) || tokens <= 0 || !Number.isSafeInteger(acqBlock)) continue;
+    lots.push({ tokens, acqBlock });
+  }
+  return sortLotsFreshestFirst(lots);
+}
+
 export function kSupply(c: string): string {
   return mk(c, 'sup');
 }

@@ -1,3 +1,4 @@
+import type { CohortLot } from '../types';
 import {
   ASSET_DECIMALS,
   BLOCKS_PER_DAY,
@@ -91,6 +92,9 @@ export interface CurveMarketInput {
   position: {
     /** The holder's WHOLE position — core/matured.go:145 totalBalance, i.e. maturing + matured. */
     tokens: number;
+    /** ★ COHORTS (2026-09-15): the cohort ledger and its read block; when present the exit fee is exact per cohort. */
+    lots?: CohortLot[] | null;
+    asOfBlock?: number;
     /**
      * The MATURING half of that position (core/matured.go's kBal bucket) — the
      * only half a curve sell owes exit tax on, because a matured token's rate is
@@ -337,7 +341,13 @@ export function sellQuote(tokens: number, m: CurveMarketInput, holdDays: number)
   // reproduces this file's previous number exactly.
   const maturingHeld =
     m.position?.maturingTokens === undefined ? held : Math.max(0, Math.min(held, Math.floor(m.position.maturingTokens)));
-  const q = n > 0 ? quoteSellBaseUnits(supply, n, heldBlocks, maturingHeld) : null;
+  // ★ COHORTS (2026-09-15): the chain taxes a PARTIAL sale per cohort, freshest
+  // first (sell.go maturingCohortTax), so the blended `holdDays` rate under-
+  // states the fee for a mixed-age position. With the ledger the quote is the
+  // contract's own walk, struck at the read block; rates only fall with time,
+  // so the chain charges at most this.
+  const cohorts = m.position?.lots && m.position.lots.length > 0 && m.position.asOfBlock ? { lots: m.position.lots, block: m.position.asOfBlock } : undefined;
+  const q = n > 0 ? quoteSellBaseUnits(supply, n, heldBlocks, maturingHeld, cohorts) : null;
   if (!q) return { curveProceedsUsd: 0, exitFeePct: exitFeeFraction(holdDays), exitFeeUsd: 0, tradeFeeUsd: 0, receiveUsd: 0 };
   return {
     curveProceedsUsd: baseUnitsToUsd(q.grossBaseUnits),

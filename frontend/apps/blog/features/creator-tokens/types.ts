@@ -286,6 +286,12 @@ export interface Market {
   pending?: boolean;
 }
 
+/** One maturing cohort of a position: `tokens` credited at `acqBlock` (holdclock_lots.go mLot). */
+export interface CohortLot {
+  tokens: number;
+  acqBlock: number;
+}
+
 export interface HolderPosition {
   creator: string;
   holder: string;
@@ -327,6 +333,17 @@ export interface HolderPosition {
   heldBlocks: number;
   /** exittax.go ExitTaxBpsAt(heldBlocks) — the RATE this position would pay on either exit door (curve Sell, sell.go; or wind-down Refund, refund.go) right now. Informational for the UI; the actual tax charged is always recomputed at execution time from the live clock. */
   exitTaxBps: number;
+  /**
+   * ★ COHORTS (2026-09-15): holdclock_lots.go's maturing cohort ledger for this
+   * position, freshest first, as of `asOfBlock`. Null when the chain holds no
+   * ledger for it (a position from before the ledger existed), in which case
+   * the reader synthesises one cohort on the blended clock, exactly as the
+   * contract's getLots does. A partial sale is taxed per cohort (sell.go
+   * maturingCohortTax), so this is what makes the sell quote exact.
+   */
+  lots?: CohortLot[] | null;
+  /** The chain head the position (and `lots`) were read at; cohort rates are struck here. */
+  asOfBlock?: number;
   /**
    * Optimistic-write flag, same meaning as Market.pending: set only on the
    * expected post-state a buy/sell/refund/refundHolder returns before L2

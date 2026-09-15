@@ -155,7 +155,7 @@ import {
   toDid,
   toU64,
   unknownMarket,
-  STATE_CLOSED, assertTransferDestination } from './vsc/reads';
+  STATE_CLOSED, assertTransferDestination, kLots, parseLots } from './vsc/reads';
 import { displayPriceUsd } from '../market/curve';
 import { marketHealthOf, windingDownOf } from '../market/market-health';
 import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, rulesForCode, windingDownUnder } from '../market/contract-rules';
@@ -771,7 +771,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   }
 
   async readHolderPosition(creator: string, holder: string): Promise<HolderPosition | null> {
-    const keys = [kRegisteredAt(creator), kSupply(creator), kReserve(creator), kBal(creator, holder), kAcqBlock(creator, holder)];
+    const keys = [kRegisteredAt(creator), kSupply(creator), kReserve(creator), kBal(creator, holder), kAcqBlock(creator, holder), kLots(creator, holder)];
     // rejects on failure — see interface doc. heldBlocks (below) needs a real
     // chain head (the exit tax RATE is time-dependent, holdclock.go), so this
     // read is genuinely incomplete without one — reject rather than guess.
@@ -817,6 +817,14 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       heldBlocks,
       tokensMaturing
     );
+    // ★ COHORTS (2026-09-15): the ledger as the chain keeps it, or, for a
+    // position from before the ledger, the one cohort the contract's getLots
+    // synthesises on the blended clock (head − heldBlocks reproduces that clock;
+    // an unset clock reads as fresh, which lotRateBpsAt taxes at the maximum).
+    let lots = parseLots(state[kLots(creator, holder)]);
+    if ((lots === null || lots.length === 0) && tokensMaturing > 0) {
+      lots = [{ tokens: tokensMaturing, acqBlock: head - heldBlocks }];
+    }
     return {
       creator,
       holder,
@@ -824,7 +832,9 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       tokensMaturing,
       floorValueHbd: baseUnitsToHuman(netBaseUnits),
       heldBlocks,
-      exitTaxBps: taxBps
+      exitTaxBps: taxBps,
+      lots,
+      asOfBlock: head
     };
   }
 
@@ -1218,7 +1228,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         kAcqBlock(creator, seller),
         kPaidUntil(creator),
         kState(creator),
-        kRetiredAt(creator)
+        kRetiredAt(creator),
+        kLots(creator, seller)
       ]),
       this.gql.getStateByKeysHex(this.config.contractId, [kMatured(creator, seller)]),
       this.gql.getHeadBlockCached(),
@@ -1267,7 +1278,11 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // (splitDraw MATURING-FIRST, then maturingGrossShare pro rata). The maturing
     // BALANCE is what goes in: quoteSellBaseUnits performs splitDraw itself,
     // the same shape refundNetBaseUnits already takes.
-    const q = quoteSellBaseUnits(supplyTokens, tokens, heldBlocks, tokensMaturing);
+    // ★ COHORTS (2026-09-15): the ledger (or the contract's one-cohort synthesis) makes a partial sell's tax exact, freshest first.
+    let lots = parseLots(state[kLots(creator, seller)]);
+    if ((lots === null || lots.length === 0) && tokensMaturing > 0) lots = [{ tokens: tokensMaturing, acqBlock: head - heldBlocks }];
+    const cohorts = lots && lots.length > 0 ? { lots, block: head } : undefined;
+    const q = quoteSellBaseUnits(supplyTokens, tokens, heldBlocks, tokensMaturing, cohorts);
     if (q === null) {
       // curve.go SellProceeds errors when k > S — unreachable given the
       // balance check above (bal <= supply, I3), kept as the same

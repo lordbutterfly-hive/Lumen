@@ -19,7 +19,7 @@
  * yet" is not.
  */
 
-import type { Ask, ContractRules, DeliveryRecord as ChainDeliveryRecord, HolderPosition as ChainHolderPosition, Market, Offering } from '../types';
+import type { Ask, ContractRules, DeliveryRecord as ChainDeliveryRecord, HolderPosition as ChainHolderPosition, Market, Offering, CohortLot } from '../types';
 
 import type { DeliveryRecord as UiDeliveryRecord } from '../market/types';
 import type { PortfolioAsk } from '../market/portfolio';
@@ -208,6 +208,9 @@ export interface LiveHolderPosition {
   /** NET of this position's own hold-time exit tax — "the least you're guaranteed back". The gross overstates a fresh holder by up to 20%. */
   floorValueUsd: number;
   heldDays: number;
+  /** ★ COHORTS (2026-09-15): the position's cohort ledger and the block it was read at; makes a partial sale's exit fee exact (curve.ts sellQuote). */
+  lots?: CohortLot[] | null;
+  asOfBlock?: number;
 }
 
 /**
@@ -319,7 +322,9 @@ export function adaptPosition(pos: ChainHolderPosition | null, spotPriceUsd: num
     floorValueUsd: usdFromHbd(pos.floorValueHbd),
     // heldBlocks is already the hold clock as of the read's block — an UNSET
     // clock reads 0, i.e. maximally FRESH (maximum exit tax), never ancient.
-    heldDays: blocksToDays(pos.heldBlocks)
+    heldDays: blocksToDays(pos.heldBlocks),
+    lots: pos.lots,
+    asOfBlock: pos.asOfBlock
   };
 }
 
