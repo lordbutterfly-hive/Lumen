@@ -36,25 +36,45 @@ export function postAgeMs(created: string, now: number): number {
 }
 
 /**
- * One builder on the roster.
+ * One builder on the roster. Three modes, each decided by READING that
+ * builder's real posts (the pulls of 2026-09-15, twenty root posts per
+ * account), never by guessing from the account name:
  *
- * `mode: 'all'` — a PRODUCT account: everything it posts is the product
- * shipping (Snapie, Keychain, 3Speak, Actifit…). Owner, 2026-09-15: "some only
- * post from their dapps like snapie … all posts are development related".
+ * `all` — a PRODUCT account (or a person) whose every post is the product
+ * shipping: Snapie, Keychain, Actifit, Terracore, Hive Engine, Holozing,
+ * liketu, and @blocktrades, whose last twenty are all HAF/API release notes
+ * (owner: "for blocktrades for example every post of his is about
+ * development").
  *
- * `mode: 'dev'` — a PERSON who also posts photography, music, rants. Only posts
- * carrying a development tag are shown: the shared vocabulary below, or the
- * builder's own product `tags` (owner: "if theyre building theyre using their
- * own dapp tag name"). Measured on @lordbutterfly's last 20: the Lumen/Magi/
- * Hive Watch/Freechain posts carry those names as tags; the photography and
- * the Vibes contest posts do not. Same on @acidyo: `scrobble` on the Scrobble
- * posts, nothing of the kind on the rest.
+ * `dev` — a person whose development posts carry the shared vocabulary below
+ * (`dev`, `hivedev`, `witness-update`, the HiveDevs community…) and whose
+ * other posts do not. Verified per account, e.g. @gtg: the peer-loss and
+ * hard-fork posts carry `dev`/`witness-update`, the anniversary and HiveFest
+ * posts carry neither. `tags`/`titles` add that builder's own rules on top.
+ *
+ * `own` — ONLY this builder's own `tags` and `titles` count; the shared
+ * vocabulary and the dev communities are ignored. For people whose feed
+ * defeats the vocabulary: @howo tags EVERYTHING `core,dev` including "I'm
+ * bored and sad about my profession" (owner: "remove howo's category
+ * match"); Lumen adds a `lumen` tag to whatever the owner publishes through
+ * it, so the owner's rule has to live in the TITLE (owner: "if lumen in title
+ * or meritum or algo"); @brianoflondon puts `v4vapp` on Bitcoin opinion
+ * pieces too, but `developers` only on the V4V.app engineering posts.
+ *
+ * `tags` match a post's category or any of its tags, exactly, lower-cased.
+ * `titles` match as a case-insensitive SUBSTRING of the title ("algo" is
+ * meant to catch "algorithm"; "core dev" catches "Core dev meeting #84" and
+ * "Core development proposal year 7").
  */
+export type BuilderMode = 'all' | 'dev' | 'own';
+
 export interface Builder {
   account: string;
-  mode: 'all' | 'dev';
-  /** The builder's own product/dapp tags. Any post carrying one counts. */
+  mode: BuilderMode;
+  /** This builder's own tags (a category counts as a tag). Any post carrying one counts. */
   tags?: readonly string[];
+  /** Title keywords, matched case-insensitively as substrings. Any post whose title contains one counts. */
+  titles?: readonly string[];
 }
 
 /**
@@ -66,15 +86,18 @@ export interface Builder {
  * here names the ACT of building or the artefact of it; nothing here names a
  * topic someone might merely write about. `frontend`/`backend` were here and
  * are not: a rant about frontends carried `frontend` too (measured on the
- * owner's own feed), and a product tag says the same thing more precisely. Communities: HiveDevs and
- * Programming & Dev, the two whose whole remit is development.
+ * owner's own feed), and a product tag says the same thing more precisely.
+ * `core` was here and is not (owner, 2026-09-15: "remove howo's category
+ * match"): @howo files every post under `core`, the bored-and-sad one
+ * included, so the word names his BLOG, not the act of building. Communities:
+ * HiveDevs and Programming & Dev, the two whose whole remit is development.
  */
 export const DEV_TAGS: ReadonlySet<string> = new Set([
   'dev', 'devlog', 'devlogs', 'development', 'developer', 'developers', 'programming', 'coding', 'software',
   'opensource', 'open-source', 'github', 'release', 'changelog', 'witness-update', 'witnessupdate',
   'api', 'sdk', 'dapp', 'hiveproject', 'hiveprojects', 'hivedev', 'hive-dev', 'hivedevs',
   'haf', 'hafah', 'hafsql', 'hivemind', 'infrastructure', 'node', 'multisig', 'smart-contract', 'smartcontract',
-  'smartcontracts', 'contracts', 'l2', 'layer2', 'core', 'core-dev', 'coredev', 'hardfork', 'explorer', 'indexer'
+  'smartcontracts', 'contracts', 'l2', 'layer2', 'core-dev', 'coredev', 'hardfork', 'explorer', 'indexer'
 ]);
 
 export const DEV_COMMUNITIES: ReadonlySet<string> = new Set([
@@ -113,16 +136,33 @@ export function tagsOf(entry: Pick<Entry, 'json_metadata'>): string[] {
 }
 
 /** Is this post the builder building? See `Builder` and `DEV_TAGS`. */
-export function isDevelopmentPost(builder: Builder, entry: Pick<Entry, 'json_metadata' | 'category'>): boolean {
+export function isDevelopmentPost(builder: Builder, entry: Pick<Entry, 'json_metadata' | 'category' | 'title'>): boolean {
   if (builder.mode === 'all') return true;
   const category = (entry.category ?? '').toLowerCase();
-  if (DEV_COMMUNITIES.has(category) || DEV_TAGS.has(category)) return true;
+  const tags = tagsOf(entry);
+  if (builder.mode === 'dev') {
+    if (DEV_COMMUNITIES.has(category) || DEV_TAGS.has(category)) return true;
+    if (tags.some((tag) => DEV_TAGS.has(tag))) return true;
+  }
   const own = new Set((builder.tags ?? []).map((t) => t.toLowerCase()));
-  if (own.has(category)) return true;
-  for (const tag of tagsOf(entry)) {
-    if (DEV_TAGS.has(tag) || own.has(tag)) return true;
+  if (own.size > 0 && (own.has(category) || tags.some((tag) => own.has(tag)))) return true;
+  const title = (entry.title ?? '').toLowerCase();
+  for (const keyword of builder.titles ?? []) {
+    const needle = keyword.toLowerCase();
+    if (needle && title.includes(needle)) return true;
   }
   return false;
+}
+
+/**
+ * A cross-post is a stub whose body is a link to the original, posted into a
+ * second community (tagged exactly `cross-post`, as @liketu, @snapie,
+ * @brianoflondon and @hive.pizza all do). The original is in the same page,
+ * so the stub would only put the same title on the row twice — and link to
+ * the worse copy.
+ */
+export function isCrossPost(entry: Pick<Entry, 'json_metadata'>): boolean {
+  return tagsOf(entry).includes('cross-post');
 }
 
 /**
@@ -134,8 +174,9 @@ export function isDevelopmentPost(builder: Builder, entry: Pick<Entry, 'json_met
  * that flips to somebody else's title is a wrong row. Anything not authored
  * by the account itself is dropped here, whatever the Bridge returned.
  *
- * ★ DEVELOPMENT POSTS ONLY, NEWEST FIRST, AT MOST `POSTS_PER_BUILDER`. The
- * Bridge returns newest first, so the first matches are the latest ones.
+ * ★ DEVELOPMENT POSTS ONLY, NO CROSS-POST STUBS, NEWEST FIRST, AT MOST
+ * `POSTS_PER_BUILDER`. The Bridge returns newest first, so the first matches
+ * are the latest ones.
  *
  * ★ A ROW WITH NO POSTS IS NO ROW. An empty page, a failed read, a builder
  * whose last 20 posts are all photography or all older than a year — all return null and the account
@@ -155,6 +196,7 @@ export function shapeBuilderRow(
     if ((e.author ?? '').toLowerCase() !== own) continue;
     const title = (e.title ?? '').trim();
     if (!e.permlink || !e.category || !title) continue;
+    if (isCrossPost(e)) continue;
     if (!isDevelopmentPost(builder, e)) continue;
     if (postAgeMs(e.created, now) > MAX_POST_AGE_MS) continue;
     posts.push({ permlink: e.permlink, category: e.category, title, created: e.created });

@@ -1,9 +1,11 @@
 import { getAccountPostsPage } from '@transaction/lib/bridge-api';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 import { shapeBuilderRow } from '@/blog/lib/builders-board-shape';
-import type { Builder, BuilderRow } from '@/blog/lib/builders-board-shape';
+import type { BuilderRow } from '@/blog/lib/builders-board-shape';
+import { BUILDERS } from '@/blog/lib/builders-roster';
 
 export type { Builder, BuilderRow, BuilderPost } from '@/blog/lib/builders-board-shape';
+export { BUILDERS } from '@/blog/lib/builders-roster';
 
 /**
  * ★★★ HIVE BUILDERS — the right-rail card on HOME and TOPICS that tracks
@@ -12,65 +14,15 @@ export type { Builder, BuilderRow, BuilderPost } from '@/blog/lib/builders-board
  *
  * Same shape as the Meritum departures board (`offerings-board.tsx`): one row
  * per builder, each row cycling through that builder's last three development
- * posts, one flip per half-minute. This module is the SERVER half — who the
- * builders are and what they have posted — read once, cached, and handed to
- * the browser as plain JSON through `/api/builders-board`, for exactly the
- * reason `lib/trending-tags.ts` gives: a rail widget mounted on the two
- * busiest shells must never pull the chain client into the client bundle, and
- * must never cost every reader an upstream call. The rule that decides which
- * posts count is in `builders-board-shape.ts`, chain-free and unit-tested.
- *
- * ★ HOW THE ROSTER WAS BUILT (2026-09-15). The top 100 witnesses by vote plus
- * every dapp/product account I could name were pulled — 126 accounts, their
- * last 20 root posts each, with tags — and scored against the development
- * vocabulary. The score was a SCREEN, not the answer: the first pass read
- * "100% development" for tribe and curation accounts because `witness`,
- * `update` and an account's own name as a tag all matched. So the vocabulary
- * was tightened to words that name the act of building, and each row below
- * was then read by hand. Owner's exclusions: asgarth, good-karma, ecency,
- * peakd. Owner's additions: lordbutterfly, acidyo, holozing, and Scrobble —
- * which lives on @acidyo's posts tagged `scrobble` (`@scrobble` is a curation
- * compilation account and `@scrobble.life` has no root posts).
- *
- * Two modes, per `Builder` in the shape module: `all` for a product account
- * whose every post is the product shipping, `dev` for a person whose feed
- * mixes building with life, where only posts carrying the shared vocabulary or
- * that builder's own product tags are shown. Real builders whose last
- * development post is more than ~6 months old are left off (deathwing 02-07,
- * disregardfiat 02-27, v4vapp 02-09, vsc.network 2025-11, techcoderx 2025-11,
- * stoodkev 2024-10 — Keychain is carried by @keychain instead): a card titled
- * "Hive builders" that shows a year-old post is claiming something it cannot
- * back. Dropped after replaying real posts through the filter (2026-09-15):
- * quochuy (witness EARNINGS reports, not building), splinterlands (sticker
- * shop, a memorial card) and risingstargame (a birthday post). Keep the
- * reason next to any entry you add or remove.
+ * posts, one flip per half-minute. This module is the SERVER half — reading
+ * what each builder has posted, cached, and handed to the browser as plain
+ * JSON through `/api/builders-board`, for exactly the reason
+ * `lib/trending-tags.ts` gives: a rail widget mounted on the two busiest
+ * shells must never pull the chain client into the client bundle, and must
+ * never cost every reader an upstream call. WHO the builders are is
+ * `builders-roster.ts`; WHICH posts count is `builders-board-shape.ts`; both
+ * are chain-free and unit-tested against real posts.
  */
-export const BUILDERS: readonly Builder[] = [
-  // ── people ──────────────────────────────────────────────────────────────
-  { account: 'lordbutterfly', mode: 'dev', tags: ['lumen', 'magi', 'hivewatch', 'freechain'] }, // Lumen, Magi, Hive Watch, Freechain. Not `frontend`: a rant carried it too
-  { account: 'howo', mode: 'dev', tags: ['core', 'gopherd'] }, // core dev meetings, 2026-09-08
-  { account: 'sagarkothari88', mode: 'dev', tags: ['hivesuite'] }, // HiveSuite, 2026-09-14
-  { account: 'acidyo', mode: 'dev', tags: ['scrobble', 'holozing'] }, // Scrobble.life + Holozing MMO, 2026-09-12
-  { account: 'emrebeyler', mode: 'dev', tags: ['hivescan', 'lighthive'] }, // hivescan.io, lighthive, 2026-08-13
-  { account: 'gtg', mode: 'dev' }, // node ops / witness updates, 2026-07-18
-  { account: 'engrave', mode: 'dev' }, // hiveprojects, witness updates, 2026-07-01
-  { account: 'brianoflondon', mode: 'dev', tags: ['v4vapp', 'podping'] }, // V4V.app, Podping, 2026-08-16
-  { account: 'imwatsi', mode: 'dev', tags: ['freebeings-dao', 'freebeings'] }, // HAF plug-and-play, FreeBeings, 2026-06-30
-  { account: 'mahdiyari', mode: 'dev' }, // HafSQL, HAF, 2026-04-22
-  { account: 'blocktrades', mode: 'dev' }, // HAF API stack, 2026-04-10
-  // ── products (every post is the product shipping) ───────────────────────
-  { account: 'snapie', mode: 'all' }, // 2026-08-31
-  { account: 'thebeedevs', mode: 'all' }, // clive / wallet / cli, 2026-09-02
-  { account: 'keychain', mode: 'all' }, // 2026-08-26
-  { account: 'threespeak', mode: 'all' }, // 2026-09-13
-  { account: 'actifit', mode: 'all' }, // 2026-08-21
-  { account: 'terracore', mode: 'all' }, // 2026-08-08
-  { account: 'hive-engine', mode: 'all' }, // 2026-07-14
-  { account: 'liketu', mode: 'all' }, // 2026-07-12
-  { account: 'holozing', mode: 'all' }, // 2026-08-14
-  { account: 'hive.pizza', mode: 'dev', tags: ['moon', 'pizza', 'hivepizza'] } // MOON dev log, 2026-05-22
-];
-
 /**
  * How many root posts to read per builder. A `dev`-mode person may have three
  * development posts spread across twenty ordinary ones, so the page has to be

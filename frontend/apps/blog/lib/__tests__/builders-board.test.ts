@@ -1,16 +1,18 @@
 /**
- * UNIT TESTS for the pure half of the builders board
- * (`lib/builders-board-shape.ts`): which posts count as development, and how
- * one builder's Bridge page becomes (or refuses to become) a row.
+ * UNIT TESTS for the pure half of the builders board: which posts count as
+ * development (`lib/builders-board-shape.ts`) and the roster's rules
+ * (`lib/builders-roster.ts`) replayed against the REAL posts they were
+ * written from (pulled 2026-09-15).
  *
  * Run by `pnpm --filter @hive/blog test:unit` under ts-node; own harness.
- * ★ Imports the PURE module only — `../builders-board` imports the chain
+ * ★ Imports the PURE modules only — `../builders-board` imports the chain
  * client, which ts-node cannot resolve, and one such import aborts the whole
  * runner at this file.
  */
 import type { Entry } from '@hive/common-hiveio-packages/wax';
-import { shapeBuilderRow, isDevelopmentPost, tagsOf, postAgeMs, POSTS_PER_BUILDER, MAX_POST_AGE_MS } from '../builders-board-shape';
+import { shapeBuilderRow, isDevelopmentPost, isCrossPost, tagsOf, postAgeMs, POSTS_PER_BUILDER, MAX_POST_AGE_MS, DEV_TAGS } from '../builders-board-shape';
 import type { Builder } from '../builders-board-shape';
+import { BUILDERS } from '../builders-roster';
 
 let checks = 0;
 let failures = 0;
@@ -40,71 +42,150 @@ const post = (
   } as unknown as Entry;
 };
 
-// ★ Fixtures are the REAL tag shapes measured on mainnet, 2026-09-15.
-const LORDBUTTERFLY: Builder = { account: 'lordbutterfly', mode: 'dev', tags: ['lumen', 'magi', 'hivewatch', 'freechain'] };
-const ACIDYO: Builder = { account: 'acidyo', mode: 'dev', tags: ['scrobble', 'holozing'] };
-const SNAPIE: Builder = { account: 'snapie', mode: 'all' };
-const NEOXIAN_LIKE: Builder = { account: 'neoxian', mode: 'dev' }; // a tribe account, no product tags
+const rule = (account: string): Builder => {
+  const found = BUILDERS.find((b) => b.account === account);
+  if (!found) throw new Error(`${account} is not on the roster`);
+  return found;
+};
 
 console.log('\ntagsOf');
 ok('object metadata', tagsOf(post('a', 'p', { tags: ['Lumen', 'hive'] })).join() === 'lumen,hive');
 ok('string metadata', tagsOf(post('a', 'p', { tags: ['devlog'], metaAsString: true })).join() === 'devlog');
 ok('corrupt string metadata -> no tags, no throw', tagsOf({ json_metadata: '{nope' } as unknown as Entry).length === 0);
 
-console.log('\nisDevelopmentPost: the owner\'s own feed, measured');
-ok('"What Are Meritum Tokens?" tagged lumen,hive,magi -> development', isDevelopmentPost(LORDBUTTERFLY, post('lordbutterfly', 'p', { category: 'lumen', tags: ['lumen', 'hive', 'magi'] })));
-ok('"Seedance // Hive Watch ads" tagged hive,lumen,frontend -> development', isDevelopmentPost(LORDBUTTERFLY, post('lordbutterfly', 'p', { category: 'hive', tags: ['hive', 'lumen', 'frontend'] })));
-ok('"Product photography attempt" tagged photography,images,diy -> NOT', !isDevelopmentPost(LORDBUTTERFLY, post('lordbutterfly', 'p', { category: 'photography', tags: ['photography', 'images', 'diy'] })));
-ok('a Vibes music contest post -> NOT', !isDevelopmentPost(LORDBUTTERFLY, post('lordbutterfly', 'p', { category: 'hive-140169', tags: ['hive', 'music', 'contest', 'vibes'] })));
-ok('a rant tagged hive,rant,do,it -> NOT (hive alone is not building)', !isDevelopmentPost(LORDBUTTERFLY, post('lordbutterfly', 'p', { category: 'hive', tags: ['hive', 'rant', 'do', 'it'] })));
-ok('"Killing Hive\'s Social Potential" tagged hive,rant,frontend -> NOT (frontend is not a product tag)', !isDevelopmentPost(LORDBUTTERFLY, post('lordbutterfly', 'p', { category: 'hive', tags: ['hive', 'rant', 'frontend'] })));
+// ★ Every fixture below is a REAL post: author, category, tags and title as
+// measured on mainnet, 2026-09-15. Change a rule, replay it here.
+console.log('\nthe owner: the rule lives in the TITLE, because Lumen tags every post it publishes `lumen`');
+const OWNER = rule('lordbutterfly');
+ok('mode is own, with no tags at all', OWNER.mode === 'own' && !OWNER.tags);
+ok('"What Are Meritum Tokens?" -> development', isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'What Are Meritum Tokens?', category: 'lumen', tags: ['lumen', 'hive', 'magi'] })));
+ok('"Lumen: Bringing Meritum Tokens and a New Creator Economy to Hive" -> development', isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'Lumen: Bringing Meritum Tokens and a New Creator Economy to Hive', category: 'lumen', tags: ['lumen', 'launch', 'hive'] })));
+ok('"Testing." tagged lumen (published through Lumen) -> NOT', !isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'Testing.', category: 'lumen', tags: ['lumen'] })));
+ok('"Seedance 2.5 // Hive Watch ads //" tagged hive,lumen,frontend -> NOT', !isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'Seedance 2.5 // Hive Watch ads // ', category: 'hive', tags: ['hive', 'lumen', 'frontend', 'do', 'it'] })));
+ok('"Product photography attempt NO.1" -> NOT', !isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'Product photography attempt NO.1', category: 'photography', tags: ['photography', 'images', 'diy'] })));
+ok('"Killing Hive\'s Social Potential -> POB Based Content Discovery" -> NOT', !isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'Killing Hive’s Social Potential -> POB Based Content Discovery ', category: 'hive', tags: ['hive', 'rant', 'frontend'] })));
+ok('a future "How the Lumen algorithm ranks posts" -> development (algo)', isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'How the Lumen algorithm ranks posts', category: 'hive', tags: ['hive'] })));
+ok('the title match is case-insensitive', isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'MERITUM week one', category: 'hive', tags: [] })));
 
-console.log('\nisDevelopmentPost: Scrobble lives on @acidyo');
-ok('"Scrobble.life Updates" (category scrobble) -> development', isDevelopmentPost(ACIDYO, post('acidyo', 'p', { category: 'scrobble', tags: ['scrobble', 'life', 'updates'] })));
-ok('"A new little update on Holozing MMO" tagged holozing -> development', isDevelopmentPost(ACIDYO, post('acidyo', 'p', { category: 'hive-131131', tags: ['holozing', 'mmo', 'update'] })));
-ok('"WoW TBC lvl 10-X" -> NOT', !isDevelopmentPost(ACIDYO, post('acidyo', 'p', { category: 'hive-140217', tags: ['wow', 'tbc', 'hc'] })));
-ok('"Is Hive oversold?" -> NOT', !isDevelopmentPost(ACIDYO, post('acidyo', 'p', { category: 'thoughts', tags: ['thoughts'] })));
+console.log('\n@howo: no category match; the meetings say "Core dev" in the title, the project is tagged gopherd');
+const HOWO = rule('howo');
+ok('`core` is no longer in the shared vocabulary', !DEV_TAGS.has('core'));
+ok('"Core dev meeting #84" -> development', isDevelopmentPost(HOWO, post('howo', 'p', { title: 'Core dev meeting #84', category: 'core', tags: ['core', 'dev', 'meeting'] })));
+ok('"Core development proposal year 7" -> development', isDevelopmentPost(HOWO, post('howo', 'p', { title: 'Core development proposal year 7', category: 'core', tags: ['core', 'dev', 'proposal'] })));
+ok('"Hive is now a multi client network, the forking incident I caused…" tagged gopherd -> development', isDevelopmentPost(HOWO, post('howo', 'p', { title: 'Hive is now a multi client network, the forking incident I caused, and reducing my proposal to 150 HBD a day', category: 'core', tags: ['core', 'dev', 'gopherd', 'proposal'] })));
+ok('"I\'m bored and sad about my profession" (category core, tags core,dev) -> NOT', !isDevelopmentPost(HOWO, post('howo', 'p', { title: "I'm bored and sad about my profession", category: 'core', tags: ['core', 'dev'] })));
+ok('"What changes would you like to see in communities ?" -> NOT', !isDevelopmentPost(HOWO, post('howo', 'p', { title: 'What changes would you like to see in communities ? ', category: 'hive', tags: ['hive', 'communities'] })));
 
-console.log('\nisDevelopmentPost: a product account counts wholesale');
-ok('any Snapie post -> development, whatever the tags', isDevelopmentPost(SNAPIE, post('snapie', 'p', { category: 'hive-178315', tags: ['cross-post'] })));
+console.log('\n@acidyo: the scrobble tag AND the holozing tag, both in use');
+const ACIDYO = rule('acidyo');
+ok('"Scrobble.life Updates" (category scrobble) -> development', isDevelopmentPost(ACIDYO, post('acidyo', 'p', { title: 'Scrobble.life Updates', category: 'scrobble', tags: ['scrobble', 'life', 'updates'] })));
+ok('"Moar Gems" in the Scrobble community, tagged scrobble -> development', isDevelopmentPost(ACIDYO, post('acidyo', 'p', { title: 'Moar Gems', category: 'hive-110713', tags: ['scrobble', 'games', 'more', 'kinds', 'fun'] })));
+ok('"A new little update on Holozing MMO" tagged holozing -> development', isDevelopmentPost(ACIDYO, post('acidyo', 'p', { title: 'A new little update on Holozing MMO', category: 'hive-131131', tags: ['holozing', 'mmo', 'update'] })));
+ok('"Scrobble Delegation Rewards" tagged everyday,im,scrobbling (no scrobble tag) -> NOT', !isDevelopmentPost(ACIDYO, post('acidyo', 'p', { title: 'Scrobble Delegation Rewards', category: 'hive-110713', tags: ['everyday', 'im', 'scrobbling'] })));
+ok('"WoW TBC lvl 10-X" -> NOT', !isDevelopmentPost(ACIDYO, post('acidyo', 'p', { title: 'WoW TBC lvl 10-X', category: 'hive-140217', tags: ['wow', 'tbc', 'hc'] })));
+ok('"Is Hive oversold?" -> NOT', !isDevelopmentPost(ACIDYO, post('acidyo', 'p', { title: 'Is Hive oversold?', category: 'thoughts', tags: ['thoughts'] })));
+ok('"Ai Subs" tagged ai,subs,proposal,dhf -> NOT (own mode ignores the shared vocabulary)', !isDevelopmentPost(ACIDYO, post('acidyo', 'p', { title: 'Ai Subs', category: 'ai', tags: ['ai', 'subs', 'proposal', 'dhf'] })));
 
-console.log('\nisDevelopmentPost: the loose matches the first draft got wrong are gone');
-ok('"witness" alone (an earnings report) -> NOT', !isDevelopmentPost(NEOXIAN_LIKE, post('neoxian', 'p', { tags: ['witness', 'report'] })));
-ok('"update" alone -> NOT', !isDevelopmentPost(NEOXIAN_LIKE, post('neoxian', 'p', { tags: ['update', 'news'] })));
-ok('the account\'s own name as a tag -> NOT, unless it is a declared product tag', !isDevelopmentPost(NEOXIAN_LIKE, post('neoxian', 'p', { tags: ['neoxian', 'pob'] })));
-ok('but witness-update (the ops post) -> development', isDevelopmentPost(NEOXIAN_LIKE, post('neoxian', 'p', { tags: ['witness-update'] })));
-ok('and the HiveDevs community -> development', isDevelopmentPost(NEOXIAN_LIKE, post('neoxian', 'p', { category: 'hive-139531', tags: [] })));
-ok('and howo\'s "core" category -> development', isDevelopmentPost({ account: 'howo', mode: 'dev' }, post('howo', 'p', { category: 'core', tags: ['dev', 'meeting'] })));
+console.log('\n@sagarkothari88: "Development Update" yes, "Daily Rewards" no, same tags on both');
+const SAGAR = rule('sagarkothari88');
+const sagarTags = ['hive-139531', 'dapps', 'india', 'daily', 'threespeak', 'hivedev', 'updates', 'ocd', 'neoxion', 'hivesuite'];
+ok('"HiveSuite Development Update: Chat Experience, Drive & Editor" -> development', isDevelopmentPost(SAGAR, post('sagarkothari88', 'p', { title: 'HiveSuite Development Update: Chat Experience, Drive & Editor ', category: 'hive-139531', tags: sagarTags })));
+ok('"HiveSuite & HiveReactKit Dev Update - Smarter Snaps Notifications" -> development', isDevelopmentPost(SAGAR, post('sagarkothari88', 'p', { title: 'HiveSuite & HiveReactKit Dev Update - Smarter Snaps Notifications', category: 'hive-139531', tags: sagarTags })));
+ok('"🎉 HiveSuite Daily Rewards for 6-Sep-2026" -> NOT', !isDevelopmentPost(SAGAR, post('sagarkothari88', 'p', { title: '🎉 HiveSuite Daily Rewards for 6-Sep-2026', category: 'hive-185924', tags: ['hive-185924', 'hive', 'rewards', 'india', 'community', 'daily', 'bee', 'neoxian', 'waiv', 'hivesuite'] })));
+
+console.log('\n@brianoflondon: `developers` marks the engineering posts, `v4vapp` alone does not');
+const BRIAN = rule('brianoflondon');
+ok('"Anatomy of a failed Lightning Payment" tagged v4vapp,vsc,developers -> development', isDevelopmentPost(BRIAN, post('brianoflondon', 'p', { title: 'Anatomy of a failed Lightning Payment', category: 'hive-110369', tags: ['v4vapp', 'vsc', 'developers', 'leofinance', 'proofofbrain', 'lightning', 'failure', 'btc'] })));
+ok('"Coinkite Coldcard just proved the real Bitcoin risk…" tagged v4vapp,lightning,btc,btcmaxis -> NOT', !isDevelopmentPost(BRIAN, post('brianoflondon', 'p', { title: 'Coinkite Coldcard just proved the real Bitcoin risk: bad devices, not “not your keys”', category: 'v4vapp', tags: ['v4vapp', 'lightning', 'btc', 'btcmaxis', 'hardware', 'leofinance', 'hive', 'voltage'] })));
+ok('"The Blogs: Arafat polonium — junk science" tagged archivedcontenthaf -> NOT (haf is not a substring match)', !isDevelopmentPost(BRIAN, post('brianoflondon', 'p', { title: 'The Blogs: Arafat polonium — junk science', category: 'archivedcontenthaf', tags: ['archivedcontenthaf', 'archiveother', 'archivelong'] })));
+ok('a politics post -> NOT', !isDevelopmentPost(BRIAN, post('brianoflondon', 'p', { title: 'How do you search for ships at sea?', category: 'hive-181335', tags: ['israel', 'hormuz', 'usnavy'] })));
+
+console.log('\n@gtg and @mahdiyari: the shared vocabulary, verified on their feeds');
+const GTG = rule('gtg');
+ok('"How to lose all your peers in one block (a witness update)" -> development', isDevelopmentPost(GTG, post('gtg', 'p', { title: 'How to lose all your peers in one block (a witness update)', category: 'hive-160391', tags: ['witness-category', 'witness-update', 'hive', 'dev', 'p2p'] })));
+ok('"Hive HardFork 28 Jump Starter Kit" -> development', isDevelopmentPost(GTG, post('gtg', 'p', { title: 'Hive HardFork 28 Jump Starter Kit', category: 'hive-160391', tags: ['hivepressure', 'dev', 'witness-category', 'hive', 'doc', 'faq'] })));
+ok('"Thank you for passing by" (anniversary) -> NOT', !isDevelopmentPost(GTG, post('gtg', 'p', { title: 'Thank you for passing by', category: 'hive-160391', tags: ['hive', 'witness-category', 'community', 'anniversary'] })));
+ok('"HiveFest: say Hi(ve) in person" -> NOT', !isDevelopmentPost(GTG, post('gtg', 'p', { title: 'HiveFest: say Hi(ve) in person', category: 'hive-160391', tags: ['hive', 'hivefest', 'roadtohivefest'] })));
+const MAHDI = rule('mahdiyari');
+ok('"Witness update - 4/22" (nodes healthy; tags witness-category,witness only) -> development by title', isDevelopmentPost(MAHDI, post('mahdiyari', 'p', { title: 'Witness update - 4/22', category: 'hive-111111', tags: ['witness-category', 'witness'] })));
+ok('"Rant 1.0" tagged hive,dhf,rant,random -> NOT', !isDevelopmentPost(MAHDI, post('mahdiyari', 'p', { title: 'Rant 1.0', category: 'hive', tags: ['hive', 'dhf', 'rant', 'random'] })));
+ok('"Dark Souls 3" -> NOT', !isDevelopmentPost(MAHDI, post('mahdiyari', 'p', { title: 'Dark Souls 3', category: 'hive-140217', tags: ['game', 'dark', 'souls'] })));
+
+console.log('\n@dalz and @techcoderlabz (owner\'s additions)');
+const DALZ = rule('dalz');
+ok('"Hive Witness Report | Ranking, Voting, Missed Blocks…" tagged witness,hive,report -> development', isDevelopmentPost(DALZ, post('dalz', 'p', { title: 'Hive Witness Report | Ranking, Voting, Missed Blocks, HBD Interest Changes and More | August 2026 ', category: 'witness', tags: ['witness', 'hive', 'report', 'aug26', 'data', 'ranking', 'moves'] })));
+ok('"Ecency! | Data On Posts, Comments, Users" in Hive Statistics (no hive tag) -> development by community', isDevelopmentPost(DALZ, post('dalz', 'p', { title: 'Ecency! | Data On Posts, Comments, Users | Aug 2026', category: 'hive-133987', tags: ['ecency', 'data', 'activity', 'users', 'maus', 'stats'] })));
+ok('"A Look at the Lido Protocol…" -> NOT', !isDevelopmentPost(DALZ, post('dalz', 'p', { title: 'A Look at the Lido Protocol | A Leading Protocol for Staking Ethereum | September 2026', category: 'lido', tags: ['lido', 'data', 'staked', 'eth', 'steth', 'defi'] })));
+ok('"Robinhood Chain Is Growing Fast!" -> NOT', !isDevelopmentPost(DALZ, post('dalz', 'p', { title: 'Robinhood Chain Is Growing Fast! | Data on TVL, Stablecoins, Active Addresses, Transactions', category: 'robinhood', tags: ['robinhood', 'hood', 'chain', 'crypto', 'defi', 'activity', 'stats'] })));
+const TECH = rule('techcoderlabz');
+ok('"#Learn #Python #Together | 🔥 Day 11 | #basics" -> development', isDevelopmentPost(TECH, post('techcoderlabz', 'p', { title: '#Learn #Python #Together | 🔥 Day 11 | #basics | #python ', category: 'python', tags: ['python', 'learn', 'basics', 'pip'] })));
+ok('"Learn Python Basics Together - Day 4 | Python Dictionaries…" (tags: hivesuite only) -> development', isDevelopmentPost(TECH, post('techcoderlabz', 'p', { title: 'Learn Python Basics Together - Day 4 | Python Dictionaries Explained for Beginners', category: 'hivesuite', tags: ['hivesuite'] })));
+ok('"😱 AI Is Taking Programming Jobs? Here\'s the Truth" tagged programming,coding,developers -> NOT (own mode)', !isDevelopmentPost(TECH, post('techcoderlabz', 'p', { title: "😱 AI Is Taking Programming Jobs? Here's the Truth Every Dev Should Know", category: 'programming', tags: ['programming', 'ai', 'softwareengineer', 'coding', 'developers'] })));
+ok('"Pune Hive Meetup Recap" -> NOT', !isDevelopmentPost(TECH, post('techcoderlabz', 'p', { title: ' Pune Hive Meetup Recap: Small Turnout, One Strong Onboarding 🐝', category: 'hive-127555', tags: ['hive', 'web3', 'meetup', 'pune'] })));
+
+console.log('\nproducts');
+ok('@blocktrades: any post counts', rule('blocktrades').mode === 'all' && isDevelopmentPost(rule('blocktrades'), post('blocktrades', 'p', { title: 'Release of new HAF API stack 1.28.6 next week', category: 'hive-139531', tags: ['hive', 'blockchain', 'software'] })));
+ok('@snapie: any post counts, whatever the tags', isDevelopmentPost(rule('snapie'), post('snapie', 'p', { category: 'hive-178315', tags: ['pob'] })));
+ok('@thebeedevs: "Meet us at European Blockchain Convention 2026" -> NOT', !isDevelopmentPost(rule('thebeedevs'), post('thebeedevs', 'p', { title: 'Meet us at European Blockchain Convention 2026', category: 'hive-106258', tags: ['hivefest', 'hive', 'conference', 'barcelona', 'ebc2026', 'thebeedevs'] })));
+ok('@thebeedevs: "Clive — A Modern Replacement for CLI Wallet" -> development', isDevelopmentPost(rule('thebeedevs'), post('thebeedevs', 'p', { title: 'Clive — A Modern Replacement for CLI Wallet', category: 'hive-139531', tags: ['hive', 'dev', 'clive', 'wallet', 'cli'] })));
+ok('@hive.pizza: "MOON Dev Log — May 2026" -> development', isDevelopmentPost(rule('hive.pizza'), post('hive.pizza', 'p', { title: 'MOON Dev Log — May 2026: Mobile, PWA, and Attack Alerts', category: 'hive-140217', tags: ['moon', 'gaming', 'gamedev', 'archon'] })));
+ok('@hive.pizza: "MOON Season 1 Rewards Payout" -> NOT', !isDevelopmentPost(rule('hive.pizza'), post('hive.pizza', 'p', { title: 'MOON Season 1 Rewards Payout', category: 'hive-185582', tags: ['moon', 'gaming', 'oneup', 'archon', 'tribes', 'pizza'] })));
+ok('threespeak is off the roster (an automated weekly report is not building)', !BUILDERS.some((b) => b.account === 'threespeak'));
+ok('asgarth, good-karma, ecency, peakd are not on the roster', !BUILDERS.some((b) => ['asgarth', 'good-karma', 'ecency', 'peakd'].includes(b.account)));
+ok('every own-mode builder has at least one tag or title (otherwise its row can never exist)', BUILDERS.every((b) => b.mode !== 'own' || (b.tags?.length ?? 0) + (b.titles?.length ?? 0) > 0));
+ok('no account appears twice', new Set(BUILDERS.map((b) => b.account)).size === BUILDERS.length);
+
+console.log('\nthe loose matches the first draft got wrong stay gone');
+const TRIBE: Builder = { account: 'neoxian', mode: 'dev' };
+ok('"witness" alone (an earnings report) -> NOT', !isDevelopmentPost(TRIBE, post('neoxian', 'p', { tags: ['witness', 'report'] })));
+ok('"update" alone -> NOT', !isDevelopmentPost(TRIBE, post('neoxian', 'p', { tags: ['update', 'news'] })));
+ok('the account\'s own name as a tag -> NOT', !isDevelopmentPost(TRIBE, post('neoxian', 'p', { tags: ['neoxian', 'pob'] })));
+ok('an own-mode builder with nothing declared matches nothing', !isDevelopmentPost({ account: 'x', mode: 'own' }, post('x', 'p', { title: 'dev', category: 'hive-139531', tags: ['dev'] })));
+ok('an empty title keyword never matches', !isDevelopmentPost({ account: 'x', mode: 'own', titles: [''] }, post('x', 'p', { title: 'anything' })));
+
+console.log('\ncross-posts');
+ok('a post tagged exactly cross-post is a cross-post', isCrossPost(post('liketu', 'p', { tags: ['cross-post'] })));
+ok('a normal post is not', !isCrossPost(post('liketu', 'p', { tags: ['liketu', 'feature'] })));
 
 console.log('\nshapeBuilderRow: refuses to invent a row');
-ok('null page -> no row', shapeBuilderRow(LORDBUTTERFLY, null) === null);
-ok('empty page -> no row', shapeBuilderRow(LORDBUTTERFLY, []) === null);
-ok('a page of only reblogs -> no row', shapeBuilderRow(SNAPIE, [post('someone-else', 'x'), post('another', 'y')]) === null);
-ok('a person whose last 20 are all photography -> no row', shapeBuilderRow(LORDBUTTERFLY, [post('lordbutterfly', 'a', { category: 'photography', tags: ['photography'] })]) === null);
+ok('null page -> no row', shapeBuilderRow(OWNER, null) === null);
+ok('empty page -> no row', shapeBuilderRow(OWNER, []) === null);
+ok('a page of only reblogs -> no row', shapeBuilderRow(rule('snapie'), [post('someone-else', 'x'), post('another', 'y')]) === null);
+ok('a person whose last 20 are all photography -> no row', shapeBuilderRow(OWNER, [post('lordbutterfly', 'a', { title: 'Product photography attempt NO.1', category: 'photography', tags: ['photography'] })]) === null);
 
-console.log('\nshapeBuilderRow: the last THREE development posts, newest first, nothing else');
-const mixed = [
-  post('lordbutterfly', 'meritum', { title: 'What Are Meritum Tokens?', category: 'lumen', tags: ['lumen'], created: '2026-09-11T00:00:00' }),
-  post('lordbutterfly', 'launch', { title: 'Lumen: Bringing Meritum Tokens', category: 'lumen', tags: ['lumen', 'launch'], created: '2026-09-09T00:00:00' }),
-  post('lordbutterfly', 'photo', { title: 'Product photography attempt', category: 'photography', tags: ['photography'], created: '2026-08-25T00:00:00' }),
-  post('reblogged-author', 'their-post', { title: 'Not mine', tags: ['lumen'] }),
-  post('LORDBUTTERFLY', 'seedance', { title: 'Seedance // Hive Watch ads', category: 'hive', tags: ['hive', 'lumen', 'frontend'], created: '2026-08-25T00:00:00' }),
+console.log('\nshapeBuilderRow: the owner\'s real page, newest first, nothing else');
+const ownerPage = [
+  post('lordbutterfly', 'meritum', { title: 'What Are Meritum Tokens?', category: 'lumen', tags: ['lumen', 'hive', 'magi'], created: '2026-09-11T00:00:00' }),
+  post('lordbutterfly', 'launch', { title: 'Lumen: Bringing Meritum Tokens and a New Creator Economy to Hive', category: 'lumen', tags: ['lumen', 'launch', 'hive'], created: '2026-09-09T00:00:00' }),
+  post('lordbutterfly', 'photo', { title: 'Product photography attempt NO.1', category: 'photography', tags: ['photography'], created: '2026-08-25T00:00:00' }),
+  post('reblogged-author', 'their-post', { title: 'Lumen is great', tags: ['lumen'] }),
+  post('LORDBUTTERFLY', 'seedance', { title: 'Seedance 2.5 // Hive Watch ads // ', category: 'hive', tags: ['hive', 'lumen', 'frontend'], created: '2026-08-25T00:00:00' }),
   post('lordbutterfly', 'testing', { title: 'Testing.', category: 'lumen', tags: ['lumen'], created: '2026-08-08T00:00:00' }),
-  post('lordbutterfly', 'rant', { title: 'Killing Hive\'s Social Potential', category: 'hive', tags: ['hive', 'rant', 'frontend'], created: '2026-07-08T00:00:00' }),
+  post('lordbutterfly', 'rant', { title: 'Killing Hive’s Social Potential -> POB Based Content Discovery ', category: 'hive', tags: ['hive', 'rant', 'frontend'], created: '2026-07-08T00:00:00' }),
+  post('lordbutterfly', 'algo', { title: 'The Lumen algo, explained', category: 'lumen', tags: ['lumen'], created: '2026-06-01T00:00:00' }),
+  post('lordbutterfly', 'old-algo', { title: 'Algo notes', category: 'lumen', tags: ['lumen'], created: '2026-05-01T00:00:00' }),
   post('lordbutterfly', 'untitled', { title: '   ', category: 'lumen', tags: ['lumen'] })
 ];
-const row = shapeBuilderRow(LORDBUTTERFLY, mixed);
+const NOW = Date.parse('2026-09-15T12:00:00Z');
+const row = shapeBuilderRow(OWNER, ownerPage, NOW);
 ok('a row is produced', row !== null);
 ok(`exactly ${POSTS_PER_BUILDER} posts`, row?.posts.length === POSTS_PER_BUILDER);
-ok('newest development post first', row?.posts[0]?.permlink === 'meritum');
-ok('the photography post is skipped, the next development post takes its slot', row?.posts.map((p) => p.permlink).join() === 'meritum,launch,seedance');
-ok('the reblog is dropped', !row?.posts.some((p) => p.permlink === 'their-post'));
-ok('author match is case-insensitive', row?.posts.some((p) => p.permlink === 'seedance') === true);
+ok('Meritum, Lumen launch, then the algo post; Testing., the ads post and the rant are skipped', row?.posts.map((p) => p.permlink).join() === 'meritum,launch,algo');
+ok('the reblog is dropped even though its title says Lumen', !row?.posts.some((p) => p.permlink === 'their-post'));
 ok('created passes through untouched', row?.posts[0]?.created === '2026-09-11T00:00:00');
 
+console.log('\nshapeBuilderRow: a cross-post stub does not take a slot (the @liketu page)');
+const liketuPage = [
+  post('liketu', 'front', { title: 'front — one link that\'s actually yours', category: 'hive-147010', tags: ['liketu', 'hive', 'front', 'feature'], created: '2026-07-12T00:00:00' }),
+  post('liketu', 'network-value', { title: 'Network value: the number that knows who grows liketu', category: 'hive-147010', tags: ['liketu', 'centrality'], created: '2026-07-07T00:00:00' }),
+  post('liketu', 'wild-xpost', { title: 'Introducing liketu Wild', category: 'hive-147010', tags: ['cross-post'], created: '2026-06-13T10:00:00' }),
+  post('liketu', 'wild', { title: 'Introducing liketu Wild', category: 'liketu', tags: ['liketu', 'feature', 'wild'], created: '2026-06-13T09:00:00' })
+];
+const liketuRow = shapeBuilderRow(rule('liketu'), liketuPage, NOW);
+ok('the original takes the third slot, not the stub', liketuRow?.posts.map((p) => p.permlink).join() === 'front,network-value,wild');
+
 console.log('\nshapeBuilderRow: nothing older than a year (the @imwatsi replay)');
-const NOW = Date.parse('2026-09-15T12:00:00Z');
-const IMWATSI: Builder = { account: 'imwatsi', mode: 'dev', tags: ['freebeings-dao'] };
+const IMWATSI = rule('imwatsi');
 const replay = [
   post('imwatsi', 'dao-live', { title: 'Back on Hive — and FreeBeings DAO is live', category: 'hive-139531', tags: ['freebeings-dao'], created: '2026-06-30T00:00:00' }),
   post('imwatsi', 'proposal-2023', { title: 'Proposal: FreeBeings.io LLC - HAF Development', category: 'hive-139531', tags: ['development'], created: '2023-04-15T00:00:00' }),
