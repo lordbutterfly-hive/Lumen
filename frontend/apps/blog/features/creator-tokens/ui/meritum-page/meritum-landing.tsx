@@ -309,9 +309,17 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
         className="relative overflow-hidden rounded-[20px] border border-line-9 border-l-[3px] border-l-line-brand-10 bg-[linear-gradient(112deg,#FAEEEB_0%,#FBF7F2_46%,#FCFAF7_100%)] px-6 pb-8 pt-10 md:px-10 md:pt-[54px]"
         data-testid="meritum-hero"
       >
+        {/* Share sits in the card's top-right corner (owner, 2026-09-15: "Put share
+            top right in the card header and put message where the share is"). */}
+        <div className="absolute right-5 top-5 md:right-8 md:top-7">
+          {shareButton(
+            'inline-flex h-9 items-center gap-2 rounded-full border border-ink-2/20 bg-surface-1/70 px-4 font-ui text-[13.5px] leading-none font-medium text-ink-2 hover:border-ink-2 hover:bg-surface-1',
+            'meritum-share-hero'
+          )}
+        </div>
         <div className="grid grid-cols-1 items-end gap-8 2xl:grid-cols-[minmax(0,1fr)_400px] 2xl:gap-10">
           <div className="min-w-0">
-            <div className="mb-6 flex items-center gap-3 font-ui text-[15px] font-bold uppercase tracking-[0.2em] text-ink-brand-6 md:text-[17px]">
+            <div className="mb-6 flex items-center gap-3 pr-24 font-ui text-[15px] font-bold uppercase tracking-[0.2em] text-ink-brand-6 md:text-[17px]">
               <CreatorTokenLaurel size={24} />
               {COPY.eyebrow}
             </div>
@@ -363,7 +371,6 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
               <button type="button" onClick={openSell} disabled={writesBlocked} title={writeBlockedReason ?? undefined} className={ghost} data-testid="meritum-sell">
                 {market.windingDown ? COPY.redeem : COPY.sell}
               </button>
-              {shareButton(ghost, 'meritum-share-hero')}
               {!isOwner ? <MessageButton handle={routeHandle} label={COPY.message} className={ghost} /> : null}
             </div>
             {writeBlockedReason ? <div className="mt-3 font-ui text-caption text-ink-10">{blockedNotice}</div> : null}
