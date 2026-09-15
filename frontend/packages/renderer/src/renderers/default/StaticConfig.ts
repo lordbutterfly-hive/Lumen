@@ -164,7 +164,8 @@ export class StaticConfig {
                     if (!src) return null;
                     const match = src.match(/3speak\.(?:tv|online|co)\/embed\?v=([^&\s]+)/i);
                     if (!match || match.length !== 2) return null;
-                    return `https://play.3speak.tv/embed?v=${match[1]}`;
+                    // `mode=iframe&layout=desktop`: 3speak's embed mode + strict 16:9 (see ThreeSpeakEmbedder.processEmbed).
+                    return `https://play.3speak.tv/embed?v=${match[1]}&mode=iframe&layout=desktop`;
                 }
             },
             {
@@ -174,7 +175,8 @@ export class StaticConfig {
                     if (!src) return null;
                     const match = src.match(/3speak\.(?:tv|online|co)\/watch\?v=([^&\s]+)/i);
                     if (!match || match.length !== 2) return null;
-                    return `https://play.3speak.tv/embed?v=${match[1]}`;
+                    // `mode=iframe&layout=desktop`: 3speak's embed mode + strict 16:9 (see ThreeSpeakEmbedder.processEmbed).
+                    return `https://play.3speak.tv/embed?v=${match[1]}&mode=iframe&layout=desktop`;
                 }
             },
             {

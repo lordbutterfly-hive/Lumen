@@ -214,10 +214,6 @@ const RendererContainer = ({
     sub?.forEach((e) => {
       e.classList.add('leading-[22px]');
     });
-    const threeSpeak = ref.current?.querySelectorAll('.threeSpeakWrapper');
-    threeSpeak?.forEach((link) => {
-      link.classList.add('videoWrapper');
-    });
     // Note: Previously removed margins from paragraphs when !mainPost (preview mode)
     // This caused issue #759 where line breaks/spacing weren't visible in preview
     // Now paragraphs keep their default prose styling in both preview and published view

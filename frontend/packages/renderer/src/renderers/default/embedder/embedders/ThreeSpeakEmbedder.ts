@@ -59,7 +59,22 @@ export class ThreeSpeakEmbedder extends AbstractEmbedder {
     // property is unchanged: still a single hardcoded origin, still only the
     // charset-checked id from `linkRegex` interpolated into it.
     public processEmbed(id: string, size: {width: number; height: number}): string {
-        const embedUrl = `https://play.3speak.tv/embed?v=${id}`;
-        return `<div class="threeSpeakWrapper"><iframe width="${size.width}" height="${size.height}" src="${embedUrl}" frameborder="0" allowfullscreen></iframe></div>`;
+        // ★ ONE WINDOW, SET SIZE (owner, 2026-09-15: "theres a weird scroll on them
+        // instead of it being a single window at set size"). Without `mode=iframe`
+        // this URL is 3speak's full player PAGE: logo header, "Video Info" panel,
+        // 20px paddings, and a player that takes the video's own aspect ratio, so
+        // a portrait video ran 1223px tall inside our 390px box and scrolled.
+        // 3speak's own embed guide (play.3speak.tv/embed-demo.html): `mode=iframe`
+        // "hides the header and info panel for a clean, embeddable experience",
+        // `layout=desktop` "maintains a strict 16:9 aspect ratio like YouTube ...
+        // perfect for web embeds". hive.blog and 3speak.tv's own renderer emit the
+        // same pair. Both are literals appended after the charset-checked id.
+        //
+        // `videoWrapper` directly, like YouTube/Twitch/Vimeo, so the 16:9 box
+        // exists in the server HTML; `threeSpeakWrapper` had no CSS and only
+        // became a videoWrapper in a client effect after hydration, which is why
+        // the frame first painted at 640x480 and then jumped.
+        const embedUrl = `https://play.3speak.tv/embed?v=${id}&mode=iframe&layout=desktop`;
+        return `<div class="videoWrapper"><iframe width="${size.width}" height="${size.height}" src="${embedUrl}" frameborder="0" allowfullscreen></iframe></div>`;
     }
 }
