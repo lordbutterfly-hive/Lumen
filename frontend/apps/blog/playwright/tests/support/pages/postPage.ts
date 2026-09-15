@@ -306,7 +306,8 @@ export class PostPage {
     this.notFoundHeading = this.notFoundPage.locator('h1');
     this.postFooterTimestamp = page.locator('[data-testid="post-footer-timestamp"]');
     this.authorHeaderReputation = this.articleAuthorData.locator('[data-testid="author-reputation"]');
-    this.authorHeaderAvatar = this.articleAuthorData.locator('[data-testid="user-avatar"]');
+    // The byline avatar is UserAvatarImg since 2026-09-15 (image host first, proxy second, monogram beneath).
+    this.authorHeaderAvatar = this.articleAuthorData.locator('[data-testid="user-avatar-img"]');
     // Moderator-only controls on the main post (rendered when userCanModerate
     // and depth === 0). Pin/unpin buttons are unique to the main post.
     this.pinButton = page.getByTestId('post-pin-button');

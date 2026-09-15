@@ -43,7 +43,8 @@ function UserInfo({
   liteName,
   author_reputation,
   author_title,
-  blacklist
+  blacklist,
+  liteAvatarUrl
 }: UserInfoProps) {
   const { t } = useTranslation('common_blog');
   return (
@@ -51,6 +52,7 @@ function UserInfo({
       <UserPopoverCard
         author={author}
         liteName={liteName}
+        liteAvatarUrl={liteAvatarUrl}
         author_reputation={author_reputation}
         withImage
         blacklist={blacklist}

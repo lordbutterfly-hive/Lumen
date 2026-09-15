@@ -117,7 +117,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (lite.isLite && lite.keyless) {
       const served = await serveLiteAvatar(username, lite.imageUrl, size, width, height);
       if (served) return served;
-      return initialAvatar(username);
+      return initialAvatar(username, Boolean(lite.imageUrl));
     }
 
     // Fetch the image from the image hoster and stream it to the client.
@@ -149,7 +149,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       if (lite.isLite) {
         const served = await serveLiteAvatar(username, lite.imageUrl, size, width, height);
         if (served) return served;
-        return initialAvatar(username);
+        // A stored picture that could not be served is a transient miss, and so is
+        // a chain picture the image host failed to deliver (the gateway statuses
+        // below); no picture anywhere is the permanent answer.
+        return initialAvatar(username, Boolean(lite.imageUrl) || isGatewayFailure(response.status));
       }
       // ★ AND THE SAME FOR A HIVE ACCOUNT WHOSE STORED PICTURE IS DEAD.
       //
@@ -161,7 +164,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       // on-chain `profile_image` points at a Steemit-era host that no longer
       // exists. That is not an unusual account; it is what a meaningful share of
       // eight years of Hive history looks like.
-      return initialAvatar(username);
+      //
+      // ★ BUT NOT FOR A DAY WHEN THE CAUSE WAS A TIMEOUT (2026-09-15). `fetchAsWebp`
+      // answers 504 when its 3 s budget runs out (`budgetExhausted`), and this branch
+      // then served the monogram with the SAME one-day cache header as a real
+      // picture. Measured on production: 112 "avatar fetch timed out or failed"
+      // lines in /var/log/lumen.log, one of them magi.network, whose byline then
+      // showed a purple "M" for a day while every direct-host surface showed the
+      // real logo. A slow second upstream is not a fact about the account; cache
+      // it for a minute, not a day. A genuinely dead picture (any other status)
+      // keeps the long life.
+      return initialAvatar(username, isGatewayFailure(response.status));
     }
 
     // Prepare headers, copying content-type from the origin
@@ -279,7 +292,24 @@ function avatarBox(size: string | null, width: string | null, height: string | n
  * Deterministic initial-letter avatar. Same name always yields the same colour, so a
  * user's avatar does not change between page loads.
  */
-function initialAvatar(username: string): NextResponse {
+/**
+ * 502/503 from the image host, or the 504 `fetchAsWebp` synthesises when its budget
+ * runs out (`budgetExhausted`): the picture may well exist, the gateway just did not
+ * deliver it. NOT `>= 500`: the host answers a MISSING account with a 500, and that
+ * one is permanent.
+ */
+function isGatewayFailure(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
+
+/**
+ * `transient`: the monogram stands in for a picture that exists (or may exist) but
+ * could not be served just now, so it must expire quickly and let the next render
+ * try again. A stored lite picture that is permanently dead also lands here; that
+ * costs one lookup a minute per viewer, bounded by TOTAL_BUDGET_MS, and is the
+ * price of never caching a mere timeout for a day.
+ */
+function initialAvatar(username: string, transient = false): NextResponse {
   const letter = (username.trim()[0] ?? '?').toUpperCase();
   let hash = 0;
   for (const ch of username) hash = (hash * 31 + ch.charCodeAt(0)) % 360;
@@ -291,8 +321,9 @@ function initialAvatar(username: string): NextResponse {
     status: 200,
     headers: {
       'Content-Type': 'image/svg+xml',
-      // Cacheable: it is a pure function of the name.
-      'Cache-Control': 'public, max-age=86400'
+      // Cacheable: it is a pure function of the name -- unless it is standing in
+      // for a picture that merely timed out (see the 504 branch above).
+      'Cache-Control': transient ? 'public, max-age=60' : 'public, max-age=86400'
     }
   });
 }

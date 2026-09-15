@@ -24,6 +24,8 @@ export interface UserPopoverCardProps {
   author_reputation: number;
   blacklist: string[];
   withImage?: boolean;
+  /** The lite author's stored picture for the `withImage` avatar (LiteOverlay.avatarUrl). */
+  liteAvatarUrl?: string;
 }
 
 export function UserPopoverCard({
@@ -31,7 +33,8 @@ export function UserPopoverCard({
   liteName,
   author_reputation,
   blacklist,
-  withImage = false
+  withImage = false,
+  liteAvatarUrl
 }: UserPopoverCardProps) {
   const { t } = useTranslation('common_blog');
   const shownName = liteName || author;
@@ -50,7 +53,9 @@ export function UserPopoverCard({
             IS the interactive element (a Popover trigger, not a plain link),
             so growing its own box is the only way to grow its target. */}
         <button className="flex min-h-[24px] items-center gap-1 hover:cursor-pointer">
-          {withImage && <UserAvatar username={shownName} size="normal" />}
+          {withImage && (
+            <UserAvatar username={shownName} size="normal" src={liteAvatarUrl} lite={Boolean(liteName)} />
+          )}
           {/* ★ ONE INK FOR A USERNAME (2026-08-13, audit §5.3). `text-foreground`
               computes rgb(51,51,51) — measured on the shipped build — while the
               redesigned surfaces (the followers list, the profile masthead, the

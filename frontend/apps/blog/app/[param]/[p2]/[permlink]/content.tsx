@@ -1758,6 +1758,7 @@ const PostContent = () => {
                       moderateEnabled={!!userCanModerate}
                       author={visibleCrossPost?.author || litePost?.chainAuthor || postData.author}
                       liteName={visibleCrossPost ? undefined : litePost?.author}
+                      liteAvatarUrl={visibleCrossPost ? undefined : litePost?.avatarUrl}
                       author_reputation={
                         visibleCrossPost?.author_reputation ?? postData.author_reputation
                       }

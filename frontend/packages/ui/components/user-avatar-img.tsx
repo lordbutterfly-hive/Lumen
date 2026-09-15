@@ -229,34 +229,81 @@ export function UserAvatarImg({
    */
   useEffect(() => {
     if (stage === 'failed') return;
-    const timer = setTimeout(() => {
-      const el = imgRef.current;
-      // `complete` is true for a LOADED image and for one that errored (whose
-      // onError already handled it). Still false means: still waiting.
-      //
-      // ★ ...AND `complete` IS ALSO TRUE FOR A BLOCKED ONE, WHICH IS THE THIRD
-      // CASE THIS GUARD ORIGINALLY MISSED (2026-08-15). Chrome's Opaque Response
-      // Blocking (`ERR_BLOCKED_BY_ORB`) — which fires when the image host answers
-      // a missing avatar with a non-image body — COMPLETES the request with zero
-      // pixels and does NOT fire `onError`. So both escapes were shut: `onError`
-      // never ran, and `!el.complete` was false, so the promotion never happened
-      // and the reader kept the broken-image glyph indefinitely.
-      //
-      // Measured on `/creators/launch` with a fresh lite account, both avatars on
-      // ONE page: `size=small` promoted and resolved through the proxy
-      // (naturalWidth 96), while `size=medium` sat at `complete: true,
-      // naturalWidth: 0` forever. Same component, same account — so the proxy
-      // demonstrably works and only the trigger was missing.
-      //
-      // `naturalWidth === 0` on a completed image means exactly "produced no
-      // pixels", so this can only ADD promotions to a path already proven good;
-      // a genuinely loaded image has a non-zero width and is untouched.
-      if (!el || (el.complete && el.naturalWidth > 0)) return;
-      // direct -> proxy -> failed. Never backwards, so this always terminates.
-      setStage((current) => (current === 'direct' ? 'proxy' : 'failed'));
-    }, DIRECT_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, [stage]);
+    const el = imgRef.current;
+    if (!el) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      timer = setTimeout(() => {
+        const img = imgRef.current;
+        // `complete` is true for a LOADED image and for one that errored (whose
+        // onError already handled it). Still false means: still waiting.
+        //
+        // ★ ...AND `complete` IS ALSO TRUE FOR A BLOCKED ONE, WHICH IS THE THIRD
+        // CASE THIS GUARD ORIGINALLY MISSED (2026-08-15). Chrome's Opaque Response
+        // Blocking (`ERR_BLOCKED_BY_ORB`) — which fires when the image host answers
+        // a missing avatar with a non-image body — COMPLETES the request with zero
+        // pixels and does NOT fire `onError`. So both escapes were shut: `onError`
+        // never ran, and `!el.complete` was false, so the promotion never happened
+        // and the reader kept the broken-image glyph indefinitely.
+        //
+        // Measured on `/creators/launch` with a fresh lite account, both avatars on
+        // ONE page: `size=small` promoted and resolved through the proxy
+        // (naturalWidth 96), while `size=medium` sat at `complete: true,
+        // naturalWidth: 0` forever. Same component, same account — so the proxy
+        // demonstrably works and only the trigger was missing.
+        //
+        // `naturalWidth === 0` on a completed image means exactly "produced no
+        // pixels", so this can only ADD promotions to a path already proven good;
+        // a genuinely loaded image has a non-zero width and is untouched.
+        if (!img || (img.complete && img.naturalWidth > 0)) return;
+        // direct -> proxy -> failed. Never backwards, so this always terminates.
+        setStage((current) => (current === 'direct' ? 'proxy' : 'failed'));
+      }, DIRECT_TIMEOUT_MS);
+    };
+    /**
+     * ★★★ A LAZY IMAGE THAT HAS NOT SCROLLED INTO VIEW IS NOT A HUNG ONE
+     * (2026-09-15, owner: "some profile pics are missing").
+     *
+     * `loading="lazy"` is the default here, and a lazy image far below the fold
+     * is never REQUESTED until it nears the viewport, so `complete` stays false
+     * for as long as the reader has not scrolled. The timer above cannot tell
+     * that apart from a blocked request: measured on a live post page, a
+     * comment avatar 3000px down made ZERO network requests, was promoted
+     * direct -> proxy -> failed by two timers before anyone scrolled, and by the
+     * time the reader reached it the <img> had been unmounted and only the
+     * monogram was left. Both of its sources answered in under 350ms.
+     *
+     * So the timer is armed only once the element is within reach of the
+     * viewport. 300px, because the margin must sit INSIDE every browser's own
+     * lazy-load distance or the timer can still fire before a request exists:
+     * Chromium starts a lazy image 1250px out (2500px on 3G), Firefox only
+     * 300px out (bug 1673785), WebKit one viewport height. At 300px the request
+     * has started by the time the timer arms, in all three. Everything the timer guards
+     * against -- a hang, a blocked request, a zero-pixel response -- is a
+     * property of a request that EXISTS, and this is the earliest moment one
+     * does. An eager image, or a browser without IntersectionObserver, keeps
+     * the previous behaviour exactly.
+     */
+    if (loading === 'lazy' && typeof IntersectionObserver !== 'undefined') {
+      const io = new IntersectionObserver(
+        (entries) => {
+          if (!entries.some((entry) => entry.isIntersecting)) return;
+          io.disconnect();
+          arm();
+        },
+        { rootMargin: '300px' }
+      );
+      io.observe(el);
+      return () => {
+        io.disconnect();
+        if (timer !== undefined) clearTimeout(timer);
+      };
+    }
+    arm();
+    return () => {
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [stage, loading]);
 
   // Hashed once per render from the same trimmed value the letter below uses,
   // so an empty username and the literal '?' glyph share one deterministic hue

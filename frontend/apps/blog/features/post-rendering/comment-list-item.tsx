@@ -58,7 +58,7 @@ import { CircleSpinner } from 'react-spinners-kit';
 import MutePostDialog from './mute-post-dialog';
 import ChangeTitleDialog from '../community-profile/change-title-dialog';
 import TimeAgo from '@hive/ui/components/time-ago';
-import { getUserAvatarUrl } from '@hive/ui';
+import { UserAvatarImg } from '@ui/components';
 import { UserPopoverCard } from './user-popover-card';
 import { useTranslation } from '@/blog/i18n/client';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
@@ -720,13 +720,18 @@ const CommentListItem = memo(function CommentListItem({
                                     in the gutter or cross the connector line. The card-level
                                     `opacity-50` already fades hidden/temporary comments, so this
                                     doesn't need its own opacity variant. */}
-                                <img
-                                  className="mr-1.5 h-[20px] w-[20px] shrink-0 rounded-3xl"
-                                  height="20"
-                                  width="20"
-                                  src={getUserAvatarUrl(displayAuthor, 'small')}
-                                  alt={`${displayAuthor} profile picture`}
-                                  loading="lazy"
+                                {/* ★ CONVERGED ON UserAvatarImg (2026-09-15): this was a bare
+                                    <img> on the /api/avatar proxy alone, so a single upstream
+                                    timeout became a day-long cached monogram here while the
+                                    feed card (image host first) kept the real picture. See
+                                    user-avatar.tsx for the measurement. `src`/`lite` keep the
+                                    squatting guard for a lite author. */}
+                                <UserAvatarImg
+                                  username={displayAuthor}
+                                  pixelSize={20}
+                                  src={liteOverlay?.avatarUrl || undefined}
+                                  lite={Boolean(liteOverlay)}
+                                  className="mr-1.5"
                                 />
                                 <UserPopoverCard
                                   // The card ACTS on the real signing account —
