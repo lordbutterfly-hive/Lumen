@@ -41,12 +41,56 @@ import type { BuilderRow } from '@/blog/lib/builders-board-shape';
  * paints a short skeleton so the rail does not jump when the rows arrive.
  */
 
-/** How long one post holds its row before the flip. Staggered per row below. */
-const DWELL_MS = 5_600;
+/** How long one post holds its row before the flip (owner, 2026-09-15: "it flips
+ *  once every 30 second per person"). Staggered per row below so rows never
+ *  flip in unison. */
+const DWELL_MS = 30_000;
 /** The flip itself — short enough to read as a change, not an animation. */
 const FLAP_MS = 260;
-/** Rows the card shows, however many builders the route returns. */
-const MAX_ROWS = 8;
+/** Rows the card shows, however many builders the route returns. The list
+ *  scrolls inside a measured cap (see `useViewportCap`), so this is a sanity
+ *  bound, not a layout one. */
+const MAX_ROWS = 40;
+
+/** The shell's own `sticky top-24`, in px. The list can never be taller than what is left below it. */
+const STICKY_TOP_PX = 96;
+/** Breathing room under the list so it never ends flush with the window edge. */
+const BOTTOM_GUTTER_PX = 24;
+
+/**
+ * ★★★ THE LIST CAPS AT THE SPACE ACTUALLY AVAILABLE AND SCROLLS INSIDE IT
+ * (owner, 2026-09-15: "on scroll the list is hidden, cant scroll down it").
+ * The rail is `sticky top-24 h-fit`: a sticky box taller than the viewport is
+ * unreachable at the bottom — the page scrolls, the box does not, and the last
+ * rows can never be read. Ported verbatim from the Meritum board, which learned
+ * the same lesson: measure this list's offset INSIDE the aside (so the Topics
+ * card above it is accounted for, whatever its height) and cap at
+ * `viewport - stickyTop - offset - gutter`. Measured against the aside, not the
+ * viewport, because `rect.top` reads the unpinned position at scroll 0.
+ */
+function useViewportCap(ref: React.RefObject<HTMLElement>, rowCount: number): number | undefined {
+  const [cap, setCap] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    const measure = () => {
+      const el = ref.current;
+      const aside = el?.closest('aside');
+      if (!el || !aside) return;
+      const offsetInAside = el.getBoundingClientRect().top - aside.getBoundingClientRect().top;
+      setCap(Math.max(160, window.innerHeight - STICKY_TOP_PX - offsetInAside - BOTTOM_GUTTER_PX));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+    // ★ RE-MEASURE WHEN THE ROWS ARRIVE (caught on the first local render,
+    // 2026-09-15: `maxHeight` never set, list bottom at 1104px in a 900px
+    // viewport). The `<ul>` this measures only mounts once the query resolves;
+    // the skeleton before it carries no ref. Keyed on `[ref]` alone, this
+    // effect ran once against `ref.current === null` and never again, so the
+    // cap the owner asked for was computed for nothing. `rowCount` changes
+    // exactly when the real list appears.
+  }, [ref, rowCount]);
+  return cap;
+}
 
 async function fetchBuildersBoard(): Promise<BuilderRow[]> {
   const res = await fetch('/api/builders-board');
@@ -68,8 +112,9 @@ const BuilderRowView: FC<{ row: BuilderRow; index: number; paused: boolean }> = 
     // of a timer, so a paused board costs no wakeups at all.
     if (paused || row.posts.length < 2) return;
     // Staggered so rows never flip in unison — that reads as the page
-    // re-rendering rather than a board updating.
-    const delay = DWELL_MS + index * 460;
+    // re-rendering rather than a board updating. 1.5 s apart: with a 30 s
+    // dwell the rows drift through the half-minute instead of ticking together.
+    const delay = DWELL_MS + index * 1_500;
     timer.current = setTimeout(() => {
       setFlapping(true);
       setTimeout(() => {
@@ -123,6 +168,7 @@ const Builders = () => {
   const { t } = useTranslation('common_blog');
   const [hovered, setHovered] = useState(false);
   const [hidden, setHidden] = useState(false);
+  const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     // Animating a board nobody is looking at is pure battery.
@@ -141,8 +187,11 @@ const Builders = () => {
     retry: 1
   });
 
-  if (isError) return null;
+  // Above the early returns: a hook. `rows` is derived before it so the cap
+  // re-measures the moment the real list mounts.
   const rows = (data ?? []).slice(0, MAX_ROWS);
+  const cap = useViewportCap(listRef, rows.length);
+  if (isError) return null;
   if (!isLoading && rows.length === 0) return null;
 
   return (
@@ -161,7 +210,14 @@ const Builders = () => {
           ))}
         </ul>
       ) : (
-        <ul onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+        <ul
+          ref={listRef}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          className="overflow-y-auto overscroll-contain pr-1"
+          style={cap ? { maxHeight: cap } : undefined}
+          data-testid="builders-list"
+        >
           {rows.map((row, i) => (
             <BuilderRowView key={row.account} row={row} index={i} paused={hovered || hidden} />
           ))}

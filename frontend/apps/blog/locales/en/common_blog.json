@@ -2122,8 +2122,8 @@
       "empty": "No trending topics right now."
     },
     "builders": {
-      "heading": "Building on Hive",
-      "blurb": "What the people building the chain are publishing."
+      "heading": "Hive builders",
+      "blurb": "Tracking development on Hive: what the people building it are shipping."
     }
   },
   "tags_page": {

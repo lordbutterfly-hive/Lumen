@@ -3,6 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
+import { filterContainerEntries } from '@/blog/lib/moderation/container-posts';
 import { ensureSquatterList } from '@/blog/lib/lite/moderation/squatter-list';
 import { filterBlockedForViewer, viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
@@ -285,7 +286,13 @@ const trendingForPrefetch = withTtlCache(
      * module is a SEPARATE path backing `app/page.tsx`, and it was missed.
      */
     await ensureSquatterList();
-    return trimForSSR(filterBannedEntries(merged));
+    // ★★★ AND THE CONTAINERS (owner, 2026-09-15: "ecency.waves is still in my
+    // feed and we removed it globally"). `container-posts.ts` measured
+    // `ecency.waves` at #1 trending on 2026-09-13 and the route's fallback
+    // dropped it — but THIS is the anonymous home page's SSR seed, a separate
+    // path that only ever ran the ban filter, so the shell went straight into
+    // the HTML anyway. Same rule, same order as `loadFallbackPage`.
+    return trimForSSR(filterContainerEntries(filterBannedEntries(merged)));
   },
   () => 'home-trending-prefetch',
   {
@@ -468,7 +475,10 @@ async function finishStoredFeed(
   // signed-in home page's SSR seed, a separate path from the awaited one in
   // `for-you/route.ts`, and a cold read here puts a squatter straight into the HTML.
   await ensureSquatterList();
-  let entries = filterBannedEntries(stored.entries);
+  // Containers too, for symmetry with the route's stored branch (1235): the
+  // ranker drops them at its own gate, so this should be a no-op — and a
+  // filter that is only correct while the ranker is correct is not a filter.
+  let entries = filterContainerEntries(filterBannedEntries(stored.entries));
   // Apply the viewer's block list server-side so blocked authors never appear
   // in the SSR HTML. A `getLiteSession()` failure degrades open (unfiltered),
   // same as the API route; a `boundedBlockedKeySet` TIMEOUT is different and

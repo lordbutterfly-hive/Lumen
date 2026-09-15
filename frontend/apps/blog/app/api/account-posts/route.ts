@@ -10,6 +10,7 @@ import {
 } from '@/blog/lib/lite/social/block-filter';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { trimEntriesForSeed } from '@/blog/lib/feed/seed-trim';
+import { filterContainerEntries } from '@/blog/lib/moderation/container-posts';
 import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
 import { ensureSquatterList } from '@/blog/lib/lite/moderation/squatter-list';
 import { rememberAccountPostsSeed } from '@/blog/lib/feed/account-posts-seed-cache';
@@ -154,6 +155,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // blocks second -- same order `/api/discussion` uses and for the same
     // reason.
     entries = await attachLiteIdentities(entries);
+    // ★ CONTAINER SHELLS LEAVE THE FOLLOWING FEED, AND ONLY THE FEED (owner,
+    // 2026-09-15: "removed it globally … since it's a container post").
+    // `sort: 'feed'` is what `/@me/feed` and the home "Following" tab read, and
+    // following `ecency.waves` put a new empty shell in it every day. The
+    // profile tabs (`posts`, `comments`, `replies`) are deliberately NOT
+    // touched: `container-posts.ts` rules that `/@ecency.waves` must still list
+    // its posts — a destination somebody asked for by name is not a feed.
+    if (sort === 'feed') entries = filterContainerEntries(entries);
     // ★★★ "COULD NOT CHECK" IS NOT "HAS NOTHING TO SHOW" (2026-08-13, adversarial
     // review S2). `applyOwnerBlocksToAuthoredEntries` fails CLOSED per parent —
     // right, and it stays — but it does so by returning FEWER entries and throwing

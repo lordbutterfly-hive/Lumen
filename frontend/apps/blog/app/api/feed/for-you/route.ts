@@ -801,8 +801,18 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
       );
       const onTopic = topic ? posts.filter((e) => hasTopic(e, topic)) : posts;
       const merged = await mergeLumenEngagement(onTopic);
+      // ★★★ BANS AND CONTAINERS APPLY TO PAGE 2 AS WELL (owner, 2026-09-15:
+      // "ecency.waves is still in my feed and we removed it globally"). Every
+      // page-1 branch filtered; this one — raw chronological chain paging —
+      // never did, so the shells the ranker and the fallback both dropped came
+      // straight back the moment a reader scrolled. `nextCursor` stays on the
+      // RAW page below: the cursor is the last entry the CHAIN gave, and if it
+      // were recomputed from the filtered list and the filtered post was last,
+      // the next request would start from before it and fetch the same page
+      // forever.
+      const visible = filterContainerEntries(filterBannedEntries(merged));
       return feedJson({
-        entries: merged,
+        entries: visible,
         source: 'chain-page',
         // ★★★ SAY WHAT THIS PAGE ACTUALLY IS (2026-08-14). Page 1 is ranked and
         // reports `ranked`/`served`/`cache`/`builtAt`; page 2 onward is raw

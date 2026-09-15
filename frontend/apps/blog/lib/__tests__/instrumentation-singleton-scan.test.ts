@@ -272,6 +272,11 @@ const ALLOWLIST: Record<string, string[]> = {
   'apps/blog/lib/trending-tags.ts': ['TRENDING_TAGS_QUERY_KEY'],
   'packages/transaction/lib/hive.ts': ['keyTypes'],
   'apps/blog/lib/feed/feed-prefetch.ts': ['BODY_IMAGE_PATTERNS'],
+  // Reachable since 2026-09-15 via feed-prefetch.ts -> container-posts.ts (the
+  // SSR seed now drops container shells). An immutable Set of three account
+  // names, never written after module load: a second copy per layer is a
+  // second identical constant, not a second cache.
+  'apps/blog/lib/moderation/container-posts.ts': ['CONTAINER_ACCOUNTS'],
   'apps/blog/lib/lite/config.ts': ['FRONTEND_ACCOUNTS', 'ACCOUNT_CREATOR_ACCOUNTS', 'liteConfig'],
   'packages/smart-signer/lib/session.ts': ['sessionOptions'],
   'apps/blog/lib/request-budget.ts': [

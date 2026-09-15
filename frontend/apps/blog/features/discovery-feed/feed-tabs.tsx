@@ -11,6 +11,7 @@ import {
 import ScrollPagerFooter from './scroll-pager-footer';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
+import { isContainerEntry } from '@/blog/lib/moderation/container-posts';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
@@ -757,11 +758,27 @@ function ForYouFeed({ ssrCardCount = Number.POSITIVE_INFINITY }: { ssrCardCount?
   // post the chain pages reach again later, and a feed that repeats itself reads
   // as broken. Accepted posts go first — the reader asked for them, so they belong
   // at the top, and the dedupe keeps a later page from repeating one.
+  /* ★★★ THE READER'S OWN BLOCK LIST, APPLIED HERE TOO (owner, 2026-09-15: "I
+     blocked ecency.stats and it still showed up in my feed"). The server
+     filters every page it serves, and a block invalidates `forYouRanked` so
+     page 1 comes back clean — but `accepted` (the posts the reader took from
+     the "Show N new posts" pill) is CLIENT state that no refetch touches. It
+     was filtered at probe time, against the block list as it stood THEN; block
+     someone after accepting their post and it stayed on top, and since the
+     acceptance is now remembered for six hours (accepted-new-posts.ts) it
+     stayed across reloads as well. The Following tab below has always applied
+     this same reader-side filter; the ranked feed relied on the server alone.
+     Reader-side only — the owner-side half of blocking is never enforced in a
+     browser, see use-lumen-block.ts. Still above the guards: this is a hook. */
+  const blockList = useLumenBlockList(true);
   const seen = new Set<string>();
   const rawEntries = [...accepted, ...pages.flatMap((page) => page?.entries ?? [])].filter((e) => {
     const key = entryKey(e);
     if (seen.has(key)) return false;
     seen.add(key);
+    // Blocked authors and container shells never render, whichever path put
+    // them here: page 1, a continuation page, or the reader's own `accepted`.
+    if (isBlockedEntry(e, blockList) || isContainerEntry(e)) return false;
     return true;
   });
 
@@ -1415,7 +1432,10 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   //
   // Same NSFW list-level filter as the ranked feed above (see lib/nsfw.ts).
   const entries = filterVisiblePosts(
-    rawPageEntries.filter((entry) => !isBlockedEntry(entry, blockList)),
+    // Containers as well as blocks (owner, 2026-09-15): the server now drops
+    // shells from `sort: 'feed'`, and this keeps them out if a cached page
+    // predates that.
+    rawPageEntries.filter((entry) => !isBlockedEntry(entry, blockList) && !isContainerEntry(entry)),
     nsfwPreference
   );
 
