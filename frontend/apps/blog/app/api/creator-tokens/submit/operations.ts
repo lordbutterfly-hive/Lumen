@@ -41,3 +41,19 @@ export const TX_STATUS_OPERATION = `query FindTransaction($id: String!) {
     status
   }
 }`;
+
+/**
+ * ★ THE EXECUTION SIGNAL (2026-09-15). The ledger rows a transaction wrote on
+ * this node: a buy's draw (`<txid>#in`) appears the block after inclusion,
+ * minutes before the anchored CONFIRMED status. lib/meritum/executed-signal.ts
+ * reads it. Same shape and limits as the status poll.
+ */
+export const TX_LEDGER_OPERATION = `query FindLedgerTXs($id: String!) {
+  findLedgerTXs(filterOptions: { byTxId: $id }) {
+    id
+    owner
+    amount
+    asset
+    type
+  }
+}`;

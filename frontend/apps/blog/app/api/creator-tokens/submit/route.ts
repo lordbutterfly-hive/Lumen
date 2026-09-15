@@ -3,7 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceMagiGqlRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { consumeLocalGlobal, consumeLocalPerIp } from '@/blog/lib/lite/antispam/local-rate-limit';
-import { NONCE_OPERATION, SUBMIT_OPERATION, TX_STATUS_OPERATION } from './operations';
+import { NONCE_OPERATION, SUBMIT_OPERATION, TX_LEDGER_OPERATION, TX_STATUS_OPERATION } from './operations';
 import { guardBodySize } from '@/blog/lib/lite/http/guard';
 
 const logger = getLogger('app');
@@ -39,7 +39,8 @@ const ALLOWED = new Map<string, 'nonce' | 'submit' | 'status'>([
   // A cheap, idempotent read, so it shares the generous nonce budget rather
   // than the submit one — confirming a transaction must never be rationed as
   // tightly as sending one, or a user cannot find out what happened to theirs.
-  [TX_STATUS_OPERATION, 'status']
+  [TX_STATUS_OPERATION, 'status'],
+  [TX_LEDGER_OPERATION, 'status']
 ]);
 
 /**

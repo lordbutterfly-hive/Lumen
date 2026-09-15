@@ -95,7 +95,7 @@ const ConfirmingOnChain: FC = () => (
     className="mt-3 flex items-center justify-center gap-2.5 rounded-card border border-line-brand-10 bg-surface-16 px-4 py-3 text-center text-caption font-medium text-ink-2 font-ui"
   >
     <Spinner />
-    <span>Confirming on the Magi network. This usually takes about 20 seconds, sometimes up to a minute. Keep this open while it goes through.</span>
+    <span>Confirming on the Magi network. Usually a few seconds. Keep this open while it goes through.</span>
   </div>
 );
 

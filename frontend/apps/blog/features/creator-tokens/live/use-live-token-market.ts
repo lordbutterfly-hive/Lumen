@@ -1,5 +1,7 @@
 'use client';
 
+import { toast } from '@ui/components/hooks/use-toast';
+
 /**
  * The real-chain replacement for market/store.ts's useTokenMarket().
  *
@@ -443,7 +445,24 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
     mutationFn: async ({ tokens, maxTotalUsd, fundFromHive }: { tokens: number; maxTotalUsd?: number; fundFromHive?: boolean }) => {
       const { source, signer } = requireSigner();
       // `fundFromHive`: ★ ONE SIGNATURE FUNDS AND BUYS (2026-09-15), see BuyInput.fundFromHive.
-      await runUnderTxClaim(creator, signer, () => source.buy({ creator, buyer: signer, tokens, maxTotalHbd: maxTotalUsd, fundFromHive }));
+      await runUnderTxClaim(creator, signer, () =>
+        source.buy({
+          creator,
+          buyer: signer,
+          tokens,
+          maxTotalHbd: maxTotalUsd,
+          fundFromHive,
+          // The buy resolved on the node's execution; if finality later disagrees
+          // (it should not), refresh everything and say so. See BuyInput.onReversed.
+          onReversed: () => {
+            invalidate();
+            toast({
+              title: 'Magi reversed this purchase',
+              description: 'The network finalised a different result than the node executed. Your balances and holdings have been refreshed.'
+            });
+          }
+        })
+      );
     },
     // onSettled, not onSuccess: a REFUSED funded buy has still moved HBD from
     // the Hive wallet into the Magi balance, and an UNCONFIRMED one may have.

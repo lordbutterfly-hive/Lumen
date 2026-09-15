@@ -682,6 +682,14 @@ export interface BuyInput {
    * Ignored for DID buyers (no Hive wallet to draw from).
    */
   fundFromHive?: boolean;
+  /**
+   * ★ EXECUTED BEATS ANCHORED (2026-09-15). A buy resolves as soon as this
+   * node's ledger shows the buyer's draw; finality (the anchored output) is
+   * watched in the background. If that later reports FAILED, which would mean
+   * consensus finalised something other than what the node executed, this is
+   * called so the caller can refresh and tell the buyer. Never silent.
+   */
+  onReversed?: () => void;
 }
 
 /**

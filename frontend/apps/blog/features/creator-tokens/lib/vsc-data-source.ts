@@ -166,7 +166,8 @@ import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, rulesForCode, windi
 // (submit.ts SUBMIT_PROXY_PATH) — so no new node surface, and the query cannot
 // drift from the wallet rail's. See awaitExecution() below.
 import { SUBMIT_PROXY_PATH } from '@/blog/lib/lite/wallet/vsc-tx/submit';
-import { TX_STATUS_OPERATION } from '@/blog/app/api/creator-tokens/submit/operations';
+import { TX_LEDGER_OPERATION, TX_STATUS_OPERATION } from '@/blog/app/api/creator-tokens/submit/operations';
+import { buyExecutedIn, parseLedgerRows, type LedgerRow } from '@/blog/lib/meritum/executed-signal';
 import { readMagiSpendingPower } from '@/blog/lib/lite/wallet/magi-balance';
 import { depositIntentOf, hbdString, planHiveTopUp, rcLimitOf, type GatewayDepositIntent } from '@/blog/lib/meritum/hive-topup';
 import { rcLimitForAction } from './vsc/rc-budget';
@@ -237,6 +238,8 @@ export const RENEW_CONFIRM_TIMEOUT_MS = 90_000;
  * says CHECK, never retry), an early timeout on a real success is not.
  */
 export const EXECUTION_CONFIRM_TIMEOUT_MS = 180_000;
+/** How long a buy that already EXECUTED keeps watching for its anchored finality in the background. */
+export const FINALITY_WATCH_MS = 15 * 60_000;
 
 // Real, on-chain implementation. Reads live contract state via GraphQL
 // getStateByKeys (plumbing + decoding in ./vsc/reads.ts); builds custom_json
@@ -318,6 +321,17 @@ async function defaultTxStatusReader(txId: string): Promise<string | null> {
   };
   return parsed.data?.findTransaction?.[0]?.status ?? null;
 }
+/** The ledger rows a transaction wrote on the node (lib/meritum/executed-signal.ts). Browser only, via the submit proxy. */
+export type TxLedgerReader = (txId: string) => Promise<LedgerRow[] | null>;
+async function defaultTxLedgerReader(txId: string): Promise<LedgerRow[] | null> {
+  const res = await fetch(SUBMIT_PROXY_PATH, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ query: TX_LEDGER_OPERATION, variables: { id: txId } }),
+    cache: 'no-store'
+  });
+  return parseLedgerRows(JSON.parse(await res.text()));
+}
 
 export interface VscCreatorTokensDataSourceDeps {
   config: CreatorTokensConfig;
@@ -329,6 +343,8 @@ export interface VscCreatorTokensDataSourceDeps {
   fundedBroadcaster?: FundedBroadcaster;
   /** Optional tx-status reader; unset in production (uses defaultTxStatusReader). See TxStatusReader. */
   txStatusReader?: TxStatusReader;
+  /** Optional ledger reader (tests); the browser uses the submit proxy. See TxLedgerReader. */
+  txLedgerReader?: TxLedgerReader;
 }
 
 const NO_BROADCASTER_MSG = 'VscCreatorTokensDataSource: no broadcaster wired — inject the transaction service';
@@ -404,6 +420,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   private readonly bundleBroadcaster?: BundleBroadcaster;
   private readonly fundedBroadcaster?: FundedBroadcaster;
   private readonly txStatusReader: TxStatusReader | null;
+  private readonly txLedgerReader: TxLedgerReader | null;
   private readonly indexer: MagiIndexerClient | null;
 
   constructor(deps: VscCreatorTokensDataSourceDeps) {
@@ -420,6 +437,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // Unset in production -> awaitExecution uses defaultTxStatusReader (browser
     // fetch). A Node caller injects one; see TxStatusReader.
     this.txStatusReader = deps.txStatusReader ?? null;
+    this.txLedgerReader = deps.txLedgerReader ?? null;
   }
 
   // ---- reads ----
@@ -1645,7 +1663,9 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // A funded buy is ONE record under the same L1 id on the node (it only
     // defaults to CONFIRMED when a deposit is the sole op, state_engine.go),
     // so this poll cannot mistake the credited deposit for a confirmed buy.
-    const outcome = await this.awaitExecution(txId);
+    // ★ EXECUTED BEATS ANCHORED (2026-09-15): resolves on the ledger draw or
+    // the terminal status, whichever lands first; see awaitBuyExecuted.
+    const outcome = await this.awaitBuyExecuted(txId, input.buyer);
     if (outcome === 'failed') {
       if (deposit) {
         // The node credits the deposit at ingest and reverts only the call's
@@ -1666,6 +1686,16 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       throw new Error(
         'CREATOR_TOKENS_BUY_UNCONFIRMED: Hive accepted your purchase, but Magi has not confirmed it yet. Check your balance before buying again.'
       );
+    }
+    if (outcome === 'executed') {
+      // Executed on this node; the anchored finality is watched in the
+      // background. A later FAILED would mean consensus finalised something
+      // other than what this node executed: surface it, never silently.
+      void this.awaitExecution(txId, FINALITY_WATCH_MS)
+        .then((final) => {
+          if (final === 'failed') input.onReversed?.();
+        })
+        .catch(() => undefined);
     }
     // Confirmed. Return the PROJECTION, not a re-read: the UI invalidates on
     // success and refetches exact state, so a re-read here is redundant (43/57,
@@ -3025,7 +3055,38 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
    *     day and report UNCONFIRMED on real successes. rate-limit.ts carries the
    *     matching note — do not restore the old default.
    */
-  private async awaitExecution(txId: string): Promise<'confirmed' | 'failed' | 'timeout'> {
+  /**
+   * ★ EXECUTED BEATS ANCHORED (2026-09-15; the owner's live funded buy executed
+   * 3 s after signing and turned CONFIRMED 3+ minutes later, past the 180 s
+   * wait). Resolves 'executed' as soon as this node's ledger shows the buyer's
+   * draw for `txId` (lib/meritum/executed-signal.ts), 'confirmed'/'failed' when
+   * the terminal status lands first, or 'timeout'. Without a ledger reader
+   * (server, tests that inject only a status reader) it is exactly awaitExecution.
+   */
+  private async awaitBuyExecuted(txId: string, buyer: string): Promise<'executed' | 'confirmed' | 'failed' | 'timeout'> {
+    const readLedger = this.txLedgerReader ?? (typeof window !== 'undefined' ? defaultTxLedgerReader : null);
+    if (!readLedger) return this.awaitExecution(txId);
+    const readStatus = this.txStatusReader ?? defaultTxStatusReader;
+    const POLL_MS = 2_000;
+    const giveUpAt = Date.now() + EXECUTION_CONFIRM_TIMEOUT_MS;
+    for (;;) {
+      try {
+        const status = await readStatus(txId);
+        if (status === 'CONFIRMED') return 'confirmed';
+        if (status === 'FAILED') return 'failed';
+      } catch {
+        // transient read failure: keep polling until the deadline
+      }
+      try {
+        if (buyExecutedIn(await readLedger(txId), txId, buyer)) return 'executed';
+      } catch {
+        // same
+      }
+      if (Date.now() + POLL_MS >= giveUpAt) return 'timeout';
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    }
+  }
+  private async awaitExecution(txId: string, timeoutMs: number = EXECUTION_CONFIRM_TIMEOUT_MS): Promise<'confirmed' | 'failed' | 'timeout'> {
     const injected = this.txStatusReader;
     // The DEFAULT reader is a relative-path browser fetch, so an accidental
     // server-side call would throw, be caught below as "no verdict", and burn the
@@ -3045,7 +3106,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // below returns 'timeout' when the NEXT poll would cross the deadline, so the
     // final poll lands ~one interval early (57 review #5). Intentional, same
     // shape as the escrow/paidUntil helpers above.
-    const deadline = Date.now() + EXECUTION_CONFIRM_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
     for (;;) {
       try {
         const status = await read(txId);
