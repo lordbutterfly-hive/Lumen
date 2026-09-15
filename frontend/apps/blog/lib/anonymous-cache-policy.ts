@@ -108,6 +108,14 @@ export function anonymousCachePolicy(input: CachePolicyInput): CachePolicy {
     return policy('topic', 60, 120);
   }
 
+  // /m/<handle>: the Meritum creator page (2026-09-15). Public, built for
+  // unfurler fan-out, carrying a live price — a minute shared is the same
+  // bound the topic pages accept, and the head's og:image URL already
+  // changes with the price. Only a well-formed Hive name here: a DID carries
+  // ':' and stays uncached, and a malformed segment is a 404 that must never
+  // be labelled shared-cacheable.
+  if (parts[0] === 'm' && parts.length === 2 && ACCOUNT.test(parts[1])) return policy('meritum-creator', 60, 120);
+
   // /@name and its public sub-pages
   if (ACCOUNT.test(parts[0])) {
     if (parts.length === 1) return policy('profile', 300, 3600);

@@ -16,7 +16,6 @@ import { healthWordFor, marketHealthOf } from '../../market/market-health';
 import { buyerOracleNotice } from '../../market/oracle-copy';
 import { HOW_IT_WORKS_RESERVE_LINE, MARKET_CAP_LABEL, MARKET_CAP_NOTE, WIND_DOWN_BANNER, honestNote } from '../token-page/disclosure-copy';
 import { MeritumEligibilityNotice, useMeritumEligibility } from '../meritum-eligibility';
-import TokenShell from '../token-shell';
 import TokenModals, { type TokenDialog } from '../token-page/token-modals';
 import { askReference, interstitialKey } from '../token-page/token-page-helpers';
 import CreatorTokenLaurel from '../creator-token-laurel';
@@ -93,6 +92,11 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
   const [service, setService] = useState<Service | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const pendingAction = useRef<TokenDialog>(null);
+  // ★ A DEEP LINK OPENS ITS DIALOG ONCE (review, 2026-09-15). The effect below
+  // depends on `loggedIn` and `writesBlocked`, both of which settle after
+  // mount; without this, closing the dialog and having one of them flip
+  // re-opened it. Keyed on the query string so a NEW deep link still works.
+  const consumedDeepLink = useRef<string | null>(null);
   const hasMarket = market !== null;
   const shown = displayHandle(handle);
   const routeHandle = routeHandleOf(handle);
@@ -133,24 +137,38 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
     if (!market) return;
     const a = searchParams?.get('a');
     if (!a) return;
+    const key = searchParams?.toString() ?? '';
+    if (consumedDeepLink.current === key) return;
+    const consume = () => {
+      consumedDeepLink.current = key;
+    };
     if (a === 'share') {
+      consume();
       setShareOpen(true);
       return;
     }
     if (a === 'dm') {
+      consume();
       setDialog('dm');
       return;
     }
+    // Not consumed yet: the reader may sign in and come back through this same URL.
     if (!live.loggedIn || writesBlocked) return;
     if (a === 'buy') {
+      consume();
       if (market.canBuy && !soldOut) setDialog('buy');
     } else if (a === 'sell' || a === 'redeem') {
+      consume();
       setDialog(market.windingDown ? 'redeem' : 'sell');
     } else if (a === 'send') {
+      consume();
       setDialog('send');
     } else if (a === 'spend' && market.canAsk) {
+      consume();
+      // ★ NO SUBSTITUTION (review, 2026-09-15): an `o` that names no offering
+      // opens nothing, rather than the first offering under a different name.
       const wanted = searchParams?.get('o');
-      const sv = (wanted ? market.services.find((s) => s.key === wanted) : undefined) ?? market.services[0];
+      const sv = wanted ? market.services.find((s) => s.key === wanted) : market.services[0];
       if (sv) {
         setService(sv);
         setDialog('ask');
@@ -197,8 +215,8 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
 
   const stat = (label: string, value: string, testId: string) => (
     <div className="bg-surface-1 px-[18px] py-4" data-testid={testId}>
-      <div className="font-ui text-[11px] font-medium uppercase tracking-[0.13em] text-ink-14">{label}</div>
-      <div className="mt-1.5 text-[22px] leading-[28px] text-ink-2 font-num">{value}</div>
+      <div className="font-ui text-[11px] font-bold uppercase tracking-[0.13em] text-ink-14">{label}</div>
+      <div className="mt-1.5 text-[22px] leading-[28px] font-semibold text-ink-2 font-num">{value}</div>
     </div>
   );
   const stats5 = [
@@ -219,37 +237,6 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
     </button>
   );
 
-  const howThisWorks = (
-    <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
-      <div className="mb-3 font-ui text-[15px] leading-[24px] font-medium text-ink-2">How this works</div>
-      <div className="flex flex-col gap-3.5">
-        {HOW_THIS_WORKS_LINES.map((line, i) => (
-          <div key={i} className="flex gap-3">
-            <span className="text-ink-brand-6 font-num">{i + 1}</span>
-            <span className="font-ui text-caption text-ink-7">{line}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-  const marketCapCard = (
-    <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
-      <div className="mb-1.5 font-ui text-caption text-ink-10">{MARKET_CAP_LABEL}</div>
-      <div className="mb-0.5 text-[20px] tabular-nums text-ink-2 font-num">{usdWholeNonZero(market.marketCapUsd)}</div>
-      <p className="font-ui text-caption text-ink-14">{MARKET_CAP_NOTE}</p>
-      {shareButton(
-        'mt-4 flex w-full items-center justify-center gap-2 rounded-full border border-line-11 bg-surface-1 py-2.5 font-ui text-[14px] font-medium text-ink-2 hover:bg-surface-16',
-        'meritum-share-rail'
-      )}
-    </div>
-  );
-  const rightRail = (
-    <div className="flex flex-col gap-5 pt-[26px]">
-      {howThisWorks}
-      {marketCapCard}
-    </div>
-  );
-
   const handleBuy = async (usd: number, maxTotalUsd?: number): Promise<void> => {
     const local = buyQuote(usd, market);
     if (local.tokens <= 0) throw new Error('That budget does not cover a whole token at the current price.');
@@ -266,123 +253,123 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
     await live.refund(tokens, minNetUsd);
   };
 
-  const pill = 'inline-flex items-center gap-2 rounded-full font-ui text-[15px] leading-[24px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
-  const ghost = `${pill} border border-line-11 bg-surface-1/70 px-6 py-3 text-ink-2 hover:bg-surface-1`;
+  // The handoff's pills: 52px tall, brand with a warm shadow for Buy, ghost for the rest.
+  const pill = 'inline-flex h-[52px] items-center gap-2.5 rounded-full px-7 font-ui text-[16px] leading-none font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
+  const ghost = `${pill} border border-ink-2/20 bg-surface-1/70 text-ink-2 hover:border-ink-2 hover:bg-surface-1`;
+  const card = 'rounded-[14px] border border-line-9 bg-surface-1';
 
   return (
-    <TokenShell rightRail={rightRail} back={{ href: '/creators', label: COPY.back }}>
-      <div data-testid="meritum-landing" data-handle={handle}>
-        {/* ── hero: the warm wash, the eyebrow, the person, the actions, the curve ── */}
-        <section
-          className="relative overflow-hidden rounded-panel border border-line-9 border-l-[3px] border-l-line-brand-10 bg-[linear-gradient(112deg,#FAEEEB_0%,#FBF7F2_46%,#FCFAF7_100%)] px-7 pb-7 pt-9 md:px-10"
-          data-testid="meritum-hero"
-        >
-          {/* ★ THE NAME ROW SPANS THE HERO; ONLY THE BUTTONS SHARE A ROW WITH
-              THE CURVE (measured 2026-09-15 on the first render: with the name
-              beside a 400px curve panel inside this shell's ~750px column,
-              "@lordbutterfly" broke into three lines mid-word). The handoff's
-              1280px canvas has 1fr for the name; this page's content column is
-              narrower by the two rails, so the name gets the full width and the
-              panel drops beside the actions instead. */}
-          <div className="mb-5 flex items-center gap-2.5 font-ui text-[14px] font-semibold uppercase tracking-[0.2em] text-ink-brand-6">
-            <CreatorTokenLaurel size={22} />
-            {COPY.eyebrow}
-          </div>
-          {/* Stacked under `sm`: at 390px the avatar, the gap and a 14-character
-              handle do not share a row without breaking the name mid-word
-              (measured 2026-09-15). From `sm` up the face sits beside the name. */}
-          <div className="flex flex-col items-start gap-4 sm:flex-row sm:gap-5">
-            <UserAvatarImg
-              username={routeHandle}
-              pixelSize={76}
-              apiSize="large"
-              radiusClassName="rounded-full"
-              className="shrink-0 border-2 border-line-brand-10"
-              alt={`@${shown} profile picture`}
-            />
-            <div className="min-w-0 max-w-full">
-              <h1 className="break-words font-ui text-[30px] leading-[1.08] font-semibold tracking-[-0.02em] text-ink-2 md:text-[40px]" data-testid="meritum-handle">
-                @{shown}
-              </h1>
-              {profile.about ? (
-                <p className="mt-2.5 max-w-[60ch] font-lora text-[16.5px] leading-[1.52] text-ink-4" data-testid="meritum-about">
-                  {profile.about}
-                </p>
-              ) : null}
-            </div>
-          </div>
+    <div className="mx-auto w-full max-w-[1320px] px-4 pb-20 pt-[22px] md:px-5" data-testid="meritum-landing" data-handle={handle}>
+      {/* ★ NO LEFT RAIL ON THIS PAGE (owner, 2026-09-15: "this looks nothing like
+          what I sent you"). The handoff is a landing page: one 1280px column
+          with the hero across the top and a 316px rail beside the body. Inside
+          the app's three-column shell the hero lost its curve panel and every
+          heading wrapped. The global header stays; the way back is the link. */}
+      <Link href="/creators" className="mb-4 inline-block font-ui text-[14px] leading-[22px] font-medium text-ink-brand-6 hover:text-ink-brand-4" data-testid="creator-back">
+        {COPY.back}
+      </Link>
 
-          {market.windingDown ? (
-            <div className="mt-5 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5 font-ui text-[14px] leading-[22px] font-medium text-ink-warn-3">
-              {WIND_DOWN_BANNER}
+      {/* ── hero: the warm wash, the eyebrow, the person, the actions, the curve, the stat strip ── */}
+      <section
+        className="relative overflow-hidden rounded-[20px] border border-line-9 border-l-[3px] border-l-line-brand-10 bg-[linear-gradient(112deg,#FAEEEB_0%,#FBF7F2_46%,#FCFAF7_100%)] px-6 pb-8 pt-10 md:px-10 md:pt-[54px]"
+        data-testid="meritum-hero"
+      >
+        <div className="grid grid-cols-1 items-end gap-8 xl:grid-cols-[minmax(0,1fr)_430px] xl:gap-[52px]">
+          <div className="min-w-0">
+            <div className="mb-6 flex items-center gap-3 font-ui text-[15px] font-bold uppercase tracking-[0.2em] text-ink-brand-6 md:text-[17px]">
+              <CreatorTokenLaurel size={24} />
+              {COPY.eyebrow}
             </div>
-          ) : market.delinquentUntilBlock !== null ? (
-            <div className="mt-5 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5 font-ui text-[14px] leading-[22px] font-medium text-ink-warn-3">
-              This creator has left too many paid asks unanswered, so buying and new asks are paused for now. Selling, refunds and reclaims are unaffected.
-            </div>
-          ) : null}
-
-          {/* `2xl`, not `xl`: inside this shell's two rails the content column is
-              ~750px at 1440 and the four pills need ~600px of it; beside a 380px
-              panel they wrapped to three rows. From 1536 the column is wide enough. */}
-          <div className="mt-6 grid grid-cols-1 items-end gap-6 2xl:grid-cols-[minmax(0,1fr)_380px]">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={openBuy}
-                  disabled={!market.canBuy || soldOut || writesBlocked}
-                  title={soldOut ? 'Every token on this curve has been issued.' : writeBlockedReason ?? undefined}
-                  className={`${pill} bg-surface-brand-12 px-7 py-3 text-ink-27 shadow-[0_4px_14px_rgba(192,57,43,0.34)] hover:bg-surface-brand-16`}
-                  data-testid="meritum-buy"
-                >
-                  {soldOut ? COPY.soldOut : COPY.buy}
-                  {!soldOut ? <span className="font-num font-normal opacity-80">{usdPrice(market.priceUsd)}</span> : null}
-                </button>
-                <button type="button" onClick={openSell} disabled={writesBlocked} title={writeBlockedReason ?? undefined} className={ghost} data-testid="meritum-sell">
-                  {market.windingDown ? COPY.redeem : COPY.sell}
-                </button>
-                {shareButton(ghost, 'meritum-share-hero')}
-                {!isOwner ? <MessageButton handle={routeHandle} label={COPY.message} className={ghost} /> : null}
+            <div className="flex flex-col items-start gap-4 sm:flex-row sm:gap-5">
+              <UserAvatarImg
+                username={routeHandle}
+                pixelSize={76}
+                apiSize="large"
+                radiusClassName="rounded-full"
+                className="shrink-0 border-2 border-line-brand-10"
+                alt={`@${shown} profile picture`}
+                // A lite-owned name must not wear the Hive squatter's face (see user-avatar-img.tsx).
+                lite={profile.source === 'lite'}
+              />
+              <div className="min-w-0 max-w-full">
+                <h1 className="break-words font-lora text-[34px] leading-[1.02] font-bold tracking-[-0.03em] text-ink-2 md:text-[54px]" data-testid="meritum-handle">
+                  @{shown}
+                </h1>
+                {profile.about ? (
+                  <p className="mt-2.5 max-w-[560px] font-lora text-[16.5px] leading-[1.52] text-ink-4" data-testid="meritum-about">
+                    {profile.about}
+                  </p>
+                ) : null}
               </div>
-              {writeBlockedReason ? <div className="mt-3 font-ui text-caption text-ink-10">{blockedNotice}</div> : null}
             </div>
 
-            <CurvePanel market={market} historyUnavailable={live.historyUnavailable} />
-          </div>
+            {market.windingDown ? (
+              <div className="mt-5 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5 font-ui text-[14px] leading-[22px] font-medium text-ink-warn-3">
+                {WIND_DOWN_BANNER}
+              </div>
+            ) : market.delinquentUntilBlock !== null ? (
+              <div className="mt-5 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5 font-ui text-[14px] leading-[22px] font-medium text-ink-warn-3">
+                This creator has left too many paid asks unanswered, so buying and new asks are paused for now. Selling, refunds and reclaims are unaffected.
+              </div>
+            ) : null}
 
-          {/* stat strip: five cells at most, an unknown one dropped rather than zeroed */}
-          <div
-            className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-card border border-line-9 bg-surface-26 sm:grid-cols-3 lg:grid-cols-5"
-            data-testid="meritum-stats"
-          >
-            {stats5}
-          </div>
-        </section>
-
-        {market.position ? (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-panel border border-line-9 bg-surface-12 px-6 py-[18px]" data-testid="meritum-position">
-            <div className="font-ui text-[15px] leading-[24px] text-ink-7">
-              {COPY.yourPosition}: <strong className="text-ink-2 font-num">{tok(market.position.tokens)}</strong> tokens
-            </div>
-            <div className="flex gap-2.5">
-              <button type="button" onClick={openSell} disabled={writesBlocked} className="rounded-control border border-line-11 bg-surface-1 px-4 py-2.5 font-ui text-caption font-medium text-ink-7 hover:bg-surface-23 disabled:opacity-50">
+            <div className="mt-[30px] flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={openBuy}
+                disabled={!market.canBuy || soldOut || writesBlocked}
+                title={soldOut ? 'Every token on this curve has been issued.' : writeBlockedReason ?? undefined}
+                className={`${pill} bg-surface-brand-12 px-[30px] text-ink-27 shadow-[0_4px_14px_rgba(192,57,43,0.34)] hover:bg-surface-brand-16 hover:shadow-[0_6px_22px_rgba(192,57,43,0.46)]`}
+                data-testid="meritum-buy"
+              >
+                {soldOut ? COPY.soldOut : COPY.buy}
+                {!soldOut ? <span className="font-num font-normal opacity-80">{usdPrice(market.priceUsd)}</span> : null}
+              </button>
+              <button type="button" onClick={openSell} disabled={writesBlocked} title={writeBlockedReason ?? undefined} className={ghost} data-testid="meritum-sell">
                 {market.windingDown ? COPY.redeem : COPY.sell}
               </button>
-              <button type="button" onClick={() => setDialog('send')} disabled={writesBlocked} className="rounded-control border border-line-11 bg-surface-1 px-4 py-2.5 font-ui text-caption font-medium text-ink-7 hover:bg-surface-23 disabled:opacity-50">
-                {COPY.send}
-              </button>
+              {shareButton(ghost, 'meritum-share-hero')}
+              {!isOwner ? <MessageButton handle={routeHandle} label={COPY.message} className={ghost} /> : null}
             </div>
+            {writeBlockedReason ? <div className="mt-3 font-ui text-caption text-ink-10">{blockedNotice}</div> : null}
           </div>
-        ) : null}
 
-        <div className="mt-6 flex flex-col gap-6">
-          {/* ── asks ── */}
+          <CurvePanel market={market} historyUnavailable={live.historyUnavailable} />
+        </div>
+
+        {/* stat strip: five cells at most, an unknown one dropped rather than zeroed */}
+        <div
+          className="mt-[38px] grid grid-cols-2 gap-px overflow-hidden rounded-[14px] border border-ink-2/10 bg-ink-2/10 sm:grid-cols-3 lg:grid-cols-5"
+          data-testid="meritum-stats"
+        >
+          {stats5}
+        </div>
+      </section>
+
+      {market.position ? (
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-[14px] border border-line-9 bg-surface-12 px-6 py-[18px]" data-testid="meritum-position">
+          <div className="font-ui text-[15px] leading-[24px] text-ink-7">
+            {COPY.yourPosition}: <strong className="text-ink-2 font-num">{tok(market.position.tokens)}</strong> tokens
+          </div>
+          <div className="flex gap-2.5">
+            <button type="button" onClick={openSell} disabled={writesBlocked} className="rounded-full border border-line-11 bg-surface-1 px-4 py-2.5 font-ui text-caption font-medium text-ink-7 hover:bg-surface-23 disabled:opacity-50">
+              {market.windingDown ? COPY.redeem : COPY.sell}
+            </button>
+            <button type="button" onClick={() => setDialog('send')} disabled={writesBlocked} className="rounded-full border border-line-11 bg-surface-1 px-4 py-2.5 font-ui text-caption font-medium text-ink-7 hover:bg-surface-23 disabled:opacity-50">
+              {COPY.send}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── body: the asks, the record, the holders; the rail beside them ── */}
+      <div className="mt-[34px] grid grid-cols-1 gap-[26px] xl:grid-cols-[minmax(0,1fr)_316px]">
+        <div className="flex min-w-0 flex-col gap-[26px]">
           {market.services.length > 0 ? (
             <section data-testid="meritum-asks">
-              <div className="mb-3.5 flex flex-wrap items-baseline gap-3">
-                <h2 className="font-ui text-[24px] leading-[32px] font-medium tracking-[-0.01em] text-ink-2">{COPY.asksTitle}</h2>
-                <span className="font-ui text-caption text-ink-14">{COPY.asksSub}</span>
+              <div className="mb-4 flex flex-wrap items-baseline gap-3">
+                <h2 className="font-lora text-[26px] leading-[32px] font-semibold tracking-[-0.015em] text-ink-2">{COPY.asksTitle}</h2>
+                <span className="font-ui text-[13.5px] text-ink-14">{COPY.asksSub}</span>
               </div>
               {oracleOff ? (
                 <div className="mb-3 rounded-control border border-line-warn-2 bg-surface-warn-4 px-4 py-3 font-ui text-caption text-ink-warn-1">
@@ -395,39 +382,39 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
                   return (
                     <article
                       key={sv.key}
-                      className="grid grid-cols-1 gap-4 rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(26,22,18,0.04),0_2px_8px_rgba(26,22,18,0.04)] sm:grid-cols-[minmax(0,1fr)_140px_124px] sm:items-start"
+                      className={`${card} grid grid-cols-1 gap-5 p-[22px] shadow-[0_1px_2px_rgba(26,22,18,0.04),0_2px_8px_rgba(26,22,18,0.04)] transition-shadow hover:border-line-brand-10/40 hover:shadow-[0_2px_4px_rgba(26,22,18,0.06),0_8px_24px_rgba(26,22,18,0.08)] sm:grid-cols-[minmax(0,1fr)_150px_124px] sm:items-start sm:gap-6`}
                       data-testid="meritum-ask"
                     >
                       <div className="min-w-0">
-                        <h3 className="font-ui text-[18px] leading-[26px] font-medium text-ink-2">{sv.name}</h3>
-                        <p className="mt-1.5 font-ui text-[14.5px] leading-[1.58] text-ink-7">{sv.desc}</p>
+                        <h3 className="font-lora text-[19px] leading-[28px] font-semibold tracking-[-0.01em] text-ink-2">{sv.name}</h3>
+                        <p className="mt-2 font-lora text-[15px] leading-[1.58] text-ink-4">{sv.desc}</p>
                       </div>
                       <div className="sm:text-right">
-                        <div className="text-[24px] leading-[28px] tracking-[-0.02em] text-ink-2 font-num">{usdMoney(sv.usd)}</div>
+                        <div className="text-[26px] leading-[28px] tracking-[-0.02em] text-ink-2 font-num">{usdMoney(sv.usd)}</div>
                         {quote && quote.tokens > 0 ? (
-                          <div className="mt-1 font-ui text-caption text-ink-14">
+                          <div className="mt-1 font-ui text-[13px] text-ink-14">
                             ≈ <span className="font-num">{tok(quote.tokens)}</span> tokens
                           </div>
                         ) : (
-                          <div className="mt-1 font-ui text-caption text-ink-14">{COPY.tokenCostUnavailable}</div>
+                          <div className="mt-1 font-ui text-[13px] text-ink-14">{COPY.tokenCostUnavailable}</div>
                         )}
                       </div>
-                      <div className="sm:pt-0.5">
+                      <div>
                         {market.windingDown ? (
-                          <span className="inline-flex rounded-full bg-surface-warn-4 px-3 py-1.5 font-ui text-caption font-medium text-ink-warn-3">{COPY.windingDown}</span>
+                          <span className="inline-flex whitespace-nowrap rounded-full bg-surface-warn-4 px-2.5 py-1.5 font-ui text-[12px] font-medium text-ink-warn-3">{COPY.windingDown}</span>
                         ) : !market.canAsk ? (
-                          <span className="inline-flex rounded-full bg-surface-warn-4 px-3 py-1.5 font-ui text-caption font-medium text-ink-warn-3">{healthWordFor(health) ?? 'Paused'}</span>
+                          <span className="inline-flex whitespace-nowrap rounded-full bg-surface-warn-4 px-2.5 py-1.5 font-ui text-[12px] font-medium text-ink-warn-3">{healthWordFor(health) ?? 'Paused'}</span>
                         ) : sv.status !== 'live' ? (
-                          <span className="inline-flex rounded-full bg-surface-11 px-3 py-1.5 font-ui text-caption font-medium text-ink-10">{COPY.rollingOut}</span>
+                          <span className="inline-flex whitespace-nowrap rounded-full bg-surface-11 px-2.5 py-1.5 font-ui text-[12px] font-medium text-ink-10">{COPY.rollingOut}</span>
                         ) : oracleOff ? (
-                          <span className="inline-flex rounded-full bg-surface-warn-4 px-3 py-1.5 font-ui text-caption font-medium text-ink-warn-3">{COPY.notPriceable}</span>
+                          <span className="inline-flex whitespace-nowrap rounded-full bg-surface-warn-4 px-2.5 py-1.5 font-ui text-[12px] font-medium text-ink-warn-3">{COPY.notPriceable}</span>
                         ) : (
                           <button
                             type="button"
                             onClick={() => openAsk(sv)}
                             disabled={writesBlocked}
                             title={writeBlockedReason ?? undefined}
-                            className="w-full rounded-full border border-line-brand-10 bg-surface-1 py-2.5 font-ui text-[14px] font-medium text-ink-brand-6 hover:bg-surface-brand-3 disabled:opacity-50"
+                            className="h-10 w-full rounded-full border border-line-brand-10/40 bg-surface-1 font-ui text-[14px] font-bold text-ink-brand-6 hover:border-line-brand-10 hover:bg-surface-brand-3 disabled:opacity-50"
                             data-testid="meritum-request"
                           >
                             {COPY.request}
@@ -439,7 +426,7 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
                 })}
               </div>
               {writeBlockedReason ? <p className="mt-3 font-ui text-caption font-medium text-ink-10">{blockedNotice}</p> : null}
-              <p className="mt-3 font-ui text-caption text-ink-10">
+              <p className="mt-3 font-ui text-[13px] leading-[1.58] text-ink-14">
                 Prices are set in dollars: the total you’ll pay. 12% goes to Lumen as a separate platform commission, paid in HBD; the rest is spent in
                 tokens, and as the token’s price rises a service costs fewer of them.
               </p>
@@ -447,31 +434,31 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
           ) : null}
 
           {/* ── delivery record ── */}
-          <section className="rounded-panel border border-line-9 bg-surface-1 p-6" data-testid="meritum-delivery">
+          <section className={`${card} p-[26px]`} data-testid="meritum-delivery">
             <div className="flex flex-wrap items-baseline gap-3">
-              <h2 className="font-ui text-[20px] leading-[30px] font-medium text-ink-2">{COPY.deliveryTitle}</h2>
-              <span className="ml-auto font-ui text-caption text-ink-14">{COPY.deliverySub}</span>
+              <h2 className="font-lora text-[22px] leading-[30px] font-semibold tracking-[-0.01em] text-ink-2">{COPY.deliveryTitle}</h2>
+              <span className="ml-auto font-ui text-[13.5px] text-ink-14">{COPY.deliverySub}</span>
             </div>
             {d.available ? (
               <>
                 {d.marks.length > 0 ? (
-                  <div className="mt-3.5 flex flex-wrap gap-1.5">
+                  <div className="mt-[18px] flex flex-wrap gap-1.5">
                     {d.marks.map((answered, i) => (
                       <span key={i} className={`h-[18px] w-[18px] rounded-control ${answered ? 'bg-surface-ok-7' : 'border-2 border-line-20 bg-surface-1'}`} />
                     ))}
                   </div>
                 ) : null}
-                <div className="mt-3 font-ui text-base text-ink-4">
+                <div className="mt-3.5 font-lora text-[15.5px] leading-[1.58] text-ink-4">
                   {d.completionPct === null ? (
-                    <strong>No deliveries yet</strong>
+                    <strong className="font-semibold">No deliveries yet</strong>
                   ) : (
                     <>
-                      <strong>{pctLabel(d.answered, d.total) ?? '0%'} completion rate</strong>: completed <span className="font-num">{d.answered}</span> of{' '}
+                      <strong className="font-semibold">{pctLabel(d.answered, d.total) ?? '0%'} completion rate</strong>: completed <span className="font-num">{d.answered}</span> of{' '}
                       <span className="font-num">{d.total}</span>
                       {d.typicalResponse ? (
                         <>
                           {' '}
-                          · usually within <strong className="font-num">{d.typicalResponse}</strong>
+                          · usually within <strong className="font-num font-semibold">{d.typicalResponse}</strong>
                         </>
                       ) : null}
                       .
@@ -479,7 +466,7 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
                   )}
                 </div>
                 {d.ratingCount > 0 && d.avgRating !== null ? (
-                  <div className="mt-1.5 font-ui text-caption text-ink-4">
+                  <div className="mt-1.5 font-ui text-[13px] text-ink-4">
                     <span className="mr-1 text-ink-warn-3" aria-hidden="true">
                       {ratingStars(d.avgRating)}
                     </span>
@@ -493,86 +480,107 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
                     ) : null}
                   </div>
                 ) : d.declinedCount > 0 ? (
-                  <div className="mt-1.5 font-ui text-caption text-ink-14">
+                  <div className="mt-1.5 font-ui text-[13px] text-ink-14">
                     Declined <span className="font-num">{d.declinedCount}</span> {d.declinedCount === 1 ? 'request' : 'requests'}
                   </div>
                 ) : null}
-                <p className="mt-2 font-ui text-caption text-ink-14">{d.completionPct !== null ? COPY.deliveryWhy : COPY.deliveryEmpty}</p>
+                <p className="mt-3.5 font-ui text-[13px] text-ink-14">{d.completionPct !== null ? COPY.deliveryWhy : COPY.deliveryEmpty}</p>
               </>
             ) : (
-              <div className="mt-3.5 rounded-control border border-dashed border-line-11 px-4 py-3 font-ui text-caption text-ink-14">{COPY.deliveryUnavailable}</div>
+              <div className="mt-[18px] rounded-control border border-dashed border-line-11 px-4 py-3 font-ui text-caption text-ink-14">{COPY.deliveryUnavailable}</div>
             )}
           </section>
 
           {/* ── holders ── */}
           {holders && holders.count > 0 ? (
-            <section className="rounded-panel border border-line-9 bg-surface-1 p-6" data-testid="meritum-holders">
+            <section className={`${card} p-[26px]`} data-testid="meritum-holders">
               <div className="flex flex-wrap items-center gap-3">
-                <h2 className="font-ui text-[20px] leading-[30px] font-medium text-ink-2">{COPY.holdersTitle}</h2>
-                <span className="ml-auto font-ui text-caption text-ink-14" data-testid="meritum-holders-count">
+                <h2 className="font-lora text-[22px] leading-[30px] font-semibold tracking-[-0.01em] text-ink-2">{COPY.holdersTitle}</h2>
+                <span className="ml-auto font-ui text-[13.5px] text-ink-14" data-testid="meritum-holders-count">
                   {holdersHeadline(holders.count)}
                 </span>
               </div>
-              <div className="mt-4 flex flex-col gap-px overflow-hidden rounded-card bg-surface-26">
+              <div className="mt-[18px] flex flex-col gap-px overflow-hidden rounded-[10px] bg-line-9">
                 {holders.rows.map((h) => (
-                  <div key={h.handle} className="grid grid-cols-[minmax(0,1fr)_96px] items-center gap-4 bg-surface-1 px-3.5 py-2.5" data-testid="meritum-holder">
-                    <span className="flex min-w-0 items-center gap-2.5">
+                  <div key={h.handle} className="grid grid-cols-[minmax(0,1fr)_92px] items-center gap-4 bg-surface-1 px-3.5 py-[11px]" data-testid="meritum-holder">
+                    <span className="flex min-w-0 items-center gap-[11px]">
                       <UserAvatarImg username={h.handle} pixelSize={32} radiusClassName="rounded-full" />
                       {h.hasProfile ? (
-                        <Link href={`/@${h.handle}`} className="truncate font-ui text-[14.5px] font-medium text-ink-2 hover:text-ink-brand-6">
+                        <Link href={`/@${h.handle}`} className="truncate font-ui text-[14.5px] font-semibold text-ink-2 hover:text-ink-brand-6">
                           @{h.handle}
                         </Link>
                       ) : (
-                        <span className="truncate font-ui text-[14.5px] font-medium text-ink-2">@{displayHandle(h.handle)}</span>
+                        <span className="truncate font-ui text-[14.5px] font-semibold text-ink-2">@{displayHandle(h.handle)}</span>
                       )}
                     </span>
-                    <span className="text-right text-[14px] text-ink-7 font-num">{h.tokensLabel}</span>
+                    <span className="text-right text-[14px] text-ink-4 font-num">{h.tokensLabel}</span>
                   </div>
                 ))}
               </div>
               {holders.truncated ? (
-                <p className="mt-2.5 font-ui text-caption text-ink-14">
+                <p className="mt-2.5 font-ui text-[13px] text-ink-14">
                   Showing the <span className="font-num">{holders.rows.length}</span> largest.
                 </p>
               ) : null}
             </section>
           ) : null}
 
-          <div className="xl:hidden">{howThisWorks}</div>
-          <div className="xl:hidden">{marketCapCard}</div>
-
-          <p className="font-ui text-caption text-ink-14">{honestNote()}</p>
+          <p className="font-ui text-[13px] leading-[1.58] text-ink-14">{honestNote()}</p>
         </div>
 
-        <TokenModals
-          dialog={dialog}
-          market={market}
-          service={service}
-          positionUnavailable={live.positionUnavailable}
-          onBuy={handleBuy}
-          onSell={handleSell}
-          onRedeem={handleRedeem}
-          onSpend={({ offeringId, deadlineDays, usd, question }) =>
-            live.ask({ offeringId, contentHash: askReference(question), deadlineDays, maxCostUsd: usd })
-          }
-          onTransfer={(to, tokens) => live.transfer(to, tokens)}
-          quoteAsk={live.quoteAsk}
-          onClose={() => {
-            if (dialog === 'inter' && typeof window !== 'undefined') {
-              try {
-                window.sessionStorage.setItem(interstitialKey(handle, live.viewer), '1');
-              } catch {
-                // Storage blocked: showing the warning again is the safe failure.
-              }
-            }
-            const queued = pendingAction.current;
-            pendingAction.current = null;
-            setDialog(queued ?? null);
-          }}
-        />
-        {shareOpen ? <ShareSheet handle={shown} url={shareUrl} cardSrc={cardSrc} onClose={() => setShareOpen(false)} /> : null}
+        {/* ── rail: the two cards, text verbatim from disclosure-copy (owner: "the text on right side navbar is kept") ── */}
+        <aside className="flex flex-col gap-[18px] xl:sticky xl:top-24 xl:h-fit">
+          <div className={`${card} p-[22px]`}>
+            <h3 className="font-ui text-[16px] font-bold text-ink-2">How this works</h3>
+            <div className="mt-3.5 flex flex-col gap-3.5">
+              {HOW_THIS_WORKS_LINES.map((line, i) => (
+                <div key={i} className="flex gap-[11px]">
+                  <span className="w-5 shrink-0 text-[13px] font-bold text-ink-brand-6 font-num">{i + 1}</span>
+                  <p className="font-ui text-[13.5px] leading-[1.58] text-ink-4">{line}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className={`${card} p-[22px]`}>
+            <h3 className="font-ui text-[13px] font-bold uppercase tracking-[0.1em] text-ink-14">{MARKET_CAP_LABEL}</h3>
+            <div className="mt-2 text-[30px] leading-[36px] tracking-[-0.02em] text-ink-2 font-num">{usdWholeNonZero(market.marketCapUsd)}</div>
+            <p className="mt-2.5 font-ui text-[13.5px] leading-[1.58] text-ink-4">{MARKET_CAP_NOTE}</p>
+            {shareButton(
+              'mt-[18px] flex h-[42px] w-full items-center justify-center gap-2 rounded-full border border-ink-2/20 bg-surface-1 font-ui text-[14.5px] font-medium text-ink-2 hover:border-ink-2 hover:bg-surface-11',
+              'meritum-share-rail'
+            )}
+          </div>
+        </aside>
       </div>
-    </TokenShell>
+
+      <TokenModals
+        dialog={dialog}
+        market={market}
+        service={service}
+        positionUnavailable={live.positionUnavailable}
+        onBuy={handleBuy}
+        onSell={handleSell}
+        onRedeem={handleRedeem}
+        onSpend={({ offeringId, deadlineDays, usd, question }) =>
+          live.ask({ offeringId, contentHash: askReference(question), deadlineDays, maxCostUsd: usd })
+        }
+        onTransfer={(to, tokens) => live.transfer(to, tokens)}
+        quoteAsk={live.quoteAsk}
+        onClose={() => {
+          if (dialog === 'inter' && typeof window !== 'undefined') {
+            try {
+              window.sessionStorage.setItem(interstitialKey(handle, live.viewer), '1');
+            } catch {
+              // Storage blocked: showing the warning again is the safe failure.
+            }
+          }
+          const queued = pendingAction.current;
+          pendingAction.current = null;
+          setDialog(queued ?? null);
+        }}
+      />
+      {shareOpen ? <ShareSheet handle={shown} url={shareUrl} cardSrc={cardSrc} onClose={() => setShareOpen(false)} /> : null}
+    </div>
   );
 };
 

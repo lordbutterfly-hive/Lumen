@@ -1,5 +1,5 @@
 /** UNIT TESTS for `lib/meritum/profile-fields.ts`. Run by `pnpm --filter @hive/blog test:unit` under ts-node; own harness. */
-import { sanitizeAbout, sanitizeProfileImage, truncateOnWord, ABOUT_MAX_CHARS } from '../meritum/profile-fields';
+import { sanitizeAbout, sanitizeProfileImage, sanitizeDisplayName, truncateOnWord, truncateToColumns, ABOUT_MAX_CHARS, DISPLAY_NAME_MAX_CHARS } from '../meritum/profile-fields';
 
 let checks = 0;
 let failures = 0;
@@ -47,6 +47,21 @@ for (const [label, bad] of [
   ['too long', 'https://example.com/' + 'a'.repeat(600)],
   ['not a string', 12]
 ] as const) ok(`${label} -> null`, sanitizeProfileImage(bad) === null);
+
+console.log('\nsanitizeDisplayName');
+ok('a name passes', sanitizeDisplayName('Lord Butterfly') === 'Lord Butterfly');
+ok('not a string / empty -> null', sanitizeDisplayName(undefined) === null && sanitizeDisplayName('  ') === null && sanitizeDisplayName(5) === null);
+ok('controls stripped, whitespace collapsed', sanitizeDisplayName('a\u0000b  c') === 'ab c');
+ok(`capped at ${DISPLAY_NAME_MAX_CHARS} characters, by character not by byte`, (sanitizeDisplayName('x'.repeat(200)) ?? '').length === DISPLAY_NAME_MAX_CHARS && sanitizeDisplayName('😀'.repeat(70)) === '😀'.repeat(DISPLAY_NAME_MAX_CHARS));
+
+console.log('\ntruncateToColumns (the card: CJK is two columns wide)');
+ok('short latin untouched', truncateToColumns('hello world', 20) === 'hello world');
+ok('latin cuts on a word with an ellipsis', truncateToColumns('the quick brown fox jumps over', 20) === 'the quick brown fox…');
+const cjk = '安全研究者。契約が壊れる前に壊し、その方法を正確に書き残す。'.repeat(3);
+const cjkCut = truncateToColumns(cjk, 110);
+ok('CJK counts two columns per character: at most 55 characters survive', Array.from(cjkCut).length <= 56 && cjkCut.endsWith('…'));
+ok('CJK under the limit untouched', truncateToColumns('安全研究者', 110) === '安全研究者');
+ok('emoji count double too', Array.from(truncateToColumns('😀'.repeat(80), 110)).length <= 56);
 
 if (failures === 0) {
   console.log(`\nmeritum-profile-fields: ALL ${checks} CHECKS PASSED`);

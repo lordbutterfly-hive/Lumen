@@ -21,6 +21,8 @@ export interface HoldersView {
 }
 
 const HIVE_NAME = /^[a-z][a-z0-9.-]{1,15}$/;
+/** What the contract accepts as an account (printable ASCII, no `|`, <=160 bytes) — anything else is a corrupt row, not a holder. */
+const ACCOUNT_SHAPE = /^[!-{}~]{1,160}$/;
 
 export function tokensLabel(n: number): string {
   if (!Number.isFinite(n)) return '0';
@@ -30,7 +32,7 @@ export function tokensLabel(n: number): string {
 /** Largest first (the indexer already orders, but a caller must not depend on it), zero and malformed rows dropped. */
 export function shapeHolders(rows: readonly { holder: string; tokens: number }[], count: number, limit = 8): HoldersView {
   const cleaned = rows
-    .filter((r) => typeof r.holder === 'string' && r.holder.length > 0 && Number.isFinite(r.tokens) && r.tokens > 0)
+    .filter((r) => typeof r.holder === 'string' && ACCOUNT_SHAPE.test(r.holder) && Number.isFinite(r.tokens) && r.tokens > 0)
     .map((r) => {
       const handle = r.holder.startsWith('hive:') ? r.holder.slice('hive:'.length) : r.holder;
       return { handle, hasProfile: HIVE_NAME.test(handle), tokens: r.tokens, tokensLabel: tokensLabel(r.tokens) };

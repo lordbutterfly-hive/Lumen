@@ -1,6 +1,7 @@
 import 'server-only';
 import { getLogger } from '@ui/lib/logging';
-import { cachedRead } from '@/blog/lib/server-read-cache';
+import { withTtlCache } from '@/blog/lib/server-ttl-cache';
+import { consumeLocalGlobal } from '@/blog/lib/lite/antispam/local-rate-limit';
 import { STATE_QUERY, kRegisteredAt, kSupply, toDid, toU64 } from '@/blog/features/creator-tokens/lib/vsc/reads';
 import { displayPriceUsd } from '@/blog/features/creator-tokens/market/curve';
 
@@ -25,6 +26,19 @@ const logger = getLogger('app');
  * head block are the page's business and the client hook already owns them.
  * Two keys, one request, cached 30 s per creator so a burst of crawlers (a
  * share fans out to a dozen unfurlers at once) costs the node one read.
+ *
+ * ★ UNDER THE SAME GLOBAL CEILING AS THE PROXY (review, 2026-09-15). The
+ * browser's reads pass `consumeLocalGlobal('creator_tokens_gql')` in
+ * `/api/creator-tokens/gql` — the one bound on how much this server can
+ * amplify against the Magi node in total, which per-IP limits cannot give.
+ * A server-side read that skipped it would re-open exactly that hole, one
+ * distinct handle per request. Over the ceiling this returns null, which the
+ * page treats as "could not read" (renders, no 404) and the card as "no
+ * price line" — never as a fact about the market.
+ *
+ * ★ ITS OWN BOUNDED CACHE, NOT `cachedRead` (review, 2026-09-15): that memo
+ * is one 500-entry map shared with `/api/account`; a crawl of a few hundred
+ * creator pages would have flushed the account cache the feed depends on.
  */
 export interface CreatorMarketSummary {
   /** `hive:<name>` or the DID — what the chain keys the market under. */
@@ -86,9 +100,21 @@ async function fetchSummary(handle: string): Promise<CreatorMarketSummary | null
  * node outage is not a creator without a market. A summary with
  * `registered: false` is the honest 404.
  */
+const readSummaryCached = withTtlCache(
+  async (handle: string): Promise<CreatorMarketSummary | null> => {
+    if (!consumeLocalGlobal('creator_tokens_gql')) {
+      logger.warn('meritum page: market summary read shed — global Magi ceiling hit');
+      return null;
+    }
+    return fetchSummary(handle);
+  },
+  (handle: string) => toDid(handle),
+  { name: 'meritum-market-summary', ttlMs: SUMMARY_TTL_MS, max: 500, shouldCache: (v) => v !== null }
+);
+
 export async function readCreatorMarketSummary(handle: string): Promise<CreatorMarketSummary | null> {
   try {
-    return await cachedRead(`meritum-page:market:${toDid(handle)}`, SUMMARY_TTL_MS, () => fetchSummary(handle));
+    return await readSummaryCached(handle);
   } catch (error) {
     logger.warn(error, 'meritum page: market summary read failed for %s', handle);
     return null;

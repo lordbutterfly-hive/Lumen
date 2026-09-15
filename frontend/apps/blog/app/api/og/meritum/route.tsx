@@ -6,7 +6,7 @@ import { CREATOR_TOKEN_LAUREL_PATH } from '@/blog/features/creator-tokens/ui/cre
 import { displayHandle } from '@/blog/features/creator-tokens/live/adapt';
 import { usdPrice } from '@/blog/features/creator-tokens/market/format';
 import { HIVE_USERNAME, isRoutableCreatorHandle, normalizeCreatorHandle } from '@/blog/lib/meritum/creator-handle';
-import { truncateOnWord } from '@/blog/lib/meritum/profile-fields';
+import { truncateToColumns } from '@/blog/lib/meritum/profile-fields';
 import { readCreatorMarketSummary } from '@/blog/lib/meritum/server-market';
 import { readCreatorProfile } from '@/blog/lib/meritum/server-profile';
 
@@ -59,9 +59,16 @@ const PAPER_0 = '#FFFEFC';
 const AVATAR_TIMEOUT_MS = 2_500;
 const AVATAR_MAX_BYTES = 1_500_000;
 
-async function font(file: string): Promise<ArrayBuffer> {
-  const buf = await readFile(path.join(process.cwd(), 'public', 'fonts', file));
-  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+// Read once per process (review, 2026-09-15: two disk reads per request).
+const fontCache = new Map<string, Promise<ArrayBuffer>>();
+function font(file: string): Promise<ArrayBuffer> {
+  let p = fontCache.get(file);
+  if (!p) {
+    p = readFile(path.join(process.cwd(), 'public', 'fonts', file)).then((buf) => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
+    p.catch(() => fontCache.delete(file));
+    fontCache.set(file, p);
+  }
+  return p;
 }
 
 /** Hive's image proxy, by NAME: the only remote fetch this route makes, to one fixed host. */
@@ -107,20 +114,22 @@ export async function GET(req: NextRequest): Promise<Response> {
   const handle = normalizeCreatorHandle(raw);
   if (!isRoutableCreatorHandle(handle)) return new Response('not found', { status: 404 });
 
-  const [summary, profile, bold, regular] = await Promise.all([
-    readCreatorMarketSummary(handle),
-    readCreatorProfile(handle),
-    font('Lora-Bold.ttf'),
-    font('Lora-Regular.ttf')
-  ]);
   // No market, no card: a 404 here is what stops a crawler caching a picture
   // that says "Buy their Meritum" about someone who has none. A failed read
-  // (null) still draws — with no price line rather than a wrong one.
+  // (null) still draws — with no price line rather than a wrong one. The
+  // market is read FIRST so a made-up name never reaches the profile stores.
+  const summary = await readCreatorMarketSummary(handle);
   if (summary && !summary.registered) return new Response('not found', { status: 404 });
+  const [profile, bold, regular] = await Promise.all([readCreatorProfile(handle), font('Lora-Bold.ttf'), font('Lora-Regular.ttf')]);
 
   const shown = displayHandle(handle);
-  const about = profile.about ? truncateOnWord(profile.about, 110) : null;
-  const face = await hiveAvatarDataUri(handle);
+  const about = profile.about ? truncateToColumns(profile.about, 110) : null;
+  // ★ THE FACE ONLY FOR A NAME THE HIVE ACCOUNT OWNS (review, 2026-09-15; the
+  // `/api/avatar` squatter incident of 2026-09-11): when the profile resolved
+  // from the lite store, images.hive.blog would answer with the Hive
+  // squatter's picture under the lite owner's name and about, baked into a
+  // card cached for a day. A lite-owned name gets the initial disc.
+  const face = profile.source === 'hive' ? await hiveAvatarDataUri(handle) : null;
   const initial = (profile.displayName || shown).trim().charAt(0).toUpperCase() || '@';
   const price = summary ? usdPrice(summary.priceUsd) : null;
   const nameSize = handleSize(shown);

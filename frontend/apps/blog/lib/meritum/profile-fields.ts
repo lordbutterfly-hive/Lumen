@@ -62,9 +62,55 @@ export function sanitizeProfileImage(raw: unknown): string | null {
   return url.toString();
 }
 
+export const DISPLAY_NAME_MAX_CHARS = 64;
+
+/** The one field that had no gate (review, 2026-09-15): plain text, controls stripped, bounded. */
+export function sanitizeDisplayName(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const text = raw.replace(STRIP, '').replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+  return Array.from(text).slice(0, DISPLAY_NAME_MAX_CHARS).join('');
+}
+
+/** Roughly how wide a character is on a card: CJK, fullwidth and emoji take two columns, the rest one. */
+function columnsOf(ch: string): number {
+  const cp = ch.codePointAt(0) ?? 0;
+  if (cp >= 0x1100 && (cp <= 0x115f || (cp >= 0x2e80 && cp <= 0xa4cf) || (cp >= 0xac00 && cp <= 0xd7a3) || (cp >= 0xf900 && cp <= 0xfaff) || (cp >= 0xfe30 && cp <= 0xfe4f) || (cp >= 0xff00 && cp <= 0xff60) || (cp >= 0xffe0 && cp <= 0xffe6) || cp >= 0x1f300)) return 2;
+  return 1;
+}
+
+/**
+ * Truncate to a number of COLUMNS, not characters (review, 2026-09-15): 110
+ * CJK characters are three lines where 110 Latin ones are two, and a card
+ * clips the third line with no cue. Cuts on a space when one is near the
+ * limit, otherwise on a character boundary (CJK has no spaces), always with
+ * the ellipsis.
+ */
+export function truncateToColumns(text: string, maxColumns: number): string {
+  const chars = Array.from(text);
+  let used = 0;
+  let end = chars.length;
+  for (let i = 0; i < chars.length; i++) {
+    used += columnsOf(chars[i]);
+    if (used > maxColumns) {
+      end = i;
+      break;
+    }
+  }
+  if (end >= chars.length) return text;
+  const head = chars.slice(0, end).join('');
+  const lastSpace = head.lastIndexOf(' ');
+  const cut = lastSpace > head.length * 0.6 ? head.slice(0, lastSpace) : head;
+  return `${cut.replace(/[\s.,;:!?-]+$/, '')}…`;
+}
+
+export type CreatorProfileSource = 'hive' | 'lite' | 'none';
+
 export interface CreatorProfileFields {
   website: string | null;
   displayName: string | null;
   about: string | null;
   profileImage: string | null;
+  /** Which store answered: decides whose FACE a surface may show (a lite-owned name must never wear the Hive squatter's picture). */
+  source: CreatorProfileSource;
 }

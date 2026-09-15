@@ -17,7 +17,12 @@ export const HIVE_USERNAME = /^[a-z][a-z0-9.-]{1,15}$/;
  * (mirroring core/util.go's MaxAccountLen of 160): `did:pkh:` plus a short
  * chain path. Case-significant (an EVM checksum lives in it).
  */
-const WALLET_DID = /^did:pkh:[a-z0-9]+:[a-z0-9]+:[A-Za-z0-9]+$/;
+// ★ NOT TIGHTER THAN THE CONTRACT (review, 2026-09-15). `reads.ts`'s
+// `isWellFormedDid` accepts printable ASCII up to 160 bytes and its own note
+// warns that a too-tight client guard is a defect: a wallet whose chain path
+// carries a `-`, `_` or `.` would get a hard 404 on their own page. What is
+// excluded here is only what a URL or an HTML attribute could misread.
+const WALLET_DID = /^did:pkh:[A-Za-z0-9._:%+-]{1,150}$/;
 const MAX_DID_LENGTH = 160;
 
 /**

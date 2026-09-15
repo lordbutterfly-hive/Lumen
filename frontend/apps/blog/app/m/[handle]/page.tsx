@@ -40,7 +40,12 @@ function priceKey(priceUsd: number): string {
 export async function generateMetadata({ params }: { params: { handle: string } }): Promise<Metadata> {
   const handle = normalizeCreatorHandle(params.handle);
   if (!isRoutableCreatorHandle(handle)) return { title: 'Meritum' };
-  const [summary, profile] = await Promise.all([readCreatorMarketSummary(handle), readCreatorProfile(handle)]);
+  // ★ MARKET FIRST, PROFILE ONLY FOR A MARKET THAT EXISTS (review, 2026-09-15):
+  // a made-up handle must cost one cached chain read, not also a Postgres
+  // lookup and a Hive RPC on the way to a 404.
+  const summary = await readCreatorMarketSummary(handle);
+  if (summary && !summary.registered) return { title: 'Meritum' };
+  const profile = await readCreatorProfile(handle);
   const shown = displayHandle(handle);
   const title = `@${shown} on Lumen`;
   // The Hive `about`, verbatim, or a sentence that makes no claim about the person.
@@ -70,9 +75,11 @@ export default async function MeritumCreatorPage({ params }: { params: { handle:
   if (!isRoutableCreatorHandle(handle)) notFound();
   // Your own token is managed in the Studio, not traded from its public page.
   if (handle === 'you') redirect('/creators/studio');
-  const [summary, profile] = await Promise.all([readCreatorMarketSummary(handle), readCreatorProfile(handle)]);
+  const summary = await readCreatorMarketSummary(handle);
   // ★ Only a CONFIRMED "never registered" is a 404. `summary === null` is a
-  // read that failed; the page renders and says so itself.
+  // read that failed; the page renders and says so itself. The profile is read
+  // only past this gate (see generateMetadata).
   if (summary && !summary.registered) notFound();
+  const profile = await readCreatorProfile(handle);
   return <MeritumLanding handle={handle} profile={profile} shareUrl={creatorPageUrl(siteDomain(), handle)} />;
 }

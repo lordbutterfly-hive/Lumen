@@ -27,7 +27,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // ★ Public and cacheable even on the "nothing found" answer — a repeated
   // lookup for a creator with no profile is the common case, and identical
   // bytes with no cookie are exactly as safe to share across viewers.
-  if (!rawHandle || rawHandle.length > 200) return NextResponse.json(NULL_PROFILE, { headers: CACHE_HEADERS });
+  if (!rawHandle || rawHandle.length > 170) return NextResponse.json(NULL_PROFILE, { headers: CACHE_HEADERS });
   const profile = await readCreatorProfile(rawHandle);
   return NextResponse.json(profile, { headers: CACHE_HEADERS });
 }

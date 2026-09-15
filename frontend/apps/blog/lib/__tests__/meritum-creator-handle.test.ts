@@ -24,8 +24,8 @@ ok('a bare % does not throw and is kept', normalizeCreatorHandle('abc%') === 'ab
 ok('whitespace trimmed', normalizeCreatorHandle('  gtg ') === 'gtg');
 
 console.log('\nisRoutableCreatorHandle: what can be a page at all');
-for (const good of ['lordbutterfly', 'hbd-temp', 'a.b', 'ab', 'did:pkh:eip155:1:0xAbC123']) ok(`${good} -> routable`, isRoutableCreatorHandle(good));
-for (const bad of ['', 'a', '1abc', 'Lord', 'abc%', 'x'.repeat(17), '../etc', 'a b', 'did:pkh:', 'did:pkh:eip155:1:0x<script>', 'javascript:alert(1)', 'did:pkh:' + 'a:'.repeat(90) + 'b']) ok(`${JSON.stringify(bad).slice(0, 40)} -> NOT routable`, !isRoutableCreatorHandle(bad));
+for (const good of ['lordbutterfly', 'hbd-temp', 'a.b', 'ab', 'did:pkh:eip155:1:0xAbC123', 'did:pkh:bip122:000000000019d6689c085ae165831e93:1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa', 'did:pkh:some-chain_x.y:1:abc']) ok(`${good} -> routable`, isRoutableCreatorHandle(good));
+for (const bad of ['', 'a', '1abc', 'Lord', 'abc%', 'x'.repeat(17), '../etc', 'a b', 'did:pkh:', 'did:pkh:eip155:1:0x<script>', 'did:pkh:a|b', 'did:pkh:a/b', 'javascript:alert(1)', 'did:pkh:' + 'a:'.repeat(90) + 'b']) ok(`${JSON.stringify(bad).slice(0, 40)} -> NOT routable`, !isRoutableCreatorHandle(bad));
 
 console.log('\ncreatorPagePath / creatorPageUrl');
 ok('/m/<name>', creatorPagePath('lordbutterfly') === '/m/lordbutterfly');
