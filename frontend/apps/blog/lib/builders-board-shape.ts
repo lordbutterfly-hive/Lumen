@@ -20,14 +20,16 @@ import type { Entry } from '@hive/common-hiveio-packages/wax';
 export const POSTS_PER_BUILDER = 3;
 
 /**
- * ★ NOTHING OLDER THAN A YEAR. Replaying the real pulls through the filter,
- * @imwatsi's row would have flipped to a 2023 proposal and a 2022 HAF report,
- * @emrebeyler's to a 2024 Lighthive release — true development, honestly
- * dated, and still wrong on a card that claims to track what is being built
- * NOW. A row with fewer than three posts simply flips less; a row with none
- * is not shown.
+ * ★ NOTHING OLDER THAN 30 DAYS (owner, 2026-09-15: "any post older than 1
+ * month should not show up. if older than 1 month and user doesnt have newer
+ * stuff, he isnt showed"). The first cut was a year: replaying the real pulls,
+ * @imwatsi's row would have flipped to a 2023 proposal and a 2022 HAF report
+ * — true development, honestly dated, and still wrong on a card that claims
+ * to track what is being built NOW. A month is the owner's bar for "now". A
+ * row with fewer than three posts simply flips less; a builder with no post
+ * inside the month is not shown at all, and comes back with the next post.
  */
-export const MAX_POST_AGE_MS = 365 * 24 * 60 * 60 * 1000;
+export const MAX_POST_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Chain timestamps carry no zone and are UTC; parsed the way the feed parses them. */
 export function postAgeMs(created: string, now: number): number {
@@ -179,7 +181,7 @@ export function isCrossPost(entry: Pick<Entry, 'json_metadata'>): boolean {
  * are the latest ones.
  *
  * ★ A ROW WITH NO POSTS IS NO ROW. An empty page, a failed read, a builder
- * whose last 20 posts are all photography or all older than a year — all return null and the account
+ * whose last 20 posts are all photography or all older than a month — all return null and the account
  * simply does not appear, the way the Meritum board drops a creator with an
  * empty shop. A rail card explains nothing about a missing row; it would
  * have to explain an empty one.
@@ -250,4 +252,37 @@ export function buildSlotQueues(rows: readonly BuilderRow[], slots: number = BOA
   const queues: SlotEntry[][] = Array.from({ length: count }, () => []);
   entries.forEach((entry, i) => queues[i % count].push(entry));
   return queues;
+}
+
+/**
+ * ★ THE BOARD READ IS BOUNDED, NOT A BURST (2026-09-15, found while chasing a
+ * slow topics page). The loader used to fire one Bridge call per builder at
+ * once — 20+ POSTs to the Hive node in the same tick. Every outbound Hive call
+ * on a worker shares ONE undici pool (`lib/http-keepalive.ts`, 64 sockets),
+ * so a cold refresh took a third of the pool for a second or two and every
+ * page render that needed the chain in that window queued behind a rail
+ * widget. The refresh runs behind a stale-while-revalidate cache, so its own
+ * latency is invisible; a small concurrency keeps it invisible to everyone
+ * else too. Generic and pure so the test can prove the bound.
+ */
+export async function mapBounded<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      try {
+        results[i] = { status: 'fulfilled', value: await fn(items[i], i) };
+      } catch (reason) {
+        results[i] = { status: 'rejected', reason };
+      }
+    }
+  };
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker);
+  await Promise.all(workers);
+  return results;
 }

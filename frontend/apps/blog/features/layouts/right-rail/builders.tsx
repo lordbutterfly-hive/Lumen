@@ -1,6 +1,7 @@
 'use client';
 
-import { FC, useEffect, useMemo, useRef, useState } from 'react';
+import { FC, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@hive/ui';
 import { UserAvatarImg } from '@ui/components';
@@ -11,6 +12,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { buildSlotQueues } from '@/blog/lib/builders-board-shape';
 import type { BuilderRow, SlotEntry } from '@/blog/lib/builders-board-shape';
 import { BUILDERS_CURATOR } from '@/blog/lib/builders-roster';
+import { readBuildersHidden, writeBuildersHidden, BUILDERS_HIDDEN_KEY } from '@/blog/lib/builders-card-visibility';
 
 /**
  * ★★★ THE BUILDERS BOARD — the right-rail card on HOME and TOPICS showing what
@@ -46,7 +48,19 @@ import { BUILDERS_CURATOR } from '@/blog/lib/builders-roster';
  * ★ RENDERS NOTHING ON ERROR OR EMPTY, LIKE THE BOARD. A rail card cannot
  * explain an empty box, and an empty box reads as broken. While loading it
  * paints a short skeleton so the rail does not jump when the rows arrive.
+ *
+ * ★ THE READER CAN HIDE IT, AND THAT STICKS (owner, 2026-09-15: "add a button
+ * to hide this on top right. if someone hides it that persists in their cache
+ * so its hidden until they open it"). Hidden = the card collapses to its
+ * heading and a "Show" link, and the board is not even fetched. The choice is
+ * read from localStorage in a LAYOUT effect after mount, never in the
+ * `useState` initializer: the server has no storage, so an initializer that
+ * read it would hydrate a collapsed card over expanded HTML and React would
+ * throw the mismatch (the rule every cross-page store in this app follows).
  */
+
+/** `useLayoutEffect` on the client (runs before paint, so a hidden card never flashes open), `useEffect` on the server (no layout there, and React warns). */
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 /** How long one entry holds its slot before the flip (owner, 2026-09-15: "it flips
  *  once every 30 second per person"). Staggered per slot below so slots never
@@ -150,11 +164,25 @@ const SlotView: FC<{ queue: SlotEntry[]; index: number; paused: boolean }> = ({ 
 const Builders = () => {
   const { t } = useTranslation('common_blog');
   const [hovered, setHovered] = useState(false);
-  const [hidden, setHidden] = useState(false);
+  const [tabHidden, setTabHidden] = useState(false);
+  // ★ THREE STATES, NOT TWO. `'unknown'` is the server's and the first client
+  // render's answer: no storage has been consulted yet. The query is enabled
+  // only once the answer is `'shown'`, so a reader who hid the card never
+  // pays for the board (measured 2026-09-15: with a boolean that started
+  // `false`, the request had already left before the layout effect flipped
+  // it — react-query dispatches from the mount effect, and by then the
+  // observer was created enabled). While `'unknown'`, the card paints its
+  // skeleton, exactly what the server painted, so hydration matches.
+  const [pref, setPref] = useState<'unknown' | 'shown' | 'hidden'>('unknown');
+  const collapsed = pref === 'hidden';
+
+  useIsomorphicLayoutEffect(() => {
+    setPref(readBuildersHidden() ? 'hidden' : 'shown');
+  }, []);
 
   useEffect(() => {
     // Animating a board nobody is looking at is pure battery.
-    const onVisibility = () => setHidden(document.visibilityState === 'hidden');
+    const onVisibility = () => setTabHidden(document.visibilityState === 'hidden');
     onVisibility();
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
@@ -166,21 +194,83 @@ const Builders = () => {
     staleTime: StaleTime.LONG,
     // Decorative widget: one retry absorbs a blip, more only lengthens the
     // worst case (see the Topics card's note on the same decision).
-    retry: 1
+    retry: 1,
+    // A hidden (or not-yet-known) card costs no request; showing it fetches.
+    enabled: pref === 'shown',
+    // ★ A TAB LEFT OPEN KEEPS UP (owner, 2026-09-15: "if new post comes 1
+    // previous post from that author is removed and replaced by new post").
+    // The server re-reads the roster every ten minutes; without this, a tab
+    // that never lost focus would flip the same posts for hours. Matched to
+    // the server TTL so the interval never asks for what it cannot get; off
+    // while the tab is hidden, like the flips.
+    refetchInterval: 10 * 60_000,
+    refetchIntervalInBackground: false
   });
+
+  useEffect(() => {
+    // Hidden in one tab, hidden in the next one over: the storage event fires
+    // in every OTHER tab of the same origin when the key changes.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null || e.key === BUILDERS_HIDDEN_KEY) setPref(readBuildersHidden() ? 'hidden' : 'shown');
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  const setHidden = (next: boolean) => {
+    setPref(next ? 'hidden' : 'shown');
+    writeBuildersHidden(next);
+  };
 
   // Above the early return: a hook. The queues are dealt once per answer, so a
   // slot's queue keeps its identity across renders and its timer is not reset
   // by the parent re-rendering.
   const queues = useMemo(() => buildSlotQueues(data ?? []), [data]);
+
+  if (collapsed) {
+    // The heading and a way back, nothing else: the reader asked for the
+    // space. (Rendered even when the board would be empty or failed — the
+    // reader must always be able to reopen what they closed.)
+    return (
+      <section aria-labelledby="right-rail-builders-heading" data-testid="right-rail-builders" data-collapsed="true">
+        <div className="flex items-center justify-between gap-2">
+          <h2 id="right-rail-builders-heading" className="font-ui text-lg font-medium text-ink-2">
+            {t('right_rail.builders.heading')}
+          </h2>
+          <button
+            type="button"
+            onClick={() => setHidden(false)}
+            className="shrink-0 font-ui text-caption text-ink-14 underline-offset-2 hover:text-ink-brand-6 hover:underline"
+            data-testid="builders-show"
+          >
+            {t('right_rail.builders.show')}
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   if (isError) return null;
   if (!isLoading && queues.length === 0) return null;
 
   return (
-    <section aria-labelledby="right-rail-builders-heading" data-testid="right-rail-builders">
-      <h2 id="right-rail-builders-heading" className="mb-0.5 font-ui text-lg font-medium text-ink-2">
-        {t('right_rail.builders.heading')}
-      </h2>
+    <section aria-labelledby="right-rail-builders-heading" data-testid="right-rail-builders" data-collapsed="false">
+      <div className="mb-0.5 flex items-start justify-between gap-2">
+        <h2 id="right-rail-builders-heading" className="font-ui text-lg font-medium text-ink-2">
+          {t('right_rail.builders.heading')}
+        </h2>
+        {/* Top right, as asked. An icon button with its name for screen readers and on hover. */}
+        <button
+          type="button"
+          onClick={() => setHidden(true)}
+          className="-mr-1 -mt-0.5 shrink-0 rounded p-1 text-ink-14 hover:bg-surface-11 hover:text-ink-2"
+          aria-label={t('right_rail.builders.hide')}
+          title={t('right_rail.builders.hide')}
+          data-testid="builders-hide"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
+      </div>
       <p className="mb-2 font-ui text-caption text-ink-14">{t('right_rail.builders.blurb')}</p>
       {isLoading ? (
         <ul className="animate-pulse" aria-hidden="true">
@@ -195,7 +285,7 @@ const Builders = () => {
         <ul onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} data-testid="builders-list">
           {queues.map((queue, i) => (
             // Keyed by slot, not by builder: the slot is the stable thing, its occupant changes.
-            <SlotView key={i} queue={queue} index={i} paused={hovered || hidden} />
+            <SlotView key={i} queue={queue} index={i} paused={hovered || tabHidden} />
           ))}
         </ul>
       )}

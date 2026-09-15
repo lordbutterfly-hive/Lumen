@@ -10,7 +10,7 @@
  * runner at this file.
  */
 import type { Entry } from '@hive/common-hiveio-packages/wax';
-import { shapeBuilderRow, isDevelopmentPost, isCrossPost, tagsOf, postAgeMs, interleaveByRound, buildSlotQueues, POSTS_PER_BUILDER, MAX_POST_AGE_MS, DEV_TAGS, BOARD_SLOTS } from '../builders-board-shape';
+import { shapeBuilderRow, isDevelopmentPost, isCrossPost, tagsOf, postAgeMs, interleaveByRound, buildSlotQueues, mapBounded, POSTS_PER_BUILDER, MAX_POST_AGE_MS, DEV_TAGS, BOARD_SLOTS } from '../builders-board-shape';
 import type { Builder, BuilderRow } from '../builders-board-shape';
 import { BUILDERS, BUILDERS_CURATOR } from '../builders-roster';
 
@@ -113,12 +113,7 @@ ok('"Witness update - 4/22" (nodes healthy; tags witness-category,witness only) 
 ok('"Rant 1.0" tagged hive,dhf,rant,random -> NOT', !isDevelopmentPost(MAHDI, post('mahdiyari', 'p', { title: 'Rant 1.0', category: 'hive', tags: ['hive', 'dhf', 'rant', 'random'] })));
 ok('"Dark Souls 3" -> NOT', !isDevelopmentPost(MAHDI, post('mahdiyari', 'p', { title: 'Dark Souls 3', category: 'hive-140217', tags: ['game', 'dark', 'souls'] })));
 
-console.log('\n@dalz and @techcoderlabz (owner\'s additions)');
-const DALZ = rule('dalz');
-ok('"Hive Witness Report | Ranking, Voting, Missed Blocks…" tagged witness,hive,report -> development', isDevelopmentPost(DALZ, post('dalz', 'p', { title: 'Hive Witness Report | Ranking, Voting, Missed Blocks, HBD Interest Changes and More | August 2026 ', category: 'witness', tags: ['witness', 'hive', 'report', 'aug26', 'data', 'ranking', 'moves'] })));
-ok('"Ecency! | Data On Posts, Comments, Users" in Hive Statistics (no hive tag) -> development by community', isDevelopmentPost(DALZ, post('dalz', 'p', { title: 'Ecency! | Data On Posts, Comments, Users | Aug 2026', category: 'hive-133987', tags: ['ecency', 'data', 'activity', 'users', 'maus', 'stats'] })));
-ok('"A Look at the Lido Protocol…" -> NOT', !isDevelopmentPost(DALZ, post('dalz', 'p', { title: 'A Look at the Lido Protocol | A Leading Protocol for Staking Ethereum | September 2026', category: 'lido', tags: ['lido', 'data', 'staked', 'eth', 'steth', 'defi'] })));
-ok('"Robinhood Chain Is Growing Fast!" -> NOT', !isDevelopmentPost(DALZ, post('dalz', 'p', { title: 'Robinhood Chain Is Growing Fast! | Data on TVL, Stablecoins, Active Addresses, Transactions', category: 'robinhood', tags: ['robinhood', 'hood', 'chain', 'crypto', 'defi', 'activity', 'stats'] })));
+console.log('\n@techcoderlabz (owner\'s addition)');
 const TECH = rule('techcoderlabz');
 ok('"#Learn #Python #Together | 🔥 Day 11 | #basics" -> development', isDevelopmentPost(TECH, post('techcoderlabz', 'p', { title: '#Learn #Python #Together | 🔥 Day 11 | #basics | #python ', category: 'python', tags: ['python', 'learn', 'basics', 'pip'] })));
 ok('"Learn Python Basics Together - Day 4 | Python Dictionaries…" (tags: hivesuite only) -> development', isDevelopmentPost(TECH, post('techcoderlabz', 'p', { title: 'Learn Python Basics Together - Day 4 | Python Dictionaries Explained for Beginners', category: 'hivesuite', tags: ['hivesuite'] })));
@@ -143,6 +138,7 @@ ok('@thebeedevs: "Clive — A Modern Replacement for CLI Wallet" -> development'
 ok('@hive.pizza: "MOON Dev Log — May 2026" -> development', isDevelopmentPost(rule('hive.pizza'), post('hive.pizza', 'p', { title: 'MOON Dev Log — May 2026: Mobile, PWA, and Attack Alerts', category: 'hive-140217', tags: ['moon', 'gaming', 'gamedev', 'archon'] })));
 ok('@hive.pizza: "MOON Season 1 Rewards Payout" -> NOT', !isDevelopmentPost(rule('hive.pizza'), post('hive.pizza', 'p', { title: 'MOON Season 1 Rewards Payout', category: 'hive-185582', tags: ['moon', 'gaming', 'oneup', 'archon', 'tribes', 'pizza'] })));
 ok('threespeak is off the roster (an automated weekly report is not building)', !BUILDERS.some((b) => b.account === 'threespeak'));
+ok('dalz is off the roster (owner: not a builder)', !BUILDERS.some((b) => b.account === 'dalz'));
 ok('hive-engine is off the roster (owner: a fake account)', !BUILDERS.some((b) => b.account === 'hive-engine'));
 ok('asgarth, good-karma, ecency, peakd are not on the roster', !BUILDERS.some((b) => ['asgarth', 'good-karma', 'ecency', 'peakd'].includes(b.account)));
 ok('every own-mode builder has at least one tag or title (otherwise its row can never exist)', BUILDERS.every((b) => b.mode !== 'own' || (b.tags?.length ?? 0) + (b.titles?.length ?? 0) > 0));
@@ -189,29 +185,42 @@ ok('created passes through untouched', row?.posts[0]?.created === '2026-09-11T00
 
 console.log('\nshapeBuilderRow: a cross-post stub does not take a slot (the @liketu page)');
 const liketuPage = [
-  post('liketu', 'front', { title: 'front — one link that\'s actually yours', category: 'hive-147010', tags: ['liketu', 'hive', 'front', 'feature'], created: '2026-07-12T00:00:00' }),
-  post('liketu', 'network-value', { title: 'Network value: the number that knows who grows liketu', category: 'hive-147010', tags: ['liketu', 'centrality'], created: '2026-07-07T00:00:00' }),
-  post('liketu', 'wild-xpost', { title: 'Introducing liketu Wild', category: 'hive-147010', tags: ['cross-post'], created: '2026-06-13T10:00:00' }),
-  post('liketu', 'wild', { title: 'Introducing liketu Wild', category: 'liketu', tags: ['liketu', 'feature', 'wild'], created: '2026-06-13T09:00:00' })
+  post('liketu', 'front', { title: 'front — one link that\'s actually yours', category: 'hive-147010', tags: ['liketu', 'hive', 'front', 'feature'], created: '2026-09-12T00:00:00' }),
+  post('liketu', 'network-value', { title: 'Network value: the number that knows who grows liketu', category: 'hive-147010', tags: ['liketu', 'centrality'], created: '2026-09-07T00:00:00' }),
+  post('liketu', 'wild-xpost', { title: 'Introducing liketu Wild', category: 'hive-147010', tags: ['cross-post'], created: '2026-09-03T10:00:00' }),
+  post('liketu', 'wild', { title: 'Introducing liketu Wild', category: 'liketu', tags: ['liketu', 'feature', 'wild'], created: '2026-09-03T09:00:00' })
 ];
 const liketuRow = shapeBuilderRow(rule('liketu'), liketuPage, NOW);
 ok('the original takes the third slot, not the stub', liketuRow?.posts.map((p) => p.permlink).join() === 'front,network-value,wild');
 
-console.log('\nshapeBuilderRow: nothing older than a year (the @imwatsi replay)');
+console.log('\nshapeBuilderRow: nothing older than 30 days, and a builder with nothing inside the month is not shown');
 const IMWATSI = rule('imwatsi');
 const replay = [
   post('imwatsi', 'dao-live', { title: 'Back on Hive — and FreeBeings DAO is live', category: 'hive-139531', tags: ['freebeings-dao'], created: '2026-06-30T00:00:00' }),
-  post('imwatsi', 'proposal-2023', { title: 'Proposal: FreeBeings.io LLC - HAF Development', category: 'hive-139531', tags: ['development'], created: '2023-04-15T00:00:00' }),
-  post('imwatsi', 'report-2022', { title: '3rd HAF Projects Development Report for 2022', category: 'hive-139531', tags: ['haf'], created: '2022-07-21T00:00:00' })
+  post('imwatsi', 'proposal-2023', { title: 'Proposal: FreeBeings.io LLC - HAF Development', category: 'hive-139531', tags: ['development'], created: '2023-04-15T00:00:00' })
 ];
-const aged = shapeBuilderRow(IMWATSI, replay, NOW);
-ok('the 2026 post is kept', aged?.posts.some((p) => p.permlink === 'dao-live') === true);
-ok('the 2023 and 2022 posts are dropped', aged?.posts.length === 1);
-ok('a row with one post is still a row (it just never flips)', aged !== null);
-ok('a builder whose only development posts are older than a year -> no row', shapeBuilderRow(IMWATSI, replay.slice(1), NOW) === null);
-ok('exactly a year old is kept, a day past it is not',
-  postAgeMs('2025-09-15T12:00:00', NOW) <= MAX_POST_AGE_MS && postAgeMs('2025-09-14T11:59:59', NOW) > MAX_POST_AGE_MS);
+ok('the real @imwatsi page (newest 2026-06-30) -> no row on 2026-09-15', shapeBuilderRow(IMWATSI, replay, NOW) === null);
+const fresh = post('imwatsi', 'fresh', { title: 'FreeBeings DAO: the first vote', category: 'hive-139531', tags: ['freebeings-dao'], created: '2026-09-14T00:00:00' });
+const revived = shapeBuilderRow(IMWATSI, [fresh, ...replay], NOW);
+ok('one new post inside the month brings the builder back, with that post only', revived?.posts.map((p) => p.permlink).join() === 'fresh');
+ok('exactly 30 days old is kept, a second past it is not',
+  postAgeMs('2026-08-16T12:00:00', NOW) <= MAX_POST_AGE_MS && postAgeMs('2026-08-16T11:59:59', NOW) > MAX_POST_AGE_MS);
 ok('an unparseable created is treated as infinitely old', postAgeMs('not a date', NOW) === Number.POSITIVE_INFINITY);
+
+console.log('\nover time: a new post replaces the oldest of the three (owner: "1 previous post from that author is removed and replaced")');
+const SNAPIE = rule('snapie');
+const day = (d: number) => `2026-09-${String(d).padStart(2, '0')}T00:00:00`;
+const week1 = [post('snapie', 'p3', { title: 'p3', created: day(10) }), post('snapie', 'p2', { title: 'p2', created: day(8) }), post('snapie', 'p1', { title: 'p1', created: day(6) })];
+const rowW1 = shapeBuilderRow(SNAPIE, week1, NOW);
+ok('week one: p3, p2, p1', rowW1?.posts.map((p) => p.permlink).join() === 'p3,p2,p1');
+const week2 = [post('snapie', 'p4', { title: 'p4', created: day(15) }), ...week1];
+const rowW2 = shapeBuilderRow(SNAPIE, week2, NOW);
+ok('a new post arrives: p4 in, p1 (the oldest) out, still three', rowW2?.posts.map((p) => p.permlink).join() === 'p4,p3,p2');
+const LATER = Date.parse('2026-10-08T12:00:00Z'); // p1 (09-06) and p2 (09-08) are now past 30 days
+ok('three weeks later with no new post: only the posts still inside the month remain', shapeBuilderRow(SNAPIE, week2, LATER)?.posts.map((p) => p.permlink).join() === 'p4,p3');
+ok('and once the last one ages out, the row disappears', shapeBuilderRow(SNAPIE, week2, Date.parse('2026-10-20T12:00:00Z')) === null);
+const weekBurst = Array.from({ length: 6 }, (_, i) => post('snapie', `b${6 - i}`, { title: `b${6 - i}`, created: day(15 - i) }));
+ok('six posts in a week: only the newest three', shapeBuilderRow(SNAPIE, weekBurst, NOW)?.posts.map((p) => p.permlink).join() === 'b6,b5,b4');
 
 console.log('\nslots: the board flips writers as well as posts');
 const rowOf = (account: string, n: number): BuilderRow => ({
@@ -235,6 +244,33 @@ ok('fewer entries than slots -> fewer slots, never an empty one', buildSlotQueue
 ok('no rows -> no slots', buildSlotQueues([]).length === 0);
 ok('the request line has a curator on the roster to point at', BUILDERS.some((b) => b.account === BUILDERS_CURATOR));
 
+async function testMapBounded(): Promise<void> {
+  console.log('\nmapBounded: the roster read never bursts past its limit');
+  let inFlight = 0;
+  let peak = 0;
+  const seen: number[] = [];
+  const slow = (i: number) => new Promise<number>((resolve, reject) => {
+    inFlight++;
+    peak = Math.max(peak, inFlight);
+    seen.push(i);
+    setTimeout(() => {
+      inFlight--;
+      if (i === 5) reject(new Error('node hiccup'));
+      else resolve(i * 10);
+    }, 5 + (i % 3) * 3);
+  });
+  const items = Array.from({ length: 21 }, (_, i) => i);
+  const settled = await mapBounded(items, 4, (_, i) => slow(i));
+  ok('peak in-flight is the limit, not the roster size', peak === 4, `peak ${peak}`);
+  ok('every item was read exactly once', seen.length === 21 && new Set(seen).size === 21);
+  ok('results keep the roster order', settled.every((r, i) => r.status === 'rejected' || r.value === i * 10));
+  ok('one rejection is isolated, the rest fulfil', settled.filter((r) => r.status === 'rejected').length === 1 && settled[5].status === 'rejected');
+  ok('an empty roster resolves to nothing', (await mapBounded([], 4, async () => 1)).length === 0);
+  ok('a limit above the roster size just runs them all', (await mapBounded([1, 2], 8, async (x) => x)).length === 2);
+  ok('a limit of zero still makes progress (one worker)', (await mapBounded([1, 2, 3], 0, async (x) => x)).map((r) => (r.status === 'fulfilled' ? r.value : -1)).join() === '1,2,3');
+}
+
+testMapBounded().then(() => {
 if (failures === 0) {
   console.log(`\nbuilders-board: ALL ${checks} CHECKS PASSED`);
   process.exit(0);
@@ -242,3 +278,4 @@ if (failures === 0) {
   console.error(`\nbuilders-board: ${failures}/${checks} CHECK(S) FAILED`);
   process.exit(1);
 }
+});

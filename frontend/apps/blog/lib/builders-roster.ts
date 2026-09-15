@@ -18,7 +18,7 @@ import type { Builder } from '@/blog/lib/builders-board-shape';
  * or change. Modes are explained on `Builder`.
  *
  * Owner's exclusions: asgarth, good-karma, ecency, peakd. Owner's additions:
- * lordbutterfly, acidyo, holozing, techcoderlabz, dalz, and Scrobble — which
+ * lordbutterfly, acidyo, holozing, techcoderlabz, magi.network, and Scrobble — which
  * lives on @acidyo's posts tagged `scrobble` (`@scrobble` is a curation
  * compilation account and `@scrobble.life` has no root posts).
  *
@@ -31,7 +31,9 @@ import type { Builder } from '@/blog/lib/builders-board-shape';
  * Network Weekly Activity Report", so the row would flip between three
  * identical titles and none of them is something being built); hive-engine
  * (owner, 2026-09-15: "Hive engine is a fake account. Get rid of it" — its
- * posts are auto-published contract sources, not a person or team writing).
+ * posts are auto-published contract sources, not a person or team writing);
+ * dalz (owner, 2026-09-15: "remove dalz, hes not a builder" — data reports
+ * about Hive, not building on it).
  */
 /** Where a builder who is not listed asks to be: the card's footer links to this profile. */
 export const BUILDERS_CURATOR = 'lordbutterfly';
@@ -80,10 +82,6 @@ export const BUILDERS: readonly Builder[] = [
   // Owner: "every post of his is about development". Twenty of twenty are
   // HAF/API-stack release notes.
   { account: 'blocktrades', mode: 'all' },
-  // Owner's addition. Hive data reports (accounts, inflation, witnesses, DHF,
-  // HBD, frontends) carry `hive` or sit in Hive Statistics (hive-133987); the
-  // Lido/Base/Solana/stablecoin reports carry neither.
-  { account: 'dalz', mode: 'own', tags: ['hive', 'hive-133987'] },
   // Owner's addition. The "#Learn #Python #Together" tutorial series, every
   // one titled with Python; the AI opinion pieces and the Pune meetups are not.
   { account: 'techcoderlabz', mode: 'own', titles: ['python'] },

@@ -2124,7 +2124,9 @@
     "builders": {
       "heading": "Hive builders",
       "blurb": "Tracking development on Hive.",
-      "request": "Building on Hive and not listed? Ask @{{curator}} to be added."
+      "request": "Building on Hive and not listed? Ask @{{curator}} to be added.",
+      "hide": "Hide Hive builders",
+      "show": "Show"
     }
   },
   "tags_page": {

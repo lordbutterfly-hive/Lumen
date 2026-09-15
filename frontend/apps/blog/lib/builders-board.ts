@@ -1,6 +1,6 @@
 import { getAccountPostsPage } from '@transaction/lib/bridge-api';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
-import { shapeBuilderRow } from '@/blog/lib/builders-board-shape';
+import { shapeBuilderRow, mapBounded } from '@/blog/lib/builders-board-shape';
 import type { BuilderRow } from '@/blog/lib/builders-board-shape';
 import { BUILDERS } from '@/blog/lib/builders-roster';
 
@@ -31,16 +31,19 @@ export { BUILDERS } from '@/blog/lib/builders-roster';
  */
 const POSTS_TO_READ = 20;
 
+/** Builders read at once. See `mapBounded`: the whole roster in one burst took a third of the worker's Hive socket pool. */
+const READ_CONCURRENCY = 4;
+
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 async function readBuildersBoard(): Promise<BuilderRow[]> {
-  // Every builder in parallel, none allowed to take the others down: one dead
+  // A few builders at a time, none allowed to take the others down: one dead
   // account (renamed, or a node hiccup on that one call) drops one row, not
   // the card. `getAccountPostsPage` already retries and fails over across
   // nodes on its own, so nothing is wrapped here.
-  const settled = await Promise.allSettled(
-    BUILDERS.map((b) => getAccountPostsPage('posts', b.account, '', '', '', POSTS_TO_READ))
+  const settled = await mapBounded(BUILDERS, READ_CONCURRENCY, (b) =>
+    getAccountPostsPage('posts', b.account, '', '', '', POSTS_TO_READ)
   );
   const rows: BuilderRow[] = [];
   settled.forEach((result, i) => {
