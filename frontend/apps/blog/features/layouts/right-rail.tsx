@@ -3,6 +3,7 @@
 import { getMarketDataSource } from '@/blog/features/prediction-market/lib/market-data-source';
 import MarketWidget from '@/blog/features/prediction-market/market-widget';
 import Topics from './right-rail/topics';
+import Builders from './right-rail/builders';
 
 const CARD_CLASS =
 /* ★ WARM CARD SHADOW (illumination SPEC.md §3, owner 2026-08-21: "do the
@@ -21,7 +22,21 @@ const CARD_CLASS =
 // Communities widget removed from the right rail (owner request, 2026-08-06).
 // `right-rail/communities.tsx` (subscriptions query + card) was deleted with
 // it — nothing else in the tree imported that file.
-export default function RightRail() {
+export default function RightRail({
+  builders = false
+}: {
+  /**
+   * ★ THE BUILDERS BOARD IS OPT-IN, PER CALL SITE (owner, 2026-09-15: "I want
+   * a card like that to show up on HOME and on TOPICS. ONLY THOSE TWO PAGES.
+   * DONT HAVE IT SPILL OVER INTO MERITUM OR ANYTHING"). This rail is mounted
+   * by six shells; a route test inside the card would be one regex away from
+   * matching a seventh. A prop that defaults to `false` cannot spill: the card
+   * appears only where a call site says `builders`, and today exactly three
+   * do — `home-shell.tsx`, `topic-shell.tsx`, and `app/topics/[tag]/loading.tsx`
+   * (so the skeleton and the page keep the same rail height).
+   */
+  builders?: boolean;
+} = {}) {
   // ★ THE MARKET CARD IS GONE UNTIL THE MARKET SHIPS (owner ruling, 2026-08-11,
   // item F8/P3). No REACT_APP_VSC_MARKET_* contract is provisioned on this
   // build, so MarketWidget's own `isUnavailable` branch was rendering a
@@ -53,6 +68,11 @@ export default function RightRail() {
       <div className={CARD_CLASS}>
         <Topics />
       </div>
+      {builders ? (
+        <div className={CARD_CLASS}>
+          <Builders />
+        </div>
+      ) : null}
     </aside>
   );
 }

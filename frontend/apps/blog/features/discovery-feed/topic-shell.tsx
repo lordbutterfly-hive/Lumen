@@ -371,7 +371,7 @@ export default function TopicShell({ tag }: { tag: string }) {
       </main>
 
       <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
-        <RightRail />
+        <RightRail builders />
       </aside>
     </div>
   );

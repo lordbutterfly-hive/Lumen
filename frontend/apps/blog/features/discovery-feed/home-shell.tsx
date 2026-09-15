@@ -87,7 +87,7 @@ export default async function HomeShell({ showIntro = false }: { showIntro?: boo
       </main>
 
       <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
-        <RightRail />
+        <RightRail builders />
       </aside>
     </div>
   );

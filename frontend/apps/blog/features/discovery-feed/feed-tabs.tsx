@@ -27,6 +27,7 @@ import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useOffline } from '@/blog/components/offline-guard';
 import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
 import { useInitialFeed } from '@/blog/components/observer-provider';
+import { readAcceptedNewPosts, writeAcceptedNewPosts } from '@/blog/lib/feed/accepted-new-posts';
 import { computeScrollRestoreTarget } from '@/blog/lib/feed/scroll-restore-target';
 
 // TODO: move to i18n
@@ -360,6 +361,11 @@ function ForYouFeed({ ssrCardCount = Number.POSITIVE_INFINITY }: { ssrCardCount?
   const { t } = useTranslation('common_blog');
   const queryClient = useQueryClient();
   const initialFeed = useInitialFeed();
+  // Keys the accepted-new-posts memory below (lib/feed/accepted-new-posts.ts),
+  // so a reader who signs out and back in as someone else in the same tab
+  // never inherits the first reader's acceptance. Empty for the anonymous
+  // reader, which is its own key.
+  const viewer = useSessionIdentity().username ?? '';
   // Keys the scroll keeper and the saved-position read below. This is the
   // home route's own pathname (this component only ever mounts from
   // `home-shell.tsx`), read here rather than threaded down as a prop because
@@ -498,8 +504,32 @@ function ForYouFeed({ ssrCardCount = Number.POSITIVE_INFINITY }: { ssrCardCount?
     enabled: pollReady
   });
 
-  /** New posts the reader accepted, kept above the pages they were already reading. */
+  /** New posts the reader accepted, kept above the pages they were already reading.
+   *
+   *  ★★ RESTORED FROM THIS TAB'S MEMORY AFTER MOUNT (owner, 2026-09-15: "if i
+   *  go anywhere else and come back I have to click it again"). This was a
+   *  bare `useState<Entry[]>([])`, so leaving the route threw the answer away
+   *  and, on return, the still-cached probe page re-offered the very same
+   *  posts. See `lib/feed/accepted-new-posts.ts` for the mechanism, and for
+   *  why the memory is `sessionStorage`: measured on the production build, a
+   *  topic navigation from home is a full document load, which no module
+   *  variable survives.
+   *
+   *  ★ THE INITIALISER STAYS `[]`, THE RESTORE IS A LAYOUT EFFECT BELOW — for
+   *  exactly the reason `revealed` never reads anything browser-only in its
+   *  initialiser: on a hard load the server rendered `[]`, and a client that
+   *  read storage during hydration would disagree with it. React 18 answers
+   *  that by throwing the boundary away and re-rendering it, which costs more
+   *  than this feature saves and can itself flash. The layout effect runs
+   *  after hydration and before paint, so the accepted posts are on top by
+   *  the first frame the reader sees, with no mismatch. */
   const [accepted, setAccepted] = useState<Entry[]>([]);
+  useIsomorphicLayoutEffect(() => {
+    const remembered = readAcceptedNewPosts(viewer);
+    if (remembered.length > 0) setAccepted(remembered);
+    // Once per mount (and again only if the viewer changes under a mounted
+    // feed, which re-keys the memory). `readAcceptedNewPosts` is pure.
+  }, [viewer]);
 
   /**
    * ★★★ SSR RENDERS ONLY THE FIRST `ssrCardCount` CARDS; THE CLIENT REVEALS
@@ -850,7 +880,12 @@ function ForYouFeed({ ssrCardCount = Number.POSITIVE_INFINITY }: { ssrCardCount?
 
   const acceptNew = () => {
     // Capped so a tab left open all day cannot grow this without bound.
-    setAccepted((prev) => [...offered, ...prev].slice(0, FOR_YOU_LIMIT * 4));
+    // Written through to the session memory so a navigation away and back
+    // starts from this answer instead of asking the question again. The cap
+    // is applied HERE, once, and the memory stores exactly what is rendered.
+    const next = [...offered, ...accepted].slice(0, FOR_YOU_LIMIT * 4);
+    setAccepted(next);
+    writeAcceptedNewPosts(viewer, next);
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 

@@ -34,7 +34,7 @@ export default function Loading() {
         <LumenLoader size="lg" label={t('global.loading_posts')} />
       </main>
       <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
-        <RightRail />
+        <RightRail builders />
       </aside>
     </div>
   );

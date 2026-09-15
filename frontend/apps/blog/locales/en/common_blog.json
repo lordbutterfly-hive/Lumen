@@ -2120,6 +2120,10 @@
       "heading": "Topics",
       "error": "Couldn't load trending topics.",
       "empty": "No trending topics right now."
+    },
+    "builders": {
+      "heading": "Building on Hive",
+      "blurb": "What the people building the chain are publishing."
     }
   },
   "tags_page": {
