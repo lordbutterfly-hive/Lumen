@@ -51,7 +51,17 @@ const ModalShell: FC<ModalShellProps> = ({ width, onClose, title, className, chi
       wrapperClassName="p-5 py-12"
       style={{ width }}
       className={cn(
-        'max-w-full rounded-panel bg-surface-1 shadow-[0_20px_60px_rgba(20,18,10,0.25)] focus:outline-none',
+        // ★★★ THE DIALOG ITSELF SCROLLS (owner, 2026-09-15, screenshot 2407:
+        // "clips the bottom of the page cant scroll to buy. HUUUUUGE PROBLEM").
+        // The wrapper around this content is `overflow-y-auto`, but Radix's
+        // Dialog wraps the CONTENT in react-remove-scroll, which swallows wheel
+        // and touch scrolling on anything outside the content node — the
+        // wrapper included. So a Buy dialog taller than the viewport (the
+        // "Add HBD to Magi" notice plus the fee note plus the submit button)
+        // could never be scrolled to its button. Bounding the content to the
+        // viewport (minus the wrapper's 3rem top and bottom padding) and letting
+        // it scroll internally keeps every button reachable on every screen.
+        'max-h-[calc(100dvh-6rem)] max-w-full overflow-y-auto overscroll-contain rounded-panel bg-surface-1 shadow-[0_20px_60px_rgba(20,18,10,0.25)] focus:outline-none',
         className
       )}
     >
