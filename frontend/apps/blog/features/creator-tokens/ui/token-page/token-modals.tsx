@@ -24,6 +24,8 @@ import { writeFailureMessage } from '../write-failure';
 import { useTokenAccounts } from '../../live/use-token-accounts';
 import { useMagiSpendingPower } from '../../live/use-magi-spending-power';
 import { HiveTopUpPanel, MagiFuelGauge, MagiFundingHelp } from '../../live/magi-fuel-gauge';
+import RecipientPicker, { type RecipientResolution } from '@/blog/features/wallet/components/dialogs/shared/recipient-picker';
+import type { UseFormRegisterReturn } from 'react-hook-form';
 import { bareHiveName, planHiveTopUp, type TopUpPlan } from '@/blog/lib/meritum/hive-topup';
 import { rcLimitForAction } from '../../lib/vsc/rc-budget';
 import { getCreatorTokensConfig } from '../../lib/creator-tokens-data-source';
@@ -33,7 +35,6 @@ import type { MagiSpendingPower } from '@/blog/lib/lite/wallet/magi-balance';
 import ModalShell from '../modal-shell';
 import DmComposeModal from '@/blog/features/direct-messages/ui/dm-compose-modal';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
-import { getCreatorTokensDataSource } from '../../lib/creator-tokens-data-source';
 import { sellEmptyStateMessage } from './sell-empty-state';
 import { buyerOracleNotice } from '../../market/oracle-copy';
 import type { Quote } from '../../types';
@@ -1177,29 +1178,38 @@ const SendModal: FC<{
   const [to, setTo] = useState('');
   const [amt, setAmt] = useState('');
   const [failure, setFailure] = useState<string | null>(null);
-  const [checking, setChecking] = useState(false);
+  // ★ THE SAME RECIPIENT PICKER THE WALLET USES (owner, 2026-09-15: "when you
+  // type the names and it checks against the chain if real name... just copy
+  // that code into send meritum tokens"). It resolves a Hive name against the
+  // chain as you type (avatar, display name, exists / not found / could not
+  // check) or a wallet address; the button only arms on a resolved
+  // destination. A failed check can still be sent on a second press, as before.
+  const [resolution, setResolution] = useState<RecipientResolution>({ status: 'idle' });
+  const checking = resolution.status === 'checking';
+  const dest =
+    resolution.status === 'ok' ? (resolution.kind === 'hive' ? resolution.name : resolution.id) : resolution.status === 'check_failed' ? resolution.name : null;
+  const registerTo: UseFormRegisterReturn = {
+    name: 'to',
+    onChange: async (e: { target: { value: string } }) => {
+      setTo(e.target.value);
+      setFailure(null);
+      setConfirmAnyway(false);
+    },
+    onBlur: async () => undefined,
+    ref: () => undefined
+  };
   // Set when a hive destination could not be verified to exist; a second Send
   // press then goes through. Reset whenever the destination changes.
   const [confirmAnyway, setConfirmAnyway] = useState(false);
   const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
-  const valid = to.trim().length > 0 && Number.isFinite(tokens) && tokens > 0 && tokens <= held;
+  const valid = dest !== null && Number.isFinite(tokens) && tokens > 0 && tokens <= held;
   return (
     <ModalShell width={420} onClose={onClose} title={`Send @${displayHandle(m.handle)} tokens`}>
       <ModalHead title={`Send @${displayHandle(m.handle)} tokens`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
-        <label className="mb-1.5 block text-caption font-medium text-ink-10 font-ui">
-          To (Lumen or Hive name)
-        </label>
-        <input
-          value={to}
-          onChange={(e) => {
-            setTo(e.target.value);
-            setFailure(null);
-            setConfirmAnyway(false);
-          }}
-          placeholder="@name"
-          className="mb-3.5 w-full rounded-xl border border-line-11 px-4 py-3 text-[15px] leading-[24px] font-medium text-ink-2 font-ui outline-none focus-visible:outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
-        />
+        <div className="mb-3.5">
+          <RecipientPicker mode="magi" label="To (Hive name or wallet address)" register={registerTo} value={to} onResolved={setResolution} testId="meritum-send-to" />
+        </div>
         <div className="mb-1.5 flex items-center justify-between">
           <label className="text-caption font-medium text-ink-10 font-ui">Amount (tokens)</label>
           <button
@@ -1224,30 +1234,16 @@ const SendModal: FC<{
             if (!valid) return;
             // F7: synchronous — see BuyModal's `inFlight` doc.
             if (inFlight.current) return;
-            const dest = to.trim().replace(/^@/, '');
             // ★ EXISTENCE CHECK for hive destinations (2026-09-01, 57 confirmed
             // against core). The transfer contract CREDITS a well-formed but
             // NONEXISTENT hive account, so a typo is a permanent, unrecoverable
             // send that a stranger could later claim by registering that name.
             // did:pkh has no registry, so shape is all there is for those.
-            if (!dest.startsWith('did:') && !confirmAnyway) {
-              setChecking(true);
-              setFailure(null);
-              const ds = getCreatorTokensDataSource();
-              const exists = ds ? await ds.hiveAccountExists(dest) : null;
-              setChecking(false);
-              if (exists === false) {
-                setFailure(`There is no Hive account named @${dest}. Check the spelling. Sends are permanent and cannot be undone.`);
-                return;
-              }
-              if (exists === null) {
-                // Could not verify (no node, or the lookup failed). Never
-                // silent-send: ask for one explicit confirmation rather than
-                // block on a blip.
-                setConfirmAnyway(true);
-                setFailure(`Could not verify @${dest} exists right now. Sends are permanent and cannot be undone. Press Send again to send anyway.`);
-                return;
-              }
+            if (dest === null) return;
+            if (resolution.status === 'check_failed' && !confirmAnyway) {
+              setConfirmAnyway(true);
+              setFailure(`Could not verify @${dest} exists right now. Sends are permanent and cannot be undone. Press Send again to send anyway.`);
+              return;
             }
             inFlight.current = true;
             setBusy(true);
