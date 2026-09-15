@@ -204,3 +204,50 @@ export function shapeBuilderRow(
   }
   return posts.length > 0 ? { account: builder.account, posts } : null;
 }
+
+/**
+ * ★★★ THE BOARD FLIPS WRITERS, NOT JUST POSTS (owner, 2026-09-15: "make sure
+ * the card flips the writers as well as their posts"). The card has a fixed
+ * number of SLOTS, and each slot cycles through a queue of (builder, post)
+ * entries, so every flip can bring a different builder into view, the way a
+ * departures board shows a different flight in the same row. Over one full
+ * cycle every builder's every post passes through the card; nothing is lost
+ * to a row nobody scrolled to.
+ *
+ * ★ QUEUES ARE DEALT SO NO TWO SLOTS SHOW THE SAME BUILDER AT ONCE. The
+ * entries are laid out by ROUND — every builder's newest post first (in the
+ * board's newest-first order), then every builder's second post, then the
+ * third — and dealt round-robin into the slots. The slots step in near
+ * lockstep (same dwell, a small stagger), so at any moment they show a run of
+ * consecutive entries, and consecutive entries within a round are distinct
+ * builders. Dealing the flat newest-first list instead would have opened the
+ * card with @sagarkothari88 in three slots at once.
+ */
+export const BOARD_SLOTS = 8;
+
+export interface SlotEntry {
+  account: string;
+  post: BuilderPost;
+}
+
+/** Every builder's newest post, then every builder's second, then third… */
+export function interleaveByRound(rows: readonly BuilderRow[]): SlotEntry[] {
+  const out: SlotEntry[] = [];
+  const deepest = rows.reduce((max, r) => Math.max(max, r.posts.length), 0);
+  for (let round = 0; round < deepest; round++) {
+    for (const row of rows) {
+      const post = row.posts[round];
+      if (post) out.push({ account: row.account, post });
+    }
+  }
+  return out;
+}
+
+/** Deal the round-interleaved entries into at most `slots` queues; a queue is never empty. */
+export function buildSlotQueues(rows: readonly BuilderRow[], slots: number = BOARD_SLOTS): SlotEntry[][] {
+  const entries = interleaveByRound(rows);
+  const count = Math.max(0, Math.min(slots, entries.length));
+  const queues: SlotEntry[][] = Array.from({ length: count }, () => []);
+  entries.forEach((entry, i) => queues[i % count].push(entry));
+  return queues;
+}

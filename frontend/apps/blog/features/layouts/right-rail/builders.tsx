@@ -1,6 +1,6 @@
 'use client';
 
-import { FC, useEffect, useRef, useState } from 'react';
+import { FC, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@hive/ui';
 import { UserAvatarImg } from '@ui/components';
@@ -8,17 +8,24 @@ import TimeAgo from '@ui/components/time-ago';
 import { cn } from '@ui/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useTranslation } from '@/blog/i18n/client';
-import type { BuilderRow } from '@/blog/lib/builders-board-shape';
+import { buildSlotQueues } from '@/blog/lib/builders-board-shape';
+import type { BuilderRow, SlotEntry } from '@/blog/lib/builders-board-shape';
+import { BUILDERS_CURATOR } from '@/blog/lib/builders-roster';
 
 /**
  * ★★★ THE BUILDERS BOARD — the right-rail card on HOME and TOPICS showing what
  * the people building on Hive are publishing (owner, 2026-09-15).
  *
  * Deliberately the same object as the Meritum departures board
- * (`creator-tokens/ui/meritum/board/offerings-board.tsx`): one row per person,
- * each row holding ONE of their recent posts and flipping to the next on a
- * staggered timer, the way an airport board cycles a flight. The three rules
- * that board learned the hard way apply here unchanged:
+ * (`creator-tokens/ui/meritum/board/offerings-board.tsx`): a fixed number of
+ * SLOTS, each holding one (builder, post) and flipping to the next on a
+ * staggered timer, the way an airport board cycles a flight. The first
+ * version pinned one builder per row and flipped only the post; the owner
+ * asked for the WRITERS to flip too ("make sure the card flips the writers as
+ * well as their posts"), so a slot now cycles through a queue dealt across
+ * every builder — see `buildSlotQueues` for how the queues are dealt so no
+ * two slots show the same builder at once. The three rules the Meritum board
+ * learned the hard way apply here unchanged:
  *
  *  1. IT LIVES ONLY WHERE IT WAS ASKED FOR. `RightRail` renders this only when
  *     handed `builders`, and exactly three call sites pass it: `home-shell`,
@@ -28,7 +35,7 @@ import type { BuilderRow } from '@/blog/lib/builders-board-shape';
  *     cannot drift onto a page nobody meant it to reach.
  *
  *  2. IT NEVER ROTATES UNDER A READER'S EYES. Paused on hover and while the tab
- *     is hidden; `paused` is a single derived flag so a row cannot be flipping
+ *     is hidden; `paused` is a single derived flag so a slot cannot be flipping
  *     while the pointer is on it.
  *
  *  3. THE TITLE WRAPS, THE NAME AND THE TIME DO NOT. A post title is the whole
@@ -41,56 +48,25 @@ import type { BuilderRow } from '@/blog/lib/builders-board-shape';
  * paints a short skeleton so the rail does not jump when the rows arrive.
  */
 
-/** How long one post holds its row before the flip (owner, 2026-09-15: "it flips
- *  once every 30 second per person"). Staggered per row below so rows never
+/** How long one entry holds its slot before the flip (owner, 2026-09-15: "it flips
+ *  once every 30 second per person"). Staggered per slot below so slots never
  *  flip in unison. */
 const DWELL_MS = 30_000;
 /** The flip itself — short enough to read as a change, not an animation. */
 const FLAP_MS = 260;
-/** Rows the card shows, however many builders the route returns. The list
- *  scrolls inside a measured cap (see `useViewportCap`), so this is a sanity
- *  bound, not a layout one. */
-const MAX_ROWS = 40;
-
-/** The shell's own `sticky top-24`, in px. The list can never be taller than what is left below it. */
-const STICKY_TOP_PX = 96;
-/** Breathing room under the list so it never ends flush with the window edge. */
-const BOTTOM_GUTTER_PX = 24;
 
 /**
- * ★★★ THE LIST CAPS AT THE SPACE ACTUALLY AVAILABLE AND SCROLLS INSIDE IT
- * (owner, 2026-09-15: "on scroll the list is hidden, cant scroll down it").
- * The rail is `sticky top-24 h-fit`: a sticky box taller than the viewport is
- * unreachable at the bottom — the page scrolls, the box does not, and the last
- * rows can never be read. Ported verbatim from the Meritum board, which learned
- * the same lesson: measure this list's offset INSIDE the aside (so the Topics
- * card above it is accounted for, whatever its height) and cap at
- * `viewport - stickyTop - offset - gutter`. Measured against the aside, not the
- * viewport, because `rect.top` reads the unpinned position at scroll 0.
+ * ★ NO IN-CARD SCROLL, AND THE RAIL IT SITS IN IS NOT STICKY (owner,
+ * 2026-09-15: "its still weird on scroll. how about you remove the incard
+ * scroll and unlock the whole right navbar area so you can scroll down
+ * normally and it isnt sticky"). The first version capped the list at the
+ * viewport and scrolled it inside a sticky aside, the way the Meritum board
+ * does; the owner found the nested scroller weird. So the list is plain, and
+ * the two shells that mount this card (`home-shell`, `topic-shell`, plus the
+ * topics `loading.tsx`) drop `sticky top-24` from their RIGHT aside: the page
+ * scrolls past the rail like any other content. Every other shell keeps its
+ * sticky rail; this card is not there.
  */
-function useViewportCap(ref: React.RefObject<HTMLElement>, rowCount: number): number | undefined {
-  const [cap, setCap] = useState<number | undefined>(undefined);
-  useEffect(() => {
-    const measure = () => {
-      const el = ref.current;
-      const aside = el?.closest('aside');
-      if (!el || !aside) return;
-      const offsetInAside = el.getBoundingClientRect().top - aside.getBoundingClientRect().top;
-      setCap(Math.max(160, window.innerHeight - STICKY_TOP_PX - offsetInAside - BOTTOM_GUTTER_PX));
-    };
-    measure();
-    window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
-    // ★ RE-MEASURE WHEN THE ROWS ARRIVE (caught on the first local render,
-    // 2026-09-15: `maxHeight` never set, list bottom at 1104px in a 900px
-    // viewport). The `<ul>` this measures only mounts once the query resolves;
-    // the skeleton before it carries no ref. Keyed on `[ref]` alone, this
-    // effect ran once against `ref.current === null` and never again, so the
-    // cap the owner asked for was computed for nothing. `rowCount` changes
-    // exactly when the real list appears.
-  }, [ref, rowCount]);
-  return cap;
-}
 
 async function fetchBuildersBoard(): Promise<BuilderRow[]> {
   const res = await fetch('/api/builders-board');
@@ -101,65 +77,72 @@ async function fetchBuildersBoard(): Promise<BuilderRow[]> {
   return body.builders ?? [];
 }
 
-const BuilderRowView: FC<{ row: BuilderRow; index: number; paused: boolean }> = ({ row, index, paused }) => {
-  const [slot, setSlot] = useState(0);
+/** One slot of the board: a queue of (builder, post) entries, showing one and flipping through the rest. */
+const SlotView: FC<{ queue: SlotEntry[]; index: number; paused: boolean }> = ({ queue, index, paused }) => {
+  const [step, setStep] = useState(0);
   const [flapping, setFlapping] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const current = row.posts[slot % row.posts.length];
+  const current = queue[step % queue.length];
 
   useEffect(() => {
-    // One post never flips, a paused board never flips. Both are the ABSENCE
-    // of a timer, so a paused board costs no wakeups at all.
-    if (paused || row.posts.length < 2) return;
-    // Staggered so rows never flip in unison — that reads as the page
+    // A one-entry queue never flips, a paused board never flips. Both are the
+    // ABSENCE of a timer, so a paused board costs no wakeups at all.
+    if (paused || queue.length < 2) return;
+    // Staggered so slots never flip in unison — that reads as the page
     // re-rendering rather than a board updating. 1.5 s apart: with a 30 s
-    // dwell the rows drift through the half-minute instead of ticking together.
+    // dwell the slots drift through the half-minute instead of ticking together.
     const delay = DWELL_MS + index * 1_500;
     timer.current = setTimeout(() => {
       setFlapping(true);
       setTimeout(() => {
-        setSlot((s) => s + 1);
+        setStep((s) => s + 1);
         setFlapping(false);
       }, FLAP_MS);
     }, delay);
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [paused, row.posts.length, index, slot]);
+  }, [paused, queue.length, index, step]);
 
-  const postHref = `/${current.category}/@${row.account}/${current.permlink}`;
+  const { account, post } = current;
+  const postHref = `/${post.category}/@${account}/${post.permlink}`;
 
   return (
-    <li className="border-b border-line-2 py-2.5 last:border-0" data-testid="builders-row">
-      <div className="flex min-w-0 items-center justify-between gap-2">
-        <Link
-          href={`/@${row.account}`}
-          className="flex min-w-0 flex-1 items-center gap-2 font-ui text-[13px] leading-[20px] font-semibold text-ink-2 hover:text-ink-brand-6"
-          title={`@${row.account}`}
-        >
-          {/* The same avatar component the feed byline uses, at the board's 24px. */}
-          <UserAvatarImg username={row.account} pixelSize={24} alt={`@${row.account} profile picture`} />
-          <span className="min-w-0 flex-1 truncate">@{row.account}</span>
-        </Link>
-        {/* One token, never wrapped. */}
-        <span className="shrink-0 font-ui text-caption text-ink-14">
-          <TimeAgo date={current.created} />
-        </span>
-      </div>
-      <Link
-        href={postHref}
-        data-testid="builders-post-link"
+    <li className="border-b border-line-2 py-2.5 last:border-0" data-testid="builders-row" data-account={account}>
+      {/* The whole entry flaps — name, avatar, time and title leave and arrive together, because the writer changes too. */}
+      <div
         className={cn(
-          'mt-1 block min-w-0 break-words font-ui text-caption leading-[18px] text-ink-10 transition-all hover:text-ink-brand-6 motion-reduce:transition-none',
-          // The flap: the outgoing title lifts and fades, the incoming settles.
+          'transition-all motion-reduce:transition-none',
+          // The flap: the outgoing entry lifts and fades, the incoming settles.
           // `motion-reduce` drops it to a plain swap — the change still happens.
           flapping ? '-translate-y-1 opacity-0' : 'translate-y-0 opacity-100'
         )}
         style={{ transitionDuration: `${FLAP_MS}ms` }}
-        title={current.title}
       >
-        {current.title}
-      </Link>
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <Link
+            href={`/@${account}`}
+            className="flex min-w-0 flex-1 items-center gap-2 font-ui text-[13px] leading-[20px] font-semibold text-ink-2 hover:text-ink-brand-6"
+            title={`@${account}`}
+          >
+            {/* The same avatar component the feed byline uses, at the board's 24px. */}
+            <UserAvatarImg username={account} pixelSize={24} alt={`@${account} profile picture`} />
+            <span className="min-w-0 flex-1 truncate">@{account}</span>
+          </Link>
+          {/* One token, never wrapped. */}
+          <span className="shrink-0 font-ui text-caption text-ink-14">
+            <TimeAgo date={post.created} />
+          </span>
+        </div>
+        <Link
+          href={postHref}
+          data-testid="builders-post-link"
+          className="mt-1 block min-w-0 break-words font-ui text-caption leading-[18px] text-ink-10 hover:text-ink-brand-6"
+          title={post.title}
+        >
+          {post.title}
+        </Link>
+      </div>
     </li>
   );
 };
@@ -168,7 +151,6 @@ const Builders = () => {
   const { t } = useTranslation('common_blog');
   const [hovered, setHovered] = useState(false);
   const [hidden, setHidden] = useState(false);
-  const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     // Animating a board nobody is looking at is pure battery.
@@ -187,12 +169,12 @@ const Builders = () => {
     retry: 1
   });
 
-  // Above the early returns: a hook. `rows` is derived before it so the cap
-  // re-measures the moment the real list mounts.
-  const rows = (data ?? []).slice(0, MAX_ROWS);
-  const cap = useViewportCap(listRef, rows.length);
+  // Above the early return: a hook. The queues are dealt once per answer, so a
+  // slot's queue keeps its identity across renders and its timer is not reset
+  // by the parent re-rendering.
+  const queues = useMemo(() => buildSlotQueues(data ?? []), [data]);
   if (isError) return null;
-  if (!isLoading && rows.length === 0) return null;
+  if (!isLoading && queues.length === 0) return null;
 
   return (
     <section aria-labelledby="right-rail-builders-heading" data-testid="right-rail-builders">
@@ -210,19 +192,19 @@ const Builders = () => {
           ))}
         </ul>
       ) : (
-        <ul
-          ref={listRef}
-          onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => setHovered(false)}
-          className="overflow-y-auto overscroll-contain pr-1"
-          style={cap ? { maxHeight: cap } : undefined}
-          data-testid="builders-list"
-        >
-          {rows.map((row, i) => (
-            <BuilderRowView key={row.account} row={row} index={i} paused={hovered || hidden} />
+        <ul onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} data-testid="builders-list">
+          {queues.map((queue, i) => (
+            // Keyed by slot, not by builder: the slot is the stable thing, its occupant changes.
+            <SlotView key={i} queue={queue} index={i} paused={hovered || hidden} />
           ))}
         </ul>
       )}
+      {/* Owner, 2026-09-15: "add small in italic words, request to be added to the list of builders". */}
+      <p className="mt-2 font-ui text-caption italic text-ink-14" data-testid="builders-request">
+        <Link href={`/@${BUILDERS_CURATOR}`} className="hover:text-ink-brand-6">
+          {t('right_rail.builders.request', { curator: BUILDERS_CURATOR })}
+        </Link>
+      </p>
     </section>
   );
 };

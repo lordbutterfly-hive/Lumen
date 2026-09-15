@@ -29,14 +29,20 @@ import type { Builder } from '@/blog/lib/builders-board-shape';
  * risingstargame (a birthday post), skatehive (compilations); threespeak
  * (dropped 2026-09-15: its last 20 posts are the same automated "Encoder
  * Network Weekly Activity Report", so the row would flip between three
- * identical titles and none of them is something being built).
+ * identical titles and none of them is something being built); hive-engine
+ * (owner, 2026-09-15: "Hive engine is a fake account. Get rid of it" — its
+ * posts are auto-published contract sources, not a person or team writing).
  */
+/** Where a builder who is not listed asks to be: the card's footer links to this profile. */
+export const BUILDERS_CURATOR = 'lordbutterfly';
+
 export const BUILDERS: readonly Builder[] = [
   // ── people ──────────────────────────────────────────────────────────────
   // The owner. Lumen tags every post published through it `lumen` ("Testing."
   // and a Seedance ads post carry it), so tags say nothing; the Meritum and
-  // Lumen posts say so in the title. Owner: "if lumen in title or meritum or algo".
-  { account: 'lordbutterfly', mode: 'own', titles: ['lumen', 'meritum', 'algo'] },
+  // Lumen posts say so in the title. Owner: "if lumen in title or meritum or
+  // algo", then "add hive watch as well" (the watch posts are titled with it).
+  { account: 'lordbutterfly', mode: 'own', titles: ['lumen', 'meritum', 'algo', 'hive watch', 'hivewatch'] },
   // Every post is category `core` with tags `core,dev` — the 84 core dev
   // meetings, the Gopherd posts, AND "I'm bored and sad about my profession".
   // The meetings and the proposal say "Core dev"/"Core development" in the
@@ -89,9 +95,16 @@ export const BUILDERS: readonly Builder[] = [
   { account: 'keychain', mode: 'all' }, // multichain betas, EVM, proposals, 2026-08-26
   { account: 'actifit', mode: 'all' }, // web/android/iOS releases, 2026-08-21
   { account: 'terracore', mode: 'all' }, // devlogs, 2026-08-08
-  { account: 'hive-engine', mode: 'all' }, // smart-contract publications, 2026-07-14
   { account: 'liketu', mode: 'all' }, // feature launches, 2026-07-12
   { account: 'holozing', mode: 'all' }, // marketplace, Wilds alpha, creature releases, 2026-08-14
+  // Owner's addition ("@magi.network goes up there as well"). Every post carries
+  // the same tags (hive,magi,crosschain,maginetwork), so the title decides: the
+  // releases ("The Magi Market is live!", "FEATURE RELEASE", "Just Shipped a
+  // Token Factory", "Liquidity Pools Have Launched", "x DASH Integration",
+  // "SDK", "Introducing Magi Tokens", the "Development Update"s and the
+  // security report) are in; the writing-contest posts, the Hive Engine breach
+  // statement, the DHF proposal and the strategy essays are not.
+  { account: 'magi.network', mode: 'own', titles: ['update', 'release', 'is live', 'shipped', 'launched', 'integration', 'sdk', 'introducing', 'report'] },
   // "MOON Dev Log — May 2026" is the building; the Season 1 payout and winner
   // posts carry `moon` too and are not.
   { account: 'hive.pizza', mode: 'own', titles: ['dev log', 'devlog'], tags: ['gamedev'] }

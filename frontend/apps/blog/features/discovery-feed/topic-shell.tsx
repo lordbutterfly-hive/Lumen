@@ -370,7 +370,12 @@ export default function TopicShell({ tag }: { tag: string }) {
         />
       </main>
 
-      <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
+      {/* ★ NOT STICKY, unlike every other shell's right rail (owner, 2026-09-15:
+          "unlock the whole right navbar area so you can scroll down normally and it
+          isnt sticky"). The builders card below Topics made a pinned rail taller
+          than the viewport, and a nested scroller inside it read as broken; the
+          rail now scrolls away with the page. */}
+      <aside className="hidden h-fit bg-background-secondary xl:block">
         <RightRail builders />
       </aside>
     </div>

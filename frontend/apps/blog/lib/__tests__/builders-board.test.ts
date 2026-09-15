@@ -10,9 +10,9 @@
  * runner at this file.
  */
 import type { Entry } from '@hive/common-hiveio-packages/wax';
-import { shapeBuilderRow, isDevelopmentPost, isCrossPost, tagsOf, postAgeMs, POSTS_PER_BUILDER, MAX_POST_AGE_MS, DEV_TAGS } from '../builders-board-shape';
-import type { Builder } from '../builders-board-shape';
-import { BUILDERS } from '../builders-roster';
+import { shapeBuilderRow, isDevelopmentPost, isCrossPost, tagsOf, postAgeMs, interleaveByRound, buildSlotQueues, POSTS_PER_BUILDER, MAX_POST_AGE_MS, DEV_TAGS, BOARD_SLOTS } from '../builders-board-shape';
+import type { Builder, BuilderRow } from '../builders-board-shape';
+import { BUILDERS, BUILDERS_CURATOR } from '../builders-roster';
 
 let checks = 0;
 let failures = 0;
@@ -61,7 +61,9 @@ ok('mode is own, with no tags at all', OWNER.mode === 'own' && !OWNER.tags);
 ok('"What Are Meritum Tokens?" -> development', isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'What Are Meritum Tokens?', category: 'lumen', tags: ['lumen', 'hive', 'magi'] })));
 ok('"Lumen: Bringing Meritum Tokens and a New Creator Economy to Hive" -> development', isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'Lumen: Bringing Meritum Tokens and a New Creator Economy to Hive', category: 'lumen', tags: ['lumen', 'launch', 'hive'] })));
 ok('"Testing." tagged lumen (published through Lumen) -> NOT', !isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'Testing.', category: 'lumen', tags: ['lumen'] })));
-ok('"Seedance 2.5 // Hive Watch ads //" tagged hive,lumen,frontend -> NOT', !isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'Seedance 2.5 // Hive Watch ads // ', category: 'hive', tags: ['hive', 'lumen', 'frontend', 'do', 'it'] })));
+ok('"From Prototype to Proof // Building the Hive Watch" -> development (owner: "add hive watch as well")', isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'From Prototype to Proof // Building the Hive Watch', category: 'hive', tags: ['hive', 'hivewatch'] })));
+ok('"Seedance 2.5 // Hive Watch ads //" -> development, by the same rule', isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'Seedance 2.5 // Hive Watch ads // ', category: 'hive', tags: ['hive', 'lumen', 'frontend', 'do', 'it'] })));
+ok('"FREECHAIN update." -> NOT (not in the owner\'s list)', !isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'FREECHAIN update.', category: 'hive', tags: ['hive', 'news', 'freechain'] })));
 ok('"Product photography attempt NO.1" -> NOT', !isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'Product photography attempt NO.1', category: 'photography', tags: ['photography', 'images', 'diy'] })));
 ok('"Killing Hive\'s Social Potential -> POB Based Content Discovery" -> NOT', !isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'Killing Hive’s Social Potential -> POB Based Content Discovery ', category: 'hive', tags: ['hive', 'rant', 'frontend'] })));
 ok('a future "How the Lumen algorithm ranks posts" -> development (algo)', isDevelopmentPost(OWNER, post('lordbutterfly', 'p', { title: 'How the Lumen algorithm ranks posts', category: 'hive', tags: ['hive'] })));
@@ -123,6 +125,16 @@ ok('"Learn Python Basics Together - Day 4 | Python Dictionaries…" (tags: hives
 ok('"😱 AI Is Taking Programming Jobs? Here\'s the Truth" tagged programming,coding,developers -> NOT (own mode)', !isDevelopmentPost(TECH, post('techcoderlabz', 'p', { title: "😱 AI Is Taking Programming Jobs? Here's the Truth Every Dev Should Know", category: 'programming', tags: ['programming', 'ai', 'softwareengineer', 'coding', 'developers'] })));
 ok('"Pune Hive Meetup Recap" -> NOT', !isDevelopmentPost(TECH, post('techcoderlabz', 'p', { title: ' Pune Hive Meetup Recap: Small Turnout, One Strong Onboarding 🐝', category: 'hive-127555', tags: ['hive', 'web3', 'meetup', 'pune'] })));
 
+console.log('\n@magi.network: releases and development updates by title, contests and statements out');
+const MAGI = rule('magi.network');
+const magiTags = ['hive', 'magi', 'crosschain', 'maginetwork', 'news'];
+for (const title of ['The Magi Market is live!', '⚖️ FEATURE RELEASE: The Incentive Pendulum is live on Magi mainnet ', 'Magi Just Shipped a Token Factory!  👷', 'Magi Progress Update 29.4.//  EVM integration, ZK Proofs, Incentive Pendulum', 'Magi SDK Embeddable Cross-chain Swap widget for HIVE, HBD, and BTC', ' 🎉Native Bitcoin Liquidity Pools Have Launched on Magi Network', 'Magi x DASH Integration', 'Introducing Magi Tokens & NFTs: Launching Our Full Token Ecosystem ✅', 'Magi Technical Development Update // 4.2.2026', 'Magi Security and Bug Hunt Report //  February - May']) {
+  ok(`"${title.trim().slice(0, 60)}" -> development`, isDevelopmentPost(MAGI, post('magi.network', 'p', { title, category: 'hive', tags: magiTags })));
+}
+for (const title of ['Magi Writing Contest // Winners', 'Magi Writing Contest! $500 USD in BTC and 90k HP in delegations up for grabs!', 'On the Hive Engine Breach - A Statement from Magi', 'HBD = Hive\'s Secret Weapon for Global Cross-Chain DeFi ', 'Magi Network DHF Proposal 2026', 'Magi Protocol: The Unified Financial Network', 'On Repeated Development Work, Misaligned Incentives, and the Need for Strategic Coordination on Hive']) {
+  ok(`"${title.trim().slice(0, 60)}" -> NOT`, !isDevelopmentPost(MAGI, post('magi.network', 'p', { title, category: 'hive', tags: magiTags })));
+}
+
 console.log('\nproducts');
 ok('@blocktrades: any post counts', rule('blocktrades').mode === 'all' && isDevelopmentPost(rule('blocktrades'), post('blocktrades', 'p', { title: 'Release of new HAF API stack 1.28.6 next week', category: 'hive-139531', tags: ['hive', 'blockchain', 'software'] })));
 ok('@snapie: any post counts, whatever the tags', isDevelopmentPost(rule('snapie'), post('snapie', 'p', { category: 'hive-178315', tags: ['pob'] })));
@@ -131,6 +143,7 @@ ok('@thebeedevs: "Clive — A Modern Replacement for CLI Wallet" -> development'
 ok('@hive.pizza: "MOON Dev Log — May 2026" -> development', isDevelopmentPost(rule('hive.pizza'), post('hive.pizza', 'p', { title: 'MOON Dev Log — May 2026: Mobile, PWA, and Attack Alerts', category: 'hive-140217', tags: ['moon', 'gaming', 'gamedev', 'archon'] })));
 ok('@hive.pizza: "MOON Season 1 Rewards Payout" -> NOT', !isDevelopmentPost(rule('hive.pizza'), post('hive.pizza', 'p', { title: 'MOON Season 1 Rewards Payout', category: 'hive-185582', tags: ['moon', 'gaming', 'oneup', 'archon', 'tribes', 'pizza'] })));
 ok('threespeak is off the roster (an automated weekly report is not building)', !BUILDERS.some((b) => b.account === 'threespeak'));
+ok('hive-engine is off the roster (owner: a fake account)', !BUILDERS.some((b) => b.account === 'hive-engine'));
 ok('asgarth, good-karma, ecency, peakd are not on the roster', !BUILDERS.some((b) => ['asgarth', 'good-karma', 'ecency', 'peakd'].includes(b.account)));
 ok('every own-mode builder has at least one tag or title (otherwise its row can never exist)', BUILDERS.every((b) => b.mode !== 'own' || (b.tags?.length ?? 0) + (b.titles?.length ?? 0) > 0));
 ok('no account appears twice', new Set(BUILDERS.map((b) => b.account)).size === BUILDERS.length);
@@ -170,7 +183,7 @@ const NOW = Date.parse('2026-09-15T12:00:00Z');
 const row = shapeBuilderRow(OWNER, ownerPage, NOW);
 ok('a row is produced', row !== null);
 ok(`exactly ${POSTS_PER_BUILDER} posts`, row?.posts.length === POSTS_PER_BUILDER);
-ok('Meritum, Lumen launch, then the algo post; Testing., the ads post and the rant are skipped', row?.posts.map((p) => p.permlink).join() === 'meritum,launch,algo');
+ok('Meritum, Lumen launch, then the Hive Watch ads post; Testing. and the rant are skipped', row?.posts.map((p) => p.permlink).join() === 'meritum,launch,seedance');
 ok('the reblog is dropped even though its title says Lumen', !row?.posts.some((p) => p.permlink === 'their-post'));
 ok('created passes through untouched', row?.posts[0]?.created === '2026-09-11T00:00:00');
 
@@ -199,6 +212,28 @@ ok('a builder whose only development posts are older than a year -> no row', sha
 ok('exactly a year old is kept, a day past it is not',
   postAgeMs('2025-09-15T12:00:00', NOW) <= MAX_POST_AGE_MS && postAgeMs('2025-09-14T11:59:59', NOW) > MAX_POST_AGE_MS);
 ok('an unparseable created is treated as infinitely old', postAgeMs('not a date', NOW) === Number.POSITIVE_INFINITY);
+
+console.log('\nslots: the board flips writers as well as posts');
+const rowOf = (account: string, n: number): BuilderRow => ({
+  account,
+  posts: Array.from({ length: n }, (_, i) => ({ permlink: `${account}-${i + 1}`, category: 'hive', title: `${account} post ${i + 1}`, created: `2026-09-${String(14 - i).padStart(2, '0')}T00:00:00` }))
+});
+const board = [rowOf('a', 3), rowOf('b', 3), rowOf('c', 1), rowOf('d', 2), rowOf('e', 3), rowOf('f', 3), rowOf('g', 3), rowOf('h', 3), rowOf('i', 3), rowOf('j', 2)];
+const dealt = interleaveByRound(board);
+ok('every post of every builder is dealt exactly once', dealt.length === board.reduce((n, r) => n + r.posts.length, 0));
+ok('round one is every builder\'s newest post, in board order', dealt.slice(0, 10).map((e) => `${e.account}${e.post.permlink.slice(-1)}`).join() === 'a1,b1,c1,d1,e1,f1,g1,h1,i1,j1');
+ok('round two skips the builder with one post', dealt.slice(10, 19).map((e) => e.account).join('') === 'abdefghij');
+ok('round three skips the builders with two', dealt.slice(19).map((e) => e.account).join('') === 'abefghi');
+const queues = buildSlotQueues(board);
+ok(`${BOARD_SLOTS} slots for a full board`, queues.length === BOARD_SLOTS);
+ok('no queue is empty', queues.every((q) => q.length > 0));
+ok('the opening screen shows eight DIFFERENT builders', new Set(queues.map((q) => q[0].account)).size === BOARD_SLOTS);
+ok('and so does every later step', [1, 2].every((step) => new Set(queues.map((q) => q[step % q.length]?.account)).size === BOARD_SLOTS));
+ok('a slot\'s first flip brings a different writer, not the same writer\'s next post', queues.every((q) => q.length < 2 || q[0].account !== q[1].account));
+ok('slot one is dealt a1, i1, h2, h3 (round-robin over the rounds)', queues[0].map((e) => e.post.permlink).join() === 'a-1,i-1,h-2,h-3');
+ok('fewer entries than slots -> fewer slots, never an empty one', buildSlotQueues([rowOf('a', 2), rowOf('b', 1)]).length === 3);
+ok('no rows -> no slots', buildSlotQueues([]).length === 0);
+ok('the request line has a curator on the roster to point at', BUILDERS.some((b) => b.account === BUILDERS_CURATOR));
 
 if (failures === 0) {
   console.log(`\nbuilders-board: ALL ${checks} CHECKS PASSED`);
