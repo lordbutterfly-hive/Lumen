@@ -1,5 +1,5 @@
 /** UNIT TESTS for `lib/meritum/creator-handle.ts`. Run by `pnpm --filter @hive/blog test:unit` under ts-node; own harness. */
-import { normalizeCreatorHandle, isRoutableCreatorHandle, routeHandleOf, creatorPagePath, creatorPageUrl, legacyCreatorPagePath, loginThenReturnTo } from '../meritum/creator-handle';
+import { normalizeCreatorHandle, isRoutableCreatorHandle, routeHandleOf, creatorPagePath, creatorPageUrl, legacyCreatorPagePath, loginThenReturnTo, creatorCardPath, CARD_REVISION } from '../meritum/creator-handle';
 
 let checks = 0;
 let failures = 0;
@@ -44,6 +44,11 @@ ok('a hostile handle cannot break out of the path', !creatorPagePath('../../x').
 console.log('\nloginThenReturnTo');
 ok('the login page gets the deep link, encoded once', loginThenReturnTo(creatorPagePath('lordbutterfly', 'buy')) === '/login?next=%2Fm%2Flordbutterfly%3Fa%3Dbuy');
 ok('a spend link keeps its offering id through the round trip', decodeURIComponent(loginThenReturnTo(creatorPagePath('gtg', 'spend', 3)).slice('/login?next='.length)) === '/m/gtg?a=spend&o=3');
+
+console.log('\ncreatorCardPath');
+ok('price in cents and the drawing revision', creatorCardPath('lordbutterfly', 1.02) === `/api/og/meritum?u=lordbutterfly&v=102&r=${CARD_REVISION}`);
+ok('hive: prefix dropped, DID encoded once', creatorCardPath('hive:gtg', 0) === `/api/og/meritum?u=gtg&v=0&r=${CARD_REVISION}` && creatorCardPath('did:pkh:a:b:c', 2).startsWith('/api/og/meritum?u=did%3Apkh%3Aa%3Ab%3Ac&v=200'));
+ok('a NaN or negative price is zero, never NaN in a URL', creatorCardPath('x', Number.NaN).includes('&v=0&') && creatorCardPath('x', -3).includes('&v=0&'));
 
 if (failures === 0) {
   console.log(`\nmeritum-creator-handle: ALL ${checks} CHECKS PASSED`);

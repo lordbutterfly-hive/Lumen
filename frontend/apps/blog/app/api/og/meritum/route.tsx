@@ -56,7 +56,12 @@ const IMPRINT = '#6b7280';
 const BRAND = '#C0392B';
 const PAPER_0 = '#FFFEFC';
 
-const AVATAR_TIMEOUT_MS = 2_500;
+// ★ 6 s, NOT 2.5 (2026-09-15, measured from the production box: Hive's image
+// proxy answers the 302 alone in ~2.1 s there, so the old bound aborted the
+// fetch and every card drew the initial disc — the owner: "profile pic is
+// completely missing from the card"). The card is cached at the edge, so one
+// slow render is cheaper than a wrong card cached for a day.
+const AVATAR_TIMEOUT_MS = 6_000;
 const AVATAR_MAX_BYTES = 1_500_000;
 
 // Read once per process (review, 2026-09-15: two disk reads per request).
@@ -209,12 +214,17 @@ export async function GET(req: NextRequest): Promise<Response> {
                 {initial}
               </div>
             )}
-            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, maxWidth: '860px' }}>
+            {/* ★ FACE TOP AND NAME TOP FLUSH (handoff §4; owner: "the top of the
+                profile name needs to be aligned with top of profile pic"). The
+                line box carries leading above the cap height — measured on the
+                rendered PNG at 96px: the glyph top sat 19px below the face top —
+                so the column is lifted by a fifth of the font size. */}
+            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, maxWidth: '860px', marginTop: `${-Math.round(nameSize * 0.2)}px` }}>
               <div style={{ display: 'flex', fontSize: `${nameSize}px`, fontWeight: 700, lineHeight: 1.04, letterSpacing: '-0.04em', color: INK }}>
                 @{shown}
               </div>
               {about ? (
-                <div style={{ display: 'flex', marginTop: '12px', fontSize: '22px', fontWeight: 400, lineHeight: 1.36, color: INK_SOFT, maxHeight: '60px', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', marginTop: '12px', fontSize: '22px', fontWeight: 400, lineHeight: 1.36, color: INK_SOFT, maxHeight: '66px', overflow: 'hidden' }}>
                   {about}
                 </div>
               ) : null}

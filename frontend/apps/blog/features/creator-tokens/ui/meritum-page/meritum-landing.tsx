@@ -23,7 +23,7 @@ import TokenShell from '../token-shell';
 import CurvePanel from './curve-panel';
 import ShareSheet from './share-sheet';
 import { MERITUM_PAGE_COPY as COPY } from './meritum-copy';
-import { creatorPagePath, loginThenReturnTo, routeHandleOf, type CreatorPageAction } from '@/blog/lib/meritum/creator-handle';
+import { creatorCardPath, creatorPagePath, loginThenReturnTo, routeHandleOf, type CreatorPageAction } from '@/blog/lib/meritum/creator-handle';
 import { holdersHeadline, monthLabel, shapeHolders } from '@/blog/lib/meritum/holders';
 import type { CreatorProfileFields } from '@/blog/lib/meritum/profile-fields';
 
@@ -211,7 +211,7 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
   const d = market.delivery;
   const health = marketHealthOf({ phase: market.phase, canBuy: market.canBuy, windingDown: market.windingDown });
   const oracleOff = Boolean(live.servicesOracleStatus && live.servicesOracleStatus !== 'ok');
-  const cardSrc = `/api/og/meritum?u=${encodeURIComponent(handle)}&v=${Math.round(Math.max(0, market.priceUsd) * 100)}`;
+  const cardSrc = creatorCardPath(handle, market.priceUsd);
   const blockedNotice = writeBlockedReason ? <MeritumEligibilityNotice surface="trade" who={eligibility} inline /> : null;
 
   const stat = (label: string, value: string, testId: string) => (

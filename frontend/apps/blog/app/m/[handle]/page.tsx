@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import MeritumLanding from '@/blog/features/creator-tokens/ui/meritum-page/meritum-landing';
 import { displayHandle } from '@/blog/features/creator-tokens/live/adapt';
-import { creatorPagePath, creatorPageUrl, isRoutableCreatorHandle, normalizeCreatorHandle } from '@/blog/lib/meritum/creator-handle';
+import { creatorCardPath, creatorPagePath, creatorPageUrl, isRoutableCreatorHandle, normalizeCreatorHandle } from '@/blog/lib/meritum/creator-handle';
 import { readCreatorMarketSummary } from '@/blog/lib/meritum/server-market';
 import { readCreatorProfile } from '@/blog/lib/meritum/server-profile';
 
@@ -32,11 +32,6 @@ function siteDomain(): string {
   return process.env.REACT_APP_SITE_DOMAIN || 'http://localhost:3000';
 }
 
-/** A price that will not change the URL on every sub-cent tick: whole cents. */
-function priceKey(priceUsd: number): string {
-  return String(Math.round(Math.max(0, priceUsd) * 100));
-}
-
 export async function generateMetadata({ params }: { params: { handle: string } }): Promise<Metadata> {
   const handle = normalizeCreatorHandle(params.handle);
   if (!isRoutableCreatorHandle(handle)) return { title: 'Meritum' };
@@ -51,7 +46,7 @@ export async function generateMetadata({ params }: { params: { handle: string } 
   // The Hive `about`, verbatim, or a sentence that makes no claim about the person.
   const description = profile.about ?? `The Meritum of @${shown} on Lumen: buy the token, spend it on their work.`;
   const url = creatorPageUrl(siteDomain(), handle);
-  const card = `/api/og/meritum?u=${encodeURIComponent(handle)}&v=${priceKey(summary?.priceUsd ?? 0)}`;
+  const card = creatorCardPath(handle, summary?.priceUsd ?? 0);
   return {
     // `absolute`: the layout's title template appends " - Lumen", which would
     // read "@x on Lumen - Lumen" in the tab. The og/twitter titles below are

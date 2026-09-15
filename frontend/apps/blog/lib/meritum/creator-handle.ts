@@ -106,3 +106,17 @@ export function legacyCreatorPagePath(account: string): string {
 export function loginThenReturnTo(path: string): string {
   return `/login?next=${encodeURIComponent(path)}`;
 }
+
+/**
+ * The share card's URL. `v` is the price in cents (a moved price is a new
+ * URL); `r` is the card's DRAWING revision — bump it when the card's layout or
+ * inputs change, so a render cached at the edge (a day of
+ * stale-while-revalidate) from before the change is never served again.
+ * 2: face timeout raised, name flush with the face (2026-09-15).
+ */
+export const CARD_REVISION = 2;
+
+export function creatorCardPath(account: string, priceUsd: number): string {
+  const cents = Math.round(Math.max(0, Number.isFinite(priceUsd) ? priceUsd : 0) * 100);
+  return `/api/og/meritum?u=${encodeURIComponent(routeHandleOf(account))}&v=${cents}&r=${CARD_REVISION}`;
+}

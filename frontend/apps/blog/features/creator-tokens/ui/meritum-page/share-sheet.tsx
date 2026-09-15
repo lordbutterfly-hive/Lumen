@@ -2,6 +2,7 @@
 
 import { FC, useEffect, useRef, useState } from 'react';
 import ModalShell from '../modal-shell';
+import { LumenLoader } from '@hive/ui';
 import { MERITUM_PAGE_COPY as COPY } from './meritum-copy';
 
 /**
@@ -24,6 +25,11 @@ import { MERITUM_PAGE_COPY as COPY } from './meritum-copy';
 const ShareSheet: FC<{ handle: string; url: string; cardSrc: string; onClose: () => void }> = ({ handle, url, cardSrc, onClose }) => {
   const [copied, setCopied] = useState(false);
   const [canNativeShare, setCanNativeShare] = useState(false);
+  // The card is rendered on the server on first request (a few seconds cold);
+  // the box keeps the 1200x630 ratio and says what is happening meanwhile
+  // (owner, 2026-09-15: "there needs to be a spinner and telling people it will
+  // be generated").
+  const [cardState, setCardState] = useState<'loading' | 'ready' | 'failed'>('loading');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -86,9 +92,30 @@ const ShareSheet: FC<{ handle: string; url: string; cardSrc: string; onClose: ()
           </button>
         </div>
         <p className="mt-1 font-ui text-caption text-ink-14">{COPY.shareHint}</p>
-        <div className="mt-4 overflow-hidden rounded-card border border-line-9 bg-surface-1">
+        <div className="relative mt-4 overflow-hidden rounded-card border border-line-9 bg-surface-1" style={{ aspectRatio: '1200 / 630' }} data-testid="meritum-share-card-box" data-state={cardState}>
           {/* The card at half size: 1200x630 keeps its ratio at any width. */}
-          <img src={cardSrc} alt={`@${handle} on Lumen`} width={1200} height={630} className="block h-auto w-full" data-testid="meritum-share-card" />
+          <img
+            src={cardSrc}
+            alt={`@${handle} on Lumen`}
+            width={1200}
+            height={630}
+            onLoad={() => setCardState('ready')}
+            onError={() => setCardState('failed')}
+            className={`block h-auto w-full transition-opacity duration-300 ${cardState === 'ready' ? 'opacity-100' : 'opacity-0'}`}
+            data-testid="meritum-share-card"
+          />
+          {cardState !== 'ready' ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-1 px-6 text-center" data-testid="meritum-share-card-status">
+              {cardState === 'loading' ? (
+                <>
+                  <LumenLoader size="md" label={COPY.cardGenerating} />
+                  <p className="font-ui text-caption text-ink-14">{COPY.cardGeneratingHint}</p>
+                </>
+              ) : (
+                <p className="font-ui text-caption text-ink-14">{COPY.cardFailed}</p>
+              )}
+            </div>
+          ) : null}
         </div>
         <div className="mt-4 flex items-center gap-2.5 rounded-control bg-surface-11 px-3.5 py-3">
           <span id="meritum-share-url" className="min-w-0 flex-1 select-all break-all font-ui text-[14px] leading-[22px] text-ink-4" data-testid="meritum-share-url">
