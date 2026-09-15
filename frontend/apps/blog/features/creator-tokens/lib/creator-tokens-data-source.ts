@@ -1,5 +1,5 @@
 import env from '@beam-australia/react-env';
-import type { AnswerInput, Ask, AskInput, BoardCreator, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, ContractRules, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../types';
+import type { AnswerInput, Ask, AskInput, BoardCreator, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, ContractRules, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput, CreatorPublicStats} from '../types';
 import { MockCreatorTokensDataSource } from './mock/mock-data-source';
 import { hiveTransactionBroadcaster, hiveTransactionBundleBroadcaster } from './vsc/broadcaster';
 import { routingBroadcaster } from './vsc/wallet-broadcaster';
@@ -70,6 +70,8 @@ export interface CreatorTokensDataSource {
   readMyAsks(asker: string): Promise<MyAsksResult>;
   /** Answered-vs-missed history + response time. Not contract state (SPEC §1.7.1) — always indexer-backed; degrades to source:'unavailable'. */
   readDeliveryRecord(creator: string): Promise<DeliveryRecord>;
+  /** Holders, holder count and first trade for the creator page. `source: 'unavailable'` on an indexer outage — never an empty answer dressed as data. */
+  readCreatorPublicStats(creator: string): Promise<CreatorPublicStats>;
   /**
    * Client-side preview of what Ask() would charge right now. Never authoritative — see Quote.asOfBlock doc. Rejects on a genuine read failure; a resolved oracleStatus other than 'ok' means AskRate()/SettlementRate() itself would refuse to price (RULING C: no PAR fallback any more — see Quote.rate's doc), so the caller must disable the ask action, not merely treat it as informational.
    *

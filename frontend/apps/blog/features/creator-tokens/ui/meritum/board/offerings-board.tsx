@@ -58,6 +58,7 @@ import { cn } from '@ui/lib/utils';
 import { usdPrice } from '../../../market/format';
 import { usdFromHbd, displayHandle, routeHandle } from '../../../live/adapt';
 import { useOfferingBoard } from '../../../live/use-offering-board';
+import { creatorPagePath } from '@/blog/lib/meritum/creator-handle';
 
 /** How long one offering holds the row before flipping. Staggered per row below. */
 const DWELL_MS = 5_200;
@@ -190,7 +191,7 @@ const BoardRow: FC<{
     <li className="border-b border-line-2 last:border-0">
       <div className="flex min-w-0 items-center justify-between gap-2 py-2">
         <BasePathLink
-          href={`/creators/${routeHandle(creator)}`}
+          href={creatorPagePath(creator)}
           className="flex min-w-0 flex-1 items-center gap-2 font-ui text-[13px] leading-[20px] font-semibold text-ink-2 hover:text-ink-brand-6"
           title={displayHandle(creator)}
         >

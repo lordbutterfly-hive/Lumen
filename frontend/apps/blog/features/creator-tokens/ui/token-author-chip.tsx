@@ -6,6 +6,7 @@ import { useTokenPriceChip } from '../live/use-token-price-chip';
 import { useLiveDiscovery } from '../live/use-live-discovery';
 import { usdPrice } from '../market/format';
 import { SOLD_OUT_WORD, buyWordFor } from '../market/market-health';
+import { creatorPagePath } from '@/blog/lib/meritum/creator-handle';
 
 // The "Buy" word moved to market/market-health.ts's `buyWordFor` (2026-08-30,
 // B4), where it is one of four words, so every small surface that has a Buy
@@ -118,7 +119,7 @@ const TokenAuthorChip: FC<{ handle: string }> = ({ handle }) => {
 
   return (
     <Link
-      href={`/creators/${handle}`}
+      href={creatorPagePath(handle)}
       className="inline-flex shrink-0 items-center gap-[7px] rounded-full border border-line-16 bg-surface-warn-2 py-[3px] pl-[9px] pr-[4px] transition-colors hover:border-line-23 hover:bg-surface-warn-7"
       data-testid="token-author-chip"
     >

@@ -37,6 +37,7 @@ import type {
   WithdrawTreasuryInput,
   MarketPrice,
   IndexerHealth,
+  CreatorPublicStats
 } from '../types';
 import type { BoardCreator, ContractRules, CreatorAsksResult } from '../types';
 import type { CreatorTokensConfig, CreatorTokensDataSource } from './creator-tokens-data-source';
@@ -922,6 +923,19 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       return { asks: asks.sort((a, b) => b.deadlineBlock - a.deadlineBlock), unavailable: false };
     } catch {
       return { asks: [], unavailable: true };
+    }
+  }
+
+  async readCreatorPublicStats(creator: string): Promise<CreatorPublicStats> {
+    const unavailable: CreatorPublicStats = { creator, holders: [], holderCount: 0, firstTradeTs: null, source: 'unavailable' };
+    if (!this.indexer) return unavailable;
+    try {
+      const stats = await this.indexer.publicStatsOf(toDid(creator));
+      return { creator, ...stats, source: 'indexer' };
+    } catch {
+      // An outage is reported as one; the page drops the section rather than
+      // claiming nobody holds a token it could not read.
+      return unavailable;
     }
   }
 

@@ -7,6 +7,7 @@ import { useLiveTokenMarket } from '../live/use-live-token-market';
 import { useTokenAccounts } from '../live/use-token-accounts';
 import { pctLabel, usdPrice } from '../market/format';
 import { SOLD_OUT_WORD, marketHealthOf, soldOutOf } from '../market/market-health';
+import { creatorPagePath } from '@/blog/lib/meritum/creator-handle';
 
 // TODO i18n — staged copy, same precedent as the rest of this feature.
 const COPY = {
@@ -15,6 +16,7 @@ const COPY = {
   completionRate: 'Completion rate',
   medianReply: 'Median reply',
   buy: 'Buy',
+  meritumPill: 'Meritum',
   /**
    * ★ THE CARD HAD NO PHASE CHECK AT ALL (2026-08-30, B4): price + Buy on a
    * FROZEN, retired or delinquent market, identical to a healthy one, and the
@@ -221,15 +223,21 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
           {/* Buy only when buy.go would take it (`canBuy` is RequireInflowOpen,
               the same gate the token page disables its own button on). A lapsed
               market keeps it, under the line above. */}
-          {market.canBuy && !soldOut ? (
-            <Link
-              href={`/creators/${resolvedHandle}?a=buy`}
-              className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-ui text-[15px] leading-[24px] font-medium text-ink-27 transition-colors hover:bg-surface-brand-16"
-              data-testid="profile-token-buy"
-            >
-              {COPY.buy}
-            </Link>
-          ) : market.canBuy && soldOut ? (
+          {/* ★ A "Meritum" pill, not "Buy" (owner, 2026-09-15: "instead of BUY
+              pill theres a Meritum pill that goes to this page"). It opens the
+              creator's page at /m/<handle> — where Buy, Sell, the asks and the
+              record all live — so it is offered whenever the market is ready,
+              in every health state: the page is where those states are
+              explained. The sold-out word below is kept beside it for the one
+              market where it is a fact. */}
+          <Link
+            href={creatorPagePath(resolvedHandle)}
+            className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-ui text-[15px] leading-[24px] font-medium text-ink-27 transition-colors hover:bg-surface-brand-16"
+            data-testid="profile-token-meritum"
+          >
+            {COPY.meritumPill}
+          </Link>
+          {market.canBuy && soldOut ? (
             // The token page's own disabled-button word, in the Buy slot, with no
             // warning styling: every buy would revert (buy.go refuses past the
             // cap), so the control is not offered, and nothing is said about the

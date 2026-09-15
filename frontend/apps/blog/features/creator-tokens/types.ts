@@ -1048,3 +1048,26 @@ export interface TransferTokensInput {
   /** INTEGER whole tokens. Never a fractional/3-decimal amount. */
   tokens: number;
 }
+
+/**
+ * What the Meritum creator page (`/m/<handle>`) shows about a market that
+ * nothing else reads: who holds the token and when it first traded (handoff
+ * §1, 2026-09-15). Both come from the indexer's own tables
+ * (`lumen_ct_balances` filtered by creator, `lumen_ct_price_history`'s
+ * earliest row), never from the chain state, which has no reverse index.
+ *
+ * `source: 'unavailable'` is an OUTAGE, not an empty market: the page drops
+ * the holders section and the first-trade cell rather than printing "0
+ * holders" about a market it could not read. `holderCount` is the REAL count
+ * (an aggregate), `holders` at most the requested page of it, so the header
+ * can say "14 people hold this" while listing eight.
+ */
+export interface CreatorPublicStats {
+  creator: string;
+  /** Largest positions first. Account ids as the chain writes them (`hive:<name>` or a DID). */
+  holders: { holder: string; tokens: number }[];
+  holderCount: number;
+  /** ISO timestamp of the earliest recorded trade, or null when the market has never traded. */
+  firstTradeTs: string | null;
+  source: 'indexer' | 'unavailable';
+}

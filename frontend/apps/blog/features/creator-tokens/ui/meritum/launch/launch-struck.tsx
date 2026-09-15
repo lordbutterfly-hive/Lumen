@@ -3,6 +3,7 @@
 import { FC } from 'react';
 import { useTranslation } from '@/blog/i18n/client';
 import { Notice, PrimaryLink, SecondaryLink } from './launch-controls';
+import { creatorPagePath } from '@/blog/lib/meritum/creator-handle';
 
 /**
  * THE STRUCK PANEL — shown only once the launch write has actually returned.
@@ -62,7 +63,7 @@ const LaunchStruck: FC<LaunchStruckProps> = ({
       {offersFailed ? <Notice>{t('meritum_launch.offers_failed')}</Notice> : null}
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
-        <PrimaryLink href={`/creators/${account}`} label={t('meritum_launch.cta_token_page')} />
+        <PrimaryLink href={creatorPagePath(account)} label={t('meritum_launch.cta_token_page')} />
         {/* ★ ITEM D — deep-link straight to the Offerings tab in Studio. Under the
             atomic launch every configured offering is already live, so this is a
             general "add another service later" convenience, not a recovery path.

@@ -27,6 +27,7 @@ import WorkLinkField from '../work-link-field';
 import { creatorOracleNotice } from '../../market/oracle-copy';
 import DmInboxPanel from '@/blog/features/direct-messages/ui/dm-inbox-panel';
 import { useOwnDmRegistration, useDmUnread } from '@/blog/features/direct-messages/live/use-direct-messages';
+import { creatorPagePath } from '@/blog/lib/meritum/creator-handle';
 
 type Section = 'overview' | 'inbox' | 'offerings' | 'market' | 'billing' | 'earnings';
 const SECTIONS: { id: Section; label: string }[] = [
@@ -1955,7 +1956,7 @@ const CreatorStudio: FC = () => {
                 <div className="mt-4 rounded-control border border-line-11 bg-surface-5 px-4 py-3 text-caption text-ink-10 font-ui">
                   This market is winding down, so selling on the curve is closed. Your tokens are redeemed from your
                   own token page instead.{' '}
-                  <a href={`/creators/${studio.creator ?? ''}`} className="font-medium text-ink-brand-6 hover:underline">
+                  <a href={creatorPagePath(studio.creator ?? '')} className="font-medium text-ink-brand-6 hover:underline">
                     Open your token page
                   </a>
                 </div>

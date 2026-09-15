@@ -13,6 +13,7 @@ import { deliveryMarks, pctLabel, ratingStars, usdCompact, usdPrice } from '../.
 import { resolveDiscoveryControls, type DiscoverySort } from '../../market/discovery-ranking';
 import TokenShell from '../token-shell';
 import OfferingsBoard from '../meritum/board/offerings-board';
+import { creatorPagePath } from '@/blog/lib/meritum/creator-handle';
 
 // TODO i18n — staged copy; move to locales/*/common_blog.json once final.
 const COPY = {
@@ -137,7 +138,7 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
   const marks = deliveryMarks(c.answeredCount, c.missedCount);
   return (
     <Link
-      href={`/creators/${routeHandle(c.creator)}`}
+      href={creatorPagePath(c.creator)}
       className="block rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)] transition-colors hover:bg-surface-12"
     >
       <div className="mb-3.5 flex items-center gap-3">
@@ -441,7 +442,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
             {newCreators.map((c) => (
               <Link
                 key={c.creator}
-                href={`/creators/${routeHandle(c.creator)}`}
+                href={creatorPagePath(c.creator)}
                 className="block min-w-[240px] rounded-2xl border border-line-9 bg-surface-1 p-4 transition-colors hover:border-line-17"
               >
                 <div className="mb-3 flex items-center gap-3">

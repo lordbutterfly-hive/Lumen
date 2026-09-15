@@ -28,6 +28,7 @@ import { usdPrice } from '@/blog/features/creator-tokens/market/format';
 import { routeHandle } from '@/blog/features/creator-tokens/live/adapt';
 import { usePublicPortfolio } from '@/blog/features/creator-tokens/live/use-public-portfolio';
 import PublicHoldingRow from './public-holding-row';
+import { creatorPagePath } from '@/blog/lib/meritum/creator-handle';
 
 const SECONDARY_BUTTON_CLASS =
   'lm-press rounded-card border border-line-11 px-4 py-2 text-caption font-medium text-ink-7 transition-colors hover:bg-surface-16';
@@ -89,7 +90,7 @@ export default function PublicMeritumPanel({ username, target }: { username: str
                 <div className="text-label font-medium uppercase tracking-label text-ink-14">{t('wallet.meritum.own_price')}</div>
               </div>
               <Link
-                href={`/creators/${routeHandle(username)}`}
+                href={creatorPagePath(username)}
                 className={SECONDARY_BUTTON_CLASS}
                 data-testid="public-meritum-own-view-market"
               >

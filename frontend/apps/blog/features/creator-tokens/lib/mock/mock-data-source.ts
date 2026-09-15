@@ -1,5 +1,5 @@
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
-import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchOfferingResult, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput } from '../../types';
+import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchOfferingResult, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput, CreatorPublicStats } from '../../types';
 import type { CreatorTokensDataSource } from '../creator-tokens-data-source';
 import {
   BLOCKS_PER_DAY,
@@ -455,6 +455,12 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       seeds.filter((s) => s.asker === asker).forEach((s) => out.push(this.buildAsk(creator, s, head)));
     }
     return { asks: out.sort((a, b) => b.deadlineBlock - a.deadlineBlock), unavailable: false };
+  }
+
+  async readCreatorPublicStats(creator: string): Promise<CreatorPublicStats> {
+    await delay(120);
+    // The mock has no holder index; an honest "unavailable" drops the section.
+    return { creator, holders: [], holderCount: 0, firstTradeTs: null, source: 'unavailable' };
   }
 
   async readDeliveryRecord(creator: string): Promise<DeliveryRecord> {

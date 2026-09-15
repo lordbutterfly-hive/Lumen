@@ -48,6 +48,7 @@ import { TRADE_FEE_BPS } from '../../lib/contract-math';
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
 import { MeritumEligibilityNotice, useMeritumEligibility } from '../meritum-eligibility';
+import { creatorPagePath } from '@/blog/lib/meritum/creator-handle';
 
 // ★ toFixed(2), matching token-market-view, token-modals and creator-studio (2026-08-23).
 // This file alone printed 30.0 where the other three print 30.00 for the same balance,
@@ -126,7 +127,7 @@ const HoldingRow: FC<{ h: HolderPosition; price?: MarketPrice }> = ({ h, price }
   <div className="flex flex-wrap items-center gap-4 rounded-card border border-line-9 bg-surface-1 px-5 py-4">
     <UserAvatarImg username={routeHandle(h.creator)} apiSize="medium" pixelSize={44} radiusClassName="rounded-control" />
     <div className="min-w-0 flex-1">
-      <Link href={`/creators/${routeHandle(h.creator)}`} className="text-[15px] leading-[24px] font-medium text-ink-2 font-ui hover:text-ink-brand-6">
+      <Link href={creatorPagePath(h.creator)} className="text-[15px] leading-[24px] font-medium text-ink-2 font-ui hover:text-ink-brand-6">
         @{displayHandle(h.creator)}
       </Link>
       {/* No bio line: it is not contract state, and the Hive profile is not read on this route. */}
@@ -156,20 +157,20 @@ const HoldingRow: FC<{ h: HolderPosition; price?: MarketPrice }> = ({ h, price }
         </span>
       ) : (
         <Link
-          href={`/creators/${routeHandle(h.creator)}?a=buy`}
+          href={creatorPagePath(h.creator, 'buy')}
           className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-medium text-ink-7 font-ui hover:bg-surface-23"
         >
           Buy
         </Link>
       )}
       <Link
-        href={`/creators/${routeHandle(h.creator)}?a=${price?.health === 'closed' ? 'redeem' : 'sell'}`}
+        href={creatorPagePath(h.creator, price?.health === 'closed' ? 'redeem' : 'sell')}
         className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-medium text-ink-7 font-ui hover:bg-surface-23"
       >
         {price?.health === 'closed' ? 'Redeem' : 'Sell'}
       </Link>
       <Link
-        href={`/creators/${routeHandle(h.creator)}?a=send`}
+        href={creatorPagePath(h.creator, 'send')}
         className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-caption font-medium text-ink-7 font-ui hover:bg-surface-23"
       >
         Send

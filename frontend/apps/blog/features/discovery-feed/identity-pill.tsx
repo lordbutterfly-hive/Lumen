@@ -9,6 +9,7 @@ import { usdPrice } from '@/blog/features/creator-tokens/market/format';
 import styles from './post-card.module.css';
 import { buyWordFor } from '@/blog/features/creator-tokens/market/market-health';
 import { useIntentPrefetch } from '@/blog/components/intent-prefetch';
+import { creatorPagePath } from '@/blog/lib/meritum/creator-handle';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -184,7 +185,7 @@ export default function IdentityPill({ handle, price, luminosity, avatarUrl, lit
           <>
             <span className={styles.idSeam} aria-hidden="true" />
             <Link
-              href={`/creators/${routeHandle(handle)}`}
+              href={creatorPagePath(handle)}
               className={styles.idMarket}
               aria-label={`Meritum market for ${handle}`}
               data-testid="identity-pill-market"

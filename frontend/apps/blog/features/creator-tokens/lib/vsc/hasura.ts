@@ -212,6 +212,39 @@ export class MagiIndexerClient {
     };
   }
 
+  /**
+   * Holders of one creator's token, largest first, with the REAL total and the
+   * earliest trade — one round trip (handoff §1, 2026-09-15). `lumen_ct_balances`
+   * is the same table `balancesOf` reads the other way round; filtering it by
+   * creator is what the chain state cannot do (there is no holder index under
+   * a creator key). `tokens > 0` because a sold-out position stays as a zero row.
+   */
+  async publicStatsOf(creator: string, holdersLimit = 8): Promise<{ holders: { holder: string; tokens: number }[]; holderCount: number; firstTradeTs: string | null }> {
+    const data = await this.query(
+      `query CreatorPublicStats($creator: String!, $limit: Int!) {
+         lumen_ct_balances(where: {creator: {_eq: $creator}, tokens: {_gt: 0}}, order_by: {tokens: desc}, limit: $limit) {
+           holder tokens
+         }
+         lumen_ct_balances_aggregate(where: {creator: {_eq: $creator}, tokens: {_gt: 0}}) {
+           aggregate { count }
+         }
+         lumen_ct_price_history(where: {creator: {_eq: $creator}}, order_by: {block: asc}, limit: 1) {
+           ts
+         }
+       }`,
+      { creator, limit: holdersLimit }
+    );
+    const holders = rowsOf(data, 'lumen_ct_balances').map((r) => ({
+      holder: String(field(r, 'holder') ?? ''),
+      tokens: num(field(r, 'tokens'))
+    }));
+    const aggregate = field(field(data, 'lumen_ct_balances_aggregate'), 'aggregate');
+    const holderCount = num(field(aggregate, 'count'));
+    const first = rowsOf(data, 'lumen_ct_price_history')[0];
+    const ts = field(first, 'ts');
+    return { holders, holderCount, firstTradeTs: typeof ts === 'string' && ts.length > 0 ? ts : null };
+  }
+
   /** Price history as SUPPLY points. The caller applies the ported curve formula — see the view's own doc for why the price is not stored. */
   async priceHistoryOf(creator: string, limit = 200): Promise<HasuraPricePoint[]> {
     const data = await this.query(

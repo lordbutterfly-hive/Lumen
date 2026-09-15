@@ -1,0 +1,46 @@
+/**
+ * Every string on `/m/<handle>` that is not a number or a name. Staged copy,
+ * same precedent as the rest of this feature (TODO i18n). The right-rail
+ * cards and every sentence that makes a money claim are NOT here: they are
+ * imported verbatim from `../token-page/disclosure-copy.ts`, the module every
+ * Meritum surface shares, so this page cannot say something different about
+ * the same market (owner, 2026-09-15: "the text on right side navbar is kept").
+ */
+export const MERITUM_PAGE_COPY = {
+  eyebrow: 'Meritum',
+  back: '← All creators',
+  buy: 'Buy Meritum',
+  sell: 'Sell',
+  redeem: 'Redeem',
+  share: 'Share',
+  message: 'Message',
+  soldOut: 'Sold out',
+  bondingCurve: 'Bonding curve',
+  curveNote: 'Price is set by the curve, not by a last traded quote.',
+  noHistory: 'A chart appears as soon as this market has traded.',
+  historyUnavailable: 'Price history unavailable just now. The price above is live from the curve.',
+  stats: { price: 'Price', marketCap: 'Market cap', issued: 'Tokens issued', holders: 'Holders', firstTrade: 'First trade' },
+  asksTitle: 'What you can buy',
+  asksSub: 'Priced in dollars, paid in Meritum',
+  request: 'Request',
+  rollingOut: 'Rolling out',
+  notPriceable: 'Not priceable yet',
+  windingDown: 'Winding down',
+  tokenCostUnavailable: 'token cost unavailable',
+  deliveryTitle: 'Delivery record',
+  deliverySub: 'Every paid ask, settled',
+  deliveryEmpty: 'A delivery record builds here once this creator completes their first paid ask.',
+  deliveryUnavailable: 'Delivery record unavailable',
+  deliveryWhy: 'Why the token is worth holding. This is what you’re really buying.',
+  holdersTitle: 'Holders',
+  yourPosition: 'Your position',
+  send: 'Send',
+  shareTitle: (handle: string) => `Share @${handle}`,
+  shareHint: 'The card people see when this link is pasted anywhere.',
+  copy: 'Copy',
+  copied: 'Copied',
+  nativeShare: 'Share…',
+  close: 'Close',
+  shareThisPage: 'Share this page',
+  signInToTrade: 'Sign in to trade this token.'
+} as const;

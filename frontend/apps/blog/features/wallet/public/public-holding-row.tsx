@@ -21,6 +21,7 @@ import { UserAvatarImg } from '@ui/components';
 import { displayHandle, routeHandle } from '@/blog/features/creator-tokens/live/adapt';
 import { healthWordFor } from '@/blog/features/creator-tokens/market/market-health';
 import type { HolderPosition, MarketPrice } from '@/blog/features/creator-tokens/types';
+import { creatorPagePath } from '@/blog/lib/meritum/creator-handle';
 
 export default function PublicHoldingRow({ holding, price }: { holding: HolderPosition; price?: MarketPrice }) {
   return (
@@ -31,7 +32,7 @@ export default function PublicHoldingRow({ holding, price }: { holding: HolderPo
       <UserAvatarImg username={routeHandle(holding.creator)} apiSize="medium" pixelSize={44} radiusClassName="rounded-control" />
       <div className="min-w-0 flex-1">
         <Link
-          href={`/creators/${routeHandle(holding.creator)}`}
+          href={creatorPagePath(holding.creator)}
           className="text-[15px] leading-[24px] font-medium text-ink-2 font-ui hover:text-ink-brand-6"
         >
           @{displayHandle(holding.creator)}
