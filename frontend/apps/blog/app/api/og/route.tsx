@@ -17,7 +17,7 @@ import path from 'node:path';
  * generated card and the drawn one cannot drift:
  *
  *   Canvas    1200 x 630, rgb(252 250 247), 88px margin on all four sides
- *   Imprint   Lora 700, 23px, 0.22em tracking, uppercase (was Open Sans 700
+ *   Imprint   Lora 700, 30px, 0.22em tracking, uppercase (was Open Sans 700
  *             until the all-Lora migration, 2026-08-19; the px value and the
  *             tracking are unchanged because caps do not need compensating)
  *             LUMEN · COMMUNITY · @HANDLE — community segment AND its separator
@@ -133,8 +133,10 @@ export async function GET(req: NextRequest): Promise<Response> {
           argued that setting the whole line in one family would lose the piece
           that is brand rather than metadata. It would have, when the other
           family was a sans. It does not now: the wordmark still separates from
-          the metadata on three axes it always had anyway — 30px against 23px,
-          zero tracking against 0.22em, and INK against INK_SOFT. What it no
+          the metadata on the axes it always had anyway: zero tracking against
+          0.22em, INK against INK_SOFT, and mixed case against caps. (It used
+          to differ in size too, 30px against 23px; see the note on the caps
+          below for why that axis was dropped on 2026-09-15.) What it no
           longer does is contradict the product, where nothing is set in a sans.
 
           ★ THIS FILE DOES NOT FOLLOW THE CSS TOKEN. Satori renders it from the
@@ -143,8 +145,23 @@ export async function GET(req: NextRequest): Promise<Response> {
           font does NOT change this card; changing this card is a separate edit,
           which is exactly why the old pairing survived every previous swap.
         */}
-        <div style={{ display: 'flex', alignItems: 'baseline', color: INK_SOFT }}>
-          <div style={{ display: 'flex', fontFamily: 'Lora', fontWeight: 700, fontSize: '30px', color: INK }}>
+        {/*
+          ★★★ ONE LINE, MEASURED (2026-09-15, owner: "Lordbutterfly name and Lumen
+          name are not aligned on same line, one is above and one below").
+
+          Two things made the imprint read as two lines. `alignItems: 'baseline'`
+          is not a true baseline in Satori (it landed within a pixel here, but only
+          by luck of the two line boxes), and, the real cause, the two runs were
+          DIFFERENT SIZES: a 30px wordmark whose capital L stood 19px tall beside
+          23px caps standing 16px, so their tops disagreed by 3px and their
+          optical centres by more. Same size fixes both at once: measured on the
+          rendered PNG, the wordmark and the caps now share the same top row (95)
+          and the same bottom row (114). `flex-end` plus `lineHeight: 1` on both
+          runs makes that hold by construction rather than by coincidence, and a
+          16-character name (the Hive maximum) still fits with room to spare.
+        */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', color: INK_SOFT }}>
+          <div style={{ display: 'flex', fontFamily: 'Lora', fontWeight: 700, fontSize: '30px', lineHeight: 1, color: INK }}>
             Lumen
           </div>
           {imprintRest ? (
@@ -153,12 +170,13 @@ export async function GET(req: NextRequest): Promise<Response> {
                 display: 'flex',
                 fontFamily: 'Lora',
                 fontWeight: 700,
-                fontSize: '23px',
-                // Kept at 23px and 0.22em, NOT scaled up with the rest of the
-                // migration: Lora's cap-height is only 2.8% below Open Sans's
-                // (against 8% on the x-height), so uppercase does not need the
-                // compensation lowercase does. Growing it would make the
-                // metadata louder than the wordmark it sits beside.
+                // 23px until 2026-09-15; now the wordmark's own 30px so the two
+                // runs share one cap height (see the note above the row). The
+                // caps stay quieter than the wordmark through colour and
+                // tracking, which is what the earlier 23px argument was really
+                // protecting.
+                fontSize: '30px',
+                lineHeight: 1,
                 letterSpacing: '0.22em',
                 marginLeft: '18px'
               }}
@@ -196,6 +214,21 @@ export async function GET(req: NextRequest): Promise<Response> {
              * before four lines are reachable anyway.
              */
             maxHeight: `${Math.round(size * (TITLE_LINE * 3 + DESCENDER_EM))}px`,
+            /**
+             * ★★★ ...AND THE SAME ROOM ON A ONE- OR TWO-LINE TITLE (2026-09-15,
+             * owner: "See how the Y is clipped", on "Lumen: the first six days").
+             *
+             * The 09-11 fix above only widened `maxHeight`, which binds on a
+             * THREE-line title. A shorter title never reaches it: the box is
+             * exactly its own 1.06em line boxes tall, `overflow: hidden` clips
+             * at that edge, and the last line's tails hang below it just the
+             * same. Reproduced at 92px ("days" lost the bottom of its y) and
+             * fixed against the same render. Bottom padding is inside the
+             * clip box, so it gives every last line the same descender room
+             * `DESCENDER_EM` already reserved for the third; the max-height
+             * case is unchanged (verified on the 66px/78px three-line title).
+             */
+            paddingBottom: `${Math.round(size * DESCENDER_EM)}px`,
             overflow: 'hidden'
           }}
         >
