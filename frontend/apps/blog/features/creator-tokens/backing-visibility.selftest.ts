@@ -99,7 +99,7 @@ console.log('\n── 1. THE INSTRUMENT. A scan that read nothing must FAIL, not
   // ★ NEGATIVE CONTROL: the stripper must not have eaten live code. Without
   //   this, a stripper that returned '' would satisfy every "is gone" assertion
   //   in this file.
-  check('★ NEGATIVE CONTROL: live code survived stripping in every file', view.code.includes('<PriceChart points={market.chart} />') && studio.code.includes('label="Market cap"') && wallet.code.includes('tokens</div>') && modals.code.includes('buyRiskNote(') && states.code.includes('Couldn’t load this market'));
+  check('★ NEGATIVE CONTROL: live code survived stripping in every file', view.code.includes('<PriceChart points={market.chart} />') && studio.code.includes('label="Market cap"') && wallet.code.includes('tokens</div>') && modals.code.includes('<MagiFuelGauge state={spending}') && states.code.includes('Couldn’t load this market'));
 }
 
 console.log('\n── 2. THE FLAG. One switch, off, and typed so its branches stay alive.\n');
@@ -338,7 +338,10 @@ console.log('\n── 5. THE COPY MODULE IS WIRED THROUGH ITS SELECTORS, NOT ITS
 {
   check('★ the closing note goes through honestNote()', view.code.includes('{honestNote()}') && !view.code.includes('{HONEST_NOTE}'));
   check('★ the interstitial goes through interstitialLines()', modals.code.includes('interstitialLines().map') && !modals.code.includes('INTERSTITIAL_LINES.map'));
-  check('★ the buy dialog still passes the figure, so nothing has to be rewired when the flag flips', modals.code.includes('{buyRiskNote(backingPerTokenValue(m.floorUsd, m.supply))}'));
+  // ★ 2026-09-15 (owner): the buy dialog no longer renders buyRiskNote at all
+  // ("This token's price floats... no point to it"); the flag flip has one fewer
+  // surface to reach, and this pins that the paragraph stays gone.
+  check('★ the buy dialog no longer renders the risk note', !modals.code.includes('buyRiskNote('));
   // (The overdue banner used to pass the figure through overdueFigures() too;
   // it is gone with the subscription — see the re-pointed check in section 2.)
 }

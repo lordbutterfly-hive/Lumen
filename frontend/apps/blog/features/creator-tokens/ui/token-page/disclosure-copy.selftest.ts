@@ -433,7 +433,8 @@ console.log('\n── 7. WIRING. The components really render this, and no longe
   check('★ …and renders the shared, promise-free line', modal.includes('{exitRoutesNote(redeem)}'));
   check('the interstitial renders the shared lines', modal.includes('interstitialLines().map'));
   check('…and its old literals are gone', !view.includes('If you buy from the market above the floor') && !modal.includes('If you buy from the market above the floor'));
-  check('the buy dialog renders the shared risk note', modal.includes('buyRiskNote(backingPerTokenValue(m.floorUsd, m.supply))'));
+  // ★ 2026-09-15 (owner): the buy dialog no longer renders the risk note at all ("no point to it").
+  check('the buy dialog no longer renders the risk note', !modal.includes('buyRiskNote('));
   check('…and its old paragraph is gone', !modal.includes('is what the reserve would'));
 
   // ── Defect 5 (house style): the one em dash in copy this session changed.
@@ -456,7 +457,9 @@ console.log('\n── 7. WIRING. The components really render this, and no longe
   // separate maxTotalUsd to onBuy, so `usd` IS the ceiling that binds and the
   // note is built from it. The property is unchanged: the line under the button
   // must name the amount that can actually be charged, not the label's estimate.
-  check('★ …and the button names the ceiling that actually binds', modal.includes('buyCeilingNote(usd, false)') && !modal.includes('onBuy(usd, maxTotalUsd)'));
+  // ★ 2026-09-15 (owner): the footnote under the button is gone; the typed budget
+  // still binds (handleBuy's cap), it is just no longer restated in the dialog.
+  check('★ …the ceiling footnote is no longer rendered, and the cap is still the typed budget', !modal.includes('buyCeilingNote(') && !modal.includes('onBuy(usd, maxTotalUsd)'));
   check(
     'the unreadable-balance sentence lost its dash too',
     !readFileSync(join(__dirname, 'sell-empty-state.ts'), 'utf8').includes('safe on-chain —')

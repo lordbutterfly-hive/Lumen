@@ -24,7 +24,7 @@ import { writeFailureMessage } from '../write-failure';
 import { useTokenAccounts } from '../../live/use-token-accounts';
 import { useMagiSpendingPower } from '../../live/use-magi-spending-power';
 import { HiveTopUpPanel, MagiFuelGauge, MagiFundingHelp } from '../../live/magi-fuel-gauge';
-import { bareHiveName, hbdString, planHiveTopUp, type TopUpPlan } from '@/blog/lib/meritum/hive-topup';
+import { bareHiveName, planHiveTopUp, type TopUpPlan } from '@/blog/lib/meritum/hive-topup';
 import { rcLimitForAction } from '../../lib/vsc/rc-budget';
 import { getCreatorTokensConfig } from '../../lib/creator-tokens-data-source';
 import { useMagiL1Balances, type MagiL1Balances } from '@/blog/features/wallet/hooks/use-magi-l1-balances';
@@ -41,7 +41,7 @@ import type { Quote } from '../../types';
 // sell-empty-state.ts exists: this is a `'use client'` tree, so a sentence
 // written inline is a sentence no test can read. disclosure-copy.ts's header
 // carries the live figures each rewrite was reproduced against.
-import { backingPerTokenValue, buyRiskNote, exitRoutesNote, interstitialLines } from './disclosure-copy';
+import { exitRoutesNote, interstitialLines } from './disclosure-copy';
 // ★★★ THE DIALOGS' ARITHMETIC, FOR THE SAME REASON (2026-08-27). A number
 // computed inline in a `'use client'` tree is a number no test can read, and
 // every defect this module was extracted for was a number: a partial redeem
@@ -52,7 +52,6 @@ import { backingPerTokenValue, buyRiskNote, exitRoutesNote, interstitialLines } 
 import {
   acceptAmountText,
   askCost,
-  buyCeilingNote,
   buyRows,
   effectiveExitFeePct,
   exitFeeBaseNote,
@@ -371,23 +370,11 @@ const BuyModal: FC<{
         <div className="mb-3 rounded-control bg-surface-16 px-3.5 py-3 text-caption text-ink-10 font-ui">
           The {TRADE_FEE_PCT} trade fee is on the token cost, not your budget ({TRADE_FEE_HALF_PCT} to @{displayHandle(m.handle)}, {TRADE_FEE_HALF_PCT} to Lumen).
         </div>
-        {/* ★★ HIDDEN FOR LAUNCH: `buyRiskNote` defaults to SHOW_BACKING_FIGURES
-            and returns the standalone variant while it is false, so this
-            paragraph carries no backing clause and no parenthetical today. The
-            argument is still computed and still passed, unchanged, so nothing has
-            to be rewired when the flag flips. The note below describes the copy
-            that returns with it. */}
-        {/* ★ THE FIGURE QUOTED HERE IS GROSS OF THE EARLY-EXIT FEE (2026-08-27).
-            It read "The floor ($1.20) is what the reserve would pay out per token
-            if the market wound down", and on this market a holder redeeming
-            inside six weeks receives less than that: $0.96 on day 0, $1.08 on day
-            21, the full $1.20 only from day 42 (refundNetBaseUnits against the
-            live reserve of 60153 and supply 50). The sentence now names the
-            deduction, and uses the renamed stat so the reader can find the number
-            it is talking about. */}
-        <p className="mb-3.5 font-ui text-caption text-ink-14">
-          {buyRiskNote(backingPerTokenValue(m.floorUsd, m.supply))}
-        </p>
+        {/* ★ NO DISCLOSURE PARAGRAPHS UNDER THE FEE LINE (owner, 2026-09-15: "This
+            token's price floats... ALL THIS TEXT REMOVE IT: no point to it").
+            The risk-note helper in disclosure-copy.ts and the one-signature /
+            budget-ceiling footnote helper in trade-preview.ts are no longer
+            rendered here; both stay for the interstitial and the tests. */}
         <button
           onClick={async () => {
             // q.tokens <= 0 is the same refusal the disabled attribute makes
@@ -497,24 +484,6 @@ const BuyModal: FC<{
         ) : null}
         {failure ? (
           <div role="alert" ref={(n) => n?.scrollIntoView({ block: 'nearest' })} className="mt-2.5 text-center text-caption font-medium text-ink-brand-6 font-ui">{failure}</div>
-        ) : null}
-        {/* F-E: the label above is an estimate; THIS is the number that binds.
-            handleBuy refuses outright above `usd`, the typed budget (its `cap`),
-            so this is a guarantee rather than a hedge and is worth stating plainly. */}
-        {/* Minor: don't state "confirms your buy" / a $0 ceiling while the CTA reads
-            "Minimum buy is $X" for an empty or sub-minimum amount, show the binding
-            ceiling only when there is a real buy to confirm. */}
-        {q.tokens > 0 && usd > 0 ? (
-          <div className="mt-2.5 text-center text-caption text-ink-14 font-ui">
-            {/* The panel's figure is an estimate from the dialog's last balance
-                read; the data source sizes the real transfer from a fresh read
-                and may add the credit reserve. Say "up to", say where the rest
-                goes, and do not pair it with the budget-ceiling sentence, which
-                is about the CHARGE, not the transfer (scrutiny F4). */}
-            {fundPlan
-              ? `One signature moves up to ${hbdString(fundPlan.depositBaseUnits)} HBD from your Hive wallet and confirms your buy. Whatever this buy does not spend stays in your Magi balance.`
-              : `One signature confirms your buy. ${buyCeilingNote(usd, false)}`}
-          </div>
         ) : null}
       </div>
     </ModalShell>

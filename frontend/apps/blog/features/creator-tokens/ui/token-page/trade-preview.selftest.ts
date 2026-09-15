@@ -994,8 +994,9 @@ console.log('\n── 8. WIRING.\n');
     modal.includes('tok('));
   check('★ F-D: the token count is an integer everywhere in the ask dialog', !modal.includes('tok(q.tokens)'));
   check('★ F-E: the CTA is marked as an estimate', modal.includes('`Buy for ~${usdPrice(q.totalUsd)}`'));
-  check('★ F-E: …and the ceiling is named, from the budget that is actually signed',
-    modal.includes('buyCeilingNote(usd, false)'));
+  // ★ 2026-09-15 (owner): the one-signature / budget-ceiling footnote is gone
+  // from the buy dialog ("no point to it"); buyCeilingNote stays a tested helper.
+  check('★ F-E: …and the buy dialog no longer renders the ceiling footnote', !modal.includes('buyCeilingNote('));
   check('★ F-F: the itemised row carries the effective rate', modal.includes('effectiveExitFeePct(rows.exitFeeUsd, rows.curveProceedsUsd)'));
   check('★ F-F: …and the strip says "rate" and names its base',
     modal.includes('Early-exit fee rate:') && modal.includes('exitFeeBaseNote(held, m.position?.maturingTokens)'));
