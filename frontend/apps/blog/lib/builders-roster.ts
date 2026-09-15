@@ -35,8 +35,11 @@ import type { Builder } from '@/blog/lib/builders-board-shape';
  * dalz (owner, 2026-09-15: "remove dalz, hes not a builder" — data reports
  * about Hive, not building on it).
  */
-/** Where a builder who is not listed asks to be: the card's footer links to this profile. */
+/** Who curates the roster (the footer used to link here; the request now goes to Discord). */
 export const BUILDERS_CURATOR = 'lordbutterfly';
+
+/** Where a builder who is not listed asks to be (owner, 2026-09-15: "add the Magi discord invite link... just a button"). The same invite `flagged-account-notice.tsx` points appeals at. */
+export const MAGI_DISCORD_INVITE = 'https://discord.gg/NAdHac8m77';
 
 export const BUILDERS: readonly Builder[] = [
   // ── people ──────────────────────────────────────────────────────────────

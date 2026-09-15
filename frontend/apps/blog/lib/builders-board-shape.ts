@@ -286,3 +286,69 @@ export async function mapBounded<T, R>(
   await Promise.all(workers);
   return results;
 }
+
+/**
+ * ★★★ ONE BUILDER ON SCREEN AT A TIME (owner, 2026-09-15: "make sure the same
+ * person cant show up twice at the same time on the list. thats a bug. you
+ * show me twice"). The first slot board dealt fixed queues and let every slot
+ * run its own timer; the queues were distinct only while the slots stepped in
+ * lockstep, and a hover pause, a hidden tab or a refetch broke the lockstep,
+ * after which two slots could land on two posts of the same builder.
+ *
+ * So the board is now ONE schedule: a cursor walks the round-interleaved
+ * entries, and each tick refills one slot with the next entry whose builder
+ * is not on screen in any OTHER slot. The invariant holds at every tick by
+ * construction, whatever the timers did before. A roster smaller than the
+ * slot count is the one case a slot may keep its builder: then it flips to
+ * that builder's other posts, because there is nobody else to show.
+ */
+export function initialSlots(entries: readonly SlotEntry[], slots: number = BOARD_SLOTS): SlotEntry[] {
+  const out: SlotEntry[] = [];
+  const seen = new Set<string>();
+  for (const e of entries) {
+    if (out.length >= slots) break;
+    if (seen.has(e.account)) continue;
+    seen.add(e.account);
+    out.push(e);
+  }
+  return out;
+}
+
+export interface NextSlot {
+  entry: SlotEntry;
+  /** Index into `entries`, so the caller can record when it was shown. */
+  index: number;
+}
+
+/**
+ * The next entry for `slot`. Eligible = a builder on screen in no OTHER slot
+ * and not the entry the slot already shows. Among the eligible, the one shown
+ * LEAST RECENTLY (`shownAt[i]`, the tick it last appeared; never = -Infinity),
+ * ties in roster order — so every post of every builder gets its turn, and a
+ * builder just replaced does not come straight back. When every other builder
+ * is on screen (a roster smaller than the slot count), the slot moves to its
+ * own builder's least recently shown other post. Null when nothing can change.
+ */
+export function nextSlotEntry(entries: readonly SlotEntry[], visible: readonly SlotEntry[], slot: number, shownAt: readonly number[]): NextSlot | null {
+  if (entries.length === 0 || slot < 0 || slot >= visible.length) return null;
+  const current = visible[slot];
+  const onScreenElsewhere = new Set(visible.filter((_, i) => i !== slot).map((e) => e.account));
+  const pick = (eligible: (e: SlotEntry) => boolean): NextSlot | null => {
+    let best: NextSlot | null = null;
+    let bestAt = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      if (!eligible(e)) continue;
+      const at = shownAt[i] ?? Number.NEGATIVE_INFINITY;
+      if (at < bestAt) {
+        bestAt = at;
+        best = { entry: e, index: i };
+      }
+    }
+    return best;
+  };
+  return (
+    pick((e) => !onScreenElsewhere.has(e.account) && e.account !== current.account) ??
+    pick((e) => e.account === current.account && e.post.permlink !== current.post.permlink)
+  );
+}

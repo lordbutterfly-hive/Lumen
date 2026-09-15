@@ -171,6 +171,14 @@ check(
   anonymousCachePolicy(baseInput({ pathname: '/@lumen.beat/settings' })).cacheable === false
 );
 
+
+console.log('\n/m/<handle> (the Meritum creator page, 2026-09-15)');
+check('/m/lordbutterfly anonymous GET -> shared for a minute', anonymousCachePolicy({ pathname: '/m/lordbutterfly', method: 'GET', hasSession: false, hasQuery: false, hasQaHeader: false }).klass === 'meritum-creator');
+check('/m/<did> (has a colon) -> not cached', anonymousCachePolicy({ pathname: '/m/did:pkh:eip155:1:0xabc', method: 'GET', hasSession: false, hasQuery: false, hasQaHeader: false }).klass !== 'meritum-creator');
+check('/m/<name>?a=buy (a query) -> not cached', anonymousCachePolicy({ pathname: '/m/lordbutterfly', method: 'GET', hasSession: false, hasQuery: true, hasQaHeader: false }).klass !== 'meritum-creator');
+check('/m/<name> with a session -> not cached', anonymousCachePolicy({ pathname: '/m/lordbutterfly', method: 'GET', hasSession: true, hasQuery: false, hasQaHeader: false }).klass !== 'meritum-creator');
+check('/m/../x -> not cached', anonymousCachePolicy({ pathname: '/m/../x', method: 'GET', hasSession: false, hasQuery: false, hasQaHeader: false }).klass !== 'meritum-creator');
+
 if (failures === 0) {
   console.log('\nanonymous-cache-policy: ALL CHECKS PASSED');
   process.exit(0);

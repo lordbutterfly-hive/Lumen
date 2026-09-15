@@ -19,6 +19,7 @@ import { MeritumEligibilityNotice, useMeritumEligibility } from '../meritum-elig
 import TokenModals, { type TokenDialog } from '../token-page/token-modals';
 import { askReference, interstitialKey } from '../token-page/token-page-helpers';
 import CreatorTokenLaurel from '../creator-token-laurel';
+import TokenShell from '../token-shell';
 import CurvePanel from './curve-panel';
 import ShareSheet from './share-sheet';
 import { MERITUM_PAGE_COPY as COPY } from './meritum-copy';
@@ -258,23 +259,57 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
   const ghost = `${pill} border border-ink-2/20 bg-surface-1/70 text-ink-2 hover:border-ink-2 hover:bg-surface-1`;
   const card = 'rounded-[14px] border border-line-9 bg-surface-1';
 
+  // ★ THE RAIL CARDS, text verbatim from disclosure-copy (owner: "the text on
+  // right side navbar is kept"). Shown in the shell's right rail from `xl` up
+  // and inline below the body under that width, exactly as the token page
+  // does, so the figure appears once at every width.
+  const howThisWorks = (
+    <div className={`${card} p-[22px]`}>
+      <h3 className="font-ui text-[16px] font-bold text-ink-2">How this works</h3>
+      <div className="mt-3.5 flex flex-col gap-3.5">
+        {HOW_THIS_WORKS_LINES.map((line, i) => (
+          <div key={i} className="flex gap-[11px]">
+            <span className="w-5 shrink-0 text-[13px] font-bold text-ink-brand-6 font-num">{i + 1}</span>
+            <p className="font-ui text-[13.5px] leading-[1.58] text-ink-4">{line}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+  const marketCapCard = (
+    <div className={`${card} p-[22px]`}>
+      <h3 className="font-ui text-[13px] font-bold uppercase tracking-[0.1em] text-ink-14">{MARKET_CAP_LABEL}</h3>
+      <div className="mt-2 text-[30px] leading-[36px] tracking-[-0.02em] text-ink-2 font-num">{usdWholeNonZero(market.marketCapUsd)}</div>
+      <p className="mt-2.5 font-ui text-[13.5px] leading-[1.58] text-ink-4">{MARKET_CAP_NOTE}</p>
+      {shareButton(
+        'mt-[18px] flex h-[42px] w-full items-center justify-center gap-2 rounded-full border border-ink-2/20 bg-surface-1 font-ui text-[14.5px] font-medium text-ink-2 hover:border-ink-2 hover:bg-surface-11',
+        'meritum-share-rail'
+      )}
+    </div>
+  );
+  const rightRail = (
+    <div className="flex flex-col gap-[18px] pt-[26px]">
+      {howThisWorks}
+      {marketCapCard}
+    </div>
+  );
+
   return (
-    <div className="mx-auto w-full max-w-[1320px] px-4 pb-20 pt-[22px] md:px-5" data-testid="meritum-landing" data-handle={handle}>
-      {/* ★ NO LEFT RAIL ON THIS PAGE (owner, 2026-09-15: "this looks nothing like
-          what I sent you"). The handoff is a landing page: one 1280px column
-          with the hero across the top and a 316px rail beside the body. Inside
-          the app's three-column shell the hero lost its curve panel and every
-          heading wrapped. The global header stays; the way back is the link. */}
-      <Link href="/creators" className="mb-4 inline-block font-ui text-[14px] leading-[22px] font-medium text-ink-brand-6 hover:text-ink-brand-4" data-testid="creator-back">
-        {COPY.back}
-      </Link>
+    // ★ INSIDE THE APP'S SHELL — both rails (owner, 2026-09-15: "you cut the
+    // whole left navbar... put it back", "you cut the right one as well. you
+    // cant do that"). The handoff's page is drawn on a 1280px canvas; here it
+    // lives in the content column between the two rails, so the hero's curve
+    // panel sits beside the name only where the column is wide enough (2xl)
+    // and stacks under the actions elsewhere.
+    <TokenShell rightRail={rightRail} back={{ href: '/creators', label: COPY.back }}>
+    <div data-testid="meritum-landing" data-handle={handle}>
 
       {/* ── hero: the warm wash, the eyebrow, the person, the actions, the curve, the stat strip ── */}
       <section
         className="relative overflow-hidden rounded-[20px] border border-line-9 border-l-[3px] border-l-line-brand-10 bg-[linear-gradient(112deg,#FAEEEB_0%,#FBF7F2_46%,#FCFAF7_100%)] px-6 pb-8 pt-10 md:px-10 md:pt-[54px]"
         data-testid="meritum-hero"
       >
-        <div className="grid grid-cols-1 items-end gap-8 xl:grid-cols-[minmax(0,1fr)_430px] xl:gap-[52px]">
+        <div className="grid grid-cols-1 items-end gap-8 2xl:grid-cols-[minmax(0,1fr)_400px] 2xl:gap-10">
           <div className="min-w-0">
             <div className="mb-6 flex items-center gap-3 font-ui text-[15px] font-bold uppercase tracking-[0.2em] text-ink-brand-6 md:text-[17px]">
               <CreatorTokenLaurel size={24} />
@@ -362,8 +397,8 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
         </div>
       ) : null}
 
-      {/* ── body: the asks, the record, the holders; the rail beside them ── */}
-      <div className="mt-[34px] grid grid-cols-1 gap-[26px] xl:grid-cols-[minmax(0,1fr)_316px]">
+      {/* ── body: the asks, the record, the holders; the rail is the shell's ── */}
+      <div className="mt-[34px]">
         <div className="flex min-w-0 flex-col gap-[26px]">
           {market.services.length > 0 ? (
             <section data-testid="meritum-asks">
@@ -528,29 +563,11 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
           <p className="font-ui text-[13px] leading-[1.58] text-ink-14">{honestNote()}</p>
         </div>
 
-        {/* ── rail: the two cards, text verbatim from disclosure-copy (owner: "the text on right side navbar is kept") ── */}
-        <aside className="flex flex-col gap-[18px] xl:sticky xl:top-24 xl:h-fit">
-          <div className={`${card} p-[22px]`}>
-            <h3 className="font-ui text-[16px] font-bold text-ink-2">How this works</h3>
-            <div className="mt-3.5 flex flex-col gap-3.5">
-              {HOW_THIS_WORKS_LINES.map((line, i) => (
-                <div key={i} className="flex gap-[11px]">
-                  <span className="w-5 shrink-0 text-[13px] font-bold text-ink-brand-6 font-num">{i + 1}</span>
-                  <p className="font-ui text-[13.5px] leading-[1.58] text-ink-4">{line}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className={`${card} p-[22px]`}>
-            <h3 className="font-ui text-[13px] font-bold uppercase tracking-[0.1em] text-ink-14">{MARKET_CAP_LABEL}</h3>
-            <div className="mt-2 text-[30px] leading-[36px] tracking-[-0.02em] text-ink-2 font-num">{usdWholeNonZero(market.marketCapUsd)}</div>
-            <p className="mt-2.5 font-ui text-[13.5px] leading-[1.58] text-ink-4">{MARKET_CAP_NOTE}</p>
-            {shareButton(
-              'mt-[18px] flex h-[42px] w-full items-center justify-center gap-2 rounded-full border border-ink-2/20 bg-surface-1 font-ui text-[14.5px] font-medium text-ink-2 hover:border-ink-2 hover:bg-surface-11',
-              'meritum-share-rail'
-            )}
-          </div>
-        </aside>
+        {/* The rail cards, for every width the shell's right rail does not reach (the token page's rule). */}
+        <div className="mt-[26px] flex flex-col gap-[18px] xl:hidden">
+          {howThisWorks}
+          {marketCapCard}
+        </div>
       </div>
 
       <TokenModals
@@ -581,6 +598,7 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
       />
       {shareOpen ? <ShareSheet handle={shown} url={shareUrl} cardSrc={cardSrc} onClose={() => setShareOpen(false)} /> : null}
     </div>
+    </TokenShell>
   );
 };
 

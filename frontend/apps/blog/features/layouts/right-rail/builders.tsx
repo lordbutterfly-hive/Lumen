@@ -1,7 +1,7 @@
 'use client';
 
 import { FC, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { ArrowUpRight, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@hive/ui';
 import { UserAvatarImg } from '@ui/components';
@@ -9,9 +9,9 @@ import TimeAgo from '@ui/components/time-ago';
 import { cn } from '@ui/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useTranslation } from '@/blog/i18n/client';
-import { buildSlotQueues } from '@/blog/lib/builders-board-shape';
+import { BOARD_SLOTS, interleaveByRound, nextSlotEntry } from '@/blog/lib/builders-board-shape';
 import type { BuilderRow, SlotEntry } from '@/blog/lib/builders-board-shape';
-import { BUILDERS_CURATOR } from '@/blog/lib/builders-roster';
+import { MAGI_DISCORD_INVITE } from '@/blog/lib/builders-roster';
 import { readBuildersHidden, writeBuildersHidden, BUILDERS_HIDDEN_KEY } from '@/blog/lib/builders-card-visibility';
 
 /**
@@ -24,10 +24,14 @@ import { readBuildersHidden, writeBuildersHidden, BUILDERS_HIDDEN_KEY } from '@/
  * staggered timer, the way an airport board cycles a flight. The first
  * version pinned one builder per row and flipped only the post; the owner
  * asked for the WRITERS to flip too ("make sure the card flips the writers as
- * well as their posts"), so a slot now cycles through a queue dealt across
- * every builder — see `buildSlotQueues` for how the queues are dealt so no
- * two slots show the same builder at once. The three rules the Meritum board
- * learned the hard way apply here unchanged:
+ * well as their posts"). The first slot board dealt one fixed queue per slot
+ * and gave every slot its own timer; the owner then saw himself twice at
+ * once ("thats a bug"), because the queues were distinct only while the
+ * timers stepped in lockstep. The board is now ONE schedule: a single
+ * interval refills one slot per tick with the least-recently-shown entry
+ * whose builder is on screen in no other slot (`nextSlotEntry`), so the
+ * invariant holds at every tick by construction. The three rules the Meritum
+ * board learned the hard way apply here unchanged:
  *
  *  1. IT LIVES ONLY WHERE IT WAS ASKED FOR. `RightRail` renders this only when
  *     handed `builders`, and exactly three call sites pass it: `home-shell`,
@@ -91,46 +95,30 @@ async function fetchBuildersBoard(): Promise<BuilderRow[]> {
   return body.builders ?? [];
 }
 
-/** One slot of the board: a queue of (builder, post) entries, showing one and flipping through the rest. */
-const SlotView: FC<{ queue: SlotEntry[]; index: number; paused: boolean }> = ({ queue, index, paused }) => {
-  const [step, setStep] = useState(0);
+/** One slot of the board. It shows what the schedule hands it and flaps when that changes. */
+const SlotView: FC<{ entry: SlotEntry }> = ({ entry }) => {
+  const [shown, setShown] = useState(entry);
   const [flapping, setFlapping] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const current = queue[step % queue.length];
 
   useEffect(() => {
-    // A one-entry queue never flips, a paused board never flips. Both are the
-    // ABSENCE of a timer, so a paused board costs no wakeups at all.
-    if (paused || queue.length < 2) return;
-    // Staggered so slots never flip in unison — that reads as the page
-    // re-rendering rather than a board updating. 1.5 s apart: with a 30 s
-    // dwell the slots drift through the half-minute instead of ticking together.
-    const delay = DWELL_MS + index * 1_500;
-    timer.current = setTimeout(() => {
-      setFlapping(true);
-      setTimeout(() => {
-        setStep((s) => s + 1);
-        setFlapping(false);
-      }, FLAP_MS);
-    }, delay);
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
-  }, [paused, queue.length, index, step]);
+    if (shown === entry) return;
+    // The flap: the outgoing entry lifts and fades, then the incoming settles.
+    setFlapping(true);
+    const t = setTimeout(() => {
+      setShown(entry);
+      setFlapping(false);
+    }, FLAP_MS);
+    return () => clearTimeout(t);
+  }, [entry, shown]);
 
-  const { account, post } = current;
+  const { account, post } = shown;
   const postHref = `/${post.category}/@${account}/${post.permlink}`;
 
   return (
     <li className="border-b border-line-2 py-2.5 last:border-0" data-testid="builders-row" data-account={account}>
       {/* The whole entry flaps — name, avatar, time and title leave and arrive together, because the writer changes too. */}
       <div
-        className={cn(
-          'transition-all motion-reduce:transition-none',
-          // The flap: the outgoing entry lifts and fades, the incoming settles.
-          // `motion-reduce` drops it to a plain swap — the change still happens.
-          flapping ? '-translate-y-1 opacity-0' : 'translate-y-0 opacity-100'
-        )}
+        className={cn('transition-all motion-reduce:transition-none', flapping ? '-translate-y-1 opacity-0' : 'translate-y-0 opacity-100')}
         style={{ transitionDuration: `${FLAP_MS}ms` }}
       >
         <div className="flex min-w-0 items-center justify-between gap-2">
@@ -160,6 +148,8 @@ const SlotView: FC<{ queue: SlotEntry[]; index: number; paused: boolean }> = ({ 
     </li>
   );
 };
+
+const sameEntry = (a: SlotEntry, b: SlotEntry) => a.account === b.account && a.post.permlink === b.post.permlink;
 
 const Builders = () => {
   const { t } = useTranslation('common_blog');
@@ -222,10 +212,59 @@ const Builders = () => {
     writeBuildersHidden(next);
   };
 
-  // Above the early return: a hook. The queues are dealt once per answer, so a
-  // slot's queue keeps its identity across renders and its timer is not reset
-  // by the parent re-rendering.
-  const queues = useMemo(() => buildSlotQueues(data ?? []), [data]);
+  // ★ THE SCHEDULE. `entries` is every builder's every post, dealt by round
+  // (newest posts first). `visible` is what the slots show right now; the
+  // interval below refills one slot per tick. Refs carry the bookkeeping the
+  // interval needs without restarting it on every render.
+  const entries = useMemo(() => interleaveByRound(data ?? []), [data]);
+  const [visible, setVisible] = useState<SlotEntry[]>([]);
+  const visibleRef = useRef<SlotEntry[]>([]);
+  const shownAt = useRef<number[]>([]);
+  const tick = useRef(0);
+  const turn = useRef(0);
+  const commit = (next: SlotEntry[]) => {
+    visibleRef.current = next;
+    setVisible(next);
+  };
+
+  // (Re)deal when the answer changes: keep what is on screen if it still
+  // exists, fill the rest with builders not yet on screen, newest first.
+  useEffect(() => {
+    const kept = visibleRef.current.filter((v) => entries.some((e) => sameEntry(e, v)));
+    const seen = new Set(kept.map((e) => e.account));
+    const out = [...kept];
+    for (const e of entries) {
+      if (out.length >= BOARD_SLOTS) break;
+      if (seen.has(e.account)) continue;
+      seen.add(e.account);
+      out.push(e);
+    }
+    shownAt.current = entries.map((e) => (out.some((v) => sameEntry(e, v)) ? 0 : Number.NEGATIVE_INFINITY));
+    tick.current = 0;
+    commit(out);
+  }, [entries]);
+
+  const paused = hovered || tabHidden;
+  useEffect(() => {
+    // One slot per tick, round-robin, so each slot flips once per DWELL_MS
+    // (owner: "it flips once every 30 second per person") and the flips are
+    // spread through the half-minute instead of ticking together. A paused
+    // board is the ABSENCE of the interval, so it costs no wakeups.
+    if (paused || visible.length === 0 || entries.length < 2) return;
+    const period = Math.max(2_000, Math.round(DWELL_MS / visible.length));
+    const id = setInterval(() => {
+      const prev = visibleRef.current;
+      if (prev.length === 0) return;
+      tick.current += 1;
+      const slot = turn.current % prev.length;
+      turn.current += 1;
+      const next = nextSlotEntry(entries, prev, slot, shownAt.current);
+      if (!next) return;
+      shownAt.current[next.index] = tick.current;
+      commit(prev.map((e, i) => (i === slot ? next.entry : e)));
+    }, period);
+    return () => clearInterval(id);
+  }, [paused, entries, visible.length]);
 
   if (collapsed) {
     // The heading and a way back, nothing else: the reader asked for the
@@ -251,7 +290,7 @@ const Builders = () => {
   }
 
   if (isError) return null;
-  if (!isLoading && queues.length === 0) return null;
+  if (!isLoading && entries.length === 0) return null;
 
   return (
     <section aria-labelledby="right-rail-builders-heading" data-testid="right-rail-builders" data-collapsed="false">
@@ -283,18 +322,28 @@ const Builders = () => {
         </ul>
       ) : (
         <ul onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} data-testid="builders-list">
-          {queues.map((queue, i) => (
+          {visible.map((entry, i) => (
             // Keyed by slot, not by builder: the slot is the stable thing, its occupant changes.
-            <SlotView key={i} queue={queue} index={i} paused={hovered || tabHidden} />
+            <SlotView key={i} entry={entry} />
           ))}
         </ul>
       )}
-      {/* Owner, 2026-09-15: "add small in italic words, request to be added to the list of builders". */}
-      <p className="mt-2 font-ui text-caption italic text-ink-14" data-testid="builders-request">
-        <Link href={`/@${BUILDERS_CURATOR}`} className="hover:text-ink-brand-6">
-          {t('right_rail.builders.request', { curator: BUILDERS_CURATOR })}
-        </Link>
-      </p>
+      {/* Owner, 2026-09-15: "Request to be listed" and a button to the Magi Discord
+          (no bare URL on the card). Opens in a new tab; `noopener` so the tab
+          cannot reach back into this page. */}
+      <div className="mt-2.5 flex items-center justify-between gap-3" data-testid="builders-request">
+        <span className="font-ui text-caption italic text-ink-14">{t('right_rail.builders.request')}</span>
+        <a
+          href={MAGI_DISCORD_INVITE}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-line-11 bg-surface-1 px-3 py-1 font-ui text-caption font-medium text-ink-2 hover:border-ink-2 hover:bg-surface-16"
+          data-testid="builders-discord"
+        >
+          {t('right_rail.builders.discord')}
+          <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+        </a>
+      </div>
     </section>
   );
 };

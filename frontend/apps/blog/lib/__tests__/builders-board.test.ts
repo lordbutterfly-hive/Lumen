@@ -10,9 +10,9 @@
  * runner at this file.
  */
 import type { Entry } from '@hive/common-hiveio-packages/wax';
-import { shapeBuilderRow, isDevelopmentPost, isCrossPost, tagsOf, postAgeMs, interleaveByRound, buildSlotQueues, mapBounded, POSTS_PER_BUILDER, MAX_POST_AGE_MS, DEV_TAGS, BOARD_SLOTS } from '../builders-board-shape';
+import { shapeBuilderRow, isDevelopmentPost, isCrossPost, tagsOf, postAgeMs, interleaveByRound, buildSlotQueues, initialSlots, nextSlotEntry, mapBounded, POSTS_PER_BUILDER, MAX_POST_AGE_MS, DEV_TAGS, BOARD_SLOTS } from '../builders-board-shape';
 import type { Builder, BuilderRow } from '../builders-board-shape';
-import { BUILDERS, BUILDERS_CURATOR } from '../builders-roster';
+import { BUILDERS, BUILDERS_CURATOR, MAGI_DISCORD_INVITE } from '../builders-roster';
 
 let checks = 0;
 let failures = 0;
@@ -242,7 +242,60 @@ ok('a slot\'s first flip brings a different writer, not the same writer\'s next 
 ok('slot one is dealt a1, i1, h2, h3 (round-robin over the rounds)', queues[0].map((e) => e.post.permlink).join() === 'a-1,i-1,h-2,h-3');
 ok('fewer entries than slots -> fewer slots, never an empty one', buildSlotQueues([rowOf('a', 2), rowOf('b', 1)]).length === 3);
 ok('no rows -> no slots', buildSlotQueues([]).length === 0);
-ok('the request line has a curator on the roster to point at', BUILDERS.some((b) => b.account === BUILDERS_CURATOR));
+ok('the curator is on the roster', BUILDERS.some((b) => b.account === BUILDERS_CURATOR));
+ok('the request button points at a Discord invite over https', /^https:\/\/discord\.gg\/[A-Za-z0-9]+$/.test(MAGI_DISCORD_INVITE));
+
+console.log('\none builder on screen at a time, whatever the timers did');
+const dealt2 = interleaveByRound(board);
+const first = initialSlots(dealt2);
+ok('the opening screen is the first eight DISTINCT builders', first.map((e) => e.account).join('') === 'abcdefgh');
+{
+  // Simulate the board: each tick refills one slot (round-robin). Whatever the
+  // order, no builder twice, and every entry gets its turn.
+  let visible = [...first];
+  const shownAt: number[] = dealt2.map((e) => (first.includes(e) ? 0 : Number.NEGATIVE_INFINITY));
+  let dupes = 0;
+  const seenEntries = new Set<string>();
+  let flips = 0;
+  let bounced = 0;
+  for (let tick = 1; tick <= 400; tick++) {
+    const slot = (tick - 1) % visible.length;
+    const before = visible[slot];
+    const next = nextSlotEntry(dealt2, visible, slot, shownAt);
+    if (next) {
+      if (next.entry.account === before.account) bounced++;
+      visible = visible.map((e, i) => (i === slot ? next.entry : e));
+      shownAt[next.index] = tick;
+      flips++;
+    }
+    const accounts = visible.map((e) => e.account);
+    if (new Set(accounts).size !== accounts.length) dupes++;
+    for (const e of visible) seenEntries.add(`${e.account}/${e.post.permlink}`);
+  }
+  ok('400 ticks: never a builder twice on screen', dupes === 0, `${dupes} ticks with a duplicate`);
+  ok('every entry of every builder got its turn', seenEntries.size === dealt2.length, `${seenEntries.size} of ${dealt2.length}`);
+  ok('the board kept flipping', flips === 400);
+  ok('a slot never flips to the same builder while others are waiting', bounced === 0, `${bounced}`);
+}
+{
+  // Drift: two slots holding the same builder's two posts (the old bug) — the
+  // next refill of either slot removes the duplicate.
+  const broken = [...first];
+  broken[1] = dealt2.find((e) => e.account === 'a' && e.post.permlink === 'a-2')!;
+  const fixed = nextSlotEntry(dealt2, broken, 1, dealt2.map(() => Number.NEGATIVE_INFINITY));
+  ok('a refill never picks a builder already on screen elsewhere', fixed !== null && fixed.entry.account !== 'a' && !broken.filter((_, i) => i !== 1).some((e) => e.account === fixed.entry.account));
+}
+{
+  // A roster smaller than the slot count: the slot flips to its own builder's other post.
+  const tiny = interleaveByRound([rowOf('x', 3), rowOf('y', 2)]);
+  const vis = initialSlots(tiny);
+  ok('two builders -> two slots', vis.length === 2);
+  const n0 = nextSlotEntry(tiny, vis, 0, tiny.map(() => Number.NEGATIVE_INFINITY));
+  ok('with everyone on screen, slot one moves to its own next post', n0 !== null && n0.entry.account === 'x' && n0.entry.post.permlink !== vis[0].post.permlink);
+  const one = interleaveByRound([rowOf('solo', 1)]);
+  ok('one entry in the whole board -> nothing to flip to', nextSlotEntry(one, initialSlots(one), 0, [0]) === null);
+  ok('a bad slot index -> null, no throw', nextSlotEntry(tiny, vis, 9, []) === null);
+}
 
 async function testMapBounded(): Promise<void> {
   console.log('\nmapBounded: the roster read never bursts past its limit');

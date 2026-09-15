@@ -148,9 +148,14 @@ export async function GET(req: NextRequest): Promise<Response> {
           fontFamily: 'Lora'
         }}
       >
-        {/* The big laurel: fully inside the card, 38px clear of the right edge, a wash not a subject. */}
-        <div style={{ position: 'absolute', right: '38px', top: '26px', display: 'flex' }}>
-          <Laurel size={360} color={BRAND} opacity={0.17} />
+        {/* The big laurel: the mark's VISIBLE wreath is 360px wide and clears the
+            right edge by 38px (handoff §4). The product's laurel path is inset in
+            its own box (x 2.73..21.3 of 24, y 1.44..21.7), so the box is 465px and
+            sits partly outside the padding to put the optical edges where the
+            spec puts them — measured 2026-09-15 after the owner: "the meritum
+            logo on the card isnt right enough". */}
+        <div style={{ position: 'absolute', right: '-14px', top: '-2px', display: 'flex' }}>
+          <Laurel size={465} color={BRAND} opacity={0.17} />
         </div>
 
         <div
@@ -167,8 +172,9 @@ export async function GET(req: NextRequest): Promise<Response> {
           }}
         >
           {/* Imprint: the mark, pulled left so its optical edge lands on the margin, then MERITUM tracked wide. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginLeft: '-3px' }}>
-            <Laurel size={30} color={BRAND} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '-5px' }}>
+            {/* 38px box so the visible mark is ~30px; pulled left by its own inset so the optical edge lands on the margin. */}
+            <Laurel size={38} color={BRAND} />
             <div style={{ display: 'flex', fontSize: '23px', fontWeight: 700, letterSpacing: '0.22em', textTransform: 'uppercase', color: IMPRINT, lineHeight: 1 }}>
               Meritum
             </div>

@@ -114,7 +114,8 @@ export function anonymousCachePolicy(input: CachePolicyInput): CachePolicy {
   // changes with the price. Only a well-formed Hive name here: a DID carries
   // ':' and stays uncached, and a malformed segment is a 404 that must never
   // be labelled shared-cacheable.
-  if (parts[0] === 'm' && parts.length === 2 && ACCOUNT.test(parts[1])) return policy('meritum-creator', 60, 120);
+  // (`ACCOUNT` expects the `@` a profile URL carries; this segment is the bare name.)
+  if (parts[0] === 'm' && parts.length === 2 && /^[a-z][a-z0-9.-]{2,15}$/.test(parts[1])) return policy('meritum-creator', 60, 120);
 
   // /@name and its public sub-pages
   if (ACCOUNT.test(parts[0])) {
