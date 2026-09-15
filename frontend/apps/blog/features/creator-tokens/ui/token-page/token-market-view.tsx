@@ -273,7 +273,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   // hook's throw remains the backstop for a stale render or a deep link, per
   // its own doc.
 
-  const handleBuy = async (usd: number, maxTotalUsd?: number): Promise<void> => {
+  const handleBuy = async (usd: number, maxTotalUsd?: number, fundFromHive?: boolean): Promise<void> => {
     const local = buyQuote(usd, market);
     if (local.tokens <= 0) throw new Error('That budget does not cover a whole token at the current price.');
     const authoritative = await live.quoteBuy(local.tokens);
@@ -290,7 +290,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
     if (authoritative.totalDueHbd > cap) {
       throw new Error('The price moved above your limit.');
     }
-    await live.buy(local.tokens, cap);
+    await live.buy(local.tokens, cap, fundFromHive);
   };
 
   /**

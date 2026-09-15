@@ -11,6 +11,7 @@
 import {
   RC_HIVE_FREE_AMOUNT,
   checkAffordable,
+  rcReserveBaseUnits,
   getsFreeResourceCredits,
   readMagiSpendingPower,
   type MagiSpendingPower
@@ -211,6 +212,27 @@ async function main(): Promise<void> {
       'zero RC outranks an insufficient balance',
       checkAffordable(broke, 999999) === 'no_resource_credits'
     );
+
+    // The node's reserve (execution-context.go PullBalance): a Hive account
+    // with its free allowance intact reserves nothing out of the balance.
+    const hive4: MagiSpendingPower = {
+      balance: { account: 'hive:a', hbdBaseUnits: 4000, blockHeight: 1 },
+      rc: { account: 'hive:a', amount: 14000, maxRcs: 14000 },
+      cannotTransact: false
+    };
+    check('hive account, free allowance intact: no reserve, 3.199 fits in 4.000 with rc_limit 4265', rcReserveBaseUnits(hive4, 4265) === 0 && checkAffordable(hive4, 3199, 4265) === 'ok');
+    // 10,000 frozen but still 4,400 credits available, so the RC gate passes and the reserve decides.
+    const hiveFrozen: MagiSpendingPower = { ...hive4, rc: { account: 'hive:a', amount: 4400, maxRcs: 14400 } };
+    check('hive account, allowance fully frozen: the whole limit is reserved -> insufficient', rcReserveBaseUnits(hiveFrozen, 4265) === 4265 && checkAffordable(hiveFrozen, 3199, 4265) === 'insufficient_hbd');
+    const hiveHalf: MagiSpendingPower = { ...hive4, rc: { account: 'hive:a', amount: 5000, maxRcs: 14000 } };
+    check('hive account, 9000 frozen: reserve = 4265 - 1000', rcReserveBaseUnits(hiveHalf, 4265) === 3265);
+    const did: MagiSpendingPower = {
+      balance: { account: 'did:pkh:eip155:1:0xabc', hbdBaseUnits: 4000, blockHeight: 1 },
+      rc: { account: 'did:pkh:eip155:1:0xabc', amount: 5000, maxRcs: 5000 },
+      cannotTransact: false
+    };
+    check('a wallet identity has no allowance: the whole limit is reserved, as before', rcReserveBaseUnits(did, 4265) === 4265 && checkAffordable(did, 3199, 4265) === 'insufficient_hbd');
+    check('the RC gate itself is unchanged: limit above available credits -> no_resource_credits', checkAffordable({ ...hive4, rc: { account: 'hive:a', amount: 100, maxRcs: 14000 } }, 1, 4265) === 'no_resource_credits');
   }
 
   // ── optional: one live read-only query ──────────────────────────────────────

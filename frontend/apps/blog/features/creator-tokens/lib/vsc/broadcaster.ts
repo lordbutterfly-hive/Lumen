@@ -1,9 +1,15 @@
+import env from '@beam-australia/react-env';
+import { WaxChainApiError } from '@hiveio/wax';
+import { getAsset } from '@transaction/lib/utils';
 import { transactionService } from '@transaction/index';
 import { getCreatorTokensConfig } from '../creator-tokens-data-source';
 import { getCreatorTokensHiveChain } from './hive-chain';
 import { LoginType } from '@smart-signer/types/common';
 import type { CustomJsonOp } from './op-builders';
 import type { Broadcaster, BundleBroadcaster } from '../vsc-data-source';
+import type { FundedBroadcaster } from '../vsc-data-source';
+import { assertFundedBundle, hbdString, rcLimitOf } from '@/blog/lib/meritum/hive-topup';
+import { rcLimitForAction } from './rc-budget';
 
 // Finding C-B: the real broadcaster. VscCreatorTokensDataSource's
 // broadcaster dependency existed (VscCreatorTokensDataSourceDeps.broadcaster)
@@ -237,6 +243,37 @@ export function assertActiveSignerFor(account: string): void {
   );
 }
 
+/**
+ * ★ A LOST RESPONSE IS NOT A REFUSAL (scrutiny F1, 2026-09-15). The signed
+ * transaction can reach the Hive node and the HTTP response still get lost
+ * (timeout, a blip, the extension). Reported as a plain failure, that read as
+ * "nothing moved": tx-claim.ts released the cross-tab claim and the dialog
+ * invited a second signature, which for a funded buy is a SECOND Hive
+ * transfer out of the wallet. So the outcome is classified: a node that
+ * ANSWERED with an RPC error (WaxChainApiError) refused the transaction and
+ * nothing moved; anything else (transport error, timeout, a 5xx, a
+ * "duplicate" answer) may already have landed, and says so with the
+ * `_UNCONFIRMED` code tx-claim.ts keeps the claim for.
+ */
+async function broadcastSigned(chain: Awaited<ReturnType<typeof getCreatorTokensHiveChain>>, txBuilder: Awaited<ReturnType<Awaited<ReturnType<typeof getCreatorTokensHiveChain>>['createTransaction']>>, code: string): Promise<string> {
+  try {
+    await chain.api.network_broadcast_api.broadcast_transaction({
+      max_block_age: -1,
+      trx: txBuilder.toApiJson()
+    });
+    return txBuilder.id;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const answered = err instanceof WaxChainApiError;
+    if (answered && !/duplicate/i.test(message)) {
+      throw new Error(`${code}_REFUSED: Hive refused this transaction before accepting it, so nothing moved. ${message}`);
+    }
+    throw new Error(
+      `${code}_UNCONFIRMED: Hive did not confirm receiving this transaction (${message}). It may already have been accepted. Check your Magi balance and holdings before signing it again.`
+    );
+  }
+}
+
 export const hiveTransactionBroadcaster: Broadcaster = async (op: CustomJsonOp) => {
   assertCanSignWithActiveAuthority(op);
 
@@ -286,11 +323,7 @@ export const hiveTransactionBroadcaster: Broadcaster = async (op: CustomJsonOp) 
       override.chainId || undefined
     );
     txBuilder.addSignature(signature);
-    await chain.api.network_broadcast_api.broadcast_transaction({
-      max_block_age: -1,
-      trx: txBuilder.toApiJson()
-    });
-    return txBuilder.id;
+    return broadcastSigned(chain, txBuilder, 'CREATOR_TOKENS_BROADCAST');
   }
 
   const result = await transactionService.processHiveAppOperation(
@@ -375,11 +408,7 @@ export const hiveTransactionBundleBroadcaster: BundleBroadcaster = async (ops: C
       override.chainId || undefined
     );
     txBuilder.addSignature(signature);
-    await chain.api.network_broadcast_api.broadcast_transaction({
-      max_block_age: -1,
-      trx: txBuilder.toApiJson()
-    });
-    return txBuilder.id;
+    return broadcastSigned(chain, txBuilder, 'CREATOR_TOKENS_BROADCAST');
   }
 
   const result = await transactionService.processHiveAppOperation(
@@ -389,4 +418,68 @@ export const hiveTransactionBundleBroadcaster: BundleBroadcaster = async (ops: C
     { requiredKeyType: REQUIRED_KEY_TYPE }
   );
   return result.transactionId;
+};
+
+/**
+ * The gateway account: the same configuration the wallet's Deposit dialog
+ * reads (features/wallet/hooks/use-magi-deposit-mutation.ts). It is a constant
+ * of this build, never a value a caller can pass in.
+ */
+const MAGI_GATEWAY_ACCOUNT = env('MAGI_GATEWAY_ACCOUNT') || 'vsc.gateway';
+
+/**
+ * ★ ONE SIGNATURE FUNDS AND BUYS (2026-09-15). A Hive transfer of the
+ * shortfall to the gateway (memo `to=<signer>`) rides in FRONT of the buy call
+ * in one Hive transaction. The node credits the transfer at ingest, in op
+ * order, before the call of that block executes (go-vsc-node
+ * state_engine.go), which is the same construction Magi's crosschain swaps
+ * use (crosschain-sdk quickSwap.ts). Both ops need the ACTIVE key, so the
+ * wallet shows them together in one prompt: the transfer to @vsc.gateway and
+ * the Meritum call.
+ *
+ * Nothing here is taken on trust from the caller: `to` is this module's
+ * constant, and `assertFundedBundle` (lib/meritum/hive-topup.ts) re-checks
+ * that the deposit is from the signer, credits the signer, and is no larger
+ * than this buy's own spend cap plus its credit reserve. The transaction is
+ * refused without the creator-tokens chain override: a deposit signed on the
+ * app's default chain could land on a network the buy is not on.
+ */
+export const hiveFundedTransactionBroadcaster: FundedBroadcaster = async (deposit, op) => {
+  assertCanSignWithActiveAuthority(op);
+  assertFundedBundle(deposit, op, MAGI_GATEWAY_ACCOUNT, rcLimitOf(op) ?? rcLimitForAction('buy'));
+
+  const config = getCreatorTokensConfig();
+  const override =
+    config?.hiveApi || config?.hiveChainId
+      ? { apiEndpoint: config?.hiveApi ?? '', chainId: config?.hiveChainId ?? '' }
+      : null;
+  if (!override) {
+    throw new Error(
+      'CREATOR_TOKENS_FUNDED_BUY_UNAVAILABLE: paying a buy straight from a Hive wallet needs REACT_APP_CREATOR_TOKENS_HIVE_API and REACT_APP_CREATOR_TOKENS_HIVE_CHAIN_ID. Refusing to move HBD on the app default chain. Deposit to Magi first instead.'
+    );
+  }
+  const chain = await getCreatorTokensHiveChain(override);
+  const txBuilder = await chain.createTransaction();
+  // Op 0: the deposit. Op 1: the buy. The order is the whole point (see the file doc).
+  txBuilder.pushOperation({
+    transfer_operation: {
+      from: deposit.from,
+      to: MAGI_GATEWAY_ACCOUNT,
+      // The same constructor the wallet's Deposit dialog uses (use-magi-deposit-mutation.ts).
+      amount: await getAsset(hbdString(deposit.amountBaseUnits), 'HBD'),
+      memo: deposit.memo
+    }
+  });
+  txBuilder.pushOperation({ custom_json_operation: op });
+  txBuilder.validate();
+  const signature = await transactionService.signTransaction(
+    txBuilder,
+    undefined,
+    REQUIRED_KEY_TYPE,
+    chain,
+    override.apiEndpoint || undefined,
+    override.chainId || undefined
+  );
+  txBuilder.addSignature(signature);
+  return broadcastSigned(chain, txBuilder, 'CREATOR_TOKENS_FUNDED_BUY');
 };

@@ -289,6 +289,24 @@ export function checkAffordable(
   // (`transaction-pool.go:213-215`).
   if (rcLimitBaseUnits > power.rc.amount) return 'no_resource_credits';
   // ...and the reservation plus the purchase must both fit in the balance.
-  if (costBaseUnits + rcLimitBaseUnits > power.balance.hbdBaseUnits) return 'insufficient_hbd';
+  if (costBaseUnits + rcReserveBaseUnits(power, rcLimitBaseUnits) > power.balance.hbdBaseUnits) return 'insufficient_hbd';
   return 'ok';
+}
+
+/**
+ * The slice of `rc_limit` the node keeps OUT of the balance during a draw.
+ * execution-context.go PullBalance: `exclusion = rcLimit - rcFreeRemaining`
+ * (only when positive); rc-system.go FreeRcRemaining: `free - frozen` for a
+ * `hive:` account, 0 for a wallet identity. So a Hive account with an
+ * untouched allowance reserves nothing, one that has spent its allowance
+ * reserves the rest, and a DID reserves the whole limit. `frozen` is
+ * `max_rcs - amount`, the same reading the node's resolver derives it from.
+ * Before 2026-09-15 this gate charged every account the whole limit, which
+ * blocked Hive buyers who could already pay (scrutiny F3).
+ */
+export function rcReserveBaseUnits(power: MagiSpendingPower, rcLimitBaseUnits: number): number {
+  if (!getsFreeResourceCredits(power.balance.account)) return rcLimitBaseUnits;
+  const frozen = Math.max(0, power.rc.maxRcs - power.rc.amount);
+  const freeRemaining = Math.max(0, RC_HIVE_FREE_AMOUNT - frozen);
+  return Math.max(0, rcLimitBaseUnits - freeRemaining);
 }

@@ -345,7 +345,7 @@ console.log('\n── WIRING — the modal really renders these, and no longer r
     // ★ THE CALL LOST ITS SECOND ARGUMENT. BuyModal stopped passing a separate
     // ceiling to onBuy, so the landmark is `onBuy(usd)`; the property this
     // control exists for (the slice really is the buy dialog) is unchanged.
-    buy.includes('await onBuy(usd);') && buy.includes('MagiFuelGauge')
+    buy.includes('await onBuy(usd, undefined, fundFromHive);') && buy.includes('MagiFuelGauge')
   );
   check(
     'comment stripping did not eat the code (the sell CTA below still scans intact)',

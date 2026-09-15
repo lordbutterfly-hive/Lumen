@@ -1,7 +1,7 @@
 import env from '@beam-australia/react-env';
 import type { AnswerInput, Ask, AskInput, BoardCreator, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, ContractRules, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput, CreatorPublicStats} from '../types';
 import { MockCreatorTokensDataSource } from './mock/mock-data-source';
-import { hiveTransactionBroadcaster, hiveTransactionBundleBroadcaster } from './vsc/broadcaster';
+import { hiveFundedTransactionBroadcaster, hiveTransactionBroadcaster, hiveTransactionBundleBroadcaster } from './vsc/broadcaster';
 import { routingBroadcaster } from './vsc/wallet-broadcaster';
 import { signMessageWith, signTypedDataWith } from '@/blog/features/lite-auth/wallet/appkit';
 import { VscCreatorTokensDataSource } from './vsc-data-source';
@@ -296,7 +296,8 @@ export function getCreatorTokensDataSource(): CreatorTokensDataSource | null {
         // named error — so it fails closed rather than silently for any path that
         // did reach it. Wallet-rail bundling is a container change out of scope
         // here (and unreachable), so it is deliberately not wired.
-        bundleBroadcaster: hiveTransactionBundleBroadcaster
+        bundleBroadcaster: hiveTransactionBundleBroadcaster,
+        fundedBroadcaster: hiveFundedTransactionBroadcaster
       });
     } else if (isCreatorTokensDemoEnabled()) {
       instance = new MockCreatorTokensDataSource();

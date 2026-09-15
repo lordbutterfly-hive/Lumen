@@ -30,7 +30,10 @@ export interface MagiL1BroadcastResult {
 export function getMagiL1ChainOverride(): CreatorTokensChainOverride | null {
   const config = getCreatorTokensConfig();
   if (!config) return null;
-  if (config.hiveApi || config.hiveChainId) {
+  // BOTH, not either: getCreatorTokensHiveChain refuses a half-configured
+  // override, so a lone value must read as "not configured" at the gate rather
+  // than fail after the click (scrutiny F10, 2026-09-15).
+  if (config.hiveApi && config.hiveChainId) {
     return { apiEndpoint: config.hiveApi ?? '', chainId: config.hiveChainId ?? '' };
   }
   return null;

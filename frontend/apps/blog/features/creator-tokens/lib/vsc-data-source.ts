@@ -167,6 +167,9 @@ import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, rulesForCode, windi
 // drift from the wallet rail's. See awaitExecution() below.
 import { SUBMIT_PROXY_PATH } from '@/blog/lib/lite/wallet/vsc-tx/submit';
 import { TX_STATUS_OPERATION } from '@/blog/app/api/creator-tokens/submit/operations';
+import { readMagiSpendingPower } from '@/blog/lib/lite/wallet/magi-balance';
+import { depositIntentOf, hbdString, planHiveTopUp, rcLimitOf, type GatewayDepositIntent } from '@/blog/lib/meritum/hive-topup';
+import { rcLimitForAction } from './vsc/rc-budget';
 
 /**
  * ★★★ HOW LONG WE WAIT FOR THE CHAIN TO CONFIRM A REGISTER, AND WHY IT IS
@@ -275,6 +278,14 @@ export type Broadcaster = (op: CustomJsonOp) => Promise<string>;
  * leaves the signer/key path untouched.
  */
 export type BundleBroadcaster = (ops: CustomJsonOp[]) => Promise<string>;
+/**
+ * ★ ONE SIGNATURE FUNDS AND BUYS (2026-09-15): signs a Hive transfer of
+ * `deposit` to the gateway in FRONT of `op` in one Hive transaction and returns
+ * the L1 transaction id. The node records the pair as ONE transaction under
+ * that id (INCLUDED, then CONFIRMED or FAILED after the call runs), so
+ * `awaitExecution` reads it like any other buy. See lib/meritum/hive-topup.ts.
+ */
+export type FundedBroadcaster = (deposit: GatewayDepositIntent, op: CustomJsonOp) => Promise<string>;
 
 /**
  * Reads a transaction's status by id. Injectable (VscCreatorTokensDataSourceDeps)
@@ -314,11 +325,15 @@ export interface VscCreatorTokensDataSourceDeps {
   broadcaster?: Broadcaster;
   /** Broadcasts a multi-op bundle as one Hive transaction (the one-signature launch). See BundleBroadcaster. */
   bundleBroadcaster?: BundleBroadcaster;
+  /** ★ ONE SIGNATURE FUNDS AND BUYS: the deposit-plus-buy transaction. See FundedBroadcaster. */
+  fundedBroadcaster?: FundedBroadcaster;
   /** Optional tx-status reader; unset in production (uses defaultTxStatusReader). See TxStatusReader. */
   txStatusReader?: TxStatusReader;
 }
 
 const NO_BROADCASTER_MSG = 'VscCreatorTokensDataSource: no broadcaster wired — inject the transaction service';
+const NO_FUNDED_BROADCASTER_MSG =
+  'VscCreatorTokensDataSource: no funded broadcaster wired: paying a buy from a Hive wallet needs fundedBroadcaster injected';
 const NO_BUNDLE_BROADCASTER_MSG =
   'VscCreatorTokensDataSource: no bundle broadcaster wired: the one-signature launch needs bundleBroadcaster injected';
 
@@ -387,6 +402,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   private readonly gql: CreatorTokensGqlClient;
   private readonly broadcaster?: Broadcaster;
   private readonly bundleBroadcaster?: BundleBroadcaster;
+  private readonly fundedBroadcaster?: FundedBroadcaster;
   private readonly txStatusReader: TxStatusReader | null;
   private readonly indexer: MagiIndexerClient | null;
 
@@ -400,6 +416,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     this.indexer = deps.config.indexerUrl ? new MagiIndexerClient(deps.config.indexerUrl, deps.config.contractId) : null;
     this.broadcaster = deps.broadcaster;
     this.bundleBroadcaster = deps.bundleBroadcaster;
+    this.fundedBroadcaster = deps.fundedBroadcaster;
     // Unset in production -> awaitExecution uses defaultTxStatusReader (browser
     // fetch). A Node caller injects one; see TxStatusReader.
     this.txStatusReader = deps.txStatusReader ?? null;
@@ -1615,16 +1632,37 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.buyer,
       rcLimit: this.config.rcLimit
     });
-    const txId = await this.broadcast(op);
+    // ★ ONE SIGNATURE FUNDS AND BUYS (2026-09-15). Sized here from a FRESH
+    // balance read, never from what the dialog showed: a stale-high Magi
+    // balance would under-deposit and the call would fail (the deposit
+    // itself is never lost: it stays in the buyer's Magi balance).
+    const deposit = input.fundFromHive ? await this.planDeposit(input.buyer, totalDueBaseUnits, op) : null;
+    const txId = deposit ? await this.fundedBroadcast(deposit, op) : await this.broadcast(op);
     // ★ CONFIRM EXECUTION (2026-08-31, seventeen-unconfirmed-writes finding).
     // This used to return a PROJECTED balance (pending) the instant Hive
     // accepted the op, indistinguishable from a buy the chain refused (cap,
     // price moved, market retired). Confirm to a terminal status first.
+    // A funded buy is ONE record under the same L1 id on the node (it only
+    // defaults to CONFIRMED when a deposit is the sole op, state_engine.go),
+    // so this poll cannot mistake the credited deposit for a confirmed buy.
     const outcome = await this.awaitExecution(txId);
     if (outcome === 'failed') {
+      if (deposit) {
+        // The node credits the deposit at ingest and reverts only the call's
+        // ledger effects (ExecuteBatch: ledgerSession.Revert touches the
+        // session, not the deposit record). Say where the HBD is.
+        throw new Error(
+          `CREATOR_TOKENS_BUY_REFUSED_DEPOSIT_KEPT: the chain refused this purchase, so no tokens were bought. Your ${hbdString(deposit.amountBaseUnits)} HBD did reach Magi and is in your Magi balance, so nothing is lost. Try the buy again.`
+        );
+      }
       throw new Error('CREATOR_TOKENS_BUY_REFUSED: the chain refused this purchase, so no tokens were bought and nothing was charged.');
     }
     if (outcome === 'timeout') {
+      if (deposit) {
+        throw new Error(
+          `CREATOR_TOKENS_BUY_UNCONFIRMED: Hive accepted your ${hbdString(deposit.amountBaseUnits)} HBD deposit and your purchase, but Magi has not confirmed the purchase yet. Check your Magi balance and your holdings before buying again.`
+        );
+      }
       throw new Error(
         'CREATOR_TOKENS_BUY_UNCONFIRMED: Hive accepted your purchase, but Magi has not confirmed it yet. Check your balance before buying again.'
       );
@@ -2800,6 +2838,33 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   private async bundleBroadcast(ops: CustomJsonOp[]): Promise<string> {
     if (!this.bundleBroadcaster) throw new Error(NO_BUNDLE_BROADCASTER_MSG);
     return this.bundleBroadcaster(ops);
+  }
+  private async fundedBroadcast(deposit: GatewayDepositIntent, op: CustomJsonOp): Promise<string> {
+    if (!this.fundedBroadcaster) throw new Error(NO_FUNDED_BROADCASTER_MSG);
+    return this.fundedBroadcaster(deposit, op);
+  }
+  /**
+   * How much HBD this buy needs moved from the buyer's Hive wallet, or null
+   * when the Magi balance already covers it (then the plain buy runs and
+   * nothing is transferred). The Hive-side balance is not read here: Hive
+   * itself refuses a transfer the wallet cannot cover, atomically, so nothing
+   * moves in that case; the dialog pre-checks it for the buyer's sake.
+   */
+  private async planDeposit(buyer: string, totalDueBaseUnits: number, op: CustomJsonOp): Promise<GatewayDepositIntent | null> {
+    const power = await readMagiSpendingPower(this.config.gqlUrl, toDid(buyer));
+    const plan = planHiveTopUp({
+      signer: buyer,
+      totalDueBaseUnits,
+      magiHbdBaseUnits: power.balance.hbdBaseUnits,
+      magiRcAvailable: power.rc.amount,
+      magiRcMax: power.rc.maxRcs,
+      rcLimitBaseUnits: rcLimitOf(op) ?? rcLimitForAction('buy'),
+      hiveLiquidHbdBaseUnits: null
+    });
+    if (plan.kind === 'not-a-hive-account') {
+      throw new Error('CREATOR_TOKENS_FUNDED_BUY_NOT_HIVE: only a Hive account can pay a buy straight from its Hive wallet.');
+    }
+    return depositIntentOf(plan);
   }
 
   /**

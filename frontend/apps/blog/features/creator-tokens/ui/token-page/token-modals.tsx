@@ -23,7 +23,13 @@ import { pctLabel, usdPrice } from '../../market/format';
 import { writeFailureMessage } from '../write-failure';
 import { useTokenAccounts } from '../../live/use-token-accounts';
 import { useMagiSpendingPower } from '../../live/use-magi-spending-power';
-import { MagiFuelGauge, MagiFundingHelp } from '../../live/magi-fuel-gauge';
+import { HiveTopUpPanel, MagiFuelGauge, MagiFundingHelp } from '../../live/magi-fuel-gauge';
+import { bareHiveName, hbdString, planHiveTopUp, type TopUpPlan } from '@/blog/lib/meritum/hive-topup';
+import { rcLimitForAction } from '../../lib/vsc/rc-budget';
+import { getCreatorTokensConfig } from '../../lib/creator-tokens-data-source';
+import { useMagiL1Balances, type MagiL1Balances } from '@/blog/features/wallet/hooks/use-magi-l1-balances';
+import { isMagiL1Configured } from '@/blog/features/wallet/lib/magi-l1-broadcast';
+import type { MagiSpendingPower } from '@/blog/lib/lite/wallet/magi-balance';
 import ModalShell from '../modal-shell';
 import DmComposeModal from '@/blog/features/direct-messages/ui/dm-compose-modal';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
@@ -108,9 +114,43 @@ const ModalHead: FC<{ title: string; onClose: () => void }> = ({ title, onClose 
 
 const tok = (n: number) => n.toFixed(2);
 
+/**
+ * ★ ONE SIGNATURE FUNDS AND BUYS (2026-09-15). When a Hive account cannot
+ * cover the buy from Magi, size the shortfall that will ride in front of the
+ * buy call from their Hive wallet (lib/meritum/hive-topup.ts). Null whenever
+ * the path does not apply: not a Hive account, the chain override the L1
+ * transfer needs is not configured, no fresh Magi read yet, nothing to buy,
+ * or Magi already covers it (then the ordinary gate decides). Any bad input
+ * from a chain read is refused by the planner and treated as "no plan".
+ */
+function hiveTopUpPlan(
+  hiveName: string | null,
+  l1Ready: boolean,
+  power: MagiSpendingPower | null,
+  chargedBaseUnits: number,
+  hiveWallet: MagiL1Balances | null
+): TopUpPlan | null {
+  if (!hiveName || !l1Ready || !power || chargedBaseUnits <= 0) return null;
+  try {
+    const plan = planHiveTopUp({
+      signer: hiveName,
+      totalDueBaseUnits: chargedBaseUnits,
+      magiHbdBaseUnits: power.balance.hbdBaseUnits,
+      magiRcAvailable: power.rc.amount,
+      magiRcMax: power.rc.maxRcs,
+      // The limit the op will actually carry (op-builders.ts: config.rcLimit, else the measured default).
+      rcLimitBaseUnits: getCreatorTokensConfig()?.rcLimit ?? rcLimitForAction('buy'),
+      hiveLiquidHbdBaseUnits: hiveWallet ? Math.round(hiveWallet.liquidHbd.times(1000).toNumber()) : null
+    });
+    return plan.kind === 'not-a-hive-account' || plan.kind === 'magi-covers' ? null : plan;
+  } catch {
+    return null;
+  }
+}
+
 const BuyModal: FC<{
   m: LiveTokenMarket;
-  onBuy: (usd: number, maxTotalUsd?: number) => Promise<void>;
+  onBuy: (usd: number, maxTotalUsd?: number, fundFromHive?: boolean) => Promise<void>;
   onClose: () => void;
 }> = ({ m, onBuy, onClose }) => {
   const [busy, setBusy] = useState(false);
@@ -182,7 +222,29 @@ const BuyModal: FC<{
   // the parent signs (cap = usd), so there is nothing higher to account for.
   const costBaseUnits = Math.round(usd * 1000);
   const affordability = spending.affordability(costBaseUnits, 'buy');
-  const blockedBySpending = affordability === 'no_resource_credits' || affordability === 'insufficient_hbd';
+  // ★ ONE SIGNATURE FUNDS AND BUYS (2026-09-15, owner: "if their hbd is on
+  // Hive they just sign a tx directly from there"). A Hive account short on
+  // Magi is no longer sent away to deposit: the shortfall moves from its Hive
+  // wallet in the SAME signature (see hiveTopUpPlan). The plan is sized from
+  // the CHARGED total (rows.totalUsd, what the button repeats), and the data
+  // source re-sizes it from a fresh balance read before anything is signed.
+  const hiveName = payer?.kind === 'hive' ? bareHiveName(payer.id) : null;
+  const l1Ready = isMagiL1Configured();
+  // This buyer can pay from Hive in the same signature. The flag goes to the
+  // data source whenever it holds: the data source re-sizes the deposit from a
+  // FRESH balance read at broadcast time, and a zero deposit is the plain buy,
+  // so a stale dialog balance can neither under-deposit nor block a buyer who
+  // can already pay (scrutiny F3/F4, 2026-09-15). The dialog's own plan below
+  // is for what it SHOWS, and for the one honest dead end: short on Hive too.
+  const hiveRail = hiveName !== null && l1Ready;
+  const hiveWallet = useMagiL1Balances(hiveRail ? hiveName : '');
+  const chargedBaseUnits = Number.isFinite(rows.totalUsd) && q.tokens > 0 ? Math.round(rows.totalUsd * 1000) : 0;
+  const shortOnMagi = affordability === 'no_resource_credits' || affordability === 'insufficient_hbd';
+  const topUp = hiveRail && shortOnMagi ? hiveTopUpPlan(hiveName, l1Ready, spending.power, chargedBaseUnits, hiveWallet.balances) : null;
+  const fundPlan = topUp && (topUp.kind === 'top-up' || topUp.kind === 'hive-unknown') ? topUp : null;
+  const shortOnHive = topUp?.kind === 'short-on-hive';
+  const fundFromHive = hiveRail && !shortOnHive;
+  const blockedBySpending = shortOnMagi && !fundFromHive;
 
   return (
     <ModalShell width={460} onClose={onClose} title={`Buy @${displayHandle(m.handle)} token`}>
@@ -293,11 +355,14 @@ const BuyModal: FC<{
           ) : null}
         </div>
         {/* What you can actually spend, and whether you can send anything at all. */}
-        <MagiFuelGauge state={spending} costBaseUnits={costBaseUnits} kind={payer?.kind} className="mb-3" />
-        {blockedBySpending && payer ? <MagiFundingHelp kind={payer.kind} account={payer.id} className="mb-3" /> : null}
+        <MagiFuelGauge state={spending} costBaseUnits={costBaseUnits} kind={payer?.kind} fundedFromHive={fundFromHive && shortOnMagi} className="mb-3" />
+        {topUp && spending.power ? (
+          <HiveTopUpPanel plan={topUp} magiHbdBaseUnits={spending.power.balance.hbdBaseUnits} pending={hiveWallet.isLoading} className="mb-3" />
+        ) : null}
+        {blockedBySpending && payer && !shortOnHive ? <MagiFundingHelp kind={payer.kind} account={payer.id} className="mb-3" /> : null}
         {/* H6 (2026-08-31): the exact remedy — how much HBD to add and that credit
             refills on its own — which describeRcBudget produced and nothing rendered. */}
-        {blockedBySpending
+        {blockedBySpending && !shortOnHive
           ? (() => {
               const msg = spending.remedy(costBaseUnits, 'buy');
               return msg ? <p className="mb-3 text-caption text-ink-warn-3 font-ui">{msg}</p> : null;
@@ -341,7 +406,7 @@ const BuyModal: FC<{
             setBusy(true);
             setFailure(null);
             try {
-              await onBuy(usd);
+              await onBuy(usd, undefined, fundFromHive);
               onClose();
             } catch (err) {
               // The REAL reason, not a guess. See ../write-failure.ts.
@@ -385,9 +450,11 @@ const BuyModal: FC<{
             )
             : soldOut
               ? 'Sold out. Every token is issued'
-              : affordability === 'no_resource_credits'
+              : shortOnHive
+                ? 'Not enough HBD on Hive'
+              : affordability === 'no_resource_credits' && !fundFromHive
               ? 'Add HBD on Magi first'
-              : affordability === 'insufficient_hbd'
+              : affordability === 'insufficient_hbd' && !fundFromHive
                 ? 'Not enough HBD'
                 : q.tokens <= 0 && minBuy > 0
                   ? `Minimum buy is ${usdPrice(minBuy)}`
@@ -439,7 +506,14 @@ const BuyModal: FC<{
             ceiling only when there is a real buy to confirm. */}
         {q.tokens > 0 && usd > 0 ? (
           <div className="mt-2.5 text-center text-caption text-ink-14 font-ui">
-            One signature confirms your buy. {buyCeilingNote(usd, false)}
+            {/* The panel's figure is an estimate from the dialog's last balance
+                read; the data source sizes the real transfer from a fresh read
+                and may add the credit reserve. Say "up to", say where the rest
+                goes, and do not pair it with the budget-ceiling sentence, which
+                is about the CHARGE, not the transfer (scrutiny F4). */}
+            {fundPlan
+              ? `One signature moves up to ${hbdString(fundPlan.depositBaseUnits)} HBD from your Hive wallet and confirms your buy. Whatever this buy does not spend stays in your Magi balance.`
+              : `One signature confirms your buy. ${buyCeilingNote(usd, false)}`}
           </div>
         ) : null}
       </div>
@@ -1305,7 +1379,7 @@ const TokenModals: FC<{
   dialog: TokenDialog;
   market: LiveTokenMarket;
   service: Service | null;
-  onBuy: (usd: number, maxTotalUsd?: number) => Promise<void>;
+  onBuy: (usd: number, maxTotalUsd?: number, fundFromHive?: boolean) => Promise<void>;
   onSell: (tokens: number, minNetUsd?: number) => Promise<void>;
   /** refund.go Refund — the pro-rata exit, and the only rail that works once the market winds down. */
   onRedeem: (tokens: number, minNetUsd?: number) => Promise<void>;

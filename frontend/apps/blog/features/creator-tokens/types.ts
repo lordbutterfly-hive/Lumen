@@ -671,6 +671,17 @@ export interface BuyInput {
    * a worse price than intended.
    */
   maxTotalHbd?: number;
+  /**
+   * ★ ONE SIGNATURE FUNDS AND BUYS (2026-09-15). When true and the buyer is a
+   * Hive account whose Magi balance does not cover TotalDue, the data source
+   * puts a Hive transfer to the gateway (memo `to=<buyer>`, the shortfall) in
+   * front of the buy call in the SAME Hive transaction. The node credits the
+   * deposit at ingest, in op order, before any call of that block executes
+   * (go-vsc-node state_engine.go), so the buy sees the HBD and the buyer signs
+   * once. Sizing and the anti-hijack bindings: lib/meritum/hive-topup.ts.
+   * Ignored for DID buyers (no Hive wallet to draw from).
+   */
+  fundFromHive?: boolean;
 }
 
 /**

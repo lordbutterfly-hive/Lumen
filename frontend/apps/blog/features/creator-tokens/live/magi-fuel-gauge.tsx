@@ -25,6 +25,7 @@
 
 import { useState } from 'react';
 import env from '@beam-australia/react-env';
+import { hbdString, type TopUpPlan } from '@/blog/lib/meritum/hive-topup';
 import MagiDepositDialog from '@/blog/features/wallet/components/dialogs/magi-deposit-dialog';
 import { ManabarRing } from '@/blog/features/layouts/site-header/manabar-ring';
 import { MAGI_MIN_RC_FOR_A_CALL, type MagiSpendingPowerState } from './use-magi-spending-power';
@@ -48,6 +49,7 @@ export function MagiFuelGauge({
   state,
   costBaseUnits,
   kind,
+  fundedFromHive = false,
   className = ''
 }: {
   state: MagiSpendingPowerState;
@@ -55,6 +57,10 @@ export function MagiFuelGauge({
   /** Identity kind, so the blocked state can tell the truth — a Hive account
    *  starts with a 10,000 RC baseline, a BTC/EVM identity starts with zero. */
   kind?: 'hive' | 'btc' | 'evm';
+  /** ★ ONE SIGNATURE FUNDS AND BUYS (2026-09-15): the shortfall (and the credits
+   *  it brings) come from the Hive wallet in the same signature, so "more than
+   *  you hold" and "cannot send" would contradict the live button (scrutiny F7). */
+  fundedFromHive?: boolean;
   className?: string;
 }) {
   // No endpoint configured: say nothing rather than imply a zero balance. Rendering
@@ -94,7 +100,7 @@ export function MagiFuelGauge({
   // Cannot send anything. Named separately from "can't afford this" because the fix
   // is different: any amount of HBD unblocks transacting, whereas affording a
   // specific purchase needs a specific amount.
-  if (state.cannotTransact) {
+  if (state.cannotTransact && !fundedFromHive) {
     return (
       <div className={`flex items-start gap-3 ${className}`} data-testid="magi-fuel-blocked">
         {ring(readiness, SHORT)}
@@ -137,10 +143,12 @@ export function MagiFuelGauge({
 
   return (
     <div className={`flex items-start gap-3 ${className}`} data-testid="magi-fuel-ok">
-      {ring(readiness, short ? SHORT : READY)}
+      {ring(readiness, short && !fundedFromHive ? SHORT : READY)}
       <div className="text-caption font-ui">
         <div className="tabular-nums text-ink-2 font-num">{hbd(balance.hbdBaseUnits)} HBD on Magi</div>
-        {short ? (
+        {short && fundedFromHive ? (
+          <div className="text-ink-10">The rest of this buy comes from your Hive wallet in the same signature.</div>
+        ) : short ? (
           <div className="text-ink-warn-3">
             {/* M-03: state the COST only, not a second shortfall number. The gauge used to
                 compute its own `cost - balance`, which omits the transaction-credit reserve,
@@ -347,6 +355,61 @@ export function MagiFundingHelp({
               </a>
             </>
           ) : null}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * ★ ONE SIGNATURE FUNDS AND BUYS (2026-09-15). Shown in the Buy dialog when a
+ * Hive account is short on Magi: the shortfall moves from the Hive wallet in
+ * the same signature as the buy (lib/meritum/hive-topup.ts). No deposit step,
+ * no waiting. The short-on-Hive variant is the one honest dead end left: the
+ * wallet itself cannot cover it, so the button stays off and says why.
+ */
+export function HiveTopUpPanel({
+  plan,
+  magiHbdBaseUnits,
+  pending = false,
+  className = ''
+}: {
+  plan: TopUpPlan;
+  magiHbdBaseUnits: number;
+  /** The Hive wallet balance read is still in flight (scrutiny F6: never claim a failed read while loading). */
+  pending?: boolean;
+  className?: string;
+}) {
+  if (plan.kind === 'short-on-hive') {
+    return (
+      <div
+        className={`rounded-control border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-caption text-ink-warn-1 font-ui ${className}`}
+        data-testid="hive-topup-short"
+      >
+        <div className="mb-1 font-medium">Not enough HBD on Hive either</div>
+        <p>
+          This buy needs <span className="font-num">{hbdString(plan.depositBaseUnits)}</span> HBD more than you hold on Magi, and your
+          Hive wallet is <span className="font-num">{hbdString(plan.missingBaseUnits)}</span> HBD short of that. Add HBD to your Hive
+          wallet, or lower the amount.
+        </p>
+      </div>
+    );
+  }
+  if (plan.kind !== 'top-up' && plan.kind !== 'hive-unknown') return null;
+  return (
+    <div className={`rounded-control border border-line-9 bg-surface-12 px-4 py-3 text-caption text-ink-10 font-ui ${className}`} data-testid="hive-topup">
+      <div className="mb-1 font-medium text-ink-2">
+        <span className="font-num">{hbdString(plan.depositBaseUnits)}</span> HBD from your Hive wallet
+      </div>
+      <p>
+        You hold <span className="font-num">{hbdString(magiHbdBaseUnits)}</span> HBD on Magi. The rest moves from your Hive wallet in the
+        same signature and pays for this buy directly. Nothing to deposit first, nothing to wait for.
+      </p>
+      {plan.kind === 'hive-unknown' ? (
+        <p className="mt-1.5 italic">
+          {pending
+            ? 'Reading your Hive wallet balance…'
+            : 'We could not read your Hive wallet balance just now. If it is short, your wallet refuses the transaction and nothing moves.'}
         </p>
       ) : null}
     </div>

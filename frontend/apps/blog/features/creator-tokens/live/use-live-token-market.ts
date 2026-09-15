@@ -161,7 +161,7 @@ export interface LiveTokenMarketResult {
   servicesOracleStatus: QuoteOracleStatus | null;
 
   /** Buys `tokens` whole tokens. `maxTotalUsd` becomes the signed transfer.allow cap — the buyer's ONLY slippage protection. */
-  buy: (tokens: number, maxTotalUsd?: number) => Promise<void>;
+  buy: (tokens: number, maxTotalUsd?: number, fundFromHive?: boolean) => Promise<void>;
   sell: (tokens: number, minNetUsd?: number) => Promise<void>;
   /**
    * refund.go Refund — the pro-rata exit at the floor. This is the rail to use
@@ -405,6 +405,8 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
     // identity the signer used keeps the money view and the position view honest
     // together.
     queryClient.invalidateQueries({ queryKey: magiSpendingPowerKey(positionAccount) });
+    // A funded buy also moved HBD out of the Hive wallet (use-magi-l1-balances.ts key).
+    queryClient.invalidateQueries({ queryKey: ['wallet', 'magiL1Balances'] });
   }, [queryClient, creator, positionAccount]);
 
   // Every money action funnels through this. It refuses with a NAMED error
@@ -438,11 +440,15 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   }, [dataSource, viewer, isLite, signingAccount, sessionUnavailable]);
 
   const buyMutation = useMutation({
-    mutationFn: async ({ tokens, maxTotalUsd }: { tokens: number; maxTotalUsd?: number }) => {
+    mutationFn: async ({ tokens, maxTotalUsd, fundFromHive }: { tokens: number; maxTotalUsd?: number; fundFromHive?: boolean }) => {
       const { source, signer } = requireSigner();
-      await runUnderTxClaim(creator, signer, () => source.buy({ creator, buyer: signer, tokens, maxTotalHbd: maxTotalUsd }));
+      // `fundFromHive`: ★ ONE SIGNATURE FUNDS AND BUYS (2026-09-15), see BuyInput.fundFromHive.
+      await runUnderTxClaim(creator, signer, () => source.buy({ creator, buyer: signer, tokens, maxTotalHbd: maxTotalUsd, fundFromHive }));
     },
-    onSuccess: invalidate
+    // onSettled, not onSuccess: a REFUSED funded buy has still moved HBD from
+    // the Hive wallet into the Magi balance, and an UNCONFIRMED one may have.
+    // Both balance views must refetch either way (scrutiny F8, 2026-09-15).
+    onSettled: invalidate
   });
 
   const sellMutation = useMutation({
@@ -592,7 +598,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
       [dataSource, creator, positionAccount]
     ),
 
-    buy: useCallback((tokens: number, maxTotalUsd?: number) => buyMutation.mutateAsync({ tokens, maxTotalUsd }), [buyMutation]),
+    buy: useCallback((tokens: number, maxTotalUsd?: number, fundFromHive?: boolean) => buyMutation.mutateAsync({ tokens, maxTotalUsd, fundFromHive }), [buyMutation]),
     sell: useCallback((tokens: number, minNetUsd?: number) => sellMutation.mutateAsync({ tokens, minNetUsd }), [sellMutation]),
     refund: useCallback(
       (tokens: number, minNetUsd?: number) => refundMutation.mutateAsync({ tokens, minNetUsd }),

@@ -981,7 +981,7 @@ console.log('\n── 8. WIRING.\n');
   check('★ F-B: the amount field is guarded (the one input this dialog still takes)',
     modal.includes('acceptAmountText(amt, e.target.value)'));
   check('★ F-C: the ceiling is the typed budget, signed as-is',
-    modal.includes('await onBuy(usd);') && !modal.includes('onBuy(usd, maxTotalUsd)'));
+    modal.includes('await onBuy(usd, undefined, fundFromHive);') && !modal.includes('onBuy(usd, maxTotalUsd)'));
   check('★ F-C: …and the bare-curve comparison is gone', !modal.includes('q.priceAfter > maxP'));
   check('★ F-C: …and so is the frozen spot-based default', !modal.includes('(m.priceUsd * 1.05).toFixed(2)'));
   check('★ F-D: the ask card prices the real cost', modal.includes('askCost(usd, { tokens: chainTokens, commissionUsd }, m.priceUsd)'));
