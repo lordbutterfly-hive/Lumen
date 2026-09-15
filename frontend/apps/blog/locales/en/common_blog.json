@@ -1784,6 +1784,8 @@
     },
     "comment": {
       "replying_to_prefix": "replying to",
+      "on_post_prefix": "on",
+      "on_post_generic": "the post",
       "in_community_prefix": "in",
       "empty": "@{{username}} hasn't commented yet."
     }

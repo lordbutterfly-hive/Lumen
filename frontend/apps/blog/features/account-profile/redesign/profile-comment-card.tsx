@@ -8,6 +8,7 @@ import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { useTranslation } from '@/blog/i18n/client';
 import { getPostSummary, normalizeTitle } from '@/blog/lib/utils';
+import { rootPostHref, rootPostTitle } from '@/blog/lib/root-post-link';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
 import PostCardCommentTooltip from '@/blog/features/list-of-posts/post-card-comment-tooltip';
 import DetailsCardHover from '@/blog/features/list-of-posts/details-card-hover';
@@ -59,6 +60,16 @@ export default function ProfileCommentCard({
      `hive-\d+` id, so every previously-empty slot fills and nothing is invented. */
   const rubric = getPostRubric(post);
 
+  /* ★★ THE POST THIS REPLY SITS UNDER (owner, 2026-09-14). The line below named
+     `@parent_author` and stopped there, so a lite profile's Comments tab showed
+     your replies with no indication of WHAT you had replied to and no way to
+     reach it. Both values come off the comment itself, so this costs no request.
+     `rootPostHref` is built from the permlink rather than any display name, on
+     purpose: a lite handle is a name that was free on Hive, so a name-shaped
+     link is one a squatter can later come to own. See `lib/root-post-link.ts`. */
+  const rootHref = rootPostHref(post);
+  const rootTitle = rootPostTitle(post);
+
   return (
     /* ★ THE POST CARD'S OWN SHELL (owner ruling 2026-08-25: the profile cards
        "have to be the same as feed"). This was `rounded-panel border p-[22px]`,
@@ -102,6 +113,29 @@ export default function ProfileCommentCard({
             <span>{t('profile.comment.replying_to_prefix')}</span>
             <Link href={`/@${post.parent_author}`} className="font-semibold text-ink-10 hover:underline">
               @{post.parent_author}
+            </Link>
+          </>
+        ) : null}
+        {rootHref ? (
+          <>
+            <span>{t('profile.comment.on_post_prefix')}</span>
+            {/* `max-w` + `truncate` because a post title is arbitrary length and
+                this row already carries the author and the timestamp. The title
+                is the only element here that can degrade legibly.
+
+                ★ THE LABEL FALLS BACK, THE LINK NEVER DOES (2026-09-15). On a
+                lite comment the identity overlay has already replaced `title`
+                with the comment's own, so `rootPostTitle` refuses to claim it
+                names the root (see root-post-link.ts). The post must still be
+                REACHABLE in that case — being unable to get back to the thread
+                is the whole bug this line exists to fix — so the anchor stays
+                and only its text degrades to a generic one. */}
+            <Link
+              href={rootHref}
+              className="min-w-0 max-w-[32ch] truncate font-semibold text-ink-10 hover:underline"
+              data-testid="profile-comment-root-post"
+            >
+              {rootTitle ? normalizeTitle(rootTitle) : t('profile.comment.on_post_generic')}
             </Link>
           </>
         ) : null}
