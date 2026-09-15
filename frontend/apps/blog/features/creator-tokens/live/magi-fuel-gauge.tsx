@@ -25,6 +25,7 @@
 
 import { useState } from 'react';
 import env from '@beam-australia/react-env';
+import MagiDepositDialog from '@/blog/features/wallet/components/dialogs/magi-deposit-dialog';
 import { ManabarRing } from '@/blog/features/layouts/site-header/manabar-ring';
 import { MAGI_MIN_RC_FOR_A_CALL, type MagiSpendingPowerState } from './use-magi-spending-power';
 
@@ -190,6 +191,13 @@ export function MagiFuelGauge({
 /** The Magi gateway account. Verified to exist on both testnet and mainnet. */
 const MAGI_GATEWAY = env('MAGI_GATEWAY_ACCOUNT') || 'vsc.gateway';
 
+/** A Hive username out of a Magi account id (`hive:<name>`), or null for a wallet DID. Only a Hive name can sign a deposit from here. */
+function hiveNameOf(account: string | undefined): string | null {
+  if (!account) return null;
+  const name = account.startsWith('hive:') ? account.slice('hive:'.length) : account;
+  return /^[a-z][a-z0-9.-]{2,15}$/.test(name) ? name : null;
+}
+
 /**
  * Where a BTC/ETH holder goes to swap into HBD. Altera is the Magi-native
  * market; it is a separate app, so its URL is configuration, and when it is
@@ -263,6 +271,42 @@ export function MagiFundingHelp({
   className?: string;
 }) {
   const memoTarget = depositMemoTarget(account);
+  const hiveName = kind === 'hive' ? hiveNameOf(account) : null;
+
+  // ★ A HIVE ACCOUNT DEPOSITS WITH ONE BUTTON (owner, 2026-09-15: "replace the
+  // memo stuff with the deposit button from the MAGI wallet deposit for HBD").
+  // The wallet's own deposit dialog signs the transfer to the gateway with the
+  // right memo, so the reader never types either; the Buy dialog's balance read
+  // polls and picks the deposit up on its own. The memo instructions below stay
+  // only for a wallet-only account, which has no Hive key to sign with.
+  if (hiveName) {
+    return (
+      <div
+        className={`rounded-control border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-caption text-ink-warn-1 font-ui ${className}`}
+        data-testid="magi-funding-help"
+      >
+        <div className="mb-1 font-medium">Add HBD to Magi</div>
+        <p>Move HBD from your Hive wallet into your Magi account. It lands in the same account this pays from, usually within a minute.</p>
+        <div className="mt-3">
+          <MagiDepositDialog
+            username={hiveName}
+            trigger={
+              <button
+                type="button"
+                className="rounded-full bg-surface-brand-12 px-5 py-2 font-ui text-[14px] font-medium text-ink-27 hover:bg-surface-brand-16"
+                data-testid="magi-deposit-button"
+              >
+                Deposit HBD
+              </button>
+            }
+          />
+        </div>
+        <p className="mt-2.5 italic">
+          From an exchange instead? Send HBD to @{MAGI_GATEWAY} with the memo <code className="font-num">to={hiveName}</code>.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div
