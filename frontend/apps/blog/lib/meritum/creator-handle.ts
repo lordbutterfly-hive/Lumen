@@ -113,8 +113,11 @@ export function loginThenReturnTo(path: string): string {
  * inputs change, so a render cached at the edge (a day of
  * stale-while-revalidate) from before the change is never served again.
  * 2: face timeout raised, name flush with the face (2026-09-15).
+ * 3: imprint 23px -> 30px, matching the post card (2026-09-16). It also keys the
+ *    kept PNGs on disk (app/api/og/meritum), so a drawing change without a bump
+ *    keeps serving the old picture from there as well as from the edge.
  */
-export const CARD_REVISION = 2;
+export const CARD_REVISION = 3;
 
 export function creatorCardPath(account: string, priceUsd: number): string {
   const cents = Math.round(Math.max(0, Number.isFinite(priceUsd) ? priceUsd : 0) * 100);

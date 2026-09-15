@@ -257,11 +257,14 @@ export async function GET(req: NextRequest): Promise<Response> {
             padding: '84px 88px'
           }}
         >
-          {/* Imprint: the mark, pulled left so its optical edge lands on the margin, then MERITUM tracked wide. */}
+          {/* Imprint: the mark, pulled left so its optical edge lands on the margin, then MERITUM tracked wide.
+              ★ 30px, not 23px (2026-09-16, owner: "fix the meritum share card too"): the same size the post
+              card's imprint moved to the day before, so the two share cards carry one imprint scale. The caps
+              stay centred on the 38px mark (a 30px cap height of ~21px sits inside its ~30px visible height). */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '-5px' }}>
             {/* 38px box so the visible mark is ~30px; pulled left by its own inset so the optical edge lands on the margin. */}
             <Laurel size={38} color={BRAND} />
-            <div style={{ display: 'flex', fontSize: '23px', fontWeight: 700, letterSpacing: '0.22em', textTransform: 'uppercase', color: IMPRINT, lineHeight: 1 }}>
+            <div style={{ display: 'flex', fontSize: '30px', fontWeight: 700, letterSpacing: '0.22em', textTransform: 'uppercase', color: IMPRINT, lineHeight: 1 }}>
               Meritum
             </div>
           </div>
