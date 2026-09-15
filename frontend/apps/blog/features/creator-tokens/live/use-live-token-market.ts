@@ -441,6 +441,15 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
     return { source: dataSource, signer: viewer };
   }, [dataSource, viewer, isLite, signingAccount, sessionUnavailable]);
 
+  // A write resolved on the node's execution; if the anchored finality later
+  // disagrees (it should not), refresh everything and say so. See BuyInput.onReversed.
+  const reversed = useCallback(() => {
+    invalidate();
+    toast({
+      title: 'Magi reversed this transaction',
+      description: 'The network finalised a different result than the node executed. Your balances, holdings and requests have been refreshed.'
+    });
+  }, [invalidate]);
   const buyMutation = useMutation({
     mutationFn: async ({ tokens, maxTotalUsd, fundFromHive }: { tokens: number; maxTotalUsd?: number; fundFromHive?: boolean }) => {
       const { source, signer } = requireSigner();
@@ -452,15 +461,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
           tokens,
           maxTotalHbd: maxTotalUsd,
           fundFromHive,
-          // The buy resolved on the node's execution; if finality later disagrees
-          // (it should not), refresh everything and say so. See BuyInput.onReversed.
-          onReversed: () => {
-            invalidate();
-            toast({
-              title: 'Magi reversed this purchase',
-              description: 'The network finalised a different result than the node executed. Your balances and holdings have been refreshed.'
-            });
-          }
+          onReversed: reversed
         })
       );
     },
@@ -473,7 +474,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   const sellMutation = useMutation({
     mutationFn: async ({ tokens, minNetUsd }: { tokens: number; minNetUsd?: number }) => {
       const { source, signer } = requireSigner();
-      await runUnderTxClaim(creator, signer, () => source.sell({ creator, seller: signer, tokens, minNetHbd: minNetUsd }));
+      await runUnderTxClaim(creator, signer, () => source.sell({ creator, seller: signer, tokens, minNetHbd: minNetUsd, onReversed: reversed }));
     },
     onSuccess: invalidate
   });
@@ -487,7 +488,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   const refundMutation = useMutation({
     mutationFn: async ({ tokens, minNetUsd }: { tokens: number; minNetUsd?: number }) => {
       const { source, signer } = requireSigner();
-      await runUnderTxClaim(creator, signer, () => source.refund({ creator, holder: signer, tokens, minNetHbd: minNetUsd }));
+      await runUnderTxClaim(creator, signer, () => source.refund({ creator, holder: signer, tokens, minNetHbd: minNetUsd, onReversed: reversed }));
     },
     onSuccess: invalidate
   });
@@ -547,6 +548,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
       await runUnderTxClaim(creator, signer, () => source.ask({
         creator,
         asker: signer,
+        onReversed: reversed,
         contentHash: input.contentHash,
         // ask.go bounds the deadline in BLOCKS on both sides; the UI collects
         // days, so the conversion belongs here rather than in four call sites.

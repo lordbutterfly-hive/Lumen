@@ -51,6 +51,28 @@ export function buyExecutedIn(rows: readonly LedgerRow[] | null | undefined, txI
   );
 }
 
+/**
+ * The account's HBD payout for `txId` is on the ledger: a SELL or REFUND
+ * executed. The contract's SendBalance writes `<txid>#in` (contract, negative)
+ * and `<txid>#out` (the account, positive); a refused call writes neither.
+ * Measured on mainnet (hbd-temp's sell 44acb96f…, 2026-09-07: #out +0.718 HBD).
+ */
+export function payoutExecutedIn(rows: readonly LedgerRow[] | null | undefined, txId: string, account: string): boolean {
+  if (!Array.isArray(rows) || !txId) return false;
+  const owner = toDid(account);
+  return rows.some(
+    (r) =>
+      r &&
+      typeof r.id === 'string' &&
+      r.id === `${txId}#out` &&
+      r.owner === owner &&
+      r.asset === 'hbd' &&
+      r.type === 'transfer' &&
+      typeof r.amount === 'number' &&
+      r.amount > 0
+  );
+}
+
 /** The deposit that rode in front of the buy was credited to the buyer (the funded rail). */
 export function depositCreditedIn(rows: readonly LedgerRow[] | null | undefined, txId: string, buyer: string): boolean {
   if (!Array.isArray(rows) || !txId) return false;

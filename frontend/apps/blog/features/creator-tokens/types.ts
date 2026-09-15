@@ -714,6 +714,8 @@ export interface SellInput {
    * hatch must exist).
    */
   minNetHbd?: number;
+  /** See BuyInput.onReversed: called if the anchored finality ever disagrees with the executed result. */
+  onReversed?: () => void;
 }
 
 /** market.go Retire — the creator's own irreversible wind-down trigger (RULING D/K3). Starts the 5-day OVERDUE notice, after which the market is FROZEN regardless of any hostile Renew. Moves no funds. Once-only: a second call refuses. */
@@ -768,6 +770,8 @@ export interface AskInput {
    * or every purchase silently charges the generic face price instead.
    */
   offeringId?: number;
+  /** See BuyInput.onReversed: called if the anchored finality ever disagrees with the executed result. */
+  onReversed?: () => void;
 }
 
 /** One posted service in a creator's shop (core/offerings.go). Prices are per-offering and each sits under its own title-anchored 2x/7d anti-rug band. */
@@ -1045,6 +1049,8 @@ export interface RefundInput {
   tokens: number;
   /** OPTIONAL signed floor on the NET HBD received, same OUTFLOW-CLIFF-1 guard as SellInput.minNetHbd — see that field's doc. */
   minNetHbd?: number;
+  /** See BuyInput.onReversed: called if the anchored finality ever disagrees with the executed result. */
+  onReversed?: () => void;
 }
 
 export interface RefundHolderInput {

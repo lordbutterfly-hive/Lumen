@@ -167,7 +167,7 @@ import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, rulesForCode, windi
 // drift from the wallet rail's. See awaitExecution() below.
 import { SUBMIT_PROXY_PATH } from '@/blog/lib/lite/wallet/vsc-tx/submit';
 import { TX_LEDGER_OPERATION, TX_STATUS_OPERATION } from '@/blog/app/api/creator-tokens/submit/operations';
-import { buyExecutedIn, parseLedgerRows, type LedgerRow } from '@/blog/lib/meritum/executed-signal';
+import { buyExecutedIn, parseLedgerRows, payoutExecutedIn, type LedgerRow } from '@/blog/lib/meritum/executed-signal';
 import { readMagiSpendingPower } from '@/blog/lib/lite/wallet/magi-balance';
 import { depositIntentOf, hbdString, planHiveTopUp, rcLimitOf, type GatewayDepositIntent } from '@/blog/lib/meritum/hive-topup';
 import { rcLimitForAction } from './vsc/rc-budget';
@@ -1664,8 +1664,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // defaults to CONFIRMED when a deposit is the sole op, state_engine.go),
     // so this poll cannot mistake the credited deposit for a confirmed buy.
     // ★ EXECUTED BEATS ANCHORED (2026-09-15): resolves on the ledger draw or
-    // the terminal status, whichever lands first; see awaitBuyExecuted.
-    const outcome = await this.awaitBuyExecuted(txId, input.buyer);
+    // the terminal status, whichever lands first; see awaitExecutedBy.
+    const outcome = await this.awaitExecutedBy(txId, this.ledgerProbe(txId, (rows) => buyExecutedIn(rows, txId, input.buyer)));
     if (outcome === 'failed') {
       if (deposit) {
         // The node credits the deposit at ingest and reverts only the call's
@@ -1687,16 +1687,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         'CREATOR_TOKENS_BUY_UNCONFIRMED: Hive accepted your purchase, but Magi has not confirmed it yet. Check your balance before buying again.'
       );
     }
-    if (outcome === 'executed') {
-      // Executed on this node; the anchored finality is watched in the
-      // background. A later FAILED would mean consensus finalised something
-      // other than what this node executed: surface it, never silently.
-      void this.awaitExecution(txId, FINALITY_WATCH_MS)
-        .then((final) => {
-          if (final === 'failed') input.onReversed?.();
-        })
-        .catch(() => undefined);
-    }
+    if (outcome === 'executed') this.watchFinality(txId, input.onReversed);
     // Confirmed. Return the PROJECTION, not a re-read: the UI invalidates on
     // success and refetches exact state, so a re-read here is redundant (43/57,
     // 2026-09-01). Project the minted tokens onto the prior
@@ -1750,7 +1741,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // ★ CONFIRM EXECUTION (2026-08-31). This used to return a projected balance
     // (pending) the instant Hive accepted the op — MEASURED as reporting
     // success for a real sell the chain refused (57, main). Confirm terminal first.
-    const outcome = await this.awaitExecution(txId);
+    // ★ EXECUTED BEATS ANCHORED (2026-09-15): the payout row is the execution signal.
+    const outcome = await this.awaitExecutedBy(txId, this.ledgerProbe(txId, (rows) => payoutExecutedIn(rows, txId, input.seller)));
     if (outcome === 'failed') {
       throw new Error('CREATOR_TOKENS_SELL_REFUSED: the chain refused this sale, so no tokens were sold and no HBD was paid out.');
     }
@@ -1759,6 +1751,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         'CREATOR_TOKENS_SELL_UNCONFIRMED: Hive accepted your sale, but Magi has not confirmed it yet. Check your balance before selling again.'
       );
     }
+    if (outcome === 'executed') this.watchFinality(txId, input.onReversed);
     // Confirmed. Return the PROJECTION (tokens debited off the whole balance),
     // not a re-read: the UI invalidates on success and refetches the exact
     // post-state, so a re-read here would be redundant with that AND would leave
@@ -2264,13 +2257,17 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       activeAuth: input.asker,
       rcLimit: this.config.rcLimit
     });
+    // ★ EXECUTED BEATS ANCHORED (2026-09-15). An ask moves no HBD, so its
+    // execution signal is contract state: the asker's escrow record for this
+    // content hash appearing at or after the seq count read before broadcast.
+    const seqBefore = toU64((await this.gql.getStateByKeys(this.config.contractId, [kSeq(input.creator)]))[kSeq(input.creator)]);
     const txId = await this.broadcast(op);
     // ★ CONFIRM EXECUTION (2026-08-31). An ask escrows the asker's tokens; a
     // refusal (settlement-spend cap, a closed
     // window, the delivery gate) used to return an optimistic 'awaiting' Ask as
     // though the escrow had opened. It is the escrow op that OPENS one, so its
     // three siblings (answer/decline/reclaim) confirm and this did not.
-    const outcome = await this.awaitExecution(txId);
+    const outcome = await this.awaitExecutedBy(txId, async () => (await this.findAskSeq(input.creator, input.asker, input.contentHash, seqBefore)) !== null);
     if (outcome === 'failed') {
       throw new Error('CREATOR_TOKENS_ASK_REFUSED: the chain refused this request, so nothing was escrowed.');
     }
@@ -2278,6 +2275,17 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       throw new Error(
         'CREATOR_TOKENS_ASK_UNCONFIRMED: Hive accepted your request, but Magi has not confirmed it yet. Check your requests before sending it again.'
       );
+    }
+    if (outcome === 'executed') this.watchFinality(txId, input.onReversed);
+    // ★ EXECUTED BEATS ANCHORED (2026-09-15): the escrow record is readable the
+    // moment the probe saw it, so return the REAL ask (seq and all) when we can.
+    const seq = await this.findAskSeq(input.creator, input.asker, input.contentHash, seqBefore).catch(() => null);
+    if (seq !== null) {
+      try {
+        return await this.readOneAsk(input.creator, seq);
+      } catch {
+        // fall through to the placeholder below
+      }
     }
     // Confirmed on chain (the caller still re-reads readCreatorAsks for the
     // real seq). The contract assigns `seq` server-side; the frontend cannot know it
@@ -2505,7 +2513,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // ★ CONFIRM EXECUTION (2026-08-31). Redeeming is a money-OUT path: this used
     // to return a projected balance (pending) as though HBD had been paid out,
     // even if the chain refused the redemption. Confirm to terminal first.
-    const outcome = await this.awaitExecution(txId);
+    // ★ EXECUTED BEATS ANCHORED (2026-09-15): the payout row is the execution signal.
+    const outcome = await this.awaitExecutedBy(txId, this.ledgerProbe(txId, (rows) => payoutExecutedIn(rows, txId, input.holder)));
     if (outcome === 'failed') {
       throw new Error('CREATOR_TOKENS_REFUND_REFUSED: the chain refused this redemption. Your tokens were not redeemed and no HBD was paid out.');
     }
@@ -2514,6 +2523,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         'CREATOR_TOKENS_REFUND_UNCONFIRMED: Hive accepted your redemption, but Magi has not confirmed it yet. Check your balance before redeeming again.'
       );
     }
+    if (outcome === 'executed') this.watchFinality(txId, input.onReversed);
     // Confirmed. Return the PROJECTION, not a re-read (UI invalidates + refetches
     // exact state; 43/57, 2026-09-01). Project the redeemed tokens off the
     // pre-broadcast balance (same best-effort floorValueHbd simplification as
@@ -2568,7 +2578,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     const txId = await this.broadcast(op);
     // ★ CONFIRM EXECUTION (2026-08-31). A push-refund the chain refused used to
     // return tokensHeld: 0 (pending) as though the holder had been paid out.
-    const outcome = await this.awaitExecution(txId);
+    // ★ EXECUTED BEATS ANCHORED (2026-09-15): the payout row is the execution signal.
+    const outcome = await this.awaitExecutedBy(txId, this.ledgerProbe(txId, (rows) => payoutExecutedIn(rows, txId, input.holder)));
     if (outcome === 'failed') {
       throw new Error('CREATOR_TOKENS_REFUND_REFUSED: the chain refused this refund. The holder was not paid out and their tokens were not redeemed.');
     }
@@ -3058,14 +3069,14 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   /**
    * ★ EXECUTED BEATS ANCHORED (2026-09-15; the owner's live funded buy executed
    * 3 s after signing and turned CONFIRMED 3+ minutes later, past the 180 s
-   * wait). Resolves 'executed' as soon as this node's ledger shows the buyer's
-   * draw for `txId` (lib/meritum/executed-signal.ts), 'confirmed'/'failed' when
-   * the terminal status lands first, or 'timeout'. Without a ledger reader
-   * (server, tests that inject only a status reader) it is exactly awaitExecution.
+   * wait). Resolves 'executed' as soon as `probe` sees the write's own footprint
+   * on this node (a ledger row for buys, sells and refunds; the escrow record
+   * for asks; lib/meritum/executed-signal.ts), 'confirmed'/'failed' when the
+   * terminal status lands first, or 'timeout'. With no probe (server, tests
+   * that inject only a status reader) it is exactly awaitExecution.
    */
-  private async awaitBuyExecuted(txId: string, buyer: string): Promise<'executed' | 'confirmed' | 'failed' | 'timeout'> {
-    const readLedger = this.txLedgerReader ?? (typeof window !== 'undefined' ? defaultTxLedgerReader : null);
-    if (!readLedger) return this.awaitExecution(txId);
+  private async awaitExecutedBy(txId: string, probe: (() => Promise<boolean>) | null): Promise<'executed' | 'confirmed' | 'failed' | 'timeout'> {
+    if (!probe) return this.awaitExecution(txId);
     const readStatus = this.txStatusReader ?? defaultTxStatusReader;
     const POLL_MS = 2_000;
     const giveUpAt = Date.now() + EXECUTION_CONFIRM_TIMEOUT_MS;
@@ -3078,13 +3089,44 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         // transient read failure: keep polling until the deadline
       }
       try {
-        if (buyExecutedIn(await readLedger(txId), txId, buyer)) return 'executed';
+        if (await probe()) return 'executed';
       } catch {
         // same
       }
       if (Date.now() + POLL_MS >= giveUpAt) return 'timeout';
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }
+  }
+  private ledgerReader(): TxLedgerReader | null {
+    return this.txLedgerReader ?? (typeof window !== 'undefined' ? defaultTxLedgerReader : null);
+  }
+  /** A probe over the transaction's ledger rows, or null where no ledger reader exists (then the terminal status decides). */
+  private ledgerProbe(txId: string, test: (rows: LedgerRow[] | null) => boolean): (() => Promise<boolean>) | null {
+    const read = this.ledgerReader();
+    return read ? async () => test(await read(txId)) : null;
+  }
+  /**
+   * A write that resolved on its execution keeps watching for its anchored
+   * finality in the background. A later FAILED would mean consensus finalised
+   * something other than what this node executed: surfaced, never silent.
+   */
+  private watchFinality(txId: string, onReversed?: () => void): void {
+    void this.awaitExecution(txId, FINALITY_WATCH_MS)
+      .then((final) => {
+        if (final === 'failed') onReversed?.();
+      })
+      .catch(() => undefined);
+  }
+  /** The seq of the asker's escrow for `contentHash` at or after `from`, once it exists on this node. */
+  private async findAskSeq(creator: string, asker: string, contentHash: string, from: number): Promise<number | null> {
+    const seqs = Array.from({ length: 8 }, (_, i) => from + i);
+    const state = await this.gql.getStateByKeys(this.config.contractId, seqs.map((sq) => kEscrow(creator, sq)));
+    for (const sq of seqs) {
+      const raw = state[kEscrow(creator, sq)];
+      const parsed = raw ? parseEscrow(raw) : null;
+      if (parsed && toDid(parsed.asker) === toDid(asker) && parsed.contentHash === contentHash) return sq;
+    }
+    return null;
   }
   private async awaitExecution(txId: string, timeoutMs: number = EXECUTION_CONFIRM_TIMEOUT_MS): Promise<'confirmed' | 'failed' | 'timeout'> {
     const injected = this.txStatusReader;
