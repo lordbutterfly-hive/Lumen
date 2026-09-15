@@ -1534,7 +1534,8 @@
         "recipient_self": "This is your own account.",
         "recipient_invalid_evm": "That Ethereum address has a bad checksum. Copy it again from the source.",
         "recipient_invalid_btc": "Enter a Bitcoin address the bridge can pay (bc1q…, 3… or 1…).",
-        "recipient_invalid_any": "Enter a Hive account name, an Ethereum address (0x…) or a Bitcoin address."
+        "recipient_invalid_any": "Enter a Hive account name, an Ethereum address (0x…) or a Bitcoin address.",
+        "rate_warning": "This rate looks far from the network's recent average. Double-check the VESTS amount above before signing, or try a different node."
       },
       "send": {
         "title": "Send {{currency}}",
@@ -1549,7 +1550,8 @@
         "description": "Schedule a 13-week Hive Power withdrawal.",
         "per_week": "≈ {{amount}} HIVE per payment, across 13 weekly payments",
         "already_active": "A power down is already in progress: {{remaining}} HIVE remaining.",
-        "available": "Available to power down: {{amount}} HP"
+        "available": "Available to power down: {{amount}} HP",
+        "signed_vests": "Powering down {{hp}} HP, signing {{vests}} VESTS (rate: {{rate}} VESTS/HIVE)."
       },
       "stop_power_down": {
         "title": "Stop power down",
@@ -1558,7 +1560,8 @@
       },
       "delegate": {
         "title": "Delegate Hive Power",
-        "description": "Lend HP to another account. Set the amount to 0 to revoke an existing delegation."
+        "description": "Lend HP to another account. Set the amount to 0 to revoke an existing delegation.",
+        "signed_vests": "Delegating {{hp}} HP, signing {{vests}} VESTS (rate: {{rate}} VESTS/HIVE)."
       },
       "savings_deposit": {
         "title": "Deposit to {{currency}} Savings",
