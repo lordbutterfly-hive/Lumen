@@ -1,11 +1,13 @@
 import { ImageResponse } from 'next/og';
 import { NextRequest } from 'next/server';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { CREATOR_TOKEN_LAUREL_PATH } from '@/blog/features/creator-tokens/ui/creator-token-laurel';
 import { displayHandle } from '@/blog/features/creator-tokens/live/adapt';
 import { usdPrice } from '@/blog/features/creator-tokens/market/format';
-import { HIVE_USERNAME, isRoutableCreatorHandle, normalizeCreatorHandle } from '@/blog/lib/meritum/creator-handle';
+import { CARD_REVISION, HIVE_USERNAME, isRoutableCreatorHandle, normalizeCreatorHandle } from '@/blog/lib/meritum/creator-handle';
+import { cardFileKey, cardStillValid, parseCardMeta, type CardInputs, type CardMeta } from '@/blog/lib/meritum/card-cache';
 import { truncateToColumns } from '@/blog/lib/meritum/profile-fields';
 import { readCreatorMarketSummary } from '@/blog/lib/meritum/server-market';
 import { readCreatorProfile } from '@/blog/lib/meritum/server-profile';
@@ -45,6 +47,15 @@ import { readCreatorProfile } from '@/blog/lib/meritum/server-profile';
  * ★ FONTS ARE VENDORED STATIC CUTS (see `/api/og`'s header for why: Satori
  * cannot read woff2 or variable fonts). `Lora-Regular.ttf` is instantiated
  * from the same woff2 the site serves; both files must keep no `fvar` table.
+ *
+ * ★ GENERATED ONCE, KEPT (owner, 2026-09-15: "make sure the card persists...
+ * so its always the same card you generated once"). A rendered card is
+ * written to `LUMEN_CARD_CACHE_DIR` (one PNG + one JSON of its inputs per
+ * creator, ~90 KB; the OS temp dir when unset) and held in a small in-process
+ * map, and is served from there until an input changes or a week passes
+ * (`lib/meritum/card-cache.ts` has the rule). The `x-lumen-card` response
+ * header says where a card came from: `memory`, `disk`, `generated`, or
+ * `uncached` (a failed market read: drawn, never kept).
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -62,6 +73,58 @@ const PAPER_0 = '#FFFEFC';
 // completely missing from the card"). The card is cached at the edge, so one
 // slow render is cheaper than a wrong card cached for a day.
 const AVATAR_TIMEOUT_MS = 6_000;
+
+const CARD_DIR = process.env.LUMEN_CARD_CACHE_DIR || path.join(os.tmpdir(), 'lumen-meritum-cards');
+const MEMORY_MAX = 200;
+const memory = new Map<string, { meta: CardMeta; png: Buffer }>();
+
+function remember(key: string, meta: CardMeta, png: Buffer): void {
+  memory.delete(key);
+  memory.set(key, { meta, png });
+  while (memory.size > MEMORY_MAX) {
+    const oldest = memory.keys().next().value;
+    if (oldest === undefined) break;
+    memory.delete(oldest);
+  }
+}
+
+async function readKept(key: string, inputs: CardInputs, now: number): Promise<{ meta: CardMeta; png: Buffer } | null> {
+  try {
+    const meta = parseCardMeta(await readFile(path.join(CARD_DIR, `${key}.json`), 'utf8'));
+    if (!cardStillValid(meta, inputs, now)) return null;
+    const png = await readFile(path.join(CARD_DIR, `${key}.png`));
+    return png.byteLength > 0 && meta ? { meta, png } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Atomic per file (write to a temp name, then rename), so a reader never sees half a card; the cluster's workers share the directory. */
+async function keep(key: string, meta: CardMeta, png: Buffer): Promise<void> {
+  try {
+    await mkdir(CARD_DIR, { recursive: true });
+    const suffix = `.tmp-${process.pid}-${Date.now()}`;
+    const pngPath = path.join(CARD_DIR, `${key}.png`);
+    const metaPath = path.join(CARD_DIR, `${key}.json`);
+    await writeFile(pngPath + suffix, png);
+    await rename(pngPath + suffix, pngPath);
+    await writeFile(metaPath + suffix, JSON.stringify(meta));
+    await rename(metaPath + suffix, metaPath);
+  } catch {
+    // A full or read-only disk costs the persistence, not the card.
+  }
+}
+
+function respond(png: Buffer, origin: string): Response {
+  return new Response(png, {
+    status: 200,
+    headers: {
+      'content-type': 'image/png',
+      'cache-control': 'public, s-maxage=600, stale-while-revalidate=86400',
+      'x-lumen-card': origin
+    }
+  });
+}
 const AVATAR_MAX_BYTES = 1_500_000;
 
 // Read once per process (review, 2026-09-15: two disk reads per request).
@@ -125,7 +188,25 @@ export async function GET(req: NextRequest): Promise<Response> {
   // market is read FIRST so a made-up name never reaches the profile stores.
   const summary = await readCreatorMarketSummary(handle);
   if (summary && !summary.registered) return new Response('not found', { status: 404 });
-  const [profile, bold, regular] = await Promise.all([readCreatorProfile(handle), font('Lora-Bold.ttf'), font('Lora-Regular.ttf')]);
+  const profile = await readCreatorProfile(handle);
+
+  // The kept card, if its inputs still hold. A failed market read has no
+  // price to key on: it is drawn below and never kept.
+  const now = Date.now();
+  const key = cardFileKey(handle);
+  const inputs: CardInputs | null = summary
+    ? { revision: CARD_REVISION, cents: Math.round(summary.priceUsd * 100), about: profile.about, name: profile.displayName, source: profile.source }
+    : null;
+  if (inputs) {
+    const inMemory = memory.get(key);
+    if (inMemory && cardStillValid(inMemory.meta, inputs, now)) return respond(inMemory.png, 'memory');
+    const onDisk = await readKept(key, inputs, now);
+    if (onDisk) {
+      remember(key, onDisk.meta, onDisk.png);
+      return respond(onDisk.png, 'disk');
+    }
+  }
+  const [bold, regular] = await Promise.all([font('Lora-Bold.ttf'), font('Lora-Regular.ttf')]);
 
   const shown = displayHandle(handle);
   const about = profile.about ? truncateToColumns(profile.about, 110) : null;
@@ -272,6 +353,10 @@ export async function GET(req: NextRequest): Promise<Response> {
       ]
     }
   );
-  image.headers.set('cache-control', 'public, s-maxage=600, stale-while-revalidate=86400');
-  return image;
+  const png = Buffer.from(await image.arrayBuffer());
+  if (!inputs) return respond(png, 'uncached');
+  const meta: CardMeta = { ...inputs, generatedAt: now };
+  remember(key, meta, png);
+  await keep(key, meta, png);
+  return respond(png, 'generated');
 }

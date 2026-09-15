@@ -15,7 +15,6 @@ export const MERITUM_PAGE_COPY = {
   share: 'Share',
   message: 'Message',
   soldOut: 'Sold out',
-  bondingCurve: 'Bonding curve',
   curveNote: 'Price is set by the curve, not by a last traded quote.',
   noHistory: 'A chart appears as soon as this market has traded.',
   historyUnavailable: 'Price history unavailable just now. The price above is live from the curve.',

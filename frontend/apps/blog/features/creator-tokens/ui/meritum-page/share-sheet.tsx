@@ -105,10 +105,18 @@ const ShareSheet: FC<{ handle: string; url: string; cardSrc: string; onClose: ()
             data-testid="meritum-share-card"
           />
           {cardState !== 'ready' ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-1 px-6 text-center" data-testid="meritum-share-card-status">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 overflow-hidden bg-surface-1 px-6 text-center" data-testid="meritum-share-card-status">
               {cardState === 'loading' ? (
                 <>
-                  <LumenLoader size="md" label={COPY.cardGenerating} />
+                  {/* `sm`, not `md` (2026-09-15, owner: "generating your card clips
+                      bottom"): the md loader's 260px minimum alone was taller than
+                      this 1200x630 box at sheet width (~245px), so the words under
+                      it were pushed out of the box. The loader's own label is
+                      screen-reader only; the words must be on screen too. */}
+                  <LumenLoader size="sm" label={COPY.cardGenerating} className="shrink-0" />
+                  <p className="font-ui text-[14px] font-medium text-ink-2" data-testid="meritum-share-card-generating">
+                    {COPY.cardGenerating}…
+                  </p>
                   <p className="font-ui text-caption text-ink-14">{COPY.cardGeneratingHint}</p>
                 </>
               ) : (

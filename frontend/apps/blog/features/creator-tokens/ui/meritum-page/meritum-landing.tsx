@@ -309,20 +309,22 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
         className="relative overflow-hidden rounded-[20px] border border-line-9 border-l-[3px] border-l-line-brand-10 bg-[linear-gradient(112deg,#FAEEEB_0%,#FBF7F2_46%,#FCFAF7_100%)] px-6 pb-8 pt-10 md:px-10 md:pt-[54px]"
         data-testid="meritum-hero"
       >
-        {/* Share sits in the card's top-right corner (owner, 2026-09-15: "Put share
-            top right in the card header and put message where the share is"). */}
-        <div className="absolute right-5 top-5 md:right-8 md:top-7">
+        {/* The eyebrow row carries Share at its right end (owner, 2026-09-15:
+            "Put share top right in the card header"; then "share button clips
+            the curve" — a floating button overlapped the chart panel when it
+            sat beside the name, so Share is in the flow now). */}
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 font-ui text-[15px] font-bold uppercase tracking-[0.2em] text-ink-brand-6 md:text-[17px]">
+            <CreatorTokenLaurel size={24} />
+            {COPY.eyebrow}
+          </div>
           {shareButton(
-            'inline-flex h-9 items-center gap-2 rounded-full border border-ink-2/20 bg-surface-1/70 px-4 font-ui text-[13.5px] leading-none font-medium text-ink-2 hover:border-ink-2 hover:bg-surface-1',
+            'inline-flex h-9 shrink-0 items-center gap-2 rounded-full border border-ink-2/20 bg-surface-1/70 px-4 font-ui text-[13.5px] leading-none font-medium text-ink-2 hover:border-ink-2 hover:bg-surface-1',
             'meritum-share-hero'
           )}
         </div>
         <div className="grid grid-cols-1 items-end gap-8 2xl:grid-cols-[minmax(0,1fr)_400px] 2xl:gap-10">
           <div className="min-w-0">
-            <div className="mb-6 flex items-center gap-3 pr-24 font-ui text-[15px] font-bold uppercase tracking-[0.2em] text-ink-brand-6 md:text-[17px]">
-              <CreatorTokenLaurel size={24} />
-              {COPY.eyebrow}
-            </div>
             <div className="flex flex-col items-start gap-4 sm:flex-row sm:gap-5">
               <UserAvatarImg
                 username={routeHandle}

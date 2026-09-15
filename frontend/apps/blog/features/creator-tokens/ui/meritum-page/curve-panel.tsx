@@ -4,6 +4,7 @@ import { FC } from 'react';
 import type { LiveTokenMarket } from '../../live/adapt';
 import { usdPrice } from '../../market/format';
 import { priceChangeLabel } from '../../market/price-change';
+import { pctMoveLabel } from '../../market/format';
 import { chartGeometry } from '../token-page/price-chart-geometry';
 import { MERITUM_PAGE_COPY as COPY } from './meritum-copy';
 
@@ -27,6 +28,8 @@ const H = 118;
  */
 const CurvePanel: FC<{ market: LiveTokenMarket; historyUnavailable: boolean }> = ({ market, historyUnavailable }) => {
   const change = priceChangeLabel(market.priceChange);
+  const magnitude = market.priceChange ? pctMoveLabel(market.priceChange.pct) : null;
+  const changeText = !change ? null : change.direction === 'flat' ? '0%' : change.direction === 'up' ? `+${magnitude ?? ''}` : `−${magnitude ?? ''}`;
   const points = market.chart;
   const g = chartGeometry(points, W, H);
   const trades = market.chartTrades ?? points?.length ?? 0;
@@ -34,25 +37,26 @@ const CurvePanel: FC<{ market: LiveTokenMarket; historyUnavailable: boolean }> =
 
   return (
     <div className="rounded-panel border border-line-9 bg-surface-1 px-[22px] pb-4 pt-5 shadow-[0_2px_10px_rgba(26,22,18,0.05)]" data-testid="meritum-curve-panel">
-      <div className="flex items-baseline gap-2.5">
-        <span className="text-[40px] leading-[44px] tracking-[-0.02em] text-ink-2 font-num" data-testid="meritum-price">
+      {/* Price and change on ONE baseline: both spans are plain inline text
+          with `leading-none`, so the flex row's baseline alignment has nothing
+          to fight (owner, 2026-09-15: "the price and unchanged over 2 trades is
+          completely shittily aligned"). The change is a signed percentage —
+          "+0.9%", "−1.2%", or "0%" when flat (owner: "unchanged over trades
+          should just be 0%"); the sentence stays for screen readers. No
+          "BONDING CURVE" label: this is a price chart (owner). */}
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-[40px] leading-none tracking-[-0.02em] text-ink-2 font-num" data-testid="meritum-price">
           {usdPrice(market.priceUsd)}
         </span>
-        {change ? (
+        {change && changeText ? (
           <span
-            className={`inline-flex items-baseline gap-1 text-[14px] leading-[22px] font-num ${
-              change.direction === 'up' ? 'text-ink-2' : change.direction === 'down' ? 'text-ink-brand-6' : 'text-ink-10'
-            }`}
+            className={`text-[15px] leading-none font-medium font-num ${change.direction === 'up' ? 'text-ink-2' : change.direction === 'down' ? 'text-ink-brand-6' : 'text-ink-10'}`}
             data-testid="meritum-price-change"
           >
-            <span aria-hidden="true">
-              {change.mark ? `${change.mark} ` : ''}
-              {change.text}
-            </span>
+            <span aria-hidden="true">{changeText}</span>
             <span className="sr-only">{change.aria}</span>
           </span>
         ) : null}
-        <span className="ml-auto font-ui text-[11.5px] font-medium uppercase tracking-[0.12em] text-ink-14">{COPY.bondingCurve}</span>
       </div>
       {g ? (
         <svg viewBox={`0 0 ${W} ${H}`} className="mt-3 block h-[118px] w-full" fill="none" aria-hidden="true" data-testid="meritum-sparkline">
