@@ -119,20 +119,19 @@ func TestSettlement_RulingJCollapsesRateContradiction(t *testing.T) {
 
 // ---- the min() and its arms ------------------------------------------------
 
-func TestSettlementRate_MedianArmCappedAtSpot(t *testing.T) {
-	// ★ ORACLE-CLUSTER FIX (2026-09-08): SettlementRate is now
-	// min(spot, median(short, long, spot)), NOT the old three-way min. A lone
-	// low arm (short OR long) is the outlier the median discards, so no single
-	// walked/stale TWAP can drag the rate DOWN (which over-charges askers,
-	// PRICE-3/CT-ORACLE-01); spot remains the no-arbitrage ceiling via the
-	// outer min. Two arms must be corrupted to move the median.
-	// All three fixtures: S=200 (spot 2680, avg_ceil 1827 — C5 quiet for
-	// every rate used here since 4·1500 = 6000 > 1827).
+func TestSettlementRate_ShortWindowCapsSpot(t *testing.T) {
+	// ★ REWRITTEN 2026-09-16 (owner ruling: no trading-history gate). Until
+	// then this pinned min(spot, median(short, long, spot)) and a refusal when
+	// the long window could not price. The rate is now min(spot, short) when
+	// the short window prices and spot otherwise; the long ring is recorded
+	// history that settlement never reads, so its contents must be invisible
+	// here — every fixture below carries a long ring precisely to prove that.
+	// All fixtures: S=200 (spot 2680, avg_ceil 1827 — C5 quiet for every rate
+	// used here since 4·1500 = 6000 > 1827).
 	const q = uint64(500_000)
 
-	t.Run("ShortIsLowOutlier_Ignored", func(t *testing.T) {
-		// CT-ORACLE-01 defense in a unit: a low short is the outlier.
-		// median(1500,2000,2680)=2000; min(spot 2680, 2000)=2000.
+	t.Run("ShortBelowSpot_CapsTheRate", func(t *testing.T) {
+		// A pump inside the hour cannot lift the rate above the recent average.
 		s := NewMemStore()
 		curveMarket(s, creator1, 200)
 		stFillShort(s, creator1, q-50, MinObsCount, big.NewInt(1500))
@@ -141,31 +140,30 @@ func TestSettlementRate_MedianArmCappedAtSpot(t *testing.T) {
 		if err != nil {
 			t.Fatalf("SettlementRate: %v", err)
 		}
-		if got.Cmp(big.NewInt(2000)) != 0 {
-			t.Fatalf("rate = %s, want 2000 (median discards the lone low short; NOT the old min 1500)", got)
+		if got.Cmp(big.NewInt(1500)) != 0 {
+			t.Fatalf("rate = %s, want 1500 (min(spot 2680, short 1500); the long ring's 2000 must be invisible)", got)
 		}
 	})
 
-	t.Run("LongIsLowOutlier_Ignored", func(t *testing.T) {
-		// Symmetric: a stale-low long (the PRICE-3 / CT-ORACLE-02 lever) is the
-		// outlier the median discards. median(2500,2000,2680)=2500;
-		// min(spot 2680, 2500)=2500. Discarding it means the stale long can
-		// neither over-charge askers nor keep the C5 breaker tripped on growth.
-		s := NewMemStore()
-		curveMarket(s, creator1, 200)
-		stFillShort(s, creator1, q-50, MinObsCount, big.NewInt(2500))
-		stFillLong(s, creator1, q-50, stObsCount, big.NewInt(2000))
-		got, err := SettlementRate(s, creator1, q)
-		if err != nil {
-			t.Fatalf("SettlementRate: %v", err)
-		}
-		if got.Cmp(big.NewInt(2500)) != 0 {
-			t.Fatalf("rate = %s, want 2500 (median discards the lone low long; NOT the old min 2000)", got)
+	t.Run("LongRingIsInvisible", func(t *testing.T) {
+		// Same short, a wildly different long ring: identical answer.
+		for _, longRate := range []int64{1, 2000, 90_000} {
+			s := NewMemStore()
+			curveMarket(s, creator1, 200)
+			stFillShort(s, creator1, q-50, MinObsCount, big.NewInt(2500))
+			stFillLong(s, creator1, q-50, stObsCount, big.NewInt(longRate))
+			got, err := SettlementRate(s, creator1, q)
+			if err != nil {
+				t.Fatalf("SettlementRate (long=%d): %v", longRate, err)
+			}
+			if got.Cmp(big.NewInt(2500)) != 0 {
+				t.Fatalf("rate = %s with long ring at %d, want 2500 (settlement must not read the long ring)", got, longRate)
+			}
 		}
 	})
 
 	t.Run("SpotIsLowest", func(t *testing.T) {
-		// The load-bearing no-arbitrage ceiling: both TWAPs way above the
+		// The load-bearing no-arbitrage ceiling: a short window way above the
 		// curve's live marginal price -> the rate is capped at spot.
 		s := NewMemStore()
 		curveMarket(s, creator1, 200)
@@ -180,14 +178,52 @@ func TestSettlementRate_MedianArmCappedAtSpot(t *testing.T) {
 		}
 	})
 
-	t.Run("RefusesWhenLongWindowUnavailable", func(t *testing.T) {
-		// A valid SHORT window alone is NOT enough (the young-market
-		// refusal): without long history, refuse.
+	t.Run("NoShortWindow_CurvePrices", func(t *testing.T) {
+		// The inverted young-market refusal: a valid LONG window alone, a
+		// short ring below its minimum count -> the curve alone prices.
+		s := NewMemStore()
+		curveMarket(s, creator1, 200)
+		stFillShort(s, creator1, q-50, MinObsCount-1, big.NewInt(1500))
+		stFillLong(s, creator1, q-50, stObsCount, big.NewInt(1500))
+		got, err := SettlementRate(s, creator1, q)
+		if err != nil {
+			t.Fatalf("SettlementRate refused with no short window: %v", err)
+		}
+		if got.Cmp(big.NewInt(2680)) != 0 {
+			t.Fatalf("rate = %s, want spot 2680 (no usable short window: the curve alone prices)", got)
+		}
+	})
+
+	t.Run("StaleShortWindow_CurvePrices", func(t *testing.T) {
+		// Staleness is a market condition, not a bug: past MaxStaleBlocks the
+		// short window steps aside and spot prices. (Frozen markets are shut
+		// upstream by RequireInflowOpen; this is only the rate.)
 		s := NewMemStore()
 		curveMarket(s, creator1, 200)
 		stFillShort(s, creator1, q-50, MinObsCount, big.NewInt(1500))
-		if _, err := SettlementRate(s, creator1, q); err == nil {
-			t.Fatal("SettlementRate priced with no long-window history")
+		got, err := SettlementRate(s, creator1, q-50+MaxStaleBlocks+1)
+		if err != nil {
+			t.Fatalf("SettlementRate refused on a stale short window: %v", err)
+		}
+		if got.Cmp(big.NewInt(2680)) != 0 {
+			t.Fatalf("rate = %s, want spot 2680 (stale short window: the curve alone prices)", got)
+		}
+	})
+
+	t.Run("CorruptShortRing_StillRefuses", func(t *testing.T) {
+		// A corrupt ring is a BUG, never a market condition: no fallback.
+		s := NewMemStore()
+		curveMarket(s, creator1, 200)
+		setU64(s, kObsIdx(creator1), 3)
+		for i := uint64(0); i < 3; i++ {
+			setStr(s, kObs(creator1, i), "not-an-observation")
+		}
+		_, err := SettlementRate(s, creator1, q)
+		if err == nil {
+			t.Fatal("SettlementRate priced off a corrupt short ring")
+		}
+		if askErrSymbol(err) != ErrState {
+			t.Fatalf("symbol = %q, want %q (err=%v)", askErrSymbol(err), ErrState, err)
 		}
 	})
 }
@@ -400,58 +436,6 @@ func TestRecordObs_LongRingSpacing(t *testing.T) {
 	}
 }
 
-func TestAskRateLong_MinimumHistory(t *testing.T) {
-	const q = uint64(1_000_000)
-
-	// 8 samples at minimum spacing span only 7·6300 = 44,100 < 2 days:
-	// refuse — the ruled young-market dead zone.
-	s := NewMemStore()
-	stFillLong(s, creator1, q-50, LongMinObsCount, big.NewInt(1000))
-	if _, err := askRateLong(s, creator1, q); err == nil {
-		t.Fatal("askRateLong priced on a sub-minimum span")
-	}
-
-	// 12 samples span 69,300 >= LongMinObsBlocks: price.
-	s2 := NewMemStore()
-	stFillLong(s2, creator1, q-50, stObsCount, big.NewInt(1000))
-	rate, err := askRateLong(s2, creator1, q)
-	if err != nil {
-		t.Fatalf("askRateLong on a full valid window: %v", err)
-	}
-	if rate.Cmp(big.NewInt(1000)) != 0 {
-		t.Fatalf("long TWAP = %s, want 1000 (constant history)", rate)
-	}
-
-	// Staleness is wired again (twap.go, re-enabled 2026-08-19 at a widened
-	// horizon — LongMaxStaleBlocks, 6 weeks + one spacing interval). A long
-	// ring that satisfied count+span keeps quoting its average through
-	// ordinary quiet spells, but a genuinely ancient newest sample refuses.
-	// Both sides pinned: just inside the horizon still prices, just past it
-	// refuses.
-	s3 := NewMemStore()
-	stFillLong(s3, creator1, q-50, stObsCount, big.NewInt(1000))
-	fresh, err := askRateLong(s3, creator1, q-50+LongMaxStaleBlocks)
-	if err != nil {
-		t.Fatalf("askRateLong refused a bootstrapped ring exactly at the staleness horizon: %v", err)
-	}
-	if fresh.Cmp(big.NewInt(1000)) != 0 {
-		t.Fatalf("long TWAP at the horizon = %s, want the unchanged 1000 (constant history)", fresh)
-	}
-	if _, err := askRateLong(s3, creator1, q-50+LongMaxStaleBlocks+1); errSymbol(err) != ErrOracle {
-		t.Fatalf("askRateLong priced (or refused with the wrong symbol) past LongMaxStaleBlocks: err=%v", err)
-	}
-
-	// The epoch filter: samples recorded before the current incarnation's
-	// kRegisteredAt are dropped, so a full otherwise-valid window from a
-	// previous market life refuses. (The harness re-registration test
-	// proves this end-to-end through Register; this is the unit pin.)
-	s4 := NewMemStore()
-	stFillLong(s4, creator1, q-50, stObsCount, big.NewInt(1000))
-	setU64(s4, kRegisteredAt(creator1), q-40) // re-registered AFTER every sample
-	if _, err := askRateLong(s4, creator1, q); err == nil {
-		t.Fatal("askRateLong priced off previous-incarnation samples (epoch filter broken)")
-	}
-}
 
 // ---- RULING C3: one derivation for every token-settled service ------------
 
@@ -501,9 +485,9 @@ func TestSettlement_AskUsesTheRuledDerivation(t *testing.T) {
 // balances. None of them can even reach a settlement refusal.
 //
 // The runtime half, end-to-end here: a REAL market prices services, opens
-// real escrows, then a below-bootstrap ring drives settlement into refusal
-// (verified) — and then EVERY outflow in the package is exercised and
-// succeeds: Sell, TransferCredits, Answer, Reclaim, ClaimTradeFees,
+// real escrows, then a corrupt ring drives settlement into refusal
+// (verified; since 2026-09-16 a thin or stale ring no longer refuses) — and
+// then EVERY outflow in the package is exercised and succeeds: Sell, TransferCredits, Answer, Reclaim, ClaimTradeFees,
 // WithdrawTreasury, and (after the natural lapse) Refund and RefundHolder.
 func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 	s := NewMemStore()
@@ -554,10 +538,17 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 	// 28,800 + 1,200 = 30,000) with margin, small enough to stay well inside
 	// the market's hzLongGap so it remains ACTIVE (checked below).
 	quiet := askBlock + 40_000
-	setU64(s, kObsIdx(creator), 0)
-	setU64(s, kObsLongIdx(creator), 0)
+	// ★ 2026-09-16: a below-bootstrap ring no longer refuses (the curve alone
+	// prices, owner ruling), so the refusal is induced by the one settlement
+	// refusal a live market cannot trade its way out of: a CORRUPT short ring
+	// (ErrState). The property under test is unchanged — whatever makes
+	// settlement refuse, no outflow may be gated by it.
+	setU64(s, kObsIdx(creator), 3)
+	for i := uint64(0); i < 3; i++ {
+		setStr(s, kObs(creator, i), "corrupt")
+	}
 	if _, err := SettlementRate(s, creator, quiet); err == nil {
-		t.Fatal("premise broken: settlement still prices with a below-bootstrap ring")
+		t.Fatal("premise broken: settlement still prices with a corrupt ring")
 	}
 	// New service inflows are refused now — that is ALL the refusal gates.
 	if _, err := askAt0(s, holder1, creator, quiet, big.NewInt(10), "refused", MinAskDeadline); err == nil {
@@ -603,8 +594,10 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 	if got := Phase(s, creator, frozen); got != StateFrozen {
 		t.Fatalf("fixture: phase = %s, want FROZEN", got)
 	}
-	if _, err := SettlementRate(s, creator, frozen); err == nil {
-		t.Fatal("premise broken: settlement prices at the frozen block")
+	// At the frozen block the rate itself may exist (spot always does now);
+	// what is shut is the INFLOW door. The premise is that no new ask lands.
+	if _, err := askAt0(s, holder1, creator, frozen, big.NewInt(1), "frozen-ask", MinAskDeadline); err == nil {
+		t.Fatal("premise broken: Ask succeeded at the frozen block")
 	}
 	if payout, err := Refund(s, holder2, creator, frozen, big.NewInt(10)); err != nil || payout.Sign() <= 0 {
 		t.Fatalf("OUTFLOW BLOCKED: Refund during settlement refusal: payout=%v err=%v", payout, err)

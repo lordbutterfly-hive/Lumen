@@ -20,14 +20,35 @@ import "math/big"
 // refusal is safe BY CONSTRUCTION here because every settlement consumer is
 // an inflow (see "refusal gates no funds" below).
 //
-// THE RATE (RULING C1):
+// THE RATE (OWNER RULING 2026-09-16, "we shouldn't have added this at all"):
 //
-//	rate = min( spot, median( AskRate, askRateLong, spot ) ) — see SettlementRate.
+//	rate = min( spot, AskRate )  when the ~hour window can price,
+//	rate = spot                  otherwise                          — see SettlementRate.
 //	             AskRate       — the ~hours window (twap.go),
-//	            askRateLong   — the 7-day window (twap.go),
-//	            SpotRate(S)   — the curve's live marginal price (curve.go) )
+//	             SpotRate(S)   — the curve's live marginal price (curve.go)
 //
-// Each arm covers the others' failure mode:
+// No window is ever REQUIRED. A market with one token outstanding can settle
+// a service at once; the short window, when it exists, only ever LOWERS the
+// rate (a pump inside one hour cannot raise the min above the recent average).
+//
+// WHAT WAS REMOVED AND WHY. Until 2026-09-16 the rate was
+// min(spot, median(AskRate, askRateLong, spot)) and BOTH windows had to price,
+// so a new market could not settle a service until 8 trades had landed in 8
+// separate ~5.25h stretches spanning at least 2 days (LongMinObsCount /
+// LongMinObsBlocks), and a quiet market lost the rail again after 42 days.
+// The owner ruled that gate out. It was also weaker than it looked: once the
+// short window was walked (an hour of dust trades), median(walked, honest,
+// walked) IS the walked value, so the 7-day arm bounded nothing an attacker
+// could not wait an hour for. What actually makes a pump-then-ask lose money
+// was measured through this package on 2026-09-16 (1000 HBD pump on a
+// 200-token market: attacker net -323 HBD for a 100 HBD gig, creator +188 HBD
+// against ~90 honest): the 15% exit tax and the 5% fee on both legs of the
+// round trip, the per-ask spend cap (5% of supply), the depth ceiling (face
+// <= 50% of area) and the creator's right to Decline. All of those stay.
+//
+// The 7-day ring (kObsLong) is still RECORDED by RecordObs as price history;
+// nothing in money math reads it any more, and its reader was deleted.
+//
 //   - The SPOT arm is the no-arbitrage ceiling and it is load-bearing:
 //     tokens are mintable on demand, so a service must never settle at a
 //     rate ABOVE spot — c = ceil(F/rate) >= F/rate, and every token in
@@ -39,11 +60,13 @@ import "math/big"
 //     base units of free money). See the RULING-J note below for why R/S
 //     stopped being a competing candidate at all.
 //   - The SHORT TWAP arm absorbs a transient spot spike (a pump inside one
-//     window cannot raise the min above the recent average).
-//   - The LONG TWAP arm absorbs a sustained short-window walk: to lift it an
-//     attacker must hold real supply (real curve capital, fees, exit tax)
-//     across ~days of 6300-block samples — at which point the elevated rate
-//     IS the market price by any honest definition.
+//     window cannot raise the min above the recent average). When it cannot
+//     price (young, stale, walked beyond MaxRateDeviationBps) the curve alone
+//     prices: every one of those refusals is ErrOracle and every one of them
+//     was a state an attacker could reach or wait out, so refusing there
+//     protected nothing that spot's ceiling does not. A CORRUPT ring
+//     (ErrState) or a block regression (ErrInput) still refuses: those are
+//     bugs, never market conditions, and are never papered over.
 //   - The DOWN direction (a walked-down rate inflates the token count) is
 //     NOT bounded by the min — it is bounded by the asker's own signed
 //     maxCredits cap and by the spend cap below (RULING C2's second half).
@@ -73,14 +96,15 @@ import "math/big"
 // credit amounts, wind-down pays pro-rata off (R, S), the curve pays exact
 // area steps. So a market that cannot price services refuses NEW service
 // inflows and nothing else — proven end-to-end by
-// TestSettlementRefusalGatesNoOutflow, which freezes settlement (no
-// observations at all) and exercises every outflow.
+// TestSettlementRefusalGatesNoOutflow, which breaks settlement (a corrupt
+// observation ring, the one refusal left that a market cannot trade its way
+// out of) and exercises every outflow.
 
 // SettleQuote is what settleSpend derives: the rate used and the exact
 // token count a face-priced service costs at it. Both freshly allocated.
 type SettleQuote struct {
 	Credits *big.Int // ceil(face/rate) — the WHOLE posted price since 2026-09-12, not an 88% token leg. RULING C keeps the ceil (floor would admit c == 0, a free service)
-	Rate    *big.Int // min(spot, median(TWAP_short, TWAP_long, spot)) — robust to one walked/stale arm
+	Rate    *big.Int // min(spot, TWAP_short) when the short window prices, else spot (2026-09-16)
 	// CommissionCredits is the platform's slice OF `Credits` — the same tokens,
 	// not a second asset (OWNER RULING 2026-09-12, CommissionBps). It is set
 	// only by settlePosted; a bare settleSpend call leaves it nil, because a raw
@@ -106,52 +130,28 @@ type SettleQuote struct {
 func SettlementRate(s Store, creator string, block uint64) (*big.Int, error) {
 	supply := getMoney(s, kSupply(creator))
 	if supply.Sign() == 0 {
-		// No supply -> no traded token -> nothing to denominate a token
-		// settlement in. SpotRate(0) is 0 by package convention (curve.go);
-		// refusing here keeps "never a non-positive rate" structural.
 		return nil, newErr(ErrOracle, "no supply: no token exists to settle in")
 	}
-
-	short, err := AskRate(s, creator, block)
-	if err != nil {
-		return nil, err
-	}
-	long, err := askRateLong(s, creator, block)
-	if err != nil {
-		return nil, err
-	}
 	spot := SpotRate(supply) // > 0: supply >= 1 and price(i) >= BasePrice
-
-	// ★ ORACLE-CLUSTER FIX (2026-09-08). Was mMin(mMin(short, long), spot) — a
-	// straight three-way min. That let ANY SINGLE low arm set the rate, which is
-	// how the short-ring dwell-clamp walk (CT-ORACLE-01) steered settlement with
-	// supply restored (short walked ~16%% below an honest long+spot), how the
-	// stale 7-day long arm over-charged askers on a rising market (PRICE-3), and
-	// how that same stale long arm tripped the C5 divergence breaker for ~5.69
-	// days on honest growth (CT-ORACLE-02). The median of the three is robust to
-	// a single corrupted/lagging arm (two must be moved to shift it), and the
-	// outer mMin(spot, ...) PRESERVES the no-arbitrage invariant "never a rate
-	// above live spot" (settlement can never under-charge below the marginal
-	// price). So: honest quiet market -> all three ~equal -> unchanged; short
-	// walked -> median ignores it; rising market -> median picks the fresher
-	// short (less lag) not the stalest long; a genuine falling market -> median
-	// exceeds spot and the outer min clamps back to spot, exactly as before.
-	rate := mMin(spot, mMedian3(short, long, spot))
+	rate := spot
+	// ★ NO WINDOW IS REQUIRED (OWNER RULING 2026-09-16; the file header has the
+	// measurement). The short window caps the rate when it can price; when it
+	// refuses for a MARKET reason (ErrOracle: too young, stale, walked past the
+	// deviation cap) the curve alone prices. A corrupt ring or a block
+	// regression is a BUG and still refuses — never a fallback for those.
+	short, err := AskRate(s, creator, block)
+	if err == nil {
+		rate = mMin(spot, short)
+	} else if e, ok := err.(*Err); !ok || e.Symbol != ErrOracle {
+		return nil, err // corrupt ring / block regression: a bug, never a market condition
+	}
 	if rate.Sign() <= 0 {
-		// Unreachable: all three arms are positive by their own contracts.
-		// Kept as the same defense-in-depth every "provably can't happen"
-		// path in this package carries.
 		return nil, newErr(ErrArith, "settlement rate non-positive")
 	}
-
-	// RULING C5 — the divergence circuit-breaker, kept as a TRIPWIRE: under
-	// R === area(S), backing-per-token ceil(R/S) is (average curve price,
-	// ceiled), which sits below spot and therefore below 4·rate whenever the
-	// TWAPs track the curve at all. If this fires, either the equality
-	// invariant is broken (state corrupt — refuse loudly, exactly like
-	// sell.go's own solvency pre-check) or the market just moved ≳4x in
-	// average-price terms inside the TWAP windows (refuse and self-heal as
-	// the windows catch up). Refusing is safe: services are an inflow.
+	// ★ C5 TRIPWIRE (unchanged): backing per token vs the rate. With R ===
+	// area(S) the backing is the curve's average price, never above spot, so
+	// this can only fire on a corrupt reserve or a short window that has
+	// collapsed 4x under the backing inside an hour.
 	backing := mMulDivCeil(getMoney(s, kReserve(creator)), big.NewInt(1), supply)
 	limit := new(big.Int).Mul(rate, new(big.Int).SetUint64(DivergenceRateMultiple))
 	if backing.Cmp(limit) > 0 {

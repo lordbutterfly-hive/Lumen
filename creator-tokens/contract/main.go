@@ -28,10 +28,12 @@
 //
 //  1. `ask`'s settlement rate is NEVER read from the payload, and — as of
 //     the 2026-07-20 defect fix — is not even a parameter this wrapper
-//     chooses: core.Ask derives it internally (RULING C, 2026-07-21:
-//     core.SettlementRate is now min(TWAP_short, TWAP_long, spot) and
-//     REFUSES with a typed error when no safe rate exists — the old
-//     TWAP-or-PAR fallback is deleted; see core/settlement.go's autopsy.
+//     chooses: core.Ask derives it internally (RULING C, 2026-07-21, and
+//     the OWNER RULING of 2026-09-16: core.SettlementRate is min(spot,
+//     TWAP_short) when the ~hour window prices and spot otherwise — no
+//     trading-history gate — and still REFUSES with a typed error on zero
+//     supply or a corrupt ring; the old TWAP-or-PAR fallback stays deleted;
+//     see core/settlement.go's header.
 //     The rings are fed by the trade path itself: core.Buy/core.Sell call
 //     core.RecordObs with the curve's marginal rate, so no DEX integration
 //     is needed for settlement to leave refusal). core.Ask used to take

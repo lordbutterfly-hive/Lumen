@@ -1575,27 +1575,29 @@ func TestHarness_ReRegistration_AfterClosed(t *testing.T) {
 			hzMustErr(t, err, ErrOracle, "AskRate immediately after re-registration")
 		}
 
-		// THE LONG RING'S HALF OF THE SAME LEAK (RULING C1, 2026-07-21):
-		// Register does NOT reset the long ring's write counter (the twl|
-		// family postdates Register's reset list), so the old life's long
-		// samples are still PHYSICALLY present — assert that premise, then
-		// assert the epoch filter (askRateLong drops every sample older
-		// than the current kRegisteredAt) refuses to price off them. If
-		// this ever fails, a re-registered market's first services would be
-		// priced by its DEAD incarnation's rates.
+		// THE LONG RING'S HALF OF THE SAME LEAK, RE-BASED 2026-09-16: Register
+		// still does not reset the long ring's write counter, so the old
+		// life's long samples are still PHYSICALLY present — assert that
+		// premise. Since the owner's ruling removed the 7-day window from
+		// settlement (its reader was deleted), those dead samples have NO
+		// reader at all; the epoch filter they needed went with it. What
+		// keeps a re-registered market off its dead life's prices is the
+		// short ring's reset above plus settlement pricing off the market's
+		// OWN curve when no short window exists (asserted below).
 		if got := getU64(s, kObsLongIdx(creator)); got == 0 {
 			t.Fatal("test premise broken: expected the old life's long-ring samples to survive re-registration physically (Register must not have learned to clear twl| without this test being updated)")
 		}
-		if _, err := askRateLong(s, creator, queryBlock); err == nil {
-			t.Fatal("askRateLong must REFUSE on a freshly re-registered market whose long ring holds only previous-incarnation samples")
-		} else {
-			hzMustErr(t, err, ErrOracle, "askRateLong immediately after re-registration")
-		}
 
-		// End-to-end: the new market cannot transact on stale prices at
-		// all — an ask that tries is refused rather than silently settled.
+		// End-to-end: the new market prices off its own curve, never off the
+		// dead life's samples. (With zero supply settlement still refuses —
+		// there is no token to settle in — so the check follows the buy.)
 		hzBuy(t, s, "newholder1", creator, reRegBlock+10, 500)
 		hzResetObs(s, creator) // see hzResetObs: the funding Buy fed the ring
+		if rate, err := SettlementRate(s, creator, reRegBlock+11); err != nil {
+			t.Fatalf("SettlementRate on a freshly re-registered market must price off its own curve: %v", err)
+		} else if want := SpotRate(Supply(s, creator)); rate.Cmp(want) != 0 {
+			t.Fatalf("re-registered market settles at %s, want its own spot %s (never a dead incarnation's samples)", rate, want)
+		}
 
 		// Once genuinely fresh observations exist, pricing resumes normally
 		// and reflects ONLY the new life's data.
@@ -1610,15 +1612,14 @@ func TestHarness_ReRegistration_AfterClosed(t *testing.T) {
 			t.Fatalf("new life's TWAP = %s, want %d from its OWN observations (old marker rate was %d)", rate, freshRate, oldRate)
 		}
 
-		// FULL settlement, however, must STILL refuse here (RULING C1): the
-		// 200-spaced fresh series lands only ONE sample in the 7-day ring,
-		// far below LongMinObsCount — a re-registered market re-earns its
-		// service pricing with ~2 days of genuine trading history, exactly
-		// like a brand-new one. Refusal gates only new service inflows.
-		if _, err := SettlementRate(s, creator, freshQuery); err == nil {
-			t.Fatal("SettlementRate must still REFUSE until the new life accumulates a real long-window history")
-		} else {
-			hzMustErr(t, err, ErrOracle, "SettlementRate before the new life's long window fills")
+		// FULL settlement follows the new life's own short window (capped by
+		// spot) — since 2026-09-16 no 7-day history is required, so a
+		// re-registered market prices services from its first hour of
+		// genuine trading, exactly like a brand-new one.
+		if got, err := SettlementRate(s, creator, freshQuery); err != nil {
+			t.Fatalf("SettlementRate after the new life's short window fills: %v", err)
+		} else if want := mMin(SpotRate(Supply(s, creator)), big.NewInt(freshRate)); got.Cmp(want) != 0 {
+			t.Fatalf("SettlementRate = %s, want min(spot, fresh short %d) = %s", got, freshRate, want)
 		}
 	})
 }

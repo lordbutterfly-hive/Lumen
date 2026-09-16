@@ -68,7 +68,7 @@ func fcMixRates(attacker int, honest, walked int64) []int64 {
 	return rates
 }
 
-func TestTwap_ProducerMajorityBoundedByMedianAndLongRing(t *testing.T) {
+func TestTwap_ProducerMajorityBoundedByMedianAndSpot(t *testing.T) {
 	if ObsWindow != 32 {
 		t.Fatalf("this test hand-computes against ObsWindow==32, got %d", ObsWindow)
 	}
@@ -163,7 +163,7 @@ func TestTwap_ProducerMajorityBoundedByMedianAndLongRing(t *testing.T) {
 		curveMarket(s, c, supply) // R === area(S); spot = SpotRate(100); keeps C5 quiet at this small supply
 		Q := uint64(2_000_000)
 		fcSeedShort(s, c, Q-50, fcMixRates(32, 2000, 2000)) // short ring fully WALKED to 2000
-		fcSeedLong(s, c, Q-50, fcMixRates(32, 1000, 1000))  // long ring still HONEST at 1000
+		fcSeedLong(s, c, Q-50, fcMixRates(32, 1000, 1000))  // long ring present and honest — recorded history only, settlement no longer reads it (2026-09-16)
 
 		short, err := AskRate(s, c, Q)
 		if err != nil {
@@ -172,27 +172,17 @@ func TestTwap_ProducerMajorityBoundedByMedianAndLongRing(t *testing.T) {
 		if short.Cmp(big.NewInt(2000)) != 0 {
 			t.Fatalf("short ring not fully walked: AskRate = %s, want 2000", short)
 		}
-		long, err := askRateLong(s, c, Q)
-		if err != nil {
-			t.Fatalf("long askRateLong: %v", err)
-		}
-		if long.Cmp(big.NewInt(1000)) != 0 {
-			t.Fatalf("long ring not honest: askRateLong = %s, want 1000", long)
-		}
 		spot := SpotRate(big.NewInt(supply))
-		if long.Cmp(spot) > 0 {
-			t.Fatalf("test premise: honest long %s must be <= spot %s so the min picks the long arm", long, spot)
-		}
 
 		settle, err := SettlementRate(s, c, Q)
 		if err != nil {
-			t.Fatalf("SettlementRate refused (%v) — expected it to settle at the honest long arm, not error", err)
+			t.Fatalf("SettlementRate refused (%v) — expected it to settle at spot, not error", err)
 		}
 		if settle.Cmp(spot) != 0 {
-			t.Fatalf("settlement = %s, want spot %s — a walked-UP short is bounded by the no-arbitrage ceiling min(spot, median(...)), never the walked value", settle, spot)
+			t.Fatalf("settlement = %s, want spot %s — a walked-UP short is bounded by the no-arbitrage ceiling min(spot, short), never the walked value", settle, spot)
 		}
 		if settle.Cmp(short) >= 0 {
-			t.Fatalf("settlement %s reached the walked short rate %s — min(spot, median(short,long,spot)) failed to bound the producer-majority walk", settle, short)
+			t.Fatalf("settlement %s reached the walked short rate %s — min(spot, short) failed to bound the producer-majority walk", settle, short)
 		}
 		if settle.Cmp(spot) > 0 {
 			t.Fatalf("settlement %s exceeded spot %s — the no-arbitrage ceiling was breached", settle, spot)
@@ -237,19 +227,13 @@ func TestTwap_ProducerMajorityBoundedByMedianAndLongRing(t *testing.T) {
 		if shortAfter := getU64(s, kObsIdx(c)); shortAfter <= shortBefore {
 			t.Fatalf("short ring did not absorb the burst: idx %d -> %d", shortBefore, shortAfter)
 		}
-		// And the long window's priced rate is unmoved by the burst.
-		long, err := askRateLong(s, c, burstEnd)
-		if err != nil {
-			t.Fatalf("askRateLong after burst: %v", err)
+		// And the long ring's newest RECORDED sample is unmoved by the burst
+		// (the ring is price history since 2026-09-16; settlement no longer
+		// reads it, so this pins the recorder, not a rate).
+		newest, ok := readTwapObsKey(s, kObsLong(c, (longBefore-1)%ObsWindow))
+		if !ok || newest.rate.Cmp(big.NewInt(1000)) != 0 {
+			t.Fatalf("the burst reached the long ring (newest sample %v ok=%v), want the honest 1000 — a sub-6300-block burst must not touch it", newest, ok)
 		}
-		if long.Cmp(big.NewInt(1000)) != 0 {
-			t.Fatalf("the burst moved the long window to %s, want the honest 1000 — a sub-6300-block burst must not touch it", long)
-		}
-		// Quantified: to add ONE long sample the producer must wait a full
-		// LongObsSpacing (6300 blocks); to own the long window's median they need
-		// ⌈17/32⌉ samples ≈ 17·6300 ≈ 107,100 blocks ≈ 3.7 days of SUSTAINED,
-		// capital-backed manipulation — the "held across days" cost the min()
-		// design converts a short-ring walk into.
-		t.Logf("F-C4: producer-majority short-ring walk is bounded — settlement takes min(short,long,spot); walking the long window requires ≈17·%d ≈ %d blocks of sustained manipulation.", LongObsSpacing, 17*LongObsSpacing)
+		t.Logf("F-C4: producer-majority short-ring walk is bounded by the no-arbitrage ceiling — settlement takes min(short, spot) (2026-09-16); the long ring is recorded history only.")
 	}
 }

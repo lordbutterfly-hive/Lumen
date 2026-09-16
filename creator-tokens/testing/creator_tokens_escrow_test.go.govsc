@@ -337,3 +337,76 @@ func TestCreatorTokens_EscrowFiveStepPath(t *testing.T) {
 // hbdSpentOnBuys is only used for a log line; the assertion that matters is the
 // token position, which is checked directly.
 func hbdSpentOnBuys(e *ctEnv, account string) int64 { return 0 }
+
+// ★ OWNER RULING 2026-09-16: no trading-history gate. A market with ONE buy
+// behind it must price and settle a service at once, at the curve's spot
+// rate, through the REAL wasm — the old binary refused this for two days.
+// Run against the previous build (CREATOR_TOKENS_WASM=<old>) this test must
+// fail at the quote with the oracle refusal: that failure is the control.
+func TestCreatorTokens_FreshMarketAsksAtOnce(t *testing.T) {
+	const (
+		owner   = "hive:lumencontracts"
+		creator = "hive:ctfresh"
+		// 13 chars WITH the prefix: the harness's deposit memo validates the
+		// whole "hive:<name>" string against Hive's 16-char limit and silently
+		// credits the SENDER on failure — "hive:ctfreshasker" (17) got nothing.
+		asker = "hive:ctfasker"
+	)
+	e := newCtEnv(t, owner)
+	ctFund(e, []string{owner, creator, asker}, 5_000_000)
+	e.mustCall(owner, "init", `{}`, 40_000)
+	// face 150.000 HBD: at spot(600) = 6,670 that is ceil(150000/6670) = 23 credits,
+	// inside the 5%%-of-supply spend cap (30) and the depth ceiling, with a
+	// whole-token commission (2) — the same three guards the five-step fixture
+	// documents, cleared on a market that is ONE buy old.
+	e.mustCall(creator, "register", `{"face":150000,"cap":1000000}`, 40_000)
+	// ONE buy, no warm-up, no spacing: 600 tokens (~2,320 HBD with fee) -> spot(600) = 6,670.
+	// (The block step is the harness's deposit settling, the same step the
+	// five-step fixture takes before its first buy; it is not oracle spacing.)
+	e.ct.IncrementBlocks(9_000)
+	if bal := e.ct.GetBalance(asker, ledgerDb.AssetHbd); bal != 5_000_000 {
+		t.Fatalf("fixture: asker balance = %d, want 5,000,000 (the deposit memo did not credit the asker)", bal)
+	}
+	buy := e.callIntent(asker, "buy", fmt.Sprintf(`{"creator":%q,"tokens":"600"}`, creator), 40_000, "2400.000")
+	if !buy.Success {
+		t.Fatalf("buy refused: %s / %s", buy.Err, buy.ErrMsg)
+	}
+	e.ct.IncrementBlocks(1)
+
+	q := e.call(asker, "quote", fmt.Sprintf(`{"creator":%q}`, creator), 40_000)
+	if !q.Success {
+		t.Fatalf("quote REFUSED on a one-buy market: err=%s msg=%s (the trading-history gate is back)", q.Err, q.ErrMsg)
+	}
+	var quote struct {
+		CreditsPerAsk string `json:"creditsPerAsk"`
+		Rate          string `json:"rate"`
+	}
+	if err := json.Unmarshal([]byte(q.Ret), &quote); err != nil {
+		t.Fatalf("quote is not JSON: %v (%s)", err, q.Ret)
+	}
+	if quote.Rate != "6670" {
+		t.Fatalf("quote rate = %s, want the curve's spot 6670 (no window: the curve alone prices)", quote.Rate)
+	}
+	credits, _ := strconv.ParseInt(quote.CreditsPerAsk, 10, 64)
+	if credits != 23 { // ceil(150000 / 6670)
+		t.Fatalf("creditsPerAsk = %d, want 23 = ceil(150000/6670)", credits)
+	}
+	t.Logf("  fresh market: quote %s credits at rate %s (spot)", quote.CreditsPerAsk, quote.Rate)
+
+	balKey := "mb|" + creator + "|" + creator
+	before := e.u64(balKey)
+	a := e.mustCall(asker, "ask", fmt.Sprintf(`{"creator":%q,"maxCredits":"23","contentHash":"fresh-1","deadlineBlocks":28800}`, creator), 40_000)
+	var ask struct {
+		Seq uint64 `json:"seq"`
+	}
+	if err := json.Unmarshal([]byte(a.Ret), &ask); err != nil {
+		t.Fatalf("ask ret is not JSON: %v (%s)", err, a.Ret)
+	}
+	e.ct.IncrementBlocks(5)
+	e.mustCall(creator, "answer", fmt.Sprintf(`{"seq":%d,"answerHash":"ans-fresh"}`, ask.Seq), 40_000)
+	after := e.u64(balKey)
+	if after <= before {
+		t.Fatalf("creator position did not grow on answer: %d -> %d", before, after)
+	}
+	t.Logf("  creator position %d -> %d after answer (23 credits minus the 12%% commission)", before, after)
+}

@@ -36,18 +36,17 @@ import (
 //     settlement path refused — a market that succeeded killed its own
 //     services product).
 //   - LONG ring (kObsLong/kObsLongIdx): one observation per LongObsSpacing
-//     (6300) blocks max, 32 slots — spans exactly the ruled 7 days. Read by
-//     askRateLong. Same packed format, same writer, coarser sampling. The
-//     storage cost is one extra state write per ~5.25h of trading per
-//     creator (params.go's LongObsSpacing doc); the granularity cost is that
-//     the long window reacts in 6300-block steps — which is the point: a
-//     sustained rate walk must hold its position (and its capital) across
-//     many samples to move this window at all.
+//     (6300) blocks max, 32 slots — spans 7 days. RECORDED HISTORY ONLY since
+//     the OWNER RULING of 2026-09-16: settlement no longer reads it and its
+//     reader (askRateLong) was deleted; the writer is kept so the 7-day price
+//     record stays available to readers off-chain. Same packed format, same
+//     writer, coarser sampling — one extra state write per ~5.25h of trading
+//     per creator (params.go's LongObsSpacing doc).
 //
-// Settlement (settlement.go) takes min(AskRate, askRateLong, SpotRate(S)) —
-// the min is what makes each ring's failure mode safe: a walked short window
-// is bounded by the long one, a stale long window is bounded by its own
-// staleness refusal, and a pumped spot never raises the rate above either
+// Settlement (settlement.go) takes min(SpotRate(S), AskRate) when the short
+// window prices and SpotRate(S) otherwise — the short window can only LOWER
+// the rate (a pump inside one hour cannot lift the min above the recent
+// average), and a pumped spot never raises the rate above
 // TWAP (RULING C1; the DOWN direction is bounded by settlement.go's spend
 // cap, not by the rings).
 //
@@ -381,30 +380,6 @@ func AskRate(s Store, creator string, block uint64) (*big.Int, error) {
 }
 
 // askRateLong is the 7-day window read (RULING C1's TWAP_long). Package-
-// private: nothing outside settlement.go should consume the long window
-// alone — v1 RULING 3c priced the old spend-to-unlock feature off the long
-// TWAP ALONE and that was backwards (longest = stalest = highest rate =
-// fewest tokens = LEAST creator-favouring; a 100 HBD permanent entitlement
-// went for 12.111 HBD). The long window is only ever one arm of settlement's
-// min().
-func askRateLong(s Store, creator string, block uint64) (*big.Int, error) {
-	return twapWindowRead(s, creator, block, twapRingCfg{
-		obsKey:    kObsLong,
-		idxKey:    kObsLongIdx,
-		minCount:  LongMinObsCount,
-		minSpan:   LongMinObsBlocks,
-		maxStale:  LongMaxStaleBlocks,
-		maxWeight: LongMaxObsWeightBlocks,
-		// The long counter survives re-registration (Register predates this
-		// ring family), so the epoch boundary is enforced HERE: any sample
-		// from before the current incarnation is dropped. Without this, a
-		// re-registered market's first services would price off the DEAD
-		// incarnation's rates — the exact leak Register's kObsIdx reset
-		// closes for the short ring (harness regression test, 2026-07-21).
-		sinceBlock: getU64(s, kRegisteredAt(creator)),
-	})
-}
-
 // medianRate returns the median of the observation rates in the window, by
 // value and independent of time-weighting. It is the reference point for the
 // movement cap: unlike the newest observation, it cannot be moved by a single

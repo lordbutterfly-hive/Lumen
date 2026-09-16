@@ -1533,9 +1533,11 @@ func (e *Engine) ensureCreditsForAsk(name, creator string, at askTarget) {
 // creditsEstimate recomputed at a rate its own buy just moved." That is not
 // what happens: a diagnostic run (4 configs, seeds 1/2/3/7, up to 180 days)
 // showed one_shot actors making ZERO buy attempts at all, not merely zero
-// asks — the SettlementRate call a few lines below refuses (ErrOracle)
-// before doBuy is ever reached, so there is no "own buy" to have moved
-// anything. THE REAL CAUSE: one_shot actors' single lifetime action fires
+// asks — the SettlementRate call a few lines below USED TO refuse (ErrOracle)
+// before doBuy was ever reached, so there was no "own buy" to have moved
+// anything. (Since the 2026-09-16 owner ruling settlement prices a market
+// from its first token, so this whole timing gap is closed; the history below
+// is kept because it explains the actor schedule.) THE REAL CAUSE: one_shot actors' single lifetime action fires
 // once, uniformly in [genesisBlock+1 day, genesisBlock+2 days)
 // (scheduleInitialEvents), but core.SettlementRate's long TWAP ring
 // (twap.go/params.go: LongMinObsBlocks = 2 days) cannot price ANYTHING

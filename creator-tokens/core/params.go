@@ -607,20 +607,19 @@ const ExitTaxDecayBlocks uint64 = 42 * BlocksPerDay
 // is exactly the property the long window exists for.
 const LongObsSpacing uint64 = 6300
 
-// LongMinObsCount is the minimum number of long-ring samples before the long
-// TWAP may price at all (mirrors MinObsCount's role on the short ring).
+// LongMinObsCount was the minimum number of long-ring samples before the long
+// TWAP could price. HISTORY ONLY since 2026-09-16 (owner ruling): settlement
+// no longer reads the long ring and its reader is gone; the constant is kept
+// for the ring's documentation and any off-chain reader of the 7-day record.
 const LongMinObsCount uint64 = 8
 
-// LongMinObsBlocks is the minimum span (and minimum accumulated clamped
-// weight) the long ring must cover before pricing: 2 days. Consequence,
-// stated honestly: a brand-new market CANNOT settle services for its first
-// ~2 days of trading — that is deliberate. The first observations after
-// launch are the thinnest and most manipulable this system ever sees (the
-// old PAR-era doc admitted this and shipped anyway); under RULING C the
-// young-market answer is REFUSE, which gates only inflows. Full 7-day depth
-// was considered and rejected as the minimum: it would dead-zone every
-// market's first week for no additional safety, since the spot ceiling
-// (RULING C1's no-arbitrage bound) holds independently of window depth.
+// LongMinObsBlocks was the minimum span the long ring had to cover before
+// pricing: 2 days — the gate that kept a brand-new market from settling any
+// service for its first ~2 days. REMOVED FROM SETTLEMENT on 2026-09-16 by
+// owner ruling ("we shouldn't have added this at all"): a new market prices
+// services off its own curve at once (settlement.go header has the measured
+// reason it is safe). The constant stays as documentation of the ring's
+// intended span; nothing in money math reads it.
 const LongMinObsBlocks uint64 = 2 * BlocksPerDay
 
 // LongMaxObsWeightBlocks caps the dwell weight of a single long-ring sample

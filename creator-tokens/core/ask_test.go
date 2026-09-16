@@ -641,18 +641,23 @@ func TestAskSignatureCannotAcceptCallerSuppliedRate(t *testing.T) {
 // coverage (each min arm, every guard boundary, the attacker walk, the
 // no-outflow-gated proof) lives in settlement_test.go.
 
-func TestSettlementRate_RefusesWhenOracleUnavailable(t *testing.T) {
+func TestSettlementRate_CurvePricesWithNoHistory(t *testing.T) {
+	// ★ INVERTED 2026-09-16 (owner ruling: no trading-history gate). This used
+	// to assert an ErrOracle refusal on a market with no observations; the
+	// PAR fallback this guarded against (1 base unit per token, a 100x
+	// overcharge) is still gone — the fallback is SPOT, the no-arbitrage
+	// ceiling, never PAR.
 	s := NewMemStore()
-	// A market with supply but NO observations: both windows must refuse,
-	// so SettlementRate must return a typed ORACLE error — never PAR, never
-	// zero, never a made-up rate.
 	curveMarket(s, creator1, 100)
-	_, err := SettlementRate(s, creator1, 1000)
-	if err == nil {
-		t.Fatal("REGRESSION: SettlementRate returned a rate with no observations — the PAR fallback is back")
+	got, err := SettlementRate(s, creator1, 1000)
+	if err != nil {
+		t.Fatalf("SettlementRate refused a market with no observations: %v", err)
 	}
-	if askErrSymbol(err) != ErrOracle {
-		t.Fatalf("symbol = %q, want %q (err=%v)", askErrSymbol(err), ErrOracle, err)
+	if want := SpotRate(big.NewInt(100)); got.Cmp(want) != 0 {
+		t.Fatalf("SettlementRate = %s, want spot %s (no window: the curve alone prices)", got, want)
+	}
+	if got.Cmp(big.NewInt(1)) == 0 {
+		t.Fatal("REGRESSION: the PAR fallback is back")
 	}
 }
 
@@ -691,27 +696,34 @@ func TestSettlementRate_TWAPWhenAvailable(t *testing.T) {
 // SettlementRate helper — REFUSES cleanly (typed error, total no-op) for a
 // market with no usable observation history, instead of settling at PAR as
 // the pre-RULING-C version did.
-func TestAsk_RefusesWhenOracleUnavailable(t *testing.T) {
+func TestAsk_SettlesAtSpotWithNoHistory(t *testing.T) {
+	// ★ INVERTED 2026-09-16 (owner ruling): an ask on a market with no
+	// trading history settles at the curve's spot price instead of refusing.
+	// The downstream checks are inverted with it: the balance MOVES and the
+	// sequence ADVANCES, because the ask now exists.
 	s := NewMemStore()
 	const block = uint64(1000)
 	curveMarket(s, creator1, 100)
 	activateMarket(s, creator1, block)
 	setMoney(s, kFace(creator1), big.NewInt(1000))
 	setMoney(s, kBal(creator1, asker1), big.NewInt(5000))
-
-	_, err := askAt0(s, asker1, creator1, block, big.NewInt(1000), "cid", MinAskDeadline)
-	if err == nil {
-		t.Fatal("REGRESSION: Ask succeeded with no oracle — the PAR fallback is back")
+	spot := SpotRate(big.NewInt(100))
+	wantCredits := creditsForAsk(big.NewInt(1000), spot)
+	res, err := askAt0(s, asker1, creator1, block, big.NewInt(1000), "cid", MinAskDeadline)
+	if err != nil {
+		t.Fatalf("Ask with no oracle history must settle at spot, got: %v", err)
 	}
-	if askErrSymbol(err) != ErrOracle {
-		t.Fatalf("symbol = %q, want %q (err=%v)", askErrSymbol(err), ErrOracle, err)
+	if res.RateUsed.Cmp(spot) != 0 {
+		t.Fatalf("RateUsed = %s, want spot %s", res.RateUsed, spot)
 	}
-	// Refusal is a total no-op (RULING G: nothing mutates on a rejected call).
-	if got := getMoney(s, kBal(creator1, asker1)); got.Cmp(big.NewInt(5000)) != 0 {
-		t.Fatalf("asker balance changed on refused ask: %s", got)
+	if res.CreditsSpent.Cmp(wantCredits) != 0 {
+		t.Fatalf("CreditsSpent = %s, want %s", res.CreditsSpent, wantCredits)
 	}
-	if got := getU64(s, kSeq(creator1)); got != 0 {
-		t.Fatalf("kSeq advanced on refused ask: %d", got)
+	if got := getMoney(s, kBal(creator1, asker1)); got.Cmp(new(big.Int).Sub(big.NewInt(5000), wantCredits)) != 0 {
+		t.Fatalf("asker balance = %s, want 5000 - %s", got, wantCredits)
+	}
+	if got := getU64(s, kSeq(creator1)); got != 1 {
+		t.Fatalf("kSeq = %d, want 1 (the ask exists)", got)
 	}
 }
 

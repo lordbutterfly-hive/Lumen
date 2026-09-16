@@ -5,12 +5,14 @@ import (
 	"testing"
 )
 
-// zz_oraclefix_repro_test.go — INSTRUMENT + PROOF (additive, scratch-only) for
-// the oracle-cluster fix: SettlementRate is now min(spot, median(short, long,
-// spot)) instead of min(short, long, spot). BEFORE = the old three-way min,
-// computed inline here as mMin(mMin(short,long),spot); AFTER = the live
-// SettlementRate. Storage-level ring construction, exactly the way
-// settlement_test.go builds divergent windows. All three findings, one change.
+// zz_oraclefix_repro_test.go — INSTRUMENT + PROOF (additive, scratch-only),
+// re-based 2026-09-16 on the owner's ruling that removed the 7-day window
+// from settlement: SettlementRate is now min(spot, short) when the short
+// window prices, spot otherwise. BEFORE = the pre-09-08 three-way min,
+// computed inline here as mMin(mMin(short,long),spot) with the long value the
+// fixture SEEDED (the long ring is recorded history now and has no reader);
+// AFTER = the live SettlementRate. Storage-level ring construction, exactly
+// the way settlement_test.go builds divergent windows.
 
 func ofOldMin(short, long, spot *big.Int) *big.Int { return mMin(mMin(short, long), spot) }
 
@@ -52,7 +54,7 @@ func TestOF_CTORACLE01_SettlementWalkClosed(t *testing.T) {
 		stFillLong(s, c, last, stObsCount, honest) // long ring unmoved
 		q := last + MaxObsWeightBlocks             // marker dwell saturates the clamp
 		short, _ = AskRate(s, c, q)
-		long, _ = askRateLong(s, c, q)
+		long = honest // what the seeded long ring holds; settlement no longer reads it
 		spot = SpotRate(big.NewInt(S))
 		settle, _ = SettlementRate(s, c, q)
 		return
@@ -72,9 +74,22 @@ func TestOF_CTORACLE01_SettlementWalkClosed(t *testing.T) {
 	if oldMin.Cmp(hSettle) >= 0 {
 		t.Fatalf("instrument broken: old min %s should have walked BELOW honest %s", oldMin, hSettle)
 	}
-	if aSettle.Cmp(hSettle) != 0 {
-		t.Fatalf("CT-ORACLE-01 NOT closed: median settle=%s != honest %s (walk %.2f%%)", aSettle, hSettle, walkNew)
+	// ★ 2026-09-16: without the 7-day arm there is no median to discard a lone
+	// low short marker, so settlement FOLLOWS the short window down again. The
+	// bound is the short ring's own deviation cap: a walk past
+	// MaxRateDeviationBps refuses the window (ErrOracle) and spot prices, so
+	// the most a lone marker can over-charge an asker is that cap — and the
+	// asker signs a maxCredits ceiling off the live quote, which is the consent
+	// that makes the DOWN direction theirs to refuse. Pinned here so the size
+	// of what the ruling gave back is a number, not a memory.
+	if aSettle.Cmp(hSettle) > 0 {
+		t.Fatalf("settlement rose above honest on a DOWN walk: %s > %s", aSettle, hSettle)
 	}
+	floor := mMulBpsDiv(hSettle, 10_000-MaxRateDeviationBps)
+	if aSettle.Cmp(floor) < 0 {
+		t.Fatalf("CT-ORACLE-01 walk %.2f%% exceeds the deviation cap (%d bps): settle=%s < floor %s", walkNew, MaxRateDeviationBps, aSettle, floor)
+	}
+	t.Logf("  the walk the ruling gave back: %.2f%% (bounded by MaxRateDeviationBps=%d, refusable by the asker's maxCredits)", walkNew, MaxRateDeviationBps)
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +120,7 @@ func TestOF_CTORACLE02_HonestGrowthKeepsShopOpen(t *testing.T) {
 	qq := last + 50
 
 	shortR, _ := AskRate(s, c, qq)
-	longR, _ := askRateLong(s, c, qq)
+	longR := stale // the seeded 7-day value the old min() would have picked
 	backing := mMulDivCeil(getMoney(s, kReserve(c)), big.NewInt(1), getMoney(s, kSupply(c)))
 	oldMin := ofOldMin(shortR, longR, spot)
 	oldLimit := new(big.Int).Mul(oldMin, big.NewInt(int64(DivergenceRateMultiple)))
@@ -114,13 +129,13 @@ func TestOF_CTORACLE02_HonestGrowthKeepsShopOpen(t *testing.T) {
 	newRate, newErr := SettlementRate(s, c, qq)
 	t.Logf("CT-ORACLE-02: backing=%s spot=%s short=%s staleLong=%s", backing, spot, shortR, longR)
 	t.Logf("  BEFORE (old min): rate=%s  4x=%s  backing>4x => Ask REFUSES=%v (the 5.69-day lockout)", oldMin, oldLimit, oldRefuses)
-	t.Logf("  AFTER (median):   rate=%v  err=%v  => Ask PRICES (shop stays open on honest growth)", newRate, newErr)
+	t.Logf("  AFTER (min(spot, short)): rate=%v  err=%v  => Ask PRICES (shop stays open on honest growth)", newRate, newErr)
 
 	if !oldRefuses {
 		t.Fatalf("instrument broken: the old min should have tripped C5 (backing %s <= 4x %s)", backing, oldLimit)
 	}
 	if newErr != nil {
-		t.Fatalf("CT-ORACLE-02 NOT fixed: median settlement still refuses on honest growth: %v", newErr)
+		t.Fatalf("CT-ORACLE-02 NOT fixed: settlement still refuses on honest growth: %v", newErr)
 	}
 	if newRate.Cmp(spot) > 0 {
 		t.Fatalf("no-arbitrage breached: rate %s > spot %s", newRate, spot)
@@ -154,7 +169,7 @@ func TestOF_PRICE3_RisingMarketOverchargeReduced(t *testing.T) {
 	qq := last + 50
 
 	sh, _ := AskRate(s, c, qq)
-	lo, _ := askRateLong(s, c, qq)
+	lo := longRate                     // the seeded 7-day value the old min() would have picked
 	oldRate := ofOldMin(sh, lo, spot) // == longRate, the stalest
 	newRate, err := SettlementRate(s, c, qq)
 	if err != nil {
@@ -166,10 +181,10 @@ func TestOF_PRICE3_RisingMarketOverchargeReduced(t *testing.T) {
 	newCredits := creditsForAsk(face, newRate)
 	t.Logf("PRICE-3 rising market: spot=%s short=%s staleLong=%s", spot, sh, lo)
 	t.Logf("  BEFORE (old min=stale long %s): asker charged %s tokens for a %s face", oldRate, oldCredits, face)
-	t.Logf("  AFTER  (median %s):             asker charged %s tokens  (%.1f%% fewer, never below spot)",
+	t.Logf("  AFTER  (min(spot, short) %s):   asker charged %s tokens  (%.1f%% fewer, never above spot)",
 		newRate, newCredits, 100*(1-f2(newCredits)/f2(oldCredits)))
 	if newRate.Cmp(oldRate) <= 0 {
-		t.Fatalf("PRICE-3 not improved: median rate %s <= old stale rate %s (would not reduce the overcharge)", newRate, oldRate)
+		t.Fatalf("PRICE-3 not improved: rate %s <= old stale rate %s (would not reduce the overcharge)", newRate, oldRate)
 	}
 	if newRate.Cmp(spot) > 0 {
 		t.Fatalf("no-arbitrage breached: rate %s > spot %s", newRate, spot)
