@@ -5,7 +5,7 @@ Nothing on it assumes you know anything about Hive.
 
 ## What is Lumen?
 
-Lumen is a calmer place to read and write, built on top of the Hive blockchain.
+Lumen is a social network where followers become holders, built on top of the Hive blockchain.
 You read and write here; what you publish is stored on Hive, which is public and
 outside any one company's control.
 

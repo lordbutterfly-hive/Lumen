@@ -19,8 +19,7 @@ const logger = getLogger('app');
 // ★ Was Hive's boilerplate, describing Hive (2026-08-18). Kept identical to the
 // root layout's string on purpose, so a shared profile or post reads as the same
 // site as a shared home page rather than a second one.
-const SITE_DESC =
-  'A calmer place to read and write. Read what is worth your time. Write without chasing an audience.';
+const SITE_DESC = 'Where followers become holders.'; // the root layout's tagline (owner, 2026-09-16); keep identical
 
 // ★ NEVER `siteConfig.name` HERE (audit item 15) — see the long note at its
 // use below. The root layout's `%s - Lumen` template turns the bare site name

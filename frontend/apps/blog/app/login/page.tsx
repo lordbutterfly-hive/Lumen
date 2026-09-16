@@ -13,8 +13,8 @@ const googleReady = (() => {
 export const metadata: Metadata = {
   title: 'Sign in',
   description: googleReady
-    ? 'A calmer place to read and write. Start free with Lumen Lite (Google or Bitcoin, no keys), or sign in with your Hive account.'
-    : 'A calmer place to read and write. Start free with Lumen Lite using a Bitcoin or Ethereum wallet, or sign in with your Hive account.'
+    ? 'Where followers become holders. Start free with Lumen Lite (Google or Bitcoin, no keys), or sign in with your Hive account.'
+    : 'Where followers become holders. Start free with Lumen Lite using a Bitcoin or Ethereum wallet, or sign in with your Hive account.'
 };
 
 export default function LoginPage() {

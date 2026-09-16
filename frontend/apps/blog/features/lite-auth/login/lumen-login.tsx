@@ -41,7 +41,7 @@ import { SHOW_HELP_LINKS } from '@/blog/lib/help-visibility';
  * sentence, so the product's one line appeared twice in two different roles.
  */
 const COPY = {
-  tagline: 'A calmer place to read and write.',
+  tagline: 'Where followers become holders.',
   /**
    * ★★★ THE FIRST LINE SELLS THE PLACE, NOT THE SAFETY (v8, owner).
    *

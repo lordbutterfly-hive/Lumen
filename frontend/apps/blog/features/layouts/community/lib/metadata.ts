@@ -27,7 +27,7 @@ export async function buildCommunityTagMetadata(
     const communityName = data?.title ?? data?.name ?? tag;
     const titleSection = sectionLabel ? ` / ${sectionLabel}` : '';
     const title = `${communityName}${titleSection} - Lumen`;
-    const description = data?.description || `${tag} community. A calmer place to read and write.`;
+    const description = data?.description || `${tag} community. Where followers become holders.`;
     /**
      * ★ Falls through to OUR generated share card, not a flat logo (2026-08-28).
      * `/api/og` draws the name in Lora on Lumen's paper; it is the same card
@@ -67,10 +67,10 @@ export async function buildCommunityTagMetadata(
   }
   return {
     title: `#${tag}${sectionLabel ? ` / ${sectionLabel}` : ''} - Lumen`,
-    description: `${tag} community. A calmer place to read and write.`,
+    description: `${tag} community. Where followers become holders.`,
     openGraph: {
       title: `#${tag}${sectionLabel ? ` / ${sectionLabel}` : ''} - Lumen`,
-      description: `${tag} community. A calmer place to read and write.`,
+      description: `${tag} community. Where followers become holders.`,
       images: [`/api/og?title=${encodeURIComponent(`#${tag}`)}`]
     }
   };

@@ -1255,12 +1255,28 @@ const CreatorStudio: FC = () => {
   return (
     <TokenShell back={{ href: '/creators', label: '← All creators' }}>
       <div className="pt-[26px]">
-        <div className="mb-1 flex items-center gap-3">
-          <UserAvatarImg username={studio.creator ?? ''} apiSize="medium" pixelSize={44} radiusClassName="rounded-card" />
-          <div>
-            <h1 className="font-ui text-2xl font-medium text-ink-2">Creator Studio</h1>
-            <p className="text-[14px] leading-[22px] text-ink-10 font-ui">Your token @{displayHandle(studio.creator)} · your control room</p>
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <UserAvatarImg username={studio.creator ?? ''} apiSize="medium" pixelSize={44} radiusClassName="rounded-card" />
+            <div>
+              <h1 className="font-ui text-2xl font-medium text-ink-2">Creator Studio</h1>
+              <p className="text-[14px] leading-[22px] text-ink-10 font-ui">Your token @{displayHandle(studio.creator)} · your control room</p>
+            </div>
           </div>
+          {/* ★ THE WAY OUT TO THE PUBLIC PAGE (owner, 2026-09-16: "theres already a
+              pill on normal profile that leads there but we need one from creator
+              studio we forgot to add"). Same pill as profile-token-card.tsx's
+              Meritum pill, same destination (/m/<handle>), so the creator sees
+              their own market exactly as a buyer does. */}
+          {studio.creator ? (
+            <a
+              href={creatorPagePath(studio.creator)}
+              className="shrink-0 rounded-xl bg-surface-brand-12 px-7 py-3 font-ui text-[15px] leading-[24px] font-medium text-ink-27 transition-colors hover:bg-surface-brand-16"
+              data-testid="studio-meritum-page"
+            >
+              Your Meritum page
+            </a>
+          ) : null}
         </div>
 
         {/* Section tabs */}
