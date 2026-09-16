@@ -59,6 +59,7 @@ import MutePostDialog from './mute-post-dialog';
 import ChangeTitleDialog from '../community-profile/change-title-dialog';
 import TimeAgo from '@hive/ui/components/time-ago';
 import { UserAvatarImg } from '@ui/components';
+import TokenAuthorChip from '@/blog/features/creator-tokens/ui/token-author-chip';
 import { UserPopoverCard } from './user-popover-card';
 import { useTranslation } from '@/blog/i18n/client';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
@@ -742,6 +743,18 @@ const CommentListItem = memo(function CommentListItem({
                                   author_reputation={comment.author_reputation}
                                   blacklist={comment.blacklists}
                                 />
+                                {/* ★ THE MERITUM PILL, SAME RULE AS THE FEED AND THE POST
+                                    HEADER (owner, 2026-09-16: "accounts don't carry their
+                                    meritum pill next to their name like they do inside the
+                                    feeds"). Keyed on the DISPLAYED identity exactly as the
+                                    feed card keys its pill (medium-post-card.tsx passes
+                                    displayAuthor): a lite name has no market and draws
+                                    nothing; a Hive author with a market draws price + state
+                                    word. One shared discovery read per page, no per-comment
+                                    request (token-author-chip.tsx). */}
+                                <span className="ml-1.5 inline-flex items-center">
+                                  <TokenAuthorChip handle={displayAuthor} />
+                                </span>
                                 {/* ★ author_title badge removed (2026-08-16, spec). ChangeTitleDialog stays:
                                     it is the moderator's set_label write control, not the display. */}
                                 <ChangeTitleDialog
