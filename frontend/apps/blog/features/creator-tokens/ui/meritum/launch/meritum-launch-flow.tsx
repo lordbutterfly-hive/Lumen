@@ -400,7 +400,19 @@ const MeritumLaunchFlow: FC = () => {
             380 + 330 = 710 leaves 40px of slack at 750. The rail cannot go below
             330: the coin is 268px inside px-[30px], so 328px is its hard floor.
           */}
-          <div className="min-w-[min(100%,340px)] flex-1 basis-[380px] px-9 pb-9 pt-[34px]">
+          {/*
+            ★ SELF-LIMITING VERTICAL CENTRING (2026-09-17). The card's height is
+            whichever column is taller. Steps 2 and 3 are taller than the coin
+            rail, so THEY set it and `justify-center` does nothing there — it
+            only engages on the one panel that is shorter than the rail, step 1,
+            which lost its billing paragraph the same day (launch-step-account.tsx)
+            and would otherwise sit in the top third of a 617px card with ~200px
+            of white under the confirm button. Centring rather than padding
+            because the slack is not a constant: it is the difference between two
+            columns, and it changes with the viewport, the handle length and
+            whether the eligibility notice renders.
+          */}
+          <div className="flex min-w-[min(100%,340px)] flex-1 basis-[380px] flex-col justify-center px-9 pb-9 pt-[34px]">
             {/*
               ★ "STEP X OF 3" (2026-08-17, verified UX defect #3). There was no
               indicator anywhere in this flow telling a reader how much of it
@@ -462,9 +474,6 @@ const MeritumLaunchFlow: FC = () => {
               <LaunchStepAccount
                 handle={flow.handle}
                 account={account}
-                isLite={flow.block === 'lite'}
-                launchHoldHbd={flow.launchHoldHbd}
-                rules={flow.rules}
                 onConfirm={flow.goNext}
               />
             ) : flow.step === 2 ? (

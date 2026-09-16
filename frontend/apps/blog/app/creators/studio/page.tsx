@@ -5,8 +5,12 @@ import { getServerSessionUser, loginRedirectFor } from '@/blog/lib/server-sessio
 
 export const metadata: Metadata = {
   title: 'Creator Studio',
+  // ★ "subscription" DELETED 2026-09-17: the 10 HBD month left the contract on
+  // 2026-09-12 and the Studio has had no Subscription card since. A description
+  // is indexed and quoted by link unfurlers, so a stale word here outlives the
+  // screen it described.
   description:
-    'Launch and manage your Meritum on Lumen: set service prices, answer requests, manage your market, subscription, and earnings.'
+    'Launch and manage your Meritum on Lumen: set service prices, answer requests, manage your market and earnings.'
 };
 
 // A static segment, so it takes precedence over the /creators/[handle] dynamic

@@ -104,7 +104,27 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
     // This is the terms ledger a creator accepts, so it gets the v3 sentence,
     // not a deleted row: "there is no recurring cost" is itself a term, and
     // silence would read as an omission to anyone comparing the two versions.
-    { id: 'listed', label: t('meritum_launch.term_listed_label'), value: rules === 'v3' ? t('meritum_launch.term_listed_value_v3') : t('meritum_launch.term_listed_value') },
+    //
+    // ★ WHY IT SURVIVES HERE AND NOT ON STEP 1 (2026-09-17). The same two
+    // strings were also rendered under the account card on step 1, and the
+    // owner deleted them there. The distinction is what the two screens are
+    // for: step 1 asks "is this you?", so naming a fee that is not charged
+    // manufactures a worry; this is the LEDGER — a numbered list of what a
+    // creator is agreeing to, read once and struck — and "what does staying
+    // listed cost" is a question it is answering, not raising. The v3 value
+    // was reworded the same day to answer the label directly ("Nothing.")
+    // rather than deny a charge ("No monthly fee.").
+    // ★★★ `rules === 'v3'` → `hasNoSubscriptionUnder(rules)` (2026-09-17). This
+    // was the LAST billing branch in the app still pinned to the literal, and
+    // types.ts warns about exactly this shape: v4 is v3 plus the ask-gate
+    // removal, so it has no subscription either — but it is not the string
+    // 'v3', and this row would therefore have flipped back to "About $10 a
+    // month." on the day the v4 bytecode activates. Nothing would have failed;
+    // the terms ledger a creator accepts would simply have started quoting a
+    // charge that left the contract in September. Every sibling branch (the
+    // 'stop' row below, the step-1 disclosure before it was deleted, the Studio
+    // empty state) already reads the helper.
+    { id: 'listed', label: t('meritum_launch.term_listed_label'), value: hasNoSubscriptionUnder(rules) ? t('meritum_launch.term_listed_value_v3') : t('meritum_launch.term_listed_value') },
     { id: 'cut', label: t('meritum_launch.term_cut_label'), value: t('meritum_launch.term_cut_value', { pct: commission }) },
     // ★ TRADING FEE disclosed here (owner, 2026-09-04). 10% on every curve buy
     // and sell, split 5% creator + 5% platform (core/params.go TradeFeeBps=1000,
@@ -142,9 +162,16 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
     // Written as an explicit three-way, not `rules === 'v2' ? … : …` widened
     // by accident: each rule set owns a different FACT here, so falling
     // through to either neighbour would be wrong rather than merely stale.
+    // ★ THE LABEL IS BRANCHED TOO (2026-09-17). Only the VALUE was, so under v3
+    // the row rendered "IF YOU STOP PAYING — Only you can stop it. Retiring
+    // winds the market down…": a question about a bill that does not exist,
+    // answered by a sentence saying there is no bill. The label is half the
+    // row, and a rule-set branch that moves one half and not the other states
+    // the old rule in the part a reader scans FIRST. Same three-way shape and
+    // the same reason as the value below.
     {
       id: 'stop',
-      label: t('meritum_launch.term_stop_label'),
+      label: hasNoSubscriptionUnder(rules) ? t('meritum_launch.term_stop_label_v3') : t('meritum_launch.term_stop_label'),
       value:
         hasNoSubscriptionUnder(rules)
           ? t('meritum_launch.term_stop_value_v3')

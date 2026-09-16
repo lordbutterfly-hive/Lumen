@@ -36,7 +36,19 @@ const SECTIONS: { id: Section; label: string }[] = [
   { id: 'inbox', label: 'Inbox' },
   { id: 'offerings', label: 'Offerings' },
   { id: 'market', label: 'Market' },
-  { id: 'billing', label: 'Billing' },
+  // ★★ "BILLING" → "ENDING" (2026-09-17, owner). The label outlived what it
+  // named: the 10 HBD month left the contract on 2026-09-12 and the card lost
+  // its bill, its lapse and its Renew button the same day, leaving a tab called
+  // Billing whose only content was a sentence saying there is nothing to bill
+  // — the same stale framing as the wizard's step-1 disclosure, deleted in this
+  // commit (launch-step-account.tsx). What the tab actually holds is the one
+  // irreversible control in the Studio, so it is named for that.
+  // ★ THE ID STAYS 'billing'. It is in `Section`, in the ?section= query the
+  // page reads, and in whatever links a creator has already saved; renaming the
+  // id would 404 those for a cosmetic gain. Nothing in the repo links to
+  // ?section=billing today (only ?section=offerings does, from launch-struck),
+  // so the label is free to move while the id is not.
+  { id: 'billing', label: 'Ending' },
   { id: 'earnings', label: 'Earnings' }
 ];
 
@@ -1146,10 +1158,19 @@ const CreatorStudio: FC = () => {
               recurring cost from this screen for as long as the old contract is live,
               and surfacing that cost HERE is the whole reason the 2026-08-23 journey run
               added it. A screen that stops disclosing a real charge to avoid a stale
-              string is the same defect wearing the other mask. */}
+              string is the same defect wearing the other mask.
+
+              ★ 2026-09-17: the no-subscription branch dropped "no monthly fee" from its
+              sentence. Under the rule set it describes there is no fee to deny, and a
+              denial is still a mention — it plants the idea of a recurring charge in
+              the one line a creator reads before opening the wizard. The v1/v2 branch
+              is untouched and still quotes the real charge, for exactly the reason the
+              paragraph above gives. Same ruling deleted the wizard's step-1 disclosure
+              (launch-step-account.tsx) — the third of the "if either moves, move all
+              three" trio, and the reason none of the three names a fee any more. */}
           <p className="mt-3 font-ui text-[15px] leading-[24px] text-ink-10">
             {hasNoSubscriptionUnder(rules)
-              ? 'One token, bound to your account, that trades on a live market and is spent on your services. Free to launch, no monthly fee, and it stays listed until you retire it.'
+              ? 'One token, bound to your account, that trades on a live market and is spent on your services. Free to launch, and it stays listed until you retire it.'
               : 'One token, bound to your account, that trades on a live market and is spent on your services. Free to launch, then about $10 a month to stay listed. First month’s on the house.'}
           </p>
           <a
@@ -1835,7 +1856,7 @@ const CreatorStudio: FC = () => {
 
         {section === 'billing' ? (
           <Card>
-            <div className="mb-1 font-ui text-lg font-medium text-ink-2">Billing</div>
+            <div className="mb-1 font-ui text-lg font-medium text-ink-2">Ending</div>
             {/* ★★ THERE IS NOTHING TO PAY (OWNER RULING 2026-09-12). This card
                 used to carry the subscription: a "Paid up / Lapsed" line, a
                 "Renew ~$10" button, the S4 read-only "Check again" for a payment
@@ -1846,10 +1867,20 @@ const CreatorStudio: FC = () => {
                 be double-charged.
                 ★ WHAT SURVIVES IS THE ONE TRUE SENTENCE THIS CARD ALWAYS OWED A
                 CREATOR — what ENDING their token does to the people holding it —
-                and the control that does it, both directly below. */}
+                and the control that does it, both directly below.
+                ★★★ AND THE DENIAL WENT TOO (2026-09-17, owner). What was left
+                read "Your market stays listed for as long as you want it. There
+                is no subscription and nothing to renew." — a card, under a tab
+                called Billing, whose whole job had become telling a creator
+                about a charge that does not exist. A denial is still a mention:
+                it plants the charge in the reader's head so it can deny it. The
+                tab is named for what it holds (SECTIONS, above) and the card now
+                only answers the question that control raises — what ending does
+                to the people holding the token. Same ruling that deleted the
+                wizard's step-1 disclosure (launch-step-account.tsx). */}
             <p className="mb-4 text-[14px] leading-[22px] text-ink-8 font-ui">
-              Your market stays listed for as long as you want it. There is no subscription and nothing to renew.
-              Answering and cashing out are never blocked.
+              Your market stays listed for as long as you want it. Ending it is the only thing that closes buying,
+              and only you can do it. Answering and cashing out are never blocked.
             </p>
             <div className="mt-5 border-t border-line-2 pt-4">
               {market.windingDown ? (

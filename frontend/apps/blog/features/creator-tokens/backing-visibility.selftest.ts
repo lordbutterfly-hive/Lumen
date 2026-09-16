@@ -274,11 +274,20 @@ console.log('\n── 4. NO SENTENCE POINTS AT A FIGURE THAT IS NOT THERE.\n');
   // lapse and no bill since the OWNER RULING (core/params.go), so the sentence
   // is gone rather than gated — and what has to be asserted instead is that
   // NOTHING on that tab claims there is one.
+  // ★ RE-POINTED AGAIN 2026-09-17, and for the reason the note above gives about
+  // vacuous instruments. It asserted the PRESENCE of "There is no subscription
+  // and nothing to renew" — which pinned a denial in place: an assertion that
+  // the tab must keep talking about the charge in order to deny it. The owner
+  // deleted that sentence (the tab is now "Ending"), so the assertion is turned
+  // around to what it always meant: no word for the charge survives anywhere in
+  // the Studio, denial included. 'subscription', 'renew' and 'stop paying' are
+  // each scanned, so re-introducing any of the three fails here.
   check(
-    '★ the Billing tab makes no subscription claim at all — there is no bill to describe',
+    '★ the Studio makes no subscription claim at all, not even a denial — there is no bill to describe',
     count(studio.code, 'stop paying') === 0 &&
       count(studio.code, 'Renew ~$10') === 0 &&
-      studio.code.includes('There is no subscription and nothing to renew')
+      count(studio.code, 'nothing to renew') === 0 &&
+      count(studio.code, 'no subscription') === 0
   );
   check(
     '★ …and the false "holders are refunded" claim is gone from the studio entirely',
