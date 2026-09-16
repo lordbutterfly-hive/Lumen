@@ -1,5 +1,15 @@
 import type { QuoteOracleStatus } from '../types';
 
+/*
+ * ★ 2026-09-16 (OWNER RULING, contract v4): the four trading-history states
+ * below — insufficient_observations, insufficient_span, stale,
+ * deviation_capped — are only ever PRODUCED while the chain still runs a
+ * pre-v4 bytecode (vsc-data-source.readQuote mirrors whichever rule set the
+ * chain reports; contract-rules.ts askPricingUnder). Under v4 a service is
+ * priced off the curve at once and none of these can occur, so their copy
+ * is kept for the old chain only, not rewritten.
+ */
+
 /**
  * WHAT WE TELL PEOPLE WHEN A SERVICE CANNOT BE PRICED (2026-08-30, clauderfly-43).
  *

@@ -18,13 +18,16 @@
  * condition, and rulesForCode discriminates its inputs, so a constant function
  * could not pass the sections below by accident.
  */
-import { areaBaseUnitsBig } from '../lib/contract-math';
+import { areaBaseUnitsBig, settlementRateCurveBaseUnits, spotRateBaseUnits } from '../lib/contract-math';
 import type { ContractRules, MarketPhase } from '../types';
 import {
   V1_CODE_CID,
   V2_CODE_CIDS,
   V2_FAST_TWIN_CODE_CID,
   V3_CODE_CIDS,
+  V4_CODE_CIDS,
+  askPricingUnder,
+  hasNoSubscriptionUnder,
   closesIfDrainedUnder,
   reserveVersusCurve,
   rulesForCode,
@@ -74,6 +77,31 @@ function check(name: string, condition: boolean, detail?: string): void {
   // still charging and still lapsing, until activation lands.
   check('V3_CODE_CIDS is disjoint from V2 and from v1: no CID can answer to two rule sets',
     [...V3_CODE_CIDS].every((c) => !V2_CODE_CIDS.has(c) && c !== V1_CODE_CID) && V3_CODE_CIDS.size === 1);
+  // ★ v4 (2026-09-16): the no-trading-history-gate bytecode.
+  const v4 = [...V4_CODE_CIDS][0];
+  check('rulesForCode: the v4 cid -> v4, and v4 is disjoint from every older list',
+    rulesForCode(v4) === 'v4' && V4_CODE_CIDS.size === 1 && !V3_CODE_CIDS.has(v4) && !V2_CODE_CIDS.has(v4) && v4 !== V1_CODE_CID);
+  check('billing: v3 and v4 have no subscription; v1 and v2 do',
+    hasNoSubscriptionUnder('v3') && hasNoSubscriptionUnder('v4') && !hasNoSubscriptionUnder('v2') && !hasNoSubscriptionUnder('v1'));
+  check('ask pricing: only v4 prices off the curve; every older rule set keeps the windowed gate',
+    askPricingUnder('v4') === 'curve' && askPricingUnder('v3') === 'windowed' && askPricingUnder('v2') === 'windowed' && askPricingUnder('v1') === 'windowed');
+  // The v4 quote mirror (contract-math settlementRateCurveBaseUnits) against
+  // core/settlement.go after 2026-09-16: spot capped by the short window, no
+  // window required, the only refusal is no supply.
+  const spot200 = spotRateBaseUnits(200);
+  check('v4 mirror: no supply -> market_too_small (the chain\'s "no token to settle in")',
+    settlementRateCurveBaseUnits({ rateBaseUnits: 1500, status: 'ok' }, 0).status === 'market_too_small');
+  check('v4 mirror: a short window below spot caps the rate',
+    settlementRateCurveBaseUnits({ rateBaseUnits: 1500, status: 'ok' }, 200).rateBaseUnits === 1500);
+  check('v4 mirror: a short window above spot is capped at spot (no-arbitrage ceiling)',
+    settlementRateCurveBaseUnits({ rateBaseUnits: 60_000, status: 'ok' }, 200).rateBaseUnits === spot200 && spot200 === 2680);
+  check('v4 mirror: no usable short window -> the curve alone prices, never a refusal',
+    settlementRateCurveBaseUnits({ rateBaseUnits: null, status: 'insufficient_observations' }, 200).rateBaseUnits === spot200 &&
+    settlementRateCurveBaseUnits({ rateBaseUnits: null, status: 'stale' }, 200).status === 'ok' &&
+    settlementRateCurveBaseUnits({ rateBaseUnits: null, status: 'deviation_capped' }, 200).status === 'ok');
+  check('v4 inherits the v2/v3 wind-down and close rules (branches written !== v1)',
+    windingDownUnder('v4', { phase: 'FROZEN', retiredAtBlock: null }) === windingDownUnder('v3', { phase: 'FROZEN', retiredAtBlock: null }) &&
+    closesIfDrainedUnder('v4', { phase: 'FROZEN', retiredAtBlock: null, supplyTokens: 0 }) === closesIfDrainedUnder('v3', { phase: 'FROZEN', retiredAtBlock: null, supplyTokens: 0 }));
   check('every listed v2 and v3 CID is a CIDv1 raw/base32 string of the same shape as the live v1 one',
     [...V2_CODE_CIDS, ...V3_CODE_CIDS].every((c) => /^bafkrei[a-z2-7]{52}$/.test(c)) && /^bafkrei[a-z2-7]{52}$/.test(V1_CODE_CID));
 }

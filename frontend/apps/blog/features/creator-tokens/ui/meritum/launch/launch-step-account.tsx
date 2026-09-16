@@ -6,6 +6,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { PrimaryAction } from './launch-controls';
 import { MeritumEligibilityNotice, useMeritumEligibility } from '../../meritum-eligibility';
 import type { ContractRules } from '@/blog/features/creator-tokens/types';
+import { hasNoSubscriptionUnder } from '@/blog/features/creator-tokens/market/contract-rules';
 
 /**
  * STEP 1 — the bound account.
@@ -96,7 +97,7 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
             branch as step 3's terms ledger, reading the same two strings. */}
         <p className="mt-1.5">
           <span className="font-medium text-meritum-ink-3">{t('meritum_launch.term_listed_label')}:</span>{' '}
-          {rules === 'v3' ? t('meritum_launch.term_listed_value_v3') : t('meritum_launch.term_listed_value')}
+          {hasNoSubscriptionUnder(rules) ? t('meritum_launch.term_listed_value_v3') : t('meritum_launch.term_listed_value')}
         </p>
       </div>
 

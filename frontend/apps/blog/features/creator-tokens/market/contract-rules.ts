@@ -154,6 +154,17 @@ export const V3_CODE_CIDS: ReadonlySet<string> = new Set([
   'bafkreighvwezdaaatz6fhmtoboxxdp2hnknmljk6o3qaojim5ekhprfdzu' // v3: commission-in-tokens + subscription REMOVED + escrow-stranding + graduation-gate (2026-09-12)
 ]);
 /** The Stage D fixture's CID on its own, so a test can tell the two apart. Same rules as v2; never mainnet. */
+/**
+ * ★ v4 (2026-09-16, OWNER RULING): v3 plus the removal of the trading-history
+ * gate on paid asks. core/settlement.go SettlementRate = min(spot, short TWAP)
+ * when the ~hour window prices, spot otherwise; the 7-day window is recorded
+ * history only. Build: creator-tokens/build-wasm.sh EXPECTED_CID, reproduced
+ * twice at 159,488 bytes. Ships everything v3 was built to ship (the v3 CID
+ * was never deployed).
+ */
+export const V4_CODE_CIDS: ReadonlySet<string> = new Set([
+  'bafkreihvrfag55ceybqc4steidpk6iw7tdtpp5rbdm3hongr77nxjxcsbm' // v4: settlement prices off the curve at once; no 2-day / 8-trade gate (2026-09-16)
+]);
 export const V2_FAST_TWIN_CODE_CID = 'bafkreih4eper5br4vqmgip6f5vykwmhuxtor4j2pqaw2ewdtwuirzf5h7y';
 
 /** How long a chain answer about the deployed code is trusted before it is asked again. Bounds the deploy gap (header, item 3). */
@@ -169,8 +180,29 @@ export const RULES_RETRY_MS = 15_000;
  */
 export function rulesForCode(code: string | null | undefined): ContractRules {
   if (typeof code !== 'string') return 'v1';
+  if (V4_CODE_CIDS.has(code)) return 'v4';
   if (V3_CODE_CIDS.has(code)) return 'v3';
   return V2_CODE_CIDS.has(code) ? 'v2' : 'v1';
+}
+
+/**
+ * The billing fact v3 introduced (no 10 HBD month) and v4 keeps. Every UI
+ * branch that used to read `rules === 'v3'` reads this instead, so a future
+ * rule set cannot silently fall back to the subscription copy — the exact
+ * `=== 'v2'` shape types.ts warns about, one version later.
+ */
+export function hasNoSubscriptionUnder(rules: ContractRules): boolean {
+  return rules === 'v3' || rules === 'v4';
+}
+
+/**
+ * How a paid ask is priced by the live bytecode. 'curve': spot, capped by the
+ * ~hour average when one exists, never a required window (v4). 'windowed':
+ * the pre-2026-09-16 two-window gate the older bytecodes still enforce, which
+ * the quote must keep mirroring or it promises asks the chain refuses.
+ */
+export function askPricingUnder(rules: ContractRules): 'curve' | 'windowed' {
+  return rules === 'v4' ? 'curve' : 'windowed';
 }
 
 /** core/market.go inWindDown under each rule set. The rail switch: true routes a holder's exit to Refund, false to Sell. */

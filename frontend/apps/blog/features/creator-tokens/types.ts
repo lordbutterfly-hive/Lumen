@@ -121,7 +121,21 @@ export type MarketHealth = 'open' | 'lapsed' | 'delisted' | 'closed' | 'paused';
  * written `!== 'v1'`, never `=== 'v2'` — that exact shape is what this change
  * had to repair in two places.
  */
-export type ContractRules = 'v1' | 'v2' | 'v3';
+export type ContractRules = 'v1' | 'v2' | 'v3' | 'v4';
+
+/**
+ * ★★★ 'v4' IS THE NO-TRADING-HISTORY-GATE BYTECODE (2026-09-16 OWNER RULING,
+ * "we shouldn't have added this at all"). It is v3 in every rule but ONE: a
+ * service settles at the curve's spot price, capped by the ~hour average when
+ * one exists; no window is ever required, so a market with one buy behind it
+ * takes a paid ask at once. Until the chain reports this CID the client keeps
+ * mirroring the old two-window gate (core/settlement.go before 2026-09-16), so
+ * the quote never promises an ask the live bytecode would refuse.
+ *
+ * Every billing branch that reads `=== 'v3'` (no subscription) must treat v4
+ * the same — see `hasNoSubscriptionUnder` in market/contract-rules.ts, which
+ * is the ONLY place that knowledge lives now.
+ */
 
 // THERE IS NO RenewRefusal. It named why a renewal would be refused — paused,
 // retired, closed, a v1 terminal lapse, or v2's surplus/deficit revival check —

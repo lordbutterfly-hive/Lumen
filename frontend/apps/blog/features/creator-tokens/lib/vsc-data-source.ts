@@ -71,7 +71,8 @@ import {
   BLOCKS_PER_DAY,
   EXIT_TAX_DECAY_BLOCKS,
   displayPricePerTokenBaseUnits,
-  type AskRateEstimate
+  type AskRateEstimate,
+  settlementRateCurveBaseUnits
 } from './contract-math';
 import {
   type CustomJsonOp,
@@ -158,7 +159,7 @@ import {
   STATE_CLOSED, assertTransferDestination, kLots, parseLots } from './vsc/reads';
 import { displayPriceUsd } from '../market/curve';
 import { marketHealthOf, windingDownOf } from '../market/market-health';
-import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, rulesForCode, windingDownUnder } from '../market/contract-rules';
+import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, rulesForCode, windingDownUnder, askPricingUnder } from '../market/contract-rules';
 // ★ EXECUTION CONFIRMATION (2026-08-31, seventeen-unconfirmed-writes finding).
 // The money-moving writes confirm by polling the tx's own terminal status
 // through the SAME findTransaction query the wallet rail already runs
@@ -1133,7 +1134,15 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // with a null rate — the ask action must read as unavailable, exactly
     // mirroring what a real ask() call would do right now (RequireInflowOpen
     // is a separate gate; this is the settlement-refusal gate).
-    const settlement = settlementRateBaseUnits(estimate, longEstimate, supplyTokens);
+    // ★ WHICH SETTLEMENT THE LIVE BYTECODE RUNS (2026-09-16). 'curve' is v4:
+    // spot capped by the short window, no window required. Anything older
+    // still enforces the two-window gate, and the quote must keep mirroring
+    // it or it promises an ask the chain refuses (contract-rules.ts, rule 4:
+    // never assume the new rules against the old chain).
+    const settlement =
+      askPricingUnder(await this.readRules()) === 'curve'
+        ? settlementRateCurveBaseUnits(estimate, supplyTokens)
+        : settlementRateBaseUnits(estimate, longEstimate, supplyTokens);
     if (settlement.rateBaseUnits === null) {
       return unpriced(settlement.status, head);
     }

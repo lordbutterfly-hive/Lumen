@@ -7,6 +7,7 @@ import type { MeritumLaunchBlock } from './use-meritum-launch';
 import { MagiFuelGauge, MagiFundingHelp } from '@/blog/features/creator-tokens/live/magi-fuel-gauge';
 import type { MagiSpendingPowerState } from '@/blog/features/creator-tokens/live/use-magi-spending-power';
 import type { ContractRules } from '@/blog/features/creator-tokens/types';
+import { hasNoSubscriptionUnder } from '@/blog/features/creator-tokens/market/contract-rules';
 
 /**
  * STEP 3 — the terms ledger, the optional first buy, and the strike.
@@ -145,7 +146,7 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
       id: 'stop',
       label: t('meritum_launch.term_stop_label'),
       value:
-        rules === 'v3'
+        hasNoSubscriptionUnder(rules)
           ? t('meritum_launch.term_stop_value_v3')
           : rules === 'v2'
             ? t('meritum_launch.term_stop_value_v2')

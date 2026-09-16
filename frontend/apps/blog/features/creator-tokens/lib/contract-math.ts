@@ -1193,6 +1193,29 @@ export function settlementRateBaseUnits(
 }
 
 /** core/params.go MaxServiceFaceAreaBps — a service's token leg may not exceed 50% of the curve area (RULING C2 depth ceiling). */
+/**
+ * ★ v4 settlement mirror (2026-09-16 OWNER RULING, core/settlement.go
+ * SettlementRate after the change): the rate is the curve's spot, capped by
+ * the ~hour window when that window prices; NO window is ever required, and
+ * the 7-day ring is not read at all. A short-window refusal for a MARKET
+ * reason (too young, stale, deviation-capped) is not a refusal here — the
+ * curve alone prices — which is exactly the contract's own fallback. The only
+ * remaining refusal is a market with no supply (there is no token to settle
+ * in; the chain says ErrOracle "no supply"), reported as 'market_too_small' so
+ * the copy says "too new" rather than inventing a trading-history story.
+ * Zero supply is also the only way `spot` here is non-positive.
+ */
+export function settlementRateCurveBaseUnits(short: AskRateEstimate, supplyTokens: number): SettlementRateResult {
+  const spot = spotRateBaseUnits(supplyTokens);
+  if (!(supplyTokens > 0) || spot <= 0) {
+    return { rateBaseUnits: null, status: 'market_too_small' };
+  }
+  if (short.status === 'ok' && short.rateBaseUnits !== null && short.rateBaseUnits > 0) {
+    return { rateBaseUnits: Math.min(short.rateBaseUnits, spot), status: 'ok' };
+  }
+  return { rateBaseUnits: spot, status: 'ok' };
+}
+
 export const MAX_SERVICE_FACE_AREA_BPS = 5000;
 /** core/params.go MaxSpendSupplyBps — one settlement may consume at most 5% of supply (RULING C2 spend cap). */
 export const MAX_SPEND_SUPPLY_BPS = 500;

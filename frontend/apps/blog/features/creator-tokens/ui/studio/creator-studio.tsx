@@ -7,6 +7,7 @@ import { displayHandle, dueLabelFor } from '../../live/adapt';
 import { FC, useState, useEffect, useRef } from 'react';
 import { useLiveStudio, type LiveStudio } from '../../live/use-live-studio';
 import { useContractRules } from '../../live/use-contract-rules';
+import { hasNoSubscriptionUnder } from '../../market/contract-rules';
 import { useMagiSpendingPower } from '../../live/use-magi-spending-power';
 import { MarketLoading, MarketRateLimited, MarketReadFailed, MarketSessionUnavailable, MarketUnavailable } from '../../live/market-states';
 import type { Ask } from '../../types';
@@ -1147,7 +1148,7 @@ const CreatorStudio: FC = () => {
               added it. A screen that stops disclosing a real charge to avoid a stale
               string is the same defect wearing the other mask. */}
           <p className="mt-3 font-ui text-[15px] leading-[24px] text-ink-10">
-            {rules === 'v3'
+            {hasNoSubscriptionUnder(rules)
               ? 'One token, bound to your account, that trades on a live market and is spent on your services. Free to launch, no monthly fee, and it stays listed until you retire it.'
               : 'One token, bound to your account, that trades on a live market and is spent on your services. Free to launch, then about $10 a month to stay listed. First month’s on the house.'}
           </p>
