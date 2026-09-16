@@ -133,7 +133,20 @@ function siteDomain(): string {
   return 'http://localhost:3000';
 }
 
-const SITE_DESC = 'A calmer place to read and write. Read what is worth your time. Write without chasing an audience.';
+/**
+ * ★ THE TAGLINE (owner, 2026-09-16): "Where followers become holders." It is
+ * the card's description on every unfurler and it is baked into the card
+ * image, so the two cannot drift.
+ *
+ * ★★ THE IMAGE FILENAME CARRIES A DATE, AND MUST CHANGE WITH THE PICTURE.
+ * Discord, X and the rest key their card cache on the image URL. On
+ * 2026-09-09 `og-plain.png` was regenerated in place from "LUMEN.BLOG" to
+ * "LUMENSOCIAL.NET" and Discord went on showing the old render a week later,
+ * because the URL had not changed. Never regenerate a card image under a
+ * name an unfurler has already seen; write a new file and point here at it.
+ */
+const SITE_DESC = 'Where followers become holders.';
+const SITE_CARD = '/lumen/og-home-20260916.png';
 
 const metadata = {
   /**
@@ -178,7 +191,7 @@ const metadata = {
     description: SITE_DESC,
     // The TODO that sat here is done: this is Lumen's own card now (LP8, warm
     // paper, wordmark, masthead rule), not hive.blog's.
-    images: ['/lumen/og-plain.png']
+    images: [SITE_CARD]
   },
   twitter: {
     // ★ `summary_large_image`, not `summary`: the card is a 1200x630 landscape
@@ -190,7 +203,7 @@ const metadata = {
     // `site` rather than keeping the unrelated official @hiveblocks handle.
     title: siteConfig.name,
     description: SITE_DESC,
-    images: ['/lumen/og-plain.png']
+    images: [SITE_CARD]
   },
   other: {
     // Real placeholder removed: no Facebook App ID is configured anywhere in

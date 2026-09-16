@@ -3,8 +3,9 @@ import type { Metadata } from 'next';
 
 // The same words as app/layout.tsx's SITE_DESC (not exported there), kept
 // identical so the home page reads as the same site as every other page.
-const SITE_DESC =
-  'A calmer place to read and write. Read what is worth your time. Write without chasing an audience.';
+const SITE_DESC = 'Where followers become holders.';
+// Same dated filename as app/layout.tsx (its comment says why the date is there).
+const SITE_CARD = '/lumen/og-home-20260916.png';
 
 /**
  * ★ THE HOME PAGE NAMES ITS OWN ADDRESS (2026-09-09). The root layout's Open
@@ -22,7 +23,7 @@ export const metadata: Metadata = {
     siteName: 'Lumen',
     title: 'Lumen',
     description: SITE_DESC,
-    images: ['/lumen/og-plain.png']
+    images: [SITE_CARD]
   }
 };
 import { InitialFeedProvider } from '@/blog/components/observer-provider';
