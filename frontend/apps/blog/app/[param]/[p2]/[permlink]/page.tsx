@@ -15,6 +15,7 @@ import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { isUsernameValid, isPermlinkValid, isValidUserParam } from '@/blog/utils/validate-links';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { getLogger } from '@ui/lib/logging';
+import { renderTimer, renderStopwatch, renderTimingEnabled } from '@ui/lib/render-timing';
 import { isCommunity } from '@ui/lib/utils';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
 import {
@@ -89,18 +90,71 @@ const PostPage = async ({
   let mutedListData = null;
 
   try {
+    /*
+     * ★★★ MEASUREMENT ONLY, CHANGES NOTHING (2026-09-16).
+     *
+     * WHY. This fan-out has no deadline. The render blocks on the SLOWEST of
+     * these calls and each one runs to wax's full 8,000ms timeout. The profile
+     * page's equivalent read IS capped, at 3,500ms
+     * (lib/feed/posts-prefetch-budget.ts), and the difference shows in the log:
+     * the capped call's failure rate is FLAT across a 14x volume swing (28 per
+     * 1,000 renders quiet and at peak alike), while this page's moves 1.2 -> 36.6
+     * per 1,000, roughly 30x, on post traffic that is flat 24/7 at ~2,300/hour.
+     *
+     * Everything on our side was eliminated first, with numbers, so that this
+     * instrument is not measuring a hypothesis someone already disproved: event
+     * loop lag (the highest-lag minutes had the LOWEST failure rate), render
+     * concurrency (max 7 renders in any second, inflight max 4), the undici pool
+     * (64 connections per worker, never approached), cache miss rate (flat 51-58%
+     * every hour), restarts (the hour with three restarts had the day's lowest
+     * failure rate) and post size (p50 identical quiet vs peak).
+     *
+     * WHAT IS STILL UNKNOWN, and the only reason this exists: WHICH branch is
+     * slow, and how often. `render-timing` covers root-layout, profile-layout,
+     * account-full and profile-posts. It has never covered the post page, which
+     * serves 99.93% of its renders to anonymous clients. Capping this fan-out
+     * without that number would be guessing at which call to cap and at what.
+     *
+     * ★ PER-BRANCH STOPWATCHES, NOT `mark()`. These calls OVERLAP, so "time
+     * since the previous mark" is meaningless for them -- the exact case
+     * `renderStopwatch` was written for; see its doc in @ui/lib/render-timing.
+     *
+     * ★ AN INSTRUMENT IS NEVER A PARTICIPANT. With LUMEN_RENDER_TIMING unset,
+     * `timed` returns the promise untouched: no wrapper, no closure, no
+     * allocation per branch. With it set, the wrapper records on BOTH settle
+     * paths and rethrows the original rejection unaltered, so `allSettled` sees
+     * exactly the outcome it would have seen either way.
+     */
+    const fanOutTimer = renderTimer('post-page');
+    const timingOn = renderTimingEnabled();
+    const branchMs: Record<string, number> = {};
+    const timed = <T,>(name: string, work: Promise<T>): Promise<T> => {
+      if (!timingOn) return work;
+      const watch = renderStopwatch();
+      return work.then(
+        (value) => {
+          branchMs[name] = watch.elapsedMs();
+          return value;
+        },
+        (error) => {
+          branchMs[name] = watch.elapsedMs();
+          throw error;
+        }
+      );
+    };
+
     // Fetch post, discussion, and optionally community in parallel.
     // ActiveVotes and rolesList are secondary — fetched client-side only.
     const [postResult, discussionResult, mutedListResult, communityResult] = await Promise.allSettled([
       // Use cached version — deduplicated with layout's generateMetadata within the same request
-      getPostCached(username, permlink, observer),
-      getDiscussionCached(username, permlink, observer),
+      timed('post', getPostCached(username, permlink, observer)),
+      timed('discussion', getDiscussionCached(username, permlink, observer)),
       // Prefetch the user's muted list so comments are filtered from the first render.
       // ★ CACHED, 30s, keyed on (observer, follow_type) — see getFollowListCached's
       // own doc in cached-api.ts. This was the one branch here with no
       // cross-request memory at all; a just-muted account can show for up to
       // 30s on a fresh page load, which that doc explains is the accepted cost.
-      isLoggedIn ? getFollowListCached(observer, 'muted') : Promise.resolve(null),
+      isLoggedIn ? timed('muted', getFollowListCached(observer, 'muted')) : Promise.resolve(null),
       // ★ `correctSubscribers: false` (2026-09-05, TTFB pass) — this page never
       // shows `.subscribers` (see `getCommunity`'s own doc in bridge-api.ts), so
       // it must not block on the banned-subscriber-count correction that number
@@ -108,9 +162,31 @@ const PostPage = async ({
       // without this flag it sat on the critical path of every community post's
       // `Promise.allSettled` for a number this render never uses.
       isCommunity(community)
-        ? getCommunityCached(community, observer, { correctSubscribers: false })
+        ? timed('community', getCommunityCached(community, observer, { correctSubscribers: false }))
         : Promise.resolve(null)
     ]);
+
+    if (timingOn) {
+      // `slowest` is the whole question a deadline would have to answer: capping
+      // the fan-out only helps if the wait is concentrated in one branch. -1 means
+      // NOT MEASURED (renderStopwatch's contract), never "instant" -- a branch that
+      // was skipped, e.g. `community` on a non-community post, reports -1 and must
+      // not be read as a fast call.
+      const ranked = Object.entries(branchMs).sort((a, b) => b[1] - a[1]);
+      const slowest = ranked[0];
+      fanOutTimer.done({
+        user: username,
+        anon: isLoggedIn ? 'false' : 'true',
+        post: `${branchMs.post ?? -1}ms`,
+        discussion: `${branchMs.discussion ?? -1}ms`,
+        community: `${branchMs.community ?? -1}ms`,
+        muted: `${branchMs.muted ?? -1}ms`,
+        slowest: slowest ? slowest[0] : 'none',
+        slowestms: `${slowest ? slowest[1] : -1}ms`,
+        postok: postResult.status === 'fulfilled' ? 'yes' : 'no',
+        discok: discussionResult.status === 'fulfilled' ? 'yes' : 'no'
+      });
+    }
 
     postData = postResult.status === 'fulfilled' ? (postResult.value ?? null) : null;
 
