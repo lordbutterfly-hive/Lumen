@@ -512,6 +512,41 @@ export const CONTRACT_QUERY = `query CreatorTokensContract($id: String!) {
   findContract(filterOptions: { byId: $id }) { id code }
 }`;
 
+/**
+ * The block of this contract's most recent output, per the CHAIN.
+ *
+ * ★★★ THIS EXISTS BECAUSE THE INDEXER-LAG BANNER WAS A FALSE ALARM
+ * (2026-09-17). `useIndexerHealth` measured lag as
+ * `localNodeInfo.last_processed_block - indexer_health.latest_block_height`,
+ * and those two numbers are not comparable. The node's head advances every
+ * block; `indexer_health` is `MAX(block_height) FROM contract_logs`
+ * (magi-mongo-indexer datalayer.go EnsureHealthView), and `contract_logs`
+ * gets one row per LOG ENTRY of a tracked contract (fetcher/mongo.go's
+ * `for _, logEntry := range result.Logs`), never one per block scanned. So
+ * the "lag" was really "blocks since anyone last used any tracked contract",
+ * which on a young product is hours by lunchtime. Proven live: `/creators`
+ * told every visitor "the creator index is about 2 hours behind the chain"
+ * while the index was in fact 9 blocks off the chain's own record of THIS
+ * contract.
+ *
+ * Comparing THIS number against the indexer's last log block FOR THE SAME
+ * CONTRACT makes both sides measure the one thing the banner is about —
+ * "has the index seen everything this contract has done" — so an idle
+ * contract leaves both sides parked on the same old block and says nothing,
+ * while a stalled indexer shows a real and growing gap.
+ *
+ * Rows come back newest-first: the resolver sorts `block_height: -1` before
+ * it paginates (go-vsc-node hive_blocks.go GetAggTimestampPipeline, used by
+ * contracts.go FindOutputs), so `limit: 1` is the latest output and not an
+ * arbitrary one. Sent through the same-origin proxy like every other query
+ * here, so it must stay in that route's exact-match allowlist
+ * (app/api/creator-tokens/gql/route.ts ALLOWED_QUERIES) or the health read
+ * fails closed to "cannot tell", which is the honest default.
+ */
+export const CONTRACT_OUTPUT_QUERY = `query CreatorTokensLastOutput($id: String!) {
+  findContractOutput(filterOptions: { byContract: $id, limit: 1 }) { block_height }
+}`;
+
 export class CreatorTokensGqlClient {
   // No longer picks the network target (see postGql's own doc — every call now
   // goes to the same-origin proxy, which reads the real upstream from its own
@@ -567,6 +602,24 @@ export class CreatorTokensGqlClient {
     const row = rows.find((r) => getJsonProp(r, 'id') === contractId) ?? rows[0];
     const code = getJsonProp(row, 'code');
     return typeof code === 'string' && code.length > 0 ? code : null;
+  }
+
+  /**
+   * The block height of this contract's latest output, or null when the node
+   * answered without one — which includes the legitimate "this contract has
+   * never run" case, so null is never an error here and never a lag.
+   * THROWS on a transport or GraphQL error, like getContractCode: the caller
+   * (vsc-data-source.ts readIndexerHealth) reports an unreadable side as
+   * "cannot tell", never as "up to date".
+   */
+  async getLastOutputBlock(contractId: string): Promise<number | null> {
+    const data = await postGql(CONTRACT_OUTPUT_QUERY, { id: contractId });
+    const rows = getJsonProp(data, 'findContractOutput');
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const height = Number(getJsonProp(rows[0], 'block_height'));
+    // Same fail-closed rule as getHeadBlock below: a height that coerces to 0
+    // is a missing field, not block zero, and must not be read as one.
+    return Number.isFinite(height) && height > 0 ? height : null;
   }
 
   async getHeadBlock(): Promise<number | null> {

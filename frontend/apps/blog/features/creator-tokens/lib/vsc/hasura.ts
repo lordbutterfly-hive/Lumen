@@ -304,6 +304,36 @@ export class MagiIndexerClient {
     };
   }
 
+  /**
+   * The highest block at which this indexer recorded a log FOR ONE CONTRACT.
+   *
+   * ★ NOT `health()` ABOVE, and the difference is the whole point (2026-09-17).
+   * `indexer_health` is `MAX(block_height) FROM contract_logs` across EVERY
+   * tracked contract, so it answers "when did anything last happen on this
+   * Hasura", which is not a statement about our contract or about how far the
+   * indexer has scanned. Scoping to `contract_address` makes this comparable
+   * to the chain's own `findContractOutput` for the same contract, which is
+   * what turns the lag banner from a guess into a measurement — see
+   * CONTRACT_OUTPUT_QUERY's doc in ../vsc/reads.ts.
+   *
+   * Returns null when this contract has no logs at all (a real state for a
+   * contract nobody has used yet), which callers must treat as "nothing to be
+   * behind on", never as a lag.
+   */
+  async lastLogBlock(contractId: string): Promise<number | null> {
+    const data = await this.query(
+      `query ContractLastLog($contract: String!) {
+         contract_logs(where: { contract_address: { _eq: $contract } }, order_by: { block_height: desc }, limit: 1) {
+           block_height
+         }
+       }`,
+      { contract: contractId }
+    );
+    const rows = rowsOf(data, 'contract_logs');
+    if (rows.length === 0) return null;
+    return numOrNull(field(rows[0], 'block_height'));
+  }
+
   /** The ranked creator list. Ordering lives in the VIEW, deliberately — so a client cannot quietly re-rank on price or volume. */
   async discovery(limit = 60): Promise<HasuraDeliveryRow[]> {
     const data = await this.query(

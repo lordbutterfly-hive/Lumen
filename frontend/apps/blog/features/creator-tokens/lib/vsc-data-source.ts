@@ -1905,24 +1905,59 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
    * working page over a diagnostic. `available: false` says "cannot tell",
    * which the UI is required to render as unknown and never as healthy.
    */
+  /**
+   * ★★★ THE TWO NUMBERS MUST MEASURE THE SAME THING (rewritten 2026-09-17).
+   *
+   * This used to compare the node's HEAD against `indexer_health`'s global
+   * `latest_block_height`. Those are not the same quantity: the head advances
+   * every 3 seconds no matter what, while `indexer_health` is
+   * `MAX(block_height) FROM contract_logs` over every tracked contract
+   * (magi-mongo-indexer `EnsureHealthView`), and `contract_logs` takes one row
+   * per LOG ENTRY, never one per block scanned. The difference therefore
+   * measured "how long since anyone last touched any tracked contract" and
+   * reported it as indexer lag. On a young product that is hours by lunchtime,
+   * so `/creators` warned every visitor that the index was stale while it was
+   * in fact current — proven live 2026-09-17: the banner claimed ~2 hours
+   * behind when the indexer was 9 blocks off the chain's own record.
+   *
+   * Both sides are now scoped to THIS CONTRACT: what the chain says it last
+   * did (`findContractOutput byContract`) against what the indexer last
+   * recorded for it (`contract_logs` filtered by `contract_address`). An idle
+   * contract leaves both on the same old block and produces silence; a stalled
+   * indexer produces a real, growing gap. A contract that has never run reads
+   * null on the chain side — nothing to be behind on, not a lag.
+   *
+   * `lastUpdate` still comes from `indexer_health` and is still only ever
+   * DISPLAYED, never the lag decision, exactly as its own doc says.
+   */
   async readIndexerHealth(): Promise<IndexerHealth> {
     const unknown: IndexerHealth = {
       available: false,
       lastUpdate: null,
       indexerBlock: null,
-      nodeBlock: null,
+      chainBlock: null,
       blocksBehind: null
     };
     if (!this.indexer) return unknown;
     try {
-      const [health, nodeBlock] = await Promise.all([this.indexer.health(), this.gql.getHeadBlockCached()]);
-      const indexerBlock = health.latestBlockHeight;
+      const [health, indexerBlock, chainBlock] = await Promise.all([
+        this.indexer.health(),
+        this.indexer.lastLogBlock(this.config.contractId),
+        this.gql.getLastOutputBlock(this.config.contractId)
+      ]);
       // Both heights, or no lag number at all. A one-sided read cannot produce
       // a difference, and defaulting the missing side to 0 would report the
-      // entire chain height as the lag.
+      // entire chain height as the lag. The one asymmetric case is deliberate:
+      // a chain that has no output for this contract (chainBlock null) means
+      // there is nothing the indexer could be missing, so the honest answer is
+      // 0 behind rather than "unknown".
       const blocksBehind =
-        indexerBlock !== null && nodeBlock !== null ? Math.max(0, nodeBlock - indexerBlock) : null;
-      return { available: true, lastUpdate: health.lastUpdate, indexerBlock, nodeBlock, blocksBehind };
+        chainBlock === null
+          ? 0
+          : indexerBlock === null
+            ? null
+            : Math.max(0, chainBlock - indexerBlock);
+      return { available: true, lastUpdate: health.lastUpdate, indexerBlock, chainBlock, blocksBehind };
     } catch {
       return unknown;
     }

@@ -186,7 +186,7 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
    */
   async readIndexerHealth(): Promise<IndexerHealth> {
     await delay(50);
-    return { available: false, lastUpdate: null, indexerBlock: null, nodeBlock: null, blocksBehind: null };
+    return { available: false, lastUpdate: null, indexerBlock: null, chainBlock: null, blocksBehind: null };
   }
 
   async readDiscovery(): Promise<CreatorSummary[]> {

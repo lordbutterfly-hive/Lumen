@@ -851,13 +851,31 @@ export interface IndexerHealth {
   available: boolean;
   /** `indexer_health.last_update`, verbatim, for display. Never the lag decision. */
   lastUpdate: string | null;
-  /** Highest block the indexer has ingested (`indexer_health.latest_block_height`). */
-  indexerBlock: number | null;
-  /** The Magi node's own head at the same moment (`localNodeInfo.last_processed_block`). */
-  nodeBlock: number | null;
   /**
-   * `nodeBlock - indexerBlock`, clamped at 0. null when either side is
+   * The last block at which the indexer recorded a log FOR THE CREATOR-TOKENS
+   * CONTRACT (`contract_logs` scoped to `contract_address`).
+   *
+   * ★ DELIBERATELY NOT `indexer_health.latest_block_height` (2026-09-17). That
+   * field is `MAX(block_height)` over EVERY tracked contract's logs, so it
+   * moves when some unrelated contract is used and stands still when ours is
+   * simply idle — it cannot answer "is this page's data current".
+   */
+  indexerBlock: number | null;
+  /**
+   * The last block at which THE CHAIN says that same contract produced an
+   * output (`findContractOutput byContract`). The comparable half of
+   * `indexerBlock` — both sides now measure the same contract's activity, so
+   * an idle contract parks both on one block instead of manufacturing lag.
+   */
+  chainBlock: number | null;
+  /**
+   * `chainBlock - indexerBlock`, clamped at 0. null when either side is
    * unreadable — null is "we don't know how far behind", never "not behind".
+   *
+   * Expect a SMALL non-zero value on a healthy indexer: a contract's output is
+   * written a few blocks after the input that triggered it, and the log rows
+   * carry the input's block (measured 9 blocks apart on mainnet, 2026-09-17),
+   * which is why the staleness threshold is hundreds of blocks and not one.
    */
   blocksBehind: number | null;
 }

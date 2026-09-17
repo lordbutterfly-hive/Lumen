@@ -14,6 +14,16 @@
  *
  * See `IndexerHealth` for why the lag is a BLOCK difference and never a
  * comparison against the viewer's clock.
+ *
+ * ★★★ WHAT THE LAG IS MEASURED FROM CHANGED (2026-09-17). The original
+ * implementation compared the node's head against `indexer_health`'s global
+ * `latest_block_height` — two numbers that do not measure the same thing (see
+ * `readIndexerHealth` in vsc-data-source.ts for the full account). The result
+ * was a banner that fired on IDLENESS: with no tracked-contract activity for a
+ * couple of hours, `/creators` told every visitor the index was hours behind
+ * while it was 9 blocks off the chain. Both sides are now scoped to the
+ * creator-tokens contract, so silence on a quiet day is silence, and the
+ * threshold below only ever sees a real gap.
  */
 
 import { useQuery } from '@tanstack/react-query';
@@ -31,6 +41,16 @@ const healthKey = ['creatorTokens', 'live', 'indexerHealth'];
  * enough to catch ordinary catch-up jitter would put a warning banner on a
  * working page and teach readers to ignore it. The lag this was written for was
  * 20,100 blocks, so it is not a close call in the case that matters.
+ *
+ * It also has to absorb the small STRUCTURAL offset between the two sides: a
+ * contract's output lands a few blocks after the input that triggered it, and
+ * the indexer's log rows carry the input's block (measured 9 blocks apart on
+ * mainnet, 2026-09-17). 600 is two orders of magnitude clear of that.
+ *
+ * ★ That 20,100-block reading came from the OLD, idleness-sensitive
+ * measurement, so it may have been a quiet chain rather than a real stall —
+ * unprovable now. The threshold is kept as-is regardless: it is sized for the
+ * failure it guards against, not for that one observation.
  */
 export const LAG_BLOCKS_THRESHOLD = 600;
 
@@ -63,7 +83,7 @@ export function useIndexerHealth(): IndexerLag {
     available: false,
     lastUpdate: null,
     indexerBlock: null,
-    nodeBlock: null,
+    chainBlock: null,
     blocksBehind: null
   };
 

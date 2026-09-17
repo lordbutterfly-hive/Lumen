@@ -30,10 +30,15 @@
  *     yet" while live markets sit an inch above it in the New-here shelf.
  *
  * ★ THIS IS NOT THE STALENESS BANNER'S JOB AND DOES NOT REPLACE IT. That banner
- * ("The creator index is about N hours behind the chain") is correct, was built
- * deliberately, and answers a different question: it says the delivery data is
- * OLD. This says there is no delivery data AT ALL. Both are true on the current
- * build — ~30 hours behind AND nothing to rank — and neither implies the other.
+ * ("The creator index is about N hours behind the chain") answers a different
+ * question: it says the delivery data is OLD. This says there is no delivery
+ * data AT ALL, and neither implies the other.
+ *
+ * ★ The "~30 hours behind" this note used to cite as fact came from the
+ * banner's ORIGINAL measurement, which fired on idleness rather than on lag
+ * (corrected 2026-09-17 — see use-indexer-health.ts). Treat it as unproven:
+ * what is certainly true on the current build is the half this file is about,
+ * that there is nothing to rank.
  */
 
 import type { CreatorSummary } from '../types';

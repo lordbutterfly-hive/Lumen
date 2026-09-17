@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { CONTRACT_QUERY, HEAD_QUERY, STATE_QUERY, STATE_QUERY_HEX } from '@/blog/features/creator-tokens/lib/vsc/reads';
+import { CONTRACT_OUTPUT_QUERY, CONTRACT_QUERY, HEAD_QUERY, STATE_QUERY, STATE_QUERY_HEX } from '@/blog/features/creator-tokens/lib/vsc/reads';
 import { BALANCE_QUERY } from '@/blog/lib/lite/wallet/magi-balance';
 import { MAGI_ASSETS_QUERY } from '@/blog/lib/lite/wallet/magi-assets';
 import { SIMULATE_QUERY } from '@/blog/lib/lite/wallet/magi-simulate';
@@ -85,6 +85,12 @@ const ALLOWED_QUERIES = new Set<string>([
   HEAD_QUERY,
   BALANCE_QUERY,
   CONTRACT_QUERY,
+  // CONTRACT_OUTPUT_QUERY added 2026-09-17: the chain's own record of when this
+  // contract last produced an output. It is the other half of the indexer-lag
+  // comparison (see its doc in reads.ts for why the previous comparison was a
+  // false alarm) and is imported by identity, like every entry above, so the
+  // proxy and the client cannot drift.
+  CONTRACT_OUTPUT_QUERY,
   MAGI_ASSETS_QUERY,
   SIMULATE_QUERY
 ]);
