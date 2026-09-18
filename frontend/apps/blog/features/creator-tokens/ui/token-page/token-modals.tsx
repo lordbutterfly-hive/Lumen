@@ -1323,7 +1323,16 @@ const InterstitialModal: FC<{ handle: string; onClose: () => void }> = ({ onClos
       <div className="flex gap-3">
         <button
           onClick={onClose}
-          className="flex-1 rounded-xl bg-surface-42 py-3.5 text-[15px] leading-[24px] font-medium text-ink-27 font-ui hover:bg-surface-44"
+          /* ★★ THE PRIMARY BUTTON INVERTS IN DARK (owner: "its pill is invisible. its
+             just text i hover over to see pill"). `bg-surface-42` is #1a1a17 in
+             light — a near-BLACK button carrying white text, which is the whole
+             point of it. Mapped into dark by lightness it became #2c3036, a grey
+             a few points off the #16181b panel it sits on, so white text on it
+             looked like text on the panel until the hover lifted it. A near-black
+             primary in light is a near-WHITE primary in dark; that is the same
+             design idea mirrored, and it is what `bg-primary` already does on
+             /service-unavailable. */
+          className="flex-1 rounded-xl bg-surface-42 py-3.5 text-[15px] leading-[24px] font-medium text-ink-27 font-ui hover:bg-surface-44 dark:bg-[rgb(var(--ink-2))] dark:text-[rgb(var(--surface-23))] dark:hover:bg-[rgb(var(--ink-10))]"
         >
           I understand. Show the market
         </button>

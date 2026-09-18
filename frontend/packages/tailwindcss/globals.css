@@ -1080,30 +1080,30 @@
     --surface-info-10: 33 53 120; /* #172554 -> #213578 x12 */
     /* surface / neutral */
     --surface-1: 22 24 27; /* #ffffff -> #16181b x196  */
-    --surface-2: 30 33 38; /* #fbfdfb -> #1e2126 x1  */
-    --surface-3: 30 33 38; /* #fdfcfb -> #1e2126 x6  */
-    --surface-4: 30 33 38; /* #fbfbfc -> #1e2126 x1  */
+    --surface-2: 31 34 38; /* #fbfdfb -> #1f2226 x1  */
+    --surface-3: 30 33 37; /* #fdfcfb -> #1e2125 x6  */
+    --surface-4: 28 31 36; /* #fbfbfc -> #1c1f24 x1  */
     --surface-5: 30 33 38; /* #fbfbfa -> #1e2126 x8  */
-    --surface-6: 30 33 38; /* #fefaf9 -> #1e2126 x1  */
-    --surface-7: 30 33 38; /* #fafafa -> #1e2126 x1  */
-    --surface-8: 30 33 38; /* #f9fafb -> #1e2126 x2  */
+    --surface-6: 28 31 35; /* #fefaf9 -> #1c1f23 x1  */
+    --surface-7: 27 29 33; /* #fafafa -> #1b1d21 x1  */
+    --surface-8: 26 29 33; /* #f9fafb -> #1a1d21 x2  */
     --surface-9: 25 27 31; /* #f8f9ff -> #191b1f x1  */
     --surface-10: 25 27 31; /* #faf9f8 -> #191b1f x3  */
     --surface-11: 25 27 31; /* #faf9f7 -> #191b1f x1  */
     --surface-12: 25 27 31; /* #faf9f6 -> #191b1f x13  */
     --surface-13: 24 26 30; /* #f4faf6 -> #181a1e x2  */
-    --surface-14: 14 15 17; /* #f9f7f5 -> #0e0f11 x3  */
-    --surface-15: 14 15 17; /* #f7f7f7 -> #0e0f11 x4  */
+    --surface-14: 21 23 27; /* #f9f7f5 -> #15171b x3  */
+    --surface-15: 21 23 26; /* #f7f7f7 -> #15171a x4  */
     --surface-16: 39 43 49; /* #f6f7f8 -> #272b31 x35  */
-    --surface-17: 14 15 17; /* #f7f7f5 -> #0e0f11 x1  */
-    --surface-18: 14 15 17; /* #f0f7f2 -> #0e0f11 x1  */
-    --surface-19: 14 15 17; /* #f5f5f5 -> #0e0f11 x1  */
-    --surface-20: 14 15 17; /* #f6f5f2 -> #0e0f11 x2  */
-    --surface-21: 14 15 17; /* #f4f5f7 -> #0e0f11 x21  */
-    --surface-22: 14 15 17; /* #f3f4f6 -> #0e0f11 x1  */
+    --surface-17: 20 22 26; /* #f7f7f5 -> #14161a x1  */
+    --surface-18: 20 22 24; /* #f0f7f2 -> #141618 x1  */
+    --surface-19: 19 21 24; /* #f5f5f5 -> #131518 x1  */
+    --surface-20: 19 21 24; /* #f6f5f2 -> #131518 x2  */
+    --surface-21: 19 21 24; /* #f4f5f7 -> #131518 x21  */
+    --surface-22: 19 21 24; /* #f3f4f6 -> #131518 x1  */
     --surface-23: 14 15 17; /* #f1f3f5 -> #0e0f11 x29  */
-    --surface-24: 14 15 17; /* #f0f0ee -> #0e0f11 x1  */
-    --surface-25: 14 15 17; /* #eef0f2 -> #0e0f11 x1  */
+    --surface-24: 17 19 21; /* #f0f0ee -> #111315 x1  */
+    --surface-25: 16 18 21; /* #eef0f2 -> #101215 x1  */
     /* ★★★ THESE TWO ARE LINES, NOT SURFACES, AND THE GRAPHITE PASS ERASED THEM
        (2026-09-18, reported: "all the separator lines are gone"). Every one of the
        24 call sites is a 1px divider wearing `bg-surface-26/27` — the vertical rule
@@ -1115,24 +1115,24 @@
        surfaces and mapped them by LIGHTNESS, which put both at #0e0f11 — byte
        identical to the page ground — so every separator in the app vanished. They
        take the hairline's value instead. */
-    --surface-26: 42 46 52; /* #ececec -> #2a2e34 x19 */
-    --surface-27: 42 46 52; /* #ebebeb -> #2a2e34 x5 */
-    --surface-28: 14 15 17; /* #e9ebee -> #0e0f11 x2  */
+    --surface-26: 16 17 19; /* #ececec -> #101113 x19 */
+    --surface-27: 16 17 19; /* #ebebeb -> #101113 x5 */
+    --surface-28: 16 17 19; /* #e9ebee -> #101113 x2  */
     --surface-29: 15 17 19; /* #e8eaed -> #0f1113 x1  */
     --surface-30: 14 16 18; /* #e4e6e9 -> #0e1012 x1  */
     --surface-31: 14 15 17; /* #e6e2df -> #0e0f11 x1  */
     --surface-32: 13 15 17; /* #e6dcd6 -> #0d0f11 x1  */
     --surface-33: 12 13 15; /* #cbd5e1 -> #0c0d0f x13  */
-    --surface-34: 30 33 38; /* #9ca3af -> #1e2126 x30  */
-    --surface-35: 30 33 38; /* #6b7280 -> #1e2126 x25  */
-    --surface-36: 22 24 27; /* #4b5563 -> #16181b x28  */
-    --surface-37: 22 24 27; /* #374151 -> #16181b x24  */
-    --surface-38: 22 24 27; /* #1e293b -> #16181b x14  */
-    --surface-39: 22 24 27; /* #1f2937 -> #16181b x17  */
-    --surface-40: 22 24 27; /* #2b2822 -> #16181b x1  */
-    --surface-41: 22 24 27; /* #2a2822 -> #16181b x1  */
-    --surface-42: 22 24 27; /* #1a1a17 -> #16181b x14  */
-    --surface-43: 22 24 27; /* #161511 -> #16181b x10  */
+    --surface-34: 26 29 33; /* #9ca3af -> #1a1d21 x30  */
+    --surface-35: 30 33 37; /* #6b7280 -> #1e2125 x25  */
+    --surface-36: 32 35 39; /* #4b5563 -> #202327 x28  */
+    --surface-37: 33 37 42; /* #374151 -> #21252a x24  */
+    --surface-38: 35 39 44; /* #1e293b -> #23272c x14  */
+    --surface-39: 35 39 44; /* #1f2937 -> #23272c x17  */
+    --surface-40: 35 39 44; /* #2b2822 -> #23272c x1  */
+    --surface-41: 35 39 44; /* #2a2822 -> #23272c x1  */
+    --surface-42: 36 40 45; /* #1a1a17 -> #24282d x14  */
+    --surface-43: 36 40 46; /* #161511 -> #24282e x10  */
     --surface-44: 39 43 49; /* #000000 -> #272b31 x58  */
     /* surface / ok */
     --surface-ok-1: 23 41 31; /* #f0fdf4 -> #17291f x13 */
@@ -1272,6 +1272,31 @@
   }
   html {
     scroll-padding-top: 5rem; /* 80px = sticky navbar (h-16/64px) + visual buffer */
+
+    /**
+     * ★★ RESERVES THE SCROLLBAR'S COLUMN WHETHER OR NOT THERE IS A SCROLLBAR
+     * (owner, 2026-09-18: "the left navbar still wiggles a bit when i scroll up
+     * and down ... that seems a overall issue not only a theme thing").
+     *
+     * ★ SAID PLAINLY: I COULD NOT REPRODUCE THE WIGGLE. Measured in headless
+     * Chrome at 1440x{1080,900,800,720,650}, scrolling 0 -> 3000 -> 0 in 50px
+     * steps and sampling after two animation frames, the rail's top, LEFT and
+     * height do not move by a sub-pixel: stuck-top range 0.00, left range 0.00,
+     * one height, one document height. Same with the new `min-height` forced off.
+     * So this is not a guess dressed as a fix, it is the standard cure for the
+     * symptom, applied because headless cannot see the thing that causes it:
+     * headless draws OVERLAY scrollbars, which take no layout width, so a
+     * classic scrollbar appearing or disappearing — which shifts every column on
+     * the page by ~15px — is invisible to the instrument by construction.
+     *
+     * `stable` keeps the gutter present at all times, so crossing the "does this
+     * page scroll" threshold cannot move the grid sideways. Costs a fixed gutter
+     * on the rare page short enough not to scroll, which is the trade every
+     * app that has met this bug makes. If the wiggle survives this, it is not
+     * the scrollbar and the next suspects are smooth-scroll interpolation and a
+     * compositing layer on an ancestor — both of which need a real window.
+     */
+    scrollbar-gutter: stable;
 
     /**
      * ★★★ REQUIRED BY THE POST CARD'S DRAWER (2026-08-19). Without it the

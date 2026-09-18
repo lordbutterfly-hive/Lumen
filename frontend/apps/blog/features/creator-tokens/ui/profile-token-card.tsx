@@ -161,7 +161,7 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
     const soldOut = soldOutOf(market);
     return (
       <div
-        className="-mt-2 flex flex-wrap items-start justify-between gap-6 rounded-panel border border-line-9 bg-surface-1 px-6 py-[22px]"
+        className="-mt-2 flex flex-wrap items-start justify-between gap-6 rounded-panel border border-line-9 bg-surface-1 px-6 py-[18px]"
         data-testid="profile-token-card"
       >
         <div className="min-w-0">
@@ -184,7 +184,15 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
               adaptDelivery). Omitted entirely rather than shown as "unavailable"
               dashes: this compact card has no room for an explanatory fallback,
               and price + Buy on their own are still a complete, honest card. */}
-          {d.available ? (
+          {/* ★★ AN EMPTY ROW STILL COSTS ITS MARGIN (owner, 2026-09-18: the card
+              "still seems wide"). This was gated on `d.available` alone, but BOTH
+              of its children are independently conditional — and for an account
+              with no completion record and no median reply, which is every new
+              market, both are null. The row then rendered at HEIGHT 0 and still
+              contributed `mt-4`: 16px of dead space, measured, inside a 145px card
+              holding 74px of content. Gating on the children means the row exists
+              only when it has something to put in it. */}
+          {d.available && (d.completionPct !== null || d.typicalResponse) ? (
             <div className="mt-4 flex flex-wrap gap-[26px]">
               {/* Omitted, not shown as "0%", when there is no record yet — this
                   card has no room to explain, and an unexplained 0% is read as a

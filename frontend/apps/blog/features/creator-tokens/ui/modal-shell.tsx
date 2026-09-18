@@ -47,7 +47,13 @@ const ModalShell: FC<ModalShellProps> = ({ width, onClose, title, className, chi
   >
     <DialogContentBare
       aria-describedby={undefined}
-      overlayClassName="bg-[rgba(20,18,10,0.4)] backdrop-blur-[2px]"
+      /* ★★ THE SCRIM HAS TO WORK ON A DARK PAGE TOO (owner, 2026-09-18: the
+         interstitial "slips and looks weird, has no outline. moves on top of
+         page"). 40% of a warm near-black over cream reads as "the page has
+         stepped back"; the same 40% over #0e0f11 changes almost nothing, so the
+         dialog appeared to float with the page still fully present behind it.
+         Deeper in dark only — light keeps the value it has always had. */
+      overlayClassName="bg-[rgba(20,18,10,0.4)] backdrop-blur-[2px] dark:bg-[rgba(4,5,7,0.72)]"
       wrapperClassName="p-5 py-12"
       style={{ width }}
       className={cn(
@@ -61,7 +67,15 @@ const ModalShell: FC<ModalShellProps> = ({ width, onClose, title, className, chi
         // could never be scrolled to its button. Bounding the content to the
         // viewport (minus the wrapper's 3rem top and bottom padding) and letting
         // it scroll internally keeps every button reachable on every screen.
+        /* ★★ AN EDGE, BECAUSE THE SHADOW STOPPED BEING ONE. The separation here is
+           carried entirely by `shadow-[0_20px_60px_rgba(20,18,10,0.25)]`: a warm
+           black at 25%, which against cream is a soft lift and against #0e0f11 is
+           nothing at all. With `bg-surface-1` also being every card's colour, the
+           dialog had no edge of any kind in dark. A `ring` rather than a `border`
+           on purpose: it paints outside the box, so the panel's size, padding and
+           the `max-h` scroll behaviour are byte-identical. */
         'max-h-[calc(100dvh-6rem)] max-w-full overflow-y-auto overscroll-contain rounded-panel bg-surface-1 shadow-[0_20px_60px_rgba(20,18,10,0.25)] focus:outline-none',
+        'dark:shadow-[0_24px_70px_rgba(0,0,0,0.75)] dark:ring-1 dark:ring-[var(--line-strong)]',
         className
       )}
     >
