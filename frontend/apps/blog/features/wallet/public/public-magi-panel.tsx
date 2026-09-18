@@ -19,6 +19,7 @@ import PageMasthead from '@/blog/features/layouts/page-masthead';
 import { useHiveMarketPrices } from '@/blog/features/wallet/hooks/use-hive-market-prices';
 import { usePublicMagiAssets } from './hooks/use-public-magi-assets';
 import PublicMagiAccountCard from './public-magi-account-card';
+import MagiHistoryList from '@/blog/features/wallet/components/magi/magi-history-list';
 
 const Notice = ({ children, testId }: { children: React.ReactNode; testId: string }) => (
   <div className="rounded-card border border-dashed border-line-11 px-5 py-6 text-center font-ui text-[14px] leading-[22px] text-ink-14" data-testid={testId}>
@@ -42,17 +43,25 @@ export default function PublicMagiPanel({ username, target }: { username: string
       ) : magi.unavailable ? (
         <Notice testId="public-wallet-magi-unavailable">{t('wallet.magi.unavailable')}</Notice>
       ) : (
-        <PublicMagiAccountCard
-          username={username}
-          assets={magi.assets}
-          assetsLoading={magi.assetsLoading}
-          assetsFailed={magi.assetsFailed}
-          btcSats={magi.btcSats}
-          btcLoading={magi.btcLoading}
-          btcFailed={magi.btcFailed}
-          btcUnavailable={magi.btcUnavailable}
-          prices={prices ?? null}
-        />
+        <>
+          <PublicMagiAccountCard
+            username={username}
+            assets={magi.assets}
+            assetsLoading={magi.assetsLoading}
+            assetsFailed={magi.assetsFailed}
+            btcSats={magi.btcSats}
+            btcLoading={magi.btcLoading}
+            btcFailed={magi.btcFailed}
+            btcUnavailable={magi.btcUnavailable}
+            prices={prices ?? null}
+          />
+          {/* ★ The same Magi activity list the signed-in wallet shows, reused
+              rather than copied (2026-09-18). It reads PUBLIC chain history
+              through the same read-only proxy and offers no control that
+              signs anything, so S1 (zero signing surface on somebody else's
+              wallet) holds. A lite target never reaches this branch. */}
+          <MagiHistoryList account={username} />
+        </>
       )}
     </div>
   );

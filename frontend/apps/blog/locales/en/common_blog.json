@@ -1444,9 +1444,37 @@
         "claim_rewards": "Claimed rewards",
         "market_trade": "Market trade",
         "author_reward": "Author reward",
-        "other": "{{type}}"
+        "other": "{{type}}",
+        "recurrent_transfer_sent": "Recurring payment sent",
+        "recurrent_transfer_received": "Recurring payment received",
+        "recurrent_transfer_started": "Set up a recurring payment",
+        "recurrent_transfer_stopped": "Stopped a recurring payment",
+        "savings_withdrawal_completed": "Savings withdrawal arrived",
+        "power_down_payout": "Power down payout",
+        "delegation_out": "Delegated HP",
+        "delegation_in": "Received an HP delegation",
+        "delegation_removed": "Ended an HP delegation",
+        "delegation_returned": "Delegated HP returned",
+        "market_order_placed": "Placed a market order",
+        "market_order_cancelled": "Cancelled a market order",
+        "convert_started": "Started a conversion",
+        "convert_completed": "Conversion completed",
+        "curation_reward": "Curation reward",
+        "benefactor_reward": "Benefactor reward"
       },
-      "no_amount": "No funds moved"
+      "no_amount": "No funds moved",
+      "groups": {
+        "label": "Filter activity",
+        "all": "All",
+        "rewards": "Rewards",
+        "transfers": "Send & receive"
+      },
+      "empty_all": "No transactions yet",
+      "empty_rewards": "No rewards yet",
+      "empty_transfers": "Nothing sent or received yet",
+      "load_older": "Load older",
+      "loading_older": "Loading…",
+      "end_of_history": "That is the whole history."
     },
     "hbd_card": {
       "name": "HBD",
@@ -1696,6 +1724,48 @@
         "unavailable": "Swapping isn’t available on this build yet.",
         "success_title": "Swap sent",
         "success_body": "Transaction {{txId}}. Balances refresh once Magi confirms it."
+      },
+      "history": {
+        "label": "Activity on Magi",
+        "loading": "Loading Magi transactions…",
+        "error": "Couldn't load the Magi transactions just now. Nothing is wrong with your funds.",
+        "view_on_explorer": "View this transaction on the Magi explorer",
+        "empty_all": "No Magi transactions yet",
+        "empty_transfers": "Nothing sent or received on Magi yet",
+        "empty_staking": "Nothing staked or unstaked yet",
+        "empty_contracts": "No contract activity yet",
+        "groups": {
+          "label": "Filter Magi activity",
+          "all": "All",
+          "transfers": "Send & receive",
+          "staking": "Staking",
+          "contracts": "Contracts"
+        },
+        "status": {
+          "pending": "Pending",
+          "failed": "Failed"
+        },
+        "types": {
+          "transfer_sent": "Sent on Magi",
+          "transfer_received": "Received on Magi",
+          "deposit": "Deposited to Magi",
+          "withdraw": "Withdrew to Hive",
+          "stake": "Staked",
+          "unstake": "Started unstaking",
+          "consensus_stake": "Staked for consensus",
+          "consensus_unstake": "Started consensus unstaking",
+          "contract_action": "Contract call: {{action}} ({{contract}})",
+          "contract_call": "Contract call ({{contract}})",
+          "other": "{{type}}",
+          "withdraw_to": "Withdrew from Magi",
+          "contract_action_known": "{{contract}}: {{action}}",
+          "contract_call_known": "{{contract}} contract call"
+        },
+        "contracts": {
+          "meritum": "Meritum",
+          "dex": "Magi DEX",
+          "btc": "Bitcoin bridge"
+        }
       }
     },
     "meritum": {

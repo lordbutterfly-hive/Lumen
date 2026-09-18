@@ -632,6 +632,37 @@ export interface HiveOperation {
       vesting_payout: NaiAsset;
       hbd_payout: NaiAsset;
       hive_payout: NaiAsset;
+      /**
+       * ★ ADDED 2026-09-18 for the wallet's activity list, which now describes
+       * the HP and market operations it always fetched but could only render as
+       * "<op name>" with no amount (see features/wallet/lib/account-history.ts).
+       * Every one of these is OPTIONAL and verified against a live
+       * `account_history_api.get_account_history` response from api.hive.blog on
+       * that date, not inferred from the op definitions: `vesting_shares`,
+       * `withdrawn`, `deposited` and `reward` all arrive as NaiAsset objects
+       * even where an older declaration above says `string`.
+       */
+      delegator?: string;
+      delegatee?: string;
+      benefactor?: string;
+      from_account?: string;
+      to_account?: string;
+      withdrawn?: NaiAsset;
+      deposited?: NaiAsset;
+      amount_in?: NaiAsset;
+      amount_out?: NaiAsset;
+      amount_to_sell?: NaiAsset;
+      min_to_receive?: NaiAsset;
+      excess_collateral?: NaiAsset;
+      orderid?: number;
+      requestid?: number;
+      open_orderid?: number;
+      current_orderid?: number;
+      open_owner?: string;
+      executions?: number;
+      remaining_executions?: number;
+      recurrence?: number;
+      payout_must_be_claimed?: boolean;
     };
   };
 }
@@ -1005,6 +1036,44 @@ export type ExtendedNodeApi = {
     get_following: TWaxApiRequest<
       [ /* account: */ string /*; start: */, string /*; type: */, string /*; limit: */, number ],
       IFollow[]
+    >;
+  };
+  /**
+   * ★ ADDED 2026-09-18 — the wallet's activity list pages BACKWARDS through an
+   * account's history, and this is the only Hive read that can do it with a
+   * STABLE cursor. The REST `hivemind-api/accounts/{name}/operations` this
+   * wallet used before numbers its pages from the OLDEST operation, so "the
+   * newest page" is `total_pages` — a number that moves every time the account
+   * transacts, shifting every page boundary under the reader — and the newest
+   * page is the REMAINDER, which is why the wallet's "Recent activity" card
+   * could render 4 rows for `page-size=25` (measured on api.hive.blog,
+   * 2026-09-18) and look like a wallet with almost no history.
+   *
+   * `get_account_history` instead takes `start` = a per-account operation
+   * SEQUENCE NUMBER (-1 means newest) and walks back `limit` matching
+   * operations from there. Sequence numbers are immutable, so a cursor stays
+   * correct however many new operations arrive while somebody reads.
+   *
+   * ★ THE TWO FILTER WORDS ARE STRINGS, NOT NUMBERS. They are uint64 bitsets
+   * keyed by op type id and the wallet's own mask is larger than
+   * `Number.MAX_SAFE_INTEGER`; passing a JS number silently changes which bits
+   * are set and therefore which operations come back. See
+   * `features/wallet/lib/history-groups.ts` for the measurement.
+   *
+   * hived asserts `start >= limit - 1` and `limit <= 1000`; both are the
+   * caller's job (app/api/wallet/history/route.ts clamps them).
+   */
+  account_history_api: {
+    get_account_history: TWaxApiRequest<
+      {
+        account: string;
+        start: number;
+        limit: number;
+        include_reversible?: boolean;
+        operation_filter_low?: string;
+        operation_filter_high?: string;
+      },
+      { history: [number, HiveOperation][] }
     >;
   };
   database_api: {

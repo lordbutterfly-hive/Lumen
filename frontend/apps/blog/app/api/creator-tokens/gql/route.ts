@@ -3,6 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { CONTRACT_OUTPUT_QUERY, CONTRACT_QUERY, HEAD_QUERY, STATE_QUERY, STATE_QUERY_HEX } from '@/blog/features/creator-tokens/lib/vsc/reads';
 import { BALANCE_QUERY } from '@/blog/lib/lite/wallet/magi-balance';
 import { MAGI_ASSETS_QUERY } from '@/blog/lib/lite/wallet/magi-assets';
+import { MAGI_TRANSACTIONS_QUERY, MAGI_TRANSACTIONS_MAX_OFFSET } from '@/blog/lib/lite/wallet/magi-transactions';
 import { SIMULATE_QUERY } from '@/blog/lib/lite/wallet/magi-simulate';
 import { getServerSessionUser } from '@/blog/lib/server-session';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
@@ -92,6 +93,12 @@ const ALLOWED_QUERIES = new Set<string>([
   // proxy and the client cannot drift.
   CONTRACT_OUTPUT_QUERY,
   MAGI_ASSETS_QUERY,
+  // MAGI_TRANSACTIONS_QUERY added 2026-09-18 (wallet Magi tab): the account's
+  // own transaction history, the read Altera's transactions page has always
+  // made. Imported by identity like every entry above. It is a READ; it signs
+  // nothing. Its variables are bounded below, because `limit`/`offset` on a
+  // node-side scan are exactly the two knobs an amplifier would reach for.
+  MAGI_TRANSACTIONS_QUERY,
   SIMULATE_QUERY
 ]);
 
@@ -156,6 +163,18 @@ const MAX_VARIABLES_BYTES = 64 * 1024;
  *    so anonymous traffic has no business here even though the state reads
  *    above it stay public.
  */
+/**
+ * Bounds for `findTransaction` (MAGI_TRANSACTIONS_QUERY). The node caps `limit`
+ * at 100 itself, which is precisely the reasoning this route already refuses to
+ * rely on elsewhere: "relying on the upstream to reject an oversized request
+ * means our amplification is bounded only by someone else's validation". The
+ * wallet asks for 12 at a time and stops offering "load older" past
+ * MAGI_TRANSACTIONS_MAX_OFFSET, so these are this client's real ceilings, not
+ * invented round numbers.
+ */
+const MAX_TRANSACTIONS_LIMIT = 25;
+const MAX_TRANSACTIONS_TYPES = 12;
+
 const MAX_SIMULATE_CALLS = 1;
 const MAX_SIMULATE_RC_LIMIT = 100_000;
 const MAX_SIMULATE_AUTHS = 2;
@@ -175,6 +194,27 @@ function simulateContractAllowlist(): Set<string> {
 
 function isStringArray(value: unknown, max: number, maxLen: number): value is string[] {
   return Array.isArray(value) && value.length <= max && value.every((v) => typeof v === 'string' && v.length > 0 && v.length <= maxLen);
+}
+
+/** Returns an error message, or null when the transaction-history variables are within bounds. */
+function validateTransactionVariables(variables: Record<string, unknown>): string | null {
+  const account = variables.account;
+  if (typeof account !== 'string' || account.length === 0 || account.length > 160) {
+    return 'account must be a string of at most 160 characters';
+  }
+  const limit = variables.limit;
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > MAX_TRANSACTIONS_LIMIT) {
+    return `limit must be an integer from 1 to ${MAX_TRANSACTIONS_LIMIT}`;
+  }
+  const offset = variables.offset;
+  if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0 || offset > MAGI_TRANSACTIONS_MAX_OFFSET) {
+    return `offset must be an integer from 0 to ${MAGI_TRANSACTIONS_MAX_OFFSET}`;
+  }
+  const byType = variables.byType;
+  if (byType !== null && byType !== undefined && !isStringArray(byType, MAX_TRANSACTIONS_TYPES, 64)) {
+    return `byType must be null or 1 to ${MAX_TRANSACTIONS_TYPES} operation type names`;
+  }
+  return null;
 }
 
 /** Returns an error message, or null when the simulate variables are within bounds. */
@@ -277,6 +317,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { errors: [{ message: `keys must be an array of 1 to ${MAX_STATE_KEYS} items` }] },
         { status: 400 }
       );
+    }
+  }
+
+  // The history shape carries `account`/`limit`/`offset`. No session check: the
+  // wallet's Magi tab is read by its owner, but `/@name/wallet` shows the same
+  // PUBLIC chain history to a logged-out visitor, exactly like the balance
+  // reads above it — gating this would break that page for everyone.
+  if (query === MAGI_TRANSACTIONS_QUERY) {
+    const problem = validateTransactionVariables(variablesObj);
+    if (problem) {
+      return NextResponse.json({ errors: [{ message: problem }] }, { status: 400 });
     }
   }
 

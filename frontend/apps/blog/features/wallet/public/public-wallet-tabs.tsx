@@ -40,7 +40,7 @@ export default function PublicWalletTabs({
     >
       <TabsList
         aria-label={t('wallet.tabs.label')}
-        className="mb-5 inline-flex h-auto items-center gap-1.5 rounded-xl border border-line-6 bg-[var(--amb-1)] p-[5px] text-ink-10"
+        className="mb-5 inline-flex h-auto items-center gap-1.5 rounded-xl border border-line-6 bg-[var(--amb-1)] p-[5px] text-ink-10 dark:bg-surface-23"
         data-testid="public-wallet-tabs"
       >
         {WALLET_TABS.map((value) => (
@@ -48,7 +48,7 @@ export default function PublicWalletTabs({
             key={value}
             value={value}
             style={tab === value ? ACTIVE_GLOW : undefined}
-            className="rounded-lg px-[18px] py-2 font-ui text-[14px] leading-[22px] font-medium text-ink-10 shadow-none data-[state=active]:bg-[var(--lum-1)] data-[state=active]:text-ink-2"
+            className="rounded-lg px-[18px] py-2 font-ui text-[14px] leading-[22px] font-medium text-ink-10 shadow-none data-[state=active]:bg-[var(--lum-1)] data-[state=active]:text-ink-2 dark:data-[state=active]:bg-surface-1"
             data-testid={`public-wallet-tab-${value}`}
           >
             {t(`wallet.tabs.${value}`)}

@@ -18,6 +18,7 @@ import { displayHandle } from '@/blog/features/creator-tokens/live/adapt';
 import { useMagiAssets } from '../../hooks/use-magi-assets';
 import { useHiveMarketPrices } from '../../hooks/use-hive-market-prices';
 import MagiAccountCard from './magi-account-card';
+import MagiHistoryList from './magi-history-list';
 import MagiSdkSwap from './magi-sdk-swap';
 
 const SECONDARY_BUTTON_CLASS =
@@ -72,21 +73,34 @@ export default function MagiPanel() {
         </div>
       ) : (
         <>
-          {magi.accounts.map((entry) => (
-            <MagiAccountCard
-              key={entry.account.id}
-              entry={entry}
-              prices={prices ?? null}
-              btcUnavailable={magi.btcUnavailable}
-              ownLabel={
-                entry.account.kind === 'hive'
-                  ? t('wallet.magi.account_hive', { name: displayHandle(entry.account.id) })
-                  : entry.account.kind === 'evm'
-                    ? t('wallet.magi.account_evm')
-                    : t('wallet.magi.account_btc')
-              }
-            />
-          ))}
+          {magi.accounts.map((entry) => {
+            const ownLabel =
+              entry.account.kind === 'hive'
+                ? t('wallet.magi.account_hive', { name: displayHandle(entry.account.id) })
+                : entry.account.kind === 'evm'
+                  ? t('wallet.magi.account_evm')
+                  : t('wallet.magi.account_btc');
+            return (
+              <div key={entry.account.id}>
+                <MagiAccountCard
+                  entry={entry}
+                  prices={prices ?? null}
+                  btcUnavailable={magi.btcUnavailable}
+                  ownLabel={ownLabel}
+                />
+                {/* ★ The account's own transactions, directly under its
+                    balances (2026-09-18). One list per account, never merged:
+                    a Hive account and a bound wallet are different accounts
+                    with different keys, and the balances above already say so.
+                    The label is repeated only when there IS more than one, so
+                    the ordinary single-account wallet stays uncluttered. */}
+                <MagiHistoryList
+                  account={entry.account.id}
+                  accountLabel={magi.accounts.length > 1 ? ownLabel : undefined}
+                />
+              </div>
+            );
+          })}
           {/* The Magi SDK's own swap widget, LAST: under the balances, under
               Deposit, under the estimated value (owner: "PUT THE SDK UNDER
               EVERYTHING in MAGI TAB. THE SDK. NOT HIS ITERATION OF IT."). */}
