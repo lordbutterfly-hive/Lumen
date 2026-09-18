@@ -27,7 +27,16 @@ set -euo pipefail
 NETWORK="${NETWORK:-mainnet}"
 if [ "$NETWORK" = "mainnet" ]; then
   CONTRACT_ID="${CONTRACT_ID:-vsc1BisggC1NtviuYN1mSR372HGSU6hUfdZARt}"
-  GQL="${GQL:-https://api.vsc.eco/api/v1/graphql}"
+  # api.vsc.eco DIED 2026-09-17 and is not coming back (the ex-founder stopped
+  # paying for the machine; no ICMP, no TCP on 22/80/443, from two networks).
+  # It used to be this default, which is not a wrong-chain bug but a HANG: step
+  # 2 below curls it with --max-time 30 and the script exits 28 with no message
+  # about why, holding a freshly built wasm and no page. Both live mainnet nodes
+  # were verified against THIS contract on 2026-09-17 - same code CID, same
+  # state, getStateByKeys/findContract/simulateContractCalls all answering. The
+  # other one is https://magi.milohpr.com/api/v1/graphql (Milo, active witness);
+  # pass it as GQL=... if techcoderx is down when you come to sign.
+  GQL="${GQL:-https://vsc.techcoderx.com/api/v1/graphql}"
   NET_ID="vsc-mainnet"
   CURRENCY="HBD"
 else

@@ -18,8 +18,12 @@
 #    `-cancel-update` (the escape hatch inside the timelock). This script builds
 #    from source every time, so what runs always matches what is in the clone.
 #
-# 2. `-gqlUrl` DEFAULTS TO MAINNET (`https://api.vsc.eco/api/v1/graphql`). It
-#    feeds the election lookup behind the storage proof. Overridden below.
+# 2. `-gqlUrl` DEFAULTS TO A HOST THAT NO LONGER EXISTS
+#    (`https://api.vsc.eco/api/v1/graphql`, the deployer's own default in
+#    go-vsc-node). It feeds the election lookup behind the storage proof.
+#    That default was merely the wrong chain until 2026-09-17, when the machine
+#    behind it went off for good - so an unoverridden run no longer deploys to
+#    mainnet by accident, it hangs on a dead host. Overridden below either way.
 #
 # 3. `-data-dir` DEFAULTS TO `data`, i.e. `$HOME/data/config`, which on this
 #    machine holds a PLACEHOLDER key and MAINNET Hive API URLs. The real
