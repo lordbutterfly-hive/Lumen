@@ -34,12 +34,16 @@ import { discussionKey } from './top-comment';
  */
 
 /**
- * Mirror of `comment-list.tsx:65` (`MAX_VISUAL_DEPTH = 4`). Kept in sync by
+ * Mirror of `comment-list.tsx:84` (`MAX_VISUAL_DEPTH = 4`). Kept in sync by
  * CITATION rather than imported, so this feature carries no dependency on a
  * post-rendering module-local constant (the spec permits import OR mirror-with-
  * citation, §2.3/§2.4). Beyond this many levels the indent stops growing and the
- * reply is labelled "replying to X" — see `comment-list.tsx:58-65` for the
- * runaway-indent bug this cap fixed (item 10, 2026-08-11).
+ * reply is labelled "replying to X" — see `comment-list.tsx:60-83` for the
+ * runaway-indent bug this cap fixed (item 10, 2026-08-11), and for the second job
+ * the same constant took on in 2026-09-18: past this depth the post page FLATTENS
+ * the subtree instead of opening another list, which is what bounds the element
+ * tree now that nothing caps how deep a thread may render. That second job is the
+ * post page's alone — this drawer builds its own bounded slice and is unaffected.
  */
 export const MAX_VISUAL_DEPTH = 4;
 

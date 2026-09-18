@@ -1199,6 +1199,23 @@ const PostContent = () => {
    * introduce).
    */
   const mutedListUnknown = mutedListIsError;
+  /*
+   * ★★ ONE ARRAY IDENTITY, NOT A FRESH ONE EVERY RENDER (2026-09-18). The thread was
+   * handed `mutedList || initialMutedList || []` inline. For a signed-out reader — or
+   * a `lite`-tier one, where `useFollowListQuery` is disabled — both operands are
+   * undefined and that expression allocates a NEW empty array on every render.
+   *
+   * That was free while nothing downstream compared it. It is not free now:
+   * `comment-list.tsx` keys its flatten memo on `mutedList` (it prunes muted subtrees,
+   * so it must recompute when the list changes), and a new identity each render made
+   * that memo miss every time — rebuilding two Maps over the whole discussion, once
+   * per flattened list, on every render of the page. `CommentListItem` is `memo`'d on
+   * the same prop and was re-rendering for the same reason.
+   */
+  const mutedListForThread = useMemo(
+    () => mutedList || initialMutedList || [],
+    [mutedList, initialMutedList]
+  );
 
   const pinMutations = usePinMutation();
   const unpinMutation = useUnpinMutation();
@@ -2457,7 +2474,7 @@ const PostContent = () => {
               postData={postData}
               paginatedDiscussionState={paginatedDiscussionState}
               userCanModerate={!!userCanModerate}
-              mutedList={mutedList || initialMutedList || []}
+              mutedList={mutedListForThread}
               mutedListUnknown={mutedListUnknown}
               flagText={communityData?.flag_text}
               discussionAuthor={author}

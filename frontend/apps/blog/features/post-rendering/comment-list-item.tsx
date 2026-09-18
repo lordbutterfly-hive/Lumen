@@ -82,7 +82,6 @@ import {
 interface CommentListProps {
   permissionToMute: Boolean;
   comment: Entry;
-  parent_depth: number;
   mutedList: IFollowList[];
   /** True when the viewer's mute-list read failed (React Query's retries
    *  exhausted) — see `content.tsx`'s `mutedListUnknown` doc comment. Threaded
@@ -97,10 +96,21 @@ interface CommentListProps {
   flagText: string | undefined;
   filteringEnabled?: boolean;
   onCommnentLinkClick: (hash: string) => void;
-  /** Set by CommentList once nesting passes MAX_VISUAL_DEPTH (item 10): the
-   *  thread stops indenting further, so this names who the flattened reply is
-   *  actually answering, since the connector line no longer shows it. */
-  replyingToAuthor?: string;
+  /**
+   * Set by CommentList once nesting passes MAX_VISUAL_DEPTH (item 10): the thread
+   * stops indenting further, so this says what the flattened reply is actually
+   * answering, since the connector line no longer shows it.
+   *
+   * ★★ THE ENTRY, NOT THE NAME (2026-09-18). This was a resolved `string`, and the
+   * list resolved it — which meant the label and the byline two lines above it read
+   * a Lumen author's identity through two different paths. The overlay hook falls
+   * back to react-query's warm cache for entries that arrive without `_lite` (its own
+   * doc: the common case after a client refetch), and the list's plain `_lite` read
+   * could not, so a refetch left a byline reading "@realperson" above a label reading
+   * the shared publishing account. Passing the entry lets the ONE component that
+   * already resolves identity resolve this one too.
+   */
+  replyingTo?: Entry;
   children?: ReactNode;
 }
 // ★★★ COMMENTS ARE NOW LORA, LIKE POST BODIES (2026-08-13, typography audit
@@ -209,7 +219,6 @@ const DEFAULT_DOWNVOTE_WEIGHT = [100];
 const CommentListItem = memo(function CommentListItem({
   permissionToMute,
   comment,
-  parent_depth,
   mutedList,
   mutedListUnknown,
   parentPermlink,
@@ -220,7 +229,7 @@ const CommentListItem = memo(function CommentListItem({
   observer,
   filteringEnabled = true,
   onCommnentLinkClick,
-  replyingToAuthor,
+  replyingTo,
   children
 }: CommentListProps) {
   const { t } = useTranslation('common_blog');
@@ -265,6 +274,12 @@ const CommentListItem = memo(function CommentListItem({
   // the chain.
   const liteOverlay = useLiteOverlay(comment);
   const displayAuthor = liteOverlay?.author ?? comment.author;
+  // The comment this one answers, named the SAME way as the byline right above — see
+  // the `replyingTo` prop's doc for why it is resolved here and not by the list. Safe
+  // when absent: the hook's `isLumenProxiedEntry` answers false for undefined, so it
+  // issues no query and returns null.
+  const replyingToOverlay = useLiteOverlay(replyingTo);
+  const replyingToAuthor = replyingTo ? (replyingToOverlay?.author ?? replyingTo.author) : undefined;
   // See the four-state badge doc above `commentClassName`.
   const publishBadgeState = getPublishBadgeState(!!comment._optimistic, !!liteOverlay, comment.created, !!comment._publishFailed);
 
@@ -574,7 +589,6 @@ const CommentListItem = memo(function CommentListItem({
     setOpenState(shouldBeHidden ? '' : 'item-1');
     setTemporaryHidden(filteringEnabled && !!comment.stats?.gray);
   }, [comment.stats?.gray, filteringEnabled]);
-  const currentDepth = comment.depth - parent_depth;
 
   const deleteCommentMutation = useDeleteCommentMutation();
   const deleteComment = async (permlink: string) => {
@@ -648,758 +662,785 @@ const CommentListItem = memo(function CommentListItem({
   if (userModerationHidden) {
     return null;
   }
+  /*
+   * ★★★ THE DEPTH-8 CAP AND ITS "Load more..." LINK ARE GONE (owner, 2026-09-18:
+   * "the load more button doesnt work at all it does nothing ... there should not
+   * be a load more button at all. get rid of it, just show the comments").
+   *
+   * What used to be here: `currentDepth < 8` rendered the comment, `=== 8` rendered
+   * a bare `Load more...` Link to `/{category}/@{author}/{permlink}`, and anything
+   * deeper rendered `null`. The link was the escape hatch — the reader went to the
+   * comment's OWN page, which re-rooted the thread there and let them keep reading.
+   *
+   * That page was deleted on 2026-09-03 (`lib/post/comment-redirect.ts`: "there is
+   * no standalone comment page ... a comment belongs under its post"). Every reply
+   * URL now 308s back to the post + `#@author/permlink`. So the link pointed at a
+   * redirect back to the page the reader was already on, aimed at a comment that
+   * this very branch had replaced with the link — `getElementById` missed,
+   * `comments-section.tsx` took its "cannot resolve" fallback, and the reader got a
+   * scroll to the top of the comments and nothing else. Reproduced live 2026-09-18
+   * on lordbutterfly/what-if-only-bloggers-are-left, whose thread with antisocialist
+   * reaches depth 8: the URL gained a hash, the page did not move, and the depth-8
+   * reply (and anything under it) was unreachable on Lumen by ANY route.
+   *
+   * A cap whose only exit was removed is not a cap, it is a wall. The indent problem
+   * the cap was really about is already solved one file up — `MAX_VISUAL_DEPTH` in
+   * `comment-list.tsx` stops adding indent after 4 levels and labels deeper cards
+   * with who they reply to — so depth costs no horizontal room and there is nothing
+   * left for a depth limit to protect. Render every comment.
+   */
   return (
-    <>
-      {currentDepth < 8 ? (
-        <li data-testid="comment-list-item" className="lm-enter w-full min-w-0">
-          <div className="w-full min-w-0" id={commentId} ref={ref}>
-            <Accordion type="single" collapsible value={openState} className="w-full min-w-0">
-              <AccordionItem className="w-full min-w-0" value="item-1">
-                {/* ★ THE COMMENT SUBTREE WAS AN UNMIGRATED VISUAL SYSTEM (v8, post detail).
-                    Measured on a real thread: 181 bordered boxes at border-radius 0 with
-                    border rgb(241,245,249), plus stray 6px, 8px and 12px radii, while the
-                    rest of the app is 14/18/20/22px on #ebebeb / #eee2dc. Card's own
-                    default (`rounded-md`, themed `border`) is what produced most of it.
-                    Pinned to the house tokens here: white surface, #ebebeb hairline,
-                    14px radius, which is the radius the design system assigns to rows. */}
-                <Card
-                  className={cn(
-                    `font-ui mb-4 w-full min-w-0 overflow-hidden rounded-card border-line-9 bg-surface-1 text-primary depth-${comment.depth}`,
-                    {
-                      'opacity-50 hover:opacity-100': hiddenComment || tempraryHidden,
-                      'border border-destructive': comment._temporary,
-                      'border border-line-info-2/50': comment._optimistic
-                    }
-                  )}
-                >
-                  {/* ★ ONE padding token for the whole card (item 5/6/8): CardHeader
-                      carries it here, CardContent and CardFooter below match it
-                      exactly (px-3 py-2), and nothing inside any of the three rows
-                      adds its own competing offset (the old pl-1/ml-4/px-[5px]/px-2
-                      mix is what produced 4px at one depth and 12-16px at another —
-                      it was never depth-dependent, just inconsistent per row). */}
-                  <CardHeader className="px-3 py-2">
-                    <div className="flex w-full justify-between">
-                      <div
-                        className="flex w-full flex-col justify-start sm:flex-row sm:items-center"
-                        data-testid="comment-card-header"
-                      >
-                        <div className="flex w-full items-center justify-between text-caption sm:text-sm">
-                          <div className="flex flex-wrap items-center">
-                            {comment._temporary && !comment._optimistic ? (
-                              <div className="flex items-center font-medium hover:cursor-pointer hover:text-destructive">
-                                {displayAuthor}
-                              </div>
-                            ) : (
-                              <>
-                                {publishBadgeState && (
-                                  <span
-                                    className={cn('mr-2 flex items-center gap-1 text-caption', {
-                                      'text-ink-info-9': publishBadgeState === 'publishing' || publishBadgeState === 'queued',
-                                      'text-muted-foreground': publishBadgeState === 'waiting',
-                                      'text-ink-warn-6': publishBadgeState === 'delayed'
-                                    })}
-                                    data-testid="comment-publish-status"
-                                    data-publish-state={publishBadgeState}
-                                  >
-                                    {/* Spinner on the FIRST state only — a spinner is what
-                                        reads as a hang, and everything past "just broadcast,
-                                        resolving in seconds" is a calm, static sentence. */}
-                                    {publishBadgeShowsSpinner(publishBadgeState) && (
-                                      <CircleSpinner size={10} color="#3b82f6" loading />
-                                    )}
-                                    {t(PUBLISH_BADGE_COPY_KEY[publishBadgeState])}
-                                  </span>
-                                )}
-                                {/* ★ item 7: ONE avatar rule for every depth. Used to be TWO —
-                                    a 40px avatar rendered before the card (desktop only,
-                                    outside this component's own padding, and the thing that
-                                    made the per-depth indent compound by 52px on top of the
-                                    24px thread line) plus this 20px one (mobile only). Now
-                                    there is just this one, at every breakpoint and every depth,
-                                    living inside the card's own padding so it can never float
-                                    in the gutter or cross the connector line. The card-level
-                                    `opacity-50` already fades hidden/temporary comments, so this
-                                    doesn't need its own opacity variant. */}
-                                {/* ★ CONVERGED ON UserAvatarImg (2026-09-15): this was a bare
-                                    <img> on the /api/avatar proxy alone, so a single upstream
-                                    timeout became a day-long cached monogram here while the
-                                    feed card (image host first) kept the real picture. See
-                                    user-avatar.tsx for the measurement. `src`/`lite` keep the
-                                    squatting guard for a lite author. */}
-                                <UserAvatarImg
-                                  username={displayAuthor}
-                                  pixelSize={20}
-                                  src={liteOverlay?.avatarUrl || undefined}
-                                  lite={Boolean(liteOverlay)}
-                                  className="mr-1.5"
-                                />
-                                <UserPopoverCard
-                                  // The card ACTS on the real signing account —
-                                  // follow, mute and the profile lookup all live in
-                                  // there — and only DISPLAYS the lite name.
-                                  author={comment.author}
-                                  liteName={liteOverlay?.author}
-                                  author_reputation={comment.author_reputation}
-                                  blacklist={comment.blacklists}
-                                />
-                                {/* ★ THE MERITUM PILL, SAME RULE AS THE FEED AND THE POST
-                                    HEADER (owner, 2026-09-16: "accounts don't carry their
-                                    meritum pill next to their name like they do inside the
-                                    feeds"). Keyed on the DISPLAYED identity exactly as the
-                                    feed card keys its pill (medium-post-card.tsx passes
-                                    displayAuthor): a lite name has no market and draws
-                                    nothing; a Hive author with a market draws price + state
-                                    word. One shared discovery read per page, no per-comment
-                                    request (token-author-chip.tsx). */}
-                                <span className="ml-1.5 inline-flex items-center">
-                                  <TokenAuthorChip handle={displayAuthor} />
-                                </span>
-                                {/* ★ author_title badge removed (2026-08-16, spec). ChangeTitleDialog stays:
-                                    it is the moderator's set_label write control, not the display. */}
-                                <ChangeTitleDialog
-                                  permlink={parentPermlink}
-                                  moderateEnabled={permissionToMute}
-                                  userOnList={comment.author}
-                                  title={authorTitleOf(comment)}
-                                  community={comment.community ?? ''}
-                                />
-                                <Link
-                                  href={`#@${comment.author}/${comment.permlink}`}
-                                  className="ml-1 hover:text-destructive md:text-sm"
-                                  title={String(parseDate(comment.created))}
-                                  data-testid="comment-timestamp-link"
-                                  onClick={() => {
-                                    onCommnentLinkClick(`#@${comment.author}/${comment.permlink}`);
-                                  }}
-                                >
-                                  <TimeAgo date={comment.created} />
-                                </Link>
-                                {!comment._optimistic && (
-                                  <Link
-                                    className="p-1 sm:p-2"
-                                    href={`/${comment.category}/@${displayAuthor}/${comment.permlink}`}
-                                    data-testid="comment-page-link"
-                                    aria-label={`Open ${displayAuthor}'s reply on its own page`}
-                                  >
-                                    <Icons.link className="h-3 w-3" />
-                                  </Link>
-                                )}
-                                {/* ★ item 10: once CommentList stops indenting past
-                                    MAX_VISUAL_DEPTH, this is the only thing left that says
-                                    who a flattened reply is actually answering. */}
-                                {replyingToAuthor && (
-                                  <span
-                                    className="whitespace-nowrap text-caption text-muted-foreground"
-                                    data-testid="comment-replying-to"
-                                  >
-                                    {t('cards.comment_card.replying_to', { author: replyingToAuthor })}
-                                  </span>
-                                )}
-                              </>
-                            )}
+    <li data-testid="comment-list-item" className="lm-enter w-full min-w-0">
+      <div className="w-full min-w-0" id={commentId} ref={ref}>
+        <Accordion type="single" collapsible value={openState} className="w-full min-w-0">
+          <AccordionItem className="w-full min-w-0" value="item-1">
+            {/* ★ THE COMMENT SUBTREE WAS AN UNMIGRATED VISUAL SYSTEM (v8, post detail).
+                Measured on a real thread: 181 bordered boxes at border-radius 0 with
+                border rgb(241,245,249), plus stray 6px, 8px and 12px radii, while the
+                rest of the app is 14/18/20/22px on #ebebeb / #eee2dc. Card's own
+                default (`rounded-md`, themed `border`) is what produced most of it.
+                Pinned to the house tokens here: white surface, #ebebeb hairline,
+                14px radius, which is the radius the design system assigns to rows. */}
+            <Card
+              className={cn(
+                `font-ui mb-4 w-full min-w-0 overflow-hidden rounded-card border-line-9 bg-surface-1 text-primary depth-${comment.depth}`,
+                {
+                  'opacity-50 hover:opacity-100': hiddenComment || tempraryHidden,
+                  'border border-destructive': comment._temporary,
+                  'border border-line-info-2/50': comment._optimistic
+                }
+              )}
+            >
+              {/* ★ ONE padding token for the whole card (item 5/6/8): CardHeader
+                  carries it here, CardContent and CardFooter below match it
+                  exactly (px-3 py-2), and nothing inside any of the three rows
+                  adds its own competing offset (the old pl-1/ml-4/px-[5px]/px-2
+                  mix is what produced 4px at one depth and 12-16px at another —
+                  it was never depth-dependent, just inconsistent per row). */}
+              <CardHeader className="px-3 py-2">
+                <div className="flex w-full justify-between">
+                  <div
+                    className="flex w-full flex-col justify-start sm:flex-row sm:items-center"
+                    data-testid="comment-card-header"
+                  >
+                    <div className="flex w-full items-center justify-between text-caption sm:text-sm">
+                      <div className="flex flex-wrap items-center">
+                        {comment._temporary && !comment._optimistic ? (
+                          <div className="flex items-center font-medium hover:cursor-pointer hover:text-destructive">
+                            {displayAuthor}
                           </div>
-                          {comment._temporary && !comment._optimistic ? null : !hiddenComment ? (
-                            <div className="flex items-center">
-                              {/* Only show flag here for non-originally-hidden comments; originally hidden ones show flag in the reveal/hide section */}
-                              {null}
-                              <AccordionTrigger
-                                className="pb-0 pt-1 !no-underline sm:hidden"
-                                aria-label={
-                                  openState === 'item-1' ? 'Collapse this reply' : 'Expand this reply'
-                                }
-                                onClick={() => setOpenState((prev) => (prev === 'item-1' ? '' : 'item-1'))}
-                              />
-                            </div>
-                          ) : null}
-                        </div>
-                        {comment._temporary && !comment._optimistic ? null : isOriginallyHidden ? (
-                          <div className="flex w-full items-center justify-between">
-                            <AccordionTrigger
-                              className="pb-0 pt-1 !no-underline "
-                              onClick={() => setOpenState((prev) => (prev === 'item-1' ? '' : 'item-1'))}
-                            >
+                        ) : (
+                          <>
+                            {publishBadgeState && (
                               <span
-                                // ★ item 9: this used to wrap mid-phrase ("Reveal
-                                // Comment" / "(blacklisted)" on separate lines) once the
-                                // per-depth indent (item 10) had eaten enough width.
-                                // whitespace-nowrap keeps it one line; the row itself is
-                                // free to wrap around it if the viewport is that narrow.
-                                className="cursor-pointer whitespace-nowrap text-caption sm:text-sm"
-                                // ★★★ ONE SOURCE OF TRUTH (2026-08-13, reported: the
-                                // stub read "Hide Comment" while `aria-expanded="false"`,
-                                // and the filter reason never appeared).
-                                //
-                                // This span used to carry its OWN `onClick` toggling
-                                // `hiddenComment`, nested inside an `AccordionTrigger`
-                                // whose click toggles `openState`. A click on the span
-                                // bubbled and moved BOTH; a click anywhere else on the
-                                // trigger moved only `openState`. Two states for one row,
-                                // so they desynced — and because the label AND the
-                                // "(reason)" beside it were keyed off `hiddenComment`
-                                // while the actual collapse is driven by `openState`, the
-                                // row ended up labelled "Hide Comment" while collapsed,
-                                // with its explanation hidden. The reason strings were
-                                // wired all along; they were gated on the wrong state.
-                                //
-                                // The trigger is the only thing that toggles now, and
-                                // everything the reader sees is derived from `openState`.
+                                className={cn('mr-2 flex items-center gap-1 text-caption', {
+                                  'text-ink-info-9': publishBadgeState === 'publishing' || publishBadgeState === 'queued',
+                                  'text-muted-foreground': publishBadgeState === 'waiting',
+                                  'text-ink-warn-6': publishBadgeState === 'delayed'
+                                })}
+                                data-testid="comment-publish-status"
+                                data-publish-state={publishBadgeState}
                               >
-                                {collapsed
-                                  ? t('cards.comment_card.reveal_comment')
-                                  : t('cards.comment_card.hide_comment')}
-                                {collapsed && (
-                                  <span className="ml-1 text-muted-foreground">
-                                    (
-                                    {t(
-                                      getCommentMuteReasonKey(
-                                        comment.stats?.muted_reasons,
-                                        isMutedByViewer,
-                                        blacklistReason
-                                      )
-                                    )}
-                                    )
-                                  </span>
+                                {/* Spinner on the FIRST state only — a spinner is what
+                                    reads as a hang, and everything past "just broadcast,
+                                    resolving in seconds" is a calm, static sentence. */}
+                                {publishBadgeShowsSpinner(publishBadgeState) && (
+                                  <CircleSpinner size={10} color="#3b82f6" loading />
                                 )}
+                                {t(PUBLISH_BADGE_COPY_KEY[publishBadgeState])}
                               </span>
-                            </AccordionTrigger>
-                            {/* Flag icon stays in this section for originally hidden comments */}
-                            <div className="flex items-center gap-2">
-                              {/* ★ E5 — the way back to the list that caused this hide.
-                                  Deliberately OUTSIDE the AccordionTrigger button above:
-                                  an anchor nested inside a button is invalid HTML, so the
-                                  link lives in this sibling row instead. */}
-                              {collapsed && hiddenReasonListHref && identity.isLoggedIn ? (
-                                <Link
-                                  href={hiddenReasonListHref}
-                                  className="whitespace-nowrap text-caption text-muted-foreground underline-offset-2 hover:text-destructive hover:underline sm:text-sm"
-                                  data-testid="comment-hidden-reason-list-link"
-                                >
-                                  {t('cards.comment_card.manage_list_link')}
-                                </Link>
-                              ) : null}
-                              {null}
-                            </div>
-                          </div>
-                        ) : null}
-
-                        {comment._temporary && !comment._optimistic ? null : !openState ? (
-                          <div
-                            className="flex h-5 w-full items-center gap-2.5 text-[17px]"
-                            data-testid="comment-card-footer"
-                          >
-                            <VotesComponentWrapper post={comment} type="comment" />
-
-                            <DetailsCardHover
-                              post={comment}
-                              decline={parseFloat(comment.max_accepted_payout) === 0}
-                              className="order-last ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))]"
+                            )}
+                            {/* ★ item 7: ONE avatar rule for every depth. Used to be TWO —
+                                a 40px avatar rendered before the card (desktop only,
+                                outside this component's own padding, and the thing that
+                                made the per-depth indent compound by 52px on top of the
+                                24px thread line) plus this 20px one (mobile only). Now
+                                there is just this one, at every breakpoint and every depth,
+                                living inside the card's own padding so it can never float
+                                in the gutter or cross the connector line. The card-level
+                                `opacity-50` already fades hidden/temporary comments, so this
+                                doesn't need its own opacity variant. */}
+                            {/* ★ CONVERGED ON UserAvatarImg (2026-09-15): this was a bare
+                                <img> on the /api/avatar proxy alone, so a single upstream
+                                timeout became a day-long cached monogram here while the
+                                feed card (image host first) kept the real picture. See
+                                user-avatar.tsx for the measurement. `src`/`lite` keep the
+                                squatting guard for a lite author. */}
+                            <UserAvatarImg
+                              username={displayAuthor}
+                              pixelSize={20}
+                              src={liteOverlay?.avatarUrl || undefined}
+                              lite={Boolean(liteOverlay)}
+                              className="mr-1.5"
+                            />
+                            <UserPopoverCard
+                              // The card ACTS on the real signing account —
+                              // follow, mute and the profile lookup all live in
+                              // there — and only DISPLAYS the lite name.
+                              author={comment.author}
+                              liteName={liteOverlay?.author}
+                              author_reputation={comment.author_reputation}
+                              blacklist={comment.blacklists}
+                            />
+                            {/* ★ THE MERITUM PILL, SAME RULE AS THE FEED AND THE POST
+                                HEADER (owner, 2026-09-16: "accounts don't carry their
+                                meritum pill next to their name like they do inside the
+                                feeds"). Keyed on the DISPLAYED identity exactly as the
+                                feed card keys its pill (medium-post-card.tsx passes
+                                displayAuthor): a lite name has no market and draws
+                                nothing; a Hive author with a market draws price + state
+                                word. One shared discovery read per page, no per-comment
+                                request (token-author-chip.tsx). */}
+                            <span className="ml-1.5 inline-flex items-center">
+                              <TokenAuthorChip handle={displayAuthor} />
+                            </span>
+                            {/* ★ author_title badge removed (2026-08-16, spec). ChangeTitleDialog stays:
+                                it is the moderator's set_label write control, not the display. */}
+                            <ChangeTitleDialog
+                              permlink={parentPermlink}
+                              moderateEnabled={permissionToMute}
+                              userOnList={comment.author}
+                              title={authorTitleOf(comment)}
+                              community={comment.community ?? ''}
+                            />
+                            <Link
+                              href={`#@${comment.author}/${comment.permlink}`}
+                              className="ml-1 hover:text-destructive md:text-sm"
+                              title={String(parseDate(comment.created))}
+                              data-testid="comment-timestamp-link"
+                              onClick={() => {
+                                onCommnentLinkClick(`#@${comment.author}/${comment.permlink}`);
+                              }}
                             >
-                              <div
-                                data-testid="comment-card-footer-payout"
-                                className={clsx(
-                                  /* ★★★ THE SECOND FOOTER. THE 2026-08-21 FIX ONLY REACHED THE
-                                     OTHER ONE (corrected 2026-08-23, owner: "why is the comment
-                                     payout still in the same place on the left").
-
-                                     This file renders TWO comment footers, both carrying
-                                     `data-testid="comment-card-footer"`: the `CardFooter` below,
-                                     and THIS one, which is the COLLAPSED comment's row. The owner
-                                     report ("the value needs to be on the right like on posts,
-                                     like on feeds") and the money-colour fix from the same report
-                                     were both applied to the other site only, so every collapsed
-                                     comment kept the exact layout that was reported - payout
-                                     second of three, between the vote control and the reply
-                                     count, and hovering RED like an error rather than reading as
-                                     money.
-
-                                     Same three properties as the sibling, deliberately identical:
-                                     `order-last ml-auto` puts it at the row's right edge,
-                                     `font-medium` is the requested Lora weight, and the payout ink
-                                     stops it inheriting near-black and hovering to --destructive. */
-                                  'order-last ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
-                                  {
-                                    'line-through opacity-50': parseFloat(comment.max_accepted_payout) === 0
-                                  }
-                                )}
+                              <TimeAgo date={comment.created} />
+                            </Link>
+                            {!comment._optimistic && (
+                              <Link
+                                className="p-1 sm:p-2"
+                                href={`/${comment.category}/@${displayAuthor}/${comment.permlink}`}
+                                data-testid="comment-page-link"
+                                aria-label={`Open ${displayAuthor}'s reply on its own page`}
                               >
-                                {'$'}
-                                {comment.payout.toFixed(2)}
-                              </div>
-                            </DetailsCardHover>
-                            {comment.children ? (
-                              <>
-                                <Separator orientation="vertical" />
-                                <div className="flex items-center text-nowrap">
-                                  {comment.children}{' '}
-                                  {comment.children > 1
-                                    ? t('cards.comment_card.replies')
-                                    : t('cards.comment_card.one_reply')}
-                                </div>
-                              </>
-                            ) : null}
-                          </div>
-                        ) : null}
+                                <Icons.link className="h-3 w-3" />
+                              </Link>
+                            )}
+                            {/* ★ item 10: once CommentList stops indenting past
+                                MAX_VISUAL_DEPTH, this is the only thing left that says
+                                who a flattened reply is actually answering. */}
+                            {replyingToAuthor && (
+                              <span
+                                className="whitespace-nowrap text-caption text-muted-foreground"
+                                data-testid="comment-replying-to"
+                              >
+                                {t('cards.comment_card.replying_to', { author: replyingToAuthor })}
+                              </span>
+                            )}
+                          </>
+                        )}
                       </div>
-                      {!hiddenComment ? (
-                        <AccordionTrigger
-                          /* ★ min-w-[24px] FOR THE HIT TARGET (2026-08-19, WCAG 2.2 AA
-                              2.5.8). This trigger renders no children of its own — the
-                              chevron icon (h-4 w-4) is the only content — so its width was
-                              exactly the icon's 16px with zero horizontal padding. Height
-                              was already 28px (py-4/pt-1 puts it above the 24px floor), so
-                              only the width needed a floor. Measured across all 5 comment
-                              threads on a live post: with `min-w-[24px]` applied, the
-                              enclosing `<h3>` row and the comment card's own height were
-                              byte-identical before and after (see comment-card-footer's own
-                              note two screens up for the same measurement discipline). The
-                              mobile counterpart just below (`sm:hidden`) is NOT touched here
-                              — at a 390px viewport it measures 16x20 too, but there the
-                              parent row hugs it tightly and grows 4px per comment when
-                              enlarged, a real (if modest) cost this pass did not get
-                              sign-off to spend. */
-                          className="mr-2 hidden min-w-[24px] pb-0 pt-1 !no-underline sm:block"
-                          aria-label={openState === 'item-1' ? 'Collapse this reply' : 'Expand this reply'}
-                          onClick={() => setOpenState((prev) => (prev === 'item-1' ? '' : 'item-1'))}
-                        />
+                      {comment._temporary && !comment._optimistic ? null : !hiddenComment ? (
+                        <div className="flex items-center">
+                          {/* Only show flag here for non-originally-hidden comments; originally hidden ones show flag in the reveal/hide section */}
+                          {null}
+                          <AccordionTrigger
+                            className="pb-0 pt-1 !no-underline sm:hidden"
+                            aria-label={
+                              openState === 'item-1' ? 'Collapse this reply' : 'Expand this reply'
+                            }
+                            onClick={() => setOpenState((prev) => (prev === 'item-1' ? '' : 'item-1'))}
+                          />
+                        </div>
                       ) : null}
                     </div>
-                  </CardHeader>
-                  <AccordionContent className="h-fit p-0">
-                    {/* ★ item 8: this used to be header / hairline / body / hairline /
-                        footer — three stacked, separately-bordered bands rather than one
-                        card. Both internal <Separator>s are gone; the card's own border
-                        is the only edge now, and CardContent matches the same px-3 py-2
-                        token as the header and footer above/below it. */}
-                    <CardContent
-                      className="h-fit w-full min-w-0 overflow-hidden px-3 pb-1 pt-2"
-                      data-testid="comment-card-to-hover"
-                    >
-                      {legalBlockedUser ? (
-                        <div className="px-2 py-6">{t('global.unavailable_for_legal_reasons')}</div>
-                      ) : userFromDMCA ? (
-                        <div className="px-2 py-6">{t('post_content.body.copyright')}</div>
-                      ) : edit && comment.parent_permlink && comment.parent_author ? (
-                        <ReplyTextbox
-                          editMode={edit}
-                          onSetReply={setEdit}
-                          username={comment.parent_author}
-                          permlink={comment.permlink}
-                          parentPermlink={comment.parent_permlink}
-                          storageId={editStorageId}
-                          comment={comment}
-                          discussionAuthor={discussionAuthor}
-                          discussionPermlink={discussionPermlink}
-                          observer={observer}
-                        />
-                      ) : (
-                        <>
-                        <CardDescription data-testid="comment-card-description">
-                          <RendererContainer
-                            body={comment.body}
-                            author={comment.author}
-                            permlink={comment.permlink}
-                            className={commentClassName}
-                          />
-                        </CardDescription>
-                        {/* ★ "posted via lumen", under the comment body and above its action row —
-                            the same line the post page carries, from the same component so the two
-                            cannot drift. Renders nothing for a comment Lumen did not publish. */}
-                        <PostedViaLumen entry={comment} className="mt-2" />
-                        </>
-                      )}
-                    </CardContent>
-                    <CardFooter className="px-3 pb-1.5 pt-0">
-                      {comment._temporary && !comment._optimistic ? null : (
-                        <div
-                          // ★ item 9: this used to be a single non-wrapping row inside a
-                          // Card with `overflow-hidden`. Once per-depth indent (fixed
-                          // separately, item 10) ate enough of the card's width the row
-                          // had nowhere to go but clip — the downvote arrow rendered
-                          // half-width and the payout vanished past the card's right
-                          // edge. flex-wrap means a still-narrow card reflows the row
-                          // onto a second line instead of silently cutting it off.
-                          className="flex w-full flex-wrap items-center gap-2.5 pt-0 text-[17px]"
-                          data-testid="comment-card-footer"
+                    {comment._temporary && !comment._optimistic ? null : isOriginallyHidden ? (
+                      <div className="flex w-full items-center justify-between">
+                        <AccordionTrigger
+                          className="pb-0 pt-1 !no-underline "
+                          onClick={() => setOpenState((prev) => (prev === 'item-1' ? '' : 'item-1'))}
                         >
-                          <VotesComponentWrapper post={comment} type="comment" />
-                          <DetailsCardHover
-                            post={comment}
-                            decline={parseFloat(comment.max_accepted_payout) === 0}
-                            className="order-last ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))]"
->
-                            <div
-                              data-testid="comment-card-footer-payout"
-                              className={clsx(
-                                /* ★ Money is green, and it does not go RED under the pointer (2026-08-20,
-                                   owner report). This inherited near-black and hovered to --destructive, so
-                                   the one figure on the row that is money looked like body text until you
-                                   touched it and then looked like an error. */
-                                /* ★★ ON THE RIGHT, LIKE EVERY OTHER PAYOUT (2026-08-21, owner: "comments
-                                   started mixing up the payout for comments with all the icons. the value
-                                   needs to be on the right like on posts, like on feeds").
-                                
-                                   It sat SECOND of four in this flex row — between the vote control and the
-                                   vote count — so the one figure on the row that is money read as just
-                                   another icon label. `ml-auto` is what the feed card uses to push its payout
-                                   to the card's right edge; `order-last` is what keeps it there, because this
-                                   element is not last in the markup and `ml-auto` alone would drag the vote
-                                   count and Reply across with it.
-                                
-                                   ★ MEDIUM, NOT NORMAL (same report): "the payouts need to be medium, not
-                                   normal to give them a little bit of Lora font boldness." 400 -> 500. */
-                                'order-last ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
-                                {
-                                  'line-through opacity-50': parseFloat(comment.max_accepted_payout) === 0
-                                }
-                              )}
-                            >
-                              {'$'}
-                              {comment.payout.toFixed(2)}
-                            </div>
-                          </DetailsCardHover>
-                          {/* ★ item 11: "the app's tokens" — copied verbatim from the
-                              reply editor's own Cancel button (reply-textbox.tsx), the
-                              nearest sibling component in this same feature, rather than
-                              inventing a new de-emphasised-text convention here. */}
-                          {/* ★ min-h-[24px] FOR THE HIT TARGET (2026-08-19, WCAG 2.2 AA
-                              2.5.8). 35.8x22 measured — width was already fine, only the
-                              22px line-height-driven height failed. Measured across 5
-                              comment footers: the row (`comment-card-footer`, h-5 but
-                              governed by taller siblings) and the comment card itself were
-                              unchanged, 0px cost, same as the "More options" trigger below. */}
-                          {identity.isLoggedIn ? (
-                            <button
-                              disabled={deleteCommentMutation.isLoading}
-                              onClick={() => setReply(!reply)}
-                              className="flex h-9 items-center rounded-control px-2.5 py-1.5 text-[15px] font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
-                              data-testid="comment-card-footer-reply"
-                            >
-                              {t('cards.comment_card.reply')}
-                            </button>
-                          ) : (
-                            <DialogLogin>
-                              <button
-                                className="flex h-9 items-center rounded-control px-2.5 py-1.5 text-[15px] font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
-                                data-testid="comment-card-footer-reply"
-                              >
-                                {t('post_content.footer.reply')}
-                              </button>
-                            </DialogLogin>
-                          )}
-                          {identity.isLoggedIn && comment.author === identity.username ? (
-                            <button
-                              disabled={deleteCommentMutation.isLoading}
-                              onClick={() => {
-                                setEdit(!edit);
-                              }}
-                              className="flex h-9 items-center rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
-                              data-testid="comment-card-footer-edit"
-                            >
-                              {t('cards.comment_card.edit')}
-                            </button>
-                          ) : null}
-                          {comment.replies.length === 0 &&
-                          identity.isLoggedIn &&
-                          comment.author === identity.username &&
-                          new Date() < new Date(`${comment.payout_at}Z`) ? (
-                            <PostDeleteDialog
-                              permlink={comment.permlink}
-                              action={dialogAction}
-                              label="Comment"
-                            >
-                              <button
-                                disabled={edit || deleteCommentMutation.isLoading}
-                                className="flex h-9 items-center rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
-                                data-testid="comment-card-footer-delete"
-                              >
-                                {deleteCommentMutation.isLoading ? (
-                                  <CircleSpinner
-                                    loading={deleteCommentMutation.isLoading}
-                                    size={18}
-                                    color="#dc2626"
-                                  />
-                                ) : (
-                                  t('cards.comment_card.delete')
+                          <span
+                            // ★ item 9: this used to wrap mid-phrase ("Reveal
+                            // Comment" / "(blacklisted)" on separate lines) once the
+                            // per-depth indent (item 10) had eaten enough width.
+                            // whitespace-nowrap keeps it one line; the row itself is
+                            // free to wrap around it if the viewport is that narrow.
+                            className="cursor-pointer whitespace-nowrap text-caption sm:text-sm"
+                            // ★★★ ONE SOURCE OF TRUTH (2026-08-13, reported: the
+                            // stub read "Hide Comment" while `aria-expanded="false"`,
+                            // and the filter reason never appeared).
+                            //
+                            // This span used to carry its OWN `onClick` toggling
+                            // `hiddenComment`, nested inside an `AccordionTrigger`
+                            // whose click toggles `openState`. A click on the span
+                            // bubbled and moved BOTH; a click anywhere else on the
+                            // trigger moved only `openState`. Two states for one row,
+                            // so they desynced — and because the label AND the
+                            // "(reason)" beside it were keyed off `hiddenComment`
+                            // while the actual collapse is driven by `openState`, the
+                            // row ended up labelled "Hide Comment" while collapsed,
+                            // with its explanation hidden. The reason strings were
+                            // wired all along; they were gated on the wrong state.
+                            //
+                            // The trigger is the only thing that toggles now, and
+                            // everything the reader sees is derived from `openState`.
+                          >
+                            {collapsed
+                              ? t('cards.comment_card.reveal_comment')
+                              : t('cards.comment_card.hide_comment')}
+                            {collapsed && (
+                              <span className="ml-1 text-muted-foreground">
+                                (
+                                {t(
+                                  getCommentMuteReasonKey(
+                                    comment.stats?.muted_reasons,
+                                    isMutedByViewer,
+                                    blacklistReason
+                                  )
                                 )}
-                              </button>
-                            </PostDeleteDialog>
+                                )
+                              </span>
+                            )}
+                          </span>
+                        </AccordionTrigger>
+                        {/* Flag icon stays in this section for originally hidden comments */}
+                        <div className="flex items-center gap-2">
+                          {/* ★ E5 — the way back to the list that caused this hide.
+                              Deliberately OUTSIDE the AccordionTrigger button above:
+                              an anchor nested inside a button is invalid HTML, so the
+                              link lives in this sibling row instead. */}
+                          {collapsed && hiddenReasonListHref && identity.isLoggedIn ? (
+                            <Link
+                              href={hiddenReasonListHref}
+                              className="whitespace-nowrap text-caption text-muted-foreground underline-offset-2 hover:text-destructive hover:underline sm:text-sm"
+                              data-testid="comment-hidden-reason-list-link"
+                            >
+                              {t('cards.comment_card.manage_list_link')}
+                            </Link>
                           ) : null}
-                          {permissionToMute ? (
-                            <MutePostDialog
-                              comment={true}
-                              community={comment.community ?? ''}
-                              username={comment.author}
-                              permlink={comment.permlink}
-                              contentMuted={comment.stats?.gray ?? false}
-                              discussionPermlink={parentPermlink}
-                              discussionAuthor={parentAuthor}
-                              temporaryDisable={comment.stats?._temporary}
-                            />
-                          ) : null}
-                          {/* ★ E2, REVISED 2026-08-12 (owner ruling) — Block reachable
-                              from the comment itself, not only from a popover triggered
-                              by clicking the author's name. This used to be two items,
-                              Mute and Blacklist; the owner's ruling collapsed them into
-                              the one control that already does both of what those two
-                              were trying to do, plus the part neither of them could
-                              (hiding the blocked account's replies under the viewer's
-                              OWN content from every other reader — see
-                              `lib/lite/social/block-service.ts`). Hidden (not disabled)
-                              for the same reason Mute/Blacklist were: a lite comment's
-                              `comment.author` is the shared publishing account, not a
-                              blockable person — `useLumenBlock`'s own "not yourself"
-                              check covers the rest. */}
-                          {block.available || block.unknown ? (
-                            <>
-                              {/* ★ THE POPOVER WRAPS THE TRIGGER (not the other way round)
-                                  so `PopoverAnchor` and `PopoverContent` share one `<Popover>`
-                                  root — Popper positions off the Anchor's ref, not DOM
-                                  nesting order, so the DropdownMenu living between them here
-                                  is fine. `PopoverAnchor` only registers a position; unlike
-                                  `PopoverTrigger` it adds no click handler, so clicking "···"
-                                  for Block never also toggles this popover — only
-                                  `handleDownvoteSelect` (via `downvoteWeightOpen`) does. */}
-                              <Popover open={downvoteWeightOpen} onOpenChange={setDownvoteWeightOpen}>
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <PopoverAnchor asChild>
-                                      <button
-                                        ref={moreTriggerRef}
-                                        type="button"
-                                        aria-label={
-                                          vote_downvoted
-                                            ? t('cards.comment_card.overflow_menu_label_downvoted')
-                                            : t('profile.overflow_menu_label')
-                                        }
-                                        className={cn(
-                                          // ★ min-h/min-w-[24px] FOR THE HIT TARGET (2026-08-19,
-                                          // WCAG 2.2 AA 2.5.8). No children besides the h-4 w-4
-                                          // icon and no padding, so the box was exactly 16x16.
-                                          // Measured across all 4 comments on this thread that
-                                          // render this trigger (plus the post's own overflow
-                                          // trigger, same fix, `content.tsx`): the footer row and
-                                          // the comment card's height were unchanged, 0px cost.
-                                          'flex min-h-[24px] min-w-[24px] items-center justify-center hover:cursor-pointer hover:text-destructive',
-                                          // ★ item 4: colour alone is not an accessible signal —
-                                          // the aria-label above already carries the same fact —
-                                          // this is the SAME slate `--lm-vote-slate` resolves to
-                                          // for a cast downvote in `vote-control.module.css`
-                                          // (`.down.mine`), duplicated as literals because that
-                                          // custom property is scoped to `VotesComponent`'s own
-                                          // `.root` element, a sibling of this button, not an
-                                          // ancestor — `var()` would not inherit across to here.
-                                          vote_downvoted
-                                            ? 'text-[#5b6470] dark:text-[#a3adba]'
-                                            : 'text-foreground/60'
-                                        )}
-                                        data-testid="comment-card-footer-overflow"
-                                      >
-                                        <Icons.moreHorizontal className="h-[22px] w-[22px]" />
-                                      </button>
-                                    </PopoverAnchor>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end" className="w-52">
-                                    {identity.isLoggedIn ? (
-                                      <>
-                                        {/* ★ item 5: no destructive classes here — Downvote is
-                                            not styled destructive-red, unlike Block below. */}
-                                        <DropdownMenuItem
-                                          onSelect={handleDownvoteSelect}
-                                          disabled={voteActionDisabled}
-                                          className="cursor-pointer"
-                                          data-testid="comment-downvote-menu-item"
-                                        >
-                                          {vote_downvoted
-                                            ? t('cards.comment_card.remove_downvote')
-                                            : t('cards.comment_card.downvote')}
-                                        </DropdownMenuItem>
-                                        <DropdownMenuSeparator />
-                                      </>
-                                    ) : null}
-                                    {block.available ? (
-                                      <DropdownMenuItem
-                                        onClick={handleBlockClick}
-                                        disabled={block.busy}
-                                        className="cursor-pointer text-destructive focus:text-destructive"
-                                        data-testid="comment-block-menu-item"
-                                      >
-                                        {block.isBlocking
-                                          ? t('user_profile.unblock_button')
-                                          : t('user_profile.block_button')}
-                                      </DropdownMenuItem>
-                                    ) : (
-                                      // `unknown`, not `available`: the read failed rather than
-                                      // "this pair cannot be blocked" (use-lumen-block.ts). A
-                                      // disabled item that says so, not a vanished menu, is the
-                                      // honest answer during a backend outage.
-                                      <DropdownMenuItem
-                                        disabled
-                                        className="cursor-not-allowed"
-                                        data-testid="comment-block-menu-item-unknown"
-                                        title={t('user_profile.block_status_unknown_hint')}
-                                      >
-                                        {t('user_profile.block_status_unknown')}
-                                      </DropdownMenuItem>
-                                    )}
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                                {/* The weight picker — same Slider, same warning copy, same
-                                    reasons list the inline arrow's popover showed. Confirming
-                                    closes this popover explicitly (the original branch swaps
-                                    to the removal dialog once `vote_downvoted` flips instead,
-                                    which this component cannot do without unmounting the whole
-                                    Popover mid-open). */}
-                                <PopoverContent
-                                  className="z-50 max-w-xs rounded-lg bg-background-secondary p-4 shadow-lg"
-                                  align="end"
-                                  onCloseAutoFocus={returnFocusToOverflowTrigger}
-                                  data-testid="comment-downvote-slider-popover"
-                                >
-                                  <div className="flex h-full items-center gap-2">
-                                    <button
-                                      type="button"
-                                      data-testid="comment-downvote-slider-confirm"
-                                      aria-label={t('cards.post_card.downvote')}
-                                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-foreground/70 hover:text-[#5b6470] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 dark:hover:text-[#a3adba]"
-                                      disabled={voteActionDisabled}
-                                      onClick={() => {
-                                        void submitCommentDownvote(-sliderDownvote[0] * 100);
-                                        storeDownvoteWeights((prev) => ({
-                                          ...prev,
-                                          comment: { ...prev.comment, downvote: sliderDownvote }
-                                        }));
-                                        setDownvoteWeightOpen(false);
-                                      }}
-                                    >
-                                      {/* Same blade glyph the inline arrow used, rotated the
-                                          same 180° `.down svg` applies in vote-control.module.css
-                                          — reproduced with a plain transform since that module's
-                                          rotation rule is scoped to a class this button does not
-                                          carry (see the colour note above). */}
-                                      <span className="inline-block rotate-180">
-                                        <BladeGlyph />
-                                      </span>
-                                    </button>
-                                    <Slider
-                                      dataTestId="comment-downvote-slider"
-                                      defaultValue={sliderDownvote}
-                                      value={sliderDownvote}
-                                      min={1}
-                                      className="w-36"
-                                      onValueChange={(v: number[]) => setSliderDownvote(v)}
-                                    />
-                                    <div
-                                      className="w-fit text-destructive"
-                                      data-testid="comment-downvote-slider-percentage-value"
-                                    >
-                                      -{sliderDownvote}%
-                                    </div>
-                                  </div>
-                                  <div
-                                    className="flex flex-col gap-1 pt-2 text-sm"
-                                    data-testid="comment-downvote-description-content"
-                                  >
-                                    <p>{t('cards.post_card.downvote_warning')}</p>
-                                    <ul>
-                                      <li>{t('cards.post_card.reason_1')}</li>
-                                      <li>{t('cards.post_card.reason_2')}</li>
-                                      <li>{t('cards.post_card.reason_3')}</li>
-                                      <li>{t('cards.post_card.reason_4')}</li>
-                                    </ul>
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
-
-                              {/* Undo confirmation — same title/description/button copy as
-                                  `VoteRemovalDialog(voteType="downvote")`. That component is
-                                  not reused directly here because it owns its OWN trigger and
-                                  `open` state with no external control point; rule 2 needs the
-                                  open state owned by this component instead, so this is a
-                                  controlled AlertDialog built from the same primitives and the
-                                  same `vote_removal_dialog.*` keys. */}
-                              <AlertDialog open={downvoteRemovalOpen} onOpenChange={setDownvoteRemovalOpen}>
-                                <AlertDialogContent
-                                  className="flex flex-col gap-8 sm:rounded-r-xl"
-                                  onCloseAutoFocus={returnFocusToOverflowTrigger}
-                                >
-                                  <AlertDialogHeader className="gap-2">
-                                    <div className="flex items-center justify-between">
-                                      <AlertDialogTitle data-testid="comment-downvote-removal-dialog-header">
-                                        {t('vote_removal_dialog.remove_downvote_title')}
-                                      </AlertDialogTitle>
-                                      <AlertDialogCancel
-                                        className="border-none hover:text-ink-brand-3"
-                                        data-testid="comment-downvote-removal-dialog-close"
-                                      >
-                                        X
-                                      </AlertDialogCancel>
-                                    </div>
-                                    <AlertDialogDescription data-testid="comment-downvote-removal-dialog-description">
-                                      {t('vote_removal_dialog.remove_downvote_description')}
-                                    </AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter className="gap-2 sm:flex-row-reverse">
-                                    <AlertDialogCancel
-                                      className="hover:text-ink-brand-3"
-                                      data-testid="comment-downvote-removal-dialog-cancel"
-                                    >
-                                      {t('vote_removal_dialog.cancel')}
-                                    </AlertDialogCancel>
-                                    <AlertDialogAction
-                                      autoFocus
-                                      className="rounded-none bg-surface-39 text-base text-ink-27 shadow-lg shadow-destructive hover:bg-destructive hover:shadow-line-26 disabled:bg-surface-34 disabled:shadow-none"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        void submitCommentDownvote(0);
-                                        setDownvoteRemovalOpen(false);
-                                      }}
-                                      data-testid="comment-downvote-removal-dialog-ok"
-                                    >
-                                      {t('vote_removal_dialog.confirm')}
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
-                            </>
-                          ) : null}
+                          {null}
                         </div>
-                      )}
-                    </CardFooter>
-                    {reply && user && user.isLoggedIn ? (
-                      <div className="px-2 pb-2">
-                        <ReplyTextbox
-                          editMode={false}
-                          onSetReply={setReply}
-                          username={comment.author}
-                          permlink={comment.permlink}
-                          storageId={replyStorageId}
-                          comment=""
-                          discussionAuthor={discussionAuthor}
-                          discussionPermlink={discussionPermlink}
-                          observer={observer}
-                        />
                       </div>
                     ) : null}
-                  </AccordionContent>
-                </Card>
-                {/* Children rendered without AccordionContent so replies are always visible even when parent is hidden */}
-                {children ? <div className="h-fit p-0">{children}</div> : null}
-              </AccordionItem>
-            </Accordion>
-          </div>
-        </li>
-      ) : currentDepth === 8 ? (
-        <div className="h-8">
-          <Link
-            href={`/${comment.category}/@${displayAuthor}/${comment.permlink}`}
-            className="text-destructive"
-          >
-            {t('cards.comment_card.load_more')}...
-          </Link>
-        </div>
-      ) : null}
-    </>
+
+                    {comment._temporary && !comment._optimistic ? null : !openState ? (
+                      <div
+                        className="flex h-5 w-full items-center gap-2.5 text-[17px]"
+                        data-testid="comment-card-footer"
+                      >
+                        <VotesComponentWrapper post={comment} type="comment" />
+
+                        <DetailsCardHover
+                          post={comment}
+                          decline={parseFloat(comment.max_accepted_payout) === 0}
+                          className="order-last ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))]"
+                        >
+                          <div
+                            data-testid="comment-card-footer-payout"
+                            className={clsx(
+                              /* ★★★ THE SECOND FOOTER. THE 2026-08-21 FIX ONLY REACHED THE
+                                 OTHER ONE (corrected 2026-08-23, owner: "why is the comment
+                                 payout still in the same place on the left").
+
+                                 This file renders TWO comment footers, both carrying
+                                 `data-testid="comment-card-footer"`: the `CardFooter` below,
+                                 and THIS one, which is the COLLAPSED comment's row. The owner
+                                 report ("the value needs to be on the right like on posts,
+                                 like on feeds") and the money-colour fix from the same report
+                                 were both applied to the other site only, so every collapsed
+                                 comment kept the exact layout that was reported - payout
+                                 second of three, between the vote control and the reply
+                                 count, and hovering RED like an error rather than reading as
+                                 money.
+
+                                 Same three properties as the sibling, deliberately identical:
+                                 `order-last ml-auto` puts it at the row's right edge,
+                                 `font-medium` is the requested Lora weight, and the payout ink
+                                 stops it inheriting near-black and hovering to --destructive. */
+                              'order-last ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
+                              {
+                                'line-through opacity-50': parseFloat(comment.max_accepted_payout) === 0
+                              }
+                            )}
+                          >
+                            {'$'}
+                            {comment.payout.toFixed(2)}
+                          </div>
+                        </DetailsCardHover>
+                        {comment.children ? (
+                          <>
+                            <Separator orientation="vertical" />
+                            <div className="flex items-center text-nowrap">
+                              {comment.children}{' '}
+                              {comment.children > 1
+                                ? t('cards.comment_card.replies')
+                                : t('cards.comment_card.one_reply')}
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                  {!hiddenComment ? (
+                    <AccordionTrigger
+                      /* ★ min-w-[24px] FOR THE HIT TARGET (2026-08-19, WCAG 2.2 AA
+                          2.5.8). This trigger renders no children of its own — the
+                          chevron icon (h-4 w-4) is the only content — so its width was
+                          exactly the icon's 16px with zero horizontal padding. Height
+                          was already 28px (py-4/pt-1 puts it above the 24px floor), so
+                          only the width needed a floor. Measured across all 5 comment
+                          threads on a live post: with `min-w-[24px]` applied, the
+                          enclosing `<h3>` row and the comment card's own height were
+                          byte-identical before and after (see comment-card-footer's own
+                          note two screens up for the same measurement discipline). The
+                          mobile counterpart just below (`sm:hidden`) is NOT touched here
+                          — at a 390px viewport it measures 16x20 too, but there the
+                          parent row hugs it tightly and grows 4px per comment when
+                          enlarged, a real (if modest) cost this pass did not get
+                          sign-off to spend. */
+                      className="mr-2 hidden min-w-[24px] pb-0 pt-1 !no-underline sm:block"
+                      aria-label={openState === 'item-1' ? 'Collapse this reply' : 'Expand this reply'}
+                      onClick={() => setOpenState((prev) => (prev === 'item-1' ? '' : 'item-1'))}
+                    />
+                  ) : null}
+                </div>
+              </CardHeader>
+              <AccordionContent className="h-fit p-0">
+                {/* ★ item 8: this used to be header / hairline / body / hairline /
+                    footer — three stacked, separately-bordered bands rather than one
+                    card. Both internal <Separator>s are gone; the card's own border
+                    is the only edge now, and CardContent matches the same px-3 py-2
+                    token as the header and footer above/below it. */}
+                <CardContent
+                  className="h-fit w-full min-w-0 overflow-hidden px-3 pb-1 pt-2"
+                  data-testid="comment-card-to-hover"
+                >
+                  {legalBlockedUser ? (
+                    <div className="px-2 py-6">{t('global.unavailable_for_legal_reasons')}</div>
+                  ) : userFromDMCA ? (
+                    <div className="px-2 py-6">{t('post_content.body.copyright')}</div>
+                  ) : edit && comment.parent_permlink && comment.parent_author ? (
+                    <ReplyTextbox
+                      editMode={edit}
+                      onSetReply={setEdit}
+                      username={comment.parent_author}
+                      permlink={comment.permlink}
+                      parentPermlink={comment.parent_permlink}
+                      storageId={editStorageId}
+                      comment={comment}
+                      discussionAuthor={discussionAuthor}
+                      discussionPermlink={discussionPermlink}
+                      observer={observer}
+                    />
+                  ) : (
+                    <>
+                    <CardDescription data-testid="comment-card-description">
+                      <RendererContainer
+                        body={comment.body}
+                        author={comment.author}
+                        permlink={comment.permlink}
+                        className={commentClassName}
+                      />
+                    </CardDescription>
+                    {/* ★ "posted via lumen", under the comment body and above its action row —
+                        the same line the post page carries, from the same component so the two
+                        cannot drift. Renders nothing for a comment Lumen did not publish. */}
+                    <PostedViaLumen entry={comment} className="mt-2" />
+                    </>
+                  )}
+                </CardContent>
+                <CardFooter className="px-3 pb-1.5 pt-0">
+                  {comment._temporary && !comment._optimistic ? null : (
+                    <div
+                      // ★ item 9: this used to be a single non-wrapping row inside a
+                      // Card with `overflow-hidden`. Once per-depth indent (fixed
+                      // separately, item 10) ate enough of the card's width the row
+                      // had nowhere to go but clip — the downvote arrow rendered
+                      // half-width and the payout vanished past the card's right
+                      // edge. flex-wrap means a still-narrow card reflows the row
+                      // onto a second line instead of silently cutting it off.
+                      className="flex w-full flex-wrap items-center gap-2.5 pt-0 text-[17px]"
+                      data-testid="comment-card-footer"
+                    >
+                      <VotesComponentWrapper post={comment} type="comment" />
+                      <DetailsCardHover
+                        post={comment}
+                        decline={parseFloat(comment.max_accepted_payout) === 0}
+                        className="order-last ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))]"
+>
+                        <div
+                          data-testid="comment-card-footer-payout"
+                          className={clsx(
+                            /* ★ Money is green, and it does not go RED under the pointer (2026-08-20,
+                               owner report). This inherited near-black and hovered to --destructive, so
+                               the one figure on the row that is money looked like body text until you
+                               touched it and then looked like an error. */
+                            /* ★★ ON THE RIGHT, LIKE EVERY OTHER PAYOUT (2026-08-21, owner: "comments
+                               started mixing up the payout for comments with all the icons. the value
+                               needs to be on the right like on posts, like on feeds").
+                            
+                               It sat SECOND of four in this flex row — between the vote control and the
+                               vote count — so the one figure on the row that is money read as just
+                               another icon label. `ml-auto` is what the feed card uses to push its payout
+                               to the card's right edge; `order-last` is what keeps it there, because this
+                               element is not last in the markup and `ml-auto` alone would drag the vote
+                               count and Reply across with it.
+                            
+                               ★ MEDIUM, NOT NORMAL (same report): "the payouts need to be medium, not
+                               normal to give them a little bit of Lora font boldness." 400 -> 500. */
+                            'order-last ml-auto flex h-9 min-w-[88px] items-center justify-end rounded-control px-[6px] py-[6px] text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))] hover:cursor-pointer',
+                            {
+                              'line-through opacity-50': parseFloat(comment.max_accepted_payout) === 0
+                            }
+                          )}
+                        >
+                          {'$'}
+                          {comment.payout.toFixed(2)}
+                        </div>
+                      </DetailsCardHover>
+                      {/* ★ item 11: "the app's tokens" — copied verbatim from the
+                          reply editor's own Cancel button (reply-textbox.tsx), the
+                          nearest sibling component in this same feature, rather than
+                          inventing a new de-emphasised-text convention here. */}
+                      {/* ★ min-h-[24px] FOR THE HIT TARGET (2026-08-19, WCAG 2.2 AA
+                          2.5.8). 35.8x22 measured — width was already fine, only the
+                          22px line-height-driven height failed. Measured across 5
+                          comment footers: the row (`comment-card-footer`, h-5 but
+                          governed by taller siblings) and the comment card itself were
+                          unchanged, 0px cost, same as the "More options" trigger below. */}
+                      {identity.isLoggedIn ? (
+                        <button
+                          disabled={deleteCommentMutation.isLoading}
+                          onClick={() => setReply(!reply)}
+                          className="flex h-9 items-center rounded-control px-2.5 py-1.5 text-[15px] font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
+                          data-testid="comment-card-footer-reply"
+                        >
+                          {t('cards.comment_card.reply')}
+                        </button>
+                      ) : (
+                        <DialogLogin>
+                          <button
+                            className="flex h-9 items-center rounded-control px-2.5 py-1.5 text-[15px] font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
+                            data-testid="comment-card-footer-reply"
+                          >
+                            {t('post_content.footer.reply')}
+                          </button>
+                        </DialogLogin>
+                      )}
+                      {/* ★ EDIT AND DELETE ARE THE SAME SIZE AS REPLY (owner,
+                          2026-09-18: "the edit and reply on comments arent the same
+                          font ... pick what size they should be based on the card ui
+                          there"). They are the same button, three times over, and the
+                          only difference was a missing `text-[15px]`: these two
+                          inherited the footer row's `text-[17px]` while Reply carried
+                          its own 15px. 5894d78 ("Comment card: ... smaller/heavier
+                          type") took the card down a step — comment body 17px -> 15px
+                          on desktop, Reply with it — and simply missed these two, so
+                          the row has been reading at two sizes since. 15px is the
+                          card's own scale: the same size as Reply and as the comment
+                          text above it. The payout keeps its explicit 17px `font-num`
+                          — that one is money, sized on purpose (2026-08-21). */}
+                      {identity.isLoggedIn && comment.author === identity.username ? (
+                        <button
+                          disabled={deleteCommentMutation.isLoading}
+                          onClick={() => {
+                            setEdit(!edit);
+                          }}
+                          className="flex h-9 items-center rounded-control px-2.5 py-1.5 text-[15px] font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
+                          data-testid="comment-card-footer-edit"
+                        >
+                          {t('cards.comment_card.edit')}
+                        </button>
+                      ) : null}
+                      {comment.replies.length === 0 &&
+                      identity.isLoggedIn &&
+                      comment.author === identity.username &&
+                      new Date() < new Date(`${comment.payout_at}Z`) ? (
+                        <PostDeleteDialog
+                          permlink={comment.permlink}
+                          action={dialogAction}
+                          label="Comment"
+                        >
+                          <button
+                            disabled={edit || deleteCommentMutation.isLoading}
+                            className="flex h-9 items-center rounded-control px-2.5 py-1.5 text-[15px] font-medium text-ink-action transition-colors hover:cursor-pointer hover:bg-[#f4f5f7] hover:text-brand"
+                            data-testid="comment-card-footer-delete"
+                          >
+                            {deleteCommentMutation.isLoading ? (
+                              <CircleSpinner
+                                loading={deleteCommentMutation.isLoading}
+                                size={18}
+                                color="#dc2626"
+                              />
+                            ) : (
+                              t('cards.comment_card.delete')
+                            )}
+                          </button>
+                        </PostDeleteDialog>
+                      ) : null}
+                      {permissionToMute ? (
+                        <MutePostDialog
+                          comment={true}
+                          community={comment.community ?? ''}
+                          username={comment.author}
+                          permlink={comment.permlink}
+                          contentMuted={comment.stats?.gray ?? false}
+                          discussionPermlink={parentPermlink}
+                          discussionAuthor={parentAuthor}
+                          temporaryDisable={comment.stats?._temporary}
+                        />
+                      ) : null}
+                      {/* ★ E2, REVISED 2026-08-12 (owner ruling) — Block reachable
+                          from the comment itself, not only from a popover triggered
+                          by clicking the author's name. This used to be two items,
+                          Mute and Blacklist; the owner's ruling collapsed them into
+                          the one control that already does both of what those two
+                          were trying to do, plus the part neither of them could
+                          (hiding the blocked account's replies under the viewer's
+                          OWN content from every other reader — see
+                          `lib/lite/social/block-service.ts`). Hidden (not disabled)
+                          for the same reason Mute/Blacklist were: a lite comment's
+                          `comment.author` is the shared publishing account, not a
+                          blockable person — `useLumenBlock`'s own "not yourself"
+                          check covers the rest. */}
+                      {block.available || block.unknown ? (
+                        <>
+                          {/* ★ THE POPOVER WRAPS THE TRIGGER (not the other way round)
+                              so `PopoverAnchor` and `PopoverContent` share one `<Popover>`
+                              root — Popper positions off the Anchor's ref, not DOM
+                              nesting order, so the DropdownMenu living between them here
+                              is fine. `PopoverAnchor` only registers a position; unlike
+                              `PopoverTrigger` it adds no click handler, so clicking "···"
+                              for Block never also toggles this popover — only
+                              `handleDownvoteSelect` (via `downvoteWeightOpen`) does. */}
+                          <Popover open={downvoteWeightOpen} onOpenChange={setDownvoteWeightOpen}>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <PopoverAnchor asChild>
+                                  <button
+                                    ref={moreTriggerRef}
+                                    type="button"
+                                    aria-label={
+                                      vote_downvoted
+                                        ? t('cards.comment_card.overflow_menu_label_downvoted')
+                                        : t('profile.overflow_menu_label')
+                                    }
+                                    className={cn(
+                                      // ★ min-h/min-w-[24px] FOR THE HIT TARGET (2026-08-19,
+                                      // WCAG 2.2 AA 2.5.8). No children besides the h-4 w-4
+                                      // icon and no padding, so the box was exactly 16x16.
+                                      // Measured across all 4 comments on this thread that
+                                      // render this trigger (plus the post's own overflow
+                                      // trigger, same fix, `content.tsx`): the footer row and
+                                      // the comment card's height were unchanged, 0px cost.
+                                      'flex min-h-[24px] min-w-[24px] items-center justify-center hover:cursor-pointer hover:text-destructive',
+                                      // ★ item 4: colour alone is not an accessible signal —
+                                      // the aria-label above already carries the same fact —
+                                      // this is the SAME slate `--lm-vote-slate` resolves to
+                                      // for a cast downvote in `vote-control.module.css`
+                                      // (`.down.mine`), duplicated as literals because that
+                                      // custom property is scoped to `VotesComponent`'s own
+                                      // `.root` element, a sibling of this button, not an
+                                      // ancestor — `var()` would not inherit across to here.
+                                      vote_downvoted
+                                        ? 'text-[#5b6470] dark:text-[#a3adba]'
+                                        : 'text-foreground/60'
+                                    )}
+                                    data-testid="comment-card-footer-overflow"
+                                  >
+                                    <Icons.moreHorizontal className="h-[22px] w-[22px]" />
+                                  </button>
+                                </PopoverAnchor>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-52">
+                                {identity.isLoggedIn ? (
+                                  <>
+                                    {/* ★ item 5: no destructive classes here — Downvote is
+                                        not styled destructive-red, unlike Block below. */}
+                                    <DropdownMenuItem
+                                      onSelect={handleDownvoteSelect}
+                                      disabled={voteActionDisabled}
+                                      className="cursor-pointer"
+                                      data-testid="comment-downvote-menu-item"
+                                    >
+                                      {vote_downvoted
+                                        ? t('cards.comment_card.remove_downvote')
+                                        : t('cards.comment_card.downvote')}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                  </>
+                                ) : null}
+                                {block.available ? (
+                                  <DropdownMenuItem
+                                    onClick={handleBlockClick}
+                                    disabled={block.busy}
+                                    className="cursor-pointer text-destructive focus:text-destructive"
+                                    data-testid="comment-block-menu-item"
+                                  >
+                                    {block.isBlocking
+                                      ? t('user_profile.unblock_button')
+                                      : t('user_profile.block_button')}
+                                  </DropdownMenuItem>
+                                ) : (
+                                  // `unknown`, not `available`: the read failed rather than
+                                  // "this pair cannot be blocked" (use-lumen-block.ts). A
+                                  // disabled item that says so, not a vanished menu, is the
+                                  // honest answer during a backend outage.
+                                  <DropdownMenuItem
+                                    disabled
+                                    className="cursor-not-allowed"
+                                    data-testid="comment-block-menu-item-unknown"
+                                    title={t('user_profile.block_status_unknown_hint')}
+                                  >
+                                    {t('user_profile.block_status_unknown')}
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                            {/* The weight picker — same Slider, same warning copy, same
+                                reasons list the inline arrow's popover showed. Confirming
+                                closes this popover explicitly (the original branch swaps
+                                to the removal dialog once `vote_downvoted` flips instead,
+                                which this component cannot do without unmounting the whole
+                                Popover mid-open). */}
+                            <PopoverContent
+                              className="z-50 max-w-xs rounded-lg bg-background-secondary p-4 shadow-lg"
+                              align="end"
+                              onCloseAutoFocus={returnFocusToOverflowTrigger}
+                              data-testid="comment-downvote-slider-popover"
+                            >
+                              <div className="flex h-full items-center gap-2">
+                                <button
+                                  type="button"
+                                  data-testid="comment-downvote-slider-confirm"
+                                  aria-label={t('cards.post_card.downvote')}
+                                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-foreground/70 hover:text-[#5b6470] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 dark:hover:text-[#a3adba]"
+                                  disabled={voteActionDisabled}
+                                  onClick={() => {
+                                    void submitCommentDownvote(-sliderDownvote[0] * 100);
+                                    storeDownvoteWeights((prev) => ({
+                                      ...prev,
+                                      comment: { ...prev.comment, downvote: sliderDownvote }
+                                    }));
+                                    setDownvoteWeightOpen(false);
+                                  }}
+                                >
+                                  {/* Same blade glyph the inline arrow used, rotated the
+                                      same 180° `.down svg` applies in vote-control.module.css
+                                      — reproduced with a plain transform since that module's
+                                      rotation rule is scoped to a class this button does not
+                                      carry (see the colour note above). */}
+                                  <span className="inline-block rotate-180">
+                                    <BladeGlyph />
+                                  </span>
+                                </button>
+                                <Slider
+                                  dataTestId="comment-downvote-slider"
+                                  defaultValue={sliderDownvote}
+                                  value={sliderDownvote}
+                                  min={1}
+                                  className="w-36"
+                                  onValueChange={(v: number[]) => setSliderDownvote(v)}
+                                />
+                                <div
+                                  className="w-fit text-destructive"
+                                  data-testid="comment-downvote-slider-percentage-value"
+                                >
+                                  -{sliderDownvote}%
+                                </div>
+                              </div>
+                              <div
+                                className="flex flex-col gap-1 pt-2 text-sm"
+                                data-testid="comment-downvote-description-content"
+                              >
+                                <p>{t('cards.post_card.downvote_warning')}</p>
+                                <ul>
+                                  <li>{t('cards.post_card.reason_1')}</li>
+                                  <li>{t('cards.post_card.reason_2')}</li>
+                                  <li>{t('cards.post_card.reason_3')}</li>
+                                  <li>{t('cards.post_card.reason_4')}</li>
+                                </ul>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+
+                          {/* Undo confirmation — same title/description/button copy as
+                              `VoteRemovalDialog(voteType="downvote")`. That component is
+                              not reused directly here because it owns its OWN trigger and
+                              `open` state with no external control point; rule 2 needs the
+                              open state owned by this component instead, so this is a
+                              controlled AlertDialog built from the same primitives and the
+                              same `vote_removal_dialog.*` keys. */}
+                          <AlertDialog open={downvoteRemovalOpen} onOpenChange={setDownvoteRemovalOpen}>
+                            <AlertDialogContent
+                              className="flex flex-col gap-8 sm:rounded-r-xl"
+                              onCloseAutoFocus={returnFocusToOverflowTrigger}
+                            >
+                              <AlertDialogHeader className="gap-2">
+                                <div className="flex items-center justify-between">
+                                  <AlertDialogTitle data-testid="comment-downvote-removal-dialog-header">
+                                    {t('vote_removal_dialog.remove_downvote_title')}
+                                  </AlertDialogTitle>
+                                  <AlertDialogCancel
+                                    className="border-none hover:text-ink-brand-3"
+                                    data-testid="comment-downvote-removal-dialog-close"
+                                  >
+                                    X
+                                  </AlertDialogCancel>
+                                </div>
+                                <AlertDialogDescription data-testid="comment-downvote-removal-dialog-description">
+                                  {t('vote_removal_dialog.remove_downvote_description')}
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter className="gap-2 sm:flex-row-reverse">
+                                <AlertDialogCancel
+                                  className="hover:text-ink-brand-3"
+                                  data-testid="comment-downvote-removal-dialog-cancel"
+                                >
+                                  {t('vote_removal_dialog.cancel')}
+                                </AlertDialogCancel>
+                                <AlertDialogAction
+                                  autoFocus
+                                  className="rounded-none bg-surface-39 text-base text-ink-27 shadow-lg shadow-destructive hover:bg-destructive hover:shadow-line-26 disabled:bg-surface-34 disabled:shadow-none"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    void submitCommentDownvote(0);
+                                    setDownvoteRemovalOpen(false);
+                                  }}
+                                  data-testid="comment-downvote-removal-dialog-ok"
+                                >
+                                  {t('vote_removal_dialog.confirm')}
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </>
+                      ) : null}
+                    </div>
+                  )}
+                </CardFooter>
+                {reply && user && user.isLoggedIn ? (
+                  <div className="px-2 pb-2">
+                    <ReplyTextbox
+                      editMode={false}
+                      onSetReply={setReply}
+                      username={comment.author}
+                      permlink={comment.permlink}
+                      storageId={replyStorageId}
+                      comment=""
+                      discussionAuthor={discussionAuthor}
+                      discussionPermlink={discussionPermlink}
+                      observer={observer}
+                    />
+                  </div>
+                ) : null}
+              </AccordionContent>
+            </Card>
+            {/* Children rendered without AccordionContent so replies are always visible even when parent is hidden */}
+            {children ? <div className="h-fit p-0">{children}</div> : null}
+          </AccordionItem>
+        </Accordion>
+      </div>
+    </li>
   );
 });
 

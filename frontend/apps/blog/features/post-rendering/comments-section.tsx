@@ -352,7 +352,6 @@ const CommentsSection = memo(function CommentsSection({
             flagText={flagText}
             filteringEnabled={filteringEnabled}
             parent={postData}
-            parent_depth={postData.depth}
             discussionAuthor={discussionAuthor}
             discussionPermlink={discussionPermlink}
             observer={observer}

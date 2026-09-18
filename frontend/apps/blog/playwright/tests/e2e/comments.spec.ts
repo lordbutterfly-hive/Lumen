@@ -605,7 +605,7 @@ test.describe('@gtg - Comments of "hive-160391/@gtg/hive-hardfork-25-jump-starte
   });
 });
 
-test.describe('Load more... comments in the post', () => {
+test.describe('Deep comment threads in the post', () => {
   let homePage: HomePage;
   let postPage: PostPage;
 
@@ -614,24 +614,33 @@ test.describe('Load more... comments in the post', () => {
     postPage = new PostPage(page);
   });
 
-  test('Validate "Load more... button in comments" in the post "leofinance/@leo-curation/organic-curation-report-week-25"', async ({
+  /*
+   * ★ THIS TEST USED TO ASSERT THE OPPOSITE (2026-09-18). It rendered 12 of this
+   * post's 16 comments, clicked "Load more..." and expected to land on the comment's
+   * own page. Both halves are gone: the standalone comment page was removed on
+   * 2026-09-03 (`lib/post/comment-redirect.ts`), which left the link redirecting to
+   * the page it was already on and doing visibly nothing, and the depth cap behind
+   * it was removed on 2026-09-18, so the whole thread renders.
+   *
+   * This post is the right fixture for it: `leo-curation`'s week-25 report carries a
+   * `fexonice`/`infinity0` exchange that runs to depth 11, four levels past the old
+   * cap. 16 comments, no link, and the deepest reply on the page.
+   */
+  test('Renders a thread past the old depth cap, with no "Load more" link, in "leofinance/@leo-curation/organic-curation-report-week-25"', async ({
     page
   }) => {
-    const commentViewPage = new CommentViewPage(page);
-    const rePostTitle: string = 'RE: Organic Curation report - Week 25, 2023';
-
     // Move to the post "leofinance/@leo-curation/organic-curation-report-week-25"
     await postPage.gotoPostPage('leofinance', 'leo-curation', 'organic-curation-report-week-25');
     await expect(await postPage.articleTitle).toBeVisible();
     await expect(await postPage.articleTitle).toHaveText('Organic Curation report - Week 25, 2023');
     await expect(postPage.commentListItems.first()).toBeVisible();
-    await expect((await postPage.commentListItems.all()).length).toBe(12);
-    // Click "Load more... link" and validate that you moved to the comment view page with the others post
-    await postPage.getLoadMoreCommentsLink.click();
-    await expect(await commentViewPage.getReArticleTitle).toBeVisible();
-    await expect(await commentViewPage.getReArticleTitle).toHaveText(rePostTitle);
-    await expect(postPage.commentListItems.first()).toBeVisible();
-    expect((await postPage.commentListItems.all()).length).toBe(3);
+    // Every comment on the thread, not the 12 the depth-8 cap allowed through.
+    await expect(postPage.commentListItems).toHaveCount(16);
+    // The link itself must not come back.
+    await expect(postPage.getLoadMoreCommentsLink).toHaveCount(0);
+    // The deepest reply (depth 11) is on the page and reachable by its own anchor,
+    // which is what the removed link was pretending to offer.
+    await expect(page.locator('[id="@infinity0/re-fexonice-2023626t8025262z"]')).toBeVisible();
   });
 
   test('@flaky Validate sorting the comments in the post "leofinance/@leo-curation/organic-curation-report-week-25"', async ({
@@ -643,8 +652,13 @@ test.describe('Load more... comments in the post', () => {
     await postPage.gotoPostPage('leofinance', 'leo-curation', 'organic-curation-report-week-25');
     await expect(await postPage.articleTitle).toHaveText('Organic Curation report - Week 25, 2023');
     // Validate the number of visible posts
+    // ★ 12 -> 16 with the depth cap (2026-09-18). Same fixture as the test above and
+    // the same arithmetic: this thread runs to depth 11, and the four replies past the
+    // old depth-8 cap rendered no `comment-list-item` at all — depth 8 was replaced by
+    // a bare "Load more..." link and 9-11 by nothing. Leaving this at 12 would have
+    // made two tests on ONE post disagree about how many comments it has.
     await postPage.commentListItems.first().waitFor({state: 'visible'});
-    await expect((await postPage.commentListItems.all()).length).toBe(12);
+    await expect(postPage.commentListItems).toHaveCount(16);
     // Validate the author and content of the first post in the Trending filter
     await expect(await postPage.commentAuthorLink.first()).toHaveText('infinity0');
     await expect(await postPage.commentCardsDescriptions.first()).toContainText(
