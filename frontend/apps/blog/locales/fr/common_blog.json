@@ -154,7 +154,9 @@
       "creators": "Jetons de créateur",
       "vote_witness": "Témoins",
       "proposals": "Propositions",
-      "settings": "Paramètres"
+      "settings": "Paramètres",
+      "theme_light": "Light theme",
+      "theme_dark": "Dark theme"
     }
   },
   "select_sort": {
@@ -713,8 +715,7 @@
     "hot_posts": "posts populaires",
     "trending_posts": "posts tendances",
     "muted_posts": "posts muets"
-  }
-,
+  },
   "topic_page": {
     "building_hint": "Le classement de ce sujet est encore en cours de préparation. En attendant, voici les publications les plus récentes."
   }

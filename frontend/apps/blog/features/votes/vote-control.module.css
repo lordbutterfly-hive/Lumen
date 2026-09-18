@@ -132,7 +132,11 @@
   /* `--lm-vote-muted` and `--lm-vote-brand` are intentionally absent here: both now
      resolve through `--ink-action` / `--brand`, which already switch in dark mode. */
   --lm-vote-slate: #a3adba;
-  --lm-vote-ink: #fdfbfa;
+  /* ★ #fdfbfa -> the ink token (2026-09-18). This was the warm near-white the
+     whole dark palette used before the graphite pass; it is now #f2f4f6 and lives
+     in one place. Left as a literal it would be the only warm white left on a
+     comment row, beside a payout and a timestamp that had both moved. */
+  --lm-vote-ink: rgb(var(--ink-2));
 }
 
 .side {

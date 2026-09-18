@@ -154,7 +154,9 @@
       "creators": "Токены авторов",
       "vote_witness": "Делегаты",
       "proposals": "Предложения",
-      "settings": "Настройки"
+      "settings": "Настройки",
+      "theme_light": "Light theme",
+      "theme_dark": "Dark theme"
     }
   },
   "select_sort": {
@@ -719,8 +721,7 @@
     "hot_posts": "популярные посты",
     "trending_posts": "трендовые посты",
     "muted_posts": "приглушенные посты"
-  }
-,
+  },
   "topic_page": {
     "building_hint": "Ранжирование этой темы ещё готовится. Пока показываем самые новые публикации."
   }

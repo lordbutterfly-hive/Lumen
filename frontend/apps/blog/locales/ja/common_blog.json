@@ -154,7 +154,9 @@
       "creators": "クリエイタートークン",
       "vote_witness": "証人",
       "proposals": "提案",
-      "settings": "設定"
+      "settings": "設定",
+      "theme_light": "Light theme",
+      "theme_dark": "Dark theme"
     }
   },
   "select_sort": {
@@ -713,8 +715,7 @@
     "hot_posts": "人気の投稿",
     "trending_posts": "トレンド投稿",
     "muted_posts": "ミュートされた投稿"
-  }
-,
+  },
   "topic_page": {
     "building_hint": "このトピックのランキングはまだ準備中です。その間は新しい順に表示しています。"
   }

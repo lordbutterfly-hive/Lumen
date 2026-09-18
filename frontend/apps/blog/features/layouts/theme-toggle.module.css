@@ -1,0 +1,73 @@
+/*
+ * ════ THE THEME PAIR AT THE FOOT OF THE RAIL ════
+ *
+ * ★★★ THE SELECTED STATE IS PAINTED BY CSS, NOT BY REACT (2026-09-18). These
+ * selectors read `html[data-theme]`, which `THEME_INIT_SCRIPT` sets in <head>
+ * before the first paint. React never has to know which theme is on, so this
+ * control has no hydration gap: the server and the client both render the same
+ * two buttons, and the browser decides which one looks pressed. Reading the
+ * class in an effect instead would render "neither selected" on the server and
+ * correct it a frame later — a flicker on the one control whose entire job is to
+ * say which theme you are in.
+ *
+ * ★ EVERY VALUE HERE COMES OFF THE RAIL, not out of the air. The 15.4px inline
+ * padding and 22px icon are `ROW_CLASS`'s own metrics (left-rail.tsx: "everything
+ * in this rail is 10% larger", 2026-08-16), so the pair sits on the same grid as
+ * the rows above it. The seat and hover reuse `--lm-nav-*`, declared on `.rail`
+ * in left-rail.module.css and already re-pointed for dark there, which is why
+ * this file defines no colour of its own.
+ */
+
+.pair {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  /* Aligns the pair's outer edge with a nav row's icon rather than its box, so the
+     two sun/moon glyphs sit in the same column as the icons above them. */
+  padding-inline: 15.4px;
+  padding-block: 12.1px;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-control, 8px);
+  color: rgb(var(--ink-10));
+  background-color: transparent;
+  cursor: pointer;
+  transition-property: background-color, color;
+  transition-duration: 140ms;
+  transition-timing-function: var(--ease-out);
+}
+
+.button:hover {
+  background-color: rgb(var(--lm-nav-hover));
+  color: rgb(var(--lm-nav-hover-ink));
+}
+
+.icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+/*
+ * The selected seat. `.row[data-active]` in left-rail.module.css states the same
+ * thing for a nav row — brand seat, brand ink, weight — and this is the two-value
+ * subset of it that a 34px icon button can carry.
+ */
+:global(html[data-theme='light']) .light,
+:global(html[data-theme='dark']) .dark {
+  background-color: rgb(var(--lm-nav-seat));
+  color: rgb(var(--lm-nav-active-ink));
+}
+
+/*
+ * ★ WITHOUT THIS, BOTH BUTTONS LOOK SELECTED BEFORE THE SCRIPT RUNS. If
+ * `data-theme` is somehow absent — the script threw, or a consumer renders this
+ * outside the app document — neither rule above matches and the pair reads as
+ * "no theme", which is honest. Nothing here fakes a selection it cannot prove.
+ */

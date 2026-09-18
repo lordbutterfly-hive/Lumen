@@ -181,8 +181,35 @@
  * oxblood is left alone; it is already dark-card legible.
  */
 :global(.dark) .wrap {
-  --mt-face: radial-gradient(68% 64% at 34% 26%, #eef1f4 0%, #dee3e9 46%, #c9d0d8 78%, #b5bdc7 100%);
-  --mt-contact: 0 22px 34px -14px rgba(0, 0, 0, 0.72);
+  /* ★★ THE GROUND MOVED UNDER THE COIN (2026-09-18). This block was tuned against
+     the old dark card #2c2620 (L 15%); the card is now #16181b (L 10%). Two
+     consequences, and only two — the handoff's other coin proposals are declined
+     below with reasons.
+
+     1. THE FACE COMES DOWN ONE MORE STOP. A face topping out at #eef1f4 was a
+        considered choice at L 15% and glares at L 10%: it is the brightest thing
+        on the screen by a wide margin. The gradient's shape, stops and positions
+        are unchanged; every value moves down together, so the modelling is
+        identical and only the exposure changes. Centre lands on the handoff's
+        measured target for the face (#cfd5dc).
+     2. THE CONTACT SHADOW GOES BLUE-BLACK AND DEEPER. `rgba(0,0,0,.72)` against
+        #2c2620 was a visible seat; against #16181b, pure black at .72 is nearly
+        the card itself, so the coin floats. `rgba(6,8,12,.9)` is the handoff's
+        value and is fractionally cooler than the card, which is what makes a
+        shadow read as contact rather than as a darker patch.
+
+     ★ DECLINED: the handoff also proposes a milled-edge target (#aeb5bf) and calls
+     the rim "unchanged between themes, therefore unthemed". The rim IS deliberate —
+     `--mt-rim` is a conic specular and the note above it says so — and dimming a
+     specular is exactly what its own §5 warns against two paragraphs later. The
+     laurel is left alone for the same reason it was left alone when the coin turns
+     over: it is an inlay, and its ramp was checked at 268px in both states.
+
+     ★ STILL EXEMPT from `--media-dim`. That filter is scoped to post-card
+     thumbnails (`post-card.module.css`); nothing here inherits it. Two dims
+     stacked over a highlight is how struck metal starts reading as grey plastic. */
+  --mt-face: radial-gradient(68% 64% at 34% 26%, #e4e8ed 0%, #cfd5dc 46%, #b9c1cb 78%, #a6aeb9 100%);
+  --mt-contact: 0 22px 34px -14px rgba(6, 8, 12, 0.9);
   --mt-engrave: #5d6773;
   --mt-device: #21272f;
   --mt-exergue: #6b7481;

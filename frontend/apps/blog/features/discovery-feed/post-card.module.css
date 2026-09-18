@@ -1478,3 +1478,72 @@
 .viewAll:focus-visible {
   text-decoration: underline;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * DARK: THE SIX LITERALS, AND THE THUMBNAIL (2026-09-18, dark-theme handoff)
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ * ★★★ THE IDENTITY PILL WAS THE WORST THING ON THE PAGE: 1.1:1, on every feed.
+ * Everything else in this module resolves through `--pc-*`, which map onto real
+ * tokens and therefore followed `.dark` for free. The identity cluster did not,
+ * because its three warm tints were checked in as literals on purpose — the note
+ * at §"IDENTITY CLUSTER (N1)" above says so, and was right to: they have no
+ * token, so bending them onto a near-neighbour would have changed the light
+ * design. The cost only came due when dark became reachable. The handle is
+ * `--pc-ink-strong` (#f2f4f6 in dark) and the pill under it stayed #faeeeb, so
+ * every author name in the feed was near-white on near-white.
+ *
+ * ★★ GEOMETRY IS UNTOUCHED, AND THAT IS NOT INCIDENTAL. The handoff proposes
+ * replacing the pill's border with `box-shadow: inset 0 0 0 1px`. The border
+ * above is load-bearing — its own note records the measurement: with no border
+ * the content box is 38px, with it 36px, and `.idHandle { height: 100% }`
+ * resolves against that, so the handle's top edge moved 1px the moment a token
+ * appeared (probe caught y 313 -> 314). So the border stays a border and only
+ * its COLOUR moves, through the same `--id-pill-line` property the seam and the
+ * split state already share — one value, three consumers, no drift.
+ */
+:global(.dark) .idPill {
+  --id-pill-line: var(--line-strong);
+  background: rgb(var(--surface-5));
+}
+:global(.dark) .idHandle:hover,
+:global(.dark) .idMarket:hover {
+  background: rgb(var(--surface-16));
+}
+:global(.dark) .idBuy {
+  background: rgb(var(--surface-1));
+  border-color: var(--line-strong);
+}
+
+/*
+ * ★ THE THUMBNAIL, DIMMED BY A HAIR AND GIVEN AN EDGE (handoff §2/§4.6). A
+ * light-heavy photo on a #16181b card is the brightest thing on the screen and
+ * bleeds into the card's own edge. `--media-dim` is 0.92 — enough to seat it,
+ * far short of recolouring someone's picture, which is CONTENT and not ours to
+ * restyle.
+ *
+ * ★★ SCOPED TO `.image img`, WHICH IS THE POST THUMBNAIL AND NOTHING ELSE.
+ * Avatars (`.avatar`, `.commentAvatar`, `.idFace`) and images inside a post body
+ * are deliberately exempt: a dimmed face reads as a loading state, and a post's
+ * own images are the thing the reader came for. The Meritum coin is exempt too
+ * and for a different reason — see meritum-coin.module.css: it is struck metal
+ * whose specular highlight must stay at full value, and two dims stacked is how
+ * silver starts reading as grey plastic.
+ */
+:global(.dark) .image img {
+  filter: brightness(var(--media-dim));
+  box-shadow: var(--media-ring);
+}
+
+/*
+ * ★ THE CARD'S SHEEN (handoff §2). 3.5% at the top, gone by 42%. It separates a
+ * run of cards from the ground without becoming twenty light sources down one
+ * column — which is exactly what putting `--hero-wash` here would do, and why
+ * the wash is reserved for page headers.
+ *
+ * `background-image` rather than `background`, so the card keeps `--pc-surface`
+ * underneath it and the hover transition on `background-color` still runs.
+ */
+:global(.dark) .card {
+  background-image: var(--card-sheen);
+}

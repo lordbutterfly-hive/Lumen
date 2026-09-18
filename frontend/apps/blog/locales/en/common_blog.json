@@ -320,7 +320,9 @@
       "creators": "Meritum tokens",
       "vote_witness": "Witnesses",
       "proposals": "Proposals",
-      "settings": "Settings"
+      "settings": "Settings",
+      "theme_light": "Light theme",
+      "theme_dark": "Dark theme"
     }
   },
   "select_sort": {

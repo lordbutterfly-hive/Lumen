@@ -154,7 +154,9 @@
       "creators": "创作者代币",
       "vote_witness": "见证人",
       "proposals": "提案",
-      "settings": "设置"
+      "settings": "设置",
+      "theme_light": "Light theme",
+      "theme_dark": "Dark theme"
     }
   },
   "select_sort": {
@@ -713,8 +715,7 @@
     "hot_posts": "热门帖子",
     "trending_posts": "趋势帖子",
     "muted_posts": "静音帖子"
-  }
-,
+  },
   "topic_page": {
     "building_hint": "该话题的排序仍在准备中。暂时按最新发布顺序显示。"
   }

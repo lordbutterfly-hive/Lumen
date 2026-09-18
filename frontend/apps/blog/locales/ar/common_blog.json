@@ -155,7 +155,9 @@
       "creators": "رموز المبدعين",
       "vote_witness": "الشهود",
       "proposals": "الاقتراحات",
-      "settings": "الإعدادات"
+      "settings": "الإعدادات",
+      "theme_light": "Light theme",
+      "theme_dark": "Dark theme"
     }
   },
   "select_sort": {
@@ -760,8 +762,7 @@
     "hot_posts": "المشاركات الساخنة",
     "trending_posts": "المشاركات الرائجة",
     "muted_posts": "المشاركات الصامتة"
-  }
-,
+  },
   "topic_page": {
     "building_hint": "لا يزال ترتيب هذا الموضوع قيد التجهيز. نعرض أحدث المنشورات في هذه الأثناء."
   }

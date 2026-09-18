@@ -3,7 +3,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 
 import { FC, PropsWithChildren, useMemo } from 'react';
-import Head from 'next/head';
 import { SignerProvider } from '@hive/smart-signer/components/signer-provider';
 import { GoogleOAuthRedirectGate } from '@smart-signer/components/google-oauth-redirect-gate';
 import { siteConfig } from '@ui/config/site';
@@ -19,6 +18,7 @@ import {
   NavigationProgressHandler
 } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
+import ThemeKeeper from '@/blog/features/layouts/theme-keeper';
 
 export const Providers: FC<PropsWithChildren> = ({ children }) => {
   const queryClient = useMemo(() => getQueryClient(), []);
@@ -26,19 +26,23 @@ export const Providers: FC<PropsWithChildren> = ({ children }) => {
 
   return (
     <>
-      <Head>
-        {/* ★ LIGHT ONLY, NO THEME (2026-08-11, owner ruling supersedes the
-            2026-08-06 forced-light ruling). Dark mode was never reachable — no
-            toggle existed anywhere in the product — and the `.dark` styles that
-            did ship were provably broken when forced (header and cards stayed
-            white, sidebar labels went unreadable dark-grey-on-dark). Rather than
-            keep carrying next-themes to serve a single static value, the
-            provider and every `dark:` variant in this app are removed. The color
-            is now a plain constant. apps/wallet keeps its own real, working
-            next-themes toggle — that is a separate app with its own provider and
-            is not touched by this. */}
-        <meta name="theme-color" content="#ffffff" />
-      </Head>
+      {/* ★★ THE `<Head>` BLOCK IS GONE WITH THE LIGHT-ONLY RULING (2026-09-18).
+          It held exactly one tag — `<meta name="theme-color" content="#ffffff">` —
+          and the 2026-08-11 note beside it explained that the app had no theme so
+          the colour could be a constant. The owner has asked for dark back, so a
+          constant is now wrong: an installed PWA would show a white bar over a
+          #0e0f11 page. Two things replace it, both closer to the value they
+          describe — the `viewport` export in app/layout.tsx emits one media-scoped
+          `theme-color` per theme, and `applyTheme()` in lib/theme.ts rewrites the
+          served tag when the reader's stated choice differs from their system
+          preference.
+          ★ Worth knowing either way: this is `next/head`, which is a PAGES-router
+          component and a no-op inside the App Router. Whatever it held was never
+          in the document; the working tag has always been the `viewport` export.
+          So this removes dead code as well as a stale value. */}
+      {/* Re-states the theme after hydration; see theme-keeper.tsx for the one
+          route family that needs it and the measurement that found it. */}
+      <ThemeKeeper />
       <QueryClientProvider client={queryClient}>
         <NavigationProgressProvider>
           <NavigationProgress />

@@ -24,6 +24,7 @@ import OfflineGuard from '../components/offline-guard';
 import { Lora } from 'next/font/google';
 import { siteConfig } from '@ui/config/site';
 import { configuredImagesEndpoint } from '@ui/config/public-vars';
+import { THEME_INIT_SCRIPT } from '@/blog/lib/theme';
 import { renderTimer, renderStopwatch, renderTimingEnabled } from '@ui/lib/render-timing';
 
 // ★★★ ONE FAMILY. LORA, AND NOTHING ELSE (owner ruling, 2026-08-19).
@@ -244,7 +245,21 @@ export function generateMetadata(): Metadata {
  * or the browser chrome and the page will disagree by a visible step.
  */
 export const viewport: Viewport = {
-  themeColor: '#f7f7f7'
+  /*
+   * ★★ TWO ENTRIES SINCE DARK BECAME REACHABLE (2026-09-18). A single value made
+   * the browser chrome continue the page in exactly one theme and contradict it in
+   * the other, which on an installed PWA is the most visible edge on the screen.
+   * Next 14 emits one `<meta name="theme-color" media="...">` per entry and the
+   * browser picks by system preference — which is right for a first paint, and NOT
+   * enough on its own: a reader whose system is light but who chose dark here would
+   * still get the light chrome. `applyTheme()` in lib/theme.ts rewrites the tag's
+   * content on every switch, so the stated preference wins over the system one.
+   * Values live in THEME_COLORS beside the palette they have to agree with.
+   */
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#f7f7f7' },
+    { media: '(prefers-color-scheme: dark)', color: '#0e0f11' }
+  ]
 };
 
 /**
@@ -460,7 +475,22 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   });
 
   return (
-    <html lang={locale} dir={isRTL ? 'rtl' : 'ltr'} className={lora.variable}>
+    /*
+     * ★ `suppressHydrationWarning` IS BACK, AND FOR A DIFFERENT REASON THAN LAST TIME
+     * (2026-09-18). It was removed when the theme was (see the note at the theme script
+     * below); React is now guaranteed to find attributes on <html> that the server did
+     * not write, because `THEME_INIT_SCRIPT` sets `class`, `data-theme` and
+     * `style.color-scheme` before hydration. That is the intended behaviour, not drift:
+     * the server CANNOT know the reader's theme — it is in their localStorage — so the
+     * only alternatives are a flash or a mismatch warning, and one of those is visible
+     * to readers. This suppression is one element deep and does not reach the tree.
+     */
+    <html
+      lang={locale}
+      dir={isRTL ? 'rtl' : 'ltr'}
+      className={lora.variable}
+      suppressHydrationWarning
+    >
       <head>
         {/* ★ T3b (perf hunt, 2026-09-04) — warm the image host connection.
             See imagesPreconnectOrigin() above for why there's no crossOrigin
@@ -874,30 +904,21 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
 })();`
           }}
         />
-        {/* ★ CLEAR THE DEAD `theme` KEY (QA Low-4, 2026-08-16). This app has no
-            dark-mode control anywhere — features/layouts/providers.tsx:27-38
-            (owner ruling, 2026-08-11) records that next-themes and every
-            `dark:` variant were removed after the dark palette was found
-            broken when forced (header and cards stayed white, the sidebar
-            went unreadable dark-grey-on-dark), and that decision was final:
-            light-only, no toggle, no revisit. Grepping this app and its
-            shared packages turns up zero remaining code that reads or writes
-            a `theme` key — so a reader who still carries one in
-            localStorage (from before that removal, or from a shared-origin
-            visit to apps/wallet, which keeps its own real, separate
-            next-themes toggle) is holding a value nothing here has consulted
-            in months, and nothing here will ever act on again. Cheap,
-            one-time, best-effort removal rather than leaving stale state
-            sitting in a reader's browser forever; safe to run on every load
-            (removeItem on an already-missing key is a no-op), and a plain
-            script rather than a React effect so it runs even if a chunk
-            fails to load (same reasoning as the chunk-error guard above). */}
-        <script
-          id="lumen-clear-dead-theme-key"
-          dangerouslySetInnerHTML={{
-            __html: `(function () { try { localStorage.removeItem('theme'); } catch (e) {} })();`
-          }}
-        />
+        {/* ★★★ THIS TAG USED TO DELETE THE `theme` KEY; IT NOW READS IT (2026-09-18).
+            From 2026-08-16 to today it ran `localStorage.removeItem('theme')` on every
+            load, because the 2026-08-11 ruling in features/layouts/providers.tsx had
+            removed next-themes and every `dark:` variant and nothing here consulted a
+            theme any more. The owner has asked for dark back, with a real control in
+            the left rail, so the key is live again and this is the script that applies
+            it — SAME TAG rather than a second one, so a reader still carrying a value
+            from before the removal cannot have the remover and the reader race inside
+            one document. See lib/theme.ts for why this must be inline and synchronous
+            (a theme restored in an effect is a theme the reader watches arrive), why
+            no stored value means follow the system rather than force light, and why it
+            sets `data-theme` and `color-scheme` alongside the class. Still a plain
+            script rather than a React effect for the same reason as the chunk-error
+            guard above: it has to run even if a chunk fails to load. */}
+        <script id="lumen-theme-init" dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         {/* ★ T3a (perf hunt, 2026-09-04): was `<script src="/__ENV.js?v=...">`,
             a separate render-blocking request (826B, `no-store`) needing a full
             cold RTT after the CSS chain before <body> could paint. Inlined —

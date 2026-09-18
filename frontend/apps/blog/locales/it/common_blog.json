@@ -154,7 +154,9 @@
       "creators": "Token dei creator",
       "vote_witness": "Witness",
       "proposals": "Proposte",
-      "settings": "Impostazioni"
+      "settings": "Impostazioni",
+      "theme_light": "Light theme",
+      "theme_dark": "Dark theme"
     }
   },
   "select_sort": {
@@ -713,8 +715,7 @@
     "hot_posts": "post popolari",
     "trending_posts": "post di tendenza",
     "muted_posts": "post silenziati"
-  }
-,
+  },
   "topic_page": {
     "building_hint": "La classifica di questo argomento si sta ancora preparando. Nel frattempo mostriamo i post più recenti."
   }

@@ -12,6 +12,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import DialogLogin from '@/blog/components/dialog-login';
 import { LeagueShowcase } from '@/blog/features/retention/components/league-showcase';
 import { CreatorTokenLaurel } from '@/blog/features/creator-tokens/ui/creator-token-laurel';
+import ThemeToggle from './theme-toggle';
 import styles from './left-rail.module.css';
 
 /**
@@ -385,6 +386,18 @@ export default function LeftRail() {
           />
         )}
       </ul>
+      {/* ★ THE THEME PAIR SITS OUTSIDE THE <ul> ON PURPOSE (owner, 2026-09-18:
+          "dark light mode get 2 icons on left navbar on bottom"). Every child of
+          that list is a destination — the list IS the primary navigation this
+          <nav>'s `aria-label` announces, and `activeIs`/`activeUnder` above
+          decide exactly one of them is "where you are". A theme control is a
+          setting, not a place: putting it in the list would have a screen reader
+          count it among the pages and would invite the same `data-active`
+          treatment that means "you are here". `mt-auto` pins it to the foot
+          whatever the rail's height, without the rows above it moving. */}
+      <div className="mt-auto pt-2">
+        <ThemeToggle />
+      </div>
     </nav>
   );
 }

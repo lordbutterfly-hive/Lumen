@@ -306,7 +306,7 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
 
       {/* ── hero: the warm wash, the eyebrow, the person, the actions, the curve, the stat strip ── */}
       <section
-        className="relative overflow-hidden rounded-[20px] border border-line-9 border-l-[3px] border-l-line-brand-10 bg-[linear-gradient(112deg,#FAEEEB_0%,#FBF7F2_46%,#FCFAF7_100%)] px-6 pb-8 pt-10 md:px-10 md:pt-[54px]"
+        className="relative overflow-hidden rounded-[20px] border border-line-9 border-l-[3px] border-l-line-brand-10 bg-[linear-gradient(112deg,#FAEEEB_0%,#FBF7F2_46%,#FCFAF7_100%)] dark:bg-[linear-gradient(112deg,#1E2126_0%,#1A1D21_46%,#16181B_100%)] px-6 pb-8 pt-10 md:px-10 md:pt-[54px]"
         data-testid="meritum-hero"
       >
         {/* The eyebrow row carries Share at its right end (owner, 2026-09-15:

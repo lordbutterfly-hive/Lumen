@@ -156,7 +156,9 @@
       "creators": "Tokeny twórców",
       "vote_witness": "Delegaci",
       "proposals": "Propozycje",
-      "settings": "Ustawienia"
+      "settings": "Ustawienia",
+      "theme_light": "Light theme",
+      "theme_dark": "Dark theme"
     }
   },
   "select_sort": {
@@ -718,8 +720,7 @@
     "hot_posts": "gorące posty",
     "trending_posts": "trendingowe posty",
     "muted_posts": "wyciszone posty"
-  }
-,
+  },
   "topic_page": {
     "building_hint": "Ranking tego tematu wciąż się przygotowuje. W międzyczasie pokazujemy najnowsze wpisy."
   }
