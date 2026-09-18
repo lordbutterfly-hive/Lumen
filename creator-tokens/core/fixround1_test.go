@@ -422,8 +422,20 @@ func TestSettlement_SET3_SmallSupplyStillPrices(t *testing.T) {
 		}
 	}
 
-	// The cap still BINDS for credits > 1 (it is not weakened where it does
-	// its down-walk job): a 2-credit spend at S=20 (cap = 1) must refuse.
+	// ★ v5 (2026-09-18) — THE OTHER HALF OF SET-3 IS NOW THE POINT.
+	//
+	// This block used to assert the opposite: that a 2-credit spend at S=20
+	// REFUSED, because the 5%-of-supply cap allowed exactly 1 token there.
+	// That was SET-3 working as designed, and it was also the whole defect:
+	// a service costing N tokens needed S >= 20·N, so every young market
+	// could sell nothing but a one-token service. params.go's
+	// MaxSpendSupplyBps carries the measurements; the cap is now the supply
+	// itself.
+	//
+	// So the assertion inverts, and it is the product requirement: on a
+	// 20-token market a 2-credit service must PRICE. The refusal that still
+	// has to hold — a spend larger than the supply — is pinned by
+	// TestSettleSpend_SpendCapBoundary in settlement_test.go.
 	s := NewMemStore()
 	c := "alice"
 	base := uint64(8_000_000)
@@ -436,8 +448,12 @@ func TestSettlement_SET3_SmallSupplyStillPrices(t *testing.T) {
 	q := base + (stObsCount-1)*LongObsSpacing + 50
 	// face that costs 2 credits: 2*rate - 1
 	face2 := new(big.Int).Sub(new(big.Int).Mul(rate, big.NewInt(2)), big.NewInt(1))
-	if _, err := SettleSpend(s, c, q, face2); err == nil {
-		t.Fatal("SET-3: a 2-credit spend at S=20 (cap=1) was admitted — the cap was over-weakened")
+	quote2, err := SettleSpend(s, c, q, face2)
+	if err != nil {
+		t.Fatalf("v5: a 2-credit spend at S=20 must price, got: %v", err)
+	}
+	if quote2.Credits.Cmp(big.NewInt(2)) != 0 {
+		t.Fatalf("v5: expected a 2-credit spend at S=20, got %s", quote2.Credits)
 	}
 }
 

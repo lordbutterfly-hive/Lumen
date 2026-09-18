@@ -638,23 +638,84 @@ const LongMaxObsWeightBlocks uint64 = 2 * LongObsSpacing
 const LongMaxStaleBlocks uint64 = MaxStaleBlocks + LongObsSpacing
 
 // MaxServiceFaceAreaBps is RULING C2's depth ceiling: a service face may not
-// exceed 50% of area(S) — the market's OWN curve depth — at spend time.
-// Measured against area(S), NEVER the reserve: v1's reserve-relative version
-// was backwards — divergence IS the reserve being large relative to S, so the
+// exceed area(S) — the market's OWN curve depth — at spend time. Measured
+// against area(S), NEVER the reserve: v1's reserve-relative version was
+// backwards — divergence IS the reserve being large relative to S, so the
 // reserve-relative ceiling read 480,048 HBD on the diverged exhibit (never
 // binds when needed) and over-bound a healthy market. Under R === area(S)
 // the two coincide, and the area form stays correct even on corrupt state.
-const MaxServiceFaceAreaBps uint64 = 5000
+//
+// ★★★ 5000 -> 10000 (OWNER RULING 2026-09-18, contract v5). At 50% the
+// ceiling did not say "a service may not be worth more than this market" —
+// it said "twice the service price must already be sitting in the curve
+// before anybody may buy it", and that doubling had no author. Measured on
+// mainnet the same day: seven live markets, 1-6 tokens and 1-6 HBD of
+// backing each, and not one of the nine listed services could be bought at
+// any price the creator had posted. @godfish's 50.000 HBD shirt needed 298
+// tokens (~672 HBD) in the curve, 13x the thing being sold.
+//
+// At 10000 the rule is the honest one the ceiling was always described as:
+// a single service may not cost more than the entire backing of the market
+// it is sold against. The path the owner asked for — "you have to buy the
+// fucking thing, but if you buy enough tokens you should be able to buy
+// it" — now closes at ~1x the price plus the 5% trade fee, instead of ~2x
+// before the cap below even had its say.
+//
+// It also RETIRES the `lo > hi` dead zone: at S == 1 the C4 floor is 504 and
+// area(1) is 1007, so a one-token market can finally price a service
+// (before: floor 504 > ceiling 503, "market too small to price any
+// service", which is what @ausbitbank and @daveks were both hitting).
+const MaxServiceFaceAreaBps uint64 = 10000
 
-// MaxSpendSupplyBps is the settlement spend cap: one settlement may consume
-// at most 5% of the CURRENT supply in tokens (c·10000 <= S·500). RULING C2
-// ships it in the same commit as the spot term because it is load-bearing
-// against DOWN-manipulation of spot: min() follows a walked-down rate, which
-// INFLATES the token count c = ceil(face/rate) — the asker consented via
-// maxCredits, but without this cap a down-walked market would let a single
-// service settlement move an unbounded fraction of the supply to the
-// creator in one call.
-const MaxSpendSupplyBps uint64 = 500
+// MaxSpendSupplyBps is the settlement spend cap: one settlement may not
+// consume more tokens than the supply itself (c·10000 <= S·10000, i.e.
+// c <= S). It is a structural assertion, not a market rule.
+//
+// ★★★ 500 -> 10000 (OWNER RULING 2026-09-18, contract v5). THE 5% HAD NO
+// DERIVATION — not here, not in a ruling document, not in a test, not in a
+// sim result. What it DID have was a measured, documented product failure
+// that was filed as a tuning nuisance three separate times:
+//
+//   settlement.go SET-3 (2026-07-22), our own words: "UNSATISFIABLE for
+//   every supply below 10000/MaxSpendSupplyBps = 20 … Every newly launched
+//   market sat in that dead zone between registration and its 20th token."
+//   The fix exempted c == 1 and moved the edge instead of removing it: a
+//   service costing N tokens still needed S >= 20·N, so at launch (S = 1-6)
+//   only a one-token service could ever settle.
+//
+//   sim/engine.go and cmd/sim/main.go, independently: "the settlement spend
+//   cap … binds on nearly every ask, so escrows stop being created at all",
+//   and the delivery guardrail could not be exercised at default population
+//   because of it.
+//
+// WHY REMOVING IT IS SAFE — the three protections that actually do the work,
+// none of which is this cap:
+//
+//  1. CREDITS ARE FIXED AT ASK TIME, not at settle time. settleSpend runs
+//     inside Ask; the escrow stores rec.credits, and Answer/Decline/Reclaim
+//     spend that stored number. A creator cannot walk the rate down after
+//     the fact to inflate the bill — which is the exact attack this cap was
+//     written against.
+//  2. THE ASKER SIGNS A CEILING. ask.go rejects creditsSpent > maxCredits
+//     before any balance is touched, and the client derives maxCredits from
+//     the quote it just showed plus 2%. A manipulated rate cannot overcharge
+//     an asker beyond their own signed slippage bound; past it the ask
+//     reverts cleanly.
+//  3. YOU CANNOT SPEND TOKENS YOU DO NOT HOLD. Credits are escrowed from the
+//     asker's own balance, and every balance is <= supply, so "an unbounded
+//     fraction of the supply" was never reachable: the true ceiling is the
+//     float, and acquiring the float means buying it on the curve, which
+//     raises supply and the rate as it goes.
+//
+// And it is not an exit-tax rail: ask.go's Answer carries the asker's own
+// acqBlock to the creator, so a settlement moves no maturity that
+// TransferCredits could not already move.
+//
+// The constant is kept (rather than deleting the check) so the refusal path
+// and its tests stay alive as a defence-in-depth assertion: c > S can only
+// be reached by corrupt state, and it should still refuse loudly if it ever
+// is.
+const MaxSpendSupplyBps uint64 = 10000
 
 // DivergenceRateMultiple is RULING C5's circuit-breaker: refuse settlement
 // when ceil(R/S) > 4·rate. Under R === area(S) the backing-per-token R/S is

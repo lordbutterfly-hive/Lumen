@@ -167,6 +167,13 @@ func SettlementRate(s Store, creator string, block uint64) (*big.Int, error) {
 // Guard order (each is independent; the order is fixed so tests can pin
 // which refusal fires): rate derivation (incl. C5) -> C4 min-price -> C2
 // depth ceiling -> spend cap.
+//
+// ★ v5 (2026-09-18): the depth ceiling is area(S), not half of it, and the
+// spend cap is the supply itself, not 5% of it — see params.go's
+// MaxServiceFaceAreaBps and MaxSpendSupplyBps for the measurements behind
+// both. Neither guard was deleted: the ORDER, the error paths and the
+// C4/C5 guards are untouched, so what used to refuse a healthy market now
+// admits it and what was always corrupt still refuses.
 func settleSpend(s Store, creator string, block uint64, face *big.Int) (*SettleQuote, error) {
 	if face == nil || face.Sign() <= 0 {
 		// Callers guard this with their own precise "no price set" errors;
@@ -224,7 +231,7 @@ func settleSpend(s Store, creator string, block uint64, face *big.Int) (*SettleQ
 	// R === area(S) the two coincide on healthy state, and this form stays
 	// correct even when the state is corrupt.
 	if face.Cmp(hi) > 0 {
-		return nil, newErr(ErrState, "face exceeds the market depth ceiling (50% of curve area)")
+		return nil, newErr(ErrState, "face exceeds the market depth ceiling (the market's whole curve backing)")
 	}
 
 	// RULING C: KEEP ceil(face/rate) for the token count — floor would admit
@@ -263,7 +270,7 @@ func settleSpend(s Store, creator string, block uint64, face *big.Int) (*SettleQ
 		spendLhs := new(big.Int).Mul(credits, big.NewInt(10000))
 		spendRhs := new(big.Int).Mul(supply, new(big.Int).SetUint64(MaxSpendSupplyBps))
 		if spendLhs.Cmp(spendRhs) > 0 {
-			return nil, newErr(ErrState, "settlement spend exceeds 5% of supply (spend cap)")
+			return nil, newErr(ErrState, "settlement spend exceeds the supply itself (spend cap)")
 		}
 	}
 

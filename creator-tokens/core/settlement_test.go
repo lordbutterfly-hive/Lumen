@@ -274,54 +274,89 @@ func TestSettleSpend_MinPriceGuardBoundary(t *testing.T) {
 }
 
 func TestSettleSpend_DepthCeilingBoundary(t *testing.T) {
-	// RULING C2: face·10000 <= MaxServiceFaceAreaBps·area(S), area-relative
-	// and NEVER reserve-relative. S=200: area = 365,340, ceiling = 182,670.
+	// RULING C2 under v5 (2026-09-18): face·10000 <= MaxServiceFaceAreaBps·area(S)
+	// with MaxServiceFaceAreaBps == 10000, i.e. the ceiling IS area(S) —
+	// area-relative and NEVER reserve-relative. S=200: area = 365,340.
+	//
+	// The old assertion pinned the 50% form (ceiling 182,670) and, at the
+	// boundary, pinned the SPEND CAP firing behind it. Both halves moved in
+	// the same ruling, so both are restated here rather than deleted: the
+	// ceiling is the market's whole backing, and at the boundary the spend
+	// cap no longer fires because a settlement may now consume up to the
+	// supply itself.
 	s := NewMemStore()
 	curveMarket(s, creator1, 200)
 	q := seedSettleObs(s, creator1, 1000, big.NewInt(2000))
 
-	// One unit OVER the ceiling: refused by the depth guard (which runs
-	// BEFORE the spend cap — this also pins the guard order).
-	_, err := settleSpend(s, creator1, q, big.NewInt(182_671))
+	// One unit OVER the ceiling: still refused by the depth guard, which
+	// still runs BEFORE the spend cap — this also pins the guard order.
+	_, err := settleSpend(s, creator1, q, big.NewInt(365_341))
 	if err == nil {
-		t.Fatal("face above 50% of area(S) must refuse")
+		t.Fatal("face above area(S) must refuse")
 	}
 	if askErrSymbol(err) != ErrState || !strings.Contains(err.Error(), "depth ceiling") {
 		t.Fatalf("want the depth-ceiling refusal, got: %v", err)
 	}
-	// AT the ceiling the depth guard passes — and the refusal that fires
-	// instead is the SPEND CAP (ceil(182,670/2000) = 92 credits > 5% of
-	// 200): on a coherent market the spend cap binds long before the depth
-	// ceiling, which is exactly why both exist — the depth ceiling is the
-	// backstop for states the spend cap cannot see (corrupt supply, future
-	// curve shapes with spot >> average).
-	_, err = settleSpend(s, creator1, q, big.NewInt(182_670))
-	if err == nil {
-		t.Fatal("expected the spend cap to refuse a 92-credit spend on a 200-token market")
+	// AT the ceiling the spend PRICES: ceil(365,340/2000) = 183 credits,
+	// which is under the 200-token supply. A market may sell a service
+	// worth everything backing it, to somebody who holds that much of it.
+	quote, err := settleSpend(s, creator1, q, big.NewInt(365_340))
+	if err != nil {
+		t.Fatalf("face == area(S) must price under v5: %v", err)
 	}
-	if !strings.Contains(err.Error(), "spend cap") {
-		t.Fatalf("want the spend-cap refusal at the depth boundary, got: %v", err)
+	if quote.Credits.Cmp(big.NewInt(183)) != 0 {
+		t.Fatalf("credits = %s, want 183", quote.Credits)
 	}
 }
 
 func TestSettleSpend_SpendCapBoundary(t *testing.T) {
-	// The 5%-of-supply spend cap, exact: S=200, rate 2680 (== spot, so the
-	// min resolves there). face 26,800 -> c = 10 == 200·500/10000 exactly:
-	// PASSES. face 26,801 -> c = 11: refused.
+	// The spend cap under v5 (2026-09-18) is the SUPPLY ITSELF:
+	// c·10000 <= S·MaxSpendSupplyBps with MaxSpendSupplyBps == 10000, i.e.
+	// c <= S. It is a structural assertion — a real asker can never exceed
+	// it, because credits are escrowed from a balance that is itself <= S —
+	// so this test drives settleSpend directly to prove the boundary is
+	// still enforced rather than deleted.
+	//
+	// What the old 5% form asserted (c == 10 passes at S=200, c == 11
+	// refuses) is now the ORDINARY case, and it is asserted here too: the
+	// 11-credit spend that used to be refused must price.
 	s := NewMemStore()
 	curveMarket(s, creator1, 200)
 	q := seedSettleObs(s, creator1, 1000, big.NewInt(2680))
 
-	quote, err := settleSpend(s, creator1, q, big.NewInt(26_800))
+	// The spend the 5% cap used to refuse.
+	quote, err := settleSpend(s, creator1, q, big.NewInt(26_801))
 	if err != nil {
-		t.Fatalf("c == exactly 5%% of supply must pass: %v", err)
+		t.Fatalf("an 11-credit spend on a 200-token market must price under v5: %v", err)
 	}
-	if quote.Credits.Cmp(big.NewInt(10)) != 0 {
-		t.Fatalf("credits = %s, want 10", quote.Credits)
+	if quote.Credits.Cmp(big.NewInt(11)) != 0 {
+		t.Fatalf("credits = %s, want 11", quote.Credits)
 	}
-	_, err = settleSpend(s, creator1, q, big.NewInt(26_801))
+
+	// The boundary itself, in coherent state. The cap is reachable only
+	// when the settlement rate sits BELOW the backing per token (area/S):
+	// credits = ceil(face/rate) and face is itself capped at area(S), so
+	// c > S needs rate < area(S)/S. A short window that has sagged under
+	// the backing — but not so far that C5's 4x tripwire fires — is exactly
+	// that state. S=200: area 365,340, backing 1,827, C5 floor 457.
+	s2 := NewMemStore()
+	curveMarket(s2, creator1, 200)
+	q2 := seedSettleObs(s2, creator1, 1000, big.NewInt(1000))
+
+	// face 200,000 at rate 1000 -> c == 200 == S exactly: PASSES.
+	quote, err = settleSpend(s2, creator1, q2, big.NewInt(200_000))
+	if err != nil {
+		t.Fatalf("c == exactly the supply must pass: %v", err)
+	}
+	if quote.Credits.Cmp(big.NewInt(200)) != 0 {
+		t.Fatalf("credits = %s, want 200", quote.Credits)
+	}
+
+	// face 200,001 -> c == 201 > S: refused, and by THIS guard (the depth
+	// ceiling is 365,340 here, so it is not the one talking).
+	_, err = settleSpend(s2, creator1, q2, big.NewInt(200_001))
 	if err == nil {
-		t.Fatal("c above 5% of supply must refuse")
+		t.Fatal("c above the supply must refuse")
 	}
 	if askErrSymbol(err) != ErrState || !strings.Contains(err.Error(), "spend cap") {
 		t.Fatalf("want the spend-cap refusal, got: %v", err)
@@ -707,14 +742,29 @@ func TestSettlement_LoneAttackerWalkDoesNotMovePrice(t *testing.T) {
 		t.Logf("spaced day-long up-walk to %s (%.0fx honest): %d prices (max %v) <= bound %s, %d refusals — settlement never followed", rate, float64(rate.Int64())/float64(honest), priced, maxPriced, bound, refused)
 	})
 
-	t.Run("WalkDownIsBoundedByTheSpendCap", func(t *testing.T) {
+	t.Run("WalkDownIsBoundedByTheSupplyAndTheAskersOwnCeiling", func(t *testing.T) {
 		// The DOWN direction: min() genuinely follows a walked-down rate —
 		// by design, a lower rate only makes services cost MORE tokens, and
 		// the asker consents via maxCredits. What the attacker wants from a
 		// down-walk is to make ONE settlement move a huge slice of supply
-		// to the creator; the 5%-of-supply spend cap is the load-bearing
-		// bound (RULING C2, shipped with the spot arm). Walk the rate down
-		// 10x, then verify a face that would need >5% of supply REFUSES.
+		// to the creator.
+		//
+		// ★ v5 (2026-09-18) — WHAT BOUNDS IT NOW. The 5%-of-supply cap was
+		// removed (params.go MaxSpendSupplyBps, and the measurements there),
+		// so this subtest asserts the bounds that remain, which are the ones
+		// that were always doing the work:
+		//
+		//   a) the spend cap still refuses a settlement that would consume
+		//      MORE THAN THE SUPPLY ITSELF — asserted below;
+		//   b) the depth ceiling still caps the face at area(S), and C5's
+		//      tripwire refuses a rate that has sagged 4x under the backing,
+		//      so the reachable credit count stays finite by construction;
+		//   c) the asker's own signed maxCredits bounds their exposure at the
+		//      Ask() door, before any balance is touched — that is
+		//      TestAskMaxCreditsSlippageGuard, and it is the protection an
+		//      asker actually relies on;
+		//   d) credits are escrowed from the asker's balance, which is <= S,
+		//      so a settlement can never move tokens that do not exist.
 		s, last := build()
 		rate := big.NewInt(honest)
 		for w := uint64(1); w <= 60; w++ {
@@ -728,16 +778,17 @@ func TestSettlement_LoneAttackerWalkDoesNotMovePrice(t *testing.T) {
 			t.Logf("down-walk: settlement refused outright (%v) — safe", err)
 			return
 		}
-		// It priced below honest — now prove the damage bound: at S=1000 the
-		// cap is 50 tokens, so any face needing >50 credits refuses.
-		overCap := mAdd(new(big.Int).Mul(got, big.NewInt(50)), big.NewInt(1)) // ceil((50·rate+1)/rate) = 51 > cap
-		_, err = settleSpend(s, creator1, q, overCap)
+		// It priced below honest. The damage bound: a face needing MORE
+		// credits than the whole supply still refuses.
+		supply := getMoney(s, kSupply(creator1))
+		overSupply := mAdd(new(big.Int).Mul(got, supply), big.NewInt(1)) // ceil -> S+1 credits
+		_, err = settleSpend(s, creator1, q, overSupply)
 		if err == nil {
-			t.Fatalf("down-walked market allowed a %s-face settlement needing >5%% of supply", overCap)
+			t.Fatalf("down-walked market allowed a %s-face settlement needing more credits than the %s-token supply", overSupply, supply)
 		}
 		if !strings.Contains(err.Error(), "spend cap") && !strings.Contains(err.Error(), "depth ceiling") {
 			t.Fatalf("want the spend-cap (or depth) refusal on the down-walked spend, got: %v", err)
 		}
-		t.Logf("down-walk to %s (%.2fx honest): priced, but a >5%%-of-supply spend refuses (%v)", got, float64(got.Int64())/float64(honest), err)
+		t.Logf("down-walk to %s (%.2fx honest): priced, but a spend above the %s-token supply refuses (%v)", got, float64(got.Int64())/float64(honest), supply, err)
 	})
 }
