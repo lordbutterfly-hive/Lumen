@@ -7,7 +7,7 @@ import PublicHivePanel from './public-hive-panel';
 import PublicMagiPanel from './public-magi-panel';
 import PublicMeritumPanel from './public-meritum-panel';
 
-const ACTIVE_GLOW = { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } as const;
+const ACTIVE_GLOW = { boxShadow: 'var(--tab-active-glow)' } as const;
 
 /**
  * Read-only copy of features/wallet/components/wallet-tabs.tsx for the

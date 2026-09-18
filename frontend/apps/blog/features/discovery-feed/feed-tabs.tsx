@@ -1591,7 +1591,7 @@ function TabButton({
         isActive
           ? // §1: one step weaker than the nav rail (§4). See the note above for why
             // this is not a Tailwind class.
-            { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' }
+            { boxShadow: 'var(--tab-active-glow)' }
           : undefined
       }
     >

@@ -283,7 +283,20 @@ export default function LeftRail() {
   return (
     <nav
       aria-label={LABELS.primaryNav}
-      className={cn('flex flex-col py-4', styles.rail)}
+      /* ★★ FULL-HEIGHT COLUMN SO THE THEME PILL CAN SIT AT THE BOTTOM OF THE
+         SCREEN (owner, 2026-09-18: "at the bottom of the screen"). `mt-auto` on
+         the pill needs a column TALLER than its rows, and it had none: every
+         shell mounts this nav inside `<aside class="sticky top-24 … h-fit">`, so
+         the aside was exactly as tall as the eight rows and `mt-auto` had no
+         slack to push into — the pill sat directly under Proposals.
+         `8rem` is the sticky `top-24` (6rem) plus the grid's own `pt-[26px]`
+         and a little air, so the pill lands just inside the viewport's bottom
+         edge rather than under it. `dvh`, not `vh`, because on mobile Safari
+         `vh` is the ADDRESS-BAR-EXPANDED height and the pill would hide behind
+         the bar. The mobile drawer mounts this same nav inside its own
+         `overflow-y-auto` column, which absorbs the height with room to spare
+         (`pt-12` + `pb-8` = 5rem against the 8rem subtracted here). */
+      className={cn('flex min-h-[calc(100dvh-8rem)] flex-col py-4', styles.rail)}
       data-testid="left-rail-nav"
     >
       <ul className="flex flex-col gap-1">
@@ -395,7 +408,7 @@ export default function LeftRail() {
           count it among the pages and would invite the same `data-active`
           treatment that means "you are here". `mt-auto` pins it to the foot
           whatever the rail's height, without the rows above it moving. */}
-      <div className="mt-auto pt-2">
+      <div className="mt-auto pl-[10px] pt-6">
         <ThemeToggle />
       </div>
     </nav>

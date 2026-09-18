@@ -480,7 +480,7 @@ export const YourTokensBody: FC = () => {
                 key={t}
                 onClick={() => setTab(t)}
                 aria-pressed={tab === t}
-                style={tab === t ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
+                style={tab === t ? { boxShadow: 'var(--tab-active-glow)' } : undefined}
                 className={`rounded-lg px-[18px] py-2 text-[14px] leading-[22px] font-medium font-ui capitalize ${
                   tab === t ? 'bg-[var(--lum-1)] text-ink-2 dark:bg-surface-1' : 'text-ink-10'
                 }`}

@@ -11,7 +11,9 @@ import styles from './theme-toggle.module.css';
  * ════ TWO ICONS AT THE FOOT OF THE RAIL (owner, 2026-09-18) ════
  *
  * "dark light mode get 2 icons on left navbar on bottom easy to switch between
- * them" — so a PAIR, not one button that swaps its own glyph. The difference is not
+ * them", then "the light dark needs to be a PILL on left navbar containing both and
+ * at the bottom of the screen" — so a pair inside one trough, not one button that
+ * swaps its own glyph and not two loose icons. The difference is not
  * cosmetic: a single swapping button has to be read twice (what does the icon mean,
  * and does it show the current state or the one I would get?), while two buttons
  * with one seated are a segmented control and answer both at a glance. Every other
@@ -53,7 +55,7 @@ export default function ThemeToggle() {
   };
 
   return (
-    <div className={styles.pair} data-testid="theme-toggle">
+    <div className={styles.pill} data-testid="theme-toggle" role="group" aria-label={t('navigation.left_rail.theme_group')}>
       <button
         type="button"
         onClick={() => choose('light')}

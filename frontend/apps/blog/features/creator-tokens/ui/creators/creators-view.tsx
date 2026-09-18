@@ -400,7 +400,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
                 key={s.id}
                 onClick={() => setSort(s.id)}
                 aria-pressed={on}
-                style={on ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
+                style={on ? { boxShadow: 'var(--tab-active-glow)' } : undefined}
                 className={`rounded-control px-[15px] py-2 text-[14px] leading-[22px] font-medium font-ui ${
                   on ? 'bg-[var(--lum-1)] text-ink-2 dark:bg-surface-1' : 'text-ink-10'
                 }`}

@@ -375,7 +375,14 @@ export default function ProfileMain() {
           is still live inside `LeagueShowcase` and `RanksLadder`. Deleting the file
           would strand those references without removing anything from the screen. */}
 
-      <div className="mt-7">
+      {/* ★ 28px -> 20px (owner, 2026-09-18: "you can move the meritum card up a bit
+          and the posts/comments up as well a bit. theres too much room there thats
+          not uniform"). The column below the identity block now steps at a single
+          20px: masthead -> Meritum card (via that card's own `-mt-2` against the
+          shared `mb-7`) and Meritum card -> tabs. The 58px above the identity block
+          is NOT touched: it is the avatar's overhang off the banner, measured at
+          ~10px of clearance, and tightening it would clip the face. */}
+      <div className="mt-5">
         <ProfileTabs
           username={username}
           observer={observer}

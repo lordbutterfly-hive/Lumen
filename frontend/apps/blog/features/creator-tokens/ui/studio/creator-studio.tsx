@@ -1312,7 +1312,7 @@ const CreatorStudio: FC = () => {
             <button
               key={s.id}
               onClick={() => setSection(s.id)}
-              style={section === s.id ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
+              style={section === s.id ? { boxShadow: 'var(--tab-active-glow)' } : undefined}
               className={`rounded-control px-4 py-2 font-ui text-[14px] leading-[22px] font-medium transition-colors ${
                 section === s.id ? 'bg-[var(--lum-1)] text-ink-2 dark:bg-surface-1' : 'text-ink-10 hover:text-ink-2'
               }`}
@@ -1477,7 +1477,7 @@ const CreatorStudio: FC = () => {
                   key={id}
                   type="button"
                   onClick={() => setInboxTab(id)}
-                  style={inboxTab === id ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
+                  style={inboxTab === id ? { boxShadow: 'var(--tab-active-glow)' } : undefined}
                   className={`rounded-control px-4 py-1.5 font-ui text-[14px] leading-[22px] font-medium transition-colors ${
                     inboxTab === id ? 'bg-[var(--lum-1)] text-ink-2 dark:bg-surface-1' : 'text-ink-10 hover:text-ink-2'
                   }`}

@@ -99,7 +99,7 @@ export default function HistoryCard({
                 role="tab"
                 aria-selected={active}
                 onClick={() => setGroup(value)}
-                style={active ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
+                style={active ? { boxShadow: 'var(--tab-active-glow)' } : undefined}
                 className={`rounded-lg px-3.5 py-1.5 font-ui text-caption font-medium transition-colors ${
                   active ? 'bg-[var(--lum-1)] text-ink-2 dark:bg-surface-1' : 'text-ink-10 hover:text-ink-4'
                 }`}

@@ -32,7 +32,7 @@ import WalletContent from './wallet-content';
 import MagiPanel from './magi/magi-panel';
 import MeritumPanel from './meritum/meritum-panel';
 
-const ACTIVE_GLOW = { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } as const;
+const ACTIVE_GLOW = { boxShadow: 'var(--tab-active-glow)' } as const;
 
 export default function WalletTabs({ tab, onTabChange }: { tab: WalletTab; onTabChange: (tab: WalletTab) => void }) {
   const { t } = useTranslation('common_blog');

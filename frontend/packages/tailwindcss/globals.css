@@ -246,6 +246,11 @@
        later gives `--lum` a dark value, both move together and nothing here
        needs to change. */
     --rail-fade: 120px;
+    /* ★ THE SEATED-TAB SHADOW, AS ONE VALUE (2026-09-18). Ten components had this
+       box-shadow typed out as an inline `style`, which no stylesheet can override —
+       so making it answer to the theme meant giving it a name. Light keeps exactly
+       what it had; `.dark` drops the glow half (see there for why). */
+    --tab-active-glow: var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85);
     --rail-fill: linear-gradient(180deg, rgb(var(--lum)) 0, rgb(var(--brand)) var(--rail-fade));
     --rail-glow: 0 0 7px 0 rgb(var(--lum) / 0.7);
 
@@ -980,9 +985,29 @@
     --line-ok-4: 110 172 28; /* #4d7c0f -> #6eac1c x13 */
     --line-ok-5: 66 176 111; /* #2f7d4f -> #42b06f x2 */
     /* line / warn */
-    --line-warn-1: 143 104 59; /* #efe7de -> #8f683b x2 */
+    /* ★★ THE MERITUM RULE WAS THE YELLOW ONE (owner, 2026-09-18: "the outline on
+       meritum page or the cards is yellow for some reason"). `--line-warn-1` IS
+       `--meritum-line-paper`, and at #8f683b it sits at hue 32 — the gold band —
+       while the header outline beside it sits at hue 22. Two warm edges on one
+       card disagreeing by ten degrees of hue is what reads as "yellow": not the
+       colour on its own, the mismatch. It takes the outline's exact value, so the
+       Meritum surfaces have ONE warm edge instead of two. */
+    --line-warn-1: 122 83 60; /* #efe7de -> #7a533c x2 */
     --line-warn-2: 152 101 25; /* #f6e2c4 -> #986519 x15 */
-    --line-warn-3: 158 96 65; /* #eee2dc -> #9e6041 x3 */
+    /* ★★ THE MASTHEAD'S OUTLINE STAYS ORANGE, MUTED (owner, 2026-09-18: first
+       "header outline is orange. looks shit", then "you can keep the header orange
+       outline but it cant be so ugly, on edges it turns ugly, not smooth").
+       Both notes are about the same thing and the second one names it: the CURVE.
+       `page-masthead.tsx` draws a 1px `border-line-warn-3` on an 18px radius, and
+       at #9e6041 that hairline is high-contrast enough against #16181b that the
+       anti-aliasing along the corner arc is plainly visible — the straight runs
+       look like an edge and the corners look like a broken wire. Contrast is what
+       makes a 1px arc show its stair-steps; the fix is to take the chroma and the
+       lightness down until the arc resolves, not to remove the colour. #7a533c is
+       still unmistakably orange on the straights and smooth around the corners,
+       checked at 3x device scale against three alternatives.
+       Light is untouched: there the same token is #eee2dc on cream. */
+    --line-warn-3: 122 83 60; /* #eee2dc -> #7a533c x3 */
     --line-warn-4: 157 97 64; /* #ecdfd8 -> #9d6140 x1 */
     --line-warn-5: 158 98 26; /* #f7931a -> #9e621a x1 */
     --line-warn-6: 175 89 29; /* #f97316 -> #af591d x12 */
@@ -1039,8 +1064,8 @@
     --surface-brand-16: 159 53 37; /* #a5301f -> #9f3525 x17 */
     --surface-brand-17: 143 44 34; /* #96271b -> #8f2c22 x20 */
     /* surface / gold */
-    --surface-gold-1: 44 39 23; /* #fffbeb -> #2c2717 x13 */
-    --surface-gold-2: 41 36 20; /* #fef3c7 -> #292414 x13 */
+    --surface-gold-1: 41 38 31; /* #fffbeb -> #29261f x13 */
+    --surface-gold-2: 35 33 26; /* #fef3c7 -> #23211a x13 */
     --surface-gold-3: 194 159 46; /* #c9a227 -> #c29f2e x1 */
     /* surface / info */
     --surface-info-1: 12 23 37; /* #eff6ff -> #0c1725 x13 */
@@ -1079,8 +1104,19 @@
     --surface-23: 14 15 17; /* #f1f3f5 -> #0e0f11 x29  */
     --surface-24: 14 15 17; /* #f0f0ee -> #0e0f11 x1  */
     --surface-25: 14 15 17; /* #eef0f2 -> #0e0f11 x1  */
-    --surface-26: 14 15 17; /* #ececec -> #0e0f11 x19  */
-    --surface-27: 14 15 17; /* #ebebeb -> #0e0f11 x5  */
+    /* ★★★ THESE TWO ARE LINES, NOT SURFACES, AND THE GRAPHITE PASS ERASED THEM
+       (2026-09-18, reported: "all the separator lines are gone"). Every one of the
+       24 call sites is a 1px divider wearing `bg-surface-26/27` — the vertical rule
+       between the rail and the content (`main-page-layout`, `page-shell`,
+       `profile-subpage-shell`, `wallet-shell`, `token-shell`, `not-found`, two
+       `loading.tsx`), and the `<Separator>` inside the rail itself. They are
+       hairlines misfiled in the surface family, the same way `--surface-warn-*`
+       are warm creams misfiled as warnings. The conversion treated them as
+       surfaces and mapped them by LIGHTNESS, which put both at #0e0f11 — byte
+       identical to the page ground — so every separator in the app vanished. They
+       take the hairline's value instead. */
+    --surface-26: 42 46 52; /* #ececec -> #2a2e34 x19 */
+    --surface-27: 42 46 52; /* #ebebeb -> #2a2e34 x5 */
     --surface-28: 14 15 17; /* #e9ebee -> #0e0f11 x2  */
     --surface-29: 15 17 19; /* #e8eaed -> #0f1113 x1  */
     --surface-30: 14 16 18; /* #e4e6e9 -> #0e1012 x1  */
@@ -1109,15 +1145,15 @@
     --surface-ok-8: 41 112 70; /* #276b43 -> #297046 x1 */
     --surface-ok-9: 41 112 70; /* #256640 -> #297046 x1 */
     /* surface / warn */
-    --surface-warn-1: 47 42 29; /* #fffaf3 -> #2f2a1d x1 */
-    --surface-warn-2: 42 36 24; /* #fbf7f2 -> #2a2418 x4 */
-    --surface-warn-3: 41 35 23; /* #fef6ec -> #292317 x1 */
-    --surface-warn-4: 40 34 22; /* #fdf6ec -> #282216 x16 */
-    --surface-warn-5: 39 33 21; /* #fdf6e7 -> #272115 x1 */
-    --surface-warn-6: 38 32 20; /* #fdf3e7 -> #262014 x1 */
-    --surface-warn-7: 36 31 20; /* #f8f1ea -> #241f14 x2 */
-    --surface-warn-8: 33 28 18; /* #f0ead9 -> #211c12 x1 */
-    --surface-warn-9: 32 27 17; /* #f4e3c8 -> #201b11 x1 */
+    --surface-warn-1: 38 36 33; /* #fffaf3 -> #262421 x1 */
+    --surface-warn-2: 34 32 30; /* #fbf7f2 -> #22201e x4 */
+    --surface-warn-3: 33 31 28; /* #fef6ec -> #211f1c x1 */
+    --surface-warn-4: 31 29 27; /* #fdf6ec -> #1f1d1b x16 */
+    --surface-warn-5: 30 28 26; /* #fdf6e7 -> #1e1c1a x1 */
+    --surface-warn-6: 29 27 25; /* #fdf3e7 -> #1d1b19 x1 */
+    --surface-warn-7: 27 26 24; /* #f8f1ea -> #1b1a18 x2 */
+    --surface-warn-8: 26 24 23; /* #f0ead9 -> #1a1817 x1 */
+    --surface-warn-9: 25 23 21; /* #f4e3c8 -> #191715 x1 */
     --surface-warn-10: 212 126 74; /* #e07b3e -> #d47e4a x2 */
     --surface-warn-11: 153 87 36; /* #b45309 -> #995724 x5 */
     --surface-warn-12: 130 68 30; /* #92400e -> #82441e x1 */
@@ -1187,8 +1223,27 @@
        have made the spine invisible against the card it sits on.
        The outer glow is kept and halved: 0.7 alpha of a warm orange is a bloom on
        cream, the same alpha of near-white on #16181b is a flare. */
-    --rail-fill: rgb(var(--lum));
-    --rail-glow: 0 0 7px 0 rgb(var(--lum) / 0.35);
+    /* ★★ NO HALO IN DARK (owner, 2026-09-18: "for your and following and probably
+       everywhere else shadow is weird. prolly best without"). The glow was
+       `rgb(var(--lum) / 0.85)`, and `--lum` used to be a warm orange (#e07b3e) — a
+       soft amber bloom on cream. It is now #f2f4f6, so the same declaration became a
+       WHITE halo around every seated tab on a near-black trough, which reads as a
+       rendering artefact rather than as light. The resting lift stays; the bloom
+       goes. Ten call sites, one value. */
+    --tab-active-glow: var(--lift-1);
+    /* ★★ THE SPINE GOES WARM, AND LOSES ITS GLOW (owner, 2026-09-18, the same
+       "on edges it turns ugly" report). It was the OTHER half of that corner:
+       `rgb(var(--lum))` is #f2f4f6, so the 3px bar down the header's left edge was
+       the brightest object on the page, with a white bloom around it, ending in a
+       flat cap right where the orange border curves away. Two maximum-contrast
+       shapes meeting at the one place the eye already checks for craft.
+       Light runs this bar `--lum` -> `--brand`, warm into red; dark now runs the
+       same shape `--ink-warn-3` -> `--brand`, which is that gradient re-stated at
+       dark-mode lightness. It belongs to the orange border instead of fighting it.
+       The glow is dropped rather than dimmed: a bloom is light spilling onto a
+       surface, and on #16181b it read as a smudge at any alpha worth having. */
+    --rail-fill: linear-gradient(180deg, rgb(var(--ink-warn-3)) 0, rgb(var(--brand)) var(--rail-fade));
+    --rail-glow: none;
 
     /* ★ MEDIA (handoff §2). A reader's photo is content, so it is dimmed by a
        hair rather than recoloured, and given an edge so a light-heavy thumbnail
@@ -3347,6 +3402,40 @@ input[data-testid='witnesses-filter-search'] {
   z-index: 1;
   transform-origin: center;
   animation: accent-rail 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/*
+ * ★★★ IN DARK THE SPINE IS THE CARD'S LEFT EDGE, NOT A BAR NEAR IT (owner,
+ * 2026-09-18: "the edges also in some places on corners have no color. its empty
+ * edge on top card on meritum").
+ *
+ * The 18px inset above is deliberate and its note explains why: it starts and
+ * stops the rail exactly where the card's straight left edge begins, so the rail
+ * reads as full-height at 142px and at 1007px alike and never collides with the
+ * curve. That is correct in LIGHT, where the card's border is #eee2dc — a
+ * near-white on cream that nobody can see, so nobody can see where it stops.
+ *
+ * In dark the border is #7a533c and plainly visible, which exposes the seam: the
+ * orange arc comes round the corner, ends at y=18, and the spine's ROUNDED cap
+ * starts there and pulls in another pixel or two. Between them the card's own
+ * background shows through as a small colourless notch — at the one place on the
+ * card the eye already checks for craft. Measured at 3x device scale against the
+ * inset at 18px, 8px and 0.
+ *
+ * At 0 with square ends the spine covers the full left edge and the parent's own
+ * rounding does the corner: `.accent-rail` call sites all clip (three with
+ * `overflow: hidden`, `meritum-intro` with `clip-path: inset(0 round 18px)` —
+ * see the note above for why that one is different), so the spine cannot escape
+ * the curve. The collision the inset was protecting against is handled by the
+ * clip, not by the inset.
+ *
+ * ★ DARK ONLY, ON PURPOSE. Light has no visible seam to fix, and its geometry is
+ * not ours to move for a problem it does not have.
+ */
+.dark .accent-rail::before {
+  top: 0;
+  bottom: 0;
+  border-radius: 0;
 }
 
 /* ★ `scaleY`, NOT an animated `height`. The nav rail animates `height` on a

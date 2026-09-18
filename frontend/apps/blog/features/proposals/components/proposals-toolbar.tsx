@@ -39,7 +39,7 @@ export default function ProposalsToolbar({ tab, onTabChange, sort, onSortChange 
             type="button"
             role="tab"
             aria-selected={tab === t2}
-            style={tab === t2 ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
+            style={tab === t2 ? { boxShadow: 'var(--tab-active-glow)' } : undefined}
             onClick={() => onTabChange(t2)}
             data-testid={`proposals-tab-${t2}`}
             className={cn(

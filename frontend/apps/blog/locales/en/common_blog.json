@@ -322,7 +322,8 @@
       "proposals": "Proposals",
       "settings": "Settings",
       "theme_light": "Light theme",
-      "theme_dark": "Dark theme"
+      "theme_dark": "Dark theme",
+      "theme_group": "Theme"
     }
   },
   "select_sort": {
