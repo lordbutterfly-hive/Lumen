@@ -184,9 +184,23 @@ const (
 // ever credit rec.asker, with acqBlock stored at escrow-out time, so it is
 // exactly conserved rather than created — the age-weight identity
 // ((bal−c)·w + n·B + c·w) / (bal+n) == (bal·w + n·B) / (bal+n) makes an
-// escrow round trip exactly age-NEUTRAL: the asker ends up with the same
-// clock they would have had if they had never escrowed. Nothing can be
-// inflated because nothing is chosen at reclaim time. Answer is different and
+// escrow round trip age-NEUTRAL IN THE WEIGHTED CLOCK: the asker ends up with
+// the same clock they would have had if they had never escrowed. Nothing can be
+// inflated because nothing is chosen at reclaim time.
+//
+// ★ THE PROMISE STOPS AT MaxSettlementLots (corrected 2026-09-18, adversarial
+// review). The identity above is about the weighted clock; the COHORT LIST is a
+// separate object, and every settlement door routes it through
+// boundSettlementLots (holdclock_lots.go), which above eight cohorts merges
+// pairs at the YOUNGER acq. That direction is deliberate — it can never
+// launder — but on the RETURN leg it is confiscation: an asker whose escrow
+// swept 9+ cohorts gets them back worth more exit tax than they left with
+// (measured in zz_v5_lot_bound_test.go: +2.2% at 9 cohorts, +8.2% at 20,
+// +10.1% at 64). Under the old 5%-of-supply spend cap that took a holder whose
+// whole position was a sliver of supply; v5 lets anyone spend their whole
+// balance in one ask, so it is now ordinary rather than pathological. Raising
+// MaxSettlementLots is the fix, and holdclock_lots.go asks for the measurement
+// that would justify a number — do that before assuming 8 is margin. Answer is different and
 // stays different: the CREATOR is credited with a fresh clock (creditInflow),
 // which is the conservative direction.
 //
@@ -836,9 +850,34 @@ func Reclaim(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 	// A SELF-DEALT escrow is not a miss (recordMiss returns immediately on
 	// asker==creator), and the same condition governs the slice here, so the two
 	// can never disagree about whether this was an offence.
+	//
+	// ★★★ ONE CREDIT IS THE FLOOR (v5.1, 2026-09-18 — adversarial review).
+	// The slice is a fraction OF THE COMMISSION, and the commission is
+	// floor(credits x CommissionBps/10000), which is ZERO at eight credits or
+	// fewer. So every cheap ask carried a zero deterrent: three unanswered
+	// one-credit asks shut a creator's inflows for DelinquencyBlocks at a cost
+	// to the griefer of exactly nothing — the precise hole MissReclaimSliceBps
+	// was created to close, reopened one level up from where its own doc looks
+	// ("Rounded UP ... so no dust-priced escrow can round the deterrent away to
+	// zero": the ceil is here, the floor that kills it is in the commission).
+	//
+	// The floor is ONE CREDIT, not a new parameter, because the smallest
+	// possible ask IS one credit and the smallest possible deterrent is
+	// therefore one: any percentage of a cheap escrow rounds to zero, and a
+	// second constant would only move the same cliff somewhere else. It is
+	// clamped to the escrow's own credits so this can never pay out more than
+	// came in, which keeps returnEscrowToOwner's partition intact at credits
+	// == 1 (the asker gets nothing back, the owner gets the one token — the
+	// deliberate price of a creator having gone silent for the whole window).
 	slice := mZero()
-	if rec.asker != creator && rec.commissionCredits != nil && rec.commissionCredits.Sign() > 0 {
+	if rec.asker != creator {
 		slice = mMulDivCeil(rec.commissionCredits, new(big.Int).SetUint64(MissReclaimSliceBps), big.NewInt(10000))
+		if slice.Sign() <= 0 {
+			slice = big.NewInt(1)
+		}
+		if slice.Cmp(rec.credits) > 0 {
+			slice = new(big.Int).Set(rec.credits)
+		}
 	}
 	returned, retained, ownerGraduated := returnEscrowToOwner(s, creator, rec.asker, Owner(s), seq, rec.credits, slice, rec.acqBlock, block)
 	rec.status = askReclaimed
