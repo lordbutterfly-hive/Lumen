@@ -129,6 +129,20 @@ export const DYNAMIC_SAMPLES = {
   '/roles/[tag]': ['hive-139531'],
   '/topics/[tag]': ['photography'],
   '/creators/[handle]': ['lordbutterfly'],
+  /* ★★ THESE TWO WERE MISSING, AND THE COST WAS THE WHOLE SWEEP (2026-09-18).
+     `listSweepUrls()` treats an unsampled dynamic pattern as a HARD ERROR, on
+     purpose — the note above `listSweepUrls` says skipping one would "quietly
+     drop a page from every page". It did exactly what it promised: since the
+     public wallet (2026-09-09) and the Meritum creator page (2026-09-15)
+     landed, `qa:sweep` has thrown "No DYNAMIC_SAMPLES entry for:
+     /[param]/wallet, /m/[handle]" and run nothing at all. A guard that stops
+     the run is honest; a guard nobody notices has stopped the run for nine days
+     is not, so this is worth saying out loud rather than just fixing.
+     Same account as every other `[param]` sample so one fixture check covers
+     them, and `/m/[handle]` takes the bare handle — that route's own segment is
+     a Lumen handle, not an `@name` (see app/m/[handle]/page.tsx). */
+  '/[param]/wallet': ['@lordbutterfly'],
+  '/m/[handle]': ['lordbutterfly'],
   // Three segments at once. `[param]` is the category, `[p2]` the @author.
   '/[param]/[p2]/[permlink]': [
     { param: 'hive-139531', p2: '@ecency', permlink: 'ecency-scaling-hive-access-infrastructure' }
