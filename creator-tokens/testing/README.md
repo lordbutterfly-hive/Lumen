@@ -61,8 +61,12 @@ state. Those are deploy-rehearsal concerns, not contract-logic ones.
 A fixture that misses any one of these PASSES while proving nothing, so all
 three are asserted rather than assumed:
 
-1. **C2 depth ceiling** - `face <= 50% of area(supply)`.
-2. **Spend cap** - `credits <= 5% of supply` (`MaxSpendSupplyBps` 500).
+1. **C2 depth ceiling** - `face <= area(supply)` (`MaxServiceFaceAreaBps` 10000;
+   it was 50% of area, 5000, before v5 on 2026-09-18).
+2. **Spend cap** - `credits <= supply` (`MaxSpendSupplyBps` 10000; it was 5% of
+   supply, 500, before v5). A coherent market reaches it only when the
+   settlement rate sags below the backing per token, so a fixture that wants to
+   exercise it must seed a sagged short window, not just a big face.
 3. **A non-zero commission** - `floor(credits x 12%)` is 0 below 9 credits, so a
    small ask makes every assertion about the split vacuous.
 

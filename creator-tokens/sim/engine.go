@@ -422,7 +422,12 @@ func NewEngine(cfg Config) *Engine {
 			//   tight caps  -> supply stays small -> setCap/raise-cap actually
 			//                  fire, but the settlement spend cap ("no ask may
 			//                  spend >5% of supply") then binds on nearly every
-			//                  ask, so escrows stop being created at all;
+			//                  ask, so escrows stop being created at all.
+			//                  ★ v5 (2026-09-18) removed that cap — this note
+			//                  is one of the three places this repo wrote the
+			//                  defect down and filed it as a tuning nuisance;
+			//                  the heterogeneity below is still useful, but the
+			//                  reason given for it no longer binds;
 			//   loose caps  -> markets get deep enough to sustain asks (and
 			//                  therefore expiries, and therefore the
 			//                  permissionless reclaims the H1 no-keeper

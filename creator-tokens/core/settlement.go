@@ -43,8 +43,17 @@ import "math/big"
 // was measured through this package on 2026-09-16 (1000 HBD pump on a
 // 200-token market: attacker net -323 HBD for a 100 HBD gig, creator +188 HBD
 // against ~90 honest): the 15% exit tax and the 5% fee on both legs of the
-// round trip, the per-ask spend cap (5% of supply), the depth ceiling (face
-// <= 50% of area) and the creator's right to Decline. All of those stay.
+// round trip, the per-ask spend cap, the depth ceiling and the creator's right
+// to Decline.
+//
+// ★ TWO OF THOSE FIVE MOVED IN v5 (2026-09-18) AND THIS PARAGRAPH WAS LEFT
+// STALE FOR HALF A DAY — recorded because a security measurement that names
+// its own assumptions is worthless once the assumptions change silently. The
+// spend cap is now the supply itself (was 5% of supply) and the depth ceiling
+// is area(S) (was 50% of it); see params.go. The exit tax, the 5% fee on both
+// legs and Decline are untouched, and they are the three that carried the
+// pump-then-ask arithmetic above — but the numbers in that measurement were
+// taken under the OLD pair and have not been re-run.
 //
 // The 7-day ring (kObsLong) is still RECORDED by RecordObs as price history;
 // nothing in money math reads it any more, and its reader was deleted.

@@ -117,9 +117,10 @@ func Reclaim(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 // REFUSES (typed error) when it cannot price safely. rate =
 // min(AskRate short window, 7-day long window, SpotRate(supply)) + the C5
 // divergence tripwire; SettleSpend adds the C4 minimum-price guard
-// (face·2 >= rate), the C2 depth ceiling (face <= 50% of Area(supply) — the
-// AREA, never the reserve), ceil(face/rate) for the count, and the 5%-of-
-// supply spend cap. Refusal gates NO funds: only the three service INFLOWS
+// (face·2 >= rate), the C2 depth ceiling (face <= Area(supply) — the AREA,
+// never the reserve; it was 50% of it before v5), ceil(face/rate) for the
+// count, and the spend cap (credits <= supply; it was 5% of supply before
+// v5). Refusal gates NO funds: only the three service INFLOWS
 // call this.
 type SettleQuote struct { Credits *big.Int; Rate *big.Int }
 func SettlementRate(s Store, creator string, block uint64) (*big.Int, error)

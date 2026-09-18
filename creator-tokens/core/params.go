@@ -652,7 +652,10 @@ const LongMaxStaleBlocks uint64 = MaxStaleBlocks + LongObsSpacing
 // mainnet the same day: seven live markets, 1-6 tokens and 1-6 HBD of
 // backing each, and not one of the nine listed services could be bought at
 // any price the creator had posted. @godfish's 50.000 HBD shirt needed 298
-// tokens (~672 HBD) in the curve, 13x the thing being sold.
+// tokens (~672 HBD) in the curve, 13x the thing being sold — though that 13x
+// is the SPEND CAP's doing, not this ceiling's: the 50% ceiling alone asked
+// for ~77 tokens (~2.1x). Both moved, and each should be credited with what
+// it actually cost.
 //
 // At 10000 the rule is the honest one the ceiling was always described as:
 // a single service may not cost more than the entire backing of the market
@@ -665,6 +668,10 @@ const LongMaxStaleBlocks uint64 = MaxStaleBlocks + LongObsSpacing
 // area(1) is 1007, so a one-token market can finally price a service
 // (before: floor 504 > ceiling 503, "market too small to price any
 // service", which is what @ausbitbank and @daveks were both hitting).
+// ★ The POSTABLE window there is [MinFace, 1007] = [508, 1007], not
+// [504, 1007]: MinFace (params.go) refuses a posted price below 508 at
+// SetOfferingPrice time, before settlement ever sees it. The 504 is the
+// settlement floor, which is a different door.
 const MaxServiceFaceAreaBps uint64 = 10000
 
 // MaxSpendSupplyBps is the settlement spend cap: one settlement may not
@@ -712,9 +719,19 @@ const MaxServiceFaceAreaBps uint64 = 10000
 // TransferCredits could not already move.
 //
 // The constant is kept (rather than deleting the check) so the refusal path
-// and its tests stay alive as a defence-in-depth assertion: c > S can only
-// be reached by corrupt state, and it should still refuse loudly if it ever
-// is.
+// and its tests stay alive.
+//
+// ★ CORRECTED SAME DAY, AFTER AN ADVERSARIAL REVIEW. This paragraph first said
+// c > S "can only be reached by corrupt state". That is wrong, and the change's
+// OWN new test (settlement_test.go TestSettleSpend_SpendCapBoundary) says so:
+// c = ceil(face/rate) and face is capped at area(S), so c > S needs
+// rate < area(S)/S — the backing per token — which a short window sagging under
+// the backing produces in perfectly coherent state (C5's tripwire only refuses
+// a 4x sag). So the cap still binds in real conditions: it is the LAST bound on
+// how many tokens one settlement can consume when the rate is low, and the
+// asker's signed maxCredits is the one that bounds the DRIFT between the quote
+// they saw and execution. Those are different bounds; do not sell either as the
+// other.
 const MaxSpendSupplyBps uint64 = 10000
 
 // DivergenceRateMultiple is RULING C5's circuit-breaker: refuse settlement
