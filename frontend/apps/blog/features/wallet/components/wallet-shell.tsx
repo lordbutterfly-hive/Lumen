@@ -79,7 +79,7 @@ export default function WalletShell({ initialTab, fallbackTab = 'hive' }: { init
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
+      <aside className="sticky top-[var(--rail-sticky-top)] hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
 
@@ -88,7 +88,7 @@ export default function WalletShell({ initialTab, fallbackTab = 'hive' }: { init
       </main>
 
       {showRightRail ? (
-        <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
+        <aside className="sticky top-[var(--rail-sticky-top)] hidden h-fit bg-background-secondary xl:block">
           <WalletRightRail />
         </aside>
       ) : null}

@@ -93,7 +93,7 @@ const ProfileSubpageShell = ({
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
+      <aside className="sticky top-[var(--rail-sticky-top)] hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
 
@@ -114,7 +114,7 @@ const ProfileSubpageShell = ({
         {children}
       </main>
 
-      {rail ? <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">{rail}</aside> : null}
+      {rail ? <aside className="sticky top-[var(--rail-sticky-top)] hidden h-fit bg-background-secondary xl:block">{rail}</aside> : null}
     </div>
   );
 };

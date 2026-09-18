@@ -29,6 +29,22 @@
  * tailwind.config.js keys every `dark:` variant off it; the attribute is additive.
  */
 
+/*
+ * ★★ RAW `localStorage`, AND THE LINT RULE IS DISABLED ON PURPOSE. The project's
+ * `no-restricted-globals` rule points at `setStorageItem`/`getStorageItem`, and it
+ * is right for almost everything — but those write a JSON ENVELOPE
+ * (`{value, expiresAt, createdAt}`), and the one reader that matters here is
+ * `THEME_INIT_SCRIPT`: an inline string in <head> that runs before any module
+ * exists, cannot import the helper, and has to stay small enough to be worth
+ * inlining. Routing this through the wrapper would mean re-implementing the
+ * envelope inside that script and breaking every reader whose key was written the
+ * other way. The project's own table puts "user preferences" in the PERMANENT
+ * column, i.e. no TTL at all, which is exactly the case where the envelope buys
+ * nothing. Disabled with the reason rather than left as three warnings that look
+ * like an oversight.
+ */
+/* eslint-disable no-restricted-globals -- see the note above: the inline head script is the other reader */
+
 export const THEME_STORAGE_KEY = 'theme';
 
 export type Theme = 'light' | 'dark';

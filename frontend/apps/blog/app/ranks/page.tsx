@@ -20,7 +20,7 @@ export default function RanksPage() {
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
+      <aside className="sticky top-[var(--rail-sticky-top)] hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
 

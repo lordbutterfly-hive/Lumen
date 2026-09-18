@@ -87,7 +87,7 @@ export default async function Loading() {
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
+      <aside className="sticky top-[var(--rail-sticky-top)] hidden h-fit bg-background-secondary md:block">
         <SidebarSkeleton />
       </aside>
 
@@ -102,7 +102,7 @@ export default async function Loading() {
         <LumenLoader size="lg" label={t('global.loading_proposals')} />
       </main>
 
-      <aside className="sticky top-24 hidden h-fit flex-col gap-5 bg-background-secondary xl:flex">
+      <aside className="sticky top-[var(--rail-sticky-top)] hidden h-fit flex-col gap-5 bg-background-secondary xl:flex">
         <RightRailCardSkeleton />
         <RightRailCardSkeleton />
       </aside>

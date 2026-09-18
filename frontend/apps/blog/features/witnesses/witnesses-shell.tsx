@@ -93,7 +93,7 @@ export default function WitnessesShell() {
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
+      <aside className="sticky top-[var(--rail-sticky-top)] hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
 
@@ -144,7 +144,7 @@ export default function WitnessesShell() {
         />
       </main>
 
-      <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
+      <aside className="sticky top-[var(--rail-sticky-top)] hidden h-fit bg-background-secondary xl:block">
         <WitnessesRightRail
           filtersState={filtersState}
           isLoggedIn={identity.isLoggedIn}

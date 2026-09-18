@@ -81,7 +81,7 @@ const FLAP_MS = 260;
  * viewport and scrolled it inside a sticky aside, the way the Meritum board
  * does; the owner found the nested scroller weird. So the list is plain, and
  * the two shells that mount this card (`home-shell`, `topic-shell`, plus the
- * topics `loading.tsx`) drop `sticky top-24` from their RIGHT aside: the page
+ * topics `loading.tsx`) drop `sticky top-[var(--rail-sticky-top)]` from their RIGHT aside: the page
  * scrolls past the rail like any other content. Every other shell keeps its
  * sticky rail; this card is not there.
  */

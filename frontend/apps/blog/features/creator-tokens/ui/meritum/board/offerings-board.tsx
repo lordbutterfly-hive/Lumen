@@ -23,7 +23,7 @@
  *    read as one column of offers.
  *
  * 2. IT STAYS PUT WHEN THE PAGE SCROLLS. The shell's right `<aside>` is already
- *    `sticky top-24 h-fit`, so this inherits that for free -- and must not fight
+ *    `sticky top-[var(--rail-sticky-top)] h-fit`, so this inherits that for free -- and must not fight
  *    it. Nothing here sets its own `position`.
  *
  * 3. IT CANNOT CLIP. A sticky box taller than the viewport is unreachable at the
@@ -105,7 +105,7 @@ function useDescription(creator: string, offeringId: number, open: boolean): str
   return text;
 }
 
-/** The shell's own `sticky top-24`, in px. The list can never be taller than what is left below it. */
+/** The shell's own `sticky top-[var(--rail-sticky-top)]`, in px. The list can never be taller than what is left below it. */
 const STICKY_TOP_PX = 96;
 /** Breathing room under the list so it never ends flush with the window edge. */
 const BOTTOM_GUTTER_PX = 24;

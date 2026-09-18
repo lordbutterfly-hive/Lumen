@@ -286,7 +286,7 @@ export default function LeftRail() {
       /* ★★ FULL-HEIGHT COLUMN SO THE THEME PILL CAN SIT AT THE BOTTOM OF THE
          SCREEN (owner, 2026-09-18: "at the bottom of the screen"). `mt-auto` on
          the pill needs a column TALLER than its rows, and it had none: every
-         shell mounts this nav inside `<aside class="sticky top-24 … h-fit">`, so
+         shell mounts this nav inside `<aside class="sticky top-[var(--rail-sticky-top)] … h-fit">`, so
          the aside was exactly as tall as the eight rows and `mt-auto` had no
          slack to push into — the pill sat directly under Proposals.
          `8rem` is the sticky `top-24` (6rem) plus the grid's own `pt-[26px]`

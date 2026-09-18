@@ -67,7 +67,7 @@ export default function PublicWalletShell({
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
+      <aside className="sticky top-[var(--rail-sticky-top)] hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
 
@@ -76,7 +76,7 @@ export default function PublicWalletShell({
       </main>
 
       {showRightRail ? (
-        <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
+        <aside className="sticky top-[var(--rail-sticky-top)] hidden h-fit bg-background-secondary xl:block">
           <PublicWalletRightRail />
         </aside>
       ) : null}

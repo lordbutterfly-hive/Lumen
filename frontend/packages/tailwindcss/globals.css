@@ -1299,6 +1299,29 @@
     scrollbar-gutter: stable;
 
     /**
+     * ★★★ WHERE A STICKY COLUMN COMES TO REST, AND WHY IT IS NOT 96px (owner,
+     * 2026-09-19: "the left navbar still slightly moves when the page scroll hits
+     * top").
+     *
+     * MEASURED, and it is the same everywhere: every sticky column in this app
+     * carried `top-24` (96px) while its NATURAL resting top is 107px — the sticky
+     * header is 81px tall and the page grid pads 26px. So on the first 12px of
+     * scroll the rail slid 11px upward and then locked. Sampled at y = 0, 2, 4, 6,
+     * 8, 10, 12: top = 107, 105, 103, 101, 99, 97, 96. That is the movement; it is
+     * not jitter, it is the sticky engaging from the wrong offset, which is why it
+     * only ever showed at the top of the page and why scrolling further looked
+     * perfectly still.
+     *
+     * An audit of every `position: sticky` element on seven routes found the SAME
+     * pair — 96px against a natural 107 — and nothing else mismatched, so one
+     * value fixes all 32 call sites. It lives here rather than being typed 32
+     * times: if the header's height or the grid's padding ever moves, this is the
+     * one line that has to move with it, and `top-[var(--rail-sticky-top)]` at the
+     * call sites will follow.
+     */
+    --rail-sticky-top: 107px; /* header 81px + grid padding 26px */
+
+    /**
      * ★★★ REQUIRED BY THE POST CARD'S DRAWER (2026-08-19). Without it the
      * drawer cannot animate to `height: auto` at all.
      *

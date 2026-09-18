@@ -53,7 +53,7 @@ export default function PageShell({
    * §6). Measured on the shipped build: the panel sat in the 200px left aside
    * alongside the primary navigation, as an `overflow-y-auto` scroller
    * (`clientHeight 687` / `scrollHeight 1976`) inside a `md:sticky md:top-24`
-   * panel inside the `sticky top-24` aside. Two stickies at the SAME offset can
+   * panel inside the `sticky top-[var(--rail-sticky-top)]` aside. Two stickies at the SAME offset can
    * never move relative to each other, so the inner one bought nothing and only
    * created a second scroll context; and its `overscroll-behavior: auto` chained
    * the wheel to the page the moment the inner scroller bottomed out — which is
@@ -88,7 +88,7 @@ export default function PageShell({
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
+      <aside className="sticky top-[var(--rail-sticky-top)] hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
 
@@ -100,7 +100,7 @@ export default function PageShell({
           column may add a second `sticky` or its own scroller — see the
           `rightRailExtra` note above for what that cost the last time. */}
       {hasRightColumn ? (
-        <aside className="sticky top-24 hidden h-fit flex-col gap-5 bg-background-secondary xl:flex">
+        <aside className="sticky top-[var(--rail-sticky-top)] hidden h-fit flex-col gap-5 bg-background-secondary xl:flex">
           {rail}
           {rightRailExtra}
         </aside>
