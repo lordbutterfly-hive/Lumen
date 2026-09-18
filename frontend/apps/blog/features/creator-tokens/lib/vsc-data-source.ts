@@ -159,7 +159,7 @@ import {
   STATE_CLOSED, assertTransferDestination, kLots, parseLots } from './vsc/reads';
 import { displayPriceUsd } from '../market/curve';
 import { marketHealthOf, windingDownOf } from '../market/market-health';
-import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, rulesForCode, windingDownUnder, askPricingUnder } from '../market/contract-rules';
+import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, rulesForCode, windingDownUnder, askPricingUnder, spendGuardsUnder } from '../market/contract-rules';
 // ★ EXECUTION CONFIRMATION (2026-08-31, seventeen-unconfirmed-writes finding).
 // The money-moving writes confirm by polling the tx's own terminal status
 // through the SAME findTransaction query the wallet rail already runs
@@ -1152,7 +1152,16 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // healthy markets when the posted face is outside the window that moves with
     // supply, and without this a green quote led to a signed ask the chain
     // refused only at settlement. Same order the contract enforces.
-    const spend = settleSpendStatus(faceBaseUnits, settlement.rateBaseUnits, supplyTokens, creditsRequiredBaseUnits);
+    // ★ v5 (2026-09-18): the two size bounds come from the LIVE rule set, not
+    // from contract-math's constants — mirroring v5's opened bounds against a
+    // v4 chain would promise an ask the chain refuses at settlement.
+    const spend = settleSpendStatus(
+      faceBaseUnits,
+      settlement.rateBaseUnits,
+      supplyTokens,
+      creditsRequiredBaseUnits,
+      spendGuardsUnder(await this.readRules())
+    );
     if (spend !== 'ok') return unpriced(spend, head);
     return {
       ...base,

@@ -15,6 +15,7 @@
  * five of its outcomes over the grid), or the boundary assertions below could
  * pass on a constant.
  */
+import { spendGuardsUnder } from './contract-rules';
 import {
   MAX_SERVICE_FACE_AREA_BPS,
   MAX_SPEND_SUPPLY_BPS,
@@ -104,6 +105,50 @@ function credits(leg: number, rate: number): number { return Math.ceil(leg / rat
 {
   const rate = 1000, supply = 1000, leg = 5000; // above floor 500, below ceiling area(1000)/2 (large), credits 5 within cap
   check('healthy market, in-window price -> ok', settleSpendStatus(leg, rate, supply, credits(leg, rate)) === 'ok');
+}
+
+// ---- 6. v5 bounds (2026-09-18) — the client must mirror the LIVE rule set ----
+{
+  // The whole point of the v5 contract change, from the client's side: the
+  // same numbers that were refused under v4 must be admitted under v5, and
+  // the DEFAULT must stay the old pair so a client on an old chain never
+  // green-lights an ask that chain would refuse (contract-rules.ts, rule 4).
+  const v5 = spendGuardsUnder('v5');
+  const v4 = spendGuardsUnder('v4');
+  check('v5 opens both bounds to 100%', v5.faceAreaBps === 10_000 && v5.spendSupplyBps === 10_000);
+  check('v4 keeps 50% / 5%', v4.faceAreaBps === MAX_SERVICE_FACE_AREA_BPS && v4.spendSupplyBps === MAX_SPEND_SUPPLY_BPS);
+
+  // A 5-token market, spot ~1.039 HBD/token: the live @stayoutoftherz shape.
+  // A 3-credit service (2.500 HBD) was spend_cap under v4 and must be ok under v5.
+  const rate = 1039, supply = 5, leg = 2500;
+  check('v4 bounds: the live 3-credit service on a 5-token market is spend-capped',
+    settleSpendStatus(leg, rate, supply, credits(leg, rate), v4) === 'spend_cap');
+  check('v5 bounds: the same service prices',
+    settleSpendStatus(leg, rate, supply, credits(leg, rate), v5) === 'ok',
+    `got ${settleSpendStatus(leg, rate, supply, credits(leg, rate), v5)}`);
+  check('the DEFAULT bounds are still the old pair (safe direction)',
+    settleSpendStatus(leg, rate, supply, credits(leg, rate)) === 'spend_cap');
+
+  // The v5 ceiling is area(S), so a face above the market's whole backing
+  // still refuses — and a face at it prices.
+  const areaAt5 = 5118; // area(5) in base units, from the curve
+  check('v5: a face above area(S) is still price_above_ceiling',
+    settleSpendStatus(areaAt5 + 1, rate, supply, credits(areaAt5 + 1, rate), v5) === 'price_above_ceiling');
+  check('v5: a face at exactly area(S) prices',
+    settleSpendStatus(areaAt5, rate, supply, credits(areaAt5, rate), v5) === 'ok',
+    `got ${settleSpendStatus(areaAt5, rate, supply, credits(areaAt5, rate), v5)}`);
+
+  // The one-token market that could not price ANY service under v4.
+  const rate1 = 1007, area1 = 1007;
+  check('v4: a 1-token market cannot price any service (floor 504 > ceiling 503)',
+    settleSpendStatus(600, rate1, 1, credits(600, rate1), v4) === 'market_too_small');
+  check('v5: a 1-token market can sell a service inside [504, 1007]',
+    settleSpendStatus(600, rate1, 1, credits(600, rate1), v5) === 'ok',
+    `got ${settleSpendStatus(600, rate1, 1, credits(600, rate1), v5)}`);
+  check('v5: below the C4 floor still refuses on a 1-token market',
+    settleSpendStatus(503, rate1, 1, credits(503, rate1), v5) === 'price_below_floor');
+  check('v5: above area(1) still refuses on a 1-token market',
+    settleSpendStatus(area1 + 1, rate1, 1, credits(area1 + 1, rate1), v5) === 'price_above_ceiling');
 }
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

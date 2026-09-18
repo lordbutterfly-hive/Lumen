@@ -165,6 +165,26 @@ export const V3_CODE_CIDS: ReadonlySet<string> = new Set([
 export const V4_CODE_CIDS: ReadonlySet<string> = new Set([
   'bafkreihvrfag55ceybqc4steidpk6iw7tdtpp5rbdm3hongr77nxjxcsbm' // v4: settlement prices off the curve at once; no 2-day / 8-trade gate (2026-09-16)
 ]);
+/**
+ * ★ v5 (2026-09-18, OWNER RULING): v4 plus the two settlement SIZE guards
+ * opened up — `core/params.go` MaxServiceFaceAreaBps 5000 -> 10000 (a service
+ * may cost up to the market's whole curve backing, not half of it) and
+ * MaxSpendSupplyBps 500 -> 10000 (a settlement may consume up to the supply
+ * itself, not 5% of it). Nothing was deleted: the guard order, the C4
+ * minimum-price floor and the C5 divergence tripwire are byte-identical, and
+ * both refusals still fire past the new bounds.
+ *
+ * WHY THE CLIENT MUST KNOW: `settleSpendStatus` mirrors those two constants to
+ * refuse before a signature. Mirroring the NEW numbers against an OLD chain is
+ * the one direction this module forbids (header, rule 4) — it would offer an
+ * ask the chain then refuses at settlement. So the bounds are read from the
+ * rule set, never from a bare constant, and v1-v4 keep the old pair.
+ *
+ * Build: creator-tokens/build-wasm.sh EXPECTED_CID, 159,511 bytes.
+ */
+export const V5_CODE_CIDS: ReadonlySet<string> = new Set([
+  'bafkreidmizk2flxzgksyt74ly7iix5ew4b5msuclbdzawhk57jau6e7erq' // v5: depth ceiling = area(S), spend cap = supply (2026-09-18)
+]);
 export const V2_FAST_TWIN_CODE_CID = 'bafkreih4eper5br4vqmgip6f5vykwmhuxtor4j2pqaw2ewdtwuirzf5h7y';
 
 /** How long a chain answer about the deployed code is trusted before it is asked again. Bounds the deploy gap (header, item 3). */
@@ -180,6 +200,7 @@ export const RULES_RETRY_MS = 15_000;
  */
 export function rulesForCode(code: string | null | undefined): ContractRules {
   if (typeof code !== 'string') return 'v1';
+  if (V5_CODE_CIDS.has(code)) return 'v5';
   if (V4_CODE_CIDS.has(code)) return 'v4';
   if (V3_CODE_CIDS.has(code)) return 'v3';
   return V2_CODE_CIDS.has(code) ? 'v2' : 'v1';
@@ -192,7 +213,7 @@ export function rulesForCode(code: string | null | undefined): ContractRules {
  * `=== 'v2'` shape types.ts warns about, one version later.
  */
 export function hasNoSubscriptionUnder(rules: ContractRules): boolean {
-  return rules === 'v3' || rules === 'v4';
+  return rules === 'v3' || rules === 'v4' || rules === 'v5';
 }
 
 /**
@@ -202,7 +223,27 @@ export function hasNoSubscriptionUnder(rules: ContractRules): boolean {
  * the quote must keep mirroring or it promises asks the chain refuses.
  */
 export function askPricingUnder(rules: ContractRules): 'curve' | 'windowed' {
-  return rules === 'v4' ? 'curve' : 'windowed';
+  return rules === 'v4' || rules === 'v5' ? 'curve' : 'windowed';
+}
+
+/**
+ * The two settlement size bounds the live bytecode enforces, in basis points —
+ * `core/params.go` MaxServiceFaceAreaBps (the depth ceiling, against area(S))
+ * and MaxSpendSupplyBps (the spend cap, against supply).
+ *
+ * v5 opened both; everything older keeps 50% / 5%. Read through this function
+ * rather than importing the constants, so a client on an old chain never
+ * quotes an ask that chain would refuse (header, rule 4).
+ */
+export interface SpendGuardBps {
+  faceAreaBps: number;
+  spendSupplyBps: number;
+}
+
+export function spendGuardsUnder(rules: ContractRules): SpendGuardBps {
+  return rules === 'v5'
+    ? { faceAreaBps: 10_000, spendSupplyBps: 10_000 }
+    : { faceAreaBps: 5_000, spendSupplyBps: 500 };
 }
 
 /** core/market.go inWindDown under each rule set. The rail switch: true routes a holder's exit to Refund, false to Sell. */

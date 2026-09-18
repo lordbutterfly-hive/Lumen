@@ -82,9 +82,14 @@ const CREATOR_NOTICE = {
   price_below_floor:
     'This price is too low to settle right now. The smallest a service can cost rises with your token’s price; raise it into the current range (the Studio shows the window). Your prices are saved.',
   price_above_ceiling:
-    'This price is too high to settle right now. A single service can’t be worth more than half your market’s backing; lower it into the current range (the Studio shows the window). Your prices are saved.',
+    'This price is too high to settle right now. A single service can’t be worth more than the backing in your own market; lower it into the current range (the Studio shows the window), or it settles once more tokens are held. Your prices are saved.',
+  // ★ v5 (2026-09-18): the bound is the SUPPLY, not 5% of it, and a real buyer
+  // cannot reach it (credits come out of a balance that is itself <= supply).
+  // The copy no longer names a percentage that only one bytecode ever had —
+  // both the old chain and the new one are described truthfully by "more of the
+  // token than one purchase may move".
   spend_cap:
-    'This price is too high to settle right now. One purchase can’t move more than 5% of your token’s supply; lower it, or it settles once more tokens are held. Your prices are saved.'
+    'This price is too high to settle right now. It would move more of your token’s supply in one purchase than the contract allows; lower it, or it settles once more tokens are held. Your prices are saved.'
 } satisfies Record<QuoteOracleStatus, string | null>;
 
 /** The Ask dialog, addressed to the buyer about somebody else's shop. */
@@ -102,8 +107,8 @@ const BUYER_NOTICE = {
   no_price_set: 'hasn’t been priced yet — this creator hasn’t set a price for their token.',
   market_too_small: 'can’t be bought yet — this token is too new to price a service against it.',
   price_below_floor: 'can’t be bought right now — the posted price is below what the market can settle. Check back after it trades more.',
-  price_above_ceiling: 'can’t be bought right now — the posted price is above what the market can settle. Check back after it trades more.',
-  spend_cap: 'can’t be bought right now — it would move too large a share of the token’s supply in one go.'
+  price_above_ceiling: 'can’t be bought right now — the posted price is worth more than the whole market backing it. It clears as more of the token is bought.',
+  spend_cap: 'can’t be bought right now — it would move more of the token’s supply in one purchase than the contract allows. It clears as more tokens are held.'
 } satisfies Record<QuoteOracleStatus, string | null>;
 
 /**

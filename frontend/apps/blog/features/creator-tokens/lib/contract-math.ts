@@ -1244,21 +1244,37 @@ export const MAX_OFFERINGS = 20;
  * minimum possible at any rate and is not a manipulation lever), reproduced so
  * a market with 1-19 tokens is not falsely refused as a 5%-of-supply violation.
  */
+export interface SpendGuardBounds {
+  /** core/params.go MaxServiceFaceAreaBps under the LIVE bytecode. */
+  faceAreaBps: number;
+  /** core/params.go MaxSpendSupplyBps under the LIVE bytecode. */
+  spendSupplyBps: number;
+}
+
+/**
+ * ★ THE BOUNDS ARE PASSED IN, NOT IMPORTED (v5, 2026-09-18). Both constants
+ * changed with the v5 bytecode (50% -> 100% of area, 5% -> 100% of supply), and
+ * a client that mirrors the NEW numbers against an OLD chain would green-light
+ * an ask the chain refuses at settlement — the one direction contract-rules.ts
+ * forbids. Callers pass `spendGuardsUnder(rules)`; the default is the OLD pair,
+ * so a caller that forgets is wrong in the safe direction.
+ */
 export function settleSpendStatus(
   tokenLegBaseUnits: number,
   rateBaseUnits: number,
   supplyTokens: number,
-  credits: number
+  credits: number,
+  bounds: SpendGuardBounds = { faceAreaBps: MAX_SERVICE_FACE_AREA_BPS, spendSupplyBps: MAX_SPEND_SUPPLY_BPS }
 ): QuoteOracleStatus {
   const lo = BigInt(Math.ceil(rateBaseUnits / 2));
-  const hi = (areaBaseUnitsBig(supplyTokens) * BigInt(MAX_SERVICE_FACE_AREA_BPS)) / 10000n;
+  const hi = (areaBaseUnitsBig(supplyTokens) * BigInt(bounds.faceAreaBps)) / 10000n;
   const leg = BigInt(Math.trunc(tokenLegBaseUnits));
   if (lo > hi) return 'market_too_small';
   if (leg < lo) return 'price_below_floor';
   if (leg > hi) return 'price_above_ceiling';
   if (credits > 1) {
     const lhs = BigInt(Math.trunc(credits)) * 10000n;
-    const rhs = BigInt(Math.trunc(supplyTokens)) * BigInt(MAX_SPEND_SUPPLY_BPS);
+    const rhs = BigInt(Math.trunc(supplyTokens)) * BigInt(bounds.spendSupplyBps);
     if (lhs > rhs) return 'spend_cap';
   }
   return 'ok';

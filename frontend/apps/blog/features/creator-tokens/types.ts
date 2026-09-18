@@ -121,7 +121,7 @@ export type MarketHealth = 'open' | 'lapsed' | 'delisted' | 'closed' | 'paused';
  * written `!== 'v1'`, never `=== 'v2'` — that exact shape is what this change
  * had to repair in two places.
  */
-export type ContractRules = 'v1' | 'v2' | 'v3' | 'v4';
+export type ContractRules = 'v1' | 'v2' | 'v3' | 'v4' | 'v5';
 
 /**
  * ★★★ 'v4' IS THE NO-TRADING-HISTORY-GATE BYTECODE (2026-09-16 OWNER RULING,
