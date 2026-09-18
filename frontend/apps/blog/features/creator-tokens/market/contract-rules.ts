@@ -183,7 +183,16 @@ export const V4_CODE_CIDS: ReadonlySet<string> = new Set([
  * Build: creator-tokens/build-wasm.sh EXPECTED_CID, 159,511 bytes.
  */
 export const V5_CODE_CIDS: ReadonlySet<string> = new Set([
-  'bafkreidmizk2flxzgksyt74ly7iix5ew4b5msuclbdzawhk57jau6e7erq' // v5: depth ceiling = area(S), spend cap = supply (2026-09-18)
+  // v5.1, the one that ships: the two opened bounds PLUS the one-credit floor
+  // under the missed-ask deterrent (ask.go; an adversarial review found a
+  // commission of floor(credits x 12%) rounds to zero at <= 8 credits, so a
+  // junk ask that shuts a creator's inflows for a week cost nothing).
+  'bafkreicij3ipcglu6xkc25upwlox5okpcfojf6u2g3flfzt2kszw44bdeu',
+  // v5.0 — built, deployed to TESTNET only, never to mainnet. Listed so a
+  // client reading that testnet contract still derives v5 rules rather than
+  // silently falling back to v1 (the CID list is the only thing that can tell
+  // them apart, and an unlisted CID means v1 forever).
+  'bafkreidmizk2flxzgksyt74ly7iix5ew4b5msuclbdzawhk57jau6e7erq'
 ]);
 export const V2_FAST_TWIN_CODE_CID = 'bafkreih4eper5br4vqmgip6f5vykwmhuxtor4j2pqaw2ewdtwuirzf5h7y';
 
