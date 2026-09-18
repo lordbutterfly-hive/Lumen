@@ -1307,14 +1307,14 @@ const CreatorStudio: FC = () => {
             active pill on --lum-1 with a soft warm glow, one step weaker than the
             nav rail (§4). The glow is an inline style because a `/` in a Tailwind
             arbitrary value is the opacity shorthand and silently kills the class. */}
-        <div className="mb-5 mt-4 flex flex-wrap gap-1.5 rounded-card border border-line-6 bg-[var(--amb-1)] p-[5px]">
+        <div className="mb-5 mt-4 flex flex-wrap gap-1.5 rounded-card border border-line-6 bg-[var(--amb-1)] p-[5px] dark:bg-surface-23">
           {SECTIONS.map((s) => (
             <button
               key={s.id}
               onClick={() => setSection(s.id)}
               style={section === s.id ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
               className={`rounded-control px-4 py-2 font-ui text-[14px] leading-[22px] font-medium transition-colors ${
-                section === s.id ? 'bg-[var(--lum-1)] text-ink-2' : 'text-ink-10 hover:text-ink-2'
+                section === s.id ? 'bg-[var(--lum-1)] text-ink-2 dark:bg-surface-1' : 'text-ink-10 hover:text-ink-2'
               }`}
             >
               {s.label}
@@ -1471,7 +1471,7 @@ const CreatorStudio: FC = () => {
             {/* ★ DMs sit ALONGSIDE the paid-ask escrow cards, never merged: asks
                 carry money and deadlines, direct messages do not. This sub-toggle
                 switches the Inbox between the two without conflating them. */}
-            <div className="flex gap-1.5 self-start rounded-card border border-line-6 bg-[var(--amb-1)] p-[5px]">
+            <div className="flex gap-1.5 self-start rounded-card border border-line-6 bg-[var(--amb-1)] p-[5px] dark:bg-surface-23">
               {([['requests', 'Requests'], ['messages', 'Messages']] as const).map(([id, label]) => (
                 <button
                   key={id}
@@ -1479,7 +1479,7 @@ const CreatorStudio: FC = () => {
                   onClick={() => setInboxTab(id)}
                   style={inboxTab === id ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
                   className={`rounded-control px-4 py-1.5 font-ui text-[14px] leading-[22px] font-medium transition-colors ${
-                    inboxTab === id ? 'bg-[var(--lum-1)] text-ink-2' : 'text-ink-10 hover:text-ink-2'
+                    inboxTab === id ? 'bg-[var(--lum-1)] text-ink-2 dark:bg-surface-1' : 'text-ink-10 hover:text-ink-2'
                   }`}
                 >
                   {label}

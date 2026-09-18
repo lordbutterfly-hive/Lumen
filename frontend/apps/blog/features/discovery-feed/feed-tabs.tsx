@@ -1584,7 +1584,7 @@ function TabButton({
              An inline style takes the exact §1 value with no parser between it and
              the browser. `--lift-1` and `--lum` still resolve as tokens, so this is
              not a hardcoded colour — it is the same declaration the spec writes. */
-          ? 'bg-[var(--lum-1)] text-[#161511]'
+          ? 'bg-[var(--lum-1)] text-[#161511] dark:bg-surface-1'
           : 'bg-transparent text-[#5c6472] hover:text-[#161511]'
       )}
       style={
@@ -1734,7 +1734,7 @@ export default function FeedTabs({
            unrelated cool grey to the warm ambient token, same as every other
            trough in this pass. Border untouched: §7 rules out any border
            change. */
-        className="mb-5 inline-flex w-fit max-w-full flex-wrap gap-1.5 rounded-card border border-[#ebedf0] bg-[var(--amb-1)] p-[5px]"
+        className="mb-5 inline-flex w-fit max-w-full flex-wrap gap-1.5 rounded-card border border-[#ebedf0] bg-[var(--amb-1)] p-[5px] dark:bg-surface-23"
       >
         <TabButton isActive={activeTab === 'for-you'} onClick={() => selectTab('for-you')}>
           {LABELS.forYou}

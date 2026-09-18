@@ -132,7 +132,15 @@ export default function ActivityRow({
         <Icon size={16} strokeWidth={2} />
       </span>
 
-      <div className="min-w-0 flex-1">
+      {/* ★ A FLOOR, NOT `min-w-0` (measured at 390px, 2026-09-18). With
+          `min-w-0 flex-1` the text column shrinks below its own content to
+          keep a long amount on the same line, and a reward row reading
+          "+0.221 HIVE and 0.223 HP" squeezed "Claimed rewards" into one
+          CHARACTER PER LINE. A basis floor makes the amount wrap onto its own
+          line instead — the rule hive-token-card.tsx already follows, where
+          the figure group wraps under the text at 390 rather than squeezing
+          it into a column. */}
+      <div className="min-w-[9rem] flex-1">
         <p className="break-words text-[14px] leading-[22px] text-ink-4">{label}</p>
         <span
           className="flex flex-wrap items-center gap-1.5 font-num font-medium text-caption text-ink-14"

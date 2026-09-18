@@ -392,7 +392,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
            so `shadow-[...rgb(var(--lum)/.85)]` never compiles and no rule is emitted at
            all. Measured on the feed's own tab bar, which shipped with `box-shadow: none`
            until it was caught. */}
-        <div className="flex gap-1.5 rounded-xl border border-line-6 bg-[var(--amb-1)] p-[5px]">
+        <div className="flex gap-1.5 rounded-xl border border-line-6 bg-[var(--amb-1)] p-[5px] dark:bg-surface-23">
           {SORTS.map((s) => {
             const on = effectiveSort === s.id;
             return (
@@ -402,7 +402,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
                 aria-pressed={on}
                 style={on ? { boxShadow: 'var(--lift-1), 0 0 12px -5px rgb(var(--lum) / 0.85)' } : undefined}
                 className={`rounded-control px-[15px] py-2 text-[14px] leading-[22px] font-medium font-ui ${
-                  on ? 'bg-[var(--lum-1)] text-ink-2' : 'text-ink-10'
+                  on ? 'bg-[var(--lum-1)] text-ink-2 dark:bg-surface-1' : 'text-ink-10'
                 }`}
               >
                 {s.label}

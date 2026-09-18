@@ -32,7 +32,7 @@ export default function ProposalsToolbar({ tab, onTabChange, sort, onSortChange 
          so `shadow-[...rgb(var(--lum)/.85)]` never compiles and no rule is emitted at
          all. Measured on the feed's own tab bar, which shipped with `box-shadow: none`
          until it was caught. */}
-      <div role="tablist" className="flex gap-1.5 rounded-xl border border-line-6 bg-[var(--amb-1)] p-[5px]">
+      <div role="tablist" className="flex gap-1.5 rounded-xl border border-line-6 bg-[var(--amb-1)] p-[5px] dark:bg-surface-23">
         {TABS.map((t2) => (
           <button
             key={t2}
@@ -45,7 +45,7 @@ export default function ProposalsToolbar({ tab, onTabChange, sort, onSortChange 
             className={cn(
               'rounded-lg px-[15px] py-2 font-sans text-[14px] leading-[22px] font-semibold transition-colors',
               tab === t2
-                ? 'bg-[var(--lum-1)] text-ink-2'
+                ? 'bg-[var(--lum-1)] text-ink-2 dark:bg-surface-1'
                 : 'bg-transparent text-ink-10 hover:text-ink-2'
             )}
           >

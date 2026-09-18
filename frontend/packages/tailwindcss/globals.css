@@ -155,6 +155,19 @@
      * triples would silently break every consumer.
      */
     --lum: 224 123 62; /* #e07b3e — the warm light; already --surface-warn-10 below */
+    /* ★★ A CONSUMER OF THESE THREE MUST SUPPLY ITS OWN DARK PAIR (2026-09-18).
+       `--lum-1/2/3` and `--amb-0/1` have NO `.dark` counterpart — see the note
+       above, it is deliberate — but `--ink-2` and the `text-[#161511]` literal
+       DO flip to near-white under `.dark`. Every segmented tab bar in this app
+       pairs them (`bg-[var(--amb-1)]` trough, `bg-[var(--lum-1)] text-ink-2`
+       pill), so under `.dark` each one rendered rgb(253,251,250) text on a
+       rgb(253,245,241) pill: an invisible label. Measured in a browser on the
+       wallet, then fixed in all nine bars (wallet x2, wallet activity x2, feed,
+       proposals, creators, your-tokens, studio x2) by adding
+       `dark:bg-surface-23` to the trough and `dark:bg-surface-1` to the pill —
+       the trough becomes the recess, the pill becomes the card surface, and the
+       ink token reads again. Latent, not live: this app has no dark toggle
+       (features/layouts/providers.tsx). If you add another bar, add the pair. */
     --lum-1: #FDF5F1; /* lightest warm paper */
     --lum-2: #FBEAE2; /* mid warm paper */
     --lum-3: #F7DCD0; /* deepest warm paper */
