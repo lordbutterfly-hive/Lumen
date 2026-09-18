@@ -1115,8 +1115,19 @@
        surfaces and mapped them by LIGHTNESS, which put both at #0e0f11 — byte
        identical to the page ground — so every separator in the app vanished. They
        take the hairline's value instead. */
-    --surface-26: 16 17 19; /* #ececec -> #101113 x19 */
-    --surface-27: 16 17 19; /* #ebebeb -> #101113 x5 */
+    /* ★★★ ...AND A RAMP-WIDE RE-DERIVATION CLOBBERED THAT FIX (2026-09-19,
+       reported a second time: the rail `<Separator>` between "Meritum tokens" and
+       "Witnesses", and the vertical rule beside the rail, are gone again). The pass
+       above re-derived the WHOLE `--surface-*` ramp from the light backup and wrote
+       these two straight back to #101113 — two points off the page ground #0e0f11,
+       so they are invisible all over again. THE SYMPTOM IS SILENT: nothing errors,
+       nothing lints, no test goes red; every separator in the app simply stops
+       existing and only an eye on the page catches it. ANY FUTURE PASS THAT
+       REGENERATES THIS RAMP MUST EXCLUDE `--surface-26` AND `--surface-27` BY NAME.
+       Their value is not a lightness mapping of the light token — it is the line
+       palette's hairline, and it does not belong to the ramp at all. */
+    --surface-26: 42 46 52; /* #ececec -> #2a2e34 x19 */
+    --surface-27: 42 46 52; /* #ebebeb -> #2a2e34 x5 */
     --surface-28: 16 17 19; /* #e9ebee -> #101113 x2  */
     --surface-29: 15 17 19; /* #e8eaed -> #0f1113 x1  */
     --surface-30: 14 16 18; /* #e4e6e9 -> #0e1012 x1  */
