@@ -37,6 +37,8 @@ interface Mark {
 
 interface CrosspostRow {
   account: string;
+  steemPosts: number;
+  partial: boolean;
   lastSteem: string;
   lastHive: string;
   hivePosts: number;
@@ -65,6 +67,20 @@ interface BoardDef {
 /** Rows revealed per press of SHOW MORE. */
 const PAGE = 12;
 
+/** The orderings a reader can pick, per board. The first is that board's default. */
+const SORTS: Partial<Record<BoardId, { key: string; label: string; field: string }[]>> = {
+  inquisitors: [
+    { key: 'removed', label: 'BY $ REMOVED', field: 'removedUsd' },
+    { key: 'cast', label: 'BY DOWNVOTES CAST', field: 'downvotes' },
+    { key: 'targets', label: 'BY TARGETS', field: 'targets' }
+  ],
+  downvoted: [
+    { key: 'downvotes', label: 'BY DOWNVOTES', field: 'downvotes' },
+    { key: 'removed', label: 'BY $ REMOVED', field: 'removedUsd' },
+    { key: 'voters', label: 'BY DOWNVOTERS', field: 'voters' }
+  ]
+};
+
 const BOARDS: BoardDef[] = [
   {
     id: 'ke',
@@ -80,9 +96,9 @@ const BOARDS: BoardDef[] = [
     tab: 'TOP DOWNVOTED',
     kicker: 'BOARD 02 \u00b7 RECEIVED',
     title: 'Most downvoted',
-    meta: 'rolling 3 months\nsorted by voters',
+    meta: 'rolling 3 months\nsorted by downvotes received',
     blurb:
-      'Sorted by how many distinct accounts downvoted, not by how many downvotes landed: 903 downvotes from 12 accounts is a dispute, 212 from 29 is a consensus. Sorting by volume would let one large downvoter manufacture the top of the board.'
+      'Ranked by how many downvotes each account received. The number of distinct downvoters is beside it, because those two say different things: many downvotes from few accounts is a dispute, a smaller number from many is a consensus. The money column is what those downvotes actually took off the posts.'
   },
   {
     id: 'muted',
@@ -107,9 +123,9 @@ const BOARDS: BoardDef[] = [
     tab: 'CROSSPOSTING',
     kicker: 'BOARD 05 \u00b7 HIVE AND STEEM',
     title: 'Crossposting',
-    meta: 'active on both chains\nsorted by recency',
+    meta: 'since 2020-09-20\nsorted by Steem posts',
     blurb:
-      "Accounts still publishing to Steem as well as Hive, ranked by how recently they were active on both chains. Built from Steem's most recent posts, so everyone here posted there within days."
+      'Accounts publishing to Steem as well as Hive, ranked by how many posts they have put on Steem since six months after the 2020 fork. The migration window is excluded because posting there then was rarely a choice. The last-post dates say who is still doing it now.'
 
   }
 ];
@@ -162,7 +178,18 @@ export default function InquisitionBoard() {
    * else's database. A reader who never presses it never pays for rows nobody looked at.
    */
   const [shown, setShown] = useState(PAGE);
-  const [deep, setDeep] = useState(false);
+  /*
+   * ★★★ TWO BOARDS ARE SORTABLE, AND IT COSTS NOTHING (owner, 2026-09-19: "the top
+   * inquisitiors you need to be able to click rank by number of votes cast and $ value
+   * removed ... the primary starting for top inquisitior would be $ value removed", then
+   * "same thing for the most downvoted page").
+   *
+   * Both figures are already in every row, so the toggle re-sorts what the reader is
+   * holding. No second query, no second cache entry, no wait. The default differs per
+   * board because the owner set it: money first on Inquisitors, raw downvotes first on
+   * Downvoted.
+   */
+  const [sortKey, setSortKey] = useState<string | null>(null);
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -187,17 +214,11 @@ export default function InquisitionBoard() {
   // A new board starts at the first page again.
   useEffect(() => {
     setShown(PAGE);
-    /*
-     * ★ DEPTH RESETS WITH THE BOARD, AND NOT RESETTING IT BLANKED EVERY BOARD AFTER THE
-     * FIRST PRESS (found by adversarial review): `deep` stayed true, so the next board
-     * visited asked for its 150-row tier, which is a cold query, and showed "Reading the
-     * chain" in place of the 50 rows it already had.
-     */
-    setDeep(false);
+    setSortKey(null);
   }, [board]);
 
   useEffect(() => {
-    const held = cache[`${board}:${deep ? 'deep' : 'top'}`];
+    const held = cache[board];
     if (held) {
       setData(held);
       // ★ AND CLEAR THE FLAG. Returning early without this left `loading` true forever
@@ -273,7 +294,7 @@ export default function InquisitionBoard() {
     };
 
     const pull = () => {
-      fetch(`/api/inquisition/boards?board=${board}${deep ? '&deep=1' : ''}`)
+      fetch(`/api/inquisition/boards?board=${board}`)
         .then((r) => {
           // ★ A 429 carries `Retry-After`; honour it rather than guessing.
           if (!r.ok) {
@@ -298,7 +319,7 @@ export default function InquisitionBoard() {
           const settled = json?.building !== true;
           const worthKeeping = ((json?.rows as unknown[] | undefined) ?? []).length > 0;
           if (!settled) timer = setTimeout(pull, nextWait());
-          else if (worthKeeping) setCache((c) => ({ ...c, [`${board}:${deep ? 'deep' : 'top'}`]: json }));
+          else if (worthKeeping) setCache((c) => ({ ...c, [board]: json }));
         })
         .catch(retryOrGiveUp);
     };
@@ -308,7 +329,7 @@ export default function InquisitionBoard() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [board, cache, deep]);
+  }, [board, cache]);
 
   /*
    * ★★★ THE ROWS MUST BELONG TO THE BOARD THAT IS SHOWING, AND FOR ONE RENDER THEY DID
@@ -323,10 +344,31 @@ export default function InquisitionBoard() {
    * rendered, and the panel shows its loading line for that one frame.
    */
   const matches = data?.board === board;
-  const allRows = matches ? ((data?.rows as unknown[] | undefined) ?? []) : [];
+  const sorts = SORTS[board];
+  const activeSort = sortKey ?? sorts?.[0]?.key ?? null;
+  const rawRows = matches ? ((data?.rows as unknown[] | undefined) ?? []) : [];
+  /*
+   * ★ A NULL MONEY FIGURE SORTS LAST, NOT AS ZERO. "not computed" is not "took nothing",
+   * so those rows sink rather than competing with real zeros at the bottom of the money
+   * ordering.
+   */
+  const allRows = (() => {
+    const field = sorts?.find((x) => x.key === activeSort)?.field;
+    if (!field) return rawRows;
+    return [...rawRows].sort((a, b) => {
+      const av = (a as Record<string, unknown>)[field];
+      const bv = (b as Record<string, unknown>)[field];
+      const an = typeof av === 'number' ? av : null;
+      const bn = typeof bv === 'number' ? bv : null;
+      if (an === null && bn === null) return 0;
+      if (an === null) return 1;
+      if (bn === null) return -1;
+      return bn - an;
+    });
+  })();
   const rows = allRows.slice(0, shown);
-  const canDeepen = matches && data?.canDeepen === true;
-  const more = shown < allRows.length || (shown >= allRows.length && canDeepen && !deep);
+  // ★ SHOW MORE now only ever reveals rows already in hand: the build is 100 deep.
+  const more = shown < allRows.length;
   const unavailable = matches && data?.unavailable === true;
   const pending = loading || !matches;
 
@@ -485,7 +527,29 @@ export default function InquisitionBoard() {
           </div>
           {/* ★ The KE paragraph is a build requirement, not decoration: the spec says KE
               "must say so on its face, not in a tooltip". */}
-          <p className="mt-3 max-w-[78ch] font-ui text-[13px] leading-[20px] text-ink-10">{def.blurb}</p>
+          <p className="mt-3 max-w-[78ch] font-ui text-[13.5px] leading-[21px] text-ink-10">{def.blurb}</p>
+
+          {sorts ? (
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {sorts.map((o) => (
+                <button
+                  key={o.key}
+                  type="button"
+                  onClick={() => setSortKey(o.key)}
+                  aria-pressed={activeSort === o.key}
+                  className={cn(
+                    'rounded-md px-[13px] py-2 font-num text-[10px] uppercase tracking-[0.09em] transition-colors',
+                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10',
+                    activeSort === o.key
+                      ? 'bg-surface-brand-12 text-ink-27'
+                      : 'text-ink-14 ring-1 ring-inset ring-line-9 hover:text-ink-4'
+                  )}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="overflow-x-auto">
@@ -518,22 +582,14 @@ export default function InquisitionBoard() {
           {rows.length > 0 && more ? (
             <button
               type="button"
-              onClick={() => {
-                if (shown < allRows.length) {
-                  setShown((n) => n + PAGE);
-                } else {
-                  // ★ Exhausted what is loaded: ask the server for the deeper tier.
-                  setDeep(true);
-                  setShown((n) => n + PAGE);
-                }
-              }}
+              onClick={() => setShown((n) => n + PAGE)}
               className={cn(
                 'w-full border-t border-line-9 px-[26px] py-3.5 font-num text-[10px] uppercase tracking-[0.13em]',
                 'text-ink-14 transition-colors hover:bg-[var(--lum-1)] hover:text-ink-brand-6',
                 'focus:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10'
               )}
             >
-              {shown < allRows.length ? 'Show more' : 'Show more \u00b7 pulls a deeper query'}
+              Show more &middot; {allRows.length - shown} left
             </button>
           ) : null}
         </div>
@@ -568,7 +624,7 @@ function MutedTable({ rows }: { rows: MutedRow[] }) {
   return (
     <table className="w-full border-collapse">
       <thead>
-        <tr className="border-b border-line-9 text-left font-num text-[9.5px] uppercase tracking-[0.13em] text-ink-14">
+        <tr className="border-b border-line-9 text-left font-num text-[10px] uppercase tracking-[0.13em] text-ink-14">
           <th className="w-[52px] px-[26px] py-3 font-normal">#</th>
           <th className="px-[26px] py-3 font-normal">Account</th>
           <th className="px-[26px] py-3 text-right font-normal" title="Accounts that have muted this one">
@@ -585,21 +641,21 @@ function MutedTable({ rows }: { rows: MutedRow[] }) {
       <tbody>
         {rows.map((row, i) => (
           <tr key={row.account} className="border-b border-line-9 last:border-0 hover:bg-[var(--lum-1)]">
-            <td className="px-[26px] py-[15px] font-num text-[12.5px] tabular-nums text-ink-14">{i + 1}</td>
-            <td className="px-[26px] py-[15px] font-num text-[13px] text-ink-2">
+            <td className="px-[26px] py-[15px] font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-[15px] font-num text-[14px] text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
             <td
               className={cn(
-                'px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums',
+                'px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums',
                 row.mutedBy >= 50 ? 'text-ink-warn-3' : 'text-ink-2'
               )}
             >
               {row.mutedBy.toLocaleString()}
             </td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-10">
               {row.muterMvests.toLocaleString(undefined, { maximumFractionDigits: 1 })}M HP
             </td>
           </tr>
@@ -613,7 +669,7 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
   return (
     <table className="w-full border-collapse">
       <thead>
-        <tr className="border-b border-line-9 text-left font-num text-[9.5px] uppercase tracking-[0.13em] text-ink-14">
+        <tr className="border-b border-line-9 text-left font-num text-[10px] uppercase tracking-[0.13em] text-ink-14">
           <th className="w-[52px] px-[26px] py-3 font-normal">#</th>
           <th className="px-[26px] py-3 font-normal">Account</th>
           {/*
@@ -627,7 +683,7 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
             className="px-[26px] py-3 text-right font-normal"
             title="Payout these downvotes took off the accounts this board could read. Whole history, valued per post; a dash means it was outside that set."
           >
-            Removed
+            Removed (USD)
           </th>
           <th
             className="px-[26px] py-3 text-right font-normal"
@@ -646,13 +702,13 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
       <tbody>
         {rows.map((row, i) => (
           <tr key={row.account} className="border-b border-line-9 last:border-0 hover:bg-[var(--lum-1)]">
-            <td className="px-[26px] py-[15px] font-num text-[12.5px] tabular-nums text-ink-14">{i + 1}</td>
-            <td className="px-[26px] py-[15px] font-num text-[13px] text-ink-2">
+            <td className="px-[26px] py-[15px] font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-[15px] font-num text-[14px] text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums">
+            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums">
               {/* ★ A SUB-CENT TOTAL IS NOTHING, AND IT RENDERED THREE DIFFERENT WAYS:
                   "$0", "-$0.00" and a dash, in one column. One rule now. */}
               {row.removedUsd === null || row.removedUsd < 0.005 ? (
@@ -666,10 +722,10 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
                 </span>
               )}
             </td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums text-ink-2">
+            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-2">
               {row.targets.toLocaleString()}
             </td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-10">
               {row.downvotes.toLocaleString()}
             </td>
             {/*
@@ -677,7 +733,7 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
               handle, so "@askrafiki 871" read as part of the account name rather than as
               how many downvotes that account took.
             */}
-            <td className="px-[26px] py-[15px] font-num text-[13px] text-ink-10">
+            <td className="px-[26px] py-[15px] font-num text-[13.5px] text-ink-10">
               {row.topTarget ? (
                 <span className="inline-flex items-baseline gap-1.5">
                   <a href={`/@${row.topTarget}`} className="text-ink-2 hover:text-ink-brand-6">
@@ -701,22 +757,26 @@ function DvTable({ rows }: { rows: DvRow[] }) {
   return (
     <table className="w-full border-collapse">
       <thead>
-        <tr className="border-b border-line-9 text-left font-ui text-caption uppercase tracking-label text-ink-14">
-          <th className="w-[46px] px-[26px] py-3 font-medium">#</th>
-          <th className="px-[26px] py-3 font-medium">Account</th>
-          {/* ★ VOTERS IS THE SORT, AND THE REASON IS IN THE QUERY: 903 downvotes from 12
-              accounts is a dispute, 212 from 29 is a consensus. */}
-          <th className="px-[26px] py-3 text-right font-medium" title="Distinct accounts that downvoted this one">
-            Voters
-          </th>
-          <th className="px-[26px] py-3 text-right font-medium" title="Downvotes received in the last three months">
+        <tr className="border-b border-line-9 text-left font-num text-[10px] uppercase tracking-[0.13em] text-ink-14">
+          <th className="w-[52px] px-[26px] py-3 font-normal">#</th>
+          <th className="px-[26px] py-3 font-normal">Account</th>
+          {/* ★ DOWNVOTES IS THE RANK, not distinct voters — the board is called MOST
+              DOWNVOTED and now means it. Downvoters stays beside it because the two say
+              different things: many downvotes from few accounts is a dispute, a smaller
+              number from many is a consensus. */}
+          <th className="px-[26px] py-3 text-right font-normal" title="Downvotes received in the last three months">
             Downvotes
+          </th>
+          {/* ★ "Downvoters", not "Voters": on a board about downvotes the short word is
+              ambiguous and reads as everyone who voted. */}
+          <th className="px-[26px] py-3 text-right font-normal" title="Distinct accounts that cast those downvotes">
+            Downvoters
           </th>
           <th
             className="px-[26px] py-3 text-right font-medium"
             title="Payout removed across this account's whole history, each post valued at its own payout rate. The vote counts beside it are the last three months."
           >
-            Removed
+            Removed (USD)
           </th>
           <th className="px-[26px] py-3 font-medium" title="The account that cast the most of them">
             Top source
@@ -725,16 +785,19 @@ function DvTable({ rows }: { rows: DvRow[] }) {
       </thead>
       <tbody>
         {rows.map((row, i) => (
-          <tr key={row.account} className="border-b border-line-9 last:border-0">
-            <td className="px-[26px] py-3 font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
-            <td className="px-[26px] py-3 font-ui text-[14px] text-ink-2">
+          <tr key={row.account} className="border-b border-line-9 last:border-0 hover:bg-[var(--lum-1)]">
+            <td className="px-[26px] py-[15px] font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-[15px] font-num text-[14px] text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
-            <td className="px-[26px] py-3 text-right font-num text-[14px] tabular-nums text-ink-2">{row.voters}</td>
-            <td className="px-[26px] py-3 text-right font-num text-[14px] tabular-nums text-ink-10">
+            {/* Downvotes first: it is the rank. */}
+            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-2">
               {row.downvotes.toLocaleString()}
+            </td>
+            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-10">
+              {row.voters.toLocaleString()}
             </td>
             {/* ★ A DASH IS "NOT COMPUTED", NEVER "NOTHING WAS TAKEN" — the enrichment
                 query runs against a time budget and stops when it is spent. */}
@@ -743,7 +806,11 @@ function DvTable({ rows }: { rows: DvRow[] }) {
                 'px-6 py-3 text-right font-num text-[14px] tabular-nums',
                 row.removedUsd === null ? 'text-ink-14' : row.removedUsd >= 10 ? 'text-ink-brand-6' : 'text-ink-10'
               )}
-              title={row.removedUsd === null ? 'Not computed for this row' : 'Whole history, valued per post'}
+              title={
+                row.removedUsd === null
+                  ? 'Not computed for this row'
+                  : 'Payout these downvotes took off the posts, each valued at that post\u2019s own rate when it paid'
+              }
             >
               {row.removedUsd === null || row.removedUsd < 0.005
                 ? '\u2014'
@@ -781,15 +848,25 @@ function KeTable({ rows }: { rows: KeRow[] }) {
   return (
     <table className="w-full border-collapse">
       <thead>
-        <tr className="border-b border-line-9 text-left font-num text-[9.5px] uppercase tracking-[0.13em] text-ink-14">
+        <tr className="border-b border-line-9 text-left font-num text-[10px] uppercase tracking-[0.13em] text-ink-14">
           <th className="w-[52px] px-[26px] py-3 font-normal">#</th>
           <th className="px-[26px] py-3 font-normal">Account</th>
-          <th className="px-[26px] py-3 text-right font-normal" title="Lifetime rewards taken divided by Hive Power held">
+          <th
+            className="px-[26px] py-3 text-right font-normal"
+            title="Lifetime rewards taken (HIVE) divided by Hive Power held. Both sides are HIVE, so the ratio has no unit."
+          >
             KE
           </th>
           <th className="px-[26px] py-3 font-normal">Band</th>
-          <th className="px-[26px] py-3 text-right font-normal" title="Author and curation rewards over the account's whole life">
-            Rewards
+          {/* ★★ THE UNIT IS IN THE HEADER (owner: "rewards in places miss what it is. is
+              it USD on KE or Hive"). KE's numerator is HIVE, not dollars: author plus
+              curation rewards as HIVE, over HP held. Both sides of the ratio are the same
+              unit, which is exactly why KE is a bare number with no currency on it. */}
+          <th
+            className="px-[26px] py-3 text-right font-normal"
+            title="Author and curation rewards over the account's whole life, in HIVE"
+          >
+            Rewards (HIVE)
           </th>
           <th className="px-[26px] py-3 text-right font-normal" title="Hive Power held now">
             HP held
@@ -799,20 +876,20 @@ function KeTable({ rows }: { rows: KeRow[] }) {
       <tbody>
         {rows.map((row, i) => (
           <tr key={row.account} className="border-b border-line-9 last:border-0 hover:bg-[var(--lum-1)]">
-            <td className="px-[26px] py-[15px] font-num text-[12.5px] tabular-nums text-ink-14">{i + 1}</td>
-            <td className="px-[26px] py-[15px] font-num text-[13px] text-ink-2">
+            <td className="px-[26px] py-[15px] font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-[15px] font-num text-[14px] text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
-            <td className={cn('px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums', tone(row.ke))}>
+            <td className={cn('px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums', tone(row.ke))}>
               {row.ke.toFixed(2)}
             </td>
-            <td className={cn('px-[26px] py-[15px] font-ui text-[13px]', tone(row.ke))}>{row.band}</td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums text-ink-10">
+            <td className={cn('px-[26px] py-[15px] font-ui text-[13.5px]', tone(row.ke))}>{row.band}</td>
+            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-10">
               {row.rewardsHive.toLocaleString()}
             </td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-10">
               {row.hp.toLocaleString()}
             </td>
           </tr>
@@ -827,36 +904,54 @@ function CrosspostTable({ rows }: { rows: CrosspostRow[] }) {
   return (
     <table className="w-full border-collapse">
       <thead>
-        <tr className="border-b border-line-9 text-left font-ui text-caption uppercase tracking-label text-ink-14">
-          <th className="w-[46px] px-[26px] py-3 font-medium">#</th>
-          <th className="px-[26px] py-3 font-medium">Account</th>
-          <th className="px-[26px] py-3 text-right font-medium" title="Most recent post published to Steem">
+        <tr className="border-b border-line-9 text-left font-num text-[10px] uppercase tracking-[0.13em] text-ink-14">
+          <th className="w-[52px] px-[26px] py-3 font-normal">#</th>
+          <th className="px-[26px] py-3 font-normal">Account</th>
+          <th
+            className="px-[26px] py-3 text-right font-normal"
+            title="Posts published to Steem since six months after the fork. This is the ranking."
+          >
+            Steem posts
+          </th>
+          <th className="px-[26px] py-3 text-right font-normal" title="Most recent post published to Steem">
             Last Steem
           </th>
-          <th className="px-[26px] py-3 text-right font-medium" title="Most recent post published to Hive">
+          <th className="px-[26px] py-3 text-right font-normal" title="Most recent post published to Hive">
             Last Hive
           </th>
-          <th className="px-[26px] py-3 text-right font-medium" title="Posts published to Hive since the 2020 fork">
+          <th className="px-[26px] py-3 text-right font-normal" title="Posts published to Hive since the 2020 fork">
             Hive posts
           </th>
         </tr>
       </thead>
       <tbody>
         {rows.map((row, i) => (
-          <tr key={row.account} className="border-b border-line-9 last:border-0">
-            <td className="px-[26px] py-3 font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
-            <td className="px-[26px] py-3 font-ui text-[14px] text-ink-2">
+          <tr key={row.account} className="border-b border-line-9 last:border-0 hover:bg-[var(--lum-1)]">
+            <td className="px-[26px] py-[15px] font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-[15px] font-num text-[14px] text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
-            <td className="px-[26px] py-3 text-right font-num text-[13.5px] tabular-nums text-ink-2">
+            {/* ★ -1 means the counting pass ran out of budget before reaching this row.
+                "not counted" is the truth; 0 would be a claim. */}
+            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-brand-6">
+              {row.steemPosts < 0 ? (
+                <span className="text-ink-14">not counted</span>
+              ) : (
+                <>
+                  {row.steemPosts.toLocaleString()}
+                  {row.partial ? '+' : ''}
+                </>
+              )}
+            </td>
+            <td className="px-[26px] py-[15px] text-right font-num text-[13.5px] tabular-nums text-ink-2">
               {day(row.lastSteem)}
             </td>
-            <td className="px-[26px] py-3 text-right font-num text-[13.5px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-[15px] text-right font-num text-[13.5px] tabular-nums text-ink-10">
               {day(row.lastHive)}
             </td>
-            <td className="px-[26px] py-3 text-right font-num text-[14px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-10">
               {row.hivePosts.toLocaleString()}
             </td>
           </tr>

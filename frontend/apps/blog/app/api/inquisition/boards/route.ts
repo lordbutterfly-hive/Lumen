@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import {
   BOARD_ROWS,
-  BOARD_ROWS_DEEP,
   inquisitorBoard,
   keBoard,
   mostDownvoted,
@@ -9,6 +8,14 @@ import {
 } from '@/blog/lib/inquisition/boards-sql';
 import { hiveSqlConfigured } from '@/blog/lib/inquisition/hivesql';
 import { loadCrossposters, type CrosspostRow } from '@/blog/lib/inquisition/crossposting';
+import {
+  claimBuild,
+  isClaimed,
+  isStale,
+  readBoard,
+  releaseBuild,
+  writeBoard
+} from '@/blog/lib/inquisition/board-store';
 import { nowIso } from '@/blog/lib/inquisition/types';
 
 export const dynamic = 'force-dynamic';
@@ -65,126 +72,96 @@ const SQL_REBUILD_MS = 6 * 60 * 60 * 1000;
 const RETRY_AFTER_FAIL_MS = 60 * 1000;
 
 /**
- * ════ ONE BACKGROUND BOARD ════
+ * ════ ONE BOARD, BUILT ONCE, SERVED FROM DISK ════
  *
- * ★★★ `builtAt` AND `asOf` ARE ONLY STAMPED BY A BUILD THAT PRODUCED ROWS, and that is
- * the fix for this feature's worst failure mode (found by adversarial review,
- * 2026-09-19). The Steem build used to set both unconditionally at the end of the loop.
- * So on a worker where api.steemit.com was down, all 45 lookups fell into the catch,
- * `rows` stayed empty — and the build still stamped `builtAt = now`. The board then
- * answered **"Nothing to confess." Indexed \<now\>** for a full 24 hours, because the
- * freshness guard refused to rebuild. A confident, freshly timestamped negative claim
- * about named human accounts, produced by the single most likely upstream failure.
+ * ★★★ THE READER IS NEVER MADE TO WAIT FOR A REBUILD. Whatever is on disk is served
+ * immediately, however old; if it has gone stale a refresh runs behind the response. The
+ * only person who ever sees "Counting..." is whoever arrives before the very first build
+ * of a board has ever completed. See `board-store.ts` for why this is a file and not
+ * process memory: three workers share it, and it survives a deploy.
  *
- * `lastFailed` carries the other half: an attempt that finished with nothing is
- * reported as `unavailable`, never as an empty answer, and the next reader retries.
+ * ★★ A BUILD THAT FINDS NOTHING NEVER OVERWRITES A GOOD BOARD. `writeBoard` refuses an
+ * empty row set, so a failed or degraded refresh leaves yesterday's answer in place
+ * rather than blanking the board and stamping it with today's date. That failure mode
+ * cost this feature a full day of "Nothing to confess." once already.
  */
-interface BoardState<T> {
-  rows: T[];
-  building: boolean;
-  /** Only ever set by a build that produced at least one row. */
-  builtAt: number;
-  /** Only ever set alongside `rows`. `null` means "we have never had an answer". */
-  asOf: string | null;
-  /** The most recent finished attempt produced nothing. */
-  lastFailed: boolean;
-  /** When that attempt gave up. Retries are held off for `RETRY_AFTER_FAIL_MS`. */
-  failedAt: number;
+interface Building {
+  running: boolean;
 }
+const BUILDING = Symbol.for('lumen.inquisition.building.v3');
+const building = ((globalThis as Record<symbol, unknown>)[BUILDING] ??= {}) as Record<string, Building>;
 
-function slot<T>(key: string): BoardState<T> {
-  const sym = Symbol.for(`lumen.inquisition.board.${key}.v2`);
-  return ((globalThis as Record<symbol, unknown>)[sym] ??= {
-    rows: [],
-    building: false,
-    builtAt: 0,
-    asOf: null,
-    lastFailed: false,
-    failedAt: 0
-  }) as BoardState<T>;
-}
-
-/**
- * Starts a build if one is not running and the last good answer has expired.
- * `run` resolves with the rows, or `null` for "we could not ask".
- */
-function startBuild<T>(state: BoardState<T>, ttlMs: number, run: () => Promise<T[] | null>): void {
-  const now = Date.now();
-  const fresh = state.builtAt > 0 && now - state.builtAt < ttlMs;
-  const coolingOff = state.lastFailed && now - state.failedAt < RETRY_AFTER_FAIL_MS;
-  if (state.building || fresh || coolingOff) return;
-  state.building = true;
+function refreshInBackground<T>(key: string, run: () => Promise<{ rows: T[]; asOf: string } | null>): void {
+  const state = (building[key] ??= { running: false });
+  if (state.running) return;
+  // ★ One worker builds; the others serve what is on disk.
+  if (!claimBuild(key)) return;
+  state.running = true;
   void (async () => {
     try {
-      const rows = await run();
-      if (rows && rows.length > 0) {
-        state.rows = rows;
-        state.builtAt = Date.now();
-        state.asOf = nowIso();
-        state.lastFailed = false;
-        state.failedAt = 0;
+      const built = await run();
+      if (built && built.rows.length > 0) {
+        writeBoard(key, built.rows, built.asOf);
       } else {
-        // ★ Keep whatever we had. A failed rebuild must not blank a board that was
-        // answering, and it must not restamp yesterday's rows with today's time.
-        state.lastFailed = true;
-        state.failedAt = Date.now();
+        // Let the next reader retry rather than sitting out the whole claim window.
+        releaseBuild(key);
       }
     } catch {
-      state.lastFailed = true;
-      state.failedAt = Date.now();
+      releaseBuild(key);
     } finally {
-      // ★ `finally`, so no escape can pin `building` and freeze the board forever.
-      state.building = false;
+      state.running = false;
     }
   })();
 }
 
 /**
- * ★ AN EMPTY BOARD IS ONLY EVER "NOTHING TO CONFESS" IF WE ACTUALLY ASKED AND GOT
- * NOTHING. Otherwise it is `unavailable`, and the page says so.
+ * Serve a board: disk first, refresh behind. `building` is only ever true when there is
+ * genuinely nothing to show yet.
  */
-function boardResponse<T>(board: string, state: BoardState<T>, depth = BOARD_ROWS): NextResponse {
-  const unavailable = state.rows.length === 0 && !state.building && state.lastFailed;
+function serve<T>(
+  board: string,
+  key: string,
+  run: () => Promise<{ rows: T[]; asOf: string } | null>
+): NextResponse {
+  const stored = readBoard<T>(key);
+  if (isStale(stored)) refreshInBackground(key, run);
+
+  if (!stored) {
+    /*
+     * ★★ NO ROWS PLUS "NOT BUILDING" IS THE ONE COMBINATION THAT LIES, because the page
+     * renders it as "Nothing to confess." The claim is held on disk, so a build running
+     * on another worker — or one stranded by a restart and not yet expired — still counts
+     * as building here. The reader waits; they are never told the chain is clean.
+     */
+    const inFlight = building[key]?.running === true || isClaimed(key);
+    return NextResponse.json(
+      { board, rows: [], building: inFlight },
+      { headers: { 'cache-control': 'private, max-age=15' } }
+    );
+  }
   return NextResponse.json(
     {
       board,
-      rows: state.rows,
-      asOf: state.asOf ?? undefined,
-      building: state.building,
-      depth,
-      // ★ The button only appears when there is genuinely more to fetch.
-      canDeepen: depth < BOARD_ROWS_DEEP,
-      ...(unavailable ? { unavailable: true } : {})
+      rows: stored.rows,
+      asOf: stored.asOf,
+      building: false,
+      // ★ The reader is told when they are looking at a copy that is being refreshed.
+      refreshing: isStale(stored)
     },
-    { headers: { 'cache-control': 'private, max-age=30' } }
+    { headers: { 'cache-control': 'private, max-age=60' } }
   );
 }
-
-const mutedStateDeep = slot<{ account: string; mutedBy: number; muterMvests: number }>('muted-deep');
-const mutedState = slot<{ account: string; mutedBy: number; muterMvests: number }>('muted');
-const keStateDeep = slot<{ account: string; ke: number; rewardsHive: number; hp: number; band: string }>('ke-deep');
-const keState = slot<{ account: string; ke: number; rewardsHive: number; hp: number; band: string }>('ke');
-type DvRowT = { account: string; downvotes: number; voters: number; topSource: string; topSourceVotes: number; removedUsd: number | null; postsHit: number };
-type InqRowT = { account: string; downvotes: number; targets: number; topTarget: string; topTargetVotes: number; removedUsd: number | null };
-const dvStateDeep = slot<DvRowT>('downvoted-deep');
-const dvState = slot<{ account: string; downvotes: number; voters: number }>('downvoted');
-const xpostState = slot<CrosspostRow>('crossposting');
-const xpostCandidates = ((globalThis as Record<symbol, unknown>)[Symbol.for('lumen.inquisition.xpost.candidates')] ??= { n: 0 }) as { n: number };
-const inqStateDeep = slot<InqRowT>('inquisitors-deep');
-const inqState = slot<{ account: string; downvotes: number; targets: number; topTarget: string; topTargetVotes: number }>('inquisitors');
-
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const params = new URL(request.url).searchParams;
   const board = params.get('board') ?? 'ke';
   /*
-   * ★★ DEPTH IS A READER'S CHOICE, AND THERE ARE EXACTLY TWO OF THEM. `?deep=1` is the
-   * SHOW MORE button. Accepting an arbitrary number here would let a stranger ask for a
-   * 10,000-row aggregate against somebody else's free database; two fixed tiers cannot
-   * be abused and cache cleanly, one slot each.
+   * ★★ THERE IS NO DEEP TIER ANY MORE. Every board is built to `BOARD_ROWS` once and
+   * served from disk, so SHOW MORE reveals rows the reader already has instead of
+   * triggering a second, more expensive query. That removes the `?deep=1` parameter, the
+   * duplicate cache slots behind it, and the bug where one press left every board
+   * afterwards asking for a tier nobody had built.
    */
-  const limit = params.get('deep') === '1' ? BOARD_ROWS_DEEP : BOARD_ROWS;
-  const deeper = limit === BOARD_ROWS_DEEP;
 
   try {
     /*
@@ -210,11 +187,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           { headers: { 'cache-control': 'no-store' } }
         );
       }
-      startBuild(deeper ? mutedStateDeep : mutedState, SQL_REBUILD_MS, async () => {
-        const { rows, failed } = await mostMuted(limit);
-        return failed ? null : rows;
+      return serve(board, 'muted', async () => {
+        const { rows, asOf, failed } = await mostMuted(BOARD_ROWS);
+        return failed ? null : { rows, asOf };
       });
-      return boardResponse(board, deeper ? mutedStateDeep : mutedState, limit);
     }
 
     if (board === 'ke') {
@@ -224,11 +200,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           { headers: { 'cache-control': 'no-store' } }
         );
       }
-      startBuild(deeper ? keStateDeep : keState, SQL_REBUILD_MS, async () => {
-        const { rows, failed } = await keBoard(limit);
-        return failed ? null : rows;
+      return serve(board, 'ke', async () => {
+        const { rows, asOf, failed } = await keBoard(BOARD_ROWS);
+        return failed ? null : { rows, asOf };
       });
-      return boardResponse(board, deeper ? keStateDeep : keState, limit);
     }
 
     /*
@@ -242,38 +217,46 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           { headers: { 'cache-control': 'no-store' } }
         );
       }
-      startBuild(deeper ? dvStateDeep : dvState, REBUILD_MS, async () => {
-        const { rows, failed } = await mostDownvoted(limit);
-        return failed ? null : rows;
+      return serve(board, 'downvoted', async () => {
+        const { rows, asOf, failed } = await mostDownvoted(BOARD_ROWS);
+        return failed ? null : { rows, asOf };
       });
-      return boardResponse(board, deeper ? dvStateDeep : dvState, limit);
     }
 
     if (board === 'inquisitors') {
       if (!hiveSqlConfigured()) {
         return NextResponse.json({ board, rows: [], unconfigured: true }, { headers: { 'cache-control': 'no-store' } });
       }
-      startBuild(deeper ? inqStateDeep : inqState, REBUILD_MS, async () => {
-        const { rows, failed } = await inquisitorBoard(limit);
-        return failed ? null : rows;
+      return serve(board, 'inquisitors', async () => {
+        const { rows, asOf, failed } = await inquisitorBoard(BOARD_ROWS);
+        return failed ? null : { rows, asOf };
       });
-      return boardResponse(board, deeper ? inqStateDeep : inqState, limit);
     }
 
     if (board === 'crossposting') {
       if (!hiveSqlConfigured()) {
         return NextResponse.json({ board, rows: [], unconfigured: true }, { headers: { 'cache-control': 'no-store' } });
       }
-      startBuild(xpostState, SQL_REBUILD_MS, async () => {
-        const { rows, candidates, failed } = await loadCrossposters();
-        xpostCandidates.n = candidates;
-        return failed ? null : rows;
-      });
-      const base = boardResponse(board, xpostState);
-      const body = await base.json();
+      /*
+       * ★ CROSSPOSTING CARRIES ITS OWN SCOPE NUMBERS, so they ride along inside the
+       * stored rows' sibling fields rather than in separate process memory that a
+       * restart would lose while the rows survived.
+       */
+      const res = serve<CrosspostRow & { _matched?: number; _listed?: number }>(
+        board,
+        'crossposting',
+        async () => {
+          const { rows, candidates, matched, failed } = await loadCrossposters(BOARD_ROWS);
+          if (failed || rows.length === 0) return null;
+          const tagged = rows.map((r, i) => (i === 0 ? { ...r, _matched: matched, _listed: candidates } : r));
+          return { rows: tagged, asOf: nowIso() };
+        }
+      );
+      const body = (await res.json()) as { rows?: (CrosspostRow & { _matched?: number; _listed?: number })[] };
+      const head = body.rows?.[0];
       return NextResponse.json(
-        { ...body, scope: xpostState.rows.length, listed: xpostCandidates.n },
-        { headers: { 'cache-control': 'private, max-age=30' } }
+        { ...body, scope: body.rows?.length ?? 0, matched: head?._matched, listed: head?._listed },
+        { headers: { 'cache-control': 'private, max-age=60' } }
       );
     }
 

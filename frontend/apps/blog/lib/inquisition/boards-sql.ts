@@ -28,13 +28,6 @@ const MIN_VESTS = 10_000_000;
 const MIN_AGE_DAYS = 90;
 
 /**
- * ★★★ HOW DEEP A BOARD GOES, AND IT IS A PARAMETER BECAUSE THE READER DECIDES (owner,
- * 2026-09-19: "each page needs to be able to be expanded. SHOW MORE. then you pull
- * more"). The first build stops at `BOARD_ROWS`; pressing the button asks for
- * `BOARD_ROWS_DEEP`, which is a second, deeper query rather than a bigger first one, so
- * a reader who never expands never pays for rows nobody looked at.
- */
-/**
  * ★★★ HOW MANY VOTE LEDGERS THE MONEY COLUMNS ARE SUMMED OVER, AND IT IS THE WHOLE COST
  * OF THIS FEATURE'S SLOW PATH.
  *
@@ -53,8 +46,19 @@ const INQ_LEDGER_ACCOUNTS = 12;
 /** The KE board's stake floor, in HP. Converted to VESTS at the live rate. */
 const KE_MIN_HP = 500;
 
-export const BOARD_ROWS = 50;
-export const BOARD_ROWS_DEEP = 150;
+/**
+ * ★★★ ONE HUNDRED ROWS PER LIST, BUILT ONCE FOR EVERYONE (owner, 2026-09-19: "cant you
+ * build once for everyone for top 100 per list and then update the list 1 time every 3
+ * days or so").
+ *
+ * The expensive part of every board is the aggregate, not the row count: `TOP 100` costs
+ * essentially what `TOP 50` cost, because the database has already done the grouping
+ * either way. So the earlier design — build 50, and have SHOW MORE fire a second, deeper
+ * 150-row query — was paying twice for something it could have had once. The deep tier,
+ * its duplicate cache slots and the bug where one press left every later board requesting
+ * an unbuilt tier all went with it. SHOW MORE now reveals rows the reader already holds.
+ */
+export const BOARD_ROWS = 100;
 
 export interface MutedRow {
   account: string;
@@ -137,7 +141,7 @@ async function loadMostMuted(limit = BOARD_ROWS): Promise<{ rows: MutedRow[]; as
  */
 
 /**
- * Most downvoted, sorted by DISTINCT VOTERS.
+ * Most downvoted, sorted by RAW DOWNVOTE COUNT.
  *
  * ★★ 903 DOWNVOTES FROM 12 ACCOUNTS IS A DISPUTE; 212 FROM 29 IS A CONSENSUS. Sorting
  * by volume lets one large downvoter manufacture the top of the board, so the default
@@ -156,10 +160,13 @@ async function loadMostDownvoted(limit = BOARD_ROWS): Promise<{ rows: DownvotedR
      WHERE v.weight < 0 AND v.timestamp > DATEADD(month, -3, GETDATE())
        AND a.vesting_shares > @minVests AND a.created < DATEADD(day, -@minAge, GETDATE())
      GROUP BY v.author
-     -- ★ VOTERS FIRST, COUNT AS THE TIEBREAK. 903 downvotes from 12 accounts is one
-     -- dispute; 212 from 29 is a consensus, and consensus is what the board is for.
-     -- Without the second key, 22-from-22 outranked 1,875-from-22 by accident.
-     ORDER BY COUNT(DISTINCT v.voter) DESC, COUNT(*) DESC`,
+     -- ★★★ RAW COUNT IS THE RANK (owner, 2026-09-19: "most downvoted is the person who
+     -- got most downvotes in raw numbers, not what you wrote there"). I had ranked by
+     -- distinct voters on the argument that consensus beats volume. That is an argument
+     -- for a different board; this one is called MOST DOWNVOTED and it now means what it
+     -- says. Voters stays as a column so the reader can still tell a brigade from a
+     -- dispute, it just no longer decides the order.
+     ORDER BY COUNT(*) DESC, COUNT(DISTINCT v.voter) DESC`,
     [
       { name: 'minVests', type: TYPES.Float, value: MIN_VESTS },
       { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS },
