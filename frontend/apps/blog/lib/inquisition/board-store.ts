@@ -53,12 +53,16 @@ export const REFRESH_MS = 3 * 24 * 60 * 60 * 1000;
  * building: false`, which the page renders as **"Nothing to confess."**, for the rest of
  * the claim window. No rows, nobody building, and a confident negative on screen.
  *
- * Six minutes is longer than the slowest board has ever taken (~250s) and short enough
- * that a killed build recovers on its own. The other half of the fix is in `isClaimed`:
+ * ★★ AND IT HAS TO OUTLAST THE LONGEST BUILD, WHICH SIX MINUTES NO LONGER DID. Once the
+ * downvote boards went to full history the inquisitor build became a 102s scan plus a
+ * chunked top-target pass plus forty vote ledgers. A claim shorter than the work lets a
+ * second worker take it over while the first is still running, which is the duplicate
+ * work the lock exists to prevent. Twenty-five minutes is comfortably longer than any
+ * build here and still short enough that a killed one recovers on its own. The other half of the fix is in `isClaimed`:
  * a board with no rows now reports `building: true` while somebody holds the claim, so
  * the page says "Counting..." instead of asserting there is nothing to find.
  */
-const CLAIM_MS = 6 * 60 * 1000;
+const CLAIM_MS = 25 * 60 * 1000;
 
 export interface StoredBoard<T> {
   rows: T[];

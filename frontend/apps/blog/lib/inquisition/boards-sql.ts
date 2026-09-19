@@ -2,7 +2,8 @@ import 'server-only';
 import { TYPES } from 'tedious';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 import { hiveSqlConfigured, queryFast, querySlow } from './hivesql';
-import { removedByVoterAcross, voteLedger } from './vote-ledger';
+import { readBoard } from './board-store';
+import { removedByAuthorAcross, removedByVoterAcross } from './vote-ledger';
 import { keBand, nowIso } from './types';
 import type { KeBand } from './types';
 
@@ -50,7 +51,7 @@ const INQ_LEDGER_ACCOUNTS = 40;
  */
 const TOP_TARGET_ROWS = 25;
 const TOP_TARGET_CHUNK = 4;
-const TOP_TARGET_BUDGET_MS = 8 * 60 * 1000;
+const TOP_TARGET_BUDGET_MS = 4 * 60 * 1000;
 
 /** The KE board's stake floor, in HP. Converted to VESTS at the live rate. */
 const KE_MIN_HP = 500;
@@ -198,10 +199,15 @@ async function loadMostDownvoted(limit = BOARD_ROWS): Promise<{ rows: DownvotedR
    * source prints nothing, and the downvote counts beside them are still true.
    */
   const names = rows.map((r) => r.account);
-  const [sources, removed] = await Promise.all([
-    topSourceFor(names).catch(() => new Map<string, { voter: string; n: number }>()),
-    removedByAuthor(names).catch(() => new Map<string, { usd: number; posts: number }>())
-  ]);
+  const sources = await topCounterpart(
+    names.slice(0, TOP_TARGET_ROWS),
+    'by-author',
+    TOP_TARGET_BUDGET_MS,
+    TOP_TARGET_CHUNK
+  ).catch(() => new Map<string, { name: string; n: number }>());
+  const removed = await removedByAuthor(names).catch(
+    () => new Map<string, { usd: number; posts: number }>()
+  );
 
   return {
     rows: rows.map((r) => {
@@ -211,7 +217,7 @@ async function loadMostDownvoted(limit = BOARD_ROWS): Promise<{ rows: DownvotedR
         account: r.account,
         downvotes: Number(r.downvotes) || 0,
         voters: Number(r.voters) || 0,
-        topSource: src?.voter ?? '',
+        topSource: src?.name ?? '',
         topSourceVotes: src?.n ?? 0,
         removedUsd: val ? val.usd : null,
         postsHit: val?.posts ?? 0
@@ -256,23 +262,18 @@ const ENRICH_CHUNK = 10;
 
 async function removedByAuthor(authors: string[]): Promise<Map<string, { usd: number; posts: number }>> {
   /*
-   * ★★★ THIS USED TO READ `vote_rshares - net_rshares` AND WAS WRONG FOR EVERY PAID POST.
-   * Both columns are reset to 0 at payout, so the sum only ever saw posts inside their
-   * seven-day window: it reported −$9 for @lordbutterfly, whose real lifetime figure is
-   * −$238.25. `voteLedger` reads `active_votes`, which survives payout. See that file.
-   *
-   * ★★ BOUNDED TO THE TOP OF THE BOARD. A ledger is ~12s per account, so the money column
-   * is filled for the first `INQ_LEDGER_ACCOUNTS` rows and reports `null` past that. A
-   * dash reads as "not computed" and says so; it never reads as zero.
+   * ★★★ ONE SERVER-SIDE STATEMENT, NOT FORTY CLIENT-SIDE READS. This used to call
+   * `voteLedger` per account, which pulls that account's whole `active_votes` blob over
+   * the wire — 235 MB for @haejin, 195 MB for @acidyo. Forty of those never finished.
+   * `removedByAuthorAcross` sums the same thing with `OPENJSON` where the data already
+   * is and returns one row per author. See vote-ledger.ts.
    */
   const out = new Map<string, { usd: number; posts: number }>();
-  for (const author of authors.slice(0, INQ_LEDGER_ACCOUNTS)) {
-    try {
-      const ledger = await voteLedger(author, 'background');
-      if (ledger) out.set(author, { usd: ledger.removedUsd, posts: ledger.topPosts.length });
-    } catch {
-      // One unreadable account does not fail the column for the rest.
-    }
+  try {
+    const removed = await removedByAuthorAcross(authors.slice(0, INQ_LEDGER_ACCOUNTS));
+    for (const [author, usd] of removed) out.set(author, { usd, posts: 0 });
+  } catch {
+    // A missing money column is not a missing board.
   }
   return out;
 }
@@ -319,25 +320,53 @@ const hbdPerRshare = withTtlCache(loadHbdPerRshare, () => 'hbd-per-rshare', {
 });
 
 
-/** Each named account's heaviest single downvoter, from that account's own votes. */
-async function topSourceFor(authors: string[]): Promise<Map<string, { voter: string; n: number }>> {
-  const best = new Map<string, { voter: string; n: number }>();
-  if (authors.length === 0) return best;
-  const placeholders = authors.map((_, i) => `@a${i}`).join(',');
-  const rows = await querySlow<{ author: string; voter: string; n: number }>(
-    `SELECT v.author, v.voter, COUNT(*) AS n
-     FROM TxVotes v WITH (NOLOCK)
-     WHERE v.weight < 0 AND v.author IN (${placeholders})
-     GROUP BY v.author, v.voter`,
-    authors.map((name, i) => ({ name: `a${i}`, type: TYPES.VarChar, value: name }))
-  );
-  for (const r of rows ?? []) {
-    const n = Number(r.n) || 0;
-    const held = best.get(r.author);
-    if (!held || n > held.n) best.set(r.author, { voter: r.voter, n });
+/**
+ * ════ THE HEAVIEST COUNTERPART, IN EITHER DIRECTION ════
+ *
+ * ★★★ ONE INDEXED TOP-1 PER NAME, CHUNKED, AGAINST A CLOCK. Both boards want the same
+ * shape — for each downvoter their most-hit target, for each target their heaviest
+ * downvoter — and both were asking for it the same wrong way: `GROUP BY voter, author`
+ * over the whole chain for a hundred names at once. Over full history that grouping is
+ * enormous (@adm alone has 18,321 distinct targets, @spaminator 43,834), so the query
+ * returned null, the column rendered empty, and on the inquisitor board it silently took
+ * the money column with it because the money seeded off those names.
+ *
+ * `CROSS APPLY` asks each name's own index for its single heaviest counterpart instead.
+ * Measured 132.3s for eight, so the cost is real and uneven — which is why this runs a
+ * few at a time under a wall-clock budget, and why the boards say the column is read for
+ * the first rows only rather than pretending it covers all hundred.
+ */
+async function topCounterpart(
+  names: string[],
+  direction: 'by-voter' | 'by-author',
+  budgetMs: number,
+  chunkSize: number
+): Promise<Map<string, { name: string; n: number }>> {
+  const best = new Map<string, { name: string; n: number }>();
+  const self = direction === 'by-voter' ? 'voter' : 'author';
+  const other = direction === 'by-voter' ? 'author' : 'voter';
+  const deadline = Date.now() + budgetMs;
+
+  for (let i = 0; i < names.length; i += chunkSize) {
+    if (Date.now() >= deadline) break;
+    const chunk = names.slice(i, i + chunkSize);
+    const values = chunk.map((_, j) => `(@v${j})`).join(',');
+    const rows = await querySlow<{ k: string; p: string; n: number }>(
+      `SELECT s.k, t.${other} AS p, t.n
+       FROM (VALUES ${values}) AS s(k)
+       CROSS APPLY (SELECT TOP 1 v.${other}, COUNT(*) AS n
+                    FROM TxVotes v WITH (NOLOCK)
+                    WHERE v.${self} = s.k AND v.weight < 0
+                    GROUP BY v.${other}
+                    ORDER BY COUNT(*) DESC) AS t`,
+      chunk.map((name, j) => ({ name: `v${j}`, type: TYPES.VarChar, value: name }))
+    );
+    if (rows === null) continue;
+    for (const row of rows) best.set(row.k, { name: row.p, n: Number(row.n) || 0 });
   }
   return best;
 }
+
 
 export const mostDownvoted = withTtlCache(loadMostDownvoted, (limit = BOARD_ROWS) => `most-downvoted:${limit}`, {
   ttlMs: 24 * 60 * 60 * 1000,
@@ -451,71 +480,34 @@ async function loadInquisitors(limit = BOARD_ROWS): Promise<{ rows: InquisitorRo
    * budget over the whole pass. Whatever is reached gets a real top target; the rest
    * report none, and the column header says it is read for the first rows only.
    */
+  const targets = await topCounterpart(
+    leaders.slice(0, TOP_TARGET_ROWS).map((r) => r.account),
+    'by-voter',
+    TOP_TARGET_BUDGET_MS,
+    TOP_TARGET_CHUNK
+  ).catch(() => new Map<string, { name: string; n: number }>());
   const best = new Map<string, { author: string; n: number }>();
-  const candidates = leaders.slice(0, TOP_TARGET_ROWS).map((r) => r.account);
-  const deadline = Date.now() + TOP_TARGET_BUDGET_MS;
-  for (let i = 0; i < candidates.length; i += TOP_TARGET_CHUNK) {
-    if (Date.now() >= deadline) break;
-    const chunk = candidates.slice(i, i + TOP_TARGET_CHUNK);
-    const values = chunk.map((_, j) => `(@v${j})`).join(',');
-    const pairs = await querySlow<{ voter: string; author: string; n: number }>(
-      `SELECT s.voter, t.author, t.n
-       FROM (VALUES ${values}) AS s(voter)
-       CROSS APPLY (SELECT TOP 1 v.author, COUNT(*) AS n
-                    FROM TxVotes v WITH (NOLOCK)
-                    WHERE v.voter = s.voter AND v.weight < 0
-                    GROUP BY v.author
-                    ORDER BY COUNT(*) DESC) AS t`,
-      chunk.map((name, j) => ({ name: `v${j}`, type: TYPES.VarChar, value: name }))
-    );
-    if (pairs === null) continue;
-    for (const row of pairs) best.set(row.voter, { author: row.author, n: Number(row.n) || 0 });
-  }
+  for (const [voter, t] of targets) best.set(voter, { author: t.name, n: t.n });
 
   /*
-   * ★★★ THE LEDGER SET IS SEEDED FROM THE INQUISITORS' OWN TARGETS, NOT FROM THE
-   * MOST-DOWNVOTED BOARD, AND THE FIRST VERSION WAS USELESS BECAUSE OF THAT.
+   * ★★★ SEEDED FROM THE SIBLING BOARD'S CACHED FILE, NOT BY CALLING ITS BUILDER. Calling
+   * `mostDownvoted()` here did not merely run a query: it triggered that entire board's
+   * build — its own 102s scan plus its forty vote ledgers — and this build then waited
+   * for all of it before starting its own. Measured: still counting at 22 minutes, on a
+   * board that should take ten. It is the second time the two heavy boards have chained
+   * into one job, so the rule is now explicit: a board may READ another board's stored
+   * output, and may never START another board's work.
    *
-   * Summing over the top 20 most-downvoted accounts gave @freebornsociety **$0.02** —
-   * arithmetically true and completely misleading, because that account's 7,796
-   * downvotes land almost entirely on accounts that are not on board 02. A figure that
-   * says "this person took two cents" about someone who has removed real money is worse
-   * than no figure.
-   *
-   * So the accounts whose ledgers get read are the ones these voters actually hit: every
-   * top target on this board, plus the heaviest-downvoted accounts, deduplicated. Each
-   * ledger is ~12s, so the set is capped and the column reports `null` for anyone whose
-   * money is outside it. A dash says "not computed"; it never says zero.
-   */
-  /*
-   * ★★★ SEEDED ONLY FROM THIS BOARD'S OWN TOP TARGETS, AND PULLING IN THE DOWNVOTED
-   * BOARD MADE THIS BUILD TAKE EIGHT MINUTES.
-   *
-   * Calling `mostDownvoted()` here to widen the seed set did not just cost its own query:
-   * it triggered that entire board's build, including its twelve vote ledgers, and the
-   * inquisitor build then waited for all of it before starting its own twelve. Measured:
-   * still counting at 300s. Two slow boards chained into one.
-   *
-   * The top targets are the better seed anyway. They come free from phase B above, and
-   * they are by definition the accounts these particular voters took value from, which is
-   * exactly what the column claims to measure.
-   */
-  /*
-   * ★ THE MONEY SEEDS DO NOT DEPEND ON THE TOP-TARGET PASS. They did, and when that pass
-   * returned nothing the money column went blank for all 100 rows as a side effect of an
-   * unrelated timeout. The most-downvoted accounts are the primary seed now — they are
-   * where removed value concentrates — and any top targets found are added on top.
+   * `readBoard` is a file read. If the downvoted board has never been built the seed
+   * falls back to this board's own top targets, which is why the money column can be
+   * thinner on the very first build and full on every one after it.
    */
   const seed = new Set<string>();
   for (const [, top] of best) {
     if (top.author) seed.add(top.author);
   }
-  try {
-    const victims = await mostDownvoted();
-    if (!victims.failed) for (const v of victims.rows.slice(0, INQ_LEDGER_ACCOUNTS)) seed.add(v.account);
-  } catch {
-    // The board still works without the money column.
-  }
+  const stored = readBoard<{ account: string }>('downvoted');
+  for (const row of stored?.rows.slice(0, INQ_LEDGER_ACCOUNTS) ?? []) seed.add(row.account);
 
   let removed = new Map<string, number>();
   try {

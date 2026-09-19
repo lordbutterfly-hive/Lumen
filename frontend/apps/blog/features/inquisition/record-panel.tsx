@@ -60,7 +60,6 @@ export interface RecordData {
   removedUsd: number | null;
   topDownvoters: { account: string; usd: number }[];
   topByCount: { account: string; votes: number }[];
-  topPosts: { permlink: string; usd: number }[];
   selfRewardUsd: number | null;
   selfRewardPct: number | null;
   steemPosts: number | null;

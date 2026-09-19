@@ -71,7 +71,6 @@ export async function GET(
         removedUsd: ledger ? ledger.removedUsd : null,
         topDownvoters: ledger?.topDownvoters ?? [],
         topByCount: ledger?.topByCount ?? [],
-        topPosts: ledger?.topPosts ?? [],
         selfRewardUsd: ledger ? ledger.selfRewardUsd : null,
         selfRewardPct: ledger ? ledger.selfRewardPct : null,
         steemPosts: steem ? steem.posts : null,
