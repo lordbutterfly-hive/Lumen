@@ -77,16 +77,24 @@ export function isArmed(): boolean {
  * A class flip repaints every surface on the next frame, which reads as a glitch rather
  * than as a mode change. So arming adds `inquisition-dimming` to <html> for the length
  * of one transition, and a single rule in globals.css gives background, border and text
- * colour a 600ms ease on every element while it is there.
+ * colour a 520ms ease on every element while it is there, and runs a 900ms sweep across
+ * the viewport. `DIM_MS` below is the window the class stays on for, which has to outlast
+ * the LONGEST of those, not the shortest.
  *
  * ★★ THE CLASS IS REMOVED AFTERWARDS, ON PURPOSE. Leaving a global colour transition on
- * permanently would put a 600ms lag on every hover state, every focus ring and every
+ * permanently would put a 520ms lag on every hover state, every focus ring and every
  * theme token in the app for as long as the session lasts. It is on for the flip and
  * gone immediately after.
  *
  * ★ AND IT IS SKIPPED FOR ANYONE WHO ASKED FOR THAT. `prefers-reduced-motion` is
  * honoured by the CSS rule itself, so this function does not need to branch: adding the
  * class simply does nothing for those readers.
+ */
+/*
+ * ★ 950ms BECAUSE THE SWEEP IS 900ms, and this number drifted away from the CSS once
+ * already: the comment above described a 600ms cue after the stylesheet had moved to
+ * 520ms colour and a 900ms sweep. A duration stated in prose has no compiler, so when
+ * these disagree the prose is the one that is wrong.
  */
 const DIM_MS = 950;
 

@@ -3632,8 +3632,15 @@ input[data-testid='witnesses-filter-search'] {
  *   2. A single brand-tinted sweep crosses the viewport once, left to right, 900ms. It
  *      is the lamp being carried past, and it is the only moment the accent colour owns
  *      the whole screen.
- *   3. The page lifts 3px and settles, which is what makes it feel like a cue rather
+ *   3. The page settles from 88% opacity, which is what makes it feel like a cue rather
  *      than a repaint.
+ *
+ * ★★ THE SETTLE IS OPACITY, NOT `transform`, AND THAT IS NOT A STYLE CHOICE. A
+ * `transform` on `body` makes body the containing block for every `position: fixed`
+ * descendant for as long as it is applied, so the sticky rail and anything fixed
+ * re-anchor and jump for the length of the cue. `filter` and `perspective` do the same.
+ * `opacity` creates a stacking context but NOT a containing block, so it is the one
+ * property here that can animate the whole page without moving anything.
  *
  * `background-color`, `border-color`, `color` and `fill` only: transitioning `all` would
  * animate layout properties and produce the jitter this exists to avoid.
@@ -3687,10 +3694,10 @@ input[data-testid='witnesses-filter-search'] {
 
 @keyframes inquisition-settle {
   from {
-    transform: translateY(3px);
+    opacity: 0.88;
   }
   to {
-    transform: translateY(0);
+    opacity: 1;
   }
 }
 
