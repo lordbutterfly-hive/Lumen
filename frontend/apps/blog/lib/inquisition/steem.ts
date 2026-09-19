@@ -52,7 +52,18 @@ interface SteemPost {
   permlink?: string;
 }
 
-async function steemCall(endpoint: string, method: string, params: unknown): Promise<unknown> {
+/**
+ * ★ THE REQUEST COUNTER IS PASSED, NOT MODULE-LEVEL. A shared `let` would be correct
+ * only as long as two accounts are never walked at once — which is true of today's
+ * sequential build and is exactly the kind of assumption that breaks silently when
+ * somebody parallelises it later. A per-call box cannot be raced.
+ */
+interface Spend {
+  n: number;
+}
+
+async function steemCall(spend: Spend, endpoint: string, method: string, params: unknown): Promise<unknown> {
+  spend.n += 1;
   const res = await fetch(endpoint, {
     method: 'POST',
     signal: AbortSignal.timeout(3000),
@@ -66,11 +77,11 @@ async function steemCall(endpoint: string, method: string, params: unknown): Pro
   return json.result;
 }
 
-async function steem(method: string, params: unknown): Promise<unknown> {
+async function steem(spend: Spend, method: string, params: unknown): Promise<unknown> {
   let last: unknown;
   for (const endpoint of STEEM_ENDPOINTS) {
     try {
-      return await steemCall(endpoint, method, params);
+      return await steemCall(spend, endpoint, method, params);
     } catch (error) {
       last = error;
     }
@@ -91,6 +102,7 @@ async function steem(method: string, params: unknown): Promise<unknown> {
  * that inflates for anyone who reshares.
  */
 async function loadSteem(account: string): Promise<SteemActivity> {
+  const spend: Spend = { n: 0 };
   const seen = new Set<string>();
   let postsSinceFork = 0;
   let lastPost: string | null = null;
@@ -98,17 +110,30 @@ async function loadSteem(account: string): Promise<SteemActivity> {
   let startAuthor = '';
   let startPermlink = '';
 
+  const done = (posts: number, last: string | null, isPartial: boolean): SteemActivity => ({
+    postsSinceFork: posts,
+    lastPost: last,
+    partial: isPartial,
+    asOf: nowIso(),
+    requests: spend.n
+  });
+
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const query: Record<string, unknown> = { tag: account, limit: PAGE_LIMIT };
     if (startPermlink) {
       query.start_author = startAuthor;
       query.start_permlink = startPermlink;
     }
-    const result = (await steem('condenser_api.get_discussions_by_blog', [query])) as SteemPost[];
+    const result = (await steem(spend, 'condenser_api.get_discussions_by_blog', [query])) as SteemPost[];
     if (!Array.isArray(result) || result.length === 0) {
-      return { postsSinceFork, lastPost, partial: false, asOf: nowIso() };
+      return done(postsSinceFork, lastPost, false);
     }
 
+    // ★ THE CURSOR MUST ADVANCE OR THE WALK IS ASKING FOR THE SAME PAGE AGAIN. If every
+    // entry on a page is already `seen`, `startPermlink` never changes and the next
+    // request is byte-identical to this one — twelve times over, against somebody
+    // else's endpoint, for nothing. Bounded before, pointless now.
+    const cursorBefore = startPermlink;
     let crossedFork = false;
     for (const post of result) {
       const created = typeof post.created === 'string' ? post.created : null;
@@ -149,12 +174,13 @@ async function loadSteem(account: string): Promise<SteemActivity> {
       if (!lastPost || created > lastPost) lastPost = created;
     }
 
-    if (crossedFork) return { postsSinceFork, lastPost, partial: false, asOf: nowIso() };
-    if (result.length < PAGE_LIMIT) return { postsSinceFork, lastPost, partial: false, asOf: nowIso() };
+    if (crossedFork) return done(postsSinceFork, lastPost, false);
+    if (result.length < PAGE_LIMIT) return done(postsSinceFork, lastPost, false);
+    if (startPermlink === cursorBefore) return done(postsSinceFork, lastPost, false);
     if (page === MAX_PAGES - 1) partial = true;
   }
 
-  return { postsSinceFork, lastPost, partial, asOf: nowIso() };
+  return done(postsSinceFork, lastPost, partial);
 }
 
 /**

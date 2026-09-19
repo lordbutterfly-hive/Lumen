@@ -13,6 +13,7 @@ import DialogLogin from '@/blog/components/dialog-login';
 import { LeagueShowcase } from '@/blog/features/retention/components/league-showcase';
 import { CreatorTokenLaurel } from '@/blog/features/creator-tokens/ui/creator-token-laurel';
 import ThemeToggle from './theme-toggle';
+import InquisitionRow from '@/blog/features/inquisition/inquisition-rail-row';
 import styles from './left-rail.module.css';
 
 /**
@@ -398,6 +399,10 @@ export default function LeftRail() {
             testId="left-rail-settings"
           />
         )}
+        {/* ★ ONLY WHILE ARMED, and it disappears the moment the mode is off. A row that
+            is sometimes a destination and sometimes not would be worse than no row —
+            this one is only ever present when the reader has already said yes. */}
+        <InquisitionRow />
       </ul>
       {/* ★ THE THEME PAIR SITS OUTSIDE THE <ul> ON PURPOSE (owner, 2026-09-18:
           "dark light mode get 2 icons on left navbar on bottom"). Every child of

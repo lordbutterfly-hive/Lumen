@@ -13,6 +13,7 @@ import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/u
 import { useModerationStatus } from '@/blog/features/mute-follow/hooks/use-moderation-status';
 import NoDataError from '@/blog/components/no-data-error';
 import ProfileTokenCard from '@/blog/features/creator-tokens/ui/profile-token-card';
+import RecordStrip from '@/blog/features/inquisition/record-strip';
 import PageMasthead from '@/blog/features/layouts/page-masthead';
 import { cn } from '@ui/lib/utils';
 import { LumenLoader } from '@hive/ui';
@@ -355,6 +356,12 @@ export default function ProfileMain() {
           the retention rework and has no such card at all). Renders nothing of
           its own when there is nothing real to show — see the component's doc. */}
       <ProfileTokenCard username={username} isOwnProfile={isOwnProfile} />
+
+      {/* ★ THE RECORD SITS BETWEEN THE IDENTITY BLOCK AND THE TABS, NEVER INSIDE BIO
+          CONTENT THE ACCOUNT WROTE (spec §4). It renders nothing at all unless the
+          reader has armed Inquisition mode, so an ordinary profile view is unchanged
+          and costs no extra request. */}
+      <RecordStrip account={username} />
 
       {/* ★ THE RANK CARD IS GONE FROM THE PROFILE (2026-08-19, owner):
           "get rid of that card completely. its enough what we have, it doesnt

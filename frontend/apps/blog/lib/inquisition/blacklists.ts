@@ -127,14 +127,31 @@ export const blacklistIndex = withTtlCache(loadIndex, () => 'inq-blacklists', {
   ttlMs: 6 * 60 * 60 * 1000,
   max: 1,
   name: 'inq-blacklists',
-  // ★ AN INDEX WITH EVERY PUBLISHER MISSING IS NOT AN ANSWER. Six failed calls and
-  // six calls that each legitimately returned nothing render identically — an empty
-  // board — so the empty-with-failures case is refused and the next reader retries
-  // rather than inheriting six hours of a chain outage.
-  shouldCache: (index) => index.missing.length < PUBLISHERS.length
+  /*
+   * ★★ ONLY A COMPLETE INDEX IS CACHED, AND "ALL FOUR FAILED" WAS TOO WEAK A BAR
+   * (tightened after adversarial review, 2026-09-19).
+   *
+   * The old rule accepted an index where THREE of four publishers had failed and held
+   * it for six hours. hivewatchers alone is 27 of ~87 marks, so one 429 from
+   * api.hive.blog could pin a mostly-empty picture for a quarter of a day — and the
+   * per-account lookup reads exactly this index, so every armed profile would have
+   * printed a clean record for people who are in fact listed.
+   *
+   * A partial read still ANSWERS — the board renders it and names who is missing — it
+   * just does not get to become the cached answer. Retrying eight cheap requests beats
+   * six hours of a wrong negative about a named human being.
+   */
+  shouldCache: (index) => index.missing.length === 0
 });
 
-export async function marksFor(account: string): Promise<BlacklistMark[]> {
+/**
+ * ★★★ THE CALLER IS TOLD WHETHER THE PICTURE WAS COMPLETE. `marksFor` used to return
+ * bare marks, so "no marks" and "we could not read the lists" were the same value — and
+ * the profile strip turned that into the word **None** under a fresh timestamp. That is
+ * the same class of lie `hivesql.ts` documents at length, on the surface where it does
+ * the most damage: a specific, named account.
+ */
+export async function marksFor(account: string): Promise<{ marks: BlacklistMark[]; missing: string[] }> {
   const index = await blacklistIndex();
-  return index.byAccount.get(account) ?? [];
+  return { marks: index.byAccount.get(account) ?? [], missing: index.missing };
 }

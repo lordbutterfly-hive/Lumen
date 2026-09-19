@@ -47,13 +47,29 @@ interface SteemRow {
   partial: boolean;
 }
 
-type BoardId = 'blacklists' | 'muted' | 'steem';
+type BoardId = 'blacklists' | 'muted' | 'downvoted' | 'ke' | 'steem';
 
 const BOARDS: { id: BoardId; label: string; hint: string }[] = [
   { id: 'blacklists', label: 'Lists', hint: 'Accounts on a published blacklist, and who published it' },
   { id: 'muted', label: 'Muted', hint: 'Accounts muting this one, and the stake behind them' },
+  { id: 'downvoted', label: 'Downvoted', hint: 'Downvotes received in the last three months, and how many accounts cast them' },
+  { id: 'ke', label: 'KE', hint: 'Lifetime rewards taken divided by Hive Power held' },
   { id: 'steem', label: 'Steem', hint: 'Posts published to Steem after the 2020 Hive fork' }
 ];
+
+interface DvRow {
+  account: string;
+  downvotes: number;
+  voters: number;
+}
+
+interface KeRow {
+  account: string;
+  ke: number;
+  rewardsHive: number;
+  hp: number;
+  band: string;
+}
 
 interface MutedRow {
   account: string;
@@ -102,15 +118,37 @@ export default function InquisitionBoard() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
 
+    /*
+     * ★★★ A POLL MAY NEVER TAKE ROWS AWAY, AND THIS IS NOT A COSMETIC RULE.
+     * `cluster.js` runs three worker processes and Node round-robins connections
+     * between them, so each poll can land on a different worker with its own copy of a
+     * board that is still filling. Observed in testing: 7 rows, then 0, then 17. The
+     * server cannot fix that on its own — worker B genuinely has nothing yet — so the
+     * client keeps the fullest answer it has seen for this board and lets a thinner one
+     * update only the `building` flag.
+     *
+     * ★★ AND AN EMPTY BOARD IS NEVER CACHED AS FINAL. Caching `rows: []` because one
+     * worker answered first is how "Nothing to confess." gets pinned over a board that
+     * was about to fill.
+     */
     const pull = () => {
       fetch(`/api/inquisition/boards?board=${board}`)
         .then((r) => r.json())
         .then((json) => {
           if (cancelled) return;
-          setData(json);
+          setData((prev) => {
+            const prevRows = prev?.board === board ? ((prev.rows as unknown[] | undefined) ?? []) : [];
+            const nextRows = (json?.rows as unknown[] | undefined) ?? [];
+            if (prevRows.length > nextRows.length) {
+              return { ...prev, building: json?.building === true, asOf: prev?.asOf ?? json?.asOf };
+            }
+            return json;
+          });
           setLoading(false);
-          if (json?.building === true) timer = setTimeout(pull, 3000);
-          else setCache((c) => ({ ...c, [board]: json }));
+          const settled = json?.building !== true;
+          const worthKeeping = ((json?.rows as unknown[] | undefined) ?? []).length > 0;
+          if (!settled) timer = setTimeout(pull, 3000);
+          else if (worthKeeping) setCache((c) => ({ ...c, [board]: json }));
         })
         .catch(() => {
           if (cancelled) return;
@@ -216,12 +254,20 @@ export default function InquisitionBoard() {
           </p>
         ) : rows.length === 0 ? (
           <p className="px-6 py-8 font-ui text-[14px] text-ink-10">
-            {matches && data?.building === true ? 'Asking Steem\u2026' : 'Nothing to confess.'}
+            {matches && data?.building === true
+              ? board === 'steem'
+                ? 'Asking Steem\u2026'
+                : 'Counting\u2026'
+              : 'Nothing to confess.'}
           </p>
         ) : board === 'blacklists' ? (
           <BlacklistTable rows={rows as BlacklistRow[]} />
         ) : board === 'muted' ? (
           <MutedTable rows={rows as MutedRow[]} />
+        ) : board === 'downvoted' ? (
+          <DvTable rows={rows as DvRow[]} />
+        ) : board === 'ke' ? (
+          <KeTable rows={rows as KeRow[]} />
         ) : (
           <SteemTable rows={rows as SteemRow[]} />
         )}
@@ -246,10 +292,11 @@ export default function InquisitionBoard() {
       ) : null}
       {matches && board === 'steem' && typeof data?.scope === 'number' ? (
         <p className="mt-2 font-ui text-caption text-ink-14">
-          Checked the first {String(data.scope)} listed accounts.
+          Checked the first {String(data.scope)}
+          {typeof data?.listed === 'number' ? ` of ${String(data.listed)}` : ''} listed accounts, alphabetically.
         </p>
       ) : null}
-      <p className="mt-2 font-ui text-caption text-ink-14">Downvote totals are not on the board yet.</p>
+
     </div>
   );
 }
@@ -335,6 +382,82 @@ function MutedTable({ rows }: { rows: MutedRow[] }) {
             <td className="px-6 py-3 text-right font-num text-[14px] tabular-nums text-ink-2">{row.mutedBy}</td>
             <td className="px-6 py-3 text-right font-num text-[14px] tabular-nums text-ink-10">
               {row.muterMvests.toLocaleString()}M
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function DvTable({ rows }: { rows: DvRow[] }) {
+  return (
+    <table className="w-full border-collapse">
+      <thead>
+        <tr className="border-b border-line-9 text-left font-ui text-caption uppercase tracking-label text-ink-14">
+          <th className="px-6 py-3 font-medium">Account</th>
+          {/* ★ VOTERS IS THE SORT, AND THE REASON IS IN THE QUERY: 903 downvotes from 12
+              accounts is a dispute, 212 from 29 is a consensus. */}
+          <th className="px-6 py-3 text-right font-medium" title="Accounts that cast them">
+            Voters
+          </th>
+          <th className="px-6 py-3 text-right font-medium" title="Downvotes received in the last three months">
+            Downvotes
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.account} className="border-b border-line-9 last:border-0">
+            <td className="px-6 py-3 font-ui text-[14px] text-ink-2">
+              <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
+                @{row.account}
+              </a>
+            </td>
+            <td className="px-6 py-3 text-right font-num text-[14px] tabular-nums text-ink-2">{row.voters}</td>
+            <td className="px-6 py-3 text-right font-num text-[14px] tabular-nums text-ink-10">{row.downvotes}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function KeTable({ rows }: { rows: KeRow[] }) {
+  return (
+    <table className="w-full border-collapse">
+      <thead>
+        <tr className="border-b border-line-9 text-left font-ui text-caption uppercase tracking-label text-ink-14">
+          <th className="px-6 py-3 font-medium">Account</th>
+          <th className="px-6 py-3 text-right font-medium" title="Lifetime rewards taken divided by Hive Power held">
+            KE
+          </th>
+          {/* ★ NO DEFINITION OF THE BAND WORDS ON SCREEN — owner's instruction. The
+              thresholds and the caveat live in types.ts. */}
+          <th className="px-6 py-3 font-medium">Band</th>
+          <th className="px-6 py-3 text-right font-medium" title="Author and curation rewards over the account's whole life">
+            Rewards
+          </th>
+          <th className="px-6 py-3 text-right font-medium" title="Hive Power held now">
+            HP
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.account} className="border-b border-line-9 last:border-0">
+            <td className="px-6 py-3 font-ui text-[14px] text-ink-2">
+              <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
+                @{row.account}
+              </a>
+            </td>
+            <td className="px-6 py-3 text-right font-num text-[14px] tabular-nums text-ink-2">{row.ke.toFixed(2)}</td>
+            <td className="px-6 py-3 font-ui text-[14px] text-ink-10">{row.band}</td>
+            <td className="px-6 py-3 text-right font-num text-[14px] tabular-nums text-ink-10">
+              {row.rewardsHive.toLocaleString()}
+            </td>
+            <td className="px-6 py-3 text-right font-num text-[14px] tabular-nums text-ink-10">
+              {row.hp.toLocaleString()}
             </td>
           </tr>
         ))}

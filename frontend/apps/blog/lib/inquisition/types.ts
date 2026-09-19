@@ -36,6 +36,13 @@ export interface SteemActivity {
   lastPost: string | null;
   partial: boolean;
   asOf: string;
+  /**
+   * ★ HOW MANY UPSTREAM REQUESTS THIS ANSWER ACTUALLY COST. The board build spends a
+   * fixed budget against api.steemit.com, and it cannot spend one it cannot count. A
+   * cache hit reports the cost of the walk that produced it, which overstates the live
+   * cost — the safe direction.
+   */
+  requests: number;
 }
 
 export interface KeRatio {

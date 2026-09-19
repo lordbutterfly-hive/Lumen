@@ -70,13 +70,97 @@ export interface SqlParam {
 }
 
 /**
+ * ════ THE GATE ════
+ *
+ * ★★★ AT MOST `MAX_INFLIGHT` CONNECTIONS TO HIVESQL AT ONCE, PER WORKER, AND A CALLER
+ * THAT CANNOT GET IN GIVES UP RATHER THAN QUEUEING (added after adversarial review,
+ * 2026-09-19).
+ *
+ * "One connection per query" is fine when every caller is a once-a-day cache miss. It
+ * stops being fine the moment a caller can be driven by a stranger: `/api/inquisition/
+ * record/<name>` accepts any name matching `^[a-z0-9.-]{3,16}$`, and a name with no
+ * account returns `null`, which the cache deliberately refuses to store. So a `curl`
+ * loop over made-up names was one new TDS login per request, forever, against a
+ * DHF-funded free service we use under a single subscription. The rate limiter in
+ * `request-budget.ts` is the first gate; this is the one that holds when that gate is
+ * wrong, and it is the one that also covers our own background builds running on three
+ * workers at once.
+ *
+ * ★★ FAILING FAST IS THE POINT. An unbounded queue just moves the pile-up from the
+ * database to this process and hands every waiting reader a four-minute tab. `null`
+ * here means exactly what it means everywhere else in this module — "we could not ask"
+ * — and every caller already has to distinguish that from "the answer is none".
+ */
+/**
+ * ★★★ TWO LANES, AND THIS IS NOT A REFINEMENT — A SINGLE SHARED GATE BROKE THE PROFILE
+ * STRIP THE FIRST TIME IT RAN (2026-09-19).
+ *
+ * With one pool of four, opening the dashboard starts four board builds at once, every
+ * slot is taken, and the next per-account read — an armed reader's profile — waits two
+ * seconds, gives up, and renders "The record could not be read." While the database was
+ * perfectly healthy. A background job had starved a reader.
+ *
+ * So background aggregates and reader-facing lookups do not compete. They have separate
+ * counters, the slow lane is deliberately the smaller one, and a reader's query can
+ * always get in. Worst case is five concurrent connections per worker, fifteen across
+ * the cluster, which is a reasonable thing to ask of a service we do not pay for.
+ */
+const SLOW_LANE = 2;
+const FAST_LANE = 3;
+/**
+ * ★★ A READER GIVES UP; A BACKGROUND BUILD QUEUES. Three seconds is the difference
+ * between a strip that fills and a strip that lies, and nobody is watching a build, so
+ * it can afford to wait its turn — which is the behaviour we actually want against
+ * somebody else's database: the aggregates run one or two at a time instead of all at
+ * once. A build that gave up quickly would be indistinguishable from a build the
+ * database refused, and would put an available board into a minute of cooldown for no
+ * reason at all.
+ */
+const FAST_WAIT_MS = 3000;
+const SLOW_WAIT_MS = 120000;
+
+const GATE_SLOT = Symbol.for('lumen.inquisition.hivesql.gate.v2');
+const gate = ((globalThis as Record<symbol, unknown>)[GATE_SLOT] ??= { fast: 0, slow: 0 }) as {
+  fast: number;
+  slow: number;
+};
+
+type Lane = 'fast' | 'slow';
+
+async function acquire(lane: Lane): Promise<boolean> {
+  const limit = lane === 'fast' ? FAST_LANE : SLOW_LANE;
+  const deadline = Date.now() + (lane === 'fast' ? FAST_WAIT_MS : SLOW_WAIT_MS);
+  for (;;) {
+    if (gate[lane] < limit) {
+      gate[lane] += 1;
+      return true;
+    }
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+function release(lane: Lane): void {
+  gate[lane] = Math.max(0, gate[lane] - 1);
+}
+
+/**
  * ★★ ONE CONNECTION PER QUERY, CLOSED IN A `finally`. A pool would be better for a
  * hot path and this has no hot path: every caller is a cache miss that happens at most
  * once per account per day. A leaked connection against somebody else's free service
  * is a worse failure than a 200 ms reconnect.
  */
-async function run<T>(sql: string, params: SqlParam[], timeoutMs: number): Promise<T[] | null> {
+async function run<T>(sql: string, params: SqlParam[], timeoutMs: number, lane: Lane): Promise<T[] | null> {
   if (!hiveSqlConfigured()) return null;
+  if (!(await acquire(lane))) return null;
+  try {
+    return await connectAndRun<T>(sql, params, timeoutMs);
+  } finally {
+    release(lane);
+  }
+}
+
+async function connectAndRun<T>(sql: string, params: SqlParam[], timeoutMs: number): Promise<T[] | null> {
 
   const cfg = config();
   (cfg.options as { requestTimeout?: number }).requestTimeout = timeoutMs;
@@ -159,7 +243,7 @@ async function run<T>(sql: string, params: SqlParam[], timeoutMs: number): Promi
 
 /** For queries measured under a second. Safe to await on a cache miss. */
 export function queryFast<T>(sql: string, params: SqlParam[] = []): Promise<T[] | null> {
-  return run<T>(sql, params, 8000);
+  return run<T>(sql, params, 8000, 'fast');
 }
 
 /**
@@ -167,5 +251,5 @@ export function queryFast<T>(sql: string, params: SqlParam[] = []): Promise<T[] 
  * reader is waiting on** — see the measurements at the top of this file.
  */
 export function querySlow<T>(sql: string, params: SqlParam[] = []): Promise<T[] | null> {
-  return run<T>(sql, params, 240000);
+  return run<T>(sql, params, 240000, 'slow');
 }

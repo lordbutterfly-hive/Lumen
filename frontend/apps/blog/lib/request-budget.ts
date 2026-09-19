@@ -200,11 +200,24 @@ const PUBLIC_DIRS = ['/_next/', '/api/', '/auth/', '/fonts/', '/images/', '/loca
  * Not in that list, on purpose: `/public/` (next.config.js rewrites
  * `/public/:path*` to `/:path*`, so `/public/@name` IS the profile page: found
  * in review), `/static/` and `/assets/` (nothing is served there; a request lands
- * in the dynamic route), `/sitemap*` (there is no sitemap route). `/api/og` is
- * the one API route that is budgeted: it rasterises a 1200x630 share image on
- * the same thread this whole module protects.
+ * in the dynamic route), `/sitemap*` (there is no sitemap route).
+ *
+ * ★★★ TWO API ROUTES ARE BUDGETED, AND BOTH ARE BUDGETED FOR THE SAME REASON: they
+ * are the only ones where a single cheap request makes US do expensive work.
+ *
+ *   `/api/og`          rasterises a 1200x630 share image on the thread this module
+ *                      exists to protect.
+ *   `/api/inquisition` opens a connection to HiveSQL — a DHF-funded free service we
+ *                      use under one subscription — and calls api.hive.blog, per
+ *                      account, for any name matching `^[a-z0-9.-]{3,16}$`. Names that
+ *                      do not exist are deliberately not cached (caching "no record"
+ *                      from a failed read is this feature's worst lie), so an
+ *                      unbudgeted loop over made-up names was an unbounded amplifier
+ *                      onto somebody else's database. Found by adversarial review,
+ *                      2026-09-19. Arming the mode is a client-side choice and cannot
+ *                      be a server-side gate, so the gate has to be the budget.
  */
-const BUDGETED_API = ['/api/og'];
+const BUDGETED_API = ['/api/og', '/api/inquisition'];
 const PUBLIC_FILES = new Set([
   '/favicon.ico', '/favicon.svg', '/robots.txt', '/site.webmanifest', '/__ENV.js', '/apple-touch-icon.png',
   '/icon-192.png', '/icon-512.png', '/mark-on-ink.svg', '/defaultavatar.png', '/dolphin.png', '/external-icon.svg',
