@@ -287,3 +287,17 @@ export function queryReader<T>(sql: string, params: SqlParam[] = []): Promise<T[
 export function querySlow<T>(sql: string, params: SqlParam[] = []): Promise<T[] | null> {
   return run<T>(sql, params, 240000, 'slow');
 }
+
+/**
+ * ★★★ A BACKGROUND QUERY WITH ITS OWN CEILING, SO ONE GIANT CANNOT STARVE THE REST.
+ *
+ * The per-account money pass runs down a board's rows under a wall-clock budget. On
+ * `querySlow`'s 240s ceiling the first two rows — @spaminator with 1,769,154 downvotes
+ * and @mack-bot with 558,579 — consumed eight of the ten available minutes between them
+ * and produced nothing, so 28 of 30 rows reported a dash. Most accounts take ~19s; the
+ * outliers are two orders of magnitude worse. Capping each attempt means the budget is
+ * spent on rows that can actually finish, and the ones that cannot say so.
+ */
+export function queryCapped<T>(sql: string, params: SqlParam[], timeoutMs: number): Promise<T[] | null> {
+  return run<T>(sql, params, timeoutMs, 'slow');
+}

@@ -1,141 +1,194 @@
 import 'server-only';
 import { TYPES } from 'tedious';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
-import { queryReader, querySlow } from './hivesql';
+import { queryCapped, queryReader, querySlow } from './hivesql';
 
 /**
- * ════ WHAT EACH VOTE WAS WORTH, SUMMED ON THE SERVER ════
+ * ════ WHAT A DOWNVOTE REMOVED ════
  *
- * ★★★ `active_votes` IS THE ONLY PLACE PER-VOTE VALUE EXISTS, AND PULLING IT ACROSS THE
- * WIRE DOES NOT SCALE. `TxVotes` stores a vote's PERCENTAGE and no rshares at all.
- * `Comments.net_rshares` / `vote_rshares` look usable and are the trap: **both are reset
- * to 0 once a post pays out**, so anything built on them only ever sees the last seven
- * days. That bug reported −$9 for an account whose real lifetime figure is −$513.
+ * ★★★ THE PREVIOUS VERSION OF THIS FILE NEVER RAN AT ALL IN ONE DIRECTION. The scope was
+ * interpolated between `FROM` and `CROSS APPLY`, producing
+ * `FROM Comments c WHERE c.author = @a0 CROSS APPLY OPENJSON(...)` — invalid T-SQL,
+ * *"Incorrect syntax near the keyword 'CROSS'"*. `connectAndRun` turns a SQL error into
+ * `null`, and `null` correctly means "we could not ask", so every row of MOST DOWNVOTED
+ * and every money figure on every profile rendered as a dash. I spent hours tuning
+ * timeouts and budgets against what was an operator-ordering bug. The voter direction
+ * used a `JOIN`, which is legal there, which is why the one number I ever measured
+ * happened to work. Scope is now split into `%JOIN%` (before) and `%WHERE%` (after).
  *
- * So the value has to come from the `active_votes` JSON — and the first version of this
- * file read that JSON in Node. It worked on a modest account (@lordbutterfly: 883 posts,
- * 8 MB, 12.1s) and collapsed on the accounts the boards actually rank. Measured:
+ * ★★★ AND THE RATE MODEL WAS DOING WORK IT DID NOT NEED TO DO. For a post that PAID, the
+ * value its downvotes removed is exactly known with no model at all:
  *
- *     @haejin            7,308 posts    235 MB of vote JSON
- *     @acidyo            2,633 posts    195 MB
- *     @taskmaster4450le  4,084 posts    103 MB
- *     @erikah            3,738 posts     86 MB
+ *     payout = rho x net   =>   rho = payout / net   =>   removed = payout x neg / net
  *
- * Forty of those is several gigabytes over TDS, parsed one object at a time. The board
- * build ran for twenty-two minutes and produced nothing at all.
+ * That is exact, and it covers 68-100% of the value on every account audited. A modelled
+ * rate is only needed for posts flattened to zero, which paid nothing and so have no rate
+ * of their own. The old code applied the model everywhere and threw away the exact truth.
  *
- * ★★★ `OPENJSON` MOVES THE WHOLE SUM TO THE SERVER. SQL Server parses `active_votes`
- * where it already lives and returns one row. Measured on the same data:
+ * ★★★ THE MODEL ALSO DELETED ROWS SILENTLY. The monthly rate table was joined with an
+ * INNER join, so any post whose month produced no rate vanished from the sum. Two ways
+ * that happened, both measured:
  *
- *     @erikah, 86 MB, whole-history totals          4.2s
- *     ten victim accounts, per-voter attribution   30.0s
+ *   - HiveSQL leaves `last_payout = 1970-01-01` on a class of 2017-2020 posts (chain-
+ *     verified: a @haejin post reads 1970 here and 2018-01-09 on chain). All 32,233 such
+ *     posts in the audit sample bucket to month 197001, which has $0 of payout, so no
+ *     rate exists and every one was dropped. Cost: **$61,764 on @steemcleaners alone, 66%
+ *     of its figure.** Those are exactly the zeroed posts this was built to capture.
+ *   - An account flattened on everything has no paying posts at all, so no month yields a
+ *     rate. @offgridlife lost 1,485 downvoted posts worth $648, 29.5% of his figure.
  *
- * Nothing crosses the wire but the answer.
+ * Both are fixed: epoch dates are re-derived as `created + 7 days`, and the rate is a
+ * LEFT-JOINed ladder (month, then year, then the whole corpus) so a missing bucket falls
+ * through instead of deleting the row.
  *
- * ★★ THE RATE IS `payout / NET`, per post. Hive pays a post on its net rshares, so that
- * is the dollars-per-rshare that actually applied; dividing by the positive side alone
- * understates every removal by exactly the fraction the downvotes took. Posts whose net
- * fell to zero have no rate of their own and are excluded rather than guessed at.
+ * ★★ THE UNIT IS HBD, NOT USD, and the column now says so. `total_payout_value` is the
+ * reward's HIVE value converted at the witness feed, verified against a post's own
+ * `author_rewards x feed_price`. The feed prices HIVE in USD and treats HBD as $1 — which
+ * held except in 2016-09..2018-07, when SBD traded up to **$6.93** (recovered three ways:
+ * feed over the internal DEX rate, conversion-request execution prices, and the collapse
+ * of conversion volume from 13,921/month to 61 when the market paid seven times peg).
+ * Roughly 30-41% of an author's payout was actual SBD tokens, so realised value in that
+ * window was up to **1.88x** the declared figure for a pre-2018 account. The published
+ * number is the chain-declared one; calling it "$" implied a precision it does not have.
+ *
+ * ★ THE SUM HAPPENS ON THE SERVER. `active_votes` is the only place per-vote value lives,
+ * and it is far too big to move: @haejin's posts carry 235 MB of it. `OPENJSON` parses it
+ * where it already is and returns one row.
  */
 
-/** One post's vote totals. Every query below is built on this. */
-const POST_TOTALS = `
-  SELECT c.author, c.permlink,
+/**
+ * Per-post vote totals for a scope, plus a rate ladder built from the same corpus.
+ *
+ * `%JOIN%` goes before `CROSS APPLY` (a join must); `%WHERE%` goes after it (a filter
+ * must). Getting that backwards is what made the author direction return nothing.
+ */
+const VALUED = `
+WITH p AS (
+  SELECT c.ID,
+         /* ★ Epoch dates: the mirror leaves 1970-01-01 on a class of rows. Payout is
+            seven days after creation on this chain, which is chain-verified correct. */
+         CASE WHEN c.last_payout < '2016-01-01' THEN DATEADD(day, 7, c.created) ELSE c.last_payout END AS paid_at,
          SUM(CASE WHEN j.rshares > 0 THEN CAST(j.rshares AS float) ELSE 0 END) AS pos,
          SUM(CASE WHEN j.rshares < 0 THEN -CAST(j.rshares AS float) ELSE 0 END) AS neg,
          MAX(CAST(c.total_payout_value AS float) + CAST(c.curator_payout_value AS float)) AS payout
   FROM Comments c WITH (NOLOCK)
+  %JOIN%
   CROSS APPLY OPENJSON(c.active_votes) WITH (rshares bigint '$.rshares') AS j
-  WHERE c.depth = 0 AND c.author IN (%AUTHORS%)
-  GROUP BY c.author, c.permlink`;
+  %WHERE%
+  GROUP BY c.ID, c.last_payout, c.created
+),
+paid AS (
+  SELECT *, DATEPART(year, paid_at) * 100 + DATEPART(month, paid_at) AS ym,
+            DATEPART(year, paid_at) AS y
+  FROM p WHERE pos - neg > 0 AND payout > 0
+),
+rm AS (SELECT ym, SUM(payout) / NULLIF(SUM(pos - neg), 0) AS rate FROM paid GROUP BY ym),
+ry AS (SELECT y,  SUM(payout) / NULLIF(SUM(pos - neg), 0) AS rate FROM paid GROUP BY y),
+ro AS (SELECT SUM(payout) / NULLIF(SUM(pos - neg), 0) AS rate FROM paid),
+v AS (
+  SELECT p.*,
+         COALESCE(rm.rate, ry.rate, ro.rate) AS rate
+  FROM p
+  LEFT JOIN rm ON rm.ym = DATEPART(year, p.paid_at) * 100 + DATEPART(month, p.paid_at)
+  LEFT JOIN ry ON ry.y  = DATEPART(year, p.paid_at)
+  CROSS JOIN ro
+)`;
 
-const authorList = (n: number) => Array.from({ length: n }, (_, i) => `@a${i}`).join(',');
-const authorParams = (names: string[]) =>
-  names.map((name, i) => ({ name: `a${i}`, type: TYPES.VarChar, value: name }));
+/**
+ * What a share `s` of a post's downvotes was worth. Exact when the post paid; modelled and
+ * capped at what the post could ever have earned when it did not.
+ */
+const valueOf = (share: string) => `
+  CASE WHEN v.pos - v.neg > 0 AND v.payout > 0
+       THEN v.payout * (${share}) / (v.pos - v.neg)
+       ELSE COALESCE(v.rate, 0) * (CASE WHEN v.neg <= v.pos THEN v.neg ELSE v.pos END)
+            * (${share}) / NULLIF(v.neg, 0)
+  END`;
+
+/** The whole post's downvotes. */
+const ALL_NEG = valueOf('v.neg');
+/** One voter's share of them. */
+const ONE_VOTER = valueOf('-CAST(j.rshares AS float)');
+
+/**
+ * How long one account's money query may take. Measured with the real SQL: a normal
+ * account is ~19s, @steemcleaners 108.5s, @adm 66.8s, and @spaminator and @mack-bot both
+ * exceed 240s. 150s keeps the big-but-possible ones and still fails fast on the two that
+ * cannot be done at all, so they do not eat a board's whole budget.
+ */
+const PER_ACCOUNT_MS = 150_000;
 
 export interface VoteLedger {
   /** HBD taken off this account's posts by downvotes, over its whole history. */
   removedUsd: number;
-  /** The heaviest downvoters by VALUE removed, most first. */
   topDownvoters: { account: string; usd: number }[];
-  /** The heaviest downvoters by COUNT, which is a different list. */
   topByCount: { account: string; votes: number }[];
-  /** HBD of this account's own rewards that came from its own votes. */
   selfRewardUsd: number;
-  /** That, as a share of every reward the account's posts have paid. */
   selfRewardPct: number | null;
   totalPayoutUsd: number;
   posts: number;
 }
 
-interface TotalsRow {
-  removed: number;
-  total_payout: number;
-  self_reward: number;
-  posts: number;
-}
-
-interface VoterRow {
-  voter: string;
-  removed: number;
-  dvs: number;
-}
+/** A NULL sum means "nothing computable", which is not the same as zero. */
+const orNull = (v: unknown): number | null => {
+  const n = Number(v);
+  return v === null || v === undefined || !Number.isFinite(n) ? null : n;
+};
 
 async function loadVoteLedger(
   account: string,
   lane: 'reader' | 'background' = 'reader'
 ): Promise<VoteLedger | null> {
   const query = lane === 'background' ? querySlow : queryReader;
-  const cte = POST_TOTALS.replace('%AUTHORS%', '@a0');
+  const cte = VALUED.replace('%JOIN%', '').replace('%WHERE%', 'WHERE c.author = @a0');
+  const p = [{ name: 'a0', type: TYPES.VarChar, value: account }];
 
-  /*
-   * ★ `self_reward` is the author's own positive rshares valued at the same per-post
-   * rate: the share of their payouts that came from their own votes, in MONEY rather
-   * than in vote count, which is what the design asks for and what a count cannot give.
-   */
-  const totals = await query<TotalsRow>(
-    `WITH p AS (${cte})
-     SELECT
-       SUM(p.neg * p.payout / NULLIF(p.pos - p.neg, 0)) AS removed,
-       SUM(p.payout) AS total_payout,
-       (SELECT ISNULL(SUM(CAST(j.rshares AS float) * p2.payout / NULLIF(p2.pos - p2.neg, 0)), 0)
-          FROM Comments c2 WITH (NOLOCK)
-          CROSS APPLY OPENJSON(c2.active_votes) WITH (rshares bigint '$.rshares', voter nvarchar(20) '$.voter') AS j
-          JOIN p AS p2 ON p2.author = c2.author AND p2.permlink = c2.permlink
-         WHERE c2.author = @a0 AND c2.depth = 0 AND j.voter = @a0 AND j.rshares > 0
-           AND p2.pos - p2.neg > 0) AS self_reward,
-       COUNT(*) AS posts
-     FROM p
-     WHERE p.pos - p.neg > 0`,
-    authorParams([account])
+  const totals = await query<{ removed: number; total_payout: number; posts: number }>(
+    `${cte}
+     SELECT SUM(${ALL_NEG}) AS removed, SUM(v.payout) AS total_payout, COUNT(*) AS posts
+     FROM v`,
+    p
   );
   // ★ `null` is "we could not ask" and must not become a clean record. See hivesql.ts.
   if (totals === null || totals.length === 0) return null;
 
-  const voters = await query<VoterRow>(
-    `WITH p AS (${cte})
-     SELECT TOP 20 j.voter,
-            SUM(-CAST(j.rshares AS float) * p.payout / NULLIF(p.pos - p.neg, 0)) AS removed,
-            COUNT(*) AS dvs
-     FROM Comments c WITH (NOLOCK)
+  const voters = await query<{ voter: string; removed: number; dvs: number }>(
+    `${cte}
+     SELECT TOP 20 j.voter, SUM(${ONE_VOTER}) AS removed, COUNT(*) AS dvs
+     FROM v
+     JOIN Comments c WITH (NOLOCK) ON c.ID = v.ID
      CROSS APPLY OPENJSON(c.active_votes) WITH (rshares bigint '$.rshares', voter nvarchar(20) '$.voter') AS j
-     JOIN p ON p.author = c.author AND p.permlink = c.permlink
-     WHERE c.author = @a0 AND c.depth = 0 AND j.rshares < 0 AND p.pos - p.neg > 0
+     WHERE j.rshares < 0
      GROUP BY j.voter
-     ORDER BY SUM(-CAST(j.rshares AS float) * p.payout / NULLIF(p.pos - p.neg, 0)) DESC`,
-    authorParams([account])
+     ORDER BY SUM(${ONE_VOTER}) DESC`,
+    p
+  );
+
+  /*
+   * ★ SELF-REWARD is the author's own POSITIVE rshares valued the same way: the share of
+   * their payouts that came from their own votes, in money rather than in vote count.
+   */
+  const self = await query<{ self_reward: number }>(
+    `${cte}
+     SELECT SUM(CASE WHEN v.pos - v.neg > 0 AND v.payout > 0
+                     THEN v.payout * CAST(j.rshares AS float) / (v.pos - v.neg)
+                     ELSE 0 END) AS self_reward
+     FROM v
+     JOIN Comments c WITH (NOLOCK) ON c.ID = v.ID
+     CROSS APPLY OPENJSON(c.active_votes) WITH (rshares bigint '$.rshares', voter nvarchar(20) '$.voter') AS j
+     WHERE j.voter = @a0 AND j.rshares > 0`,
+    p
   );
 
   const rows = voters ?? [];
-  const removedUsd = Number(totals[0]?.removed) || 0;
   const totalPayoutUsd = Number(totals[0]?.total_payout) || 0;
-  const selfRewardUsd = Number(totals[0]?.self_reward) || 0;
+  const selfRewardUsd = Number(self?.[0]?.self_reward) || 0;
 
   return {
-    removedUsd,
+    removedUsd: orNull(totals[0]?.removed) ?? 0,
     topDownvoters: rows.slice(0, 3).map((r) => ({ account: r.voter, usd: Number(r.removed) || 0 })),
-    // ★ A DIFFERENT LIST FROM A DIFFERENT SORT. Whoever downvoted most often and whoever
-    // took the most value are rarely the same people; each cell names its own three.
+    // ★ A different list from a different sort: whoever downvoted most often and whoever
+    // took the most value are rarely the same people.
     topByCount: [...rows]
       .sort((a, b) => (Number(b.dvs) || 0) - (Number(a.dvs) || 0))
       .slice(0, 3)
@@ -148,76 +201,73 @@ async function loadVoteLedger(
   };
 }
 
-/**
- * ★★ CACHED PER ACCOUNT, because an armed profile and both boards can want the same one.
- * The key is the account alone: whichever lane warms it, the other reads it free.
- */
 export const voteLedger = withTtlCache(
   loadVoteLedger,
   (account: string, _lane?: 'reader' | 'background') => account,
   {
-    ttlMs: 24 * 60 * 60 * 1000,
-    max: 120,
+    ttlMs: 7 * 24 * 60 * 60 * 1000,
+    max: 200,
     name: 'inq-vote-ledger',
-    // ★ `null` is "we could not ask" and is never cached as an answer.
     shouldCache: (value) => value !== null
   }
 );
 
 /**
- * ════ WHO TOOK IT, ACROSS MANY ACCOUNTS ════
- *
- * The green figure on the inquisitors board: one statement over the whole seed set,
- * grouped by the voter rather than by the victim. 30.0s for ten victims, against a JS
- * version that never returned at all.
- *
- * ★ THE LABEL HAS TO SAY WHAT THIS COVERS: value removed from the accounts in the seed,
- * not from every post on Hive. A voter whose targets fall outside it reports nothing,
- * which the column renders as a dash and never as zero.
+ * What ONE downvoter took, across every post they hit. Scoped by the voter's own votes,
+ * never by a seed of victims — a seed covering 1.2% of someone's targets produced $881
+ * where the truth is $45,000.
  */
-export async function removedByVoterAcross(
-  accounts: string[]
-): Promise<{ byVoter: Map<string, number>; covered: number }> {
-  const byVoter = new Map<string, number>();
-  if (accounts.length === 0) return { byVoter, covered: 0 };
+async function loadRemovedByVoter(voter: string): Promise<number | null> {
+  const join = `JOIN (SELECT DISTINCT v2.author, v2.permlink
+                      FROM TxVotes v2 WITH (NOLOCK)
+                      WHERE v2.voter = @v AND v2.weight < 0) AS tgt
+                  ON tgt.author = c.author AND tgt.permlink = c.permlink`;
+  const cte = VALUED.replace('%JOIN%', join).replace('%WHERE%', '');
 
-  const list = authorList(accounts.length);
-  const cte = POST_TOTALS.replace('%AUTHORS%', list);
-  const rows = await querySlow<{ voter: string; removed: number }>(
-    `WITH p AS (${cte})
-     SELECT j.voter, SUM(-CAST(j.rshares AS float) * p.payout / NULLIF(p.pos - p.neg, 0)) AS removed
-     FROM Comments c WITH (NOLOCK)
+  const rows = await queryCapped<{ removed: number }>(
+    `${cte}
+     SELECT SUM(${ONE_VOTER}) AS removed
+     FROM v
+     JOIN Comments c WITH (NOLOCK) ON c.ID = v.ID
      CROSS APPLY OPENJSON(c.active_votes) WITH (rshares bigint '$.rshares', voter nvarchar(20) '$.voter') AS j
-     JOIN p ON p.author = c.author AND p.permlink = c.permlink
-     WHERE c.depth = 0 AND c.author IN (${list})
-       AND j.rshares < 0 AND p.pos - p.neg > 0
-     GROUP BY j.voter`,
-    authorParams(accounts)
+     WHERE j.voter = @v AND j.rshares < 0`,
+    [{ name: 'v', type: TYPES.VarChar, value: voter }],
+    PER_ACCOUNT_MS
   );
-  if (rows === null) return { byVoter, covered: 0 };
-  for (const row of rows) byVoter.set(row.voter, Number(row.removed) || 0);
-  return { byVoter, covered: accounts.length };
+  if (rows === null || rows.length === 0) return null;
+  // ★ A NULL sum is "nothing computable", not $0.00. Returning 0 here printed a positive
+  // claim — "this account took nothing" — where the design intends a dash.
+  return orNull(rows[0]?.removed);
 }
 
-/**
- * What downvotes took off each of these accounts, for the most-downvoted board. Same
- * shape, grouped the other way, and it replaces forty sequential per-account reads with
- * one statement.
- */
-export async function removedByAuthorAcross(accounts: string[]): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
-  if (accounts.length === 0) return out;
+export const removedByVoter = withTtlCache(loadRemovedByVoter, (voter: string) => voter, {
+  ttlMs: 7 * 24 * 60 * 60 * 1000,
+  max: 300,
+  name: 'inq-removed-by-voter',
+  shouldCache: (value) => value !== null
+});
 
-  const cte = POST_TOTALS.replace('%AUTHORS%', authorList(accounts.length));
-  const rows = await querySlow<{ author: string; removed: number }>(
-    `WITH p AS (${cte})
-     SELECT p.author, SUM(p.neg * p.payout / NULLIF(p.pos - p.neg, 0)) AS removed
-     FROM p
-     WHERE p.pos - p.neg > 0
-     GROUP BY p.author`,
-    authorParams(accounts)
-  );
-  if (rows === null) return out;
-  for (const row of rows) out.set(row.author, Number(row.removed) || 0);
+/**
+ * The money column for a board, one account at a time under a wall-clock budget. Rows past
+ * the budget report `null`, which renders as a dash: a figure covering a fraction of
+ * someone's activity, printed beside a correct target count, is worse than no figure.
+ */
+export async function removedForMany(
+  names: string[],
+  kind: 'voter' | 'author',
+  budgetMs: number
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const deadline = Date.now() + budgetMs;
+  for (const name of names) {
+    if (Date.now() >= deadline) break;
+    try {
+      const value =
+        kind === 'voter' ? await removedByVoter(name) : ((await voteLedger(name, 'background'))?.removedUsd ?? null);
+      if (value !== null && value !== undefined) out.set(name, value);
+    } catch {
+      // One unreadable account does not fail the column for the rest.
+    }
+  }
   return out;
 }

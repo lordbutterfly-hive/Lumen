@@ -51,7 +51,7 @@ const FEED_PAGES = 4;
 
 /**
  * Upstream requests the per-account counting pass may spend. The board is rebuilt once
- * every three days, so a few hundred requests to api.steemit.com is a reasonable ask;
+ * once a week, so a few hundred requests to api.steemit.com is a reasonable ask;
  * doing it per reader would not be.
  */
 const STEEM_COUNT_BUDGET = 400;
@@ -195,7 +195,7 @@ export async function loadCrossposters(limit = 50): Promise<{
    * ★★ THE COUNT COSTS ONE WALK PER ACCOUNT, SO IT RUNS AGAINST A BUDGET. Each account's
    * Steem blog is paged until it crosses the fork, up to `MAX_PROFILE_PAGES`. Across a
    * hundred candidates that is a few hundred requests to a chain we do not run — fine
-   * once every three days behind the board store, not fine per reader. Accounts past the
+   * once a week behind the board store, not fine per reader. Accounts past the
    * budget keep their row and report a count of -1, which the table renders as "not
    * counted" rather than as zero.
    */

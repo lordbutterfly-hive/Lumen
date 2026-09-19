@@ -95,7 +95,7 @@ const BOARDS: BoardDef[] = [
     tab: 'TOP DOWNVOTED',
     kicker: 'BOARD 02 \u00b7 THE PENITENTS',
     title: 'Most downvoted',
-    meta: 'whole chain history\nvalue read for the top 40',
+    meta: 'whole chain history\nvalue read for the first rows',
     blurb:
       'Ranked by downvotes received. The money column records the punishment duly inflicted.'
   },
@@ -113,7 +113,7 @@ const BOARDS: BoardDef[] = [
     tab: 'TOP INQUISITORS',
     kicker: 'BOARD 04 \u00b7 THE FAITHFUL, AT WORK',
     title: 'Top inquisitors',
-    meta: 'whole chain, pre-fork included\ntop target read for the first 25',
+    meta: 'whole chain, pre-fork included\nvalue and top target for the first rows',
     blurb:
       'The other end of the rod. Who wields it, how widely, what it cost the accused, and who feels it most. Downvoting is a right the chain grants everyone: this board says who exercises it, never whether they should.'
   },
@@ -696,7 +696,7 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
           */}
           <th
             className="px-[26px] py-3 text-right font-normal"
-            title="What these downvotes took off the forty most-punished accounts this board reads in full. A floor, not a lifetime total \u2014 a dash means this one's targets fall outside that set."
+            title="What this account's downvotes took off every post they landed on, across the whole chain. HBD as the chain declared it: for posts before mid-2018 the SBD of the day traded above peg, so realised value was higher. A dash means not computed, never nothing."
           >
             Removed (HBD)
           </th>
@@ -726,8 +726,13 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
             <td className="px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums">
               {/* ★ A SUB-CENT TOTAL IS NOTHING, AND IT RENDERED THREE DIFFERENT WAYS:
                   "$0", "-$0.00" and a dash, in one column. One rule now. */}
-              {row.removedUsd === null || row.removedUsd < 0.005 ? (
+              {/* ★ A DASH MEANS NOT COMPUTED. A real sub-cent total is "<$0.01", which is
+                  a finding of its own: @prowler cast 91,569 downvotes for two-thousandths
+                  of a cent. Rendering both as the same dash hid that. */}
+              {row.removedUsd === null ? (
                 <span className="text-ink-14">&mdash;</span>
+              ) : row.removedUsd < 0.005 ? (
+                <span className="text-ink-14">&lt;$0.01</span>
               ) : (
                 <span className="text-ink-ok-2">
                   {'$' +
@@ -789,7 +794,7 @@ function DvTable({ rows }: { rows: DvRow[] }) {
           </th>
           <th
             className="px-[26px] py-3 text-right font-medium"
-            title="Payout removed across this account's whole history, each post valued at its own rate on the day it paid"
+            title="Payout this account's posts lost to downvotes, across the whole chain. Exact where the post still paid; modelled only where it was flattened to nothing. A dash means not computed, never zero."
           >
             Removed (HBD)
           </th>
@@ -827,9 +832,11 @@ function DvTable({ rows }: { rows: DvRow[] }) {
                   : 'Payout these downvotes took off the posts, each valued at that post\u2019s own rate when it paid'
               }
             >
-              {row.removedUsd === null || row.removedUsd < 0.005
+              {row.removedUsd === null
                 ? '\u2014'
-                : '\u2212$' + (row.removedUsd >= 100 ? Math.round(row.removedUsd).toLocaleString() : row.removedUsd.toFixed(2))}
+                : row.removedUsd < 0.005
+                  ? '\u2212<$0.01'
+                  : '\u2212$' + (row.removedUsd >= 100 ? Math.round(row.removedUsd).toLocaleString() : row.removedUsd.toFixed(2))}
             </td>
             <td className="px-[26px] py-[15px] font-ui text-caption text-ink-10">
               {row.topSource ? (

@@ -134,7 +134,7 @@ function cellsFor(r: RecordData): Cell[] {
       body:
         r.removedUsd === null
           ? 'Not computed for this account, which is not the same as nothing having been taken.'
-          : "What those downvotes took off this account's payouts across its whole history, each post valued at its own payout rate on the day it paid."
+          : "What those downvotes took off this account's payouts across its whole history, in HBD as the chain declared it. Exact where the post still paid; modelled only where it was flattened to nothing."
     },
     {
       label: 'MUTED BY',

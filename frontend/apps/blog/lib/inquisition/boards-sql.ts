@@ -3,7 +3,7 @@ import { TYPES } from 'tedious';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 import { hiveSqlConfigured, queryFast, querySlow } from './hivesql';
 import { readBoard } from './board-store';
-import { removedByAuthorAcross, removedByVoterAcross } from './vote-ledger';
+import { removedForMany } from './vote-ledger';
 import { keBand, nowIso } from './types';
 import type { KeBand } from './types';
 
@@ -35,14 +35,20 @@ const MIN_AGE_DAYS = 90;
  * One ledger is ~12s (883 posts, ~8 MB of vote JSON). Twelve of them left the money
  * column blank on 88 rows out of 100, which the owner saw immediately: "only a few
  * numbers populate. about 12. no more." Forty is about eight minutes — irrelevant on a
- * board rebuilt every three days and served from disk in between — and because the
+ * board rebuilt once a week and served from disk in between — and because the
  * ledgers are cached per account and the two boards' seed sets overlap heavily, the
  * second board mostly reads the first one's work for free.
  *
  * The cost is paid once a day. Rows past this depth report `null`, which the column
  * renders as a dash and says "not computed" on hover, never as zero.
  */
-const INQ_LEDGER_ACCOUNTS = 40;
+/**
+ * How many rows carry a money figure, and how long the pass may take. One account is
+ * ~19s (measured on @themarkymark's 60,000-post history), so this is the cost knob. Rows
+ * past it report null rather than a number that covers a fraction of the account.
+ */
+const MONEY_ROWS = 30;
+const MONEY_BUDGET_MS = 14 * 60 * 1000;
 
 /**
  * How many rows get a true top target, how many per statement, and how long the whole
@@ -172,7 +178,7 @@ async function loadMostDownvoted(limit = BOARD_ROWS): Promise<{ rows: DownvotedR
      -- covered 90 days while the money column covered the account's whole life, so
      -- @solominer read as "78 downvotes, 2 targets, $9,385 removed". His real record is
      -- 3,839 downvotes across 455 targets. Measured 102.3s for the full scan, against
-     -- ~70s for the window, which is nothing on a board rebuilt every three days.
+     -- ~70s for the window, which is nothing on a board rebuilt once a week.
      WHERE v.weight < 0
        AND a.vesting_shares > @minVests AND a.created < DATEADD(day, -@minAge, GETDATE())
      GROUP BY v.author
@@ -261,20 +267,11 @@ const ENRICH_BUDGET_MS = 150_000;
 const ENRICH_CHUNK = 10;
 
 async function removedByAuthor(authors: string[]): Promise<Map<string, { usd: number; posts: number }>> {
-  /*
-   * ★★★ ONE SERVER-SIDE STATEMENT, NOT FORTY CLIENT-SIDE READS. This used to call
-   * `voteLedger` per account, which pulls that account's whole `active_votes` blob over
-   * the wire — 235 MB for @haejin, 195 MB for @acidyo. Forty of those never finished.
-   * `removedByAuthorAcross` sums the same thing with `OPENJSON` where the data already
-   * is and returns one row per author. See vote-ledger.ts.
-   */
   const out = new Map<string, { usd: number; posts: number }>();
-  try {
-    const removed = await removedByAuthorAcross(authors.slice(0, INQ_LEDGER_ACCOUNTS));
-    for (const [author, usd] of removed) out.set(author, { usd, posts: 0 });
-  } catch {
-    // A missing money column is not a missing board.
-  }
+  const removed = await removedForMany(authors.slice(0, MONEY_ROWS), 'author', MONEY_BUDGET_MS).catch(
+    () => new Map<string, number>()
+  );
+  for (const [author, usd] of removed) out.set(author, { usd, posts: 0 });
   return out;
 }
 
@@ -490,31 +487,18 @@ async function loadInquisitors(limit = BOARD_ROWS): Promise<{ rows: InquisitorRo
   for (const [voter, t] of targets) best.set(voter, { author: t.name, n: t.n });
 
   /*
-   * ★★★ SEEDED FROM THE SIBLING BOARD'S CACHED FILE, NOT BY CALLING ITS BUILDER. Calling
-   * `mostDownvoted()` here did not merely run a query: it triggered that entire board's
-   * build — its own 102s scan plus its forty vote ledgers — and this build then waited
-   * for all of it before starting its own. Measured: still counting at 22 minutes, on a
-   * board that should take ten. It is the second time the two heavy boards have chained
-   * into one job, so the rule is now explicit: a board may READ another board's stored
-   * output, and may never START another board's work.
-   *
-   * `readBoard` is a file read. If the downvoted board has never been built the seed
-   * falls back to this board's own top targets, which is why the money column can be
-   * thinner on the very first build and full on every one after it.
+   * ★★★ NO SEED. The money is now computed FROM EACH VOTER'S OWN DOWNVOTES, which is the
+   * question the column claims to answer. Summing over a fixed set of victim accounts
+   * gave @themarkymark $881 where the truth is ~$45,000, because that set covered 1.2%
+   * of his 3,442 targets — and the tooltip described a seed that was not even the seed
+   * being used. Rows past the budget report null and render as a dash: a figure covering
+   * one percent of someone's activity is worse than no figure.
    */
-  const seed = new Set<string>();
-  for (const [, top] of best) {
-    if (top.author) seed.add(top.author);
-  }
-  const stored = readBoard<{ account: string }>('downvoted');
-  for (const row of stored?.rows.slice(0, INQ_LEDGER_ACCOUNTS) ?? []) seed.add(row.account);
-
-  let removed = new Map<string, number>();
-  try {
-    removed = (await removedByVoterAcross([...seed].slice(0, INQ_LEDGER_ACCOUNTS))).byVoter;
-  } catch {
-    // A missing money column is not a missing board.
-  }
+  const removed = await removedForMany(
+    leaders.slice(0, MONEY_ROWS).map((r) => r.account),
+    'voter',
+    MONEY_BUDGET_MS
+  ).catch(() => new Map<string, number>());
 
   return {
     rows: leaders.map((r) => {
