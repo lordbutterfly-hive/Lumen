@@ -139,13 +139,13 @@ importers:
         version: 1.1.1(@types/react-dom@18.3.0)(@types/react@18.3.0)(react-dom@18.3.0(react@18.3.0))(react@18.3.0)
       '@reown/appkit':
         specifier: 1.8.23
-        version: 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)
+        version: 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)
       '@reown/appkit-adapter-bitcoin':
         specifier: 1.8.23
-        version: 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
+        version: 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
       '@reown/appkit-adapter-ethers':
         specifier: 1.8.23
-        version: 1.8.23(@ethersproject/sha2@5.8.0)(@types/react@18.3.0)(ethers@6.17.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)
+        version: 1.8.23(@azure/identity@4.13.3)(@ethersproject/sha2@5.8.0)(@types/react@18.3.0)(ethers@6.17.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)
       '@sentry/nextjs':
         specifier: ^10
         version: 10.34.0(@opentelemetry/context-async-hooks@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/core@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.4.0(@opentelemetry/api@1.9.0))(next@14.2.23(@opentelemetry/api@1.9.0)(@playwright/test@1.49.1)(react-dom@18.3.0(react@18.3.0))(react@18.3.0))(react@18.3.0)(webpack@5.97.1)
@@ -287,6 +287,9 @@ importers:
       tailwind-merge:
         specifier: ^1.13.2
         version: 1.14.0
+      tedious:
+        specifier: ^20.0.0
+        version: 20.0.0
       undici:
         specifier: ^6.28.1
         version: 6.28.1
@@ -378,7 +381,7 @@ importers:
         version: 8.57.1
       eslint-config-next:
         specifier: latest
-        version: 16.3.4(@typescript-eslint/parser@8.49.0(eslint@8.57.1)(typescript@5.5.3))(eslint@8.57.1)(typescript@5.5.3)
+        version: 16.3.5(@typescript-eslint/parser@8.49.0(eslint@8.57.1)(typescript@5.5.3))(eslint@8.57.1)(typescript@5.5.3)
       eslint-config-prettier:
         specifier: latest
         version: 10.1.8(eslint@8.57.1)
@@ -387,7 +390,7 @@ importers:
         version: 7.37.5(eslint@8.57.1)
       eslint-plugin-turbo:
         specifier: latest
-        version: 2.10.12(eslint@8.57.1)(turbo@2.3.3)
+        version: 2.11.2(eslint@8.57.1)(turbo@2.3.3)
     devDependencies:
       '@typescript-eslint/eslint-plugin':
         specifier: 7.15.0
@@ -910,6 +913,74 @@ packages:
 
   '@asamuzakjp/css-color@2.8.3':
     resolution: {integrity: sha512-GIc76d9UI1hCvOATjZPyHFmE5qhRccp3/zGfMPapK3jBi+yocEzp6BBB0UnfRYP9NP4FANqUZYb0hnfs3TM3hw==}
+
+  '@azure-rest/core-client@2.9.0':
+    resolution: {integrity: sha512-6933vNLqh06RR7rumnrq3UZIeBtRLeBHDPMrieDPIljiCaMMwt0nRw++nd3TOxiohtasNtm29rC+b/9ZVKCOqg==}
+    engines: {node: '>=22.0.0'}
+
+  '@azure/abort-controller@2.2.0':
+    resolution: {integrity: sha512-fNAjWnA/nZ2jz31kxR/AqRaUT8ewHBw/WuBIosK0moMy1C9e5ValbDfFdIxJzVOOYaYkV/b2F1S4H/aHiqfVQg==}
+    engines: {node: '>=22.0.0'}
+
+  '@azure/core-auth@1.11.0':
+    resolution: {integrity: sha512-IUZydyTUkDnYdstOW9pFOOUQlBjAepK5teihDE3x6yxsPJs/hsAaaYpeGxdxrgtOiJbBKSjKW7MDk7AEhb4LRg==}
+    engines: {node: '>=22.0.0'}
+
+  '@azure/core-client@1.11.1':
+    resolution: {integrity: sha512-2QygG2F76ZpMP2eMztiJvAiFMu71M9rDeU7vO/QKg5Css7MgM4frUOslFjhVjRhbGaCNPtz/S8M6y46/fFKVuQ==}
+    engines: {node: '>=22.0.0'}
+
+  '@azure/core-lro@2.7.2':
+    resolution: {integrity: sha512-0YIpccoX8m/k00O7mDDMdJpbr6mf1yWo2dfmxt5A8XVZVVMz2SSKaEbMCeJRvgQ0IaSlqhjT47p4hVIRRy90xw==}
+    engines: {node: '>=18.0.0'}
+
+  '@azure/core-paging@1.7.0':
+    resolution: {integrity: sha512-7GEAoIsaoBr6KELNRb8nypowCqvk8dnCHFCYg4XD4lOQGY2GqjQg5IhkRjyBFRO18CGSMq05PaNqSOE9GQro3g==}
+    engines: {node: '>=22.0.0'}
+
+  '@azure/core-process@1.0.0':
+    resolution: {integrity: sha512-/shnJ+ooO8WPxDhPEeI/2oRQuubn16gZ6CvlbpWbEswZfzwI9tI/sMAHmF3x1LuQ9yZYXfLW3TjzGMLEC5blKg==}
+    engines: {node: '>=22.0.0'}
+
+  '@azure/core-rest-pipeline@1.25.0':
+    resolution: {integrity: sha512-bMs8ekJLjX8wPV+9IPBges1SLPyuDtE9g5gLDWOpxzKcoOFQnpLGkbcT1tdw3FaAmDS1gnPmMmJ6y/T5B96kIA==}
+    engines: {node: '>=22.0.0'}
+
+  '@azure/core-tracing@1.4.0':
+    resolution: {integrity: sha512-eGwxD0AtncrxeBM4tG8R55Pc3rdX1hNW2WibJAgYpCVA6E93mvvVH+LcssoVjOBrSKWS55yEIHsk0X8ctHmfOQ==}
+    engines: {node: '>=22.0.0'}
+
+  '@azure/core-util@1.14.0':
+    resolution: {integrity: sha512-9n2pWK61veAuN0V20t9lOuoV4CFMdyAZ1ygZzvBGk/pBBJRib/PjL9PLXa/aI2CcPpyHfqVsxxqLCYl6uZlfDw==}
+    engines: {node: '>=22.0.0'}
+
+  '@azure/identity@4.13.3':
+    resolution: {integrity: sha512-zGQPtqvXPgSA8yfV2CkIQ1qirqk0p9AIVpC5uEkdXQYcKl07QHvyaGYRnZOk0AsQUmxNb4wfkcwY5di8Z5xa9A==}
+    engines: {node: '>=22.0.0'}
+
+  '@azure/keyvault-common@2.1.0':
+    resolution: {integrity: sha512-aCDidWuKY06LWQ4x7/8TIXK6iRqTaRWRL3t7T+LC+j1b07HtoIsOxP/tU90G4jCSBn5TAyUTCtA4MS/y5Hudaw==}
+    engines: {node: '>=20.0.0'}
+
+  '@azure/keyvault-keys@4.10.2':
+    resolution: {integrity: sha512-VmUSLbXRAbSzDD8grXHGPaknYs0SKr3yuf6U+d4XMpX4XuVYskNqbTTwXce0zR1LyxfTZm9rWEBcvs3vdYwCmQ==}
+    engines: {node: '>=20.0.0'}
+
+  '@azure/logger@1.4.0':
+    resolution: {integrity: sha512-rbAE25KUfjU/s3XHUdJgceoCP5dEOpMx85J04kF+QMdta73XkuG9JGHHinch+XIoKpBdqljin+KqURpJriSzLA==}
+    engines: {node: '>=22.0.0'}
+
+  '@azure/msal-browser@5.22.0':
+    resolution: {integrity: sha512-5kgu9xeEKgGc2JeidxAtU15NJTqiH/CMCRRQAJ4Rac56kB7KVg91vbNmn+z3RO1vNomPN69UvjKG9h1Pghx6dQ==}
+    engines: {node: '>=0.8.0'}
+
+  '@azure/msal-common@16.14.1':
+    resolution: {integrity: sha512-Or6xhPNyi4zHW25158yxBoyxuCqNSPa5YBVqfF1J5Ks4MJWBo/USXdp05DQIPu1Zli00YZu6t0+h6KvHJealxQ==}
+    engines: {node: '>=0.8.0'}
+
+  '@azure/msal-node@6.0.1':
+    resolution: {integrity: sha512-ixSO1Y/kCVRthRs+hSx/5qkwaunX1/RAePhlMN0wIpIQ4WEZ6AREGGnGd1AP0qspHVsAwzWQKGubpjh50JyJIQ==}
+    engines: {node: '>=20'}
 
   '@babel/code-frame@7.26.2':
     resolution: {integrity: sha512-RJlIHRueQgwWitWgF8OdFYGZX328Ax5BCemNGlqHfplnRT9ESi8JkFlvaVYbS+UubVY6dpv87Fs2u5M29iNFVQ==}
@@ -2009,6 +2080,9 @@ packages:
   '@jridgewell/trace-mapping@0.3.9':
     resolution: {integrity: sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ==}
 
+  '@js-joda/core@6.1.0':
+    resolution: {integrity: sha512-H8NTMRDJqad/leyv/D/A3kSOsf5/58Ydj4DJGDyaCWk9OU/zuZOLhndVffJgQjsgrn5GC0znHMHie7TfvPPG4w==}
+
   '@koa/cors@5.0.0':
     resolution: {integrity: sha512-x/iUDjcS90W69PryLDIMgFyV21YLTnG9zOpPXS7Bkt2b8AsY3zZsIpOLBkYr9fBcF3HbkKaER5hOBZLfpLgYNw==}
     engines: {node: '>= 14.0.0'}
@@ -2133,8 +2207,8 @@ packages:
   '@next/env@14.2.23':
     resolution: {integrity: sha512-CysUC9IO+2Bh0omJ3qrb47S8DtsTKbFidGm6ow4gXIG6reZybqxbkH2nhdEm1tC8SmgzDdpq3BIML0PWsmyUYA==}
 
-  '@next/eslint-plugin-next@16.3.4':
-    resolution: {integrity: sha512-szW9y2Aumu4z88YXfTzcFsgUAg2k64uzbtcO5L9f1AKS4w/GUKJcbFllRflROVyNPgJtGOnvNxiyp3v6b+prIA==}
+  '@next/eslint-plugin-next@16.3.5':
+    resolution: {integrity: sha512-PGfSeItHJ12DH8t+6sEbuMe59NE5rAhCfgk06QKTH2ne9VUL1JlaXdYXY3B8RaiF2SO50rDYvd39TulP6A6xZQ==}
 
   '@next/swc-darwin-arm64@14.2.23':
     resolution: {integrity: sha512-WhtEntt6NcbABA8ypEoFd3uzq5iAnrl9AnZt9dXdO+PZLACE32z3a3qA5OoV20JrbJfSJ6Sd6EqGZTrlRnGxQQ==}
@@ -4448,6 +4522,9 @@ packages:
   '@types/react@18.3.0':
     resolution: {integrity: sha512-DiUcKjzE6soLyln8NNZmyhcQjVv+WsUIFSqetMN0p8927OztKT4VTfFTqsbAi5oAGIcgOmOajlfBqyptDDjZRw==}
 
+  '@types/readable-stream@4.0.24':
+    resolution: {integrity: sha512-NRvUNC/JFGPJvqdAfEve8oginbM6V08u5NzLWpG8MwA2kTPOLnqk+wpwuPT+mp3aUsxyuT6m2gnrPuHYCruzEg==}
+
   '@types/remarkable@2.0.8':
     resolution: {integrity: sha512-eKXqPZfpQl1kOADjdKchHrp2gwn9qMnGXhH/AtZe0UrklzhGJkawJo/Y/D0AlWcdWoWamFNIum8+/nkAISQVGg==}
 
@@ -4710,6 +4787,10 @@ packages:
   '@typescript-eslint/visitor-keys@8.49.0':
     resolution: {integrity: sha512-LlKaciDe3GmZFphXIc79THF/YYBugZ7FS1pO581E/edlVVNbZKDy93evqmrfQ9/Y4uN0vVhX4iuchq26mK/iiA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+
+  '@typespec/ts-http-runtime@0.3.9':
+    resolution: {integrity: sha512-edSdeAqkdxBVzA1yL1LrLCml1YjyCVvPMtMqJpbF+6K609tHe8V6sQUzFQSGcYNhcuhOceZtjvN32+mpIth30A==}
+    engines: {node: '>=22.0.0'}
 
   '@ungap/structured-clone@1.2.1':
     resolution: {integrity: sha512-fEzPV3hSkSMltkw152tJKNARhOupqbH96MZWyRjNaYZOMIzbrTeQDG+MTc6Mr2pgzFQzFxAfmhGDNP5QK++2ZA==}
@@ -5326,6 +5407,9 @@ packages:
   bl@4.1.0:
     resolution: {integrity: sha512-1W07cM9gS6DcLperZfFSj+bWLtaPGSOHWhPiGzXmvVJbRLdG82sH/Kn8EtW1VqWVA54AKf2h5k5BbnIbwF3h6w==}
 
+  bl@6.1.6:
+    resolution: {integrity: sha512-jLsPgN/YSvPUg9UX0Kd73CXpm2Psg9FxMeCSXnk3WBO3CMT10JMwijubhGfHCnFu6TPn1ei3b975dxv7K2pWVg==}
+
   blakejs@1.2.1:
     resolution: {integrity: sha512-QXUSXI3QVc/gJME0dBpXrag1kbzOqCjCX8/b54ntNyW6sjtoqxqRk3LTmXzaJoh71zMsDCjM+47jS7XiwN/+fQ==}
 
@@ -5418,6 +5502,10 @@ packages:
 
   buffer@6.0.3:
     resolution: {integrity: sha512-FTiCpNxtwiZZHEZbcbTIcZjERVICn9yq/pDFkTl95/AxzD1naBctN7YO68riM/gLSDY7sdrMby8hofADYuuqOA==}
+
+  bundle-name@4.1.0:
+    resolution: {integrity: sha512-tjwM5exMg6BGRI+kNmTntNsvdZS1X8BFYS6tnJ2hdH0kVxM6/eVZ2xy+FqStSWvYmtfFMDLIxurorHwDKfDz5Q==}
+    engines: {node: '>=18'}
 
   busboy@1.6.0:
     resolution: {integrity: sha512-8SFQbg/0hQ9xy3UNTB0YEnsNBbWfhf7RtnzpL7TkBiTBRfrQ9Fxcnz7VJsleJpyp6rVLvXiuORqjlHi5q+PYuA==}
@@ -6013,6 +6101,14 @@ packages:
     resolution: {integrity: sha512-3sUqbMEc77XqpdNO7FRyRog+eW3ph+GYCbj+rK+uYyRMuwsVy0rMiVtPn+QJlKFvWP/1PYpapqYn0Me2knFn+A==}
     engines: {node: '>=0.10.0'}
 
+  default-browser-id@5.0.1:
+    resolution: {integrity: sha512-x1VCxdX4t+8wVfd1so/9w+vQ4vx7lKd2Qp5tDRutErwmR85OgmfX7RlLRMWafRMY7hbEiXIbudNrjOAPa/hL8Q==}
+    engines: {node: '>=18'}
+
+  default-browser@5.5.1:
+    resolution: {integrity: sha512-m1pAzaJgZ/gssEqlOhJkPJp8Xly7QyW6xcrkUa2KKcDeDSEMP7X8xipU3snUcfisTQx0w1AGae+9UtJSfVnXGw==}
+    engines: {node: '>=18'}
+
   default-require-extensions@3.0.1:
     resolution: {integrity: sha512-eXTJmRbm2TIt9MgWTsOH1wEuhew6XGZcMeGKCtLedIg/NCsg1iBePXkceTdK4Fii7pzmN9tGsZhKzZ4h7O/fxw==}
     engines: {node: '>=8'}
@@ -6027,6 +6123,10 @@ packages:
   define-data-property@1.1.4:
     resolution: {integrity: sha512-rBMvIzlpA8v6E+SJZoo++HAYqsLrkg7MSfIinMPFhmkorw7X+dOXVJQs+QT69zGkzMyfDnIMN2Wid1+NbL3T+A==}
     engines: {node: '>= 0.4'}
+
+  define-lazy-prop@3.0.0:
+    resolution: {integrity: sha512-N+MeXYoqr3pOgn8xfyRPREN7gHakLYjhsHhWGT3fWAiL4IkAt0iDw14QiiEm2bE30c5XX5q0FtAA3CK5f9/BUg==}
+    engines: {node: '>=12'}
 
   define-properties@1.2.1:
     resolution: {integrity: sha512-8QmQKqEASLd5nx0U1B1okLElbUuuttJ/AnYmRXbbbGDWh6uS208EjD4Xqq/I9wK7u0v6O08XhTWnt5XtEbR6Dg==}
@@ -6330,8 +6430,8 @@ packages:
     engines: {node: '>=6.0'}
     hasBin: true
 
-  eslint-config-next@16.3.4:
-    resolution: {integrity: sha512-35/8RM10huEL9vlr8hUZMERMENHBrnyHN3ZZkF9efSgzGaqK34jIqry44A956//zriUhUAUW0XSkcolhrryqAA==}
+  eslint-config-next@16.3.5:
+    resolution: {integrity: sha512-wPjq9MLQuWykHs8tsm2gH6OJThk6N27L8Te2JatlaGZ7jT1gtgGmJKukygL28xOlWsg5J1a1bGy/PvLyQC8OYA==}
     peerDependencies:
       eslint: '>=9.0.0'
       typescript: '>=3.3.1'
@@ -6478,8 +6578,8 @@ packages:
   eslint-plugin-security@1.7.1:
     resolution: {integrity: sha512-sMStceig8AFglhhT2LqlU5r+/fn9OwsA72O5bBuQVTssPCdQAOQzL+oMn/ZcpeUY6KcNfLJArgcrsSULNjYYdQ==}
 
-  eslint-plugin-turbo@2.10.12:
-    resolution: {integrity: sha512-QZ9u3sV3ky4bl3XUpsVG8Ehk11I0omsGV2K7dCDut6sGvaVErFvWbgd46oh5tsnLt/5i+KvuOWgKJneleMqk2Q==}
+  eslint-plugin-turbo@2.11.2:
+    resolution: {integrity: sha512-u5gsG7EUn7t+QxXfS0fOCdbwrn3vMeF3BscfjKWk5WIWTWvMLmFDV3Zka9PrkXyNgQqzW1PJE5CPcGNbEFsBFQ==}
     peerDependencies:
       eslint: '>6.6.0'
       turbo: '>2.0.0'
@@ -7454,6 +7554,11 @@ packages:
     engines: {node: '>=8'}
     hasBin: true
 
+  is-docker@3.0.0:
+    resolution: {integrity: sha512-eljcgEDlEns/7AXFosB5K/2nCM4P7FQPkGc/DWLy5rmFEWvZayGrik1d9/QIY5nJ4f9YsVvBkA6kJpHn9rISdQ==}
+    engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
+    hasBin: true
+
   is-es2016-keyword@1.0.0:
     resolution: {integrity: sha512-JtZWPUwjdbQ1LIo9OSZ8MdkWEve198ors27vH+RzUUvZXXZkzXCxFnlUhzWYxy5IexQSRiXVw9j2q/tHMmkVYQ==}
 
@@ -7488,6 +7593,11 @@ packages:
   is-glob@4.0.3:
     resolution: {integrity: sha512-xelSayHH36ZgE7ZWhli7pW34hNbNl8Ojv5KVmkJD4hBdD3th8Tfk9vYasLM+mXWOZhFkgZfxhLSnrwRr4elSSg==}
     engines: {node: '>=0.10.0'}
+
+  is-inside-container@1.0.0:
+    resolution: {integrity: sha512-KIYLCCJghfHZxqjYBE7rEy0OBuTd5xCHS7tHVgvCLkx7StIoaxwNW3hCALgEUjFfeRk+MG/Qxmp/vtETEF3tRA==}
+    engines: {node: '>=14.16'}
+    hasBin: true
 
   is-interactive@1.0.0:
     resolution: {integrity: sha512-2HvIEKRoqS62guEC+qBjpvRubdX910WCMuJTZ+I9yvqKU2/12eSL549HMwtabb4oupdj2sMP50k+XJfB/8JE6w==}
@@ -7646,6 +7756,10 @@ packages:
   is-windows@1.0.2:
     resolution: {integrity: sha512-eXK1UInq2bPmjyX6e3VHIzMLobc4J94i4AWn+Hpq3OU5KkrRC96OAcR3PRJ/pGu6m8TRnBHP9dkXQVsT/COVIA==}
     engines: {node: '>=0.10.0'}
+
+  is-wsl@3.1.1:
+    resolution: {integrity: sha512-e6rvdUCiQCAuumZslxRJWR/Doq4VpPR82kqclvcS0efgt430SlGIk05vdCN58+VrzgtIcfNODjozVielycD4Sw==}
+    engines: {node: '>=16'}
 
   isarray@1.0.0:
     resolution: {integrity: sha512-VLghIWNM6ELQzo7zwmcg0NmTVyWKYjvIeM83yjp0wRDTmUnrM678fQbcKBo6n2CJEF0szoG//ytg+TKla89ALQ==}
@@ -7813,6 +7927,10 @@ packages:
   jsontokens@4.0.1:
     resolution: {integrity: sha512-+MO415LEN6M+3FGsRz4wU20g7N2JA+2j9d9+pGaNJHviG4L8N0qzavGyENw6fJqsq9CcrHOIL6iWX5yeTZ86+Q==}
 
+  jsonwebtoken@9.0.3:
+    resolution: {integrity: sha512-MT/xP0CrubFRNLNKvxJ2BYfy53Zkm++5bX9dtuPbqAeQpTVe0MQTFhao8+Cp//EmJp244xt6Drw/GVEGCUj40g==}
+    engines: {node: '>=12', npm: '>=6'}
+
   jsx-ast-utils@3.3.5:
     resolution: {integrity: sha512-ZZow9HBI5O6EPgSJLUb8n2NKgmVWTwCvHGwFuJlMjvLFqlGG6pjirPhtdsseaLZjSibD8eegzmYpUZwoIlj2cQ==}
     engines: {node: '>=4.0'}
@@ -7958,9 +8076,21 @@ packages:
     resolution: {integrity: sha512-z+Uw/vLuy6gQe8cfaFWD7p0wVv8fJl3mbzXh33RS+0oW2wvUqiRXiQ69gLWSLpgB5/6sU+r6BlQR0MBILadqTQ==}
     deprecated: This package is deprecated. Use the optional chaining (?.) operator instead.
 
+  lodash.includes@4.3.0:
+    resolution: {integrity: sha512-W3Bx6mdkRTGtlJISOvVD/lbqjTlPPUDTMnlXZFnVwi9NKJ6tiAk6LVdlhZMm17VZisqhKcgzpO5Wz91PCt5b0w==}
+
+  lodash.isboolean@3.0.3:
+    resolution: {integrity: sha512-Bz5mupy2SVbPHURB98VAcw+aHh4vRV5IPNhILUCsOzRmsTmSQ17jIuqopAentWoehktxGd9e/hbIXq980/1QJg==}
+
   lodash.isequal@4.5.0:
     resolution: {integrity: sha512-pDo3lu8Jhfjqls6GkMgpahsF9kCyayhgykjyLMNFTKWrpVdAQtYyB4muAMWozBB4ig/dtWAmsMxLEI8wuz+DYQ==}
     deprecated: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+
+  lodash.isinteger@4.0.4:
+    resolution: {integrity: sha512-DBwtEWN2caHQ9/imiNeEA5ys1JoRtRfY3d7V9wkqtbycnAmTvRRmbHKDV4a0EYc678/dia0jrte4tjYwVBaZUA==}
+
+  lodash.isnumber@3.0.3:
+    resolution: {integrity: sha512-QYqzpfwO3/CWf3XP+Z+tkQsfaLL/EnUlXWVkIk5FUPc4sBdTehEqZONuyRt2P67PXAk+NXmTBcc97zw9t1FQrw==}
 
   lodash.isplainobject@4.0.6:
     resolution: {integrity: sha512-oSXzaWypCMHkPC3NvBEaPHf0KsA5mvPrOPgQWDsbg8n7orZ290M0BmC/jgRZ4vcJ6DTAhjrsSYgdsW/F+MFOBA==}
@@ -7976,6 +8106,9 @@ packages:
 
   lodash.mergewith@4.6.2:
     resolution: {integrity: sha512-GK3g5RPZWTRSeLSpgP8Xhra+pnjBC56q9FZYe1d5RN3TJ35dbkGy3YqBSMbyCrlbi+CM9Z3Jk5yTL7RCsqboyQ==}
+
+  lodash.once@4.1.1:
+    resolution: {integrity: sha512-Sb487aTOCr9drQVL8pIxOzVhafOjZN9UU54hiN8PU3uAiSV7lx1yYNpbNmex2PK6dSJoNTSJUUswT651yww3Mg==}
 
   lodash.snakecase@4.1.1:
     resolution: {integrity: sha512-QZ1d4xoBHYUeuouhEq3lk3Uq7ldgyFXGBhg04+oRLnIz8o9T65Eh+8YdroUwn846zchkA9yDsDl5CVVaV2nqYw==}
@@ -8276,6 +8409,9 @@ packages:
     engines: {node: ^18 || >=20}
     hasBin: true
 
+  native-duplexpair@1.0.0:
+    resolution: {integrity: sha512-E7QQoM+3jvNtlmyfqRZ0/U75VFgCls+fSkbml2MpgWkWyz3ox8Y58gNhfuziuQYGNNQAbFZJQck55LHCnCK6CA==}
+
   natural-compare@1.4.0:
     resolution: {integrity: sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw==}
 
@@ -8558,6 +8694,10 @@ packages:
 
   only@0.0.2:
     resolution: {integrity: sha512-Fvw+Jemq5fjjyWz6CpKx6w9s7xxqo3+JCyM0WXWeCSOboZ8ABkyvP8ID4CZuChA/wxSx+XSJmdOm8rGVyJ1hdQ==}
+
+  open@10.2.0:
+    resolution: {integrity: sha512-YgBpdJHPyQ2UE5x+hlSXcnejzAvD0b22U2OuAP+8OnlJT+PjWPxtgmGqKKc+RgTM63U9gN0YzrYc71R2WT/hTA==}
+    engines: {node: '>=18'}
 
   opener@1.5.2:
     resolution: {integrity: sha512-ur5UIdyw5Y7yEj9wLzhqXiy6GZ3Mwx0yGI+5sMn2r0N0v3cKJvUmFH5yPP+WXh9e0xfyzyJX95D8l088DNFj7A==}
@@ -9658,6 +9798,10 @@ packages:
   rrweb-cssom@0.8.0:
     resolution: {integrity: sha512-guoltQEx+9aMf2gDZ0s62EcV8lsXR+0w8915TC3ITdn2YueuNjdAYh/levpU9nFaoChh9RUS5ZdQMrKfVEN9tw==}
 
+  run-applescript@7.1.0:
+    resolution: {integrity: sha512-DPe5pVFaAsinSaV6QjQ6gdiedWDcRCbUuiQfQa2wmWV7+xC9bGulGI8+TdRmoFkAPaBXk8CrAbnlY2ISniJ47Q==}
+    engines: {node: '>=18'}
+
   run-async@2.4.1:
     resolution: {integrity: sha512-tvVnVv01b8c1RrA6Ep7JkStj85Guv/YrMcwqYQnwjsAS2cTmmPGBBjAjpCW7RrSodNSoE2/qg9O4bceNvUuDgQ==}
     engines: {node: '>=0.12.0'}
@@ -10201,6 +10345,10 @@ packages:
   tapable@2.3.0:
     resolution: {integrity: sha512-g9ljZiwki/LfxmQADO3dEY1CbpmXT5Hm2fJ+QaGKwSXUylMybePR7/67YW7jOrrvjEgL1Fmz5kzyAjWVWLlucg==}
     engines: {node: '>=6'}
+
+  tedious@20.0.0:
+    resolution: {integrity: sha512-bTR0aou0Ghucf0ytvZUJjnKHGKDV8tT57jPYtEkSpfTWFe++4uR1wxJLQ4mh5wlSvAYXzmgBxbI0vaE56qigXw==}
+    engines: {node: '>=22'}
 
   temp-dir@3.0.0:
     resolution: {integrity: sha512-nHc6S/bwIilKHNRgK/3jlhDoIHcp45YgyiwcAk46Tr0LfEqGBVpmiAyuiuxeVE44m3mXnEeVhaipLOEWmH+Njw==}
@@ -11128,6 +11276,10 @@ packages:
       utf-8-validate:
         optional: true
 
+  wsl-utils@0.1.0:
+    resolution: {integrity: sha512-h3Fbisa2nKGPxCpm89Hk33lBLsnaGBvctQopaBSOW/uIs6FTe1ATyAnKFJrzVs9vpGdsTe73WF3V4lIsk4Gacw==}
+    engines: {node: '>=18'}
+
   xml-name-validator@5.0.0:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
     engines: {node: '>=18'}
@@ -11293,6 +11445,144 @@ snapshots:
       '@csstools/css-parser-algorithms': 3.0.4(@csstools/css-tokenizer@3.0.3)
       '@csstools/css-tokenizer': 3.0.3
       lru-cache: 10.4.3
+
+  '@azure-rest/core-client@2.9.0':
+    dependencies:
+      '@azure/abort-controller': 2.2.0
+      '@azure/core-auth': 1.11.0
+      '@azure/core-rest-pipeline': 1.25.0
+      '@azure/core-tracing': 1.4.0
+      '@typespec/ts-http-runtime': 0.3.9
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - supports-color
+
+  '@azure/abort-controller@2.2.0':
+    dependencies:
+      tslib: 2.8.1
+
+  '@azure/core-auth@1.11.0':
+    dependencies:
+      '@azure/abort-controller': 2.2.0
+      '@azure/core-util': 1.14.0
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - supports-color
+
+  '@azure/core-client@1.11.1':
+    dependencies:
+      '@azure/abort-controller': 2.2.0
+      '@azure/core-auth': 1.11.0
+      '@azure/core-rest-pipeline': 1.25.0
+      '@azure/core-tracing': 1.4.0
+      '@azure/core-util': 1.14.0
+      '@azure/logger': 1.4.0
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - supports-color
+
+  '@azure/core-lro@2.7.2':
+    dependencies:
+      '@azure/abort-controller': 2.2.0
+      '@azure/core-util': 1.14.0
+      '@azure/logger': 1.4.0
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - supports-color
+
+  '@azure/core-paging@1.7.0':
+    dependencies:
+      tslib: 2.8.1
+
+  '@azure/core-process@1.0.0': {}
+
+  '@azure/core-rest-pipeline@1.25.0':
+    dependencies:
+      '@azure/abort-controller': 2.2.0
+      '@azure/core-auth': 1.11.0
+      '@azure/core-tracing': 1.4.0
+      '@azure/core-util': 1.14.0
+      '@azure/logger': 1.4.0
+      '@typespec/ts-http-runtime': 0.3.9
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - supports-color
+
+  '@azure/core-tracing@1.4.0':
+    dependencies:
+      tslib: 2.8.1
+
+  '@azure/core-util@1.14.0':
+    dependencies:
+      '@azure/abort-controller': 2.2.0
+      '@typespec/ts-http-runtime': 0.3.9
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - supports-color
+
+  '@azure/identity@4.13.3':
+    dependencies:
+      '@azure/abort-controller': 2.2.0
+      '@azure/core-auth': 1.11.0
+      '@azure/core-client': 1.11.1
+      '@azure/core-process': 1.0.0
+      '@azure/core-rest-pipeline': 1.25.0
+      '@azure/core-tracing': 1.4.0
+      '@azure/core-util': 1.14.0
+      '@azure/logger': 1.4.0
+      '@azure/msal-browser': 5.22.0
+      '@azure/msal-node': 6.0.1
+      open: 10.2.0
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - supports-color
+
+  '@azure/keyvault-common@2.1.0':
+    dependencies:
+      '@azure-rest/core-client': 2.9.0
+      '@azure/abort-controller': 2.2.0
+      '@azure/core-auth': 1.11.0
+      '@azure/core-rest-pipeline': 1.25.0
+      '@azure/core-tracing': 1.4.0
+      '@azure/core-util': 1.14.0
+      '@azure/logger': 1.4.0
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - supports-color
+
+  '@azure/keyvault-keys@4.10.2':
+    dependencies:
+      '@azure-rest/core-client': 2.9.0
+      '@azure/abort-controller': 2.2.0
+      '@azure/core-auth': 1.11.0
+      '@azure/core-lro': 2.7.2
+      '@azure/core-paging': 1.7.0
+      '@azure/core-rest-pipeline': 1.25.0
+      '@azure/core-tracing': 1.4.0
+      '@azure/core-util': 1.14.0
+      '@azure/keyvault-common': 2.1.0
+      '@azure/logger': 1.4.0
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - supports-color
+
+  '@azure/logger@1.4.0':
+    dependencies:
+      '@typespec/ts-http-runtime': 0.3.9
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - supports-color
+
+  '@azure/msal-browser@5.22.0':
+    dependencies:
+      '@azure/msal-common': 16.14.1
+
+  '@azure/msal-common@16.14.1': {}
+
+  '@azure/msal-node@6.0.1':
+    dependencies:
+      '@azure/msal-common': 16.14.1
+      jsonwebtoken: 9.0.3
 
   '@babel/code-frame@7.26.2':
     dependencies:
@@ -12887,6 +13177,8 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.0
 
+  '@js-joda/core@6.1.0': {}
+
   '@koa/cors@5.0.0':
     dependencies:
       vary: 1.1.2
@@ -13087,7 +13379,7 @@ snapshots:
 
   '@next/env@14.2.23': {}
 
-  '@next/eslint-plugin-next@16.3.4(eslint@8.57.1)':
+  '@next/eslint-plugin-next@16.3.5(eslint@8.57.1)':
     dependencies:
       '@eslint-community/eslint-utils': 4.9.1(eslint@8.57.1)
       fast-glob: 3.3.1
@@ -14530,17 +14822,17 @@ snapshots:
 
   '@radix-ui/rect@1.1.0': {}
 
-  '@reown/appkit-adapter-bitcoin@1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)':
+  '@reown/appkit-adapter-bitcoin@1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)':
     dependencies:
       '@exodus/bitcoin-wallet-standard': 0.0.0
-      '@reown/appkit': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)
+      '@reown/appkit': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)
       '@reown/appkit-common': 1.8.23(typescript@5.3.3)(zod@3.25.76)
-      '@reown/appkit-controllers': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
+      '@reown/appkit-controllers': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
       '@reown/appkit-polyfills': 1.8.23
-      '@reown/appkit-utils': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
+      '@reown/appkit-utils': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
       '@wallet-standard/app': 1.1.0
       '@wallet-standard/base': 1.1.0
-      '@walletconnect/universal-provider': 2.23.7(typescript@5.3.3)(zod@3.25.76)
+      '@walletconnect/universal-provider': 2.23.7(@azure/identity@4.13.3)(typescript@5.3.3)(zod@3.25.76)
       bitcoinjs-lib: 6.1.7
       sats-connect: 3.5.0(typescript@5.3.3)
     transitivePeerDependencies:
@@ -14580,17 +14872,17 @@ snapshots:
       - valtio
       - zod
 
-  '@reown/appkit-adapter-ethers@1.8.23(@ethersproject/sha2@5.8.0)(@types/react@18.3.0)(ethers@6.17.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)':
+  '@reown/appkit-adapter-ethers@1.8.23(@azure/identity@4.13.3)(@ethersproject/sha2@5.8.0)(@types/react@18.3.0)(ethers@6.17.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)':
     dependencies:
       '@ethersproject/sha2': 5.8.0
-      '@reown/appkit': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)
+      '@reown/appkit': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)
       '@reown/appkit-common': 1.8.23(typescript@5.3.3)(zod@3.25.76)
-      '@reown/appkit-controllers': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
+      '@reown/appkit-controllers': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
       '@reown/appkit-polyfills': 1.8.23
-      '@reown/appkit-scaffold-ui': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
-      '@reown/appkit-utils': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
+      '@reown/appkit-scaffold-ui': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
+      '@reown/appkit-utils': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
       '@reown/appkit-wallet': 1.8.23(typescript@5.3.3)
-      '@walletconnect/universal-provider': 2.23.7(typescript@5.3.3)(zod@3.25.76)
+      '@walletconnect/universal-provider': 2.23.7(@azure/identity@4.13.3)(typescript@5.3.3)(zod@3.25.76)
       ethers: 6.17.0
       valtio: 2.1.7(@types/react@18.3.0)(react@18.3.0)
     transitivePeerDependencies:
@@ -14651,11 +14943,11 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@reown/appkit-controllers@1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)':
+  '@reown/appkit-controllers@1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)':
     dependencies:
       '@reown/appkit-common': 1.8.23(typescript@5.3.3)(zod@3.25.76)
       '@reown/appkit-wallet': 1.8.23(typescript@5.3.3)
-      '@walletconnect/universal-provider': 2.23.7(typescript@5.3.3)(zod@3.25.76)
+      '@walletconnect/universal-provider': 2.23.7(@azure/identity@4.13.3)(typescript@5.3.3)(zod@3.25.76)
       valtio: 2.1.7(@types/react@18.3.0)(react@18.3.0)
       viem: 2.55.10(typescript@5.3.3)(zod@3.25.76)
     transitivePeerDependencies:
@@ -14686,12 +14978,12 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@reown/appkit-pay@1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)':
+  '@reown/appkit-pay@1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)':
     dependencies:
       '@reown/appkit-common': 1.8.23(typescript@5.3.3)(zod@3.25.76)
-      '@reown/appkit-controllers': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
-      '@reown/appkit-ui': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
-      '@reown/appkit-utils': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
+      '@reown/appkit-controllers': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
+      '@reown/appkit-ui': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
+      '@reown/appkit-utils': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
       lit: 3.3.0
       valtio: 2.1.7(@types/react@18.3.0)(react@18.3.0)
     transitivePeerDependencies:
@@ -14734,13 +15026,13 @@ snapshots:
     dependencies:
       buffer: 6.0.3
 
-  '@reown/appkit-scaffold-ui@1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)':
+  '@reown/appkit-scaffold-ui@1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)':
     dependencies:
       '@reown/appkit-common': 1.8.23(typescript@5.3.3)(zod@3.25.76)
-      '@reown/appkit-controllers': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
-      '@reown/appkit-pay': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)
-      '@reown/appkit-ui': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
-      '@reown/appkit-utils': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
+      '@reown/appkit-controllers': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
+      '@reown/appkit-pay': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)
+      '@reown/appkit-ui': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
+      '@reown/appkit-utils': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
       '@reown/appkit-wallet': 1.8.23(typescript@5.3.3)
       lit: 3.3.0
     transitivePeerDependencies:
@@ -14780,11 +15072,11 @@ snapshots:
       - valtio
       - zod
 
-  '@reown/appkit-ui@1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)':
+  '@reown/appkit-ui@1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)':
     dependencies:
       '@phosphor-icons/webcomponents': 2.1.5
       '@reown/appkit-common': 1.8.23(typescript@5.3.3)(zod@3.25.76)
-      '@reown/appkit-controllers': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
+      '@reown/appkit-controllers': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
       '@reown/appkit-wallet': 1.8.23(typescript@5.3.3)
       lit: 3.3.0
       qrcode: 1.5.3
@@ -14816,15 +15108,15 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@reown/appkit-utils@1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)':
+  '@reown/appkit-utils@1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)':
     dependencies:
       '@reown/appkit-common': 1.8.23(typescript@5.3.3)(zod@3.25.76)
-      '@reown/appkit-controllers': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
+      '@reown/appkit-controllers': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
       '@reown/appkit-polyfills': 1.8.23
       '@reown/appkit-wallet': 1.8.23(typescript@5.3.3)
       '@wallet-standard/wallet': 1.1.0
       '@walletconnect/logger': 3.0.2
-      '@walletconnect/universal-provider': 2.23.7(typescript@5.3.3)(zod@3.25.76)
+      '@walletconnect/universal-provider': 2.23.7(@azure/identity@4.13.3)(typescript@5.3.3)(zod@3.25.76)
       valtio: 2.1.7(@types/react@18.3.0)(react@18.3.0)
       viem: 2.55.10(typescript@5.3.3)(zod@3.25.76)
     optionalDependencies:
@@ -14879,17 +15171,17 @@ snapshots:
       - typescript
       - utf-8-validate
 
-  '@reown/appkit@1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)':
+  '@reown/appkit@1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)':
     dependencies:
       '@reown/appkit-common': 1.8.23(typescript@5.3.3)(zod@3.25.76)
-      '@reown/appkit-controllers': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
-      '@reown/appkit-pay': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)
+      '@reown/appkit-controllers': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
+      '@reown/appkit-pay': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(zod@3.25.76)
       '@reown/appkit-polyfills': 1.8.23
-      '@reown/appkit-scaffold-ui': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
-      '@reown/appkit-ui': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
-      '@reown/appkit-utils': 1.8.23(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
+      '@reown/appkit-scaffold-ui': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
+      '@reown/appkit-ui': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(zod@3.25.76)
+      '@reown/appkit-utils': 1.8.23(@azure/identity@4.13.3)(@types/react@18.3.0)(react@18.3.0)(typescript@5.3.3)(use-sync-external-store@1.4.0(react@18.3.0))(valtio@2.1.7(@types/react@18.3.0)(react@18.3.0))(zod@3.25.76)
       '@reown/appkit-wallet': 1.8.23(typescript@5.3.3)
-      '@walletconnect/universal-provider': 2.23.7(typescript@5.3.3)(zod@3.25.76)
+      '@walletconnect/universal-provider': 2.23.7(@azure/identity@4.13.3)(typescript@5.3.3)(zod@3.25.76)
       bs58: 6.0.0
       semver: 7.7.2
       valtio: 2.1.7(@types/react@18.3.0)(react@18.3.0)
@@ -16169,6 +16461,10 @@ snapshots:
       '@types/prop-types': 15.7.14
       csstype: 3.1.3
 
+  '@types/readable-stream@4.0.24':
+    dependencies:
+      '@types/node': 20.14.10
+
   '@types/remarkable@2.0.8': {}
 
   '@types/sanitize-html@2.11.0':
@@ -16577,6 +16873,14 @@ snapshots:
       '@typescript-eslint/types': 8.49.0
       eslint-visitor-keys: 4.2.1
 
+  '@typespec/ts-http-runtime@0.3.9':
+    dependencies:
+      http-proxy-agent: 7.0.2
+      https-proxy-agent: 7.0.6
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - supports-color
+
   '@ungap/structured-clone@1.2.1': {}
 
   '@vsc.eco/crosschain-core@0.0.3': {}
@@ -16610,21 +16914,21 @@ snapshots:
     dependencies:
       '@wallet-standard/base': 1.1.1
 
-  '@walletconnect/core@2.23.7(typescript@5.3.3)(zod@3.25.76)':
+  '@walletconnect/core@2.23.7(@azure/identity@4.13.3)(typescript@5.3.3)(zod@3.25.76)':
     dependencies:
       '@walletconnect/heartbeat': 1.2.2
       '@walletconnect/jsonrpc-provider': 1.0.14
       '@walletconnect/jsonrpc-types': 1.0.4
       '@walletconnect/jsonrpc-utils': 1.0.8
       '@walletconnect/jsonrpc-ws-connection': 1.0.16
-      '@walletconnect/keyvaluestorage': 1.1.1
+      '@walletconnect/keyvaluestorage': 1.1.1(@azure/identity@4.13.3)
       '@walletconnect/logger': 3.0.2
       '@walletconnect/relay-api': 1.0.11
       '@walletconnect/relay-auth': 1.1.0
       '@walletconnect/safe-json': 1.0.2
       '@walletconnect/time': 1.0.2
-      '@walletconnect/types': 2.23.7
-      '@walletconnect/utils': 2.23.7(typescript@5.3.3)(zod@3.25.76)
+      '@walletconnect/types': 2.23.7(@azure/identity@4.13.3)
+      '@walletconnect/utils': 2.23.7(@azure/identity@4.13.3)(typescript@5.3.3)(zod@3.25.76)
       '@walletconnect/window-getters': 1.0.1
       es-toolkit: 1.44.0
       events: 3.3.0
@@ -16705,11 +17009,11 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@walletconnect/keyvaluestorage@1.1.1':
+  '@walletconnect/keyvaluestorage@1.1.1(@azure/identity@4.13.3)':
     dependencies:
       '@walletconnect/safe-json': 1.0.2
       idb-keyval: 6.3.0
-      unstorage: 1.17.5(idb-keyval@6.3.0)
+      unstorage: 1.17.5(@azure/identity@4.13.3)(idb-keyval@6.3.0)
     transitivePeerDependencies:
       - '@azure/app-configuration'
       - '@azure/cosmos'
@@ -16751,16 +17055,16 @@ snapshots:
     dependencies:
       tslib: 1.14.1
 
-  '@walletconnect/sign-client@2.23.7(typescript@5.3.3)(zod@3.25.76)':
+  '@walletconnect/sign-client@2.23.7(@azure/identity@4.13.3)(typescript@5.3.3)(zod@3.25.76)':
     dependencies:
-      '@walletconnect/core': 2.23.7(typescript@5.3.3)(zod@3.25.76)
+      '@walletconnect/core': 2.23.7(@azure/identity@4.13.3)(typescript@5.3.3)(zod@3.25.76)
       '@walletconnect/events': 1.0.1
       '@walletconnect/heartbeat': 1.2.2
       '@walletconnect/jsonrpc-utils': 1.0.8
       '@walletconnect/logger': 3.0.2
       '@walletconnect/time': 1.0.2
-      '@walletconnect/types': 2.23.7
-      '@walletconnect/utils': 2.23.7(typescript@5.3.3)(zod@3.25.76)
+      '@walletconnect/types': 2.23.7(@azure/identity@4.13.3)
+      '@walletconnect/utils': 2.23.7(@azure/identity@4.13.3)(typescript@5.3.3)(zod@3.25.76)
       events: 3.3.0
     transitivePeerDependencies:
       - '@azure/app-configuration'
@@ -16791,12 +17095,12 @@ snapshots:
     dependencies:
       tslib: 1.14.1
 
-  '@walletconnect/types@2.23.7':
+  '@walletconnect/types@2.23.7(@azure/identity@4.13.3)':
     dependencies:
       '@walletconnect/events': 1.0.1
       '@walletconnect/heartbeat': 1.2.2
       '@walletconnect/jsonrpc-types': 1.0.4
-      '@walletconnect/keyvaluestorage': 1.1.1
+      '@walletconnect/keyvaluestorage': 1.1.1(@azure/identity@4.13.3)
       '@walletconnect/logger': 3.0.2
       events: 3.3.0
     transitivePeerDependencies:
@@ -16820,18 +17124,18 @@ snapshots:
       - ioredis
       - uploadthing
 
-  '@walletconnect/universal-provider@2.23.7(typescript@5.3.3)(zod@3.25.76)':
+  '@walletconnect/universal-provider@2.23.7(@azure/identity@4.13.3)(typescript@5.3.3)(zod@3.25.76)':
     dependencies:
       '@walletconnect/events': 1.0.1
       '@walletconnect/jsonrpc-http-connection': 1.0.8
       '@walletconnect/jsonrpc-provider': 1.0.14
       '@walletconnect/jsonrpc-types': 1.0.4
       '@walletconnect/jsonrpc-utils': 1.0.8
-      '@walletconnect/keyvaluestorage': 1.1.1
+      '@walletconnect/keyvaluestorage': 1.1.1(@azure/identity@4.13.3)
       '@walletconnect/logger': 3.0.2
-      '@walletconnect/sign-client': 2.23.7(typescript@5.3.3)(zod@3.25.76)
-      '@walletconnect/types': 2.23.7
-      '@walletconnect/utils': 2.23.7(typescript@5.3.3)(zod@3.25.76)
+      '@walletconnect/sign-client': 2.23.7(@azure/identity@4.13.3)(typescript@5.3.3)(zod@3.25.76)
+      '@walletconnect/types': 2.23.7(@azure/identity@4.13.3)
+      '@walletconnect/utils': 2.23.7(@azure/identity@4.13.3)(typescript@5.3.3)(zod@3.25.76)
       es-toolkit: 1.44.0
       events: 3.3.0
     transitivePeerDependencies:
@@ -16860,7 +17164,7 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@walletconnect/utils@2.23.7(typescript@5.3.3)(zod@3.25.76)':
+  '@walletconnect/utils@2.23.7(@azure/identity@4.13.3)(typescript@5.3.3)(zod@3.25.76)':
     dependencies:
       '@msgpack/msgpack': 3.1.3
       '@noble/ciphers': 1.3.0
@@ -16868,13 +17172,13 @@ snapshots:
       '@noble/hashes': 1.8.0
       '@scure/base': 1.2.6
       '@walletconnect/jsonrpc-utils': 1.0.8
-      '@walletconnect/keyvaluestorage': 1.1.1
+      '@walletconnect/keyvaluestorage': 1.1.1(@azure/identity@4.13.3)
       '@walletconnect/logger': 3.0.2
       '@walletconnect/relay-api': 1.0.11
       '@walletconnect/relay-auth': 1.1.0
       '@walletconnect/safe-json': 1.0.2
       '@walletconnect/time': 1.0.2
-      '@walletconnect/types': 2.23.7
+      '@walletconnect/types': 2.23.7(@azure/identity@4.13.3)
       '@walletconnect/window-getters': 1.0.1
       '@walletconnect/window-metadata': 1.0.1
       blakejs: 1.2.1
@@ -17487,6 +17791,13 @@ snapshots:
       inherits: 2.0.4
       readable-stream: 3.6.2
 
+  bl@6.1.6:
+    dependencies:
+      '@types/readable-stream': 4.0.24
+      buffer: 6.0.3
+      inherits: 2.0.4
+      readable-stream: 4.7.0
+
   blakejs@1.2.1: {}
 
   bn.js@4.12.5: {}
@@ -17607,6 +17918,10 @@ snapshots:
     dependencies:
       base64-js: 1.5.1
       ieee754: 1.2.1
+
+  bundle-name@4.1.0:
+    dependencies:
+      run-applescript: 7.1.0
 
   busboy@1.6.0:
     dependencies:
@@ -18206,6 +18521,13 @@ snapshots:
 
   deepmerge@4.3.1: {}
 
+  default-browser-id@5.0.1: {}
+
+  default-browser@5.5.1:
+    dependencies:
+      bundle-name: 4.1.0
+      default-browser-id: 5.0.1
+
   default-require-extensions@3.0.1:
     dependencies:
       strip-bom: 4.0.0
@@ -18221,6 +18543,8 @@ snapshots:
       es-define-property: 1.0.1
       es-errors: 1.3.0
       gopd: 1.2.0
+
+  define-lazy-prop@3.0.0: {}
 
   define-properties@1.2.1:
     dependencies:
@@ -18569,9 +18893,9 @@ snapshots:
     optionalDependencies:
       source-map: 0.6.1
 
-  eslint-config-next@16.3.4(@typescript-eslint/parser@8.49.0(eslint@8.57.1)(typescript@5.5.3))(eslint@8.57.1)(typescript@5.5.3):
+  eslint-config-next@16.3.5(@typescript-eslint/parser@8.49.0(eslint@8.57.1)(typescript@5.5.3))(eslint@8.57.1)(typescript@5.5.3):
     dependencies:
-      '@next/eslint-plugin-next': 16.3.4(eslint@8.57.1)
+      '@next/eslint-plugin-next': 16.3.5(eslint@8.57.1)
       eslint: 8.57.1
       eslint-import-resolver-node: 0.3.9
       eslint-import-resolver-typescript: 3.7.0(eslint-plugin-import@2.32.0)(eslint@8.57.1)
@@ -18803,7 +19127,7 @@ snapshots:
     dependencies:
       safe-regex: 2.1.1
 
-  eslint-plugin-turbo@2.10.12(eslint@8.57.1)(turbo@2.3.3):
+  eslint-plugin-turbo@2.11.2(eslint@8.57.1)(turbo@2.3.3):
     dependencies:
       dotenv: 16.0.3
       eslint: 8.57.1
@@ -20068,6 +20392,8 @@ snapshots:
 
   is-docker@2.2.1: {}
 
+  is-docker@3.0.0: {}
+
   is-es2016-keyword@1.0.0: {}
 
   is-extglob@1.0.0: {}
@@ -20096,6 +20422,10 @@ snapshots:
   is-glob@4.0.3:
     dependencies:
       is-extglob: 2.1.1
+
+  is-inside-container@1.0.0:
+    dependencies:
+      is-docker: 3.0.0
 
   is-interactive@1.0.0: {}
 
@@ -20217,6 +20547,10 @@ snapshots:
   is-what@4.1.16: {}
 
   is-windows@1.0.2: {}
+
+  is-wsl@3.1.1:
+    dependencies:
+      is-inside-container: 1.0.0
 
   isarray@1.0.0: {}
 
@@ -20403,6 +20737,19 @@ snapshots:
       '@noble/secp256k1': 1.7.2
       base64-js: 1.5.1
 
+  jsonwebtoken@9.0.3:
+    dependencies:
+      jws: 4.0.1
+      lodash.includes: 4.3.0
+      lodash.isboolean: 3.0.3
+      lodash.isinteger: 4.0.4
+      lodash.isnumber: 3.0.3
+      lodash.isplainobject: 4.0.6
+      lodash.isstring: 4.0.1
+      lodash.once: 4.1.1
+      ms: 2.1.3
+      semver: 7.7.2
+
   jsx-ast-utils@3.3.5:
     dependencies:
       array-includes: 3.1.9
@@ -20575,7 +20922,15 @@ snapshots:
 
   lodash.get@4.4.2: {}
 
+  lodash.includes@4.3.0: {}
+
+  lodash.isboolean@3.0.3: {}
+
   lodash.isequal@4.5.0: {}
+
+  lodash.isinteger@4.0.4: {}
+
+  lodash.isnumber@3.0.3: {}
 
   lodash.isplainobject@4.0.6: {}
 
@@ -20586,6 +20941,8 @@ snapshots:
   lodash.merge@4.6.2: {}
 
   lodash.mergewith@4.6.2: {}
+
+  lodash.once@4.1.1: {}
 
   lodash.snakecase@4.1.1: {}
 
@@ -20849,6 +21206,8 @@ snapshots:
 
   nanoid@5.0.9: {}
 
+  native-duplexpair@1.0.0: {}
+
   natural-compare@1.4.0: {}
 
   negotiator@0.6.3: {}
@@ -21103,6 +21462,13 @@ snapshots:
       mimic-fn: 4.0.0
 
   only@0.0.2: {}
+
+  open@10.2.0:
+    dependencies:
+      default-browser: 5.5.1
+      define-lazy-prop: 3.0.0
+      is-inside-container: 1.0.0
+      wsl-utils: 0.1.0
 
   opener@1.5.2: {}
 
@@ -22196,6 +22562,8 @@ snapshots:
 
   rrweb-cssom@0.8.0: {}
 
+  run-applescript@7.1.0: {}
+
   run-async@2.4.1: {}
 
   run-parallel@1.2.0:
@@ -22880,6 +23248,21 @@ snapshots:
 
   tapable@2.3.0: {}
 
+  tedious@20.0.0:
+    dependencies:
+      '@azure/core-auth': 1.11.0
+      '@azure/identity': 4.13.3
+      '@azure/keyvault-keys': 4.10.2
+      '@js-joda/core': 6.1.0
+      '@types/node': 22.7.5
+      bl: 6.1.6
+      iconv-lite: 0.7.2
+      js-md4: 0.3.2
+      native-duplexpair: 1.0.0
+      sprintf-js: 1.1.3
+    transitivePeerDependencies:
+      - supports-color
+
   temp-dir@3.0.0: {}
 
   tempy@3.1.0:
@@ -23524,7 +23907,7 @@ snapshots:
 
   unquote@1.1.1: {}
 
-  unstorage@1.17.5(idb-keyval@6.3.0):
+  unstorage@1.17.5(@azure/identity@4.13.3)(idb-keyval@6.3.0):
     dependencies:
       anymatch: 3.1.3
       chokidar: 5.0.0
@@ -23535,6 +23918,7 @@ snapshots:
       ofetch: 1.5.1
       ufo: 1.6.4
     optionalDependencies:
+      '@azure/identity': 4.13.3
       idb-keyval: 6.3.0
 
   update-browserslist-db@1.1.2(browserslist@4.24.4):
@@ -23959,6 +24343,10 @@ snapshots:
   ws@8.18.0: {}
 
   ws@8.21.0: {}
+
+  wsl-utils@0.1.0:
+    dependencies:
+      is-wsl: 3.1.1
 
   xml-name-validator@5.0.0: {}
 

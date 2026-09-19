@@ -34,6 +34,7 @@ const LITE_LABELS = {
 const LABELS = {
   yourTokens: 'Your tokens',
   creatorStudio: 'Creator Studio',
+  inquisition: 'Inquisition mode',
   settings: 'Settings'
 };
 
@@ -202,6 +203,19 @@ const AccountMenuContent = ({ user }: { user: User }) => {
       <DropdownMenuSeparator className="-mx-2 my-1.5 h-px bg-line-9" />
 
       <DropdownMenuGroup className="flex flex-col gap-0.5">
+        {/* ★ INQUISITION MODE LIVES HERE, NOT IN THE HEADER'S TOOL CLUSTER (owner,
+            2026-09-19: "a new page that you enter from your drop down on profile pic
+            on top right"). The design spec puts the control between compose and
+            notifications, on the grounds that it is "a tool you pick up, not a thing
+            you are". The owner's placement wins, and it reads better anyway: this menu
+            is already where the reader's own modes and settings live, and the header
+            cluster is for actions, not states. */}
+        <DropdownMenuItem asChild className={ROW_CLASS}>
+          <Link href="/inquisition" data-testid="user-profile-menu-inquisition-link">
+            <span>{LABELS.inquisition}</span>
+          </Link>
+        </DropdownMenuItem>
+
         {/* Your tokens (design brief §4) — the held-token count, real from
             useLivePortfolio, omitted (not rendered as "0 held" or a spinner)
             for as long as the read hasn't confidently answered. */}

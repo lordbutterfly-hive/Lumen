@@ -42,7 +42,14 @@ export const APP_DIR = join(HERE, '..', '..', 'app');
  *
  * Counted 2026-08-18: 53 `page.tsx` files under `app/`.
  */
-export const EXPECTED_PAGE_COUNT = 53;
+/*
+ * ★ 53 -> 57 (2026-09-19). This counter is a DRIFT GUARD, not a target: `sweep.mjs`
+ * refuses to run when it disagrees with the filesystem, so that a route added without
+ * a thought about coverage stops the sweep instead of slipping past it. It had been
+ * stale at 53 while the tree held 56 — the sweep was already refusing before this
+ * feature — and `/inquisition` makes 57.
+ */
+export const EXPECTED_PAGE_COUNT = 57;
 
 /** Below this, something is structurally wrong with the glob — fail loudly. */
 const IMPLAUSIBLY_FEW = 20;
