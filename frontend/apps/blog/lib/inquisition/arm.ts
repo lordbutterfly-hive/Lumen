@@ -70,18 +70,49 @@ export function isArmed(): boolean {
  * So arming applies dark to the DOCUMENT and does not touch storage. The theme the
  * reader chose is still their theme; the mode is just painting over it while it is on.
  */
+/**
+ * ★★★ THE LIGHTS GO DOWN, THEY DO NOT SNAP OFF (owner, 2026-09-19: "we need to animate
+ * this a bit if possible, when clicked a slow transition into black").
+ *
+ * A class flip repaints every surface on the next frame, which reads as a glitch rather
+ * than as a mode change. So arming adds `inquisition-dimming` to <html> for the length
+ * of one transition, and a single rule in globals.css gives background, border and text
+ * colour a 600ms ease on every element while it is there.
+ *
+ * ★★ THE CLASS IS REMOVED AFTERWARDS, ON PURPOSE. Leaving a global colour transition on
+ * permanently would put a 600ms lag on every hover state, every focus ring and every
+ * theme token in the app for as long as the session lasts. It is on for the flip and
+ * gone immediately after.
+ *
+ * ★ AND IT IS SKIPPED FOR ANYONE WHO ASKED FOR THAT. `prefers-reduced-motion` is
+ * honoured by the CSS rule itself, so this function does not need to branch: adding the
+ * class simply does nothing for those readers.
+ */
+const DIM_MS = 600;
+
+function withDimming(change: () => void): void {
+  const root = typeof document !== 'undefined' ? document.documentElement : null;
+  if (!root) {
+    change();
+    return;
+  }
+  root.classList.add('inquisition-dimming');
+  change();
+  window.setTimeout(() => root.classList.remove('inquisition-dimming'), DIM_MS + 60);
+}
+
 export function arm(): void {
   const state = read();
   if (state.armed) return;
   write({ armed: true, restore: readTheme() });
-  applyTheme('dark');
+  withDimming(() => applyTheme('dark'));
 }
 
 export function disarm(): void {
   const state = read();
   write({ armed: false, restore: null });
   // Back to whatever they actually chose — which storage still holds, untouched.
-  applyTheme(state.restore ?? resolveTheme());
+  withDimming(() => applyTheme(state.restore ?? resolveTheme()));
 }
 
 export function toggleArm(): void {

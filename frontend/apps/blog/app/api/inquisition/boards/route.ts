@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { blacklistIndex } from '@/blog/lib/inquisition/blacklists';
-import { keBoard, mostDownvoted, mostMuted } from '@/blog/lib/inquisition/boards-sql';
+import { inquisitorBoard, keBoard, mostDownvoted, mostMuted } from '@/blog/lib/inquisition/boards-sql';
 import { hiveSqlConfigured } from '@/blog/lib/inquisition/hivesql';
-import { steemActivity } from '@/blog/lib/inquisition/steem';
+import { loadCrossposters, type CrosspostRow } from '@/blog/lib/inquisition/crossposting';
 import { nowIso } from '@/blog/lib/inquisition/types';
 
 export const dynamic = 'force-dynamic';
@@ -37,25 +37,6 @@ export const dynamic = 'force-dynamic';
  * time, when no cache is warm and no upstream should be called.
  */
 
-/**
- * ★★ THE STEEM SCOPE IS A PREFIX OF THE LISTED SET, AND THE UI SAYS SO. 45 was sized
- * when the board read one list type; the bridge fix roughly doubled the listed set, and
- * `index.accounts` is sorted alphabetically, so this is the first 45 names in
- * alphabetical order — not the worst 45 and not a sample. The board prints the scope
- * and the total beside it rather than implying it covered everyone.
- */
-const MAX_STEEM_LOOKUPS = 45;
-
-/**
- * ★★★ A HARD CEILING ON REQUESTS TO SOMEBODY ELSE'S CHAIN, PER BUILD. The prose here
- * used to claim "45 requests a day" and the code could not honour it: `steem.ts` walks
- * up to `MAX_PAGES` pages per account and retries the second endpoint on every failure,
- * so the true worst case was 45 × 12 × 2 = 1,080 per build per worker — 24× the stated
- * budget, 3,240 a day across the cluster. A number in a comment is not a bound. This
- * one is: the build stops when it is spent, and the board is marked partial.
- */
-const STEEM_REQUEST_BUDGET = 220;
-
 const REBUILD_MS = 24 * 60 * 60 * 1000;
 const SQL_REBUILD_MS = 6 * 60 * 60 * 1000;
 
@@ -76,13 +57,6 @@ const SQL_REBUILD_MS = 6 * 60 * 60 * 1000;
  * degraded HiveSQL is asked four times an hour instead of two hundred and forty.
  */
 const RETRY_AFTER_FAIL_MS = 60 * 1000;
-
-interface SteemRow {
-  account: string;
-  postsSinceFork: number;
-  lastPost: string | null;
-  partial: boolean;
-}
 
 /**
  * ════ ONE BACKGROUND BOARD ════
@@ -180,75 +154,10 @@ function boardResponse<T>(board: string, state: BoardState<T>): NextResponse {
 const mutedState = slot<{ account: string; mutedBy: number; muterMvests: number }>('muted');
 const keState = slot<{ account: string; ke: number; rewardsHive: number; hp: number; band: string }>('ke');
 const dvState = slot<{ account: string; downvotes: number; voters: number }>('downvoted');
-const steemState = slot<SteemRow>('steem');
+const xpostState = slot<CrosspostRow>('crossposting');
+const xpostCandidates = ((globalThis as Record<symbol, unknown>)[Symbol.for('lumen.inquisition.xpost.candidates')] ??= { n: 0 }) as { n: number };
+const inqState = slot<{ account: string; downvotes: number; targets: number; topTarget: string; topTargetVotes: number }>('inquisitors');
 
-/**
- * ★★★ THE STEEM BUILD, WITH ITS BUDGET IN ITS HAND. Measured 30.2s cold: forty-five
- * accounts, one to twelve requests each to a chain we do not run, done sequentially so
- * we are not hammering it. A tab click cannot cost that, and forty readers clicking it
- * cannot cost it forty times over — so it runs here, once, and the rows arrive on a
- * poll. `steemActivity` caches each account for a day on top of that.
- */
-function startSteemBuild(accounts: string[]): void {
-  const now = Date.now();
-  const fresh = steemState.builtAt > 0 && now - steemState.builtAt < REBUILD_MS;
-  const coolingOff = steemState.lastFailed && now - steemState.failedAt < RETRY_AFTER_FAIL_MS;
-  if (steemState.building || fresh || coolingOff) return;
-  steemState.building = true;
-  void (async () => {
-    const rows: SteemRow[] = [];
-    let budget = STEEM_REQUEST_BUDGET;
-    let truncated = false;
-    try {
-      for (const account of accounts) {
-        if (budget <= 0) {
-          truncated = true;
-          break;
-        }
-        try {
-          const activity = await steemActivity(account);
-          budget -= activity.requests || 1;
-          if (activity.postsSinceFork > 0) {
-            rows.push({
-              account,
-              postsSinceFork: activity.postsSinceFork,
-              lastPost: activity.lastPost,
-              partial: activity.partial
-            });
-            /*
-             * Publish as we go, so a reader polling sees the board fill rather than
-             * staring at an empty panel for half a minute.
-             *
-             * ★ COMPLETE ROWS RANK ABOVE CAPPED ONES. A capped row's number is a floor,
-             * so ordering a `298+` above an exact `62` asserts a comparison we cannot
-             * make. Capped rows still appear, below, still marked `+`.
-             */
-            steemState.rows = [...rows].sort((a, b) => {
-              if (a.partial !== b.partial) return a.partial ? 1 : -1;
-              return b.postsSinceFork - a.postsSinceFork;
-            });
-            steemState.asOf = nowIso();
-            steemState.lastFailed = false;
-          }
-        } catch {
-          // An endpoint that will not answer is not a fact about the account.
-        }
-      }
-    } finally {
-      steemState.building = false;
-      if (rows.length > 0) {
-        // ★ Only a build that found something may claim today's date — see BoardState.
-        steemState.builtAt = truncated ? 0 : Date.now();
-        steemState.asOf = nowIso();
-        steemState.lastFailed = false;
-        steemState.failedAt = 0;
-      } else {
-        steemState.lastFailed = true;
-        steemState.failedAt = Date.now();
-      }
-    }
-  })();
-}
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const board = new URL(request.url).searchParams.get('board') ?? 'blacklists';
@@ -311,7 +220,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       if (!hiveSqlConfigured()) {
         // ★ NO `asOf` ON A FAILURE. A fresh "Indexed <now>" under an empty board is a
         // freshness claim about data we do not have.
-        return NextResponse.json({ board, rows: [], unconfigured: true }, { headers: { 'cache-control': 'no-store' } });
+        return NextResponse.json(
+          { board, rows: [], unconfigured: true },
+          { headers: { 'cache-control': 'no-store' } }
+        );
       }
       startBuild(mutedState, SQL_REBUILD_MS, async () => {
         const { rows, failed } = await mostMuted();
@@ -322,7 +234,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     if (board === 'ke') {
       if (!hiveSqlConfigured()) {
-        return NextResponse.json({ board, rows: [], unconfigured: true }, { headers: { 'cache-control': 'no-store' } });
+        return NextResponse.json(
+          { board, rows: [], unconfigured: true },
+          { headers: { 'cache-control': 'no-store' } }
+        );
       }
       startBuild(keState, SQL_REBUILD_MS, async () => {
         const { rows, failed } = await keBoard();
@@ -337,7 +252,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
      */
     if (board === 'downvoted') {
       if (!hiveSqlConfigured()) {
-        return NextResponse.json({ board, rows: [], unconfigured: true }, { headers: { 'cache-control': 'no-store' } });
+        return NextResponse.json(
+          { board, rows: [], unconfigured: true },
+          { headers: { 'cache-control': 'no-store' } }
+        );
       }
       startBuild(dvState, REBUILD_MS, async () => {
         const { rows, failed } = await mostDownvoted();
@@ -346,14 +264,30 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       return boardResponse(board, dvState);
     }
 
-    if (board === 'steem') {
-      const index = await blacklistIndex();
-      const accounts = index.accounts.slice(0, MAX_STEEM_LOOKUPS);
-      startSteemBuild(accounts);
-      const base = boardResponse(board, steemState);
+    if (board === 'inquisitors') {
+      if (!hiveSqlConfigured()) {
+        return NextResponse.json({ board, rows: [], unconfigured: true }, { headers: { 'cache-control': 'no-store' } });
+      }
+      startBuild(inqState, REBUILD_MS, async () => {
+        const { rows, failed } = await inquisitorBoard();
+        return failed ? null : rows;
+      });
+      return boardResponse(board, inqState);
+    }
+
+    if (board === 'crossposting') {
+      if (!hiveSqlConfigured()) {
+        return NextResponse.json({ board, rows: [], unconfigured: true }, { headers: { 'cache-control': 'no-store' } });
+      }
+      startBuild(xpostState, SQL_REBUILD_MS, async () => {
+        const { rows, candidates, failed } = await loadCrossposters();
+        xpostCandidates.n = candidates;
+        return failed ? null : rows;
+      });
+      const base = boardResponse(board, xpostState);
       const body = await base.json();
       return NextResponse.json(
-        { ...body, scope: accounts.length, listed: index.accounts.length, done: steemState.builtAt > 0 },
+        { ...body, scope: xpostState.rows.length, listed: xpostCandidates.n },
         { headers: { 'cache-control': 'private, max-age=30' } }
       );
     }

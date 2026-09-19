@@ -207,7 +207,8 @@ const PUBLIC_DIRS = ['/_next/', '/api/', '/auth/', '/fonts/', '/images/', '/loca
  *
  *   `/api/og`          rasterises a 1200x630 share image on the thread this module
  *                      exists to protect.
- *   `/api/inquisition` opens a connection to HiveSQL — a DHF-funded free service we
+ *   `/api/inquisition/record`
+ *                      opens a connection to HiveSQL — a DHF-funded free service we
  *                      use under one subscription — and calls api.hive.blog, per
  *                      account, for any name matching `^[a-z0-9.-]{3,16}$`. Names that
  *                      do not exist are deliberately not cached (caching "no record"
@@ -216,8 +217,21 @@ const PUBLIC_DIRS = ['/_next/', '/api/', '/auth/', '/fonts/', '/images/', '/loca
  *                      onto somebody else's database. Found by adversarial review,
  *                      2026-09-19. Arming the mode is a client-side choice and cannot
  *                      be a server-side gate, so the gate has to be the budget.
+ *
+ * ★★★ AND IT IS THE `record` PATH SPECIFICALLY, NOT ALL OF `/api/inquisition`. The
+ * first version of this budgeted the whole prefix, which swept in `/boards` — and
+ * `/boards` is the one path in the feature that CANNOT be amplified: the board id is a
+ * fixed enum, every branch reads one shared cached aggregate, and no per-request value
+ * reaches a database. Budgeting it bought nothing and cost something real, because a
+ * board that is still building is POLLED, and a poll is a request. One bucket per IP at
+ * 90/min covers pages and this together, so a reader with the dashboard open was
+ * spending their own page budget on it — and a 429 here is a plain-text body, which the
+ * poll's `r.json()` would have thrown on, painting "The chain did not answer" over a
+ * board that was merely rate-limited, and ending the poll. Protection aimed at the path
+ * with no risk, paid for by the path that reads. The amplifier is `record`; the budget
+ * goes there.
  */
-const BUDGETED_API = ['/api/og', '/api/inquisition'];
+const BUDGETED_API = ['/api/og', '/api/inquisition/record'];
 const PUBLIC_FILES = new Set([
   '/favicon.ico', '/favicon.svg', '/robots.txt', '/site.webmanifest', '/__ENV.js', '/apple-touch-icon.png',
   '/icon-192.png', '/icon-512.png', '/mark-on-ink.svg', '/defaultavatar.png', '/dolphin.png', '/external-icon.svg',

@@ -36,6 +36,13 @@ export interface DownvotedRow {
   account: string;
   downvotes: number;
   voters: number;
+  /** The account that cast the most of them, or '' when the lookup was not reached. */
+  topSource: string;
+  topSourceVotes: number;
+  /** USD removed from this account's posts in the window, or null when not computed. */
+  removedUsd: number | null;
+  /** Posts that lost value to a downvote. */
+  postsHit: number;
 }
 
 /**
@@ -125,12 +132,33 @@ async function loadMostDownvoted(): Promise<{ rows: DownvotedRow[]; asOf: string
   );
   // ★ `null` is "we could not ask" and must never become an empty board — see hivesql.ts.
   if (rows === null) return { rows: [], asOf: nowIso(), failed: true };
+
+  /*
+   * ★★ THE COUNTS ARE THE BOARD; THE VALUE AND THE SOURCE ARE ENRICHMENT. Both extra
+   * queries run against the fifty names this one just chose, and both are allowed to come
+   * back empty without failing the board: a missing dollar figure prints a dash, a missing
+   * source prints nothing, and the downvote counts beside them are still true.
+   */
+  const names = rows.map((r) => r.account);
+  const [sources, removed] = await Promise.all([
+    topSourceFor(names).catch(() => new Map<string, { voter: string; n: number }>()),
+    removedByAuthor(names).catch(() => new Map<string, { usd: number; posts: number }>())
+  ]);
+
   return {
-    rows: rows.map((r) => ({
-      account: r.account,
-      downvotes: Number(r.downvotes) || 0,
-      voters: Number(r.voters) || 0
-    })),
+    rows: rows.map((r) => {
+      const src = sources.get(r.account);
+      const val = removed.get(r.account);
+      return {
+        account: r.account,
+        downvotes: Number(r.downvotes) || 0,
+        voters: Number(r.voters) || 0,
+        topSource: src?.voter ?? '',
+        topSourceVotes: src?.n ?? 0,
+        removedUsd: val ? val.usd : null,
+        postsHit: val?.posts ?? 0
+      };
+    }),
     asOf: nowIso(),
     failed: false
   };
@@ -144,10 +172,251 @@ export const mostMuted = withTtlCache(loadMostMuted, () => 'most-muted', {
   shouldCache: (v) => !v.failed && v.rows.length > 0
 });
 
+/**
+ * ════ WHAT A DOWNVOTE ACTUALLY TOOK ════
+ *
+ * ★★★ THE MOCK HAS AN RSHARES COLUMN AND THE OWNER ASKED FOR DOLLARS, AND I SHIPPED
+ * NEITHER (2026-09-19: "people with most downvotes in terms of vote numbers and $ removed
+ * from posts. you did none of this"). A downvote count with no value beside it cannot
+ * distinguish thirty trivial flags from one that took a hundred dollars off a post.
+ *
+ * ★★ THE SUM IS `vote_rshares - net_rshares`, PER POST. `vote_rshares` is the positive
+ * side of the vote total and `net_rshares` is what survived the downvotes, so the
+ * difference is exactly what the downvotes removed. Both live on `Comments`, so this
+ * traces to individual posts a reader can open — which is the spec's bar ("Receipts or it
+ * is cut").
+ *
+ * ★★ AND IT IS CHUNKED AGAINST A TIME BUDGET, because it is not cheap. Measured
+ * 2026-09-19: eight authors over three months took **37.5 seconds**. The unrestricted
+ * version — scanning `Comments` for `net_rshares < 0` across every author — did not
+ * finish inside 90 seconds at all, which is why this only ever runs against names the
+ * board has already chosen. Rows past the budget report `null`, and the column renders a
+ * dash rather than a zero: "we did not compute it" is not "nothing was taken".
+ */
+const ENRICH_BUDGET_MS = 150_000;
+const ENRICH_CHUNK = 10;
+
+async function removedByAuthor(authors: string[]): Promise<Map<string, { usd: number; posts: number }>> {
+  const out = new Map<string, { usd: number; posts: number }>();
+  const rate = await hbdPerRshare();
+  if (rate <= 0) return out;
+
+  const deadline = Date.now() + ENRICH_BUDGET_MS;
+  for (let i = 0; i < authors.length; i += ENRICH_CHUNK) {
+    if (Date.now() >= deadline) break;
+    const chunk = authors.slice(i, i + ENRICH_CHUNK);
+    const placeholders = chunk.map((_, j) => `@a${j}`).join(',');
+    const rows = await querySlow<{ author: string; removed_rshares: number; posts: number }>(
+      `SELECT c.author,
+              SUM(CAST(c.vote_rshares AS float) - CAST(c.net_rshares AS float)) AS removed_rshares,
+              COUNT(*) AS posts
+       FROM Comments c WITH (NOLOCK)
+       WHERE c.depth = 0 AND c.author IN (${placeholders})
+         AND c.created > DATEADD(month, -3, GETDATE())
+         AND c.net_rshares < c.vote_rshares
+       GROUP BY c.author`,
+      chunk.map((name, j) => ({ name: `a${j}`, type: TYPES.VarChar, value: name }))
+    );
+    if (rows === null) break;
+    for (const r of rows) {
+      out.set(r.author, { usd: (Number(r.removed_rshares) || 0) * rate, posts: Number(r.posts) || 0 });
+    }
+  }
+  return out;
+}
+
+/**
+ * HBD per rshare, from the live reward fund. `reward_balance / recent_claims` is HIVE per
+ * rshare; the median feed price converts that to HBD. Both move daily, so neither is
+ * hardcoded — see `vestsPerHive` for the same argument about the VESTS rate.
+ */
+async function loadHbdPerRshare(): Promise<number> {
+  const endpoint = process.env.REACT_APP_API_ENDPOINT || 'https://api.hive.blog';
+  const call = async (method: string) => {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      signal: AbortSignal.timeout(5000),
+      headers: { 'content-type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({ jsonrpc: '2.0', method, params: [method.endsWith('reward_fund') ? 'post' : undefined].filter(Boolean), id: 1 })
+    });
+    const json = (await res.json()) as { result?: Record<string, string> };
+    return json.result ?? null;
+  };
+  try {
+    const [fund, price] = await Promise.all([
+      call('condenser_api.get_reward_fund'),
+      call('condenser_api.get_current_median_history_price')
+    ]);
+    const balance = Number.parseFloat(fund?.reward_balance ?? '');
+    const claims = Number.parseFloat(fund?.recent_claims ?? '');
+    const base = Number.parseFloat(price?.base ?? '');
+    const quote = Number.parseFloat(price?.quote ?? '');
+    if (![balance, claims, base, quote].every(Number.isFinite) || claims <= 0 || quote <= 0) return 0;
+    return (balance / claims) * (base / quote);
+  } catch {
+    return 0;
+  }
+}
+
+const hbdPerRshare = withTtlCache(loadHbdPerRshare, () => 'hbd-per-rshare', {
+  ttlMs: 30 * 60 * 1000,
+  max: 1,
+  name: 'inq-rshare-rate',
+  shouldCache: (v) => v > 0
+});
+
+/**
+ * What downvotes took off ONE account's posts, for the profile Record. Same expression
+ * as the board's enrichment, one name, lifetime rather than a rolling window — a profile
+ * figure that only covered three months would read as a clean record for anyone whose
+ * trouble was last year.
+ */
+export async function removedForAccount(account: string): Promise<number | null> {
+  const rate = await hbdPerRshare();
+  if (rate <= 0) return null;
+  const rows = await queryFast<{ removed_rshares: number }>(
+    `SELECT SUM(CAST(c.vote_rshares AS float) - CAST(c.net_rshares AS float)) AS removed_rshares
+     FROM Comments c WITH (NOLOCK)
+     WHERE c.depth = 0 AND c.author = @account AND c.net_rshares < c.vote_rshares`,
+    [{ name: 'account', type: TYPES.VarChar, value: account }]
+  );
+  if (rows === null || rows.length === 0) return null;
+  const rshares = Number(rows[0]?.removed_rshares);
+  if (!Number.isFinite(rshares)) return null;
+  return rshares * rate;
+}
+
+/** Each named account's heaviest single downvoter, from that account's own votes. */
+async function topSourceFor(authors: string[]): Promise<Map<string, { voter: string; n: number }>> {
+  const best = new Map<string, { voter: string; n: number }>();
+  if (authors.length === 0) return best;
+  const placeholders = authors.map((_, i) => `@a${i}`).join(',');
+  const rows = await querySlow<{ author: string; voter: string; n: number }>(
+    `SELECT v.author, v.voter, COUNT(*) AS n
+     FROM TxVotes v WITH (NOLOCK)
+     WHERE v.weight < 0 AND v.timestamp > DATEADD(month, -3, GETDATE())
+       AND v.author IN (${placeholders})
+     GROUP BY v.author, v.voter`,
+    authors.map((name, i) => ({ name: `a${i}`, type: TYPES.VarChar, value: name }))
+  );
+  for (const r of rows ?? []) {
+    const n = Number(r.n) || 0;
+    const held = best.get(r.author);
+    if (!held || n > held.n) best.set(r.author, { voter: r.voter, n });
+  }
+  return best;
+}
+
 export const mostDownvoted = withTtlCache(loadMostDownvoted, () => 'most-downvoted', {
   ttlMs: 24 * 60 * 60 * 1000,
   max: 1,
   name: 'inq-board-downvoted',
+  shouldCache: (v) => !v.failed && v.rows.length > 0
+});
+
+export interface InquisitorRow {
+  account: string;
+  downvotes: number;
+  targets: number;
+  topTarget: string;
+  topTargetVotes: number;
+}
+
+/**
+ * ════ BOARD 05 — WHO IS CASTING ════
+ *
+ * ★★★ THE OTHER END OF BOARD 02, AND IT WAS MISSING ENTIRELY (owner, 2026-09-19:
+ * "Wheres the top inquisitors? how many votes they cast, their top target, $ taken").
+ * A feature that boards the most-downvoted accounts and not the accounts doing the
+ * downvoting is only telling half a story, and it is the half that reads as an
+ * accusation. Casting downvotes is a normal, intended use of the chain; this board says
+ * who does it and at whom, and nothing about whether they should.
+ *
+ * ★★ SORTED BY DISTINCT TARGETS, for the same reason board 02 sorts by distinct voters:
+ * 900 downvotes aimed at one account is a feud, 200 spread over 40 is a patrol, and the
+ * raw count cannot tell them apart.
+ *
+ * ★★★ WHAT IS **NOT** HERE, AND WHY — the "$ removed" column the owner asked for.
+ * `TxVotes` carries `weight` (the vote percentage) and no rshares at all, so the value a
+ * downvote removed is simply not in the table this query reads. It lives in
+ * `Comments.net_rshares` / `vote_rshares`, per POST. Measured 2026-09-19: scanning
+ * `Comments` for `net_rshares < 0` over three months did not finish inside a 90-second
+ * request, so the per-voter attribution join is not a thing this can do on the cheap —
+ * and attributing a whole post's lost payout to one of its several downvoters would be
+ * an invented number wearing a dollar sign. The spec's own bar is "Receipts or it is
+ * cut", so it is cut until it can be earned from the reward fund per post. `topTarget`
+ * IS traceable: it is that voter's own votes, grouped.
+ */
+async function loadInquisitors(): Promise<{ rows: InquisitorRow[]; asOf: string; failed: boolean }> {
+  /*
+   * ★★★ TWO INDEXED PHASES, BECAUSE ONE GROUP-BY DOES NOT FINISH. Measured 2026-09-19:
+   * grouping `TxVotes` by (voter, author) over three months with a window function to
+   * pick each voter's top target ran past **230 seconds** and was killed. Grouping by
+   * voter alone is 70.1s — the same shape and cost as board 02 — and once that has named
+   * fifty accounts, asking for THEIR targets is an indexed lookup: 9.2s for six voters,
+   * 1,907 rows. Same answer, and it actually returns.
+   *
+   * This is the `profileRecord` lesson at board scale: narrow to the names first, then
+   * ask the expensive question only about those names.
+   */
+  const leaders = await querySlow<{ account: string; downvotes: number; targets: number }>(
+    `SELECT TOP 50 v.voter AS account, COUNT(*) AS downvotes, COUNT(DISTINCT v.author) AS targets
+     FROM TxVotes v WITH (NOLOCK)
+     JOIN Accounts acc ON acc.name = v.voter
+     WHERE v.weight < 0 AND v.timestamp > DATEADD(month, -3, GETDATE())
+       AND acc.vesting_shares > @minVests AND acc.created < DATEADD(day, -@minAge, GETDATE())
+     GROUP BY v.voter
+     -- ★ Targets first: 900 downvotes at one account is a feud, 200 across 40 is a patrol.
+     ORDER BY COUNT(DISTINCT v.author) DESC, COUNT(*) DESC`,
+    [
+      { name: 'minVests', type: TYPES.Float, value: MIN_VESTS },
+      { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS }
+    ]
+  );
+  if (leaders === null) return { rows: [], asOf: nowIso(), failed: true };
+  if (leaders.length === 0) return { rows: [], asOf: nowIso(), failed: false };
+
+  const names = leaders.map((r) => r.account);
+  const placeholders = names.map((_, i) => `@v${i}`).join(',');
+  const pairs = await querySlow<{ voter: string; author: string; n: number }>(
+    `SELECT v.voter, v.author, COUNT(*) AS n
+     FROM TxVotes v WITH (NOLOCK)
+     WHERE v.weight < 0 AND v.timestamp > DATEADD(month, -3, GETDATE())
+       AND v.voter IN (${placeholders})
+     GROUP BY v.voter, v.author`,
+    names.map((name, i) => ({ name: `v${i}`, type: TYPES.VarChar, value: name }))
+  );
+
+  // ★ A missing phase B is not a missing board. The counts are real either way; only the
+  // top-target column goes unknown, and it says so rather than guessing.
+  const best = new Map<string, { author: string; n: number }>();
+  for (const row of pairs ?? []) {
+    const n = Number(row.n) || 0;
+    const held = best.get(row.voter);
+    if (!held || n > held.n) best.set(row.voter, { author: row.author, n });
+  }
+
+  return {
+    rows: leaders.map((r) => {
+      const top = best.get(r.account);
+      return {
+        account: r.account,
+        downvotes: Number(r.downvotes) || 0,
+        targets: Number(r.targets) || 0,
+        topTarget: top?.author ?? '',
+        topTargetVotes: top?.n ?? 0
+      };
+    }),
+    asOf: nowIso(),
+    failed: false
+  };
+}
+
+export const inquisitorBoard = withTtlCache(loadInquisitors, () => 'inquisitors', {
+  ttlMs: 24 * 60 * 60 * 1000,
+  max: 1,
+  name: 'inq-board-inquisitors',
   shouldCache: (v) => !v.failed && v.rows.length > 0
 });
 
@@ -270,11 +539,23 @@ export const keBoard = withTtlCache(loadKeBoard, () => 'ke', {
 export interface ProfileRecord {
   account: string;
   mutedBy: number;
+  muterMvests: number;
   publishers: string[];
   ke: number | null;
   band: KeBand;
   rewardsHive: number;
   hp: number;
+  /** Downvotes received over the account's whole history. */
+  downvotes: number;
+  downvoters: number;
+  lastDownvote: string | null;
+  /** USD taken off this account's payouts by those downvotes, or null if not computed. */
+  removedUsd: number | null;
+  /** Share of this account's post payouts that sit on posts it voted for itself. */
+  selfVotePct: number | null;
+  selfVoteUsd: number;
+  payoutUsd: number;
+  accountAgeDays: number;
   asOf: string;
 }
 
@@ -305,14 +586,48 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
    */
   const ratio = await vestsPerHive();
   if (ratio <= 0) return null;
+
+  /*
+   * ★★★ SEVEN FIGURES, ONE ROUND TRIP EACH, BECAUSE THE DESIGN ASKS FOR SEVEN AND I
+   * SHIPPED FOUR (owner, 2026-09-19: "youre missing a ton of stuff"). The mock's Record
+   * carries DOWNVOTES, REMOVED, MUTED BY, STEEM, KE RATIO, SELF-VOTE and LISTED. Each
+   * one below is the narrowest query that answers exactly one of them, every one keyed
+   * on this single account name so the index does the work.
+   */
   const rows = await queryFast<{
     muted_by: number;
+    muter_mvests: number;
     rewards_hive: number;
     hp: number;
+    age_days: number;
+    downvotes: number;
+    downvoters: number;
+    last_downvote: string | Date | null;
+    self_vote_usd: number;
+    payout_usd: number;
   }>(
     `SELECT (SELECT COUNT(*) FROM Mutes WHERE muted = @account) AS muted_by,
+            -- ★ DIVIDED BY THE VESTS RATE, BECAUSE THE LABEL SAYS HP. The raw sum is
+            -- VESTS; printing it under "M HP" overstated the muters' stake by ~1,610x
+            -- (4,498 MVESTS is 2.8M HP, not 4,498M HP).
+            (SELECT ISNULL(SUM(CAST(a2.vesting_shares AS float)),0)/@ratio/1000000.0
+               FROM Mutes m LEFT JOIN Accounts a2 ON a2.name = m.muter
+              WHERE m.muted = @account) AS muter_mvests,
             (CAST(a.posting_rewards AS float) + CAST(a.curation_rewards AS float)) / 1000.0 AS rewards_hive,
-            a.vesting_shares / @ratio AS hp
+            a.vesting_shares / @ratio AS hp,
+            DATEDIFF(day, a.created, GETDATE()) AS age_days,
+            (SELECT COUNT(*) FROM TxVotes WHERE author = @account AND weight < 0) AS downvotes,
+            (SELECT COUNT(DISTINCT voter) FROM TxVotes WHERE author = @account AND weight < 0) AS downvoters,
+            (SELECT MAX(timestamp) FROM TxVotes WHERE author = @account AND weight < 0) AS last_downvote,
+            -- ★ SELF-VOTE IS DENOMINATED IN PAYOUT, NOT IN VOTES. The mock is explicit
+            -- that counting votes "flatters whales and punishes small accounts", so this
+            -- is the payout sitting on posts the author voted for, over total payout.
+            (SELECT ISNULL(SUM(CAST(c.total_payout_value AS float)),0) FROM Comments c WITH (NOLOCK)
+              WHERE c.author = @account AND c.depth = 0
+                AND EXISTS (SELECT 1 FROM TxVotes sv WHERE sv.voter = @account
+                              AND sv.author = c.author AND sv.permlink = c.permlink AND sv.weight > 0)) AS self_vote_usd,
+            (SELECT ISNULL(SUM(CAST(c.total_payout_value AS float)),0) FROM Comments c WITH (NOLOCK)
+              WHERE c.author = @account AND c.depth = 0) AS payout_usd
      FROM Accounts a
      WHERE a.name = @account`,
     [
@@ -328,18 +643,41 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
    * rounding detail: 1.99 HP truncated to 1 turned a real KE of 25,125 into a printed
    * 50,000. The board always did this correctly; the two now agree.
    */
+  /*
+   * ★★ THE DIVISION HAPPENS IN FLOAT, AND ROUNDING COMES LAST. Both sides used to be
+   * `CAST(... AS int)` before the divide, and this record — unlike the board — applies
+   * no HP floor, so it runs on accounts with single-digit HP where that is not a
+   * rounding detail: 1.99 HP truncated to 1 turned a real KE of 25,125 into a printed
+   * 50,000. The board always did this correctly; the two now agree.
+   */
   const hp = Number(rows[0]?.hp) || 0;
   const rewardsHive = Number(rows[0]?.rewards_hive) || 0;
   const ke = hp > 0 ? Number((rewardsHive / hp).toFixed(2)) : null;
+  const payoutUsd = Number(rows[0]?.payout_usd) || 0;
+  const selfVoteUsd = Number(rows[0]?.self_vote_usd) || 0;
+  const last = rows[0]?.last_downvote ?? null;
+
   return {
     account,
     mutedBy: Number(rows[0]?.muted_by) || 0,
+    muterMvests: Number(rows[0]?.muter_mvests) || 0,
     publishers: [],
     ke,
     band: keBand(ke),
     // ★ The DIVISION is done in float (above); only the DISPLAYED figures are rounded.
     rewardsHive: Math.round(rewardsHive),
     hp: Math.round(hp),
+    downvotes: Number(rows[0]?.downvotes) || 0,
+    downvoters: Number(rows[0]?.downvoters) || 0,
+    lastDownvote: last ? new Date(last).toISOString() : null,
+    // Filled by the route, which owns the slower value lookup.
+    removedUsd: null,
+    // ★ `null`, not 0, when the account has never been paid: 0% would read as a clean
+    // record where the truth is that there is nothing to take a share of.
+    selfVotePct: payoutUsd > 0 ? Number(((selfVoteUsd / payoutUsd) * 100).toFixed(1)) : null,
+    selfVoteUsd,
+    payoutUsd,
+    accountAgeDays: Number(rows[0]?.age_days) || 0,
     asOf: nowIso()
   };
 }

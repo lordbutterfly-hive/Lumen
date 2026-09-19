@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { marksFor } from '@/blog/lib/inquisition/blacklists';
-import { profileRecord } from '@/blog/lib/inquisition/boards-sql';
+import { profileRecord, removedForAccount } from '@/blog/lib/inquisition/boards-sql';
+import { steemPostsSinceFork } from '@/blog/lib/inquisition/crossposting';
 import { hiveSqlConfigured } from '@/blog/lib/inquisition/hivesql';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 
@@ -52,9 +53,13 @@ export async function GET(
      * If the index is unreachable the strip shows the rest of the record rather than
      * failing whole: a missing listing is shown as none-known, never as a clean record.
      */
-    const [record, listing] = await Promise.all([
+    const [record, listing, removedUsd, steemPosts] = await Promise.all([
       cached(account),
-      marksFor(account).catch(() => ({ marks: [], missing: ['all'] }))
+      marksFor(account).catch(() => ({ marks: [], missing: ['all'] })),
+      // ★ Both of these are allowed to come back null. A dash in the panel reads as
+      // "not computed" and says so on hover; a zero would read as a finding.
+      removedForAccount(account).catch(() => null),
+      steemPostsSinceFork(account).catch(() => null)
     ]);
     if (!record) {
       return NextResponse.json({ account, unavailable: true }, { headers: { 'cache-control': 'no-store' } });
@@ -64,6 +69,8 @@ export async function GET(
       {
         ...record,
         publishers,
+        removedUsd,
+        steemPosts,
         // ★ An incomplete read is reported, never rendered as a clean record.
         listsIncomplete: listing.missing.length > 0
       },

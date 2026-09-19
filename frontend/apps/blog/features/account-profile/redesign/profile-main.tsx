@@ -13,7 +13,7 @@ import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/u
 import { useModerationStatus } from '@/blog/features/mute-follow/hooks/use-moderation-status';
 import NoDataError from '@/blog/components/no-data-error';
 import ProfileTokenCard from '@/blog/features/creator-tokens/ui/profile-token-card';
-import RecordStrip from '@/blog/features/inquisition/record-strip';
+import RecordPanel from '@/blog/features/inquisition/record-panel';
 import PageMasthead from '@/blog/features/layouts/page-masthead';
 import { cn } from '@ui/lib/utils';
 import { LumenLoader } from '@hive/ui';
@@ -339,12 +339,28 @@ export default function ProfileMain() {
             {/* `_temporary` is how a Lumen lite account's stand-in profile is marked:
                 no Hive account exists behind it, so a follow of this person can only
                 live on Lumen. It is a hint, not a decision — the server confirms it. */}
+            {/* ★★★ THE RECORD LIVES INSIDE THE IDENTITY CARD, UNDER THE ACTIONS, WHICH
+                IS WHERE THE DESIGN PUTS IT (owner, 2026-09-19: "you positioned the recod
+                badly. should go on profile card not below"). It was a separate card
+                between the Meritum card and the tabs, which both pushed the Meritum card
+                down the page and read as a verdict panel of its own rather than as part
+                of the account's identity. Renders nothing at all unless the mode is
+                armed, so an ordinary profile is byte-for-byte what it was. */}
             <ProfileActions
               username={username}
               following={following}
               liteTarget={Boolean(profileData._temporary)}
             />
           </div>
+
+          {/* ★★★ THE RECORD SPANS THE CARD, IT DOES NOT SHARE THE ACTION COLUMN. Nested
+              in the right-hand column beside Wallet/Follow it had no width to work with:
+              the seven-column grid pushed past the card's edge, clipped its own
+              explanation text mid-word, and squeezed the buttons out of view. It is still
+              inside the identity card, as the design has it and as the owner asked — just
+              on its own line under the identity row, where it has the full width the
+              seven figures need. */}
+          <RecordPanel account={username} />
         </PageMasthead>
       </div>
 
@@ -357,11 +373,6 @@ export default function ProfileMain() {
           its own when there is nothing real to show — see the component's doc. */}
       <ProfileTokenCard username={username} isOwnProfile={isOwnProfile} />
 
-      {/* ★ THE RECORD SITS BETWEEN THE IDENTITY BLOCK AND THE TABS, NEVER INSIDE BIO
-          CONTENT THE ACCOUNT WROTE (spec §4). It renders nothing at all unless the
-          reader has armed Inquisition mode, so an ordinary profile view is unchanged
-          and costs no extra request. */}
-      <RecordStrip account={username} />
 
       {/* ★ THE RANK CARD IS GONE FROM THE PROFILE (2026-08-19, owner):
           "get rid of that card completely. its enough what we have, it doesnt

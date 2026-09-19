@@ -161,7 +161,6 @@ async function run<T>(sql: string, params: SqlParam[], timeoutMs: number, lane: 
 }
 
 async function connectAndRun<T>(sql: string, params: SqlParam[], timeoutMs: number): Promise<T[] | null> {
-
   const cfg = config();
   (cfg.options as { requestTimeout?: number }).requestTimeout = timeoutMs;
 

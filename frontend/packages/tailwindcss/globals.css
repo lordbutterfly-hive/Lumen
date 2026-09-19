@@ -3616,3 +3616,31 @@ input[data-testid='witnesses-filter-search'] {
 .lm-comment-weight :is(strong, b, h1, h2, h3, h4, h5, h6, th) {
   font-variation-settings: 'wght' 700;
 }
+
+/*
+ * ════ THE LIGHTS GOING DOWN ════
+ *
+ * ★★★ Arming Inquisition mode forces dark site-wide. Flipping the class repaints every
+ * surface on the next frame, which reads as a glitch rather than as a deliberate change
+ * of state — so `arm()` adds this class for exactly one transition and removes it again
+ * (see lib/inquisition/arm.ts for why it must not stay on).
+ *
+ * `background-color`, `border-color`, `color` and `fill` only: transitioning `all` would
+ * animate layout properties and produce the jitter this is meant to avoid.
+ */
+.inquisition-dimming,
+.inquisition-dimming *:not(svg):not(path) {
+  transition:
+    background-color 600ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 600ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 600ms cubic-bezier(0.4, 0, 0.2, 1),
+    fill 600ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* ★ Anyone who asked for less motion gets the instant flip, and `arm()` needs no branch. */
+@media (prefers-reduced-motion: reduce) {
+  .inquisition-dimming,
+  .inquisition-dimming *:not(svg):not(path) {
+    transition: none !important;
+  }
+}
