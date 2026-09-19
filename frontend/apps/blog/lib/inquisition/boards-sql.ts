@@ -35,11 +35,20 @@ const MIN_AGE_DAYS = 90;
  * a reader who never expands never pays for rows nobody looked at.
  */
 /**
- * How many of the most-downvoted accounts the inquisitor money column is summed over.
- * Each one is a ~12s vote-ledger read, so this is the whole cost of that column: 20
- * accounts is about four minutes, once a day, in the background.
+ * ★★★ HOW MANY VOTE LEDGERS THE MONEY COLUMNS ARE SUMMED OVER, AND IT IS THE WHOLE COST
+ * OF THIS FEATURE'S SLOW PATH.
+ *
+ * One ledger is ~12s (883 posts, ~8 MB of vote JSON). Two boards want them, and with 30
+ * apiece running concurrently on a two-slot lane the pair took over five minutes to
+ * settle — which a reader opening either tab spends watching "Counting...". Twelve is
+ * about ninety seconds per board, and because the ledgers are cached per account and the
+ * two boards' seed sets overlap heavily, the second board mostly reads the first one's
+ * work for free.
+ *
+ * The cost is paid once a day. Rows past this depth report `null`, which the column
+ * renders as a dash and says "not computed" on hover, never as zero.
  */
-const INQ_LEDGER_ACCOUNTS = 30;
+const INQ_LEDGER_ACCOUNTS = 12;
 
 /** The KE board's stake floor, in HP. Converted to VESTS at the live rate. */
 const KE_MIN_HP = 500;
@@ -441,15 +450,22 @@ async function loadInquisitors(limit = BOARD_ROWS): Promise<{ rows: InquisitorRo
    * ledger is ~12s, so the set is capped and the column reports `null` for anyone whose
    * money is outside it. A dash says "not computed"; it never says zero.
    */
+  /*
+   * ★★★ SEEDED ONLY FROM THIS BOARD'S OWN TOP TARGETS, AND PULLING IN THE DOWNVOTED
+   * BOARD MADE THIS BUILD TAKE EIGHT MINUTES.
+   *
+   * Calling `mostDownvoted()` here to widen the seed set did not just cost its own query:
+   * it triggered that entire board's build, including its twelve vote ledgers, and the
+   * inquisitor build then waited for all of it before starting its own twelve. Measured:
+   * still counting at 300s. Two slow boards chained into one.
+   *
+   * The top targets are the better seed anyway. They come free from phase B above, and
+   * they are by definition the accounts these particular voters took value from, which is
+   * exactly what the column claims to measure.
+   */
   const seed = new Set<string>();
   for (const [, top] of best) {
     if (top.author) seed.add(top.author);
-  }
-  try {
-    const victims = await mostDownvoted();
-    if (!victims.failed) for (const v of victims.rows.slice(0, 10)) seed.add(v.account);
-  } catch {
-    // The board still works without the money column.
   }
 
   let removed = new Map<string, number>();
