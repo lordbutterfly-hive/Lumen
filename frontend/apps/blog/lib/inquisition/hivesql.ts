@@ -108,6 +108,14 @@ export interface SqlParam {
 const SLOW_LANE = 2;
 const FAST_LANE = 3;
 /**
+ * ★★★ AND THE QUEUE HAS TO BE LONGER THAN THE WORK, WHICH 120s WAS NOT. Observed
+ * 2026-09-19: opening the dashboard starts five builds, the two slow-lane slots go to the
+ * downvote aggregate (80s) and the inquisitor walk (~90s), and the KE board sat in the
+ * queue, timed out at two minutes, and reported itself **unavailable** against a database
+ * that was answering perfectly well. A build that gives up looks identical to a build the
+ * database refused. Ten minutes is longer than any query here can take, so the only thing
+ * that can now produce `unavailable` is a real failure.
+ *
  * ★★ A READER GIVES UP; A BACKGROUND BUILD QUEUES. Three seconds is the difference
  * between a strip that fills and a strip that lies, and nobody is watching a build, so
  * it can afford to wait its turn — which is the behaviour we actually want against
@@ -117,7 +125,7 @@ const FAST_LANE = 3;
  * reason at all.
  */
 const FAST_WAIT_MS = 3000;
-const SLOW_WAIT_MS = 120000;
+const SLOW_WAIT_MS = 600000;
 
 const GATE_SLOT = Symbol.for('lumen.inquisition.hivesql.gate.v2');
 const gate = ((globalThis as Record<symbol, unknown>)[GATE_SLOT] ??= { fast: 0, slow: 0 }) as {
@@ -243,6 +251,25 @@ async function connectAndRun<T>(sql: string, params: SqlParam[], timeoutMs: numb
 /** For queries measured under a second. Safe to await on a cache miss. */
 export function queryFast<T>(sql: string, params: SqlParam[] = []): Promise<T[] | null> {
   return run<T>(sql, params, 8000, 'fast');
+}
+
+/**
+ * ★★★ THE READER LANE, WITH A REALISTIC CEILING, AND ITS ABSENCE SILENTLY EMPTIED THREE
+ * COLUMNS (2026-09-19).
+ *
+ * The vote ledger pulls every root post an account has written with its `active_votes`
+ * blob: 883 posts and ~8 MB for @lordbutterfly, measured at **12.1 seconds**. It was
+ * issued through `queryFast`, whose ceiling is 8 seconds, so it timed out on every single
+ * call and returned `null` — and `null` is correctly treated as "we could not ask", so
+ * REMOVED, the top-three downvoters and SELF-REWARD all rendered as "not computed" on
+ * every profile. Nothing errored and nothing logged; the figures were simply never there.
+ *
+ * It belongs on the FAST lane regardless, because a reader is waiting for it: the slow
+ * lane queues behind background board builds for up to ten minutes, which would be worse
+ * than the timeout. Three slots, a minute of headroom, and the result is cached for a day.
+ */
+export function queryReader<T>(sql: string, params: SqlParam[] = []): Promise<T[] | null> {
+  return run<T>(sql, params, 60000, 'fast');
 }
 
 /**

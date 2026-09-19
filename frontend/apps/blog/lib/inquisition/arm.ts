@@ -88,7 +88,7 @@ export function isArmed(): boolean {
  * honoured by the CSS rule itself, so this function does not need to branch: adding the
  * class simply does nothing for those readers.
  */
-const DIM_MS = 600;
+const DIM_MS = 950;
 
 function withDimming(change: () => void): void {
   const root = typeof document !== 'undefined' ? document.documentElement : null;

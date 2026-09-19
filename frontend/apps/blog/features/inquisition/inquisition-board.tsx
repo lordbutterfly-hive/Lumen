@@ -35,11 +35,6 @@ interface Mark {
   appealUrl: string | null;
 }
 
-interface BlacklistRow {
-  account: string;
-  marks: Mark[];
-}
-
 interface CrosspostRow {
   account: string;
   lastSteem: string;
@@ -47,22 +42,16 @@ interface CrosspostRow {
   hivePosts: number;
 }
 
-type BoardId = 'ke' | 'downvoted' | 'muted' | 'blacklists' | 'inquisitors' | 'crossposting';
+type BoardId = 'ke' | 'downvoted' | 'muted' | 'inquisitors' | 'crossposting';
 
 /**
- * ★★★ THE BOARDS CARRY THEIR OWN TITLE, KICKER AND SCOPE LINE, AND STRIPPING THAT WAS
- * A MISTAKE (owner, 2026-09-19: "you cut all text ... No one even knows what these tabs
- * are").
+ * ★★★ THE BOARDS CARRY THEIR OWN TITLE, KICKER AND SCOPE LINE. Stripping that was a
+ * mistake (owner: "you cut all text ... No one even knows what these tabs are"): a tab
+ * reading "KE" over a column reading "KE" tells a reader nothing about what the number
+ * is, where it came from, or how far back it goes.
  *
- * The instruction before it was to cut Claude Design's *superfluous* copy, and I cut
- * the load-bearing copy with it: a tab reading "KE" over a column reading "KE" tells a
- * reader nothing about what the number is, where it came from, or how far back it goes.
- * The mock puts three things above every board — BOARD 0n · WHAT IT MEASURES, the
- * title, and the scope — and every one of them answers a question a reader actually
- * has. They come back.
- *
- * What stays cut is the theatre in the rows: no "abuser", no "farmer", no verdict
- * words. Theatre lives in the header band and the empty states; the boards stay flat.
+ * ★★ NO BLACKLIST BOARD (owner, 2026-09-19: "remove the blacklists from mode and bar.
+ * it wont work, we add that later"). Removed outright, not hidden behind a flag.
  */
 interface BoardDef {
   id: BoardId;
@@ -73,60 +62,55 @@ interface BoardDef {
   blurb: string;
 }
 
+/** Rows revealed per press of SHOW MORE. */
+const PAGE = 12;
+
 const BOARDS: BoardDef[] = [
   {
     id: 'ke',
     tab: 'KE INDEX',
-    kicker: 'BOARD 01 · REWARDS ÷ STAKE',
+    kicker: 'BOARD 01 \u00b7 REWARDS \u00f7 STAKE',
     title: 'The KE index',
-    meta: 'top 50 · min 6,211 HP · 90 days old',
+    meta: 'worst first \u00b7 min 500 HP\nposted in the last 3 months',
     blurb:
       'Everything an account has ever taken in rewards, divided by the Hive Power it still holds. It reads someone living off their payouts and a reward-pool farm as the same number, so it is evidence of cash-out behaviour and never of abuse.'
   },
   {
     id: 'downvoted',
     tab: 'TOP DOWNVOTED',
-    kicker: 'BOARD 02 · RECEIVED',
+    kicker: 'BOARD 02 \u00b7 RECEIVED',
     title: 'Most downvoted',
-    meta: 'rolling 3 months · sorted by voters',
+    meta: 'rolling 3 months\nsorted by voters',
     blurb:
       'Sorted by how many distinct accounts downvoted, not by how many downvotes landed: 903 downvotes from 12 accounts is a dispute, 212 from 29 is a consensus. Sorting by volume would let one large downvoter manufacture the top of the board.'
   },
   {
     id: 'muted',
     tab: 'MOST MUTED',
-    kicker: 'BOARD 03 · MUTES RECEIVED',
+    kicker: 'BOARD 03 \u00b7 MUTES RECEIVED',
     title: 'Most muted',
-    meta: 'on-chain follow ops · what: ignore',
+    meta: 'on-chain follow ops\nwhat: ignore',
     blurb:
-      'A mute is free, personal and one-sided — it hides an account from one reader and costs nothing to cast. The stake behind the muters is shown beside the count because a raw count flatters whoever annoyed the largest number of small accounts.'
-  },
-  {
-    id: 'blacklists',
-    tab: 'BLACKLISTED',
-    kicker: 'BOARD 04 · PUBLISHED LISTS',
-    title: 'Blacklisted',
-    meta: 'four publishers · both list types',
-    blurb:
-      'A blacklist does not mute anyone. It attaches information to a name and warns on transfers — most readers assume the opposite. The lists are never merged into one verdict: they have different scopes and different appeal routes, and each row names its own.'
+      'A mute is free, personal and one-sided. It hides an account from one reader and costs nothing to cast, so the stake behind the muters is shown beside the count: a raw count flatters whoever annoyed the largest number of small accounts.'
   },
   {
     id: 'inquisitors',
     tab: 'TOP INQUISITORS',
-    kicker: 'BOARD 05 · DOWNVOTES CAST',
+    kicker: 'BOARD 04 \u00b7 VALUE REMOVED, GIVEN',
     title: 'Top inquisitors',
-    meta: 'rolling 3 months · sorted by targets',
+    meta: 'rolling 3 months\nsorted by targets',
     blurb:
-      'The other end of board 02: who is casting the downvotes, how many separate accounts they land on, and which account takes the most. Casting downvotes is a normal, intended part of Hive — this board says who does it, not whether they should.'
+      'The other end of board 02: who casts the downvotes, how many separate accounts they land on, what those downvotes took off the posts, and which account takes the most. Casting downvotes is a normal, intended part of Hive.'
   },
   {
     id: 'crossposting',
     tab: 'CROSSPOSTING',
-    kicker: 'BOARD 06 · HIVE AND STEEM',
+    kicker: 'BOARD 05 \u00b7 HIVE AND STEEM',
     title: 'Crossposting',
-    meta: 'active on both chains · sorted by recency',
+    meta: 'active on both chains\nsorted by recency',
     blurb:
-      'Accounts still publishing to Steem as well as Hive since the 2020 fork, ranked by how recently they posted to Steem. Reshares are excluded, so the count is what this account published under its own name.'
+      "Accounts still publishing to Steem as well as Hive, ranked by how recently they were active on both chains. Built from Steem's most recent posts, so everyone here posted there within days."
+
   }
 ];
 
@@ -136,6 +120,7 @@ interface InquisitorRow {
   targets: number;
   topTarget: string;
   topTargetVotes: number;
+  removedUsd: number | null;
 }
 
 interface DvRow {
@@ -166,7 +151,18 @@ const day = (iso: string | null) => (iso ? iso.slice(0, 10) : '—');
 
 export default function InquisitionBoard() {
   const [armed, setArmed] = useState(false);
-  const [board, setBoard] = useState<BoardId>('blacklists');
+  const [board, setBoard] = useState<BoardId>('ke');
+  /*
+   * ★★★ SHOW MORE REVEALS, THEN FETCHES (owner, 2026-09-19: "each page needs to be able
+   * to be expanded. SHOW MORE. then you pull more").
+   *
+   * Two stages on purpose. The build already holds 50 rows, so the first presses cost
+   * nothing but a re-render; only once those are exhausted does the button ask the server
+   * for the deeper tier, which is a genuinely more expensive query against somebody
+   * else's database. A reader who never presses it never pays for rows nobody looked at.
+   */
+  const [shown, setShown] = useState(PAGE);
+  const [deep, setDeep] = useState(false);
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -178,7 +174,7 @@ export default function InquisitionBoard() {
    * cached, but a component that refetches on every tab click still turns one reader
    * into a stream of requests.
    */
-  const [cache, setCache] = useState<Partial<Record<BoardId, Record<string, unknown>>>>({});
+  const [cache, setCache] = useState<Record<string, Record<string, unknown>>>({});
 
   /*
    * ★★ A BUILDING BOARD IS POLLED, A FINISHED ONE IS KEPT. The Steem board is assembled
@@ -188,8 +184,20 @@ export default function InquisitionBoard() {
    * the poll stops the moment the server says `done`. Only a finished board is cached,
    * so a half-built one can never be mistaken for the answer.
    */
+  // A new board starts at the first page again.
   useEffect(() => {
-    const held = cache[board];
+    setShown(PAGE);
+    /*
+     * ★ DEPTH RESETS WITH THE BOARD, AND NOT RESETTING IT BLANKED EVERY BOARD AFTER THE
+     * FIRST PRESS (found by adversarial review): `deep` stayed true, so the next board
+     * visited asked for its 150-row tier, which is a cold query, and showed "Reading the
+     * chain" in place of the 50 rows it already had.
+     */
+    setDeep(false);
+  }, [board]);
+
+  useEffect(() => {
+    const held = cache[`${board}:${deep ? 'deep' : 'top'}`];
     if (held) {
       setData(held);
       // ★ AND CLEAR THE FLAG. Returning early without this left `loading` true forever
@@ -265,7 +273,7 @@ export default function InquisitionBoard() {
     };
 
     const pull = () => {
-      fetch(`/api/inquisition/boards?board=${board}`)
+      fetch(`/api/inquisition/boards?board=${board}${deep ? '&deep=1' : ''}`)
         .then((r) => {
           // ★ A 429 carries `Retry-After`; honour it rather than guessing.
           if (!r.ok) {
@@ -290,7 +298,7 @@ export default function InquisitionBoard() {
           const settled = json?.building !== true;
           const worthKeeping = ((json?.rows as unknown[] | undefined) ?? []).length > 0;
           if (!settled) timer = setTimeout(pull, nextWait());
-          else if (worthKeeping) setCache((c) => ({ ...c, [board]: json }));
+          else if (worthKeeping) setCache((c) => ({ ...c, [`${board}:${deep ? 'deep' : 'top'}`]: json }));
         })
         .catch(retryOrGiveUp);
     };
@@ -300,7 +308,7 @@ export default function InquisitionBoard() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [board, cache]);
+  }, [board, cache, deep]);
 
   /*
    * ★★★ THE ROWS MUST BELONG TO THE BOARD THAT IS SHOWING, AND FOR ONE RENDER THEY DID
@@ -315,7 +323,10 @@ export default function InquisitionBoard() {
    * rendered, and the panel shows its loading line for that one frame.
    */
   const matches = data?.board === board;
-  const rows = matches ? ((data?.rows as unknown[] | undefined) ?? []) : [];
+  const allRows = matches ? ((data?.rows as unknown[] | undefined) ?? []) : [];
+  const rows = allRows.slice(0, shown);
+  const canDeepen = matches && data?.canDeepen === true;
+  const more = shown < allRows.length || (shown >= allRows.length && canDeepen && !deep);
   const unavailable = matches && data?.unavailable === true;
   const pending = loading || !matches;
 
@@ -324,20 +335,28 @@ export default function InquisitionBoard() {
   return (
     <div className="min-w-0">
       {/*
-        ★★★ THE HEADER BAND, WITH THE ART (owner, 2026-09-19: "wheres teh header i gave
-        you? the image with the guy in the hood?"). I shipped a bare <h1> and a one-line
-        subtitle, which is why the page read as a spreadsheet with no reason to exist.
+        ★★★ THE HEADER BAND. The art is the whole costume, and the boards below stay
+        flat because of it. Three things the owner cut by name and which are NOT here:
+        the "INQUISITION MODE / ON" kicker above the title, the line "Nobody expects the
+        Hive Inquisition.", and every em dash in the copy.
 
-        The band is the whole joke and the whole warning at once: the costume carries the
-        theatre so the boards below can stay flat. The art sits under a left-to-right
-        scrim so the title is on solid ink at every width, and it is dimmed to 28% when
-        the mode is off — present, but clearly not switched on.
+        ★★★ THIS IS THE MOCK'S OWN ASSET, AND I HAD SHIPPED THE WRONG FILE. The handoff
+        contains two images with the same name: `dark-handoff/assets/inquisition-header.png`
+        (1400x420, a hood in the dark) and the Inquisition mock's own
+        `inquisition/assets/inquisition-header.png` (1400x560, md5 abb4a923) — the one with
+        the lit magnifying glass, which is the whole visual argument for the feature. I
+        copied the first. A visual review caught it: "the one image element that told users
+        this is an investigation tool was cropped away". It was never in the file.
+
+        The real asset is composed for a centre crop with a dark left third for the scrim,
+        so `object-center` is correct here and `object-right` was me compensating for the
+        wrong picture.
       */}
       <div
         className={cn(
-          'relative mb-5 flex min-h-[238px] items-center overflow-hidden rounded-panel border',
-          'bg-[#16181b] transition-[border-color] duration-500',
-          armed ? 'border-[#3a3226]' : 'border-line-9'
+          'relative mb-4 flex min-h-[238px] items-center overflow-hidden rounded-panel border',
+          'bg-surface-1 transition-[border-color] duration-700',
+          armed ? 'border-line-brand-10' : 'border-line-9'
         )}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -345,44 +364,38 @@ export default function InquisitionBoard() {
           src="/inquisition/header.png"
           alt=""
           aria-hidden="true"
-          className="absolute inset-0 h-full w-full object-cover object-center transition-opacity duration-700"
-          style={{ opacity: armed ? 1 : 0.28 }}
+          className={cn(
+            'absolute inset-0 h-full w-full object-cover object-center',
+            'transition-[opacity,transform] duration-[900ms] ease-out'
+          )}
+          style={{ opacity: armed ? 1 : 0.24, transform: armed ? 'scale(1)' : 'scale(1.04)' }}
         />
         <div
           aria-hidden="true"
           className="absolute inset-0"
           style={{
             background:
-              'linear-gradient(90deg, rgba(14,15,17,.95) 0%, rgba(14,15,17,.9) 34%, rgba(14,15,17,.35) 52%, rgba(14,15,17,0) 66%)'
+              'linear-gradient(90deg, rgb(var(--surface-1)) 0%, rgb(var(--surface-1) / 0.92) 34%, rgb(var(--surface-1) / 0.35) 52%, rgb(var(--surface-1) / 0) 68%)'
           }}
         />
 
-        <div className="relative z-[2] max-w-[560px] px-7 py-8">
-          <p className="font-ui text-caption uppercase tracking-label text-ink-brand-6">
-            Inquisition mode &middot; {armed ? 'ON' : 'OFF'}
-          </p>
-          <h1 className="mt-2 font-text text-[30px] font-semibold leading-[38px] text-[#f2f4f6]">
-            Nobody expects the Hive Inquisition.
+        {/* ★ THE MEASUREMENTS ARE THE MOCK'S: 30/32px padding, the title capped at 16ch
+            and the body at 33ch, with no cap on the wrapper. Capping the wrapper instead
+            squeezed the title onto two lines and ran the body down a narrow column. */}
+        <div className="relative z-[2] px-8 py-[30px]">
+          <h1 className="max-w-[16ch] font-text text-[clamp(32px,3.6vw,44px)] font-semibold leading-[1.04] tracking-[-0.02em] text-ink-2">
+            Inquisition mode
           </h1>
-          {/*
-            ★ THE SUBTITLE NAMES THE SIGNALS. It is the one place a reader finds out what
-            the six tabs below actually contain before clicking any of them.
-          */}
-          <p className="mt-3 font-ui text-[14px] leading-[22px] text-[#aeb4bc]">
+          <p className="mt-3 max-w-[33ch] font-ui text-[14.5px] leading-[1.6] text-ink-10">
             Public chain data on any account. Downvotes, value removed, mutes, rewards
-            against stake, crossposting, and every published blacklist. Lumen authors no
-            list and scores nobody &mdash; it reads what is already on chain and names the
-            source.
+            against stake and crossposting. Lumen authors no list and scores nobody: it
+            reads what is already on chain and names the source.
           </p>
         </div>
 
         {/*
-          ★★ THE ARMING PILL, AND THE BLACK RECTANGLE IS GONE (owner: "when i click off
-          on i can see teh black rectangle around the pill"). That was the browser's
-          default focus ring painting a square box around a round control on click.
-          `focus:outline-none` with a real `focus-visible` ring keeps it invisible to a
-          mouse and visible to a keyboard, which is the behaviour the rest of the app
-          already has.
+          ★★ THE ARMING PILL. The black rectangle on click was the browser's default focus
+          ring boxing a round control; `focus-visible` only.
         */}
         <button
           type="button"
@@ -392,16 +405,15 @@ export default function InquisitionBoard() {
           className={cn(
             'absolute right-6 top-5 z-[5] inline-flex shrink-0 items-center gap-2 rounded-full border p-1',
             'transition-[background-color,border-color,box-shadow] duration-500',
-            'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-brand)] focus-visible:ring-offset-0',
-            armed ? 'border-line-brand-10 bg-[rgba(14,15,17,.82)]' : 'border-line-6 bg-[rgba(14,15,17,.72)]'
+            'focus:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10',
+            armed ? 'border-line-brand-10 bg-[var(--amb-1)]' : 'border-line-6 bg-[var(--amb-1)]'
           )}
-          style={armed ? { boxShadow: '0 0 22px -6px rgba(198,58,58,.55)' } : undefined}
           data-testid="inquisition-arm"
         >
           <span
             className={cn(
               'rounded-full px-3 py-1 font-ui text-[13px] font-medium leading-[20px] transition-colors duration-300',
-              !armed ? 'bg-[var(--lum-1)] text-ink-2' : 'text-[#8a929c]'
+              !armed ? 'bg-[var(--lum-1)] text-ink-2' : 'text-ink-14'
             )}
           >
             Off
@@ -409,7 +421,7 @@ export default function InquisitionBoard() {
           <span
             className={cn(
               'rounded-full px-3 py-1 font-ui text-[13px] font-medium leading-[20px] transition-colors duration-300',
-              armed ? 'bg-surface-brand-12 text-ink-27' : 'text-[#8a929c]'
+              armed ? 'bg-surface-brand-12 text-ink-27' : 'text-ink-14'
             )}
           >
             On
@@ -431,7 +443,7 @@ export default function InquisitionBoard() {
             onClick={() => setBoard(b.id)}
             className={cn(
               'rounded-lg px-[14px] py-2 font-ui text-caption font-medium uppercase tracking-label transition-colors',
-              'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-brand)]',
+              'focus:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10',
               board === b.id ? 'bg-[var(--lum-1)] text-ink-2' : 'text-ink-10 hover:text-ink-4'
             )}
           >
@@ -441,50 +453,90 @@ export default function InquisitionBoard() {
       </div>
 
       {/*
-        ★★★ EVERY BOARD SAYS WHAT IT IS BEFORE IT SAYS WHO IS ON IT. Kicker, title,
-        scope, and one paragraph of what the number means and does not mean. The KE
-        paragraph in particular is a build requirement, not decoration: the spec's own
-        instruction is that KE "must say so on its face — not in a tooltip".
-      */}
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
-        <div className="min-w-0 max-w-[620px]">
-          <p className="font-ui text-caption uppercase tracking-label text-ink-brand-6">{def.kicker}</p>
-          <h2 className="mt-1 font-text text-[22px] font-semibold leading-[30px] text-ink-2">{def.title}</h2>
-          <p className="mt-2 font-ui text-[13.5px] leading-[21px] text-ink-10">{def.blurb}</p>
-        </div>
-        <p className="shrink-0 whitespace-pre-line text-right font-ui text-caption leading-[18px] text-ink-14">
-          {def.meta}
-        </p>
-      </div>
+        ★★★ THE BOARD HEADER LIVES INSIDE THE CARD, AND THAT IS WHY THE TEXT NOW LINES UP
+        (owner, 2026-09-19: "the text in places is outside the line with the cards. the
+        explanation text is not allinged with card edges").
 
-      <div className="overflow-x-auto rounded-panel border border-line-9 bg-surface-1">
-        {pending ? (
-          <p className="px-6 py-8 font-ui text-[14px] text-ink-10">Reading the chain&hellip;</p>
-        ) : unavailable ? (
-          <p className="px-6 py-8 font-ui text-[14px] text-ink-10">
-            The chain did not answer. Nothing is wrong with the account.
-          </p>
-        ) : rows.length === 0 ? (
-          <p className="px-6 py-8 font-ui text-[14px] text-ink-10">
-            {matches && data?.building === true
-              ? board === 'crossposting'
-                ? 'Asking Steem\u2026'
-                : 'Counting\u2026'
-              : 'Nothing to confess.'}
-          </p>
-        ) : board === 'blacklists' ? (
-          <BlacklistTable rows={rows as BlacklistRow[]} />
-        ) : board === 'muted' ? (
-          <MutedTable rows={rows as MutedRow[]} />
-        ) : board === 'downvoted' ? (
-          <DvTable rows={rows as DvRow[]} />
-        ) : board === 'inquisitors' ? (
-          <InquisitorTable rows={rows as InquisitorRow[]} />
-        ) : board === 'ke' ? (
-          <KeTable rows={rows as KeRow[]} />
-        ) : (
-          <CrosspostTable rows={rows as CrosspostRow[]} />
-        )}
+        I had the kicker, title, scope and blurb as a block ABOVE the bordered card, so
+        every one of them started at the page gutter while the table started at the card's
+        inner padding. The mock puts all of it in ONE card and gives the header block, the
+        column header row and the body rows the same horizontal padding, so the title, the
+        blurb and the first column all begin on the same vertical line. It is a repeated
+        number, not a computed alignment, which is exactly why it has to be repeated
+        faithfully: 26px on all three.
+      */}
+      <div className="overflow-hidden rounded-panel border border-line-9 bg-surface-1">
+        <div className="border-b border-line-9 px-[26px] pb-5 pt-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-5 gap-y-2">
+            <div className="min-w-0">
+              <p
+                className={cn(
+                  'font-num text-[10px] uppercase tracking-[0.16em] transition-colors',
+                  armed ? 'text-ink-brand-6' : 'text-ink-14'
+                )}
+              >
+                {def.kicker}
+              </p>
+              <h2 className="mt-2 font-text text-[25px] font-semibold leading-[32px] text-ink-2">{def.title}</h2>
+            </div>
+            <p className="shrink-0 whitespace-pre-line text-right font-num text-[11px] leading-[1.6] text-ink-14">
+              {def.meta}
+            </p>
+          </div>
+          {/* ★ The KE paragraph is a build requirement, not decoration: the spec says KE
+              "must say so on its face, not in a tooltip". */}
+          <p className="mt-3 max-w-[78ch] font-ui text-[13px] leading-[20px] text-ink-10">{def.blurb}</p>
+        </div>
+
+        <div className="overflow-x-auto">
+          {pending ? (
+            <p className="px-[26px] py-8 font-ui text-[14px] text-ink-10">Reading the chain&hellip;</p>
+          ) : unavailable ? (
+            <p className="px-[26px] py-8 font-ui text-[14px] text-ink-10">
+              The chain did not answer. Nothing is wrong with the account.
+            </p>
+          ) : rows.length === 0 ? (
+            <p className="px-[26px] py-8 font-ui text-[14px] text-ink-10">
+              {matches && data?.building === true
+                ? board === 'crossposting'
+                  ? 'Asking Steem\u2026'
+                  : 'Counting\u2026'
+                : 'Nothing to confess.'}
+            </p>
+          ) : board === 'muted' ? (
+            <MutedTable rows={rows as MutedRow[]} />
+          ) : board === 'downvoted' ? (
+            <DvTable rows={rows as DvRow[]} />
+          ) : board === 'inquisitors' ? (
+            <InquisitorTable rows={rows as InquisitorRow[]} />
+          ) : board === 'ke' ? (
+            <KeTable rows={rows as KeRow[]} />
+          ) : (
+            <CrosspostTable rows={rows as CrosspostRow[]} />
+          )}
+
+          {rows.length > 0 && more ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (shown < allRows.length) {
+                  setShown((n) => n + PAGE);
+                } else {
+                  // ★ Exhausted what is loaded: ask the server for the deeper tier.
+                  setDeep(true);
+                  setShown((n) => n + PAGE);
+                }
+              }}
+              className={cn(
+                'w-full border-t border-line-9 px-[26px] py-3.5 font-num text-[10px] uppercase tracking-[0.13em]',
+                'text-ink-14 transition-colors hover:bg-[var(--lum-1)] hover:text-ink-brand-6',
+                'focus:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10'
+              )}
+            >
+              {shown < allRows.length ? 'Show more' : 'Show more \u00b7 pulls a deeper query'}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {matches && data?.asOf ? (
@@ -498,171 +550,57 @@ export default function InquisitionBoard() {
         index on the public endpoints — measured, see signals.ts — and a board that
         silently omits it reads as "this account has none".
       */}
-      {/* ★ INCOMPLETENESS REACHES THE SCREEN. The server computes which publishers it
-          could not read and the UI used to discard it, so a short board carried a fresh
-          timestamp and no hint anything was missing. */}
-      {matches && Array.isArray(data?.missing) && (data.missing as string[]).length > 0 ? (
-        <p className="mt-2 font-ui text-caption text-ink-warn-3">
-          Could not read: {(data.missing as string[]).map((p) => `@${p}`).join(', ')}. This list is
-          incomplete.
-        </p>
-      ) : null}
       {matches && board === 'crossposting' && typeof data?.scope === 'number' ? (
         <p className="mt-2 font-ui text-caption text-ink-14">
-          {String(data.scope)} of {typeof data?.listed === 'number' ? String(data.listed) : '?'} accounts
-          on Steem&rsquo;s most recent posts also publish to Hive.
+          {typeof data?.matched === 'number' ? String(data.matched) : String(data.scope)} of{' '}
+          {typeof data?.listed === 'number' ? String(data.listed) : '?'} accounts on Steem&rsquo;s most
+          recent posts also publish to Hive.
         </p>
       ) : null}
 
-      {/*
-        ★★ THE LEGEND AND THE APPEAL ROUTES CAME BACK TOO. A band word on a row
-        ("extractive") is meaningless without its threshold, and the spec makes an appeal
-        route a hard requirement — "Always an appeal ... Every blacklist mark links to
-        that list's published appeal route".
-      */}
-      <div className="mt-6 grid gap-4 sm:grid-cols-2">
-        <div className="rounded-panel border border-line-9 bg-surface-1 px-5 py-4">
-          <p className="font-ui text-caption uppercase tracking-label text-ink-14">How to read it</p>
-          <dl className="mt-3 space-y-1.5">
-            {LEGEND.map((l) => (
-              <div key={l.k} className="flex gap-3">
-                <dt className="w-[76px] shrink-0 font-num text-[12.5px] tabular-nums text-ink-4">{l.k}</dt>
-                <dd className="font-ui text-[13px] leading-[20px] text-ink-10">{l.v}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-        <div className="rounded-panel border border-line-9 bg-surface-1 px-5 py-4">
-          <p className="font-ui text-caption uppercase tracking-label text-ink-14">Appeal a listing</p>
-          <ul className="mt-3 space-y-1.5">
-            {APPEALS.map((a) => (
-              <li key={a.name} className="flex items-baseline justify-between gap-3">
-                <span className="font-ui text-[13px] text-ink-4">{a.name}</span>
-                <a
-                  href={a.url}
-                  target="_blank"
-                  rel="noopener noreferrer nofollow"
-                  className="font-ui text-[13px] text-ink-brand-6 hover:underline"
-                >
-                  appeal guide &rarr;
-                </a>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3 font-ui text-caption leading-[18px] text-ink-14">
-            Lumen publishes no list and cannot remove a name from one. Appeals go to the
-            publisher.
-          </p>
-        </div>
-      </div>
     </div>
   );
 }
 
-const LEGEND: { k: string; v: string }[] = [
-  { k: 'KE < 1', v: 'Net holder — kept more than it took' },
-  { k: 'KE 1–3', v: 'Ordinary for an active author' },
-  { k: 'KE 3–10', v: 'Extractive cash-out pattern' },
-  { k: 'KE > 10', v: 'Cashing out, at scale' },
-  { k: 'VOTERS', v: 'Distinct downvoters — beats raw volume' },
-  { k: 'MUTED BY', v: 'Personal and free; stake is the corrective' }
-];
 
-const APPEALS: { name: string; url: string }[] = [
-  { name: 'HiveWatchers', url: 'https://hivewatchers.com' },
-  { name: 'Spaminator', url: 'https://spaminator.me' },
-  { name: 'Steemcleaners', url: 'https://steemcleaners.org' }
-];
-
-function BlacklistTable({ rows }: { rows: BlacklistRow[] }) {
-  return (
-    <table className="w-full border-collapse">
-      <thead>
-        <tr className="border-b border-line-9 text-left font-ui text-caption uppercase tracking-label text-ink-14">
-          <th className="px-6 py-3 font-medium">Account</th>
-          <th className="px-6 py-3 font-medium" title="The account that published the list">
-            Listed by
-          </th>
-          <th
-            className="px-6 py-3 font-medium"
-            title="A blacklist warns on transfers; it does not mute anyone"
-          >
-            List
-          </th>
-          <th className="px-6 py-3 font-medium">Appeal</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) =>
-          row.marks.map((mark, i) => (
-            <tr
-              key={`${row.account}-${mark.publisher}-${mark.kind}`}
-              className="border-b border-line-9 last:border-0"
-            >
-              <td className="px-6 py-3 font-ui text-[14px] text-ink-2">
-                {i === 0 ? (
-                  <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
-                    @{row.account}
-                  </a>
-                ) : null}
-              </td>
-              <td className="px-6 py-3 font-ui text-[14px] text-ink-10">
-                <a href={`/@${mark.publisher}`} className="hover:text-ink-brand-6">
-                  @{mark.publisher}
-                </a>
-              </td>
-              <td className="px-6 py-3 font-ui text-[14px] text-ink-10">{mark.kind}</td>
-              <td className="px-6 py-3 font-ui text-[14px]">
-                {mark.appealUrl ? (
-                  <a
-                    href={mark.appealUrl}
-                    target="_blank"
-                    rel="noopener noreferrer nofollow"
-                    className="text-ink-brand-6 hover:underline"
-                  >
-                    appeal
-                  </a>
-                ) : (
-                  <span className="text-ink-14">—</span>
-                )}
-              </td>
-            </tr>
-          ))
-        )}
-      </tbody>
-    </table>
-  );
-}
 
 function MutedTable({ rows }: { rows: MutedRow[] }) {
   return (
     <table className="w-full border-collapse">
       <thead>
-        <tr className="border-b border-line-9 text-left font-ui text-caption uppercase tracking-label text-ink-14">
-          <th className="px-6 py-3 font-medium">Account</th>
-          <th className="px-6 py-3 text-right font-medium" title="Accounts that have muted this one">
+        <tr className="border-b border-line-9 text-left font-num text-[9.5px] uppercase tracking-[0.13em] text-ink-14">
+          <th className="w-[52px] px-[26px] py-3 font-normal">#</th>
+          <th className="px-[26px] py-3 font-normal">Account</th>
+          <th className="px-[26px] py-3 text-right font-normal" title="Accounts that have muted this one">
             Muted by
           </th>
           {/* ★ STAKE IS THE CORRECTIVE. A mute is free, so a raw count rewards whoever
-              annoyed the most small accounts. */}
-          <th className="px-6 py-3 text-right font-medium" title="VESTS held by those accounts, in millions">
+              annoyed the most small accounts. In HP, matching the profile record: this
+              column used to print raw VESTS under an HP label, 1,610x off. */}
+          <th className="px-[26px] py-3 text-right font-normal" title="Combined Hive Power of those accounts, in millions">
             Muter stake
           </th>
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) => (
-          <tr key={row.account} className="border-b border-line-9 last:border-0">
-            <td className="px-6 py-3 font-ui text-[14px] text-ink-2">
+        {rows.map((row, i) => (
+          <tr key={row.account} className="border-b border-line-9 last:border-0 hover:bg-[var(--lum-1)]">
+            <td className="px-[26px] py-[15px] font-num text-[12.5px] tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-[15px] font-num text-[13px] text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
-            <td className="font-num px-6 py-3 text-right text-[14px] tabular-nums text-ink-2">
-              {row.mutedBy}
+            <td
+              className={cn(
+                'px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums',
+                row.mutedBy >= 50 ? 'text-ink-warn-3' : 'text-ink-2'
+              )}
+            >
+              {row.mutedBy.toLocaleString()}
             </td>
-            <td className="font-num px-6 py-3 text-right text-[14px] tabular-nums text-ink-10">
-              {row.muterMvests.toLocaleString()}M
+            <td className="px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums text-ink-10">
+              {row.muterMvests.toLocaleString(undefined, { maximumFractionDigits: 1 })}M HP
             </td>
           </tr>
         ))}
@@ -675,46 +613,80 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
   return (
     <table className="w-full border-collapse">
       <thead>
-        <tr className="border-b border-line-9 text-left font-ui text-caption uppercase tracking-label text-ink-14">
-          <th className="w-[46px] px-6 py-3 font-medium">#</th>
-          <th className="px-6 py-3 font-medium">Account</th>
+        <tr className="border-b border-line-9 text-left font-num text-[9.5px] uppercase tracking-[0.13em] text-ink-14">
+          <th className="w-[52px] px-[26px] py-3 font-normal">#</th>
+          <th className="px-[26px] py-3 font-normal">Account</th>
+          {/*
+            ★ REMOVED IS GREEN HERE AND ONLY HERE (owner: "Wheres on that page in green $
+            amount they took off posts"). On board 02 the same money is a loss to the
+            account listed, so it carries the brand accent; on this board it is value the
+            inquisitor took OUT of the reward pool, which is the job working. Same figure,
+            opposite sign, and the colour is the only thing that says so.
+          */}
           <th
-            className="px-6 py-3 text-right font-medium"
+            className="px-[26px] py-3 text-right font-normal"
+            title="Payout these downvotes took off the accounts this board could read. Whole history, valued per post; a dash means it was outside that set."
+          >
+            Removed
+          </th>
+          <th
+            className="px-[26px] py-3 text-right font-normal"
             title="Separate accounts this one downvoted. Spread, not volume, is the sort."
           >
             Targets
           </th>
-          <th className="px-6 py-3 text-right font-medium" title="Downvotes cast in the last three months">
-            Dvs cast
+          <th className="px-[26px] py-3 text-right font-normal" title="Downvotes cast in the last three months">
+            Downvotes cast
           </th>
-          <th className="px-6 py-3 font-medium" title="The account that received the most of them">
+          <th className="px-[26px] py-3 font-normal" title="The account that received the most of them">
             Top target
           </th>
         </tr>
       </thead>
       <tbody>
         {rows.map((row, i) => (
-          <tr key={row.account} className="border-b border-line-9 last:border-0">
-            <td className="px-6 py-3 font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
-            <td className="px-6 py-3 font-ui text-[14px] text-ink-2">
+          <tr key={row.account} className="border-b border-line-9 last:border-0 hover:bg-[var(--lum-1)]">
+            <td className="px-[26px] py-[15px] font-num text-[12.5px] tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-[15px] font-num text-[13px] text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
-            <td className="px-6 py-3 text-right font-num text-[14px] tabular-nums text-ink-2">{row.targets}</td>
-            <td className="px-6 py-3 text-right font-num text-[14px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums">
+              {/* ★ A SUB-CENT TOTAL IS NOTHING, AND IT RENDERED THREE DIFFERENT WAYS:
+                  "$0", "-$0.00" and a dash, in one column. One rule now. */}
+              {row.removedUsd === null || row.removedUsd < 0.005 ? (
+                <span className="text-ink-14">&mdash;</span>
+              ) : (
+                <span className="text-ink-ok-2">
+                  {'$' +
+                    row.removedUsd.toLocaleString(undefined, {
+                      maximumFractionDigits: row.removedUsd < 100 ? 2 : 0
+                    })}
+                </span>
+              )}
+            </td>
+            <td className="px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums text-ink-2">
+              {row.targets.toLocaleString()}
+            </td>
+            <td className="px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums text-ink-10">
               {row.downvotes.toLocaleString()}
             </td>
-            <td className="px-6 py-3 font-ui text-[13.5px] text-ink-10">
+            {/*
+              ★ THE COUNT IS SEPARATED FROM THE NAME. It used to sit flush after the
+              handle, so "@askrafiki 871" read as part of the account name rather than as
+              how many downvotes that account took.
+            */}
+            <td className="px-[26px] py-[15px] font-num text-[13px] text-ink-10">
               {row.topTarget ? (
-                <>
-                  <a href={`/@${row.topTarget}`} className="hover:text-ink-brand-6">
+                <span className="inline-flex items-baseline gap-1.5">
+                  <a href={`/@${row.topTarget}`} className="text-ink-2 hover:text-ink-brand-6">
                     @{row.topTarget}
-                  </a>{' '}
-                  <span className="font-num tabular-nums text-ink-14">{row.topTargetVotes.toLocaleString()}</span>
-                </>
+                  </a>
+                  <span className="text-ink-14">&middot;</span>
+                  <span className="tabular-nums text-ink-14">{row.topTargetVotes.toLocaleString()}</span>
+                </span>
               ) : (
-                /* ★ Phase B can fail on its own; the counts are still real. */
                 <span className="text-ink-14">not read</span>
               )}
             </td>
@@ -730,23 +702,23 @@ function DvTable({ rows }: { rows: DvRow[] }) {
     <table className="w-full border-collapse">
       <thead>
         <tr className="border-b border-line-9 text-left font-ui text-caption uppercase tracking-label text-ink-14">
-          <th className="w-[46px] px-6 py-3 font-medium">#</th>
-          <th className="px-6 py-3 font-medium">Account</th>
+          <th className="w-[46px] px-[26px] py-3 font-medium">#</th>
+          <th className="px-[26px] py-3 font-medium">Account</th>
           {/* ★ VOTERS IS THE SORT, AND THE REASON IS IN THE QUERY: 903 downvotes from 12
               accounts is a dispute, 212 from 29 is a consensus. */}
-          <th className="px-6 py-3 text-right font-medium" title="Distinct accounts that downvoted this one">
+          <th className="px-[26px] py-3 text-right font-medium" title="Distinct accounts that downvoted this one">
             Voters
           </th>
-          <th className="px-6 py-3 text-right font-medium" title="Downvotes received in the last three months">
+          <th className="px-[26px] py-3 text-right font-medium" title="Downvotes received in the last three months">
             Downvotes
           </th>
           <th
-            className="px-6 py-3 text-right font-medium"
-            title="Payout removed from this account's posts by downvotes, at today's reward rate"
+            className="px-[26px] py-3 text-right font-medium"
+            title="Payout removed across this account's whole history, each post valued at its own payout rate. The vote counts beside it are the last three months."
           >
             Removed
           </th>
-          <th className="px-6 py-3 font-medium" title="The account that cast the most of them">
+          <th className="px-[26px] py-3 font-medium" title="The account that cast the most of them">
             Top source
           </th>
         </tr>
@@ -754,14 +726,14 @@ function DvTable({ rows }: { rows: DvRow[] }) {
       <tbody>
         {rows.map((row, i) => (
           <tr key={row.account} className="border-b border-line-9 last:border-0">
-            <td className="px-6 py-3 font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
-            <td className="px-6 py-3 font-ui text-[14px] text-ink-2">
+            <td className="px-[26px] py-3 font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-3 font-ui text-[14px] text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
-            <td className="px-6 py-3 text-right font-num text-[14px] tabular-nums text-ink-2">{row.voters}</td>
-            <td className="px-6 py-3 text-right font-num text-[14px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-3 text-right font-num text-[14px] tabular-nums text-ink-2">{row.voters}</td>
+            <td className="px-[26px] py-3 text-right font-num text-[14px] tabular-nums text-ink-10">
               {row.downvotes.toLocaleString()}
             </td>
             {/* ★ A DASH IS "NOT COMPUTED", NEVER "NOTHING WAS TAKEN" — the enrichment
@@ -771,13 +743,13 @@ function DvTable({ rows }: { rows: DvRow[] }) {
                 'px-6 py-3 text-right font-num text-[14px] tabular-nums',
                 row.removedUsd === null ? 'text-ink-14' : row.removedUsd >= 10 ? 'text-ink-brand-6' : 'text-ink-10'
               )}
-              title={row.removedUsd === null ? 'Not computed for this row' : `${row.postsHit} posts affected`}
+              title={row.removedUsd === null ? 'Not computed for this row' : 'Whole history, valued per post'}
             >
-              {row.removedUsd === null
+              {row.removedUsd === null || row.removedUsd < 0.005
                 ? '\u2014'
                 : '\u2212$' + (row.removedUsd >= 100 ? Math.round(row.removedUsd).toLocaleString() : row.removedUsd.toFixed(2))}
             </td>
-            <td className="px-6 py-3 font-ui text-[13.5px] text-ink-10">
+            <td className="px-[26px] py-3 font-ui text-[13.5px] text-ink-10">
               {row.topSource ? (
                 <>
                   <a href={`/@${row.topSource}`} className="hover:text-ink-brand-6">
@@ -797,47 +769,50 @@ function DvTable({ rows }: { rows: DvRow[] }) {
 }
 
 function KeTable({ rows }: { rows: KeRow[] }) {
+  /*
+   * ★★★ THE BAND IS COLOURED, AND IT WAS THE BIGGEST REASON THE BOARD LOOKED DEAD (found
+   * by visual review, 2026-09-19: every band from KE 51 to KE 124 rendered flat grey).
+   * The ramp already existed and worked on the profile; it simply was not wired to the
+   * one table the design built it for. Colour carries the reading here, which is why the
+   * band word sits next to it and says the same thing in English.
+   */
+  const tone = (ke: number) =>
+    ke >= 10 ? 'text-ink-brand-6' : ke >= 3 ? 'text-ink-warn-3' : ke >= 1 ? 'text-ink-2' : 'text-ink-ok-2';
   return (
     <table className="w-full border-collapse">
       <thead>
-        <tr className="border-b border-line-9 text-left font-ui text-caption uppercase tracking-label text-ink-14">
-          <th className="px-6 py-3 font-medium">Account</th>
-          <th
-            className="px-6 py-3 text-right font-medium"
-            title="Lifetime rewards taken divided by Hive Power held"
-          >
+        <tr className="border-b border-line-9 text-left font-num text-[9.5px] uppercase tracking-[0.13em] text-ink-14">
+          <th className="w-[52px] px-[26px] py-3 font-normal">#</th>
+          <th className="px-[26px] py-3 font-normal">Account</th>
+          <th className="px-[26px] py-3 text-right font-normal" title="Lifetime rewards taken divided by Hive Power held">
             KE
           </th>
-          {/* ★ NO DEFINITION OF THE BAND WORDS ON SCREEN — owner's instruction. The
-              thresholds and the caveat live in types.ts. */}
-          <th className="px-6 py-3 font-medium">Band</th>
-          <th
-            className="px-6 py-3 text-right font-medium"
-            title="Author and curation rewards over the account's whole life"
-          >
+          <th className="px-[26px] py-3 font-normal">Band</th>
+          <th className="px-[26px] py-3 text-right font-normal" title="Author and curation rewards over the account's whole life">
             Rewards
           </th>
-          <th className="px-6 py-3 text-right font-medium" title="Hive Power held now">
-            HP
+          <th className="px-[26px] py-3 text-right font-normal" title="Hive Power held now">
+            HP held
           </th>
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) => (
-          <tr key={row.account} className="border-b border-line-9 last:border-0">
-            <td className="px-6 py-3 font-ui text-[14px] text-ink-2">
+        {rows.map((row, i) => (
+          <tr key={row.account} className="border-b border-line-9 last:border-0 hover:bg-[var(--lum-1)]">
+            <td className="px-[26px] py-[15px] font-num text-[12.5px] tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-[15px] font-num text-[13px] text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
-            <td className="font-num px-6 py-3 text-right text-[14px] tabular-nums text-ink-2">
+            <td className={cn('px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums', tone(row.ke))}>
               {row.ke.toFixed(2)}
             </td>
-            <td className="px-6 py-3 font-ui text-[14px] text-ink-10">{row.band}</td>
-            <td className="font-num px-6 py-3 text-right text-[14px] tabular-nums text-ink-10">
+            <td className={cn('px-[26px] py-[15px] font-ui text-[13px]', tone(row.ke))}>{row.band}</td>
+            <td className="px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums text-ink-10">
               {row.rewardsHive.toLocaleString()}
             </td>
-            <td className="font-num px-6 py-3 text-right text-[14px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-[15px] text-right font-num text-[13px] tabular-nums text-ink-10">
               {row.hp.toLocaleString()}
             </td>
           </tr>
@@ -853,15 +828,15 @@ function CrosspostTable({ rows }: { rows: CrosspostRow[] }) {
     <table className="w-full border-collapse">
       <thead>
         <tr className="border-b border-line-9 text-left font-ui text-caption uppercase tracking-label text-ink-14">
-          <th className="w-[46px] px-6 py-3 font-medium">#</th>
-          <th className="px-6 py-3 font-medium">Account</th>
-          <th className="px-6 py-3 text-right font-medium" title="Most recent post published to Steem">
+          <th className="w-[46px] px-[26px] py-3 font-medium">#</th>
+          <th className="px-[26px] py-3 font-medium">Account</th>
+          <th className="px-[26px] py-3 text-right font-medium" title="Most recent post published to Steem">
             Last Steem
           </th>
-          <th className="px-6 py-3 text-right font-medium" title="Most recent post published to Hive">
+          <th className="px-[26px] py-3 text-right font-medium" title="Most recent post published to Hive">
             Last Hive
           </th>
-          <th className="px-6 py-3 text-right font-medium" title="Posts published to Hive since the 2020 fork">
+          <th className="px-[26px] py-3 text-right font-medium" title="Posts published to Hive since the 2020 fork">
             Hive posts
           </th>
         </tr>
@@ -869,19 +844,19 @@ function CrosspostTable({ rows }: { rows: CrosspostRow[] }) {
       <tbody>
         {rows.map((row, i) => (
           <tr key={row.account} className="border-b border-line-9 last:border-0">
-            <td className="px-6 py-3 font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
-            <td className="px-6 py-3 font-ui text-[14px] text-ink-2">
+            <td className="px-[26px] py-3 font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-3 font-ui text-[14px] text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
-            <td className="px-6 py-3 text-right font-num text-[13.5px] tabular-nums text-ink-2">
+            <td className="px-[26px] py-3 text-right font-num text-[13.5px] tabular-nums text-ink-2">
               {day(row.lastSteem)}
             </td>
-            <td className="px-6 py-3 text-right font-num text-[13.5px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-3 text-right font-num text-[13.5px] tabular-nums text-ink-10">
               {day(row.lastHive)}
             </td>
-            <td className="px-6 py-3 text-right font-num text-[14px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-3 text-right font-num text-[14px] tabular-nums text-ink-10">
               {row.hivePosts.toLocaleString()}
             </td>
           </tr>

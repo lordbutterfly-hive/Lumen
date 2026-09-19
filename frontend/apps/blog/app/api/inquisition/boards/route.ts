@@ -1,6 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { blacklistIndex } from '@/blog/lib/inquisition/blacklists';
-import { inquisitorBoard, keBoard, mostDownvoted, mostMuted } from '@/blog/lib/inquisition/boards-sql';
+import {
+  BOARD_ROWS,
+  BOARD_ROWS_DEEP,
+  inquisitorBoard,
+  keBoard,
+  mostDownvoted,
+  mostMuted
+} from '@/blog/lib/inquisition/boards-sql';
 import { hiveSqlConfigured } from '@/blog/lib/inquisition/hivesql';
 import { loadCrossposters, type CrosspostRow } from '@/blog/lib/inquisition/crossposting';
 import { nowIso } from '@/blog/lib/inquisition/types';
@@ -137,7 +143,7 @@ function startBuild<T>(state: BoardState<T>, ttlMs: number, run: () => Promise<T
  * ★ AN EMPTY BOARD IS ONLY EVER "NOTHING TO CONFESS" IF WE ACTUALLY ASKED AND GOT
  * NOTHING. Otherwise it is `unavailable`, and the page says so.
  */
-function boardResponse<T>(board: string, state: BoardState<T>): NextResponse {
+function boardResponse<T>(board: string, state: BoardState<T>, depth = BOARD_ROWS): NextResponse {
   const unavailable = state.rows.length === 0 && !state.building && state.lastFailed;
   return NextResponse.json(
     {
@@ -145,70 +151,49 @@ function boardResponse<T>(board: string, state: BoardState<T>): NextResponse {
       rows: state.rows,
       asOf: state.asOf ?? undefined,
       building: state.building,
+      depth,
+      // ★ The button only appears when there is genuinely more to fetch.
+      canDeepen: depth < BOARD_ROWS_DEEP,
       ...(unavailable ? { unavailable: true } : {})
     },
     { headers: { 'cache-control': 'private, max-age=30' } }
   );
 }
 
+const mutedStateDeep = slot<{ account: string; mutedBy: number; muterMvests: number }>('muted-deep');
 const mutedState = slot<{ account: string; mutedBy: number; muterMvests: number }>('muted');
+const keStateDeep = slot<{ account: string; ke: number; rewardsHive: number; hp: number; band: string }>('ke-deep');
 const keState = slot<{ account: string; ke: number; rewardsHive: number; hp: number; band: string }>('ke');
+type DvRowT = { account: string; downvotes: number; voters: number; topSource: string; topSourceVotes: number; removedUsd: number | null; postsHit: number };
+type InqRowT = { account: string; downvotes: number; targets: number; topTarget: string; topTargetVotes: number; removedUsd: number | null };
+const dvStateDeep = slot<DvRowT>('downvoted-deep');
 const dvState = slot<{ account: string; downvotes: number; voters: number }>('downvoted');
 const xpostState = slot<CrosspostRow>('crossposting');
 const xpostCandidates = ((globalThis as Record<symbol, unknown>)[Symbol.for('lumen.inquisition.xpost.candidates')] ??= { n: 0 }) as { n: number };
+const inqStateDeep = slot<InqRowT>('inquisitors-deep');
 const inqState = slot<{ account: string; downvotes: number; targets: number; topTarget: string; topTargetVotes: number }>('inquisitors');
 
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const board = new URL(request.url).searchParams.get('board') ?? 'blacklists';
+  const params = new URL(request.url).searchParams;
+  const board = params.get('board') ?? 'ke';
+  /*
+   * ★★ DEPTH IS A READER'S CHOICE, AND THERE ARE EXACTLY TWO OF THEM. `?deep=1` is the
+   * SHOW MORE button. Accepting an arbitrary number here would let a stranger ask for a
+   * 10,000-row aggregate against somebody else's free database; two fixed tiers cannot
+   * be abused and cache cleanly, one slot each.
+   */
+  const limit = params.get('deep') === '1' ? BOARD_ROWS_DEEP : BOARD_ROWS;
+  const deeper = limit === BOARD_ROWS_DEEP;
 
   try {
-    if (board === 'blacklists') {
-      /*
-       * ★★★ THE SQL PATH FOR THIS BOARD IS GONE, AND IT WAS WRONG IN THE EXACT WAY
-       * `blacklists.ts` WARNS ABOUT (found by adversarial review, 2026-09-19).
-       *
-       * HiveSQL's `Blacklists` table carries only the BLACKLISTED list type, and this
-       * route hardcoded `kind: 'blacklisted'`. Two of the four publishers do not use
-       * that type. Measured against api.hive.blog:
-       *
-       *     hivewatchers   blacklisted  0   muted 27
-       *     steemcleaners  blacklisted  0   muted 13
-       *     spaminator     blacklisted 35   muted  1
-       *     buildawhale    blacklisted  9   muted  2
-       *
-       * So the board showed 45 marks from two publishers and silently dropped 40 marks
-       * from the other two — including hivewatchers, the best-known publisher on Hive.
-       * Worse, an early return on `rows.length > 0` meant the bridge fallback that DOES
-       * read both types could never run. The lesson was written down in one module and
-       * lost in the next one; the `LIST` column read "blacklisted" on every row,
-       * carrying no information at all.
-       *
-       * `bridge.get_follow_list` reads both types per publisher, names the publisher,
-       * and costs eight cached requests every six hours. It is simply the better
-       * source here, so it is the only source here. HiveSQL keeps the two jobs it
-       * alone can do: the muted board and the per-account marks.
-       */
-      const index = await blacklistIndex();
-      const rows = index.accounts.map((account) => ({
-        account,
-        marks: index.byAccount.get(account) ?? []
-      }));
-      return NextResponse.json(
-        {
-          board,
-          rows,
-          asOf: index.asOf,
-          // ★ THE READER IS TOLD WHEN THE PICTURE IS INCOMPLETE. This was computed and
-          // then thrown away: a publisher whose read failed produced a shorter board
-          // with a fresh timestamp and no hint that anything was missing.
-          missing: index.missing,
-          source: 'bridge'
-        },
-        { headers: { 'cache-control': 'private, max-age=60' } }
-      );
-    }
-
+    /*
+     * ★★★ THERE IS NO BLACKLIST BOARD (owner, 2026-09-19: "remove the blacklists from
+     * mode and bar. it wont work, we add that later"). The bridge reader, its cache and
+     * the board branch are all gone rather than hidden behind a flag: a published
+     * blacklist is somebody else's editorial judgement about a named person, and a
+     * half-built surface for that is worse than none.
+     */
     /*
      * ★★ HIVESQL ANSWERS THIS ONE AND NOTHING ELSE CAN. `Mutes(muter, muted)` is the
      * reverse lookup the spec called impossible and HAF genuinely cannot serve — it
@@ -225,11 +210,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           { headers: { 'cache-control': 'no-store' } }
         );
       }
-      startBuild(mutedState, SQL_REBUILD_MS, async () => {
-        const { rows, failed } = await mostMuted();
+      startBuild(deeper ? mutedStateDeep : mutedState, SQL_REBUILD_MS, async () => {
+        const { rows, failed } = await mostMuted(limit);
         return failed ? null : rows;
       });
-      return boardResponse(board, mutedState);
+      return boardResponse(board, deeper ? mutedStateDeep : mutedState, limit);
     }
 
     if (board === 'ke') {
@@ -239,11 +224,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           { headers: { 'cache-control': 'no-store' } }
         );
       }
-      startBuild(keState, SQL_REBUILD_MS, async () => {
-        const { rows, failed } = await keBoard();
+      startBuild(deeper ? keStateDeep : keState, SQL_REBUILD_MS, async () => {
+        const { rows, failed } = await keBoard(limit);
         return failed ? null : rows;
       });
-      return boardResponse(board, keState);
+      return boardResponse(board, deeper ? keStateDeep : keState, limit);
     }
 
     /*
@@ -257,22 +242,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           { headers: { 'cache-control': 'no-store' } }
         );
       }
-      startBuild(dvState, REBUILD_MS, async () => {
-        const { rows, failed } = await mostDownvoted();
+      startBuild(deeper ? dvStateDeep : dvState, REBUILD_MS, async () => {
+        const { rows, failed } = await mostDownvoted(limit);
         return failed ? null : rows;
       });
-      return boardResponse(board, dvState);
+      return boardResponse(board, deeper ? dvStateDeep : dvState, limit);
     }
 
     if (board === 'inquisitors') {
       if (!hiveSqlConfigured()) {
         return NextResponse.json({ board, rows: [], unconfigured: true }, { headers: { 'cache-control': 'no-store' } });
       }
-      startBuild(inqState, REBUILD_MS, async () => {
-        const { rows, failed } = await inquisitorBoard();
+      startBuild(deeper ? inqStateDeep : inqState, REBUILD_MS, async () => {
+        const { rows, failed } = await inquisitorBoard(limit);
         return failed ? null : rows;
       });
-      return boardResponse(board, inqState);
+      return boardResponse(board, deeper ? inqStateDeep : inqState, limit);
     }
 
     if (board === 'crossposting') {

@@ -3621,20 +3621,77 @@ input[data-testid='witnesses-filter-search'] {
  * ════ THE LIGHTS GOING DOWN ════
  *
  * ★★★ Arming Inquisition mode forces dark site-wide. Flipping the class repaints every
- * surface on the next frame, which reads as a glitch rather than as a deliberate change
- * of state — so `arm()` adds this class for exactly one transition and removes it again
- * (see lib/inquisition/arm.ts for why it must not stay on).
+ * surface on the next frame, which reads as a glitch; a flat 600ms linear fade reads as
+ * a loading state. What it wants is a THEATRE CUE, because that is what the mode is.
+ *
+ * Three things happen on one timeline (owner, 2026-09-19: "the animation is weird, it
+ * needs some soul"):
+ *
+ *   1. Colour eases out over 520ms on a curve with a long tail, so the room darkens fast
+ *      and then settles rather than sliding at a constant rate.
+ *   2. A single brand-tinted sweep crosses the viewport once, left to right, 900ms. It
+ *      is the lamp being carried past, and it is the only moment the accent colour owns
+ *      the whole screen.
+ *   3. The page lifts 3px and settles, which is what makes it feel like a cue rather
+ *      than a repaint.
  *
  * `background-color`, `border-color`, `color` and `fill` only: transitioning `all` would
- * animate layout properties and produce the jitter this is meant to avoid.
+ * animate layout properties and produce the jitter this exists to avoid.
  */
 .inquisition-dimming,
 .inquisition-dimming *:not(svg):not(path) {
   transition:
-    background-color 600ms cubic-bezier(0.4, 0, 0.2, 1),
-    border-color 600ms cubic-bezier(0.4, 0, 0.2, 1),
-    color 600ms cubic-bezier(0.4, 0, 0.2, 1),
-    fill 600ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+    background-color 520ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 520ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 520ms cubic-bezier(0.16, 1, 0.3, 1),
+    fill 520ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* The lamp passing. One shot, pointer-transparent, removed with the class. */
+.inquisition-dimming::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 0%,
+    transparent 38%,
+    rgb(var(--ink-brand-6) / 0.14) 48%,
+    rgb(var(--ink-brand-6) / 0.05) 56%,
+    transparent 66%,
+    transparent 100%
+  );
+  background-size: 260% 100%;
+  animation: inquisition-sweep 900ms cubic-bezier(0.22, 0.61, 0.36, 1) 1;
+}
+
+@keyframes inquisition-sweep {
+  from {
+    background-position: 130% 0;
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  to {
+    background-position: -30% 0;
+    opacity: 0;
+  }
+}
+
+.inquisition-dimming body {
+  animation: inquisition-settle 520ms cubic-bezier(0.16, 1, 0.3, 1) 1;
+}
+
+@keyframes inquisition-settle {
+  from {
+    transform: translateY(3px);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
 
 /* ★ Anyone who asked for less motion gets the instant flip, and `arm()` needs no branch. */
@@ -3642,5 +3699,10 @@ input[data-testid='witnesses-filter-search'] {
   .inquisition-dimming,
   .inquisition-dimming *:not(svg):not(path) {
     transition: none !important;
+  }
+
+  .inquisition-dimming::after,
+  .inquisition-dimming body {
+    animation: none;
   }
 }

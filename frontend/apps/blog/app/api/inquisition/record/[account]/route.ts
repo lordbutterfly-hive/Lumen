@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { marksFor } from '@/blog/lib/inquisition/blacklists';
-import { profileRecord, removedForAccount } from '@/blog/lib/inquisition/boards-sql';
+import { profileRecord } from '@/blog/lib/inquisition/boards-sql';
+import { voteLedger } from '@/blog/lib/inquisition/vote-ledger';
 import { steemPostsSinceFork } from '@/blog/lib/inquisition/crossposting';
 import { hiveSqlConfigured } from '@/blog/lib/inquisition/hivesql';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
@@ -53,26 +53,36 @@ export async function GET(
      * If the index is unreachable the strip shows the rest of the record rather than
      * failing whole: a missing listing is shown as none-known, never as a clean record.
      */
-    const [record, listing, removedUsd, steemPosts] = await Promise.all([
+    /*
+     * ★★ THE LISTINGS ARE GONE FROM THE RECORD (owner, 2026-09-19: "remove the
+     * blacklists from mode and bar. it wont work, we add that later"). The bridge
+     * fallback, the publisher table and the LISTED cell all came out together rather
+     * than being left wired up and hidden, so nothing here calls a blacklist publisher
+     * any more.
+     */
+    const [record, ledger, steem] = await Promise.all([
       cached(account),
-      marksFor(account).catch(() => ({ marks: [], missing: ['all'] })),
-      // ★ Both of these are allowed to come back null. A dash in the panel reads as
-      // "not computed" and says so on hover; a zero would read as a finding.
-      removedForAccount(account).catch(() => null),
+      // ★ The vote ledger is the expensive half — 12.1s for 883 posts — and it is
+      // allowed to fail without taking the record with it. A dash reads as "not
+      // computed" and says so on hover; it never reads as zero.
+      voteLedger(account).catch(() => null),
       steemPostsSinceFork(account).catch(() => null)
     ]);
     if (!record) {
       return NextResponse.json({ account, unavailable: true }, { headers: { 'cache-control': 'no-store' } });
     }
-    const publishers = [...new Set(listing.marks.map((m) => m.publisher))];
     return NextResponse.json(
       {
         ...record,
-        publishers,
-        removedUsd,
-        steemPosts,
-        // ★ An incomplete read is reported, never rendered as a clean record.
-        listsIncomplete: listing.missing.length > 0
+        // ★ `publishers` is gone with the blacklist board; nothing renders it.
+        publishers: undefined,
+        removedUsd: ledger ? ledger.removedUsd : null,
+        topDownvoters: ledger?.topDownvoters ?? [],
+        topPosts: ledger?.topPosts ?? [],
+        selfRewardUsd: ledger ? ledger.selfRewardUsd : null,
+        selfRewardPct: ledger ? ledger.selfRewardPct : null,
+        steemPosts: steem ? steem.posts : null,
+        steemLastPost: steem?.lastPost ?? null
       },
       { headers: { 'cache-control': 'private, max-age=300' } }
     );

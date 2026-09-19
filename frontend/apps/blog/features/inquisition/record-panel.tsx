@@ -7,33 +7,40 @@ import { watchArm } from '@/blog/lib/inquisition/arm';
 /**
  * ════ THE RECORD ════
  *
- * ★★★ THIS IS THE MOCK'S PANEL, NOT MY SUMMARY OF IT (owner, 2026-09-19: "go back to
- * exactly what claude design made. enumerate everythign every stat, all text").
+ * ★★★ LUMEN'S TOKENS, NOT THE MOCK'S HEX (owner, 2026-09-19: "i told you not to use
+ * their fonts anywhere. you used them. I told you not to use their colors anywhere, you
+ * used them"). Every colour below is a Lumen token that already flips with the theme:
  *
- * What I shipped first was four cells in a card BELOW the profile card, with no hover
- * text and no source lines. The design has SEVEN figures — DOWNVOTES, REMOVED, MUTED BY,
- * STEEM, KE RATIO, SELF-VOTE, LISTED — in one inset strip INSIDE the identity card,
- * beside the stats, with `hover any figure` stated on it so a reader knows the
- * explanations exist. Hovering a figure brasses its label, underlines it, and opens a
- * paragraph saying what the number is, what it is not, and where it came from.
+ *     their #4ec780  ->  text-ink-ok-2     (identical in dark; Lumen already had it)
+ *     their #c89b4a  ->  text-ink-brand-6  (our accent, not their brass)
+ *     their #f2f4f6  ->  text-ink-2
+ *     their #8a929c  ->  text-ink-14
+ *     their #aeb4bc  ->  text-ink-10
+ *     their #e8b33a  ->  text-ink-warn-3
+ *     their #3a3226  ->  border-line-brand-10
+ *     their #2a2e34  ->  border-line-9
  *
- * ★★ THE HOVER IS THE POINT, AND IT WAS MISSING (owner: "you cant hover over to see what
- * it is who muted me"). Every one of these numbers is contestable, and a bare integer
- * next to a person's name with no explanation is exactly the pillory the spec spends a
- * page warning against. The body text below each figure is the product; the integer is
- * the headline.
+ * Not one raw hex remains, so this panel is themed by the same ramp as the other 58
+ * routes and cannot drift from them.
  *
- * ★ NOTHING HERE IS CLICKABLE. Still true, still structural: no `<a>`, no `<button>`, no
- * `onClick`. `onMouseEnter`/`onFocus` reveal text and change no state anywhere else.
- * Keyboard readers get the same panel via focus, which the `title`-only version could
- * never offer.
+ * ★★ SIX FIGURES, AND THE PANEL IS SHORT. It was "far bigger then it needs to be": the
+ * cells were 15px with a 58px reserved paragraph slot, on a card that already carries the
+ * identity. LISTED is gone entirely (blacklists come out of the mode for now), the type
+ * is down a step, and the explanation slot is one tight line plus one sentence.
+ *
+ * ★★ ONE SENTENCE EACH, AND THE TOP THREE WHERE THEY EARN THEIR PLACE. Downvotes and
+ * value removed both name the three accounts responsible, because "990 downvotes" with
+ * nobody attached is the pillory the spec warns about, while "990, mostly from these
+ * three" is a fact a reader can go and check.
+ *
+ * ★ NOTHING HERE IS CLICKABLE. No `<a>`, no `<button>`, no `onClick`. Hover and focus
+ * reveal text and change no state anywhere else.
  */
 
 export interface RecordData {
   account: string;
   mutedBy: number;
   muterMvests: number;
-  publishers: string[];
   ke: number | null;
   band: string;
   rewardsHive: number;
@@ -42,16 +49,19 @@ export interface RecordData {
   downvoters: number;
   lastDownvote: string | null;
   removedUsd: number | null;
-  selfVotePct: number | null;
+  topDownvoters: { account: string; usd: number }[];
+  topPosts: { permlink: string; usd: number }[];
+  selfRewardUsd: number | null;
+  selfRewardPct: number | null;
   steemPosts: number | null;
+  steemLastPost: string | null;
   accountAgeDays: number;
   asOf: string;
-  listsIncomplete?: boolean;
   unavailable?: boolean;
   unconfigured?: boolean;
 }
 
-type Tone = 'ok' | 'muted' | 'warn' | 'bad' | 'dim';
+type Tone = 'ok' | 'plain' | 'warn' | 'accent' | 'dim';
 
 interface Cell {
   label: string;
@@ -59,15 +69,14 @@ interface Cell {
   exact: string;
   tone: Tone;
   body: string;
-  src: string;
 }
 
 const TONE: Record<Tone, string> = {
-  ok: 'text-[#4ec780]',
-  muted: 'text-[#f2f4f6]',
-  warn: 'text-[#e8b33a]',
-  bad: 'text-[#e8553a]',
-  dim: 'text-[#8a929c]'
+  ok: 'text-ink-ok-2',
+  plain: 'text-ink-2',
+  warn: 'text-ink-warn-3',
+  accent: 'text-ink-brand-6',
+  dim: 'text-ink-14'
 };
 
 const ago = (iso: string | null): string => {
@@ -79,90 +88,74 @@ const ago = (iso: string | null): string => {
   return `${Math.floor(days / 365)}y ago`;
 };
 
-const money = (n: number): string =>
-  (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+const usd = (n: number): string =>
+  '$' + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: Math.abs(n) < 100 ? 2 : 0 });
 
-/** The seven figures, in the mock's order, with the mock's own explanations. */
+const three = (list: { account: string; usd: number }[]): string =>
+  list.map((t) => `@${t.account} ${usd(t.usd)}`).join(', ');
+
 function cellsFor(r: RecordData): Cell[] {
-  const listed = r.publishers.length;
   return [
     {
-      label: 'DOWNVOTES',
+      label: 'DOWNVOTES RECEIVED',
       value: r.downvotes.toLocaleString(),
-      exact: `${r.downvotes.toLocaleString()} · from ${r.downvoters.toLocaleString()} accounts`,
-      tone: r.downvoters >= 25 ? 'warn' : 'muted',
-      body: `Downvotes received over the account's whole history, from ${r.downvoters.toLocaleString()} distinct accounts. Last one ${ago(r.lastDownvote)}. Distinct voters matter more than the total — many downvotes from few accounts is a dispute, not a consensus.`,
-      src: 'TxVotes where weight < 0, grouped by author'
+      exact:
+        r.topDownvoters.length > 0
+          ? `from ${r.downvoters.toLocaleString()} accounts · most: ${three(r.topDownvoters)}`
+          : `from ${r.downvoters.toLocaleString()} accounts · last ${ago(r.lastDownvote)}`,
+      tone: r.downvoters >= 25 ? 'warn' : 'plain',
+      body: `Downvotes received over the account's whole history, from ${r.downvoters.toLocaleString()} distinct accounts, the last one ${ago(r.lastDownvote)}.`
     },
     {
       label: 'REMOVED',
-      value: r.removedUsd === null ? '—' : money(-r.removedUsd),
-      exact: r.removedUsd === null ? 'not computed' : `${money(-r.removedUsd)} over the last 3 months`,
-      tone: r.removedUsd === null ? 'dim' : r.removedUsd >= 100 ? 'bad' : 'muted',
+      value: r.removedUsd === null ? '—' : usd(r.removedUsd),
+      exact:
+        r.removedUsd === null
+          ? 'not computed'
+          : r.topDownvoters.length > 0
+            ? `whole history · most: ${three(r.topDownvoters)}`
+            : 'whole history',
+      tone: r.removedUsd === null ? 'dim' : r.removedUsd >= 100 ? 'accent' : 'plain',
       body:
         r.removedUsd === null
-          ? 'Not computed for this account. The figure is a sum over every post the account published, so it runs against a time budget and a dash here means the budget was spent — never that nothing was taken.'
-          : "The USD those downvotes took off this account's payouts, measured as the payout lost on each post and converted at today's reward rate. The only figure here denominated in money, and the one people actually argue about.",
-      src: 'Comments: vote_rshares − net_rshares × reward rate'
+          ? 'Not computed for this account, which is not the same as nothing having been taken.'
+          : "What those downvotes took off this account's payouts across its whole history, each post valued at its own payout rate on the day it paid."
     },
     {
       label: 'MUTED BY',
       value: r.mutedBy.toLocaleString(),
-      exact: `${r.mutedBy.toLocaleString()} · ${r.muterMvests.toFixed(1)}M HP between them`,
-      tone: r.mutedBy >= 50 ? 'warn' : 'muted',
-      body: `Accounts that have muted this one, holding ${r.muterMvests.toFixed(1)}M HP between them. A mute is personal, free and one-sided — it hides an account from one reader and costs nothing to cast — so the stake behind it says more than the count.`,
-      src: 'HiveSQL Mutes(muter, muted)'
+      exact: `${r.mutedBy.toLocaleString()} accounts · ${r.muterMvests.toFixed(1)}M HP between them`,
+      tone: r.mutedBy >= 50 ? 'warn' : 'plain',
+      body: 'A mute is free, personal and one-sided, so the stake behind the muters says more than the count does.'
     },
     {
       label: 'STEEM',
       value: r.steemPosts === null ? '—' : r.steemPosts.toLocaleString(),
-      exact: r.steemPosts === null ? 'not read' : `${r.steemPosts.toLocaleString()} since 2020-03-20`,
+      exact:
+        r.steemPosts === null
+          ? 'not read'
+          : r.steemLastPost
+            ? `last one ${r.steemLastPost.slice(0, 10)} · ${ago(r.steemLastPost)}`
+            : 'none since 2020-09-20',
       tone: r.steemPosts === null ? 'dim' : r.steemPosts > 0 ? 'warn' : 'ok',
-      body:
-        'Posts published to the Steem chain after the Hive hardfork, asked of Steem’s own API rather than Hive’s. Reshares are excluded, so this is what the account published under its own name. Zero is the number everyone claims and nobody checks.',
-      src: 'steem condenser_api.get_discussions_by_blog'
+      body: 'Posts published to Steem since six months after the fork, asked of Steem itself; the migration window is excluded because posting there then was rarely a choice.'
     },
     {
       label: 'KE RATIO',
       value: r.ke === null ? '—' : r.ke.toFixed(1),
       exact: r.ke === null ? 'no stake held' : `${r.ke.toFixed(2)} · ${r.band}`,
-      tone: r.ke === null ? 'dim' : r.ke >= 10 ? 'bad' : r.ke >= 3 ? 'warn' : 'ok',
-      body: `${r.rewardsHive.toLocaleString()} HIVE of rewards taken ÷ ${r.hp.toLocaleString()} HP held. Evidence of cash-out behaviour, never of abuse — someone living on their payouts and a reward-pool farm read as the same number, and it must never drive an automatic action.`,
-      src: 'Accounts: posting + curation rewards ÷ vesting_shares'
+      tone: r.ke === null ? 'dim' : r.ke >= 10 ? 'accent' : r.ke >= 3 ? 'warn' : 'ok',
+      body: `${r.rewardsHive.toLocaleString()} HIVE taken against ${r.hp.toLocaleString()} HP held: evidence of cash-out behaviour, never of abuse.`
     },
     {
-      label: 'SELF-VOTE',
-      value: '—',
-      exact: 'not computed',
-      tone: 'dim',
-      /*
-       * ★★★ THIS ONE IS DELIBERATELY BLANK, AND SAYING SO IS THE HONEST ANSWER.
-       * The design wants the share of rewards that came from the account's OWN votes,
-       * denominated in value. That needs each vote's rshares, and `TxVotes` carries only
-       * the vote percentage — no rshares column exists. The cheap substitute (payout on
-       * posts the author happened to self-vote) measures something else entirely and
-       * returns ~99% for almost everybody: measured on @lordbutterfly, $19,720 of
-       * $19,879. A figure that says the same thing about everyone is not a figure, and
-       * printing it under this label would be a lie with a percent sign on it.
-       */
-      body: 'Not computed. This is the share of rewards that came from the account’s own votes, measured in value — and that needs each vote’s rshares, which the vote table does not carry. Counting votes instead would flatter whales and punish small accounts, so it is left blank rather than filled with the wrong measurement.',
-      src: 'needs per-vote rshares — not available from HiveSQL'
-    },
-    {
-      label: 'LISTED',
-      value: r.listsIncomplete ? '—' : listed === 0 ? 'None' : String(listed),
-      exact: r.listsIncomplete
-        ? 'lists unread'
-        : listed === 0
-          ? 'on 0 published lists'
-          : r.publishers.map((p) => `@${p}`).join(', '),
-      tone: r.listsIncomplete ? 'dim' : listed === 0 ? 'ok' : 'bad',
-      body: r.listsIncomplete
-        ? 'At least one publisher’s list could not be read, so this is not a clean record — it is no record. Nothing is implied about the account.'
-        : listed === 0
-          ? 'On no published blacklist — not HiveWatchers, Spaminator, Steemcleaners or buildawhale. A listing attaches information to a name and warns on transfers; it does not mute anyone.'
-          : `Listed by ${r.publishers.map((p) => `@${p}`).join(', ')}. Each publisher has its own scope and its own appeal route, which is why they are never merged into one verdict.`,
-      src: 'bridge.get_follow_list · blacklisted + muted'
+      label: 'SELF-REWARD',
+      value: r.selfRewardPct === null ? '—' : `${r.selfRewardPct.toFixed(1)}%`,
+      exact:
+        r.selfRewardUsd === null
+          ? 'not computed'
+          : `${usd(r.selfRewardUsd)} of every reward this account's posts have paid`,
+      tone: r.selfRewardPct === null ? 'dim' : r.selfRewardPct >= 25 ? 'warn' : 'ok',
+      body: "The share of this account's post rewards that came from its own votes, counted in money rather than in votes so it does not flatter whales."
     }
   ];
 }
@@ -182,7 +175,7 @@ export default function RecordPanel({ account }: { account: string }) {
     const ask = (attempt: number): void => {
       fetch(`/api/inquisition/record/${encodeURIComponent(account)}`)
         .then((r) => {
-          // ★ A 429 is "slow down", not "no record" — the route is rate-limited and its
+          // ★ A 429 is "slow down", not "no record": this route is rate-limited and its
           // 429 body is plain text, which an unguarded r.json() would have thrown on.
           if (r.status === 429 && attempt === 0) {
             const after = Number(r.headers.get('retry-after'));
@@ -222,32 +215,22 @@ export default function RecordPanel({ account }: { account: string }) {
   return (
     <div
       data-testid="inquisition-record"
-      className="mt-4 w-full min-w-0 rounded-[10px] border border-[#3a3226] bg-[rgba(14,15,17,.72)] px-4 py-3"
+      className="mt-3 w-full min-w-0 rounded-control border border-line-brand-10 bg-[var(--amb-1)] px-4 py-2.5"
     >
-      <div className="mb-2.5 flex items-baseline justify-between gap-3">
-        <span className="font-num text-[10px] uppercase tracking-[1.4px] text-[#c89b4a]">
-          &#9906; The record
-        </span>
-        <span className="font-num text-[9.5px] tracking-[0.6px] text-[#6f757e]">
-          {record ? 'hover any figure' : ''}
-        </span>
+      <div className="mb-2 flex items-baseline justify-between gap-3">
+        <span className="font-num text-[9.5px] uppercase tracking-[0.14em] text-ink-brand-6">The record</span>
+        <span className="font-num text-[9px] tracking-[0.06em] text-ink-14">{record ? 'hover any figure' : ''}</span>
       </div>
 
       {state === 'failed' ? (
-        <p className="py-1 font-num text-[11.5px] text-[#8a929c]">
+        <p className="py-0.5 font-num text-[11px] text-ink-14">
           The record could not be read. Nothing is implied about this account.
         </p>
       ) : !record ? (
-        <p className="py-1 font-num text-[11.5px] text-[#8a929c]">Reading the chain&hellip;</p>
+        <p className="py-0.5 font-num text-[11px] text-ink-14">Reading the chain&hellip;</p>
       ) : (
         <>
-          {/*
-            ★ SEVEN ACROSS, ONE ROW, LIKE THE MOCK. `flex-wrap` with a 20px gap dropped
-            LISTED onto a second line and turned a compact dossier strip into a block. A
-            seven-column grid keeps the shape at every width the card can take, and the
-            columns size themselves to the widest value rather than to a guess.
-          */}
-          <div className="grid grid-cols-7 gap-x-2">
+          <div className="grid grid-cols-3 items-end gap-x-3 gap-y-2 sm:grid-cols-6">
             {cells.map((c, i) => (
               <div
                 key={c.label}
@@ -256,21 +239,25 @@ export default function RecordPanel({ account }: { account: string }) {
                 onMouseLeave={() => setHover(-1)}
                 onFocus={() => setHover(i)}
                 onBlur={() => setHover(-1)}
-                className="min-w-0 cursor-help rounded-sm outline-none focus-visible:bg-[rgba(200,155,74,.08)]"
+                className="min-w-0 cursor-help rounded-sm outline-none"
               >
+                {/* ★ NOT `truncate`. "DOWNVOTES RECEIVED" is the longest label and the
+                    only one that overflowed its column, so it read "DOWNVOTES RECEI…"
+                    permanently. It wraps to two lines instead; the row has the height. */}
                 <div
                   className={cn(
-                    'font-num text-[9.5px] uppercase tracking-[0.9px] transition-colors',
-                    hover === i ? 'text-[#c89b4a]' : 'text-[#6f757e]'
+                    'font-num text-[8.5px] uppercase leading-[11px] tracking-[0.06em] transition-colors',
+                    hover === i ? 'text-ink-brand-6' : 'text-ink-14'
                   )}
+                  title={c.label}
                 >
                   {c.label}
                 </div>
                 <div
                   className={cn(
-                    'mt-0.5 border-b-[1.5px] pb-0.5 font-num text-[15px] leading-[20px] tabular-nums transition-colors',
+                    'mt-px border-b pb-0.5 font-num text-[13px] leading-[18px] tabular-nums transition-colors',
                     TONE[c.tone],
-                    hover === i ? 'border-b-[#c89b4a]' : 'border-b-transparent'
+                    hover === i ? 'border-b-line-brand-10' : 'border-b-transparent'
                   )}
                 >
                   {c.value}
@@ -279,20 +266,18 @@ export default function RecordPanel({ account }: { account: string }) {
             ))}
           </div>
 
-          {/*
-            ★ THE EXPLANATION HAS A RESERVED SLOT. Rendering it only on hover made the
-            card jump by the height of a paragraph every time the pointer crossed a
-            figure, which moves the very number you were reaching for.
-          */}
-          <div className="mt-3 min-h-[58px] border-t border-[#2a2e34] pt-2.5">
+          {/* ★ A RESERVED SLOT, so the card does not jump by a paragraph's height every
+              time the pointer crosses a figure and moves the number you were reaching for. */}
+          <div className="mt-2 min-h-[34px] border-t border-line-9 pt-1.5">
             {open ? (
               <>
-                <p className="font-num text-[10.5px] tracking-[0.3px] text-[#c89b4a]">{open.exact}</p>
-                <p className="mt-1 break-words font-ui text-[12px] leading-[17px] text-[#aeb4bc]">{open.body}</p>
-                <p className="mt-1 font-num text-[9.5px] tracking-[0.4px] text-[#6f757e]">{open.src}</p>
+                <p className="truncate font-num text-[10px] tracking-[0.02em] text-ink-brand-6" title={open.exact}>
+                  {open.exact}
+                </p>
+                <p className="mt-0.5 font-ui text-[11.5px] leading-[16px] text-ink-10">{open.body}</p>
               </>
             ) : (
-              <p className="font-num text-[10px] tracking-[0.4px] text-[#6f757e]">
+              <p className="font-num text-[9.5px] tracking-[0.04em] text-ink-14">
                 indexed {record.asOf.slice(0, 16).replace('T', ' ')} UTC &middot; account{' '}
                 {Math.floor(record.accountAgeDays / 365)}y old
               </p>

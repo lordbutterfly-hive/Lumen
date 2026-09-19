@@ -46,6 +46,17 @@ const PAGE_LIMIT = 100;
 /** Hive launched 2020-03-20. A Steem post before that says nothing about crossposting. */
 const HIVE_FORK_DATE = '2020-03-20';
 
+/**
+ * ★★★ THE FIRST SIX MONTHS AFTER THE FORK DO NOT COUNT (owner, 2026-09-19: "for steem we
+ * would need to exclude data inside 6 months after the fork").
+ *
+ * Both chains ran in parallel through the split and the migration was messy: auto-posting
+ * tools, cross-posting bridges and half-moved accounts kept publishing to Steem for
+ * months without anyone choosing to. Counting that window brands people for their
+ * migration rather than for a decision, so the count starts once the dust settles.
+ */
+const STEEM_COUNT_FROM = '2020-09-20';
+
 export interface CrosspostRow {
   account: string;
   lastSteem: string;
@@ -112,21 +123,22 @@ async function recentSteemAuthors(): Promise<Map<string, string>> {
   return authors;
 }
 
-export async function loadCrossposters(): Promise<{
+export async function loadCrossposters(limit = 50): Promise<{
   rows: CrosspostRow[];
   asOf: string;
   candidates: number;
+  matched: number;
   failed: boolean;
 }> {
-  if (!hiveSqlConfigured()) return { rows: [], asOf: nowIso(), candidates: 0, failed: true };
+  if (!hiveSqlConfigured()) return { rows: [], asOf: nowIso(), candidates: 0, matched: 0, failed: true };
 
   let steemAuthors: Map<string, string>;
   try {
     steemAuthors = await recentSteemAuthors();
   } catch {
-    return { rows: [], asOf: nowIso(), candidates: 0, failed: true };
+    return { rows: [], asOf: nowIso(), candidates: 0, matched: 0, failed: true };
   }
-  if (steemAuthors.size === 0) return { rows: [], asOf: nowIso(), candidates: 0, failed: true };
+  if (steemAuthors.size === 0) return { rows: [], asOf: nowIso(), candidates: 0, matched: 0, failed: true };
 
   /*
    * ★★ THE NAMES COME FROM STEEM AND GO IN AS TDS PARAMETERS, NEVER AS SQL TEXT. They
@@ -136,7 +148,7 @@ export async function loadCrossposters(): Promise<{
    * only. The length is bounded by the feed sample, well under the TDS parameter limit.
    */
   const names = [...steemAuthors.keys()].filter((n) => /^[a-z0-9.-]{3,16}$/.test(n));
-  if (names.length === 0) return { rows: [], asOf: nowIso(), candidates: 0, failed: false };
+  if (names.length === 0) return { rows: [], asOf: nowIso(), candidates: 0, matched: 0, failed: false };
 
   const placeholders = names.map((_, i) => `@a${i}`).join(',');
   const rows = await queryFast<{ author: string; hive_posts: number; last_hive: string | Date }>(
@@ -150,7 +162,7 @@ export async function loadCrossposters(): Promise<{
     ]
   );
   // ★ `null` is "we could not ask", never an empty board. See hivesql.ts.
-  if (rows === null) return { rows: [], asOf: nowIso(), candidates: names.length, failed: true };
+  if (rows === null) return { rows: [], asOf: nowIso(), candidates: names.length, matched: 0, failed: true };
 
   const out: CrosspostRow[] = rows.map((r) => ({
     account: r.author,
@@ -173,7 +185,12 @@ export async function loadCrossposters(): Promise<{
     return cmp !== 0 ? cmp : b.hivePosts - a.hivePosts;
   });
 
-  return { rows: out.slice(0, 50), asOf: nowIso(), candidates: names.length, failed: false };
+  /*
+   * ★ `matched` IS HOW MANY CROSSPOST, `rows` IS HOW MANY ARE SHOWN, AND CONFLATING THEM
+   * PRINTED A FALSEHOOD: the footer read "50 of 340" when 140 accounts actually matched,
+   * because it counted the slice rather than the result.
+   */
+  return { rows: out.slice(0, limit), asOf: nowIso(), candidates: names.length, matched: out.length, failed: false };
 }
 
 /**
@@ -187,9 +204,15 @@ export async function loadCrossposters(): Promise<{
  */
 const MAX_PROFILE_PAGES = 6;
 
-export async function steemPostsSinceFork(account: string): Promise<number | null> {
+export interface SteemPresence {
+  posts: number;
+  lastPost: string | null;
+}
+
+export async function steemPostsSinceFork(account: string): Promise<SteemPresence | null> {
   const seen = new Set<string>();
   let posts = 0;
+  let lastPost: string | null = null;
   let startAuthor = '';
   let startPermlink = '';
 
@@ -201,7 +224,7 @@ export async function steemPostsSinceFork(account: string): Promise<number | nul
         query.start_permlink = startPermlink;
       }
       const result = (await steem('condenser_api.get_discussions_by_blog', [query])) as SteemPost[];
-      if (!Array.isArray(result) || result.length === 0) return posts;
+      if (!Array.isArray(result) || result.length === 0) return { posts, lastPost };
 
       const cursorBefore = startPermlink;
       let crossedFork = false;
@@ -217,17 +240,21 @@ export async function steemPostsSinceFork(account: string): Promise<number | nul
         startPermlink = permlink;
         // ★ Reshare filter FIRST — see the note above.
         if (author !== account) continue;
+        // ★ The WALK still stops at the fork; only the COUNT starts six months later,
+        // so a post inside the window is skipped rather than ending the walk early.
         if (created < HIVE_FORK_DATE) {
           crossedFork = true;
           break;
         }
+        if (created < STEEM_COUNT_FROM) continue;
         posts += 1;
+        if (!lastPost || created > lastPost) lastPost = created;
       }
-      if (crossedFork) return posts;
-      if (result.length < PAGE_LIMIT) return posts;
-      if (startPermlink === cursorBefore) return posts;
+      if (crossedFork) return { posts, lastPost };
+      if (result.length < PAGE_LIMIT) return { posts, lastPost };
+      if (startPermlink === cursorBefore) return { posts, lastPost };
     }
-    return posts;
+    return { posts, lastPost };
   } catch {
     // ★ An endpoint that will not answer is not a fact about the account.
     return null;

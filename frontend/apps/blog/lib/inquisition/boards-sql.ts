@@ -2,6 +2,7 @@ import 'server-only';
 import { TYPES } from 'tedious';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 import { hiveSqlConfigured, queryFast, querySlow } from './hivesql';
+import { removedByVoterAcross, voteLedger } from './vote-ledger';
 import { keBand, nowIso } from './types';
 import type { KeBand } from './types';
 
@@ -25,6 +26,26 @@ import type { KeBand } from './types';
 
 const MIN_VESTS = 10_000_000;
 const MIN_AGE_DAYS = 90;
+
+/**
+ * ★★★ HOW DEEP A BOARD GOES, AND IT IS A PARAMETER BECAUSE THE READER DECIDES (owner,
+ * 2026-09-19: "each page needs to be able to be expanded. SHOW MORE. then you pull
+ * more"). The first build stops at `BOARD_ROWS`; pressing the button asks for
+ * `BOARD_ROWS_DEEP`, which is a second, deeper query rather than a bigger first one, so
+ * a reader who never expands never pays for rows nobody looked at.
+ */
+/**
+ * How many of the most-downvoted accounts the inquisitor money column is summed over.
+ * Each one is a ~12s vote-ledger read, so this is the whole cost of that column: 20
+ * accounts is about four minutes, once a day, in the background.
+ */
+const INQ_LEDGER_ACCOUNTS = 30;
+
+/** The KE board's stake floor, in HP. Converted to VESTS at the live rate. */
+const KE_MIN_HP = 500;
+
+export const BOARD_ROWS = 50;
+export const BOARD_ROWS_DEEP = 150;
 
 export interface MutedRow {
   account: string;
@@ -63,11 +84,14 @@ export interface DownvotedRow {
  * too, so an account muted by a handful of very large accounts does not appear at all.
  * Measured at 2.6s including the join and both floors.
  */
-async function loadMostMuted(): Promise<{ rows: MutedRow[]; asOf: string; failed: boolean }> {
+async function loadMostMuted(limit = BOARD_ROWS): Promise<{ rows: MutedRow[]; asOf: string; failed: boolean }> {
   const rows = await querySlow<{ account: string; muted_by: number; muter_mvests: number }>(
-    `SELECT TOP 50 m.muted AS account, COUNT(*) AS muted_by,
+    `SELECT TOP (@lim) m.muted AS account, COUNT(*) AS muted_by,
+            -- ★ DIVIDED BY THE RATE, BECAUSE THE COLUMN SAYS HP. This summed raw VESTS
+            -- and the board printed it as "4,498M" beside a profile that printed the same
+            -- muters as "2.8M HP" — the same fact, 1,610x apart, on two screens.
             -- ★ decimal, not int: a row muted entirely by small holders rendered 0M.
-            CAST(SUM(CAST(ISNULL(a2.vesting_shares,0) AS float))/1000000.0 AS decimal(14,2)) AS muter_mvests
+            CAST(SUM(CAST(ISNULL(a2.vesting_shares,0) AS float))/@ratio/1000000.0 AS decimal(14,2)) AS muter_mvests
      FROM Mutes m
      JOIN Accounts a1 ON a1.name = m.muted
      LEFT JOIN Accounts a2 ON a2.name = m.muter
@@ -75,8 +99,10 @@ async function loadMostMuted(): Promise<{ rows: MutedRow[]; asOf: string; failed
      GROUP BY m.muted
      ORDER BY COUNT(*) DESC`,
     [
+      { name: 'ratio', type: TYPES.Float, value: await vestsPerHive() },
       { name: 'minVests', type: TYPES.Float, value: MIN_VESTS },
-      { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS }
+      { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS },
+      { name: 'lim', type: TYPES.Int, value: limit }
     ]
   );
   // `null` is "the database did not answer"; an empty array is "it answered, none".
@@ -113,9 +139,9 @@ async function loadMostMuted(): Promise<{ rows: MutedRow[]; asOf: string; failed
  * nightly job's budget, not a reader's, and this function is only ever called by the
  * refresher.
  */
-async function loadMostDownvoted(): Promise<{ rows: DownvotedRow[]; asOf: string; failed: boolean }> {
+async function loadMostDownvoted(limit = BOARD_ROWS): Promise<{ rows: DownvotedRow[]; asOf: string; failed: boolean }> {
   const rows = await querySlow<{ account: string; downvotes: number; voters: number }>(
-    `SELECT TOP 50 v.author AS account, COUNT(*) AS downvotes, COUNT(DISTINCT v.voter) AS voters
+    `SELECT TOP (@lim) v.author AS account, COUNT(*) AS downvotes, COUNT(DISTINCT v.voter) AS voters
      FROM TxVotes v WITH (NOLOCK)
      JOIN Accounts a ON a.name = v.author
      WHERE v.weight < 0 AND v.timestamp > DATEADD(month, -3, GETDATE())
@@ -127,7 +153,8 @@ async function loadMostDownvoted(): Promise<{ rows: DownvotedRow[]; asOf: string
      ORDER BY COUNT(DISTINCT v.voter) DESC, COUNT(*) DESC`,
     [
       { name: 'minVests', type: TYPES.Float, value: MIN_VESTS },
-      { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS }
+      { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS },
+      { name: 'lim', type: TYPES.Int, value: limit }
     ]
   );
   // ★ `null` is "we could not ask" and must never become an empty board — see hivesql.ts.
@@ -165,9 +192,9 @@ async function loadMostDownvoted(): Promise<{ rows: DownvotedRow[]; asOf: string
 }
 
 
-export const mostMuted = withTtlCache(loadMostMuted, () => 'most-muted', {
+export const mostMuted = withTtlCache(loadMostMuted, (limit = BOARD_ROWS) => `most-muted:${limit}`, {
   ttlMs: 6 * 60 * 60 * 1000,
-  max: 1,
+  max: 2,
   name: 'inq-board-muted',
   shouldCache: (v) => !v.failed && v.rows.length > 0
 });
@@ -197,29 +224,23 @@ const ENRICH_BUDGET_MS = 150_000;
 const ENRICH_CHUNK = 10;
 
 async function removedByAuthor(authors: string[]): Promise<Map<string, { usd: number; posts: number }>> {
+  /*
+   * ★★★ THIS USED TO READ `vote_rshares - net_rshares` AND WAS WRONG FOR EVERY PAID POST.
+   * Both columns are reset to 0 at payout, so the sum only ever saw posts inside their
+   * seven-day window: it reported −$9 for @lordbutterfly, whose real lifetime figure is
+   * −$238.25. `voteLedger` reads `active_votes`, which survives payout. See that file.
+   *
+   * ★★ BOUNDED TO THE TOP OF THE BOARD. A ledger is ~12s per account, so the money column
+   * is filled for the first `INQ_LEDGER_ACCOUNTS` rows and reports `null` past that. A
+   * dash reads as "not computed" and says so; it never reads as zero.
+   */
   const out = new Map<string, { usd: number; posts: number }>();
-  const rate = await hbdPerRshare();
-  if (rate <= 0) return out;
-
-  const deadline = Date.now() + ENRICH_BUDGET_MS;
-  for (let i = 0; i < authors.length; i += ENRICH_CHUNK) {
-    if (Date.now() >= deadline) break;
-    const chunk = authors.slice(i, i + ENRICH_CHUNK);
-    const placeholders = chunk.map((_, j) => `@a${j}`).join(',');
-    const rows = await querySlow<{ author: string; removed_rshares: number; posts: number }>(
-      `SELECT c.author,
-              SUM(CAST(c.vote_rshares AS float) - CAST(c.net_rshares AS float)) AS removed_rshares,
-              COUNT(*) AS posts
-       FROM Comments c WITH (NOLOCK)
-       WHERE c.depth = 0 AND c.author IN (${placeholders})
-         AND c.created > DATEADD(month, -3, GETDATE())
-         AND c.net_rshares < c.vote_rshares
-       GROUP BY c.author`,
-      chunk.map((name, j) => ({ name: `a${j}`, type: TYPES.VarChar, value: name }))
-    );
-    if (rows === null) break;
-    for (const r of rows) {
-      out.set(r.author, { usd: (Number(r.removed_rshares) || 0) * rate, posts: Number(r.posts) || 0 });
+  for (const author of authors.slice(0, INQ_LEDGER_ACCOUNTS)) {
+    try {
+      const ledger = await voteLedger(author, 'background');
+      if (ledger) out.set(author, { usd: ledger.removedUsd, posts: ledger.topPosts.length });
+    } catch {
+      // One unreadable account does not fail the column for the rest.
     }
   }
   return out;
@@ -308,9 +329,9 @@ async function topSourceFor(authors: string[]): Promise<Map<string, { voter: str
   return best;
 }
 
-export const mostDownvoted = withTtlCache(loadMostDownvoted, () => 'most-downvoted', {
+export const mostDownvoted = withTtlCache(loadMostDownvoted, (limit = BOARD_ROWS) => `most-downvoted:${limit}`, {
   ttlMs: 24 * 60 * 60 * 1000,
-  max: 1,
+  max: 2,
   name: 'inq-board-downvoted',
   shouldCache: (v) => !v.failed && v.rows.length > 0
 });
@@ -321,6 +342,8 @@ export interface InquisitorRow {
   targets: number;
   topTarget: string;
   topTargetVotes: number;
+  /** Value taken off the accounts on the most-downvoted board, or null if not computed. */
+  removedUsd: number | null;
 }
 
 /**
@@ -348,7 +371,7 @@ export interface InquisitorRow {
  * cut", so it is cut until it can be earned from the reward fund per post. `topTarget`
  * IS traceable: it is that voter's own votes, grouped.
  */
-async function loadInquisitors(): Promise<{ rows: InquisitorRow[]; asOf: string; failed: boolean }> {
+async function loadInquisitors(limit = BOARD_ROWS): Promise<{ rows: InquisitorRow[]; asOf: string; failed: boolean }> {
   /*
    * ★★★ TWO INDEXED PHASES, BECAUSE ONE GROUP-BY DOES NOT FINISH. Measured 2026-09-19:
    * grouping `TxVotes` by (voter, author) over three months with a window function to
@@ -361,7 +384,7 @@ async function loadInquisitors(): Promise<{ rows: InquisitorRow[]; asOf: string;
    * ask the expensive question only about those names.
    */
   const leaders = await querySlow<{ account: string; downvotes: number; targets: number }>(
-    `SELECT TOP 50 v.voter AS account, COUNT(*) AS downvotes, COUNT(DISTINCT v.author) AS targets
+    `SELECT TOP (@lim) v.voter AS account, COUNT(*) AS downvotes, COUNT(DISTINCT v.author) AS targets
      FROM TxVotes v WITH (NOLOCK)
      JOIN Accounts acc ON acc.name = v.voter
      WHERE v.weight < 0 AND v.timestamp > DATEADD(month, -3, GETDATE())
@@ -371,7 +394,8 @@ async function loadInquisitors(): Promise<{ rows: InquisitorRow[]; asOf: string;
      ORDER BY COUNT(DISTINCT v.author) DESC, COUNT(*) DESC`,
     [
       { name: 'minVests', type: TYPES.Float, value: MIN_VESTS },
-      { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS }
+      { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS },
+      { name: 'lim', type: TYPES.Int, value: limit }
     ]
   );
   if (leaders === null) return { rows: [], asOf: nowIso(), failed: true };
@@ -397,15 +421,55 @@ async function loadInquisitors(): Promise<{ rows: InquisitorRow[]; asOf: string;
     if (!held || n > held.n) best.set(row.voter, { author: row.author, n });
   }
 
+  /*
+   * ★ THE MONEY COMES FROM THE OTHER BOARD'S LEDGERS. See `removedByVoterAcross` for why
+   * the direct query is not runnable. Bounded to the most-downvoted accounts this build
+   * already knows about, and allowed to come back empty without failing the board.
+   */
+  /*
+   * ★★★ THE LEDGER SET IS SEEDED FROM THE INQUISITORS' OWN TARGETS, NOT FROM THE
+   * MOST-DOWNVOTED BOARD, AND THE FIRST VERSION WAS USELESS BECAUSE OF THAT.
+   *
+   * Summing over the top 20 most-downvoted accounts gave @freebornsociety **$0.02** —
+   * arithmetically true and completely misleading, because that account's 7,796
+   * downvotes land almost entirely on accounts that are not on board 02. A figure that
+   * says "this person took two cents" about someone who has removed real money is worse
+   * than no figure.
+   *
+   * So the accounts whose ledgers get read are the ones these voters actually hit: every
+   * top target on this board, plus the heaviest-downvoted accounts, deduplicated. Each
+   * ledger is ~12s, so the set is capped and the column reports `null` for anyone whose
+   * money is outside it. A dash says "not computed"; it never says zero.
+   */
+  const seed = new Set<string>();
+  for (const [, top] of best) {
+    if (top.author) seed.add(top.author);
+  }
+  try {
+    const victims = await mostDownvoted();
+    if (!victims.failed) for (const v of victims.rows.slice(0, 10)) seed.add(v.account);
+  } catch {
+    // The board still works without the money column.
+  }
+
+  let removed = new Map<string, number>();
+  try {
+    removed = (await removedByVoterAcross([...seed].slice(0, INQ_LEDGER_ACCOUNTS))).byVoter;
+  } catch {
+    // A missing money column is not a missing board.
+  }
+
   return {
     rows: leaders.map((r) => {
       const top = best.get(r.account);
+      const usd = removed.get(r.account);
       return {
         account: r.account,
         downvotes: Number(r.downvotes) || 0,
         targets: Number(r.targets) || 0,
         topTarget: top?.author ?? '',
-        topTargetVotes: top?.n ?? 0
+        topTargetVotes: top?.n ?? 0,
+        removedUsd: usd === undefined ? null : usd
       };
     }),
     asOf: nowIso(),
@@ -413,9 +477,9 @@ async function loadInquisitors(): Promise<{ rows: InquisitorRow[]; asOf: string;
   };
 }
 
-export const inquisitorBoard = withTtlCache(loadInquisitors, () => 'inquisitors', {
+export const inquisitorBoard = withTtlCache(loadInquisitors, (limit = BOARD_ROWS) => `inquisitors:${limit}`, {
   ttlMs: 24 * 60 * 60 * 1000,
-  max: 1,
+  max: 2,
   name: 'inq-board-inquisitors',
   shouldCache: (v) => !v.failed && v.rows.length > 0
 });
@@ -491,25 +555,49 @@ const vestsPerHive = withTtlCache(loadVestsPerHive, () => 'vests-per-hive', {
  * thresholds, and stays in the code — the owner's instruction is that no definition of
  * "extractive" or "net holder" reaches the screen.
  */
-async function loadKeBoard(): Promise<{ rows: KeRow[]; asOf: string; failed: boolean }> {
+async function loadKeBoard(limit = BOARD_ROWS): Promise<{ rows: KeRow[]; asOf: string; failed: boolean }> {
   const ratio = await vestsPerHive();
   if (ratio <= 0) return { rows: [], asOf: nowIso(), failed: true };
 
+  /*
+   * ★★★ THE FLOOR IS 500 HP AND THE ACCOUNT MUST STILL BE POSTING (owner, 2026-09-19:
+   * "the KE index should show from worth to best accounts above 500Hp that have posted
+   * inside last 3 months").
+   *
+   * Both conditions change what the board is for. The old 10,000,000 VESTS floor was
+   * 6,211 HP, which quietly excluded most real authors and left the board reading as a
+   * list of large stakeholders; 500 HP is a floor against noise, not against people. And
+   * a KE ratio on a dormant account is an epitaph, not a finding: the number cannot move
+   * because nobody is posting. `Accounts.last_post` makes that a column test rather than
+   * a join, so it costs nothing.
+   *
+   * ★ THE FLOOR IS COMPUTED FROM THE LIVE RATE, not hardcoded in VESTS, because the rate
+   * drifts and a fixed VESTS constant silently becomes a different HP floor every month.
+   * That is exactly how the old comment came to claim 5,000 HP for a 6,211 HP floor.
+   *
+   * ★ WORST FIRST, which is what the ORDER BY already did: highest KE is the most
+   * extractive, and the band word beside it says so in words.
+   */
+  const minVests = KE_MIN_HP * ratio;
+
   const rows = await querySlow<{ account: string; rewards_hive: number; hp: number; ke: number }>(
-    `SELECT TOP 50 name AS account,
+    `SELECT TOP (@lim) name AS account,
             CAST((CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) / 1000.0 AS int) AS rewards_hive,
             CAST(vesting_shares / @ratio AS int) AS hp,
             CAST(((CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) / 1000.0)
                  / NULLIF(vesting_shares / @ratio, 0) AS decimal(12,2)) AS ke
      FROM Accounts
-     WHERE vesting_shares > @minVests AND created < DATEADD(day, -@minAge, GETDATE())
+     WHERE vesting_shares > @minVests
+       AND created < DATEADD(day, -@minAge, GETDATE())
+       AND last_post > DATEADD(month, -3, GETDATE())
        AND (CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) > 0
      ORDER BY ((CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) / 1000.0)
               / NULLIF(vesting_shares / @ratio, 0) DESC`,
     [
       { name: 'ratio', type: TYPES.Float, value: ratio },
-      { name: 'minVests', type: TYPES.Float, value: MIN_VESTS },
-      { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS }
+      { name: 'minVests', type: TYPES.Float, value: minVests },
+      { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS },
+      { name: 'lim', type: TYPES.Int, value: limit }
     ]
   );
   if (rows === null) return { rows: [], asOf: nowIso(), failed: true };
@@ -529,9 +617,9 @@ async function loadKeBoard(): Promise<{ rows: KeRow[]; asOf: string; failed: boo
   };
 }
 
-export const keBoard = withTtlCache(loadKeBoard, () => 'ke', {
+export const keBoard = withTtlCache(loadKeBoard, (limit = BOARD_ROWS) => `ke:${limit}`, {
   ttlMs: 6 * 60 * 60 * 1000,
-  max: 1,
+  max: 2,
   name: 'inq-board-ke',
   shouldCache: (v) => !v.failed && v.rows.length > 0
 });
