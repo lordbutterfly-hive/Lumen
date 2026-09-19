@@ -303,26 +303,6 @@ const hbdPerRshare = withTtlCache(loadHbdPerRshare, () => 'hbd-per-rshare', {
   shouldCache: (v) => v > 0
 });
 
-/**
- * What downvotes took off ONE account's posts, for the profile Record. Same expression
- * as the board's enrichment, one name, lifetime rather than a rolling window — a profile
- * figure that only covered three months would read as a clean record for anyone whose
- * trouble was last year.
- */
-export async function removedForAccount(account: string): Promise<number | null> {
-  const rate = await hbdPerRshare();
-  if (rate <= 0) return null;
-  const rows = await queryFast<{ removed_rshares: number }>(
-    `SELECT SUM(CAST(c.vote_rshares AS float) - CAST(c.net_rshares AS float)) AS removed_rshares
-     FROM Comments c WITH (NOLOCK)
-     WHERE c.depth = 0 AND c.author = @account AND c.net_rshares < c.vote_rshares`,
-    [{ name: 'account', type: TYPES.VarChar, value: account }]
-  );
-  if (rows === null || rows.length === 0) return null;
-  const rshares = Number(rows[0]?.removed_rshares);
-  if (!Number.isFinite(rshares)) return null;
-  return rshares * rate;
-}
 
 /** Each named account's heaviest single downvoter, from that account's own votes. */
 async function topSourceFor(authors: string[]): Promise<Map<string, { voter: string; n: number }>> {
@@ -681,8 +661,8 @@ export interface ProfileRecord {
  * from one reader muting another. A SQL-only record therefore told @lordbutterfly
  * "Lists: None" while the Lists board — reading the bridge, both types, same four
  * publishers — held 83 rows from all four. Two surfaces of one feature disagreeing is
- * the feature lying on one of them. The route now merges `marksFor()`, so the strip and
- * the board are the same answer by construction.
+ * the feature lying on one of them. Listings are gone from this feature entirely, so the
+ * strip and the board have nothing left to disagree about.
  */
 export async function profileRecord(account: string): Promise<ProfileRecord | null> {
   if (!hiveSqlConfigured()) return null;

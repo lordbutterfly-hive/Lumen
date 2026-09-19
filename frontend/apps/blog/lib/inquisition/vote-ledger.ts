@@ -41,8 +41,16 @@ import { queryReader, querySlow } from './hivesql';
 export interface VoteLedger {
   /** USD taken off this account's posts by downvotes, over its whole history. */
   removedUsd: number;
-  /** The heaviest downvoters by value removed, most first. */
+  /** The heaviest downvoters by VALUE REMOVED, most first. */
   topDownvoters: { account: string; usd: number }[];
+  /**
+   * ★★★ THE HEAVIEST DOWNVOTERS BY COUNT, which is a different list and was being
+   * printed under a count label. The Record's DOWNVOTES RECEIVED cell said "most:
+   * @a $139, @b $78" — three names ranked by DOLLARS under a heading about DOWNVOTES,
+   * with money figures beside them. Whoever downvoted most often and whoever took the
+   * most value are not the same people, and the cell was naming the wrong three.
+   */
+  topByCount: { account: string; votes: number }[];
   /** EVERY downvoter and what they took, for cross-account aggregation. */
   byVoter: Map<string, number>;
   /** The posts that lost the most, most first. */
@@ -100,6 +108,7 @@ async function loadVoteLedger(account: string, lane: 'reader' | 'background' = '
   let selfRewardUsd = 0;
   let totalPayoutUsd = 0;
   const byVoter = new Map<string, number>();
+  const votesByVoter = new Map<string, number>();
   const byPost: { permlink: string; usd: number }[] = [];
 
   /*
@@ -188,6 +197,7 @@ async function loadVoteLedger(account: string, lane: 'reader' | 'background' = '
         const rshares = Number(vote.rshares) || 0;
         if (rshares < 0 && vote.voter) {
           byVoter.set(vote.voter, (byVoter.get(vote.voter) ?? 0) + -rshares * rate);
+          votesByVoter.set(vote.voter, (votesByVoter.get(vote.voter) ?? 0) + 1);
         }
       }
     }
@@ -198,6 +208,10 @@ async function loadVoteLedger(account: string, lane: 'reader' | 'background' = '
   return {
     removedUsd,
     byVoter,
+    topByCount: [...votesByVoter.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([acc, votes]) => ({ account: acc, votes })),
     topDownvoters: [...byVoter.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3)

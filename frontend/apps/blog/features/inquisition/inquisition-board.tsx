@@ -96,7 +96,7 @@ const BOARDS: BoardDef[] = [
     tab: 'TOP DOWNVOTED',
     kicker: 'BOARD 02 \u00b7 RECEIVED',
     title: 'Most downvoted',
-    meta: 'rolling 3 months\nsorted by downvotes received',
+    meta: 'rolling 3 months\nvalue read for the top 12',
     blurb:
       'Ranked by how many downvotes each account received. The number of distinct downvoters is beside it, because those two say different things: many downvotes from few accounts is a dispute, a smaller number from many is a consensus. The money column is what those downvotes actually took off the posts.'
   },
@@ -114,7 +114,7 @@ const BOARDS: BoardDef[] = [
     tab: 'TOP INQUISITORS',
     kicker: 'BOARD 04 \u00b7 VALUE REMOVED, GIVEN',
     title: 'Top inquisitors',
-    meta: 'rolling 3 months\nsorted by targets',
+    meta: 'rolling 3 months\nsorted by value removed',
     blurb:
       'The other end of board 02: who casts the downvotes, how many separate accounts they land on, what those downvotes took off the posts, and which account takes the most. Casting downvotes is a normal, intended part of Hive.'
   },
@@ -123,9 +123,9 @@ const BOARDS: BoardDef[] = [
     tab: 'CROSSPOSTING',
     kicker: 'BOARD 05 \u00b7 HIVE AND STEEM',
     title: 'Crossposting',
-    meta: 'since 2020-09-20\nsorted by Steem posts',
+    meta: 'since 2020-09-20\nfrom Steem\u2019s recent authors',
     blurb:
-      'Accounts publishing to Steem as well as Hive, ranked by how many posts they have put on Steem since six months after the 2020 fork. The migration window is excluded because posting there then was rarely a choice. The last-post dates say who is still doing it now.'
+      'Accounts publishing to Steem as well as Hive, ranked by how many posts they have put on Steem since six months after the 2020 fork. The migration window is excluded because posting there then was rarely a choice. The candidates are drawn from Steem\u2019s most recent posts, so this ranks people who are active there now rather than everyone who ever was.'
 
   }
 ];
@@ -393,10 +393,18 @@ export default function InquisitionBoard() {
         The real asset is composed for a centre crop with a dark left third for the scrim,
         so `object-center` is correct here and `object-right` was me compensating for the
         wrong picture.
+
+        ★★ AND THE BAND HAS TO BE TALL ENOUGH TO HOLD IT, which the mock's 238px is not
+        for this file. The art is 1400x560 (2.5:1). At roughly 1090px of column width
+        `object-cover` scales it to 437px tall, so a 238px band discards **45% of the
+        image height** — and what it discards is the top of the hood and the bottom of the
+        magnifying glass, which is to say the subject. 340px keeps about 78% of the frame
+        and both of them stay in it. Shorter on small screens, where the column is
+        narrower and the crop is correspondingly gentler.
       */}
       <div
         className={cn(
-          'relative mb-4 flex min-h-[238px] items-center overflow-hidden rounded-panel border',
+          'relative mb-4 flex min-h-[248px] items-center overflow-hidden rounded-panel border sm:min-h-[340px]',
           'bg-surface-1 transition-[border-color] duration-700',
           armed ? 'border-line-brand-10' : 'border-line-9'
         )}
@@ -425,10 +433,10 @@ export default function InquisitionBoard() {
             and the body at 33ch, with no cap on the wrapper. Capping the wrapper instead
             squeezed the title onto two lines and ran the body down a narrow column. */}
         <div className="relative z-[2] px-8 py-[30px]">
-          <h1 className="max-w-[16ch] font-text text-[clamp(32px,3.6vw,44px)] font-semibold leading-[1.04] tracking-[-0.02em] text-ink-2">
+          <h1 className="max-w-[16ch] font-text text-display font-semibold tracking-display text-ink-2">
             Inquisition mode
           </h1>
-          <p className="mt-3 max-w-[33ch] font-ui text-[14.5px] leading-[1.6] text-ink-10">
+          <p className="mt-3 max-w-[33ch] font-ui text-body-sm leading-[1.6] text-ink-10">
             Public chain data on any account. Downvotes, value removed, mutes, rewards
             against stake and crossposting. Lumen authors no list and scores nobody: it
             reads what is already on chain and names the source.
@@ -454,7 +462,7 @@ export default function InquisitionBoard() {
         >
           <span
             className={cn(
-              'rounded-full px-3 py-1 font-ui text-[13px] font-medium leading-[20px] transition-colors duration-300',
+              'rounded-full px-3 py-1 font-ui text-caption font-medium leading-[20px] transition-colors duration-300',
               !armed ? 'bg-[var(--lum-1)] text-ink-2' : 'text-ink-14'
             )}
           >
@@ -462,7 +470,7 @@ export default function InquisitionBoard() {
           </span>
           <span
             className={cn(
-              'rounded-full px-3 py-1 font-ui text-[13px] font-medium leading-[20px] transition-colors duration-300',
+              'rounded-full px-3 py-1 font-ui text-caption font-medium leading-[20px] transition-colors duration-300',
               armed ? 'bg-surface-brand-12 text-ink-27' : 'text-ink-14'
             )}
           >
@@ -519,7 +527,9 @@ export default function InquisitionBoard() {
               >
                 {def.kicker}
               </p>
-              <h2 className="mt-2 font-text text-[25px] font-semibold leading-[32px] text-ink-2">{def.title}</h2>
+              {/* ★ `stat` (22px) from the scale, not a hand-written 25: the ladder skips 25,
+                  and inventing a size is exactly what tailwind.config.js forbids. */}
+              <h2 className="mt-2 font-text text-stat font-semibold text-ink-2">{def.title}</h2>
             </div>
             <p className="shrink-0 whitespace-pre-line text-right font-num text-[11px] leading-[1.6] text-ink-14">
               {def.meta}
@@ -527,7 +537,7 @@ export default function InquisitionBoard() {
           </div>
           {/* ★ The KE paragraph is a build requirement, not decoration: the spec says KE
               "must say so on its face, not in a tooltip". */}
-          <p className="mt-3 max-w-[78ch] font-ui text-[13.5px] leading-[21px] text-ink-10">{def.blurb}</p>
+          <p className="mt-3 max-w-[78ch] font-ui text-caption leading-[21px] text-ink-10">{def.blurb}</p>
 
           {sorts ? (
             <div className="mt-4 flex flex-wrap gap-1.5">
@@ -554,13 +564,13 @@ export default function InquisitionBoard() {
 
         <div className="overflow-x-auto">
           {pending ? (
-            <p className="px-[26px] py-8 font-ui text-[14px] text-ink-10">Reading the chain&hellip;</p>
+            <p className="px-[26px] py-8 font-ui text-body-sm text-ink-10">Reading the chain&hellip;</p>
           ) : unavailable ? (
-            <p className="px-[26px] py-8 font-ui text-[14px] text-ink-10">
+            <p className="px-[26px] py-8 font-ui text-body-sm text-ink-10">
               The chain did not answer. Nothing is wrong with the account.
             </p>
           ) : rows.length === 0 ? (
-            <p className="px-[26px] py-8 font-ui text-[14px] text-ink-10">
+            <p className="px-[26px] py-8 font-ui text-body-sm text-ink-10">
               {matches && data?.building === true
                 ? board === 'crossposting'
                   ? 'Asking Steem\u2026'
@@ -641,21 +651,21 @@ function MutedTable({ rows }: { rows: MutedRow[] }) {
       <tbody>
         {rows.map((row, i) => (
           <tr key={row.account} className="border-b border-line-9 last:border-0 hover:bg-[var(--lum-1)]">
-            <td className="px-[26px] py-[15px] font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
-            <td className="px-[26px] py-[15px] font-num text-[14px] text-ink-2">
+            <td className="px-[26px] py-[15px] font-num text-caption tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-[15px] font-num text-body-sm text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
             <td
               className={cn(
-                'px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums',
+                'px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums',
                 row.mutedBy >= 50 ? 'text-ink-warn-3' : 'text-ink-2'
               )}
             >
               {row.mutedBy.toLocaleString()}
             </td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums text-ink-10">
               {row.muterMvests.toLocaleString(undefined, { maximumFractionDigits: 1 })}M HP
             </td>
           </tr>
@@ -681,13 +691,13 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
           */}
           <th
             className="px-[26px] py-3 text-right font-normal"
-            title="Payout these downvotes took off the accounts this board could read. Whole history, valued per post; a dash means it was outside that set."
+            title="Payout these downvotes took off the accounts this board could read \u2014 a sample, not every post on Hive. Whole history, valued per post; a dash means outside that set."
           >
-            Removed (USD)
+            Removed (HBD)
           </th>
           <th
             className="px-[26px] py-3 text-right font-normal"
-            title="Separate accounts this one downvoted. Spread, not volume, is the sort."
+            title="Separate accounts this one downvoted. Spread and volume say different things; use the pills above to reorder."
           >
             Targets
           </th>
@@ -702,13 +712,13 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
       <tbody>
         {rows.map((row, i) => (
           <tr key={row.account} className="border-b border-line-9 last:border-0 hover:bg-[var(--lum-1)]">
-            <td className="px-[26px] py-[15px] font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
-            <td className="px-[26px] py-[15px] font-num text-[14px] text-ink-2">
+            <td className="px-[26px] py-[15px] font-num text-caption tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-[15px] font-num text-body-sm text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums">
+            <td className="px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums">
               {/* ★ A SUB-CENT TOTAL IS NOTHING, AND IT RENDERED THREE DIFFERENT WAYS:
                   "$0", "-$0.00" and a dash, in one column. One rule now. */}
               {row.removedUsd === null || row.removedUsd < 0.005 ? (
@@ -722,10 +732,10 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
                 </span>
               )}
             </td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-2">
+            <td className="px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums text-ink-2">
               {row.targets.toLocaleString()}
             </td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums text-ink-10">
               {row.downvotes.toLocaleString()}
             </td>
             {/*
@@ -733,7 +743,7 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
               handle, so "@askrafiki 871" read as part of the account name rather than as
               how many downvotes that account took.
             */}
-            <td className="px-[26px] py-[15px] font-num text-[13.5px] text-ink-10">
+            <td className="px-[26px] py-[15px] font-num text-caption text-ink-10">
               {row.topTarget ? (
                 <span className="inline-flex items-baseline gap-1.5">
                   <a href={`/@${row.topTarget}`} className="text-ink-2 hover:text-ink-brand-6">
@@ -776,7 +786,7 @@ function DvTable({ rows }: { rows: DvRow[] }) {
             className="px-[26px] py-3 text-right font-medium"
             title="Payout removed across this account's whole history, each post valued at its own payout rate. The vote counts beside it are the last three months."
           >
-            Removed (USD)
+            Removed (HBD)
           </th>
           <th className="px-[26px] py-3 font-medium" title="The account that cast the most of them">
             Top source
@@ -786,24 +796,24 @@ function DvTable({ rows }: { rows: DvRow[] }) {
       <tbody>
         {rows.map((row, i) => (
           <tr key={row.account} className="border-b border-line-9 last:border-0 hover:bg-[var(--lum-1)]">
-            <td className="px-[26px] py-[15px] font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
-            <td className="px-[26px] py-[15px] font-num text-[14px] text-ink-2">
+            <td className="px-[26px] py-[15px] font-num text-caption tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-[15px] font-num text-body-sm text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
             {/* Downvotes first: it is the rank. */}
-            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-2">
+            <td className="px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums text-ink-2">
               {row.downvotes.toLocaleString()}
             </td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums text-ink-10">
               {row.voters.toLocaleString()}
             </td>
             {/* ★ A DASH IS "NOT COMPUTED", NEVER "NOTHING WAS TAKEN" — the enrichment
                 query runs against a time budget and stops when it is spent. */}
             <td
               className={cn(
-                'px-6 py-3 text-right font-num text-[14px] tabular-nums',
+                'px-6 py-3 text-right font-num text-body-sm tabular-nums',
                 row.removedUsd === null ? 'text-ink-14' : row.removedUsd >= 10 ? 'text-ink-brand-6' : 'text-ink-10'
               )}
               title={
@@ -816,7 +826,7 @@ function DvTable({ rows }: { rows: DvRow[] }) {
                 ? '\u2014'
                 : '\u2212$' + (row.removedUsd >= 100 ? Math.round(row.removedUsd).toLocaleString() : row.removedUsd.toFixed(2))}
             </td>
-            <td className="px-[26px] py-3 font-ui text-[13.5px] text-ink-10">
+            <td className="px-[26px] py-[15px] font-ui text-caption text-ink-10">
               {row.topSource ? (
                 <>
                   <a href={`/@${row.topSource}`} className="hover:text-ink-brand-6">
@@ -876,20 +886,20 @@ function KeTable({ rows }: { rows: KeRow[] }) {
       <tbody>
         {rows.map((row, i) => (
           <tr key={row.account} className="border-b border-line-9 last:border-0 hover:bg-[var(--lum-1)]">
-            <td className="px-[26px] py-[15px] font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
-            <td className="px-[26px] py-[15px] font-num text-[14px] text-ink-2">
+            <td className="px-[26px] py-[15px] font-num text-caption tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-[15px] font-num text-body-sm text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
-            <td className={cn('px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums', tone(row.ke))}>
+            <td className={cn('px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums', tone(row.ke))}>
               {row.ke.toFixed(2)}
             </td>
-            <td className={cn('px-[26px] py-[15px] font-ui text-[13.5px]', tone(row.ke))}>{row.band}</td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-10">
+            <td className={cn('px-[26px] py-[15px] font-ui text-caption', tone(row.ke))}>{row.band}</td>
+            <td className="px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums text-ink-10">
               {row.rewardsHive.toLocaleString()}
             </td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums text-ink-10">
               {row.hp.toLocaleString()}
             </td>
           </tr>
@@ -927,15 +937,15 @@ function CrosspostTable({ rows }: { rows: CrosspostRow[] }) {
       <tbody>
         {rows.map((row, i) => (
           <tr key={row.account} className="border-b border-line-9 last:border-0 hover:bg-[var(--lum-1)]">
-            <td className="px-[26px] py-[15px] font-num text-[13px] tabular-nums text-ink-14">{i + 1}</td>
-            <td className="px-[26px] py-[15px] font-num text-[14px] text-ink-2">
+            <td className="px-[26px] py-[15px] font-num text-caption tabular-nums text-ink-14">{i + 1}</td>
+            <td className="px-[26px] py-[15px] font-num text-body-sm text-ink-2">
               <a href={`/@${row.account}`} className="hover:text-ink-brand-6">
                 @{row.account}
               </a>
             </td>
             {/* ★ -1 means the counting pass ran out of budget before reaching this row.
                 "not counted" is the truth; 0 would be a claim. */}
-            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-brand-6">
+            <td className="px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums text-ink-brand-6">
               {row.steemPosts < 0 ? (
                 <span className="text-ink-14">not counted</span>
               ) : (
@@ -945,13 +955,13 @@ function CrosspostTable({ rows }: { rows: CrosspostRow[] }) {
                 </>
               )}
             </td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[13.5px] tabular-nums text-ink-2">
+            <td className="px-[26px] py-[15px] text-right font-num text-caption tabular-nums text-ink-2">
               {day(row.lastSteem)}
             </td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[13.5px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-[15px] text-right font-num text-caption tabular-nums text-ink-10">
               {day(row.lastHive)}
             </td>
-            <td className="px-[26px] py-[15px] text-right font-num text-[14px] tabular-nums text-ink-10">
+            <td className="px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums text-ink-10">
               {row.hivePosts.toLocaleString()}
             </td>
           </tr>

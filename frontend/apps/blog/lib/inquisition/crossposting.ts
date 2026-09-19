@@ -1,6 +1,6 @@
 import 'server-only';
 import { TYPES } from 'tedious';
-import { hiveSqlConfigured, queryFast } from './hivesql';
+import { hiveSqlConfigured, querySlow } from './hivesql';
 import { nowIso } from './types';
 
 /**
@@ -176,7 +176,9 @@ export async function loadCrossposters(limit = 50): Promise<{
   if (names.length === 0) return { rows: [], asOf: nowIso(), candidates: 0, matched: 0, failed: false };
 
   const placeholders = names.map((_, i) => `@a${i}`).join(',');
-  const rows = await queryFast<{ author: string; hive_posts: number; last_hive: string | Date }>(
+  // ★ This is a BACKGROUND build, so it queues on the slow lane. It was on the reader
+  // lane, which is the exact borrowing that broke every profile once already.
+  const rows = await querySlow<{ author: string; hive_posts: number; last_hive: string | Date }>(
     `SELECT c.author, COUNT(*) AS hive_posts, MAX(c.created) AS last_hive
      FROM Comments c WITH (NOLOCK)
      WHERE c.depth = 0 AND c.author IN (${placeholders}) AND c.created > @fork

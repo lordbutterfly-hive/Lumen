@@ -68,6 +68,22 @@ export interface KeRatio {
  */
 export type KeBand = 'net holder' | 'ordinary' | 'extractive' | 'cashing out' | 'unknown';
 
+/**
+ * ★★★ THE COLOUR IS DERIVED FROM THE BAND, NOT RE-THRESHOLDED BESIDE IT. Two surfaces
+ * had their own copies of the ramp and both disagreed with this function: the board
+ * painted KE exactly 10.00 in the worst tone while the word next to it said "extractive"
+ * (the second worst), and the profile had no neutral band at all, so an "ordinary" 1-3
+ * ratio rendered green there and neutral on the board. Same number, three meanings.
+ * There is now one source for the word and one mapping from the word to the tone.
+ */
+export const KE_BAND_TONE: Record<KeBand, 'ok' | 'plain' | 'warn' | 'accent' | 'dim'> = {
+  'net holder': 'ok',
+  ordinary: 'plain',
+  extractive: 'warn',
+  'cashing out': 'accent',
+  unknown: 'dim'
+};
+
 export function keBand(value: number | null): KeBand {
   if (value === null || !Number.isFinite(value)) return 'unknown';
   if (value < 1) return 'net holder';

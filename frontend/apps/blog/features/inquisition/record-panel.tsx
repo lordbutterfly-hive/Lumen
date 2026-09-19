@@ -3,9 +3,18 @@
 import { useEffect, useState } from 'react';
 import { cn } from '@ui/lib/utils';
 import { watchArm } from '@/blog/lib/inquisition/arm';
+import { KE_BAND_TONE, type KeBand } from '@/blog/lib/inquisition/types';
 
 /**
  * ════ THE RECORD ════
+ *
+ * ★★★ TYPE SIZES COME FROM LUMEN'S SCALE, AND I HAD ANSWERED "the fonts are too small"
+ * BY MAKING THEM SMALLER. `tailwind.config.js` states the rule outright: `caption:
+ * ['14px','20px'] // was 13 - the floor. Nothing lowercase goes below this.` This panel
+ * shipped lowercase prose at 11.5px and labels at 8.5px, which is not a compactness
+ * trade-off, it is below the floor the design system sets. Lowercase text is now
+ * `text-caption` or larger. The only things allowed under it are the ALL-CAPS tracked
+ * labels, which the scale does not govern.
  *
  * ★★★ LUMEN'S TOKENS, NOT THE MOCK'S HEX (owner, 2026-09-19: "i told you not to use
  * their fonts anywhere. you used them. I told you not to use their colors anywhere, you
@@ -42,7 +51,7 @@ export interface RecordData {
   mutedBy: number;
   muterMvests: number;
   ke: number | null;
-  band: string;
+  band: KeBand;
   rewardsHive: number;
   hp: number;
   downvotes: number;
@@ -50,10 +59,12 @@ export interface RecordData {
   lastDownvote: string | null;
   removedUsd: number | null;
   topDownvoters: { account: string; usd: number }[];
+  topByCount: { account: string; votes: number }[];
   topPosts: { permlink: string; usd: number }[];
   selfRewardUsd: number | null;
   selfRewardPct: number | null;
   steemPosts: number | null;
+  steemPartial: boolean;
   steemLastPost: string | null;
   accountAgeDays: number;
   asOf: string;
@@ -88,11 +99,16 @@ const ago = (iso: string | null): string => {
   return `${Math.floor(days / 365)}y ago`;
 };
 
-const usd = (n: number): string =>
+/**
+ * ★ HBD, NOT USD. `total_payout_value` is HBD-denominated and the reward rate is
+ * documented as HBD per rshare. HBD is soft-pegged to the dollar so the figures are
+ * close, but the label has to say what the number is.
+ */
+const hbd = (n: number): string =>
   '$' + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: Math.abs(n) < 100 ? 2 : 0 });
 
 const three = (list: { account: string; usd: number }[]): string =>
-  list.map((t) => `@${t.account} ${usd(t.usd)}`).join(', ');
+  list.map((t) => `@${t.account} ${hbd(t.usd)}`).join(', ');
 
 function cellsFor(r: RecordData): Cell[] {
   return [
@@ -107,8 +123,8 @@ function cellsFor(r: RecordData): Cell[] {
       body: `Downvotes received over the account's whole history, from ${r.downvoters.toLocaleString()} distinct accounts, the last one ${ago(r.lastDownvote)}.`
     },
     {
-      label: 'REMOVED',
-      value: r.removedUsd === null ? '—' : usd(r.removedUsd),
+      label: 'REMOVED (HBD)',
+      value: r.removedUsd === null ? '—' : hbd(r.removedUsd),
       exact:
         r.removedUsd === null
           ? 'not computed'
@@ -144,7 +160,7 @@ function cellsFor(r: RecordData): Cell[] {
       label: 'KE RATIO',
       value: r.ke === null ? '—' : r.ke.toFixed(1),
       exact: r.ke === null ? 'no stake held' : `${r.ke.toFixed(2)} · ${r.band}`,
-      tone: r.ke === null ? 'dim' : r.ke >= 10 ? 'accent' : r.ke >= 3 ? 'warn' : 'ok',
+      tone: KE_BAND_TONE[r.band] ?? 'dim',
       body: `${r.rewardsHive.toLocaleString()} HIVE taken against ${r.hp.toLocaleString()} HP held: evidence of cash-out behaviour, never of abuse.`
     },
     {
@@ -153,7 +169,7 @@ function cellsFor(r: RecordData): Cell[] {
       exact:
         r.selfRewardUsd === null
           ? 'not computed'
-          : `${usd(r.selfRewardUsd)} of every reward this account's posts have paid`,
+          : `${hbd(r.selfRewardUsd)} of every reward this account's posts have paid`,
       tone: r.selfRewardPct === null ? 'dim' : r.selfRewardPct >= 25 ? 'warn' : 'ok',
       body: "The share of this account's post rewards that came from its own votes, counted in money rather than in votes so it does not flatter whales."
     }
@@ -218,16 +234,16 @@ export default function RecordPanel({ account }: { account: string }) {
       className="mt-3 w-full min-w-0 rounded-control border border-line-brand-10 bg-[var(--amb-1)] px-4 py-2.5"
     >
       <div className="mb-2 flex items-baseline justify-between gap-3">
-        <span className="font-num text-[9.5px] uppercase tracking-[0.14em] text-ink-brand-6">The record</span>
-        <span className="font-num text-[9px] tracking-[0.06em] text-ink-14">{record ? 'hover any figure' : ''}</span>
+        <span className="font-num text-[11px] uppercase tracking-[0.14em] text-ink-brand-6">The record</span>
+        <span className="font-num text-[11px] tracking-[0.06em] text-ink-14">{record ? 'hover any figure' : ''}</span>
       </div>
 
       {state === 'failed' ? (
-        <p className="py-0.5 font-num text-[11px] text-ink-14">
+        <p className="py-0.5 font-num text-caption text-ink-14">
           The record could not be read. Nothing is implied about this account.
         </p>
       ) : !record ? (
-        <p className="py-0.5 font-num text-[11px] text-ink-14">Reading the chain&hellip;</p>
+        <p className="py-0.5 font-num text-caption text-ink-14">Reading the chain&hellip;</p>
       ) : (
         <>
           <div className="grid grid-cols-3 items-end gap-x-3 gap-y-2 sm:grid-cols-6">
@@ -246,7 +262,7 @@ export default function RecordPanel({ account }: { account: string }) {
                     permanently. It wraps to two lines instead; the row has the height. */}
                 <div
                   className={cn(
-                    'font-num text-[8.5px] uppercase leading-[11px] tracking-[0.06em] transition-colors',
+                    'font-num text-[10px] uppercase leading-[13px] tracking-[0.06em] transition-colors',
                     hover === i ? 'text-ink-brand-6' : 'text-ink-14'
                   )}
                   title={c.label}
@@ -255,7 +271,7 @@ export default function RecordPanel({ account }: { account: string }) {
                 </div>
                 <div
                   className={cn(
-                    'mt-px border-b pb-0.5 font-num text-[13px] leading-[18px] tabular-nums transition-colors',
+                    'mt-px border-b pb-0.5 font-num text-[17px] leading-[24px] tabular-nums transition-colors',
                     TONE[c.tone],
                     hover === i ? 'border-b-line-brand-10' : 'border-b-transparent'
                   )}
@@ -268,16 +284,16 @@ export default function RecordPanel({ account }: { account: string }) {
 
           {/* ★ A RESERVED SLOT, so the card does not jump by a paragraph's height every
               time the pointer crosses a figure and moves the number you were reaching for. */}
-          <div className="mt-2 min-h-[34px] border-t border-line-9 pt-1.5">
+          <div className="mt-2.5 min-h-[46px] border-t border-line-9 pt-2">
             {open ? (
               <>
-                <p className="truncate font-num text-[10px] tracking-[0.02em] text-ink-brand-6" title={open.exact}>
+                <p className="truncate font-num text-caption tracking-[0.01em] text-ink-brand-6" title={open.exact}>
                   {open.exact}
                 </p>
-                <p className="mt-0.5 font-ui text-[11.5px] leading-[16px] text-ink-10">{open.body}</p>
+                <p className="mt-1 font-ui text-caption leading-[20px] text-ink-10">{open.body}</p>
               </>
             ) : (
-              <p className="font-num text-[9.5px] tracking-[0.04em] text-ink-14">
+              <p className="font-num text-caption tracking-[0.02em] text-ink-14">
                 indexed {record.asOf.slice(0, 16).replace('T', ' ')} UTC &middot; account{' '}
                 {Math.floor(record.accountAgeDays / 365)}y old
               </p>

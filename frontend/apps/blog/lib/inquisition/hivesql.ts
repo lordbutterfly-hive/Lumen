@@ -106,7 +106,15 @@ export interface SqlParam {
  * the cluster, which is a reasonable thing to ask of a service we do not pay for.
  */
 const SLOW_LANE = 2;
-const FAST_LANE = 3;
+/*
+ * ★★★ SIX, BECAUSE ONE READER TAKES TWO. A single armed profile issues `profileRecord`
+ * and `voteLedger` concurrently through `Promise.all`, and both are reader-lane queries.
+ * At three slots that is two readers to saturation: the third arrives, waits its three
+ * seconds, gives up, and the profile renders "The record could not be read." against a
+ * database that was answering fine. Found by audit, and it is the same self-inflicted
+ * starvation that a background build caused earlier from the other direction.
+ */
+const FAST_LANE = 6;
 /**
  * ★★★ AND THE QUEUE HAS TO BE LONGER THAN THE WORK, WHICH 120s WAS NOT. Observed
  * 2026-09-19: opening the dashboard starts five builds, the two slow-lane slots go to the

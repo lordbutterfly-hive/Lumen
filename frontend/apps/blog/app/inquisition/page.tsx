@@ -12,7 +12,7 @@ import InquisitionBoard from '@/blog/features/inquisition/inquisition-board';
  */
 export const metadata: Metadata = {
   title: 'Inquisition mode',
-  description: 'Published blacklists and Steem activity, read off public chain data.'
+  description: 'Downvotes, value removed, mutes, rewards against stake and crossposting, read off public chain data.'
 };
 
 export default function InquisitionPage() {

@@ -47,18 +47,10 @@ export async function GET(
   }
   try {
     /*
-     * ★★ THE LISTINGS COME FROM THE SAME INDEX THE BOARD READS, not from SQL — see
-     * `profileRecord`. `marksFor` is served from the shared blacklist cache, so this is
-     * a map lookup on all but the first call of the day and adds nothing to the 264ms.
-     * If the index is unreachable the strip shows the rest of the record rather than
-     * failing whole: a missing listing is shown as none-known, never as a clean record.
-     */
-    /*
-     * ★★ THE LISTINGS ARE GONE FROM THE RECORD (owner, 2026-09-19: "remove the
-     * blacklists from mode and bar. it wont work, we add that later"). The bridge
-     * fallback, the publisher table and the LISTED cell all came out together rather
-     * than being left wired up and hidden, so nothing here calls a blacklist publisher
-     * any more.
+     * ★★ NO LISTINGS HERE AT ALL (owner: "remove the blacklists from mode and bar. it
+     * wont work, we add that later"). The bridge reader, the publisher table and the
+     * LISTED cell came out together rather than being left wired up and hidden, so
+     * nothing on this path calls a blacklist publisher.
      */
     const [record, ledger, steem] = await Promise.all([
       cached(account),
@@ -78,10 +70,13 @@ export async function GET(
         publishers: undefined,
         removedUsd: ledger ? ledger.removedUsd : null,
         topDownvoters: ledger?.topDownvoters ?? [],
+        topByCount: ledger?.topByCount ?? [],
         topPosts: ledger?.topPosts ?? [],
         selfRewardUsd: ledger ? ledger.selfRewardUsd : null,
         selfRewardPct: ledger ? ledger.selfRewardPct : null,
         steemPosts: steem ? steem.posts : null,
+        // ★ The walk's own saturation flag. Dropping it printed a floor as a total.
+        steemPartial: steem?.partial ?? false,
         steemLastPost: steem?.lastPost ?? null
       },
       { headers: { 'cache-control': 'private, max-age=300' } }
