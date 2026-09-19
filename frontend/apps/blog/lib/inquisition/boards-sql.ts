@@ -31,17 +31,26 @@ const MIN_AGE_DAYS = 90;
  * ★★★ HOW MANY VOTE LEDGERS THE MONEY COLUMNS ARE SUMMED OVER, AND IT IS THE WHOLE COST
  * OF THIS FEATURE'S SLOW PATH.
  *
- * One ledger is ~12s (883 posts, ~8 MB of vote JSON). Two boards want them, and with 30
- * apiece running concurrently on a two-slot lane the pair took over five minutes to
- * settle — which a reader opening either tab spends watching "Counting...". Twelve is
- * about ninety seconds per board, and because the ledgers are cached per account and the
- * two boards' seed sets overlap heavily, the second board mostly reads the first one's
- * work for free.
+ * One ledger is ~12s (883 posts, ~8 MB of vote JSON). Twelve of them left the money
+ * column blank on 88 rows out of 100, which the owner saw immediately: "only a few
+ * numbers populate. about 12. no more." Forty is about eight minutes — irrelevant on a
+ * board rebuilt every three days and served from disk in between — and because the
+ * ledgers are cached per account and the two boards' seed sets overlap heavily, the
+ * second board mostly reads the first one's work for free.
  *
  * The cost is paid once a day. Rows past this depth report `null`, which the column
  * renders as a dash and says "not computed" on hover, never as zero.
  */
-const INQ_LEDGER_ACCOUNTS = 12;
+const INQ_LEDGER_ACCOUNTS = 40;
+
+/**
+ * How many rows get a true top target, how many per statement, and how long the whole
+ * pass may take. Each is an indexed TOP-1 aggregate over that voter's entire downvote
+ * history, and the biggest of them has 1.7 million votes to group.
+ */
+const TOP_TARGET_ROWS = 25;
+const TOP_TARGET_CHUNK = 4;
+const TOP_TARGET_BUDGET_MS = 8 * 60 * 1000;
 
 /** The KE board's stake floor, in HP. Converted to VESTS at the live rate. */
 const KE_MIN_HP = 500;
@@ -157,7 +166,13 @@ async function loadMostDownvoted(limit = BOARD_ROWS): Promise<{ rows: DownvotedR
     `SELECT TOP (@lim) v.author AS account, COUNT(*) AS downvotes, COUNT(DISTINCT v.voter) AS voters
      FROM TxVotes v WITH (NOLOCK)
      JOIN Accounts a ON a.name = v.author
-     WHERE v.weight < 0 AND v.timestamp > DATEADD(month, -3, GETDATE())
+     -- ★★★ FULL HISTORY, NOT A ROLLING WINDOW (owner: "I said full history"). A
+     -- three-month slice also made the board incoherent with itself: the vote counts
+     -- covered 90 days while the money column covered the account's whole life, so
+     -- @solominer read as "78 downvotes, 2 targets, $9,385 removed". His real record is
+     -- 3,839 downvotes across 455 targets. Measured 102.3s for the full scan, against
+     -- ~70s for the window, which is nothing on a board rebuilt every three days.
+     WHERE v.weight < 0
        AND a.vesting_shares > @minVests AND a.created < DATEADD(day, -@minAge, GETDATE())
      GROUP BY v.author
      -- ★★★ RAW COUNT IS THE RANK (owner, 2026-09-19: "most downvoted is the person who
@@ -312,8 +327,7 @@ async function topSourceFor(authors: string[]): Promise<Map<string, { voter: str
   const rows = await querySlow<{ author: string; voter: string; n: number }>(
     `SELECT v.author, v.voter, COUNT(*) AS n
      FROM TxVotes v WITH (NOLOCK)
-     WHERE v.weight < 0 AND v.timestamp > DATEADD(month, -3, GETDATE())
-       AND v.author IN (${placeholders})
+     WHERE v.weight < 0 AND v.author IN (${placeholders})
      GROUP BY v.author, v.voter`,
     authors.map((name, i) => ({ name: `a${i}`, type: TYPES.VarChar, value: name }))
   );
@@ -383,13 +397,30 @@ async function loadInquisitors(limit = BOARD_ROWS): Promise<{ rows: InquisitorRo
     `SELECT TOP (@lim) v.voter AS account, COUNT(*) AS downvotes, COUNT(DISTINCT v.author) AS targets
      FROM TxVotes v WITH (NOLOCK)
      JOIN Accounts acc ON acc.name = v.voter
-     WHERE v.weight < 0 AND v.timestamp > DATEADD(month, -3, GETDATE())
-       AND acc.vesting_shares > @minVests AND acc.created < DATEADD(day, -@minAge, GETDATE())
+     /*
+      * ★★★ FULL HISTORY, AND **NO STAKE FLOOR ON THIS BOARD** (owner: "wheres
+      * berniesanders, he gave out millions of downvotes").
+      *
+      * He was excluded twice over. The stake floor is 10,000,000 VESTS and he holds
+      * 3 HP today, having powered down years ago — so the account with 31,776 downvotes
+      * to its name failed a test designed to keep tiny accounts off the boards about
+      * being downvoted. On the board about CASTING them, past weight is the whole point
+      * and present stake is irrelevant: the floor filtered out precisely the people a
+      * reader opens this board to find. The age floor stays, because a week-old account
+      * with a long downvote history does not exist.
+      *
+      * ★★ AND IT IS THE WHOLE CHAIN, PRE-FORK INCLUDED. TxVotes reaches back to 2016,
+      * before Hive existed. @berniesanders cast 31,776 downvotes all-time and exactly ONE
+      * after the fork — his last was 2020-03-20, the day of the split. Counting only the
+      * Hive era would answer the owner's question with an empty row. The meta line says
+      * which era this is so nobody has to guess.
+      */
+     WHERE v.weight < 0
+       AND acc.created < DATEADD(day, -@minAge, GETDATE())
      GROUP BY v.voter
      -- ★ Targets first: 900 downvotes at one account is a feud, 200 across 40 is a patrol.
      ORDER BY COUNT(DISTINCT v.author) DESC, COUNT(*) DESC`,
     [
-      { name: 'minVests', type: TYPES.Float, value: MIN_VESTS },
       { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS },
       { name: 'lim', type: TYPES.Int, value: limit }
     ]
@@ -397,31 +428,50 @@ async function loadInquisitors(limit = BOARD_ROWS): Promise<{ rows: InquisitorRo
   if (leaders === null) return { rows: [], asOf: nowIso(), failed: true };
   if (leaders.length === 0) return { rows: [], asOf: nowIso(), failed: false };
 
-  const names = leaders.map((r) => r.account);
-  const placeholders = names.map((_, i) => `@v${i}`).join(',');
-  const pairs = await querySlow<{ voter: string; author: string; n: number }>(
-    `SELECT v.voter, v.author, COUNT(*) AS n
-     FROM TxVotes v WITH (NOLOCK)
-     WHERE v.weight < 0 AND v.timestamp > DATEADD(month, -3, GETDATE())
-       AND v.voter IN (${placeholders})
-     GROUP BY v.voter, v.author`,
-    names.map((name, i) => ({ name: `v${i}`, type: TYPES.VarChar, value: name }))
-  );
-
-  // ★ A missing phase B is not a missing board. The counts are real either way; only the
-  // top-target column goes unknown, and it says so rather than guessing.
+  /*
+   * ★★★ ONE INDEXED TOP-1 PER VOTER, NOT ONE GIANT GROUP-BY. Over full history the
+   * (voter, author) grouping is enormous — @adm alone has 18,321 distinct targets — and
+   * the pairs query returned nothing at all, which is why every row showed an empty top
+   * target and no money. `CROSS APPLY` asks each voter's own index for its single
+   * heaviest target instead.
+   *
+   * ★★ BOUNDED TO `TOP_TARGET_ROWS`, because it is not cheap: measured 132.3s for eight
+   * voters, so a hundred would be near half an hour. The rows past that report no top
+   * target rather than a wrong one, and the column says so.
+   */
+  /*
+   * ★★★ CHUNKED, AND AGAINST A CLOCK, BECAUSE ONE QUERY FOR TWENTY-FIVE DOES NOT RETURN.
+   * Measured 132.3s for eight voters, so twenty-five in a single statement is past the
+   * 240s ceiling and comes back null — which is exactly what happened: every row showed
+   * an empty top target and, because the money seeds off these, no money either. Worse,
+   * the cost is wildly uneven: @spaminator has 1,769,125 downvotes to aggregate and a
+   * small account has a few hundred.
+   *
+   * So: four at a time, each statement comfortably inside the ceiling, and a wall-clock
+   * budget over the whole pass. Whatever is reached gets a real top target; the rest
+   * report none, and the column header says it is read for the first rows only.
+   */
   const best = new Map<string, { author: string; n: number }>();
-  for (const row of pairs ?? []) {
-    const n = Number(row.n) || 0;
-    const held = best.get(row.voter);
-    if (!held || n > held.n) best.set(row.voter, { author: row.author, n });
+  const candidates = leaders.slice(0, TOP_TARGET_ROWS).map((r) => r.account);
+  const deadline = Date.now() + TOP_TARGET_BUDGET_MS;
+  for (let i = 0; i < candidates.length; i += TOP_TARGET_CHUNK) {
+    if (Date.now() >= deadline) break;
+    const chunk = candidates.slice(i, i + TOP_TARGET_CHUNK);
+    const values = chunk.map((_, j) => `(@v${j})`).join(',');
+    const pairs = await querySlow<{ voter: string; author: string; n: number }>(
+      `SELECT s.voter, t.author, t.n
+       FROM (VALUES ${values}) AS s(voter)
+       CROSS APPLY (SELECT TOP 1 v.author, COUNT(*) AS n
+                    FROM TxVotes v WITH (NOLOCK)
+                    WHERE v.voter = s.voter AND v.weight < 0
+                    GROUP BY v.author
+                    ORDER BY COUNT(*) DESC) AS t`,
+      chunk.map((name, j) => ({ name: `v${j}`, type: TYPES.VarChar, value: name }))
+    );
+    if (pairs === null) continue;
+    for (const row of pairs) best.set(row.voter, { author: row.author, n: Number(row.n) || 0 });
   }
 
-  /*
-   * ★ THE MONEY COMES FROM THE OTHER BOARD'S LEDGERS. See `removedByVoterAcross` for why
-   * the direct query is not runnable. Bounded to the most-downvoted accounts this build
-   * already knows about, and allowed to come back empty without failing the board.
-   */
   /*
    * ★★★ THE LEDGER SET IS SEEDED FROM THE INQUISITORS' OWN TARGETS, NOT FROM THE
    * MOST-DOWNVOTED BOARD, AND THE FIRST VERSION WAS USELESS BECAUSE OF THAT.
@@ -450,9 +500,21 @@ async function loadInquisitors(limit = BOARD_ROWS): Promise<{ rows: InquisitorRo
    * they are by definition the accounts these particular voters took value from, which is
    * exactly what the column claims to measure.
    */
+  /*
+   * ★ THE MONEY SEEDS DO NOT DEPEND ON THE TOP-TARGET PASS. They did, and when that pass
+   * returned nothing the money column went blank for all 100 rows as a side effect of an
+   * unrelated timeout. The most-downvoted accounts are the primary seed now — they are
+   * where removed value concentrates — and any top targets found are added on top.
+   */
   const seed = new Set<string>();
   for (const [, top] of best) {
     if (top.author) seed.add(top.author);
+  }
+  try {
+    const victims = await mostDownvoted();
+    if (!victims.failed) for (const v of victims.rows.slice(0, INQ_LEDGER_ACCOUNTS)) seed.add(v.account);
+  } catch {
+    // The board still works without the money column.
   }
 
   let removed = new Map<string, number>();

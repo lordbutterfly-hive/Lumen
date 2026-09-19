@@ -70,14 +70,13 @@ const PAGE = 12;
 /** The orderings a reader can pick, per board. The first is that board's default. */
 const SORTS: Partial<Record<BoardId, { key: string; label: string; field: string }[]>> = {
   inquisitors: [
-    { key: 'removed', label: 'BY $ REMOVED', field: 'removedUsd' },
+    { key: 'removed', label: 'BY VALUE REMOVED', field: 'removedUsd' },
     { key: 'cast', label: 'BY DOWNVOTES CAST', field: 'downvotes' },
     { key: 'targets', label: 'BY TARGETS', field: 'targets' }
   ],
   downvoted: [
     { key: 'downvotes', label: 'BY DOWNVOTES', field: 'downvotes' },
-    { key: 'removed', label: 'BY $ REMOVED', field: 'removedUsd' },
-    { key: 'voters', label: 'BY DOWNVOTERS', field: 'voters' }
+    { key: 'removed', label: 'BY VALUE REMOVED', field: 'removedUsd' }
   ]
 };
 
@@ -85,47 +84,47 @@ const BOARDS: BoardDef[] = [
   {
     id: 'ke',
     tab: 'KE INDEX',
-    kicker: 'BOARD 01 \u00b7 REWARDS \u00f7 STAKE',
+    kicker: 'BOARD 01 \u00b7 WHAT WAS TAKEN, OVER WHAT WAS KEPT',
     title: 'The KE index',
     meta: 'worst first \u00b7 min 500 HP\nposted in the last 3 months',
     blurb:
-      'Everything an account has ever taken in rewards, divided by the Hive Power it still holds. It reads someone living off their payouts and a reward-pool farm as the same number, so it is evidence of cash-out behaviour and never of abuse.'
+      'Everything taken in rewards, over the stake still held. A high number is a cash-out habit, not a crime: someone quietly living off their payouts and a reward-pool farm read exactly alike here, and the index cannot tell you which is which. Neither can we.'
   },
   {
     id: 'downvoted',
     tab: 'TOP DOWNVOTED',
-    kicker: 'BOARD 02 \u00b7 RECEIVED',
+    kicker: 'BOARD 02 \u00b7 THE PENITENTS',
     title: 'Most downvoted',
-    meta: 'rolling 3 months\nvalue read for the top 12',
+    meta: 'whole chain history\nvalue read for the top 40',
     blurb:
-      'Ranked by how many downvotes each account received. The number of distinct downvoters is beside it, because those two say different things: many downvotes from few accounts is a dispute, a smaller number from many is a consensus. The money column is what those downvotes actually took off the posts.'
+      'Ranked by downvotes received. The money column records the punishment duly inflicted.'
   },
   {
     id: 'muted',
     tab: 'MOST MUTED',
-    kicker: 'BOARD 03 \u00b7 MUTES RECEIVED',
+    kicker: 'BOARD 03 \u00b7 QUIETLY SHUNNED',
     title: 'Most muted',
     meta: 'on-chain follow ops\nwhat: ignore',
     blurb:
-      'A mute is free, personal and one-sided. It hides an account from one reader and costs nothing to cast, so the stake behind the muters is shown beside the count: a raw count flatters whoever annoyed the largest number of small accounts.'
+      'Ranked by how many have quietly turned away. A mute costs nothing and asks no permission, so the stake behind them is shown too: being ignored by many is not the same as being ignored by much.'
   },
   {
     id: 'inquisitors',
     tab: 'TOP INQUISITORS',
-    kicker: 'BOARD 04 \u00b7 VALUE REMOVED, GIVEN',
+    kicker: 'BOARD 04 \u00b7 THE FAITHFUL, AT WORK',
     title: 'Top inquisitors',
-    meta: 'rolling 3 months\nsorted by value removed',
+    meta: 'whole chain, pre-fork included\ntop target read for the first 25',
     blurb:
-      'The other end of board 02: who casts the downvotes, how many separate accounts they land on, what those downvotes took off the posts, and which account takes the most. Casting downvotes is a normal, intended part of Hive.'
+      'The other end of the rod. Who wields it, how widely, what it cost the accused, and who feels it most. Downvoting is a right the chain grants everyone: this board says who exercises it, never whether they should.'
   },
   {
     id: 'crossposting',
     tab: 'CROSSPOSTING',
-    kicker: 'BOARD 05 \u00b7 HIVE AND STEEM',
+    kicker: 'BOARD 05 \u00b7 OLD LOYALTIES',
     title: 'Crossposting',
     meta: 'since 2020-09-20\nfrom Steem\u2019s recent authors',
     blurb:
-      'Accounts publishing to Steem as well as Hive, ranked by how many posts they have put on Steem since six months after the 2020 fork. The migration window is excluded because posting there then was rarely a choice. The candidates are drawn from Steem\u2019s most recent posts, so this ranks people who are active there now rather than everyone who ever was.'
+      'Still keeping a foot in the old country. Posts put on Steem since six months after the fork, when the leaving was done and staying became a choice. The candidates are drawn from Steem\u2019s recent authors, so this finds the ones still at it rather than everyone who ever was.'
 
   }
 ];
@@ -436,10 +435,16 @@ export default function InquisitionBoard() {
           <h1 className="max-w-[16ch] font-text text-display font-semibold tracking-display text-ink-2">
             Inquisition mode
           </h1>
-          <p className="mt-3 max-w-[33ch] font-ui text-body-sm leading-[1.6] text-ink-10">
-            Public chain data on any account. Downvotes, value removed, mutes, rewards
-            against stake and crossposting. Lumen authors no list and scores nobody: it
-            reads what is already on chain and names the source.
+          {/*
+            ★★★ THEATRICAL IN THE CHROME, LITERAL IN THE ROWS. That is the spec's own tone
+            rule and I had written neither half: the old line read like a privacy policy.
+            The costume carries the joke so the boards underneath can stay flat, and the
+            disclaimer still lands, just in character.
+          */}
+          <p className="mt-3 max-w-[36ch] font-ui text-body-sm leading-[1.6] text-ink-10">
+            Everything here is already on the chain. We keep no list, name no heretic and
+            pass no sentence: we simply read the ledger back to you, with receipts and the
+            dates attached. What you make of it is on your conscience.
           </p>
         </div>
 
@@ -567,7 +572,7 @@ export default function InquisitionBoard() {
             <p className="px-[26px] py-8 font-ui text-body-sm text-ink-10">Reading the chain&hellip;</p>
           ) : unavailable ? (
             <p className="px-[26px] py-8 font-ui text-body-sm text-ink-10">
-              The chain did not answer. Nothing is wrong with the account.
+              The chain declines to testify. Nothing is implied about anyone.
             </p>
           ) : rows.length === 0 ? (
             <p className="px-[26px] py-8 font-ui text-body-sm text-ink-10">
@@ -691,7 +696,7 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
           */}
           <th
             className="px-[26px] py-3 text-right font-normal"
-            title="Payout these downvotes took off the accounts this board could read \u2014 a sample, not every post on Hive. Whole history, valued per post; a dash means outside that set."
+            title="What these downvotes took off the forty most-punished accounts this board reads in full. A floor, not a lifetime total \u2014 a dash means this one's targets fall outside that set."
           >
             Removed (HBD)
           </th>
@@ -701,10 +706,10 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
           >
             Targets
           </th>
-          <th className="px-[26px] py-3 text-right font-normal" title="Downvotes cast in the last three months">
+          <th className="px-[26px] py-3 text-right font-normal" title="Downvotes cast over the account's whole history">
             Downvotes cast
           </th>
-          <th className="px-[26px] py-3 font-normal" title="The account that received the most of them">
+          <th className="px-[26px] py-3 font-normal" title="The account that received the most of them, over the whole chain. Read for the first 25 rows only.">
             Top target
           </th>
         </tr>
@@ -774,7 +779,7 @@ function DvTable({ rows }: { rows: DvRow[] }) {
               DOWNVOTED and now means it. Downvoters stays beside it because the two say
               different things: many downvotes from few accounts is a dispute, a smaller
               number from many is a consensus. */}
-          <th className="px-[26px] py-3 text-right font-normal" title="Downvotes received in the last three months">
+          <th className="px-[26px] py-3 text-right font-normal" title="Downvotes received over the account's whole history">
             Downvotes
           </th>
           {/* ★ "Downvoters", not "Voters": on a board about downvotes the short word is
@@ -784,7 +789,7 @@ function DvTable({ rows }: { rows: DvRow[] }) {
           </th>
           <th
             className="px-[26px] py-3 text-right font-medium"
-            title="Payout removed across this account's whole history, each post valued at its own payout rate. The vote counts beside it are the last three months."
+            title="Payout removed across this account's whole history, each post valued at its own rate on the day it paid"
           >
             Removed (HBD)
           </th>
