@@ -434,18 +434,21 @@ async function loadKeBoard(limit = BOARD_ROWS): Promise<{ rows: KeRow[]; asOf: s
   const minVests = KE_MIN_HP * ratio;
 
   const rows = await querySlow<{ account: string; rewards_hive: number; hp: number; ke: number }>(
+    /* ★ VESTS, not milli-HIVE — see the note on the profile record's statement. The
+       displayed HIVE figure uses the live rate; the ratio is VESTS over VESTS, where
+       the rate cancels. */
     `SELECT TOP (@lim) name AS account,
-            CAST((CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) / 1000.0 AS int) AS rewards_hive,
+            CAST((CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) / @ratio AS int) AS rewards_hive,
             CAST(vesting_shares / @ratio AS int) AS hp,
-            CAST(((CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) / 1000.0)
-                 / NULLIF(vesting_shares / @ratio, 0) AS decimal(12,2)) AS ke
+            CAST((CAST(posting_rewards AS float) + CAST(curation_rewards AS float))
+                 / NULLIF(CAST(vesting_shares AS float), 0) AS decimal(12,2)) AS ke
      FROM Accounts
      WHERE vesting_shares > @minVests
        AND created < DATEADD(day, -@minAge, GETDATE())
        AND last_root_post > DATEADD(month, -3, GETDATE())
        AND (CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) > 0
-     ORDER BY ((CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) / 1000.0)
-              / NULLIF(vesting_shares / @ratio, 0) DESC`,
+     ORDER BY (CAST(posting_rewards AS float) + CAST(curation_rewards AS float))
+              / NULLIF(CAST(vesting_shares AS float), 0) DESC`,
     [
       { name: 'ratio', type: TYPES.Float, value: ratio },
       { name: 'minVests', type: TYPES.Float, value: minVests },
@@ -577,6 +580,21 @@ export interface DownvoteTally {
   lastDownvote: string | Date | null;
 }
 
+/*
+ * ★★★ WHAT STILL STANDS, NOT WHAT WAS EVER CAST (owner, 2026-09-20: "just count actual
+ * downvotes received").
+ *
+ * `TxVotes` is the operation log, so a voter who downvotes, thinks better of it and
+ * removes the vote leaves the downvote in the log forever. Counting every pair that was
+ * EVER negative therefore counts votes that are no longer on the post. Measured on
+ * @antisocialist: 4,315 pairs were ever negative, 4,286 are still negative, 20 were
+ * withdrawn to zero and 9 were flipped to an upvote. On the casting side it is larger --
+ * 25,847 ever, 25,567 standing, 258 withdrawn.
+ *
+ * So the last vote in each (voter, post) pair decides, and only a negative one counts.
+ * The candidate set is still "pairs that were ever negative", which keeps the expensive
+ * scan bounded to the downvotes rather than to every vote the account ever received.
+ */
 export async function downvoteTally(account: string): Promise<DownvoteTally | null> {
   /*
    * ★★ ONE GROUPED PASS, NOT THREE SCANS. All three figures come from the same rows,
@@ -586,13 +604,23 @@ export async function downvoteTally(account: string): Promise<DownvoteTally | nu
    * deduplicates and counts and dates in a single pass.
    */
   const rows = await queryCapped<{ downvotes: number; downvoters: number; last_downvote: string | Date }>(
-    `SELECT COUNT(*) AS downvotes,
-            COUNT(DISTINCT d.voter) AS downvoters,
-            MAX(d.last_ts) AS last_downvote
-     FROM (SELECT voter, permlink, MAX(timestamp) AS last_ts
-           FROM TxVotes WITH (NOLOCK)
-           WHERE author = @account AND weight < 0
-           GROUP BY voter, permlink) d`,
+    `WITH ever AS (
+       SELECT DISTINCT voter, permlink
+       FROM TxVotes WITH (NOLOCK)
+       WHERE author = @account AND weight < 0
+     ),
+     final AS (
+       SELECT v.voter, v.weight, v.timestamp,
+              ROW_NUMBER() OVER (PARTITION BY v.voter, v.permlink ORDER BY v.timestamp DESC) AS rn
+       FROM TxVotes v WITH (NOLOCK)
+       JOIN ever e ON e.voter = v.voter AND e.permlink = v.permlink
+       WHERE v.author = @account
+     )
+     SELECT COUNT(*) AS downvotes,
+            COUNT(DISTINCT voter) AS downvoters,
+            MAX(timestamp) AS last_downvote
+     FROM final
+     WHERE rn = 1 AND weight < 0`,
     [{ name: 'account', type: TYPES.VarChar, value: account }],
     DOWNVOTE_COUNT_MS
   );
@@ -629,13 +657,24 @@ export interface CastTally {
 
 export async function downvotesCast(account: string): Promise<CastTally | null> {
   const rows = await queryCapped<{ downvotes: number; targets: number; last_cast: string | Date }>(
-    `SELECT COUNT(*) AS downvotes,
-            COUNT(DISTINCT d.author) AS targets,
-            MAX(d.last_ts) AS last_cast
-     FROM (SELECT author, permlink, MAX(timestamp) AS last_ts
-           FROM TxVotes WITH (NOLOCK)
-           WHERE voter = @account AND weight < 0
-           GROUP BY author, permlink) d`,
+    /* ★ The mirror of the received tally, and standing-only for the same reason. */
+    `WITH ever AS (
+       SELECT DISTINCT author, permlink
+       FROM TxVotes WITH (NOLOCK)
+       WHERE voter = @account AND weight < 0
+     ),
+     final AS (
+       SELECT v.author, v.weight, v.timestamp,
+              ROW_NUMBER() OVER (PARTITION BY v.author, v.permlink ORDER BY v.timestamp DESC) AS rn
+       FROM TxVotes v WITH (NOLOCK)
+       JOIN ever e ON e.author = v.author AND e.permlink = v.permlink
+       WHERE v.voter = @account
+     )
+     SELECT COUNT(*) AS downvotes,
+            COUNT(DISTINCT author) AS targets,
+            MAX(timestamp) AS last_cast
+     FROM final
+     WHERE rn = 1 AND weight < 0`,
     [{ name: 'account', type: TYPES.VarChar, value: account }],
     DOWNVOTE_COUNT_MS
   );
@@ -680,12 +719,31 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
 
   const rows = await queryReader<{
     rewards_hive: number;
+    ke: number;
     hp: number;
     age_days: number;
     last_downvote: string | Date | null;
   }>(
-    `SELECT (CAST(a.posting_rewards AS float) + CAST(a.curation_rewards AS float)) / 1000.0 AS rewards_hive,
+    /*
+     * ★★★ THE REWARDS FIELDS ARE VESTS, NOT MILLI-HIVE (found 2026-09-20, owner: "that
+     * ratio is available somewhere ... Peakd uses it ecency i think as well ours cant
+     * differ").
+     *
+     * `posting_rewards` and `curation_rewards` come off the chain as VESTS -- HiveSQL
+     * stores the chain's own integers, verified identical against `condenser_api.
+     * get_accounts` for @antisocialist (10,457,620 and 11,650,053). Dividing them by
+     * 1000 asserted that 1,000 VESTS is one HIVE. The real rate is 1,609.68 today and it
+     * MOVES, so every KE on the site was overstated by 61% and drifting.
+     *
+     * Converted properly with the live rate, and the ratio itself is computed as VESTS
+     * over VESTS, where the rate cancels out entirely: KE = rewards / own stake. That is
+     * azircon's definition -- rewards received against HP held -- and it is what PeakD
+     * shows, so ours cannot differ by construction rather than by luck.
+     */
+    `SELECT (CAST(a.posting_rewards AS float) + CAST(a.curation_rewards AS float)) / @ratio AS rewards_hive,
             a.vesting_shares / @ratio AS hp,
+            (CAST(a.posting_rewards AS float) + CAST(a.curation_rewards AS float))
+              / NULLIF(CAST(a.vesting_shares AS float), 0) AS ke,
             DATEDIFF(day, a.created, GETDATE()) AS age_days
      /*
       * ★★ A SECOND, DIFFERENT SELF-VOTE FIGURE USED TO BE COMPUTED HERE AND RENDERED
@@ -726,7 +784,10 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
    */
   const hp = Number(rows[0]?.hp) || 0;
   const rewardsHive = Number(rows[0]?.rewards_hive) || 0;
-  const ke = hp > 0 ? Number((rewardsHive / hp).toFixed(2)) : null;
+  // ★ VESTS over VESTS, straight from the statement: the vests-per-HIVE rate cancels, so
+  //   the figure cannot drift with the rate the way the old HIVE-over-HP division did.
+  const keRaw = Number(rows[0]?.ke);
+  const ke = Number.isFinite(keRaw) ? Number(keRaw.toFixed(2)) : null;
   const last = null;
 
   return {
