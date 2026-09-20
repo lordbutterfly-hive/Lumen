@@ -1,4 +1,5 @@
 import 'server-only';
+import { getLogger } from '@ui/lib/logging';
 import { TYPES } from 'tedious';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 import { queryCapped, queryReader, querySlow } from './hivesql';
@@ -101,7 +102,15 @@ v AS (
 const valueOf = (share: string) => `
   CASE WHEN v.pos - v.neg > 0 AND v.payout > 0
        THEN v.payout * (${share}) / (v.pos - v.neg)
-       ELSE COALESCE(v.rate, 0) * (CASE WHEN v.neg <= v.pos THEN v.neg ELSE v.pos END)
+       /* NO COALESCE TO ZERO HERE, BECAUSE A MISSING RATE IS NOT A ZERO REMOVAL.
+          The ro rung is the whole-corpus rate with no GROUP BY, so rate is NULL only
+          when the account has never had a post that both paid and survived its
+          downvotes - which is the exact profile of the most flattened accounts on the
+          chain. Valuing their removals at 0 printed "$0 removed" on the accounts that
+          lost the most. With a NULL the SUM is NULL, orNull keeps it NULL, and the cell
+          says "not computed". There is no partial-undercount risk: when any rate exists
+          at all, the ro rung covers every row, so it is all-or-nothing per account. */
+       ELSE v.rate * (CASE WHEN v.neg <= v.pos THEN v.neg ELSE v.pos END)
             * (${share}) / NULLIF(v.neg, 0)
   END`;
 
@@ -116,14 +125,17 @@ const ONE_VOTER = valueOf('-CAST(j.rshares AS float)');
  * exceed 240s. 150s keeps the big-but-possible ones and still fails fast on the two that
  * cannot be done at all, so they do not eat a board's whole budget.
  */
+const logger = getLogger('app');
+
 const PER_ACCOUNT_MS = 150_000;
 
 export interface VoteLedger {
-  /** HBD taken off this account's posts by downvotes, over its whole history. */
-  removedUsd: number;
+  /** HBD taken off this account's posts by downvotes over its whole history, or `null` when it could not be computed. */
+  removedUsd: number | null;
   topDownvoters: { account: string; usd: number }[];
   topByCount: { account: string; votes: number }[];
-  selfRewardUsd: number;
+  /** Payout that came from the author's own votes, or `null` when it could not be read. */
+  selfRewardUsd: number | null;
   selfRewardPct: number | null;
   totalPayoutUsd: number;
   posts: number;
@@ -139,7 +151,21 @@ async function loadVoteLedger(
   account: string,
   lane: 'reader' | 'background' = 'reader'
 ): Promise<VoteLedger | null> {
-  const query = lane === 'background' ? querySlow : queryReader;
+  /*
+   * ★★ THE AUTHOR SIDE IS CAPPED TOO, AND IT WAS THE ASYMMETRY THAT LET ONE ACCOUNT EAT A
+   * BOARD'S BUDGET. `removedByVoter` has always been capped per account; this path went
+   * through plain `querySlow` — a 240s ceiling, three queries per account, no cap — so a
+   * single prolific author could spend twelve minutes of a fourteen-minute budget and
+   * leave the rest of the board blank. Observed across two runs of identical code: one
+   * attempted 30 accounts and valued 18, the next attempted 6 and valued 1.
+   *
+   * A reader waiting on a profile still gets the fast lane and no cap: they are asking
+   * about one account and nobody else is queued behind them.
+   */
+  const query =
+    lane === 'background'
+      ? <T>(sql: string, p: Parameters<typeof querySlow>[1]) => queryCapped<T>(sql, p ?? [], PER_ACCOUNT_MS)
+      : queryReader;
   const cte = VALUED.replace('%JOIN%', '').replace('%WHERE%', 'WHERE c.author = @a0');
   const p = [{ name: 'a0', type: TYPES.VarChar, value: account }];
 
@@ -180,12 +206,28 @@ async function loadVoteLedger(
     p
   );
 
+  // ★ A FAILED VOTER QUERY IS NOT "NOBODY DOWNVOTED THEM". It silently produced an
+  // empty top-three and the strip simply rendered the shorter sentence.
+  if (voters === null) {
+    logger.warn(`inquisition: top-downvoter lookup failed for @${account}; its top three stay empty`);
+  }
   const rows = voters ?? [];
   const totalPayoutUsd = Number(totals[0]?.total_payout) || 0;
-  const selfRewardUsd = Number(self?.[0]?.self_reward) || 0;
+  /*
+   * ★★★ A SELF-REWARD THAT COULD NOT BE READ IS `null`, NOT 0, BECAUSE 0 IS A
+   * CHARACTER REFERENCE (found by audit, 2026-09-20).
+   *
+   * This was `Number(self?.[0]?.self_reward) || 0`. `self` is the third sequential query
+   * in this function; when it timed out or the gate refused it, `self` was null,
+   * `Number(undefined)` was NaN, `|| 0` made it 0, and the strip rendered a green
+   * "0.0%" — the positive claim that this account has never once voted for itself.
+   * A failed request is not an acquittal.
+   */
+  const selfRewardUsd = orNull(self?.[0]?.self_reward);
 
   return {
-    removedUsd: orNull(totals[0]?.removed) ?? 0,
+    // ★ NO `?? 0`. That re-collapsed the very null `orNull` exists to preserve.
+    removedUsd: orNull(totals[0]?.removed),
     topDownvoters: rows.slice(0, 3).map((r) => ({ account: r.voter, usd: Number(r.removed) || 0 })),
     // ★ A different list from a different sort: whoever downvoted most often and whoever
     // took the most value are rarely the same people.
@@ -194,8 +236,10 @@ async function loadVoteLedger(
       .slice(0, 3)
       .map((r) => ({ account: r.voter, votes: Number(r.dvs) || 0 })),
     selfRewardUsd,
-    // ★ `null`, not 0%, when nothing has ever paid out: a 0 would read as a finding.
-    selfRewardPct: totalPayoutUsd > 0 ? (selfRewardUsd / totalPayoutUsd) * 100 : null,
+    // ★ `null`, not 0%, when nothing has ever paid out OR when the figure could not be
+    // read: either way a 0 would read as a finding about the account.
+    selfRewardPct:
+      selfRewardUsd !== null && totalPayoutUsd > 0 ? (selfRewardUsd / totalPayoutUsd) * 100 : null,
     totalPayoutUsd,
     posts: Number(totals[0]?.posts) || 0
   };
@@ -203,7 +247,24 @@ async function loadVoteLedger(
 
 export const voteLedger = withTtlCache(
   loadVoteLedger,
-  (account: string, _lane?: 'reader' | 'background') => account,
+  /*
+   * ★★★ THE LANE IS PART OF THE KEY, AND LEAVING IT OUT PUT READERS BEHIND THE
+   * BACKGROUND QUEUE (found by audit, 2026-09-20).
+   *
+   * `withTtlCache` hands a second caller the in-flight promise of the first. Stage 3 of
+   * the downvoted board calls this with `'background'` for its top thirty authors — the
+   * slow lane, whose gate waits up to `SLOW_WAIT_MS` (ten minutes) before the query even
+   * starts, then three sequential statements at up to 150s each. With the lane dropped
+   * from the key, an armed reader opening one of those thirty profiles — which are
+   * exactly the profiles the board links to — joined that promise and their record
+   * request sat there with it. Every comment in this layer promises a reader never waits
+   * on the slow lane; this was the one line that broke it.
+   *
+   * Keying on the lane costs a duplicate computation for the handful of accounts that
+   * appear on both paths in the same week. That is the right trade against a profile
+   * that hangs for half an hour.
+   */
+  (account: string, lane: 'reader' | 'background' = 'reader') => `${lane}:${account}`,
   {
     ttlMs: 7 * 24 * 60 * 60 * 1000,
     max: 200,
@@ -239,6 +300,42 @@ async function loadRemovedByVoter(voter: string): Promise<number | null> {
   // claim — "this account took nothing" — where the design intends a dash.
   return orNull(rows[0]?.removed);
 }
+
+/**
+ * What one AUTHOR's posts lost, and nothing else.
+ *
+ * ★★★ THE BOARD'S MONEY COLUMN WAS PAYING FOR THREE QUERIES AND USING ONE (found
+ * 2026-09-20). It called `voteLedger`, which computes the total, the top twenty
+ * downvoters and the self-reward — because that is what a PROFILE needs — and then read
+ * `removedUsd` off it and threw the rest away. Each of those is a full `VALUED` CTE over
+ * every post the account ever wrote, each capped at `PER_ACCOUNT_MS`, so the money pass
+ * spent roughly three times the wall clock it needed and reached 29 of 30 rows in
+ * eighteen minutes instead of finishing comfortably.
+ *
+ * A board row needs one number. This is that one query.
+ */
+async function loadRemovedForAuthor(account: string): Promise<number | null> {
+  const cte = VALUED.replace('%JOIN%', '').replace('%WHERE%', 'WHERE c.author = @a0');
+  const rows = await queryCapped<{ removed: number }>(
+    `${cte}
+     SELECT SUM(${ALL_NEG}) AS removed
+     FROM v`,
+    [{ name: 'a0', type: TYPES.VarChar, value: account }],
+    PER_ACCOUNT_MS
+  );
+  if (rows === null) {
+    logger.warn(`inquisition: author money for @${account} did not finish in ${PER_ACCOUNT_MS}ms`);
+    return null;
+  }
+  return orNull(rows[0]?.removed);
+}
+
+export const removedForAuthor = withTtlCache(loadRemovedForAuthor, (account: string) => account, {
+  ttlMs: 7 * 24 * 60 * 60 * 1000,
+  max: 300,
+  name: 'inq-removed-for-author',
+  shouldCache: (value) => value !== null
+});
 
 export const removedByVoter = withTtlCache(loadRemovedByVoter, (voter: string) => voter, {
   ttlMs: 7 * 24 * 60 * 60 * 1000,

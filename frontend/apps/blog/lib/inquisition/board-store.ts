@@ -1,5 +1,16 @@
 import 'server-only';
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync, utimesSync, openSync, closeSync } from 'node:fs';
+import {
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+  utimesSync,
+  openSync,
+  closeSync
+} from 'node:fs';
+import { getLogger } from '@ui/lib/logging';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -65,7 +76,12 @@ import { join } from 'node:path';
 const DIR = process.env.LUMEN_CACHE_DIR || join(tmpdir(), 'lumen-inquisition');
 
 /** How long a built board is served before a refresh is kicked off behind the reader. */
-export const REFRESH_MS = 3 * 24 * 60 * 60 * 1000;
+/*
+ * ★ ONE WEEK (owner: "the update should happen 1 time per week for the data. not every 3
+ * days"). This reverted to 3 days once already when the file was rewritten, so: the
+ * constant and every comment that quotes a cadence must be changed together.
+ */
+export const REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * ★★★ HOW LONG ONE WORKER'S CLAIM LASTS, AND IT IS NOW A HEARTBEAT RATHER THAN A GUESS.
@@ -125,6 +141,8 @@ export interface StoredBoard<T> {
   done?: string[];
 }
 
+const logger = getLogger('app');
+
 function ensureDir(): boolean {
   try {
     mkdirSync(DIR, { recursive: true });
@@ -145,9 +163,20 @@ export function readBoard<T>(key: string): StoredBoard<T> | null {
     // ★ A file that parses but carries no rows is not an answer; treat it as absent so
     // the next reader rebuilds rather than inheriting an empty board.
     if (!Array.isArray(parsed.rows) || parsed.rows.length === 0) return null;
+    /*
+     * ★★ A BOARD WITH NO USABLE `builtAt` IS TREATED AS INFINITELY OLD, NOT AS FRESH.
+     * `isStale` is `now - builtAt >= REFRESH_MS`, and every comparison against NaN is
+     * false — so a truncated or hand-edited file would have pinned that board to
+     * whatever it last contained, permanently, with no way back short of deleting it.
+     */
+    if (!Number.isFinite(parsed.builtAt)) parsed.builtAt = 0;
     return parsed;
-  } catch {
-    // Missing, unreadable or corrupt all mean the same thing here: nothing to serve.
+  } catch (error) {
+    // Missing is ordinary. Corrupt is not, and it used to look identical: the board
+    // silently rebuilt from scratch and nobody learned the file was bad.
+    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      logger.warn(`inquisition: board file for "${key}" is unreadable, rebuilding: ${String(error)}`);
+    }
     return null;
   }
 }
@@ -165,8 +194,26 @@ function put<T>(key: string, payload: StoredBoard<T>): boolean {
     writeFileSync(tmp, JSON.stringify(payload), 'utf8');
     renameSync(tmp, boardPath(key));
     return true;
-  } catch {
-    // A cache we cannot write is a slower feature, not a broken one.
+  } catch (error) {
+    /*
+     * ★★★ A CACHE WE CANNOT WRITE IS NOT "A SLOWER FEATURE" — IT IS AN UNBOUNDED
+     * REBUILD LOOP, AND THAT COMMENT USED TO SAY OTHERWISE (found by audit, 2026-09-20).
+     *
+     * No caller checked this boolean. With an unwritable `LUMEN_CACHE_DIR` the sequence
+     * on EVERY poll on EVERY worker was: read nothing, decide it is stale, run the
+     * ranking, fail to store it, return — then do it again three seconds later. The
+     * reader saw "Counting..." alternating with "Nothing to confess." while the
+     * database took the full weight of it. `writeBoard` and `mergeBoard` now throw on
+     * this, which routes it into the caller's cooldown and logs it once a minute
+     * instead of hammering.
+     */
+    logger.error(error, `inquisition: could not store board "${key}" at ${DIR}`);
+    // Do not leave the half-written temp file behind; nothing ever swept these.
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* never existed */
+    }
     return false;
   }
 }
@@ -182,7 +229,7 @@ export interface StageMeta {
  * there, and any per-account progress recorded against the old rows goes with it.
  */
 export function writeBoard<T>(key: string, rows: T[], asOf: string, meta: StageMeta = {}): void {
-  put<T>(key, {
+  const ok = put<T>(key, {
     rows,
     asOf,
     builtAt: Date.now(),
@@ -190,6 +237,10 @@ export function writeBoard<T>(key: string, rows: T[], asOf: string, meta: StageM
     stages: meta.stages,
     done: meta.done ?? []
   });
+  // ★ THROW RATHER THAN RETURN FALSE NOBODY READS. The caller's catch applies a
+  // cooldown and logs; silently carrying on is what turned an unwritable directory into
+  // a rebuild on every poll. See `put`.
+  if (!ok) throw new Error(`board store: could not write "${key}"`);
 }
 
 /**
@@ -212,7 +263,7 @@ export function writeBoard<T>(key: string, rows: T[], asOf: string, meta: StageM
 export function mergeBoard<T>(key: string, apply: (rows: T[]) => T[], meta: StageMeta = {}): boolean {
   const stored = readBoard<T>(key);
   if (!stored) return false;
-  return put<T>(key, {
+  const ok = put<T>(key, {
     rows: apply(stored.rows),
     asOf: stored.asOf,
     builtAt: stored.builtAt,
@@ -220,6 +271,9 @@ export function mergeBoard<T>(key: string, apply: (rows: T[]) => T[], meta: Stag
     stages: meta.stages ?? stored.stages,
     done: meta.done ?? stored.done ?? []
   });
+  // ★ Same reason as `writeBoard`: a merge that did not land must not read as progress.
+  if (!ok) throw new Error(`board store: could not merge "${key}"`);
+  return true;
 }
 
 export function isStale(board: StoredBoard<unknown> | null): boolean {
@@ -245,21 +299,41 @@ export function isComplete(board: StoredBoard<unknown> | null): boolean {
  */
 export function claimBuild(key: string): boolean {
   if (!ensureDir()) return true; // No shared dir: fall back to per-worker behaviour.
+  /*
+   * ★★★ THE CLAIM HAS TO BE ATOMIC OR IT IS NOT A CLAIM (found by audit, 2026-09-20).
+   *
+   * This used to `statSync` and then `utimesSync`, and to create the lock with `'w'`,
+   * which is O_CREAT without O_EXCL. Two of the three workers polling within the same
+   * moment both saw "no lock" (or both saw the same expired one) and both returned
+   * true. The cost is two simultaneous full builds: the ranking twice, and up to thirty
+   * money accounts twice, against a database we do not own — plus `done` being written
+   * wholesale by each of them, so one builder's record of what it had attempted was
+   * simply lost.
+   *
+   * `'wx'` is O_CREAT|O_EXCL: exactly one caller can create the file. A stale claim is
+   * taken over by unlinking and then racing to re-create it the same way, so the
+   * arbitration is always the kernel's and never a read-then-write.
+   */
   const lock = join(DIR, `${key}.lock`);
   try {
     const age = Date.now() - statSync(lock).mtimeMs;
     if (age < CLAIM_MS) return false;
-    // Stale claim: take it over by stamping it now.
-    utimesSync(lock, new Date(), new Date());
-    return true;
+    // The claim has expired. Remove it so exactly one racer can re-create it below;
+    // whoever loses the unlink race simply fails the exclusive create.
+    try {
+      unlinkSync(lock);
+    } catch {
+      /* another worker removed it first */
+    }
   } catch {
     // No lock file yet.
   }
   try {
-    closeSync(openSync(lock, 'w'));
+    closeSync(openSync(lock, 'wx'));
     return true;
   } catch {
-    return true;
+    // Somebody else created it between our unlink and our create. They are building.
+    return false;
   }
 }
 
@@ -282,6 +356,57 @@ export function touchClaim(key: string): void {
 export function isClaimed(key: string): boolean {
   try {
     return Date.now() - statSync(join(DIR, `${key}.lock`)).mtimeMs < CLAIM_MS;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ★★★ "COUNTING..." FOREVER WAS THE ONLY THING A DEAD DATABASE COULD SAY (found by
+ * audit, 2026-09-20).
+ *
+ * `releaseBuild` backdates the lock so the claim expires after the cooldown — which
+ * means `isClaimed` is TRUE for the whole cooldown, `serve` reports `building: true`,
+ * and the client keeps polling a spinner. With HiveSQL down the loop is: claim, fail at
+ * the connect timeout, release, cooldown, claim again, forever, with the board never
+ * once telling the reader anything is wrong. The route's own comment claimed the
+ * cooldown meant "the reader is told the truth"; there was no path that told them.
+ *
+ * So a failure leaves its own mark, separate from the claim. Two consecutive failures
+ * with nothing on disk is the point at which we stop saying "counting" and admit it.
+ */
+const FAIL_GRACE = 2;
+
+function failPath(key: string): string {
+  return join(DIR, `${key}.fail`);
+}
+
+export function recordFailure(key: string): void {
+  try {
+    let count = 0;
+    try {
+      count = Number(JSON.parse(readFileSync(failPath(key), 'utf8')).count) || 0;
+    } catch {
+      /* first failure */
+    }
+    writeFileSync(failPath(key), JSON.stringify({ at: Date.now(), count: count + 1 }), 'utf8');
+  } catch {
+    /* an unwritable dir is already being logged by `put` */
+  }
+}
+
+export function clearFailure(key: string): void {
+  try {
+    unlinkSync(failPath(key));
+  } catch {
+    /* nothing to clear */
+  }
+}
+
+/** Has this board failed enough times in a row that a spinner would be a lie? */
+export function isFailing(key: string): boolean {
+  try {
+    return (Number(JSON.parse(readFileSync(failPath(key), 'utf8')).count) || 0) >= FAIL_GRACE;
   } catch {
     return false;
   }

@@ -145,7 +145,6 @@ interface DvRow {
   topSource: string;
   topSourceVotes: number;
   removedUsd: number | null;
-  postsHit: number;
 }
 
 interface KeRow {
@@ -159,7 +158,7 @@ interface KeRow {
 interface MutedRow {
   account: string;
   mutedBy: number;
-  muterMvests: number;
+  muterMvests: number | null;
 }
 
 const day = (iso: string | null) => (iso ? iso.slice(0, 10) : '—');
@@ -671,7 +670,13 @@ function MutedTable({ rows }: { rows: MutedRow[] }) {
               {row.mutedBy.toLocaleString()}
             </td>
             <td className="px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums text-ink-10">
-              {row.muterMvests.toLocaleString(undefined, { maximumFractionDigits: 1 })}M HP
+              {/* ★ A dash, not "0M HP". The stake pass is separate from the count and can
+                     fail on its own; 0 would claim the muters hold nothing. */}
+              {row.muterMvests === null ? (
+                <span className="text-ink-14">&mdash;</span>
+              ) : (
+                <>{row.muterMvests.toLocaleString(undefined, { maximumFractionDigits: 1 })}M HP</>
+              )}
             </td>
           </tr>
         ))}
@@ -847,7 +852,13 @@ function DvTable({ rows }: { rows: DvRow[] }) {
                   <span className="font-num tabular-nums text-ink-14">{row.topSourceVotes.toLocaleString()}</span>
                 </>
               ) : (
-                <span className="text-ink-14">mixed</span>
+                /* ★★ "not read", NEVER "mixed". An empty `topSource` means the lookup was
+                   not reached — and it is not reached for rows 26-100, because the pass
+                   only covers `TOP_TARGET_ROWS`. "mixed" is a claim that this account's
+                   downvotes came from no dominant source, which is a finding about the
+                   account rather than an admission about us. The Inquisitors table beside
+                   it already said "not read" for exactly the same state. */
+                <span className="text-ink-14">not read</span>
               )}
             </td>
           </tr>

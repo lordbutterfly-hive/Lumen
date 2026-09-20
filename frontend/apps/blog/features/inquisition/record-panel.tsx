@@ -48,13 +48,14 @@ import { KE_BAND_TONE, type KeBand } from '@/blog/lib/inquisition/types';
 
 export interface RecordData {
   account: string;
-  mutedBy: number;
-  muterMvests: number;
+  mutedBy: number | null;
+  muterMvests: number | null;
+  mutedByPartial?: boolean;
   ke: number | null;
   band: KeBand;
   rewardsHive: number;
   hp: number;
-  downvotes: number;
+  downvotes: number | null;
   downvoters: number;
   lastDownvote: string | null;
   removedUsd: number | null;
@@ -113,12 +114,17 @@ function cellsFor(r: RecordData): Cell[] {
   return [
     {
       label: 'DOWNVOTES RECEIVED',
-      value: r.downvotes.toLocaleString(),
+      /* ★ A dash when the count did not finish. It is the one figure on this strip
+         expensive enough to time out on its own (23.2s for @haejin), and it now runs as
+         its own query so the rest of the record survives it. */
+      value: r.downvotes === null ? '—' : r.downvotes.toLocaleString(),
       exact:
-        r.topDownvoters.length > 0
-          ? `from ${r.downvoters.toLocaleString()} accounts · most: ${three(r.topDownvoters)}`
-          : `from ${r.downvoters.toLocaleString()} accounts · last ${ago(r.lastDownvote)}`,
-      tone: r.downvoters >= 25 ? 'warn' : 'plain',
+        r.downvotes === null
+          ? `not counted · ${r.downvoters.toLocaleString()} accounts have downvoted this one`
+          : r.topDownvoters.length > 0
+            ? `from ${r.downvoters.toLocaleString()} accounts · most: ${three(r.topDownvoters)}`
+            : `from ${r.downvoters.toLocaleString()} accounts · last ${ago(r.lastDownvote)}`,
+      tone: r.downvotes === null ? 'dim' : r.downvoters >= 25 ? 'warn' : 'plain',
       body: `Downvotes received over the account's whole history, from ${r.downvoters.toLocaleString()} distinct accounts, the last one ${ago(r.lastDownvote)}.`
     },
     {
@@ -138,22 +144,53 @@ function cellsFor(r: RecordData): Cell[] {
     },
     {
       label: 'MUTED BY',
-      value: r.mutedBy.toLocaleString(),
-      exact: `${r.mutedBy.toLocaleString()} accounts · ${r.muterMvests.toFixed(1)}M HP between them`,
-      tone: r.mutedBy >= 50 ? 'warn' : 'plain',
+      /*
+       * ★★ THIS FIGURE NOW COMES FROM THE CHAIN AND CAN BE `null`, WHICH IS A DASH.
+       * It used to be a plain `number` read out of HiveSQL's `Mutes` table, which
+       * answers "who mutes X" with between 1% and 69% of the truth — @berniesanders
+       * rendered a confident 0 against a chain that says 638. A dash that says "not
+       * read" on hover is the honest version of a number we could not get.
+       */
+      value:
+        r.mutedBy === null ? '—' : `${r.mutedBy.toLocaleString()}${r.mutedByPartial ? '+' : ''}`,
+      exact:
+        r.mutedBy === null
+          ? 'not read'
+          : r.mutedByPartial
+            ? `at least ${r.mutedBy.toLocaleString()} accounts · the walk stopped at its page limit`
+            : r.muterMvests === null
+              ? `${r.mutedBy.toLocaleString()} accounts`
+              : `${r.mutedBy.toLocaleString()} accounts · ${r.muterMvests.toFixed(1)}M HP between them`,
+      tone: r.mutedBy === null ? 'dim' : r.mutedBy >= 50 ? 'warn' : 'plain',
       body: 'A mute is free, personal and one-sided, so the stake behind the muters says more than the count does.'
     },
     {
       label: 'STEEM',
-      value: r.steemPosts === null ? '—' : r.steemPosts.toLocaleString(),
+      /*
+       * ★★ THE `+` IS NOT DECORATION — IT IS THE DIFFERENCE BETWEEN A COUNT AND A FLOOR.
+       * The Steem walk is capped at `MAX_PROFILE_PAGES` pages and sets `partial` when it
+       * hits that cap, and this cell printed the number bare regardless: a floor rendered
+       * as a total, indistinguishable from a complete count. The flag was computed, sent
+       * over the wire and declared on the type, and then read by nothing. The board beside
+       * it got this right; two surfaces of one feature disagreeing is the feature lying on
+       * one of them.
+       */
+      value:
+        r.steemPosts === null
+          ? '—'
+          : `${r.steemPosts.toLocaleString()}${r.steemPartial ? '+' : ''}`,
       exact:
         r.steemPosts === null
           ? 'not read'
-          : r.steemLastPost
-            ? `last one ${r.steemLastPost.slice(0, 10)} · ${ago(r.steemLastPost)}`
-            : 'none since 2020-09-20',
+          : r.steemPartial
+            ? `at least ${r.steemPosts.toLocaleString()} · the walk stopped at its page limit`
+            : r.steemLastPost
+              ? `last one ${r.steemLastPost.slice(0, 10)} · ${ago(r.steemLastPost)}`
+              : 'none since 2020-09-20',
       tone: r.steemPosts === null ? 'dim' : r.steemPosts > 0 ? 'warn' : 'ok',
-      body: 'Posts published to Steem since six months after the fork, asked of Steem itself; the migration window is excluded because posting there then was rarely a choice.'
+      body: r.steemPartial
+        ? 'Posts published to Steem since six months after the fork, asked of Steem itself; the migration window is excluded because posting there then was rarely a choice. This account has posted there enough that the count stopped at its page limit, so the real figure is higher.'
+        : 'Posts published to Steem since six months after the fork, asked of Steem itself; the migration window is excluded because posting there then was rarely a choice.'
     },
     {
       label: 'KE RATIO',

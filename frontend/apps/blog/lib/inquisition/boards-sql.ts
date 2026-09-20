@@ -1,9 +1,11 @@
 import 'server-only';
 import { TYPES } from 'tedious';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
-import { hiveSqlConfigured, queryFast, querySlow } from './hivesql';
+import { getLogger } from '@ui/lib/logging';
+import { hiveSqlConfigured, queryCapped, queryReader, querySlow } from './hivesql';
 import { readBoard } from './board-store';
 import { removedForMany } from './vote-ledger';
+import { muteRoll, rankMuted } from './mutes';
 import { keBand, nowIso } from './types';
 import type { KeBand } from './types';
 
@@ -24,6 +26,8 @@ import type { KeBand } from './types';
  * Verified against the live table the same day: @lordbutterfly holds 121,380,838.23
  * vesting_shares = 75,395 HP, which matches the site, so the column is whole VESTS.
  */
+
+const logger = getLogger('app');
 
 const MIN_VESTS = 10_000_000;
 const MIN_AGE_DAYS = 90;
@@ -47,17 +51,67 @@ const MIN_AGE_DAYS = 90;
  * ~19s (measured on @themarkymark's 60,000-post history), so this is the cost knob. Rows
  * past it report null rather than a number that covers a fraction of the account.
  */
-const MONEY_ROWS = 30;
-const MONEY_BUDGET_MS = 14 * 60 * 1000;
+export const MONEY_ROWS = 30;
+export const MONEY_BUDGET_MS = 14 * 60 * 1000;
 
 /**
  * How many rows get a true top target, how many per statement, and how long the whole
  * pass may take. Each is an indexed TOP-1 aggregate over that voter's entire downvote
  * history, and the biggest of them has 1.7 million votes to group.
  */
-const TOP_TARGET_ROWS = 25;
-const TOP_TARGET_CHUNK = 4;
-const TOP_TARGET_BUDGET_MS = 4 * 60 * 1000;
+export const TOP_TARGET_ROWS = 25;
+/*
+ * ★★★ ONE NAME PER STATEMENT, AND A CEILING ON EACH, BECAUSE A CHUNK OF FOUR MEANT ONE
+ * GIANT TOOK THREE INNOCENTS WITH IT (measured 2026-09-20).
+ *
+ * At four names per statement the whole chunk shares one `querySlow` and one 240s
+ * ceiling. @spaminator has 1.7 million downvotes to group; when its chunk ran over, the
+ * statement returned `null` and `topCounterpart` skipped it — taking the other three
+ * names in that chunk with it, silently, because a skip has no error string to log. A
+ * cold build filled 12 of 25 rows and nothing anywhere said why.
+ *
+ * One name per statement means a giant can only cost itself, and `TOP_TARGET_QUERY_MS`
+ * means it costs 60 seconds rather than 240 — a normal account takes ~16s, so anything
+ * past a minute is not going to finish inside the budget anyway, and the seconds are
+ * better spent on names that can.
+ */
+export const TOP_TARGET_CHUNK = 1;
+const TOP_TARGET_QUERY_MS = 60 * 1000;
+
+/*
+ * ★★★ THE RANKING GETS TWELVE MINUTES, NOT FOUR, AND THE MARGIN IS THE WHOLE POINT
+ * (2026-09-20).
+ *
+ * Measured against an unloaded HiveSQL: 105s with literals, 117s through tedious with
+ * the exact parameters this file sends. `querySlow`'s ceiling is 240s, so the healthy
+ * case had barely 2x of headroom on a database shared with everybody else who uses the
+ * free mirror. It ran out: during one session the query crossed 240s, timed out,
+ * returned `null`, failed the build, waited out the cooldown and did it again — for
+ * twenty minutes, silently, while the board served "building" and no rows.
+ *
+ * Nobody waits on this. It is a background build behind a file that is rebuilt once a
+ * WEEK and served from disk in between, so the cost of being generous is nil and the
+ * cost of being tight is a board that never appears. Twelve minutes is ~6x the measured
+ * time; the `SLOW_LANE` of two still bounds how many can run at once.
+ */
+const RANK_QUERY_MS = 12 * 60 * 1000;
+
+/** The deduped per-account downvote count. @haejin is 23.2s; this is generous headroom. */
+const DOWNVOTE_COUNT_MS = 90 * 1000;
+/*
+ * ★★ TEN MINUTES, NOT FOUR, BECAUSE DEDUPLICATING THE COUNT MADE THIS PASS SLOWER AND
+ * THERE IS NO CHEAPER WAY TO GET IT RIGHT (2026-09-20). Picking the top counterpart by
+ * `COUNT(*)` picked the loudest BOT, not the heaviest downvoter — a re-vote bot with
+ * 935,143 logged operations beat a real flagger with 3,000 actual downvotes.
+ * `COUNT(DISTINCT permlink)` picks the real one and costs ~16s per account against ~4s.
+ *
+ * ★ FOLDING THIS INTO THE RANKING QUERY WAS TRIED AND MEASURED, AND IT DOES NOT WORK.
+ * One statement computing the ranking and the counterpart together over a shared CTE
+ * would have covered all 100 rows instead of 25 and skipped a stage entirely — but SQL
+ * Server does not materialise a CTE, it re-executes it, so the 157s pair-collapse ran
+ * twice and the statement timed out at 280s. It stays two passes.
+ */
+export const TOP_TARGET_BUDGET_MS = 10 * 60 * 1000;
 
 /** The KE board's stake floor, in HP. Converted to VESTS at the live rate. */
 const KE_MIN_HP = 500;
@@ -79,7 +133,8 @@ export const BOARD_ROWS = 100;
 export interface MutedRow {
   account: string;
   mutedBy: number;
-  muterMvests: number;
+  /** Combined stake of the muters in millions of HP, or `null` when it was not computed. */
+  muterMvests: number | null;
 }
 
 export interface DownvotedRow {
@@ -91,8 +146,6 @@ export interface DownvotedRow {
   topSourceVotes: number;
   /** USD removed from this account's posts in the window, or null when not computed. */
   removedUsd: number | null;
-  /** Posts that lost value to a downvote. */
-  postsHit: number;
 }
 
 /**
@@ -114,126 +167,91 @@ export interface DownvotedRow {
  * Measured at 2.6s including the join and both floors.
  */
 async function loadMostMuted(limit = BOARD_ROWS): Promise<{ rows: MutedRow[]; asOf: string; failed: boolean }> {
-  const rows = await querySlow<{ account: string; muted_by: number; muter_mvests: number }>(
-    `SELECT TOP (@lim) m.muted AS account, COUNT(*) AS muted_by,
-            -- ★ DIVIDED BY THE RATE, BECAUSE THE COLUMN SAYS HP. This summed raw VESTS
-            -- and the board printed it as "4,498M" beside a profile that printed the same
-            -- muters as "2.8M HP" — the same fact, 1,610x apart, on two screens.
-            -- ★ decimal, not int: a row muted entirely by small holders rendered 0M.
-            CAST(SUM(CAST(ISNULL(a2.vesting_shares,0) AS float))/@ratio/1000000.0 AS decimal(14,2)) AS muter_mvests
-     FROM Mutes m
-     JOIN Accounts a1 ON a1.name = m.muted
-     LEFT JOIN Accounts a2 ON a2.name = m.muter
-     WHERE a1.vesting_shares > @minVests AND a1.created < DATEADD(day, -@minAge, GETDATE())
-     GROUP BY m.muted
-     ORDER BY COUNT(*) DESC`,
-    [
-      { name: 'ratio', type: TYPES.Float, value: await vestsPerHive() },
-      { name: 'minVests', type: TYPES.Float, value: MIN_VESTS },
-      { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS },
-      { name: 'lim', type: TYPES.Int, value: limit }
-    ]
-  );
-  // `null` is "the database did not answer"; an empty array is "it answered, none".
-  if (rows === null) return { rows: [], asOf: nowIso(), failed: true };
+  const ratio = await vestsPerHive();
+
+  /*
+   * ★★★ THIS BOARD NO LONGER RANKS ON `Mutes`, AND THE OLD VERSION WAS NOT SLIGHTLY
+   * WRONG, IT WAS MEANINGLESS (found by audit, 2026-09-20).
+   *
+   * `SELECT COUNT(*) ... GROUP BY m.muted` reads the table in the one direction it
+   * cannot answer. Coverage against live chain state: @haejin 7 of 651, @berniesanders
+   * 0 of 638, @themarkymark 65 of 171, and the board's own #1 @heimindanger 119 of 172.
+   * A ranking built on 1%-to-69% coverage is not a scaled-down ranking, it is a
+   * different and arbitrary one — #1 was whoever's muters happened to be ingested.
+   *
+   * ★★ IT ALSO CARRIED THE STAKE FLOOR THAT THE DOWNVOTE BOARDS DROPPED. @berniesanders
+   * holds 3 HP; a 6,211 HP floor meant to keep dust off the board was removing its most
+   * notorious entry. Gone here for the same reason it went there: an account 638 people
+   * have muted is self-evidently not dust.
+   *
+   * ★ WHAT IT COSTS. The candidate scan is ~26 minutes of sliced reads once a WEEK, and
+   * the counts are ~400 sequential chain calls (~1 minute). Between rebuilds this is a
+   * file on disk. See `mutes.ts` for why the pool cannot miss anybody.
+   */
+  const runSlice = async (fromIso: string, toIso: string, minOps: number) => {
+    const rows = await queryCapped<{ account: string; ops: number }>(
+      `SELECT JSON_VALUE(json,'$[1].following') AS account, COUNT(*) AS ops
+       FROM TxCustoms WITH (NOLOCK)
+       WHERE tid = 'follow' AND json LIKE '%"ignore"%'
+         AND timestamp >= @from AND timestamp < @to
+       GROUP BY JSON_VALUE(json,'$[1].following')
+       HAVING COUNT(*) >= @minOps`,
+      [
+        { name: 'from', type: TYPES.VarChar, value: fromIso },
+        { name: 'to', type: TYPES.VarChar, value: toIso },
+        { name: 'minOps', type: TYPES.Int, value: minOps }
+      ],
+      RANK_QUERY_MS
+    );
+    if (rows === null) {
+      logger.warn(`inquisition: mute candidate slice ${fromIso}..${toIso} did not answer; pool is thinner`);
+      return null;
+    }
+    return rows.map((r) => ({ account: String(r.account ?? ''), ops: Number(r.ops) || 0 }));
+  };
+
+  const ranked = await rankMuted(runSlice, limit);
+  if (ranked === null) return { rows: [], asOf: nowIso(), failed: true };
+
+  /*
+   * The stake behind the muters, summed from the names the chain gave us. One statement
+   * for the whole board: every (account, muter) pair goes over as one JSON parameter and
+   * `OPENJSON` expands it server-side.
+   */
+  const pairs = ranked.flatMap((row) => row.muters.map((muter) => ({ a: row.account, m: muter })));
+  const stake = new Map<string, number>();
+  if (ratio > 0 && pairs.length > 0) {
+    const rows = await queryCapped<{ account: string; mvests: number }>(
+      `SELECT n.a AS account,
+              SUM(CAST(ISNULL(acc.vesting_shares, 0) AS float)) / @ratio / 1000000.0 AS mvests
+       FROM OPENJSON(@pairs) WITH (a nvarchar(20) '$.a', m nvarchar(20) '$.m') AS n
+       LEFT JOIN Accounts acc WITH (NOLOCK) ON acc.name = n.m
+       GROUP BY n.a`,
+      [
+        { name: 'pairs', type: TYPES.NVarChar, value: JSON.stringify(pairs) },
+        { name: 'ratio', type: TYPES.Float, value: ratio }
+      ],
+      RANK_QUERY_MS
+    );
+    if (rows === null) {
+      logger.warn('inquisition: muter stake query did not answer; the board shows counts without stake');
+    } else {
+      for (const r of rows) stake.set(r.account, Number(r.mvests) || 0);
+    }
+  }
+
   return {
-    rows: rows.map((r) => ({
+    rows: ranked.map((r) => ({
       account: r.account,
-      mutedBy: Number(r.muted_by) || 0,
-      muterMvests: Number(r.muter_mvests) || 0
+      mutedBy: r.mutedBy,
+      // ★ `null`, not 0, when the stake pass did not run: 0M HP is a claim that the
+      // people muting this account hold nothing.
+      muterMvests: stake.has(r.account) ? Number((stake.get(r.account) ?? 0).toFixed(2)) : null
     })),
     asOf: nowIso(),
     failed: false
   };
 }
-
-/*
- * ★ NOTHING IN THIS FILE READS `Blacklists` ANY MORE. `Blacklists` carries only the
- * blacklisted list type, and two of the four publishers publish under `muted` — see the
- * long note in the boards route. `bridge.get_follow_list` reads both, so `blacklists.ts`
- * owns every listing question now, for the board AND for the profile record. The local
- * copy of the publisher list and the SQL path that used it are gone rather than kept
- * "in step": a second copy of a list is a second thing to forget.
- */
-
-/**
- * Most downvoted, sorted by RAW DOWNVOTE COUNT.
- *
- * ★★ 903 DOWNVOTES FROM 12 ACCOUNTS IS A DISPUTE; 212 FROM 29 IS A CONSENSUS. Sorting
- * by volume lets one large downvoter manufacture the top of the board, so the default
- * sort is voters and both numbers are shown.
- *
- * ★★★ THE WINDOW IS THREE MONTHS BECAUSE TWELVE DOES NOT FINISH. Measured: a 12-month
- * aggregate blew past a 60s request timeout; 3 months returns in 80.2s. That is a
- * nightly job's budget, not a reader's, and this function is only ever called by the
- * refresher.
- */
-async function loadMostDownvoted(limit = BOARD_ROWS): Promise<{ rows: DownvotedRow[]; asOf: string; failed: boolean }> {
-  const rows = await querySlow<{ account: string; downvotes: number; voters: number }>(
-    `SELECT TOP (@lim) v.author AS account, COUNT(*) AS downvotes, COUNT(DISTINCT v.voter) AS voters
-     FROM TxVotes v WITH (NOLOCK)
-     JOIN Accounts a ON a.name = v.author
-     -- ★★★ FULL HISTORY, NOT A ROLLING WINDOW (owner: "I said full history"). A
-     -- three-month slice also made the board incoherent with itself: the vote counts
-     -- covered 90 days while the money column covered the account's whole life, so
-     -- @solominer read as "78 downvotes, 2 targets, $9,385 removed". His real record is
-     -- 3,839 downvotes across 455 targets. Measured 102.3s for the full scan, against
-     -- ~70s for the window, which is nothing on a board rebuilt once a week.
-     WHERE v.weight < 0
-       AND a.vesting_shares > @minVests AND a.created < DATEADD(day, -@minAge, GETDATE())
-     GROUP BY v.author
-     -- ★★★ RAW COUNT IS THE RANK (owner, 2026-09-19: "most downvoted is the person who
-     -- got most downvotes in raw numbers, not what you wrote there"). I had ranked by
-     -- distinct voters on the argument that consensus beats volume. That is an argument
-     -- for a different board; this one is called MOST DOWNVOTED and it now means what it
-     -- says. Voters stays as a column so the reader can still tell a brigade from a
-     -- dispute, it just no longer decides the order.
-     ORDER BY COUNT(*) DESC, COUNT(DISTINCT v.voter) DESC`,
-    [
-      { name: 'minVests', type: TYPES.Float, value: MIN_VESTS },
-      { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS },
-      { name: 'lim', type: TYPES.Int, value: limit }
-    ]
-  );
-  // ★ `null` is "we could not ask" and must never become an empty board — see hivesql.ts.
-  if (rows === null) return { rows: [], asOf: nowIso(), failed: true };
-
-  /*
-   * ★★ THE COUNTS ARE THE BOARD; THE VALUE AND THE SOURCE ARE ENRICHMENT. Both extra
-   * queries run against the fifty names this one just chose, and both are allowed to come
-   * back empty without failing the board: a missing dollar figure prints a dash, a missing
-   * source prints nothing, and the downvote counts beside them are still true.
-   */
-  const names = rows.map((r) => r.account);
-  const sources = await topCounterpart(
-    names.slice(0, TOP_TARGET_ROWS),
-    'by-author',
-    TOP_TARGET_BUDGET_MS,
-    TOP_TARGET_CHUNK
-  ).catch(() => new Map<string, { name: string; n: number }>());
-  const removed = await removedByAuthor(names).catch(
-    () => new Map<string, { usd: number; posts: number }>()
-  );
-
-  return {
-    rows: rows.map((r) => {
-      const src = sources.get(r.account);
-      const val = removed.get(r.account);
-      return {
-        account: r.account,
-        downvotes: Number(r.downvotes) || 0,
-        voters: Number(r.voters) || 0,
-        topSource: src?.name ?? '',
-        topSourceVotes: src?.n ?? 0,
-        removedUsd: val ? val.usd : null,
-        postsHit: val?.posts ?? 0
-      };
-    }),
-    asOf: nowIso(),
-    failed: false
-  };
-}
-
 
 export const mostMuted = withTtlCache(loadMostMuted, (limit = BOARD_ROWS) => `most-muted:${limit}`, {
   ttlMs: 6 * 60 * 60 * 1000,
@@ -275,102 +293,6 @@ async function removedByAuthor(authors: string[]): Promise<Map<string, { usd: nu
   return out;
 }
 
-/**
- * HBD per rshare, from the live reward fund. `reward_balance / recent_claims` is HIVE per
- * rshare; the median feed price converts that to HBD. Both move daily, so neither is
- * hardcoded — see `vestsPerHive` for the same argument about the VESTS rate.
- */
-async function loadHbdPerRshare(): Promise<number> {
-  const endpoint = process.env.REACT_APP_API_ENDPOINT || 'https://api.hive.blog';
-  const call = async (method: string) => {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      signal: AbortSignal.timeout(5000),
-      headers: { 'content-type': 'application/json' },
-      cache: 'no-store',
-      body: JSON.stringify({ jsonrpc: '2.0', method, params: [method.endsWith('reward_fund') ? 'post' : undefined].filter(Boolean), id: 1 })
-    });
-    const json = (await res.json()) as { result?: Record<string, string> };
-    return json.result ?? null;
-  };
-  try {
-    const [fund, price] = await Promise.all([
-      call('condenser_api.get_reward_fund'),
-      call('condenser_api.get_current_median_history_price')
-    ]);
-    const balance = Number.parseFloat(fund?.reward_balance ?? '');
-    const claims = Number.parseFloat(fund?.recent_claims ?? '');
-    const base = Number.parseFloat(price?.base ?? '');
-    const quote = Number.parseFloat(price?.quote ?? '');
-    if (![balance, claims, base, quote].every(Number.isFinite) || claims <= 0 || quote <= 0) return 0;
-    return (balance / claims) * (base / quote);
-  } catch {
-    return 0;
-  }
-}
-
-const hbdPerRshare = withTtlCache(loadHbdPerRshare, () => 'hbd-per-rshare', {
-  ttlMs: 30 * 60 * 1000,
-  max: 1,
-  name: 'inq-rshare-rate',
-  shouldCache: (v) => v > 0
-});
-
-
-/**
- * ════ THE HEAVIEST COUNTERPART, IN EITHER DIRECTION ════
- *
- * ★★★ ONE INDEXED TOP-1 PER NAME, CHUNKED, AGAINST A CLOCK. Both boards want the same
- * shape — for each downvoter their most-hit target, for each target their heaviest
- * downvoter — and both were asking for it the same wrong way: `GROUP BY voter, author`
- * over the whole chain for a hundred names at once. Over full history that grouping is
- * enormous (@adm alone has 18,321 distinct targets, @spaminator 43,834), so the query
- * returned null, the column rendered empty, and on the inquisitor board it silently took
- * the money column with it because the money seeded off those names.
- *
- * `CROSS APPLY` asks each name's own index for its single heaviest counterpart instead.
- * Measured 132.3s for eight, so the cost is real and uneven — which is why this runs a
- * few at a time under a wall-clock budget, and why the boards say the column is read for
- * the first rows only rather than pretending it covers all hundred.
- */
-async function topCounterpart(
-  names: string[],
-  direction: 'by-voter' | 'by-author',
-  budgetMs: number,
-  chunkSize: number
-): Promise<Map<string, { name: string; n: number }>> {
-  const best = new Map<string, { name: string; n: number }>();
-  const self = direction === 'by-voter' ? 'voter' : 'author';
-  const other = direction === 'by-voter' ? 'author' : 'voter';
-  const deadline = Date.now() + budgetMs;
-
-  for (let i = 0; i < names.length; i += chunkSize) {
-    if (Date.now() >= deadline) break;
-    const chunk = names.slice(i, i + chunkSize);
-    const values = chunk.map((_, j) => `(@v${j})`).join(',');
-    const rows = await querySlow<{ k: string; p: string; n: number }>(
-      `SELECT s.k, t.${other} AS p, t.n
-       FROM (VALUES ${values}) AS s(k)
-       CROSS APPLY (SELECT TOP 1 v.${other}, COUNT(*) AS n
-                    FROM TxVotes v WITH (NOLOCK)
-                    WHERE v.${self} = s.k AND v.weight < 0
-                    GROUP BY v.${other}
-                    ORDER BY COUNT(*) DESC) AS t`,
-      chunk.map((name, j) => ({ name: `v${j}`, type: TYPES.VarChar, value: name }))
-    );
-    if (rows === null) continue;
-    for (const row of rows) best.set(row.k, { name: row.p, n: Number(row.n) || 0 });
-  }
-  return best;
-}
-
-
-export const mostDownvoted = withTtlCache(loadMostDownvoted, (limit = BOARD_ROWS) => `most-downvoted:${limit}`, {
-  ttlMs: 24 * 60 * 60 * 1000,
-  max: 2,
-  name: 'inq-board-downvoted',
-  shouldCache: (v) => !v.failed && v.rows.length > 0
-});
 
 export interface InquisitorRow {
   account: string;
@@ -378,152 +300,9 @@ export interface InquisitorRow {
   targets: number;
   topTarget: string;
   topTargetVotes: number;
-  /** Value taken off the accounts on the most-downvoted board, or null if not computed. */
+  /** HBD this account's downvotes took off every post they landed on, or null if not computed. */
   removedUsd: number | null;
 }
-
-/**
- * ════ BOARD 05 — WHO IS CASTING ════
- *
- * ★★★ THE OTHER END OF BOARD 02, AND IT WAS MISSING ENTIRELY (owner, 2026-09-19:
- * "Wheres the top inquisitors? how many votes they cast, their top target, $ taken").
- * A feature that boards the most-downvoted accounts and not the accounts doing the
- * downvoting is only telling half a story, and it is the half that reads as an
- * accusation. Casting downvotes is a normal, intended use of the chain; this board says
- * who does it and at whom, and nothing about whether they should.
- *
- * ★★ SORTED BY DISTINCT TARGETS, for the same reason board 02 sorts by distinct voters:
- * 900 downvotes aimed at one account is a feud, 200 spread over 40 is a patrol, and the
- * raw count cannot tell them apart.
- *
- * ★★★ WHAT IS **NOT** HERE, AND WHY — the "$ removed" column the owner asked for.
- * `TxVotes` carries `weight` (the vote percentage) and no rshares at all, so the value a
- * downvote removed is simply not in the table this query reads. It lives in
- * `Comments.net_rshares` / `vote_rshares`, per POST. Measured 2026-09-19: scanning
- * `Comments` for `net_rshares < 0` over three months did not finish inside a 90-second
- * request, so the per-voter attribution join is not a thing this can do on the cheap —
- * and attributing a whole post's lost payout to one of its several downvoters would be
- * an invented number wearing a dollar sign. The spec's own bar is "Receipts or it is
- * cut", so it is cut until it can be earned from the reward fund per post. `topTarget`
- * IS traceable: it is that voter's own votes, grouped.
- */
-async function loadInquisitors(limit = BOARD_ROWS): Promise<{ rows: InquisitorRow[]; asOf: string; failed: boolean }> {
-  /*
-   * ★★★ TWO INDEXED PHASES, BECAUSE ONE GROUP-BY DOES NOT FINISH. Measured 2026-09-19:
-   * grouping `TxVotes` by (voter, author) over three months with a window function to
-   * pick each voter's top target ran past **230 seconds** and was killed. Grouping by
-   * voter alone is 70.1s — the same shape and cost as board 02 — and once that has named
-   * fifty accounts, asking for THEIR targets is an indexed lookup: 9.2s for six voters,
-   * 1,907 rows. Same answer, and it actually returns.
-   *
-   * This is the `profileRecord` lesson at board scale: narrow to the names first, then
-   * ask the expensive question only about those names.
-   */
-  const leaders = await querySlow<{ account: string; downvotes: number; targets: number }>(
-    `SELECT TOP (@lim) v.voter AS account, COUNT(*) AS downvotes, COUNT(DISTINCT v.author) AS targets
-     FROM TxVotes v WITH (NOLOCK)
-     JOIN Accounts acc ON acc.name = v.voter
-     /*
-      * ★★★ FULL HISTORY, AND **NO STAKE FLOOR ON THIS BOARD** (owner: "wheres
-      * berniesanders, he gave out millions of downvotes").
-      *
-      * He was excluded twice over. The stake floor is 10,000,000 VESTS and he holds
-      * 3 HP today, having powered down years ago — so the account with 31,776 downvotes
-      * to its name failed a test designed to keep tiny accounts off the boards about
-      * being downvoted. On the board about CASTING them, past weight is the whole point
-      * and present stake is irrelevant: the floor filtered out precisely the people a
-      * reader opens this board to find. The age floor stays, because a week-old account
-      * with a long downvote history does not exist.
-      *
-      * ★★ AND IT IS THE WHOLE CHAIN, PRE-FORK INCLUDED. TxVotes reaches back to 2016,
-      * before Hive existed. @berniesanders cast 31,776 downvotes all-time and exactly ONE
-      * after the fork — his last was 2020-03-20, the day of the split. Counting only the
-      * Hive era would answer the owner's question with an empty row. The meta line says
-      * which era this is so nobody has to guess.
-      */
-     WHERE v.weight < 0
-       AND acc.created < DATEADD(day, -@minAge, GETDATE())
-     GROUP BY v.voter
-     -- ★ Targets first: 900 downvotes at one account is a feud, 200 across 40 is a patrol.
-     ORDER BY COUNT(DISTINCT v.author) DESC, COUNT(*) DESC`,
-    [
-      { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS },
-      { name: 'lim', type: TYPES.Int, value: limit }
-    ]
-  );
-  if (leaders === null) return { rows: [], asOf: nowIso(), failed: true };
-  if (leaders.length === 0) return { rows: [], asOf: nowIso(), failed: false };
-
-  /*
-   * ★★★ ONE INDEXED TOP-1 PER VOTER, NOT ONE GIANT GROUP-BY. Over full history the
-   * (voter, author) grouping is enormous — @adm alone has 18,321 distinct targets — and
-   * the pairs query returned nothing at all, which is why every row showed an empty top
-   * target and no money. `CROSS APPLY` asks each voter's own index for its single
-   * heaviest target instead.
-   *
-   * ★★ BOUNDED TO `TOP_TARGET_ROWS`, because it is not cheap: measured 132.3s for eight
-   * voters, so a hundred would be near half an hour. The rows past that report no top
-   * target rather than a wrong one, and the column says so.
-   */
-  /*
-   * ★★★ CHUNKED, AND AGAINST A CLOCK, BECAUSE ONE QUERY FOR TWENTY-FIVE DOES NOT RETURN.
-   * Measured 132.3s for eight voters, so twenty-five in a single statement is past the
-   * 240s ceiling and comes back null — which is exactly what happened: every row showed
-   * an empty top target and, because the money seeds off these, no money either. Worse,
-   * the cost is wildly uneven: @spaminator has 1,769,125 downvotes to aggregate and a
-   * small account has a few hundred.
-   *
-   * So: four at a time, each statement comfortably inside the ceiling, and a wall-clock
-   * budget over the whole pass. Whatever is reached gets a real top target; the rest
-   * report none, and the column header says it is read for the first rows only.
-   */
-  const targets = await topCounterpart(
-    leaders.slice(0, TOP_TARGET_ROWS).map((r) => r.account),
-    'by-voter',
-    TOP_TARGET_BUDGET_MS,
-    TOP_TARGET_CHUNK
-  ).catch(() => new Map<string, { name: string; n: number }>());
-  const best = new Map<string, { author: string; n: number }>();
-  for (const [voter, t] of targets) best.set(voter, { author: t.name, n: t.n });
-
-  /*
-   * ★★★ NO SEED. The money is now computed FROM EACH VOTER'S OWN DOWNVOTES, which is the
-   * question the column claims to answer. Summing over a fixed set of victim accounts
-   * gave @themarkymark $881 where the truth is ~$45,000, because that set covered 1.2%
-   * of his 3,442 targets — and the tooltip described a seed that was not even the seed
-   * being used. Rows past the budget report null and render as a dash: a figure covering
-   * one percent of someone's activity is worse than no figure.
-   */
-  const removed = await removedForMany(
-    leaders.slice(0, MONEY_ROWS).map((r) => r.account),
-    'voter',
-    MONEY_BUDGET_MS
-  ).catch(() => new Map<string, number>());
-
-  return {
-    rows: leaders.map((r) => {
-      const top = best.get(r.account);
-      const usd = removed.get(r.account);
-      return {
-        account: r.account,
-        downvotes: Number(r.downvotes) || 0,
-        targets: Number(r.targets) || 0,
-        topTarget: top?.author ?? '',
-        topTargetVotes: top?.n ?? 0,
-        removedUsd: usd === undefined ? null : usd
-      };
-    }),
-    asOf: nowIso(),
-    failed: false
-  };
-}
-
-export const inquisitorBoard = withTtlCache(loadInquisitors, (limit = BOARD_ROWS) => `inquisitors:${limit}`, {
-  ttlMs: 24 * 60 * 60 * 1000,
-  max: 2,
-  name: 'inq-board-inquisitors',
-  shouldCache: (v) => !v.failed && v.rows.length > 0
-});
 
 /**
  * ════ KE, AND THE ACCOUNT RECORD ════
@@ -609,8 +388,16 @@ async function loadKeBoard(limit = BOARD_ROWS): Promise<{ rows: KeRow[]; asOf: s
    * 6,211 HP, which quietly excluded most real authors and left the board reading as a
    * list of large stakeholders; 500 HP is a floor against noise, not against people. And
    * a KE ratio on a dormant account is an epitaph, not a finding: the number cannot move
-   * because nobody is posting. `Accounts.last_post` makes that a column test rather than
-   * a join, so it costs nothing.
+   * because nobody is posting. `Accounts.last_root_post` makes that a column test rather
+   * than a join, so it costs nothing.
+   *
+   * ★★ IT IS `last_root_post`, NOT `last_post`, AND THE DIFFERENCE PUT A TWO-YEARS-DORMANT
+   * ACCOUNT AT RANK 2 (found by audit, 2026-09-20). `last_post` moves on any comment, so
+   * the gate read "commented in the last 3 months" while the owner asked for "posted".
+   * @ssg-community sat at #2 with a KE of 120.62 on a comment left in June; its last
+   * actual post was 2024-07-23, twenty-six months earlier. @vimukthi was on the board the
+   * same way. This file already knew the distinction — it uses `depth = 0` elsewhere to
+   * mean exactly "a post, not a comment" — and then gated this board on the wrong column.
    *
    * ★ THE FLOOR IS COMPUTED FROM THE LIVE RATE, not hardcoded in VESTS, because the rate
    * drifts and a fixed VESTS constant silently becomes a different HP floor every month.
@@ -630,7 +417,7 @@ async function loadKeBoard(limit = BOARD_ROWS): Promise<{ rows: KeRow[]; asOf: s
      FROM Accounts
      WHERE vesting_shares > @minVests
        AND created < DATEADD(day, -@minAge, GETDATE())
-       AND last_post > DATEADD(month, -3, GETDATE())
+       AND last_root_post > DATEADD(month, -3, GETDATE())
        AND (CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) > 0
      ORDER BY ((CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) / 1000.0)
               / NULLIF(vesting_shares / @ratio, 0) DESC`,
@@ -667,31 +454,42 @@ export const keBoard = withTtlCache(loadKeBoard, (limit = BOARD_ROWS) => `ke:${l
 
 export interface ProfileRecord {
   account: string;
-  mutedBy: number;
-  muterMvests: number;
+  /** Accounts currently muting this one, from the chain. `null` when it could not be read. */
+  mutedBy: number | null;
+  /** Their combined stake in millions of HP, or `null` when the roll could not be read. */
+  muterMvests: number | null;
+  /** True when the mute walk hit its page cap, so `mutedBy` is a floor and not a total. */
+  mutedByPartial: boolean;
   publishers: string[];
   ke: number | null;
   band: KeBand;
   rewardsHive: number;
   hp: number;
   /** Downvotes received over the account's whole history. */
-  downvotes: number;
+  /** Distinct (voter, post) downvotes received, or `null` when the count did not finish. */
+  downvotes: number | null;
   downvoters: number;
   lastDownvote: string | null;
   /** USD taken off this account's payouts by those downvotes, or null if not computed. */
   removedUsd: number | null;
   /** Share of this account's post payouts that sit on posts it voted for itself. */
-  selfVotePct: number | null;
-  selfVoteUsd: number;
-  payoutUsd: number;
   accountAgeDays: number;
   asOf: string;
 }
 
 /**
- * ★★★ EVERYTHING A PROFILE SHOWS, IN ONE ROUND TRIP AND UNDER A SECOND. Measured 264ms.
- * The downvote figure is deliberately absent — 20.4s per account is not something a
- * profile may wait for, and a number we cannot fetch in time is not a number we print.
+ * ★★★ EVERYTHING A PROFILE SHOWS, IN ONE ROUND TRIP, ON THE READER LANE.
+ *
+ * ★★ IT MOVED OFF `queryFast` WHEN THE DOWNVOTE COUNT STARTED TELLING THE TRUTH
+ * (2026-09-20). The cheap `COUNT(*)` over TxVotes ran in 264ms and was wrong by up to
+ * 251x — it counted vote OPERATIONS, so a re-vote bot inflated it without limit. The
+ * deduplicated count is the real one and costs real time: 4.9s for @lighteye, 5.9s for
+ * @themarkymark, 11.5s for @berniesanders. Against `queryFast`'s 8-second ceiling the
+ * worst of those would time out, and a timeout returns `null`, which takes the ENTIRE
+ * record down — six correct figures lost to one slow subquery. `queryReader` is the
+ * same gate with 60 seconds of headroom, and nothing is made to wait by the move: the
+ * route already awaits `voteLedger` (12.1s) in the same `Promise.all`, and the whole
+ * record is cached for a day.
  *
  * ★★ THE LISTINGS ARE NOT READ FROM SQL, AND THAT IS A BUG FIX, NOT A PREFERENCE. The
  * `Blacklists` table only holds entries a publisher filed as `blacklisted`; hivewatchers
@@ -702,6 +500,87 @@ export interface ProfileRecord {
  * the feature lying on one of them. Listings are gone from this feature entirely, so the
  * strip and the board have nothing left to disagree about.
  */
+/**
+ * The combined stake of a set of muters, in millions of HP.
+ *
+ * ★★ THE NAMES ARRIVE AS ONE JSON PARAMETER AND ARE EXPANDED SERVER-SIDE. The muter
+ * roll now comes from the chain rather than from `Mutes`, so the stake sum has to be
+ * taken over a list this process is holding. Sending it as a JSON array and letting
+ * `OPENJSON` turn it into rows is one round trip and one parameter; building an `IN`
+ * list of 651 literals would be neither.
+ *
+ * ★ DIVIDED BY THE VESTS RATE, BECAUSE THE LABEL SAYS HP. Printing the raw VESTS sum
+ * under "M HP" once overstated the muters' stake by ~1,610x.
+ */
+async function muterStakeMvests(muters: string[], ratio: number): Promise<number | null> {
+  if (muters.length === 0) return 0;
+  if (ratio <= 0) return null;
+  const rows = await queryReader<{ mvests: number }>(
+    `SELECT ISNULL(SUM(CAST(a.vesting_shares AS float)), 0) / @ratio / 1000000.0 AS mvests
+     FROM OPENJSON(@names) WITH (name nvarchar(20) '$') AS n
+     JOIN Accounts a WITH (NOLOCK) ON a.name = n.name`,
+    [
+      { name: 'names', type: TYPES.NVarChar, value: JSON.stringify(muters) },
+      { name: 'ratio', type: TYPES.Float, value: ratio }
+    ]
+  );
+  if (rows === null) return null;
+  return Number(rows[0]?.mvests) || 0;
+}
+
+/**
+ * How many distinct (voter, post) downvotes this account has received.
+ *
+ * ★★★ ITS OWN STATEMENT, BECAUSE IT IS TWENTY TIMES THE COST OF EVERYTHING ELSE ON
+ * THE RECORD PUT TOGETHER (measured 2026-09-20).
+ *
+ * TxVotes is the vote OPERATION LOG — a bot re-voting the same post logs a row every
+ * time — so the honest count has to deduplicate, and `SELECT DISTINCT voter, permlink`
+ * over one prolific account is expensive: 4.9s for @lighteye, 11.5s for @berniesanders,
+ * **23.2s for @haejin**. Bundled into the seven-subquery record statement it pushed the
+ * whole thing past the 60s reader ceiling, and a null from that timeout takes the ENTIRE
+ * record down — @haejin's profile rendered "The record could not be read" while his KE,
+ * his mute count and his Steem history were all sitting there computable in a second.
+ *
+ * Split out, the six cheap figures always land and this one fills or reports `null` on
+ * its own, which the strip already renders as a dash.
+ */
+interface DownvoteTally {
+  downvotes: number;
+  downvoters: number;
+  lastDownvote: string | Date | null;
+}
+
+async function downvoteTally(account: string): Promise<DownvoteTally | null> {
+  /*
+   * ★★ ONE GROUPED PASS, NOT THREE SCANS. All three figures come from the same rows,
+   * and the record statement used to ask for them as three separate correlated
+   * subqueries over the same index — so @lighteye's 937,917 downvote operations were
+   * walked three times to produce three numbers. Grouping by (voter, permlink) once
+   * deduplicates and counts and dates in a single pass.
+   */
+  const rows = await queryCapped<{ downvotes: number; downvoters: number; last_downvote: string | Date }>(
+    `SELECT COUNT(*) AS downvotes,
+            COUNT(DISTINCT d.voter) AS downvoters,
+            MAX(d.last_ts) AS last_downvote
+     FROM (SELECT voter, permlink, MAX(timestamp) AS last_ts
+           FROM TxVotes WITH (NOLOCK)
+           WHERE author = @account AND weight < 0
+           GROUP BY voter, permlink) d`,
+    [{ name: 'account', type: TYPES.VarChar, value: account }],
+    DOWNVOTE_COUNT_MS
+  );
+  if (rows === null) {
+    logger.warn(`inquisition: downvote tally for @${account} did not finish in ${DOWNVOTE_COUNT_MS}ms`);
+    return null;
+  }
+  return {
+    downvotes: Number(rows[0]?.downvotes) || 0,
+    downvoters: Number(rows[0]?.downvoters) || 0,
+    lastDownvote: rows[0]?.last_downvote ?? null
+  };
+}
+
 export async function profileRecord(account: string): Promise<ProfileRecord | null> {
   if (!hiveSqlConfigured()) return null;
   /*
@@ -723,40 +602,35 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
    * one below is the narrowest query that answers exactly one of them, every one keyed
    * on this single account name so the index does the work.
    */
-  const rows = await queryFast<{
-    muted_by: number;
-    muter_mvests: number;
+  /*
+   * ★★ THE CHAIN CALL RUNS ALONGSIDE THE SQL, NOT AFTER IT. The mute roll is an
+   * independent source answering an independent question, so making the record wait for
+   * one and then the other would add its latency for no reason.
+   */
+  const rollPromise = muteRoll(account);
+  const tallyPromise = downvoteTally(account);
+
+  const rows = await queryReader<{
     rewards_hive: number;
     hp: number;
     age_days: number;
-    downvotes: number;
-    downvoters: number;
     last_downvote: string | Date | null;
-    self_vote_usd: number;
-    payout_usd: number;
   }>(
-    `SELECT (SELECT COUNT(*) FROM Mutes WHERE muted = @account) AS muted_by,
-            -- ★ DIVIDED BY THE VESTS RATE, BECAUSE THE LABEL SAYS HP. The raw sum is
-            -- VESTS; printing it under "M HP" overstated the muters' stake by ~1,610x
-            -- (4,498 MVESTS is 2.8M HP, not 4,498M HP).
-            (SELECT ISNULL(SUM(CAST(a2.vesting_shares AS float)),0)/@ratio/1000000.0
-               FROM Mutes m LEFT JOIN Accounts a2 ON a2.name = m.muter
-              WHERE m.muted = @account) AS muter_mvests,
-            (CAST(a.posting_rewards AS float) + CAST(a.curation_rewards AS float)) / 1000.0 AS rewards_hive,
+    `SELECT (CAST(a.posting_rewards AS float) + CAST(a.curation_rewards AS float)) / 1000.0 AS rewards_hive,
             a.vesting_shares / @ratio AS hp,
-            DATEDIFF(day, a.created, GETDATE()) AS age_days,
-            (SELECT COUNT(*) FROM TxVotes WHERE author = @account AND weight < 0) AS downvotes,
-            (SELECT COUNT(DISTINCT voter) FROM TxVotes WHERE author = @account AND weight < 0) AS downvoters,
-            (SELECT MAX(timestamp) FROM TxVotes WHERE author = @account AND weight < 0) AS last_downvote,
-            -- ★ SELF-VOTE IS DENOMINATED IN PAYOUT, NOT IN VOTES. The mock is explicit
-            -- that counting votes "flatters whales and punishes small accounts", so this
-            -- is the payout sitting on posts the author voted for, over total payout.
-            (SELECT ISNULL(SUM(CAST(c.total_payout_value AS float)),0) FROM Comments c WITH (NOLOCK)
-              WHERE c.author = @account AND c.depth = 0
-                AND EXISTS (SELECT 1 FROM TxVotes sv WHERE sv.voter = @account
-                              AND sv.author = c.author AND sv.permlink = c.permlink AND sv.weight > 0)) AS self_vote_usd,
-            (SELECT ISNULL(SUM(CAST(c.total_payout_value AS float)),0) FROM Comments c WITH (NOLOCK)
-              WHERE c.author = @account AND c.depth = 0) AS payout_usd
+            DATEDIFF(day, a.created, GETDATE()) AS age_days
+     /*
+      * ★★ A SECOND, DIFFERENT SELF-VOTE FIGURE USED TO BE COMPUTED HERE AND RENDERED
+      * NOWHERE (found by audit, 2026-09-20).
+      *
+      * Two subqueries over every root post the account ever wrote, one of them an
+      * EXISTS against TxVotes, on the READER lane, on every cache miss. What the strip
+      * actually shows is selfRewardPct from the vote ledger, which weighs the
+      * author's own rshares inside each payout. This one summed the WHOLE payout of any
+      * post the author had ever upvoted, which is a much larger and quite different
+      * number. It had zero references outside this file. Dead weight is bad; dead
+      * weight that disagrees with the live figure is a trap for whoever wires it up.
+      */
      FROM Accounts a
      WHERE a.name = @account`,
     [
@@ -765,13 +639,17 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
     ]
   );
   if (rows === null || rows.length === 0) return null;
+
   /*
-   * ★★ THE DIVISION HAPPENS IN FLOAT, AND ROUNDING COMES LAST. Both sides used to be
-   * `CAST(... AS int)` before the divide, and this record — unlike the board — applies
-   * no HP floor, so it runs on accounts with single-digit HP where that is not a
-   * rounding detail: 1.99 HP truncated to 1 turned a real KE of 25,125 into a printed
-   * 50,000. The board always did this correctly; the two now agree.
+   * ★ A FAILED ROLL LEAVES BOTH FIGURES `null`, AND THE STRIP RENDERS A DASH. It must
+   * never fall back to the SQL table: that table is exactly what produced "0 accounts
+   * mute @berniesanders" against a chain that says 638, and a wrong number that looks
+   * confident is worse than an honest dash.
    */
+  const roll = await rollPromise;
+  const tally = await tallyPromise;
+  const mutedBy = roll ? roll.count : null;
+  const muterMvests = roll ? await muterStakeMvests(roll.muters, ratio) : null;
   /*
    * ★★ THE DIVISION HAPPENS IN FLOAT, AND ROUNDING COMES LAST. Both sides used to be
    * `CAST(... AS int)` before the divide, and this record — unlike the board — applies
@@ -782,31 +660,251 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
   const hp = Number(rows[0]?.hp) || 0;
   const rewardsHive = Number(rows[0]?.rewards_hive) || 0;
   const ke = hp > 0 ? Number((rewardsHive / hp).toFixed(2)) : null;
-  const payoutUsd = Number(rows[0]?.payout_usd) || 0;
-  const selfVoteUsd = Number(rows[0]?.self_vote_usd) || 0;
-  const last = rows[0]?.last_downvote ?? null;
+  const last = tally?.lastDownvote ?? null;
 
   return {
     account,
-    mutedBy: Number(rows[0]?.muted_by) || 0,
-    muterMvests: Number(rows[0]?.muter_mvests) || 0,
+    // ★★★ FROM THE CHAIN, NOT FROM `Mutes`. That table cannot answer "who mutes X" —
+    // see the table of measurements in `mutes.ts`. `null` is "not read", never 0.
+    mutedBy,
+    muterMvests,
+    mutedByPartial: roll?.partial ?? false,
     publishers: [],
     ke,
     band: keBand(ke),
     // ★ The DIVISION is done in float (above); only the DISPLAYED figures are rounded.
     rewardsHive: Math.round(rewardsHive),
     hp: Math.round(hp),
-    downvotes: Number(rows[0]?.downvotes) || 0,
-    downvoters: Number(rows[0]?.downvoters) || 0,
+    downvotes: tally ? tally.downvotes : null,
+    downvoters: tally ? tally.downvoters : 0,
     lastDownvote: last ? new Date(last).toISOString() : null,
     // Filled by the route, which owns the slower value lookup.
     removedUsd: null,
-    // ★ `null`, not 0, when the account has never been paid: 0% would read as a clean
-    // record where the truth is that there is nothing to take a share of.
-    selfVotePct: payoutUsd > 0 ? Number(((selfVoteUsd / payoutUsd) * 100).toFixed(1)) : null,
-    selfVoteUsd,
-    payoutUsd,
     accountAgeDays: Number(rows[0]?.age_days) || 0,
     asOf: nowIso()
   };
+}
+
+/**
+ * ════ THE BOARD QUERIES ════
+ *
+ * ★★ THESE LIVE HERE, NOT IN THE ROUTE. They were duplicated into the route handler while
+ * the staged pipeline was built, because the two files were being edited by different
+ * hands at the same time. Two copies of a query that ranks named people is exactly the
+ * thing that drifts — one gets a fix and the other does not — so the route imports these
+ * and the copies are gone. The originals that this replaces were dead the moment the
+ * staged build stopped calling them.
+ */
+/**
+ * ════ STAGE 1: THE RANKINGS ════
+ *
+ * ★★ THESE TWO STATEMENTS ARE THE SAME SQL AS `boards-sql.ts` `loadMostDownvoted` /
+ * `loadInquisitors`, LIFTED OUT OF THEM SO THE RANKING CAN BE PUBLISHED ON ITS OWN. Those
+ * two functions run all three passes before returning anything, which is precisely the
+ * shape being fixed here, and they are no longer called by this route — nothing else in
+ * the app calls them either. They should be deleted, and `topCounterpart` exported, the
+ * moment `boards-sql.ts` is free to edit; until then this is the one live copy and that
+ * one is dead code. Their reasoning, which is long and worth keeping, stays there.
+ *
+ * In short: full chain history, not a rolling window (a 3-month slice made the vote
+ * counts incoherent with the money column, which covers an account's whole life);
+ * downvoted is ranked by DEDUPLICATED downvote count with distinct voters beside it;
+ * inquisitors is ranked by distinct TARGETS. NEITHER CARRIES A STAKE FLOOR, because
+ * @berniesanders cast 31,776 downvotes, received 44,542, and holds 3 HP today — a
+ * floor meant to keep dust off the board was keeping its most notorious entry off it.
+ *
+ * ★★★ AND BOTH DEDUPE. `TxVotes` is the vote OPERATION LOG, not the vote state: every
+ * re-vote of the same post is another row. Ranking on `COUNT(*)` put @lighteye first
+ * with 937,917 "downvotes" when the truth is 3,738 (voter, post) pairs — 99.7% of the
+ * inflation was one bot re-voting 952 posts. The `pairs` CTE collapses each
+ * (voter, post) to one row before anything is counted, which is also what makes the
+ * count coherent with the money column: `loadRemovedByVoter` has always scoped itself
+ * with `SELECT DISTINCT author, permlink`, so the money was right while the count next
+ * to it was 251x too large. Measured at 157s over full chain history, inside the
+ * 240s slow-lane ceiling, and it runs once a week.
+ *
+ * ★★ WHAT THIS COLUMN COUNTS, STATED EXACTLY, BECAUSE TWO HONEST READINGS EXIST. A
+ * deduplicated pair from `TxVotes` is "this voter downvoted this post at some point",
+ * which INCLUDES a downvote later withdrawn or flipped positive. The stricter reading is
+ * "the vote is still negative today", which lives in `Comments.active_votes` and is what
+ * the money column sums. Measured on @lighteye: 3,738 ever-downvoted against 3,653 still
+ * negative — a 2.3% gap, not a 251x one. The looser number is the one shown, because it
+ * is the only one computable for all 100 rows: the strict count needs a full-table
+ * `OPENJSON` walk of every comment on the chain. Showing the strict count for the 30 rows
+ * the money pass reaches and the loose count for the other 70 would put two different
+ * definitions in one column, which is worse than one definition stated plainly.
+ */
+export async function rankDownvoted(): Promise<{ rows: DownvotedRow[]; asOf: string } | null> {
+  const rows = await queryCapped<{ account: string; downvotes: number; voters: number }>(
+    `WITH pairs AS (
+       SELECT v.author, v.voter
+       FROM TxVotes v WITH (NOLOCK)
+       WHERE v.weight < 0
+       GROUP BY v.author, v.voter, v.permlink
+     ),
+     agg AS (
+       SELECT p.author, COUNT(*) AS downvotes, COUNT(DISTINCT p.voter) AS voters
+       FROM pairs p
+       GROUP BY p.author
+     )
+     SELECT TOP (@lim) g.author AS account, g.downvotes, g.voters
+     FROM agg g
+     JOIN Accounts a ON a.name = g.author
+     WHERE a.created < DATEADD(day, -@minAge, GETDATE())
+     ORDER BY g.downvotes DESC, g.voters DESC`,
+    [
+      { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS },
+      { name: 'lim', type: TYPES.Int, value: BOARD_ROWS }
+    ],
+    RANK_QUERY_MS
+  );
+  // ★ `null` is "we could not ask" and must never become an empty board — see hivesql.ts.
+  if (rows === null) return null;
+  return {
+    rows: rows.map((r) => ({
+      account: r.account,
+      downvotes: Number(r.downvotes) || 0,
+      voters: Number(r.voters) || 0,
+      // ★ THE LATER STAGES' COLUMNS START EMPTY, AND EMPTY IS A RENDERED STATE. `''` is
+      // "no counterpart read yet" and `null` is "no money computed yet"; the table prints
+      // a dash for both. Neither is ever a zero.
+      topSource: '',
+      topSourceVotes: 0,
+      removedUsd: null
+    })),
+    asOf: nowIso()
+  };
+}
+
+export async function rankInquisitors(): Promise<{ rows: InquisitorRow[]; asOf: string } | null> {
+  const rows = await queryCapped<{ account: string; downvotes: number; targets: number }>(
+    `WITH pairs AS (
+       SELECT v.voter, v.author
+       FROM TxVotes v WITH (NOLOCK)
+       WHERE v.weight < 0
+       GROUP BY v.voter, v.author, v.permlink
+     ),
+     agg AS (
+       SELECT p.voter, COUNT(*) AS downvotes, COUNT(DISTINCT p.author) AS targets
+       FROM pairs p
+       GROUP BY p.voter
+     )
+     SELECT TOP (@lim) g.voter AS account, g.downvotes, g.targets
+     FROM agg g
+     JOIN Accounts acc ON acc.name = g.voter
+     WHERE acc.created < DATEADD(day, -@minAge, GETDATE())
+     ORDER BY g.targets DESC, g.downvotes DESC`,
+    [
+      { name: 'minAge', type: TYPES.Int, value: MIN_AGE_DAYS },
+      { name: 'lim', type: TYPES.Int, value: BOARD_ROWS }
+    ],
+    RANK_QUERY_MS
+  );
+  if (rows === null) return null;
+  return {
+    rows: rows.map((r) => ({
+      account: r.account,
+      downvotes: Number(r.downvotes) || 0,
+      targets: Number(r.targets) || 0,
+      topTarget: '',
+      topTargetVotes: 0,
+      removedUsd: null
+    })),
+    asOf: nowIso()
+  };
+}
+/**
+ * ════ STAGE 2: THE HEAVIEST COUNTERPART, IN EITHER DIRECTION ════
+ *
+ * ★★★ ONE INDEXED TOP-1 PER NAME, CHUNKED, AGAINST A CLOCK. Over full history a
+ * `GROUP BY voter, author` is enormous — @adm alone has 18,321 distinct targets,
+ * @spaminator 43,834 — and asking for a hundred names at once simply returned null.
+ * `CROSS APPLY` asks each name's own index for its single heaviest counterpart instead.
+ * Measured 132.3s for eight, so the cost is real and uneven: four at a time, each
+ * statement comfortably inside the 240s ceiling, and a wall clock over the whole pass.
+ *
+ * (Same statement as `topCounterpart` in `boards-sql.ts`, which is not exported — see the
+ * note on stage 1.)
+ */
+export async function topCounterpart(
+  names: string[],
+  direction: 'by-voter' | 'by-author',
+  budgetMs: number,
+  chunkSize: number
+): Promise<Map<string, { name: string; n: number }>> {
+  const best = new Map<string, { name: string; n: number }>();
+  const self = direction === 'by-voter' ? 'voter' : 'author';
+  const other = direction === 'by-voter' ? 'author' : 'voter';
+  const deadline = Date.now() + budgetMs;
+
+  for (let i = 0; i < names.length; i += chunkSize) {
+    if (Date.now() >= deadline) break;
+    const chunk = names.slice(i, i + chunkSize);
+    const values = chunk.map((_, j) => `(@v${j})`).join(',');
+
+    /*
+     * ★★★ THE BY-AUTHOR SIDE READS `active_votes`, NOT `TxVotes`, AND IT IS ~20x
+     * FASTER FOR THE SAME ANSWER (measured 2026-09-20).
+     *
+     * Deduplicating the count with `COUNT(DISTINCT v.permlink)` over `TxVotes` is
+     * correct and ruinous: @gangstalking, the heaviest row on the board, blew a 60s
+     * ceiling, and a cold build filled 4 of 25 rows. The same question asked of
+     * `Comments.active_votes` — whose JSON already holds exactly one entry per
+     * (voter, post) — answers in **3.1s**, because `c.author` is indexed and there is
+     * no DISTINCT to do: the deduplication is a property of the data.
+     *
+     * It is also the SAME SOURCE the money column sums, so the top downvoter and the
+     * value removed can no longer disagree about who was there. `TxVotes` counts a pair
+     * that was ever negative; `active_votes` counts one that still is.
+     *
+     * ★ THE BY-VOTER SIDE CANNOT DO THIS and still uses `TxVotes`. There is no index
+     * that finds "every post this account voted on" inside the JSON, so scoping by
+     * voter means scanning every comment on the chain. Scoping by author does not.
+     */
+    const sql =
+      direction === 'by-author'
+        ? `SELECT s.k, t.voter AS p, t.n
+           FROM (VALUES ${values}) AS s(k)
+           CROSS APPLY (SELECT TOP 1 j.voter, COUNT(*) AS n
+                        FROM Comments c WITH (NOLOCK)
+                        CROSS APPLY OPENJSON(c.active_votes)
+                          WITH (voter nvarchar(20) '$.voter', rshares bigint '$.rshares') AS j
+                        WHERE c.author = s.k AND j.rshares < 0
+                        GROUP BY j.voter
+                        ORDER BY COUNT(*) DESC) AS t`
+        : /*
+           * ★★ DEDUPLICATE IN A DERIVED TABLE, THEN GROUP — NOT `COUNT(DISTINCT)` IN THE
+           * AGGREGATE. Identical answer, and the difference is the whole column: the
+           * `COUNT(DISTINCT v.permlink)` form blew the 60s ceiling on the heaviest
+           * voters and left the board's top rows empty, while collapsing
+           * (author, permlink) first and counting the rows takes **15.9s** for
+           * @spaminator and his 1.7 million downvotes. Same rewrite that took the
+           * ranking query from "times out" to 117s.
+           */
+          `SELECT s.k, t.${other} AS p, t.n
+           FROM (VALUES ${values}) AS s(k)
+           CROSS APPLY (SELECT TOP 1 d.${other}, COUNT(*) AS n
+                        FROM (SELECT DISTINCT v.${other}, v.permlink
+                              FROM TxVotes v WITH (NOLOCK)
+                              WHERE v.${self} = s.k AND v.weight < 0) AS d
+                        GROUP BY d.${other}
+                        ORDER BY COUNT(*) DESC) AS t`;
+
+    const rows = await queryCapped<{ k: string; p: string; n: number }>(
+      sql,
+      chunk.map((name, j) => ({ name: `v${j}`, type: TYPES.VarChar, value: name })),
+      TOP_TARGET_QUERY_MS
+    );
+    if (rows === null) {
+      // ★ SAY WHICH NAMES WENT UNANSWERED. This `continue` filled 4 of 25 rows without
+      // a single line of output; the column simply read "not read" and nobody knew why.
+      logger.warn(
+        `inquisition: top ${other} lookup returned nothing for [${chunk.join(', ')}] ` +
+          `within ${TOP_TARGET_QUERY_MS}ms — those rows stay uncomputed`
+      );
+      continue;
+    }
+    for (const row of rows) best.set(row.k, { name: row.p, n: Number(row.n) || 0 });
+  }
+  return best;
 }

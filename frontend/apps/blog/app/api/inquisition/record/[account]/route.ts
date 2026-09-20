@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server';
+import { getLogger } from '@ui/lib/logging';
 import { profileRecord } from '@/blog/lib/inquisition/boards-sql';
 import { voteLedger } from '@/blog/lib/inquisition/vote-ledger';
 import { steemPostsSinceFork } from '@/blog/lib/inquisition/crossposting';
 import { hiveSqlConfigured } from '@/blog/lib/inquisition/hivesql';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
+
+const logger = getLogger('app');
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +19,10 @@ export const dynamic = 'force-dynamic';
  * is the "don't break the server" requirement expressed as a call graph rather than a
  * promise.
  *
- * ★ 264ms measured, cached a day. A record is a slow-moving thing: mutes and listings
+ * ★ 5-12s on a cold account, cached a day — it was 264ms until the downvote count was
+ * deduplicated, and 264ms of a wrong number is worth less than 12s of a right one. The
+ * ledger beside it already takes 12.1s, so this changes nothing a reader can feel.
+ * A record is a slow-moving thing: mutes and listings
  * change on a human timescale and KE moves with lifetime totals.
  */
 const cached = withTtlCache(
@@ -61,6 +67,14 @@ export async function GET(
       steemPostsSinceFork(account).catch(() => null)
     ]);
     if (!record) {
+      /*
+       * ★★ SAY SO. "The record could not be read" was reaching the screen with nothing
+       * written anywhere, which is the same silent-failure shape the boards had: the
+       * only way to find out why was to reproduce it by hand. `profileRecord` returns
+       * null when the chain rate is unreadable or the reader-lane query timed out, and
+       * those are very different problems.
+       */
+      logger.warn(`inquisition: no record for @${account} — the vests rate or the reader query did not answer`);
       return NextResponse.json({ account, unavailable: true }, { headers: { 'cache-control': 'no-store' } });
     }
     return NextResponse.json(
@@ -80,7 +94,8 @@ export async function GET(
       },
       { headers: { 'cache-control': 'private, max-age=300' } }
     );
-  } catch {
+  } catch (error) {
+    logger.error(error, `inquisition: record request failed for @${account}`);
     return NextResponse.json({ account, unavailable: true }, { headers: { 'cache-control': 'no-store' } });
   }
 }
