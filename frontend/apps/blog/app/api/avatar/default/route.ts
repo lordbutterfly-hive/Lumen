@@ -5,7 +5,7 @@ import { withRetry } from '@transaction/lib/retry';
 // ★ TWIN HAZARD, SAME FIX (2026-09-07). Same two-raw-fetch, no-`AbortSignal` shape as
 // the sibling `../route.ts` had fixed the same day (see `fetch-avatar-webp.ts`'s doc
 // comment) — reusing its constants/helpers rather than a second budget.
-import { hopSignal, budgetExhausted, TOTAL_BUDGET_MS } from '@/blog/lib/fetch-avatar-webp';
+import { hopSignal, budgetExhausted, budgetSpent, TOTAL_BUDGET_MS } from '@/blog/lib/fetch-avatar-webp';
 
 /**
  * Proxy endpoint for the default avatar image.
@@ -86,7 +86,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const resolved =
       response.ok && response.body
         ? response
-        : Date.now() >= deadline
+        : budgetSpent(deadline)
           ? budgetExhausted()
           : await withRetry(() => fetch(defaultUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }), {
               label: 'avatar-default-fallback',

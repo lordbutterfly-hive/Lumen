@@ -93,6 +93,35 @@ export function budgetExhausted(): Response {
   return new Response(null, { status: 504, statusText: 'avatar-fetch-budget-exhausted' });
 }
 
+/**
+ * ★★ THE SMALLEST REMAINING BUDGET WORTH ANOTHER HOP (2026-09-20).
+ *
+ * Every "is there time left?" guard here used to be `Date.now() >= deadline`, which is a
+ * boundary rather than a floor, and it let a hop start with a millisecond in hand. That
+ * hop cannot answer: the 84 timings above put the FASTEST response ever measured against
+ * images.hive.blog at 48ms. All it can do is open a socket and abort it.
+ *
+ * It is not hypothetical. Node's timers are allowed to fire up to a millisecond EARLY, so
+ * the abort that spends the budget can land at `deadline - 1`, and then `Date.now() >=
+ * deadline` is false and the next hop runs with 1ms of budget. Under load the gap is
+ * bigger, because `withRetry` gives up as soon as its next backoff would cross the budget
+ * and a stalled event loop makes that happen early. This is what made
+ * `lib/__tests__/fetch-avatar-webp.test.ts` fail roughly one run in six on a busy machine
+ * while passing alone every time -- a flaky gate, which is worse than no gate, because it
+ * trains people to re-run a red deploy.
+ *
+ * 50ms is the measured floor rounded up, not a guess.
+ */
+export const MIN_HOP_MS = 50;
+
+/**
+ * True when what is left of the budget cannot produce an answer, so the caller should
+ * degrade now rather than spend a socket proving it.
+ */
+export function budgetSpent(deadline: number): boolean {
+  return deadline - Date.now() < MIN_HOP_MS;
+}
+
 export async function fetchAsWebp(shortcutUrl: string, label: string): Promise<Response> {
   const deadline = Date.now() + TOTAL_BUDGET_MS;
   try {
@@ -110,7 +139,7 @@ export async function fetchAsWebp(shortcutUrl: string, label: string): Promise<R
     const asWebp = new URL(original);
     asWebp.searchParams.set('format', 'webp');
 
-    if (Date.now() >= deadline) return budgetExhausted();
+    if (budgetSpent(deadline)) return budgetExhausted();
 
     const webp = await withRetry(
       () => fetch(asWebp.toString(), { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),
@@ -120,7 +149,7 @@ export async function fetchAsWebp(shortcutUrl: string, label: string): Promise<R
       return webp;
     }
 
-    if (Date.now() >= deadline) return budgetExhausted();
+    if (budgetSpent(deadline)) return budgetExhausted();
 
     return await withRetry(
       () => fetch(original.toString(), { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),

@@ -29,7 +29,7 @@ import { liteAvatar } from '@/blog/lib/lite/render/lite-identity';
 // risk. Reusing this module's own constants/helpers rather than inventing a second
 // budget: `hopSignal`+`TOTAL_BUDGET_MS` bound each hop, `budgetExhausted()` gives the
 // `.catch()` below the same not-ok shape `fetchAsWebp` already returns on failure.
-import { fetchAsWebp, hopSignal, budgetExhausted, TOTAL_BUDGET_MS } from '@/blog/lib/fetch-avatar-webp';
+import { fetchAsWebp, hopSignal, budgetExhausted, budgetSpent, TOTAL_BUDGET_MS } from '@/blog/lib/fetch-avatar-webp';
 
 /**
  * Proxy endpoint for user avatars.
@@ -244,7 +244,7 @@ async function serveLiteAvatar(
     const resolved =
       picture.ok && picture.body
         ? picture
-        : Date.now() >= deadline
+        : budgetSpent(deadline)
           ? budgetExhausted()
           : await withRetry(
               () => fetch(proxifyImageSrc(imageUrl, boxWidth, boxHeight, 'match'), { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),

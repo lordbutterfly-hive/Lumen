@@ -33,7 +33,15 @@
  * from a mock or from `AbortSignal.timeout`'s internals would surface there, not
  * here).
  */
-import { fetchAsWebp, hopSignal, budgetExhausted, HOP_TIMEOUT_MS, TOTAL_BUDGET_MS } from '../fetch-avatar-webp';
+import {
+  fetchAsWebp,
+  hopSignal,
+  budgetExhausted,
+  budgetSpent,
+  HOP_TIMEOUT_MS,
+  MIN_HOP_MS,
+  TOTAL_BUDGET_MS
+} from '../fetch-avatar-webp';
 import { withRetry } from '@transaction/lib/retry';
 
 let failures = 0;
@@ -316,6 +324,9 @@ async function main(): Promise<void> {
     let threw: unknown = undefined;
     let resolved: Response | undefined;
     let elapsedMs = -1;
+    // What the guard actually had left to work with. Printed as evidence below, because
+    // whether a second hop is legitimate depends on it and on nothing else.
+    let remainingAtGuard = Number.NaN;
     try {
       const t = await timed(async () => {
         const deadline = Date.now() + TOTAL_BUDGET_MS;
@@ -323,9 +334,10 @@ async function main(): Promise<void> {
           () => fetch('https://images.hive.blog/p/deadbeef?width=128&height=128', { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),
           { label: 'avatar-resized(twin1)', budgetMs: Math.max(0, deadline - Date.now()) }
         ).catch(() => budgetExhausted());
+        remainingAtGuard = deadline - Date.now();
         return picture.ok && picture.body
           ? picture
-          : Date.now() >= deadline
+          : budgetSpent(deadline)
             ? budgetExhausted()
             : await withRetry(
                 () =>
@@ -350,10 +362,26 @@ async function main(): Promise<void> {
       `elapsedMs=${elapsedMs} TOTAL_BUDGET_MS=${TOTAL_BUDGET_MS}`
     );
     check('twin1: a spent budget yields a not-ok Response — falls through to initialAvatar(), never a 500', resolved?.ok === false);
+    /*
+     * ★★ THIS USED TO ASSERT `matchHopCalls === 0` FLAT, AND IT WAS THE FLAKY CHECK
+     * (one red run in about six on a loaded machine, green every time alone; it failed
+     * a deploy on 2026-09-20). The assertion assumed the first hop always spends the
+     * budget to the last millisecond. It does not: Node timers may fire up to 1ms
+     * EARLY, and under load `withRetry` gives up as soon as its next backoff would
+     * cross the budget, which can leave real time on the clock. The old
+     * `Date.now() >= deadline` guard then let a hop start with 1ms in hand -- a socket
+     * that could only be aborted, since the fastest response ever measured here is
+     * 48ms.
+     *
+     * So the FLOOR is the fix (`budgetSpent`/`MIN_HOP_MS`) and this is the invariant
+     * that is actually true: a second hop is allowed exactly when there was a usable
+     * budget for it, and never otherwise. It still fails if the floor is removed --
+     * proven by putting `Date.now() >= deadline` back, which reproduces the red run.
+     */
     check(
-      'twin1: the match-fallback hop was never attempted once the resize hop had already spent the budget',
-      matchHopCalls === 0,
-      `matchHopCalls=${matchHopCalls}`
+      'twin1: the match-fallback hop is attempted only with a usable budget, never the 1ms hop the old boundary allowed',
+      matchHopCalls === 0 || remainingAtGuard >= MIN_HOP_MS,
+      `matchHopCalls=${matchHopCalls} remainingAtGuard=${remainingAtGuard}ms MIN_HOP_MS=${MIN_HOP_MS}`
     );
   }
 
@@ -369,6 +397,7 @@ async function main(): Promise<void> {
     let threw: unknown = undefined;
     let resolved: Response | undefined;
     let elapsedMs = -1;
+    let remainingAtGuard = Number.NaN;
     try {
       const t = await timed(async () => {
         const deadline = Date.now() + TOTAL_BUDGET_MS;
@@ -376,9 +405,10 @@ async function main(): Promise<void> {
           () => fetch('https://images.hive.blog/p/default?format=webp', { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),
           { label: 'avatar-default(twin2)', budgetMs: Math.max(0, deadline - Date.now()) }
         ).catch(() => budgetExhausted());
+        remainingAtGuard = deadline - Date.now();
         return response.ok && response.body
           ? response
-          : Date.now() >= deadline
+          : budgetSpent(deadline)
             ? budgetExhausted()
             : await withRetry(
                 () => fetch('https://images.hive.blog/raw-default', { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: hopSignal(deadline) }),
@@ -400,9 +430,39 @@ async function main(): Promise<void> {
     );
     check('twin2: a spent budget yields a not-ok Response — the existing !resolved.ok branch, never an unguarded 500', resolved?.ok === false);
     check(
-      'twin2: the raw-CID fallback hop was never attempted once the webp hop had already spent the budget',
-      rawFallbackCalls === 0,
-      `rawFallbackCalls=${rawFallbackCalls}`
+      'twin2: the raw-CID fallback hop is attempted only with a usable budget (same floor as twin1)',
+      rawFallbackCalls === 0 || remainingAtGuard >= MIN_HOP_MS,
+      `rawFallbackCalls=${rawFallbackCalls} remainingAtGuard=${remainingAtGuard}ms MIN_HOP_MS=${MIN_HOP_MS}`
+    );
+  }
+
+  // ── 10. THE FLOOR ITSELF, with no timers involved, so these cannot flake. The two
+  //       twins above and `fetchAsWebp`'s own two guards all route through this one
+  //       predicate, which is the whole reason it exists as a function rather than as
+  //       four copies of an inequality. ─────────────────────────────────────────────
+  {
+    const now = Date.now();
+    check(
+      'budgetSpent: a millisecond of budget is spent — the hop that could only abort is never started',
+      budgetSpent(now + 1) === true
+    );
+    check(
+      'budgetSpent: just under the floor is spent',
+      budgetSpent(now + MIN_HOP_MS - 1) === true,
+      `MIN_HOP_MS=${MIN_HOP_MS}`
+    );
+    check(
+      'budgetSpent: a real budget is NOT spent — the floor refuses doomed hops, not useful ones',
+      budgetSpent(now + MIN_HOP_MS + 1000) === false
+    );
+    check(
+      'budgetSpent: a full budget is not spent',
+      budgetSpent(now + TOTAL_BUDGET_MS) === false,
+      `TOTAL_BUDGET_MS=${TOTAL_BUDGET_MS}`
+    );
+    check(
+      'the floor is at or above the fastest hop ever measured against images.hive.blog (48ms)',
+      MIN_HOP_MS >= 48
     );
   }
 
