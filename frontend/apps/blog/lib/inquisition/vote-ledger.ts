@@ -127,7 +127,22 @@ const ONE_VOTER = valueOf('-CAST(j.rshares AS float)');
  */
 const logger = getLogger('app');
 
-const PER_ACCOUNT_MS = 150_000;
+/*
+ * ★★★ RAISED 150s -> 300s (2026-09-20), because the live board proved 150s was the wrong
+ * side of the distribution. Of the first nineteen accounts the TOP INQUISITORS money pass
+ * attempted, FIFTEEN returned null at the cap and four carried a figure -- and the four
+ * were not the small fry: @berniesanders' 31,542 downvotes valued at $47,738 while
+ * accounts a third that size timed out, because the cost is the size of the posts'
+ * `active_votes` blobs, not the vote count. A cap that fails four times out of five is
+ * not protecting the database from the query, it is spending the whole budget and buying
+ * nothing with it.
+ *
+ * It is still a cap, and the giants (@spaminator, 1,745,482 downvotes across 43,834
+ * targets) will still hit it. What it buys is the middle of the board, which is most of
+ * it. Paired with the cheapest-first ordering of the money queue, one pass now values
+ * rows instead of dying on the first four.
+ */
+const PER_ACCOUNT_MS = 300_000;
 
 export interface VoteLedger {
   /** HBD taken off this account's posts by downvotes over its whole history, or `null` when it could not be computed. */

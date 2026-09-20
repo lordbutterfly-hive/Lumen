@@ -50,9 +50,17 @@ const MIN_AGE_DAYS = 90;
  * How many rows carry a money figure, and how long the pass may take. One account is
  * ~19s (measured on @themarkymark's 60,000-post history), so this is the cost knob. Rows
  * past it report null rather than a number that covers a fraction of the account.
+ *
+ * ★★ THE BUDGET IS 30 MINUTES, NOT 14 (2026-09-20). The pass is a background job behind a
+ * disk store that is rebuilt once a week, and it is now driven by the nightly warm rather
+ * than by whoever opens the page. Fourteen minutes at the old 150s cap bought four valued
+ * rows out of nineteen attempts; the pass exits early when the queue is exhausted, so the
+ * larger figure costs nothing on the boards that finish quickly. A pass that ends
+ * out-of-budget leaves the board at stage 2 and the next one resumes with the accounts it
+ * never reached -- that is how the column converges instead of freezing.
  */
 export const MONEY_ROWS = 30;
-export const MONEY_BUDGET_MS = 14 * 60 * 1000;
+export const MONEY_BUDGET_MS = 30 * 60 * 1000;
 
 /**
  * How many rows get a true top target, how many per statement, and how long the whole
