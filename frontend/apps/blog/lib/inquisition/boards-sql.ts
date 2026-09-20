@@ -586,6 +586,49 @@ export async function downvoteTally(account: string): Promise<DownvoteTally | nu
   };
 }
 
+/**
+ * ════ THE OTHER DIRECTION: WHAT THIS ACCOUNT CAST ════
+ *
+ * ★★ THE MIRROR OF `downvoteTally`, AND IT HAS TO BE A SEPARATE QUERY (owner, 2026-09-20:
+ * "just add how many downvotes you cast and how much post rewards you removed"). The
+ * record showed only what was done TO an account, which is half of a record and the
+ * flattering half: the boards have a TOP INQUISITORS ranking precisely because casting is
+ * the other side of the same ledger. A strip that reports 981 received and nothing cast
+ * reads as innocence it has not demonstrated.
+ *
+ * Same shape as the received tally, same dedupe: `TxVotes` is the operation log, so a bot
+ * re-voting one post logs a row every time, and the honest count groups by (author,
+ * permlink) first. Same cap, because the cost is symmetric.
+ */
+export interface CastTally {
+  downvotes: number;
+  targets: number;
+  lastCast: string | Date | null;
+}
+
+export async function downvotesCast(account: string): Promise<CastTally | null> {
+  const rows = await queryCapped<{ downvotes: number; targets: number; last_cast: string | Date }>(
+    `SELECT COUNT(*) AS downvotes,
+            COUNT(DISTINCT d.author) AS targets,
+            MAX(d.last_ts) AS last_cast
+     FROM (SELECT author, permlink, MAX(timestamp) AS last_ts
+           FROM TxVotes WITH (NOLOCK)
+           WHERE voter = @account AND weight < 0
+           GROUP BY author, permlink) d`,
+    [{ name: 'account', type: TYPES.VarChar, value: account }],
+    DOWNVOTE_COUNT_MS
+  );
+  if (rows === null) {
+    logger.warn(`inquisition: cast tally for @${account} did not finish in ${DOWNVOTE_COUNT_MS}ms`);
+    return null;
+  }
+  return {
+    downvotes: Number(rows[0]?.downvotes) || 0,
+    targets: Number(rows[0]?.targets) || 0,
+    lastCast: rows[0]?.last_cast ?? null
+  };
+}
+
 export async function profileRecord(account: string): Promise<ProfileRecord | null> {
   if (!hiveSqlConfigured()) return null;
   /*

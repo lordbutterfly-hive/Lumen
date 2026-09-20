@@ -65,6 +65,11 @@ export interface RecordData {
   topByCount: { account: string; votes: number }[];
   selfRewardUsd: number | null;
   selfRewardPct: number | null;
+  /** The other direction: what this account cast, and what its downvotes took. */
+  castVotes: number | null;
+  castTargets: number;
+  lastCast: string | null;
+  removedFromOthersUsd: number | null;
   steemPosts: number | null;
   steemPartial: boolean;
   steemLastPost: string | null;
@@ -109,8 +114,22 @@ const ago = (iso: string | null): string => {
 const hbd = (n: number): string =>
   '$' + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: Math.abs(n) < 100 ? 2 : 0 });
 
-const three = (list: { account: string; usd: number }[]): string =>
+/** The three who took the most MONEY. Belongs under the money cell and nowhere else. */
+const threeByValue = (list: { account: string; usd: number }[]): string =>
   list.map((t) => `@${t.account} ${hbd(t.usd)}`).join(', ');
+
+/*
+ * ★★★ THE THREE WHO DOWNVOTED MOST OFTEN, WHICH IS NOT THE SAME LIST (owner, 2026-09-20:
+ * "on downvotes received youre showing downvote value instead of downvote amount ... the
+ * downvote amount on bar should show number of downvotes and who downvoted them most").
+ *
+ * `topByCount` was computed by the vote ledger, shipped over the wire, declared on the
+ * type — and read by nothing. Both cells printed `topDownvoters`, which is ordered by HBD,
+ * so the COUNT cell answered its own question in dollars: "981 downvotes, most: @innerhive
+ * $112". One whale who downvoted twice outranked a bot that downvoted two hundred times.
+ */
+const threeByCount = (list: { account: string; votes: number }[]): string =>
+  list.map((t) => `@${t.account} ${t.votes.toLocaleString()}`).join(', ');
 
 function cellsFor(r: RecordData): Cell[] {
   return [
@@ -123,20 +142,20 @@ function cellsFor(r: RecordData): Cell[] {
       exact:
         r.downvotes === null
           ? `not counted · ${r.downvoters.toLocaleString()} accounts have downvoted this one`
-          : r.topDownvoters.length > 0
-            ? `from ${r.downvoters.toLocaleString()} accounts · most: ${three(r.topDownvoters)}`
+          : r.topByCount.length > 0
+            ? `from ${r.downvoters.toLocaleString()} accounts · most often: ${threeByCount(r.topByCount)}`
             : `from ${r.downvoters.toLocaleString()} accounts · last ${ago(r.lastDownvote)}`,
       tone: r.downvotes === null ? 'dim' : r.downvoters >= 25 ? 'warn' : 'plain',
-      body: `Downvotes received over the account's whole history, from ${r.downvoters.toLocaleString()} distinct accounts, the last one ${ago(r.lastDownvote)}.`
+      body: `How many downvotes this account received over its whole history — the count, not what they cost it — from ${r.downvoters.toLocaleString()} distinct accounts, the last one ${ago(r.lastDownvote)}. The three named on hover are the ones who cast the most of them.`
     },
     {
-      label: 'REMOVED (HBD)',
+      label: 'REWARDS LOST (HBD)',
       value: r.removedUsd === null ? '—' : hbd(r.removedUsd),
       exact:
         r.removedUsd === null
           ? 'not computed'
           : r.topDownvoters.length > 0
-            ? `whole history · most: ${three(r.topDownvoters)}`
+            ? `whole history · most taken by: ${threeByValue(r.topDownvoters)}`
             : 'whole history',
       tone: r.removedUsd === null ? 'dim' : r.removedUsd >= 100 ? 'accent' : 'plain',
       body:
@@ -210,6 +229,48 @@ function cellsFor(r: RecordData): Cell[] {
           : `${hbd(r.selfRewardUsd)} of every reward this account's posts have paid`,
       tone: r.selfRewardPct === null ? 'dim' : r.selfRewardPct >= 25 ? 'warn' : 'ok',
       body: "The share of this account's post rewards that came from its own votes, counted in money rather than in votes so it does not flatter whales."
+    },
+    /*
+     * ★★★ THE LAST TWO ARE THE OTHER SIDE OF THE SAME LEDGER (owner, 2026-09-20: "add the
+     * inquisitor data in the bar as two last numbers ... how many downvotes you cast and
+     * how much post rewards you removed"). Six figures about what was done TO an account
+     * and nothing about what it did is a record that can only ever read as innocence.
+     *
+     * The labels are deliberately the mirror image of the first two: RECEIVED/LOST is what
+     * happened to this account, CAST/REMOVED is what it did to others. "Removed" was the
+     * old label for the money it LOST, which is exactly the confusion to avoid, so that
+     * one is now "rewards lost".
+     */
+    {
+      label: 'DOWNVOTES CAST',
+      value: r.castVotes === null ? '—' : r.castVotes.toLocaleString(),
+      exact:
+        r.castVotes === null
+          ? 'not counted'
+          : r.castVotes === 0
+            ? 'never downvoted anybody'
+            : `on ${r.castTargets.toLocaleString()} accounts · last ${ago(r.lastCast)}`,
+      tone: r.castVotes === null ? 'dim' : r.castVotes >= 100 ? 'warn' : 'plain',
+      body:
+        r.castVotes === null
+          ? 'Not counted for this account, which is not the same as none having been cast.'
+          : `Downvotes this account has cast over its whole history, counted the same way as the ones it received: distinct posts, not vote operations. ${r.castVotes === 0 ? 'It has never downvoted anybody.' : `Spread across ${r.castTargets.toLocaleString()} accounts, the last one ${ago(r.lastCast)}.`}`
+    },
+    {
+      label: 'REWARDS REMOVED (HBD)',
+      value: r.removedFromOthersUsd === null ? '—' : hbd(r.removedFromOthersUsd),
+      exact:
+        r.removedFromOthersUsd === null
+          ? 'not computed'
+          : r.removedFromOthersUsd === 0
+            ? 'took nothing off anybody'
+            : 'whole history · taken off other accounts',
+      tone:
+        r.removedFromOthersUsd === null ? 'dim' : r.removedFromOthersUsd >= 100 ? 'accent' : 'plain',
+      body:
+        r.removedFromOthersUsd === null
+          ? 'Not computed for this account, which is not the same as nothing having been taken.'
+          : "What this account's own downvotes took off other people's payouts, in HBD, across its whole history — valued exactly as the money it lost is, so the two numbers can be read against each other."
     }
   ];
 }
@@ -255,7 +316,32 @@ export default function RecordPanel({ account }: { account: string }) {
             setState('failed');
             return;
           }
-          setRecord(json);
+          /*
+           * ★★★ THE CHEAP HALF DOES NOT CARRY EVERY KEY, AND THE CELLS TEST FOR `null`
+           * (2026-09-20). `profileRecord` returns the six figures it can get in a second;
+           * `topDownvoters`, `topByCount`, the self-reward pair, the Steem trio and now the
+           * cast pair are added by the slow half, so on a genuinely cold profile the first
+           * response has them ABSENT rather than null. `r.selfRewardPct === null` is false
+           * for `undefined`, and the next line calls `.toFixed()` on it, which throws
+           * inside the render rather than printing a dash.
+           *
+           * Normalising here, once, is the fix: every cell already knows how to render
+           * `null` and an empty list. It is done on the way in, not in eight cells.
+           */
+          setRecord({
+            ...json,
+            topDownvoters: json.topDownvoters ?? [],
+            topByCount: json.topByCount ?? [],
+            selfRewardUsd: json.selfRewardUsd ?? null,
+            selfRewardPct: json.selfRewardPct ?? null,
+            castVotes: json.castVotes ?? null,
+            castTargets: json.castTargets ?? 0,
+            lastCast: json.lastCast ?? null,
+            removedFromOthersUsd: json.removedFromOthersUsd ?? null,
+            steemPosts: json.steemPosts ?? null,
+            steemPartial: json.steemPartial ?? false,
+            steemLastPost: json.steemLastPost ?? null
+          });
           setState('idle');
           /*
            * ★★★ COME BACK FOR THE SLOW HALF. The route answers immediately with the
@@ -310,7 +396,7 @@ export default function RecordPanel({ account }: { account: string }) {
         <p className="py-0.5 font-num text-caption text-ink-14">Reading the chain&hellip;</p>
       ) : (
         <>
-          <div className="grid grid-cols-3 items-end gap-x-3 gap-y-2 sm:grid-cols-6">
+          <div className="grid grid-cols-2 items-end gap-x-3 gap-y-2 sm:grid-cols-4">
             {cells.map((c, i) => (
               <div
                 key={c.label}

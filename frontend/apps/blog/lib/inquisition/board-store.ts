@@ -454,6 +454,13 @@ export interface StoredRecord<T> {
   builtAt: number;
   /** False while the slow half is still being computed. */
   complete: boolean;
+  /**
+   * True when the slow half ran but at least one figure came back empty because the
+   * query could not finish. A partial record is a finished article with a hole in it,
+   * which is a different thing from an unfinished one: it is served immediately, and
+   * retried a great deal sooner than a whole one. See `recordStale`.
+   */
+  partial?: boolean;
 }
 
 function recordPath(account: string): string {
@@ -476,11 +483,11 @@ export function readRecord<T>(account: string): StoredRecord<T> | null {
   }
 }
 
-export function writeRecord<T>(account: string, record: T, complete: boolean): void {
+export function writeRecord<T>(account: string, record: T, complete: boolean, partial = false): void {
   if (!ensureDir()) return;
   const tmp = join(DIR, `rec-${account}.${process.pid}.tmp`);
   try {
-    writeFileSync(tmp, JSON.stringify({ record, builtAt: Date.now(), complete }), 'utf8');
+    writeFileSync(tmp, JSON.stringify({ record, builtAt: Date.now(), complete, partial }), 'utf8');
     renameSync(tmp, recordPath(account));
   } catch (error) {
     // ★ Unlike a board, a record that cannot be stored is genuinely only a slower
@@ -494,7 +501,24 @@ export function writeRecord<T>(account: string, record: T, complete: boolean): v
   }
 }
 
-/** Is this stored record old enough to rebuild? One week, matching the boards. */
+/**
+ * ★★ A RECORD WITH A HOLE IN IT IS RETRIED DAILY, NOT WEEKLY (2026-09-20).
+ *
+ * `@acidyo` was stored with `removedUsd`, both top-three lists and the self-reward all
+ * empty — the vote ledger had not finished inside the reader lane's 60s ceiling — and
+ * marked complete. Complete plus a weekly refresh meant those four figures were dashes
+ * for a week, with nothing coming, on an account whose profile is opened constantly.
+ *
+ * Retrying it on every request would be worse: that is a 60s query per reader on exactly
+ * the accounts that cannot answer one. So the whole record keeps the weekly cadence and a
+ * PARTIAL one is eligible again after a day, refreshed behind whoever reads it, and picked
+ * up by the daily warm timer without any reader involved at all.
+ */
+const PARTIAL_REFRESH_MS = 24 * 60 * 60 * 1000;
+
 export function recordStale(stored: StoredRecord<unknown> | null): boolean {
-  return !stored || Date.now() - stored.builtAt >= RECORD_REFRESH_MS;
+  if (!stored) return true;
+  const age = Date.now() - stored.builtAt;
+  if (stored.partial) return age >= PARTIAL_REFRESH_MS;
+  return age >= RECORD_REFRESH_MS;
 }

@@ -1,7 +1,7 @@
 import 'server-only';
 import { getLogger } from '@ui/lib/logging';
-import { downvoteTally, profileRecord, type ProfileRecord } from './boards-sql';
-import { voteLedger } from './vote-ledger';
+import { downvoteTally, downvotesCast, profileRecord, type ProfileRecord } from './boards-sql';
+import { removedByVoter, voteLedger } from './vote-ledger';
 import { steemPostsSinceFork } from './crossposting';
 import { readRecord, recordStale, writeRecord } from './board-store';
 
@@ -28,30 +28,76 @@ const logger = getLogger('app');
  * entirely. Running them in sequence would add their latencies for no reason. Each is
  * allowed to fail on its own: one dash is not the whole record.
  */
-export async function slowHalf(
-  account: string,
-  base: ProfileRecord
-): Promise<ProfileRecord & Record<string, unknown>> {
-  const [tally, ledger, steem] = await Promise.all([
+export interface SlowHalf {
+  record: ProfileRecord & Record<string, unknown>;
+  /**
+   * True when at least one expensive figure came back `null` for a reason other than
+   * "there is nothing there". See `writeRecord` — a record with a hole in it must not be
+   * stored as the finished article for a week.
+   */
+  partial: boolean;
+}
+
+export async function slowHalf(account: string, base: ProfileRecord): Promise<SlowHalf> {
+  const [tally, ledger, steem, cast, removedByThem] = await Promise.all([
     downvoteTally(account).catch(() => null),
-    voteLedger(account).catch(() => null),
-    steemPostsSinceFork(account).catch(() => null)
+    /*
+     * ★★ THE BACKGROUND LANE, BECAUSE NOBODY IS WAITING ON THIS CALL AND 60s IS NOT
+     * ENOUGH FOR A BIG ACCOUNT (2026-09-20). `voteLedger`'s reader lane caps each of its
+     * three statements at 60s, which is right when a reader is blocked on it and wrong
+     * here: @acidyo's ledger did not finish, so its REMOVED, top-three and SELF-REWARD
+     * were stored empty and then served as dashes for a week. This path is the fill that
+     * runs behind the response and the weekly warm that runs behind nobody, so it takes
+     * the slow lane's longer ceiling and queues behind board builds if it must.
+     */
+    voteLedger(account, 'background').catch(() => null),
+    steemPostsSinceFork(account).catch(() => null),
+    downvotesCast(account).catch(() => null),
+    removedByVoter(account).catch(() => null)
   ]);
 
+  /*
+   * ★★★ A SUM OVER NO ROWS IS NULL, AND NULL MEANT "COULD NOT ASK" (found 2026-09-20,
+   * owner: "for acidyo it doesnt show removed hbd or self reward").
+   *
+   * `SUM(...)` returns NULL when nothing matched, which this layer deliberately reads as
+   * "not computable" rather than as $0 — right for a failed query, wrong for an account
+   * that has simply never been downvoted or never cast one. The counts are the tiebreak:
+   * if the tally says zero downvotes were received, then zero HBD was removed, and that
+   * is a fact worth printing rather than a dash. Only a null with a non-zero count beside
+   * it is genuinely missing.
+   */
+  const removedUsd = ledger ? (tally?.downvotes === 0 ? 0 : ledger.removedUsd) : null;
+  const removedFromOthersUsd = cast?.downvotes === 0 ? 0 : removedByThem;
+
   return {
-    ...base,
-    downvotes: tally ? tally.downvotes : null,
-    downvoters: tally ? tally.downvoters : 0,
-    lastDownvote: tally?.lastDownvote ? new Date(tally.lastDownvote).toISOString() : null,
-    removedUsd: ledger ? ledger.removedUsd : null,
-    topDownvoters: ledger?.topDownvoters ?? [],
-    topByCount: ledger?.topByCount ?? [],
-    selfRewardUsd: ledger ? ledger.selfRewardUsd : null,
-    selfRewardPct: ledger ? ledger.selfRewardPct : null,
-    steemPosts: steem ? steem.posts : null,
-    // ★ The walk's own saturation flag. Dropping it printed a floor as a total.
-    steemPartial: steem?.partial ?? false,
-    steemLastPost: steem?.lastPost ?? null
+    record: {
+      ...base,
+      downvotes: tally ? tally.downvotes : null,
+      downvoters: tally ? tally.downvoters : 0,
+      lastDownvote: tally?.lastDownvote ? new Date(tally.lastDownvote).toISOString() : null,
+      removedUsd,
+      topDownvoters: ledger?.topDownvoters ?? [],
+      topByCount: ledger?.topByCount ?? [],
+      selfRewardUsd: ledger ? ledger.selfRewardUsd : null,
+      selfRewardPct: ledger ? ledger.selfRewardPct : null,
+      // ★ The other direction, which the record used to leave out entirely.
+      castVotes: cast ? cast.downvotes : null,
+      castTargets: cast ? cast.targets : 0,
+      lastCast: cast?.lastCast ? new Date(cast.lastCast).toISOString() : null,
+      removedFromOthersUsd,
+      steemPosts: steem ? steem.posts : null,
+      // ★ The walk's own saturation flag. Dropping it printed a floor as a total.
+      steemPartial: steem?.partial ?? false,
+      steemLastPost: steem?.lastPost ?? null
+    },
+    partial:
+      tally === null ||
+      ledger === null ||
+      removedUsd === null ||
+      steem === null ||
+      cast === null ||
+      removedFromOthersUsd === null
   };
 }
 
@@ -70,7 +116,8 @@ export function fillInBackground(account: string, base: ProfileRecord): void {
   inflight.add(account);
   void (async () => {
     try {
-      writeRecord(account, await slowHalf(account, base), true);
+      const filled = await slowHalf(account, base);
+      writeRecord(account, filled.record, true, filled.partial);
     } catch (error) {
       logger.warn(`inquisition: background record fill failed for @${account}: ${String(error)}`);
     } finally {
@@ -86,7 +133,8 @@ export function fillInBackground(account: string, base: ProfileRecord): void {
 export async function buildRecord(account: string): Promise<boolean> {
   const base = await profileRecord(account);
   if (!base) return false;
-  writeRecord(account, await slowHalf(account, base), true);
+  const filled = await slowHalf(account, base);
+  writeRecord(account, filled.record, true, filled.partial);
   return true;
 }
 
