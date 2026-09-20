@@ -48,21 +48,35 @@ set -e
 # test:unit` (the cacheTime/withTtlCache-name source-scanning guards among
 # others) and the packages/transaction mocha suite used to appear in no CI
 # file, no deploy script and no git hook -- they protected nothing unless a
-# human remembered to run them by hand. Run both here, before the first byte
-# moves (the purge below is the first real action), so a red guard exits 1
+# human remembered to run them by hand. Run all three here, before the first
+# byte moves (the purge below is the first real action), so a red guard exits 1
 # and the server is never touched. `$MONOREPO_ROOT` is two levels above $APP
-# (.../apps/blog -> the pnpm workspace root) so `--filter` resolves; both
+# (.../apps/blog -> the pnpm workspace root) so `--filter` resolves; all three
 # suites together are ~30s, well under the minutes the rsync+restart+verify
 # below already take.
 MONOREPO_ROOT="$(cd "$APP/../.." && pwd)"
-echo "==> guards 1/2: pnpm --filter @hive/blog test:unit"
+echo "==> guards 1/3: pnpm --filter @hive/blog test:unit"
 if ! (cd "$MONOREPO_ROOT" && pnpm --filter @hive/blog run test:unit); then
   echo "DEPLOY BLOCKED: pnpm --filter @hive/blog test:unit FAILED -- see the '== <file>' lines above for which guard/test failed. Nothing was copied to the server."
   exit 1
 fi
-echo "==> guards 2/2: packages/transaction mocha suite"
+echo "==> guards 2/3: packages/transaction mocha suite"
 if ! (cd "$MONOREPO_ROOT/packages/transaction" && pnpm test); then
   echo "DEPLOY BLOCKED: packages/transaction mocha suite FAILED -- see the failing test name(s) above. Nothing was copied to the server."
+  exit 1
+fi
+echo "==> guards 3/3: packages/ui mocha suite (@hive/ui)"
+# ★ 2026-09-20: added because the deploy path could still ship a reopened open
+# redirect with CI green. The seven `?next=` vectors that prove it stays closed
+# (`/\evil.com`, a tab or newline before the slashes, a userinfo separator
+# behind a backslash) live in packages/ui/lib/sanitize-url.test.ts, and NOTHING
+# on this path ran them: guard 1/3 globs `find lib` rooted at apps/blog, so
+# packages/ui is outside it by construction. CI runs the suite since 11b5b12,
+# but a deploy from this machine never asks CI anything. In BOTH scripts, for
+# the same reason the other two are: a guard in one is a guard a human skips by
+# picking the other. ~1s.
+if ! (cd "$MONOREPO_ROOT" && pnpm --filter @hive/ui run test); then
+  echo "DEPLOY BLOCKED: pnpm --filter @hive/ui test FAILED -- the sanitize-url / sign-in redirect suite is red. Nothing was copied to the server."
   exit 1
 fi
 # ★ Snappiness phase 2: empty the edge cache BEFORE anything changes on disk,
