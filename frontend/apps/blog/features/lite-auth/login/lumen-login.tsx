@@ -1,6 +1,6 @@
 'use client';
 
-import { FC, useCallback, useEffect, useState } from 'react';
+import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import env from '@beam-australia/react-env';
 import { useRouter } from 'next/navigation';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -10,7 +10,7 @@ import TurnstileWidget, { turnstileSiteKey } from './turnstile-widget';
 import GoogleSignIn, { googleConfigured } from './google-signin';
 import KeychainSignin from './keychain-signin';
 import { Link } from '@hive/ui';
-import { isInternalPath } from '@ui/lib/sanitize-url';
+import { leaveLoginFor, loginDestination } from './leave-login';
 import { SHOW_HELP_LINKS } from '@/blog/lib/help-visibility';
 
 // TODO i18n — staged copy while the redesign lands (mirrors app-header's LABELS
@@ -126,6 +126,17 @@ const COPY = {
     'Free. No keys to save. Your posts publish through Lumen with a small “via Lumen” mark and do not collect rewards. Upgrade to a full Hive account whenever you want. On Lumen your history follows your new name; on other Hive sites, posts written before the upgrade stay under Lumen’s account.',
   back: 'Back',
   checking: 'Checking…',
+  /**
+   * ★ THE DEAD END, GIVEN A DOOR (2026-09-19, adversarial review).
+   *
+   * `leave-login.ts` caps how many times a tab may be bounced back here, and
+   * the first version of that cap simply stopped navigating — leaving a reader
+   * who IS signed in looking at a sign-in form, with no explanation, and (since
+   * the Google button withholds itself for a signed-in visitor) one control
+   * that spins forever. A refusal has to say what happened and offer the way on.
+   */
+  alreadySignedIn: 'You are already signed in.',
+  alreadySignedInGo: 'Continue',
   googleSeam:
     'Google sign-in is being set up. For now, use a Bitcoin or Ethereum wallet, or a Hive account below.',
   captchaNeeded: 'Please complete the “I’m human” check first.'
@@ -134,31 +145,11 @@ const COPY = {
 type View = 'default' | 'name';
 
 /**
- * ★★★ `?next=` WAS WRITTEN BUT NEVER READ (2026-08-10).
- *
- * `/profile` has redirected signed-out readers to `/login?next=/profile` since it
- * was built, and `/wallet` and `/wallet/tokens` now do the same. Nothing on this
- * page ever looked at the parameter: all three `router.replace('/')` calls below
- * sent everyone to the feed, so "sign in and we will take you back" was a promise
- * the product did not keep, and the reader had to remember for themselves what
- * they had been trying to open.
- *
- * ★ `isInternalPath` IS THE GATE, AND IT IS NOT OPTIONAL. Without it this is an
- * open redirect: anyone can hand a victim `/login?next=https://evil.example` and
- * the sign-in page would send them there the moment their session was minted.
- * Only a plain in-app path (leading `/`, not `//`, no `javascript:`) is accepted;
- * anything else falls back to the feed.
- *
- * ★ WHY IT READS `window.location` AND NOT `useSearchParams()`. That hook forces
- * the page that uses it to be client-rendered or wrapped in `<Suspense>`, and
- * this value is never rendered — it is only read at the moment a redirect
- * happens. A plain function keeps the login page's rendering unchanged.
+ * `loginDestination()` and `leaveLoginFor()` moved to `./leave-login` on
+ * 2026-09-19, because the Keychain row needs the same two answers and a second
+ * copy of an open-redirect gate is how the first hole gets reopened. That file
+ * carries the full reasoning, including the production loop it exists to close.
  */
-function loginDestination(): string {
-  if (typeof window === 'undefined') return '/';
-  const next = new URLSearchParams(window.location.search).get('next') ?? '';
-  return next && isInternalPath(next) ? next : '/';
-}
 
 /**
  * `embedded` renders the same four ways in — Google, Bitcoin wallet, Ethereum
@@ -202,13 +193,41 @@ const LumenLogin: FC<LumenLoginProps> = ({ embedded = false, googleConfiguredIni
   // stranded on the wrong page.
   //
   // Fixing it here rather than in the header keeps the SEO-visible link intact.
-  const { user: sessionUser, isHydrated: sessionHydrated } = useUserClient();
+  //
+  // ★★★ AND IT LEAVES WITH A DOCUMENT LOAD, NOT `router.replace` (2026-09-19,
+  // production incident). `router.replace` answers from Next's client-side
+  // Router Cache, which still holds the `NEXT_REDIRECT` the destination
+  // returned to this reader while they were SIGNED OUT — so this effect sent
+  // them straight back to `/login`, where it fired again. Two real readers'
+  // tabs span at ~240 navigations a second until they gave up; one of them
+  // photographed the 503 card it ended on and posted it. `leaveLoginFor` is
+  // both the document load that cannot replay a cached payload and the cap
+  // that stops any future disagreement from spinning. See ./leave-login.ts.
+  //
+  // ★★★ AND IT WAITS FOR THE SERVER'S ANSWER BEFORE IT MOVES ANYBODY
+  // (`clientAnswered`, added 2026-09-19 after an adversarial review).
+  //
+  // `sessionUser` is seeded from localStorage on the first client render —
+  // `useUserCore` passes `initialData: storedUser` — so `isLoggedIn` can be TRUE
+  // here hundreds of milliseconds before `/api/users/me` has said anything. For
+  // a reader whose session cookie merely expired while that stale flag survived,
+  // this effect used to fire on a belief the server does not share: it sent them
+  // to a gated page, the page sent them back, and round it went. That is a
+  // SECOND way into the same loop, independent of the Router Cache, and the
+  // document load does not close it — only waiting for the answer does.
+  // `clientAnswered` is exactly "/api/users/me has replied in this tab"
+  // (`packages/smart-signer/lib/auth/use-user-core.ts`).
+  const { user: sessionUser, isHydrated: sessionHydrated, clientAnswered } = useUserClient();
+  const [strandedAt, setStrandedAt] = useState<string | null>(null);
   useEffect(() => {
     if (embedded) return; // inside the dialog, signing in is the point
-    if (sessionHydrated && sessionUser?.isLoggedIn) {
-      router.replace(loginDestination());
-    }
-  }, [embedded, sessionHydrated, sessionUser?.isLoggedIn, router]);
+    if (!sessionHydrated || !clientAnswered || !sessionUser?.isLoggedIn) return;
+    const dest = loginDestination();
+    // A refusal means this tab has already been bounced here twice in the last
+    // few seconds. Say so and hand over a link, rather than leaving a signed-in
+    // reader staring at a sign-in form with no explanation and no way on.
+    if (!leaveLoginFor(dest)) setStrandedAt(dest);
+  }, [embedded, sessionHydrated, clientAnswered, sessionUser?.isLoggedIn]);
   const { user } = useUserClient();
   const { nameStatus, checkName, createAccount, google, googleChallenge } = useLiteLogin();
 
@@ -238,6 +257,11 @@ const LumenLogin: FC<LumenLoginProps> = ({ embedded = false, googleConfiguredIni
   // ready / fetch failed → the real button is withheld rather than minting a token the
   // server will reject as a replay.
   const [googleNonce, setGoogleNonce] = useState<string | null>(null);
+  /**
+   * One mount, one nonce. `refreshGoogleNonce()` re-arms deliberately after a
+   * failed attempt and is not gated by this; only the mount effect is.
+   */
+  const nonceRequested = useRef(false);
   // ★★★ RESOLVED ON THE CLIENT, NOT DURING SSR (2026-08-06).
   //
   // `googleConfigured()` reads the client id through `@beam-australia/react-env`,
@@ -297,28 +321,103 @@ const LumenLogin: FC<LumenLoginProps> = ({ embedded = false, googleConfiguredIni
     // client's `window.__ENV` ever genuinely differ, this pulls `googleReady`
     // back down instead of leaving the page stuck showing a button that the
     // client side believes isn't configured.
+    // ★★★ A SIGNED-IN VISITOR NEVER NEEDS A GOOGLE NONCE (2026-09-19).
+    //
+    // This is the line that turned a redirect loop into an outage-shaped event.
+    // Every mount of this component minted a fresh single-use nonce, so while
+    // two readers' tabs bounced between `/login` and the page they had asked
+    // for, they fired 503 and 231 `POST /api/lite/auth/google/challenge` in
+    // about three minutes — measured at 1,831 in FIFTEEN SECONDS when the same
+    // loop was reproduced locally, where there is no network latency to slow it
+    // down. Our own rate limiter refused 334 of them with a 429, which is the
+    // only reason the number is not several times larger.
+    //
+    // The loop is fixed above and in ./leave-login.ts; this is the amplifier,
+    // and it is worth closing on its own.
+    //
+    // ★★ BUT BE HONEST ABOUT WHAT IT CAN AND CANNOT STOP (measured 2026-09-19,
+    // because the first draft of this comment claimed more than the code does).
+    // On a COLD document load it does NOT save the first fetch, even for a
+    // reader who is signed in: the provider's user value starts at `defaultUser`
+    // and only becomes the real one after its own first effect, so this effect
+    // has already run, seen "signed out", and sent the request. Measured on a
+    // real signed-in session: one nonce fetched, not zero.
+    //
+    // What it DOES stop is every fetch after the client knows who it is — a
+    // component that mounts again inside the same document (the sign-in dialog
+    // opening, a re-render that remounts this subtree) while `isLoggedIn` is
+    // true costs nothing. The flood in the incident came from repeated MOUNTS
+    // across documents, and that is closed by fixing the loop, not by this line.
+    // This is a cheap floor under it, not the fix.
+    //
+    // ★★★ AND IT FETCHES AT MOST ONCE PER MOUNT, WHATEVER THE DEPS DO
+    // (2026-09-19, measured in a browser against production).
+    //
+    // The first version of this guard also carried `clientAnswered` in its
+    // condition and its deps, on the theory that only the server's answer should
+    // be trusted. Measured on a real signed-out page load, that cost a SECOND
+    // nonce: the effect ran once before `/api/users/me` replied and again after,
+    // because `clientAnswered` itself flips on every load. Production fetched one
+    // nonce for that page; the change fetched two. A wasted single-use nonce is
+    // the smaller half — `<GoogleSignIn key={googleNonce}>` REMOUNTS when the
+    // nonce changes, which is the "google.accounts.id.initialize() is called
+    // multiple times" defect `google-signin.tsx` documents at length.
+    //
+    // So the condition is back to the flag that actually answers the question
+    // ("is this reader signed in"), and the ref below is what makes the count
+    // per-MOUNT rather than per-dep-change. `isLoggedIn` can only transition
+    // toward the truth, so the worst case is: skip while a stale seed says
+    // signed-in, fetch once when the server corrects it. Never two.
+    if (sessionUser?.isLoggedIn) return;
+    if (nonceRequested.current) return;
     if (!googleConfigured()) {
       setGoogleReady(false);
       return;
     }
     let cancelled = false;
     setGoogleReady(true);
+    nonceRequested.current = true;
     void googleChallenge().then((n) => {
       if (!cancelled) setGoogleNonce(n);
     });
     return () => {
       cancelled = true;
     };
-  }, [googleChallenge]);
+  }, [googleChallenge, sessionUser?.isLoggedIn]);
 
   // Already signed in → leave the pre-auth page.
+  //
+  // ★ DIALOG ONLY, SINCE 2026-09-19. The standalone page is owned by the
+  // `sessionHydrated` effect above, which leaves with a document load. This one
+  // used to run there too, so an ordinary page sign-in fired TWO competing
+  // navigations to the same place — and inside the loop that doubled its speed.
+  // Inside the dialog there is no `?next=` to read (the search string belongs to
+  // whatever page the reader was on), so this keeps its soft `replace` to the
+  // feed, exactly as before.
   useEffect(() => {
+    if (!embedded) return;
     if (user?.isLoggedIn) router.replace(loginDestination());
-  }, [user?.isLoggedIn, router]);
+  }, [embedded, user?.isLoggedIn, router]);
 
   // Named for what it did before `?next=` was honoured: the destination is the
   // feed unless the reader was sent here from a page that needs an account.
+  //
+  // ★ The page leaves with a document load for the reason in ./leave-login.ts:
+  // the identity just changed, so every entry in this tab's Router Cache was
+  // rendered for somebody else. `router.refresh()` alone is a RACE — it
+  // schedules a refetch while the navigation that consumes the stale entry is
+  // already in flight — which is why the dialog, where a full load would throw
+  // away an in-progress reply, gets the refresh AND keeps its soft navigation,
+  // while the page gets the load.
   const goHome = () => {
+    if (!embedded) {
+      // `userInitiated`: the reader pressed a sign-in control, so this must
+      // never be refused by the bounce cap and it clears the count. See
+      // ./leave-login.ts — a completed sign-in that silently goes nowhere is a
+      // worse failure than the loop it guards against.
+      leaveLoginFor(loginDestination(), { userInitiated: true });
+      return;
+    }
     router.replace(loginDestination());
     router.refresh();
   };
@@ -334,7 +433,10 @@ const LumenLogin: FC<LumenLoginProps> = ({ embedded = false, googleConfiguredIni
     setBusy(true);
     const outcome = await google(credential, googleNonce, kind);
     setBusy(false);
-    refreshGoogleNonce();
+    // ★ Only re-arm for somebody who still needs a button. Minting a fresh
+    // single-use nonce for a reader who has just authenticated is the same
+    // wasted request the guard above exists to stop.
+    if (outcome.status !== 'authenticated') refreshGoogleNonce();
     if (outcome.status === 'authenticated') goHome();
     else if (outcome.status === 'needs_name') setView('name');
     else setError(outcome.message);
@@ -349,8 +451,9 @@ const LumenLogin: FC<LumenLoginProps> = ({ embedded = false, googleConfiguredIni
     setBusy(true);
     const outcome = await google(idToken, googleNonce);
     setBusy(false);
-    // The nonce is single-use; arm a fresh one for the next attempt.
-    refreshGoogleNonce();
+    // The nonce is single-use; arm a fresh one for the next ATTEMPT — but not
+    // for somebody who has just succeeded and is on their way out.
+    if (outcome.status !== 'authenticated') refreshGoogleNonce();
     if (outcome.status === 'authenticated') goHome();
     else if (outcome.status === 'needs_name') setView('name');
     else setError(outcome.message);
@@ -420,6 +523,17 @@ const LumenLogin: FC<LumenLoginProps> = ({ embedded = false, googleConfiguredIni
           <p className="mt-2 font-text text-base text-ink-10">{COPY.tagline}</p>
         </div>
       )}
+
+      {strandedAt ? (
+        <div className="mb-4 w-[460px] max-w-full rounded-card border border-line-11 bg-surface-6 px-4 py-3 text-center">
+          <p className="font-sans text-[14px] leading-[22px] text-ink-7">
+            {COPY.alreadySignedIn}{' '}
+            <a href={strandedAt} className="font-semibold text-ink-brand-3 underline">
+              {COPY.alreadySignedInGo}
+            </a>
+          </p>
+        </div>
+      ) : null}
 
       <div className={embedded ? 'flex w-full max-w-full flex-col gap-[18px]' : 'flex w-[460px] max-w-full flex-col gap-[18px]'}>
         {view === 'default' ? (
@@ -683,7 +797,7 @@ const LumenLogin: FC<LumenLoginProps> = ({ embedded = false, googleConfiguredIni
                   <div className="h-px flex-1 bg-surface-26" />
                 </div>
 
-                <KeychainSignin />
+                <KeychainSignin embedded={embedded} />
 
                 {error ? <p className={`mt-4 ${embedded ? '' : 'text-center'} text-caption text-ink-warn-3`}>{error}</p> : null}
 

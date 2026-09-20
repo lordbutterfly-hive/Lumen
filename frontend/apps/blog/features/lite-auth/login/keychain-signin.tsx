@@ -4,6 +4,7 @@ import { FC, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useProcessAuth } from '@smart-signer/components/auth/process';
 import { KeyType, LoginType } from '@smart-signer/types/common';
+import { leaveLoginFor, loginDestination } from './leave-login';
 
 /**
  * Hive Keychain sign-in — the ONLY Hive-key path Lumen offers, and it touches no
@@ -42,6 +43,11 @@ const COPY = {
   placeholder: 'yourname',
   submit: 'Sign in with Keychain',
   working: 'Waiting for Keychain…',
+  // ★ The document load after a successful sign-in takes as long as a page load,
+  // and `finally` puts `busy` back the instant the promise settles — so without
+  // this the button returned to its resting label and the reader watched nothing
+  // happen. Say what is happening instead.
+  leaving: 'Signing you in…',
   // ★ THE OLD COPY TOLD EVERY PHONE VISITOR TO DO SOMETHING IMPOSSIBLE
   // (2026-08-28, owner report: "none of the login options work on mobile").
   // "Install the Hive Keychain extension, then reload" presumes a desktop
@@ -63,13 +69,29 @@ const COPY = {
 };
 
 interface KeychainSigninProps {
-  /** Where to land after a successful sign-in. Defaults to the feed; the
-   *  in-context dialog passes the page the user was acting on, so a "Write"
-   *  click still ends at the composer. */
+  /**
+   * Where to land after a successful sign-in, in the DIALOG. Ignored on the
+   * standalone `/login` page, which reads `?next=` instead — see the navigation
+   * comment below.
+   *
+   * ★ THIS PROP IS CURRENTLY DEAD IN THE DIALOG TOO, AND THAT IS NOT THIS
+   * CHANGE'S DOING (noted 2026-09-19). The comment here used to claim "the
+   * in-context dialog passes the page the user was acting on, so a 'Write'
+   * click still ends at the composer". It does not: `features/layouts/
+   * app-header.tsx` really does pass `redirectTo="/submit.html"` to
+   * `components/dialog-login.tsx`, but that component destructures `redirectTo`
+   * and never forwards it — `LumenLoginProps` has no such prop to forward it
+   * into. So every dialog sign-in lands on the feed. Left alone here because it
+   * is a separate defect with a separate fix, and a comment that describes
+   * wiring which does not exist is worse than the missing wiring.
+   */
   redirectTo?: string;
+  /** True inside the sign-in DIALOG, false on the standalone `/login` page.
+   *  The two surfaces have to leave differently; see below. */
+  embedded?: boolean;
 }
 
-const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
+const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/', embedded = false }) => {
   const router = useRouter();
   // ★★★ THE FIRST ARGUMENT IS `authenticateOnBackend`, AND IT MUST STAY TRUE
   // (2026-08-09). It was hardcoded `false`, which routed `signIn()` down
@@ -97,6 +119,8 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
   const [open, setOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [busy, setBusy] = useState(false);
+  /** A document load is in flight; keep the control disabled until it lands. */
+  const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detected, setDetected] = useState<boolean | null>(null);
 
@@ -120,7 +144,39 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
       // Posting authority: everything Lumen does day to day is a posting action.
       await signAuth({ loginType: LoginType.keychain, username: name, keyType: KeyType.posting, remember: false });
       await submitAuth();
-      router.push(redirectTo);
+      // ★★★ THIS LINE CAUSED A PRODUCTION LOOP (fixed 2026-09-19).
+      //
+      // It was `router.push(redirectTo)` with no `router.refresh()` beside it,
+      // and `redirectTo` on the standalone page is the default `/` — so a
+      // Keychain sign-in both ignored the `?next=` the reader had been promised
+      // AND left every entry in Next's client-side Router Cache still holding
+      // the render made for a signed-out visitor. The page's own "you are
+      // signed in, leave the door" effect then navigated to `?next=`, the
+      // router answered it from that cache with the `NEXT_REDIRECT` back to
+      // `/login`, and the two bounced: 3,664 navigations in 15 seconds when
+      // reproduced locally, ending on the 503 card for two real readers.
+      //
+      // On the PAGE the destination belongs to the page: `leaveLoginFor` reads
+      // `?next=`, refuses anything that would leave this origin, does a
+      // DOCUMENT load (which no cache can answer), and caps how many times one
+      // tab may bounce. In the DIALOG a document load would throw away whatever
+      // the reader was in the middle of writing, so it keeps its soft push and
+      // gets `router.refresh()` — which is what should have been here all along.
+      if (!embedded) {
+        // `userInitiated`: the reader pressed this button, so the bounce cap
+        // must never refuse it. A sign-in that completes and then silently goes
+        // nowhere reads as "my account stopped working", which is a worse
+        // failure than the loop the cap exists to stop.
+        if (leaveLoginFor(loginDestination(), { userInitiated: true })) {
+          // A document load is on its way; the `finally` below would otherwise
+          // put the button back to its resting label and leave the reader
+          // watching nothing happen for as long as the load takes.
+          setLeaving(true);
+        }
+      } else {
+        router.refresh();
+        router.push(redirectTo);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // The server answers 503 with an exposed message when the chain was
@@ -203,11 +259,11 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
           </div>
           <button
             onClick={() => void signIn()}
-            disabled={busy || detected === false}
+            disabled={busy || leaving || detected === false}
             data-testid="keychain-signin"
             className="mt-3 h-12 w-full cursor-pointer rounded-control bg-surface-43 text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-40 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {busy ? COPY.working : COPY.submit}
+            {leaving ? COPY.leaving : busy ? COPY.working : COPY.submit}
           </button>
           {detected === false ? (
             <p className="mt-2.5 text-caption text-ink-warn-3">{COPY.notDetected}</p>
