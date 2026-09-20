@@ -270,6 +270,31 @@ export function isInternalPath(path: string): boolean {
     return false;
   }
 
+  // ★★★ A LEADING "/" DOES NOT KEEP A NAVIGATION ON THIS ORIGIN (2026-09-19).
+  //
+  // The check above reads like it has closed the off-site hole. It has not,
+  // because the WHATWG URL parser rewrites two classes of byte before it ever
+  // looks at the slashes:
+  //
+  //   * "\" is treated as "/" inside a special scheme (http/https), so
+  //     "/\evil.com" is parsed as "//evil.com".
+  //   * raw TAB, LF and CR are STRIPPED from anywhere in the input first, so
+  //     "/<TAB>/evil.com" also becomes "//evil.com".
+  //
+  // Measured in Chrome 151 against https://lumensocial.net/login: both resolve
+  // to https://evil.com/. This function gates `?next=` on the sign-in page
+  // (features/lite-auth/login/leave-login.ts), and a signed-in reader is then
+  // NAVIGATED to whatever it approves — so accepting these is an open redirect
+  // wearing a lumensocial.net link, the exact shape a phishing page wants.
+  //
+  // Refusing every backslash and C0/DEL control character is safe: no
+  // legitimate in-app path contains one, and the percent-encoded forms that a
+  // real path would use ("/%09/x", "/%5C") are untouched by the parser and
+  // still accepted.
+  if (/[\\\u0000-\u001f\u007f]/.test(path)) {
+    return false;
+  }
+
   // Check for dangerous protocols (shouldn't be possible with / prefix, but be safe)
   if (isDangerousProtocol(path)) {
     return false;

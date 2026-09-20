@@ -257,7 +257,35 @@ describe('URL Sanitization Security Tests', () => {
         'data:text/html',
         '',
         'relative/path',
-        '../parent'
+        '../parent',
+        // ★★★ THE BACKSLASH AND CONTROL-CHARACTER VECTORS (2026-09-19).
+        //
+        // A leading "/" is NOT enough to keep a navigation on this origin. The
+        // WHATWG URL parser treats "\" as "/" inside a special scheme, and
+        // strips raw TAB / LF / CR anywhere in the input before parsing. So
+        // every one of these resolves OFF-SITE — measured in Chrome 151
+        // against https://lumensocial.net/login:
+        //
+        //   new URL('/\\evil.com',   base) -> https://evil.com/
+        //   new URL('/\tevil.com',   base) -> https://evil.com/   (tab stripped)
+        //   new URL('/\n//evil.com', base) -> https://evil.com/
+        //
+        // `isInternalPath` gates `?next=` on the sign-in page, which a signed-in
+        // reader is then NAVIGATED to. Accepting these makes that an open
+        // redirect: hand someone `/login?next=/\evil.com` and the app sends them
+        // to evil.com the moment their session is minted, from a lumensocial.net
+        // link, which is exactly the shape a phishing page wants.
+        //
+        // Percent-ENCODED equivalents are fine and stay accepted: `/%09/x`
+        // resolves to this origin's `/%09/x`. It is only the RAW bytes that the
+        // parser rewrites.
+        '/\\evil.com',
+        '/\\\\evil.com',
+        '/\tevil.com',
+        '/\t/evil.com',
+        '/\n//evil.com',
+        '/\r/evil.com',
+        '/wallet\\@evil.com'
       ];
 
       invalidPaths.forEach((path) => {
