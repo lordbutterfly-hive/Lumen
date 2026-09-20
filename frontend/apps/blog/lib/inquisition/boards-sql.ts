@@ -254,7 +254,11 @@ async function loadMostMuted(limit = BOARD_ROWS): Promise<{ rows: MutedRow[]; as
 }
 
 export const mostMuted = withTtlCache(loadMostMuted, (limit = BOARD_ROWS) => `most-muted:${limit}`, {
-  ttlMs: 6 * 60 * 60 * 1000,
+  // ★ ONE WEEK, MATCHING THE DISK STORE IN FRONT OF IT (owner, 2026-09-20: "we pull
+  // new data only once a week"). At six hours this in-memory copy expired four times a
+  // day and the next caller recomputed a ~26-minute scan that the board file already
+  // held. The disk store is the thing with the real cadence; this must not undercut it.
+  ttlMs: 7 * 24 * 60 * 60 * 1000,
   max: 2,
   name: 'inq-board-muted',
   shouldCache: (v) => !v.failed && v.rows.length > 0
@@ -446,7 +450,8 @@ async function loadKeBoard(limit = BOARD_ROWS): Promise<{ rows: KeRow[]; asOf: s
 }
 
 export const keBoard = withTtlCache(loadKeBoard, (limit = BOARD_ROWS) => `ke:${limit}`, {
-  ttlMs: 6 * 60 * 60 * 1000,
+  // ★ One week, matching the disk store. See the note on `mostMuted`.
+  ttlMs: 7 * 24 * 60 * 60 * 1000,
   max: 2,
   name: 'inq-board-ke',
   shouldCache: (v) => !v.failed && v.rows.length > 0
@@ -545,13 +550,13 @@ async function muterStakeMvests(muters: string[], ratio: number): Promise<number
  * Split out, the six cheap figures always land and this one fills or reports `null` on
  * its own, which the strip already renders as a dash.
  */
-interface DownvoteTally {
+export interface DownvoteTally {
   downvotes: number;
   downvoters: number;
   lastDownvote: string | Date | null;
 }
 
-async function downvoteTally(account: string): Promise<DownvoteTally | null> {
+export async function downvoteTally(account: string): Promise<DownvoteTally | null> {
   /*
    * ★★ ONE GROUPED PASS, NOT THREE SCANS. All three figures come from the same rows,
    * and the record statement used to ask for them as three separate correlated
@@ -608,7 +613,6 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
    * one and then the other would add its latency for no reason.
    */
   const rollPromise = muteRoll(account);
-  const tallyPromise = downvoteTally(account);
 
   const rows = await queryReader<{
     rewards_hive: number;
@@ -647,7 +651,6 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
    * confident is worse than an honest dash.
    */
   const roll = await rollPromise;
-  const tally = await tallyPromise;
   const mutedBy = roll ? roll.count : null;
   const muterMvests = roll ? await muterStakeMvests(roll.muters, ratio) : null;
   /*
@@ -660,7 +663,7 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
   const hp = Number(rows[0]?.hp) || 0;
   const rewardsHive = Number(rows[0]?.rewards_hive) || 0;
   const ke = hp > 0 ? Number((rewardsHive / hp).toFixed(2)) : null;
-  const last = tally?.lastDownvote ?? null;
+  const last = null;
 
   return {
     account,
@@ -675,8 +678,10 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
     // ★ The DIVISION is done in float (above); only the DISPLAYED figures are rounded.
     rewardsHive: Math.round(rewardsHive),
     hp: Math.round(hp),
-    downvotes: tally ? tally.downvotes : null,
-    downvoters: tally ? tally.downvoters : 0,
+    // ★★ THE SLOW HALF IS FILLED BY THE ROUTE, NOT WAITED FOR HERE. See
+    // `downvoteTally`, which is 4.9s to 23.2s on its own. `null` renders as a dash.
+    downvotes: null,
+    downvoters: 0,
     lastDownvote: last ? new Date(last).toISOString() : null,
     // Filled by the route, which owns the slower value lookup.
     removedUsd: null,

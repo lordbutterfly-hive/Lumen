@@ -51,6 +51,8 @@ export interface RecordData {
   mutedBy: number | null;
   muterMvests: number | null;
   mutedByPartial?: boolean;
+  /** True while the route is still computing the expensive half. */
+  building?: boolean;
   ke: number | null;
   band: KeBand;
   rewardsHive: number;
@@ -212,6 +214,13 @@ function cellsFor(r: RecordData): Cell[] {
   ];
 }
 
+/*
+ * How many times the strip will come back for the slow half before giving up. With the
+ * widening interval below this covers a little over two minutes, which is longer than
+ * any record measured; past that, the dashes are the honest answer.
+ */
+const MAX_FILL_POLLS = 12;
+
 export default function RecordPanel({ account }: { account: string }) {
   const [armed, setArmed] = useState(false);
   const [record, setRecord] = useState<RecordData | null>(null);
@@ -248,6 +257,25 @@ export default function RecordPanel({ account }: { account: string }) {
           }
           setRecord(json);
           setState('idle');
+          /*
+           * ★★★ COME BACK FOR THE SLOW HALF. The route answers immediately with the
+           * figures that cost one indexed lookup and sets `building` while the
+           * expensive ones (the deduplicated downvote tally at up to 23s, the vote
+           * ledger, the Steem walk) are computed behind the response. Without this the
+           * strip would show its dashes and never fill them, which is a worse lie than
+           * the wait it replaced: a dash means "not computed", not "not computed yet,
+           * and nobody is coming".
+           *
+           * ★ The interval widens as it goes. A cold record is usually ready inside
+           * half a minute, but @haejin's tally alone is 23s and a large ledger is
+           * longer, so a fixed 2s poll would ask thirty times for one answer.
+           */
+          if (json.building && attempt < MAX_FILL_POLLS) {
+            const waitMs = Math.min(2000 * Math.pow(1.5, attempt), 15000);
+            setTimeout(() => {
+              if (!cancelled) ask(attempt + 1);
+            }, waitMs);
+          }
         })
         .catch((error: Error) => {
           if (!cancelled && error?.message !== 'retrying') setState('failed');

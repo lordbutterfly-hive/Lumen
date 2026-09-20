@@ -429,3 +429,72 @@ export function releaseBuild(key: string, cooldownMs = 0): void {
     // Nothing to release.
   }
 }
+
+/**
+ * ════ ONE ACCOUNT'S RECORD, ON THE SAME DISK AS THE BOARDS ════
+ *
+ * ★★★ THE PROFILE STRIP USED TO BE A PER-WORKER, IN-MEMORY CACHE, WHICH IS THREE COLD
+ * CACHES AND A FULL RESET ON EVERY DEPLOY (owner, 2026-09-20: "make sure the warming of
+ * data on profile pages is near instant. I dont want to wait for it to lead 20 seconds").
+ *
+ * The record is expensive and the expense is unavoidable: the deduplicated downvote
+ * tally is 4.9s for @lighteye and 23.2s for @haejin, and the vote ledger is 12.1s on a
+ * modest account. What IS avoidable is paying it again. A `withTtlCache` lives in one
+ * worker's memory, so with `LUMEN_WORKERS=3` the same profile was computed up to three
+ * times, and every deploy threw all of it away.
+ *
+ * Records go on the same disk as the boards for the same three reasons: the filesystem
+ * is what the workers already share, it survives a restart, and it is one more file
+ * rather than one more service.
+ */
+const RECORD_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+
+export interface StoredRecord<T> {
+  record: T;
+  builtAt: number;
+  /** False while the slow half is still being computed. */
+  complete: boolean;
+}
+
+function recordPath(account: string): string {
+  return join(DIR, `rec-${account}.json`);
+}
+
+export function readRecord<T>(account: string): StoredRecord<T> | null {
+  try {
+    const parsed = JSON.parse(readFileSync(recordPath(account), 'utf8')) as StoredRecord<T>;
+    if (!parsed || typeof parsed !== 'object' || !parsed.record) return null;
+    // ★ Same NaN rule as the boards: a record with no usable date is infinitely old,
+    // never infinitely fresh.
+    if (!Number.isFinite(parsed.builtAt)) parsed.builtAt = 0;
+    return parsed;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      logger.warn(`inquisition: record file for @${account} is unreadable, recomputing: ${String(error)}`);
+    }
+    return null;
+  }
+}
+
+export function writeRecord<T>(account: string, record: T, complete: boolean): void {
+  if (!ensureDir()) return;
+  const tmp = join(DIR, `rec-${account}.${process.pid}.tmp`);
+  try {
+    writeFileSync(tmp, JSON.stringify({ record, builtAt: Date.now(), complete }), 'utf8');
+    renameSync(tmp, recordPath(account));
+  } catch (error) {
+    // ★ Unlike a board, a record that cannot be stored is genuinely only a slower
+    // feature: the route computed it and is about to serve it. It must still be said.
+    logger.warn(`inquisition: could not store the record for @${account}: ${String(error)}`);
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* never existed */
+    }
+  }
+}
+
+/** Is this stored record old enough to rebuild? One week, matching the boards. */
+export function recordStale(stored: StoredRecord<unknown> | null): boolean {
+  return !stored || Date.now() - stored.builtAt >= RECORD_REFRESH_MS;
+}

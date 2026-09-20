@@ -134,15 +134,17 @@ async function loadMuteRoll(account: string): Promise<MuteRoll | null> {
 }
 
 /**
- * ★ CACHED A DAY, LIKE THE RECORD IT FEEDS. Muting is a human act on a human timescale;
- * nobody's mute count moves meaningfully within a day, and the profile record this sits
- * inside is cached for exactly as long.
+ * ★ CACHED A WEEK, LIKE THE RECORD IT FEEDS. Muting is a human act on a human
+ * timescale; nobody's mute count moves meaningfully within a week, and the profile
+ * record this sits inside now refreshes weekly (owner, 2026-09-20: "we pull new data
+ * only once a week"). A shorter TTL here would have the muted board's candidate pass
+ * re-asking the chain for 400 accounts it already knew.
  *
  * ★ `shouldCache` REFUSES A NULL, so one bad minute at the API cannot pin a profile to
  * "not read" for a day.
  */
 export const muteRoll = withTtlCache(loadMuteRoll, (account: string) => account, {
-  ttlMs: 24 * 60 * 60 * 1000,
+  ttlMs: 7 * 24 * 60 * 60 * 1000,
   max: 300,
   name: 'inq-mute-roll',
   shouldCache: (value) => value !== null

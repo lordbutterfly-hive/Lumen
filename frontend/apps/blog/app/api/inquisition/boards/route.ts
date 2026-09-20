@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
+import { warmRecords } from '@/blog/lib/inquisition/record';
 import {
   BOARD_ROWS,
   MONEY_BUDGET_MS,
@@ -328,6 +329,17 @@ async function buildStaged<T>(key: string, spec: StagedBoard<T>): Promise<void> 
       if (value !== null) found.set(name, value);
       unflushed += 1;
       if (unflushed >= MONEY_FLUSH_EVERY) flush(false);
+    }
+    /*
+     * ★★ A FINISHED MONEY BOARD WARMS ITS OWN TOP ROWS. Every row here is a link to a
+     * profile, and this is the moment we know which twenty they are. Bounded and
+     * skip-if-fresh, so a resumed build does not redo it. See `warmRecords`.
+     */
+    if (!outOfBudget && accountOf) {
+      const top = (readBoard<T>(key)?.rows ?? []).map(accountOf);
+      void warmRecords(top).catch((error) =>
+        logger.warn(`inquisition: record warm for "${key}" failed: ${String(error)}`)
+      );
     }
     if (outOfBudget) {
       logger.warn(

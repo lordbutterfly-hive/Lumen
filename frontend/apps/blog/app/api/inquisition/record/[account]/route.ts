@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { profileRecord } from '@/blog/lib/inquisition/boards-sql';
-import { voteLedger } from '@/blog/lib/inquisition/vote-ledger';
-import { steemPostsSinceFork } from '@/blog/lib/inquisition/crossposting';
+import { profileRecord, type ProfileRecord } from '@/blog/lib/inquisition/boards-sql';
+import { fillInBackground } from '@/blog/lib/inquisition/record';
 import { hiveSqlConfigured } from '@/blog/lib/inquisition/hivesql';
-import { withTtlCache } from '@/blog/lib/server-ttl-cache';
+import { readRecord, recordStale, writeRecord } from '@/blog/lib/inquisition/board-store';
 
 const logger = getLogger('app');
 
@@ -13,30 +12,35 @@ export const dynamic = 'force-dynamic';
 /**
  * ════ ONE ACCOUNT'S RECORD, FOR THE PROFILE STRIP ════
  *
- * ★★ THE PROFILE ITSELF NEVER WAITS FOR THIS. The strip fetches it client-side, only
- * when the mode is armed, so an unarmed reader's profile does exactly the work it did
- * before this feature existed — no extra query, no extra byte, no slower render. That
- * is the "don't break the server" requirement expressed as a call graph rather than a
- * promise.
+ * ★★★ SERVED FROM DISK, AND THE ONE PERSON WHO EVER WAITS IS WHOEVER ARRIVES BEFORE THE
+ * FIRST BUILD (owner, 2026-09-20: "make sure the warming of data on profile pages is
+ * near instant. I dont want to wait for it to lead 20 seconds like reputation does").
  *
- * ★ 5-12s on a cold account, cached a day — it was 264ms until the downvote count was
- * deduplicated, and 264ms of a wrong number is worth less than 12s of a right one. The
- * ledger beside it already takes 12.1s, so this changes nothing a reader can feel.
- * A record is a slow-moving thing: mutes and listings
- * change on a human timescale and KE moves with lifetime totals.
+ * The figures are expensive and no amount of tuning changes that: the deduplicated
+ * downvote tally is 4.9s for @lighteye and 23.2s for @haejin, the vote ledger is 12.1s
+ * on a modest account and up to `PER_ACCOUNT_MS` on a large one, and the Steem walk is
+ * up to six requests to somebody else's node. Twenty seconds is a fair description of
+ * what an armed profile used to cost.
+ *
+ * Three things fix it, and none of them is a faster query:
+ *
+ *   1. THE RESULT GOES ON DISK, so it is computed once for everybody rather than once
+ *      per worker. It used to be a `withTtlCache`, which is per process: three workers
+ *      meant three computations of the same profile, and every deploy threw all three
+ *      away. A file is shared and survives a restart.
+ *   2. THE ANSWER COMES IN TWO HALVES. The cheap half (KE, stake, mute count, account
+ *      age) is about a second, and it is returned immediately with `building: true`
+ *      while the expensive half is computed behind the reader. The strip already
+ *      renders a dash for anything it does not have, so it fills in rather than
+ *      blocking on the slowest figure.
+ *   3. THE ACCOUNTS PEOPLE ACTUALLY OPEN ARE WARMED WEEKLY, off the five boards, so the
+ *      common case never even hits the two-halves path. See `warmRecords`.
+ *
+ * ★★ AND IT REFRESHES ONCE A WEEK, matching the boards. A record is a slow-moving
+ * thing: mutes and downvotes accumulate on a human timescale, KE moves with lifetime
+ * totals. Re-deriving it more often would cost the database a great deal to produce a
+ * figure nobody could tell apart from last week's.
  */
-const cached = withTtlCache(
-  (account: string) => profileRecord(account),
-  (account: string) => account,
-  {
-    ttlMs: 24 * 60 * 60 * 1000,
-    max: 300,
-    name: 'inq-profile-record',
-    // ★ `null` is "we could not ask", and caching it would turn one bad minute into a
-    // day of a profile claiming it has no record. See hivesql.ts.
-    shouldCache: (value) => value !== null
-  }
-);
 
 export async function GET(
   _request: Request,
@@ -51,48 +55,43 @@ export async function GET(
   if (!hiveSqlConfigured()) {
     return NextResponse.json({ account, unconfigured: true }, { headers: { 'cache-control': 'no-store' } });
   }
+
   try {
+    const stored = readRecord<ProfileRecord>(account);
+
     /*
-     * ★★ NO LISTINGS HERE AT ALL (owner: "remove the blacklists from mode and bar. it
-     * wont work, we add that later"). The bridge reader, the publisher table and the
-     * LISTED cell came out together rather than being left wired up and hidden, so
-     * nothing on this path calls a blacklist publisher.
+     * ★★★ THE WHOLE POINT: a stored record is served without touching HiveSQL at all.
+     * This is the path essentially every reader takes, and it is a file read.
+     *
+     * A stale record is served too, and refreshed behind the response. Last week's mute
+     * count is not meaningfully different from today's, and stale-while-revalidate is
+     * the difference between a strip that appears and a strip that spins.
      */
-    const [record, ledger, steem] = await Promise.all([
-      cached(account),
-      // ★ The vote ledger is the expensive half — 12.1s for 883 posts — and it is
-      // allowed to fail without taking the record with it. A dash reads as "not
-      // computed" and says so on hover; it never reads as zero.
-      voteLedger(account).catch(() => null),
-      steemPostsSinceFork(account).catch(() => null)
-    ]);
-    if (!record) {
-      /*
-       * ★★ SAY SO. "The record could not be read" was reaching the screen with nothing
-       * written anywhere, which is the same silent-failure shape the boards had: the
-       * only way to find out why was to reproduce it by hand. `profileRecord` returns
-       * null when the chain rate is unreadable or the reader-lane query timed out, and
-       * those are very different problems.
-       */
+    if (stored?.complete) {
+      if (recordStale(stored)) fillInBackground(account, stored.record);
+      return NextResponse.json(
+        { ...stored.record, building: false },
+        { headers: { 'cache-control': 'private, max-age=300' } }
+      );
+    }
+
+    // Nothing usable on disk. Pay for the cheap half only, and hand it over now.
+    const base = await profileRecord(account);
+    if (!base) {
       logger.warn(`inquisition: no record for @${account} — the vests rate or the reader query did not answer`);
       return NextResponse.json({ account, unavailable: true }, { headers: { 'cache-control': 'no-store' } });
     }
+
+    // ★ Store the half we have, so a restart mid-fill does not start from nothing, and
+    // mark it incomplete so nothing mistakes it for the finished article.
+    writeRecord(account, base, false);
+    fillInBackground(account, base);
+
     return NextResponse.json(
-      {
-        ...record,
-        // ★ `publishers` is gone with the blacklist board; nothing renders it.
-        publishers: undefined,
-        removedUsd: ledger ? ledger.removedUsd : null,
-        topDownvoters: ledger?.topDownvoters ?? [],
-        topByCount: ledger?.topByCount ?? [],
-        selfRewardUsd: ledger ? ledger.selfRewardUsd : null,
-        selfRewardPct: ledger ? ledger.selfRewardPct : null,
-        steemPosts: steem ? steem.posts : null,
-        // ★ The walk's own saturation flag. Dropping it printed a floor as a total.
-        steemPartial: steem?.partial ?? false,
-        steemLastPost: steem?.lastPost ?? null
-      },
-      { headers: { 'cache-control': 'private, max-age=300' } }
+      // ★ `building: true` is what tells the strip to come back. Everything the slow
+      // half owns is absent rather than zero, and the strip renders absent as a dash.
+      { ...base, building: true },
+      { headers: { 'cache-control': 'no-store' } }
     );
   } catch (error) {
     logger.error(error, `inquisition: record request failed for @${account}`);
