@@ -122,9 +122,9 @@ const BOARDS: BoardDef[] = [
     tab: 'CROSSPOSTING',
     kicker: 'BOARD 05 \u00b7 OLD LOYALTIES',
     title: 'Crossposting',
-    meta: 'since 2020-09-20\nfrom Steem\u2019s recent authors',
+    meta: 'Steem posts in the last 90 days\nfrom Steem\u2019s recent authors',
     blurb:
-      'Still keeping a foot in the old country. Posts put on Steem since six months after the fork, when the leaving was done and staying became a choice. The candidates are drawn from Steem\u2019s recent authors, so this finds the ones still at it rather than everyone who ever was.'
+      'Still keeping a foot in the old country. Posts put on Steem in the last ninety days, long after the leaving was done and staying became a choice. The count is a window rather than a lifetime on purpose: walked back to the fork, every prolific account hit the same page cap and the board ranked nothing. The lifetime figure, since six months after the fork, is on each profile\u2019s own record.'
 
   }
 ];
@@ -942,9 +942,9 @@ function CrosspostTable({ rows }: { rows: CrosspostRow[] }) {
           <th className="px-[26px] py-3 font-normal">Account</th>
           <th
             className="px-[26px] py-3 text-right font-normal"
-            title="Posts published to Steem since six months after the fork. This is the ranking."
+            title="Posts published to Steem in the last 90 days. This is the ranking. The lifetime figure, since six months after the fork, is on the account's own record."
           >
-            Steem posts
+            Steem posts (90d)
           </th>
           <th className="px-[26px] py-3 text-right font-normal" title="Most recent post published to Steem">
             Last Steem

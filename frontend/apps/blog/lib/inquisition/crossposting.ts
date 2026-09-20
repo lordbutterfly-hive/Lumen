@@ -54,7 +54,7 @@ const FEED_PAGES = 4;
  * once a week, so a few hundred requests to api.steemit.com is a reasonable ask;
  * doing it per reader would not be.
  */
-const STEEM_COUNT_BUDGET = 400;
+const STEEM_COUNT_BUDGET = 600;
 const PAGE_LIMIT = 100;
 
 /** Hive launched 2020-03-20. A Steem post before that says nothing about crossposting. */
@@ -193,10 +193,12 @@ export async function loadCrossposters(limit = 50): Promise<{
 
   /*
    * ★★ THE COUNT COSTS ONE WALK PER ACCOUNT, SO IT RUNS AGAINST A BUDGET. Each account's
-   * Steem blog is paged until it crosses the fork, up to `MAX_PROFILE_PAGES`. Across a
-   * hundred candidates that is a few hundred requests to a chain we do not run — fine
-   * once a week behind the board store, not fine per reader. Accounts past the
-   * budget keep their row and report a count of -1, which the table renders as "not
+   * Steem blog is paged back to the start of the window (`STEEM_WINDOW_DAYS`), which is
+   * one to three pages for almost everybody — against six pages each before, which
+   * exhausted the budget after sixty-odd accounts and left thirty rows saying "not
+   * counted". Across a hundred candidates this is a few hundred requests to a chain we do
+   * not run: fine once a week behind the board store, not fine per reader. Accounts past
+   * the budget keep their row and report a count of -1, which the table renders as "not
    * counted" rather than as zero.
    */
   const matchedAccounts = rows.map((r) => r.author);
@@ -205,7 +207,10 @@ export async function loadCrossposters(limit = 50): Promise<{
   for (const account of matchedAccounts) {
     if (budget <= 0) break;
     try {
-      const presence = await steemPostsSinceFork(account);
+      const presence = await steemPostsSinceFork(account, {
+        since: windowStart(STEEM_WINDOW_DAYS),
+        maxPages: STEEM_WINDOW_PAGES
+      });
       budget -= presence?.requests ?? 1;
       if (presence) counts.set(account, presence);
     } catch {
@@ -245,7 +250,42 @@ export async function loadCrossposters(limit = 50): Promise<{
  * walk on a stranger's old post and published the result as this account's own count —
  * measured wrong for four accounts before it was caught. Filter by author first.
  */
-const MAX_PROFILE_PAGES = 6;
+/*
+ * ★★★ SIX PAGES WAS A CEILING EVERYBODY HIT, WHICH IS A BOARD THAT RANKS NOTHING (found
+ * live 2026-09-20, owner: "steem is shwoing 595+ for all").
+ *
+ * Six pages of 100 is 600 blog entries, minus the handful of reshares filtered out of
+ * each, which is why 595 appeared on row after row: it is not a count, it is the cap
+ * wearing a number. Of the 100 rows on the board, 63 were capped, 30 said "not counted"
+ * because the request budget ran out at six pages each, and SEVEN carried a real total.
+ *
+ * Forty pages is the ceiling for a PROFILE, where the walk runs once a week in the
+ * background for one account and only a genuinely prolific one spends all forty. The
+ * BOARD does not use this at all any more -- see `STEEM_WINDOW_DAYS`.
+ */
+const MAX_PROFILE_PAGES = 40;
+
+/**
+ * ★★ THE BOARD COUNTS A WINDOW, NOT A LIFETIME, AND IT IS BOTH CHEAPER AND SHARPER.
+ *
+ * "Still keeping a foot in the old country" is a question about now, and the blurb always
+ * said the candidates are drawn from Steem's recent authors precisely to find "the ones
+ * still at it rather than everyone who ever was". A lifetime total cannot answer that once
+ * everyone saturates: the top 100 rows all read 576-595 and the ranking degenerated into
+ * the order the walk happened to stop in.
+ *
+ * Ninety days is a few hundred posts even for a heavy poster, so the walk ends naturally
+ * after one to three pages instead of at a cap, the whole matched set fits inside the
+ * request budget with room to spare, and the number on screen is a real count again.
+ * The lifetime-since-the-fork figure is still on the profile strip, where it is one
+ * account at a time and can afford forty pages.
+ */
+const STEEM_WINDOW_DAYS = 90;
+const STEEM_WINDOW_PAGES = 10;
+
+function windowStart(days: number): string {
+  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+}
 
 export interface SteemPresence {
   posts: number;
@@ -256,7 +296,24 @@ export interface SteemPresence {
   requests: number;
 }
 
-export async function steemPostsSinceFork(account: string): Promise<SteemPresence | null> {
+export interface WalkOptions {
+  /**
+   * Count posts published on or after this date AND stop walking once the account's own
+   * posts are older than it. Defaults to the fork-plus-six-months cutoff, where the walk
+   * keeps going to `HIVE_FORK_DATE` so a post inside the migration window is skipped
+   * rather than ending the walk early.
+   */
+  since?: string;
+  maxPages?: number;
+}
+
+export async function steemPostsSinceFork(
+  account: string,
+  opts: WalkOptions = {}
+): Promise<SteemPresence | null> {
+  const countFrom = opts.since ?? STEEM_COUNT_FROM;
+  const stopBefore = opts.since ?? HIVE_FORK_DATE;
+  const maxPages = opts.maxPages ?? MAX_PROFILE_PAGES;
   const seen = new Set<string>();
   const spend: Spend = { n: 0 };
   let posts = 0;
@@ -266,7 +323,7 @@ export async function steemPostsSinceFork(account: string): Promise<SteemPresenc
   let startPermlink = '';
 
   try {
-    for (let page = 0; page < MAX_PROFILE_PAGES; page += 1) {
+    for (let page = 0; page < maxPages; page += 1) {
       const query: Record<string, unknown> = { tag: account, limit: PAGE_LIMIT };
       if (startPermlink) {
         query.start_author = startAuthor;
@@ -291,11 +348,11 @@ export async function steemPostsSinceFork(account: string): Promise<SteemPresenc
         if (author !== account) continue;
         // ★ The WALK still stops at the fork; only the COUNT starts six months later,
         // so a post inside the window is skipped rather than ending the walk early.
-        if (created < HIVE_FORK_DATE) {
+        if (created < stopBefore) {
           crossedFork = true;
           break;
         }
-        if (created < STEEM_COUNT_FROM) continue;
+        if (created < countFrom) continue;
         posts += 1;
         if (!lastPost || created > lastPost) lastPost = created;
       }

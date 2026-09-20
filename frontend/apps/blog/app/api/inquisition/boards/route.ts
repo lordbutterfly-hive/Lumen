@@ -166,6 +166,11 @@ interface StagedBoard<T> {
   };
   money?: {
     kind: 'voter' | 'author';
+    /**
+     * A proxy for how expensive this row will be, used to attempt the cheap ones first.
+     * The vote count is exactly that proxy: the query groups every one of them.
+     */
+    costOf?: (row: T) => number;
     rows: number;
     merge: (row: T, usd: number) => T;
   };
@@ -262,10 +267,30 @@ async function buildStaged<T>(key: string, spec: StagedBoard<T>): Promise<void> 
     const from = readBoard<T>(key);
     if (!from) throw new Error(`lost between stages: ${key}`);
     const done = new Set<string>(from.done ?? []);
+    /*
+     * ★★★ CHEAPEST FIRST, BECAUSE THE GIANTS AT THE TOP SPEND THE BUDGET AND RETURN
+     * NOTHING (found live 2026-09-20, owner: "the top inquisitior pages arent warm and
+     * seem the same").
+     *
+     * The money pass used to walk the board in board order, and on TOP INQUISITORS the
+     * board order IS the cost order: @spaminator with 1,745,482 downvotes, @mack-bot with
+     * 545,424, @adm, @blacklist-a. Each one burns the full `PER_ACCOUNT_MS` and produces
+     * `null`, so the first four rows ate ten of the fourteen budgeted minutes and the
+     * column came out empty at the top -- five identical dashes where the most
+     * interesting numbers on the board should be.
+     *
+     * Ordering by cost values the most rows per minute of somebody else's database. The
+     * giants are attempted LAST, with whatever is left; if the budget runs out before
+     * they are reached they are never marked `done`, so the next pass resumes with
+     * exactly them and a fresh budget. Nothing is skipped, the cheap rows simply stop
+     * being held hostage.
+     */
+    const costOf = spec.money.costOf ?? (() => 0);
     const queue = from.rows
       .slice(0, spec.money.rows)
-      .map(accountOf)
-      .filter((name) => !done.has(name));
+      .filter((row) => !done.has(accountOf(row)))
+      .sort((a, b) => costOf(a) - costOf(b))
+      .map(accountOf);
 
     const deadline = Date.now() + MONEY_BUDGET_MS;
     const found = new Map<string, number>();
@@ -552,6 +577,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           // ★ BY AUTHOR: what THIS account's posts lost, summed from the posts themselves.
           kind: 'author',
           rows: MONEY_ROWS,
+          // ★ Same reason as the inquisitors board: @gangstalking's 234,242 received
+          // downvotes are the top row and the most expensive query on the board.
+          costOf: (row) => row.downvotes,
           merge: (row, usd) => ({ ...row, removedUsd: usd })
         },
         // ★ Keep what last week already proved about this account until this week
@@ -584,6 +612,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
            */
           kind: 'voter',
           rows: MONEY_ROWS,
+          costOf: (row) => row.downvotes,
           merge: (row, usd) => ({ ...row, removedUsd: usd })
         },
         // ★ Keep what last week already proved about this account until this week
