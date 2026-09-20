@@ -59,15 +59,41 @@ const MIN_AGE_DAYS = 90;
  * out-of-budget leaves the board at stage 2 and the next one resumes with the accounts it
  * never reached -- that is how the column converges instead of freezing.
  */
-export const MONEY_ROWS = 30;
-export const MONEY_BUDGET_MS = 30 * 60 * 1000;
+/**
+ * ★★★ ONE HUNDRED ROWS PER LIST, BUILT ONCE FOR EVERYONE (owner, 2026-09-19: "cant you
+ * build once for everyone for top 100 per list and then update the list 1 time every 3
+ * days or so").
+ *
+ * The expensive part of every board is the aggregate, not the row count: `TOP 100` costs
+ * essentially what `TOP 50` cost, because the database has already done the grouping
+ * either way. So the earlier design — build 50, and have SHOW MORE fire a second, deeper
+ * 150-row query — was paying twice for something it could have had once. The deep tier,
+ * its duplicate cache slots and the bug where one press left every later board requesting
+ * an unbuilt tier all went with it. SHOW MORE now reveals rows the reader already holds.
+ */
+export const BOARD_ROWS = 100;
+
+/*
+ * ★★★ EVERY ROW, NOT THE TOP THIRTY (owner, 2026-09-20: "build the fucking lists properly
+ * for all data points and all users", "i need you to populate all and then prperly
+ * populate it per week ... automatically").
+ *
+ * Thirty was a cost knob from when this pass ran behind whoever opened the page, and it
+ * meant seventy of a hundred rows carried a dash no matter how well the pass ran. The
+ * pass is now driven by the nightly timer, it resumes exactly where the last one stopped
+ * (`done` on disk), and the budget below is a wall clock rather than a row count -- so
+ * the honest setting is the whole board.
+ */
+export const MONEY_ROWS = BOARD_ROWS;
+export const MONEY_BUDGET_MS = 4 * 60 * 60 * 1000;
 
 /**
  * How many rows get a true top target, how many per statement, and how long the whole
  * pass may take. Each is an indexed TOP-1 aggregate over that voter's entire downvote
  * history, and the biggest of them has 1.7 million votes to group.
  */
-export const TOP_TARGET_ROWS = 25;
+/* ★ THE WHOLE BOARD, same reason as MONEY_ROWS above. */
+export const TOP_TARGET_ROWS = BOARD_ROWS;
 /*
  * ★★★ ONE NAME PER STATEMENT, AND A CEILING ON EACH, BECAUSE A CHUNK OF FOUR MEANT ONE
  * GIANT TOOK THREE INNOCENTS WITH IT (measured 2026-09-20).
@@ -119,24 +145,11 @@ const DOWNVOTE_COUNT_MS = 90 * 1000;
  * Server does not materialise a CTE, it re-executes it, so the 157s pair-collapse ran
  * twice and the statement timed out at 280s. It stays two passes.
  */
-export const TOP_TARGET_BUDGET_MS = 10 * 60 * 1000;
+export const TOP_TARGET_BUDGET_MS = 2 * 60 * 60 * 1000;
 
 /** The KE board's stake floor, in HP. Converted to VESTS at the live rate. */
 const KE_MIN_HP = 500;
 
-/**
- * ★★★ ONE HUNDRED ROWS PER LIST, BUILT ONCE FOR EVERYONE (owner, 2026-09-19: "cant you
- * build once for everyone for top 100 per list and then update the list 1 time every 3
- * days or so").
- *
- * The expensive part of every board is the aggregate, not the row count: `TOP 100` costs
- * essentially what `TOP 50` cost, because the database has already done the grouping
- * either way. So the earlier design — build 50, and have SHOW MORE fire a second, deeper
- * 150-row query — was paying twice for something it could have had once. The deep tier,
- * its duplicate cache slots and the bug where one press left every later board requesting
- * an unbuilt tier all went with it. SHOW MORE now reveals rows the reader already holds.
- */
-export const BOARD_ROWS = 100;
 
 export interface MutedRow {
   account: string;
