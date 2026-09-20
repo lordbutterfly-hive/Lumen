@@ -80,6 +80,18 @@ jobs:
         run: pnpm --filter @hive/blog run test:unit
       - name: Unit tests (packages/transaction)
         run: pnpm --filter @hive/transaction run test
+      # 2026-09-20: @hive/ui was never invoked here at all, so its 108 tests ran
+      # only when somebody remembered to by hand. Among them are the seven
+      # `?next=` vectors added in 9b1fcce that prove the sign-in open redirect
+      # stays closed -- `/\evil.com`, `/<TAB>/evil.com` and friends, which
+      # reached off-site on production until that commit. `@hive/blog`'s
+      # `test:unit` cannot reach them either: it globs `find lib` rooted at
+      # apps/blog, so packages/ui/lib is outside it. A future edit that reopened
+      # the redirect would have gone green. The path filter above is
+      # `frontend/**`, so this job already runs on a packages/ui change; only the
+      # step was missing. ~1s.
+      - name: Unit tests (packages/ui)
+        run: pnpm --filter @hive/ui run test
 
   recsys:
     needs: changes
