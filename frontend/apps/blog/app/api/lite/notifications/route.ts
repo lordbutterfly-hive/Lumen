@@ -10,9 +10,19 @@ import { viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { actorKey } from '@/blog/lib/lite/social/follow-actor';
 import { listByUser } from '@/blog/lib/lite/repositories/credential-repository';
 import { walletDid } from '@/blog/lib/lite/wallet/did-pkh';
+import {
+  DELIVERED_FOR_ASKS_QUERY,
+  MERITUM_NOTIFICATIONS_QUERY,
+  deliveredWhere,
+  meritumNotificationRows,
+  type AnsweredEvent,
+  type LumenNotificationRow,
+  type MeritumNotificationData
+} from '@/blog/lib/meritum/notification-rows';
 
 /**
- * ★★★ SOMEBODY BOUGHT YOUR MERITUM (2026-09-11, owner's request).
+ * ★★★ MERITUM EVENTS IN THE BELL (2026-09-11 bought; 2026-09-21 the whole order
+ * lifecycle: ordered, placed, delivered, declined, rated - owner's QA list).
  *
  * A buy is a CHAIN event, so it is not in the Lumen DB beside follows and DMs —
  * but it belongs in the same bell, and this is the route that already merges the
@@ -28,16 +38,6 @@ import { walletDid } from '@/blog/lib/lite/wallet/did-pkh';
  */
 const INDEXER_URL = process.env.REACT_APP_CREATOR_TOKENS_INDEXER_URL?.replace(/\/+$/, '');
 const CONTRACT_ID = process.env.REACT_APP_CREATOR_TOKENS_CONTRACT_ID;
-/** HBD carries 3 decimals; the indexer stores base units as strings. */
-const hbd = (baseUnits: string): number => Number(baseUnits || '0') / 1000;
-
-interface BoughtRow {
-  creator: string;
-  actor: string;
-  minted: string;
-  total_due: string;
-  indexer_ts: string;
-}
 
 /**
  * Every contract account id this reader owns a market under. A full Hive session
@@ -214,59 +214,41 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       logger.error(e, 'DM notifications lookup failed');
     }
 
-    // ── BUY rows: someone bought this creator's Meritum ──────────────────────
-    // Degrades open exactly like the DM half: a creator-token read that fails
-    // must not cost this reader their follows.
-    let buyRows: Array<{ type: 'buy'; msg: string; url: string; date: string; actor?: string; source: 'lumen' }> = [];
+    // ── MERITUM rows: bought / ordered / placed / delivered / declined / rated ──
+    // One indexer round trip for everything keyed by this reader's contract
+    // accounts, on BOTH sides of a request: the markets they own (someone bought,
+    // ordered, rated) and the asks they placed (placed, delivered, declined). A
+    // second, bounded read fetches the deliveries of the asks they placed, because
+    // an answered event carries the creator and seq but not the asker. The row
+    // text, the stable ids the bell's read marks key on, and the destinations are
+    // built in lib/meritum/notification-rows.ts, which is pure and unit-tested;
+    // this route only fetches. Degrades open exactly like the DM half.
+    let meritumRows: LumenNotificationRow[] = [];
     try {
-      const creatorKeys = await creatorKeysFor(actor as { userId?: string; hive?: string });
-      if (INDEXER_URL && CONTRACT_ID && creatorKeys.length > 0) {
-        const res = await fetch(`${INDEXER_URL}/v1/graphql`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            query: `query Bought($creators: [String!], $contract: String!) {
-              lumen_ct_bought_events(
-                where: { creator: { _in: $creators }, indexer_contract_id: { _eq: $contract } }
-                order_by: { indexer_ts: desc }
-                limit: 15
-              ) { creator actor minted total_due indexer_ts }
-            }`,
-            variables: { creators: creatorKeys, contract: CONTRACT_ID }
-          }),
-          signal: AbortSignal.timeout(6_000)
-        });
-        if (res.ok) {
-          const body = (await res.json()) as { data?: { lumen_ct_bought_events?: BoughtRow[] } };
-          buyRows = (body.data?.lumen_ct_bought_events ?? [])
-            // A creator buying their own token (the launch first-buy, or topping
-            // up) must not ping them about themselves.
-            .filter((r) => !creatorKeys.includes(r.actor))
-            .map((r) => {
-              const buyer = r.actor.startsWith('hive:') ? r.actor.slice(5) : r.actor;
-              const tokens = Number(r.minted || '0');
-              return {
-                type: 'buy' as const,
-                // Reads like every other row: actor first, then what they did.
-                msg: `${buyer} bought ${tokens === 1 ? 'a' : tokens} Meritum of yours for $${hbd(r.total_due).toFixed(2)}`,
-                // Their own market page, which is where a creator goes to see what
-                // just happened to their supply and price.
-                url: `creators/${creatorKeys[0].startsWith('hive:') ? creatorKeys[0].slice(5) : creatorKeys[0]}`,
-                // The indexer stores naive UTC, like the chain does. Say so, or the
-                // bell sorts it by the reader's own timezone offset.
-                date: r.indexer_ts.endsWith('Z') ? r.indexer_ts : `${r.indexer_ts}Z`,
-                // Only a Hive buyer has a handle the bell can draw a face from.
-                actor: r.actor.startsWith('hive:') ? buyer : undefined,
-                source: 'lumen' as const
-              };
-            });
-        }
+      const keys = await creatorKeysFor(actor as { userId?: string; hive?: string });
+      if (INDEXER_URL && CONTRACT_ID && keys.length > 0) {
+        const post = async (query: string, variables: unknown): Promise<Record<string, unknown> | null> => {
+          const res = await fetch(`${INDEXER_URL}/v1/graphql`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ query, variables }),
+            signal: AbortSignal.timeout(6_000)
+          });
+          if (!res.ok) return null;
+          const body = (await res.json()) as { data?: Record<string, unknown> };
+          return body.data ?? null;
+        };
+        const data = ((await post(MERITUM_NOTIFICATIONS_QUERY, { keys, contract: CONTRACT_ID })) ?? {}) as MeritumNotificationData;
+        const where = deliveredWhere(data.placed ?? [], CONTRACT_ID);
+        const second = where ? await post(DELIVERED_FOR_ASKS_QUERY, { where }) : null;
+        const delivered = (second?.delivered as AnsweredEvent[] | undefined) ?? [];
+        meritumRows = meritumNotificationRows({ ...data, delivered }, keys);
       }
     } catch (e) {
-      logger.error(e, 'buy notifications lookup failed');
+      logger.error(e, 'meritum notifications lookup failed');
     }
 
-    const merged = [...followRows, ...dmRows, ...buyRows].sort(
+    const merged = [...followRows, ...dmRows, ...meritumRows].sort(
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
     );
     return NextResponse.json({ notifications: merged });

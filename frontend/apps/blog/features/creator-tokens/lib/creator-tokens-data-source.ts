@@ -1,5 +1,5 @@
 import env from '@beam-australia/react-env';
-import type { AnswerInput, Ask, AskInput, BoardCreator, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, ContractRules, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput, CreatorPublicStats} from '../types';
+import type { AnswerInput, Ask, AskInput, BoardCreator, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, ContractRules, CreateOfferingInput, CreatorAskHistoryResult, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput, CreatorPublicStats} from '../types';
 import { MockCreatorTokensDataSource } from './mock/mock-data-source';
 import { hiveFundedTransactionBroadcaster, hiveTransactionBroadcaster, hiveTransactionBundleBroadcaster } from './vsc/broadcaster';
 import { routingBroadcaster } from './vsc/wallet-broadcaster';
@@ -66,8 +66,15 @@ export interface CreatorTokensDataSource {
   readWallet(holder: string): Promise<WalletPositionsResult>;
   /** A creator's own escrow inbox (UI-BRIEF Page 6), directly chain-readable via kSeq + e|creator|i. Rejects on a genuine read failure. */
   readCreatorAsks(creator: string): Promise<CreatorAsksResult>;
-  /** An asker's asks across every creator (UI-BRIEF Page 3). Indexer-backed; resolves { asks, unavailable } (same unavailable-vs-empty discriminator as readWallet). */
+  /** An asker's asks across every creator (UI-BRIEF Page 3). Indexer-backed; resolves { asks, unavailable } (same unavailable-vs-empty discriminator as readWallet). Each Ask carries the indexer row's `rating`. */
   readMyAsks(asker: string): Promise<MyAsksResult>;
+  /**
+   * Every ask ever placed WITH a creator, newest first, with each job's rating
+   * — the Studio's history, as distinct from readCreatorAsks (the inbox: chain
+   * state, actionable asks only, no ratings). Indexer-backed; resolves
+   * { asks, unavailable } like readMyAsks. Bounded to the newest ~100.
+   */
+  readCreatorAskHistory(creator: string): Promise<CreatorAskHistoryResult>;
   /** Answered-vs-missed history + response time. Not contract state (SPEC §1.7.1) — always indexer-backed; degrades to source:'unavailable'. */
   readDeliveryRecord(creator: string): Promise<DeliveryRecord>;
   /** Holders, holder count and first trade for the creator page. `source: 'unavailable'` on an indexer outage — never an empty answer dressed as data. */

@@ -460,6 +460,21 @@ export interface Ask {
   contentHash: string;
   answerHash: string | null;
   /**
+   * Which posted service this ask was placed against (packEscrow field 7).
+   * 0 is the reserved alias for the creator's legacy single face price, so a
+   * consumer that names the service must treat 0 as "no named service", not
+   * as offering #0.
+   */
+  offeringId: number;
+  /**
+   * The buyer's own 1-5 score for this job, or null when it is unrated OR when
+   * the read could not know (a chain-only read carries no ratings; only the
+   * indexer's `lumen_ct_my_asks` view joins them in). Never coalesce to 0: an
+   * unrated job and a job scored zero are different claims, and the contract
+   * refuses a score below 1 anyway (rating.go).
+   */
+  rating: number | null;
+  /**
    * Optimistic-write flag, same meaning as Market.pending. ask() also encodes
    * "unconfirmed" structurally (seq === -1 and an id ending `:pending`);
    * answer()/reclaim() set this on their expected post-state. READS never set it.
@@ -561,6 +576,40 @@ export interface CreatorAsksResult {
   scannedAll: boolean;
   /** Older escrows not read when `scannedAll` is false; 0 otherwise. */
   olderNotScanned: number;
+}
+
+/**
+ * One ask made TO a creator, as the indexer records it (`lumen_ct_my_asks`
+ * filtered by creator). This is the creator's HISTORY — every ask ever placed,
+ * resolved or not — where `CreatorAsksResult` above is the creator's INBOX
+ * (chain state, only what can still be acted on). The two are deliberately
+ * different reads: the inbox must be current to the block because an answer is
+ * a money action against it, and the history must include ratings, which live
+ * only in the indexer's join.
+ */
+export interface CreatorAskRow {
+  seq: number;
+  /** The buyer, as the contract keys it: `hive:<name>` or a full `did:pkh:…`. */
+  asker: string;
+  status: 'pending' | 'answered' | 'declined' | 'reclaimed';
+  /** The buyer's 1-5 score, or null when unrated. */
+  rating: number | null;
+  /** 0 = the creator's legacy face price (no named service). */
+  offeringId: number;
+  /** The indexer's own timestamp for the ask event (ISO-8601, no zone = UTC), or null when it has none. */
+  askedTs: string | null;
+  /** WHOLE TOKENS escrowed for this job (see ParsedEscrow.tokensEscrowed). */
+  creditsSpent: number;
+}
+
+/**
+ * The creator's ask history (readCreatorAskHistory). Same unavailable-vs-empty
+ * discriminator as MyAsksResult: an indexer outage is reported as one, never as
+ * "nobody has ever asked".
+ */
+export interface CreatorAskHistoryResult {
+  asks: CreatorAskRow[];
+  unavailable: boolean;
 }
 
 /**

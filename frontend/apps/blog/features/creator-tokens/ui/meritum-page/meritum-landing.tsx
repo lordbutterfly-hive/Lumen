@@ -92,6 +92,16 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
   const [dialog, setDialog] = useState<TokenDialog>(null);
   const [service, setService] = useState<Service | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  /**
+   * 1.1-1.3: the placed-ask receipt. `live.ask` only resolves once the chain
+   * has EXECUTED the write (use-live-token-market's runUnderTxClaim), so the
+   * escrow exists by the time this is set — which is exactly why the panel is
+   * allowed to promise there is nothing left to sign. `dueAt` is the buyer's
+   * own deadline projected forward at the contract's block time (28,800
+   * blocks/day, params.go BlocksPerDay); it is an estimate of a BLOCK height,
+   * so it is shown as a date and never as a countdown to the second.
+   */
+  const [askPlaced, setAskPlaced] = useState<{ dueAt: number } | null>(null);
   const pendingAction = useRef<TokenDialog>(null);
   // ★ A DEEP LINK OPENS ITS DIALOG ONCE (review, 2026-09-15). The effect below
   // depends on `loggedIn` and `writesBlocked`, both of which settle after
@@ -390,6 +400,44 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
         </div>
       </section>
 
+      {/* 1.1-1.3: an in-page receipt, not a second dialog. It scrolls itself
+          into view because the modal that produced it has just closed and the
+          reader's scroll position is wherever the ask card was. Dismissible
+          rather than auto-dismissing: it carries the only link to the screen
+          that tracks the escrow, and a link that disappears on a timer is a
+          link the reader has to go and find again. */}
+      {askPlaced ? (
+        <div
+          role="status"
+          aria-live="polite"
+          ref={(n) => n?.scrollIntoView({ block: 'nearest' })}
+          className="mt-5 flex flex-wrap items-start justify-between gap-4 rounded-[14px] border border-line-ok-2 bg-surface-ok-4 px-6 py-[18px]"
+          data-testid="meritum-ask-placed"
+        >
+          <div className="min-w-0">
+            <div className="font-ui text-[15px] leading-[24px] font-semibold text-ink-2">{COPY.askPlacedTitle}</div>
+            <p className="mt-1 max-w-[62ch] font-ui text-[14px] leading-[22px] text-ink-7">{COPY.askPlacedBody(shown)}</p>
+            <p className="mt-1 font-ui text-[14px] leading-[22px] text-ink-7">
+              {COPY.askPlacedDue(shown, new Date(askPlaced.dueAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))}
+            </p>
+            <Link
+              href={COPY.askPlacedTrackHref}
+              className="mt-2 inline-block font-ui text-[14px] leading-[22px] font-medium text-ink-brand-6 underline"
+              data-testid="meritum-ask-placed-track"
+            >
+              {COPY.askPlacedTrack}
+            </Link>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAskPlaced(null)}
+            className="shrink-0 rounded-full border border-line-11 bg-surface-1 px-4 py-2 font-ui text-caption font-medium text-ink-7 hover:bg-surface-23"
+          >
+            {COPY.askPlacedDismiss}
+          </button>
+        </div>
+      ) : null}
+
       {market.position ? (
         <div className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-[14px] border border-line-9 bg-surface-12 px-6 py-[18px]" data-testid="meritum-position">
           <div className="font-ui text-[15px] leading-[24px] text-ink-7">
@@ -470,9 +518,14 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
                 })}
               </div>
               {writeBlockedReason ? <p className="mt-3 font-ui text-caption font-medium text-ink-10">{blockedNotice}</p> : null}
+              {/* ★ THE COMMISSION IS A SHARE OF THE TOKENS, NOT A SECOND HBD LEG
+                  (OWNER RULING 2026-09-12, core/params.go CommissionBps). This line
+                  still told buyers to hold HBD for a 12% leg that no longer exists,
+                  which is the one thing the ruling removed so a token holder can buy
+                  a service with the tokens they already hold. */}
               <p className="mt-3 font-ui text-[13px] leading-[1.58] text-ink-14">
-                Prices are set in dollars: the total you’ll pay. 12% goes to Lumen as a separate platform commission, paid in HBD; the rest is spent in
-                tokens, and as the token’s price rises a service costs fewer of them.
+                Prices are set in dollars and paid in tokens: the posted price is your total. Lumen’s 12% is carved out of those tokens, never added on
+                top, and as the token’s price rises a service costs fewer of them.
               </p>
             </section>
           ) : null}
@@ -528,7 +581,11 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
                     Declined <span className="font-num">{d.declinedCount}</span> {d.declinedCount === 1 ? 'request' : 'requests'}
                   </div>
                 ) : null}
-                <p className="mt-3.5 font-ui text-[13px] text-ink-14">{d.completionPct !== null ? COPY.deliveryWhy : COPY.deliveryEmpty}</p>
+                {/* QA 9: the "why the token is worth holding" line is GONE, not
+                    reworded. Under a real record it editorialised about a number the
+                    reader can already read; the empty case still needs its sentence,
+                    which is the only thing that survives here. */}
+                {d.completionPct === null ? <p className="mt-3.5 font-ui text-[13px] text-ink-14">{COPY.deliveryEmpty}</p> : null}
               </>
             ) : (
               <div className="mt-[18px] rounded-control border border-dashed border-line-11 px-4 py-3 font-ui text-caption text-ink-14">{COPY.deliveryUnavailable}</div>
@@ -587,9 +644,12 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
         onBuy={handleBuy}
         onSell={handleSell}
         onRedeem={handleRedeem}
-        onSpend={({ offeringId, deadlineDays, usd, question }) =>
-          live.ask({ offeringId, contentHash: askReference(question), deadlineDays, maxCostUsd: usd })
-        }
+        onSpend={async ({ offeringId, deadlineDays, usd, question }) => {
+          await live.ask({ offeringId, contentHash: askReference(question), deadlineDays, maxCostUsd: usd, question });
+          // Only on the RESOLVED write. A rejection propagates to the modal,
+          // which keeps itself open and names the real reason.
+          setAskPlaced({ dueAt: Date.now() + deadlineDays * 86_400_000 });
+        }}
         onTransfer={(to, tokens) => live.transfer(to, tokens)}
         quoteAsk={live.quoteAsk}
         onClose={() => {

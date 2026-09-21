@@ -756,7 +756,13 @@ export function unknownMarket(creator: string): Market {
   };
 }
 
-export function buildAskFromParsed(creator: string, seq: number, parsed: ParsedEscrow, head: number | null): Ask {
+/**
+ * `rating` is the ONE field an escrow record cannot supply: the contract keeps
+ * ratings under their own key (rating.go) and no chain read here joins them, so
+ * a chain-only caller leaves it null (= "not known here", see Ask.rating) and
+ * the indexer-backed readMyAsks passes the row's own score through.
+ */
+export function buildAskFromParsed(creator: string, seq: number, parsed: ParsedEscrow, head: number | null, rating: number | null = null): Ask {
   const reclaimableAtBlock = parsed.deadlineBlock + RECLAIM_GRACE_BLOCKS;
   // A stored status (ANSWERED/RECLAIMED) is a fact regardless of head; only
   // the PENDING -> awaiting/reclaimable split needs "now" — default to the
@@ -787,7 +793,9 @@ export function buildAskFromParsed(creator: string, seq: number, parsed: ParsedE
     reclaimableAt: blockToEpochMs(reclaimableAtBlock, head),
     status,
     contentHash: parsed.contentHash,
-    answerHash: parsed.answerHash || null
+    answerHash: parsed.answerHash || null,
+    offeringId: parsed.offeringId,
+    rating
   };
 }
 

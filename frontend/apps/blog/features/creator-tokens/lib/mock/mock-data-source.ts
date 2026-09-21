@@ -1,5 +1,5 @@
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
-import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, CreateOfferingInput, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchOfferingResult, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput, CreatorPublicStats } from '../../types';
+import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, CreateOfferingInput, CreatorAskHistoryResult, CreatorAskRow, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchOfferingResult, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput, CreatorPublicStats } from '../../types';
 import type { CreatorTokensDataSource } from '../creator-tokens-data-source';
 import {
   BLOCKS_PER_DAY,
@@ -424,7 +424,9 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       reclaimableAt: blockToEpochMs(reclaimableAtBlock, head),
       status: deriveAskStatus(s.rawStatus, deadlineBlock, head),
       contentHash: s.contentHash,
-      answerHash: s.answerHash
+      answerHash: s.answerHash,
+      offeringId: s.offeringId ?? 0,
+      rating: s.rating ?? null
     };
   }
 
@@ -455,6 +457,38 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       seeds.filter((s) => s.asker === asker).forEach((s) => out.push(this.buildAsk(creator, s, head)));
     }
     return { asks: out.sort((a, b) => b.deadlineBlock - a.deadlineBlock), unavailable: false };
+  }
+
+  async readCreatorAskHistory(creator: string): Promise<CreatorAskHistoryResult> {
+    await delay(150);
+    // The failed-read fixture reports an outage, as the live source does when
+    // the indexer is down; everything else is the seeds, newest first, in the
+    // indexer row shape (the mock's "indexer" is the same seed list the chain
+    // reads come from, so the two can never disagree).
+    if (creator === MOCK_UNKNOWN) return { asks: [], unavailable: true };
+    const head = mockHeadBlock();
+    const seeds = getStorageItem<AskSeed[]>(asksKey(creator)) ?? ASK_SEEDS[creator] ?? [];
+    const rowStatus: Record<AskSeed['rawStatus'], CreatorAskRow['status']> = {
+      PENDING: 'pending',
+      ANSWERED: 'answered',
+      DECLINED: 'declined',
+      RECLAIMED: 'reclaimed'
+    };
+    const asks: CreatorAskRow[] = seeds
+      .slice()
+      .sort((a, b) => b.seq - a.seq)
+      .map((s) => ({
+        seq: s.seq,
+        asker: s.asker,
+        status: rowStatus[s.rawStatus],
+        rating: s.rating ?? null,
+        offeringId: s.offeringId ?? 0,
+        // The seed's deadline is relative to head; the ask itself opened one
+        // deadline-span earlier, which is the ordering the row is read in.
+        askedTs: new Date(blockToEpochMs(head + s.deadlineDeltaBlocks - BLOCKS_PER_DAY, head)).toISOString(),
+        creditsSpent: s.creditsBaseUnits
+      }));
+    return { asks, unavailable: false };
   }
 
   async readCreatorPublicStats(creator: string): Promise<CreatorPublicStats> {
@@ -836,6 +870,7 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       creditsBaseUnits: quote.creditsRequiredBaseUnits,
       deadlineDeltaBlocks: input.deadlineBlocks,
       rawStatus: 'PENDING',
+      offeringId: input.offeringId ?? 0,
       contentHash: input.contentHash,
       answerHash: null
     };

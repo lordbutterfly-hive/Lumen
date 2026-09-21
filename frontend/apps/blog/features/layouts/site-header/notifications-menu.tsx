@@ -28,6 +28,7 @@ import BasePathLink from '@/blog/components/base-path-link';
 import TimeAgo from '@ui/components/time-ago';
 import { UserAvatarImg } from '@ui/components';
 import type { LumenNotification } from './use-lumen-notifications';
+import { MERITUM_TYPES } from '@/blog/lib/meritum/notification-rows';
 import type { IAccountNotification } from '@hive/common-hiveio-packages/wax';
 import { handleError } from '@ui/lib/handle-error';
 import { useTranslation } from '@/blog/i18n/client';
@@ -280,7 +281,7 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
               {merged.map((row) =>
                 row.kind === 'lumen' ? (
                   <BasePathLink
-                    key={`lumen-${row.item.url}-${row.item.date}`}
+                    key={`lumen-${row.item.id ?? row.item.url}-${row.item.date}`}
                     href={`/${row.item.url}`}
                     className="flex items-center gap-3 px-4 py-3 font-sans text-sm hover:bg-surface-21"
                   >
@@ -299,8 +300,9 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
                             carry — the same glyph the left rail uses for the
                             feature, so a buy row is recognisable as one at a
                             glance the way a vote or a reply already is. Only on
-                            BUY rows: a follow is not a Meritum event. */}
-                        {row.item.type === 'buy' ? (
+                            Meritum rows (a buy, an order, a delivery, a rating):
+                            a follow is not a Meritum event. */}
+                        {MERITUM_TYPES.has(row.item.type) ? (
                           <CreatorTokenLaurel size={16} className="shrink-0 text-ink-brand-6" />
                         ) : null}
                         <TimeAgo date={row.item.date} numeric="always" />

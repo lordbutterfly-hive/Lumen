@@ -208,6 +208,10 @@ export interface AskSeed {
   rawStatus: 'PENDING' | 'ANSWERED' | 'RECLAIMED' | 'DECLINED';
   /** The asker's hold clock, carried through the escrow (packEscrow field 6). Optional in fixtures; absent reads as 0 == maximally fresh, the safe direction. */
   acqBlock?: number;
+  /** The named service asked against (packEscrow field 7). Absent reads as 0, the legacy face price. */
+  offeringId?: number;
+  /** The buyer's 1-5 score. Absent reads as null (unrated) — never 0. */
+  rating?: number | null;
   contentHash: string;
   answerHash: string | null;
 }
@@ -242,7 +246,10 @@ export const ASK_SEEDS: Record<string, AskSeed[]> = {
       deadlineDeltaBlocks: -1 * BLOCKS_PER_DAY,
       rawStatus: 'ANSWERED',
       contentHash: 'cid-answered-1',
-      answerHash: 'ans-hash-1'
+      answerHash: 'ans-hash-1',
+      // One rated job, so the demo shows what a score looks like beside an
+      // unrated one; the mock's rate() itself is a no-op.
+      rating: 5
     },
     {
       seq: 2,

@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { Service } from '../../market/token-detail';
 import { displayHandle, type LiveTokenMarket } from '../../live/adapt';
 import { buyQuote, minBuyUsd, sellQuote, serviceQuote, EXIT_FEE_MAX, MIN_NET_DEFAULT_TOLERANCE_BPS } from '../../market/curve';
-import { TRADE_FEE_BPS } from '../../lib/contract-math';
+import { COMMISSION_BPS, TRADE_FEE_BPS } from '../../lib/contract-math';
 
 /**
  * ★ DERIVED, NEVER TYPED OUT (2026-09-11). Both fee rows below read "Trade fee
@@ -15,6 +15,41 @@ import { TRADE_FEE_BPS } from '../../lib/contract-math';
  * can never disagree again.
  */
 const TRADE_FEE_PCT = `${Number((TRADE_FEE_BPS / 100).toFixed(2))}%`;
+/**
+ * ★★★ THE MISS SLICE, MIRRORED FROM THE CONTRACT (5.2 / 13-D).
+ *
+ * core/ask.go Reclaim (the `slice` block, ~873-881) keeps
+ * `max(1, ceil(commission x MissReclaimSliceBps / 10000))` out of an escrow
+ * reclaimed after a MISS, clamped to the escrow's own credits; `commission` is
+ * the escrow's held share, `floor(credits x CommissionBps / 10000)` (ask.go:543,
+ * contract-math's commissionOwedForBaseUnits). CommissionBps is 1200 and
+ * MissReclaimSliceBps is 2500 (core/params.go), so the slice is 3% of the
+ * escrow — except that it is not, at the small end, which is the entire reason
+ * this is computed rather than written as "3%":
+ *
+ *  - the commission FLOORS to zero at eight tokens or fewer, so v5.1
+ *    (2026-09-18) put a ONE TOKEN floor under the slice. Three unanswered
+ *    one-token asks used to shut a creator's inflows for seven days at a cost
+ *    to the griefer of exactly nothing.
+ *  - the ceiling means a 10-token escrow keeps 1 token (10%), not 0.3.
+ *
+ * `commissionTokens` is the chain's own `commissionCredits` off the live quote
+ * when we have it; the formula is only the fallback, and it is the contract's
+ * formula, not an approximation of it.
+ *
+ * MissReclaimSliceBps has no mirror in contract-math.ts (COMMISSION_BPS does),
+ * so it is named here with its source rather than inlined as a magic 2500.
+ */
+const MISS_RECLAIM_SLICE_BPS = 2_500; // core/params.go MissReclaimSliceBps — 25% of the HELD commission
+function missReclaimSliceTokens(escrowTokens: number, commissionTokens: number | null): number {
+  const tokens = Number.isFinite(escrowTokens) ? Math.max(0, Math.floor(escrowTokens)) : 0;
+  if (tokens <= 0) return 0;
+  const commission =
+    commissionTokens !== null && Number.isFinite(commissionTokens)
+      ? Math.max(0, Math.floor(commissionTokens))
+      : Math.floor((tokens * COMMISSION_BPS) / 10_000);
+  return Math.min(tokens, Math.max(1, Math.ceil((commission * MISS_RECLAIM_SLICE_BPS) / 10_000)));
+}
 /** The creator's half and Lumen's half of it, derived the same way — tradefee.go splits floor(fee/2) to the creator and the odd base unit to the platform. */
 const TRADE_FEE_HALF_PCT = `${Number((TRADE_FEE_BPS / 200).toFixed(2))}%`;
 // usdWhole is gone from this file: the Ask card's posted price is now exact
@@ -99,7 +134,7 @@ const ConfirmingOnChain: FC = () => (
   </div>
 );
 
-const ModalHead: FC<{ title: string; onClose: () => void }> = ({ title, onClose }) => (
+export const ModalHead: FC<{ title: string; onClose: () => void }> = ({ title, onClose }) => (
   <div className="flex items-center justify-between px-6 pt-[22px]">
     <div className="font-ui text-[22px] leading-[32px] font-medium text-ink-2">{title}</div>
     <button
@@ -1013,12 +1048,17 @@ const AskModal: FC<{
           className="h-[120px] w-full resize-y rounded-xl border border-line-11 px-4 py-3.5 font-ui text-[15px] leading-[24px] text-ink-2 outline-none focus-visible:outline-none focus:border-line-brand-10"
         />
         <div className="my-2 mb-3.5 text-caption text-ink-14 font-ui">
-          {/* ★ HONESTY FIX: the old copy claimed the text was "Stored on Lumen".
-              It is NOT: the question plaintext is discarded, and only a content
-              hash (a receipt) is recorded on-chain (see live/adapt.ts:387 and
-              token-market-view.tsx's onSpend -> askReference). The reworded line
-              makes no storage claim it cannot keep. */}
-          Private: your question text isn&rsquo;t stored on Lumen or on-chain. Only a short fingerprint of it is recorded on-chain, as a receipt, so keep your own copy.
+          {/* ★ THE MESSAGE IS STORED AGAIN, SO THE LINE HAD TO CHANGE. The ask
+              mutation now posts the buyer's text to Lumen alongside the write,
+              keyed by the same content hash, so the creator reads the request
+              beside the escrow it paid for (live/use-ask-notes.ts) instead of
+              receiving a fingerprint and no brief. The previous line — "isn't
+              stored on Lumen or on-chain" — became false the moment that
+              shipped, and a privacy claim that is false is worse than none.
+              WHAT GOES ON CHAIN IS UNCHANGED: askReference()'s short
+              fingerprint, never the text. */}
+          Your message is stored on Lumen so @{displayHandle(m.handle)} can read it with your request. Only a short fingerprint of it goes
+          on-chain.
         </div>
         {/* ★ THE REFUSAL REPLACES THE PRICE, it does not sit under one. Leaving a
             cost sentence on screen beside "this cannot be bought" is the same
@@ -1078,8 +1118,12 @@ const AskModal: FC<{
                 goes to the treasury on a miss. The credits/tokens DO return whole (returned
                 above that line, untouched). The slice applies only when `rec.asker != creator`,
                 so asking yourself is genuinely free — an edge case not worth a sentence here. */}{' '}
-            If it&rsquo;s unanswered by your deadline you can reclaim your tokens in full and 75% of the
-            commission. The platform keeps 25% so a missed deadline cannot be manufactured for free.
+            Once sent, this can&rsquo;t be cancelled. If @{displayHandle(m.handle)} declines, every token comes back. If
+            they haven&rsquo;t answered by your deadline, you can reclaim about an hour later and get{' '}
+            <strong className="tabular-nums font-num">{Math.max(0, chainTokens - missReclaimSliceTokens(chainTokens, commissionTokens))}</strong> of the{' '}
+            <strong className="tabular-nums font-num">{chainTokens}</strong> tokens back; the platform keeps{' '}
+            <strong className="tabular-nums font-num">{missReclaimSliceTokens(chainTokens, commissionTokens)}</strong> so a missed deadline can&rsquo;t be
+            manufactured for free, and the miss goes on their record.
         </div>
         )}
         <label className="mb-2 block text-caption font-medium text-ink-10 font-ui">Answer due within</label>

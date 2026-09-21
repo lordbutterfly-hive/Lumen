@@ -20,12 +20,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
 import { useTokenAccounts } from './use-token-accounts';
-import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
+import { getCreatorTokensDataSource, type CreatorTokensDataSource } from '../lib/creator-tokens-data-source';
 import { BLOCKS_PER_DAY } from '../lib/contract-math';
 import type { Ask, LaunchResult, Market, Offering, QuoteOracleStatus } from '../types';
 import { adaptAsk, adaptMarket, blocksToDays, usdFromHbd, type LiveTokenMarket } from './adapt';
 import type { PortfolioAsk } from '../market/portfolio';
-import type { LiveMarketStatus } from './use-live-token-market';
+// `deliveryKey` is IMPORTED rather than re-declared here. The delivery record is
+// read on TWO screens — the Overview stat below and the creator's own public
+// Meritum page — and an answer moves it on both. Two copies of one key is how a
+// write refreshes the Studio's cache entry and leaves the public page still
+// showing the record as it was before the job was delivered.
+import { deliveryKey, type LiveMarketStatus } from './use-live-token-market';
 import { collapseRead } from './collapse-read';
 import { runUnderTxClaim } from './tx-claim';
 
@@ -36,7 +41,12 @@ const offeringsKey = (creator: string) => ['creatorTokens', 'live', 'offerings',
 // read the SAME cache entry — two keys for one fact is how the Studio and the shop
 // end up disagreeing about what a service says.
 const descriptionsKey = (creator: string) => ['creatorTokens', 'live', 'offeringDescriptions', creator];
-const deliveryKey = (creator: string) => ['creatorTokens', 'live', 'delivery', creator];
+// The creator's ask HISTORY — every ask made to them, including the ones that
+// have already resolved. Deliberately NOT `asksKey` above: that read is live
+// contract state, which only holds escrows that are still open (a resolved
+// escrow is deleted), so an answered job exists nowhere except the indexer's
+// replay of it. Separate key, separate availability, separate failure.
+const askHistoryKey = (creator: string) => ['creatorTokens', 'live', 'creatorAskHistory', creator];
 const feeKey = (account: string) => ['creatorTokens', 'live', 'feeBalance', account];
 // The creator's own holding in their own market. Same key SHAPE as
 // use-live-token-market's positionKey (creator + holder), because it is the same
@@ -49,10 +59,93 @@ const quoteKey = (creator: string) => ['creatorTokens', 'live', 'studioQuote', c
 const REFETCH_MS = 30_000;
 const STALE_MS = 15_000;
 
+/**
+ * One ask made TO this creator, as the indexer replays it — including the ones
+ * that have resolved and therefore no longer exist in contract state.
+ *
+ * Mirrors the data layer's `CreatorAskRow` field for field; it is declared here
+ * rather than imported because this hook and that read landed in the same pass.
+ * Replace it with the import once the type is in ../types — the two must never
+ * be allowed to drift into two different ideas of what a delivered job is.
+ *
+ * `rating` is the BUYER's score for the job, 1-5, or null while nobody has
+ * rated it. NEVER 0: a 0 would render as "rated, and badly", which is the same
+ * libel `DeliveryRecord.avgRating` is null-not-zero for.
+ */
+export interface StudioAskRow {
+  seq: number;
+  asker: string;
+  status: 'pending' | 'answered' | 'declined' | 'reclaimed';
+  rating: number | null;
+  /** 0 = the creator's posted face price ("Ask a question"); anything else is a named offering. */
+  offeringId: number;
+  /** When the buyer opened the ask (ISO), or null when the replay cannot date it. */
+  askedTs: string | null;
+  /** Whole tokens the buyer spent on it. */
+  creditsSpent: number;
+}
+
+/** The two doors the history can arrive through — see `readAskHistory` below. */
+export interface StudioAskHistory {
+  rows: StudioAskRow[];
+  unavailable: boolean;
+}
+
+/** Shape-checked, never cast: a row that does not carry the fields the list renders is dropped, not rendered as zeros. */
+function toAskRow(value: unknown): StudioAskRow | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const r = value as Record<string, unknown>;
+  const status = r.status;
+  if (status !== 'pending' && status !== 'answered' && status !== 'declined' && status !== 'reclaimed') return null;
+  if (typeof r.seq !== 'number' || typeof r.asker !== 'string') return null;
+  return {
+    seq: r.seq,
+    asker: r.asker,
+    status,
+    rating: typeof r.rating === 'number' && Number.isFinite(r.rating) ? r.rating : null,
+    offeringId: typeof r.offeringId === 'number' ? r.offeringId : 0,
+    askedTs: typeof r.askedTs === 'string' ? r.askedTs : null,
+    creditsSpent: typeof r.creditsSpent === 'number' ? r.creditsSpent : 0
+  };
+}
+
+/**
+ * THE SEAM with the indexer-backed ask history.
+ *
+ * That read was built alongside this hook, so the door it arrives through is
+ * taken as it is found rather than assumed: a dedicated method if the data
+ * layer grew one, otherwise the `rows` the creator-asks read carries beside its
+ * live escrows. Both are the same answer.
+ *
+ * WHEN NEITHER IS THERE, THIS IS `unavailable`, NOT AN EMPTY HISTORY. An empty
+ * list would tell a creator who has delivered twenty jobs that they have
+ * delivered none — the same unavailable-vs-empty rule the inbox, the wallet and
+ * the delivery record are all already held to (RULE: unavailable ≠ empty).
+ */
+async function readAskHistory(source: CreatorTokensDataSource, creator: string): Promise<StudioAskHistory> {
+  // Every ask ever made to this creator, from the indexer (lumen_ct_my_asks by
+  // creator): the delivered list with each buyer's rating comes from here, not
+  // from the chain inbox scan, which stops at PENDING escrows.
+  const result = await source.readCreatorAskHistory(creator);
+  return {
+    rows: result.asks.map(toAskRow).filter((r): r is StudioAskRow => r !== null),
+    unavailable: result.unavailable
+  };
+}
+
 export interface LiveStudio {
   status: LiveMarketStatus;
   /** The signed-in creator. All studio actions are self-signed, so this is both the subject and the signer. */
   creator: string | null;
+  /**
+   * The identity the CONTRACT keys this market by: a wallet-backed creator's
+   * `did:pkh`, a Hive creator's own name. Every read and every invalidation in
+   * here is keyed on it, and anything OUTSIDE the hook that looks up data about
+   * this market has to use it too — a wallet creator's Lumen display name finds
+   * nothing and returns a silent zero rather than an error (see the note on
+   * `creatorAccount` below for the market this cost its owner).
+   */
+  creatorAccount: string | null;
   loggedIn: boolean;
   isLite: boolean;
   /**
@@ -110,6 +203,17 @@ export interface LiveStudio {
   inboxTruncated: boolean;
   /** Older escrows left unread when `inboxTruncated`; 0 otherwise. */
   inboxOlderNotScanned: number;
+  /**
+   * Every ask that has RESOLVED — answered, declined or reclaimed — as the
+   * indexer replays it. Contract state cannot answer this: the escrow record is
+   * gone the moment a job closes, which is exactly why the Inbox above only
+   * ever holds open ones.
+   */
+  askHistory: StudioAskRow[];
+  /** The history read has not succeeded, so an empty `askHistory` means UNKNOWN — never "you have delivered nothing". */
+  askHistoryUnavailable: boolean;
+  /** The first history read is still in flight. Distinct from `askHistoryUnavailable`: one is "not yet", the other is "we asked and could not get it". */
+  askHistoryLoading: boolean;
   /**
    * The creator's own holding could not be read — NOT a zero balance. Mirrors
    * use-live-token-market's flag of the same name; `readHolderPosition` rejects on
@@ -311,6 +415,24 @@ export function useLiveStudio(): LiveStudio {
     staleTime: STALE_MS
   });
 
+  /**
+   * The DELIVERED list under the Inbox's Requests tab: the jobs this creator has
+   * already answered, plus the declines and the misses behind them.
+   *
+   * Same cadence as every other read here, and gated the same way — it is a
+   * history, but it changes the moment the creator answers something, and a
+   * creator who has just banked a job and sees nothing in Delivered concludes it
+   * did not land. `invalidate()` below refreshes it on the write itself; the
+   * poll is the backstop for an answer made in another tab.
+   */
+  const askHistoryQuery = useQuery({
+    queryKey: askHistoryKey(creatorAccount ?? ''),
+    queryFn: () => readAskHistory(dataSource!, creatorAccount as string),
+    enabled: enabled && !readFailed,
+    staleTime: STALE_MS,
+    refetchInterval: REFETCH_MS
+  });
+
   // ★★★ THE STUDIO RENDERS THE CREATOR'S OWN HOLDING AND USED TO READ IT AS ZERO
   // (2026-08-30, clauderfly-43). `position: null` was passed into adaptMarket below
   // with a comment saying this screen does not render a position. It does, twice, on
@@ -457,6 +579,20 @@ export function useLiveStudio(): LiveStudio {
     // a service can be priced — so the shop's own availability is invalidated with
     // everything else a write touches.
     queryClient.invalidateQueries({ queryKey: quoteKey(creatorAccount) });
+    // ★★★ THE DELIVERY RECORD WAS NEVER INVALIDATED (2026-09-21). Answering a
+    // job is the single event that moves it, and the record is read in two
+    // places at once: the Overview's "Delivery" stat here, and the creator's own
+    // public Meritum page, which a creator very often has open in another tab
+    // while they work through their inbox. Neither refreshed until a reload, so
+    // the screen a creator checks to confirm the answer landed went on showing
+    // the record as it was before it. The KEY IS THE PUBLIC HOOK'S OWN, imported
+    // at the top of this file, so one invalidation reaches both cache entries.
+    // (The record is an indexer replay, so it can lag the answer by a block or
+    // two; the public page polls on the same 30s cadence and catches up.)
+    queryClient.invalidateQueries({ queryKey: deliveryKey(creatorAccount) });
+    // The answered job leaves the inbox and appears under Delivered, so the two
+    // lists have to move together or one of them is lying for up to 30 seconds.
+    queryClient.invalidateQueries({ queryKey: askHistoryKey(creatorAccount) });
   }, [queryClient, creatorAccount]);
 
   const requireSigner = useCallback((): { source: NonNullable<typeof dataSource>; signer: string } => {
@@ -518,6 +654,7 @@ export function useLiveStudio(): LiveStudio {
   return {
     status,
     creator,
+    creatorAccount,
     loggedIn,
     isLite,
     canSign: signingAccount !== null,
@@ -529,6 +666,17 @@ export function useLiveStudio(): LiveStudio {
     inboxUnavailable,
     inboxTruncated,
     inboxOlderNotScanned,
+    // ★ Same unavailable-vs-empty rule as the inbox two lines up: `readAskHistory`
+    // resolves an `unavailable` flag rather than rejecting, and a rejected query
+    // counts as unavailable too, so an empty Delivered list is only ever shown
+    // for a creator who genuinely has not delivered anything yet.
+    askHistory: askHistoryQuery.data?.rows ?? [],
+    askHistoryUnavailable: askHistoryQuery.isError || askHistoryQuery.data?.unavailable === true,
+    // `isLoading` ALONE IS TRUE FOREVER ON A DISABLED QUERY in react-query v4
+    // (status 'loading' means "no data yet", not "fetching"), which would leave
+    // the list saying "Loading…" on a screen that is never going to load it.
+    // `fetchStatus` is the field that means a request is actually in flight.
+    askHistoryLoading: askHistoryQuery.isLoading && askHistoryQuery.fetchStatus !== 'idle',
     // ★ H9 / SD-1 (2026-08-31): `data === undefined`, NOT `isError`. isError is
     // false WHILE the read is still in flight, so a three-state read (loading /
     // failed / answered) rendered its loading state through the answered branch:
@@ -714,7 +862,8 @@ export function useLiveStudio(): LiveStudio {
         // "Try again" must retry the holding too, or a creator whose position
         // read is the one that failed presses it and nothing changes.
         positionKey(creatorAccount ?? ''),
-        quoteKey(creatorAccount ?? '')
+        quoteKey(creatorAccount ?? ''),
+        askHistoryKey(creatorAccount ?? '')
       ]) {
         queryClient.invalidateQueries({ queryKey: key });
       }

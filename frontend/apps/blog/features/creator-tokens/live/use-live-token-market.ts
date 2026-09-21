@@ -32,6 +32,7 @@ import { adaptMarket, displayHandle, type LiveTokenMarket } from './adapt';
 import { buyerOracleNotice } from '../market/oracle-copy';
 import { runUnderTxClaim } from './tx-claim';
 import { magiSpendingPowerKey } from './use-magi-spending-power';
+import { postAskNote } from './use-ask-notes';
 
 export type LiveMarketStatus =
   /** No contract provisioned and no dev demo flag — the feature is not available in this build. */
@@ -78,7 +79,7 @@ const offeringsKey = (creator: string) => ['creatorTokens', 'live', 'offerings',
  * byte), so the prose lives in Lumen and the chain keeps the identity.
  */
 export const offeringDescriptionsKey = (creator: string) => ['creatorTokens', 'live', 'offeringDescriptions', creator];
-const deliveryKey = (creator: string) => ['creatorTokens', 'live', 'delivery', creator];
+export const deliveryKey = (creator: string) => ['creatorTokens', 'live', 'delivery', creator];
 const historyKey = (creator: string) => ['creatorTokens', 'live', 'priceHistory', creator];
 
 // A market's phase and price move with the curve, not with a ticker, so a 30s
@@ -172,7 +173,7 @@ export interface LiveTokenMarketResult {
    */
   refund: (tokens: number, minNetUsd?: number) => Promise<void>;
   /** Opens an escrowed ask against `offeringId` (0 = the creator's legacy face price). */
-  ask: (input: { offeringId: number; contentHash: string; deadlineDays: number; maxCostUsd: number }) => Promise<void>;
+  ask: (input: { offeringId: number; contentHash: string; deadlineDays: number; maxCostUsd: number; question?: string }) => Promise<void>;
   transfer: (to: string, tokens: number) => Promise<void>;
 
   isBuying: boolean;
@@ -284,7 +285,10 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
     queryKey: deliveryKey(creator),
     queryFn: () => dataSource!.readDeliveryRecord(creator),
     enabled: enabled && !readFailed,
-    staleTime: STALE_MS
+    staleTime: STALE_MS,
+    // The record changes when the CREATOR answers, on a different page, so an
+    // open Meritum page has to keep asking; without this it read once and held.
+    refetchInterval: REFETCH_MS
   });
 
   // Price history is the ONLY read here that is allowed to fail without
@@ -515,7 +519,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   // registration until its creator retires it.
 
   const askMutation = useMutation({
-    mutationFn: async (input: { offeringId: number; contentHash: string; deadlineDays: number; maxCostUsd: number }) => {
+    mutationFn: async (input: { offeringId: number; contentHash: string; deadlineDays: number; maxCostUsd: number; question?: string }) => {
       const { source, signer } = requireSigner();
       // F4 fix (2026-08-19): maxCreditsBaseUnits used to be built as
       // `humanToBaseUnits(input.maxCostUsd)` — an HBD-milliunit number, while
@@ -562,6 +566,25 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
         // is always safe to pass through as-is.
         offeringId: input.offeringId
       }));
+      // ★ THE MESSAGE GOES WITH THE REQUEST (2026-09-21, owner's QA list 3.2/3.3).
+      // The chain holds only `contentHash`, the fingerprint of the text; the text
+      // itself is filed on Lumen behind that same reference, once the escrow
+      // exists, so the creator reads the brief beside the escrow it paid for
+      // (app/api/creator-tokens/ask-note). Tried twice: the store is a separate
+      // service from the chain and a blip must not lose a message the buyer has
+      // already paid to send. If it still fails the ASK STANDS (tokens are
+      // escrowed, the request is real) and the error names the message as the
+      // thing that did not go through, so the receipt can say so instead of the
+      // dialog reporting a failed request that succeeded.
+      const text = input.question?.trim() ?? '';
+      if (text.length > 0) {
+        const note = { creator, contentHash: input.contentHash, asker: signer, text };
+        try {
+          await postAskNote(note);
+        } catch {
+          await postAskNote(note);
+        }
+      }
     },
     onSuccess: () => {
       invalidate();
@@ -625,7 +648,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
       (tokens: number, minNetUsd?: number) => refundMutation.mutateAsync({ tokens, minNetUsd }),
       [refundMutation]
     ),
-    ask: useCallback((input: { offeringId: number; contentHash: string; deadlineDays: number; maxCostUsd: number }) => askMutation.mutateAsync(input), [askMutation]),
+    ask: useCallback((input: { offeringId: number; contentHash: string; deadlineDays: number; maxCostUsd: number; question?: string }) => askMutation.mutateAsync(input), [askMutation]),
     transfer: useCallback((to: string, tokens: number) => transferMutation.mutateAsync({ to, tokens }), [transferMutation]),
 
 

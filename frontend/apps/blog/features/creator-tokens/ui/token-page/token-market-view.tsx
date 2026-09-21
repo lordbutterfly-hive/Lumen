@@ -1038,7 +1038,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           // therefore a RECEIPT, not a delivery channel — a short reference the
           // buyer can quote when they contact the creator, and a stable id both
           // sides can point at. It is not secret and is not a message.
-          live.ask({ offeringId, contentHash: askReference(question), deadlineDays, maxCostUsd: usd })
+          live.ask({ offeringId, contentHash: askReference(question), deadlineDays, maxCostUsd: usd, question })
         }
         onTransfer={(to, tokens) => live.transfer(to, tokens)}
         // Priced when the dialog OPENS, not after the click — see AskModal's askQuote doc.

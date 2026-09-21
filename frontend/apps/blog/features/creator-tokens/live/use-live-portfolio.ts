@@ -22,7 +22,7 @@ import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
 import { useTokenAccounts, type TokenAccount } from './use-token-accounts';
-import type { Ask, HolderPosition } from '../types';
+import type { Ask, HolderPosition, MyAsksResult } from '../types';
 
 const walletKey = (holder: string) => ['creatorTokens', 'live', 'wallet', holder];
 const myAsksKey = (asker: string) => ['creatorTokens', 'live', 'myAsks', asker];
@@ -202,7 +202,23 @@ export function useLivePortfolio(): LivePortfolio {
       }
       await dataSource.rate({ creator: input.creator, rater: actingSigner, seq: input.seq, score: input.score });
     },
-    onSuccess: () => {
+    onSuccess: (_result, input) => {
+      // ★ WRITE THE SCORE INTO THE CACHED ASK BEFORE ASKING THE INDEXER AGAIN
+      // (2026-09-21). `rate()` resolves only once the chain has executed the
+      // write, but the indexer that feeds readMyAsks runs minutes behind it, so
+      // an invalidate alone re-read a null rating and put the empty strip back
+      // over a score the chain already held. The cached row is updated first,
+      // for every account this portfolio reads, and the refetch confirms it.
+      for (const id of accountIds) {
+        queryClient.setQueryData<MyAsksResult>(myAsksKey(id), (old) =>
+          old
+            ? {
+                ...old,
+                asks: old.asks.map((a) => (a.creator === input.creator && a.seq === input.seq ? { ...a, rating: input.score } : a))
+              }
+            : old
+        );
+      }
       queryClient.invalidateQueries({ queryKey: myAsksKey(holder ?? '') });
     }
   });

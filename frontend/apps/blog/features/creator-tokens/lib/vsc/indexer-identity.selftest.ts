@@ -48,8 +48,9 @@ function check(name: string, ok: boolean, detail?: string): void {
  * the completeness check below fails if hasura.ts grows a method that appears in
  * neither list, rather than silently defaulting it to "needs no conversion".
  */
-const TAKES_ACCOUNT = ['balancesOf', 'asksOf', 'deliveryOf', 'priceHistoryOf'];
-const TAKES_NO_ACCOUNT = ['health', 'discovery'];
+const TAKES_ACCOUNT = ['balancesOf', 'asksOf', 'asksForCreator', 'deliveryOf', 'priceHistoryOf', 'publicStatsOf'];
+// `lastLogBlock` takes a CONTRACT id, not an account — there is nothing to convert.
+const TAKES_NO_ACCOUNT = ['health', 'discovery', 'lastLogBlock'];
 
 const here = __dirname;
 const sourcePath = join(here, '..', 'vsc-data-source.ts');

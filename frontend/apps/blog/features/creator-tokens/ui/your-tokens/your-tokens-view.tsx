@@ -39,7 +39,9 @@ import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
 import type { Ask, HolderPosition, MarketPrice } from '../../types';
 import { useTokenPriceChips } from '../../live/use-token-price-chips';
 import { healthWordFor } from '../../market/market-health';
-import { usdPrice } from '../../market/format';
+import { ratingStars, usdPrice } from '../../market/format';
+import { COMMISSION_BPS } from '../../lib/contract-math';
+import { useAskNotes } from '../../live/use-ask-notes';
 // ★★ THE FLOOR FIGURES ARE HIDDEN FOR LAUNCH (owner, 2026-08-27), on every
 // surface at once, from one flag. This screen led with one, carried one per row
 // and explained it in a closing paragraph; all three are behind the flag below.
@@ -179,6 +181,21 @@ const HoldingRow: FC<{ h: HolderPosition; price?: MarketPrice }> = ({ h, price }
   </div>
 );
 
+/**
+ * What a reclaim gives back. core/ask.go Reclaim returns the escrow minus a miss
+ * slice: MissReclaimSliceBps (25%) of the commission share (CommissionBps, 12% of
+ * the credits, floored), floored at ONE token since v5.1 so a tiny ask cannot be
+ * missed for free, and never more than the escrow itself. The card used to say
+ * "in full", which was the Decline rule, not the Reclaim rule.
+ */
+const MISS_RECLAIM_SLICE_BPS = 2_500;
+function missSliceTokens(escrowTokens: number): number {
+  const t = Math.max(0, Math.floor(escrowTokens));
+  if (t === 0) return 0;
+  const commission = Math.floor((t * COMMISSION_BPS) / 10_000);
+  return Math.min(t, Math.max(1, Math.ceil((commission * MISS_RECLAIM_SLICE_BPS) / 10_000)));
+}
+
 const askStyle: Record<string, { label: string; cls: string }> = {
   awaiting: { label: 'Awaiting', cls: 'text-ink-warn-3' },
   // The dead zone between the deadline and the reclaim window opening: nothing
@@ -210,7 +227,8 @@ const RateStrip: FC<{ onRate: (score: number) => Promise<void>; busy: boolean }>
   if (done) return <div className="mt-3 text-caption font-medium text-ink-ok-2 font-ui">Thanks. Your rating is recorded on-chain.</div>;
   return (
     <div className="mt-3 border-t border-line-2 pt-3">
-      <div className="mb-2 text-caption text-ink-10 font-ui">How did it go? Your rating is the creator’s public record.</div>
+      <div className="mb-0.5 text-[15px] leading-[24px] font-medium text-ink-2 font-ui">Rate this delivery</div>
+      <div className="mb-2 text-caption text-ink-10 font-ui">How did it go? Your rating is the creator’s public record, and it can be given once.</div>
       {/*
         ★ STARS, NOT NUMBERED BUTTONS (owner, 2026-09-12: "rate is fine, should
         be stars"). The five 1–5 buttons this replaces were accurate and unread:
@@ -276,6 +294,7 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
   const s = askStyle[a.status] ?? askStyle.awaiting;
   const reclaimable = a.status === 'reclaimable';
   const [failure, setFailure] = useState<string | null>(null);
+  const ownNote = useAskNotes(a.creator, [a.contentHash], !!a.contentHash);
   return (
     <div className={`rounded-card border bg-surface-1 px-5 py-4 ${reclaimable ? 'border-line-warn-2 bg-surface-warn-4' : 'border-line-9'}`}>
       <div className="flex items-center justify-between gap-3">
@@ -292,10 +311,43 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
           facilitates payment and reputation; the work is arranged between the
           two parties directly (USER RULING 2026-07-28). */}
       {a.contentHash ? <div className="mt-1 font-mono text-caption text-ink-14">ref {a.contentHash}</div> : null}
-      {a.status === 'answered' ? <RateStrip onRate={onRate} busy={rating} /> : null}
+      {/* The buyer's own message, read back from the store the ask filed it in
+          (use-ask-notes), so the card shows what was asked, not only a reference. */}
+      {ownNote.notes.get(a.contentHash)?.text ? (
+        <div className="mt-2 text-caption text-ink-10 font-ui">
+          <span className="text-ink-14">Your message: </span>
+          {ownNote.notes.get(a.contentHash)?.text}
+        </div>
+      ) : null}
+      {/* The creator's delivery note is on chain (answerHash) and was never shown
+          here, so a buyer saw "Answered" and no word about where the work went. */}
+      {a.status === 'answered' && a.answerHash ? (
+        <div className="mt-2 text-caption text-ink-8 font-ui" data-testid="ask-delivery-note">
+          <span className="text-ink-14">Delivered: </span>
+          <span className="text-ink-2">{a.answerHash}</span>
+        </div>
+      ) : null}
+      {/* ★ THE RATING IS READ FROM THE CHAIN'S RECORD, NOT FROM THIS COMPONENT'S
+          MEMORY (2026-09-21, owner: "the rating does not update"). `a.rating` is
+          the indexer's copy of the on-chain score; while it is null the job is
+          unrated and the strip is offered, and once it is set the card says what
+          was given. The strip used to render on every answered job forever, and
+          a refetch or reload put it straight back over a rating already recorded. */}
+      {a.status === 'answered' ? (
+        a.rating ? (
+          <div className="mt-3 border-t border-line-2 pt-3 text-caption font-medium text-ink-ok-2 font-ui" data-testid="ask-rated">
+            You rated this {ratingStars(a.rating)} ({a.rating}/5)
+          </div>
+        ) : (
+          <RateStrip onRate={onRate} busy={rating} />
+        )
+      ) : null}
       {reclaimable ? (
         <div className="mt-3 flex items-center justify-between gap-3">
-          <div className="text-caption text-ink-warn-2 font-ui">You get {a.tokensEscrowed.toFixed(2)} tokens back to your balance, in full.</div>
+          <div className="text-caption text-ink-warn-2 font-ui">
+            You get {a.tokensEscrowed - missSliceTokens(a.tokensEscrowed)} of your {a.tokensEscrowed} tokens back; {missSliceTokens(a.tokensEscrowed)}{' '}
+            {missSliceTokens(a.tokensEscrowed) === 1 ? 'goes' : 'go'} to the platform for the missed deadline, and the miss goes on @{displayHandle(a.creator)}&rsquo;s record.
+          </div>
           <button
             onClick={async () => {
               if (busy) return;
@@ -336,7 +388,18 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
  */
 export const YourTokensBody: FC = () => {
   const eligibility = useMeritumEligibility();
-  const [tab, setTab] = useState<'holdings' | 'asks'>('holdings');
+  // A notification about a request deep-links here with `?view=asks` (the bell's
+  // rows, the "Request placed" receipt); it must open on Asks, not on Holdings,
+  // or the reader is sent to the wrong list and has to find the request
+  // themselves. Lazy init, guarded for the server render, like the Studio's inbox tab.
+  const [tab, setTab] = useState<'holdings' | 'asks'>(() => {
+    if (typeof window === 'undefined') return 'holdings';
+    try {
+      return new URLSearchParams(window.location.search).get('view') === 'asks' ? 'asks' : 'holdings';
+    } catch {
+      return 'holdings';
+    }
+  });
   const p = useLivePortfolio();
   // One batched health+price read for every creator held (see HoldingRow's
   // doc). Empty list -> the query is disabled and costs nothing.

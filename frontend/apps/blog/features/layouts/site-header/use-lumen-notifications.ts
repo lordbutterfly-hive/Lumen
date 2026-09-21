@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
+import { marksAfterOpen, marksFromLegacy, unreadCount, type LumenNotificationType, type SeenMarks } from '@/blog/lib/meritum/notification-rows';
 
 /**
  * ★★★ THE BELL SAID 1 AND OPENED TO 4 (2026-08-16, owner, reported live).
@@ -33,8 +34,15 @@ import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with
  * deliberate act, or the badge clears itself for a reader who never looked.
  */
 export interface LumenNotification {
-  /** `buy` = somebody bought this reader's Meritum (chain event, via the indexer). */
-  type: 'follow' | 'dm' | 'buy';
+  /**
+   * A stable id for the EVENT (`order:<creator>:<seq>`, `buy:<creator>:<tx>`),
+   * built by lib/meritum/notification-rows.ts. The read mark keys on it, not on
+   * the timestamp - see `marks` below. Follow and DM rows carry none yet and
+   * fall back to the timestamp rule.
+   */
+  id?: string;
+  /** `buy` = somebody bought this reader's Meritum; order/order_placed/delivered/declined/rated = the request lifecycle. */
+  type: LumenNotificationType;
   msg: string;
   url: string;
   date: string;
@@ -48,7 +56,12 @@ export interface LumenNotification {
   source?: 'lumen';
 }
 
-const seenKey = (username: string) => `lumen-notifications-seen:${username}`;
+/** The old single-timestamp mark, read once to seed the id set and never written again. */
+const legacySeenKey = (username: string) => `lumen-notifications-seen:${username}`;
+/** The id set: every row this device has actually shown, bounded, plus the last-open time for id-less rows. */
+const marksKey = (username: string) => `lumen-notifications-seen-ids:${username}`;
+
+const NO_MARKS: SeenMarks = { ids: [], seenAt: 0 };
 
 export function useLumenNotifications(username: string) {
   const { data } = useQuery({
@@ -67,27 +80,68 @@ export function useLumenNotifications(username: string) {
     staleTime: 60_000
   });
 
-  // Read AFTER mount, never during render: localStorage does not exist on the
-  // server, and seeding state from it directly makes the first client render
-  // disagree with the server's HTML.
-  const [seenAt, setSeenAt] = useState<number>(0);
+  /**
+   * ★★★ UNREAD IS "NOT YET SHOWN ON THIS DEVICE", NOT "NEWER THAN THE LAST OPEN"
+   * (2026-09-21, owner: the "somebody bought" row was in the list and never put
+   * the red number on the bell).
+   *
+   * The mark used to be one timestamp, advanced when the popover opened, and a
+   * row counted as unread when its date was later. But a Meritum row is dated by
+   * the BLOCK the event landed in, and the indexer that serves it runs minutes
+   * behind the chain. Open the bell in that gap - as anyone does right after
+   * placing or receiving an order - and the mark moves past the row's date
+   * before the row exists, so it arrives already "read" and the badge never
+   * moves. Not a race a reader can lose by being slow; it is lost by being
+   * prompt.
+   *
+   * So the mark is now the set of row ids this device has actually rendered
+   * (bounded, oldest dropped first), and a row is unread until it has been in an
+   * open panel. The timestamp survives only for rows without an id (follows,
+   * DMs) and as a one-time seed so an upgrade does not resurrect months of old
+   * rows as new. Pure functions, unit-tested: lib/meritum/notification-rows.ts.
+   */
+  const [marks, setMarks] = useState<SeenMarks>(NO_MARKS);
+  // The id set is read after mount (localStorage does not exist on the server).
+  // `seeded` says whether this device has an id set at all; until the first
+  // rows arrive there is nothing to seed the legacy timestamp against.
+  const [seeded, setSeeded] = useState(false);
   useEffect(() => {
     if (!username) return;
-    setSeenAt(getStorageItem<number>(seenKey(username)) ?? 0);
+    const stored = getStorageItem<SeenMarks>(marksKey(username));
+    if (stored && Array.isArray(stored.ids)) {
+      setMarks({ ids: stored.ids.filter((id) => typeof id === 'string'), seenAt: Number(stored.seenAt) || 0 });
+      setSeeded(true);
+    } else {
+      setMarks({ ids: [], seenAt: getStorageItem<number>(legacySeenKey(username)) ?? 0 });
+      setSeeded(false);
+    }
   }, [username]);
 
-  const items = data ?? [];
-  const unread = items.filter((n) => {
-    const at = new Date(n.date).getTime();
-    return Number.isFinite(at) && at > seenAt;
-  }).length;
+  const items = useMemo(() => data ?? [], [data]);
 
+  // One-time migration: rows the old timestamp rule had already shown are
+  // seeded as seen, rows it had not stay unread. Runs once, when the first
+  // rows arrive on a device that has no id set yet.
+  useEffect(() => {
+    if (!username || seeded || items.length === 0) return;
+    const next = marksFromLegacy(items, marks.seenAt);
+    setStorageItem(marksKey(username), next, StorageTTL.PERMANENT);
+    setMarks(next);
+    setSeeded(true);
+  }, [username, seeded, items, marks.seenAt]);
+
+  const unread = unreadCount(items, marks);
+
+  // Deliberately NOT written on hover or on render: the mark has to cost a
+  // deliberate act, or the badge clears itself for a reader who never looked.
   const markSeen = useCallback(() => {
     if (!username) return;
-    const now = Date.now();
-    setStorageItem(seenKey(username), now, StorageTTL.PERMANENT);
-    setSeenAt(now);
-  }, [username]);
+    setMarks((current) => {
+      const next = marksAfterOpen(items, current, Date.now());
+      setStorageItem(marksKey(username), next, StorageTTL.PERMANENT);
+      return next;
+    });
+  }, [username, items]);
 
   return { items, unread, markSeen };
 }

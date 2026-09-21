@@ -39,7 +39,7 @@ import type {
   IndexerHealth,
   CreatorPublicStats
 } from '../types';
-import type { BoardCreator, ContractRules, CreatorAsksResult } from '../types';
+import type { BoardCreator, ContractRules, CreatorAsksResult, CreatorAskHistoryResult } from '../types';
 import type { CreatorTokensConfig, CreatorTokensDataSource } from './creator-tokens-data-source';
 import {
   MAX_ASK_DEADLINE_BLOCKS,
@@ -964,9 +964,43 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       for (const r of rows) {
         const raw = state[kEscrow(r.creator, r.seq)];
         const parsed = raw ? parseEscrow(raw) : null;
-        if (parsed) asks.push(buildAskFromParsed(r.creator, r.seq, parsed, head));
+        // The rating rides on the indexer ROW, not the escrow record: the chain
+        // keeps scores under their own key and this read never fetches it, so
+        // without this the buyer's own 5-star score was read and then dropped
+        // on the floor between `asksOf` and the Ask the page renders.
+        if (parsed) asks.push(buildAskFromParsed(r.creator, r.seq, parsed, head, r.rating));
       }
       return { asks: asks.sort((a, b) => b.deadlineBlock - a.deadlineBlock), unavailable: false };
+    } catch {
+      return { asks: [], unavailable: true };
+    }
+  }
+
+  /**
+   * Every ask ever placed with this creator, newest first, from the indexer's
+   * `lumen_ct_my_asks` view filtered by creator. NOT the inbox (readCreatorAsks
+   * above, which is chain state and only what can still be acted on): this is
+   * the creator's record of what they were asked and how each job was scored,
+   * which only the indexer's rating join can answer. Same unavailable-vs-empty
+   * discriminator as readMyAsks — a Studio that showed "no requests yet" during
+   * an indexer outage would be lying to the one person who can check.
+   */
+  async readCreatorAskHistory(creator: string): Promise<CreatorAskHistoryResult> {
+    if (!this.indexer) return { asks: [], unavailable: true };
+    try {
+      const rows = await this.indexer.asksForCreator(toDid(creator));
+      return {
+        asks: rows.map((r) => ({
+          seq: r.seq,
+          asker: r.asker,
+          status: r.status,
+          rating: r.rating,
+          offeringId: r.offeringId,
+          askedTs: r.askedTs,
+          creditsSpent: r.creditsSpent
+        })),
+        unavailable: false
+      };
     } catch {
       return { asks: [], unavailable: true };
     }
@@ -2378,6 +2412,10 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       status: 'awaiting',
       contentHash: input.contentHash,
       answerHash: null,
+      // The service the ask NAMED (0 = the legacy face price); a fresh escrow
+      // cannot have been rated yet.
+      offeringId: input.offeringId ?? 0,
+      rating: null,
       pending: true
     };
   }

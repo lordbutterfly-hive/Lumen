@@ -30,7 +30,6 @@ export const MERITUM_PAGE_COPY = {
   deliverySub: 'Every paid ask, settled',
   deliveryEmpty: 'A delivery record builds here once this creator completes their first paid ask.',
   deliveryUnavailable: 'Delivery record unavailable',
-  deliveryWhy: 'Why the token is worth holding. This is what you’re really buying.',
   holdersTitle: 'Holders',
   yourPosition: 'Your position',
   send: 'Send',
@@ -44,5 +43,23 @@ export const MERITUM_PAGE_COPY = {
   nativeShare: 'Share…',
   close: 'Close',
   shareThisPage: 'Share this page',
-  signInToTrade: 'Sign in to trade this token.'
+  signInToTrade: 'Sign in to trade this token.',
+  /**
+   * 1.1-1.3: what the reader sees once `live.ask` has RESOLVED. The modal's
+   * own "Confirming…" state ends at chain execution, so by the time this
+   * renders the escrow is already written (core/ask.go Ask) and there is no
+   * second wallet step left — the old flow simply closed the dialog and left
+   * the reader with no evidence anything had happened.
+   *
+   * Shared with the legacy token page (../token-page/token-market-view.tsx)
+   * for the same reason every money sentence lives in disclosure-copy.ts: two
+   * surfaces describing one escrow must not describe it differently.
+   */
+  askPlacedTitle: 'Request placed',
+  askPlacedBody: (handle: string) =>
+    `Your request to @${handle} is placed and waiting for their answer. There is nothing more to do in your wallet: the tokens are already held in escrow.`,
+  askPlacedDue: (handle: string, due: string) => `@${handle} has until ${due} to answer.`,
+  askPlacedTrack: 'Track it under Your Meritum → Asks',
+  askPlacedTrackHref: '/wallet?tab=meritum&view=asks',
+  askPlacedDismiss: 'Dismiss'
 } as const;

@@ -37,6 +37,22 @@ export interface HasuraAskRow {
   rating: number | null;
 }
 
+/** One row of `lumen_ct_my_asks` read the other way round — by CREATOR — for the Studio's history. */
+export interface HasuraCreatorAskRow {
+  seq: number;
+  /** The buyer, exactly as the contract keys it (`hive:<name>` or a full `did:pkh:…`). */
+  asker: string;
+  status: 'pending' | 'answered' | 'declined' | 'reclaimed';
+  offeringId: number;
+  askedBlock: number;
+  /** The indexer's `indexer_ts` for the ask event, or null when absent. */
+  askedTs: string | null;
+  /** Whole tokens escrowed (the view stores it as TEXT; see `num`). */
+  creditsSpent: number;
+  /** The buyer's own score for this job, or null if unrated. */
+  rating: number | null;
+}
+
 /** One row of `lumen_ct_delivery_record`. Every count is real; nulls mean "no data", never zero. */
 export interface HasuraDeliveryRow {
   creator: string;
@@ -185,6 +201,41 @@ export class MagiIndexerClient {
       askedBlock: num(field(r, 'asked_block')),
       rating: numOrNull(field(r, 'rating'))
     }));
+  }
+
+  /**
+   * Every ask ever placed WITH one creator, newest first — the same view
+   * `asksOf` reads, filtered on the other key. `lumen_ct_my_asks` is the only
+   * view that joins the rating in, which is why the Studio's history comes from
+   * here and not from the chain's escrow records (readCreatorAsks): a chain read
+   * knows the status of every escrow but nothing about how the buyer scored it.
+   *
+   * Bounded by `limit` on the NEWEST rows (`asked_block desc`), for the reason
+   * `priceHistoryOf` gives: `asc` with a limit would freeze the list on the
+   * creator's oldest asks the moment they passed `limit` of them.
+   */
+  async asksForCreator(creator: string, limit = 100): Promise<HasuraCreatorAskRow[]> {
+    const data = await this.query(
+      `query CreatorAsks($creator: String!, $limit: Int!) {
+         lumen_ct_my_asks(where: {creator: {_eq: $creator}}, order_by: {asked_block: desc}, limit: $limit) {
+           seq asker status offering_id asked_block asked_ts credits_spent rating
+         }
+       }`,
+      { creator, limit }
+    );
+    return rowsOf(data, 'lumen_ct_my_asks').map((r) => {
+      const ts = field(r, 'asked_ts');
+      return {
+        seq: num(field(r, 'seq')),
+        asker: String(field(r, 'asker') ?? ''),
+        status: (String(field(r, 'status') ?? 'pending') as HasuraCreatorAskRow['status']) ?? 'pending',
+        offeringId: num(field(r, 'offering_id')),
+        askedBlock: num(field(r, 'asked_block')),
+        askedTs: typeof ts === 'string' && ts.length > 0 ? ts : null,
+        creditsSpent: num(field(r, 'credits_spent')),
+        rating: numOrNull(field(r, 'rating'))
+      };
+    });
   }
 
   async deliveryOf(creator: string): Promise<HasuraDeliveryRow | null> {

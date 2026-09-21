@@ -4,14 +4,17 @@ import { cn } from '@ui/lib/utils';
 import { UserAvatarImg } from '@ui/components';
 import { useTranslation } from '@/blog/i18n/client';
 import { displayHandle, dueLabelFor } from '../../live/adapt';
-import { FC, useState, useEffect, useRef } from 'react';
-import { useLiveStudio, type LiveStudio } from '../../live/use-live-studio';
+import { FC, useState, useEffect, useMemo, useRef } from 'react';
+import { useLiveStudio, type LiveStudio, type StudioAskRow } from '../../live/use-live-studio';
+// The buyer's own message for an ask, stored off-chain beside the escrow it
+// belongs to (the contract carries a 64-byte reference, never the brief).
+import { useAskNotes } from '../../live/use-ask-notes';
 import { useContractRules } from '../../live/use-contract-rules';
 import { hasNoSubscriptionUnder } from '../../market/contract-rules';
 import { useMagiSpendingPower } from '../../live/use-magi-spending-power';
 import { MarketLoading, MarketRateLimited, MarketReadFailed, MarketSessionUnavailable, MarketUnavailable } from '../../live/market-states';
 import type { Ask } from '../../types';
-import { pctLabel, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
+import { pctLabel, ratingStars, usdPrice, usdWhole, usdWholeNonZero } from '../../market/format';
 // ★★ THE FLOOR / RESERVE FIGURES ARE HIDDEN FOR LAUNCH (owner, 2026-08-27), on
 // every surface at once, from one flag. The creator's dashboard is one of the
 // four; nothing here is deleted, and every expression returns with the flag.
@@ -276,7 +279,13 @@ const TitleInput: FC<{
   );
 };
 
-const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = ({ ask, studio, onClose }) => {
+const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; note: string | null; noteUnavailable: boolean; onClose: () => void }> = ({
+  ask,
+  studio,
+  note,
+  noteUnavailable,
+  onClose
+}) => {
   const [text, setText] = useState('');
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -321,14 +330,36 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
   // which is the same boundary, so the two cannot disagree.
   const windowClosed = dueLabel === undefined;
   return (
-    <ModalShell width={500} onClose={onClose} title="Mark this job delivered" className="p-6">
-      <div className="mb-2 font-ui text-xl font-medium text-ink-2">Mark this job delivered</div>
-      {/* The contract carries a REFERENCE, not the brief (USER RULING
-            2026-07-28): it facilitates payment and reputation, and the two
-            parties arrange the work between themselves. Showing the reference is
-            honest; pretending a message arrived here would not be. */}
+    <ModalShell width={500} onClose={onClose} title="Deliver and get paid" className="p-6">
+      {/* ★ AN X, AND A SENTENCE THAT SAYS CLOSING IS FINE (2026-09-21, owner's QA
+          list 4.1/4.2). ModalShell deliberately draws no close control, so this
+          dialog offered exactly two ways out, "Decline" and "Mark as delivered",
+          and a creator who only wanted to read the request had to pick one or
+          find the Escape key. Now it closes like every other dialog here, and
+          says that nothing is lost by doing so. */}
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div className="font-ui text-xl font-medium text-ink-2">Deliver and get paid</div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          data-testid="answer-modal-close"
+          className="-my-1 -mr-2 rounded-lg px-3 py-1 text-[22px] leading-[30px] text-ink-14 hover:bg-surface-16"
+        >
+          ×
+        </button>
+      </div>
       <div className="mb-3 rounded-control border border-line-9 bg-surface-16 px-3.5 py-3 text-caption text-ink-8 font-ui">
-        Reference <strong className="font-mono">{ask.contentHash || '—'}</strong> · from @{displayHandle(ask.asker)}
+        <div>
+          From <strong>@{displayHandle(ask.asker)}</strong> · reference <span className="font-mono">{ask.contentHash || '—'}</span>
+        </div>
+        {/* The buyer's message, filed on Lumen behind the same reference the chain
+            holds (use-ask-notes). Absent and unavailable are different answers. */}
+        {note ? (
+          <p className="mt-1.5 whitespace-pre-wrap text-ink-2" data-testid="answer-modal-note">{note}</p>
+        ) : (
+          <p className="mt-1.5 text-ink-14">{noteUnavailable ? 'Their message couldn’t be loaded just now.' : 'No message was attached.'}</p>
+        )}
       </div>
       {/* ★ THE DEADLINE, ON THE SCREEN WHERE IT IS DECIDED (A14, 2026-08-23).
           This modal asks a creator to commit to a job and showed them no clock at all,
@@ -366,10 +397,20 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
           reclaims their tokens, and the chain records a miss against your delivery record.
         </div>
       )}
-      <p className="mb-3 text-caption text-ink-10 font-ui">
-        Arrange and deliver the work with @{displayHandle(ask.asker)} however you normally would. Marking it delivered
-        releases the escrow to you, and the buyer then rates it, which is what your token’s reputation is
-        built from.
+      {/* ★ THERE IS NO ACCEPT STEP, AND THE COPY MUST NOT INVENT ONE (owner's QA
+          list 5.1). The contract has exactly three ends for a request: Answer,
+          which pays the creator and is the delivery; Decline, which refunds; and
+          the deadline, after which the buyer reclaims and a miss is recorded.
+          "Mark this job delivered" read as "accept the job", and a creator who
+          pressed it on receipt was paid for work not yet done, with the buyer's
+          rating as the only remedy. */}
+      <p className="mb-2 text-caption text-ink-10 font-ui">
+        There is nothing to accept. Arrange and deliver the work with @{displayHandle(ask.asker)} however you normally would;
+        this request stays in your inbox{dueLabel ? ` ${dueLabel.charAt(0).toLowerCase()}${dueLabel.slice(1)}` : ''}, so you can close this and come back to it.
+      </p>
+      <p className="mb-3 text-caption font-medium text-ink-7 font-ui">
+        Press the button below only once the work has actually reached them. It releases the escrow to you and closes the job;
+        the buyer then rates it, which is what your token’s reputation is built from.
       </p>
       {/* BOUNDED to exactly what core/ask.go:515-523 accepts. This box invites
             a link, and a tracking URL over MAX_HASH_LEN characters — or one
@@ -463,7 +504,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
           disabled={busy || !answerValid || windowClosed}
           className="flex-1 rounded-xl bg-surface-brand-12 py-3 text-[14px] leading-[22px] font-medium text-ink-27 font-ui hover:bg-surface-brand-17 disabled:opacity-50"
         >
-          {busy ? 'Confirm in your wallet…' : 'Mark as delivered'}
+          {busy ? 'Confirm in your wallet…' : 'I’ve delivered this, release payment'}
         </button>
       </div>
       {failure ? (
@@ -1001,6 +1042,15 @@ const CreatorStudio: FC = () => {
     commissionEarnedUsd,
     status
   } = studio;
+  // The buyers' messages for every pending request, one request for the whole
+  // inbox (use-ask-notes), keyed by the escrows' content references.
+  const pendingHashes = useMemo(() => rawInbox.map((a) => a.contentHash).filter((h) => h.length > 0), [rawInbox]);
+  const askNotes = useAskNotes(studio.creatorAccount ?? '', pendingHashes, !!studio.creatorAccount && pendingHashes.length > 0);
+  // Delivered jobs, newest first, with each buyer's rating (indexer history, not
+  // the chain inbox scan, which stops at PENDING).
+  const delivered = useMemo(() => studio.askHistory.filter((r) => r.status === 'answered'), [studio.askHistory]);
+  const serviceTitle = (offeringId: number): string =>
+    studio.offerings?.find((o) => o.offeringId === offeringId)?.title ?? (offeringId === 0 ? 'Service' : `Service #${offeringId}`);
   // ★ ITEM D (2026-09-04): honour a `?section=` query param so a deep-link (e.g.
   // the launch success screen's "add an offering in Studio" link,
   // /creators/studio?section=offerings) opens on the right tab instead of always
@@ -1539,7 +1589,11 @@ const CreatorStudio: FC = () => {
               // need seq and deadlineBlock — neither of which a portfolio row
               // carries. Zipped by index: both lists come from the same filtered
               // array in the same order, so they cannot drift.
-              inbox.map((a, i) => (
+              <>
+              <p className="text-caption text-ink-14 font-ui">
+                Requests wait here until their deadline. Nothing has to happen right away: open one, or come back later.
+              </p>
+              {inbox.map((a, i) => (
                 <Card key={a.id} className={a.urgent ? 'border-line-warn-2 bg-surface-warn-4' : ''}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-[15px] leading-[24px] font-medium text-ink-2 font-ui">{a.service}</div>
@@ -1550,18 +1604,30 @@ const CreatorStudio: FC = () => {
                     </div>
                   </div>
                   <div className="mt-1 text-caption tabular-nums text-ink-10 font-num">
-                    {usdWhole(a.costUsd)} · {tok(a.tokens)} tokens escrowed
+                    {usdWhole(a.costUsd)} · {tok(a.tokens)} tokens escrowed · from <span className="font-ui">@{displayHandle(rawInbox[i].asker)}</span>
                   </div>
+                  {/* The buyer's message, beside the escrow it came with (owner's QA
+                      list 2.1/3.3): "No message" and "couldn't load" are different. */}
+                  {askNotes.notes.get(rawInbox[i].contentHash)?.text ? (
+                    <p className="mt-2 whitespace-pre-wrap text-[14px] leading-[22px] text-ink-2 font-ui" data-testid="inbox-note">
+                      {askNotes.notes.get(rawInbox[i].contentHash)?.text}
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-caption text-ink-14 font-ui">
+                      {askNotes.isLoading ? 'Loading their message…' : askNotes.unavailable ? 'Their message couldn’t be loaded just now.' : 'No message was attached.'}
+                    </p>
+                  )}
                   <div className="mt-3">
                     <button
                       onClick={() => setAnswering(rawInbox[i])}
                       className="rounded-control bg-surface-brand-12 px-4 py-2 text-caption font-medium text-ink-27 font-ui hover:bg-surface-brand-17"
                     >
-                      Answer or decline
+                      Open request
                     </button>
                   </div>
                 </Card>
-              ))
+              ))}
+              </>
             )}
 
             {/* ★★★ MISSED JOBS, SHOWN WITHOUT A CONTROL (2026-08-30, clauderfly-43).
@@ -1592,6 +1658,39 @@ const CreatorStudio: FC = () => {
                       The answer window has closed, so this can no longer be answered or declined. The buyer
                       reclaims their tokens, and the chain records a miss against your delivery record.
                     </p>
+                  </Card>
+                ))}
+              </div>
+            ) : null}
+
+            {/* ★ DELIVERED JOBS, WITH THE BUYER'S NAME BESIDE THE RATING (owner's QA
+                list 8.6). The delivery record on the overview is a count; this is
+                the record itself, one row per job, read from the indexer's history. */}
+            {studio.askHistoryUnavailable && !studio.askHistoryLoading ? (
+              <p className="mt-1.5 text-caption text-ink-14 font-ui">Your delivered jobs couldn’t be loaded just now.</p>
+            ) : delivered.length > 0 ? (
+              <div className="mt-1.5 flex flex-col gap-2.5" data-testid="studio-delivered">
+                <div className="text-label font-medium uppercase tracking-wide text-ink-14 font-ui">Delivered</div>
+                {delivered.map((r) => (
+                  <Card key={`${r.seq}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-[15px] leading-[24px] font-medium text-ink-2 font-ui">{serviceTitle(r.offeringId)}</div>
+                      <div className="text-caption text-ink-14 font-ui">
+                        {r.askedTs ? new Date(r.askedTs.endsWith('Z') ? r.askedTs : `${r.askedTs}Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : null}
+                      </div>
+                    </div>
+                    <div className="mt-1 text-caption tabular-nums text-ink-10 font-num">
+                      {tok(r.creditsSpent)} tokens · for <span className="font-ui">@{displayHandle(r.asker)}</span>
+                    </div>
+                    <div className="mt-1.5 text-caption font-ui" data-testid="studio-delivered-rating">
+                      {r.rating ? (
+                        <span className="text-ink-2">
+                          <span className="text-ink-warn-3">{ratingStars(r.rating)}</span> {r.rating}/5 by @{displayHandle(r.asker)}
+                        </span>
+                      ) : (
+                        <span className="text-ink-14">Not rated yet by @{displayHandle(r.asker)}</span>
+                      )}
+                    </div>
                   </Card>
                 ))}
               </div>
@@ -2119,7 +2218,15 @@ const CreatorStudio: FC = () => {
         ) : null}
       </div>
 
-      {answering ? <AnswerModal ask={answering} studio={studio} onClose={() => setAnswering(null)} /> : null}
+      {answering ? (
+        <AnswerModal
+          ask={answering}
+          studio={studio}
+          note={askNotes.notes.get(answering.contentHash)?.text ?? null}
+          noteUnavailable={askNotes.unavailable}
+          onClose={() => setAnswering(null)}
+        />
+      ) : null}
       {retireOpen ? (
         <RetireModal
           handle={studio.creator ?? ''}
