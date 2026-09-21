@@ -60,9 +60,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const blocked = guardRead();
   if (blocked) return blocked;
   const creator = contractKeyOf(req.nextUrl.searchParams.get('creator') ?? '');
+  if (creator === 'hive:') return NextResponse.json({ error: 'bad_request' }, { status: 400 });
+  // References that are not the client's `ask-...` shape can never have a note
+  // (nothing is filed under them), so they are dropped rather than refused: an
+  // inbox holding one must read "no message was attached", not "couldn't load".
   const hashes = parseReferenceList(req.nextUrl.searchParams.get('hashes'));
-  if (creator === 'hive:' || hashes.length === 0) {
-    return NextResponse.json({ error: 'bad_request' }, { status: 400 });
+  if (hashes.length === 0) {
+    return NextResponse.json({ notes: {} }, { headers: { 'cache-control': 'private, no-store' } });
   }
   let mine: Set<string>;
   try {

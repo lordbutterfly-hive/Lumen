@@ -406,7 +406,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; note: string | null; noteU
           rating as the only remedy. */}
       <p className="mb-2 text-caption text-ink-10 font-ui">
         There is nothing to accept. Arrange and deliver the work with @{displayHandle(ask.asker)} however you normally would;
-        this request stays in your inbox{dueLabel ? ` ${dueLabel.charAt(0).toLowerCase()}${dueLabel.slice(1)}` : ''}, so you can close this and come back to it.
+        this request stays in your inbox until its deadline, so you can close this and come back to it.
       </p>
       <p className="mb-3 text-caption font-medium text-ink-7 font-ui">
         Press the button below only once the work has actually reached them. It releases the escrow to you and closes the job;

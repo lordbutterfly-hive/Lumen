@@ -273,7 +273,7 @@ export function meritumNotificationRows(data: MeritumNotificationData, keys: rea
       id: `buy:${b.creator}:${b.indexer_tx_hash}`,
       type: 'buy',
       // Reads like every other row: actor first, then what they did.
-      msg: `${faceOf(b.actor) ?? mention(b.actor)} bought ${tokens === 1 ? 'a' : tokens} Meritum of yours for $${hbd(b.total_due).toFixed(2)}`,
+      msg: `${mention(b.actor)} bought ${tokens === 1 ? 'a' : tokens} Meritum of yours for $${hbd(b.total_due).toFixed(2)}`,
       url: `m/${ownHandle}`,
       date: zoned(b.indexer_ts),
       actor: faceOf(b.actor),

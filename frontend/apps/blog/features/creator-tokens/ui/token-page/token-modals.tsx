@@ -1119,11 +1119,20 @@ const AskModal: FC<{
                 above that line, untouched). The slice applies only when `rec.asker != creator`,
                 so asking yourself is genuinely free — an edge case not worth a sentence here. */}{' '}
             Once sent, this can&rsquo;t be cancelled. If @{displayHandle(m.handle)} declines, every token comes back. If
-            they haven&rsquo;t answered by your deadline, you can reclaim about an hour later and get{' '}
-            <strong className="tabular-nums font-num">{Math.max(0, chainTokens - missReclaimSliceTokens(chainTokens, commissionTokens))}</strong> of the{' '}
-            <strong className="tabular-nums font-num">{chainTokens}</strong> tokens back; the platform keeps{' '}
-            <strong className="tabular-nums font-num">{missReclaimSliceTokens(chainTokens, commissionTokens)}</strong> so a missed deadline can&rsquo;t be
-            manufactured for free, and the miss goes on their record.
+            they haven&rsquo;t answered by your deadline, you can reclaim about an hour later:{' '}
+            {missReclaimSliceTokens(chainTokens, commissionTokens) >= chainTokens ? (
+              <>
+                the platform keeps {chainTokens === 1 ? 'that token' : 'all of them'} so a missed deadline can&rsquo;t be manufactured for free, and the
+                miss goes on their record.
+              </>
+            ) : (
+              <>
+                you get <strong className="tabular-nums font-num">{chainTokens - missReclaimSliceTokens(chainTokens, commissionTokens)}</strong> of the{' '}
+                <strong className="tabular-nums font-num">{chainTokens}</strong> tokens back, the platform keeps{' '}
+                <strong className="tabular-nums font-num">{missReclaimSliceTokens(chainTokens, commissionTokens)}</strong> so a missed deadline can&rsquo;t be
+                manufactured for free, and the miss goes on their record.
+              </>
+            )}
         </div>
         )}
         <label className="mb-2 block text-caption font-medium text-ink-10 font-ui">Answer due within</label>
@@ -1190,7 +1199,7 @@ const AskModal: FC<{
               ? `You need ${cost.tokens} @${displayHandle(m.handle)} tokens. Buy some first`
               : blockedByCredits
                 ? 'You need a little HBD on Magi for the network fee'
-                : `Send question for ${cost.tokens} tokens`}
+                : `Send question for ${cost.tokens} ${cost.tokens === 1 ? 'token' : 'tokens'}`}
         </button>
         {/* ★ CONFIRMING INDICATOR (2026-09-01), the token-page twin of the Studio's
             sticky banner. Every money write now WAITS for the chain to confirm

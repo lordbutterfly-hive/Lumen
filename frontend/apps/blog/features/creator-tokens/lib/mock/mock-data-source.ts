@@ -890,8 +890,16 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     return this.buildAsk(input.creator, updated, mockHeadBlock());
   }
 
-  async rate(_input: RateInput): Promise<void> {
+  async rate(input: RateInput): Promise<void> {
     await delay(300);
+    // Persist like the chain does, so a reload shows the score instead of
+    // offering the strip again: the demo must behave the way the real rail does.
+    const seeds = getStorageItem<AskSeed[]>(asksKey(input.creator)) ?? ASK_SEEDS[input.creator] ?? [];
+    const idx = seeds.findIndex((s) => s.seq === input.seq);
+    if (idx < 0) throw new Error(`MockCreatorTokensDataSource: no such escrow ${input.creator}:${input.seq}`);
+    const next = [...seeds];
+    next[idx] = { ...seeds[idx], rating: input.score };
+    setStorageItem(asksKey(input.creator), next, StorageTTL.SESSION);
   }
 
   async decline(input: DeclineInput): Promise<Ask> {
