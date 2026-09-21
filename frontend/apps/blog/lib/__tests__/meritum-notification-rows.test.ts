@@ -65,7 +65,7 @@ const seller = meritumNotificationRows(sellerData, ['hive:hbd-temp']);
 const byType = (rows: LumenNotificationRow[], t: string) => rows.filter((r) => r.type === t);
 ok('one buy, the self-buy dropped', byType(seller, 'buy').length === 1);
 ok('buy row links to the moved market page m/<handle>', byType(seller, 'buy')[0]?.url === 'm/hbd-temp');
-ok('buy row keeps its old sentence', byType(seller, 'buy')[0]?.msg === 'lordbutterfly bought 2 Meritum of yours for $2.12');
+ok('buy row names the buyer like every other row', byType(seller, 'buy')[0]?.msg === '@lordbutterfly bought 2 Meritum of yours for $2.12');
 ok('buy row id is the tx hash', byType(seller, 'buy')[0]?.id === 'buy:hive:hbd-temp:6087c43d5fca665d4c37d8635189cb86f9095f9c');
 const order = byType(seller, 'order')[0];
 ok('order row exists', !!order);
