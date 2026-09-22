@@ -73,3 +73,24 @@ three are asserted rather than assumed:
 The current fixture (1,000 tokens of supply against a 250.000 HBD face, 43
 credits, 5 of them commission) sits inside all three with room, and the vacuity
 guards in the file fail loudly if a future edit moves it out.
+
+## The devnet update rehearsal (v6, 2026-09-22)
+
+`lumen_v6_units_devnet_test.go.govsc` is a copy of
+`go-vsc-node/tests/devnet/lumen_v6_units_test.go` (the O-drive clone under
+`/mnt/o/CLONES 2/HOME MAGI/go-vsc-node`). It deploys the v5.1 wasm, builds
+whole-token state, queues the v6 wasm as an in-place code update through the
+contract-deployer (the mainnet procedure, 30-block devnet timelock), waits for
+activation and drives the decimal wire through the same contract id. Run:
+
+```
+cd "/mnt/o/CLONES 2/HOME MAGI/go-vsc-node" && . ~/.wasmedge/env
+LUMEN_V6=1 DEVNET_PROJECT=devnet-test-9f179832 LUMEN_DEVNET_DATA=/home/clauderfly/devnet-data-<fresh> \
+  go test -v -run '^TestLumenV6Units$' -timeout 70m ./tests/devnet/
+```
+
+Use a FRESH data dir every run: HAF leaves postgres-owned files behind that
+need sudo to remove. The wasm paths default to ~/devnet-wasm/creator-tokens-v5.1.wasm
+and creator-tokens-v6.wasm (LUMEN_WASM_V5 / LUMEN_WASM_V6 override them).
+It caught the one defect the unit suite and the real-wasm harness could not:
+the migration flag check trusted the host's ok bit (migrate_v6.go flagSet).

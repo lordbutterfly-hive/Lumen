@@ -1,0 +1,306 @@
+package devnet
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"vsc-node/modules/common/params"
+
+	"github.com/vsc-eco/hivego"
+	systemconfig "vsc-node/modules/common/system-config"
+)
+
+// TestLumenV6Units — THE v6 UPDATE REHEARSED ON A REAL NETWORK (2026-09-22).
+//
+// Deploys the v5.1 creator-tokens wasm (the mainnet contract), builds v5.1
+// state with it (a 2-token buy and a 1-credit PENDING ask, both stored as whole
+// tokens), then queues an in-place code update to the v6 wasm exactly the way
+// mainnet will be updated (contract-deployer -contractId, 30-block devnet
+// timelock), waits for activation, and drives the v6 wire through the SAME
+// contract id: the legacy state reads x100 on first touch, a 0.50 buy, the
+// legacy escrow answered, a fractional ask, decline, a 0.25 transfer, a 0.50
+// sale, a decimal cap, and the amounts the parser must refuse.
+//
+// Run:
+//
+//	. ~/.wasmedge/env
+//	LUMEN_V6=1 DEVNET_PROJECT=devnet-test-9f179832 LUMEN_DEVNET_DATA=/home/clauderfly/devnet-data \
+//	  go test -v -run TestLumenV6Units -timeout 70m ./tests/devnet/
+func TestLumenV6Units(t *testing.T) {
+	if os.Getenv("LUMEN_V6") == "" {
+		t.Skip("set LUMEN_V6=1 to run (real devnet, ~30 min)")
+	}
+	v5 := os.Getenv("LUMEN_WASM_V5")
+	if v5 == "" {
+		v5 = "/home/clauderfly/devnet-wasm/creator-tokens-v5.1.wasm"
+	}
+	v6 := os.Getenv("LUMEN_WASM_V6")
+	if v6 == "" {
+		v6 = "/home/clauderfly/devnet-wasm/creator-tokens-v6.wasm"
+	}
+	for _, p := range []string{v5, v6} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("wasm: %v", err)
+		}
+	}
+	cfg := DefaultConfig()
+	cfg.SkipFunding = false
+	cfg.LogLevel = "error"
+	if os.Getenv("DEVNET_KEEP") != "" {
+		cfg.KeepRunning = true
+	}
+	if pj := os.Getenv("DEVNET_PROJECT"); pj != "" {
+		cfg.ProjectName = pj
+	}
+	if dd := os.Getenv("LUMEN_DEVNET_DATA"); dd != "" {
+		cfg.DataDir = dd
+	}
+	cfg.SysConfigOverrides = &systemconfig.SysConfigOverrides{ConsensusParams: &params.ConsensusParams{ElectionInterval: 20}}
+	d, ctx := startDevnetNoKey(t, cfg, 65*time.Minute)
+	if err := d.WaitForBlockProcessing(ctx, 1, 30, 8*time.Minute); err != nil {
+		dumpDiagnostics(t, d, ctx)
+		t.Fatalf("block 30: %v", err)
+	}
+	for n := 1; n <= cfg.Nodes; n++ {
+		if err := d.waitForElectionEpoch(ctx, n, 1, 10*time.Minute); err != nil {
+			dumpDiagnostics(t, d, ctx)
+			t.Fatalf("magi-%d epoch: %v", n, err)
+		}
+	}
+	const node = 2 // never the deployer, so it always serves GQL
+	pass, fail := 0, 0
+	record := func(label, want string, ok bool, got string) {
+		if ok {
+			pass++
+			t.Logf("PASS %-30s %s (%s)", label, want, got)
+		} else {
+			fail++
+			t.Errorf("FAIL %-30s %s (got %s)", label, want, got)
+		}
+	}
+	w := func(n int) string { return d.witnessAccount(n) }
+	hw := func(n int) string { return "hive:" + d.witnessAccount(n) }
+	wait := func(txid string) string { st, _ := lfbWait(t, d, ctx, node, txid, 4*time.Minute); return st }
+	call := func(n int, action, payload string) string {
+		t.Helper()
+		tx, err := d.lfbBroadcastCall(n, cid(t), action, payload)
+		if err != nil {
+			t.Fatalf("%s broadcast: %v", action, err)
+		}
+		return wait(tx)
+	}
+	state := func(key string) string { return lfbState(t, d, ctx, node, cid(t), key) }
+	settle := func() { // let every node see the latest call before a state read
+		head := nodeBlock(t, d, ctx, 1)
+		_ = d.WaitForBlockProcessing(ctx, node, head+2, 3*time.Minute)
+	}
+
+	// ───────── v5.1: deploy, and build whole-token state ─────────
+	t.Log("PHASE 1 — v5.1 (the mainnet contract) builds whole-token state")
+	id, err := d.DeployContract(ctx, ContractDeployOpts{WasmPath: v5, Name: "creator-tokens", DeployerNode: 1, GQLNode: node})
+	if err != nil {
+		t.Fatalf("deploy v5.1: %v", err)
+	}
+	setCid(id)
+	t.Logf("creator-tokens deployed: %s", id)
+	head := nodeBlock(t, d, ctx, 1)
+	for n := 1; n <= cfg.Nodes; n++ {
+		if err := d.WaitForBlockProcessing(ctx, n, head+6, 6*time.Minute); err != nil {
+			dumpDiagnostics(t, d, ctx)
+			t.Fatalf("magi-%d after deploy: %v", n, err)
+		}
+	}
+	active, err := d.ActiveContract(ctx, node, id)
+	if err != nil || active == nil {
+		t.Fatalf("active contract: %v", err)
+	}
+	codeV5 := active.Code
+	t.Logf("active code (v5.1): %s", codeV5)
+
+	record("V5-init", "init CONFIRMED", call(1, "init", `{}`) == "CONFIRMED", "")
+	creator := hw(2)
+	record("V5-register", "register with the pre-v6 numeric cap CONFIRMED", call(2, "register", `{"face":1000,"cap":1000000}`) == "CONFIRMED", "")
+	buyer, other := 3, 4
+	if _, err := d.Deposit(ctx, buyer, "40.000", "hbd"); err != nil {
+		t.Fatalf("deposit: %v", err)
+	}
+	if !waitForL2Balance(t, d, ctx, node, hw(buyer), "hbd", 40_000, 4*time.Minute) {
+		t.Fatalf("deposit never credited")
+	}
+	tx, err := d.lfbBroadcast(lfbCase{signer: w(buyer), creator: creator, tokens: 2, capBaseUnits: lfbTotalDue(0, 2)}, id)
+	if err != nil {
+		t.Fatalf("buy broadcast: %v", err)
+	}
+	record("V5-buy-2", "buy 2 whole tokens CONFIRMED", wait(tx) == "CONFIRMED", tx)
+	settle()
+	record("V5-supply", "supply stored as the whole-token count 2", state("m|"+creator+"|sup") == "2", state("m|"+creator+"|sup"))
+	record("V5-balance", "buyer balance stored as 2", state("mb|"+creator+"|"+hw(buyer)) == "2", state("mb|"+creator+"|"+hw(buyer)))
+	askV5 := fmt.Sprintf(`{"creator":%q,"maxCredits":"1","contentHash":"v5-ask-0","deadlineBlocks":28800}`, creator)
+	record("V5-ask-1", "a 1-credit ask CONFIRMS and stays PENDING", call(buyer, "ask", askV5) == "CONFIRMED", "")
+	settle()
+	escV5 := state("e|" + creator + "|0")
+	record("V5-escrow-9-fields", "escrow #0 is the 9-field whole-token record", strings.Count(escV5, "|") == 8 && strings.Contains(escV5, "|1|") && strings.Contains(escV5, "PENDING"), escV5)
+	record("V5-balance-after-ask", "buyer holds 1 after escrowing 1", state("mb|"+creator+"|"+hw(buyer)) == "1", state("mb|"+creator+"|"+hw(buyer)))
+	reserveV5 := state("m|" + creator + "|res")
+	acqV5 := state("acq|" + creator + "|" + hw(buyer))
+	lotsV5 := state("lots|" + creator + "|" + hw(buyer))
+	t.Logf("v5.1 state: reserve=%s acq=%s lots=%q", reserveV5, acqV5, lotsV5)
+
+	// ───────── the update: queue v6, timelock, activation ─────────
+	t.Log("PHASE 2 — queue the v6 code update in place (the mainnet procedure) and wait for activation")
+	if err := d.UpdateContract(ctx, ContractUpdateOpts{ContractId: id, WasmPath: v6, Name: "creator-tokens", DeployerNode: 1, GQLNode: node}); err != nil {
+		t.Fatalf("queue v6 update: %v", err)
+	}
+	var pending *ContractGQL
+	for deadline := time.Now().Add(4 * time.Minute); ; {
+		rows, err := d.PendingUpdates(ctx, node, id)
+		if err == nil && len(rows) > 0 {
+			pending = &rows[0]
+			break
+		}
+		if time.Now().After(deadline) {
+			d.dumpContracts(ctx, t, node)
+			t.Fatalf("no pending update appeared (err=%v)", err)
+		}
+		time.Sleep(3 * time.Second)
+	}
+	t.Logf("queued: code=%s creation=%d activation=%d", pending.Code, pending.CreationHeight, pending.ActivationHeight)
+	record("UPDATE-queued", "the queued code differs from v5.1", pending.Code != codeV5, pending.Code)
+	// The OLD code still serves during the window: a decimal buy is refused by v5.1.
+	// The OLD code still serves during the window: a decimal buy is refused by v5.1.
+	record("UPDATE-window-old-code", "during the timelock a decimal buy is REFUSED by v5.1", func() bool {
+		tx, err := d.lfbBuyStr(w(buyer), id, creator, "0.5", lfbTotalDue(2, 1))
+		if err != nil {
+			t.Fatalf("window buy broadcast: %v", err)
+		}
+		return wait(tx) == "FAILED"
+	}(), "")
+	if err := d.WaitForBlockProcessing(ctx, node, pending.ActivationHeight+1, 8*time.Minute); err != nil {
+		t.Fatalf("waiting for activation height %d: %v", pending.ActivationHeight, err)
+	}
+	if _, err := d.WaitForActiveCode(ctx, node, id, pending.Code, 3*time.Minute); err != nil {
+		t.Fatalf("v6 did not activate: %v", err)
+	}
+	record("UPDATE-activated", "v6 code is active on the same contract id", true, pending.Code)
+	// Untouched state is still the v5.1 form on disk (the migration is lazy):
+	// balance "1", supply "2", the same clock, no flags.
+	record("V6-state-untouched", "before any v6 call the balance is still the raw \"1\"", state("mb|"+creator+"|"+hw(buyer)) == "1", state("mb|"+creator+"|"+hw(buyer)))
+	record("V6-supply-untouched", "before any v6 call the supply is still the raw \"2\"", state("m|"+creator+"|sup") == "2", state("m|"+creator+"|sup"))
+	record("V6-acq-clock-kept", "the acquisition clock survived the update untouched", state("acq|"+creator+"|"+hw(buyer)) == acqV5, state("acq|"+creator+"|"+hw(buyer)))
+	record("V6-no-flags-yet", "no migration flag exists before the first touch", state("u6|"+creator+"|"+hw(buyer)) == "" && state("m|"+creator+"|u6") == "", state("u6|"+creator+"|"+hw(buyer)))
+
+	// ───────── v6 through the SAME contract ─────────
+	t.Log("PHASE 3 — v6 wire on the migrated state")
+	bal := func(h string) string { return state("mb|" + creator + "|" + h) }
+	tx, err = d.lfbBroadcast(lfbCase{signer: w(buyer), creator: creator, tokens: 1, capBaseUnits: lfbTotalDue(2, 1)}, id)
+	if err != nil {
+		t.Fatalf("buy broadcast: %v", err)
+	}
+	record("V6-buy-1.00-whole-token-wire", "the pre-v6 \"1\" wire still buys 1.00 = 100 units", wait(tx) == "CONFIRMED", tx)
+	settle()
+	record("V6-balance-migrated", "buyer balance = 1 x 100 + 100 = 200 units", bal(hw(buyer)) == "200", bal(hw(buyer)))
+	record("V6-supply-migrated", "supply = 2 x 100 + 100 = 300 units", state("m|"+creator+"|sup") == "300", state("m|"+creator+"|sup"))
+	record("V6-holder-flag", "holder migration flag written once", state("u6|"+creator+"|"+hw(buyer)) == "1", state("u6|"+creator+"|"+hw(buyer)))
+	record("V6-market-flag", "market migration flag written once", state("m|"+creator+"|u6") == "1", state("m|"+creator+"|u6"))
+	record("V6-reserve-kept", "the reserve moved only by the new buy's cost (1024)", func() bool {
+		var r5, r6 int64
+		fmt.Sscanf(reserveV5, "%d", &r5)
+		fmt.Sscanf(state("m|"+creator+"|res"), "%d", &r6)
+		return r6-r5 == 1024
+	}(), state("m|"+creator+"|res"))
+
+	buyStr := func(tokens string) string {
+		t.Helper()
+		tx, err := d.lfbBuyStr(w(buyer), id, creator, tokens, lfbTotalDue(3, 1)) // allowance: one whole token at S=3 covers any fraction
+		if err != nil {
+			t.Fatalf("buy %s broadcast: %v", tokens, err)
+		}
+		return wait(tx)
+	}
+	record("V6-buy-0.50", "a 0.50-token buy CONFIRMS", buyStr("0.5") == "CONFIRMED", "")
+	settle()
+	record("V6-balance-250", "buyer balance = 250 units", bal(hw(buyer)) == "250", bal(hw(buyer)))
+	for _, bad := range []string{"0", "0.001", "1.", ".5", "1e2"} {
+		st := buyStr(bad)
+		record("V6-refuse-"+bad, "buy of "+bad+" FAILS", st == "FAILED", st)
+	}
+
+	record("V6-answer-legacy-escrow", "answering the 9-field escrow CONFIRMS", call(2, "answer", `{"seq":0,"answerHash":"ans-v5-escrow"}`) == "CONFIRMED", "")
+	settle()
+	record("V6-creator-credited-100", "creator holds 1.00 token = 100 units from the legacy escrow", bal(creator) == "100", bal(creator))
+	esc0 := state("e|" + creator + "|0")
+	record("V6-escrow-rewritten", "escrow #0 is now the 10-field unit record (u2 marker, credits 100)", strings.Count(esc0, "|") == 9 && strings.Contains(esc0, "|u2|") && strings.Contains(esc0, "|100|") && strings.Contains(esc0, "ANSWERED"), esc0)
+
+	// A fractional ask: face 1.000 HBD at the spot of the token being filled.
+	askV6 := fmt.Sprintf(`{"creator":%q,"maxCredits":"1.00","contentHash":"v6-ask-1","deadlineBlocks":28800}`, creator)
+	record("V6-ask-fractional", "an ask capped at 1.00 CONFIRMS", call(buyer, "ask", askV6) == "CONFIRMED", "")
+	settle()
+	esc1 := state("e|" + creator + "|1")
+	record("V6-escrow-fractional", "escrow #1 holds fewer than 100 units (a fraction of a token)", func() bool {
+		p := strings.Split(esc1, "|")
+		if len(p) != 10 || p[7] != "u2" {
+			return false
+		}
+		var u int64
+		fmt.Sscanf(p[1], "%d", &u)
+		return u > 0 && u < 100
+	}(), esc1)
+	record("V6-decline", "decline CONFIRMS", call(2, "decline", fmt.Sprintf(`{"creator":%q,"seq":1}`, creator)) == "CONFIRMED", "")
+	settle()
+	record("V6-balance-back-250", "the declined fraction is back: 250 units", bal(hw(buyer)) == "250", bal(hw(buyer)))
+
+	record("V6-transfer-0.25", "a 0.25 transfer CONFIRMS", call(buyer, "transfer", fmt.Sprintf(`{"creator":%q,"to":%q,"amount":"0.25"}`, creator, hw(other))) == "CONFIRMED", "")
+	settle()
+	record("V6-transfer-balances", "225 / 25 units after the transfer", bal(hw(buyer)) == "225" && bal(hw(other)) == "25", bal(hw(buyer))+"/"+bal(hw(other)))
+	half := fmt.Sprintf(`{"creator":%q,"tokens":"0.5"}`, creator) // a sale draws no HBD, so a bare call is enough
+	record("V6-sell-0.50", "a 0.50 sale CONFIRMS", call(buyer, "sell", half) == "CONFIRMED", "")
+	settle()
+	// supply: 200 (v5.1 x100) + 100 (1.00 buy) + 50 (0.50 buy) - 50 (this sale) = 300; the answered
+	// escrow moved 100 units to the creator without changing supply, the transfer moved none.
+	record("V6-sell-balances", "buyer 175 units, supply 350 - 50 = 300", bal(hw(buyer)) == "175" && state("m|"+creator+"|sup") == "300", bal(hw(buyer))+"/"+state("m|"+creator+"|sup"))
+	record("V6-setCap-decimal", "setCap with a decimal string CONFIRMS", call(2, "setCap", `{"newCap":"500000.5"}`) == "CONFIRMED", "")
+	settle()
+	record("V6-cap-units", "cap stored as 50000050 units", state("m|"+creator+"|cap") == "50000050", state("m|"+creator+"|cap"))
+	record("V6-cap-below-min", "a cap of 0.99 FAILS", call(2, "setCap", `{"newCap":"0.99"}`) == "FAILED", "")
+
+	t.Logf("SUMMARY: %d PASS, %d FAIL", pass, fail)
+	fmt.Printf("SUMMARY: %d PASS, %d FAIL\n", pass, fail)
+}
+
+// lfbBuyStr broadcasts a v6 buy whose `tokens` field is a DECIMAL token string
+// ("0.5", "0.001"), with the buyer's transfer.allow intent so the only way the
+// call can fail is the contract itself (parser, cap, curve). A bare vsc.call
+// without the intent fails on the HBD draw and proves nothing about the parser.
+func (d *Devnet) lfbBuyStr(signer, cid, creator, tokens string, capBaseUnits int64) (string, error) {
+	body := map[string]interface{}{
+		"net_id":      d.netId(),
+		"contract_id": cid,
+		"action":      "buy",
+		"payload":     map[string]interface{}{"creator": creator, "tokens": tokens},
+		"rc_limit":    20000,
+		"intents": []map[string]interface{}{{
+			"type": "transfer.allow",
+			"args": map[string]string{"limit": strings.TrimSuffix(lfbHbd(capBaseUnits), " TBD"), "token": "hbd", "decimals": "3"},
+		}},
+	}
+	raw, _ := json.Marshal(body)
+	op := hivego.CustomJsonOperation{RequiredAuths: []string{signer}, RequiredPostingAuths: []string{}, Id: "vsc.call", Json: string(raw)}
+	hc := hivego.NewHiveRpc([]string{d.DroneEndpoint()})
+	hc.ChainID = devnetChainID
+	wif := d.cfg.InitminerWIF
+	return hc.Broadcast([]hivego.HiveOperation{op}, &wif)
+}
+
+var v6cid string
+
+func setCid(s string) { v6cid = s }
+func cid(t *testing.T) string {
+	if v6cid == "" {
+		t.Fatal("contract not deployed yet")
+	}
+	return v6cid
+}
