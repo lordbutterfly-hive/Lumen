@@ -20,13 +20,14 @@
  * with encoding:"hex". Hence the hex read this file's decoder consumes.
  */
 
-import { decodeMaturedLeHex } from './reads';
+import { decodeMaturedLeHex, maturedTokensFromState } from './reads';
 import { refundNetBaseUnits, maturingGrossShareBaseUnits, formatTokenAmountFixed, fromUnits } from '../contract-math';
 
 interface Vector {
   tokens: number;
   tokensDecimal: string;
-  hex: string;
+  hex: string;       // `bal|`: LE u64 of the matured WHOLE tokens
+  fracUnits: number; // `balf|`: the 0..99-unit remainder, a decimal string on the wire
   maturing: number;
   matured: number;
   reserve: number;
@@ -42,16 +43,18 @@ interface Vector {
 // printed by `go test ./core/ -run TestFC5_WireVectors -v`); `tokensDecimal` is the
 // wire's decimal token string for the same count. The refund maths is scale-free, so
 // the six pre-v6 rows keep their figures and three fractional rows join them.
+// The matured bucket is TWO keys: `hex` is what `bal|` holds (whole tokens, the
+// integer magi-market reads, unchanged by v6) and `fracUnits` is `balf|`.
 const VECTORS: Vector[] = [
-  { tokens: 1000, tokensDecimal: '10.00', hex: '00', maturing: 1000, matured: 0, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 7500, net: 42500, taxBps: 1500 },
-  { tokens: 1000, tokensDecimal: '10.00', hex: 'e803', maturing: 0, matured: 1000, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 0, net: 50000, taxBps: 1500 },
-  { tokens: 1000, tokensDecimal: '10.00', hex: 'f401', maturing: 500, matured: 500, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 3750, net: 46250, taxBps: 1500 },
-  { tokens: 1000, tokensDecimal: '10.00', hex: 'fa', maturing: 750, matured: 250, reserve: 123457, supply: 9991, heldBlocks: 100, gross: 12356, tax: 1391, net: 10965, taxBps: 1500 },
-  { tokens: 1000, tokensDecimal: '10.00', hex: 'e703', maturing: 1, matured: 999, reserve: 999983, supply: 100003, heldBlocks: 0, gross: 9999, tax: 2, net: 9997, taxBps: 1500 },
-  { tokens: 1000, tokensDecimal: '10.00', hex: 'f401', maturing: 500, matured: 500, reserve: 500000, supply: 10000, heldBlocks: 1209600, gross: 50000, tax: 0, net: 50000, taxBps: 0 },
-  { tokens: 150, tokensDecimal: '1.50', hex: '71', maturing: 37, matured: 113, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 7500, tax: 278, net: 7222, taxBps: 1500 },
-  { tokens: 2, tokensDecimal: '0.02', hex: '01', maturing: 1, matured: 1, reserve: 2023, supply: 200, heldBlocks: 0, gross: 20, tax: 2, net: 18, taxBps: 1500 },
-  { tokens: 250, tokensDecimal: '2.50', hex: '00', maturing: 250, matured: 0, reserve: 1007, supply: 250, heldBlocks: 100, gross: 1007, tax: 152, net: 855, taxBps: 1500 }
+  { tokens: 1000, tokensDecimal: '10.00', hex: '00', fracUnits: 0, maturing: 1000, matured: 0, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 7500, net: 42500, taxBps: 1500 },
+  { tokens: 1000, tokensDecimal: '10.00', hex: '0a', fracUnits: 0, maturing: 0, matured: 1000, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 0, net: 50000, taxBps: 1500 },
+  { tokens: 1000, tokensDecimal: '10.00', hex: '05', fracUnits: 0, maturing: 500, matured: 500, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 3750, net: 46250, taxBps: 1500 },
+  { tokens: 1000, tokensDecimal: '10.00', hex: '02', fracUnits: 50, maturing: 750, matured: 250, reserve: 123457, supply: 9991, heldBlocks: 100, gross: 12356, tax: 1391, net: 10965, taxBps: 1500 },
+  { tokens: 1000, tokensDecimal: '10.00', hex: '09', fracUnits: 99, maturing: 1, matured: 999, reserve: 999983, supply: 100003, heldBlocks: 0, gross: 9999, tax: 2, net: 9997, taxBps: 1500 },
+  { tokens: 1000, tokensDecimal: '10.00', hex: '05', fracUnits: 0, maturing: 500, matured: 500, reserve: 500000, supply: 10000, heldBlocks: 1209600, gross: 50000, tax: 0, net: 50000, taxBps: 0 },
+  { tokens: 150, tokensDecimal: '1.50', hex: '01', fracUnits: 13, maturing: 37, matured: 113, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 7500, tax: 278, net: 7222, taxBps: 1500 },
+  { tokens: 2, tokensDecimal: '0.02', hex: '00', fracUnits: 1, maturing: 1, matured: 1, reserve: 2023, supply: 200, heldBlocks: 0, gross: 20, tax: 2, net: 18, taxBps: 1500 },
+  { tokens: 250, tokensDecimal: '2.50', hex: '00', fracUnits: 0, maturing: 250, matured: 0, reserve: 1007, supply: 250, heldBlocks: 100, gross: 1007, tax: 152, net: 855, taxBps: 1500 }
 ];
 
 let failures = 0;
@@ -67,15 +70,27 @@ function check(name: string, condition: boolean, detail?: string): void {
   }
 }
 
-// ── 1. The LE wire decoding, against the contract's own encoder output.
+// ── 1. The LE wire decoding, against the contract's own encoder output: the
+// whole-token half decodes alone, and the two-key reader rebuilds the unit count.
 for (const v of VECTORS) {
-  const got = decodeMaturedLeHex(v.hex);
+  const whole = decodeMaturedLeHex(v.hex);
+  const wantWhole = Math.floor(v.matured / 100);
   check(
-    `decode ${v.hex || '(empty)'} -> ${v.matured}`,
-    got === v.matured,
-    got === v.matured ? undefined : `got ${got}, want ${v.matured}`
+    `decode ${v.hex || '(empty)'} -> ${wantWhole} whole`,
+    whole === wantWhole,
+    whole === wantWhole ? undefined : `got ${whole}, want ${wantWhole}`
+  );
+  const tokens = maturedTokensFromState(v.hex, String(v.fracUnits));
+  const units = tokens === null ? null : Math.round(tokens * 100);
+  check(
+    `bal| ${v.hex || '(empty)'} + balf| ${v.fracUnits} -> ${v.matured} units`,
+    units === v.matured,
+    units === v.matured ? undefined : `got ${units}, want ${v.matured}`
   );
 }
+check('two-key reader: absent balf| is a real zero remainder', maturedTokensFromState('03', null) === 3);
+check('two-key reader: absent bal| with a remainder is below one token', maturedTokensFromState(null, '7') === 0.07);
+check('two-key reader: undecodable bal| is unavailable, not zero', maturedTokensFromState('abc', '7') === null);
 
 // ── 2. Absent/empty is a real zero (setMatured DELETES at zero), but garbage
 // is unavailable — never silently zero.

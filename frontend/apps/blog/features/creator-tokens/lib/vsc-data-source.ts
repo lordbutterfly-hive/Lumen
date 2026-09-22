@@ -125,7 +125,8 @@ import {
   kAcqBlock,
   kBal,
   kMatured,
-  decodeMaturedLeHex,
+  kMaturedFrac,
+  maturedTokensFromState,
   kCap,
   kEscrow,
   kFace,
@@ -790,7 +791,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   }
 
   async readHolderPosition(creator: string, holder: string): Promise<HolderPosition | null> {
-    const keys = [kRegisteredAt(creator), kSupply(creator), kUnitsMarket(creator), kReserve(creator), kBal(creator, holder), kUnitsHolder(creator, holder), kAcqBlock(creator, holder), kLots(creator, holder)];
+    const keys = [kRegisteredAt(creator), kSupply(creator), kUnitsMarket(creator), kReserve(creator), kBal(creator, holder), kUnitsHolder(creator, holder), kAcqBlock(creator, holder), kLots(creator, holder), kMaturedFrac(creator, holder)];
     // rejects on failure — see interface doc. heldBlocks (below) needs a real
     // chain head (the exit tax RATE is time-dependent, holdclock.go), so this
     // read is genuinely incomplete without one — reject rather than guess.
@@ -809,8 +810,9 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (head === null) {
       throw new Error('VscCreatorTokensDataSource: cannot compute the exit tax (chain head unavailable)');
     }
-    const tokensMaturedRaw = decodeMaturedLeHex(maturedState[kMatured(creator, holder)]);
-    const tokensMatured = tokensMaturedRaw === null ? null : state[kUnitsHolder(creator, holder)] === '1' ? tokensMaturedRaw / 100 : tokensMaturedRaw;
+    // v6: whole tokens from `bal|` (unchanged unit) plus the 0..99-unit remainder
+    // from `balf|`; the holder's migration flag plays no part (reads.ts).
+    const tokensMatured = maturedTokensFromState(maturedState[kMatured(creator, holder)], state[kMaturedFrac(creator, holder)]);
     if (tokensMatured === null) {
       // Undecodable ≠ zero. Reporting 0 here would tell a holder they own
       // nothing in the matured bucket and understate their exit value — the
@@ -1301,7 +1303,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         kPaidUntil(creator),
         kState(creator),
         kRetiredAt(creator),
-        kLots(creator, seller)
+        kLots(creator, seller),
+        kMaturedFrac(creator, seller)
       ]),
       this.gql.getStateByKeysHex(this.config.contractId, [kMatured(creator, seller)]),
       this.gql.getHeadBlockCached(),
@@ -1313,8 +1316,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (head === null) {
       throw new Error('VscCreatorTokensDataSource: cannot price this sell (chain head unavailable)');
     }
-    const tokensMaturedRaw = decodeMaturedLeHex(maturedState[kMatured(creator, seller)]);
-    const tokensMatured = tokensMaturedRaw === null ? null : state[kUnitsHolder(creator, seller)] === '1' ? tokensMaturedRaw / 100 : tokensMaturedRaw;
+    const tokensMatured = maturedTokensFromState(maturedState[kMatured(creator, seller)], state[kMaturedFrac(creator, seller)]);
     if (tokensMatured === null) {
       // Undecodable ≠ zero — the same choice readHolderPosition makes, for the
       // same reason, and it matters MORE here: defaulting to 0 on this path does
@@ -2339,6 +2341,10 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (!Number.isFinite(input.maxCreditsBaseUnits) || input.maxCreditsBaseUnits <= 0) {
       throw new Error('VscCreatorTokensDataSource: maxCreditsBaseUnits must be > 0');
     }
+    // The same rules-gated wire assert buy/sell/transfer/refund apply at this
+    // boundary (LOW-10, 2026-09-22): a cap off the 0.01 grid, or fractional
+    // under pre-v6 rules, is refused here rather than signed and bounced.
+    assertPositiveTokenCount(input.maxCreditsBaseUnits, 'maxCredits', fractionalTokensUnder(await this.readRules()));
     // ask.go Ask -> market.go RequireInflowOpen — the canAsk gate, identical
     // in shape to buy()'s canBuy guard above (same RequireInflowOpen
     // chokepoint on the Go side, same Market field pair on this side).

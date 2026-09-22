@@ -277,6 +277,28 @@ export function kBal(c: string, holder: string): string {
 export function kMatured(c: string, holder: string): string {
   return `bal|${toDid(holder)}|${toDid(c)}`;
 }
+// v6 (2026-09-22): `bal|` keeps meaning WHOLE tokens (LE u64, byte for byte the
+// pre-v6 value, because magi-market decodes it as an integer with no decimals
+// hint); the remainder below one token, 0..99 UNITS as a decimal string, lives
+// here (core/matured.go kMaturedFrac). Same transposition as kMatured. Read with
+// the ordinary string encoding, like every other setMoney value.
+export function kMaturedFrac(c: string, holder: string): string {
+  return `balf|${toDid(holder)}|${toDid(c)}`;
+}
+
+/**
+ * The matured balance in TOKENS from its two keys: `bal|` (whole, hex-read LE)
+ * plus `balf|` (0..99 units, decimal). Neither key is scaled by the holder's
+ * v6 flag: `bal|` never changed unit and `balf|` never existed before v6, so
+ * this reads identically against a v5.1 market (no balf|, whole tokens) and a
+ * v6 one. Returns null, never 0, when the whole-token half is undecodable
+ * (see decodeMaturedLeHex); an absent key is a real zero.
+ */
+export function maturedTokensFromState(wholeHex: string | null | undefined, fracRaw: string | null | undefined): number | null {
+  const whole = decodeMaturedLeHex(wholeHex);
+  if (whole === null) return null;
+  return whole + toU64(fracRaw) / 100;
+}
 
 // Decode core/matured.go's wire form: little-endian uint64 with trailing
 // (high-order) zero bytes TRIMMED, supplied here as the node's hex encoding.

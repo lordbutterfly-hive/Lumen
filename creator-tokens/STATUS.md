@@ -4,13 +4,20 @@ Per-creator token on a bonding curve. You buy a creator's token, spend it on
 their services, and the price moves with supply.
 
 > **2026-09-22 — v6: FRACTIONAL TOKENS (0.01 units). BUILT, PROVEN IN `go test`,
-> NOT DEPLOYED.** CID `bafkreih5siwquvmnfy3zfdal775p5wvltuokmwjmuk6jordfkylxfx3upa`
-> (167,142 B, reproducible: two clean builds, byte for byte; v5.1 was 159,539 B).
+> ON TESTNET, MAINNET PENDING THE OWNER'S SIGNATURE.** CID
+> `bafkreifl4mfns6ta3alfca7a7h63j46i2jocnzbsgfjsxtxlxxy2hi5fzm` (167,736 B,
+> reproducible: two clean builds, byte for byte; v5.1 was 159,539 B; the morning
+> candidate bafkreih5siwq… 167,142 B was superseded the same day, see below).
 > A token divides into 100 units; the wire is decimal token strings ("1.50"),
 > events are `v: 2`; the curve, reserves, clocks and fees are unchanged per whole
 > token; a lazy per-key migration scales v5.1 state x100 on first touch (proven on
-> the mainnet snapshot, 8 markets / 13 positions / the answered escrow). Full spec,
-> checklist and deploy order: `/mnt/o/LUMEN-DOCS/MERITUM-V6-FRACTIONAL-TOKENS-2026-09-22.md`.
+> the mainnet snapshot, 8 markets / 13 positions / the answered escrow).
+> **The marketplace door stays in WHOLE tokens** (scrutiny 2026-09-22 HIGH-1):
+> `bal|`, allowances, balanceOf/allowance, safeTransferFrom/approve and the
+> TransferSingle/Approval/tokenCreated events all keep the integer unit magi-market
+> decodes; the fraction below one token lives in the new `balf|` key and is
+> spendable only through Lumen's own rails. Full spec, checklist and deploy order:
+> `/mnt/o/LUMEN-DOCS/MERITUM-V6-FRACTIONAL-TOKENS-2026-09-22.md`.
 > The real-wasm harness (`testing/creator_tokens_escrow_test.go.govsc`) is GREEN on
 > this bytecode (fractional buy/transfer/sell, 42.64-credit escrow, 22.49-credit
 > fresh-market ask) and RED on v5.1 at the first v6 difference. Still to run before

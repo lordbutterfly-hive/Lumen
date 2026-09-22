@@ -143,7 +143,7 @@ func TransferCredits(s Store, caller, creator, from, to string, block uint64, am
 	if !isPayableDestination(to) {
 		return newErr(ErrInput, "credits can only be sent to a user account (not a contract or system address)")
 	}
-	if amount == nil || amount.Sign() <= 0 {
+	if belowMinTrade(amount) {
 		return newErr(ErrInput, "amount must be positive")
 	}
 

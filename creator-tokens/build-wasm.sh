@@ -18,9 +18,12 @@ IMAGE="tinygo/tinygo:0.41.1"
 OUT="${1:-bin/main.wasm}"
 # The CID the frontend's V2_CODE_CIDS allow-lists for v2. If you INTEND to change
 # the contract, this line and that allow-list move together, in that order.
-# v6 (0.01-token units), 2026-09-22, 167,142 B, reproducible (two clean builds).
+# v6 (0.01-token units), 2026-09-22, 167,736 B, reproducible (two clean builds).
+# The first v6 candidate (bafkreih5siwquvmnfy3zfdal775p5wvltuokmwjmuk6jordfkylxfx3upa,
+# 167,142 B, testnet 2026-09-22 morning) scaled `bal|` to units; it was replaced the
+# same day by the whole-token door (matured = bal| whole tokens + balf| remainder).
 # v5.1 (the mainnet contract until the v6 update) was bafkreicij3ipcglu6xkc25upwlox5okpcfojf6u2g3flfzt2kszw44bdeu, 159,539 B.
-EXPECTED_CID=bafkreih5siwquvmnfy3zfdal775p5wvltuokmwjmuk6jordfkylxfx3upa
+EXPECTED_CID=bafkreifl4mfns6ta3alfca7a7h63j46i2jocnzbsgfjsxtxlxxy2hi5fzm
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ★ THE TINYGO CACHE MUST LIVE ON A REAL LINUX FILESYSTEM. This repo is on a

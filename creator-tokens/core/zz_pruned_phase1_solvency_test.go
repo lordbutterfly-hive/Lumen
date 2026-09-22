@@ -192,11 +192,17 @@ func zp1SumTokens(s *MemStore, creator string) (maturing, matured, escrowed *big
 			}
 			seen[strings.TrimPrefix(k, mbPrefix)] = true
 		case strings.HasPrefix(k, "bal|") && strings.HasSuffix(k, balSuffix):
-			n, ok := leToU64([]byte(v))
+			n, ok := leToU64([]byte(v)) // WHOLE tokens (v6)
 			if ok {
-				matured.Add(matured, new(big.Int).SetUint64(n))
+				matured.Add(matured, new(big.Int).Mul(new(big.Int).SetUint64(n), unitsScale))
 			}
 			h := strings.TrimSuffix(strings.TrimPrefix(k, "bal|"), balSuffix)
+			seen[h] = true
+		case strings.HasPrefix(k, "balf|") && strings.HasSuffix(k, balSuffix):
+			if n, ok := new(big.Int).SetString(v, 10); ok { // the 0..99-unit remainder (v6)
+				matured.Add(matured, n)
+			}
+			h := strings.TrimSuffix(strings.TrimPrefix(k, "balf|"), balSuffix)
 			seen[h] = true
 		case strings.HasPrefix(k, escPrefix):
 			rec, ok := unpackEscrow(v)

@@ -25,7 +25,8 @@ import (
 type fc5Vector struct {
 	Tokens   uint64 `json:"tokens"`        // v6: UNITS (0.01 token)
 	Decimal  string `json:"tokensDecimal"` // the same count as the wire's decimal token string
-	Hex      string `json:"hex"`
+	Hex      string `json:"hex"`           // `bal|` value: LE u64 of the matured WHOLE tokens (matured/100)
+	Frac     uint64 `json:"fracUnits"`     // `balf|` value: matured%100, a decimal string on the wire
 	Maturing int64  `json:"maturing"`
 	Matured  int64  `json:"matured"`
 	Reserve  int64  `json:"reserve"`
@@ -94,7 +95,8 @@ func TestFC5_WireVectors(t *testing.T) {
 		out = append(out, fc5Vector{
 			Tokens:   uint64(c.maturing + c.matured),
 			Decimal:  fmtTokens(total),
-			Hex:      hex.EncodeToString(u64ToLE(uint64(c.matured))),
+			Hex:      hex.EncodeToString(u64ToLE(uint64(c.matured / TokenScale))),
+			Frac:     uint64(c.matured % TokenScale),
 			Maturing: c.maturing,
 			Matured:  c.matured,
 			Reserve:  c.reserve,

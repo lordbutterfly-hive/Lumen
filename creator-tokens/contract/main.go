@@ -723,7 +723,7 @@ func Register(a *string) *string {
 	// free. The event field is kept for schema stability (every other
 	// EvRegistered call site in this file still carries it).
 	// Declares this creator's token id to the standard tables.
-	sdk.Log(core.EvTokenCreated(caller, uint64(capVal)))
+	sdk.Log(core.EvTokenCreated(caller, uint64(capVal/core.TokenScale))) // maxSupply in WHOLE tokens, the NFT-standard integer
 	sdk.Log(core.EvRegistered(caller, caller, block, face, capVal, big.NewInt(0)))
 	minted := "0"
 	if res.FirstBuy != nil {
@@ -904,12 +904,39 @@ func emitMaturedDelta(creator, holder, operator string, block uint64, before *bi
 	switch after.Cmp(before) {
 	case 1: // grew — a graduation into the tradable bucket
 		d := new(big.Int).Sub(after, before)
-		sdk.Log(core.EvTransferSingle(operator, "", holder, creator, d))
+		emitTransferSingleWhole(operator, creator, holder, d)
 		sdk.Log(core.EvMaturedMoved(creator, operator, "", holder, block, d))
 	case -1: // shrank — tokens left the tradable supply
 		d := new(big.Int).Sub(before, after)
-		sdk.Log(core.EvTransferSingle(operator, holder, "", creator, d))
+		emitTransferSingleWhole(operator, creator, holder, new(big.Int).Neg(d))
 		sdk.Log(core.EvMaturedMoved(creator, operator, holder, "", block, d))
+	}
+}
+
+var unitsScaleBig = big.NewInt(core.TokenScale)
+
+// emitTransferSingleWhole (v6, 2026-09-22) reports the change of an account's
+// WHOLE-token matured balance, the only unit the magi_nft TransferSingle
+// ledger has ever carried, caused by a movement of `unitsDelta` (signed,
+// positive = into the matured bucket). It is derived from the post-state, so a
+// fraction that does not cross a whole-token boundary emits nothing here; the
+// Lumen sibling EvMaturedMoved always carries the exact decimal amount. This
+// keeps the shared table's history in one unit before and after the update.
+func emitTransferSingleWhole(operator, creator, acct string, unitsDelta *big.Int) {
+	if acct == "" || unitsDelta == nil || unitsDelta.Sign() == 0 {
+		return
+	}
+	after := core.MaturedOf(store, creator, acct)
+	before := new(big.Int).Sub(after, unitsDelta)
+	if before.Sign() < 0 {
+		before = big.NewInt(0)
+	}
+	d := new(big.Int).Sub(new(big.Int).Div(after, unitsScaleBig), new(big.Int).Div(before, unitsScaleBig))
+	switch d.Sign() {
+	case 1:
+		sdk.Log(core.EvTransferSingle(operator, "", acct, creator, d))
+	case -1:
+		sdk.Log(core.EvTransferSingle(operator, acct, "", creator, d.Neg(d)))
 	}
 }
 
@@ -976,14 +1003,17 @@ func SafeTransferFrom(a *string) *string {
 		return nil
 	}
 
-	amount := new(big.Int).SetUint64(amountU64)
+	// `amount` is WHOLE tokens (the NFT-standard integer, unchanged since v5.1);
+	// core works in units, so scale here and only here.
+	amountWhole := new(big.Int).SetUint64(amountU64)
+	amount := new(big.Int).Mul(amountWhole, unitsScaleBig)
 	if err := core.TransferMatured(store, creator, from, to, spender, amount); err != nil {
 		handleErr(err)
 		return nil
 	}
 	// The derived balance views are inflow minus outflow over these events, so
 	// every matured-bucket movement must emit one.
-	sdk.Log(core.EvTransferSingle(spender, from, to, creator, amount))
+	sdk.Log(core.EvTransferSingle(spender, from, to, creator, amountWhole))
 	sdk.Log(core.EvMaturedMoved(creator, spender, from, to, currentBlock(), amount))
 	return strPtr(`{"success":true}`)
 }
@@ -1061,7 +1091,7 @@ func GraduateMatured(a *string) *string {
 	moved := core.Graduate(store, creator, caller, currentBlock())
 	if moved.Sign() > 0 {
 		// Mint shape (from == ""): tokens entering the tradable supply.
-		sdk.Log(core.EvTransferSingle(caller, "", caller, creator, moved))
+		emitTransferSingleWhole(caller, creator, caller, moved)
 		sdk.Log(core.EvMaturedMoved(creator, caller, "", caller, currentBlock(), moved))
 	}
 	return strPtr(`{"graduated":"` + core.FmtTokens(moved) + `"}`)
@@ -1091,7 +1121,9 @@ func AllowanceRead(a *string) *string {
 //go:wasmexport balanceOf
 func BalanceOfMatured(a *string) *string {
 	payload := payloadStr(a)
-	v := core.MaturedOf(store, jsonStr(payload, "id"), jsonStr(payload, "account"))
+	// WHOLE tokens: the integer every NFT-standard reader expects, equal to the
+	// raw `bal|` value they decode themselves. The fraction is in creatorTokenBalance.
+	v := core.MaturedWholeOf(store, jsonStr(payload, "id"), jsonStr(payload, "account"))
 	return strPtr(`{"balance":` + v.String() + `}`)
 }
 
@@ -1268,7 +1300,7 @@ func Answer(a *string) *string {
 	// decline/reclaim already use for the asker's graduation. Skipped entirely
 	// when no owner is bound, in which case the creator received the whole escrow.
 	if res.Owner != "" && res.OwnerGraduated != nil && res.OwnerGraduated.Sign() > 0 {
-		sdk.Log(core.EvTransferSingle(caller, "", res.Owner, caller, res.OwnerGraduated))
+		emitTransferSingleWhole(caller, caller, res.Owner, res.OwnerGraduated)
 		sdk.Log(core.EvMaturedMoved(caller, caller, "", res.Owner, block, res.OwnerGraduated))
 	}
 	// M4: EvAnswered carries BOTH halves of the escrow — what the creator got and
@@ -1355,7 +1387,7 @@ func Decline(a *string) *string {
 	// which this wrapper's caller is NOT (the caller is the creator) — so we emit
 	// from the returned figure rather than measuring a delta. operator == caller.
 	if res.Graduated != nil && res.Graduated.Sign() > 0 {
-		sdk.Log(core.EvTransferSingle(caller, "", res.Asker, creator, res.Graduated))
+		emitTransferSingleWhole(caller, creator, res.Asker, res.Graduated)
 		sdk.Log(core.EvMaturedMoved(creator, caller, "", res.Asker, block, res.Graduated))
 	}
 	sdk.Log(core.EvDeclined(creator, caller, block, seq, res.CreditsReturned, res.Asker))
@@ -1439,7 +1471,7 @@ func Reclaim(a *string) *string {
 	// moved here either — core already credited it to res.Owner. It is logged so
 	// the money model still balances: escrow == returned + retained.
 	if res.Owner != "" && res.OwnerGraduated != nil && res.OwnerGraduated.Sign() > 0 {
-		sdk.Log(core.EvTransferSingle(caller, "", res.Owner, creator, res.OwnerGraduated))
+		emitTransferSingleWhole(caller, creator, res.Owner, res.OwnerGraduated)
 		sdk.Log(core.EvMaturedMoved(creator, caller, "", res.Owner, block, res.OwnerGraduated))
 	}
 	// F-C1/F-C8: if core.Reclaim banked the asker's aged position into MATURED
@@ -1447,7 +1479,7 @@ func Reclaim(a *string) *string {
 	// Reclaim is permissionless, so caller may be a third-party keeper — the
 	// recipient is res.Asker, never caller. operator == caller (the actor).
 	if res.Graduated != nil && res.Graduated.Sign() > 0 {
-		sdk.Log(core.EvTransferSingle(caller, "", res.Asker, creator, res.Graduated))
+		emitTransferSingleWhole(caller, creator, res.Asker, res.Graduated)
 		sdk.Log(core.EvMaturedMoved(creator, caller, "", res.Asker, block, res.Graduated))
 	}
 	sdk.Log(core.EvReclaimed(creator, caller, block, seq, res.CreditsReturned, res.CommissionRetainedCredits, res.Owner, res.Asker))
@@ -1601,7 +1633,7 @@ func Buy(a *string) *string {
 	if res.Graduated != nil && res.Graduated.Sign() > 0 {
 		// A buy graduates the caller's cleared position before crediting the new
 		// tokens; mint shape, because those tokens enter the tradable supply.
-		sdk.Log(core.EvTransferSingle(caller, "", caller, creator, res.Graduated))
+		emitTransferSingleWhole(caller, creator, caller, res.Graduated)
 		sdk.Log(core.EvMaturedMoved(creator, caller, "", caller, block, res.Graduated))
 	}
 	sdk.Log(core.EvBought(creator, caller, block, res.Minted, res.Cost, res.Fee, res.TotalDue))
@@ -1659,15 +1691,25 @@ func Sell(a *string) *string {
 	if res.Net != nil && res.Net.Sign() > 0 {
 		sdk.HiveTransfer(sdk.Address(caller), nativeInt64(res.Net), sdk.AssetHbd) // THEN pay the seller
 	}
-	if res.Graduated != nil && res.Graduated.Sign() > 0 {
-		sdk.Log(core.EvTransferSingle(caller, "", caller, creator, res.Graduated))
-		sdk.Log(core.EvMaturedMoved(creator, caller, "", caller, block, res.Graduated))
-	}
+	// One whole-token TransferSingle for the NET matured change of a sell
+	// (graduation in, burn out); the two Lumen events keep the exact decimal legs.
 	// Burn shape (to == ""): whatever left the MATURED bucket has left the
 	// tradable supply. A sale draws maturing tokens first, so this fires only
 	// once those are exhausted.
+	if (res.Graduated != nil && res.Graduated.Sign() > 0) || (res.MaturedBurned != nil && res.MaturedBurned.Sign() > 0) {
+		net := big.NewInt(0)
+		if res.Graduated != nil {
+			net.Add(net, res.Graduated)
+		}
+		if res.MaturedBurned != nil {
+			net.Sub(net, res.MaturedBurned)
+		}
+		emitTransferSingleWhole(caller, creator, caller, net)
+	}
+	if res.Graduated != nil && res.Graduated.Sign() > 0 {
+		sdk.Log(core.EvMaturedMoved(creator, caller, "", caller, block, res.Graduated))
+	}
 	if res.MaturedBurned != nil && res.MaturedBurned.Sign() > 0 {
-		sdk.Log(core.EvTransferSingle(caller, caller, "", creator, res.MaturedBurned))
 		sdk.Log(core.EvMaturedMoved(creator, caller, caller, "", block, res.MaturedBurned))
 	}
 	sdk.Log(core.EvSold(creator, caller, block, res.Sold, res.Gross, res.Tax, res.Fee, res.Net, res.TaxableGross, res.TaxBps, res.HeldBlocks))

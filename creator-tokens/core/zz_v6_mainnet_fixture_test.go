@@ -64,6 +64,12 @@ func mnHolders(raw *MemStore, c string) []string {
 				seen[h] = true
 				out = append(out, h)
 			}
+		case strings.HasPrefix(k, "balf|") && strings.HasSuffix(k, "|"+c):
+			h := k[5 : len(k)-len("|"+c)]
+			if !seen[h] {
+				seen[h] = true
+				out = append(out, h)
+			}
 		}
 	}
 	return out
@@ -515,7 +521,9 @@ func TestV6Mainnet_EveryEntrypointOnMigratedState(t *testing.T) {
 
 	// Maturity: the legacy dlmmqb position on lordbutterfly's market (acq
 	// 109772089, never ledgered) matures at acq+ExitTaxDecayBlocks; Graduate moves
-	// the whole 1.00 token; then Approve + TransferMatured 0.50 of it.
+	// the whole 1.00 token; then Approve + TransferMatured that 1 whole token
+	// (the door moves whole tokens only: allowance 1, amount 100 units), and the
+	// recipient sells 0.50 of it through Lumen, where fractions are allowed.
 	b = 109772089 + ExitTaxDecayBlocks
 	if !maturedNow(s, lb, dl, b) {
 		t.Fatal("legacy position should read matured at acq+window")
@@ -527,13 +535,16 @@ func TestV6Mainnet_EveryEntrypointOnMigratedState(t *testing.T) {
 		t.Fatalf("after graduate: matured %s maturing %s total %s", MaturedOf(s, lb, dl), MaturingOf(s, lb, dl), BalanceOf(s, lb, dl))
 	}
 	check("after graduate")
-	if err := Approve(s, dl, sink, lb, big.NewInt(0), big.NewInt(50)); err != nil {
+	if err := Approve(s, dl, sink, lb, big.NewInt(0), big.NewInt(1)); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
-	if err := TransferMatured(s, lb, dl, dv, sink, big.NewInt(50)); err != nil {
+	if err := TransferMatured(s, lb, dl, dv, sink, big.NewInt(50)); err == nil {
+		t.Fatal("the door moved a fraction (0.50) — magi-market cannot represent it")
+	}
+	if err := TransferMatured(s, lb, dl, dv, sink, tk(1)); err != nil {
 		t.Fatalf("transfer matured via allowance: %v", err)
 	}
-	if MaturedOf(s, lb, dv).Cmp(big.NewInt(50)) != 0 || MaturedOf(s, lb, dl).Cmp(big.NewInt(50)) != 0 || AllowanceOf(s, dl, sink, lb).Sign() != 0 {
+	if MaturedOf(s, lb, dv).Cmp(tk(1)) != 0 || MaturedOf(s, lb, dl).Sign() != 0 || AllowanceOf(s, dl, sink, lb).Sign() != 0 {
 		t.Fatalf("matured transfer: dv=%s dl=%s allowance=%s", MaturedOf(s, lb, dv), MaturedOf(s, lb, dl), AllowanceOf(s, dl, sink, lb))
 	}
 	check("after matured transfer")

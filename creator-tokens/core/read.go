@@ -52,6 +52,13 @@ func MaturedOf(s Store, creator, holder string) *big.Int {
 	return getMatured(s, creator, holder)
 }
 
+// MaturedWholeOf is the matured balance in WHOLE tokens: the integer the
+// marketplace door (balanceOf, TransferSingle) reports. The fraction below one
+// token is not part of it; MaturedOf carries it in units.
+func MaturedWholeOf(s Store, creator, holder string) *big.Int {
+	return maturedWholeOf(s, creator, holder)
+}
+
 func MaturingOf(s Store, creator, holder string) *big.Int {
 	return getMoney(s, kBal(creator, holder))
 }
@@ -155,7 +162,7 @@ func WithdrawTreasury(s Store, caller string, amount *big.Int) (*big.Int, error)
 	if caller == "" || caller != Owner(s) {
 		return nil, newErr(ErrAuth, "owner only")
 	}
-	if amount == nil || amount.Sign() <= 0 {
+	if belowMinTrade(amount) {
 		return nil, newErr(ErrInput, "amount must be positive")
 	}
 	balance := getMoney(s, kTreasury())

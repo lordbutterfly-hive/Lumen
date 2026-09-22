@@ -35,7 +35,7 @@ import "math/big"
 // package rule is "no uint64 arithmetic anywhere near money math, with zero
 // exceptions to reason about". This file is the exception and it is safe BY
 // SCOPE, not by luck: the u64 family carries TOKEN COUNTS only, never HBD. A
-// count is bounded by supply, supply by MaxCap = 1e9, and 1e9 encodes in four
+// count is bounded by supply, supply by MaxCap (1e11 units, i.e. 1e9 WHOLE tokens in `bal|`), and 1e9 encodes in four
 // bytes against a uint64 ceiling of ~1.8e19 — ten orders of magnitude of head
 // room. Every arithmetic operation below is still done in big.Int; u64 appears
 // only at the encode/decode boundary. HBD must never reach these helpers.
@@ -46,6 +46,29 @@ import "math/big"
 // one holder's position onto another's, so the argument names are deliberately
 // not interchangeable.
 func kMatured(holder, c string) string { return "bal|" + holder + "|" + c }
+
+// kMaturedFrac (v6, 2026-09-22): the fractional remainder of a matured position,
+// 0..TokenScale-1 UNITS as a decimal string. `bal|` above stays WHOLE tokens as a
+// little-endian u64, byte-for-byte the pre-v6 encoding, because it is the key
+// magi-market and every other NFT-standard reader decode as an integer with no
+// decimals hint. So the marketplace door (balanceOf, allowance, safeTransferFrom,
+// TransferSingle/Approval events) speaks WHOLE tokens; the fraction lives here,
+// is never visible through that door, and is fully spendable inside Lumen (sell,
+// refund, ask). No migration is needed for `bal|`: the value never changed unit.
+func kMaturedFrac(holder, c string) string { return "balf|" + holder + "|" + c }
+
+// maturedWholeOf is the matured balance in WHOLE tokens (what `bal|` holds).
+func maturedWholeOf(s Store, c, h string) *big.Int {
+	v, ok := s.Get(kMatured(h, c))
+	if !ok || v == "" {
+		return mZero()
+	}
+	n, valid := leToU64([]byte(v))
+	if !valid {
+		return mZero()
+	}
+	return new(big.Int).SetUint64(n)
+}
 
 // u64ToLE encodes n in magi_nft's exact wire form: little-endian uint64 with
 // trailing (high-order) zero bytes trimmed. Zero encodes as a single 0x00 byte —
@@ -92,15 +115,10 @@ func leToU64(b []byte) (uint64, bool) {
 // malformed value reads as zero — the same convention every other read in this
 // package uses, and the treasury-favouring direction.
 func getMatured(s Store, c, h string) *big.Int {
-	v, ok := s.Get(kMatured(h, c))
-	if !ok || v == "" {
-		return mZero()
-	}
-	n, valid := leToU64([]byte(v))
-	if !valid {
-		return mZero()
-	}
-	return new(big.Int).SetUint64(n)
+	// UNITS: whole tokens (bal|, LE u64) x TokenScale + the fractional remainder (balf|).
+	whole := maturedWholeOf(s, c, h)
+	units := whole.Mul(whole, unitsScale)
+	return units.Add(units, getMoney(s, kMaturedFrac(h, c)))
 }
 
 // setMatured writes the matured balance, deleting the key at zero exactly as
@@ -115,12 +133,21 @@ func setMatured(s Store, c, h string, v *big.Int) {
 	if !v.IsUint64() || v.Uint64() > uint64(MaxCap) {
 		panic("setMatured: token count exceeds MaxCap for " + c + "/" + h)
 	}
+	// v is UNITS. Split into whole tokens (bal|, the integer door) and the
+	// 0..99-unit remainder (balf|); a zero part deletes its key.
+	whole, frac := new(big.Int).DivMod(v, unitsScale, new(big.Int))
 	key := kMatured(h, c)
-	if v.Sign() == 0 {
+	if whole.Sign() == 0 {
 		s.Delete(key)
-		return
+	} else {
+		s.Set(key, string(u64ToLE(whole.Uint64())))
 	}
-	s.Set(key, string(u64ToLE(v.Uint64())))
+	fkey := kMaturedFrac(h, c)
+	if frac.Sign() == 0 {
+		s.Delete(fkey)
+	} else {
+		setMoney(s, fkey, frac)
+	}
 }
 
 // maturedNow reports whether (c,h)'s MATURING balance has cleared the window as

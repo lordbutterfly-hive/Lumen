@@ -69,6 +69,9 @@ func zp4MoneyKey(k string) bool {
 	if strings.HasPrefix(k, "mb|") {
 		return true // maturing balances
 	}
+	if strings.HasPrefix(k, "balf|") {
+		return true // v6: the matured remainder below one token, decimal units
+	}
 	if strings.HasPrefix(k, "m|") {
 		p := strings.Split(k, "|")
 		if len(p) == 3 {
@@ -215,9 +218,10 @@ func TestZP1_GetMoney_KeyFamiliesCannotAlias(t *testing.T) {
 	for _, a := range valid {
 		add(kFeeBal(a), "kFeeBal", a)
 		for _, b := range valid {
-			add(kBal(a, b), "kBal", a+","+b)           // mb|<creator>|<holder>   MONEY (base-10)
-			add(kMatured(a, b), "kMatured", a+","+b)   // bal|<holder>|<creator>  RAW LE BYTES
-			add(kAcqBlock(a, b), "kAcqBlock", a+","+b) // acq|<creator>|<holder>  u64
+			add(kBal(a, b), "kBal", a+","+b)                 // mb|<creator>|<holder>   MONEY (base-10)
+			add(kMatured(a, b), "kMatured", a+","+b)         // bal|<holder>|<creator>  RAW LE BYTES (whole tokens)
+			add(kMaturedFrac(a, b), "kMaturedFrac", a+","+b) // balf|<holder>|<creator> MONEY (0..99 units)
+			add(kAcqBlock(a, b), "kAcqBlock", a+","+b)       // acq|<creator>|<holder>  u64
 			for _, cc := range valid[:6] {
 				add(kAllowance(a, b, cc), "kAllowance", a+","+b+","+cc)
 			}

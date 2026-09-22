@@ -106,7 +106,7 @@ func buyCompute(s Store, creator string, block uint64, n *big.Int) (*BuyResult, 
 	if err := RequireInflowOpen(s, creator, block); err != nil {
 		return nil, err
 	}
-	if n == nil || n.Sign() <= 0 {
+	if belowMinTrade(n) {
 		return nil, newErr(ErrInput, "token amount must be positive")
 	}
 

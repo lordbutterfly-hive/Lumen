@@ -163,6 +163,8 @@ func hzHoldersOf(s *MemStore, creator string) []string {
 			add(k[len(maturingPrefix):])
 		case strings.HasPrefix(k, "bal|") && strings.HasSuffix(k, maturedSuffix):
 			add(k[len("bal|") : len(k)-len(maturedSuffix)])
+		case strings.HasPrefix(k, "balf|") && strings.HasSuffix(k, maturedSuffix):
+			add(k[len("balf|") : len(k)-len(maturedSuffix)])
 		}
 	}
 	sort.Strings(out)
@@ -181,19 +183,39 @@ func hzHoldersOf(s *MemStore, creator string) []string {
 // omits them entirely and reports a supply/balance mismatch that is an artefact
 // of the measurement, not a defect in the money.
 func hzSumMatured(s *MemStore, creator string) *big.Int {
-	suffix := "|" + creator
 	total := big.NewInt(0)
-	for _, k := range s.Keys() {
-		if !strings.HasPrefix(k, "bal|") || !strings.HasSuffix(k, suffix) {
-			continue
-		}
-		v, _ := s.Get(k)
-		n, ok := leToU64([]byte(v))
-		if ok {
-			total.Add(total, new(big.Int).SetUint64(n))
-		}
+	for _, h := range hzMaturedHolders(s, creator) {
+		total.Add(total, getMatured(s, creator, h))
 	}
 	return total
+}
+
+// hzMaturedHolders lists every holder with ANY matured key for the creator:
+// v6 splits the bucket into `bal|` (whole tokens, LE u64) and `balf|` (the
+// 0..99-unit remainder, decimal), and a position under one token has ONLY the
+// second, so a scan of `bal|` alone would miss it. Sum through getMatured, the
+// one codec, never by decoding either key here.
+func hzMaturedHolders(s *MemStore, creator string) []string {
+	suffix := "|" + creator
+	seen := map[string]bool{}
+	var out []string
+	for _, k := range s.Keys() {
+		var h string
+		switch {
+		case strings.HasPrefix(k, "bal|") && strings.HasSuffix(k, suffix):
+			h = k[len("bal|") : len(k)-len(suffix)]
+		case strings.HasPrefix(k, "balf|") && strings.HasSuffix(k, suffix):
+			h = k[len("balf|") : len(k)-len(suffix)]
+		default:
+			continue
+		}
+		if !seen[h] {
+			seen[h] = true
+			out = append(out, h)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // hzSumBalances totals a creator's WHOLE outstanding position — maturing plus

@@ -299,7 +299,7 @@ func Refund(s Store, caller, creator string, block uint64, credits *big.Int, min
 	if !validAccount(creator) {
 		return nil, newErr(ErrInput, "invalid creator")
 	}
-	if credits == nil || credits.Sign() <= 0 {
+	if belowMinTrade(credits) {
 		return nil, newErr(ErrInput, "credits must be positive")
 	}
 

@@ -293,7 +293,7 @@ func settleSpend(s Store, creator string, block uint64, face *big.Int) (*SettleQ
 // inequalities settleSpend enforces, rearranged so both ends are readable as
 // numbers instead of only as refusals:
 //
-//	lo = ceil(rate/2)                                (RULING C4, exact over Z)
+//	lo = ceil(rate/200)                              (RULING C4, exact over Z; v6: half a base unit per whole token, in units)
 //	hi = floor(area(S)·MaxServiceFaceAreaBps/10000)  (RULING C2, exact over Z)
 //
 // ONE source of truth: settleSpend calls this, ServiceFaceRange exports it,

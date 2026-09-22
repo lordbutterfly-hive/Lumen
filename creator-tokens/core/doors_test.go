@@ -27,7 +27,7 @@ func TestDoors_AllowanceIsPerCreator(t *testing.T) {
 	tbMature(t, s, carol, bob, 1000, 1_000_000)
 
 	// Bob approves the market for ALICE's token only.
-	if err := Approve(s, bob, mkt, alice, mZero(), tk(1000)); err != nil {
+	if err := Approve(s, bob, mkt, alice, mZero(), wtok(1000)); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 
@@ -102,13 +102,13 @@ func TestDoors_ThirdPartyNeedsAllowanceAndItDecrements(t *testing.T) {
 	if err := TransferMatured(s, c, h, "hive:carol", mkt, tk(1)); err == nil {
 		t.Fatal("a stranger moved tokens with no allowance")
 	}
-	if err := Approve(s, h, mkt, c, mZero(), tk(300)); err != nil {
+	if err := Approve(s, h, mkt, c, mZero(), wtok(300)); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if err := TransferMatured(s, c, h, "hive:carol", mkt, tk(200)); err != nil {
 		t.Fatalf("spend within allowance refused: %v", err)
 	}
-	if got := AllowanceOf(s, h, mkt, c); got.Cmp(tk(100)) != 0 {
+	if got := AllowanceOf(s, h, mkt, c); got.Cmp(wtok(100)) != 0 {
 		t.Fatalf("allowance = %s after spending 200 of 300, want 100 — an allowance that "+
 			"does not decrement is an infinite one", got)
 	}
@@ -123,23 +123,23 @@ func TestDoors_ApproveIsCompareAndSet(t *testing.T) {
 	s, c, h := drSetup(t)
 	const mkt = "hive:market"
 
-	if err := Approve(s, h, mkt, c, mZero(), tk(500)); err != nil {
+	if err := Approve(s, h, mkt, c, mZero(), wtok(500)); err != nil {
 		t.Fatalf("initial approve: %v", err)
 	}
 	// A holder who believes it is still zero must not be able to overwrite.
-	if err := Approve(s, h, mkt, c, mZero(), tk(50)); err == nil {
+	if err := Approve(s, h, mkt, c, mZero(), wtok(50)); err == nil {
 		t.Fatal("stale compare-and-set succeeded — this is the re-approve race")
 	}
-	if got := AllowanceOf(s, h, mkt, c); got.Cmp(tk(500)) != 0 {
+	if got := AllowanceOf(s, h, mkt, c); got.Cmp(wtok(500)) != 0 {
 		t.Fatalf("allowance mutated on a failed CAS: %s", got)
 	}
 	// With the true current value it succeeds.
-	if err := Approve(s, h, mkt, c, tk(500), tk(50)); err != nil {
+	if err := Approve(s, h, mkt, c, wtok(500), wtok(50)); err != nil {
 		t.Fatalf("correct compare-and-set refused: %v", err)
 	}
 	// Revoking is never blocked by a race — a holder must always be able to
 	// withdraw authority.
-	if err := Approve(s, h, mkt, c, tk(999999), mZero()); err != nil {
+	if err := Approve(s, h, mkt, c, wtok(999999), mZero()); err != nil {
 		t.Fatalf("revoke to zero was blocked (%v) — a holder must always be able to "+
 			"withdraw authority regardless of what they believe the current value is", err)
 	}
@@ -227,14 +227,14 @@ func TestDoors_NonPositiveAmountRefused(t *testing.T) {
 func TestDoors_FailedThirdPartyTransferLeavesAllowanceIntact(t *testing.T) {
 	s, c, h := drSetup(t)
 	const mkt = "hive:market"
-	if err := Approve(s, h, mkt, c, mZero(), tk(5000)); err != nil {
+	if err := Approve(s, h, mkt, c, mZero(), wtok(5000)); err != nil {
 		t.Fatal(err)
 	}
 	// Allowance is ample; the BALANCE is not.
 	if err := TransferMatured(s, c, h, "hive:carol", mkt, tk(1001)); err == nil {
 		t.Fatal("over-balance transfer succeeded")
 	}
-	if got := AllowanceOf(s, h, mkt, c); got.Cmp(tk(5000)) != 0 {
+	if got := AllowanceOf(s, h, mkt, c); got.Cmp(wtok(5000)) != 0 {
 		t.Fatalf("allowance = %s after a REFUSED transfer, want 5000 untouched — the balance "+
 			"guard must run before the allowance is spent", got)
 	}
@@ -251,7 +251,7 @@ func TestDoors_AllowanceDoesNotSurviveReRegistration(t *testing.T) {
 	s := tbMarket(t, c)
 	at := tbMature(t, s, c, h, 1000, 1_000_000)
 
-	if err := Approve(s, h, mkt, c, mZero(), tk(1000)); err != nil {
+	if err := Approve(s, h, mkt, c, mZero(), wtok(1000)); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	// ANTI-VACUITY: the grant works in the life it was made in, or the refusal
@@ -295,7 +295,7 @@ func TestDoors_AllowanceDoesNotSurviveReRegistration(t *testing.T) {
 
 	// And the holder can grant again in the new life: the dead number must not
 	// block the compare-and-set with a phantom "allowance changed" error.
-	if err := Approve(s, h, mkt, c, mZero(), tk(50)); err != nil {
+	if err := Approve(s, h, mkt, c, mZero(), wtok(50)); err != nil {
 		t.Fatalf("re-granting in the new incarnation was blocked by the dead grant: %v", err)
 	}
 	if err := TransferMatured(s, c, h, carol, mkt, tk(50)); err != nil {

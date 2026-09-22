@@ -136,6 +136,48 @@ func dec(units uint64) string { return fmt.Sprintf("%d.%02d", units/100, units%1
 
 func (e *ctEnv) state(key string) string { return e.ct.StateGet(e.id, key) }
 
+// le decodes the matured door's wire form: little-endian u64, high-order zero
+// bytes trimmed, the encoding magi-market reads (core/matured.go u64ToLE).
+// v6 (2026-09-22): `bal|` holds WHOLE tokens in this form; the remainder below
+// one token is `balf|`, a decimal unit count read with u64.
+func (e *ctEnv) le(key string) uint64 {
+	e.t.Helper()
+	v := e.state(key)
+	if len(v) > 8 {
+		e.t.Fatalf("state %q is %d bytes; the LE decoder aborts past 8", key, len(v))
+	}
+	var n uint64
+	for i := len(v) - 1; i >= 0; i-- {
+		n = n<<8 | uint64(v[i])
+	}
+	return n
+}
+
+// matured is the position's matured bucket in UNITS: bal| whole tokens x 100
+// plus the balf| remainder, exactly as core.MaturedOf assembles it.
+func (e *ctEnv) matured(holder, creator string) uint64 {
+	return e.le("bal|"+holder+"|"+creator)*100 + e.u64("balf|"+holder+"|"+creator)
+}
+
+// logs flattens every event the call emitted (each one a JSON string).
+func logsOf(res test_utils.ContractTestCallResult) []string {
+	var out []string
+	for _, lo := range res.Logs {
+		out = append(out, lo.Logs...)
+	}
+	return out
+}
+
+func countLogs(res test_utils.ContractTestCallResult, needle string) int {
+	n := 0
+	for _, l := range logsOf(res) {
+		if strings.Contains(l, needle) {
+			n++
+		}
+	}
+	return n
+}
+
 func (e *ctEnv) u64(key string) uint64 {
 	v := e.state(key)
 	if v == "" {
@@ -224,8 +266,7 @@ func TestCreatorTokens_EscrowFiveStepPath(t *testing.T) {
 	// transfer, a 0.25 sale, and the dust/malformed amounts the parser must refuse.
 	t.Log("STEP 0b — fractional buy / transfer / sell through the wasm")
 	balKey := func(holder string) string { return "mb|" + creator + "|" + holder }
-	maturedKey := func(holder string) string { return "bal|" + holder + "|" + creator }
-	position := func(holder string) uint64 { return e.u64(balKey(holder)) + e.u64(maturedKey(holder)) }
+	position := func(holder string) uint64 { return e.u64(balKey(holder)) + e.matured(holder, creator) }
 	if got := position(asker); got != 20*50*100 {
 		t.Fatalf("after 20 x 50.00 warm-up buys the asker holds %d units, want %d (state is not in units)", got, 20*50*100)
 	}
@@ -563,4 +604,165 @@ func TestCreatorTokens_V6FirstTouchRC(t *testing.T) {
 	meter("answer", e.call(creator, "answer", `{"seq":1,"answerHash":"rc-ans"}`, 40_000))
 	meter("setCap 1000000.5", e.call(creator, "setCap", `{"newCap":"1000000.5"}`, 40_000))
 	meter("claimTradeFees", e.call(creator, "claimTradeFees", `{}`, 40_000))
+}
+
+// ★ THE WHOLE-TOKEN MARKETPLACE DOOR through the real runtime (v6, 2026-09-22;
+// scrutiny HIGH-1 / MEDIUM-2 / MEDIUM-3). magi-market and every NFT-standard
+// reader decode `bal|`, `allow|`, balanceOf, allowance and the TransferSingle /
+// Approval events as INTEGERS with no decimals hint, so after the update those
+// must all still mean WHOLE tokens, byte for byte. The fraction below one token
+// lives in `balf|`, is never visible through the door, and stays spendable
+// through Lumen's own rails. Every claim below is read from the wasm's state
+// and logs, not from core.
+func TestCreatorTokens_V6WholeTokenDoor(t *testing.T) {
+	const (
+		owner   = "hive:lumencontracts"
+		creator = "hive:ctdoor"
+		holder  = "hive:ctholder"
+		buyer   = "hive:ctbuyer2"
+		market  = "hive:ctmarket" // the spender: a marketplace settling a sale
+		warm    = "hive:ctwarm"   // builds real supply so every sell below pays real HBD
+	)
+	e := newCtEnv(t, owner)
+	ctFund(e, []string{owner, creator, holder, buyer, market, warm}, 5_000_000)
+	e.mustCall(owner, "init", `{}`, 40_000)
+	reg := e.mustCall(creator, "register", `{"face":250000,"cap":"1000000"}`, 40_000)
+	if countLogs(reg, `"type":"tokenCreated"`) != 1 || countLogs(reg, `"maxSupply":1000000,`) != 1 {
+		t.Fatalf("tokenCreated must carry maxSupply in WHOLE tokens (1000000): %v", logsOf(reg))
+	}
+	// 1,000 tokens of supply from a third account: at ~0 supply the curve prices
+	// 3.50 tokens at a few base units, and a 0.30 sell would net nothing (the
+	// first run of this test refused the sell with the reserve at 0). The
+	// warm-up account is never a party to the door below, so its own ripe
+	// position cannot graduate into any balance this test reads.
+	ctWarmOracle(e, creator, warm, 20)
+	balKey := "bal|" + holder + "|" + creator
+	fracKey := "balf|" + holder + "|" + creator
+
+	t.Log("STEP 1 — 3.50 tokens bought, matured after the window, graduated")
+	e.ct.IncrementBlocks(9_000)
+	fb := e.callIntent(holder, "buy", fmt.Sprintf(`{"creator":%q,"tokens":"3.5"}`, creator), 40_000, "500.000")
+	if !fb.Success {
+		t.Fatalf("buy 3.5 refused: %s / %s", fb.Err, fb.ErrMsg)
+	}
+	if countLogs(fb, `"type":"TransferSingle"`) != 0 {
+		t.Fatalf("a first buy graduates nothing, yet emitted TransferSingle: %v", logsOf(fb))
+	}
+	bo := e.mustCall(buyer, "balanceOf", fmt.Sprintf(`{"account":%q,"id":%q}`, holder, creator), 40_000)
+	if bo.Ret != `{"balance":0}` {
+		t.Fatalf("balanceOf before maturity = %s, want 0", bo.Ret)
+	}
+	e.ct.IncrementBlocks(42*28_800 + 1) // ExitTaxDecayBlocks
+	g := e.mustCall(holder, "graduate", fmt.Sprintf(`{"id":%q}`, creator), 40_000)
+	if !strings.Contains(g.Ret, `"graduated":"3.50"`) {
+		t.Fatalf("graduate ret=%s", g.Ret)
+	}
+	if e.le(balKey) != 3 || e.state(fracKey) != "50" || e.matured(holder, creator) != 350 {
+		t.Fatalf("after graduate: bal|=%d (want 3 whole) balf|=%q (want \"50\") matured=%d", e.le(balKey), e.state(fracKey), e.matured(holder, creator))
+	}
+	if countLogs(g, `"type":"TransferSingle"`) != 1 || countLogs(g, `"from":"","to":"`+holder+`","id":"`+creator+`","value":3}`) != 1 {
+		t.Fatalf("graduate must mint TransferSingle value 3 (whole tokens), got %v", logsOf(g))
+	}
+	if countLogs(g, `"type":"maturedMoved"`) != 1 || countLogs(g, `"amount":"3.50"`) != 1 {
+		t.Fatalf("maturedMoved must carry the exact 3.50: %v", logsOf(g))
+	}
+	bo = e.mustCall(buyer, "balanceOf", fmt.Sprintf(`{"account":%q,"id":%q}`, holder, creator), 40_000)
+	if bo.Ret != `{"balance":3}` {
+		t.Fatalf("balanceOf = %s, want 3 (whole tokens; the 0.50 is not the door's to show)", bo.Ret)
+	}
+	ctb := e.mustCall(holder, "creatorTokenBalance", fmt.Sprintf(`{"account":%q,"id":%q}`, holder, creator), 40_000)
+	if !strings.Contains(ctb.Ret, `"3.50"`) {
+		t.Fatalf("creatorTokenBalance must show the full 3.50 matured: %s", ctb.Ret)
+	}
+
+	t.Log("STEP 2 — approve 2 whole tokens, the marketplace moves them one at a time")
+	ap := e.mustCall(holder, "approve", fmt.Sprintf(`{"spender":%q,"id":%q,"amount":2,"expected":0}`, market, creator), 40_000)
+	if countLogs(ap, `"type":"Approval"`) != 1 || countLogs(ap, `"amount":2}`) != 1 {
+		t.Fatalf("Approval must carry amount 2 (whole tokens): %v", logsOf(ap))
+	}
+	if e.le("allow|"+holder+"|"+market+"|"+creator) != 2 {
+		t.Fatalf("allow| = %d, want LE(2)", e.le("allow|"+holder+"|"+market+"|"+creator))
+	}
+	al := e.mustCall(market, "allowance", fmt.Sprintf(`{"owner":%q,"spender":%q,"id":%q}`, holder, market, creator), 40_000)
+	if al.Ret != `{"amount":2}` {
+		t.Fatalf("allowance = %s, want 2", al.Ret)
+	}
+	xfer := fmt.Sprintf(`{"from":%q,"to":%q,"id":%q,"amount":1}`, holder, buyer, creator)
+	x1 := e.mustCall(market, "safeTransferFrom", xfer, 40_000)
+	if countLogs(x1, `"type":"TransferSingle"`) != 1 || countLogs(x1, `"from":"`+holder+`","to":"`+buyer+`","id":"`+creator+`","value":1}`) != 1 {
+		t.Fatalf("safeTransferFrom must emit TransferSingle value 1: %v", logsOf(x1))
+	}
+	if countLogs(x1, `"amount":"1.00"`) != 1 {
+		t.Fatalf("maturedMoved must carry 1.00: %v", logsOf(x1))
+	}
+	if e.le(balKey) != 2 || e.state(fracKey) != "50" || e.le("bal|"+buyer+"|"+creator) != 1 || e.state("balf|"+buyer+"|"+creator) != "" {
+		t.Fatalf("after 1 moved: holder bal|=%d balf|=%q buyer bal|=%d balf|=%q", e.le(balKey), e.state(fracKey), e.le("bal|"+buyer+"|"+creator), e.state("balf|"+buyer+"|"+creator))
+	}
+	if r := e.call(market, "safeTransferFrom", strings.Replace(xfer, `"amount":1`, `"amount":2`, 1), 40_000); r.Success {
+		t.Fatal("moved 2 with an allowance of 1")
+	}
+	e.mustCall(market, "safeTransferFrom", xfer, 40_000)
+	if al = e.mustCall(market, "allowance", fmt.Sprintf(`{"owner":%q,"spender":%q,"id":%q}`, holder, market, creator), 40_000); al.Ret != `{"amount":0}` {
+		t.Fatalf("allowance after spending 2 = %s, want 0", al.Ret)
+	}
+	if r := e.call(market, "safeTransferFrom", xfer, 40_000); r.Success {
+		t.Fatal("moved a token with the allowance exhausted")
+	}
+	if e.le(balKey) != 1 || e.state(fracKey) != "50" || e.le("bal|"+buyer+"|"+creator) != 2 {
+		t.Fatalf("after 2 moved: holder bal|=%d balf|=%q buyer bal|=%d", e.le(balKey), e.state(fracKey), e.le("bal|"+buyer+"|"+creator))
+	}
+	if r := e.call(market, "safeTransferFrom", strings.Replace(xfer, `"amount":1`, `"amount":0.5`, 1), 40_000); r.Success {
+		t.Fatal("the door accepted a fractional amount")
+	}
+	bo = e.mustCall(buyer, "balanceOf", fmt.Sprintf(`{"account":%q,"id":%q}`, buyer, creator), 40_000)
+	if bo.Ret != `{"balance":2}` {
+		t.Fatalf("buyer balanceOf = %s, want 2", bo.Ret)
+	}
+
+	t.Log("STEP 3 — the fraction is spendable through Lumen, and the door's ledger only moves on whole-token boundaries")
+	// ★ HARNESS MONEY MODEL, measured 2026-09-22 (probe in testing/README.md):
+	// this harness never compiles a buy's HBD draw into the ledger. A buyer's
+	// GetBalance stays at its deposit after any number of buys and the contract
+	// account reads 0 at every height, so a payout (sell) is only honoured out
+	// of the PENDING draws of the same uncompiled slot. The five-step path's
+	// sells sit right behind its buys, which is why they pay. Give this slot a
+	// pending draw large enough to cover the three sells below; the sells'
+	// token arithmetic and events are what this step asserts.
+	if r := e.callIntent(warm, "buy", fmt.Sprintf(`{"creator":%q,"tokens":"5"}`, creator), 40_000, "500.000"); !r.Success {
+		t.Fatalf("funding buy refused: %s / %s", r.Err, r.ErrMsg)
+	}
+	// 1.50 matured. Sell 0.30: 1.20 left, whole count unchanged (1 -> 1): NO
+	// TransferSingle, but the exact maturedMoved 0.30.
+	s1 := e.mustCall(holder, "sell", fmt.Sprintf(`{"creator":%q,"tokens":"0.3"}`, creator), 40_000)
+	if countLogs(s1, `"type":"TransferSingle"`) != 0 || countLogs(s1, `"type":"maturedMoved"`) != 1 || countLogs(s1, `"amount":"0.30"`) != 1 {
+		t.Fatalf("sell 0.30 inside a whole token: %v", logsOf(s1))
+	}
+	if e.le(balKey) != 1 || e.state(fracKey) != "20" {
+		t.Fatalf("after selling 0.30: bal|=%d balf|=%q, want 1 / \"20\"", e.le(balKey), e.state(fracKey))
+	}
+	// Sell 0.30 more: 0.90 left, whole count 1 -> 0: a TransferSingle burn of 1.
+	s2 := e.mustCall(holder, "sell", fmt.Sprintf(`{"creator":%q,"tokens":"0.3"}`, creator), 40_000)
+	if countLogs(s2, `"from":"`+holder+`","to":"","id":"`+creator+`","value":1}`) != 1 || countLogs(s2, `"amount":"0.30"`) != 1 {
+		t.Fatalf("sell 0.30 across the boundary must burn TransferSingle value 1: %v", logsOf(s2))
+	}
+	if e.state(balKey) != "" || e.state(fracKey) != "90" || e.matured(holder, creator) != 90 {
+		t.Fatalf("after 0.90 left: bal|=%q (want absent) balf|=%q (want \"90\")", e.state(balKey), e.state(fracKey))
+	}
+	bo = e.mustCall(buyer, "balanceOf", fmt.Sprintf(`{"account":%q,"id":%q}`, holder, creator), 40_000)
+	if bo.Ret != `{"balance":0}` {
+		t.Fatalf("balanceOf at 0.90 = %s, want 0", bo.Ret)
+	}
+	if r := e.call(holder, "safeTransferFrom", xfer, 40_000); r.Success {
+		t.Fatal("moved a whole token out of a 0.90 position")
+	}
+	// The 0.90 is fully spendable: transfer 0.40 through Lumen's own rail, sell the rest.
+	tr := e.mustCall(holder, "transfer", fmt.Sprintf(`{"creator":%q,"to":%q,"amount":"0.4"}`, creator, buyer), 40_000)
+	if !strings.Contains(tr.Ret, `"amount":"0.40"`) {
+		t.Fatalf("transfer 0.40 ret=%s", tr.Ret)
+	}
+	s3 := e.mustCall(holder, "sell", fmt.Sprintf(`{"creator":%q,"tokens":"0.5"}`, creator), 40_000)
+	if !strings.Contains(s3.Ret, `"sold":"0.50"`) || e.state(balKey) != "" || e.state(fracKey) != "" {
+		t.Fatalf("sell out: ret=%s bal|=%q balf|=%q (both want absent)", s3.Ret, e.state(balKey), e.state(fracKey))
+	}
+	t.Logf("  door: graduate %s | approve %s | balanceOf %s | sells %s %s %s", g.Ret, ap.Ret, bo.Ret, s1.Ret, s2.Ret, s3.Ret)
 }

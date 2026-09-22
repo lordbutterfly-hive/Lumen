@@ -74,6 +74,28 @@ The current fixture (1,000 tokens of supply against a 250.000 HBD face, 43
 credits, 5 of them commission) sits inside all three with room, and the vacuity
 guards in the file fail loudly if a future edit moves it out.
 
+## The whole-token door (v6, 2026-09-22)
+
+`TestCreatorTokens_V6WholeTokenDoor` (same file, own process) drives the
+marketplace door through the wasm: a 3.50 position graduates into `bal|` = LE(3)
+plus `balf|` = "50", `balanceOf` answers 3, `approve` 2 / `safeTransferFrom` 1+1
+move whole tokens and decrement the whole-token allowance, a fractional
+`amount` is refused, and sells inside a whole token emit `maturedMoved` only
+while a sell across the boundary burns one `TransferSingle`.
+
+**The harness's money model (measured 2026-09-22, do not fight it):** the
+test ledger never compiles a buy's HBD draw. After any number of buys the
+buyer's `GetBalance` still reads its deposit and `contract:<id>` reads 0 at
+every height, so a payout (sell, refund) is honoured only out of the PENDING
+draws of the same uncompiled slot; a sell after an `IncrementBlocks` with no
+buy since is refused with `ledger_error insufficient balance` whatever the
+reserve says. The five-step path's sells sit right behind its buys, which is
+why they pay; the door test parks a 5-token buy in front of its sells for the
+same reason. Money conservation is proven by core's ledger tests and on
+devnet/testnet, not here. (Also: a deposit memo `&to=` longer than 16 chars
+including the `hive:` prefix credits the SENDER, silently; `hive:lumencontracts`
+is 18.)
+
 ## The devnet update rehearsal (v6, 2026-09-22)
 
 `lumen_v6_units_devnet_test.go.govsc` is a copy of

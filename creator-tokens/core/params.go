@@ -1,5 +1,7 @@
 package core
 
+import "math/big"
+
 // Protocol constants. Every settable parameter has a hard cap AND a floor in
 // code — friend.tech's had neither (setProtocolFeePercent accepted any value),
 // and that is finding #5 of our own teardown.
@@ -772,6 +774,14 @@ const TokenScale int64 = 100
 // MinTradeUnits is the smallest amount a buy, sell, transfer, refund or ask
 // may move: one unit (0.01 token). Zero-amount calls are refused, as before.
 const MinTradeUnits int64 = 1
+
+var minTradeUnits = big.NewInt(MinTradeUnits)
+
+// belowMinTrade is THE amount floor every entry point applies (buy, sell,
+// transfer, the marketplace door, refund, and the read-side quote): nil or
+// less than MinTradeUnits. One predicate, so the constant is enforced rather
+// than merely declared (INFO-13 of the 2026-09-22 scrutiny).
+func belowMinTrade(v *big.Int) bool { return v == nil || v.Cmp(minTradeUnits) < 0 }
 
 // MinFeeBaseUnits is the floor on the trade fee, in HBD base units, whenever
 // the gross is positive. With whole tokens a trade grossed at least ~1 HBD, so

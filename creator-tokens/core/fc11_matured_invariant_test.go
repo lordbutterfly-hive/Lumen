@@ -82,7 +82,8 @@ func TestMatured_NeverExceedsSupplyOnAnyWritePath(t *testing.T) {
 		from, to := holders[r.Intn(len(holders))], holders[r.Intn(len(holders))]
 		if from != to {
 			if bal := BalanceOf(s, c, from); bal.Sign() > 0 {
-				amt := new(big.Int).Rand(r, bal) // [0, bal)
+				amt := new(big.Int).Rand(r, bal)                // [0, bal)
+				amt.Sub(amt, new(big.Int).Rem(amt, unitsScale)) // v6: the door moves whole tokens only
 				if amt.Sign() > 0 {
 					// self-spender: the owner moves their own matured tokens.
 					if err := TransferMatured(s, c, from, to, from, amt); err != nil {

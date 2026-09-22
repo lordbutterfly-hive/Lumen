@@ -68,10 +68,6 @@ func (u *unitsStore) ensure(key string) {
 		if c, h, ok := splitTwo(key[3:]); ok {
 			u.ensureHolder(c, h)
 		}
-	case strings.HasPrefix(key, "bal|"):
-		if h, c, ok := splitTwo(key[4:]); ok {
-			u.ensureHolder(c, h)
-		}
 	case strings.HasPrefix(key, "lots|"):
 		if c, h, ok := splitTwo(key[5:]); ok {
 			u.ensureHolder(c, h)
@@ -131,7 +127,11 @@ func scaleMoneyString(v string) (string, bool) {
 
 // scaleLotsString multiplies every cohort's count by TokenScale, keeping the
 // acquisition blocks exactly. Same "count,acq;count,acq" layout setLots writes.
-func scaleLotsString(raw string) string {
+// STRICT: a segment that does not parse as "<positive count>,<acq>" fails the
+// whole conversion (ok == false) instead of being dropped, which would leave
+// the ledger summing below the balance. setLots never writes such a record;
+// this is defence in depth (INFO-16 of the 2026-09-22 scrutiny).
+func scaleLotsString(raw string) (string, bool) {
 	var b strings.Builder
 	first := true
 	for _, part := range strings.Split(raw, ";") {
@@ -140,11 +140,11 @@ func scaleLotsString(raw string) string {
 		}
 		fields := strings.SplitN(part, ",", 2)
 		if len(fields) != 2 {
-			continue
+			return "", false
 		}
 		cnt, ok := new(big.Int).SetString(fields[0], 10)
 		if !ok || cnt.Sign() <= 0 {
-			continue
+			return "", false
 		}
 		if !first {
 			b.WriteByte(';')
@@ -154,7 +154,7 @@ func scaleLotsString(raw string) string {
 		b.WriteByte(',')
 		b.WriteString(fields[1])
 	}
-	return b.String()
+	return b.String(), true
 }
 
 // flagSet reports whether a migration flag has been written. THE VALUE, NOT THE
@@ -174,27 +174,34 @@ func (u *unitsStore) ensureHolder(c, h string) {
 	if u.flagSet(flag) {
 		return
 	}
+	// The flag is written only once EVERY present value converted; a value that
+	// cannot be scaled leaves the holder unflagged so the next touch retries and
+	// nothing is ever frozen 100x under (INFO-15 of the 2026-09-22 scrutiny).
+	allOK := true
 	if v, ok := u.inner.Get(kBal(c, h)); ok && v != "" {
 		if scaled, ok := scaleMoneyString(v); ok {
 			u.inner.Set(kBal(c, h), scaled)
-		}
-	}
-	if v, ok := u.inner.Get(kMatured(h, c)); ok && v != "" {
-		if n, valid := leToU64([]byte(v)); valid && n > 0 {
-			scaled := new(big.Int).Mul(new(big.Int).SetUint64(n), unitsScale)
-			if scaled.IsUint64() {
-				u.inner.Set(kMatured(h, c), string(u64ToLE(scaled.Uint64())))
-			}
-		}
-	}
-	if v, ok := u.inner.Get(kLots(c, h)); ok && v != "" {
-		if scaled := scaleLotsString(v); scaled != "" {
-			u.inner.Set(kLots(c, h), scaled)
 		} else {
-			u.inner.Delete(kLots(c, h))
+			allOK = false
 		}
 	}
-	u.inner.Set(flag, "1")
+	// `bal|` (matured, LE u64) is NOT scaled: it keeps meaning WHOLE tokens, the
+	// unit the marketplace door reads; the fraction lives in `balf|` (matured.go),
+	// a key no pre-v6 market ever wrote.
+	if v, ok := u.inner.Get(kLots(c, h)); ok && v != "" {
+		if scaled, ok := scaleLotsString(v); ok {
+			if scaled == "" {
+				u.inner.Delete(kLots(c, h))
+			} else {
+				u.inner.Set(kLots(c, h), scaled)
+			}
+		} else {
+			allOK = false
+		}
+	}
+	if allOK {
+		u.inner.Set(flag, "1")
+	}
 }
 
 func (u *unitsStore) ensureMarket(c string) {
@@ -202,14 +209,19 @@ func (u *unitsStore) ensureMarket(c string) {
 	if u.flagSet(flag) {
 		return
 	}
+	allOK := true
 	for _, key := range []string{kSupply(c), kCap(c)} {
 		if v, ok := u.inner.Get(key); ok && v != "" {
 			if scaled, ok := scaleMoneyString(v); ok {
 				u.inner.Set(key, scaled)
+			} else {
+				allOK = false
 			}
 		}
 	}
-	u.inner.Set(flag, "1")
+	if allOK {
+		u.inner.Set(flag, "1")
+	}
 }
 
 // ensureEscrow converts a pre-v6 escrow record (9 fields) and its two side
@@ -238,10 +250,10 @@ func (u *unitsStore) ensureEscrow(c string, seq uint64) {
 		}
 	}
 	if v, ok := u.inner.Get(kEscrowLots(c, seq)); ok && v != "" {
-		if scaled := scaleLotsString(v); scaled != "" {
+		if scaled, ok := scaleLotsString(v); ok && scaled != "" {
 			u.inner.Set(kEscrowLots(c, seq), scaled)
 		} else {
-			u.inner.Delete(kEscrowLots(c, seq))
+			u.inner.Delete(kEscrowLots(c, seq)) // loadEscrowLots synthesises one cohort from the record's own clock
 		}
 	}
 }

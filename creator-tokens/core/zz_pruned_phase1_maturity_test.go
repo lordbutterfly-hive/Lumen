@@ -234,7 +234,7 @@ func TestZP1_H12_MaturedBucketIsUnreachableBelowOneDecayWindow(t *testing.T) {
 			}
 			// The invariant under test, checked after EVERY op, store-wide.
 			for _, k := range s.Keys() {
-				if len(k) > 4 && k[:4] == "bal|" {
+				if (len(k) > 4 && k[:4] == "bal|") || strings.HasPrefix(k, "balf|") {
 					v, _ := s.Get(k)
 					t.Fatalf("REACHED: a MATURED-bucket key %q exists at block %d (<= Dt=%d) holding %q. "+
 						"H-12's precondition is REACHABLE.", k, block, ExitTaxDecayBlocks, v)
