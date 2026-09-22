@@ -1362,8 +1362,9 @@ export function settleSpendStatus(
   if (leg < lo) return 'price_below_floor';
   if (leg > hi) return 'price_above_ceiling';
   if (credits > 1) {
-    const lhs = BigInt(Math.trunc(credits)) * 10000n;
-    const rhs = BigInt(Math.trunc(supplyTokens)) * BigInt(bounds.spendSupplyBps);
+    // v6: compare in units so a fractional ask (0.29 tokens) is not truncated to zero.
+    const lhs = BigInt(toUnits(credits)) * 10000n;
+    const rhs = BigInt(toUnits(supplyTokens)) * BigInt(bounds.spendSupplyBps);
     if (lhs > rhs) return 'spend_cap';
   }
   return 'ok';

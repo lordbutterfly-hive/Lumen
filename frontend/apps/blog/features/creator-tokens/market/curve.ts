@@ -133,7 +133,7 @@ function supplyTokens(m: CurveMarketInput): number {
  * the price source.
  */
 export function spotPriceUsd(supply: number): number {
-  return baseUnitsToUsd(spotRateBaseUnits(Math.max(0, Math.floor(supply))));
+  return baseUnitsToUsd(spotRateBaseUnits(Math.max(0, roundToUnits(supply)))); // v6: a fractional supply prices the token being filled
 }
 
 /**
@@ -157,12 +157,12 @@ export function spotPriceUsd(supply: number): number {
  * not exist yet. Anything needing the oracle rate keeps calling `spotPriceUsd`.
  */
 export function displayPriceUsd(supply: number): number {
-  return baseUnitsToUsd(displayPricePerTokenBaseUnits(Math.max(0, Math.floor(supply))));
+  return baseUnitsToUsd(displayPricePerTokenBaseUnits(Math.max(0, roundToUnits(supply))));
 }
 
 /** The reserve the curve requires at a given supply — R === Area(S), the mechanism's core equality. */
 export function reserveUsdAt(supply: number): number {
-  const s = Math.max(0, Math.floor(supply));
+  const s = Math.max(0, roundToUnits(supply));
   return baseUnitsToUsd(quoteBuyBaseUnits(0, s).costBaseUnits);
 }
 
