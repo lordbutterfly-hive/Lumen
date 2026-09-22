@@ -64,6 +64,7 @@ check(
   `got ${resolveAskMaxCreditsBaseUnits(42)}`
 );
 check('0 tolerance returns the quote figure exactly', resolveAskMaxCreditsBaseUnits(42, 0) === 42);
+check('v6 cap rounds on the 0.01 grid: 0.29 -> 0.30, 42.64 -> 43.50, never a whole token up', resolveAskMaxCreditsBaseUnits(0.29, 200, true) === 0.3 && resolveAskMaxCreditsBaseUnits(42.64, 200, true) === 43.5 && resolveAskMaxCreditsBaseUnits(0.29, 200) === 1);
 check('1 token never rounds DOWN under tolerance', resolveAskMaxCreditsBaseUnits(1) >= 1);
 check('0 credits (unpriceable) resolves to 0, not a negative or NaN cap', resolveAskMaxCreditsBaseUnits(0) === 0);
 

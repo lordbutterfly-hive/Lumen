@@ -13,7 +13,8 @@ import {
   spotRateBaseUnits,
   commissionOwedForBaseUnits,
   tokensAffordableForBudget,
-  roundToUnits
+  roundToUnits,
+  toUnits
 } from '../lib/contract-math';
 import { fractionalTokensUnder, tokenStepUnder } from './contract-rules';
 
@@ -555,8 +556,14 @@ export const ASK_MAX_CREDITS_TOLERANCE_BPS = 200; // 2%
  */
 export function resolveAskMaxCreditsBaseUnits(
   creditsRequiredBaseUnits: number,
-  toleranceBps: number = ASK_MAX_CREDITS_TOLERANCE_BPS
+  toleranceBps: number = ASK_MAX_CREDITS_TOLERANCE_BPS,
+  fractional = false
 ): number {
+  // v6 (`fractional`): the cap is rounded up on the 0.01 grid (0.29 -> 0.30),
+  // never up to the next whole token, which would triple a small ask's cap.
+  // Before v6 the live bytecode parses whole numbers only, so the cap stays an
+  // integer (42 -> 43).
+  if (fractional) return roundToUnits(Math.ceil((toUnits(creditsRequiredBaseUnits) * (10_000 + toleranceBps)) / 10_000) / 100);
   return Math.ceil((creditsRequiredBaseUnits * (10_000 + toleranceBps)) / 10_000);
 }
 
