@@ -29,6 +29,25 @@ export const usdMoney = (n: number): string => {
  * different cap and under-showed misses. One shared helper, exact below the
  * cap, proportional above, identical on every surface.
  */
+/**
+ * The completion rate FROM THE COUNTS, the one place both the creator page and
+ * the creators board derive it (2026-09-22). null, never 0, when nothing has
+ * resolved: zero is a result ("was asked, did not deliver"), no record is the
+ * absence of one, and every market is in that state on launch day.
+ *
+ * ★ Never trust the indexer view's `completion_pct` column for this. On the
+ * live indexer it was NULL for every creator with answers and zero misses (the
+ * SQL added a NULL miss count instead of coalescing it), so the board filed
+ * hbd-temp (1 of 1, rated 5.0) as "Delivery record unavailable" while its own
+ * page showed 100%. The view is fixed too, but the deployed indexer is not ours
+ * to redeploy on our schedule; the counts are, and they are what this reads.
+ */
+export function completionPctOf(answered: number, missed: number): number | null {
+  const total = answered + missed;
+  if (!Number.isFinite(total) || total <= 0) return null;
+  return Math.round((answered / total) * 100);
+}
+
 export function deliveryMarks(answered: number, missed: number, max = 18): boolean[] {
   const total = answered + missed;
   if (total <= 0) return [];

@@ -209,8 +209,16 @@ views:
              -- NULL, not 0, when nothing has resolved yet: a creator who has
              -- never been asked has no completion rate, and showing 0% would
              -- read as "fails everything".
+             -- ★ COALESCE INSIDE THE DIVISION TOO (2026-09-22). `a.n + m.n` with
+             -- m.n NULL (never missed) is NULL, so every creator with answers
+             -- and zero misses had completion_pct NULL on the live indexer:
+             -- the creators board then filed hbd-temp (1 of 1, rated 5.0) as
+             -- "Delivery record unavailable" while its own page, which derives
+             -- the rate from the counts, showed 100%. Clients must derive the
+             -- rate from answered_count/missed_count and treat this column as
+             -- a ranking hint only.
              CASE WHEN COALESCE(a.n,0) + COALESCE(m.n,0) = 0 THEN NULL
-                  ELSE ROUND(100.0 * a.n / (a.n + m.n), 0)
+                  ELSE ROUND(100.0 * COALESCE(a.n,0) / (COALESCE(a.n,0) + COALESCE(m.n,0)), 0)
              END AS completion_pct
       FROM creators c
       LEFT JOIN answered a ON a.creator = c.creator

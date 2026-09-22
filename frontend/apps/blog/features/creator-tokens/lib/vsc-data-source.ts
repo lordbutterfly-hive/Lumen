@@ -1,3 +1,4 @@
+import { completionPctOf } from '../market/format';
 import type {
   Ask,
   AskInput,
@@ -2108,7 +2109,10 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         const windingDown = phase === 'UNKNOWN' ? false : windingDownUnder(rules, { phase, retiredAtBlock });
         return {
           creator: r.creator,
-          completionPct: r.completionPct,
+          // From the COUNTS, not the view's `completion_pct` (which the live
+          // indexer served as NULL for every zero-miss creator, 2026-09-22):
+          // the same derivation the creator page's adaptDelivery uses.
+          completionPct: completionPctOf(r.answeredCount, r.missedCount),
           avgRating: r.avgRating,
           ratingCount: r.ratingCount,
           answeredCount: r.answeredCount,

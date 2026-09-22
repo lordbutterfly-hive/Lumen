@@ -156,7 +156,7 @@ SELECT c.creator,
        -- never been asked has no completion rate, and showing 0% would
        -- read as "fails everything".
        CASE WHEN COALESCE(a.n,0) + COALESCE(m.n,0) = 0 THEN NULL
-            ELSE ROUND(100.0 * a.n / (a.n + m.n), 0)
+            ELSE ROUND(100.0 * COALESCE(a.n,0) / (COALESCE(a.n,0) + COALESCE(m.n,0)), 0)
        END AS completion_pct
 FROM creators c
 LEFT JOIN answered a ON a.creator = c.creator
@@ -238,6 +238,14 @@ SELECT block, side, delta, supply_after FROM lumen_ct_price_history ORDER BY blo
 SELECT * FROM lumen_ct_creator_earnings;
 \echo === my_asks
 SELECT seq, status, credits_spent FROM lumen_ct_my_asks ORDER BY seq;
+-- 2026-09-22: a creator with answers and NO misses. The live indexer returned
+-- completion_pct NULL for exactly this shape (a.n + NULL miss count), which
+-- the creators board rendered as "Delivery record unavailable" for hbd-temp.
+-- Expected below: completion_pct 100.
+INSERT INTO lumen_ct_registered_events (creator, actor, block, face, cap, fee_paid, indexer_block_height) VALUES ('hive:zero-miss', 'hive:zero-miss', 109700000, '1000', '1000000000', '0', 109700000);
+INSERT INTO lumen_ct_asked_events (creator, actor, block, seq, credits_spent, commission_credits, rate, deadline_blocks, content_hash, offering_id, indexer_block_height) VALUES ('hive:zero-miss', 'hive:lordbutterfly', 110300000, 0, '1', '0', '1015', 28800, 'ask-zm-0', 1, 110300000);
+INSERT INTO lumen_ct_answered_events (creator, actor, block, seq, credits_to_creator, commission_credits, commission_to, answer_hash, indexer_block_height) VALUES ('hive:zero-miss', 'hive:zero-miss', 110300200, 0, '1', '0', 'hive:lumencontracts', 'done', 110300200);
+
 \echo === delivery
 SELECT * FROM lumen_ct_delivery_record;
 \echo === discovery

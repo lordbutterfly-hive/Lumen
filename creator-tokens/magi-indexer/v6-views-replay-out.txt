@@ -74,15 +74,20 @@ INSERT 0 1
    3 | reclaimed | 0.20
 (4 rows)
 
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
 === delivery
-    creator    | registered_block |         registered_ts         | answered_count | missed_count | declined_count | median_response_blocks | avg_rating | rating_count | completion_pct 
----------------+------------------+-------------------------------+----------------+--------------+----------------+------------------------+------------+--------------+----------------
- hive:hbd-temp |        109626197 | 2026-09-22 14:29:10.959962+00 |              2 |            1 |              1 |                    463 |       5.00 |            1 |             67
-(1 row)
+    creator     | registered_block |         registered_ts         | answered_count | missed_count | declined_count | median_response_blocks | avg_rating | rating_count | completion_pct 
+----------------+------------------+-------------------------------+----------------+--------------+----------------+------------------------+------------+--------------+----------------
+ hive:hbd-temp  |        109626197 | 2026-09-22 18:52:56.210348+00 |              2 |            1 |              1 |                    463 |       5.00 |            1 |             67
+ hive:zero-miss |        109700000 | 2026-09-22 18:52:56.262323+00 |              1 |            0 |              0 |                    200 |            |            0 |            100
+(2 rows)
 
 === discovery
-    creator    | registered_block |         registered_ts         | answered_count | missed_count | declined_count | median_response_blocks | avg_rating | rating_count | completion_pct 
----------------+------------------+-------------------------------+----------------+--------------+----------------+------------------------+------------+--------------+----------------
- hive:hbd-temp |        109626197 | 2026-09-22 14:29:10.959962+00 |              2 |            1 |              1 |                    463 |       5.00 |            1 |             67
-(1 row)
+    creator     | registered_block |         registered_ts         | answered_count | missed_count | declined_count | median_response_blocks | avg_rating | rating_count | completion_pct 
+----------------+------------------+-------------------------------+----------------+--------------+----------------+------------------------+------------+--------------+----------------
+ hive:zero-miss |        109700000 | 2026-09-22 18:52:56.262323+00 |              1 |            0 |              0 |                    200 |            |            0 |            100
+ hive:hbd-temp  |        109626197 | 2026-09-22 18:52:56.210348+00 |              2 |            1 |              1 |                    463 |       5.00 |            1 |             67
+(2 rows)
 

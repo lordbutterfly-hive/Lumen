@@ -26,7 +26,7 @@ import type { PortfolioAsk } from '../market/portfolio';
 import type { Service } from '../market/token-detail';
 import { type PriceChange, priceChangeOf } from '../market/price-change';
 import { BLOCKS_PER_DAY } from '../lib/contract-math';
-import { deliveryMarks } from '../market/format';
+import { deliveryMarks, completionPctOf } from '../market/format';
 
 
 /**
@@ -229,7 +229,9 @@ export function adaptDelivery(rec: ChainDeliveryRecord | null | undefined): UiDe
   // RESULT ("was asked, did not deliver"); no record is the absence of one, and
   // every market is in this state on its launch day. See DeliveryRecord's own
   // note in ../market/types.ts for what rendering it as 0% did to new creators.
-  const completionPct = total === 0 ? null : Math.round((rec.answeredCount / total) * 100);
+  // Derived from the counts (market/format.ts completionPctOf), the same way the
+  // creators board now does, so the two surfaces can never disagree again.
+  const completionPct = completionPctOf(rec.answeredCount, rec.missedCount);
   return {
     answered: rec.answeredCount,
     total,
