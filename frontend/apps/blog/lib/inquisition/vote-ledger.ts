@@ -322,7 +322,10 @@ async function loadRemovedByVoter(voter: string): Promise<number | null> {
     [{ name: 'v', type: TYPES.VarChar, value: voter }],
     PER_ACCOUNT_MS
   );
-  if (rows === null || rows.length === 0) return null;
+  if (rows === null || rows.length === 0) {
+    logger.warn(`inquisition: removed-by-voter for @${voter} did not answer within ${PER_ACCOUNT_MS}ms`);
+    return null;
+  }
   // ★ A NULL sum is "nothing computable", not $0.00. Returning 0 here printed a positive
   // claim — "this account took nothing" — where the design intends a dash.
   return orNull(rows[0]?.removed);

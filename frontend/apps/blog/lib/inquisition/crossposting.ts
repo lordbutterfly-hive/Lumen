@@ -1,7 +1,10 @@
+import { getLogger } from '@ui/lib/logging';
 import 'server-only';
 import { TYPES } from 'tedious';
 import { hiveSqlConfigured, querySlow } from './hivesql';
 import { nowIso } from './types';
+
+const logger = getLogger('app');
 
 /**
  * ════ BOARD 06 — STILL POSTING TO BOTH ════
@@ -362,8 +365,26 @@ export async function steemPostsSinceFork(
     }
     // ★ Ran out of pages before reaching the fork: the count is a floor, and says so.
     return done(true);
-  } catch {
-    // ★ An endpoint that will not answer is not a fact about the account.
+  } catch (error) {
+    // ★★ AN ACCOUNT THAT DOES NOT EXIST ON STEEM HAS ZERO STEEM POSTS (2026-09-22). Every
+    // Hive account created after the 2020 fork is unknown to Steem, and Steem answers
+    // `get_discussions_by_blog` for it with an RPC error, which this walk turned into
+    // `null` ("not read") and the record into a PARTIAL one that no nightly pass could
+    // ever complete: 56 of the 102 stuck records were exactly this. One `get_accounts`
+    // settles it: no account there means none since the fork, a real zero.
+    if (String(error).includes('steem rpc error')) {
+      try {
+        const found = (await steem('condenser_api.get_accounts', [[account]], spend)) as unknown[];
+        if (Array.isArray(found) && found.length === 0) {
+          return { posts: 0, lastPost: null, partial: false, requests: spend.n };
+        }
+      } catch (lookupError) {
+        logger.warn(`inquisition: steem account lookup for @${account} failed: ${String(lookupError)}`);
+      }
+    }
+    // ★ An endpoint that will not answer is not a fact about the account. It IS a fact
+    // about the walk, so it is logged (2026-09-22: 56 records had a silent null here).
+    logger.warn(`inquisition: steem walk for @${account} failed after ${spend.n} request(s): ${String(error)}`);
     return null;
   }
 }
