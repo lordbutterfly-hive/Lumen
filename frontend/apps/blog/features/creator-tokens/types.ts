@@ -121,7 +121,17 @@ export type MarketHealth = 'open' | 'lapsed' | 'delisted' | 'closed' | 'paused';
  * written `!== 'v1'`, never `=== 'v2'` — that exact shape is what this change
  * had to repair in two places.
  */
-export type ContractRules = 'v1' | 'v2' | 'v3' | 'v4' | 'v5';
+export type ContractRules = 'v1' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6';
+/**
+ * 'v6' IS THE FRACTIONAL-TOKEN BYTECODE (2026-09-22 OWNER RULING). It is v5 in
+ * every rule but the unit: a token divides into 100 units, every token amount
+ * on the wire is a decimal string with up to two places, and every token-count
+ * field in this module (`supplyTokens`, `capTokens`, `tokens`, `tokensEscrowed`,
+ * `CohortLot.tokens`, ...) may then carry two decimals. Under v1..v5 those
+ * fields are still whole numbers and the client refuses to sign a fraction.
+ * `fractionalTokensUnder` / `tokenStepUnder` in market/contract-rules.ts are
+ * the ONLY places that knowledge lives.
+ */
 
 /**
  * ★★★ 'v4' IS THE NO-TRADING-HISTORY-GATE BYTECODE (2026-09-16 OWNER RULING,

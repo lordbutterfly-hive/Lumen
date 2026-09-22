@@ -458,8 +458,8 @@ function oldRedeemUsd(floorValueUsd: number, tokens: number, held: number): numb
     redeemQuote({ ...base, tokens: 500 }).tokens === 100);
   check('an empty reserve quotes nothing', redeemQuote({ ...base, reserveUsd: 0, tokens: 10 }).netUsd === 0);
   check('a zero supply quotes nothing rather than dividing by it', redeemQuote({ ...base, supplyTokens: 0, tokens: 10 }).netUsd === 0);
-  check('a fractional token request is floored onto the contract lattice',
-    redeemQuote({ ...base, tokens: 10.9 }).tokens === 10);
+  check('a fractional token request is snapped onto the 0.01 lattice (v6: hundredths, never a third decimal)',
+    redeemQuote({ ...base, tokens: 10.129 }).tokens === 10.13 && redeemQuote({ ...base, tokens: 10.9 }).tokens === 10.9);
   check('★ omitting the split treats the whole position as maturing (the over-taxing, SAFE reading)',
     redeemQuote({ reserveUsd: 120, supplyTokens: 1000, heldTokens: 100, heldDays: 0, tokens: 100 }).netUsd * 1000 ===
       mustFind(REFUND, (r) => r.maturing === 100 && r.n === 100, 'maturing=100 n=100').net);

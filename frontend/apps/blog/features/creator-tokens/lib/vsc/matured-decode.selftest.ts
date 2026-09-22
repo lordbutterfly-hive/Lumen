@@ -21,10 +21,11 @@
  */
 
 import { decodeMaturedLeHex } from './reads';
-import { refundNetBaseUnits, maturingGrossShareBaseUnits } from '../contract-math';
+import { refundNetBaseUnits, maturingGrossShareBaseUnits, formatTokenAmount, fromUnits } from '../contract-math';
 
 interface Vector {
   tokens: number;
+  tokensDecimal: string;
   hex: string;
   maturing: number;
   matured: number;
@@ -37,13 +38,20 @@ interface Vector {
   taxBps: number;
 }
 
+// v6 (2026-09-22): every count is in 0.01-token UNITS (core/testdata/fc5-vectors-v6.json,
+// printed by `go test ./core/ -run TestFC5_WireVectors -v`); `tokensDecimal` is the
+// wire's decimal token string for the same count. The refund maths is scale-free, so
+// the six pre-v6 rows keep their figures and three fractional rows join them.
 const VECTORS: Vector[] = [
-  { tokens: 1000, hex: '00', maturing: 1000, matured: 0, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 7500, net: 42500, taxBps: 1500 },
-  { tokens: 1000, hex: 'e803', maturing: 0, matured: 1000, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 0, net: 50000, taxBps: 1500 },
-  { tokens: 1000, hex: 'f401', maturing: 500, matured: 500, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 3750, net: 46250, taxBps: 1500 },
-  { tokens: 1000, hex: 'fa', maturing: 750, matured: 250, reserve: 123457, supply: 9991, heldBlocks: 100, gross: 12356, tax: 1391, net: 10965, taxBps: 1500 },
-  { tokens: 1000, hex: 'e703', maturing: 1, matured: 999, reserve: 999983, supply: 100003, heldBlocks: 0, gross: 9999, tax: 2, net: 9997, taxBps: 1500 },
-  { tokens: 1000, hex: 'f401', maturing: 500, matured: 500, reserve: 500000, supply: 10000, heldBlocks: 1209600, gross: 50000, tax: 0, net: 50000, taxBps: 0 }
+  { tokens: 1000, tokensDecimal: '10.00', hex: '00', maturing: 1000, matured: 0, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 7500, net: 42500, taxBps: 1500 },
+  { tokens: 1000, tokensDecimal: '10.00', hex: 'e803', maturing: 0, matured: 1000, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 0, net: 50000, taxBps: 1500 },
+  { tokens: 1000, tokensDecimal: '10.00', hex: 'f401', maturing: 500, matured: 500, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 50000, tax: 3750, net: 46250, taxBps: 1500 },
+  { tokens: 1000, tokensDecimal: '10.00', hex: 'fa', maturing: 750, matured: 250, reserve: 123457, supply: 9991, heldBlocks: 100, gross: 12356, tax: 1391, net: 10965, taxBps: 1500 },
+  { tokens: 1000, tokensDecimal: '10.00', hex: 'e703', maturing: 1, matured: 999, reserve: 999983, supply: 100003, heldBlocks: 0, gross: 9999, tax: 2, net: 9997, taxBps: 1500 },
+  { tokens: 1000, tokensDecimal: '10.00', hex: 'f401', maturing: 500, matured: 500, reserve: 500000, supply: 10000, heldBlocks: 1209600, gross: 50000, tax: 0, net: 50000, taxBps: 0 },
+  { tokens: 150, tokensDecimal: '1.50', hex: '71', maturing: 37, matured: 113, reserve: 500000, supply: 10000, heldBlocks: 0, gross: 7500, tax: 278, net: 7222, taxBps: 1500 },
+  { tokens: 2, tokensDecimal: '0.02', hex: '01', maturing: 1, matured: 1, reserve: 2023, supply: 200, heldBlocks: 0, gross: 20, tax: 2, net: 18, taxBps: 1500 },
+  { tokens: 250, tokensDecimal: '2.50', hex: '00', maturing: 250, matured: 0, reserve: 1007, supply: 250, heldBlocks: 100, gross: 1007, tax: 152, net: 855, taxBps: 1500 }
 ];
 
 let failures = 0;
@@ -111,6 +119,10 @@ check('share: zero maturing -> 0', maturingGrossShareBaseUnits(50000, 0, 1000) =
 check('share: all maturing -> full gross', maturingGrossShareBaseUnits(50000, 1000, 1000) === 50000);
 check('share: rounds UP (ceil)', maturingGrossShareBaseUnits(9999, 1, 1000) === 10);
 check('share: zero gross -> 0', maturingGrossShareBaseUnits(0, 500, 1000) === 0);
+
+for (const v of VECTORS) {
+  check(`v6 wire: ${v.tokens} units prints as "${v.tokensDecimal}"`, formatTokenAmount(fromUnits(v.tokens)) === v.tokensDecimal, `got ${formatTokenAmount(fromUnits(v.tokens))}`);
+}
 
 console.log(`\n${checks - failures}/${checks} checks passed`);
 if (failures > 0) {

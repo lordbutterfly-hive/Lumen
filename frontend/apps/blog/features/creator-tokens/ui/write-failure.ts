@@ -65,7 +65,7 @@ const WALLET_ERROR_TOKENS =
  */
 const KNOWN_PLAIN_MESSAGES: readonly string[] = [
   'The price moved above your limit.',
-  'That budget does not cover a whole token at the current price.',
+  'That budget does not cover the smallest buy at the current price.',
   'curve sell is closed while the market winds down',
   'pro-rata refund opens only at wind-down',
   'market inflow is not open'

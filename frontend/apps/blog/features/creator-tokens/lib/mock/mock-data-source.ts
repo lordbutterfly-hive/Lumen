@@ -26,7 +26,8 @@ import {
   displayPricePerTokenBaseUnits,
   commissionOwedForBaseUnits,
   tradeFeeOn,
-  type AskRateEstimate
+  type AskRateEstimate,
+  isUnitMultiple
 } from '../contract-math';
 import { unknownMarket } from '../vsc/reads';
 import {
@@ -595,7 +596,7 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     if (settlement.rateBaseUnits === null) {
       return unpriced(settlement.status);
     }
-    const creditsRequiredBaseUnits = creditsForAskBaseUnits(faceBaseUnits, settlement.rateBaseUnits);
+    const creditsRequiredBaseUnits = creditsForAskBaseUnits(faceBaseUnits, settlement.rateBaseUnits, true); // the mock mirrors the v6 contract
     return {
       creator,
       faceHbd: baseUnitsToHuman(faceBaseUnits),
@@ -605,7 +606,7 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       // creditsRequiredBaseUnits, never baseUnitsToHuman'd.
       creditsRequired: creditsRequiredBaseUnits,
       creditsRequiredBaseUnits,
-      commissionCredits: commissionOwedForBaseUnits(creditsRequiredBaseUnits),
+      commissionCredits: commissionOwedForBaseUnits(creditsRequiredBaseUnits, true),
       oracleStatus: settlement.status,
       asOfBlock: head
     };
@@ -620,8 +621,8 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     await delay(80);
     const seed = this.seed(creator);
     if (!seed) throw new Error(`MockCreatorTokensDataSource: no such market ${creator}`);
-    if (!Number.isInteger(tokens) || tokens <= 0) {
-      throw new Error('MockCreatorTokensDataSource: tokens must be a positive whole number');
+    if (!isUnitMultiple(tokens) || tokens <= 0) {
+      throw new Error('MockCreatorTokensDataSource: tokens must be a positive multiple of 0.01');
     }
     const market = this.buildMarket(creator, seed);
     if (!market.canBuy) {
@@ -644,8 +645,8 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     await delay(80);
     const seed = this.seed(creator);
     if (!seed) throw new Error(`MockCreatorTokensDataSource: no such market ${creator}`);
-    if (!Number.isInteger(tokens) || tokens <= 0) {
-      throw new Error('MockCreatorTokensDataSource: tokens must be a positive whole number');
+    if (!isUnitMultiple(tokens) || tokens <= 0) {
+      throw new Error('MockCreatorTokensDataSource: tokens must be a positive multiple of 0.01');
     }
     const market = this.buildMarket(creator, seed);
     if (market.windingDown) {
@@ -750,8 +751,8 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     await delay(400);
     const seed = this.seed(input.creator);
     if (!seed) throw new Error(`MockCreatorTokensDataSource: no such market ${input.creator}`);
-    if (!Number.isInteger(input.tokens) || input.tokens <= 0) {
-      throw new Error('MockCreatorTokensDataSource: tokens must be a positive whole number');
+    if (!isUnitMultiple(input.tokens) || input.tokens <= 0) {
+      throw new Error('MockCreatorTokensDataSource: tokens must be a positive multiple of 0.01');
     }
     const head = mockHeadBlock();
     const market = this.buildMarket(input.creator, seed);
@@ -791,8 +792,8 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     await delay(400);
     const seed = this.seed(input.creator);
     if (!seed) throw new Error(`MockCreatorTokensDataSource: no such market ${input.creator}`);
-    if (!Number.isInteger(input.tokens) || input.tokens <= 0) {
-      throw new Error('MockCreatorTokensDataSource: tokens must be a positive whole number');
+    if (!isUnitMultiple(input.tokens) || input.tokens <= 0) {
+      throw new Error('MockCreatorTokensDataSource: tokens must be a positive multiple of 0.01');
     }
     const market = this.buildMarket(input.creator, seed);
     // sell.go's rail switch: the curve rail is CLOSED while the market winds
@@ -930,8 +931,8 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     await delay(400);
     const seed = this.seed(input.creator);
     if (!seed) throw new Error(`MockCreatorTokensDataSource: no such market ${input.creator}`);
-    if (!Number.isInteger(input.tokens) || input.tokens <= 0) {
-      throw new Error('MockCreatorTokensDataSource: tokens must be a positive whole number');
+    if (!isUnitMultiple(input.tokens) || input.tokens <= 0) {
+      throw new Error('MockCreatorTokensDataSource: tokens must be a positive multiple of 0.01');
     }
     const market = this.buildMarket(input.creator, seed);
     // refund.go Refund: the WIND-DOWN rail — inWindDown ONLY (retired, or
@@ -988,8 +989,8 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async transferTokens(input: TransferTokensInput): Promise<void> {
     await delay(400);
-    if (!Number.isInteger(input.tokens) || input.tokens <= 0) {
-      throw new Error('MockCreatorTokensDataSource: tokens must be a positive whole number');
+    if (!isUnitMultiple(input.tokens) || input.tokens <= 0) {
+      throw new Error('MockCreatorTokensDataSource: tokens must be a positive multiple of 0.01');
     }
     const head = mockHeadBlock();
     const from = readWalletEntry(input.creator, input.from);

@@ -2,7 +2,7 @@ import 'server-only';
 import { getLogger } from '@ui/lib/logging';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 import { consumeLocalGlobal } from '@/blog/lib/lite/antispam/local-rate-limit';
-import { STATE_QUERY, kRegisteredAt, kSupply, toDid, toU64 } from '@/blog/features/creator-tokens/lib/vsc/reads';
+import { STATE_QUERY, kRegisteredAt, kSupply, kUnitsMarket, toDid, toU64, tokenCountFromState } from '@/blog/features/creator-tokens/lib/vsc/reads';
 import { displayPriceUsd } from '@/blog/features/creator-tokens/market/curve';
 
 const logger = getLogger('app');
@@ -62,7 +62,7 @@ async function fetchSummary(handle: string): Promise<CreatorMarketSummary | null
   const target = upstream();
   if (!target) return null;
   const did = toDid(handle);
-  const keys = [kRegisteredAt(did), kSupply(did)];
+  const keys = [kRegisteredAt(did), kSupply(did), kUnitsMarket(did)];
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
   try {
@@ -82,7 +82,7 @@ async function fetchSummary(handle: string): Promise<CreatorMarketSummary | null
       return typeof v === 'string' ? v : null;
     };
     const registeredAt = toU64(raw(kRegisteredAt(did)));
-    const supply = toU64(raw(kSupply(did)));
+    const supply = tokenCountFromState(raw(kSupply(did)), raw(kUnitsMarket(did))); // v6: units once migrated, whole tokens before
     const registered = registeredAt > 0;
     return {
       did,

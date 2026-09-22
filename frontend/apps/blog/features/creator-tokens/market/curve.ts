@@ -1,4 +1,4 @@
-import type { CohortLot } from '../types';
+import type { CohortLot, ContractRules } from '../types';
 import {
   ASSET_DECIMALS,
   BLOCKS_PER_DAY,
@@ -12,8 +12,10 @@ import {
   quoteSellBaseUnits,
   spotRateBaseUnits,
   commissionOwedForBaseUnits,
-  tokensAffordableForBudget
+  tokensAffordableForBudget,
+  roundToUnits
 } from '../lib/contract-math';
+import { fractionalTokensUnder, tokenStepUnder } from './contract-rules';
 
 /**
  * Buy/Sell preview math for the token modals.
@@ -89,6 +91,8 @@ function baseUnitsToUsd(baseUnits: number): number {
 export interface CurveMarketInput {
   supply: number;
   cap: number;
+  /** The contract rules the chain reports; under 'v6' quotes may carry 0.01-token fractions. Absent = whole tokens. */
+  rules?: ContractRules;
   position: {
     /** The holder's WHOLE position — core/matured.go:145 totalBalance, i.e. maturing + matured. */
     tokens: number;
@@ -112,8 +116,14 @@ export interface CurveMarketInput {
   } | null;
 }
 
+function fractional(m: CurveMarketInput): boolean {
+  return m.rules !== undefined && fractionalTokensUnder(m.rules);
+}
+function snap(m: CurveMarketInput, tokens: number): number {
+  return fractional(m) ? Math.max(0, roundToUnits(tokens)) : Math.max(0, Math.floor(tokens));
+}
 function supplyTokens(m: CurveMarketInput): number {
-  return Math.max(0, Math.floor(m.supply));
+  return snap(m, m.supply);
 }
 
 /**
@@ -233,9 +243,10 @@ export interface BuyQuote {
 export function buyQuote(usdGross: number, m: CurveMarketInput): BuyQuote {
   const supply = supplyTokens(m);
   const budgetBaseUnits = usdToBaseUnits(usdGross);
-  const capHeadroom = Math.max(0, Math.floor(m.cap) - supply);
-  const affordable = tokensAffordableForBudget(supply, budgetBaseUnits);
-  const tokens = Math.min(affordable, capHeadroom);
+  const step = m.rules === undefined ? 1 : tokenStepUnder(m.rules);
+  const capHeadroom = Math.max(0, snap(m, Math.floor(m.cap) - supply));
+  const affordable = tokensAffordableForBudget(supply, budgetBaseUnits, step);
+  const tokens = snap(m, Math.min(affordable, capHeadroom));
   if (tokens <= 0) {
     // ★ THE ORACLE RATE LEAKED INTO A BUYER-FACING PRICE HERE (found 2026-08-21,
     // the same fault as the "$0.00 in the directory" bug one layer up).
@@ -301,8 +312,9 @@ export function buyQuote(usdGross: number, m: CurveMarketInput): BuyQuote {
  */
 export function minBuyUsd(m: CurveMarketInput): number {
   const supply = supplyTokens(m);
-  if (Math.max(0, Math.floor(m.cap) - supply) < 1) return 0;
-  const cents = Math.ceil(quoteBuyBaseUnits(supply, 1).totalDueBaseUnits / 10);
+  const step = m.rules === undefined ? 1 : tokenStepUnder(m.rules);
+  if (Math.max(0, Math.floor(m.cap) - supply) < step) return 0;
+  const cents = Math.ceil(quoteBuyBaseUnits(supply, step).totalDueBaseUnits / 10);
   return cents / 100;
 }
 
@@ -328,19 +340,15 @@ export interface SellQuote {
  */
 export function sellQuote(tokens: number, m: CurveMarketInput, holdDays: number): SellQuote {
   const supply = supplyTokens(m);
-  // Clamp to the CALLER'S OWN balance too, never just total supply — sell.go
-  // checks bal >= ΔS before anything else ("insufficient credits"), so typing
-  // more than you hold must quote what you'd actually receive (proceeds for
-  // your real balance), never proceeds for an amount execution will refuse.
-  const held = Math.max(0, Math.floor(m.position?.tokens ?? 0));
-  const n = Math.max(0, Math.floor(Math.min(tokens, supply, held)));
+  const held = snap(m, m.position?.tokens ?? 0);
+  const n = snap(m, Math.min(tokens, supply, held));
   const heldBlocks = Math.max(0, Math.round(holdDays * BLOCKS_PER_DAY));
   // TWO BUCKETS (F2). sell.go:234-236 taxes only the MATURING share of the draw.
   // Pass the maturing BALANCE — quoteSellBaseUnits runs splitDraw (maturing
   // FIRST, core/matured.go:149-195) itself. Unknown ⇒ the whole position, which
   // reproduces this file's previous number exactly.
   const maturingHeld =
-    m.position?.maturingTokens === undefined ? held : Math.max(0, Math.min(held, Math.floor(m.position.maturingTokens)));
+    m.position?.maturingTokens === undefined ? held : Math.max(0, Math.min(held, snap(m, m.position.maturingTokens)));
   // ★ COHORTS (2026-09-15): the chain taxes a PARTIAL sale per cohort, freshest
   // first (sell.go maturingCohortTax), so the blended `holdDays` rate under-
   // states the fee for a mixed-age position. With the ledger the quote is the
@@ -393,16 +401,18 @@ export interface ServiceQuote {
  * price safely — a live surface must take the rate from the contract's own
  * `quote` entrypoint rather than from a displayed spot price.
  */
-export function serviceQuote(usd: number, priceUsd: number): ServiceQuote {
+export function serviceQuote(usd: number, priceUsd: number, rules?: ContractRules): ServiceQuote {
   if (!Number.isFinite(usd) || !Number.isFinite(priceUsd) || usd <= 0 || priceUsd <= 0) {
     return { tokens: 0, commissionUsd: 0, totalUsd: 0 };
   }
+  // v6: the service costs ceil(face x 100 / rate) hundredths ("$1.50 = 1.48 tokens"); before v6 whole tokens, rounded up.
+  const frac = rules !== undefined && fractionalTokensUnder(rules);
   const faceBaseUnits = usdToBaseUnits(usd);
   const rateBaseUnits = Math.max(1, Math.round(priceUsd * HBD_PER_USD * SCALE));
-  const tokens = creditsForAskBaseUnits(faceBaseUnits, rateBaseUnits);
+  const tokens = creditsForAskBaseUnits(faceBaseUnits, rateBaseUnits, frac);
   return {
     tokens,
-    commissionUsd: baseUnitsToUsd(commissionOwedForBaseUnits(tokens) * rateBaseUnits),
+    commissionUsd: baseUnitsToUsd(commissionOwedForBaseUnits(tokens, frac) * rateBaseUnits),
     totalUsd: baseUnitsToUsd(faceBaseUnits)
   };
 }
@@ -476,12 +486,12 @@ export interface ServiceSupplyShare {
  * "third, wrong way to quote the same offering" this feature has already been
  * bitten by (creator-studio.tsx's own note, 2026-08-21).
  */
-export function serviceSupplyShare(usd: number, priceUsd: number, capTokens: number): ServiceSupplyShare | null {
+export function serviceSupplyShare(usd: number, priceUsd: number, capTokens: number, rules?: ContractRules): ServiceSupplyShare | null {
   if (!Number.isFinite(usd) || usd <= 0) return null;
   if (!Number.isFinite(priceUsd) || priceUsd <= 0) return null;
   if (!Number.isFinite(capTokens) || capTokens <= 0) return null;
 
-  const { tokens } = serviceQuote(usd, priceUsd);
+  const { tokens } = serviceQuote(usd, priceUsd, rules);
   // serviceQuote returns 0 when it cannot price. That is "unknown", not "free",
   // and it must not be reported as a 0% share of supply.
   if (tokens <= 0) return null;
@@ -504,8 +514,8 @@ export function serviceSupplyShare(usd: number, priceUsd: number, capTokens: num
  * the cap can be RAISED from the Studio at any time on a market below MaxCap,
  * so this is never a dead end.
  */
-export function serviceSupplyShareProblem(usd: number, priceUsd: number, capTokens: number): string | null {
-  const share = serviceSupplyShare(usd, priceUsd, capTokens);
+export function serviceSupplyShareProblem(usd: number, priceUsd: number, capTokens: number, rules?: ContractRules): string | null {
+  const share = serviceSupplyShare(usd, priceUsd, capTokens, rules);
   if (share === null || !share.unfillable) return null;
 
   const cap = Math.floor(capTokens).toLocaleString('en-US');

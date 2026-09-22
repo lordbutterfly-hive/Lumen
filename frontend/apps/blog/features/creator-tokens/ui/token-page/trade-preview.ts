@@ -19,7 +19,8 @@
 import {
   BLOCKS_PER_DAY,
   humanToBaseUnits,
-  refundNetBaseUnits
+  refundNetBaseUnits,
+  roundToUnits
 } from '../../lib/contract-math';
 
 /** HBD base units -> dollars. HBD is the dollar-pegged unit these screens print (live/adapt.ts usdFromHbd is the documented 1:1). */
@@ -123,10 +124,10 @@ export interface RedeemQuote {
  * LiveHolderPosition, pass it straight through and both notes go away.
  */
 export function redeemQuote(input: RedeemQuoteInput): RedeemQuote {
-  const supply = Math.max(0, Math.floor(input.supplyTokens));
-  const held = Math.max(0, Math.floor(input.heldTokens));
+  const supply = Math.max(0, roundToUnits(input.supplyTokens));
+  const held = Math.max(0, roundToUnits(input.heldTokens));
   // The same integer lattice the curve and the reserve share are priced on.
-  const wanted = Number.isFinite(input.tokens) ? Math.floor(input.tokens) : 0;
+  const wanted = Number.isFinite(input.tokens) ? roundToUnits(input.tokens) : 0;
   const tokens = Math.max(0, Math.min(wanted, held, supply));
   const reserveBaseUnits = humanToBaseUnits(input.reserveUsd);
   if (tokens <= 0 || supply <= 0 || reserveBaseUnits <= 0) {
@@ -139,7 +140,7 @@ export function redeemQuote(input: RedeemQuoteInput): RedeemQuote {
   const maturingBalance =
     input.maturingTokens === undefined
       ? held
-      : Math.max(0, Math.min(held, Math.floor(input.maturingTokens)));
+      : Math.max(0, Math.min(held, roundToUnits(input.maturingTokens)));
   const q = refundNetBaseUnits(reserveBaseUnits, tokens, supply, heldBlocks, maturingBalance);
   return {
     tokens,
@@ -274,7 +275,7 @@ export function resolveMaxPriceCap(text: string, q: MaxPriceCapInput): MaxPriceC
       note: 'No price cap set. Your budget is the only limit on this buy.'
     };
   }
-  const tokens = Number.isFinite(q.tokens) ? Math.max(0, Math.floor(q.tokens)) : 0;
+  const tokens = Number.isFinite(q.tokens) ? Math.max(0, roundToUnits(q.tokens)) : 0;
   if (tokens <= 0) {
     return { maxPricePerTokenUsd: parsed, maxTotalUsd: undefined, overMax: false, note: null };
   }
@@ -415,7 +416,7 @@ export function askCostLine(cost: AskCost): string {
  * equals `totalUsd` would invite it back, so the two are stated once.
  */
 export function askCost(usdPosted: number, q: { tokens: number; commissionUsd: number }, priceUsd: number): AskCost {
-  const tokens = Number.isFinite(q.tokens) ? Math.max(0, Math.floor(q.tokens)) : 0;
+  const tokens = Number.isFinite(q.tokens) ? Math.max(0, roundToUnits(q.tokens)) : 0;
   const rate = Number.isFinite(priceUsd) && priceUsd > 0 ? priceUsd : 0;
   const totalUsd = tokens * rate;
   const commissionUsd = Number.isFinite(q.commissionUsd) ? Math.min(Math.max(0, q.commissionUsd), totalUsd) : 0;
@@ -557,9 +558,9 @@ export function effectiveExitFeePct(exitFeeUsd: number, curveProceedsUsd: number
  */
 export function exitFeeBaseNote(heldTokens: number, maturingTokens: number | undefined): string {
   if (maturingTokens === undefined) return '';
-  const held = Math.max(0, Math.floor(heldTokens));
-  const maturing = Math.max(0, Math.min(held, Math.floor(maturingTokens)));
-  const matured = held - maturing;
+  const held = Math.max(0, roundToUnits(heldTokens));
+  const maturing = Math.max(0, Math.min(held, roundToUnits(maturingTokens)));
+  const matured = roundToUnits(held - maturing);
   if (held <= 0 || matured <= 0) return '';
   if (maturing <= 0) {
     return `All ${matured} of your tokens have finished maturing, so this rate no longer costs you anything.`;

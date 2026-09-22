@@ -39,6 +39,7 @@
 export type JsonFieldType =
   | 'number' // jsonU64: bare, unquoted JSON integer -> JS `number`.
   | 'string' // jsonStr: quoted JSON string -> JS `string`, any content.
+  | 'tokenString' // jsonStr -> parse.TokenAmount (v6): quoted decimal token string, up to two places
   | 'moneyString'; // jsonStr -> parseBigDecimal: quoted JSON string that must
 // ALSO be a bare non-negative base-10 integer (no sign, no decimal point,
 // no exponent) or parseBigDecimal (main.go parseBigDecimal) rejects it even though
@@ -124,7 +125,7 @@ export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
     // full 10% trade fee in the same state transition: zero premine, no
     // discount. Structurally un-front-runnable, but NOT an anti-snipe device
     // (BasePrice does that work) — never describe it as one in the UI.
-    firstBuy: { type: 'moneyString', optional: true }
+    firstBuy: { type: 'tokenString', optional: true }
   },
   // THERE IS NO `renew` SHAPE. main.go dropped the `renew` wasmexport on
   // 2026-09-12 with the 10 HBD subscription itself (OWNER RULING;
@@ -142,11 +143,11 @@ export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
     // WHOLE TOKENS, not 3-decimal base units — see contract-math.ts's unit
     // note. Slippage is the buyer's OWN signed transfer.allow on the single
     // HiveDraw of TotalDue; there is deliberately no in-payload cost cap.
-    tokens: 'moneyString' // main.go Buy
+    tokens: 'tokenString' // main.go Buy
   },
   sell: {
     creator: 'string', // main.go Sell
-    tokens: 'moneyString', // main.go Sell
+    tokens: 'tokenString', // main.go Sell
     // main.go Sell — OPTIONAL signed floor on Net. Absent == NO guard (the
     // escape hatch that keeps an exit from ever being trapped); present but
     // malformed == a hard error, never a silent zero.
@@ -156,7 +157,7 @@ export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
     creator: 'string', // main.go Ask
     contentHash: 'string', // main.go Ask
     deadlineBlocks: 'number', // main.go Ask
-    maxCredits: 'moneyString', // main.go Ask — REQUIRED; core.Ask rejects nil/zero
+    maxCredits: 'tokenString', // main.go Ask — REQUIRED; core.Ask rejects nil/zero
     // main.go jsonU64Field jsonU64Field(payload, "offeringId") — the OFFERINGS SHOP.
     // ABSENT means 0, which is the reserved alias for the creator's legacy
     // single `face` price, so leaving it off keeps the pre-shop behaviour
@@ -185,7 +186,7 @@ export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
   },
   refund: {
     creator: 'string', // main.go Refund
-    credits: 'moneyString', // main.go Refund
+    credits: 'tokenString', // main.go Refund
     minNet: { type: 'moneyString', optional: true } // main.go Refund
   },
   // ---- the offerings shop (creator-only; caller IS the creator on all five,
@@ -234,7 +235,7 @@ export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
   transfer: {
     creator: 'string', // main.go Transfer
     to: 'string', // main.go Transfer
-    amount: 'moneyString' // main.go Transfer
+    amount: 'tokenString' // main.go Transfer
   },
   retire: {
     creator: 'string' // main.go Retire — creator-only, ONCE-ONLY, starts the 5-day notice
@@ -399,7 +400,7 @@ export const READ_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
   },
   quoteBuy: {
     creator: 'string', // main.go QuoteBuy
-    tokens: 'moneyString' // main.go QuoteBuy
+    tokens: 'tokenString' // main.go QuoteBuy
   },
   quoteSell: {
     creator: 'string', // main.go QuoteSell
@@ -407,7 +408,7 @@ export const READ_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
     // is a PAYLOAD field — that is what keeps this a pure, caller-independent
     // read. The real `sell` still requires that holder's own active auth.
     holder: 'string', // main.go QuoteSell
-    tokens: 'moneyString' // main.go QuoteSell
+    tokens: 'tokenString' // main.go QuoteSell
   },
   // Pure read, no auth, no mutation: returns the creator's whole posted
   // catalogue as {creator, offerings:[{offeringId,title,price}]}.
@@ -423,6 +424,8 @@ export const READ_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
 // class of "technically a string, still reverts" regression this exists to
 // catch, so the check is intentionally stricter than SetString's own grammar.
 const MONEY_STRING_RE = /^[0-9]+$/;
+// v6 token amounts: a bare integer or up to two decimals (parse.TokenAmount / core parseTokens).
+const TOKEN_STRING_RE = /^[0-9]+(\.[0-9]{1,2})?$/;
 
 /**
  * Throws a single, itemised Error if `payload` does not EXACTLY match
@@ -475,8 +478,12 @@ export function assertPayloadShape(action: string, payload: Record<string, unkno
       // moneyString
       if (typeof value !== 'string') {
         problems.push(`"${key}" must be a quoted decimal string (main.go reads it via jsonStr then parseBigDecimal) — got ${typeof value} (${JSON.stringify(value)}); an unquoted number here is the exact bug this checker exists to catch`);
-      } else if (!MONEY_STRING_RE.test(value)) {
-        problems.push(`"${key}" = ${JSON.stringify(value)} is not a bare non-negative base-10 integer string — parseBigDecimal (main.go parseBigDecimal) would reject it (no sign, no decimal point, no exponent allowed)`);
+      } else if (kind === 'tokenString' ? !TOKEN_STRING_RE.test(value) : !MONEY_STRING_RE.test(value)) {
+        problems.push(
+          kind === 'tokenString'
+            ? `"${key}" = ${JSON.stringify(value)} is not a decimal token string: parse.TokenAmount (main.go) accepts a bare integer or up to two decimal places, no sign, no exponent`
+            : `"${key}" = ${JSON.stringify(value)} is not a bare non-negative base-10 integer string: parseBigDecimal (main.go parseBigDecimal) would reject it (no sign, no decimal point, no exponent allowed)`
+        );
       }
     }
   }
