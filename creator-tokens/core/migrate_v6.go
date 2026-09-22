@@ -157,9 +157,21 @@ func scaleLotsString(raw string) string {
 	return b.String()
 }
 
+// flagSet reports whether a migration flag has been written. THE VALUE, NOT THE
+// `ok` BIT, DECIDES: the VSC host answers a missing key with an empty string
+// and ok == true (sdk.StateGetU64 guards `val == nil || *val == ""` for the
+// same reason), so an `ok`-only check would treat every unmigrated holder as
+// already migrated - no scaling, no flag, a legacy "2" read as 0.02 tokens.
+// Caught on devnet 2026-09-22 (the real-wasm harness never saw it because it
+// had no legacy state); a MemStore answers ("", false) and would never show it.
+func (u *unitsStore) flagSet(flag string) bool {
+	v, _ := u.inner.Get(flag)
+	return v == "1"
+}
+
 func (u *unitsStore) ensureHolder(c, h string) {
 	flag := kUnitsHolder(c, h)
-	if _, done := u.inner.Get(flag); done {
+	if u.flagSet(flag) {
 		return
 	}
 	if v, ok := u.inner.Get(kBal(c, h)); ok && v != "" {
@@ -187,7 +199,7 @@ func (u *unitsStore) ensureHolder(c, h string) {
 
 func (u *unitsStore) ensureMarket(c string) {
 	flag := kUnitsMarket(c)
-	if _, done := u.inner.Get(flag); done {
+	if u.flagSet(flag) {
 		return
 	}
 	for _, key := range []string{kSupply(c), kCap(c)} {

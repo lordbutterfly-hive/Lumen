@@ -4,8 +4,8 @@ Per-creator token on a bonding curve. You buy a creator's token, spend it on
 their services, and the price moves with supply.
 
 > **2026-09-22 — v6: FRACTIONAL TOKENS (0.01 units). BUILT, PROVEN IN `go test`,
-> NOT DEPLOYED.** CID `bafkreigvcn4sgrjzn2vznek4qdjnrpxzc7knv5q2zdsf2gb3jdlnhwg5dy`
-> (167,059 B, reproducible: two clean builds, byte for byte; v5.1 was 159,539 B).
+> NOT DEPLOYED.** CID `bafkreih5siwquvmnfy3zfdal775p5wvltuokmwjmuk6jordfkylxfx3upa`
+> (167,142 B, reproducible: two clean builds, byte for byte; v5.1 was 159,539 B).
 > A token divides into 100 units; the wire is decimal token strings ("1.50"),
 > events are `v: 2`; the curve, reserves, clocks and fees are unchanged per whole
 > token; a lazy per-key migration scales v5.1 state x100 on first touch (proven on
