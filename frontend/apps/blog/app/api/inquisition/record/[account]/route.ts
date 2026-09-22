@@ -82,6 +82,13 @@ export async function GET(
       );
     }
 
+    // ★ A first build already running in another worker: its cheap half is on disk.
+    // Recomputing it here would only overwrite that file, possibly after the finished
+    // record had landed on top of it.
+    if (stored && isFilling(account)) {
+      return NextResponse.json({ ...stored.record, building: true }, { headers: { 'cache-control': 'no-store' } });
+    }
+
     // Nothing usable on disk. Pay for the cheap half only, and hand it over now.
     const base = await profileRecord(account);
     if (!base) {

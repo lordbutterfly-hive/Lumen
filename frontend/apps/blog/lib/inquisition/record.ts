@@ -3,7 +3,16 @@ import { getLogger } from '@ui/lib/logging';
 import { downvoteTally, downvotesCast, profileRecord, type ProfileRecord } from './boards-sql';
 import { removedByVoter, voteLedger } from './vote-ledger';
 import { steemPostsSinceFork } from './crossposting';
-import { readRecord, recordStale, writeRecord } from './board-store';
+import {
+  HEARTBEAT_MS,
+  claimBuild,
+  isClaimed,
+  readRecord,
+  recordStale,
+  releaseBuild,
+  touchClaim,
+  writeRecord
+} from './board-store';
 
 const logger = getLogger('app');
 
@@ -125,17 +134,44 @@ export async function slowHalf(account: string, base: ProfileRecord): Promise<Sl
 
 /*
  * ★★ ONE BUILD PER ACCOUNT PER PROCESS, so a profile opened in four tabs does not start
- * four identical twenty-second computations. Deliberately in memory rather than a lock
- * file: this is not trying to coordinate the three workers, only to stop one worker
- * racing itself. Two workers both warming the same cold record is a little waste; one
- * worker doing it four times is what a reader can cause by refreshing.
+ * four identical twenty-second computations.
  */
 const INFLIGHT = Symbol.for('lumen.inquisition.record.inflight.v1');
 const inflight = ((globalThis as Record<symbol, unknown>)[INFLIGHT] ??= new Set<string>()) as Set<string>;
 
-/** Whether a background fill for this account is running in THIS process right now. */
+/*
+ * ★★★ AND ONE BUILD PER ACCOUNT ACROSS THE THREE WORKERS (2026-09-22). The in-memory set
+ * above was all there was, on the theory that two workers warming the same record is a
+ * little waste. The nightly warm made it a lot: it re-asks every 20 seconds, the master
+ * hands each request to the next worker, and each worker found the file still stale and
+ * started its own fill. The log shows @mack-bot, @meritocracy and @spaminator each
+ * computed three times, three 300-second removed-by-voter queries apiece against a
+ * database we do not own. `building` was per-process too, so the script could be told
+ * "done" by a worker that simply was not the one filling.
+ *
+ * The boards solved this already with a lock file whose mtime is the claim, re-stamped
+ * while the work runs; records now take the same claim under their own key.
+ */
+const claimKey = (account: string) => `rec-${account}`;
+
+/** Whether a fill for this account is running in ANY worker right now. */
 export function isFilling(account: string): boolean {
-  return inflight.has(account);
+  return inflight.has(account) || isClaimed(claimKey(account));
+}
+
+/** Run `work` as the one worker filling `account`; false when another already is. */
+async function underClaim(account: string, work: () => Promise<void>): Promise<boolean> {
+  if (inflight.has(account) || !claimBuild(claimKey(account))) return false;
+  inflight.add(account);
+  const beat = setInterval(() => touchClaim(claimKey(account)), HEARTBEAT_MS);
+  try {
+    await work();
+    return true;
+  } finally {
+    clearInterval(beat);
+    releaseBuild(claimKey(account));
+    inflight.delete(account);
+  }
 }
 
 /**
@@ -145,31 +181,32 @@ export function isFilling(account: string): boolean {
  * weekly refresh. The fast half is about a second.
  */
 export function fillInBackground(account: string, base: ProfileRecord, refreshBase = false): void {
-  if (inflight.has(account)) return;
-  inflight.add(account);
-  void (async () => {
+  void underClaim(account, async () => {
     try {
       const fresh = refreshBase ? await profileRecord(account).catch(() => null) : null;
       const filled = await slowHalf(account, fresh ?? base);
       writeRecord(account, filled.record, true, filled.partial);
     } catch (error) {
       logger.warn(`inquisition: background record fill failed for @${account}: ${String(error)}`);
-    } finally {
-      inflight.delete(account);
     }
-  })();
+  });
 }
 
 /**
  * Compute a record end to end and store it. Used by the weekly warm pass, which has no
- * reader waiting and so has no reason to return half of one.
+ * reader waiting and so has no reason to return half of one. False when there is no
+ * account to build or another worker is already building it.
  */
 export async function buildRecord(account: string): Promise<boolean> {
-  const base = await profileRecord(account);
-  if (!base) return false;
-  const filled = await slowHalf(account, base);
-  writeRecord(account, filled.record, true, filled.partial);
-  return true;
+  let built = false;
+  await underClaim(account, async () => {
+    const base = await profileRecord(account);
+    if (!base) return;
+    const filled = await slowHalf(account, base);
+    writeRecord(account, filled.record, true, filled.partial);
+    built = true;
+  });
+  return built;
 }
 
 /**
