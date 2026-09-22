@@ -302,7 +302,13 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
     return effectiveAnswersOnly ? list.filter((c) => c.completionPct !== null) : list;
   }, [effectiveSort, discovery.creators, effectiveAnswersOnly]);
 
-  const newCreators = useMemo(() => discovery.creators.filter((c) => c.isNew), [discovery.creators]);
+  // "New here" is the shelf for creators who are NOT ranked yet, and its card
+  // states "No deliveries yet" as a fact. A creator inside the 30-day window who
+  // has already delivered is ranked and carries a real record in the grid
+  // below, so listing them here would state a falsehood next to the truth
+  // (2026-09-22: hbd-temp, 1 of 1 rated 5.0, sat in this shelf as "No
+  // deliveries yet"). Membership is therefore new AND unproven.
+  const newCreators = useMemo(() => discovery.creators.filter((c) => c.isNew && c.completionPct === null), [discovery.creators]);
 
   const rightRail = (
     <div className="flex flex-col gap-5 pt-[26px]">
