@@ -345,8 +345,17 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
       {reclaimable ? (
         <div className="mt-3 flex items-center justify-between gap-3">
           <div className="text-caption text-ink-warn-2 font-ui">
-            You get {a.tokensEscrowed - missSliceTokens(a.tokensEscrowed)} of your {a.tokensEscrowed} tokens back; {missSliceTokens(a.tokensEscrowed)}{' '}
-            {missSliceTokens(a.tokensEscrowed) === 1 ? 'goes' : 'go'} to the platform for the missed deadline, and the miss goes on @{displayHandle(a.creator)}&rsquo;s record.
+            {missSliceTokens(a.tokensEscrowed) >= a.tokensEscrowed ? (
+              <>
+                The platform keeps {a.tokensEscrowed === 1 ? 'this token' : 'these tokens'} for the missed deadline, and the miss goes on @{displayHandle(a.creator)}&rsquo;s
+                record. Closing the request is what puts it there.
+              </>
+            ) : (
+              <>
+                You get {a.tokensEscrowed - missSliceTokens(a.tokensEscrowed)} of your {a.tokensEscrowed} tokens back; {missSliceTokens(a.tokensEscrowed)}{' '}
+                {missSliceTokens(a.tokensEscrowed) === 1 ? 'goes' : 'go'} to the platform for the missed deadline, and the miss goes on @{displayHandle(a.creator)}&rsquo;s record.
+              </>
+            )}
           </div>
           <button
             onClick={async () => {
@@ -362,7 +371,7 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
             disabled={busy}
             className="rounded-control bg-surface-warn-11 px-4 py-2 text-caption font-medium text-ink-27 font-ui hover:bg-surface-warn-13 disabled:opacity-50"
           >
-            {busy ? 'Confirm in your wallet…' : 'Get your tokens back'}
+            {busy ? 'Confirm in your wallet…' : missSliceTokens(a.tokensEscrowed) >= a.tokensEscrowed ? 'Close the request' : 'Get your tokens back'}
           </button>
         </div>
       ) : null}

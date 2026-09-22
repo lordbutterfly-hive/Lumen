@@ -43,6 +43,7 @@ const sellerData: MeritumNotificationData = {
   placed: [],
   declined: [],
   rated: [{ creator: 'hive:hbd-temp', actor: 'hive:lordbutterfly', seq: 0, score: 5, indexer_ts: '2026-09-21T17:41:18' }],
+  missed: [{ creator: 'hive:hbd-temp', actor: 'hive:lordbutterfly', asker: 'hive:lordbutterfly', seq: 3, indexer_ts: '2026-09-23T10:00:00' }, { creator: 'hive:hbd-temp', actor: 'hive:hbd-temp', asker: 'hive:hbd-temp', seq: 4, indexer_ts: '2026-09-23T11:00:00' }],
   offerings: [
     { offering_id: 1, title: 'Let there be light!' },
     { offering_id: 2, title: 'test1' }
@@ -67,6 +68,9 @@ ok('one buy, the self-buy dropped', byType(seller, 'buy').length === 1);
 ok('buy row links to the moved market page m/<handle>', byType(seller, 'buy')[0]?.url === 'm/hbd-temp');
 ok('buy row names the buyer like every other row', byType(seller, 'buy')[0]?.msg === '@lordbutterfly bought 2 Meritum of yours for $2.12');
 ok('buy row id is the tx hash', byType(seller, 'buy')[0]?.id === 'buy:hive:hbd-temp:6087c43d5fca665d4c37d8635189cb86f9095f9c');
+const missed = byType(seller, 'missed');
+ok('one missed row, the self-dealt reclaim dropped', missed.length === 1 && missed[0].id === 'missed:hive:hbd-temp:3');
+ok('missed row tells the seller what happened and where', /reclaimed their tokens after the deadline passed; a miss is on your record/.test(missed[0]?.msg ?? '') && missed[0]?.url === 'creators/studio?section=inbox&tab=requests');
 const order = byType(seller, 'order')[0];
 ok('order row exists', !!order);
 ok('order row names the service and the tokens', order?.msg === '@lordbutterfly ordered your "Let there be light!" for 1 token', order?.msg);
@@ -81,7 +85,7 @@ ok('rated row links to the Studio requests inbox', rated?.url === SELLER_INBOX_U
 ok('rated row date is the rating block time, not the ask', rated?.date === '2026-09-21T17:41:18Z');
 ok('rated row id is the escrow key', rated?.id === 'rated:hive:hbd-temp:0');
 ok('seller gets nothing on the buyer side', byType(seller, 'order_placed').length === 0 && byType(seller, 'delivered').length === 0);
-ok('exactly three seller rows', seller.length === 3, String(seller.length));
+ok('exactly four seller rows (buy, order, rated, missed)', seller.length === 4, String(seller.length));
 
 console.log('\nbuyer side: hive:lordbutterfly');
 const buyer = meritumNotificationRows(buyerData, ['hive:lordbutterfly']);
@@ -136,8 +140,8 @@ ok(
     }),
   JSON.stringify(where)
 );
-ok('queries name every field the builder reads', ['bought', 'ordered', 'placed', 'declined', 'rated', 'offerings', 'renamed'].every((f) => MERITUM_NOTIFICATIONS_QUERY.includes(`${f}:`)) && DELIVERED_FOR_ASKS_QUERY.includes('delivered:'));
-ok('every list is filtered to the deployed contract', (MERITUM_NOTIFICATIONS_QUERY.match(/indexer_contract_id: \{ _eq: \$contract \}/g) ?? []).length === 7);
+ok('queries name every field the builder reads', ['bought', 'ordered', 'placed', 'declined', 'rated', 'missed', 'offerings', 'renamed'].every((f) => MERITUM_NOTIFICATIONS_QUERY.includes(`${f}:`)) && DELIVERED_FOR_ASKS_QUERY.includes('delivered:'));
+ok('every list is filtered to the deployed contract', (MERITUM_NOTIFICATIONS_QUERY.match(/indexer_contract_id: \{ _eq: \$contract \}/g) ?? []).length === 8);
 
 console.log('\nunread: the lag scenario the timestamp cutoff lost');
 const T = Date.parse('2026-09-21T17:02:00Z');

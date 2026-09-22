@@ -31,7 +31,9 @@ export type LumenNotificationType =
   /** Buyer: the creator declined and the tokens came back. */
   | 'declined'
   /** Seller: the buyer scored a delivery. */
-  | 'rated';
+  | 'rated'
+  /** Seller: a buyer reclaimed after the deadline; the contract wrote a miss. */
+  | 'missed';
 
 export interface LumenNotificationRow {
   /**
@@ -64,7 +66,8 @@ export const MERITUM_TYPES: ReadonlySet<LumenNotificationType> = new Set<LumenNo
   'order_placed',
   'delivered',
   'declined',
-  'rated'
+  'rated',
+  'missed'
 ]);
 
 /** Where a seller goes to act on an order: the Studio inbox, Requests sub-tab. */
@@ -105,6 +108,13 @@ export interface DeclinedEvent {
   seq: number | string;
   indexer_ts: string;
 }
+export interface ReclaimedEvent {
+  creator: string;
+  actor: string;
+  asker: string;
+  seq: number | string;
+  indexer_ts: string;
+}
 export interface RatedEvent {
   creator: string;
   actor: string;
@@ -124,6 +134,8 @@ export interface MeritumNotificationData {
   placed?: AskedEvent[];
   declined?: DeclinedEvent[];
   rated?: RatedEvent[];
+  /** Reclaims against the reader's markets: a customer took their tokens back after a missed deadline. */
+  missed?: ReclaimedEvent[];
   offerings?: OfferingTitleRow[];
   renamed?: OfferingTitleRow[];
   delivered?: AnsweredEvent[];
@@ -173,6 +185,11 @@ export const MERITUM_NOTIFICATIONS_QUERY = `query MeritumNotifications($keys: [S
     order_by: { indexer_ts: desc }
     limit: ${EVENT_LIMIT}
   ) { creator actor seq score indexer_ts }
+  missed: lumen_ct_reclaimed_events(
+    where: { creator: { _in: $keys }, indexer_contract_id: { _eq: $contract } }
+    order_by: { indexer_ts: desc }
+    limit: ${EVENT_LIMIT}
+  ) { creator actor asker seq indexer_ts }
   offerings: lumen_ct_offering_created_events(
     where: { creator: { _in: $keys }, indexer_contract_id: { _eq: $contract } }
     order_by: { indexer_ts: asc }
@@ -357,6 +374,22 @@ export function meritumNotificationRows(data: MeritumNotificationData, keys: rea
     });
   }
 
+  // A reclaim is the one ending the creator never chose and was never shown:
+  // the buyer took their tokens back after the deadline and the contract wrote
+  // a miss against the record. Said plainly, because a record that changes
+  // without a word is how a creator finds out from their own falling completion rate.
+  for (const r of data.missed ?? []) {
+    if (mine.has(r.asker)) continue;
+    rows.push({
+      id: `missed:${r.creator}:${num(r.seq)}`,
+      type: 'missed',
+      msg: `${mention(r.asker)} reclaimed their tokens after the deadline passed; a miss is on your record`,
+      url: SELLER_INBOX_URL,
+      date: zoned(r.indexer_ts),
+      actor: faceOf(r.asker),
+      source: 'lumen'
+    });
+  }
   return rows;
 }
 
