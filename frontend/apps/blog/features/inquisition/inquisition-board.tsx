@@ -71,8 +71,9 @@ const PAGE = 12;
 const SORTS: Partial<Record<BoardId, { key: string; label: string; field: string }[]>> = {
   inquisitors: [
     { key: 'removed', label: 'BY VALUE REMOVED', field: 'removedUsd' },
-    { key: 'cast', label: 'BY DOWNVOTES CAST', field: 'downvotes' },
-    { key: 'targets', label: 'BY TARGETS', field: 'targets' }
+    { key: 'cast', label: 'BY DOWNVOTES CAST', field: 'downvotes' }
+    // No BY TARGETS ordering (owner, 2026-09-22: "superfluous ... targets are already
+    // inside other tabs"): the targets column stays on every row under both orders.
   ],
   downvoted: [
     { key: 'downvotes', label: 'BY DOWNVOTES', field: 'downvotes' },

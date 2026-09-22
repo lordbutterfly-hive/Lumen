@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { profileRecord, type ProfileRecord } from '@/blog/lib/inquisition/boards-sql';
-import { fillInBackground } from '@/blog/lib/inquisition/record';
+import { fillInBackground, isFilling } from '@/blog/lib/inquisition/record';
 import { hiveSqlConfigured } from '@/blog/lib/inquisition/hivesql';
 import { readRecord, recordStale, writeRecord } from '@/blog/lib/inquisition/board-store';
 
@@ -69,9 +69,16 @@ export async function GET(
      */
     if (stored?.complete) {
       if (recordStale(stored)) fillInBackground(account, stored.record);
+      // ★ `building` is true while a refill is in flight (2026-09-22). A partial record
+      // used to answer `building: false` the instant its refill was kicked off, so the
+      // nightly warm counted it built, moved on, and started the next one; a dozen
+      // fills then shared two slow-lane slots and every one of them timed out again,
+      // which is how 102 records stayed partial night after night. The strip already
+      // re-asks while building; the warm script waits for it.
+      const filling = isFilling(account);
       return NextResponse.json(
-        { ...stored.record, building: false },
-        { headers: { 'cache-control': 'private, max-age=300' } }
+        { ...stored.record, building: filling },
+        { headers: { 'cache-control': filling ? 'no-store' : 'private, max-age=300' } }
       );
     }
 

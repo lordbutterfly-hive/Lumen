@@ -209,6 +209,19 @@ async function loadVoteLedger(
    * ★ SELF-REWARD is the author's own POSITIVE rshares valued the same way: the share of
    * their payouts that came from their own votes, in money rather than in vote count.
    */
+  // ★ TOP BY COUNT IS ITS OWN QUERY (2026-09-22). It used to be the top-20-BY-VALUE
+  // list re-sorted by count, so a downvoter with many cheap votes fell off it:
+  // @antisocialist's third most frequent downvoter is @spaminator (419), and the strip
+  // named @ghs06 (413) because @spaminator was not among the twenty most valuable.
+  const byCount = await query<{ voter: string; dvs: number }>(
+    `SELECT TOP 3 j.voter, COUNT(*) AS dvs
+     FROM Comments c WITH (NOLOCK)
+     CROSS APPLY OPENJSON(c.active_votes) WITH (rshares bigint '$.rshares', voter nvarchar(20) '$.voter') AS j
+     WHERE c.author = @a0 AND j.rshares < 0
+     GROUP BY j.voter
+     ORDER BY COUNT(*) DESC`,
+    p
+  );
   const self = await query<{ self_reward: number }>(
     `${cte}
      SELECT SUM(CASE WHEN v.pos - v.neg > 0 AND v.payout > 0
@@ -246,8 +259,7 @@ async function loadVoteLedger(
     topDownvoters: rows.slice(0, 3).map((r) => ({ account: r.voter, usd: Number(r.removed) || 0 })),
     // ★ A different list from a different sort: whoever downvoted most often and whoever
     // took the most value are rarely the same people.
-    topByCount: [...rows]
-      .sort((a, b) => (Number(b.dvs) || 0) - (Number(a.dvs) || 0))
+    topByCount: (byCount ?? [...rows].sort((a, b) => (Number(b.dvs) || 0) - (Number(a.dvs) || 0)))
       .slice(0, 3)
       .map((r) => ({ account: r.voter, votes: Number(r.dvs) || 0 })),
     selfRewardUsd,

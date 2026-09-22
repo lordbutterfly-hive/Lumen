@@ -146,7 +146,7 @@ function cellsFor(r: RecordData): Cell[] {
             ? `from ${r.downvoters.toLocaleString()} accounts · most often: ${threeByCount(r.topByCount)}`
             : `from ${r.downvoters.toLocaleString()} accounts · last ${ago(r.lastDownvote)}`,
       tone: r.downvotes === null ? 'dim' : r.downvoters >= 25 ? 'warn' : 'plain',
-      body: `How many downvotes this account received over its whole history — the count, not what they cost it — from ${r.downvoters.toLocaleString()} distinct accounts, the last one ${ago(r.lastDownvote)}. The three named on hover are the ones who cast the most of them.`
+      body: `How many downvotes this account received over its whole history, counted as distinct posts (a downvote later withdrawn still counts, the same way the boards count) — the count, not what they cost it — from ${r.downvoters.toLocaleString()} distinct accounts, the last one ${ago(r.lastDownvote)}. The three named on hover are the ones who cast the most of them.`
     },
     {
       label: 'REWARDS LOST (HBD)',

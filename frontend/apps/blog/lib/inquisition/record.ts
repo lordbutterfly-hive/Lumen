@@ -70,6 +70,20 @@ export async function slowHalf(account: string, base: ProfileRecord): Promise<Sl
   const removedUsd = ledger ? (tally?.downvotes === 0 ? 0 : ledger.removedUsd) : null;
   const removedFromOthersUsd = cast?.downvotes === 0 ? 0 : removedByThem;
 
+  // ★ A silent null is not a behaviour (2026-09-22: 102 records on disk were partial and
+  // the log held three lines). Every half that did not answer is named here, once per
+  // fill, so the nightly warm log says WHICH query is the one that never finishes.
+  const missing = [
+    tally === null ? 'downvote tally' : '',
+    ledger === null ? 'vote ledger' : '',
+    steem === null ? 'steem walk' : '',
+    cast === null ? 'cast tally' : '',
+    removedByThem === null && cast?.downvotes !== 0 ? 'removed by them' : ''
+  ].filter(Boolean);
+  if (missing.length > 0) {
+    logger.warn(`inquisition: record for @${account} is partial, missing ${missing.join(', ')}`);
+  }
+
   return {
     record: {
       ...base,
@@ -110,6 +124,11 @@ export async function slowHalf(account: string, base: ProfileRecord): Promise<Sl
  */
 const INFLIGHT = Symbol.for('lumen.inquisition.record.inflight.v1');
 const inflight = ((globalThis as Record<symbol, unknown>)[INFLIGHT] ??= new Set<string>()) as Set<string>;
+
+/** Whether a background fill for this account is running in THIS process right now. */
+export function isFilling(account: string): boolean {
+  return inflight.has(account);
+}
 
 export function fillInBackground(account: string, base: ProfileRecord): void {
   if (inflight.has(account)) return;

@@ -434,21 +434,26 @@ async function loadKeBoard(limit = BOARD_ROWS): Promise<{ rows: KeRow[]; asOf: s
   const minVests = KE_MIN_HP * ratio;
 
   const rows = await querySlow<{ account: string; rewards_hive: number; hp: number; ke: number }>(
-    /* ★ VESTS, not milli-HIVE — see the note on the profile record's statement. The
-       displayed HIVE figure uses the live rate; the ratio is VESTS over VESTS, where
-       the rate cancels. */
+    /* ★★★ THE REWARD FIELDS ARE THOUSANDTHS OF HIVE, NOT VESTS (corrected 2026-09-22).
+       `Accounts.posting_rewards` / `curation_rewards` are the chain's own integers in
+       0.001 HIVE: @azircon's published figures ("Author Rewards = 30804 hive, Curation
+       Rewards = 235719 hive", May 2025) are exactly those integers / 1000, and his KE
+       of 0.26 only comes out that way. `vesting_shares` IS VESTS, so HP = vests / rate.
+       The 2026-09-20 change that treated the rewards as VESTS and divided milli-HIVE by
+       VESTS made every KE on the site 62% of the true value (1000/1609) and drifting.
+       KE = (author + curation rewards in HIVE) / HP held, azircon's definition. */
     `SELECT TOP (@lim) name AS account,
-            CAST((CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) / @ratio AS int) AS rewards_hive,
+            CAST((CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) / 1000.0 AS int) AS rewards_hive,
             CAST(vesting_shares / @ratio AS int) AS hp,
-            CAST((CAST(posting_rewards AS float) + CAST(curation_rewards AS float))
-                 / NULLIF(CAST(vesting_shares AS float), 0) AS decimal(12,2)) AS ke
+            CAST(((CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) / 1000.0)
+                 / NULLIF(CAST(vesting_shares AS float) / @ratio, 0) AS decimal(12,2)) AS ke
      FROM Accounts
      WHERE vesting_shares > @minVests
        AND created < DATEADD(day, -@minAge, GETDATE())
        AND last_root_post > DATEADD(month, -3, GETDATE())
        AND (CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) > 0
-     ORDER BY (CAST(posting_rewards AS float) + CAST(curation_rewards AS float))
-              / NULLIF(CAST(vesting_shares AS float), 0) DESC`,
+     ORDER BY ((CAST(posting_rewards AS float) + CAST(curation_rewards AS float)) / 1000.0)
+              / NULLIF(CAST(vesting_shares AS float) / @ratio, 0) DESC`,
     [
       { name: 'ratio', type: TYPES.Float, value: ratio },
       { name: 'minVests', type: TYPES.Float, value: minVests },
@@ -596,6 +601,13 @@ export interface DownvoteTally {
  * scan bounded to the downvotes rather than to every vote the account ever received.
  */
 export async function downvoteTally(account: string): Promise<DownvoteTally | null> {
+  // ★ ONE DEFINITION FOR THE STRIP AND THE BOARDS (2026-09-22): distinct posts ever
+  // downvoted, a withdrawn downvote included, which is exactly what rankDownvoted and
+  // rankInquisitors count. The strip used to count only votes still negative today, so
+  // @antisocialist read 4,286 received here and 4,315 on the board, 25,571 cast here
+  // and 25,847 there: two surfaces of one feature disagreeing by a definition nobody
+  // could see. The money figures are unchanged; they read the final vote state, because
+  // a withdrawn downvote removed nothing.
   /*
    * ★★ ONE GROUPED PASS, NOT THREE SCANS. All three figures come from the same rows,
    * and the record statement used to ask for them as three separate correlated
@@ -605,22 +617,15 @@ export async function downvoteTally(account: string): Promise<DownvoteTally | nu
    */
   const rows = await queryCapped<{ downvotes: number; downvoters: number; last_downvote: string | Date }>(
     `WITH ever AS (
-       SELECT DISTINCT voter, permlink
+       SELECT voter, permlink, MAX(timestamp) AS last_at
        FROM TxVotes WITH (NOLOCK)
        WHERE author = @account AND weight < 0
-     ),
-     final AS (
-       SELECT v.voter, v.weight, v.timestamp,
-              ROW_NUMBER() OVER (PARTITION BY v.voter, v.permlink ORDER BY v.timestamp DESC) AS rn
-       FROM TxVotes v WITH (NOLOCK)
-       JOIN ever e ON e.voter = v.voter AND e.permlink = v.permlink
-       WHERE v.author = @account
+       GROUP BY voter, permlink
      )
      SELECT COUNT(*) AS downvotes,
             COUNT(DISTINCT voter) AS downvoters,
-            MAX(timestamp) AS last_downvote
-     FROM final
-     WHERE rn = 1 AND weight < 0`,
+            MAX(last_at) AS last_downvote
+     FROM ever`,
     [{ name: 'account', type: TYPES.VarChar, value: account }],
     DOWNVOTE_COUNT_MS
   );
@@ -656,25 +661,20 @@ export interface CastTally {
 }
 
 export async function downvotesCast(account: string): Promise<CastTally | null> {
+  // Same definition as downvoteTally above and as rankInquisitors: distinct posts ever
+  // downvoted by this account, withdrawn ones included.
   const rows = await queryCapped<{ downvotes: number; targets: number; last_cast: string | Date }>(
     /* ★ The mirror of the received tally, and standing-only for the same reason. */
     `WITH ever AS (
-       SELECT DISTINCT author, permlink
+       SELECT author, permlink, MAX(timestamp) AS last_at
        FROM TxVotes WITH (NOLOCK)
        WHERE voter = @account AND weight < 0
-     ),
-     final AS (
-       SELECT v.author, v.weight, v.timestamp,
-              ROW_NUMBER() OVER (PARTITION BY v.author, v.permlink ORDER BY v.timestamp DESC) AS rn
-       FROM TxVotes v WITH (NOLOCK)
-       JOIN ever e ON e.author = v.author AND e.permlink = v.permlink
-       WHERE v.voter = @account
+       GROUP BY author, permlink
      )
      SELECT COUNT(*) AS downvotes,
             COUNT(DISTINCT author) AS targets,
-            MAX(timestamp) AS last_cast
-     FROM final
-     WHERE rn = 1 AND weight < 0`,
+            MAX(last_at) AS last_cast
+     FROM ever`,
     [{ name: 'account', type: TYPES.VarChar, value: account }],
     DOWNVOTE_COUNT_MS
   );
@@ -725,25 +725,26 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
     last_downvote: string | Date | null;
   }>(
     /*
-     * ★★★ THE REWARDS FIELDS ARE VESTS, NOT MILLI-HIVE (found 2026-09-20, owner: "that
-     * ratio is available somewhere ... Peakd uses it ecency i think as well ours cant
-     * differ").
+     * ★★★ THE REWARD FIELDS ARE THOUSANDTHS OF HIVE, NOT VESTS (corrected 2026-09-22).
      *
-     * `posting_rewards` and `curation_rewards` come off the chain as VESTS -- HiveSQL
-     * stores the chain's own integers, verified identical against `condenser_api.
-     * get_accounts` for @antisocialist (10,457,620 and 11,650,053). Dividing them by
-     * 1000 asserted that 1,000 VESTS is one HIVE. The real rate is 1,609.68 today and it
-     * MOVES, so every KE on the site was overstated by 61% and drifting.
+     * The 2026-09-20 note here said the opposite. Its evidence was that HiveSQL's
+     * integers matched `condenser_api.get_accounts` for @antisocialist (10,457,620 and
+     * 11,650,053), which is true, and both are 0.001 HIVE: @azircon published his own
+     * figures ("Author Rewards = 30804 hive, Curation Rewards = 235719 hive, KE 0.24",
+     * May 2025) and they are exactly the chain integers / 1000. Dividing milli-HIVE by
+     * VESTS made every KE on the site 62% of the true value (1000 / 1609.46) and the
+     * "HIVE taken" figure 62% too, drifting with the rate. @antisocialist reads 0.44
+     * here against 0.71 by azircon's formula.
      *
-     * Converted properly with the live rate, and the ratio itself is computed as VESTS
-     * over VESTS, where the rate cancels out entirely: KE = rewards / own stake. That is
-     * azircon's definition -- rewards received against HP held -- and it is what PeakD
-     * shows, so ours cannot differ by construction rather than by luck.
+     * KE = (author rewards + curation rewards, in HIVE) / HP held, where held HP is the
+     * account's own `vesting_shares` at the live rate (delegations in either direction
+     * do not move it; azircon's worked example uses his own stake). One shared shape
+     * with the KE board above; the two must never compute this differently.
      */
-    `SELECT (CAST(a.posting_rewards AS float) + CAST(a.curation_rewards AS float)) / @ratio AS rewards_hive,
+    `SELECT (CAST(a.posting_rewards AS float) + CAST(a.curation_rewards AS float)) / 1000.0 AS rewards_hive,
             a.vesting_shares / @ratio AS hp,
-            (CAST(a.posting_rewards AS float) + CAST(a.curation_rewards AS float))
-              / NULLIF(CAST(a.vesting_shares AS float), 0) AS ke,
+            ((CAST(a.posting_rewards AS float) + CAST(a.curation_rewards AS float)) / 1000.0)
+              / NULLIF(CAST(a.vesting_shares AS float) / @ratio, 0) AS ke,
             DATEDIFF(day, a.created, GETDATE()) AS age_days
      /*
       * ★★ A SECOND, DIFFERENT SELF-VOTE FIGURE USED TO BE COMPUTED HERE AND RENDERED
