@@ -358,6 +358,11 @@ const NO_BUNDLE_BROADCASTER_MSG =
   'VscCreatorTokensDataSource: no bundle broadcaster wired: the one-signature launch needs bundleBroadcaster injected';
 
 /** Shared "n is a positive whole token count" guard — every buy/sell/refund/transfer amount on the curve is an integer (curve.go indexes price by the token ordinal; there is no fractional token). */
+/** The state keys readMarketPricesBatch reads per creator; its chunk size is this list's length. */
+function marketPriceKeys(did: string): string[] {
+  return [kSupply(did), kUnitsMarket(did), kState(did), kRegisteredAt(did), kPaidUntil(did), kRetiredAt(did), kDelinquentUntil(did)];
+}
+
 function assertPositiveTokenCount(n: number, label: string, fractional = false): void {
   // v6 (`fractional`): any positive multiple of 0.01. Before v6 the live
   // bytecode holds whole tokens only, so a fraction is refused here rather
@@ -554,10 +559,10 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // paidUntil COMPARED TO NOW, and a head we do not have is a phase we must
     // not guess. 100 keys per call (schema.graphql:813) / 6 = 16 creators per
     // request, and the 1 global key on top keeps it at 97.
-    // v6: the market migration flag (kUnitsMarket) rides in every batch, so seven keys per creator.
-    // Getting this wrong is silent: past MAX_STATE_KEYS_PER_REQUEST the node answers {} and every
-    // pill in the batch reads as "no market".
-    const KEYS_PER_CREATOR = 7;
+    // The per-creator key list is built ONCE here and measured, never counted by hand: past
+    // MAX_STATE_KEYS_PER_REQUEST the node answers {} and every pill in the batch silently reads
+    // as "no market" (a hand-kept 6 survived the v6 flag key for a day).
+    const KEYS_PER_CREATOR = marketPriceKeys('hive:probe').length;
     const perRequest = Math.floor((VscCreatorTokensDataSource.MAX_STATE_KEYS_PER_REQUEST - 1) / KEYS_PER_CREATOR);
 
     // ★ BATCHES IN PARALLEL, not one after another. The old loop awaited each
@@ -580,7 +585,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         kPaused(),
         ...batch.flatMap((c) => {
           const did = toDid(c);
-          return [kSupply(did), kUnitsMarket(did), kState(did), kRegisteredAt(did), kPaidUntil(did), kRetiredAt(did), kDelinquentUntil(did)];
+          return marketPriceKeys(did);
         })
       ];
       let state: Record<string, string | null>;

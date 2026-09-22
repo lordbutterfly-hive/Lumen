@@ -380,9 +380,10 @@ func TestCreatorTokens_EscrowFiveStepPath(t *testing.T) {
 	if ownerSlice == 0 || ownerSlice >= spent3/4 {
 		t.Fatalf("platform kept %d of %d on a missed deadline — want a small slice of the commission, not of the escrow", ownerSlice, spent3)
 	}
-	// v6 exact: the slice is max(floor(commission x 25%), 100 units = one whole
-	// token), never more than the escrow.
-	wantSlice := commission3 * 2500 / 10000
+	// v6 exact: the slice is max(ceil(commission x 25%), 100 units = one whole
+	// token), never more than the escrow (ask.go Reclaim: mMulDivCeil, then the
+	// MissReclaimFloorUnits floor, then the clamp).
+	wantSlice := (commission3*2500 + 9999) / 10000
 	if wantSlice < 100 {
 		wantSlice = 100
 	}
@@ -493,4 +494,73 @@ func TestCreatorTokens_FreshMarketAsksAtOnce(t *testing.T) {
 		t.Fatalf("creator got %d units, want 1980 (22.49 minus the 2.69 commission)", after-before)
 	}
 	t.Logf("  creator position %d -> %d after answer (22.49 credits minus the 12%% commission)", before, after)
+}
+
+// ★ v6 FIRST-TOUCH RC (2026-09-22). The client's RC limits (rc-budget.ts
+// RC_COST_BY_ACTION x RC_SAFETY_MARGIN) were measured on the pre-v6 bytecode.
+// Under v6 the FIRST call that touches a pre-update holder, market or escrow
+// also performs the lazy x100 migration (extra state reads and writes), so the
+// first buy/sell/ask after activation costs more than a steady-state one. This
+// measures exactly that: build state with v6, rewrite it to the v5.1 shape
+// (whole-token values, no flags, 9-field escrow), then meter each rail.
+func TestCreatorTokens_V6FirstTouchRC(t *testing.T) {
+	const (
+		owner   = "hive:lumencontracts"
+		creator = "hive:ctrccreator"
+		holder  = "hive:ctrcholder"
+		other   = "hive:ctrcother"
+	)
+	e := newCtEnv(t, owner)
+	ctFund(e, []string{owner, creator, holder, other}, 5_000_000)
+	e.mustCall(owner, "init", `{}`, 40_000)
+	e.mustCall(creator, "register", `{"face":25000,"cap":1000000}`, 40_000)
+	e.ct.IncrementBlocks(9_000)
+	if r := e.callIntent(holder, "buy", fmt.Sprintf(`{"creator":%q,"tokens":"600"}`, creator), 40_000, "2400.000"); !r.Success {
+		t.Fatalf("seed buy: %s / %s", r.Err, r.ErrMsg)
+	}
+	e.ct.IncrementBlocks(1)
+	acq := e.state("acq|" + creator + "|" + holder)
+	// Rewrite to the v5.1 shape: whole tokens, no flags, one legacy 9-field escrow.
+	set := func(k, v string) { e.ct.StateSet(e.id, k, v) }
+	// supply == held + escrowed (I3): the 3 legacy escrowed credits came OUT of the
+	// holder's 600, so 597 held + 3 in escrow = 600 = Area^-1(reserve).
+	set("mb|"+creator+"|"+holder, "597")
+	set("lots|"+creator+"|"+holder, "597,"+acq)
+	set("m|"+creator+"|sup", "600")
+	set("m|"+creator+"|cap", "1000000")
+	set("u6|"+creator+"|"+holder, "")
+	set("m|"+creator+"|u6", "")
+	set("e|"+creator+"|0", holder+"|3|1|PENDING|0|"+acq+"|0|legacy-ask|") // deadline 1: already reclaimable
+	set("el|"+creator+"|0", "3,"+acq)
+	set("m|"+creator+"|seq", "1")
+	e.ct.IncrementBlocks(2)
+	if got := e.state("mb|" + creator + "|" + holder); got != "597" {
+		t.Fatalf("rewrite did not land: %q", got)
+	}
+	meter := func(label string, res test_utils.ContractTestCallResult) {
+		if !res.Success {
+			t.Fatalf("%s REFUSED: %s / %s", label, res.Err, res.ErrMsg)
+		}
+		t.Logf("RC  %-34s rc=%-6d gas=%d", label, res.RcUsed, res.GasUsed)
+		fmt.Printf("V6RC %s %d\n", label, res.RcUsed)
+	}
+	meter("buy 1.5 (migrates holder+market)", e.callIntent(holder, "buy", fmt.Sprintf(`{"creator":%q,"tokens":"1.5"}`, creator), 40_000, "500.000"))
+	if got := e.state("mb|" + creator + "|" + holder); got != "59850" {
+		t.Fatalf("after first-touch buy: %q (want 597 x 100 + 150)", got)
+	}
+	meter("buy 1 (steady state)", e.callIntent(holder, "buy", fmt.Sprintf(`{"creator":%q,"tokens":"1"}`, creator), 40_000, "500.000"))
+	meter("reclaim legacy escrow (migrates e|)", e.call(other, "reclaim", fmt.Sprintf(`{"creator":%q,"seq":0}`, creator), 40_000))
+	meter("transfer 0.25 (new holder)", e.call(holder, "transfer", fmt.Sprintf(`{"creator":%q,"to":%q,"amount":"0.25"}`, creator, other), 40_000))
+	meter("sell 0.5 (migrated holder)", e.call(holder, "sell", fmt.Sprintf(`{"creator":%q,"tokens":"0.5"}`, creator), 40_000))
+	meter("sell 0.25 (other, first sell)", e.call(other, "sell", fmt.Sprintf(`{"creator":%q,"tokens":"0.25"}`, creator), 40_000))
+	q := e.mustCall(holder, "quote", fmt.Sprintf(`{"creator":%q}`, creator), 40_000)
+	var quote struct {
+		CreditsPerAsk string `json:"creditsPerAsk"`
+	}
+	_ = json.Unmarshal([]byte(q.Ret), &quote)
+	cap := e.units(quote.CreditsPerAsk) * 2
+	meter("ask", e.call(holder, "ask", fmt.Sprintf(`{"creator":%q,"contentHash":"rc-ask","deadlineBlocks":28800,"maxCredits":%q}`, creator, dec(cap)), 40_000))
+	meter("answer", e.call(creator, "answer", `{"seq":1,"answerHash":"rc-ans"}`, 40_000))
+	meter("setCap 1000000.5", e.call(creator, "setCap", `{"newCap":"1000000.5"}`, 40_000))
+	meter("claimTradeFees", e.call(creator, "claimTradeFees", `{}`, 40_000))
 }
