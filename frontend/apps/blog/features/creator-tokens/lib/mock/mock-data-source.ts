@@ -35,7 +35,6 @@ import {
   DELIVERY_PATTERNS,
   HOLDER_SEEDS,
   MARKET_SEEDS,
-  MOCK_RATE_BASE_UNITS,
   MOCK_UNKNOWN,
   buildDeliveryWindows,
   mockHeadBlock,
@@ -54,7 +53,7 @@ import type { BoardCreator, ContractRules } from '../../types';
  * ACTIVE for weeks. Set to 'v1' to demo the contract deployed before A1. The
  * live data source never reads this; it asks the chain.
  */
-export const MOCK_CONTRACT_RULES: ContractRules = 'v2';
+export const MOCK_CONTRACT_RULES: ContractRules = 'v6'; // 2026-09-22: the demo shows the fractional-token rules the mock's maths mirrors
 
 // Behaviour half of the mock split — the creator/holder/ask/delivery FIXTURES
 // themselves live in ./fixtures.ts (the pure "creator states" data), this file
@@ -588,7 +587,9 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
           { rateBaseUnits: null, status: 'insufficient_observations' }
         : // Simulates a market with enough live trading history for AskRate to
           // produce a real TWAP ('ok').
-          { rateBaseUnits: MOCK_RATE_BASE_UNITS, status: 'ok' };
+          // 2026-09-22: price the demo ask at the curve's spot, as the v6 contract does
+          // (askPricingUnder 'curve'), so the dialog and the page card agree on the token count.
+          { rateBaseUnits: spotRateBaseUnits(seed.supplyTokens), status: 'ok' };
     // F-C3: settlementRateBaseUnits now takes both TWAP arms. The demo has no separate
     // long ring, so the same estimate stands in for both — min(short, short, spot) is the
     // demo's prior behaviour, unchanged.

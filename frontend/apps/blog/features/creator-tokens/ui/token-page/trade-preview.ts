@@ -371,7 +371,7 @@ export interface CostSegment {
  * positionSegments exists: a sentence assembled here can be asserted here,
  * whitespace and all, and a comment can never land inside it.
  */
-export function askCostSegments(cost: AskCost): CostSegment[] {
+export function askCostSegments(cost: AskCost, fractional = false): CostSegment[] {
   const plural = cost.tokens === 1 ? '' : 's';
   return [
     { text: 'This costs ', strong: false },
@@ -383,7 +383,8 @@ export function askCostSegments(cost: AskCost): CostSegment[] {
     // can reconcile the gap between the posted price and the real cost, and a
     // posted $12.50 printed as "$13" makes that gap un-checkable.
     { text: usdAmount(cost.postedUsd), strong: true },
-    { text: '. Tokens are whole, so the last one rounds up.', strong: false },
+    // v6: the contract counts hundredths, so the overshoot is at most 0.01 of a token; before v6 a whole token.
+    { text: fractional ? '. Tokens are counted to the hundredth, so the price rounds up to the next 0.01.' : '. Tokens are whole, so the last one rounds up.', strong: false },
     // ★ A ZERO COMMISSION MUST NOT BE ANNOUNCED. floor(credits x 12%) is 0 below
     // 9 credits, and a small ask on an expensive market really does buy 2 or 3
     // credits — so this clause would have rendered "Lumen's $0.00 commission
@@ -400,8 +401,8 @@ export function askCostSegments(cost: AskCost): CostSegment[] {
 }
 
 /** The same sentence as one string, for assertions and the dash sweep. */
-export function askCostLine(cost: AskCost): string {
-  return askCostSegments(cost).map((s) => s.text).join('');
+export function askCostLine(cost: AskCost, fractional = false): string {
+  return askCostSegments(cost, fractional).map((s) => s.text).join('');
 }
 
 /**

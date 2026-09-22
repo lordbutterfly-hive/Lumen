@@ -1,5 +1,6 @@
 'use client';
 
+import { fractionalTokensUnder } from '../../market/contract-rules';
 import { FC, useState, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { Service } from '../../market/token-detail';
@@ -1106,7 +1107,7 @@ const AskModal: FC<{
               "against aposted price of". Segments cannot have that happen to
               them, and askCostLine gives a test the whole sentence to read. Same
               pattern, same reason, as disclosure-copy.ts's positionSegments. */}
-          {askCostSegments(cost).map((seg, i) =>
+          {askCostSegments(cost, fractionalTokensUnder(m.rules)).map((seg, i) =>
             seg.strong ? (
               <strong key={i} className="tabular-nums text-ink-2 font-num">
                 {seg.text}

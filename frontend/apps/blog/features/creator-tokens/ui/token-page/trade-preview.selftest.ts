@@ -986,7 +986,7 @@ console.log('\n── 8. WIRING.\n');
   check('★ F-C: …and so is the frozen spot-based default', !modal.includes('(m.priceUsd * 1.05).toFixed(2)'));
   check('★ F-D: the ask card prices the real cost', modal.includes('askCost(usd, { tokens: chainTokens, commissionUsd }, m.priceUsd)'));
   check('★ F-D: …and renders it from segments, so no comment can land inside the sentence',
-    modal.includes('askCostSegments(cost).map('));
+    modal.includes('askCostSegments(cost, fractionalTokensUnder(m.rules)).map('));
   check('★ F-D: …and no longer calls the posted price the total',
     !modal.includes('{usdWhole(usd)}</strong> total') && !modal.includes('usdWhole('),
     'the posted price is exact now; market/buy-preview.selftest.ts:331 uses usdWhole( as a stripper-sanity control and must re-point at tok(');
