@@ -431,7 +431,9 @@ export default function InquisitionBoard() {
         {/* ★ THE MEASUREMENTS ARE THE MOCK'S: 30/32px padding, the title capped at 16ch
             and the body at 33ch, with no cap on the wrapper. Capping the wrapper instead
             squeezed the title onto two lines and ran the body down a narrow column. */}
-        <div className="relative z-[2] px-8 py-[30px]">
+        {/* ★ On a phone the title wraps and "Inquisition" runs under the arming pill
+            (top-right, ~58px deep), so the text starts below it there. */}
+        <div className="relative z-[2] px-8 pb-[30px] pt-[68px] sm:pt-[30px]">
           <h1 className="max-w-[16ch] font-text text-display font-semibold tracking-display text-ink-2">
             Inquisition mode
           </h1>
