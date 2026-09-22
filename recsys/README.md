@@ -31,12 +31,12 @@ is `io/hafsql.py`, whose live queries need a reachable HAFSQL/Postgres and the
 ## Run it
 
 ```bash
-pip install --user numpy pytest ruff mypy      # (psycopg only for the live io layer)
+pip install --user numpy pytest ruff mypy "psycopg[binary]"   # psycopg is needed by the io/viewer/service tests too, not only live
 cd recsys
 export PATH="$HOME/.local/bin:$PATH"
 ruff check .        # style/lint — REPO-WIDE, harness included (E3)
 mypy recsys         # types
-pytest -q           # the full suite, pure — no DB needed (live/DB suites skip)
+pytest -q           # the full suite: no DB needed (live/DB suites skip), but psycopg must be importable
 ```
 
 Public API: `recsys.pipeline.rank_feed(viewer, gateway, norm, now=..., since=...)`.

@@ -105,9 +105,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install -e . && pip install pytest
-      # The suite is pure — the live/DB suites skip themselves when no DSN is
-      # present (recsys/README.md), so this needs no Postgres service.
+      # `.[io]` installs psycopg. No database is needed (the live/DB suites skip
+      # themselves without a DSN), but the impression-log, viewer and service
+      # tests exercise code that imports psycopg and degrades WITHOUT it, so on
+      # a psycopg-less install 55 of them fail on the degraded path. This job was
+      # red on every run from 2026-08-24 to 2026-09-22 for exactly that reason.
+      - run: pip install -e '.[io]' && pip install pytest
       - run: pytest -q
 
   creator-tokens:
