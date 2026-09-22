@@ -17,7 +17,7 @@ import (
 
 func TestHoldClock_FreshInflowStartsAtNow_C14(t *testing.T) {
 	s := NewMemStore()
-	creditInflow(s, "creatora", "alice", big.NewInt(100), 5000)
+	creditInflow(s, "creatora", "alice", tk(100), 5000)
 	if w := holderAcqBlock(s, "creatora", "alice"); w != 5000 {
 		t.Fatalf("fresh inflow wacq = %d, want exactly the inflow block 5000 (C-14)", w)
 	}
@@ -66,23 +66,23 @@ func TestHoldClock_WeightedAverage_ExactAndCeil(t *testing.T) {
 // and TestHoldClock_Basis_Property) are gone with the machinery they tested.
 func TestHoldClock_DebitKeepsClock(t *testing.T) {
 	s := NewMemStore()
-	creditInflow(s, "cr", "h", big.NewInt(100), 1000)
-	if err := debitBalance(s, "cr", "h", big.NewInt(30)); err != nil {
+	creditInflow(s, "cr", "h", tk(100), 1000)
+	if err := debitBalance(s, "cr", "h", tk(30)); err != nil {
 		t.Fatal(err)
 	}
 	// The seller's clock is NOT touched — the remainder is not re-aged.
 	if w := holderAcqBlock(s, "cr", "h"); w != 1000 {
 		t.Fatalf("wacq after debit = %d, want unchanged 1000", w)
 	}
-	if bal := getMoney(s, kBal("cr", "h")); bal.Cmp(big.NewInt(70)) != 0 {
+	if bal := getMoney(s, kBal("cr", "h")); bal.Cmp(tk(70)) != 0 {
 		t.Fatalf("bal = %s, want 70", bal)
 	}
 	// Draining to zero then a fresh inflow starts at NOW (C-14 again — the
 	// stale wacq key must not leak age into the new position).
-	if err := debitBalance(s, "cr", "h", big.NewInt(70)); err != nil {
+	if err := debitBalance(s, "cr", "h", tk(70)); err != nil {
 		t.Fatal(err)
 	}
-	creditInflow(s, "cr", "h", big.NewInt(5), 9999)
+	creditInflow(s, "cr", "h", tk(5), 9999)
 	if w := holderAcqBlock(s, "cr", "h"); w != 9999 {
 		t.Fatalf("post-drain inflow wacq = %d, want 9999", w)
 	}
@@ -90,9 +90,9 @@ func TestHoldClock_DebitKeepsClock(t *testing.T) {
 
 func TestHoldClock_DebitInsufficientRejected(t *testing.T) {
 	s := NewMemStore()
-	creditInflow(s, "cr", "h", big.NewInt(10), 100)
+	creditInflow(s, "cr", "h", tk(10), 100)
 	before := getMoney(s, kBal("cr", "h"))
-	if err := debitBalance(s, "cr", "h", big.NewInt(11)); errSymbol(err) != ErrBalance {
+	if err := debitBalance(s, "cr", "h", tk(11)); errSymbol(err) != ErrBalance {
 		t.Fatalf("over-debit: err = %v, want %s", err, ErrBalance)
 	}
 	// RULING G: the rejected debit changed NOTHING (the burn-era version
@@ -109,7 +109,7 @@ func TestHoldClock_DebitInsufficientRejected(t *testing.T) {
 func TestHoldClock_UnclockedBalanceIsFresh_NotAncient(t *testing.T) {
 	s := NewMemStore()
 	// Simulate a fixture-seeded balance: raw kBal write, no clock.
-	addMoney(s, kBal("cr", "eve"), big.NewInt(1_000_000))
+	addMoney(s, kBal("cr", "eve"), tk(1_000_000))
 
 	// Half 1: heldBlocks reads 0 (maximum tax), NEVER block−0 (zero tax).
 	if h := heldBlocksAt(s, "cr", "eve", 10_000_000); h != 0 {
@@ -119,7 +119,7 @@ func TestHoldClock_UnclockedBalanceIsFresh_NotAncient(t *testing.T) {
 	// Half 2 (anti-laundering): buying 1 token on top must NOT average the
 	// million unclocked tokens as "acquired at block 0" — the whole position
 	// clocks to NOW exactly.
-	creditInflow(s, "cr", "eve", big.NewInt(1), 10_000_000)
+	creditInflow(s, "cr", "eve", tk(1), 10_000_000)
 	if w := holderAcqBlock(s, "cr", "eve"); w != 10_000_000 {
 		t.Fatalf("post-launder wacq = %d, want exactly 10000000 (unclocked old balance averages as NOW, not 0)", w)
 	}
@@ -130,14 +130,14 @@ func TestHoldClock_UnclockedBalanceIsFresh_NotAncient(t *testing.T) {
 
 func TestHoldClock_NonMonotoneBlockSaturates(t *testing.T) {
 	s := NewMemStore()
-	creditInflow(s, "cr", "h", big.NewInt(10), 5000)
+	creditInflow(s, "cr", "h", tk(10), 5000)
 	// A query BEFORE the stored clock (never produced by real execution)
 	// reads 0 held — the pot-favouring direction.
 	if h := heldBlocksAt(s, "cr", "h", 4000); h != 0 {
 		t.Fatalf("held at earlier block = %d, want 0 (saturating)", h)
 	}
 	// An inflow at an earlier block clamps the average input to that block.
-	creditInflow(s, "cr", "h", big.NewInt(10), 4000)
+	creditInflow(s, "cr", "h", tk(10), 4000)
 	if w := holderAcqBlock(s, "cr", "h"); w != 4000 {
 		t.Fatalf("wacq after non-monotone inflow = %d, want 4000 (clamped to the inflow block)", w)
 	}

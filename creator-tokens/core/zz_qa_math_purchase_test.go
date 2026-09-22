@@ -35,7 +35,7 @@ func qaMarketAtSupply(t *testing.T, S int64) (*MemStore, string) {
 	const c = "hive:creator"
 	s := NewMemStore()
 	setStr(s, kOwner(), "hive:platform")
-	if err := Register(s, c, c, 1000, 1000, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, 1000, 1000, 1_000_000_000*TokenScale); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	if S > 0 {

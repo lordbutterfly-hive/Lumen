@@ -39,12 +39,12 @@ func TestPFGriefScan_AttackerCostVsVictimHarm(t *testing.T) {
 		// attacker buys g fresh and transfers to victim.
 		pfBuy(t, s, "attacker", c, t1, g)
 		S := getMoney(s, kSupply(c))
-		attackerCost, _ := SellProceeds(S, big.NewInt(g)) // gift's curve value ~ what attacker sank
+		attackerCost, _ := SellProceeds(S, tk(g)) // gift's curve value ~ what attacker sank
 		if err := TransferCredits(s, "attacker", c, "attacker", "victim", t1, big.NewInt(g)); err != nil {
 			t.Fatal(err)
 		}
 		// Victim sells N (freshest-first will draw the gift first under the fix).
-		q, err := QuoteSell(s, "victim", c, t1, big.NewInt(N))
+		q, err := QuoteSell(s, "victim", c, t1, tk(N))
 		if err != nil {
 			t.Fatal(err)
 		}

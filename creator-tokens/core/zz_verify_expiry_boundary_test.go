@@ -19,11 +19,11 @@ func TestZZVerifyExpiry_Boundary_ExactAndAround(t *testing.T) {
 	b1 := uint64(1_000_000)
 	T := b1 + tbWindow
 	tbKeepPaid(t, s, c, b1, T+2)
-	if _, err := Buy(s, h, c, b1, big.NewInt(500)); err != nil {
+	if _, err := Buy(s, h, c, b1, tk(500)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 	supply := new(big.Int).Set(Supply(s, c))
-	taxable, _ := SellProceeds(supply, big.NewInt(500)) // whole maturing draw
+	taxable, _ := SellProceeds(supply, tk(500)) // whole maturing draw
 
 	type row struct {
 		block       uint64
@@ -44,7 +44,7 @@ func TestZZVerifyExpiry_Boundary_ExactAndAround(t *testing.T) {
 		if lr := lotRateAt(b1, r.block); lr != r.wantBps {
 			t.Fatalf("block %d: cohort lotRate=%d want %d", r.block, lr, r.wantBps)
 		}
-		q, err := QuoteSell(s, h, c, r.block, big.NewInt(500))
+		q, err := QuoteSell(s, h, c, r.block, tk(500))
 		if err != nil {
 			t.Fatalf("block %d: quote: %v", r.block, err)
 		}
@@ -64,19 +64,19 @@ func TestZZVerifyExpiry_Boundary_OneBefore_NoGraduation(t *testing.T) {
 	b1 := uint64(1_000_000)
 	T := b1 + tbWindow
 	tbKeepPaid(t, s, c, b1, T)
-	if _, err := Buy(s, h, c, b1, big.NewInt(500)); err != nil {
+	if _, err := Buy(s, h, c, b1, tk(500)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 	supply := new(big.Int).Set(Supply(s, c))
 
-	r, err := Sell(s, h, c, T-1, big.NewInt(200))
+	r, err := Sell(s, h, c, T-1, tk(200))
 	if err != nil {
 		t.Fatalf("sell one-before: %v", err)
 	}
 	if r.TaxBps != 1 {
 		t.Fatalf("taxBps=%d want 1 (ceil-min, one block before maturity)", r.TaxBps)
 	}
-	wantTaxable, _ := SellProceeds(supply, big.NewInt(200))
+	wantTaxable, _ := SellProceeds(supply, tk(200))
 	if r.Tax.Cmp(ExitTaxOn(wantTaxable, 1)) != 0 || r.Tax.Sign() == 0 {
 		t.Fatalf("tax=%s want ceil(1bps of %s) and >0", r.Tax, wantTaxable)
 	}
@@ -111,10 +111,10 @@ func TestZZVerifyExpiry_TransferInOnClearedLedger(t *testing.T) {
 
 	// A second holder acquires a FRESH maturing position at `at`, then sends
 	// part of it to h.
-	if _, err := Buy(s, h2, c, at, big.NewInt(300)); err != nil {
+	if _, err := Buy(s, h2, c, at, tk(300)); err != nil {
 		t.Fatalf("h2 buy: %v", err)
 	}
-	if err := TransferCredits(s, h2, c, h2, h, at, big.NewInt(120)); err != nil {
+	if err := TransferCredits(s, h2, c, h2, h, at, tk(120)); err != nil {
 		t.Fatalf("transfer-in to matured holder: %v", err)
 	}
 
@@ -126,10 +126,10 @@ func TestZZVerifyExpiry_TransferInOnClearedLedger(t *testing.T) {
 	if got := zvSumLotsRaw(s, c, h); got.Cmp(MaturingOf(s, c, h)) != 0 {
 		t.Fatalf("Σlots=%s != maturing kBal=%s", got, MaturingOf(s, c, h))
 	}
-	if MaturingOf(s, c, h).Cmp(big.NewInt(120)) != 0 {
+	if MaturingOf(s, c, h).Cmp(tk(120)) != 0 {
 		t.Fatalf("h maturing=%s want 120", MaturingOf(s, c, h))
 	}
-	if MaturedOf(s, c, h).Cmp(big.NewInt(500)) != 0 {
+	if MaturedOf(s, c, h).Cmp(tk(500)) != 0 {
 		t.Fatalf("h matured=%s want 500 (transfer-in must not disturb it)", MaturedOf(s, c, h))
 	}
 	// The transferred-in cohort is FRESH (carries the sender's just-minted clock).
@@ -158,13 +158,13 @@ func TestZZVerifyExpiry_MergeAndMaturity(t *testing.T) {
 
 	// Three buys at the SAME block b1 (must merge to one cohort of 300)...
 	for i := 0; i < 3; i++ {
-		if _, err := Buy(s, h, c, b1, big.NewInt(100)); err != nil {
+		if _, err := Buy(s, h, c, b1, tk(100)); err != nil {
 			t.Fatalf("same-block buy %d: %v", i, err)
 		}
 	}
 	// ...then one buy at each of b1+1..b1+5 (five more distinct cohorts).
 	for blk := b1 + 1; blk <= last; blk++ {
-		if _, err := Buy(s, h, c, blk, big.NewInt(50)); err != nil {
+		if _, err := Buy(s, h, c, blk, tk(50)); err != nil {
 			t.Fatalf("distinct buy at %d: %v", blk, err)
 		}
 	}

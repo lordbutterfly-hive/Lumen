@@ -17,7 +17,7 @@ import (
 
 func rgMarket(t *testing.T, s *MemStore, c string, block uint64) {
 	t.Helper()
-	if err := Register(s, c, c, block, MinFace, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, block, MinFace, 1_000_000_000*TokenScale); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	// (Six prepaid subscription periods used to be bought here to keep the market
@@ -42,7 +42,7 @@ func TestReReg_RatingsDoNotSurviveReRegistration(t *testing.T) {
 
 	setStr(s, kState(c), StateClosed) // wound down
 	later := uint64(t0) + 10*hzLongGap
-	if err := Register(s, c, c, later, MinFace, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, later, MinFace, 1_000_000_000*TokenScale); err != nil {
 		t.Fatalf("re-register: %v", err)
 	}
 
@@ -70,7 +70,7 @@ func TestReReg_RatingResetIsBypassableByDeferral_KNOWN(t *testing.T) {
 	rgMarket(t, s, c, t0)
 	setStr(s, kState(c), StateClosed)
 	later := uint64(t0) + 10*hzLongGap
-	if err := Register(s, c, c, later, MinFace, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, later, MinFace, 1_000_000_000*TokenScale); err != nil {
 		t.Fatalf("re-register: %v", err)
 	}
 	if getU64(s, kRatingCount(c)) != 0 {
@@ -106,7 +106,7 @@ func TestReReg_DelinquencyEscapeIsRefused(t *testing.T) {
 	}
 
 	// Inside the window: refused.
-	if err := Register(s, c, c, convictedUntil-1, MinFace, 1_000_000_000); err == nil {
+	if err := Register(s, c, c, convictedUntil-1, MinFace, 1_000_000_000*TokenScale); err == nil {
 		t.Error("DELINQUENCY ESCAPE REOPENED: re-registration succeeded while a conviction " +
 			"was still active. See registerCheck in core/market.go.")
 	} else {
@@ -114,7 +114,7 @@ func TestReReg_DelinquencyEscapeIsRefused(t *testing.T) {
 	}
 
 	// The boundary block itself: lapsed (strict >), so allowed.
-	if err := Register(s, c, c, convictedUntil, MinFace, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, convictedUntil, MinFace, 1_000_000_000*TokenScale); err != nil {
 		t.Errorf("an EXPIRED conviction blocked re-registration at the boundary block: %v", err)
 	}
 
@@ -175,7 +175,7 @@ func TestResidual_BlendedClockLaundersSingleAccount_KNOWN(t *testing.T) {
 	if _, err := Buy(s, whale, c, at, big.NewInt(F)); err != nil {
 		t.Fatalf("fresh buy: %v", err)
 	}
-	q, err := QuoteSell(s, whale, c, at, big.NewInt(F))
+	q, err := QuoteSell(s, whale, c, at, tk(F))
 	if err != nil {
 		t.Fatalf("quote: %v", err)
 	}

@@ -66,7 +66,7 @@ func TestLaunch_IsExactlyRegisterThenBuy(t *testing.T) {
 	)
 	for _, n := range []int64{1, 2, 7, 100, 1000, 12345} {
 		atomicStore := NewMemStore()
-		res, err := RegisterWithFirstBuy(atomicStore, creator, creator, block, face, capVal, big.NewInt(n))
+		res, err := RegisterWithFirstBuy(atomicStore, creator, creator, block, face, capVal, tk(n))
 		if err != nil {
 			t.Fatalf("n=%d: RegisterWithFirstBuy: %v", n, err)
 		}
@@ -206,10 +206,10 @@ func TestLaunch_RejectedLaunchMutatesNothing(t *testing.T) {
 	}{
 		{"negative firstBuy", "negcreator", face, capVal, big.NewInt(-1), block, ErrInput},
 		{"firstBuy over cap", "capcreator", face, capVal, big.NewInt(capVal + 1), block, ErrCap},
-		{"firstBuy at block 0", "genesiscreator", face, capVal, big.NewInt(1), 0, ErrInput},
-		{"face out of range", "facecreator", MinFace - 1, capVal, big.NewInt(1), block, ErrInput},
-		{"cap out of range", "capbadcreator", face, MaxCap + 1, big.NewInt(1), block, ErrInput},
-		{"invalid creator", "bad|creator", face, capVal, big.NewInt(1), block, ErrInput},
+		{"firstBuy at block 0", "genesiscreator", face, capVal, tk(1), 0, ErrInput},
+		{"face out of range", "facecreator", MinFace - 1, capVal, tk(1), block, ErrInput},
+		{"cap out of range", "capbadcreator", face, MaxCap + 1, tk(1), block, ErrInput},
+		{"invalid creator", "bad|creator", face, capVal, tk(1), block, ErrInput},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -240,15 +240,15 @@ func TestLaunch_RejectedLaunchOverExistingStateMutatesNothing(t *testing.T) {
 	// makes the second registration a duplicate).
 	mustRegister(t, s, "othercreator", 100, 1000, 1000)
 	mustRegister(t, s, "dupe", 100, 1000, 1000)
-	if _, err := Buy(s, "someholder", "othercreator", 150, big.NewInt(50)); err != nil {
+	if _, err := Buy(s, "someholder", "othercreator", 150, tk(50)); err != nil {
 		t.Fatal(err)
 	}
 	before := lnDump(s)
 
-	if _, err := RegisterWithFirstBuy(s, "dupe", "dupe", 200, 2000, 2000, big.NewInt(10)); err == nil {
+	if _, err := RegisterWithFirstBuy(s, "dupe", "dupe", 200, 2000, 2000, tk(10)); err == nil {
 		t.Fatal("expected rejection: duplicate registration")
 	}
-	if _, err := RegisterWithFirstBuy(s, "impostor", "othercreator", 200, 2000, 2000, big.NewInt(10)); err == nil {
+	if _, err := RegisterWithFirstBuy(s, "impostor", "othercreator", 200, 2000, 2000, tk(10)); err == nil {
 		t.Fatal("expected rejection: caller != creator")
 	}
 	after := lnDump(s)
@@ -267,7 +267,7 @@ func TestLaunch_RejectedLaunchOverExistingStateMutatesNothing(t *testing.T) {
 func TestLaunch_GloballyPausedRejected(t *testing.T) {
 	s := NewMemStore()
 	setStr(s, kPaused(), "1")
-	if _, err := RegisterWithFirstBuy(s, "pausedlaunch", "pausedlaunch", 100, 1000, 1000, big.NewInt(5)); err == nil || errSymbol(err) != ErrPaused {
+	if _, err := RegisterWithFirstBuy(s, "pausedlaunch", "pausedlaunch", 100, 1000, 1000, tk(5)); err == nil || errSymbol(err) != ErrPaused {
 		t.Fatalf("err = %v, want PAUSED", err)
 	}
 	if got := getMoney(s, kSupply("pausedlaunch")); !mIsZero(got) {
@@ -281,15 +281,15 @@ func TestLaunch_GloballyPausedRejected(t *testing.T) {
 func TestLaunch_FirstBuyMayTakeTheWholeCap(t *testing.T) {
 	s := NewMemStore()
 	const capVal int64 = 250
-	res, err := RegisterWithFirstBuy(s, "wholecap", "wholecap", 1000, 1000, capVal, big.NewInt(capVal))
+	res, err := RegisterWithFirstBuy(s, "wholecap", "wholecap", 1000, 1000, capVal*TokenScale, tk(capVal))
 	if err != nil {
 		t.Fatalf("taking the whole cap must be allowed (at full price): %v", err)
 	}
-	if res.FirstBuy.Cost.Cmp(Area(big.NewInt(capVal))) != 0 {
-		t.Fatalf("cost = %s, want the full area %s", res.FirstBuy.Cost, Area(big.NewInt(capVal)))
+	if res.FirstBuy.Cost.Cmp(Area(tk(capVal))) != 0 {
+		t.Fatalf("cost = %s, want the full area %s", res.FirstBuy.Cost, Area(tk(capVal)))
 	}
 	// And the market is then full: nobody else can mint.
-	if _, err := Buy(s, "latecomer", "wholecap", 1001, big.NewInt(1)); errSymbol(err) != ErrCap {
+	if _, err := Buy(s, "latecomer", "wholecap", 1001, tk(1)); errSymbol(err) != ErrCap {
 		t.Fatalf("buy into a capped-out market: err = %v, want CAP", err)
 	}
 }
@@ -311,11 +311,11 @@ func TestLaunch_IsNotAntiSnipe_OptionalMeansTheBottomIsStillTakeable(t *testing.
 	s := NewMemStore()
 	const creator = "declinedlaunch"
 	// The creator registers and declines the first buy (the DEFAULT).
-	if err := Register(s, creator, creator, 1000, 1000, 1_000_000); err != nil {
+	if err := Register(s, creator, creator, 1000, 1000, 1_000_000*TokenScale); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	// A bot takes the bottom in the next transaction. This SUCCEEDS.
-	bot, err := Buy(s, "snipebot", creator, 1000, big.NewInt(1))
+	bot, err := Buy(s, "snipebot", creator, 1000, tk(1))
 	if err != nil {
 		t.Fatalf("the bottom-of-curve snipe is NOT prevented and this test asserts so: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestLaunch_IsNotAntiSnipe_OptionalMeansTheBottomIsStillTakeable(t *testing.
 		t.Fatalf("first-token cost = %s, want 1007 base units (BasePrice=1000 plus the curve's first step). "+
 			"If this changed, the snipe economics in launch.go's header are stale and MUST be recomputed", bot.Cost)
 	}
-	if got := getMoney(s, kBal(creator, "snipebot")); got.Cmp(big.NewInt(1)) != 0 {
+	if got := getMoney(s, kBal(creator, "snipebot")); got.Cmp(tk(1)) != 0 {
 		t.Fatalf("the sniper holds %s, want 1", got)
 	}
 }
@@ -344,8 +344,8 @@ func TestLaunch_ResidualSnipeAdvantage_Pinned(t *testing.T) {
 		{100, 3000, 140656, 4708918},
 	}
 	for _, c := range cases {
-		n := big.NewInt(c.n)
-		cost := Area(n) // the first n tokens, bought from an empty market
+		n := tk(c.n)
+		cost := Area(n) // the first n tokens, bought from an empty market (v6: units)
 		if cost.Cmp(big.NewInt(c.wantCost)) != 0 {
 			t.Fatalf("area(%d) = %s, want %d — launch.go's documented snipe economics are now WRONG and must be recomputed", c.n, cost, c.wantCost)
 		}
@@ -373,26 +373,26 @@ func TestLaunch_UnFrontRunnable_NoStateBetween(t *testing.T) {
 	s := NewMemStore()
 	const creator = "atomiccreator"
 	// (a) Before the creator's transaction, the market is not buyable at all.
-	if _, err := Buy(s, "frontrunner", creator, 1000, big.NewInt(1)); errSymbol(err) != ErrNotFound {
+	if _, err := Buy(s, "frontrunner", creator, 1000, tk(1)); errSymbol(err) != ErrNotFound {
 		t.Fatalf("pre-registration buy: err = %v, want NOT_FOUND — if a market is buyable before it is registered, the whole atomicity argument collapses", err)
 	}
 	// (b) Only the creator can register, so nobody else can open the window.
-	if _, err := RegisterWithFirstBuy(s, "frontrunner", creator, 1000, 1000, 1_000_000, big.NewInt(1)); errSymbol(err) != ErrAuth {
+	if _, err := RegisterWithFirstBuy(s, "frontrunner", creator, 1000, 1000, 1_000_000, tk(1)); errSymbol(err) != ErrAuth {
 		t.Fatalf("stranger registering someone else's market: err = %v, want AUTH", err)
 	}
 	// (c) The creator's own call registers AND mints in one transition: the
 	// very first observable state already contains the creator's slice.
-	res, err := RegisterWithFirstBuy(s, creator, creator, 1000, 1000, 1_000_000, big.NewInt(100))
+	res, err := RegisterWithFirstBuy(s, creator, creator, 1000, 1000, 1_000_000, tk(100))
 	if err != nil {
 		t.Fatalf("RegisterWithFirstBuy: %v", err)
 	}
 	if getU64(s, kRegisteredAt(creator)) == 0 {
 		t.Fatal("market not registered")
 	}
-	if got := getMoney(s, kBal(creator, creator)); got.Cmp(big.NewInt(100)) != 0 {
+	if got := getMoney(s, kBal(creator, creator)); got.Cmp(tk(100)) != 0 {
 		t.Fatalf("creator balance = %s, want 100 in the SAME transition as the registration", got)
 	}
-	if res.FirstBuy.Minted.Cmp(big.NewInt(100)) != 0 {
+	if res.FirstBuy.Minted.Cmp(tk(100)) != 0 {
 		t.Fatalf("minted = %s, want 100", res.FirstBuy.Minted)
 	}
 }
@@ -406,24 +406,24 @@ func TestLaunch_UnFrontRunnable_NoStateBetween(t *testing.T) {
 func TestLaunch_PerAccountNotPerOwner_SybilRingCanCornerALaunch(t *testing.T) {
 	s := NewMemStore()
 	const creator = "sybiltarget"
-	if err := Register(s, creator, creator, 1000, 1000, 1_000_000); err != nil {
+	if err := Register(s, creator, creator, 1000, 1000, 1_000_000*TokenScale); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	ring := []string{"sybil1", "sybil2", "sybil3", "sybil4", "sybil5"}
 	spent := mZero()
 	for i, acct := range ring {
-		r, err := Buy(s, acct, creator, uint64(1000+i), big.NewInt(100))
+		r, err := Buy(s, acct, creator, uint64(1000+i), tk(100))
 		if err != nil {
 			t.Fatalf("%s: %v", acct, err)
 		}
 		spent = mAdd(spent, r.TotalDue)
 	}
-	if got := getMoney(s, kSupply(creator)); got.Cmp(big.NewInt(500)) != 0 {
+	if got := getMoney(s, kSupply(creator)); got.Cmp(tk(500)) != 0 {
 		t.Fatalf("supply = %s, want 500 — one owner behind five accounts took the first 500 tokens and NOTHING stopped them", got)
 	}
 	// The ONLY deterrent is the price they paid: the full curve area, plus
 	// the full trade fee. State it, don't dress it up as an access control.
-	wantCurve := Area(big.NewInt(500))
+	wantCurve := Area(tk(500))
 	if got := getMoney(s, kReserve(creator)); got.Cmp(wantCurve) != 0 {
 		t.Fatalf("reserve = %s, want the full curve area %s — the ring paid full price (the only real deterrent)", got, wantCurve)
 	}
@@ -440,7 +440,7 @@ func TestLaunch_ReRegistrationCanLaunchAgainOnACleanMarket(t *testing.T) {
 	s := NewMemStore()
 	const creator = "returninglaunch"
 	regBlock := uint64(1000)
-	if _, err := RegisterWithFirstBuy(s, creator, creator, regBlock, 1000, 10_000, big.NewInt(50)); err != nil {
+	if _, err := RegisterWithFirstBuy(s, creator, creator, regBlock, 1000, 10_000, tk(50)); err != nil {
 		t.Fatalf("first launch: %v", err)
 	}
 	// Wind the market all the way down: retire, wait out the notice, refund.
@@ -448,7 +448,7 @@ func TestLaunch_ReRegistrationCanLaunchAgainOnACleanMarket(t *testing.T) {
 		t.Fatal(err)
 	}
 	windDown := regBlock + 10 + GraceBlocks
-	if _, err := Refund(s, creator, creator, windDown, big.NewInt(50)); err != nil {
+	if _, err := Refund(s, creator, creator, windDown, tk(50)); err != nil {
 		t.Fatalf("wind-down refund: %v", err)
 	}
 	if !CloseIfDrained(s, creator, windDown) {
@@ -461,18 +461,18 @@ func TestLaunch_ReRegistrationCanLaunchAgainOnACleanMarket(t *testing.T) {
 
 	// The fresh incarnation, with its own launch buy.
 	reReg := windDown + 100
-	res, err := RegisterWithFirstBuy(s, creator, creator, reReg, 2000, 20_000, big.NewInt(10))
+	res, err := RegisterWithFirstBuy(s, creator, creator, reReg, 2000, 20_000, tk(10))
 	if err != nil {
 		t.Fatalf("re-registration with a launch buy: %v", err)
 	}
-	if res.FirstBuy.Cost.Cmp(Area(big.NewInt(10))) != 0 {
+	if res.FirstBuy.Cost.Cmp(Area(tk(10))) != 0 {
 		t.Fatalf("the new incarnation priced its launch off a non-empty curve: cost = %s, want area(10) = %s",
-			res.FirstBuy.Cost, Area(big.NewInt(10)))
+			res.FirstBuy.Cost, Area(tk(10)))
 	}
-	if got := getMoney(s, kSupply(creator)); got.Cmp(big.NewInt(10)) != 0 {
+	if got := getMoney(s, kSupply(creator)); got.Cmp(tk(10)) != 0 {
 		t.Fatalf("supply = %s, want exactly the new launch's 10 (no inherited supply)", got)
 	}
-	if got := getMoney(s, kReserve(creator)); got.Cmp(Area(big.NewInt(10))) != 0 {
-		t.Fatalf("reserve = %s, want area(10) = %s — R === area(S) must hold on a fresh incarnation", got, Area(big.NewInt(10)))
+	if got := getMoney(s, kReserve(creator)); got.Cmp(Area(tk(10))) != 0 {
+		t.Fatalf("reserve = %s, want area(10) = %s — R === area(S) must hold on a fresh incarnation", got, Area(tk(10)))
 	}
 }

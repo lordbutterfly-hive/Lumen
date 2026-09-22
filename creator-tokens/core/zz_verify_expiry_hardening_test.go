@@ -33,7 +33,7 @@ func TestZZVerifyExpiry_LegacySynthesizedCohortAtMaturity(t *testing.T) {
 
 	// Backward-compat at the boundary-1: synthesized cohort tax == blend tax.
 	supply := new(big.Int).Set(Supply(s, c))
-	taxable, _ := SellProceeds(supply, big.NewInt(500))
+	taxable, _ := SellProceeds(supply, tk(500))
 	blendBefore := ExitTaxOn(taxable, ExitTaxBpsAt(heldBlocksAt(s, c, h, at-1)))
 	cohortBefore, _, _, _ := maturingCohortTax(s, c, h, supply, big.NewInt(500), at-1)
 	if cohortBefore.Cmp(blendBefore) != 0 {
@@ -47,14 +47,14 @@ func TestZZVerifyExpiry_LegacySynthesizedCohortAtMaturity(t *testing.T) {
 
 	// A real Sell at maturity: 0 tax, graduates (lotsClear is a harmless no-op on
 	// the absent key), full clean exit.
-	r, err := Sell(s, h, c, at, big.NewInt(500))
+	r, err := Sell(s, h, c, at, tk(500))
 	if err != nil {
 		t.Fatalf("legacy sell at maturity: %v", err)
 	}
 	if r.Tax.Sign() != 0 || r.TaxBps != 0 {
 		t.Fatalf("legacy matured tax=%s taxBps=%d MUST be 0", r.Tax, r.TaxBps)
 	}
-	if r.Graduated.Cmp(big.NewInt(500)) != 0 {
+	if r.Graduated.Cmp(tk(500)) != 0 {
 		t.Fatalf("legacy graduate=%s want 500", r.Graduated)
 	}
 	if Supply(s, c).Sign() != 0 || Reserve(s, c).Sign() != 0 {
@@ -77,13 +77,13 @@ func TestZZVerifyExpiry_MultiCohortPartialDebitConserves(t *testing.T) {
 		t.Fatalf("want 2 cohorts, got %d", zvNumCohorts(s, c, h))
 	}
 	// Partial sell of 120 mid-window (freshest-first consumes the b1+1000 cohort).
-	if _, err := Sell(s, h, c, b1+2_000, big.NewInt(120)); err != nil {
+	if _, err := Sell(s, h, c, b1+2_000, tk(120)); err != nil {
 		t.Fatalf("partial sell: %v", err)
 	}
 	if got := zvSumLotsRaw(s, c, h); got.Cmp(MaturingOf(s, c, h)) != 0 {
 		t.Fatalf("Σlots=%s != kBal=%s after partial multi-cohort debit", got, MaturingOf(s, c, h))
 	}
-	if MaturingOf(s, c, h).Cmp(big.NewInt(380)) != 0 {
+	if MaturingOf(s, c, h).Cmp(tk(380)) != 0 {
 		t.Fatalf("maturing=%s want 380", MaturingOf(s, c, h))
 	}
 	zvAssertNoOrphanLots(t, s, "multi-cohort partial debit")
@@ -104,7 +104,7 @@ func TestZZVerifyExpiry_DoubleGraduationIsNoop(t *testing.T) {
 	if zvHasLots(s, c, h) {
 		t.Fatalf("double graduate created/kept a ledger: %q", zvLotsStr(s, c, h))
 	}
-	if MaturedOf(s, c, h).Cmp(big.NewInt(500)) != 0 {
+	if MaturedOf(s, c, h).Cmp(tk(500)) != 0 {
 		t.Fatalf("matured=%s want 500 after double graduate", MaturedOf(s, c, h))
 	}
 	zvAssertNoOrphanLots(t, s, "double graduation")
@@ -127,7 +127,7 @@ func TestZZVerifyExpiry_TransferInOntoMaturedNotGraduated(t *testing.T) {
 	}
 	// h2 buys fresh and gifts 100 maturing tokens to h at t1.
 	mustBuy(t, s, c, h2, t1, 200)
-	if err := TransferCredits(s, h2, c, h2, h, t1, big.NewInt(100)); err != nil {
+	if err := TransferCredits(s, h2, c, h2, h, t1, tk(100)); err != nil {
 		t.Fatalf("gift transfer: %v", err)
 	}
 
@@ -135,7 +135,7 @@ func TestZZVerifyExpiry_TransferInOntoMaturedNotGraduated(t *testing.T) {
 	if got := zvSumLotsRaw(s, c, h); got.Cmp(big.NewInt(600)) != 0 {
 		t.Fatalf("Σlots=%s want 600 (aged 500 + gift 100)", got)
 	}
-	if MaturingOf(s, c, h).Cmp(big.NewInt(600)) != 0 {
+	if MaturingOf(s, c, h).Cmp(tk(600)) != 0 {
 		t.Fatalf("maturing=%s want 600", MaturingOf(s, c, h))
 	}
 	// The gift DEFERS maturity (blended clock pulled fresh) — h is no longer
@@ -145,7 +145,7 @@ func TestZZVerifyExpiry_TransferInOntoMaturedNotGraduated(t *testing.T) {
 	}
 	// The fresh gift is taxed at a high rate on a sale — the aged pile does NOT
 	// dilute it down (PRICE-1 defense intact after expiry-adjacent state).
-	q, err := QuoteSell(s, h, c, t1, big.NewInt(100))
+	q, err := QuoteSell(s, h, c, t1, tk(100))
 	if err != nil {
 		t.Fatalf("quote: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestZZVerifyExpiry_TransferInOntoMaturedNotGraduated(t *testing.T) {
 	if zvHasLots(s, c, h) {
 		t.Fatalf("ORPHAN after final graduation: %q", zvLotsStr(s, c, h))
 	}
-	if MaturedOf(s, c, h).Cmp(big.NewInt(600)) != 0 {
+	if MaturedOf(s, c, h).Cmp(tk(600)) != 0 {
 		t.Fatalf("matured=%s want 600", MaturedOf(s, c, h))
 	}
 	zvAssertNoOrphanLots(t, s, "transfer-in onto matured-not-graduated")

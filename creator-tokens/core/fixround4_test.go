@@ -87,13 +87,13 @@ func TestOUTFLOWCLIFF1_SellClockFrontRun_GuardStops(t *testing.T) {
 	// cost, which is a strict INCREASE in the cost of the attack this guard
 	// exists to stop; the guard is proven against the cheaper-per-attempt
 	// version below regardless.
-	if _, err := Buy(s, "mallory", "alice", t1, big.NewInt(1)); err != nil {
+	if _, err := Buy(s, "mallory", "alice", t1, tk(1)); err != nil {
 		t.Fatalf("mallory Buy: %v", err)
 	}
 	fr4RArea(t, s, "alice")
 
 	// ---- baseline quote, BEFORE the poison: bob is exactly at 0% ----
-	qBase, err := QuoteSell(s, "bob", "alice", t1, big.NewInt(B))
+	qBase, err := QuoteSell(s, "bob", "alice", t1, tk(B))
 	if err != nil {
 		t.Fatalf("baseline QuoteSell: %v", err)
 	}
@@ -103,10 +103,10 @@ func TestOUTFLOWCLIFF1_SellClockFrontRun_GuardStops(t *testing.T) {
 
 	// ---- the front-run: mallory forces 1 unit onto bob in the SAME block as
 	// bob's pre-quoted sell, re-aging bob's clock forward. ----
-	if err := TransferCredits(s, "mallory", "alice", "mallory", "bob", t1, big.NewInt(1)); err != nil {
+	if err := TransferCredits(s, "mallory", "alice", "mallory", "bob", t1, tk(1)); err != nil {
 		t.Fatalf("poison TransferCredits: %v", err)
 	}
-	qAtk, err := QuoteSell(s, "bob", "alice", t1, big.NewInt(B))
+	qAtk, err := QuoteSell(s, "bob", "alice", t1, tk(B))
 	if err != nil {
 		t.Fatalf("post-poison QuoteSell: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestOUTFLOWCLIFF1_SellClockFrontRun_GuardStops(t *testing.T) {
 	// of 1 bps on fifty thousand — a strict REDUCTION of the same grief, pinned
 	// here in both directions so it can never silently grow back.
 	blendEra := ExitTaxOn(qAtk.Gross, 1) // what the pre-fix blend charged
-	giftSlice, err := SellProceeds(getMoney(s, kSupply("alice")), big.NewInt(1))
+	giftSlice, err := SellProceeds(getMoney(s, kSupply("alice")), tk(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestOUTFLOWCLIFF1_RefundClockFrontRun_GuardStops(t *testing.T) {
 	// poison is structurally impossible — pinned by
 	// TestRefundHolder_OUTFLOWK2_TinyPoisonWindowBoundary.
 	poisonBuy := t0 + 1000
-	if _, err := Buy(s, "mallory", "alice", poisonBuy, big.NewInt(1)); err != nil {
+	if _, err := Buy(s, "mallory", "alice", poisonBuy, tk(1)); err != nil {
 		t.Fatalf("mallory Buy: %v", err)
 	}
 	// Retire so the wind-down (flat pro-rata Refund) rail is open at t1.
@@ -215,11 +215,11 @@ func TestOUTFLOWCLIFF1_RefundClockFrontRun_GuardStops(t *testing.T) {
 	if bps := ExitTaxBpsAt(heldBlocksAt(s, "alice", "bob", t1)); bps != 0 {
 		t.Fatalf("baseline refund taxBps = %d, want 0", bps)
 	}
-	grossBase := refundPayout(reserve, big.NewInt(B), supply) // == baseline net (tax 0)
+	grossBase := refundPayout(reserve, tk(B), supply) // == baseline net (tax 0)
 
 	// Front-run: mallory forces 1 unit onto bob (TransferCredits works in
 	// wind-down — it is property, not gated by inWindDown).
-	if err := TransferCredits(s, "mallory", "alice", "mallory", "bob", t1, big.NewInt(1)); err != nil {
+	if err := TransferCredits(s, "mallory", "alice", "mallory", "bob", t1, tk(1)); err != nil {
 		t.Fatalf("poison TransferCredits: %v", err)
 	}
 	if bps := ExitTaxBpsAt(heldBlocksAt(s, "alice", "bob", t1)); bps != 1 {
@@ -268,7 +268,7 @@ func TestOUTFLOWCLIFF1_HonestExitNeverBlocked(t *testing.T) {
 	if _, err := Buy(s, "bob", "alice", t0, big.NewInt(B)); err != nil {
 		t.Fatalf("bob Buy: %v", err)
 	}
-	q, err := QuoteSell(s, "bob", "alice", t1, big.NewInt(B))
+	q, err := QuoteSell(s, "bob", "alice", t1, tk(B))
 	if err != nil {
 		t.Fatalf("QuoteSell: %v", err)
 	}

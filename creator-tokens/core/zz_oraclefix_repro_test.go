@@ -34,7 +34,7 @@ func TestOF_CTORACLE01_SettlementWalkClosed(t *testing.T) {
 	const c = "of01"
 	const S = int64(9350)
 	const dump = int64(1349)
-	honest := SpotRate(big.NewInt(S))
+	honest := SpotRate(tk(S))
 	depressed := SpotRate(big.NewInt(S - dump))
 
 	build := func(attack bool) (short, long, spot, settle *big.Int) {
@@ -55,7 +55,7 @@ func TestOF_CTORACLE01_SettlementWalkClosed(t *testing.T) {
 		q := last + MaxObsWeightBlocks             // marker dwell saturates the clamp
 		short, _ = AskRate(s, c, q)
 		long = honest // what the seeded long ring holds; settlement no longer reads it
-		spot = SpotRate(big.NewInt(S))
+		spot = SpotRate(tk(S))
 		settle, _ = SettlementRate(s, c, q)
 		return
 	}
@@ -108,8 +108,8 @@ func TestOF_CTORACLE02_HonestGrowthKeepsShopOpen(t *testing.T) {
 	curveMarket(s, c, grown) // supply=4000, reserve=Area(4000)
 	activateMarket(s, c, 0)
 	q := uint64(2_000_000)
-	spot := SpotRate(big.NewInt(grown)) // ~74,500 (the grown marginal)
-	stale := SpotRate(big.NewInt(400))  // ~4,570 (the pre-growth long-ring rate)
+	spot := SpotRate(tk(grown)) // ~74,500 (the grown marginal)
+	stale := SpotRate(tk(400))  // ~4,570 (the pre-growth long-ring rate)
 	// SHORT ring caught up to the grown rate (creator/organic trades feed it every 40 blocks).
 	short := make([]*big.Int, 32)
 	for i := range short {
@@ -155,7 +155,7 @@ func TestOF_PRICE3_RisingMarketOverchargeReduced(t *testing.T) {
 	curveMarket(s, c, S)
 	activateMarket(s, c, 0)
 	q := uint64(3_000_000)
-	spot := SpotRate(big.NewInt(S)) // 74,500 — the live marginal (rising)
+	spot := SpotRate(tk(S)) // 74,500 — the live marginal (rising)
 	shortRate := big.NewInt(50_000) // recent avg, lags spot
 	longRate := big.NewInt(27_250)  // 7-day avg, lags most (the stalest arm)
 	last := ofWriteShort(s, c, q-32*40, func() []*big.Int {

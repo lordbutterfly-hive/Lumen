@@ -103,7 +103,7 @@ func TestZP1_GetMoney_NoReachablePathPlantsAMalformedValue(t *testing.T) {
 		rng := rand.New(rand.NewSource(seed + 5000))
 		w := zp1NewWorld(seed)
 		for _, c := range w.creators {
-			_ = Register(w.s, c, c, w.block, MinFace+5000, 5_000_000)
+			_ = Register(w.s, c, c, w.block, MinFace+5000, 5_000_000*TokenScale)
 		}
 		for i := 0; i < steps; i++ {
 			zp1Step(t, rng, w)
@@ -299,7 +299,7 @@ func TestZP1_GetMoney_BlastRadiusOfACorruptValue(t *testing.T) {
 		if err := Register(s, c, c, 1, MinFace+5000, MaxCap); err != nil {
 			t.Fatalf("Register: %v", err)
 		}
-		if _, err := Buy(s, h, c, 10, big.NewInt(10_000)); err != nil {
+		if _, err := Buy(s, h, c, 10, tk(10_000)); err != nil {
 			t.Fatalf("Buy: %v", err)
 		}
 		return s
@@ -363,13 +363,13 @@ func TestZP1_GetMoney_BlastRadiusOfACorruptValue(t *testing.T) {
 		var behaviour string
 		switch {
 		case p.key == kReserve(c):
-			_, err := Sell(s, h, c, 100, big.NewInt(1))
+			_, err := Sell(s, h, c, 100, tk(1))
 			behaviour = fmt.Sprintf("Sell -> %v", errOrOK(err))
 		case p.key == kSupply(c):
-			_, err := Sell(s, h, c, 100, big.NewInt(1))
+			_, err := Sell(s, h, c, 100, tk(1))
 			behaviour = fmt.Sprintf("Sell -> %v", errOrOK(err))
 		case p.key == kBal(c, h):
-			_, err := Sell(s, h, c, 100, big.NewInt(1))
+			_, err := Sell(s, h, c, 100, tk(1))
 			behaviour = fmt.Sprintf("Sell -> %v", errOrOK(err))
 		case p.key == kTreasury():
 			setStr(s, kOwner(), "zp4owner")

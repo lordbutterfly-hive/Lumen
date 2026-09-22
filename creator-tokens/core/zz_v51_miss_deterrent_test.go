@@ -96,7 +96,7 @@ func TestV51_DeclineStillRefundsInFull(t *testing.T) {
 	if _, err := Decline(s, creator1, creator1, 100, 0); err != nil {
 		t.Fatalf("Decline: %v", err)
 	}
-	if bal := totalBalance(s, creator1, asker1); bal.Cmp(big.NewInt(1)) != 0 {
+	if bal := totalBalance(s, creator1, asker1); bal.Cmp(tk(1)) != 0 {
 		t.Fatalf("declined escrow returned %s, want the whole 1 credit", bal)
 	}
 	if ownerBal := totalBalance(s, creator1, Owner(s)); ownerBal.Sign() != 0 {

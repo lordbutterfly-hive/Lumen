@@ -117,7 +117,7 @@ func TestExitTaxOn_ChunkingNeverEvades_Property(t *testing.T) {
 		total := r.Int63n(150) + 1
 		bps := uint64(r.Int63n(int64(MaxExitTaxBps)) + 1)
 
-		whole, err := SellProceeds(S, big.NewInt(total))
+		whole, err := SellProceeds(S, tk(total))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,7 +129,7 @@ func TestExitTaxOn_ChunkingNeverEvades_Property(t *testing.T) {
 		remaining := total
 		for remaining > 0 {
 			c := r.Int63n(remaining) + 1
-			p, err := SellProceeds(cur, big.NewInt(c))
+			p, err := SellProceeds(cur, tk(c))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -209,7 +209,7 @@ func TestExitTax_NoCreatorExitTax_OneRuleForEveryone(t *testing.T) {
 	now := uint64(5_000_000)
 	age := ExitTaxDecayBlocks / 3 // a third of the way down the decay
 	for _, h := range []string{creator, "randomholder"} {
-		setMoney(s, kBal(creator, h), big.NewInt(100))
+		setMoney(s, kBal(creator, h), tk(100))
 		setU64(s, kAcqBlock(creator, h), now-age)
 	}
 	creatorRate := ExitTaxBpsAt(heldBlocksAt(s, creator, creator, now))

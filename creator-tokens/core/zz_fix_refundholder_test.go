@@ -214,7 +214,7 @@ func TestRHFix_A4_LegacyAndHomogeneousAreExact(t *testing.T) {
 		pfMarket(t, s, c, t0+ExitTaxDecayBlocks)
 		pfBuy(t, s, "whale", c, t0, 4000)
 		pfBuy(t, s, "alt", c, t0+1000, 1000)
-		if err := TransferCredits(s, "alt", c, "alt", "whale", t0+1000, big.NewInt(1000)); err != nil {
+		if err := TransferCredits(s, "alt", c, "alt", "whale", t0+1000, tk(1000)); err != nil {
 			t.Fatalf("TransferCredits: %v", err)
 		}
 		s.Delete(kLots(c, "whale")) // legacy: a pre-ledger position

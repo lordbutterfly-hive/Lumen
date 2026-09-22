@@ -21,7 +21,7 @@ func TestZZResidual_IsItMoneyOrDisplay(t *testing.T) {
 	if _, err := Buy(s, whale, c, at, big.NewInt(F)); err != nil {
 		t.Fatal(err)
 	}
-	q, err := QuoteSell(s, whale, c, at, big.NewInt(F))
+	q, err := QuoteSell(s, whale, c, at, tk(F))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestZZResidual_IsItMoneyOrDisplay(t *testing.T) {
 	}
 	// sell the fresh slice from a position whose pile is the SAME age: identical shape,
 	// so any difference is the laundering effect, not a different curve position.
-	q2, err := QuoteSell(s2, honest, c, at, big.NewInt(F))
+	q2, err := QuoteSell(s2, honest, c, at, tk(F))
 	if err != nil {
 		t.Fatal(err)
 	}

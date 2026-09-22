@@ -1,6 +1,9 @@
 package core
 
-import "math/big"
+import (
+	"math/big"
+	"strings"
+)
 
 // Integer money helpers — every amount is a non-negative *big.Int serialized as
 // a base-10 string in state. No floats anywhere. HIVE/HBD carry 3 decimals, so
@@ -91,4 +94,66 @@ func mMedian3(a, b, c *big.Int) *big.Int {
 	med.Sub(med, hi)
 	med.Sub(med, lo)
 	return med
+}
+
+// parseTokens reads a token amount off the wire: a non-negative decimal
+// string with at most TokenDecimals fractional digits ("2", "1.5", "0.01",
+// "+3"), and returns it in state UNITS (x TokenScale). A whole number means
+// whole tokens, exactly as before v6, so every pre-v6 payload keeps its
+// meaning. Anything else is refused: a third decimal, an exponent, a sign
+// other than a leading plus, a bare point, surrounding whitespace, or nothing.
+// No floats anywhere: the digits are scaled as integers.
+func parseTokens(s string) (*big.Int, error) {
+	if s == "" {
+		return nil, newErr(ErrInput, "empty amount")
+	}
+	if s[0] == '+' {
+		s = s[1:]
+	}
+	whole, frac := s, ""
+	if i := strings.IndexByte(s, '.'); i >= 0 {
+		whole, frac = s[:i], s[i+1:]
+	}
+	if whole == "" || len(frac) > TokenDecimals || (strings.Contains(s, ".") && frac == "") {
+		return nil, newErr(ErrInput, "invalid token amount: "+s)
+	}
+	for i := 0; i < len(whole); i++ {
+		if whole[i] < '0' || whole[i] > '9' {
+			return nil, newErr(ErrInput, "invalid token amount: "+s)
+		}
+	}
+	for i := 0; i < len(frac); i++ {
+		if frac[i] < '0' || frac[i] > '9' {
+			return nil, newErr(ErrInput, "invalid token amount: "+s)
+		}
+	}
+	for len(frac) < TokenDecimals {
+		frac += "0"
+	}
+	v, ok := new(big.Int).SetString(whole+frac, 10)
+	if !ok || v.Sign() < 0 {
+		return nil, newErr(ErrInput, "invalid token amount: "+s)
+	}
+	return v, nil
+}
+
+// fmtTokens writes state UNITS as the decimal token string the wire carries:
+// always TokenDecimals places ("1.50", "0.01", "2.00"), never an exponent,
+// never a float. Events and read results use it for every token-denominated
+// field; HBD fields stay in base units (evMoney).
+func fmtTokens(units *big.Int) string {
+	if units == nil || units.Sign() == 0 {
+		return "0." + strings.Repeat("0", TokenDecimals)
+	}
+	neg := units.Sign() < 0
+	digits := new(big.Int).Abs(units).String()
+	for len(digits) <= TokenDecimals {
+		digits = "0" + digits
+	}
+	cut := len(digits) - TokenDecimals
+	out := digits[:cut] + "." + digits[cut:]
+	if neg {
+		return "-" + out
+	}
+	return out
 }

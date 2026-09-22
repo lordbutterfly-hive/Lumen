@@ -21,7 +21,7 @@ import (
 
 func setupMarket(s Store, creator string, block uint64, cap int64) {
 	setU64(s, kRegisteredAt(creator), block)
-	setMoney(s, kCap(creator), big.NewInt(cap))
+	setMoney(s, kCap(creator), tk(cap)) // cap in WHOLE tokens (v6: state holds units)
 }
 
 // sumBalances scans every bal|<creator>|<holder> key and sums it — the
@@ -59,24 +59,24 @@ func TestTransferCredits_HappyPath(t *testing.T) {
 	s := NewMemStore()
 	creator := "creatorh"
 	setupMarket(s, creator, 100, 1000)
-	if _, err := Buy(s, "alice", creator, 200, big.NewInt(500)); err != nil {
+	if _, err := Buy(s, "alice", creator, 200, tk(500)); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := TransferCredits(s, "alice", creator, "alice", "bob", 250, big.NewInt(200)); err != nil {
+	if err := TransferCredits(s, "alice", creator, "alice", "bob", 250, tk(200)); err != nil {
 		t.Fatalf("transfer failed: %v", err)
 	}
-	if got := getMoney(s, kBal(creator, "alice")); got.Cmp(big.NewInt(300)) != 0 {
+	if got := getMoney(s, kBal(creator, "alice")); got.Cmp(tk(300)) != 0 {
 		t.Fatalf("alice balance = %s, want 300", got)
 	}
-	if got := getMoney(s, kBal(creator, "bob")); got.Cmp(big.NewInt(200)) != 0 {
+	if got := getMoney(s, kBal(creator, "bob")); got.Cmp(tk(200)) != 0 {
 		t.Fatalf("bob balance = %s, want 200", got)
 	}
 	// I3: a transfer moves ownership, never total supply.
-	if got := getMoney(s, kSupply(creator)); got.Cmp(big.NewInt(500)) != 0 {
+	if got := getMoney(s, kSupply(creator)); got.Cmp(tk(500)) != 0 {
 		t.Fatalf("supply changed by a transfer: %s", got)
 	}
-	if got := sumBalances(s, creator); got.Cmp(big.NewInt(500)) != 0 {
+	if got := sumBalances(s, creator); got.Cmp(tk(500)) != 0 {
 		t.Fatalf("Σ balances after transfer = %s, want 500", got)
 	}
 	// The reserve is untouched and still EXACTLY the curve area (RULING A).
@@ -111,22 +111,22 @@ func TestTransferCredits_RecipientClockReAverages_LaunderingClosed(t *testing.T)
 	setupMarket(s, c, 1, MaxCap)
 
 	// The parked account: one token, bought six weeks + 1 block ago.
-	if _, err := Buy(s, "aged.acct", c, b, big.NewInt(1)); err != nil {
+	if _, err := Buy(s, "aged.acct", c, b, tk(1)); err != nil {
 		t.Fatal(err)
 	}
 	later := b + ExitTaxDecayBlocks + 1
 
 	// A fresh sniper buys 100 tokens at `later` and routes them through the
 	// aged account.
-	if _, err := Buy(s, "sniper", c, later, big.NewInt(100)); err != nil {
+	if _, err := Buy(s, "sniper", c, later, tk(100)); err != nil {
 		t.Fatal(err)
 	}
-	if err := TransferCredits(s, "sniper", c, "sniper", "aged.acct", later, big.NewInt(100)); err != nil {
+	if err := TransferCredits(s, "sniper", c, "sniper", "aged.acct", later, tk(100)); err != nil {
 		t.Fatal(err)
 	}
 	// wNew = ceil((1·b + 100·later)/101) — dominated by the fresh size, so
 	// heldBlocks is tiny and the tax is within a few bps of the maximum.
-	q, err := QuoteSell(s, "aged.acct", c, later, big.NewInt(101))
+	q, err := QuoteSell(s, "aged.acct", c, later, tk(101))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,16 +156,16 @@ func TestTransferCredits_RecipientInheritsSenderClock_MaturityTravels(t *testing
 	s := NewMemStore()
 	creator := "creatorb"
 	setupMarket(s, creator, 100, 1_000_000)
-	if _, err := Buy(s, "alice", creator, 200, big.NewInt(300)); err != nil {
+	if _, err := Buy(s, "alice", creator, 200, tk(300)); err != nil {
 		t.Fatal(err)
 	}
-	if err := TransferCredits(s, "alice", creator, "alice", "bob", 250, big.NewInt(100)); err != nil {
+	if err := TransferCredits(s, "alice", creator, "alice", "bob", 250, tk(100)); err != nil {
 		t.Fatal(err)
 	}
-	if got := getMoney(s, kBal(creator, "bob")); got.Cmp(big.NewInt(100)) != 0 {
+	if got := getMoney(s, kBal(creator, "bob")); got.Cmp(tk(100)) != 0 {
 		t.Fatalf("bob balance = %s, want 100 (the transferred tokens)", got)
 	}
-	if got := getMoney(s, kBal(creator, "alice")); got.Cmp(big.NewInt(200)) != 0 {
+	if got := getMoney(s, kBal(creator, "alice")); got.Cmp(tk(200)) != 0 {
 		t.Fatalf("alice balance = %s, want 200 (kept)", got)
 	}
 	// bob's inherited tokens carry ALICE's clock (block 200) — the maturity she
@@ -190,7 +190,7 @@ func TestTransferCredits_Guards(t *testing.T) {
 	s := NewMemStore()
 	creator := "creatori"
 	setupMarket(s, creator, 100, 1000)
-	if _, err := Buy(s, "alice", creator, 200, big.NewInt(500)); err != nil {
+	if _, err := Buy(s, "alice", creator, 200, tk(500)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -200,14 +200,14 @@ func TestTransferCredits_Guards(t *testing.T) {
 		amount   *big.Int
 		wantSym  string
 	}{
-		{"zero amount", "alice", "bob", big.NewInt(0), ErrInput},
+		{"zero amount", "alice", "bob", tk(0), ErrInput},
 		{"negative amount", "alice", "bob", big.NewInt(-5), ErrInput},
 		{"nil amount", "alice", "bob", nil, ErrInput},
-		{"insufficient balance", "alice", "bob", big.NewInt(10000), ErrBalance},
-		{"from equals to", "alice", "alice", big.NewInt(10), ErrInput},
-		{"invalid from account (key delimiter)", "a|b", "bob", big.NewInt(10), ErrInput},
-		{"invalid to account (key delimiter)", "alice", "BO|B", big.NewInt(10), ErrInput},
-		{"invalid to account (empty)", "alice", "", big.NewInt(10), ErrInput},
+		{"insufficient balance", "alice", "bob", tk(10000), ErrBalance},
+		{"from equals to", "alice", "alice", tk(10), ErrInput},
+		{"invalid from account (key delimiter)", "a|b", "bob", tk(10), ErrInput},
+		{"invalid to account (key delimiter)", "alice", "BO|B", tk(10), ErrInput},
+		{"invalid to account (empty)", "alice", "", tk(10), ErrInput},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -221,7 +221,7 @@ func TestTransferCredits_Guards(t *testing.T) {
 		})
 	}
 	// none of the rejected transfers should have moved any balance.
-	if got := getMoney(s, kBal(creator, "alice")); got.Cmp(big.NewInt(500)) != 0 {
+	if got := getMoney(s, kBal(creator, "alice")); got.Cmp(tk(500)) != 0 {
 		t.Fatalf("alice balance mutated by a rejected transfer: %s", got)
 	}
 }
@@ -247,13 +247,13 @@ func TestTransferCredits_RejectsCallerMismatch(t *testing.T) {
 	s := NewMemStore()
 	creator := "creatork"
 	setupMarket(s, creator, 100, 1000)
-	if _, err := Buy(s, "victim", creator, 200, big.NewInt(500)); err != nil {
+	if _, err := Buy(s, "victim", creator, 200, tk(500)); err != nil {
 		t.Fatal(err)
 	}
 
 	// The attacker never bought into this market. It calls TransferCredits
 	// naming the victim as `from` but signing (caller) as itself.
-	err := TransferCredits(s, "attacker", creator, "victim", "attacker", 250, big.NewInt(100))
+	err := TransferCredits(s, "attacker", creator, "victim", "attacker", 250, tk(100))
 	if err == nil {
 		t.Fatal("expected ErrAuth: caller != from must be refused")
 	}
@@ -261,7 +261,7 @@ func TestTransferCredits_RejectsCallerMismatch(t *testing.T) {
 		t.Fatalf("want ErrAuth, got %v", err)
 	}
 	// Nothing may have moved.
-	if got := getMoney(s, kBal(creator, "victim")); got.Cmp(big.NewInt(500)) != 0 {
+	if got := getMoney(s, kBal(creator, "victim")); got.Cmp(tk(500)) != 0 {
 		t.Fatalf("victim balance = %s, want unchanged 500 (the transfer must be refused, not partially applied)", got)
 	}
 	if got := getMoney(s, kBal(creator, "attacker")); !mIsZero(got) {
@@ -269,13 +269,13 @@ func TestTransferCredits_RejectsCallerMismatch(t *testing.T) {
 	}
 
 	// The legitimate owner can still move their own balance (caller == from).
-	if err := TransferCredits(s, "victim", creator, "victim", "friend", 250, big.NewInt(100)); err != nil {
+	if err := TransferCredits(s, "victim", creator, "victim", "friend", 250, tk(100)); err != nil {
 		t.Fatalf("legitimate transfer (caller == from) unexpectedly rejected: %v", err)
 	}
-	if got := getMoney(s, kBal(creator, "victim")); got.Cmp(big.NewInt(400)) != 0 {
+	if got := getMoney(s, kBal(creator, "victim")); got.Cmp(tk(400)) != 0 {
 		t.Fatalf("victim balance after their own transfer = %s, want 400", got)
 	}
-	if got := getMoney(s, kBal(creator, "friend")); got.Cmp(big.NewInt(100)) != 0 {
+	if got := getMoney(s, kBal(creator, "friend")); got.Cmp(tk(100)) != 0 {
 		t.Fatalf("friend balance = %s, want 100", got)
 	}
 }
@@ -288,7 +288,7 @@ func TestTransferCredits_WorksRegardlessOfBillingPhase(t *testing.T) {
 	s := NewMemStore()
 	creator := "creatorj"
 	setupMarket(s, creator, 100, 1000)
-	if _, err := Buy(s, "alice", creator, 200, big.NewInt(500)); err != nil {
+	if _, err := Buy(s, "alice", creator, 200, tk(500)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -296,17 +296,17 @@ func TestTransferCredits_WorksRegardlessOfBillingPhase(t *testing.T) {
 	// (market.go) derives FROZEN lazily from paidUntil+GraceBlocks alone, so
 	// this one write is sufficient for any query block >= 50+GraceBlocks.
 
-	if err := TransferCredits(s, "alice", creator, "alice", "bob", 50+GraceBlocks+10, big.NewInt(100)); err != nil {
+	if err := TransferCredits(s, "alice", creator, "alice", "bob", 50+GraceBlocks+10, tk(100)); err != nil {
 		t.Fatalf("transfer must work even when the market is FROZEN/lapsed: %v", err)
 	}
-	if got := getMoney(s, kBal(creator, "bob")); got.Cmp(big.NewInt(100)) != 0 {
+	if got := getMoney(s, kBal(creator, "bob")); got.Cmp(tk(100)) != 0 {
 		t.Fatalf("bob balance = %s, want 100", got)
 	}
 
 	// It must also work against a creator that was NEVER registered at all —
 	// TransferCredits has no market-existence gate (an unfunded balance simply
 	// fails on "insufficient balance", not on "no such market").
-	if err := TransferCredits(s, "alice", "neverregistered", "alice", "bob", 300, big.NewInt(1)); err == nil {
+	if err := TransferCredits(s, "alice", "neverregistered", "alice", "bob", 300, tk(1)); err == nil {
 		t.Fatal("expected insufficient-balance, not a silent success, against an unfunded holder")
 	} else if sym := errSymbol(err); sym != ErrBalance {
 		t.Fatalf("want ErrBalance (not a market-existence gate), got %v", err)

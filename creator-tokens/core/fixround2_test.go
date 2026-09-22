@@ -159,15 +159,15 @@ func TestRefundHolder_EXITTAXDOS1_TwoAccountBounceBounded(t *testing.T) {
 	if err := Register(s, c, c, 1000, 1000, MaxCap); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, g, c, 1000, big.NewInt(2)); err != nil {
+	if _, err := Buy(s, g, c, 1000, tk(2)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, a, c, 1000, big.NewInt(2)); err != nil {
+	if _, err := Buy(s, a, c, 1000, tk(2)); err != nil {
 		t.Fatal(err)
 	}
 	// R === area(S) holds after the buys (the trading invariant the fix must not
 	// disturb — it doesn't; the fix only changes the push GATE).
-	if got, want := getMoney(s, kReserve(c)), Area(big.NewInt(4)); got.Cmp(want) != 0 {
+	if got, want := getMoney(s, kReserve(c)), Area(tk(4)); got.Cmp(want) != 0 {
 		t.Fatalf("R === area(S) broken after buys: R=%s area=%s", got, want)
 	}
 	if err := Retire(s, c, c, 1000); err != nil {
@@ -246,10 +246,10 @@ func TestRefundHolder_NOTICE1DoS_LapseThenRetireRefreshBounded(t *testing.T) {
 	// paidUntil + GraceBlocks — the value windDownOpenBlock must anchor to.
 	paidUntil := 1000 + hzLongGap
 	freezeAt := paidUntil + GraceBlocks
-	if _, err := Buy(s, g, c, 1000, big.NewInt(1)); err != nil {
+	if _, err := Buy(s, g, c, 1000, tk(1)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, sybil, c, 1000, big.NewInt(1)); err != nil {
+	if _, err := Buy(s, sybil, c, 1000, tk(1)); err != nil {
 		t.Fatal(err)
 	}
 	// ★ The fixture used to freeze this market by letting its subscription lapse
@@ -270,13 +270,13 @@ func TestRefundHolder_NOTICE1DoS_LapseThenRetireRefreshBounded(t *testing.T) {
 	if _, err := RefundHolder(s, "keeper", c, g, longLapsed); errSymbol(err) != ErrState {
 		t.Fatalf("A1: push on a lapsed market must be refused (no wind-down on lapse), got %v", err)
 	}
-	if _, err := Sell(s, sybil, c, longLapsed, big.NewInt(1)); err != nil {
+	if _, err := Sell(s, sybil, c, longLapsed, tk(1)); err != nil {
 		t.Fatalf("A1: a holder of a lapsed market keeps the curve exit: %v", err)
 	}
-	if _, err := Buy(s, sybil, c, longLapsed, big.NewInt(1)); err != nil {
+	if _, err := Buy(s, sybil, c, longLapsed, tk(1)); err != nil {
 		// put the token back so the drain arithmetic below is unchanged: Buy is
 		// refused while FROZEN (inflow stop), so re-issue via a raw balance write
-		setMoney(s, kBal(c, sybil), big.NewInt(1))
+		setMoney(s, kBal(c, sybil), tk(1))
 		setMoney(s, kSupply(c), new(big.Int).Add(getMoney(s, kSupply(c)), big.NewInt(1)))
 		setMoney(s, kReserve(c), Area(getMoney(s, kSupply(c))))
 	}
@@ -351,11 +351,11 @@ func TestRefundHolder_OUTFLOWK2_TinyPoisonWindowBoundary(t *testing.T) {
 			t.Fatal(err)
 		}
 		t0 := uint64(2000)
-		if _, err := Buy(s, bob, c, t0, big.NewInt(50000)); err != nil {
+		if _, err := Buy(s, bob, c, t0, tk(50000)); err != nil {
 			t.Fatal(err)
 		}
 		poisonBuy := t0 + 1000
-		if _, err := Buy(s, mallory, c, poisonBuy, big.NewInt(1)); err != nil {
+		if _, err := Buy(s, mallory, c, poisonBuy, tk(1)); err != nil {
 			t.Fatal(err)
 		}
 		if err := Retire(s, c, c, poisonBuy); err != nil { // wind-down opens here
@@ -369,7 +369,7 @@ func TestRefundHolder_OUTFLOWK2_TinyPoisonWindowBoundary(t *testing.T) {
 	// still keeps the push refused — the in-window fresh-holder protection.
 	sShort, c, bob, open := build()
 	shortBlk := open + ExitTaxDecayBlocks - 1
-	if err := TransferCredits(sShort, "mallory", c, "mallory", bob, shortBlk, big.NewInt(1)); err != nil {
+	if err := TransferCredits(sShort, "mallory", c, "mallory", bob, shortBlk, tk(1)); err != nil {
 		t.Fatal(err)
 	}
 	if bps := ExitTaxBpsAt(heldBlocksAt(sShort, c, bob, shortBlk)); bps == 0 {
@@ -388,7 +388,7 @@ func TestRefundHolder_OUTFLOWK2_TinyPoisonWindowBoundary(t *testing.T) {
 	// the wind-down opened (RequireInflowOpen refuses a retired market), and
 	// transfers only move maturity that already exists. So mallory's dust arrives
 	// carrying a FULL window of maturity and cannot move bob's rate at all.
-	if err := TransferCredits(sAt, "mallory", c2, "mallory", bob2, atBlk, big.NewInt(1)); err != nil {
+	if err := TransferCredits(sAt, "mallory", c2, "mallory", bob2, atBlk, tk(1)); err != nil {
 		t.Fatal(err)
 	}
 	if bps := ExitTaxBpsAt(heldBlocksAt(sAt, c2, bob2, atBlk)); bps != 0 {
@@ -431,22 +431,22 @@ func TestSell_OUTFLOWK1_SellLaunderClosed_WindDownStillOpen(t *testing.T) {
 		}
 		t0 := uint64(2000)
 		t1 := t0 + ExitTaxDecayBlocks
-		if _, err := Buy(s, bob, c, t0, big.NewInt(50000)); err != nil {
+		if _, err := Buy(s, bob, c, t0, tk(50000)); err != nil {
 			t.Fatal(err)
 		}
 		if attack {
-			if _, err := Buy(s, mallory, c, t1, big.NewInt(50000)); err != nil {
+			if _, err := Buy(s, mallory, c, t1, tk(50000)); err != nil {
 				t.Fatal(err)
 			}
-			if err := TransferCredits(s, mallory, c, mallory, bob, t1, big.NewInt(50000)); err != nil {
+			if err := TransferCredits(s, mallory, c, mallory, bob, t1, tk(50000)); err != nil {
 				t.Fatal(err)
 			}
 		} else {
-			if _, err := Buy(s, carol, c, t1, big.NewInt(50000)); err != nil {
+			if _, err := Buy(s, carol, c, t1, tk(50000)); err != nil {
 				t.Fatal(err)
 			}
 		}
-		r, err := Sell(s, bob, c, t1, big.NewInt(50000))
+		r, err := Sell(s, bob, c, t1, tk(50000))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -508,10 +508,10 @@ func TestSell_OUTFLOWK1_SellLaunderClosed_WindDownStillOpen(t *testing.T) {
 			t.Fatal(err)
 		}
 		t0 := uint64(2000)
-		if _, err := Buy(s, bob, c, t0, big.NewInt(50000)); err != nil {
+		if _, err := Buy(s, bob, c, t0, tk(50000)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Buy(s, mallory, c, t0, big.NewInt(50000)); err != nil {
+		if _, err := Buy(s, mallory, c, t0, tk(50000)); err != nil {
 			t.Fatal(err)
 		}
 		t1 := t0 + ExitTaxDecayBlocks
@@ -519,12 +519,12 @@ func TestSell_OUTFLOWK1_SellLaunderClosed_WindDownStillOpen(t *testing.T) {
 			t.Fatal(err)
 		}
 		if attack {
-			if err := TransferCredits(s, mallory, c, mallory, bob, t1, big.NewInt(50000)); err != nil {
+			if err := TransferCredits(s, mallory, c, mallory, bob, t1, tk(50000)); err != nil {
 				t.Fatal(err)
 			}
 		}
 		total := mZero()
-		net1, err := Refund(s, bob, c, t1, big.NewInt(50000))
+		net1, err := Refund(s, bob, c, t1, tk(50000))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -58,7 +58,7 @@ func TestZZBound_PRICE1_LaunderStillClosed(t *testing.T) {
 	}
 
 	supply := getMoney(s, kSupply(c))
-	topM, err := SellProceeds(supply, big.NewInt(M))
+	topM, err := SellProceeds(supply, tk(M))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestZZBound_PRICE1_LaunderClosedWithFloodedLedger(t *testing.T) {
 	for i := 0; i < MaxLots; i++ {
 		blk := t1 + uint64(i)
 		pfBuy(t, s, "flood", c, blk, 1)
-		if err := TransferCredits(s, "flood", c, "flood", "whale", blk, big.NewInt(1)); err != nil {
+		if err := TransferCredits(s, "flood", c, "flood", "whale", blk, tk(1)); err != nil {
 			t.Fatalf("flood #%d: %v", i, err)
 		}
 	}
@@ -165,7 +165,7 @@ func TestZZBound_PRICE1_LaunderClosedWithFloodedLedger(t *testing.T) {
 	}
 
 	supply := getMoney(s, kSupply(c))
-	topM, _ := SellProceeds(supply, big.NewInt(M))
+	topM, _ := SellProceeds(supply, tk(M))
 	intended := ExitTaxOn(topM, MaxExitTaxBps)
 	total := getMoney(s, kBal(c, "whale"))
 	q, err := QuoteSell(s, "whale", c, blkM, total)

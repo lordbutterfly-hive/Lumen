@@ -258,19 +258,43 @@ type escrowRec struct {
 // commit. A 2026-07-24 audit caught the previous insertion (acqBlock) having
 // been made without updating the parser, which silently shifted contentHash
 // into answerHash on every read. That is why the count check below is exact.
+// escrowFieldsV5 / escrowFieldsV6: the record's field count IS its unit
+// version (v6, migrate_v6.go). A 9-field record was written before v6 and
+// holds whole tokens; a 10-field record holds units and carries the
+// escrowUnitsMarker in the eighth slot, inserted BEFORE contentHash so the
+// two free-form fields stay last (the safety property the layout note above
+// depends on). unpackEscrow accepts both and reports units either way, so a
+// caller that bypasses the migrating store (a raw test fixture) still reads
+// the right amount; the migrating store rewrites the record to 10 fields on
+// first touch, so on chain the 9-field shape is read at most once.
+const (
+	escrowFieldsV5    = 9
+	escrowFieldsV6    = 10
+	escrowUnitsMarker = "u2"
+)
+
 func packEscrow(r escrowRec) string {
 	return r.asker + "|" + r.credits.String() + "|" +
 		strconv.FormatUint(r.deadline, 10) + "|" + r.status + "|" +
 		r.commissionCredits.String() + "|" +
 		strconv.FormatUint(r.acqBlock, 10) + "|" +
 		strconv.FormatUint(r.offeringID, 10) + "|" +
+		escrowUnitsMarker + "|" +
 		r.contentHash + "|" + r.answerHash
 }
 
 func unpackEscrow(v string) (escrowRec, bool) {
-	p := strings.SplitN(v, "|", 9)
-	if len(p) != 9 {
+	p := strings.SplitN(v, "|", escrowFieldsV6)
+	legacy := len(p) == escrowFieldsV5
+	if len(p) != escrowFieldsV6 && !legacy {
 		return escrowRec{}, false
+	}
+	if !legacy {
+		if p[7] != escrowUnitsMarker {
+			return escrowRec{}, false
+		}
+		// Drop the marker so the field indexes below are the same for both shapes.
+		p = append(p[:7], p[8:]...)
 	}
 	credits, ok := new(big.Int).SetString(p[1], 10)
 	if !ok || credits.Sign() < 0 {
@@ -291,6 +315,10 @@ func unpackEscrow(v string) (escrowRec, bool) {
 	offeringID, err := strconv.ParseUint(p[6], 10, 64)
 	if err != nil {
 		return escrowRec{}, false
+	}
+	if legacy {
+		credits = new(big.Int).Mul(credits, unitsScale)
+		commissionCredits = new(big.Int).Mul(commissionCredits, unitsScale)
 	}
 	return escrowRec{
 		asker: p[0], credits: credits, deadline: deadline,
@@ -358,7 +386,11 @@ func validEventHash(field, v string) error {
 // derives it — RULING C keeps the ceil: a floor would admit 0 credits, a
 // free service).
 func creditsForAsk(face, rate *big.Int) *big.Int {
-	return mMulDivCeil(face, big.NewInt(1), rate)
+	// v6: UNITS. rate is HBD per WHOLE token (the TWAP feed is unchanged), so
+	// the units a face buys are ceil(face x TokenScale / rate). The ceil is the
+	// same RULING C ceil, now worth at most one unit (0.01 token) of overshoot
+	// instead of a whole token: that was the whole point of v6.
+	return mMulDivCeil(face, unitsScale, rate)
 }
 
 // commissionOwedFor = floor(n * CommissionBps / 10000) — the platform's slice
@@ -872,8 +904,10 @@ func Reclaim(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 	slice := mZero()
 	if rec.asker != creator {
 		slice = mMulDivCeil(rec.commissionCredits, new(big.Int).SetUint64(MissReclaimSliceBps), big.NewInt(10000))
-		if slice.Sign() <= 0 {
-			slice = big.NewInt(1)
+		// v6: the floor is MissReclaimFloorUnits (one whole token in units), the
+		// same deterrent stated in the new unit; still clamped to the escrow.
+		if slice.Cmp(big.NewInt(MissReclaimFloorUnits)) < 0 {
+			slice = big.NewInt(MissReclaimFloorUnits)
 		}
 		if slice.Cmp(rec.credits) > 0 {
 			slice = new(big.Int).Set(rec.credits)

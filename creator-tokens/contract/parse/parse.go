@@ -237,3 +237,51 @@ func Escape(s string) string {
 	}
 	return b.String()
 }
+
+// TokenAmount parses a token amount off the wire into state units: a
+// non-negative decimal with at most two places ("2", "1.5", "0.01", "+3"),
+// scaled by 100. A whole number means whole tokens, so every pre-v6 payload
+// keeps its meaning. Duplicated from core/money.go's (unexported) parseTokens
+// under the same duplication contract BigDecimal documents above; keep the two
+// in sync.
+func TokenAmount(s string) (*big.Int, bool) {
+	const decimals = 2
+	if s == "" {
+		return nil, false
+	}
+	if s[0] == '+' {
+		s = s[1:]
+	}
+	whole, frac := s, ""
+	dot := -1
+	for i := 0; i < len(s); i++ {
+		if s[i] == '.' {
+			dot = i
+			break
+		}
+	}
+	if dot >= 0 {
+		whole, frac = s[:dot], s[dot+1:]
+	}
+	if whole == "" || len(frac) > decimals || (dot >= 0 && frac == "") {
+		return nil, false
+	}
+	for i := 0; i < len(whole); i++ {
+		if whole[i] < '0' || whole[i] > '9' {
+			return nil, false
+		}
+	}
+	for i := 0; i < len(frac); i++ {
+		if frac[i] < '0' || frac[i] > '9' {
+			return nil, false
+		}
+	}
+	for len(frac) < decimals {
+		frac += "0"
+	}
+	v, ok := new(big.Int).SetString(whole+frac, 10)
+	if !ok || v.Sign() < 0 {
+		return nil, false
+	}
+	return v, true
+}

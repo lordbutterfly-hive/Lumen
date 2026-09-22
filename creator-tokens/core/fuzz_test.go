@@ -1553,7 +1553,7 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 				}
 				switch rng.Intn(3) {
 				case 0:
-					res, err := Buy(w.s, h, c, w.block, big.NewInt(1))
+					res, err := Buy(w.s, h, c, w.block, tk(1))
 					if err == nil {
 						tr.add("tiny Buy(%s,%s,1) -> due=%v", h, c, res.TotalDue)
 						w.pay(h, res.TotalDue)
@@ -1561,7 +1561,7 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 						tr.add("tiny Buy(%s,%s,1) -> err=%v", h, c, err)
 					}
 				case 1:
-					res, err := Sell(w.s, h, c, w.block, big.NewInt(1))
+					res, err := Sell(w.s, h, c, w.block, tk(1))
 					if err == nil {
 						tr.add("tiny Sell(%s,%s,1) -> net=%v", h, c, res.Net)
 						w.receive(h, res.Net)
@@ -1569,7 +1569,7 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 						tr.add("tiny Sell(%s,%s,1) -> err=%v", h, c, err)
 					}
 				default:
-					payout, err := Refund(w.s, h, c, w.block, big.NewInt(1))
+					payout, err := Refund(w.s, h, c, w.block, tk(1))
 					tr.add("tiny Refund(%s,%s,1) -> payout=%v err=%v", h, c, payout, err)
 					if err == nil {
 						w.receive(h, payout)
@@ -1630,7 +1630,7 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 			}
 			// Fund the asker on the CURVE (Buy is the only issuance path):
 			// 5000 tokens covers the worst-case spend the cap admits (250).
-			if _, err := Buy(s, asker, creator, regBlock, big.NewInt(5000)); err != nil {
+			if _, err := Buy(s, asker, creator, regBlock, tk(5000)); err != nil {
 				t.Fatalf("iter %d: setup Buy: %v", i, err)
 			}
 
@@ -1888,7 +1888,7 @@ func TestFuzzBoundarySweep(t *testing.T) {
 			if err := Register(s, creator, creator, 100, 10_000, MaxCap); err != nil {
 				t.Fatalf("setup: %v", err)
 			}
-			if _, err := Buy(s, "fzbadasker", creator, 100, big.NewInt(5000)); err != nil {
+			if _, err := Buy(s, "fzbadasker", creator, 100, tk(5000)); err != nil {
 				t.Fatalf("setup: %v", err)
 			}
 			askBlock := seedSettleObs(s, creator, 110, big.NewInt(15_000))
@@ -1897,7 +1897,7 @@ func TestFuzzBoundarySweep(t *testing.T) {
 			if v < 0 {
 				deadline = 0
 			}
-			_, err := askAt0(s, "fzbadasker", creator, askBlock, big.NewInt(1_000_000), "cid", deadline)
+			_, err := askAt0(s, "fzbadasker", creator, askBlock, tk(1_000_000), "cid", deadline)
 			inBand := deadline >= MinAskDeadline && deadline <= MaxAskDeadline
 			if inBand && err != nil {
 				t.Fatalf("Ask.deadline: v=%d INSIDE [%d,%d] but rejected: %v", deadline, MinAskDeadline, MaxAskDeadline, err)
@@ -1950,12 +1950,12 @@ func TestFuzzBoundarySweep(t *testing.T) {
 			if err := Register(s, creator, creator, 100, 1000, MaxCap); err != nil {
 				t.Fatalf("setup: %v", err)
 			}
-			if _, err := Buy(s, "fzbtcfrom", creator, 100, big.NewInt(1000)); err != nil {
+			if _, err := Buy(s, "fzbtcfrom", creator, 100, tk(1000)); err != nil {
 				t.Fatalf("setup: %v", err)
 			}
 			amt := fzAmount(rng)
 			err := TransferCredits(s, "fzbtcfrom", creator, "fzbtcfrom", "fzbtcto", 100, amt)
-			validAmt := amt != nil && amt.Sign() > 0 && amt.Cmp(big.NewInt(1000)) <= 0
+			validAmt := amt != nil && amt.Sign() > 0 && amt.Cmp(tk(1000)) <= 0
 			if validAmt && err != nil {
 				t.Fatalf("TransferCredits: amt=%s valid and within balance=1000 but rejected: %v", amt, err)
 			}
@@ -1969,7 +1969,7 @@ func TestFuzzBoundarySweep(t *testing.T) {
 			if err := Register(s, creator, creator, 100, 1000, MaxCap); err != nil {
 				t.Fatalf("setup: %v", err)
 			}
-			if _, err := Buy(s, "fzbrfholder", creator, 100, big.NewInt(1000)); err != nil {
+			if _, err := Buy(s, "fzbrfholder", creator, 100, tk(1000)); err != nil {
 				t.Fatalf("setup: %v", err)
 			}
 			// WIND-DOWN BLOCK: Refund is phase-routed to FROZEN/CLOSED
@@ -1984,7 +1984,7 @@ func TestFuzzBoundarySweep(t *testing.T) {
 			wdBlock := uint64(100) + hzLongGap + GraceBlocks + 1
 			amt := fzAmount(rng)
 			_, err := Refund(s, "fzbrfholder", creator, wdBlock, amt)
-			validAmt := amt != nil && amt.Sign() > 0 && amt.Cmp(big.NewInt(1000)) <= 0
+			validAmt := amt != nil && amt.Sign() > 0 && amt.Cmp(tk(1000)) <= 0
 			if validAmt && err != nil {
 				t.Fatalf("Refund: credits=%s valid and within balance=1000 but rejected: %v", amt, err)
 			}

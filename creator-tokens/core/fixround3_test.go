@@ -1,9 +1,6 @@
 package core
 
-import (
-	"math/big"
-	"testing"
-)
+import "testing"
 
 // fixround3_test.go — named regression tests for adversarial FIX ROUND 3
 // (2026-07-22). One test (or cluster) per finding id.
@@ -40,10 +37,10 @@ func TestWindDownOpenBlock_LapseThenRetire_AnchorsAtRetire(t *testing.T) {
 	if err := Register(s, c, c, reg, 1000, MaxCap); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, holderA, c, reg+1, big.NewInt(10)); err != nil {
+	if _, err := Buy(s, holderA, c, reg+1, tk(10)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, holderB, c, reg+1, big.NewInt(10)); err != nil {
+	if _, err := Buy(s, holderB, c, reg+1, tk(10)); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1,9 +1,6 @@
 package core
 
-import (
-	"math/big"
-	"testing"
-)
+import "testing"
 
 // rating_test.go — the buyer's rating (rating.go, USER RULING 2026-07-28).
 //
@@ -14,7 +11,7 @@ import (
 // rtDelivered drives one full ask -> answered cycle and returns the escrow seq.
 func rtDelivered(t *testing.T, s Store, at uint64, asker string) uint64 {
 	t.Helper()
-	res, err := askAt0(s, asker, creator1, at, big.NewInt(1000), "cid", MinAskDeadline)
+	res, err := askAt0(s, asker, creator1, at, tk(1000), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -71,7 +68,7 @@ func TestRating_OnlyDeliveredJobsAreRateable(t *testing.T) {
 	s, at := dgSetup(t)
 
 	// PENDING — nothing has happened yet.
-	pending, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), "cid", MinAskDeadline)
+	pending, err := askAt0(s, asker1, creator1, at, tk(1000), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -92,7 +89,7 @@ func TestRating_OnlyDeliveredJobsAreRateable(t *testing.T) {
 
 	// DECLINED — the creator said no and handed everything back. Nothing was
 	// delivered, so there is nothing to rate.
-	declined, err := askAt0(s, asker1, creator1, reclaimAt+1, big.NewInt(1000), "cid2", MinAskDeadline)
+	declined, err := askAt0(s, asker1, creator1, reclaimAt+1, tk(1000), "cid2", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask 2: %v", err)
 	}
@@ -135,11 +132,11 @@ func TestRating_NeverGatesAnyFundPath(t *testing.T) {
 		t.Fatalf("a 1-star rating closed inflows: %v", err)
 	}
 	// A new ask still works...
-	if _, err := askAt0(s, asker1, creator1, at+10, big.NewInt(1000), "cid3", MinAskDeadline); err != nil {
+	if _, err := askAt0(s, asker1, creator1, at+10, tk(1000), "cid3", MinAskDeadline); err != nil {
 		t.Fatalf("a 1-star rating blocked a new ask: %v", err)
 	}
 	// ...and so does the holder's exit.
-	if _, err := Sell(s, asker1, creator1, at+11, big.NewInt(1)); err != nil {
+	if _, err := Sell(s, asker1, creator1, at+11, tk(1)); err != nil {
 		t.Fatalf("a 1-star rating blocked a sell: %v", err)
 	}
 	// And the delivery gate is untouched by it: ratings and misses are separate

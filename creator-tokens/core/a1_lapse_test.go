@@ -1,9 +1,6 @@
 package core
 
-import (
-	"math/big"
-	"testing"
-)
+import "testing"
 
 // a1_lapse_test.go — WHAT THIS FILE USED TO BE, AND WHY IT IS NOW ITS OWN
 // INVERSE.
@@ -50,7 +47,7 @@ func TestNoLapse_AMarketStaysActiveUntilItsCreatorRetiresIt(t *testing.T) {
 	if err := Register(s, c, c, reg, 1000, MaxCap); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, holder, c, reg+1, big.NewInt(20)); err != nil {
+	if _, err := Buy(s, holder, c, reg+1, tk(20)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -64,17 +61,17 @@ func TestNoLapse_AMarketStaysActiveUntilItsCreatorRetiresIt(t *testing.T) {
 		t.Fatalf("inflows must stay open on a silent market: %v", err)
 	}
 	// ...and a real buy actually lands there, not merely a gate that says yes.
-	if _, err := Buy(s, holder, c, silent, big.NewInt(5)); err != nil {
+	if _, err := Buy(s, holder, c, silent, tk(5)); err != nil {
 		t.Fatalf("Buy after a year of silence: %v", err)
 	}
 
 	// The curve exit is open the whole time, which is the holder-protection half
 	// of A1 and the reason none of this was ever a solvency question.
-	if _, err := Sell(s, holder, c, silent+1, big.NewInt(1)); err != nil {
+	if _, err := Sell(s, holder, c, silent+1, tk(1)); err != nil {
 		t.Fatalf("Sell on a silent ACTIVE market: %v", err)
 	}
 	// The pro-rata wind-down rail stays shut: nothing is winding down.
-	if _, err := Refund(s, holder, c, silent+2, big.NewInt(1)); err == nil {
+	if _, err := Refund(s, holder, c, silent+2, tk(1)); err == nil {
 		t.Fatal("Refund must refuse outside a wind-down")
 	} else if askErrSymbol(err) != ErrState {
 		t.Fatalf("Refund refusal symbol = %q, want %q", askErrSymbol(err), ErrState)
@@ -90,7 +87,7 @@ func TestNoLapse_RetireIsTheOnlyRoadOutOfActive(t *testing.T) {
 	if err := Register(s, c, c, reg, 1000, MaxCap); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, holder, c, reg+1, big.NewInt(20)); err != nil {
+	if _, err := Buy(s, holder, c, reg+1, tk(20)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -118,10 +115,10 @@ func TestNoLapse_RetireIsTheOnlyRoadOutOfActive(t *testing.T) {
 	}
 	// And the exit rail has switched: the curve is closed, pro-rata is open.
 	frozen := retireAt + GraceBlocks + 1
-	if _, err := Sell(s, holder, c, frozen, big.NewInt(1)); err == nil {
+	if _, err := Sell(s, holder, c, frozen, tk(1)); err == nil {
 		t.Fatal("Sell must refuse while winding down (K3: the curve rail is dropped)")
 	}
-	if _, err := Refund(s, holder, c, frozen, big.NewInt(1)); err != nil {
+	if _, err := Refund(s, holder, c, frozen, tk(1)); err != nil {
 		t.Fatalf("Refund must be open while winding down: %v", err)
 	}
 }

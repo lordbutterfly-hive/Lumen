@@ -32,7 +32,7 @@ func dgSetup(t *testing.T) (Store, uint64) {
 	bindOwner(s)
 	curveMarket(s, creator1, 1000)
 	setMoney(s, kFace(creator1), big.NewInt(90_000))
-	setMoney(s, kBal(creator1, asker1), big.NewInt(500_000))
+	setMoney(s, kBal(creator1, asker1), tk(500_000))
 	askBlock := seedSettleObs(s, creator1, 1000, big.NewInt(2000))
 	activateMarket(s, creator1, askBlock)
 	return s, askBlock
@@ -42,7 +42,7 @@ func dgSetup(t *testing.T) (Store, uint64) {
 // block the reclaim happened at.
 func dgMiss(t *testing.T, s Store, at uint64) uint64 {
 	t.Helper()
-	res, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), "cid", MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, at, tk(1000), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask at %d: %v", at, err)
 	}
@@ -99,13 +99,13 @@ func TestDelivery_DelinquencyNeverGatesAnyPayout(t *testing.T) {
 
 	// An ask placed BEFORE the creator falls foul of the gate, so there is a
 	// live escrow straddling the conviction — the realistic case.
-	inflight, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), "inflight", MaxAskDeadline)
+	inflight, err := askAt0(s, asker1, creator1, at, tk(1000), "inflight", MaxAskDeadline)
 	if err != nil {
 		t.Fatalf("in-flight Ask: %v", err)
 	}
 	// The asker already holds tokens (dgSetup) and the creator has a fee
 	// balance to claim — both from before the conviction.
-	addMoney(s, kFeeBal(creator1), big.NewInt(1234))
+	addMoney(s, kFeeBal(creator1), tk(1234))
 
 	for i := 0; i < 3; i++ {
 		at = dgMiss(t, s, at) + 1
@@ -121,7 +121,7 @@ func TestDelivery_DelinquencyNeverGatesAnyPayout(t *testing.T) {
 	if _, err := Answer(s, creator1, creator1, at, inflight.Seq, "ans"); err != nil {
 		t.Fatalf("Answer blocked while delinquent — the in-flight customer is trapped: %v", err)
 	}
-	if _, err := Sell(s, asker1, creator1, at, big.NewInt(10)); err != nil {
+	if _, err := Sell(s, asker1, creator1, at, tk(10)); err != nil {
 		t.Fatalf("Sell blocked while delinquent — a holder is trapped: %v", err)
 	}
 	if _, err := ClaimTradeFees(s, creator1); err != nil {
@@ -137,7 +137,7 @@ func TestDelivery_DeclineIsNotAMiss(t *testing.T) {
 	balBefore := getMoney(s, kBal(creator1, asker1))
 
 	for i := 0; i < 5; i++ {
-		res, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), "cid", MinAskDeadline)
+		res, err := askAt0(s, asker1, creator1, at, tk(1000), "cid", MinAskDeadline)
 		if err != nil {
 			t.Fatalf("Ask %d: %v", i, err)
 		}
@@ -180,7 +180,7 @@ func TestDelivery_JudgesTheRateNotTheCount(t *testing.T) {
 	s, at := dgSetup(t)
 	// 20 clean deliveries first.
 	for i := 0; i < 20; i++ {
-		res, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), "cid", MinAskDeadline)
+		res, err := askAt0(s, asker1, creator1, at, tk(1000), "cid", MinAskDeadline)
 		if err != nil {
 			t.Fatalf("Ask %d: %v", i, err)
 		}
@@ -228,7 +228,7 @@ func TestDecline_WindowAndAuth(t *testing.T) {
 	s, at := dgSetup(t)
 
 	// Not the creator.
-	res, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), "cid", MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, at, tk(1000), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -302,11 +302,11 @@ func TestDelivery_PenaltyNeverBlocksPayingTheSubscription(t *testing.T) {
 // only would move the lever rather than remove it.
 func TestDelivery_SelfDealtEscrowsCountForNeitherSide(t *testing.T) {
 	s, at := dgSetup(t)
-	setMoney(s, kBal(creator1, creator1), big.NewInt(500_000))
+	setMoney(s, kBal(creator1, creator1), tk(500_000))
 
 	// The creator asks their OWN market and declines, repeatedly.
 	for i := 0; i < 10; i++ {
-		res, err := askAt0(s, creator1, creator1, at, big.NewInt(1000), "self", MinAskDeadline)
+		res, err := askAt0(s, creator1, creator1, at, tk(1000), "self", MinAskDeadline)
 		if err != nil {
 			t.Fatalf("self-ask %d: %v", i, err)
 		}
@@ -460,10 +460,10 @@ func TestDelivery_GriefingCostsTheAskerTheMissSlice(t *testing.T) {
 // non-event, and would let anyone quietly tax a creator's own housekeeping.
 func TestDelivery_SelfDealtReclaimIsNotAMissAndPaysNoSlice(t *testing.T) {
 	s, at := dgSetup(t)
-	setMoney(s, kBal(creator1, creator1), big.NewInt(500_000))
+	setMoney(s, kBal(creator1, creator1), tk(500_000))
 	treasuryBefore := getMoney(s, kTreasury())
 
-	res, err := askAt0(s, creator1, creator1, at, big.NewInt(1000), "cid", MinAskDeadline)
+	res, err := askAt0(s, creator1, creator1, at, tk(1000), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("self Ask: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestDelivery_StaleOffencesConvictForAnAlreadyExpiredWindow(t *testing.T) {
 	// Three asks that all expire early, and are then left alone.
 	seqs := make([]uint64, 0, 3)
 	for i := 0; i < 3; i++ {
-		res, err := askAt0(s, asker1, creator1, at+uint64(i), big.NewInt(1000), "cid", MinAskDeadline)
+		res, err := askAt0(s, asker1, creator1, at+uint64(i), tk(1000), "cid", MinAskDeadline)
 		if err != nil {
 			t.Fatalf("Ask %d: %v", i, err)
 		}
@@ -548,7 +548,7 @@ func TestDelivery_PenaltyWindowIsIndependentOfReclaimOrder(t *testing.T) {
 			// Spread the asks a day apart so the offences are genuinely
 			// different blocks; otherwise the test proves nothing.
 			askAt := at + uint64(i)*BlocksPerDay
-			res, err := askAt0(s, asker1, creator1, askAt, big.NewInt(1000), "cid", MinAskDeadline)
+			res, err := askAt0(s, asker1, creator1, askAt, tk(1000), "cid", MinAskDeadline)
 			if err != nil {
 				t.Fatalf("Ask %d: %v", i, err)
 			}

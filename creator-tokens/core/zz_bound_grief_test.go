@@ -53,12 +53,12 @@ func zbFloodVictim(t *testing.T, c string, pile int64, gifts int) (s *MemStore, 
 	attackerCost = mZero()
 	for i := 0; i < gifts; i++ {
 		blk := t1 + uint64(i)
-		r, err := Buy(s, "attacker", c, blk, big.NewInt(1))
+		r, err := Buy(s, "attacker", c, blk, tk(1))
 		if err != nil {
 			t.Fatalf("attacker buy #%d: %v", i, err)
 		}
 		attackerCost = mAdd(attackerCost, r.Cost)
-		if err := TransferCredits(s, "attacker", c, "attacker", "victim", blk, big.NewInt(1)); err != nil {
+		if err := TransferCredits(s, "attacker", c, "attacker", "victim", blk, tk(1)); err != nil {
 			t.Fatalf("attacker gift #%d: %v", i, err)
 		}
 		last = blk
@@ -115,7 +115,7 @@ func TestZZBound_FloodCannotReAgeVictimPile(t *testing.T) {
 	// THE COHORT TERM'S CEILING: with the aged pile still at 0 bps, the whole
 	// cohort charge can be no more than the FULL rate on the gifted tokens' own
 	// top slice. If a merge had re-aged the pile this would blow past it.
-	giftSlice, _ := SellProceeds(supply, big.NewInt(gifts))
+	giftSlice, _ := SellProceeds(supply, tk(gifts))
 	giftCap := ExitTaxOn(giftSlice, MaxExitTaxBps)
 	// ExitTaxOn CEILs PER COHORT, so the gifted tokens spread over up to MaxLots
 	// cohorts pay up to MaxLots base units (0.001 HBD each) of ceil padding above

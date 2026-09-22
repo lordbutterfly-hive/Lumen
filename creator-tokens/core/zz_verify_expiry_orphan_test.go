@@ -33,10 +33,10 @@ func TestZZVerifyExpiry_NoOrphanNoDoubleCount(t *testing.T) {
 		t.Fatal("graduate h2")
 	}
 	mustBuy(t, s, c, h1, t1, 200) // fresh cohort on h1's cleared ledger
-	if err := TransferMatured(s, c, h1, h3, h1, big.NewInt(100)); err != nil {
+	if err := TransferMatured(s, c, h1, h3, h1, tk(100)); err != nil {
 		t.Fatalf("h1 TransferMatured -> h3: %v", err)
 	}
-	if err := TransferCredits(s, h2, c, h2, h3, t1, big.NewInt(150)); err != nil { // matured leg
+	if err := TransferCredits(s, h2, c, h2, h3, t1, tk(150)); err != nil { // matured leg
 		t.Fatalf("h2 TransferCredits -> h3: %v", err)
 	}
 
@@ -103,7 +103,7 @@ func TestZZVerifyExpiry_NoOrphanNoDoubleCount(t *testing.T) {
 
 func mustBuy(t *testing.T, s Store, c, h string, block uint64, n int64) {
 	t.Helper()
-	if _, err := Buy(s, h, c, block, big.NewInt(n)); err != nil {
+	if _, err := Buy(s, h, c, block, tk(n)); err != nil {
 		t.Fatalf("Buy(%s, %d @ %d): %v", h, n, block, err)
 	}
 }

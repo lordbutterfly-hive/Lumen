@@ -40,7 +40,7 @@ func TestSell_ChunkingCannotEvade(t *testing.T) {
 		t.Helper()
 		s := NewMemStore()
 		c := "crea"
-		if err := Register(s, c, c, 1000, 1000, 1_000_000_000); err != nil {
+		if err := Register(s, c, c, 1000, 1000, 1_000_000_000*TokenScale); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := Buy(s, "whale", c, 1000, big.NewInt(W)); err != nil {
@@ -117,12 +117,12 @@ func TestSell_ChunkingCannotEvade(t *testing.T) {
 	// dodged fraction: q.Tax == ExitTaxOn(q.Gross, τ), exactly.
 	s := NewMemStore()
 	c := "crea2"
-	if err := Register(s, c, c, 1000, 1000, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, 1000, 1000, 1_000_000_000*TokenScale); err != nil {
 		t.Fatal(err)
 	}
-	Buy(s, "a", c, 1000, big.NewInt(100))
-	Buy(s, "b", c, 1000, big.NewInt(100))
-	q, _ := QuoteSell(s, "a", c, 1001, big.NewInt(100))
+	Buy(s, "a", c, 1000, tk(100))
+	Buy(s, "b", c, 1000, tk(100))
+	q, _ := QuoteSell(s, "a", c, 1001, tk(100))
 	if q.Tax.Cmp(ExitTaxOn(q.Gross, q.TaxBps)) != 0 {
 		t.Fatalf("single sale tax %s != ExitTaxOn(gross %s, %d) — the gross tax has no cap", q.Tax, q.Gross, q.TaxBps)
 	}
@@ -139,7 +139,7 @@ func TestSell_ET1_Fuzz_ChunkNeverBeatsSingle(t *testing.T) {
 		run := func(splits []int64) *big.Int {
 			s := NewMemStore()
 			c := "c"
-			if err := Register(s, c, c, 1000, 1000, 1_000_000_000); err != nil {
+			if err := Register(s, c, c, 1000, 1000, 1_000_000_000*TokenScale); err != nil {
 				t.Fatal(err)
 			}
 			Buy(s, "w", c, 1000, big.NewInt(W))
@@ -184,23 +184,23 @@ func TestAsk_ET2_UnansweredEscrowPreservesClock(t *testing.T) {
 		c := "alice"
 		base := uint64(8_000_000)
 		// face 9065 -> ceil(face/1813)==5 credits at the seeded rate
-		if err := Register(s, c, c, base, 9065, 1_000_000_000); err != nil {
+		if err := Register(s, c, c, base, 9065, 1_000_000_000*TokenScale); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Buy(s, "whale", c, base, big.NewInt(100)); err != nil {
+		if _, err := Buy(s, "whale", c, base, tk(100)); err != nil {
 			t.Fatal(err)
 		}
 		resetObsRings(s, c)
 		for i := uint64(1); i < 16; i++ {
-			RecordObs(s, c, base+i*LongObsSpacing, SpotRate(big.NewInt(100)))
+			RecordObs(s, c, base+i*LongObsSpacing, SpotRate(tk(100)))
 		}
 		q := base + 15*LongObsSpacing + 50
-		if _, err := Buy(s, "fan", c, q, big.NewInt(5)); err != nil {
+		if _, err := Buy(s, "fan", c, q, tk(5)); err != nil {
 			t.Fatal(err)
 		}
 		rq := q + 1 + MinAskDeadline + ReclaimGrace + 1
 		if ask {
-			ar, err := askAt0(s, "fan", c, q+1, big.NewInt(5), "cid", MinAskDeadline)
+			ar, err := askAt0(s, "fan", c, q+1, tk(5), "cid", MinAskDeadline)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -208,10 +208,10 @@ func TestAsk_ET2_UnansweredEscrowPreservesClock(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if _, err := Sell(s, "whale", c, rq+1, big.NewInt(80)); err != nil {
+		if _, err := Sell(s, "whale", c, rq+1, tk(80)); err != nil {
 			t.Fatal(err) // crash the market
 		}
-		r, err := Sell(s, "fan", c, rq+2, big.NewInt(5))
+		r, err := Sell(s, "fan", c, rq+2, tk(5))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -244,21 +244,21 @@ func TestAsk_ET2_ClockConservedThroughReclaim(t *testing.T) {
 	s := NewMemStore()
 	c := "alice"
 	base := uint64(8_000_000)
-	if err := Register(s, c, c, base, 9065, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, base, 9065, 1_000_000_000*TokenScale); err != nil {
 		t.Fatal(err)
 	}
-	Buy(s, "whale", c, base, big.NewInt(100))
+	Buy(s, "whale", c, base, tk(100))
 	resetObsRings(s, c)
 	for i := uint64(1); i < 16; i++ {
-		RecordObs(s, c, base+i*LongObsSpacing, SpotRate(big.NewInt(100)))
+		RecordObs(s, c, base+i*LongObsSpacing, SpotRate(tk(100)))
 	}
 	q := base + 15*LongObsSpacing + 50
-	Buy(s, "fan", c, q, big.NewInt(5))
+	Buy(s, "fan", c, q, tk(5))
 	acqBefore := holderAcqBlock(s, c, "fan")
 
 	// Ask escrows everything, then RECLAIM (unanswered): the clock returns
 	// exactly (age-neutral).
-	ar, err := askAt0(s, "fan", c, q+1, big.NewInt(5), "cid", MinAskDeadline)
+	ar, err := askAt0(s, "fan", c, q+1, tk(5), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,14 +280,14 @@ func TestSettlement_SET1_BusyMarketStillPrices(t *testing.T) {
 	s := NewMemStore()
 	c := "alice"
 	base := uint64(8_000_000)
-	if err := Register(s, c, c, base, 1_000_000, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, base, 1_000_000, 1_000_000_000*TokenScale); err != nil {
 		t.Fatal(err)
 	}
 	// A market at a stable supply with a constant price history — so the ONLY
 	// thing under test is the SPAN condition (the SET-1 bug), never the
 	// median-deviation guard (a separate, legitimate refusal).
 	curveMarket(s, c, 1000)
-	q0 := seedSettleObs(s, c, base, SpotRate(big.NewInt(1000)))
+	q0 := seedSettleObs(s, c, base, SpotRate(tk(1000)))
 	if _, err := SettlementRate(s, c, q0); err != nil {
 		t.Fatalf("baseline settlement refused: %v", err)
 	}
@@ -302,11 +302,11 @@ func TestSettlement_SET1_BusyMarketStillPrices(t *testing.T) {
 	// (1000/1001), so the median guard never fires — SPAN is the sole subject.
 	blk := q0 + 100
 	for i := 0; i < 200; i++ {
-		if _, err := Buy(s, "grief", c, blk, big.NewInt(1)); err != nil {
+		if _, err := Buy(s, "grief", c, blk, tk(1)); err != nil {
 			t.Fatal(err)
 		}
 		blk += 5
-		if _, err := Sell(s, "grief", c, blk, big.NewInt(1)); err != nil {
+		if _, err := Sell(s, "grief", c, blk, tk(1)); err != nil {
 			t.Fatal(err)
 		}
 		blk += 5
@@ -352,11 +352,11 @@ func TestSettlement_SET2_MinFaceClearsC4Floor(t *testing.T) {
 	s := NewMemStore()
 	c := "alice"
 	base := uint64(8_000_000)
-	if err := Register(s, c, c, base, 1000, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, base, 1000, 1_000_000_000*TokenScale); err != nil {
 		t.Fatal(err)
 	}
 	curveMarket(s, c, 100)
-	q := seedSettleObs(s, c, base, SpotRate(big.NewInt(100)))
+	q := seedSettleObs(s, c, base, SpotRate(tk(100)))
 	loSmall, hiSmall, err := ServiceFaceRange(s, c, q)
 	if err != nil {
 		t.Fatal(err)
@@ -376,7 +376,7 @@ func TestSettlement_SET2_MinFaceClearsC4Floor(t *testing.T) {
 	// finding demands be surfaced): a face legal today can go dead purely
 	// because the market appreciated.
 	curveMarket(s, c, 2000)
-	seedSettleObs(s, c, base, SpotRate(big.NewInt(2000)))
+	seedSettleObs(s, c, base, SpotRate(tk(2000)))
 	q2 := base + (stObsCount-1)*LongObsSpacing + 50
 	loBig, _, err := ServiceFaceRange(s, c, q2)
 	if err != nil {
@@ -397,11 +397,11 @@ func TestSettlement_SET3_SmallSupplyStillPrices(t *testing.T) {
 		s := NewMemStore()
 		c := "alice"
 		base := uint64(8_000_000)
-		if err := Register(s, c, c, base, 1_000_000, 1_000_000_000); err != nil {
+		if err := Register(s, c, c, base, 1_000_000, 1_000_000_000*TokenScale); err != nil {
 			t.Fatal(err)
 		}
 		curveMarket(s, c, S)
-		rate := SpotRate(big.NewInt(S))
+		rate := SpotRate(tk(S))
 		seedSettleObs(s, c, base, rate)
 		q := base + (stObsCount-1)*LongObsSpacing + 50
 		// The cheapest POSTED face the contract itself declares legal — asking
@@ -439,11 +439,11 @@ func TestSettlement_SET3_SmallSupplyStillPrices(t *testing.T) {
 	s := NewMemStore()
 	c := "alice"
 	base := uint64(8_000_000)
-	if err := Register(s, c, c, base, 1_000_000, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, base, 1_000_000, 1_000_000_000*TokenScale); err != nil {
 		t.Fatal(err)
 	}
 	curveMarket(s, c, 20)
-	rate := SpotRate(big.NewInt(20))
+	rate := SpotRate(tk(20))
 	seedSettleObs(s, c, base, rate)
 	q := base + (stObsCount-1)*LongObsSpacing + 50
 	// face that costs 2 credits: 2*rate - 1
@@ -452,7 +452,7 @@ func TestSettlement_SET3_SmallSupplyStillPrices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("v5: a 2-credit spend at S=20 must price, got: %v", err)
 	}
-	if quote2.Credits.Cmp(big.NewInt(2)) != 0 {
+	if quote2.Credits.Cmp(tk(2)) != 0 {
 		t.Fatalf("v5: expected a 2-credit spend at S=20, got %s", quote2.Credits)
 	}
 }
@@ -476,9 +476,9 @@ func TestRefundHolder_EXITTAX1_FreshPushRefused(t *testing.T) {
 	const victim = "victimfan"
 	const griefer = "griefer1"
 
-	setMoney(s, kSupply(creator), big.NewInt(10000))
+	setMoney(s, kSupply(creator), tk(10000))
 	setMoney(s, kReserve(creator), big.NewInt(10_000_000))
-	setMoney(s, kBal(creator, victim), big.NewInt(1000)) // 10% of supply
+	setMoney(s, kBal(creator, victim), tk(1000)) // 10% of supply
 	setU64(s, kAcqBlock(creator, victim), 200000)        // a genuine, fresh hold clock
 
 	// Never Registered => kPaidUntil == 0 => FROZEN for any block >= GraceBlocks,
@@ -509,7 +509,7 @@ func TestRefundHolder_EXITTAX1_FreshPushRefused(t *testing.T) {
 	// at exactly their own hold-clock rate: gross 1,000,000, 15% tax 150,000,
 	// net 850,000. This is the accepted RULING K2 cost of THEIR OWN choice to
 	// exit early; what EXITTAX-1 forbids is a STRANGER imposing it.
-	selfNet, err := Refund(s, victim, creator, pushBlock, big.NewInt(1000))
+	selfNet, err := Refund(s, victim, creator, pushBlock, tk(1000))
 	if err != nil {
 		t.Fatalf("EXITTAX-1: the holder's OWN self-Refund must still work: %v", err)
 	}
@@ -545,9 +545,9 @@ func TestRefundHolder_EXITTAX1_AgedPushAllowedAndDodgeClosed(t *testing.T) {
 	const whale = "freshwhale"
 	const ally = "whaleally"
 
-	setMoney(s, kSupply(creator), big.NewInt(10000))
+	setMoney(s, kSupply(creator), tk(10000))
 	setMoney(s, kReserve(creator), big.NewInt(10_000_000))
-	setMoney(s, kBal(creator, whale), big.NewInt(9000)) // dominant, 90% of supply
+	setMoney(s, kBal(creator, whale), tk(9000)) // dominant, 90% of supply
 	setU64(s, kAcqBlock(creator, whale), 1_000_000)     // fresh at the wind-down
 
 	// (4) DODGE CLOSED — the whale's ally cannot push the fresh whale out at 0 tax.
@@ -598,9 +598,9 @@ func TestRefundHolder_NOTICE1_FreshPushRefusedDuringRetireNotice(t *testing.T) {
 	const griefer = "noticegriefer"
 
 	setupMarket(s, creator, 100000, MaxCap) // Registered, comfortably ACTIVE
-	setMoney(s, kSupply(creator), big.NewInt(10000))
+	setMoney(s, kSupply(creator), tk(10000))
 	setMoney(s, kReserve(creator), big.NewInt(10_000_000))
-	setMoney(s, kBal(creator, victim), big.NewInt(1000))
+	setMoney(s, kBal(creator, victim), tk(1000))
 	setU64(s, kAcqBlock(creator, victim), 200000) // a fresh fan
 
 	// Creator retires -> the 5-day notice opens. During it Phase is OVERDUE, but
@@ -629,7 +629,7 @@ func TestRefundHolder_NOTICE1_FreshPushRefusedDuringRetireNotice(t *testing.T) {
 
 	// The fan is NOT trapped — their own self-Refund works during the notice,
 	// taxed at their own clock (their choice): gross 1,000,000, 15% → net 850,000.
-	selfNet, err := Refund(s, victim, creator, noticeBlock, big.NewInt(1000))
+	selfNet, err := Refund(s, victim, creator, noticeBlock, tk(1000))
 	if err != nil {
 		t.Fatalf("NOTICE-1: the fan's own self-Refund must work during the notice: %v", err)
 	}

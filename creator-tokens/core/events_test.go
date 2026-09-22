@@ -396,7 +396,7 @@ func TestEvBlockSeqDeadlineAreAlwaysBareNumbers(t *testing.T) {
 
 func TestRegisterWithFirstBuy_FirstBuyResultDrivesBothEvents(t *testing.T) {
 	s := NewMemStore()
-	res, err := RegisterWithFirstBuy(s, "aliceperry", "aliceperry", 100, 5000, 1_000_000, big.NewInt(100))
+	res, err := RegisterWithFirstBuy(s, "aliceperry", "aliceperry", 100, 5000, 1_000_000, tk(100))
 	if err != nil {
 		t.Fatalf("RegisterWithFirstBuy: %v", err)
 	}
@@ -427,7 +427,7 @@ func TestRegisterWithFirstBuy_FirstBuyResultDrivesBothEvents(t *testing.T) {
 	// market — proving cost/fee/totalDue are not just "present" but the
 	// numerically correct values a real Buy of this size would have produced
 	// (do not guess which field is cost vs fee vs totalDue — read buy.go).
-	wantCost := BuyCost(mZero(), big.NewInt(100))
+	wantCost := BuyCost(mZero(), tk(100))
 	wantFee, _, _ := tradeFeeOn(wantCost)
 	wantTotalDue := mAdd(wantCost, wantFee)
 	wantStr(t, boughtM, "cost", wantCost.String())
@@ -460,7 +460,7 @@ func TestRegisterWithFirstBuy_PlainRegistration_FirstBuyResultIsNil(t *testing.T
 	// registration case, so the gate must stay closed for zero too, not just
 	// for nil.
 	s2 := NewMemStore()
-	res2, err := RegisterWithFirstBuy(s2, "carolcreator", "carolcreator", 100, 5000, 1_000_000, big.NewInt(0))
+	res2, err := RegisterWithFirstBuy(s2, "carolcreator", "carolcreator", 100, 5000, 1_000_000, tk(0))
 	if err != nil {
 		t.Fatalf("RegisterWithFirstBuy(firstBuy=0): %v", err)
 	}

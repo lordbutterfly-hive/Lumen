@@ -17,10 +17,10 @@ func TestZZVerifyExpiry_MixedThenFullyMatured(t *testing.T) {
 	at := b2 + tbWindow         // BOTH cohorts are past the window here
 	tbKeepPaid(t, s, c, b1, at) // keep ACTIVE across the whole span
 
-	if _, err := Buy(s, h, c, b1, big.NewInt(400)); err != nil {
+	if _, err := Buy(s, h, c, b1, tk(400)); err != nil {
 		t.Fatalf("buy aged cohort: %v", err)
 	}
-	if _, err := Buy(s, h, c, b2, big.NewInt(100)); err != nil {
+	if _, err := Buy(s, h, c, b2, tk(100)); err != nil {
 		t.Fatalf("buy fresh cohort: %v", err)
 	}
 
@@ -31,7 +31,7 @@ func TestZZVerifyExpiry_MixedThenFullyMatured(t *testing.T) {
 	if got := zvSumLotsRaw(s, c, h); got.Cmp(big.NewInt(500)) != 0 {
 		t.Fatalf("Σlots=%s want 500 (==kBal)", got)
 	}
-	if MaturingOf(s, c, h).Cmp(big.NewInt(500)) != 0 {
+	if MaturingOf(s, c, h).Cmp(tk(500)) != 0 {
 		t.Fatalf("maturing=%s want 500", MaturingOf(s, c, h))
 	}
 
@@ -65,12 +65,12 @@ func TestZZVerifyExpiry_MixedThenFullyMatured(t *testing.T) {
 	if zvHasLots(s, c, h) {
 		t.Fatalf("ORPHAN: ledger survived graduation of a mixed position: %q", zvLotsStr(s, c, h))
 	}
-	if MaturedOf(s, c, h).Cmp(big.NewInt(500)) != 0 {
+	if MaturedOf(s, c, h).Cmp(tk(500)) != 0 {
 		t.Fatalf("matured=%s want 500", MaturedOf(s, c, h))
 	}
 
 	// SELL THE WHOLE 500 — zero tax on the entire (formerly mixed) position.
-	r, err := Sell(s, h, c, at, big.NewInt(500))
+	r, err := Sell(s, h, c, at, tk(500))
 	if err != nil {
 		t.Fatalf("full sell refused: %v", err)
 	}

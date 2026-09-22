@@ -87,7 +87,7 @@ func TestGRAD_1_StuckRipeCohort(t *testing.T) {
 	if got := MaturedOf(s, c, "whale"); got.Cmp(big.NewInt(aged)) != 0 {
 		t.Fatalf("balanceOf still %s after graduating", got)
 	}
-	if err := TransferMatured(s, c, "whale", "bob", "whale", big.NewInt(1)); err != nil {
+	if err := TransferMatured(s, c, "whale", "bob", "whale", tk(1)); err != nil {
 		t.Fatalf("TransferMatured still refused: %v", err)
 	}
 	t.Logf("  ABI balanceOf now = %s ; safeTransferFrom(1) SUCCEEDS", MaturedOf(s, c, "whale"))
@@ -192,7 +192,7 @@ func TestGRAD_3_MoneyUnchangedOnEveryRail(t *testing.T) {
 						t.Fatalf("TransferCredits: %v", err)
 					}
 					// and what bob then owes selling all of it
-					q, err := QuoteSell(s, "bob", c, blk, big.NewInt(k))
+					q, err := QuoteSell(s, "bob", c, blk, tk(k))
 					if err != nil {
 						t.Fatalf("QuoteSell(bob): %v", err)
 					}
@@ -295,7 +295,7 @@ func TestGRAD_4_EscrowRailMoney(t *testing.T) {
 					}
 				}
 				setMoney(st, kFace(c), face)
-				ar, err := Ask(st, h, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(1_000_000)), "cid", MinAskDeadline, 0)
+				ar, err := Ask(st, h, c, askBlock, new(big.Int).Mul(q.Credits, tk(1_000_000)), "cid", MinAskDeadline, 0)
 				if err != nil {
 					t.Fatal(err)
 				}

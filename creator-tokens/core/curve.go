@@ -220,25 +220,95 @@ func curveSpotRateIn(S, base, lin, quad, den *big.Int) *big.Int {
 // reserve holds exactly what the curve owes and not a unit more, so no
 // unallocated pot ever forms and a flat pro-rata wind-down is provably
 // unprofitable for every fresh buyer at every size and every wait.
-func Area(S *big.Int) *big.Int {
+// ---------------------------------------------------------------------------
+// v6 UNITS (OWNER RULING 2026-09-22, params.go "TOKEN UNIT"). The exported
+// API below takes and returns UNITS of supply (TokenScale per token), while
+// the ruled schedule above stays defined per WHOLE token, exactly as RULING I
+// wrote it. The bridge is D4 of the v6 spec: within one token the price is
+// spread evenly over its TokenScale units, so for u = TokenScale*S + r
+//
+//	AreaUnits(u) = Area(S) + floor(r * (Area(S+1) - Area(S)) / TokenScale)
+//
+// which is Area(S) exactly at every whole boundary (r == 0). That equality is
+// what lets the reserve stay untouched through the migration: R === Area held
+// for every reachable state before v6, and it still holds afterwards because
+// the migrated supply is TokenScale*S and AreaUnits(TokenScale*S) == Area(S).
+// Buying or selling any number of units telescopes through AreaUnits, so path
+// independence (L3/L4) holds by construction; the single floor per partial
+// token is the only new rounding and it favours the reserve.
+// ---------------------------------------------------------------------------
+
+// curveAreaUnitsIn is AreaUnits over the given constants.
+func curveAreaUnitsIn(u, base, lin, quad, den *big.Int) *big.Int {
+	if u.Sign() <= 0 {
+		return mZero()
+	}
+	S, r := new(big.Int).DivMod(u, unitsScale, new(big.Int))
+	area := curveAreaIn(S, base, lin, quad, den)
+	if r.Sign() == 0 {
+		return area
+	}
+	next := curveAreaIn(new(big.Int).Add(S, big.NewInt(1)), base, lin, quad, den)
+	step := next.Sub(next, area) // the exact price of the token being filled
+	part := new(big.Int).Mul(step, r)
+	part.Div(part, unitsScale) // floor: the reserve keeps the fraction
+	return area.Add(area, part)
+}
+
+// Unit-aware cost and proceeds over explicit constants, for the fuzz models
+// that drive the curve with their own calibration.
+func curveBuyCostUnitsIn(u, n, base, lin, quad, den *big.Int) *big.Int {
+	up := curveAreaUnitsIn(new(big.Int).Add(u, n), base, lin, quad, den)
+	return up.Sub(up, curveAreaUnitsIn(u, base, lin, quad, den))
+}
+
+func curveSellProceedsUnitsIn(u, k, base, lin, quad, den *big.Int) (*big.Int, error) {
+	if k.Cmp(u) > 0 {
+		return nil, newErr(ErrArith, "sellProceeds: k exceeds supply")
+	}
+	out := curveAreaUnitsIn(u, base, lin, quad, den)
+	return out.Sub(out, curveAreaUnitsIn(new(big.Int).Sub(u, k), base, lin, quad, den)), nil
+}
+
+// Area is the integer reserve backing u UNITS of supply (v6). At a whole
+// boundary it is the RULING I area; see the note above.
+func Area(u *big.Int) *big.Int {
+	return curveAreaUnitsIn(u, curveBase, curveLin, curveQuad, curveDen)
+}
+
+// AreaTokens is the RULING I area over WHOLE tokens, kept for the tests and
+// proofs that speak in tokens. Area(TokenScale*S) == AreaTokens(S).
+func AreaTokens(S *big.Int) *big.Int {
 	return curveAreaIn(S, curveBase, curveLin, curveQuad, curveDen)
 }
 
 // BuyCost is the cost to mint n tokens starting from supply S — the exact
 // integer area step Area(S+n) − Area(S) (L1). Path-independent (L3).
-func BuyCost(S, n *big.Int) *big.Int {
-	return curveBuyCostIn(S, n, curveBase, curveLin, curveQuad, curveDen)
+func BuyCost(u, n *big.Int) *big.Int {
+	up := Area(new(big.Int).Add(u, n))
+	return up.Sub(up, Area(u)) // >= 0: AreaUnits is monotone in u
 }
 
 // SellProceeds is the payout for redeeming the top k tokens from supply S —
 // the exact integer area step Area(S) − Area(S−k) (L2). Path-independent
 // (L4). Errors on k > S — see curveSellProceedsIn.
-func SellProceeds(S, k *big.Int) (*big.Int, error) {
-	return curveSellProceedsIn(S, k, curveBase, curveLin, curveQuad, curveDen)
+func SellProceeds(u, k *big.Int) (*big.Int, error) {
+	if k.Cmp(u) > 0 {
+		return nil, newErr(ErrArith, "sellProceeds: k exceeds supply")
+	}
+	out := Area(u)
+	return out.Sub(out, Area(new(big.Int).Sub(u, k))), nil // >= 0 (area monotone)
 }
 
 // SpotRate is the marginal HBD-base-units-per-token rate at supply S — the
 // TWAP feed and (Wave C) the settlement input. Rounds DOWN; 0 at S == 0.
-func SpotRate(S *big.Int) *big.Int {
-	return curveSpotRateIn(S, curveBase, curveLin, curveQuad, curveDen)
+func SpotRate(u *big.Int) *big.Int {
+	if u.Sign() <= 0 {
+		return mZero()
+	}
+	// The token being filled: ceil(u / TokenScale). At a whole boundary this
+	// is S itself, so every pre-v6 observation is reproduced exactly.
+	top := new(big.Int).Add(u, big.NewInt(TokenScale-1))
+	top.Div(top, unitsScale)
+	return curveSpotRateIn(top, curveBase, curveLin, curveQuad, curveDen)
 }

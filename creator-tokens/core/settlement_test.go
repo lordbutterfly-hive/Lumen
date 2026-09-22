@@ -80,10 +80,10 @@ func stFillLong(s Store, creator string, end uint64, n uint64, rate *big.Int) {
 //	constraint implies the other, and min(TWAPs, spot) is a complete answer.
 func TestSettlement_RulingJCollapsesRateContradiction(t *testing.T) {
 	// The divergence side: the contradiction, demonstrated.
-	S := big.NewInt(100)
+	S := tk(100)
 	excess := big.NewInt(960_090_850)
 	r := mAdd(Area(S), excess)
-	valueConservation := new(big.Int).Div(r, S) // floor(R/S)
+	valueConservation := new(big.Int).Div(new(big.Int).Mul(r, unitsScale), S) // floor(R/S) per WHOLE token (v6: S is units)
 	noArbCeiling := SpotRate(S)
 	if valueConservation.Cmp(big.NewInt(9_602_315)) != 0 {
 		t.Fatalf("diverged floor(R/S) = %s, want 9,602,315 (fixture drifted)", valueConservation)
@@ -264,9 +264,13 @@ func TestSettleSpend_MinPriceGuardBoundary(t *testing.T) {
 		t.Fatalf("face·2 == rate must pass the minimum-price guard: %v", err)
 	}
 	// face 999: 1998 < 2000 — refused, and by THIS guard.
-	_, err := settleSpend(s, creator1, q, big.NewInt(999))
+	// v6: the smallest spend is one UNIT, so the guard is face >= ceil(rate / 200) = 10 here.
+	if _, err := settleSpend(s, creator1, q, big.NewInt(999)); err != nil {
+		t.Fatalf("face 999 is far above the unit floor and must price: %v", err)
+	}
+	_, err := settleSpend(s, creator1, q, big.NewInt(9))
 	if err == nil {
-		t.Fatal("face below rate/2 must refuse (a 1-token spend would overcharge >2x)")
+		t.Fatal("face below rate/200 must refuse (a 0.01-token spend would overcharge >2x)")
 	}
 	if askErrSymbol(err) != ErrState || !strings.Contains(err.Error(), "minimum-price") {
 		t.Fatalf("want the minimum-price refusal, got: %v", err)
@@ -304,8 +308,8 @@ func TestSettleSpend_DepthCeilingBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("face == area(S) must price under v5: %v", err)
 	}
-	if quote.Credits.Cmp(big.NewInt(183)) != 0 {
-		t.Fatalf("credits = %s, want 183", quote.Credits)
+	if quote.Credits.Cmp(big.NewInt(18267)) != 0 { // v6 units: 182.67 tokens, no whole-token ceil to 183
+		t.Fatalf("credits = %s, want 18267", quote.Credits)
 	}
 }
 
@@ -329,8 +333,8 @@ func TestSettleSpend_SpendCapBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an 11-credit spend on a 200-token market must price under v5: %v", err)
 	}
-	if quote.Credits.Cmp(big.NewInt(11)) != 0 {
-		t.Fatalf("credits = %s, want 11", quote.Credits)
+	if quote.Credits.Cmp(big.NewInt(1001)) != 0 { // v6 units: 10.01 tokens
+		t.Fatalf("credits = %s, want 1001", quote.Credits)
 	}
 
 	// The boundary itself, in coherent state. The cap is reachable only
@@ -348,8 +352,8 @@ func TestSettleSpend_SpendCapBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("c == exactly the supply must pass: %v", err)
 	}
-	if quote.Credits.Cmp(big.NewInt(200)) != 0 {
-		t.Fatalf("credits = %s, want 200", quote.Credits)
+	if quote.Credits.Cmp(tk(200)) != 0 {
+		t.Fatalf("credits = %s, want 200 tokens", quote.Credits)
 	}
 
 	// face 200,001 -> c == 201 > S: refused, and by THIS guard (the depth
@@ -379,8 +383,8 @@ func TestSettleSpend_KeepsCeilNeverFloor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settleSpend: %v", err)
 	}
-	if quote.Credits.Cmp(big.NewInt(1)) != 0 {
-		t.Fatalf("credits = %s, want 1 — ceil(1001/2000); a floor here would be a FREE service", quote.Credits)
+	if quote.Credits.Cmp(big.NewInt(51)) != 0 { // v6 units: ceil(1001*100/2000) = 51 (0.51 token)
+		t.Fatalf("credits = %s, want 51 — ceil(1001*100/2000); a floor here would be a FREE service", quote.Credits)
 	}
 }
 
@@ -430,7 +434,7 @@ func TestSettlementRate_C5Tripwire(t *testing.T) {
 		s := NewMemStore()
 		curveMarket(s, creator1, 100)
 		q := seedSettleObs(s, creator1, 1000, big.NewInt(1813))
-		setMoney(s, kReserve(creator1), new(big.Int).Mul(Area(big.NewInt(100)), big.NewInt(10)))
+		setMoney(s, kReserve(creator1), new(big.Int).Mul(Area(tk(100)), big.NewInt(10)))
 		_, err := SettlementRate(s, creator1, q)
 		if err == nil {
 			t.Fatal("tripwire must fire when R = 10·area(S)")
@@ -489,7 +493,7 @@ func TestSettlement_AskUsesTheRuledDerivation(t *testing.T) {
 		stFillShort(s, creator1, q-50, MinObsCount, big.NewInt(2500))
 		stFillLong(s, creator1, q-50, stObsCount, big.NewInt(1500))
 		activateMarket(s, creator1, q)
-		setMoney(s, kBal(creator1, asker1), big.NewInt(100))
+		setMoney(s, kBal(creator1, asker1), tk(100))
 		return s
 	}
 	want := big.NewInt(2500) // min(spot 2680, median(2500,1500,2680)=2500)
@@ -497,7 +501,7 @@ func TestSettlement_AskUsesTheRuledDerivation(t *testing.T) {
 
 	s := build()
 	setMoney(s, kFace(creator1), face)
-	askRes, err := askAt0(s, asker1, creator1, q, big.NewInt(2), "cid", MinAskDeadline)
+	askRes, err := askAt0(s, asker1, creator1, q, tk(2), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -536,21 +540,21 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 	if err := Register(s, creator, creator, regBlock, 10_000, MaxCap); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if _, err := Buy(s, holder1, creator, regBlock+1, big.NewInt(2000)); err != nil {
+	if _, err := Buy(s, holder1, creator, regBlock+1, tk(2000)); err != nil {
 		t.Fatalf("Buy(holder1): %v", err)
 	}
-	if _, err := Buy(s, holder2, creator, regBlock+2, big.NewInt(500)); err != nil {
+	if _, err := Buy(s, holder2, creator, regBlock+2, tk(500)); err != nil {
 		t.Fatalf("Buy(holder2): %v", err)
 	}
 
 	// A working settlement window while the market is alive (S=2500:
 	// avg_ceil 16,320 so marker 15,000 clears C5 by 4x; spot 37,093 above).
 	askBlock := seedSettleObs(s, creator, regBlock+10, big.NewInt(15_000))
-	askA, err := askAt0(s, holder1, creator, askBlock, big.NewInt(1), "to-answer", MaxAskDeadline)
+	askA, err := askAt0(s, holder1, creator, askBlock, tk(1), "to-answer", MaxAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask(to-answer): %v", err)
 	}
-	askR, err := askAt0(s, holder2, creator, askBlock, big.NewInt(1), "to-reclaim", MinAskDeadline)
+	askR, err := askAt0(s, holder2, creator, askBlock, tk(1), "to-reclaim", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask(to-reclaim): %v", err)
 	}
@@ -586,7 +590,7 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 		t.Fatal("premise broken: settlement still prices with a corrupt ring")
 	}
 	// New service inflows are refused now — that is ALL the refusal gates.
-	if _, err := askAt0(s, holder1, creator, quiet, big.NewInt(10), "refused", MinAskDeadline); err == nil {
+	if _, err := askAt0(s, holder1, creator, quiet, tk(10), "refused", MinAskDeadline); err == nil {
 		t.Fatal("premise broken: Ask succeeded while settlement refuses")
 	}
 
@@ -595,10 +599,10 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 	if got := Phase(s, creator, quiet); got != StateActive {
 		t.Fatalf("fixture: phase at quiet = %s, want ACTIVE (quiet=%d)", got, quiet)
 	}
-	if _, err := Sell(s, holder2, creator, quiet, big.NewInt(100)); err != nil {
+	if _, err := Sell(s, holder2, creator, quiet, tk(100)); err != nil {
 		t.Fatalf("OUTFLOW BLOCKED: Sell during settlement refusal: %v", err)
 	}
-	if err := TransferCredits(s, holder1, creator, holder1, holder2, quiet, big.NewInt(50)); err != nil {
+	if err := TransferCredits(s, holder1, creator, holder1, holder2, quiet, tk(50)); err != nil {
 		t.Fatalf("OUTFLOW BLOCKED: TransferCredits during settlement refusal: %v", err)
 	}
 	if _, err := Answer(s, creator, creator, quiet, askA.Seq, "answered-late"); err != nil {
@@ -631,10 +635,10 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 	}
 	// At the frozen block the rate itself may exist (spot always does now);
 	// what is shut is the INFLOW door. The premise is that no new ask lands.
-	if _, err := askAt0(s, holder1, creator, frozen, big.NewInt(1), "frozen-ask", MinAskDeadline); err == nil {
+	if _, err := askAt0(s, holder1, creator, frozen, tk(1), "frozen-ask", MinAskDeadline); err == nil {
 		t.Fatal("premise broken: Ask succeeded at the frozen block")
 	}
-	if payout, err := Refund(s, holder2, creator, frozen, big.NewInt(10)); err != nil || payout.Sign() <= 0 {
+	if payout, err := Refund(s, holder2, creator, frozen, tk(10)); err != nil || payout.Sign() <= 0 {
 		t.Fatalf("OUTFLOW BLOCKED: Refund during settlement refusal: payout=%v err=%v", payout, err)
 	}
 	if payout, err := RefundHolder(s, "anyonepushing", creator, holder1, frozen); err != nil || payout.Sign() <= 0 {

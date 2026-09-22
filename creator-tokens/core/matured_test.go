@@ -2,7 +2,6 @@ package core
 
 import (
 	"bytes"
-	"math/big"
 	"testing"
 )
 
@@ -76,7 +75,7 @@ func TestMatured_CodecRefusesOverlongValue(t *testing.T) {
 // state behind on every fully-sold position.
 func TestMatured_ZeroDeletesTheKeyRatherThanStoringIt(t *testing.T) {
 	s := NewMemStore()
-	setMatured(s, "hive:alice", "hive:bob", big.NewInt(5))
+	setMatured(s, "hive:alice", "hive:bob", tk(5))
 	if _, ok := s.Get(kMatured("hive:bob", "hive:alice")); !ok {
 		t.Fatal("setup: nonzero write did not land")
 	}
@@ -141,7 +140,7 @@ func TestMatured_GraduatesAtTheWindowAndNotBefore(t *testing.T) {
 	const c, h = "hive:alice", "hive:bob"
 	const buyBlock = 1_000_000
 
-	creditInflow(s, c, h, big.NewInt(500), buyBlock)
+	creditInflow(s, c, h, tk(500), buyBlock)
 
 	if maturedNow(s, c, h, buyBlock+ExitTaxDecayBlocks-1) {
 		t.Fatal("matured one block early — that token still owes tax and must not be transferable")
@@ -160,20 +159,20 @@ func TestMatured_GraduatesAtTheWindowAndNotBefore(t *testing.T) {
 	}
 
 	moved := graduate(s, c, h, at)
-	if moved.Cmp(big.NewInt(500)) != 0 {
+	if moved.Cmp(tk(500)) != 0 {
 		t.Fatalf("graduated %s, want the whole 500", moved.String())
 	}
 	if getMoney(s, kBal(c, h)).Sign() != 0 {
 		t.Fatal("maturing bucket must be empty after graduation")
 	}
-	if getMatured(s, c, h).Cmp(big.NewInt(500)) != 0 {
+	if getMatured(s, c, h).Cmp(tk(500)) != 0 {
 		t.Fatal("matured bucket must hold the graduated tokens")
 	}
 	if _, ok := s.Get(kAcqBlock(c, h)); ok {
 		t.Fatal("the hold clock must be cleared — a stale clock on an empty maturing " +
 			"balance would make the next buy look older than it is")
 	}
-	if totalBalance(s, c, h).Cmp(big.NewInt(500)) != 0 {
+	if totalBalance(s, c, h).Cmp(tk(500)) != 0 {
 		t.Fatal("graduation must conserve the holder's total position exactly")
 	}
 }
@@ -184,7 +183,7 @@ func TestMatured_GraduatesAtTheWindowAndNotBefore(t *testing.T) {
 func TestMatured_GraduationConservesAndIsIdempotent(t *testing.T) {
 	s := NewMemStore()
 	const c, h = "hive:alice", "hive:bob"
-	creditInflow(s, c, h, big.NewInt(700), 1_000_000)
+	creditInflow(s, c, h, tk(700), 1_000_000)
 	at := uint64(1_000_000 + ExitTaxDecayBlocks)
 
 	before := totalBalance(s, c, h)
@@ -194,7 +193,7 @@ func TestMatured_GraduationConservesAndIsIdempotent(t *testing.T) {
 	if after := totalBalance(s, c, h); after.Cmp(before) != 0 {
 		t.Fatalf("total moved from %s to %s across repeated graduation", before, after)
 	}
-	if getMatured(s, c, h).Cmp(big.NewInt(700)) != 0 {
+	if getMatured(s, c, h).Cmp(tk(700)) != 0 {
 		t.Fatal("repeated graduation must not multiply the matured balance")
 	}
 }
@@ -204,7 +203,7 @@ func TestMatured_GraduationConservesAndIsIdempotent(t *testing.T) {
 func TestMatured_UnclockedBalanceIsNeverMatured(t *testing.T) {
 	s := NewMemStore()
 	const c, h = "hive:alice", "hive:bob"
-	setMoney(s, kBal(c, h), big.NewInt(100)) // deliberately outside the chokepoints
+	setMoney(s, kBal(c, h), tk(100)) // deliberately outside the chokepoints
 	if maturedNow(s, c, h, 9_000_000) {
 		t.Fatal("a balance with no clock must not be treated as matured — the zero-value " +
 			"convention is maximally FRESH, and the treasury-favouring direction")

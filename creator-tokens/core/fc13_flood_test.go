@@ -39,13 +39,13 @@ func TestFC13_FloodedCreatorFundsUntouched(t *testing.T) {
 	// accused of touching: a claimable trade-fee pot and their own token
 	// holding. (dgSetup already set the curve reserve via curveMarket.)
 	setMoney(s, kFeeBal(creator1), big.NewInt(4242))
-	setMoney(s, kBal(creator1, creator1), big.NewInt(7777))
+	setMoney(s, kBal(creator1, creator1), tk(7777))
 
 	// A genuine paying customer's ask, placed BEFORE the flood, that will still
 	// be in flight when the creator is frozen — the realistic straddle. It is an
 	// inflow, so it must be accepted here, while the creator is still in good
 	// standing.
-	inflight, err := askAt0(s, asker1, creator1, at, big.NewInt(1000), "realcustomer", MaxAskDeadline)
+	inflight, err := askAt0(s, asker1, creator1, at, tk(1000), "realcustomer", MaxAskDeadline)
 	if err != nil {
 		t.Fatalf("in-flight customer ask (pre-flood): %v", err)
 	}
@@ -112,7 +112,7 @@ func TestFC13_FloodedCreatorFundsUntouched(t *testing.T) {
 	if _, err := Answer(s, creator1, creator1, at, inflight.Seq, "ans"); err != nil {
 		t.Fatalf("frozen creator could not ANSWER the in-flight paying customer — the flood trapped a live escrow: %v", err)
 	}
-	if _, err := Sell(s, asker1, creator1, at, big.NewInt(10)); err != nil {
+	if _, err := Sell(s, asker1, creator1, at, tk(10)); err != nil {
 		t.Fatalf("frozen creator's market refused a holder's SELL — an outflow was gated by delinquency: %v", err)
 	}
 	if _, err := ClaimTradeFees(s, creator1); err != nil {

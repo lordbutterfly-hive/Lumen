@@ -171,7 +171,7 @@ func TestXL_LaunderClosedAtEveryHopCount(t *testing.T) {
 				holder = next
 			}
 		}
-		q, err := QuoteSell(s, holder, c, t1, big.NewInt(M))
+		q, err := QuoteSell(s, holder, c, t1, tk(M))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -245,17 +245,17 @@ func TestXL_LaunderClosedThroughAnAlreadyAgedMule(t *testing.T) {
 	pfBuy(t, s, "alt", c, t1, 50_000)
 
 	ctl := hzCloneStore(s)
-	qCtl, err := QuoteSell(ctl, "alt", c, t1, big.NewInt(50_000))
+	qCtl, err := QuoteSell(ctl, "alt", c, t1, tk(50_000))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(50_000)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(50_000)); err != nil {
 		t.Fatal(err)
 	}
-	if err := TransferCredits(s, "whale", c, "whale", "mule", t1, big.NewInt(50_000)); err != nil {
+	if err := TransferCredits(s, "whale", c, "whale", "mule", t1, tk(50_000)); err != nil {
 		t.Fatal(err)
 	}
-	q, err := QuoteSell(s, "mule", c, t1, big.NewInt(50_000))
+	q, err := QuoteSell(s, "mule", c, t1, tk(50_000))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestXL_GraduateNeverClearsAGreenCohort(t *testing.T) {
 		pfMarket(t, s, c, t1+3*ExitTaxDecayBlocks)
 		pfBuy(t, s, "whale", c, t0, N)
 		pfBuy(t, s, "alt", c, t1, 1000)
-		if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(1000)); err != nil {
+		if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(1000)); err != nil {
 			t.Fatal(err)
 		}
 		// The block at which the BLENDED clock first reads "matured".
@@ -293,9 +293,9 @@ func TestXL_GraduateNeverClearsAGreenCohort(t *testing.T) {
 			}
 		}
 		gb := lo
-		qB, _ := QuoteSell(s, "whale", c, gb, big.NewInt(1000))
+		qB, _ := QuoteSell(s, "whale", c, gb, tk(1000))
 		moved := Graduate(s, c, "whale", gb)
-		qA, _ := QuoteSell(s, "whale", c, gb, big.NewInt(1000))
+		qA, _ := QuoteSell(s, "whale", c, gb, tk(1000))
 		if qA.Tax.Cmp(qB.Tax) < 0 {
 			t.Errorf("N=%d: Graduate destroyed %s of owed tax", N, new(big.Int).Sub(qB.Tax, qA.Tax))
 		}
@@ -313,7 +313,7 @@ func TestXL_GraduateNeverClearsAGreenCohort(t *testing.T) {
 		if got := getMatured(s, c, "whale"); got.Cmp(big.NewInt(N)) != 0 {
 			t.Errorf("N=%d: matured bucket %s, want %d", N, got, N)
 		}
-		if got := getMoney(s, kBal(c, "whale")); got.Cmp(big.NewInt(1000)) != 0 {
+		if got := getMoney(s, kBal(c, "whale")); got.Cmp(tk(1000)) != 0 {
 			t.Errorf("N=%d: maturing bucket %s, want 1000", N, got)
 		}
 		t.Logf("N=%7d: graduated %s ripe, kept 1000 green at %d bps, tax %s -> %s",
@@ -331,7 +331,7 @@ func TestXL_PartialGraduationEventuallyCompletes(t *testing.T) {
 	pfMarket(t, s, c, t1+4*ExitTaxDecayBlocks)
 	pfBuy(t, s, "whale", c, t0, 100_000)
 	pfBuy(t, s, "alt", c, t1, 1000)
-	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(1000)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(1000)); err != nil {
 		t.Fatal(err)
 	}
 	total := big.NewInt(101_000)
@@ -379,7 +379,7 @@ func TestXL_DustGiftGriefMeasured(t *testing.T) {
 			pfMarket(t, s, c, t1+10)
 			pfBuy(t, s, "victim", c, t0, N)
 			pfBuy(t, s, "att", c, t1, g)
-			qClean, err := QuoteSell(s, "victim", c, t1, big.NewInt(N))
+			qClean, err := QuoteSell(s, "victim", c, t1, tk(N))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -394,7 +394,7 @@ func TestXL_DustGiftGriefMeasured(t *testing.T) {
 			// The gift's OWN full-rate value on the dear top slice is the honest
 			// ceiling: the victim can never be charged more than what the gifted
 			// tokens themselves owe.
-			slice, err := SellProceeds(getMoney(s, kSupply(c)), big.NewInt(g))
+			slice, err := SellProceeds(getMoney(s, kSupply(c)), tk(g))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -580,7 +580,7 @@ func TestXL_HomogeneousStillExactSingleRate(t *testing.T) {
 		pfMarket(t, s, c, t0+10*ExitTaxDecayBlocks)
 		pfBuy(t, s, "h", c, t0, 5000)
 		blk := t0 + age
-		r, err := Sell(s, "h", c, blk, big.NewInt(2500))
+		r, err := Sell(s, "h", c, blk, tk(2500))
 		if err != nil {
 			t.Fatal(err)
 		}
