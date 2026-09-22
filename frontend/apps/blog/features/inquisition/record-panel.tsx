@@ -50,6 +50,8 @@ export interface RecordData {
   account: string;
   mutedBy: number | null;
   muterMvests: number | null;
+  /** The three muters with the most stake, largest first. Absent on records built before 2026-09-22. */
+  topMuters?: { account: string; hp: number }[];
   mutedByPartial?: boolean;
   /** True while the route is still computing the expensive half. */
   building?: boolean;
@@ -118,6 +120,12 @@ const hbd = (n: number): string =>
 const threeByValue = (list: { account: string; usd: number }[]): string =>
   list.map((t) => `@${t.account} ${hbd(t.usd)}`).join(', ');
 
+const hpCompact = (hp: number): string =>
+  hp >= 1_000_000 ? `${(hp / 1_000_000).toFixed(1)}M HP` : hp >= 1_000 ? `${Math.round(hp / 1_000)}k HP` : `${Math.round(hp)} HP`;
+
+const threeByStake = (list: { account: string; hp: number }[]): string =>
+  list.map((t) => `@${t.account} ${hpCompact(t.hp)}`).join(', ');
+
 /*
  * ★★★ THE THREE WHO DOWNVOTED MOST OFTEN, WHICH IS NOT THE SAME LIST (owner, 2026-09-20:
  * "on downvotes received youre showing downvote value instead of downvote amount ... the
@@ -181,7 +189,9 @@ function cellsFor(r: RecordData): Cell[] {
             ? `at least ${r.mutedBy.toLocaleString()} accounts · the walk stopped at its page limit`
             : r.muterMvests === null
               ? `${r.mutedBy.toLocaleString()} accounts`
-              : `${r.mutedBy.toLocaleString()} accounts · ${r.muterMvests.toFixed(1)}M HP between them`,
+              : r.topMuters && r.topMuters.length > 0
+                ? `${r.mutedBy.toLocaleString()} accounts · ${r.muterMvests.toFixed(1)}M HP between them · most stake: ${threeByStake(r.topMuters)}`
+                : `${r.mutedBy.toLocaleString()} accounts · ${r.muterMvests.toFixed(1)}M HP between them`,
       tone: r.mutedBy === null ? 'dim' : r.mutedBy >= 50 ? 'warn' : 'plain',
       body: 'A mute is free, personal and one-sided, so the stake behind the muters says more than the count does.'
     },

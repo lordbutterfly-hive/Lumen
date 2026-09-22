@@ -138,12 +138,19 @@ export function isFilling(account: string): boolean {
   return inflight.has(account);
 }
 
-export function fillInBackground(account: string, base: ProfileRecord): void {
+/**
+ * `refreshBase` recomputes the fast half too (2026-09-22). A stale record used to be
+ * refilled from its STORED fast half, so the mute count, the muters' stake, KE and HP
+ * were computed once at first build and never again; only the slow half moved with the
+ * weekly refresh. The fast half is about a second.
+ */
+export function fillInBackground(account: string, base: ProfileRecord, refreshBase = false): void {
   if (inflight.has(account)) return;
   inflight.add(account);
   void (async () => {
     try {
-      const filled = await slowHalf(account, base);
+      const fresh = refreshBase ? await profileRecord(account).catch(() => null) : null;
+      const filled = await slowHalf(account, fresh ?? base);
       writeRecord(account, filled.record, true, filled.partial);
     } catch (error) {
       logger.warn(`inquisition: background record fill failed for @${account}: ${String(error)}`);

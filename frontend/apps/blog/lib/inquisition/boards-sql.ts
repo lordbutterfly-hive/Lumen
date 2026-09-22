@@ -492,6 +492,8 @@ export interface ProfileRecord {
   mutedBy: number | null;
   /** Their combined stake in millions of HP, or `null` when the roll could not be read. */
   muterMvests: number | null;
+  /** The three muters with the most stake, largest first (empty when unread or none). */
+  topMuters: { account: string; hp: number }[];
   /** True when the mute walk hit its page cap, so `mutedBy` is a floor and not a total. */
   mutedByPartial: boolean;
   publishers: string[];
@@ -546,20 +548,38 @@ export interface ProfileRecord {
  * ★ DIVIDED BY THE VESTS RATE, BECAUSE THE LABEL SAYS HP. Printing the raw VESTS sum
  * under "M HP" once overstated the muters' stake by ~1,610x.
  */
-async function muterStakeMvests(muters: string[], ratio: number): Promise<number | null> {
-  if (muters.length === 0) return 0;
+export interface MuterStake {
+  /** Combined stake of every muter, in millions of HP. */
+  mvests: number;
+  /** The three muters holding the most stake, largest first, each with their HP. */
+  top: { account: string; hp: number }[];
+}
+
+/**
+ * One statement gives both the total and the three largest (owner, 2026-09-22: "3
+ * accounts with most stake mute this guy", on hover). The window SUM runs over the
+ * joined rows before TOP cuts them to three, so the total is the whole roll's.
+ */
+async function muterStake(muters: string[], ratio: number): Promise<MuterStake | null> {
+  if (muters.length === 0) return { mvests: 0, top: [] };
   if (ratio <= 0) return null;
-  const rows = await queryReader<{ mvests: number }>(
-    `SELECT ISNULL(SUM(CAST(a.vesting_shares AS float)), 0) / @ratio / 1000000.0 AS mvests
+  const rows = await queryReader<{ account: string; hp: number; mvests: number }>(
+    `SELECT TOP 3 a.name AS account,
+            CAST(a.vesting_shares AS float) / @ratio AS hp,
+            SUM(CAST(a.vesting_shares AS float)) OVER () / @ratio / 1000000.0 AS mvests
      FROM OPENJSON(@names) WITH (name nvarchar(20) '$') AS n
-     JOIN Accounts a WITH (NOLOCK) ON a.name = n.name`,
+     JOIN Accounts a WITH (NOLOCK) ON a.name = n.name
+     ORDER BY a.vesting_shares DESC`,
     [
       { name: 'names', type: TYPES.NVarChar, value: JSON.stringify(muters) },
       { name: 'ratio', type: TYPES.Float, value: ratio }
     ]
   );
   if (rows === null) return null;
-  return Number(rows[0]?.mvests) || 0;
+  return {
+    mvests: Number(rows[0]?.mvests) || 0,
+    top: rows.map((r) => ({ account: String(r.account), hp: Math.round(Number(r.hp) || 0) }))
+  };
 }
 
 /**
@@ -775,7 +795,8 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
    */
   const roll = await rollPromise;
   const mutedBy = roll ? roll.count : null;
-  const muterMvests = roll ? await muterStakeMvests(roll.muters, ratio) : null;
+  const stake = roll ? await muterStake(roll.muters, ratio) : null;
+  const muterMvests = stake ? stake.mvests : null;
   /*
    * ★★ THE DIVISION HAPPENS IN FLOAT, AND ROUNDING COMES LAST. Both sides used to be
    * `CAST(... AS int)` before the divide, and this record — unlike the board — applies
@@ -785,8 +806,7 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
    */
   const hp = Number(rows[0]?.hp) || 0;
   const rewardsHive = Number(rows[0]?.rewards_hive) || 0;
-  // ★ VESTS over VESTS, straight from the statement: the vests-per-HIVE rate cancels, so
-  //   the figure cannot drift with the rate the way the old HIVE-over-HP division did.
+  // ★ HIVE over HP, straight from the statement (rewards / 1000 over vests / rate).
   const keRaw = Number(rows[0]?.ke);
   const ke = Number.isFinite(keRaw) ? Number(keRaw.toFixed(2)) : null;
   const last = null;
@@ -797,6 +817,7 @@ export async function profileRecord(account: string): Promise<ProfileRecord | nu
     // see the table of measurements in `mutes.ts`. `null` is "not read", never 0.
     mutedBy,
     muterMvests,
+    topMuters: stake?.top ?? [],
     mutedByPartial: roll?.partial ?? false,
     publishers: [],
     ke,

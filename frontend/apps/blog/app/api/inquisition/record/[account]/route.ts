@@ -68,7 +68,7 @@ export async function GET(
      * the difference between a strip that appears and a strip that spins.
      */
     if (stored?.complete) {
-      if (recordStale(stored)) fillInBackground(account, stored.record);
+      if (recordStale(stored)) fillInBackground(account, stored.record, true);
       // ★ `building` is true while a refill is in flight (2026-09-22). A partial record
       // used to answer `building: false` the instant its refill was kicked off, so the
       // nightly warm counted it built, moved on, and started the next one; a dozen
