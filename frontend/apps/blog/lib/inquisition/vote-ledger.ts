@@ -322,10 +322,17 @@ async function loadRemovedByVoter(voter: string): Promise<number | null> {
     [{ name: 'v', type: TYPES.VarChar, value: voter }],
     PER_ACCOUNT_MS
   );
-  if (rows === null || rows.length === 0) {
+  if (rows === null) {
+    // ★ A query that did not answer THROWS (2026-09-22). It used to return the same
+    // `null` as a computed NULL sum, so the record could not tell "HiveSQL timed out,
+    // ask again tonight" from "this account's targets carry no valued removal": both
+    // marked the record partial, and the second kind is deterministic, so 40-odd records
+    // were retried every night and stayed partial forever. Callers that want a value
+    // for a column catch this and leave the column empty for that row.
     logger.warn(`inquisition: removed-by-voter for @${voter} did not answer within ${PER_ACCOUNT_MS}ms`);
-    return null;
+    throw new Error(`removed-by-voter for @${voter} did not answer`);
   }
+  if (rows.length === 0) return null;
   // ★ A NULL sum is "nothing computable", not $0.00. Returning 0 here printed a positive
   // claim — "this account took nothing" — where the design intends a dash.
   return orNull(rows[0]?.removed);

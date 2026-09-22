@@ -53,7 +53,11 @@ export async function slowHalf(account: string, base: ProfileRecord): Promise<Sl
     voteLedger(account, 'background').catch(() => null),
     steemPostsSinceFork(account).catch(() => null),
     downvotesCast(account).catch(() => null),
-    removedByVoter(account).catch(() => null)
+    // ★ Answered-with-NULL and did-not-answer are different things (2026-09-22): the
+    // first is a finished figure ("no valued removal"), the second is the only reason
+    // to try again tonight. `removedByVoter` throws on the second, so only that one
+    // becomes `null` here.
+    removedByVoter(account).then((value) => ({ value })).catch(() => null)
   ]);
 
   /*
@@ -68,7 +72,7 @@ export async function slowHalf(account: string, base: ProfileRecord): Promise<Sl
    * it is genuinely missing.
    */
   const removedUsd = ledger ? (tally?.downvotes === 0 ? 0 : ledger.removedUsd) : null;
-  const removedFromOthersUsd = cast?.downvotes === 0 ? 0 : removedByThem;
+  const removedFromOthersUsd = cast?.downvotes === 0 ? 0 : removedByThem ? removedByThem.value : null;
 
   // ★ A silent null is not a behaviour (2026-09-22: 102 records on disk were partial and
   // the log held three lines). Every half that did not answer is named here, once per
@@ -78,7 +82,7 @@ export async function slowHalf(account: string, base: ProfileRecord): Promise<Sl
     ledger === null ? 'vote ledger' : '',
     steem === null ? 'steem walk' : '',
     cast === null ? 'cast tally' : '',
-    removedByThem === null && cast?.downvotes !== 0 ? 'removed by them' : ''
+    removedByThem === null && cast?.downvotes !== 0 ? 'removed by them (did not answer)' : ''
   ].filter(Boolean);
   if (missing.length > 0) {
     logger.warn(`inquisition: record for @${account} is partial, missing ${missing.join(', ')}`);
@@ -105,13 +109,17 @@ export async function slowHalf(account: string, base: ProfileRecord): Promise<Sl
       steemPartial: steem?.partial ?? false,
       steemLastPost: steem?.lastPost ?? null
     },
+    // ★ PARTIAL MEANS "A QUERY DID NOT ANSWER", never "the answer was NULL" (2026-09-22).
+    // A ledger whose sum is NULL (no post of this account ever paid AND survived its
+    // downvotes) and a removed-by-them that is NULL for the same reason are finished
+    // figures that render as "not computed"; marking them partial retried them every
+    // night for nothing and kept 40-odd records "partial" indefinitely.
     partial:
       tally === null ||
       ledger === null ||
-      removedUsd === null ||
       steem === null ||
       cast === null ||
-      removedFromOthersUsd === null
+      (removedByThem === null && cast?.downvotes !== 0)
   };
 }
 
