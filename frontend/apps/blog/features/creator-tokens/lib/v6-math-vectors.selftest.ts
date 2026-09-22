@@ -15,7 +15,7 @@ import {
   areaBaseUnits,
   commissionOwedForBaseUnits,
   creditsForAskBaseUnits,
-  formatTokenAmount,
+  formatTokenAmountFixed,
   fromUnits,
   quoteBuyBaseUnits,
   quoteSellBaseUnits,
@@ -78,7 +78,7 @@ for (const [i, r] of V.refund.entries()) {
 for (const [i, r] of V.misc.entries()) {
   check(`misc[${i}] area`, areaBaseUnits(fromUnits(r.units)) === r.area, `u=${r.units}: ${areaBaseUnits(fromUnits(r.units))} vs ${r.area}`);
   check(`misc[${i}] spot`, spotRateBaseUnits(fromUnits(r.units)) === r.spot, `u=${r.units}: ${spotRateBaseUnits(fromUnits(r.units))} vs ${r.spot}`);
-  check(`misc[${i}] format`, formatTokenAmount(fromUnits(r.units)) === r.format, `${formatTokenAmount(fromUnits(r.units))} vs ${r.format}`);
+  check(`misc[${i}] format`, formatTokenAmountFixed(fromUnits(r.units)) === r.format, `${formatTokenAmountFixed(fromUnits(r.units))} vs ${r.format}`);
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed (seed ${V.seed})`);

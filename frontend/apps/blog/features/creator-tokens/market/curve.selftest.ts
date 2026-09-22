@@ -92,7 +92,7 @@ check('the reproduced gap exceeds 200x, consistent with the measured 1,000x-18,0
 // helper function nothing signs.
 const payload = askPayload('hive:creator', 'selftest-ref', 800, fixedMaxCredits, 0);
 check(
-  'payload.maxCredits is the decimal token string of the resolved, quote-derived cap (v6 wire: two places)',
+  'payload.maxCredits is the wire form of the resolved, quote-derived cap (an integer here, the shape v5.1 parses)',
   payload.maxCredits === formatTokenAmount(fixedMaxCredits),
   `got ${JSON.stringify(payload.maxCredits)}`
 );

@@ -21,7 +21,7 @@
  */
 
 import { decodeMaturedLeHex } from './reads';
-import { refundNetBaseUnits, maturingGrossShareBaseUnits, formatTokenAmount, fromUnits } from '../contract-math';
+import { refundNetBaseUnits, maturingGrossShareBaseUnits, formatTokenAmountFixed, fromUnits } from '../contract-math';
 
 interface Vector {
   tokens: number;
@@ -121,7 +121,7 @@ check('share: rounds UP (ceil)', maturingGrossShareBaseUnits(9999, 1, 1000) === 
 check('share: zero gross -> 0', maturingGrossShareBaseUnits(0, 500, 1000) === 0);
 
 for (const v of VECTORS) {
-  check(`v6 wire: ${v.tokens} units prints as "${v.tokensDecimal}"`, formatTokenAmount(fromUnits(v.tokens)) === v.tokensDecimal, `got ${formatTokenAmount(fromUnits(v.tokens))}`);
+  check(`v6 wire: ${v.tokens} units prints as "${v.tokensDecimal}"`, formatTokenAmountFixed(fromUnits(v.tokens)) === v.tokensDecimal, `got ${formatTokenAmountFixed(fromUnits(v.tokens))}`);
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed`);

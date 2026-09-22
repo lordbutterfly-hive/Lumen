@@ -271,18 +271,29 @@ export function isUnitMultiple(tokens: number): boolean {
   return Math.abs(scaled - Math.round(scaled)) < 1e-6;
 }
 /**
- * The wire form of a token amount: ALWAYS two places ("2.00", "1.50", "0.01"),
- * byte-for-byte what the contract itself prints (core fmtTokens) in every
- * result and event, so a value can be compared as a string on either side.
- * The parser (parse.TokenAmount) also accepts a bare integer, which is how
- * pre-v6 clients still send whole tokens. Never an exponent, never a sign.
+ * The WIRE form of a token amount: a bare integer for whole tokens ("2"),
+ * otherwise exactly two places ("1.50", "0.01").
+ *
+ * WHY THE INTEGER FORM IS LOAD-BEARING (deploy order, contract-rules.ts): this
+ * client ships BEFORE the v6 bytecode activates. The live v5.1 parser refuses
+ * any decimal point, so a whole amount sent as "2.00" would fail every buy,
+ * sell, ask and send until activation. "2" is accepted by both bytecodes (v6
+ * reads it as 2.00 tokens), and a fraction can only reach this function under
+ * v6 rules (assertPositiveTokenCount refuses it before then). Never an
+ * exponent, never a sign, never more than two places.
  */
 export function formatTokenAmount(tokens: number): string {
   const units = toUnits(tokens);
   if (units < 0) throw new Error(`formatTokenAmount: negative token amount ${tokens}`);
   const whole = Math.floor(units / TOKEN_SCALE);
   const frac = units % TOKEN_SCALE;
-  return `${whole}.${String(frac).padStart(2, '0')}`;
+  return frac === 0 ? String(whole) : `${whole}.${String(frac).padStart(2, '0')}`;
+}
+/** The contract's own DISPLAY form (core fmtTokens): always two places ("2.00"), what every v6 result and event prints. */
+export function formatTokenAmountFixed(tokens: number): string {
+  const units = toUnits(tokens);
+  if (units < 0) throw new Error(`formatTokenAmountFixed: negative token amount ${tokens}`);
+  return `${Math.floor(units / TOKEN_SCALE)}.${String(units % TOKEN_SCALE).padStart(2, '0')}`;
 }
 
 export function baseUnitsToHuman(value: string | number | null | undefined): number {

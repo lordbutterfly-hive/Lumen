@@ -554,7 +554,10 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // paidUntil COMPARED TO NOW, and a head we do not have is a phase we must
     // not guess. 100 keys per call (schema.graphql:813) / 6 = 16 creators per
     // request, and the 1 global key on top keeps it at 97.
-    const KEYS_PER_CREATOR = 6;
+    // v6: the market migration flag (kUnitsMarket) rides in every batch, so seven keys per creator.
+    // Getting this wrong is silent: past MAX_STATE_KEYS_PER_REQUEST the node answers {} and every
+    // pill in the batch reads as "no market".
+    const KEYS_PER_CREATOR = 7;
     const perRequest = Math.floor((VscCreatorTokensDataSource.MAX_STATE_KEYS_PER_REQUEST - 1) / KEYS_PER_CREATOR);
 
     // ★ BATCHES IN PARALLEL, not one after another. The old loop awaited each
