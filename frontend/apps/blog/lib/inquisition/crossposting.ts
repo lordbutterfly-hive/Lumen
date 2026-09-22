@@ -60,8 +60,17 @@ const FEED_PAGES = 4;
 const STEEM_COUNT_BUDGET = 600;
 const PAGE_LIMIT = 100;
 
-/** Hive launched 2020-03-20. A Steem post before that says nothing about crossposting. */
-const HIVE_FORK_DATE = '2020-03-20';
+/**
+ * Hive launched at block 41,818,752, 2020-03-20 14:00:00 UTC. A Steem post before that says
+ * nothing about crossposting.
+ *
+ * ★★ THE HOUR MATTERS (2026-09-22). This was the bare date, i.e. MIDNIGHT, so the
+ * fourteen hours of that day's Steem posts - history both chains share - were counted as
+ * posts published to Hive. @statsexpert's seven "Hive posts" were all made between 01:20
+ * and 13:20 UTC that morning and @spinbunny's one at 11:50: both were on the board as
+ * accounts that "also publish to Hive" without ever having posted there.
+ */
+const HIVE_FORK_DATE = '2020-03-20T14:00:00';
 
 /**
  * ★★★ THE FIRST SIX MONTHS AFTER THE FORK DO NOT COUNT (owner, 2026-09-19: "for steem we

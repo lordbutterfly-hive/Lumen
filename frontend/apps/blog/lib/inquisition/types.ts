@@ -105,8 +105,8 @@ export interface AccountRecord {
   asOf: string;
 }
 
-/** The Hive hardfork. Everything on Steem after this is the interesting number. */
-export const HIVE_FORK_ISO = '2020-03-20T00:00:00';
+/** The Hive hardfork, block 41,818,752. Everything on Steem after this is the interesting number. */
+export const HIVE_FORK_ISO = '2020-03-20T14:00:00';
 
 export function nowIso(): string {
   return new Date().toISOString().slice(0, 19);
