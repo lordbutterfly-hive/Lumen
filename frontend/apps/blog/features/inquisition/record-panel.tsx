@@ -461,7 +461,10 @@ export default function RecordPanel({ account }: { account: string }) {
           <div className="mt-2.5 min-h-[46px] border-t border-line-9 pt-2">
             {open ? (
               <>
-                <p className="truncate font-num text-caption tracking-[0.01em] text-ink-brand-6" title={open.exact}>
+                {/* ★ WRAPS, NEVER TRUNCATES (2026-09-22). This line carries the named accounts,
+                    and `truncate` cut the third muter and the third downvoter at desktop width
+                    and five of eight lines on a phone: the names are the point of the line. */}
+                <p className="break-words font-num text-caption tracking-[0.01em] text-ink-brand-6">
                   {open.exact}
                 </p>
                 <p className="mt-1 font-ui text-caption leading-[20px] text-ink-10">{open.body}</p>
