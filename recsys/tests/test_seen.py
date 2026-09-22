@@ -20,6 +20,7 @@ So the load-bearing tests here are not the arithmetic ones. They are:
 from __future__ import annotations
 
 import dataclasses
+import math
 from datetime import timedelta
 
 from recsys.config import (
@@ -40,6 +41,19 @@ from tests.test_pipeline import _explore_norm, _explore_world
 NOW = EPOCH + timedelta(hours=1)
 _PERMISSIVE = TrustPolicy.WARN
 _ON = SeenConfig(enabled=True)
+
+
+def _bar(baseline: int, cfg: SeenConfig = _ON) -> int:
+    """The resurrection bar AS SHIPPED, derived from the config rather than typed
+    into a test: ``max(min_absolute, ceil(relative * baseline))`` (`core/seen.py`).
+
+    ★ Every number below comes through here. On 2026-09-14 `resurrect_relative`
+    was halved (0.25 -> 0.125) and a test that had the old bar written into its
+    assertion message stayed red on main for eight days, because a rate in prose
+    has no compiler. A test that derives the bar moves with the constant and
+    still fails the moment the FORMULA changes, which is the only drift worth
+    catching here."""
+    return max(cfg.resurrect_min_absolute, math.ceil(cfg.resurrect_relative * baseline))
 
 
 def _norm():
@@ -105,9 +119,15 @@ def test_resurrection_relative_arm_prices_a_big_post_higher() -> None:
     pool = [_cand("alice", "a1")]
     seen = {"@alice/a1": SeenState(impressions=2, engagers_at_last_serve=80)}
 
-    # +2 clears the absolute arm but not ceil(0.25 * 80) = 20.
-    assert split_seen(pool, seen, _ON, {"@alice/a1": 82}).suppressed == 1
-    assert split_seen(pool, seen, _ON, {"@alice/a1": 100}).resurrected == 1
+    bar = _bar(80)
+    assert bar > _ON.resurrect_min_absolute, (
+        "vacuous: at 80 engagers the RELATIVE arm must be the binding one, or "
+        "this test only exercises the absolute floor"
+    )
+    # Clearing the absolute arm alone is not enough at this scale.
+    assert split_seen(pool, seen, _ON, {"@alice/a1": 80 + _ON.resurrect_min_absolute}).suppressed == 1
+    assert split_seen(pool, seen, _ON, {"@alice/a1": 80 + bar - 1}).suppressed == 1
+    assert split_seen(pool, seen, _ON, {"@alice/a1": 80 + bar}).resurrected == 1
 
 
 def test_baseline_re_arms_so_a_second_resurrection_costs_another_step() -> None:
@@ -121,10 +141,18 @@ def test_baseline_re_arms_so_a_second_resurrection_costs_another_step() -> None:
 
     # After that serve the aggregate re-armed the baseline to 10.
     rearmed = {"@alice/a1": SeenState(impressions=3, engagers_at_last_serve=10)}
-    assert split_seen(pool, rearmed, _ON, {"@alice/a1": 12}).suppressed == 1, (
-        "+2 on a baseline of 10 must NOT resurrect — ceil(0.25 * 10) = 3"
+    bar = _bar(10)
+    just_short = 10 + bar - 1
+    assert just_short - 4 >= _bar(4), (
+        "vacuous: the same engager count must clear the bar measured from the "
+        "ORIGINAL baseline of 4, or the assertion below cannot tell a re-armed "
+        "baseline from a stale one"
     )
-    assert split_seen(pool, rearmed, _ON, {"@alice/a1": 13}).resurrected == 1
+    assert split_seen(pool, rearmed, _ON, {"@alice/a1": just_short}).suppressed == 1, (
+        f"+{bar - 1} on a re-armed baseline of 10 must NOT resurrect (bar {bar}); "
+        "it would have from the original 4"
+    )
+    assert split_seen(pool, rearmed, _ON, {"@alice/a1": 10 + bar}).resurrected == 1
 
 
 def test_unknown_baseline_does_not_suppress_and_is_counted_apart() -> None:
@@ -267,9 +295,31 @@ def test_c5_exploration_seat_survives_suppression_end_to_end() -> None:
     )
     keys = [sc.post.key for sc in ranked]
 
-    assert victim not in keys, (
-        "NEGATIVE CONTROL FAILED: suppression did not fire at all, so the "
-        "exemption below is untested"
+    # ★ THE NEGATIVE CONTROL, under the fresh-head cap (2026-09-14). A suppressed
+    # post is no longer dropped from the page: it is pushed BELOW the capped
+    # fresh head (`max_new_per_build`) by the starvation valve, in the seen block.
+    # So "suppression fired" now reads as: the victim left the head it held in
+    # the baseline and sits at or after the cap. With the cap switched off the
+    # pre-cap rule still applies and the victim is absent — asserted below so a
+    # rollback to `max_new_per_build=0` is proven to be one, not assumed.
+    head_cap = armed.seen.max_new_per_build
+    assert head_cap > 0, "fixture drift: the shipped default has the cap on"
+    baseline_keys = [sc.post.key for sc in baseline]
+    assert baseline_keys.index(victim) < head_cap, (
+        "vacuous: the victim must have held a place INSIDE the fresh head before "
+        "suppression, or being outside it afterwards proves nothing"
+    )
+    assert victim in keys and keys.index(victim) >= head_cap, (
+        "NEGATIVE CONTROL FAILED: suppression did not move the seen post out of "
+        "the fresh head, so the exemption below is untested"
+    )
+    uncapped = rank_feed(
+        viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+        settings=dataclasses.replace(armed, seen=dataclasses.replace(_ON, max_new_per_build=0)),
+        trust_policy=_PERMISSIVE, seen=seen,
+    )
+    assert victim not in [sc.post.key for sc in uncapped], (
+        "with the head cap OFF the pre-cap rule must drop the seen post entirely"
     )
     assert "@newcomer/debut" in keys, (
         "C5 VIOLATED: the newcomer seat was suppressed. Resurrection keys on "
@@ -442,13 +492,130 @@ def test_valve_does_not_fire_when_the_fresh_pool_is_deep_enough() -> None:
         for i in range(5)
     }
 
-    ranked = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, settings=settings,
+    # The pre-cap rule, kept alive under `max_new_per_build=0`: that value is the
+    # documented one-value rollback of the fresh-head cap, so it must still
+    # reproduce this page exactly.
+    uncapped = dataclasses.replace(settings, seen=dataclasses.replace(_ON, max_new_per_build=0))
+    ranked = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, settings=uncapped,
                        trust_policy=_PERMISSIVE, seen=seen, serve_limit=30)
     keys = {sc.post.key for sc in ranked}
 
     assert len(keys) == 35
     for i in range(5):
         assert f"@a{i:02d}/p{i}" not in keys
+
+
+def test_the_head_cap_pushes_seen_posts_below_the_fresh_head() -> None:
+    """★ THE SHIPPED BEHAVIOUR SINCE 2026-09-14 (owner: "not flip but push down
+    the list and add on top"). With the cap on, the same deep pool is served in
+    full: the first `max_new_per_build` are the freshest ranked posts, the seen
+    block follows immediately, and every displaced fresh post is appended after
+    it. The valve is what carries the seen block, so `valve_fired` is now an
+    ordinary reading on any build with repeats, not a threshold alarm.
+
+    The five suppressed posts must never appear INSIDE the head, whatever the
+    page depth: that is the whole point of the cap."""
+    posts = [make_post(f"a{i:02d}", f"p{i}", created_min=i) for i in range(40)]
+    gateway = FakeGateway(in_network=posts)
+    viewer = make_viewer("me", follows=frozenset(f"a{i:02d}" for i in range(40)))
+    settings = Settings(
+        popular=PopularConfig(limit=0),
+        exploration=ExplorationConfig(slots_per_page=0),
+        seen=_ON,
+    )
+    head_cap = settings.seen.max_new_per_build
+    assert head_cap > 0, "fixture drift: the shipped default has the cap on"
+    suppressed = {f"@a{i:02d}/p{i}" for i in range(5)}
+    seen = {k: SeenState(impressions=4, engagers_at_last_serve=50) for k in suppressed}
+
+    uncapped = dataclasses.replace(settings, seen=dataclasses.replace(_ON, max_new_per_build=0))
+    old = [sc.post.key for sc in rank_feed(
+        viewer, gateway, _norm(), now=NOW, since=EPOCH, settings=uncapped,
+        trust_policy=_PERMISSIVE, seen=seen, serve_limit=30)]
+    new = [sc.post.key for sc in rank_feed(
+        viewer, gateway, _norm(), now=NOW, since=EPOCH, settings=settings,
+        trust_policy=_PERMISSIVE, seen=seen, serve_limit=30)]
+
+    assert len(new) == len(set(new)), "a post was served twice"
+    assert new[:head_cap] == old[:head_cap], "the fresh head is the uncapped order, truncated"
+    assert set(new[head_cap:head_cap + len(suppressed)]) == suppressed, (
+        "the seen block must sit directly below the fresh head"
+    )
+    assert new[head_cap + len(suppressed):] == old[head_cap:], (
+        "every displaced fresh post comes back, in order, after the seen block"
+    )
+    assert not (set(new[:head_cap]) & suppressed), "a suppressed post reached the head"
+
+
+# --------------------------------------------------------------------------
+# ★★★ THE FRESH-HEAD CAP (2026-09-14) — the assertions the change shipped with,
+# committed. They were run by hand at the time and never checked in, which is
+# how the three tests above stayed red on main for eight days.
+# --------------------------------------------------------------------------
+
+
+def _deep_world(n_posts: int):
+    posts = [make_post(f"a{i:02d}", f"p{i}", created_min=i) for i in range(n_posts)]
+    gateway = FakeGateway(in_network=posts)
+    viewer = make_viewer("me", follows=frozenset(f"a{i:02d}" for i in range(n_posts)))
+    settings = Settings(
+        popular=PopularConfig(limit=0),
+        fallback=FallbackConfig(min_feed_size=20),
+        exploration=ExplorationConfig(slots_per_page=0),
+        seen=_ON,
+    )
+    keys = [f"@a{i:02d}/p{i}" for i in range(n_posts)]
+    return gateway, viewer, settings, keys
+
+
+def _served(settings, gateway, viewer, seen, serve_limit):
+    return [sc.post.key for sc in rank_feed(
+        viewer, gateway, _norm(), now=NOW, since=EPOCH, settings=settings,
+        trust_policy=_PERMISSIVE, seen=seen, serve_limit=serve_limit)]
+
+
+def test_head_cap_never_shortens_a_page_and_loses_nothing() -> None:
+    """★ THE REGRESSION THE FIRST VERSION HAD: restoring the displaced posts only
+    "up to the floor" returned a SHORTER page than the uncapped code whenever the
+    fresh pool alone exceeded the floor (48 fresh gave 45). Swept across pool
+    depth, how many are suppressed and the requested page size, capped and
+    uncapped must serve the same SET of posts, the same LENGTH, no duplicates."""
+    cells = 0
+    for n in (5, 14, 15, 16, 20, 29, 30, 31, 45, 48, 60):
+        gateway, viewer, settings, keys = _deep_world(n)
+        uncapped = dataclasses.replace(settings, seen=dataclasses.replace(_ON, max_new_per_build=0))
+        for k in (0, 1, 5, 15, 29):
+            if k > n:
+                continue
+            seen = {key: SeenState(impressions=4, engagers_at_last_serve=50) for key in keys[:k]}
+            for limit in (None, 30, 45):
+                old = _served(uncapped, gateway, viewer, seen, limit)
+                new = _served(settings, gateway, viewer, seen, limit)
+                cells += 1
+                assert len(new) == len(set(new)), f"duplicate at n={n} k={k} limit={limit}"
+                assert len(new) >= len(old), f"SHORTER page at n={n} k={k} limit={limit}: {len(new)} < {len(old)}"
+                assert set(old) <= set(new), f"a post was lost at n={n} k={k} limit={limit}"
+    assert cells >= 100, f"vacuous sweep: {cells} cells"
+
+
+def test_head_cap_is_inert_for_a_reader_with_no_history() -> None:
+    """Gated on `repeats`: a first visit is built exactly as before the cap."""
+    gateway, viewer, settings, _keys = _deep_world(40)
+    uncapped = dataclasses.replace(settings, seen=dataclasses.replace(_ON, max_new_per_build=0))
+    for limit in (None, 30, 45):
+        assert _served(settings, gateway, viewer, {}, limit) == _served(uncapped, gateway, viewer, {}, limit)
+
+
+def test_head_cap_sits_above_every_reserved_seat() -> None:
+    """The cap's safety argument, as a guard rather than a comment: it runs AFTER
+    the reserved seats and the protected-head swap are placed, so truncating the
+    head must never reach a seat. Lowering the cap below a seat index would evict
+    that seat on every build with repeats; this fails first."""
+    s = Settings()
+    cap = s.seen.max_new_per_build
+    assert cap > s.exploration.position, "the exploration seat would be truncated"
+    assert cap > s.popular.reserved_position, "the popular seat would be truncated"
+    assert cap > s.freshness.position, "the freshness seat would be truncated"
 
 
 # --------------------------------------------------------------------------

@@ -3142,16 +3142,32 @@ def rank_feed(
             carried=feed_counters, top_k=len(take),
         )
         valve_fired = len(take)
-        logger.info(
-            "seen: STARVATION VALVE fired for viewer=%s — re-admitted %d "
-            "already-seen post(s) to keep the feed at the %d floor (had %d). "
-            "A valve that fires on ordinary traffic means the suppression "
-            "thresholds are wrong, not that the feed was rescued.",
-            viewer.account,
-            valve_fired,
-            floor,
-            len(ranked) - valve_fired,
-        )
+        # ★ Since the fresh-head cap (2026-09-14) this fires on EVERY build that
+        # has repeats and a cap below the floor: the valve is what carries the
+        # seen block that the cap pushes below the head. That is the design, so
+        # the alarm wording applies only when the cap did not engage.
+        if carried_over:
+            logger.info(
+                "seen: head cap %d engaged for viewer=%s — %d already-seen post(s) "
+                "follow the fresh head to keep the feed at the %d floor, %d displaced "
+                "fresh post(s) come back below them.",
+                head_cap,
+                viewer.account,
+                valve_fired,
+                floor,
+                len(carried_over),
+            )
+        else:
+            logger.info(
+                "seen: STARVATION VALVE fired for viewer=%s — re-admitted %d "
+                "already-seen post(s) to keep the feed at the %d floor (had %d). "
+                "A valve that fires on ordinary traffic means the suppression "
+                "thresholds are wrong, not that the feed was rescued.",
+                viewer.account,
+                valve_fired,
+                floor,
+                len(ranked) - valve_fired,
+            )
 
     # The repeats could not fill what the cap gave up: put the displaced fresh
     # posts back rather than serve a short page. Ordered as they were ranked, so
