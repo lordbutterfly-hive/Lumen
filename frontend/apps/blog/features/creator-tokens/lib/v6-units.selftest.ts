@@ -50,7 +50,7 @@ check('TOKEN_SCALE is 100 (params.go TokenScale)', TOKEN_SCALE === 100);
 check('toUnits survives floating point (0.29 -> 29, 1.15 -> 115)', toUnits(0.29) === 29 && toUnits(1.15) === 115);
 check('roundToUnits snaps a third decimal', roundToUnits(10.129) === 10.13 && roundToUnits(0.005) === 0.01);
 check('isUnitMultiple: 1.5 yes, 0.001 no', isUnitMultiple(1.5) && !isUnitMultiple(0.001));
-check('formatTokenAmount: "2", "1.50", "0.01", "42.64"', formatTokenAmount(2) === '2' && formatTokenAmount(1.5) === '1.50' && formatTokenAmount(0.01) === '0.01' && formatTokenAmount(42.64) === '42.64');
+check('formatTokenAmount: always two places, as the contract prints ("2.00", "1.50", "0.01", "42.64")', formatTokenAmount(2) === '2.00' && formatTokenAmount(1.5) === '1.50' && formatTokenAmount(0.01) === '0.01' && formatTokenAmount(42.64) === '42.64');
 
 // ── the unit curve (core zz_v6_curve_test.go, zz_v6_edges_test.go)
 check('Area(0.01) = 10 (floor of 1007/100)', areaBaseUnits(0.01) === 10);
@@ -107,7 +107,7 @@ check('parseEscrow: the mainnet nine-field record (hbd-temp seq 0) = 1 token, an
 check('parseEscrow refuses a truncated record', parseEscrow('hive:x|1|2|PENDING|0|3|0') === null);
 
 // ── payloads: decimal token strings the contract\'s parser accepts
-check('buy 1.5 -> "1.50", sell 0.25 -> "0.25", transfer 2 -> "2", ask cap 22.49 -> "22.49"', buyPayload('hive:c', 1.5).tokens === '1.50' && sellPayload('hive:c', 0.25).tokens === '0.25' && transferTokensPayload('hive:c', 'hive:d', 2).amount === '2' && askPayload('hive:c', 'h', 28800, 22.49, 0).maxCredits === '22.49');
+check('buy 1.5 -> "1.50", sell 0.25 -> "0.25", transfer 2 -> "2.00", ask cap 22.49 -> "22.49"', buyPayload('hive:c', 1.5).tokens === '1.50' && sellPayload('hive:c', 0.25).tokens === '0.25' && transferTokensPayload('hive:c', 'hive:d', 2).amount === '2.00' && askPayload('hive:c', 'h', 28800, 22.49, 0).maxCredits === '22.49');
 check('the payload contract accepts the decimal forms', (() => {
   try {
     assertPayloadShape('buy', buyPayload('hive:c', 1.5));

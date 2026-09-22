@@ -41,7 +41,7 @@
 
 import { resolveAskMaxCreditsBaseUnits, ASK_MAX_CREDITS_TOLERANCE_BPS } from './curve';
 import { askPayload } from '../lib/vsc/op-builders';
-import { humanToBaseUnits } from '../lib/contract-math';
+import { humanToBaseUnits, formatTokenAmount } from '../lib/contract-math';
 
 let failures = 0;
 let checks = 0;
@@ -91,8 +91,8 @@ check('the reproduced gap exceeds 200x, consistent with the measured 1,000x-18,0
 // helper function nothing signs.
 const payload = askPayload('hive:creator', 'selftest-ref', 800, fixedMaxCredits, 0);
 check(
-  'payload.maxCredits is the moneyString of the resolved, quote-derived cap',
-  payload.maxCredits === String(fixedMaxCredits),
+  'payload.maxCredits is the decimal token string of the resolved, quote-derived cap (v6 wire: two places)',
+  payload.maxCredits === formatTokenAmount(fixedMaxCredits),
   `got ${JSON.stringify(payload.maxCredits)}`
 );
 check('payload.maxCredits is NOT the old HBD-milliunit figure', payload.maxCredits !== String(oldBuggyMaxCredits));

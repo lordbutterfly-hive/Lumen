@@ -271,16 +271,18 @@ export function isUnitMultiple(tokens: number): boolean {
   return Math.abs(scaled - Math.round(scaled)) < 1e-6;
 }
 /**
- * The wire form of a token amount (parse.TokenAmount / core parseTokens): a
- * bare integer for whole tokens ("2"), otherwise exactly two places ("1.50").
- * Never an exponent, never a leading "+", never more than two places.
+ * The wire form of a token amount: ALWAYS two places ("2.00", "1.50", "0.01"),
+ * byte-for-byte what the contract itself prints (core fmtTokens) in every
+ * result and event, so a value can be compared as a string on either side.
+ * The parser (parse.TokenAmount) also accepts a bare integer, which is how
+ * pre-v6 clients still send whole tokens. Never an exponent, never a sign.
  */
 export function formatTokenAmount(tokens: number): string {
   const units = toUnits(tokens);
   if (units < 0) throw new Error(`formatTokenAmount: negative token amount ${tokens}`);
   const whole = Math.floor(units / TOKEN_SCALE);
   const frac = units % TOKEN_SCALE;
-  return frac === 0 ? String(whole) : `${whole}.${String(frac).padStart(2, '0')}`;
+  return `${whole}.${String(frac).padStart(2, '0')}`;
 }
 
 export function baseUnitsToHuman(value: string | number | null | undefined): number {
