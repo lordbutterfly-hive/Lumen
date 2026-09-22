@@ -170,6 +170,24 @@ func TestLumenV6Units(t *testing.T) {
 	}
 	t.Logf("queued: code=%s creation=%d activation=%d", pending.Code, pending.CreationHeight, pending.ActivationHeight)
 	record("UPDATE-queued", "the queued code differs from v5.1", pending.Code != codeV5, pending.Code)
+	// THE FRONTEND'S OWN QUERY (reads.ts CONTRACT_QUERY, verbatim): during the
+	// timelock it must still report the OLD code, so no client flips to v6 rules
+	// and signs a fraction the live bytecode would refuse.
+	frontendCode := func() string {
+		var out struct {
+			FindContract []struct {
+				ID   string `json:"id"`
+				Code string `json:"code"`
+			} `json:"findContract"`
+		}
+		if err := d.gqlQuery(ctx, node, `query CreatorTokensContract($id: String!) {
+  findContract(filterOptions: { byId: $id }) { id code }
+}`, map[string]any{"id": id}, &out); err != nil || len(out.FindContract) == 0 {
+			return ""
+		}
+		return out.FindContract[0].Code
+	}
+	record("FRONTEND-query-during-window", "reads.ts CONTRACT_QUERY reports the OLD code during the timelock", frontendCode() == codeV5, frontendCode())
 	// The OLD code still serves during the window: a decimal buy is refused by v5.1.
 	// The OLD code still serves during the window: a decimal buy is refused by v5.1.
 	record("UPDATE-window-old-code", "during the timelock a decimal buy is REFUSED by v5.1", func() bool {
@@ -186,6 +204,7 @@ func TestLumenV6Units(t *testing.T) {
 		t.Fatalf("v6 did not activate: %v", err)
 	}
 	record("UPDATE-activated", "v6 code is active on the same contract id", true, pending.Code)
+	record("FRONTEND-query-after-activation", "reads.ts CONTRACT_QUERY reports the v6 code once active (rulesForCode -> 'v6')", frontendCode() == pending.Code, frontendCode())
 	// Untouched state is still the v5.1 form on disk (the migration is lazy):
 	// balance "1", supply "2", the same clock, no flags.
 	record("V6-state-untouched", "before any v6 call the balance is still the raw \"1\"", state("mb|"+creator+"|"+hw(buyer)) == "1", state("mb|"+creator+"|"+hw(buyer)))
