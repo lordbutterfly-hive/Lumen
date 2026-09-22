@@ -314,6 +314,19 @@ func parseTokenAmount(s string) (*big.Int, bool) { return parse.TokenAmount(s) }
 
 // i64FromTokenAmount is parseTokenAmount for the int64 cap fields: a cap on the
 // wire is whole tokens or a decimal ("250", "250.5"), stored as units.
+// tokenFieldStr reads a token-count field that pre-v6 clients sent as a bare
+// JSON number of whole tokens ("cap":1000000) and v6 clients send as a decimal
+// token string ("cap":"1000000" or "1000000.5"). A bare number is whole tokens.
+func tokenFieldStr(payload, key string) string {
+	if v := jsonStr(payload, key); v != "" {
+		return v
+	}
+	if n, ok := jsonU64Field(payload, key); ok {
+		return strconv.FormatUint(n, 10)
+	}
+	return ""
+}
+
 func i64FromTokenAmount(s string) (int64, bool) {
 	v, ok := parseTokenAmount(s)
 	if !ok || !v.IsInt64() {
@@ -640,7 +653,8 @@ func AcceptOwnership(a *string) *string {
 	return strPtr(`{"owner":"` + jsonEscape(caller) + `"}`)
 }
 
-// Payload: {"face":<int64 HBD base units>,"cap":<int64 credits>,"firstBuy":
+// Payload: {"face":<int64 HBD base units>,"cap":"<decimal tokens>" (a bare
+// number is accepted as whole tokens, pre-v6 shape),"firstBuy":
 // "<decimal big.Int token count, optional>"}. `creator` is NEVER read from
 // the payload: core.Register enforces caller==creator internally (SPEC §1.4
 // identity binding — impersonation is structurally impossible), so this
@@ -679,7 +693,7 @@ func Register(a *string) *string {
 		handleErr(inputErr("face overflows int64"))
 		return nil
 	}
-	capVal, ok := i64FromTokenAmount(jsonStr(payload, "cap"))
+	capVal, ok := i64FromTokenAmount(tokenFieldStr(payload, "cap"))
 	if !ok {
 		handleErr(inputErr("cap overflows int64"))
 		return nil
@@ -729,7 +743,7 @@ func Register(a *string) *string {
 		// learn.
 		sdk.Log(core.EvBought(caller, caller, block, res.FirstBuy.Minted, res.FirstBuy.Cost, res.FirstBuy.Fee, res.FirstBuy.TotalDue))
 	}
-	return strPtr(`{"creator":"` + jsonEscape(caller) + `","face":` + i64s(face) + `,"cap":` + i64s(capVal) +
+	return strPtr(`{"creator":"` + jsonEscape(caller) + `","face":` + i64s(face) + `,"cap":"` + core.FmtTokens(big.NewInt(capVal)) + `"` +
 		`,"firstBuyMinted":"` + minted + `","totalDue":"` + res.TotalDue.String() + `"}`)
 }
 
@@ -774,7 +788,7 @@ func SetFace(a *string) *string {
 	return strPtr(`{"creator":"` + jsonEscape(caller) + `","face":` + i64s(newFace) + `}`)
 }
 
-// Payload: {"newCap":<int64 credits>}. Creator-only, same reasoning as
+// Payload: {"newCap":"<decimal tokens>"} (a bare number = whole tokens). Creator-only, same reasoning as
 // setFace. No money movement.
 //
 //go:wasmexport setCap
@@ -787,7 +801,7 @@ func SetCap(a *string) *string {
 	}
 	block := currentBlock()
 
-	newCap, ok := i64FromTokenAmount(jsonStr(payload, "newCap"))
+	newCap, ok := i64FromTokenAmount(tokenFieldStr(payload, "newCap"))
 	if !ok {
 		handleErr(inputErr("newCap overflows int64"))
 		return nil
@@ -798,7 +812,7 @@ func SetCap(a *string) *string {
 		return nil
 	}
 	sdk.Log(core.EvCapChanged(caller, caller, block, oldCap, newCap))
-	return strPtr(`{"creator":"` + jsonEscape(caller) + `","cap":` + i64s(newCap) + `}`)
+	return strPtr(`{"creator":"` + jsonEscape(caller) + `","cap":"` + core.FmtTokens(big.NewInt(newCap)) + `"}`)
 }
 
 // THE `prepay` ENTRYPOINT IS DELETED (RULING A, RULINGS-v2-2026-07-21):
@@ -2039,7 +2053,7 @@ func Quote(a *string) *string {
 	// was renamed from commissionOwedHbd for exactly that reason. There is no HBD
 	// leg to quote any more, so a client no longer needs to check the buyer's HBD
 	// balance or build a transfer.allow intent for an ask.
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","rate":"` + q.Rate.String() + `","face":"` + face.String() + `","creditsPerAsk":"` + core.FmtTokens(q.Credits) + `","commissionCredits":"` + q.CommissionCredits.String() + `","creditsToCreator":"` + new(big.Int).Sub(q.Credits, q.CommissionCredits).String() + `","phase":"` + jsonEscape(phase) + `","inflowsOpen":` + boolStr(inflowsOpen) + `}`)
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","rate":"` + q.Rate.String() + `","face":"` + face.String() + `","creditsPerAsk":"` + core.FmtTokens(q.Credits) + `","commissionCredits":"` + core.FmtTokens(q.CommissionCredits) + `","creditsToCreator":"` + core.FmtTokens(new(big.Int).Sub(q.Credits, q.CommissionCredits)) + `","phase":"` + jsonEscape(phase) + `","inflowsOpen":` + boolStr(inflowsOpen) + `}`)
 }
 
 // Payload: {"creator":"<hive-account>","tokens":"<decimal big.Int token
