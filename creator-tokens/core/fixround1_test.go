@@ -478,8 +478,8 @@ func TestRefundHolder_EXITTAX1_FreshPushRefused(t *testing.T) {
 
 	setMoney(s, kSupply(creator), tk(10000))
 	setMoney(s, kReserve(creator), big.NewInt(10_000_000))
-	setMoney(s, kBal(creator, victim), tk(1000)) // 10% of supply
-	setU64(s, kAcqBlock(creator, victim), 200000)        // a genuine, fresh hold clock
+	setMoney(s, kBal(creator, victim), tk(1000))  // 10% of supply
+	setU64(s, kAcqBlock(creator, victim), 200000) // a genuine, fresh hold clock
 
 	// Never Registered => kPaidUntil == 0 => FROZEN for any block >= GraceBlocks,
 	// so this is inWindDown. heldBlocks == 2 at the push block => full 20% tax.
@@ -547,8 +547,8 @@ func TestRefundHolder_EXITTAX1_AgedPushAllowedAndDodgeClosed(t *testing.T) {
 
 	setMoney(s, kSupply(creator), tk(10000))
 	setMoney(s, kReserve(creator), big.NewInt(10_000_000))
-	setMoney(s, kBal(creator, whale), tk(9000)) // dominant, 90% of supply
-	setU64(s, kAcqBlock(creator, whale), 1_000_000)     // fresh at the wind-down
+	setMoney(s, kBal(creator, whale), tk(9000))     // dominant, 90% of supply
+	setU64(s, kAcqBlock(creator, whale), 1_000_000) // fresh at the wind-down
 
 	// (4) DODGE CLOSED — the whale's ally cannot push the fresh whale out at 0 tax.
 	forceWindDown(s, creator)       // A1: wind-down is reached by Retire, not by lapse (refund_test.go)

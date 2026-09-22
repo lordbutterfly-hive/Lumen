@@ -124,7 +124,7 @@ func TestOF_CTORACLE02_HonestGrowthKeepsShopOpen(t *testing.T) {
 	qq := last + 50
 
 	shortR, _ := AskRate(s, c, qq)
-	longR := stale // the seeded 7-day value the old min() would have picked
+	longR := stale                                                                        // the seeded 7-day value the old min() would have picked
 	backing := mMulDivCeil(getMoney(s, kReserve(c)), unitsScale, getMoney(s, kSupply(c))) // per WHOLE token (v6)
 	oldMin := ofOldMin(shortR, longR, spot)
 	oldLimit := new(big.Int).Mul(oldMin, big.NewInt(int64(DivergenceRateMultiple)))
@@ -159,7 +159,7 @@ func TestOF_PRICE3_RisingMarketOverchargeReduced(t *testing.T) {
 	curveMarket(s, c, S)
 	activateMarket(s, c, 0)
 	q := uint64(3_000_000)
-	spot := SpotRate(tk(S)) // 74,500 — the live marginal (rising)
+	spot := SpotRate(tk(S))         // 74,500 — the live marginal (rising)
 	shortRate := big.NewInt(50_000) // recent avg, lags spot
 	longRate := big.NewInt(27_250)  // 7-day avg, lags most (the stalest arm)
 	last := ofWriteShort(s, c, q-32*40, func() []*big.Int {
@@ -173,7 +173,7 @@ func TestOF_PRICE3_RisingMarketOverchargeReduced(t *testing.T) {
 	qq := last + 50
 
 	sh, _ := AskRate(s, c, qq)
-	lo := longRate                     // the seeded 7-day value the old min() would have picked
+	lo := longRate                    // the seeded 7-day value the old min() would have picked
 	oldRate := ofOldMin(sh, lo, spot) // == longRate, the stalest
 	newRate, err := SettlementRate(s, c, qq)
 	if err != nil {

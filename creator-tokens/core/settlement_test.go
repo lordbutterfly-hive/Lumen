@@ -475,7 +475,6 @@ func TestRecordObs_LongRingSpacing(t *testing.T) {
 	}
 }
 
-
 // ---- RULING C3: one derivation for every token-settled service ------------
 
 func TestSettlement_AskUsesTheRuledDerivation(t *testing.T) {

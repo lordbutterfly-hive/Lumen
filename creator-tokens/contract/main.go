@@ -117,7 +117,12 @@ func (sdkStore) Delete(key string) {
 	sdk.StateDeleteObject(key)
 }
 
-var store sdkStore
+// v6 (0.01-token units): every read and write goes through core.WrapUnits, the
+// lazy per-key migration that scales a v5.1 whole-token value (balances, lots,
+// supply, cap, escrow credits) by TokenScale the first time it is touched and
+// flags it so it is never scaled twice. Without this wrapper a legacy "2" would
+// be read as 2 units (0.02 tokens) and the market would be misreported by 100x.
+var store core.Store = core.WrapUnits(sdkStore{})
 
 // ===================================
 // Error helpers

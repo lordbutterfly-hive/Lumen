@@ -1012,12 +1012,13 @@ func fzCheckSolvencyCore(t *testing.T, w *fzWorld, tr *fzTrace, step int) {
 		}
 
 		// I1, literal wording: "reserve >= sum of all refunds payable at the
-		// current refund price". RefundPrice quotes HBD per a SINGLE credit,
-		// floored — a coarse bound (often 0 once reserve<supply by even 1
-		// unit) but it is the literal quantity API.md names, so it is checked
-		// explicitly and separately from the rigorous form below.
+		// current refund price". RefundPrice quotes HBD per a SINGLE WHOLE
+		// token (v6: supply is in 0.01 units, so the bound is price x supply /
+		// TokenScale), floored — a coarse bound but it is the literal quantity
+		// API.md names, so it is checked explicitly and separately from the
+		// rigorous form below.
 		price := RefundPrice(w.s, c)
-		coarse := new(big.Int).Mul(price, supply)
+		coarse := mMulDiv(price, supply, unitsScale)
 		if coarse.Cmp(reserve) > 0 {
 			tr.dump(t, 200)
 			t.Fatalf("%s: I1 (literal RefundPrice bound) VIOLATED for %s: price=%s*supply=%s=%s > reserve=%s", label, c, price, supply, coarse, reserve)
@@ -1717,7 +1718,7 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 			// FEWER credit must always undershoot face.
 			oneLess := new(big.Int).Sub(res.CreditsSpent, big.NewInt(1))
 			if oneLess.Sign() > 0 {
-				got := new(big.Int).Mul(oneLess, rate) // units x HBD-per-token
+				got := new(big.Int).Mul(oneLess, rate)                    // units x HBD-per-token
 				if got.Cmp(new(big.Int).Mul(tokenLeg, unitsScale)) >= 0 { // v6: covers when >= face x TokenScale
 					t.Fatalf("iter %d: CreditsSpent=%s is not minimal for tokenLeg=%s at rate=%s: one less (%s) still covers it (%s)",
 						i, res.CreditsSpent, tokenLeg, rate, oneLess, got)

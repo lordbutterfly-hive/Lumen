@@ -16,7 +16,7 @@ func TestV6Curve_WholeBoundariesAreTheOldCurve(t *testing.T) {
 			t.Fatalf("Area(%d units) != AreaTokens(%d)", S*TokenScale, S)
 		}
 		old := curveSpotRateIn(u(S), curveBase, curveLin, curveQuad, curveDen)
-		if SpotRate(u(S * TokenScale)).Cmp(old) != 0 {
+		if SpotRate(u(S*TokenScale)).Cmp(old) != 0 {
 			t.Fatalf("SpotRate at boundary %d differs from the old feed", S)
 		}
 		if S > 0 && SpotRate(u((S-1)*TokenScale+1)).Cmp(old) != 0 {

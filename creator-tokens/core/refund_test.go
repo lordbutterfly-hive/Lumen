@@ -128,9 +128,9 @@ func TestRefundPrice_NoParClamp_ReportsTheRealRatio(t *testing.T) {
 	setMoney(s, kSupply(creator), tk(10))
 	setMoney(s, kReserve(creator), big.NewInt(35_000)) // 35 HBD over 10 tokens
 
-	// v6: the price is per UNIT: floor(35000 / 1000 units) = 35 base units (3.5 HBD per token).
-	if price := RefundPrice(s, creator); price.Cmp(big.NewInt(35)) != 0 {
-		t.Fatalf("RefundPrice = %s, want floor(35000/1000) = 35 per unit — the real ratio, NOT the deleted PAR clamp of 1", price)
+	// v6: supply is in units; the price is still per WHOLE token: floor(35000 x 100 / 1000 units) = 3500 (3.5 HBD per token).
+	if price := RefundPrice(s, creator); price.Cmp(big.NewInt(3500)) != 0 {
+		t.Fatalf("RefundPrice = %s, want floor(35000 x 100 / 1000 units) = 3500 per whole token — the real ratio, NOT the deleted PAR clamp of 1", price)
 	}
 
 	// And on a genuine curve state: a market whose reserve is exactly
@@ -141,7 +141,7 @@ func TestRefundPrice_NoParClamp_ReportsTheRealRatio(t *testing.T) {
 	if _, err := Buy(s2, "holder", "curvemkt", 200, tk(100)); err != nil {
 		t.Fatal(err)
 	}
-	want := mMulDiv(Area(tk(100)), big.NewInt(1), tk(100)) // per UNIT (v6)
+	want := mMulDiv(Area(tk(100)), unitsScale, tk(100)) // per WHOLE token (v6: supply is in units)
 	if got := RefundPrice(s2, "curvemkt"); got.Cmp(want) != 0 {
 		t.Fatalf("RefundPrice on a curve market = %s, want floor(area(100)/100) = %s", got, want)
 	}
