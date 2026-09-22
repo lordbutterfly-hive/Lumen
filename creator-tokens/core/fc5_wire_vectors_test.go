@@ -23,7 +23,8 @@ import (
 // Run: go test ./core/ -run TestFC5_WireVectors -v
 
 type fc5Vector struct {
-	Tokens   uint64 `json:"tokens"`
+	Tokens   uint64 `json:"tokens"`        // v6: UNITS (0.01 token)
+	Decimal  string `json:"tokensDecimal"` // the same count as the wire's decimal token string
 	Hex      string `json:"hex"`
 	Maturing int64  `json:"maturing"`
 	Matured  int64  `json:"matured"`
@@ -69,6 +70,11 @@ func TestFC5_WireVectors(t *testing.T) {
 		{maturing: 750, matured: 250, reserve: 123_457, supply: 9_991, held: 100},
 		{maturing: 1, matured: 999, reserve: 999_983, supply: 100_003, held: 0},
 		{maturing: 500, matured: 500, reserve: 500_000, supply: 10_000, held: ExitTaxDecayBlocks},
+		// v6: every count above is now in 0.01-token UNITS. These rows have a
+		// fractional token reading so a client that still divides by 1 fails.
+		{maturing: 37, matured: 113, reserve: 500_000, supply: 10_000, held: 0},
+		{maturing: 1, matured: 1, reserve: 2023, supply: 200, held: 0},
+		{maturing: 250, matured: 0, reserve: 1007, supply: 250, held: 100},
 	}
 
 	out := make([]fc5Vector, 0, len(cases))
@@ -87,6 +93,7 @@ func TestFC5_WireVectors(t *testing.T) {
 		}
 		out = append(out, fc5Vector{
 			Tokens:   uint64(c.maturing + c.matured),
+			Decimal:  fmtTokens(total),
 			Hex:      hex.EncodeToString(u64ToLE(uint64(c.matured))),
 			Maturing: c.maturing,
 			Matured:  c.matured,
@@ -109,6 +116,6 @@ func TestFC5_WireVectors(t *testing.T) {
 		t.Fatal("fresh fully-maturing position owed no tax — the vector proves nothing")
 	}
 
-	b, _ := json.MarshalIndent(out, "", "  ")
+	b, _ := json.Marshal(out) // one line, so a shell can lift it into the TS selftest
 	fmt.Printf("FC5_VECTORS_JSON=%s\n", string(b))
 }

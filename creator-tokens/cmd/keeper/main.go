@@ -232,7 +232,7 @@ func buildDemoScenario() (*core.MemStore, map[string][]string, uint64) {
 	// real event and the real fields (Minted/Cost/Fee/TotalDue) core.Buy
 	// itself returns.
 	buy := func(creator, holder string, tokens int64) {
-		res := must2(core.Buy(store, holder, creator, registeredBlock+1, big.NewInt(tokens)))
+		res := must2(core.Buy(store, holder, creator, registeredBlock+1, big.NewInt(tokens*core.TokenScale)))
 		log(core.EvBought(creator, holder, registeredBlock+1, res.Minted, res.Cost, res.Fee, res.TotalDue))
 		noteHolder(creator, holder)
 	}
@@ -257,7 +257,7 @@ func buildDemoScenario() (*core.MemStore, map[string][]string, uint64) {
 	activeRegisteredBlock := demoBlock - 100
 	must(core.Register(store, "bobmusic", "bobmusic", activeRegisteredBlock, face, marketCap))
 	log(core.EvRegistered("bobmusic", "bobmusic", activeRegisteredBlock, face, marketCap, big.NewInt(0)))
-	bobBuy := must2(core.Buy(store, "listener1", "bobmusic", activeRegisteredBlock+1, big.NewInt(40)))
+	bobBuy := must2(core.Buy(store, "listener1", "bobmusic", activeRegisteredBlock+1, big.NewInt(40*core.TokenScale)))
 	log(core.EvBought("bobmusic", "listener1", activeRegisteredBlock+1, bobBuy.Minted, bobBuy.Cost, bobBuy.Fee, bobBuy.TotalDue))
 	noteHolder("bobmusic", "listener1")
 
@@ -268,8 +268,8 @@ func buildDemoScenario() (*core.MemStore, map[string][]string, uint64) {
 	buy("carlwrites", "onlyfan1", 20)
 	retire("carlwrites")
 	selfRefundBlock := lapseBlock + 50
-	payout := must2(core.Refund(store, "onlyfan1", "carlwrites", selfRefundBlock, big.NewInt(20)))
-	log(core.EvRefunded("carlwrites", "onlyfan1", selfRefundBlock, big.NewInt(20), payout))
+	payout := must2(core.Refund(store, "onlyfan1", "carlwrites", selfRefundBlock, big.NewInt(20*core.TokenScale)))
+	log(core.EvRefunded("carlwrites", "onlyfan1", selfRefundBlock, big.NewInt(20*core.TokenScale), payout))
 
 	// danerin: FROZEN, one holder to refund, PLUS an outstanding escrow (an
 	// ask nobody has answered or reclaimed yet). Demonstrates closeIfDrained
@@ -314,7 +314,7 @@ func buildDemoScenario() (*core.MemStore, map[string][]string, uint64) {
 	// NO COMMISSION ARGUMENT (OWNER RULING 2026-09-12): the 12% is carved out of
 	// the credits inside the escrow, so core.Ask takes only the asker's own
 	// maxCredits cap.
-	askResult := must2(core.Ask(store, "reader1", "danerin", askBlock, big.NewInt(1), "demo-content-hash", core.MinAskDeadline, 0))
+	askResult := must2(core.Ask(store, "reader1", "danerin", askBlock, big.NewInt(core.TokenScale), "demo-content-hash", core.MinAskDeadline, 0))
 	log(core.EvAsked("danerin", "reader1", askBlock, askResult.Seq, askResult.CreditsSpent, askResult.CommissionCredits, askResult.RateUsed, core.MinAskDeadline, "demo-content-hash", 0))
 	retire("danerin")
 

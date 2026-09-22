@@ -61,7 +61,7 @@ func zzLapsedMarket(t *testing.T, creator, holder string, tokens int64) (*core.M
 	t.Helper()
 	s := core.NewMemStore()
 	zzMust(t, core.Register(s, creator, creator, zzRegBlock, zzFace, zzCap))
-	_, err := core.Buy(s, holder, creator, zzRegBlock+1, big.NewInt(tokens))
+	_, err := core.Buy(s, holder, creator, zzRegBlock+1, tk(tokens))
 	zzMust(t, err)
 	lapse := zzRegBlock + core.SubscriptionPeriod + core.GraceBlocks
 	return s, lapse + 500 // cmd/keeper/main.go:179 demoBlock
@@ -146,13 +146,13 @@ func TestZZ_D1b_BlindWindowLength(t *testing.T) {
 	lateS := core.NewMemStore()
 	zzMust(t, core.Register(lateS, creator, creator, zzRegBlock, zzFace, zzCap))
 	freeze := zzRegBlock + core.SubscriptionPeriod + core.GraceBlocks
-	_, e := core.Buy(lateS, holder, creator, freeze-1, big.NewInt(400))
+	_, e := core.Buy(lateS, holder, creator, freeze-1, tk(400))
 	zzMust(t, e)
 	for _, d := range []uint64{1, 7 * core.BlocksPerDay, 41 * core.BlocksPerDay, core.ExitTaxDecayBlocks - 2, core.ExitTaxDecayBlocks} {
 		blk := freeze + d
 		s3 := core.NewMemStore()
 		zzMust(t, core.Register(s3, creator, creator, zzRegBlock, zzFace, zzCap))
-		_, e3 := core.Buy(s3, holder, creator, freeze-1, big.NewInt(400))
+		_, e3 := core.Buy(s3, holder, creator, freeze-1, tk(400))
 		zzMust(t, e3)
 		ops := Plan(zzViews(s3, blk, creator, holder))
 		planned := 0
@@ -186,11 +186,11 @@ func zzBackstopOpenMarketWithFreshHolder(t *testing.T, creator, seller, victim s
 	t.Helper()
 	s := core.NewMemStore()
 	zzMust(t, core.Register(s, creator, creator, zzRegBlock, zzFace, zzCap))
-	_, err := core.Buy(s, seller, creator, zzRegBlock+1, big.NewInt(400))
+	_, err := core.Buy(s, seller, creator, zzRegBlock+1, tk(400))
 	zzMust(t, err)
 	lapse := zzRegBlock + core.SubscriptionPeriod + core.GraceBlocks
 	handover := lapse + core.ExitTaxDecayBlocks + 1 // backstop is open
-	zzMust(t, core.TransferCredits(s, seller, creator, seller, victim, handover, big.NewInt(400)))
+	zzMust(t, core.TransferCredits(s, seller, creator, seller, victim, handover, tk(400)))
 	return s, handover
 }
 
@@ -348,7 +348,7 @@ func TestZZ_D5_HolderStringDriftIsIndistinguishableFromSuccess(t *testing.T) {
 	realHolder := "hive:patron1"
 	s := core.NewMemStore()
 	zzMust(t, core.Register(s, creator, creator, zzRegBlock, zzFace, zzCap))
-	_, err := core.Buy(s, realHolder, creator, zzRegBlock+1, big.NewInt(400))
+	_, err := core.Buy(s, realHolder, creator, zzRegBlock+1, tk(400))
 	zzMust(t, err)
 	lapse := zzRegBlock + core.SubscriptionPeriod + core.GraceBlocks
 	now := lapse + core.ExitTaxDecayBlocks + 1 // backstop open, so nothing else can refuse
@@ -363,7 +363,7 @@ func TestZZ_D5_HolderStringDriftIsIndistinguishableFromSuccess(t *testing.T) {
 	} {
 		s2 := core.NewMemStore()
 		zzMust(t, core.Register(s2, creator, creator, zzRegBlock, zzFace, zzCap))
-		_, e := core.Buy(s2, realHolder, creator, zzRegBlock+1, big.NewInt(400))
+		_, e := core.Buy(s2, realHolder, creator, zzRegBlock+1, tk(400))
 		zzMust(t, e)
 		balBefore := core.BalanceOf(s2, creator, realHolder)
 		payout, err2 := core.RefundHolder(s2, "hive:keeperbot", creator, variant, now)
@@ -493,7 +493,7 @@ func TestZZ_D9_TaxedPushIsUnreachable_BackstopIsDeadCode(t *testing.T) {
 		s := core.NewMemStore()
 		zzMust(t, core.Register(s, creator, creator, zzRegBlock, zzFace, zzCap))
 		blk := freeze + d
-		_, errBuy := core.Buy(s, "newbuyer", creator, blk, big.NewInt(10))
+		_, errBuy := core.Buy(s, "newbuyer", creator, blk, tk(10))
 		errInflow := core.RequireInflowOpen(s, creator, blk)
 		t.Logf("D9a winddown+%-9d  RequireInflowOpen -> %v | core.Buy -> %v", d, errInflow, errBuy)
 		if errBuy == nil {
@@ -511,11 +511,11 @@ func TestZZ_D9_TaxedPushIsUnreachable_BackstopIsDeadCode(t *testing.T) {
 	recipes := []recipe{
 		{"plain hold (bought at registration)", func(s *core.MemStore, at uint64) (string, error) { return "h0", nil }},
 		{"bought on the LAST block before the freeze", func(s *core.MemStore, at uint64) (string, error) {
-			_, e := core.Buy(s, "hlate", creator, freeze-1, big.NewInt(50))
+			_, e := core.Buy(s, "hlate", creator, freeze-1, tk(50))
 			return "hlate", e
 		}},
 		{"single OTC transfer during wind-down", func(s *core.MemStore, at uint64) (string, error) {
-			return "hx1", core.TransferCredits(s, "h0", creator, "h0", "hx1", at, big.NewInt(50))
+			return "hx1", core.TransferCredits(s, "h0", creator, "h0", "hx1", at, tk(50))
 		}},
 		{"transfer chain, 5 hops during wind-down", func(s *core.MemStore, at uint64) (string, error) {
 			from := "h0"
@@ -529,16 +529,16 @@ func TestZZ_D9_TaxedPushIsUnreachable_BackstopIsDeadCode(t *testing.T) {
 			return "hop4", nil
 		}},
 		{"bounce A->B->A (the exact griefing recipe refund.go:429-433 names)", func(s *core.MemStore, at uint64) (string, error) {
-			if e := core.TransferCredits(s, "h0", creator, "h0", "bnc", at, big.NewInt(50)); e != nil {
+			if e := core.TransferCredits(s, "h0", creator, "h0", "bnc", at, tk(50)); e != nil {
 				return "h0", e
 			}
-			return "h0", core.TransferCredits(s, "bnc", creator, "bnc", "h0", at+1, big.NewInt(50))
+			return "h0", core.TransferCredits(s, "bnc", creator, "bnc", "h0", at+1, tk(50))
 		}},
 		{"late-buyer's tokens handed to a never-before-seen account", func(s *core.MemStore, at uint64) (string, error) {
-			if _, e := core.Buy(s, "hlate", creator, freeze-1, big.NewInt(50)); e != nil {
+			if _, e := core.Buy(s, "hlate", creator, freeze-1, tk(50)); e != nil {
 				return "hlate", e
 			}
-			return "virgin", core.TransferCredits(s, "hlate", creator, "hlate", "virgin", at, big.NewInt(50))
+			return "virgin", core.TransferCredits(s, "hlate", creator, "hlate", "virgin", at, tk(50))
 		}},
 	}
 
@@ -551,7 +551,7 @@ func TestZZ_D9_TaxedPushIsUnreachable_BackstopIsDeadCode(t *testing.T) {
 		} {
 			s := core.NewMemStore()
 			zzMust(t, core.Register(s, creator, creator, zzRegBlock, zzFace, zzCap))
-			if _, e := core.Buy(s, "h0", creator, zzRegBlock+1, big.NewInt(200)); e != nil {
+			if _, e := core.Buy(s, "h0", creator, zzRegBlock+1, tk(200)); e != nil {
 				t.Fatalf("setup: %v", e)
 			}
 			// build the recipe at a block INSIDE wind-down but before the probe
@@ -593,13 +593,13 @@ func TestZZ_D10_TransferDoesNotResetTheRecipientClock(t *testing.T) {
 	const creator = "aliceart"
 	s := core.NewMemStore()
 	zzMust(t, core.Register(s, creator, creator, zzRegBlock, zzFace, zzCap))
-	if _, e := core.Buy(s, "seller", creator, zzRegBlock+1, big.NewInt(200)); e != nil {
+	if _, e := core.Buy(s, "seller", creator, zzRegBlock+1, tk(200)); e != nil {
 		t.Fatal(e)
 	}
 	// still MATURING (well inside the decay window)
 	at := zzRegBlock + 1 + 10*core.BlocksPerDay
 	sellerMaturesAt := core.MaturesAtBlock(s, creator, "seller")
-	zzMust(t, core.TransferCredits(s, "seller", creator, "seller", "buyer", at, big.NewInt(100)))
+	zzMust(t, core.TransferCredits(s, "seller", creator, "seller", "buyer", at, tk(100)))
 	buyerMaturesAt := core.MaturesAtBlock(s, creator, "buyer")
 	t.Logf("D10 seller acquired at %d, matures at %d", zzRegBlock+1, sellerMaturesAt)
 	t.Logf("D10 transfer at %d; if the buyer 'inherited a fresh clock' (exittax.go:58) they would mature at %d", at, at+core.ExitTaxDecayBlocks)
@@ -610,11 +610,11 @@ func TestZZ_D10_TransferDoesNotResetTheRecipientClock(t *testing.T) {
 	// and a fully-MATURED transfer is fully matured on arrival
 	s2 := core.NewMemStore()
 	zzMust(t, core.Register(s2, creator, creator, zzRegBlock, zzFace, zzCap))
-	if _, e := core.Buy(s2, "seller", creator, zzRegBlock+1, big.NewInt(200)); e != nil {
+	if _, e := core.Buy(s2, "seller", creator, zzRegBlock+1, tk(200)); e != nil {
 		t.Fatal(e)
 	}
 	late := zzRegBlock + 1 + core.ExitTaxDecayBlocks + 1
-	zzMust(t, core.TransferCredits(s2, "seller", creator, "seller", "buyer", late, big.NewInt(100)))
+	zzMust(t, core.TransferCredits(s2, "seller", creator, "seller", "buyer", late, tk(100)))
 	t.Logf("D10 matured transfer at %d: buyer maturing=%v matured=%v (MaturesAtBlock=%d, 0 means nothing maturing)",
 		late, core.MaturingOf(s2, creator, "buyer"), core.MaturedOf(s2, creator, "buyer"), core.MaturesAtBlock(s2, creator, "buyer"))
 }
