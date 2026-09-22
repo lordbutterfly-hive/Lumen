@@ -157,6 +157,12 @@ func fzOrderInvariantDump(s *MemStore) string {
 			strings.HasPrefix(k, "fee|") || k == "treasury" {
 			continue
 		}
+		// The TWAP rings are first-writer-wins within a block (twap.go), so two
+		// buys in one block record whichever ran first; that is the feed's own
+		// rule, not a money-state divergence, and it is excluded here on purpose.
+		if strings.HasPrefix(k, "tw|") || strings.HasPrefix(k, "twl|") {
+			continue
+		}
 		v, _ := s.Get(k)
 		if v == "" {
 			continue
@@ -709,7 +715,7 @@ func fzActAsk(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) {
 	// fuzzer-picked value, since the fuzzer no longer controls the rate at
 	// all.
 	if res.RateUsed.Sign() > 0 && face.Sign() > 0 {
-		want := fzCeilDiv(face, res.RateUsed)
+		want := fzCeilDiv(new(big.Int).Mul(face, unitsScale), res.RateUsed) // v6: units
 		if res.CreditsSpent.Cmp(want) != 0 {
 			tr.dump(t, 200)
 			t.Fatalf("ROUNDING VIOLATION: Ask(face=%s rate=%s) CreditsSpent=%s, independent ceil=%s", face, res.RateUsed, res.CreditsSpent, want)
@@ -1006,12 +1012,13 @@ func fzCheckSolvencyCore(t *testing.T, w *fzWorld, tr *fzTrace, step int) {
 		}
 
 		// I1, literal wording: "reserve >= sum of all refunds payable at the
-		// current refund price". RefundPrice quotes HBD per a SINGLE credit,
-		// floored — a coarse bound (often 0 once reserve<supply by even 1
-		// unit) but it is the literal quantity API.md names, so it is checked
-		// explicitly and separately from the rigorous form below.
+		// current refund price". RefundPrice quotes HBD per a SINGLE WHOLE
+		// token (v6: supply is in 0.01 units, so the bound is price x supply /
+		// TokenScale), floored — a coarse bound but it is the literal quantity
+		// API.md names, so it is checked explicitly and separately from the
+		// rigorous form below.
 		price := RefundPrice(w.s, c)
-		coarse := new(big.Int).Mul(price, supply)
+		coarse := mMulDiv(price, supply, unitsScale)
 		if coarse.Cmp(reserve) > 0 {
 			tr.dump(t, 200)
 			t.Fatalf("%s: I1 (literal RefundPrice bound) VIOLATED for %s: price=%s*supply=%s=%s > reserve=%s", label, c, price, supply, coarse, reserve)
@@ -1511,6 +1518,20 @@ func TestFuzzOrderingImmunity(t *testing.T) {
 			for gi := 1; gi < len(group); gi++ {
 				if group[gi].dump != first {
 					tr.dump(t, 200)
+					// Name the lines that differ, so the cause is readable without a replay.
+					fl, gl := strings.Split(first, "\n"), strings.Split(group[gi].dump, "\n")
+					for li := 0; li < len(fl) || li < len(gl); li++ {
+						var a, b string
+						if li < len(fl) {
+							a = fl[li]
+						}
+						if li < len(gl) {
+							b = gl[li]
+						}
+						if a != b {
+							t.Logf("  DIFF line %d:\n    A: %s\n    B: %s", li, a, b)
+						}
+					}
 					t.Fatalf("trial %d: ORDERING NOT IMMUNE: op set %v — the SAME ops succeeded (%s) in every order, but final state differs by permutation.\n--- state A ---\n%s\n--- state B ---\n%s",
 						trial, subsetIDs, outcome, first, group[gi].dump)
 				}
@@ -1553,7 +1574,7 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 				}
 				switch rng.Intn(3) {
 				case 0:
-					res, err := Buy(w.s, h, c, w.block, big.NewInt(1))
+					res, err := Buy(w.s, h, c, w.block, tk(1))
 					if err == nil {
 						tr.add("tiny Buy(%s,%s,1) -> due=%v", h, c, res.TotalDue)
 						w.pay(h, res.TotalDue)
@@ -1561,7 +1582,7 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 						tr.add("tiny Buy(%s,%s,1) -> err=%v", h, c, err)
 					}
 				case 1:
-					res, err := Sell(w.s, h, c, w.block, big.NewInt(1))
+					res, err := Sell(w.s, h, c, w.block, tk(1))
 					if err == nil {
 						tr.add("tiny Sell(%s,%s,1) -> net=%v", h, c, res.Net)
 						w.receive(h, res.Net)
@@ -1569,7 +1590,7 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 						tr.add("tiny Sell(%s,%s,1) -> err=%v", h, c, err)
 					}
 				default:
-					payout, err := Refund(w.s, h, c, w.block, big.NewInt(1))
+					payout, err := Refund(w.s, h, c, w.block, tk(1))
 					tr.add("tiny Refund(%s,%s,1) -> payout=%v err=%v", h, c, payout, err)
 					if err == nil {
 						w.receive(h, payout)
@@ -1630,7 +1651,7 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 			}
 			// Fund the asker on the CURVE (Buy is the only issuance path):
 			// 5000 tokens covers the worst-case spend the cap admits (250).
-			if _, err := Buy(s, asker, creator, regBlock, big.NewInt(5000)); err != nil {
+			if _, err := Buy(s, asker, creator, regBlock, tk(5000)); err != nil {
 				t.Fatalf("iter %d: setup Buy: %v", i, err)
 			}
 
@@ -1666,7 +1687,7 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 			// INDEPENDENT model of what the contract should charge — the face
 			// itself, ceiled by the rate, with no leg arithmetic at all.
 			tokenLeg := big.NewInt(face)
-			maxCredits := fzCeilDiv(tokenLeg, rate) // the asker's own cap == the exact expected spend
+			maxCredits := fzCeilDiv(new(big.Int).Mul(tokenLeg, unitsScale), rate) // the asker's own cap == the exact expected spend, in units
 			res, err := askAt0(s, asker, creator, askBlock, maxCredits, "cid", MinAskDeadline)
 			if err != nil {
 				t.Fatalf("iter %d: Ask(face=%d rate=%s): %v", i, face, rate, err)
@@ -1675,7 +1696,7 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 				t.Fatalf("iter %d: RateUsed = %s, want the seeded TWAP %s (min(short,long,spot) did not resolve to the marker)", i, res.RateUsed, rate)
 			}
 
-			want := fzCeilDiv(tokenLeg, rate)
+			want := fzCeilDiv(new(big.Int).Mul(tokenLeg, unitsScale), rate) // v6: units
 			if res.CreditsSpent.Cmp(want) != 0 {
 				t.Fatalf("iter %d: ROUNDING VIOLATION: face=%d (tokenLeg=%s) rate=%s got CreditsSpent=%s, independent ceil(tokenLeg/rate)=%s",
 					i, face, tokenLeg, rate, res.CreditsSpent, want)
@@ -1697,8 +1718,8 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 			// FEWER credit must always undershoot face.
 			oneLess := new(big.Int).Sub(res.CreditsSpent, big.NewInt(1))
 			if oneLess.Sign() > 0 {
-				got := new(big.Int).Mul(oneLess, rate)
-				if got.Cmp(tokenLeg) >= 0 {
+				got := new(big.Int).Mul(oneLess, rate)                    // units x HBD-per-token
+				if got.Cmp(new(big.Int).Mul(tokenLeg, unitsScale)) >= 0 { // v6: covers when >= face x TokenScale
 					t.Fatalf("iter %d: CreditsSpent=%s is not minimal for tokenLeg=%s at rate=%s: one less (%s) still covers it (%s)",
 						i, res.CreditsSpent, tokenLeg, rate, oneLess, got)
 				}
@@ -1888,7 +1909,7 @@ func TestFuzzBoundarySweep(t *testing.T) {
 			if err := Register(s, creator, creator, 100, 10_000, MaxCap); err != nil {
 				t.Fatalf("setup: %v", err)
 			}
-			if _, err := Buy(s, "fzbadasker", creator, 100, big.NewInt(5000)); err != nil {
+			if _, err := Buy(s, "fzbadasker", creator, 100, tk(5000)); err != nil {
 				t.Fatalf("setup: %v", err)
 			}
 			askBlock := seedSettleObs(s, creator, 110, big.NewInt(15_000))
@@ -1897,7 +1918,7 @@ func TestFuzzBoundarySweep(t *testing.T) {
 			if v < 0 {
 				deadline = 0
 			}
-			_, err := askAt0(s, "fzbadasker", creator, askBlock, big.NewInt(1_000_000), "cid", deadline)
+			_, err := askAt0(s, "fzbadasker", creator, askBlock, tk(1_000_000), "cid", deadline)
 			inBand := deadline >= MinAskDeadline && deadline <= MaxAskDeadline
 			if inBand && err != nil {
 				t.Fatalf("Ask.deadline: v=%d INSIDE [%d,%d] but rejected: %v", deadline, MinAskDeadline, MaxAskDeadline, err)
@@ -1950,12 +1971,12 @@ func TestFuzzBoundarySweep(t *testing.T) {
 			if err := Register(s, creator, creator, 100, 1000, MaxCap); err != nil {
 				t.Fatalf("setup: %v", err)
 			}
-			if _, err := Buy(s, "fzbtcfrom", creator, 100, big.NewInt(1000)); err != nil {
+			if _, err := Buy(s, "fzbtcfrom", creator, 100, tk(1000)); err != nil {
 				t.Fatalf("setup: %v", err)
 			}
 			amt := fzAmount(rng)
 			err := TransferCredits(s, "fzbtcfrom", creator, "fzbtcfrom", "fzbtcto", 100, amt)
-			validAmt := amt != nil && amt.Sign() > 0 && amt.Cmp(big.NewInt(1000)) <= 0
+			validAmt := amt != nil && amt.Sign() > 0 && amt.Cmp(tk(1000)) <= 0
 			if validAmt && err != nil {
 				t.Fatalf("TransferCredits: amt=%s valid and within balance=1000 but rejected: %v", amt, err)
 			}
@@ -1969,7 +1990,7 @@ func TestFuzzBoundarySweep(t *testing.T) {
 			if err := Register(s, creator, creator, 100, 1000, MaxCap); err != nil {
 				t.Fatalf("setup: %v", err)
 			}
-			if _, err := Buy(s, "fzbrfholder", creator, 100, big.NewInt(1000)); err != nil {
+			if _, err := Buy(s, "fzbrfholder", creator, 100, tk(1000)); err != nil {
 				t.Fatalf("setup: %v", err)
 			}
 			// WIND-DOWN BLOCK: Refund is phase-routed to FROZEN/CLOSED
@@ -1984,7 +2005,7 @@ func TestFuzzBoundarySweep(t *testing.T) {
 			wdBlock := uint64(100) + hzLongGap + GraceBlocks + 1
 			amt := fzAmount(rng)
 			_, err := Refund(s, "fzbrfholder", creator, wdBlock, amt)
-			validAmt := amt != nil && amt.Sign() > 0 && amt.Cmp(big.NewInt(1000)) <= 0
+			validAmt := amt != nil && amt.Sign() > 0 && amt.Cmp(tk(1000)) <= 0
 			if validAmt && err != nil {
 				t.Fatalf("Refund: credits=%s valid and within balance=1000 but rejected: %v", amt, err)
 			}

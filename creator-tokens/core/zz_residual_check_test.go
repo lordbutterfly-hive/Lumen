@@ -15,13 +15,13 @@ func TestZZResidual_IsItMoneyOrDisplay(t *testing.T) {
 	// Launderer: huge aged pile + fresh slice, sells the fresh slice.
 	s := NewMemStore()
 	rgMarket(t, s, c, t0)
-	if _, err := Buy(s, whale, c, t0, big.NewInt(P)); err != nil {
+	if _, err := Buy(s, whale, c, t0, tk(P)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, whale, c, at, big.NewInt(F)); err != nil {
+	if _, err := Buy(s, whale, c, at, tk(F)); err != nil {
 		t.Fatal(err)
 	}
-	q, err := QuoteSell(s, whale, c, at, big.NewInt(F))
+	q, err := QuoteSell(s, whale, c, at, tk(F))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,15 +29,15 @@ func TestZZResidual_IsItMoneyOrDisplay(t *testing.T) {
 	// Honest control: same market, same supply, buys the SAME fresh slice, no pile.
 	s2 := NewMemStore()
 	rgMarket(t, s2, c, t0)
-	if _, err := Buy(s2, honest, c, t0, big.NewInt(P)); err != nil {
+	if _, err := Buy(s2, honest, c, t0, tk(P)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s2, honest, c, at, big.NewInt(F)); err != nil {
+	if _, err := Buy(s2, honest, c, at, tk(F)); err != nil {
 		t.Fatal(err)
 	}
 	// sell the fresh slice from a position whose pile is the SAME age: identical shape,
 	// so any difference is the laundering effect, not a different curve position.
-	q2, err := QuoteSell(s2, honest, c, at, big.NewInt(F))
+	q2, err := QuoteSell(s2, honest, c, at, tk(F))
 	if err != nil {
 		t.Fatal(err)
 	}

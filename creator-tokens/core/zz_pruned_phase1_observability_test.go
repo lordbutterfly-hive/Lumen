@@ -103,8 +103,8 @@ func hz17SeedAskableMarket(t *testing.T, creator, asker string, rate int64) (*Me
 	setupMarket(s, creator, base, 100000)
 	setMoney(s, kFace(creator), big.NewInt(rate))
 	// Give the asker a maturing balance large enough to cover any ask.
-	setMoney(s, kBal(creator, asker), big.NewInt(1_000_000))
-	setMoney(s, kSupply(creator), big.NewInt(1_000_000))
+	setMoney(s, kBal(creator, asker), tk(1_000_000))
+	setMoney(s, kSupply(creator), tk(1_000_000))
 	queryBlock := seedSettleObs(s, creator, base, big.NewInt(rate))
 	// setupMarket's paidUntil is anchored at `base`; extend it so the
 	// market is still ACTIVE at queryBlock (well past base once the TWAP
@@ -360,8 +360,8 @@ func TestPhase1_H06_StrandedHolder_BlocksCloseAndReregister(t *testing.T) {
 	// Seed supply and a matured balance for a holder the (hypothetical)
 	// indexer never learned about — mirrors "one bal-affecting event never
 	// arrived" without needing the indexer itself.
-	setMoney(s, kSupply(creator), big.NewInt(500))
-	setMatured(s, creator, strandedHolder, big.NewInt(500))
+	setMoney(s, kSupply(creator), tk(500))
+	setMatured(s, creator, strandedHolder, tk(500))
 	// Freeze the market naturally (paidUntil in the past) rather than via
 	// Retire, to isolate this from H-18/retire semantics.
 

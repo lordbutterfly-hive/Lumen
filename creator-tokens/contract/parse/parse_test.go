@@ -293,3 +293,19 @@ func TestEscape_PlainStringUnchanged(t *testing.T) {
 		t.Fatalf("Escape(%q) = %q, want unchanged", "alice", got)
 	}
 }
+
+// TokenAmount: the wire's decimal token amount, scaled to units (v6).
+func TestTokenAmount_ScalesAndRefuses(t *testing.T) {
+	good := map[string]int64{"1": 100, "1.5": 150, "0.01": 1, "+2": 200, "0": 0, "1000000000": 100_000_000_000}
+	for in, want := range good {
+		v, ok := TokenAmount(in)
+		if !ok || v.Int64() != want {
+			t.Fatalf("TokenAmount(%q) = (%v, %v), want %d", in, v, ok, want)
+		}
+	}
+	for _, bad := range []string{"", ".", "1.", ".5", "0.001", "1e3", "-1", " 1", "1 ", "1,5", "0x10", "1.2.3"} {
+		if v, ok := TokenAmount(bad); ok {
+			t.Fatalf("TokenAmount(%q) = (%v, true), want ok=false", bad, v)
+		}
+	}
+}

@@ -1,9 +1,6 @@
 package core
 
-import (
-	"math/big"
-	"testing"
-)
+import "testing"
 
 // zz_bound_expiry_test.go — PROOF 5: the MaxLots bound does not regress the
 // exit-tax EXPIRY proof (VERIFY-EXIT-TAX-EXPIRY). A ledger that has actually
@@ -21,7 +18,7 @@ func TestZZBound_MergedLedgerStillMaturesAndGraduates(t *testing.T) {
 	zbMarket(t, s, c, t0+N+2*ExitTaxDecayBlocks+10)
 
 	for i := 0; i < N; i++ {
-		if _, err := Buy(s, h, c, t0+uint64(i), big.NewInt(1)); err != nil {
+		if _, err := Buy(s, h, c, t0+uint64(i), tk(1)); err != nil {
 			t.Fatalf("buy #%d: %v", i, err)
 		}
 	}
@@ -30,8 +27,8 @@ func TestZZBound_MergedLedgerStillMaturesAndGraduates(t *testing.T) {
 		t.Fatalf("precondition: wanted a MERGED ledger, got %d cohorts for %d inflows", cohorts, N)
 	}
 	bal := getMoney(s, kBal(c, h))
-	if bal.Cmp(big.NewInt(N)) != 0 {
-		t.Fatalf("kBal=%s want %d", bal, N)
+	if bal.Cmp(tk(N)) != 0 {
+		t.Fatalf("kBal=%s want %d tokens", bal, N)
 	}
 	if sum := zvSumLotsRaw(s, c, h); sum.Cmp(bal) != 0 {
 		t.Fatalf("Σlots=%s != kBal=%s", sum, bal)
@@ -111,14 +108,14 @@ func TestZZBound_MaturedTailCollapsesOnLivePosition(t *testing.T) {
 
 	// Phase 1 — 40 cohorts of 10 tokens at distinct early blocks (400 tokens).
 	for i := 0; i < 40; i++ {
-		if _, err := Buy(s, h, c, t0+uint64(i), big.NewInt(10)); err != nil {
+		if _, err := Buy(s, h, c, t0+uint64(i), tk(10)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Phase 2 — a big mid-window buy that keeps the BLEND well short of maturity,
 	// so nothing graduates when the old cohorts individually pass the window.
 	mid := t0 + ExitTaxDecayBlocks/2
-	if _, err := Buy(s, h, c, mid, big.NewInt(400)); err != nil {
+	if _, err := Buy(s, h, c, mid, tk(400)); err != nil {
 		t.Fatal(err)
 	}
 	before := zvNumCohorts(s, c, h)
@@ -137,10 +134,10 @@ func TestZZBound_MaturedTailCollapsesOnLivePosition(t *testing.T) {
 	liveStart := t0 + ExitTaxDecayBlocks + 100
 	for i := 0; i < 40; i++ {
 		blk := liveStart + uint64(i)
-		if _, err := Buy(s, "src", c, blk, big.NewInt(10)); err != nil {
+		if _, err := Buy(s, "src", c, blk, tk(10)); err != nil {
 			t.Fatalf("phase-3 buy #%d: %v", i, err)
 		}
-		if err := TransferCredits(s, "src", c, "src", h, blk, big.NewInt(10)); err != nil {
+		if err := TransferCredits(s, "src", c, "src", h, blk, tk(10)); err != nil {
 			t.Fatalf("phase-3 transfer #%d: %v", i, err)
 		}
 	}
@@ -168,7 +165,7 @@ func TestZZBound_MaturedTailCollapsesOnLivePosition(t *testing.T) {
 	if matured != 1 {
 		t.Fatalf("expected exactly 1 matured cohort after the free collapse, got %d", matured)
 	}
-	if maturedTokens.Cmp(big.NewInt(400)) != 0 {
+	if maturedTokens.Cmp(tk(400)) != 0 {
 		t.Fatalf("matured tail holds %s, want the 400 phase-1 tokens", maturedTokens)
 	}
 	// The 41 LIVE cohorts (phase 2 + phase 3) survive individually and keep their
@@ -200,7 +197,7 @@ func TestZZBound_MergedLedgerMaturityBoundaryUnshifted(t *testing.T) {
 	s := NewMemStore()
 	zbMarket(t, s, c, t0+N+2*ExitTaxDecayBlocks+10)
 	for i := 0; i < N; i++ {
-		if _, err := Buy(s, h, c, t0+uint64(i), big.NewInt(5)); err != nil {
+		if _, err := Buy(s, h, c, t0+uint64(i), tk(5)); err != nil {
 			t.Fatal(err)
 		}
 	}

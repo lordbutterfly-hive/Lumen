@@ -16,21 +16,21 @@ func TestZZVerifyExpiry_TransferMaturedAfterExpiry(t *testing.T) {
 	s := tbMarket(t, c)
 	b1 := uint64(1_000_000)
 	at := zvMature(t, s, c, h, 500, b1)
-	if Graduate(s, c, h, at).Cmp(big.NewInt(500)) != 0 {
+	if Graduate(s, c, h, at).Cmp(tk(500)) != 0 {
 		t.Fatal("graduate 500")
 	}
 
 	supplyBefore := new(big.Int).Set(Supply(s, c))
 	reserveBefore := new(big.Int).Set(Reserve(s, c))
 
-	if err := TransferMatured(s, c, h, h2, h, big.NewInt(200)); err != nil {
+	if err := TransferMatured(s, c, h, h2, h, tk(200)); err != nil {
 		t.Fatalf("TransferMatured refused: %v", err)
 	}
 	// Matured tokens stay matured for the recipient; no tax, no clock, no lots.
-	if MaturedOf(s, c, h).Cmp(big.NewInt(300)) != 0 {
+	if MaturedOf(s, c, h).Cmp(tk(300)) != 0 {
 		t.Fatalf("sender matured=%s want 300", MaturedOf(s, c, h))
 	}
-	if MaturedOf(s, c, h2).Cmp(big.NewInt(200)) != 0 {
+	if MaturedOf(s, c, h2).Cmp(tk(200)) != 0 {
 		t.Fatalf("recipient matured=%s want 200", MaturedOf(s, c, h2))
 	}
 	if zvHasLots(s, c, h) || zvHasLots(s, c, h2) {
@@ -54,17 +54,17 @@ func TestZZVerifyExpiry_TransferCreditsOfMaturedAfterExpiry(t *testing.T) {
 	s := tbMarket(t, c)
 	b1 := uint64(1_000_000)
 	at := zvMature(t, s, c, h, 500, b1)
-	if Graduate(s, c, h, at).Cmp(big.NewInt(500)) != 0 {
+	if Graduate(s, c, h, at).Cmp(tk(500)) != 0 {
 		t.Fatal("graduate 500")
 	}
 
-	if err := TransferCredits(s, h, c, h, h2, at, big.NewInt(200)); err != nil {
+	if err := TransferCredits(s, h, c, h, h2, at, tk(200)); err != nil {
 		t.Fatalf("TransferCredits refused: %v", err)
 	}
-	if MaturedOf(s, c, h).Cmp(big.NewInt(300)) != 0 {
+	if MaturedOf(s, c, h).Cmp(tk(300)) != 0 {
 		t.Fatalf("sender matured=%s want 300", MaturedOf(s, c, h))
 	}
-	if MaturedOf(s, c, h2).Cmp(big.NewInt(200)) != 0 {
+	if MaturedOf(s, c, h2).Cmp(tk(200)) != 0 {
 		t.Fatalf("recipient matured=%s want 200 (matured leg stays matured)", MaturedOf(s, c, h2))
 	}
 	if MaturingOf(s, c, h2).Sign() != 0 {
@@ -87,7 +87,7 @@ func TestZZVerifyExpiry_RefundMaturedAfterExpiry(t *testing.T) {
 		at := zvMature(t, s, c, h, 500, b1)
 
 		if graduateFirst {
-			if Graduate(s, c, h, at).Cmp(big.NewInt(500)) != 0 {
+			if Graduate(s, c, h, at).Cmp(tk(500)) != 0 {
 				t.Fatal("graduate 500")
 			}
 		}
@@ -101,7 +101,7 @@ func TestZZVerifyExpiry_RefundMaturedAfterExpiry(t *testing.T) {
 			t.Fatal("market must be winding down after retire")
 		}
 		// Sell must be closed in wind-down (proves we exercise the Refund rail).
-		if _, err := Sell(s, h, c, windDown, big.NewInt(1)); err == nil {
+		if _, err := Sell(s, h, c, windDown, tk(1)); err == nil {
 			t.Fatal("curve rail must be closed during wind-down")
 		}
 
@@ -110,9 +110,9 @@ func TestZZVerifyExpiry_RefundMaturedAfterExpiry(t *testing.T) {
 		feeBalBefore := new(big.Int).Set(getMoney(s, kFeeBal(c)))
 		// gross the holder is owed (flat pro-rata); with a lone full holder this
 		// is the whole reserve.
-		wantGross := refundPayout(Reserve(s, c), big.NewInt(500), Supply(s, c))
+		wantGross := refundPayout(Reserve(s, c), tk(500), Supply(s, c))
 
-		net, err := Refund(s, h, c, windDown, big.NewInt(500))
+		net, err := Refund(s, h, c, windDown, tk(500))
 		if err != nil {
 			t.Fatalf("TRAPPED / refund refused: %v", err)
 		}

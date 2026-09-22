@@ -321,7 +321,7 @@ func TestPlan_RealCore_NoRefundHolderOpInsideExitTaxWindow(t *testing.T) {
 		if err := core.Register(s, creator, creator, registeredBlock, face, cap); err != nil {
 			t.Fatalf("Register: %v", err)
 		}
-		if _, err := core.Buy(s, holder, creator, registeredBlock+1, big.NewInt(400)); err != nil {
+		if _, err := core.Buy(s, holder, creator, registeredBlock+1, tk(400)); err != nil {
 			t.Fatalf("Buy: %v", err)
 		}
 		// A1 (owner ruling 2026-08-30): a natural lapse no longer opens the

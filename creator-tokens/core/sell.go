@@ -202,7 +202,7 @@ func sellCompute(s Store, caller, creator string, block uint64, deltaS *big.Int)
 	if !validAccount(creator) {
 		return nil, newErr(ErrInput, "invalid creator account")
 	}
-	if deltaS == nil || deltaS.Sign() <= 0 {
+	if belowMinTrade(deltaS) {
 		return nil, newErr(ErrInput, "token amount must be positive")
 	}
 

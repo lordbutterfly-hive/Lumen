@@ -110,8 +110,8 @@ func setAllowance(s Store, owner, spender, c string, v *big.Int) {
 	if v.Sign() < 0 {
 		panic("setAllowance: negative allowance")
 	}
-	if !v.IsUint64() || v.Uint64() > uint64(MaxCap) {
-		panic("setAllowance: allowance exceeds MaxCap")
+	if !v.IsUint64() || v.Uint64() > uint64(MaxCap/TokenScale) {
+		panic("setAllowance: allowance exceeds MaxCap (whole tokens)")
 	}
 	key := kAllowance(owner, spender, c)
 	if v.Sign() == 0 {
@@ -155,7 +155,9 @@ func Approve(s Store, owner, spender, creator string, expected, amount *big.Int)
 	if amount == nil || amount.Sign() < 0 {
 		return newErr(ErrInput, "amount must not be negative")
 	}
-	if !amount.IsUint64() || amount.Uint64() > uint64(MaxCap) {
+	// The allowance is WHOLE tokens (the door's unit), so its ceiling is the cap
+	// in whole tokens, not in units.
+	if !amount.IsUint64() || amount.Uint64() > uint64(MaxCap/TokenScale) {
 		return newErr(ErrInput, "allowance exceeds the supply ceiling")
 	}
 	if amount.Sign() > 0 {
@@ -189,8 +191,15 @@ func TransferMatured(s Store, creator, from, to, spender string, amount *big.Int
 	if from == to {
 		return newErr(ErrInput, "from and to must be different accounts")
 	}
-	if amount == nil || amount.Sign() <= 0 {
+	if belowMinTrade(amount) {
 		return newErr(ErrInput, "amount must be positive")
+	}
+	// v6: `amount` is UNITS like every other core amount, but the door only moves
+	// WHOLE tokens: the counterparties (magi-market and any NFT-standard reader)
+	// decode `bal|` and allowances as integers with no decimals hint, so a
+	// fraction can never cross this door. Sell, refund and ask still spend it.
+	if new(big.Int).Rem(amount, unitsScale).Sign() != 0 {
+		return newErr(ErrInput, "the marketplace door moves whole tokens only")
 	}
 
 	// ★ REFUSE CONTRACT RECIPIENTS. magi-market's auctions and rentals escrow
@@ -214,8 +223,9 @@ func TransferMatured(s Store, creator, from, to, spender string, amount *big.Int
 	}
 
 	if spender != from {
-		allowed := allowanceLive(s, from, spender, creator)
-		if mLt(allowed, amount) {
+		allowed := allowanceLive(s, from, spender, creator) // WHOLE tokens, the pre-v6 unit, untouched by the migration
+		amountWhole := new(big.Int).Div(amount, unitsScale)
+		if mLt(allowed, amountWhole) {
 			// Name the real reason when the grant exists but belongs to a dead
 			// incarnation. "insufficient allowance" would send an integrator
 			// hunting for a balance problem that is not there, and this is
@@ -226,7 +236,7 @@ func TransferMatured(s Store, creator, from, to, spender string, amount *big.Int
 			}
 			return newErr(ErrAuth, "insufficient allowance")
 		}
-		next, err := mSub(allowed, amount)
+		next, err := mSub(allowed, amountWhole)
 		if err != nil {
 			return err // unreachable: allowed >= amount just proven
 		}

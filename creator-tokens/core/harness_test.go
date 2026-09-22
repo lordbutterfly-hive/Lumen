@@ -163,6 +163,8 @@ func hzHoldersOf(s *MemStore, creator string) []string {
 			add(k[len(maturingPrefix):])
 		case strings.HasPrefix(k, "bal|") && strings.HasSuffix(k, maturedSuffix):
 			add(k[len("bal|") : len(k)-len(maturedSuffix)])
+		case strings.HasPrefix(k, "balf|") && strings.HasSuffix(k, maturedSuffix):
+			add(k[len("balf|") : len(k)-len(maturedSuffix)])
 		}
 	}
 	sort.Strings(out)
@@ -181,19 +183,39 @@ func hzHoldersOf(s *MemStore, creator string) []string {
 // omits them entirely and reports a supply/balance mismatch that is an artefact
 // of the measurement, not a defect in the money.
 func hzSumMatured(s *MemStore, creator string) *big.Int {
-	suffix := "|" + creator
 	total := big.NewInt(0)
-	for _, k := range s.Keys() {
-		if !strings.HasPrefix(k, "bal|") || !strings.HasSuffix(k, suffix) {
-			continue
-		}
-		v, _ := s.Get(k)
-		n, ok := leToU64([]byte(v))
-		if ok {
-			total.Add(total, new(big.Int).SetUint64(n))
-		}
+	for _, h := range hzMaturedHolders(s, creator) {
+		total.Add(total, getMatured(s, creator, h))
 	}
 	return total
+}
+
+// hzMaturedHolders lists every holder with ANY matured key for the creator:
+// v6 splits the bucket into `bal|` (whole tokens, LE u64) and `balf|` (the
+// 0..99-unit remainder, decimal), and a position under one token has ONLY the
+// second, so a scan of `bal|` alone would miss it. Sum through getMatured, the
+// one codec, never by decoding either key here.
+func hzMaturedHolders(s *MemStore, creator string) []string {
+	suffix := "|" + creator
+	seen := map[string]bool{}
+	var out []string
+	for _, k := range s.Keys() {
+		var h string
+		switch {
+		case strings.HasPrefix(k, "bal|") && strings.HasSuffix(k, suffix):
+			h = k[len("bal|") : len(k)-len(suffix)]
+		case strings.HasPrefix(k, "balf|") && strings.HasSuffix(k, suffix):
+			h = k[len("balf|") : len(k)-len(suffix)]
+		default:
+			continue
+		}
+		if !seen[h] {
+			seen[h] = true
+			out = append(out, h)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // hzSumBalances totals a creator's WHOLE outstanding position — maturing plus
@@ -526,11 +548,11 @@ func hzResetObs(s Store, creator string) {
 // `tokens` is a TOKEN count, not an HBD amount — the units changed with the
 // mechanism, and every call site below was re-denominated deliberately
 // rather than by dividing the old HBD figure by anything.
-func hzBuy(t *testing.T, s Store, holder, creator string, block uint64, tokens int64) *BuyResult {
+func hzBuy(t *testing.T, s Store, holder, creator string, block uint64, tokens int64) *BuyResult { // tokens: WHOLE, scaled below (v6)
 	t.Helper()
-	res, err := Buy(s, holder, creator, block, big.NewInt(tokens))
+	res, err := Buy(s, holder, creator, block, tk(tokens))
 	hzMustOK(t, err, fmt.Sprintf("Buy(%s -> %s, %d tokens)", holder, creator, tokens))
-	if res.Minted.Cmp(big.NewInt(tokens)) != 0 {
+	if res.Minted.Cmp(tk(tokens)) != 0 {
 		t.Fatalf("Buy(%s->%s): minted %s, want exactly %d", holder, creator, res.Minted, tokens)
 	}
 	if mAdd(res.Cost, res.Fee).Cmp(res.TotalDue) != 0 {
@@ -554,6 +576,7 @@ func hzBuy(t *testing.T, s Store, holder, creator string, block uint64, tokens i
 // ===========================================================================
 func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 	s := NewMemStore()
+	setStr(s, kOwner(), "hive:hzplatform") // v6: the commission leg only settles with an owner bound, as on mainnet
 
 	const (
 		alice = "alicecreates"
@@ -756,6 +779,13 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 		// blown), so the slice is exactly ceil(commission * MissReclaimSliceBps
 		// / 10000) and the asker gets the rest.
 		wantRetained := mMulDivCeil(a.res.CommissionCredits, new(big.Int).SetUint64(MissReclaimSliceBps), big.NewInt(10000))
+		// v6: the deterrent is floored at one whole token and clamped to the escrow (ask.go Reclaim).
+		if wantRetained.Cmp(big.NewInt(MissReclaimFloorUnits)) < 0 {
+			wantRetained = big.NewInt(MissReclaimFloorUnits)
+		}
+		if wantRetained.Cmp(a.res.CreditsSpent) > 0 {
+			wantRetained = new(big.Int).Set(a.res.CreditsSpent)
+		}
 		if gotRetained.Cmp(wantRetained) != 0 {
 			t.Fatalf("Reclaim(seq=%d): retained %s, want %s (%d bps of the %s commission)", a.res.Seq, gotRetained, wantRetained, MissReclaimSliceBps, a.res.CommissionCredits)
 		}
@@ -767,7 +797,7 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 
 	// ---- TRANSFER CREDITS (pre-lapse) ----
 	beforeTransfer := hzReserves(s, creators)
-	hzMustOK(t, TransferCredits(s, "holdertwo", alice, "holdertwo", "holderfour", pb, big.NewInt(200)), "TransferCredits")
+	hzMustOK(t, TransferCredits(s, "holdertwo", alice, "holdertwo", "holderfour", pb, tk(200)), "TransferCredits")
 	hzAssertReserveDeltas(t, s, creators, beforeTransfer, nil, "post-TransferCredits")
 	hzAssertI3(t, s, alice, "post-TransferCredits")
 
@@ -808,7 +838,7 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 	// A NEW buy is now rejected (inflows blocked) — and nothing is mutated.
 	beforeRejBuy := hzReserves(s, creators)
 	snapBefore := hzSnapshotAll(s)
-	_, err = Buy(s, "holdersix", alice, frozenBlock, big.NewInt(10))
+	_, err = Buy(s, "holdersix", alice, frozenBlock, tk(10))
 	hzMustErr(t, err, ErrState, "Buy while FROZEN must be rejected")
 	hzAssertReserveDeltas(t, s, creators, beforeRejBuy, nil, "post-rejected-Buy")
 	snapAfter := hzSnapshotAll(s)
@@ -820,7 +850,7 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 	// wind-down. Under the curve bob's reserve is the exact area of his own
 	// 800 tokens (500 + 300 across two buys), computed here from the curve
 	// rather than hard-coded, so the isolation claim survives recalibration.
-	if got, want := Reserve(s, bob), Area(big.NewInt(800)); got.Cmp(want) != 0 {
+	if got, want := Reserve(s, bob), Area(tk(800)); got.Cmp(want) != 0 {
 		t.Fatalf("bob's reserve drifted before alice's wind-down even started: %s, want area(800) = %s", got, want)
 	}
 
@@ -873,17 +903,19 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 		hzAssertConservation(t, s, creators, hbdIn, hbdOut, label)
 	}
 
-	refundSelf("holderone", 400, "wind-down: Refund(holderone, partial 400 of 1000)")
+	refundSelf("holderone", 400*TokenScale, "wind-down: Refund(holderone, partial 400 of 1000)") // credits in units
 	refundPush("hzkeeper", "holdertwo", "wind-down: RefundHolder(holdertwo, full)")
 	refundPush("hzkeeper", "holderthree", "wind-down: RefundHolder(holderthree, full)")
 	refundSelf("holderfour", BalanceOf(s, alice, "holderfour").Int64(), "wind-down: Refund(holderfour, full)")
 	refundPush("hzkeeper", "holderfive", "wind-down: RefundHolder(holderfive, full)")
 	refundPush("hzkeeper", alice, "wind-down: RefundHolder(alice's own earned credits)")
 	refundPush("hzkeeper", "holderone", "wind-down: RefundHolder(holderone, remainder)")
+	// v6: the platform owner holds the commission and miss slices of this lifecycle; sweep them too.
+	refundPush("hzkeeper", "hive:hzplatform", "wind-down: RefundHolder(the platform owner's commission and miss slices)")
 
 	// ---- CLOSE ----
 	if !CloseIfDrained(s, alice, frozenBlock) {
-		t.Fatal("CloseIfDrained returned false with supply == 0 while FROZEN")
+		t.Fatalf("CloseIfDrained returned false while FROZEN: supply=%s reserve=%s phase=%s retired=%v", Supply(s, alice), Reserve(s, alice), Phase(s, alice, frozenBlock), marketRetired(s, alice))
 	}
 	hzAssertPhase(t, s, alice, frozenBlock, StateClosed, "post-close")
 	if !CloseIfDrained(s, alice, frozenBlock) {
@@ -898,10 +930,10 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 
 	// bob's MONEY is completely untouched by alice's entire lifecycle — this
 	// is the actual cross-market isolation claim, and it holds exactly.
-	if got, want := Reserve(s, bob), Area(big.NewInt(800)); got.Cmp(want) != 0 {
+	if got, want := Reserve(s, bob), Area(tk(800)); got.Cmp(want) != 0 {
 		t.Fatalf("bob's reserve after alice's wind-down = %s, want untouched area(800) = %s", got, want)
 	}
-	if got := Supply(s, bob); got.Cmp(big.NewInt(800)) != 0 {
+	if got := Supply(s, bob); got.Cmp(tk(800)) != 0 {
 		t.Fatalf("bob's supply after alice's wind-down = %s, want untouched 800 tokens", got)
 	}
 	// ★ bob's PHASE IS NOW UNTOUCHED TOO, AND THAT IS THE INVERSION (OWNER
@@ -1032,7 +1064,7 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 	t.Run("NewBuy_isBlocked", func(t *testing.T) {
 		hzAssertPhase(t, s, creator, frozenTestBlock, StateFrozen, "precondition")
 		before := hzSnapshotAll(s)
-		_, err := Buy(s, "wouldbeholder", creator, frozenTestBlock, big.NewInt(50))
+		_, err := Buy(s, "wouldbeholder", creator, frozenTestBlock, tk(50))
 		hzMustErr(t, err, ErrState, "Buy while FROZEN")
 		after := hzSnapshotAll(s)
 		if changed := hzChangedKeys(before, after); len(changed) != 0 {
@@ -1057,7 +1089,7 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 	t.Run("Sell_isClosed_whileWindingDown", func(t *testing.T) {
 		hzAssertPhase(t, s, creator, frozenTestBlock, StateFrozen, "precondition")
 		before := hzSnapshotAll(s)
-		_, err := Sell(s, "holdera", creator, frozenTestBlock, big.NewInt(1))
+		_, err := Sell(s, "holdera", creator, frozenTestBlock, tk(1))
 		hzMustErr(t, err, ErrState, "Sell while retired/winding down (K3: curve rail dropped)")
 		if changed := hzChangedKeys(before, hzSnapshotAll(s)); len(changed) != 0 {
 			t.Fatalf("rejected Sell mutated state: %v", changed)
@@ -1070,7 +1102,7 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 		// maxCredits=1500 is an arbitrary valid (positive) cap — this call is
 		// rejected by RequireInflowOpen (FROZEN) before it ever reaches the
 		// maxCredits guard, so its exact value doesn't matter here.
-		_, err := askAt0(s, "holderc", creator, frozenTestBlock, big.NewInt(1500), "should-be-rejected", MinAskDeadline)
+		_, err := askAt0(s, "holderc", creator, frozenTestBlock, tk(1500), "should-be-rejected", MinAskDeadline)
 		hzMustErr(t, err, ErrState, "Ask while FROZEN")
 		after := hzSnapshotAll(s)
 		if changed := hzChangedKeys(before, after); len(changed) != 0 {
@@ -1082,17 +1114,17 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 		hzAssertPhase(t, s, creator, frozenTestBlock, StateFrozen, "precondition")
 		supply := Supply(s, creator)
 		reserve := Reserve(s, creator)
-		gross := refundPayout(reserve, big.NewInt(400), supply)
+		gross := refundPayout(reserve, tk(400), supply)
 		wantNet := new(big.Int).Sub(gross, ExitTaxOn(gross, ExitTaxBpsAt(heldBlocksAt(s, creator, "holderc", frozenTestBlock))))
 		before := BalanceOf(s, creator, "holderc")
-		payout, err := Refund(s, "holderc", creator, frozenTestBlock, big.NewInt(400))
+		payout, err := Refund(s, "holderc", creator, frozenTestBlock, tk(400))
 		hzMustOK(t, err, "Refund while FROZEN")
 		if payout.Cmp(wantNet) != 0 {
 			t.Fatalf("Refund while FROZEN paid %s, want net %s (gross %s − K2 tax)", payout, wantNet, gross)
 		}
 		after := BalanceOf(s, creator, "holderc")
-		if new(big.Int).Sub(before, after).Cmp(big.NewInt(400)) != 0 {
-			t.Fatalf("holderc balance moved by %s, want -400", new(big.Int).Sub(after, before))
+		if new(big.Int).Sub(before, after).Cmp(tk(400)) != 0 {
+			t.Fatalf("holderc balance moved by %s, want -400 tokens", new(big.Int).Sub(after, before))
 		}
 	})
 
@@ -1131,12 +1163,12 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 	t.Run("TransferCredits_stillWorks", func(t *testing.T) {
 		hzAssertPhase(t, s, creator, frozenTestBlock, StateFrozen, "precondition")
 		before := BalanceOf(s, creator, "holderc") // remainder after the 400 refund above
-		hzMustOK(t, TransferCredits(s, "holderc", creator, "holderc", "holderd", frozenTestBlock, big.NewInt(100)), "TransferCredits while FROZEN")
+		hzMustOK(t, TransferCredits(s, "holderc", creator, "holderc", "holderd", frozenTestBlock, tk(100)), "TransferCredits while FROZEN")
 		after := BalanceOf(s, creator, "holderc")
-		if new(big.Int).Sub(before, after).Cmp(big.NewInt(100)) != 0 {
-			t.Fatalf("holderc balance moved by %s, want -10000", new(big.Int).Sub(after, before))
+		if new(big.Int).Sub(before, after).Cmp(tk(100)) != 0 {
+			t.Fatalf("holderc balance moved by %s, want -100 tokens", new(big.Int).Sub(after, before))
 		}
-		if got := BalanceOf(s, creator, "holderd"); got.Cmp(big.NewInt(100)) != 0 {
+		if got := BalanceOf(s, creator, "holderd"); got.Cmp(tk(100)) != 0 {
 			t.Fatalf("holderd received %s, want 10000", got)
 		}
 	})
@@ -1171,7 +1203,7 @@ func TestHarness_FullWindDown_RandomOrderMixedRefundStyles(t *testing.T) {
 	s := NewMemStore()
 	const creator = "winddown1"
 	regBlock := uint64(4_000_000)
-	hzMustOK(t, Register(s, creator, creator, regBlock, 1000, 10_000_000), "Register")
+	hzMustOK(t, Register(s, creator, creator, regBlock, 1000, 10_000_000*TokenScale), "Register")
 
 	type holderAmt struct {
 		holder string
@@ -1259,10 +1291,10 @@ func TestHarness_FullWindDown_RandomOrderMixedRefundStyles(t *testing.T) {
 	// pull via Refund" — so "push a partial amount" is not an operation
 	// that exists; the push below drains exactly what the prior partial
 	// self-Refund left behind.)
-	doSelf("wdholder01", 7000, "split#1 self-partial(wdholder01, 7000 of 12000)")
+	doSelf("wdholder01", 7000*TokenScale, "split#1 self-partial(wdholder01, 7000 of 12000)")
 	doPush("wdholder01", "split#1 push-remainder(wdholder01, 5000)")
-	doSelf("wdholder02", 3000, "split#2 self-partial(wdholder02, 3000 of 7500)")
-	doSelf("wdholder02", 4500, "split#2 self-partial(wdholder02, remaining 4500)")
+	doSelf("wdholder02", 3000*TokenScale, "split#2 self-partial(wdholder02, 3000 of 7500)")
+	doSelf("wdholder02", 4500*TokenScale, "split#2 self-partial(wdholder02, remaining 4500)")
 
 	remaining := []string{
 		"wdholder03", "wdholder04", "wdholder05", "wdholder06", "wdholder07",
@@ -1290,7 +1322,7 @@ func TestHarness_FullWindDown_RandomOrderMixedRefundStyles(t *testing.T) {
 		t.Fatalf("Σ gross drained = %s, Σ curve costs = %s — dust or over-payment in a random-order full unwind", totalGrossDrained, totalCost)
 	}
 	if !CloseIfDrained(s, creator, refundBlock) {
-		t.Fatal("CloseIfDrained returned false with supply == 0 while FROZEN")
+		t.Fatalf("CloseIfDrained returned false while FROZEN: supply=%s reserve=%s phase=%s retired=%v", Supply(s, creator), Reserve(s, creator), Phase(s, creator, refundBlock), marketRetired(s, creator))
 	}
 	hzAssertPhase(t, s, creator, refundBlock, StateClosed, "final")
 
@@ -1318,7 +1350,7 @@ func TestHarness_RefundHolder_PaysHolderNeverCaller(t *testing.T) {
 	const caller = "pushercaller1"
 
 	regBlock := uint64(7_000_000)
-	hzMustOK(t, Register(s, creator, creator, regBlock, 1000, 1_000_000), "Register")
+	hzMustOK(t, Register(s, creator, creator, regBlock, 1000, 1_000_000*TokenScale), "Register")
 
 	hzBuy(t, s, target, creator, regBlock+10, 800)
 	// The pusher independently holds UNRELATED credits in the SAME market —
@@ -1385,7 +1417,7 @@ func TestHarness_RefundHolder_PaysHolderNeverCaller(t *testing.T) {
 	hzAssertExactChangedKeys(t, changed, want, "RefundHolder (0-tax) must touch ONLY holder-bal/supply/reserve/lots")
 
 	// Explicitly: the caller's OWN balance in this exact market is untouched.
-	if got := BalanceOf(s, creator, caller); got.Cmp(big.NewInt(50)) != 0 {
+	if got := BalanceOf(s, creator, caller); got.Cmp(tk(50)) != 0 {
 		t.Fatalf("caller's own unrelated balance = %s, want untouched 50", got)
 	}
 	// And the holder really did get paid in full (their balance -> 0).
@@ -1436,7 +1468,7 @@ func TestHarness_ReRegistration_AfterClosed(t *testing.T) {
 	const oldHolder = "oldholder1"
 
 	regBlock := uint64(5_000_000)
-	hzMustOK(t, Register(s, creator, creator, regBlock, 1000, 1_000_000), "Register (old life)")
+	hzMustOK(t, Register(s, creator, creator, regBlock, 1000, 1_000_000*TokenScale), "Register (old life)")
 	paidUntil := regBlock + hzLongGap
 	frozenStart := paidUntil + GraceBlocks
 
@@ -1468,7 +1500,7 @@ func TestHarness_ReRegistration_AfterClosed(t *testing.T) {
 	oldAskBlock := lastOldObs + 50 // still OVERDUE: paidUntil < oldAskBlock < frozenStart
 	oldRateGot, err := AskRate(s, creator, oldAskBlock)
 	hzMustOK(t, err, "AskRate (old life)")
-	oldAsk, err := askAt0(s, oldHolder, creator, oldAskBlock, creditsForAsk(big.NewInt(1000), oldRateGot), "old-life-ask", MinAskDeadline)
+	oldAsk, err := askAt0(s, oldHolder, creator, oldAskBlock, creditsForAsk(tk(1000), oldRateGot), "old-life-ask", MinAskDeadline)
 	hzMustOK(t, err, "Ask (old life)")
 	if oldAsk.Seq != 0 {
 		t.Fatalf("old life's first ask got seq %d, want 0", oldAsk.Seq)
@@ -1503,7 +1535,7 @@ func TestHarness_ReRegistration_AfterClosed(t *testing.T) {
 
 	// ---- RE-REGISTER, immediately, with genuinely different config ----
 	reRegBlock := closeBlock + 1
-	hzMustOK(t, Register(s, creator, creator, reRegBlock, 2000, 500000), "Register (new life)")
+	hzMustOK(t, Register(s, creator, creator, reRegBlock, 2000, 500000*TokenScale), "Register (new life)")
 
 	t.Run("SupplyReserveBalancesStartFresh", func(t *testing.T) {
 		if got := Supply(s, creator); !mIsZero(got) {

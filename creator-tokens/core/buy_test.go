@@ -24,7 +24,7 @@ func TestBuy_HappyPath_ExactAmounts(t *testing.T) {
 	}
 	s, c := bySetup(1_000_000)
 
-	r, err := Buy(s, "hodler", c, 200, big.NewInt(10))
+	r, err := Buy(s, "hodler", c, 200, tk(10))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,20 +35,20 @@ func TestBuy_HappyPath_ExactAmounts(t *testing.T) {
 	// total draw 10,955.
 	if r.Cost.Cmp(big.NewInt(10_434)) != 0 || r.Fee.Cmp(big.NewInt(521)) != 0 ||
 		r.FeeCreator.Cmp(big.NewInt(260)) != 0 || r.FeePlatform.Cmp(big.NewInt(261)) != 0 ||
-		r.TotalDue.Cmp(big.NewInt(10_955)) != 0 || r.Minted.Cmp(big.NewInt(10)) != 0 {
+		r.TotalDue.Cmp(big.NewInt(10_955)) != 0 || r.Minted.Cmp(tk(10)) != 0 {
 		t.Fatalf("BuyResult = cost %s fee %s (%s/%s) total %s minted %s, want 10434/521(260/261)/10955/10",
 			r.Cost, r.Fee, r.FeeCreator, r.FeePlatform, r.TotalDue, r.Minted)
 	}
 
 	// State: supply, reserve == the curve leg ONLY (C-19 — the fee is NOT in
 	// the reserve), balance, clock, basis, fee pots.
-	if got := getMoney(s, kSupply(c)); got.Cmp(big.NewInt(10)) != 0 {
+	if got := getMoney(s, kSupply(c)); got.Cmp(tk(10)) != 0 {
 		t.Fatalf("supply = %s, want 10", got)
 	}
 	if got := getMoney(s, kReserve(c)); got.Cmp(big.NewInt(10_434)) != 0 {
 		t.Fatalf("reserve = %s, want 10434 — the curve leg only, never cost+fee (C-19)", got)
 	}
-	if got := getMoney(s, kBal(c, "hodler")); got.Cmp(big.NewInt(10)) != 0 {
+	if got := getMoney(s, kBal(c, "hodler")); got.Cmp(tk(10)) != 0 {
 		t.Fatalf("balance = %s, want 10", got)
 	}
 	if w := holderAcqBlock(s, c, "hodler"); w != 200 {
@@ -91,12 +91,12 @@ func TestBuy_SecondBuy_WorkedExample(t *testing.T) {
 		t.Fatalf("calibration changed — recompute these expectations; do NOT skip")
 	}
 	s, c := bySetup(1_000_000)
-	if _, err := Buy(s, "hodler", c, 200, big.NewInt(10)); err != nil {
+	if _, err := Buy(s, "hodler", c, 200, tk(10)); err != nil {
 		t.Fatal(err)
 	}
 	// From S=10, buying 5 costs area(15) − area(10) = 15,948 − 10,434 =
 	// 5,514 (the exact area step), fee = floor(275.7) = 275, total 5,789.
-	r, err := Buy(s, "attacker", c, 300, big.NewInt(5))
+	r, err := Buy(s, "attacker", c, 300, tk(5))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestBuy_SecondBuy_WorkedExample(t *testing.T) {
 
 func TestBuy_ZeroPremine_CreatorHoldsNothing(t *testing.T) {
 	s, c := bySetup(1_000_000)
-	if _, err := Buy(s, "fan1", c, 200, big.NewInt(100)); err != nil {
+	if _, err := Buy(s, "fan1", c, 200, tk(100)); err != nil {
 		t.Fatal(err)
 	}
 	if got := getMoney(s, kBal(c, c)); !mIsZero(got) {
@@ -129,19 +129,19 @@ func TestBuy_Guards(t *testing.T) {
 
 	t.Run("invalid-caller", func(t *testing.T) {
 		s, c := mk()
-		if _, err := Buy(s, "bad|pipe", c, 200, big.NewInt(1)); errSymbol(err) != ErrAuth {
+		if _, err := Buy(s, "bad|pipe", c, 200, tk(1)); errSymbol(err) != ErrAuth {
 			t.Fatalf("err = %v, want %s", err, ErrAuth)
 		}
 	})
 	t.Run("invalid-creator", func(t *testing.T) {
 		s, _ := mk()
-		if _, err := Buy(s, "alice", "bad|pipe", 200, big.NewInt(1)); errSymbol(err) != ErrInput {
+		if _, err := Buy(s, "alice", "bad|pipe", 200, tk(1)); errSymbol(err) != ErrInput {
 			t.Fatalf("err = %v, want %s", err, ErrInput)
 		}
 	})
 	t.Run("no-such-market", func(t *testing.T) {
 		s := NewMemStore()
-		if _, err := Buy(s, "alice", "ghost", 200, big.NewInt(1)); errSymbol(err) != ErrNotFound {
+		if _, err := Buy(s, "alice", "ghost", 200, tk(1)); errSymbol(err) != ErrNotFound {
 			t.Fatalf("err = %v, want %s", err, ErrNotFound)
 		}
 	})
@@ -150,7 +150,7 @@ func TestBuy_Guards(t *testing.T) {
 		// (the mirror of TestSell_IgnoresGlobalPause).
 		s, c := mk()
 		setStr(s, kPaused(), "1")
-		if _, err := Buy(s, "alice", c, 200, big.NewInt(1)); errSymbol(err) != ErrPaused {
+		if _, err := Buy(s, "alice", c, 200, tk(1)); errSymbol(err) != ErrPaused {
 			t.Fatalf("err = %v, want %s", err, ErrPaused)
 		}
 	})
@@ -162,7 +162,7 @@ func TestBuy_Guards(t *testing.T) {
 		if err := Retire(s, c, c, 100); err != nil {
 			t.Fatalf("setup Retire: %v", err)
 		}
-		if _, err := Buy(s, "alice", c, 100+GraceBlocks, big.NewInt(1)); errSymbol(err) != ErrState {
+		if _, err := Buy(s, "alice", c, 100+GraceBlocks, tk(1)); errSymbol(err) != ErrState {
 			t.Fatalf("err = %v, want %s", err, ErrState)
 		}
 	})
@@ -180,16 +180,16 @@ func TestBuy_Guards(t *testing.T) {
 		if err := Retire(s, c, c, 300); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Buy(s, "alice", c, 301, big.NewInt(1)); errSymbol(err) != ErrState {
+		if _, err := Buy(s, "alice", c, 301, tk(1)); errSymbol(err) != ErrState {
 			t.Fatalf("buy inside the retire notice: err = %v, want %s (RULING K3 closes inflows the instant a market retires)", err, ErrState)
 		}
-		if _, err := Buy(s, "alice", c, 300+GraceBlocks, big.NewInt(1)); errSymbol(err) != ErrState {
+		if _, err := Buy(s, "alice", c, 300+GraceBlocks, tk(1)); errSymbol(err) != ErrState {
 			t.Fatalf("buy AT retiredAt+GraceBlocks: err = %v, want %s (the market is FROZEN and retired)", err, ErrState)
 		}
 	})
 	t.Run("overdue-still-open", func(t *testing.T) {
 		s, c := mk()
-		if _, err := Buy(s, "alice", c, 150, big.NewInt(1)); err != nil {
+		if _, err := Buy(s, "alice", c, 150, tk(1)); err != nil {
 			t.Fatalf("OVERDUE buy failed: %v — grace is fully functional", err)
 		}
 	})
@@ -207,10 +207,10 @@ func TestBuy_Guards(t *testing.T) {
 	})
 	t.Run("cap-exact-fill-ok-one-more-rejected", func(t *testing.T) {
 		s, c := mk() // cap 1000
-		if _, err := Buy(s, "alice", c, 200, big.NewInt(1000)); err != nil {
+		if _, err := Buy(s, "alice", c, 200, tk(1000)); err != nil {
 			t.Fatalf("exact-fill buy failed: %v", err)
 		}
-		if _, err := Buy(s, "bob", c, 201, big.NewInt(1)); errSymbol(err) != ErrCap {
+		if _, err := Buy(s, "bob", c, 201, tk(1)); errSymbol(err) != ErrCap {
 			t.Fatalf("err = %v, want %s", err, ErrCap)
 		}
 	})
@@ -219,7 +219,7 @@ func TestBuy_Guards(t *testing.T) {
 func TestBuy_RejectedCallMutatesNothing(t *testing.T) {
 	s, c := bySetup(10)
 	before := hzSnapshotAll(s)
-	if _, err := Buy(s, "alice", c, 200, big.NewInt(11)); errSymbol(err) != ErrCap {
+	if _, err := Buy(s, "alice", c, 200, tk(11)); errSymbol(err) != ErrCap {
 		t.Fatalf("expected cap rejection, got %v", err)
 	}
 	if changed := hzChangedKeys(before, hzSnapshotAll(s)); len(changed) != 0 {
@@ -229,12 +229,12 @@ func TestBuy_RejectedCallMutatesNothing(t *testing.T) {
 
 func TestQuoteBuy_MatchesExecution_AndWritesNothing(t *testing.T) {
 	s, c := bySetup(1_000_000)
-	if _, err := Buy(s, "hodler", c, 200, big.NewInt(10)); err != nil {
+	if _, err := Buy(s, "hodler", c, 200, tk(10)); err != nil {
 		t.Fatal(err)
 	}
 
 	before := hzSnapshotAll(s)
-	q, err := QuoteBuy(s, c, 300, big.NewInt(5))
+	q, err := QuoteBuy(s, c, 300, tk(5))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestQuoteBuy_MatchesExecution_AndWritesNothing(t *testing.T) {
 		t.Fatalf("QuoteBuy wrote state: %v", changed)
 	}
 
-	r, err := Buy(s, "attacker", c, 300, big.NewInt(5))
+	r, err := Buy(s, "attacker", c, 300, tk(5))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,10 +257,10 @@ func TestQuoteBuy_MatchesExecution_AndWritesNothing(t *testing.T) {
 // — the anti-domination property twap.go documents).
 func TestBuy_SameBlockSecondObsIgnored(t *testing.T) {
 	s, c := bySetup(1_000_000)
-	if _, err := Buy(s, "alice", c, 200, big.NewInt(10)); err != nil {
+	if _, err := Buy(s, "alice", c, 200, tk(10)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, "bob", c, 200, big.NewInt(5)); err != nil {
+	if _, err := Buy(s, "bob", c, 200, tk(5)); err != nil {
 		t.Fatal(err)
 	}
 	if n := getU64(s, kObsIdx(c)); n != 1 {

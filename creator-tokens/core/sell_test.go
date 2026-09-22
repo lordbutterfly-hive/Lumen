@@ -38,7 +38,7 @@ func slSetupCurveMarket(t *testing.T) (*MemStore, string) {
 	t.Helper()
 	s := NewMemStore()
 	setupMarket(s, "creatora", 100, 1_000_000_000)
-	if _, err := Buy(s, "hodler", "creatora", 1000, big.NewInt(10)); err != nil {
+	if _, err := Buy(s, "hodler", "creatora", 1000, tk(10)); err != nil {
 		t.Fatal(err)
 	}
 	return s, "creatora"
@@ -108,7 +108,7 @@ func TestSell_WorkedExample_InstantRoundTrip_FullRateTax(t *testing.T) {
 
 	// Fresh attacker buys 5 at block 2000: cost = area(15) − area(10) =
 	// 5,514, fee 275 — paid 5,789. R = 15,948 = area(15).
-	rb, err := Buy(s, "attacker", c, 2000, big.NewInt(5))
+	rb, err := Buy(s, "attacker", c, 2000, tk(5))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestSell_WorkedExample_InstantRoundTrip_FullRateTax(t *testing.T) {
 	// = 5,514 (the full slice, no burn); K1 tax = ceil(5,514·0.15) = 828 (GROSS
 	// rate, no cap); fee = floor(275.7) = 275 (feeC 137, feeP 138); net =
 	// 5,514 − 828 − 275 = 4,411.
-	rs, err := Sell(s, "attacker", c, 2000, big.NewInt(5))
+	rs, err := Sell(s, "attacker", c, 2000, tk(5))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestSell_WorkedExample_InstantRoundTrip_FullRateTax(t *testing.T) {
 	// After: S=10, R = 15,948 − 5,514 = 10,434 = area(10) EXACTLY — the
 	// equality invariant. The attacker's round trip LOST 1,378 (paid 5,789,
 	// received 4,411): 550 fees + 828 tax, 0 to rounding.
-	if got := getMoney(s, kSupply(c)); got.Cmp(big.NewInt(10)) != 0 {
+	if got := getMoney(s, kSupply(c)); got.Cmp(tk(10)) != 0 {
 		t.Fatalf("supply = %s, want 10", got)
 	}
 	if got := getMoney(s, kReserve(c)); got.Cmp(big.NewInt(10_434)) != 0 {
@@ -188,7 +188,7 @@ func TestSell_WorkedExample_AttackerGain_FullRateTax_ToTreasury(t *testing.T) {
 
 	// alice (the attacker) buys 100 from S=0: cost = area(100) = 140,656,
 	// fee 7,032 — paid 147,688. Basis 140,656.
-	ra, err := Buy(s, "alice", c, 1000, big.NewInt(100))
+	ra, err := Buy(s, "alice", c, 1000, tk(100))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestSell_WorkedExample_AttackerGain_FullRateTax_ToTreasury(t *testing.T) {
 		t.Fatalf("alice paid %s, want 147688", ra.TotalDue)
 	}
 	// bob (the fans) buys 100: cost = area(200) − area(100) = 224,684.
-	if _, err := Buy(s, "bob", c, 1010, big.NewInt(100)); err != nil {
+	if _, err := Buy(s, "bob", c, 1010, tk(100)); err != nil {
 		t.Fatal(err)
 	}
 	treasury0 := getMoney(s, kTreasury())
@@ -204,7 +204,7 @@ func TestSell_WorkedExample_AttackerGain_FullRateTax_ToTreasury(t *testing.T) {
 	// alice dumps her 100 one block later — fresh (τ=1500): p = area(200) −
 	// area(100) = 224,684; K1 tax = ceil(224,684·0.15) = 33,703 (gross, no cap);
 	// fee = 11,234; net = 224,684 − 33,703 − 11,234 = 179,747.
-	rs, err := Sell(s, "alice", c, 1011, big.NewInt(100))
+	rs, err := Sell(s, "alice", c, 1011, tk(100))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,14 +258,14 @@ func TestSell_WorkedExample_VictimSellsAtLoss_StillPaysFullTax(t *testing.T) {
 
 	// A whale owns the bottom of the curve; the fan buys 20 at the top
 	// (S=280→300): cost = area(300) − area(280) = 70,186.
-	if _, err := Buy(s, "whale", c, 1000, big.NewInt(280)); err != nil {
+	if _, err := Buy(s, "whale", c, 1000, tk(280)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, "fan", c, 1010, big.NewInt(20)); err != nil {
+	if _, err := Buy(s, "fan", c, 1010, tk(20)); err != nil {
 		t.Fatal(err)
 	}
 	// The whale dumps 200 — the price collapses (S: 300 → 100).
-	if _, err := Sell(s, "whale", c, 1011, big.NewInt(200)); err != nil {
+	if _, err := Sell(s, "whale", c, 1011, tk(200)); err != nil {
 		t.Fatal(err)
 	}
 	treasury0 := getMoney(s, kTreasury())
@@ -274,7 +274,7 @@ func TestSell_WorkedExample_VictimSellsAtLoss_StillPaysFullTax(t *testing.T) {
 	// area(100) − area(80) = 34,685 (a realized LOSS against the 70,186 paid).
 	// K1 tax = ceil(34,685·0.15) = 5,203 (gross, no cap — the loss is NOT
 	// sheltered). fee = 1,734. net = 34,685 − 5,203 − 1,734 = 27,748.
-	rs, err := Sell(s, "fan", c, 1012, big.NewInt(20))
+	rs, err := Sell(s, "fan", c, 1012, tk(20))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,13 +301,13 @@ func TestSell_WorkedExample_VictimSellsAtLoss_StillPaysFullTax(t *testing.T) {
 func TestSell_TaxDecay_ZeroAfterSixWeeks(t *testing.T) {
 	slRequireCalibration(t)
 	s, c := slSetupCurveMarket(t)
-	if _, err := Buy(s, "patient", c, 2000, big.NewInt(5)); err != nil {
+	if _, err := Buy(s, "patient", c, 2000, tk(5)); err != nil {
 		t.Fatal(err)
 	}
 	// Keep the subscription alive across the six-week hold — the market
 	// must be ACTIVE/OVERDUE for the curve rail.
 
-	rs, err := Sell(s, "patient", c, 2000+ExitTaxDecayBlocks, big.NewInt(5))
+	rs, err := Sell(s, "patient", c, 2000+ExitTaxDecayBlocks, tk(5))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestSell_TaxDecay_Midpoint_FullRate_ToTreasury(t *testing.T) {
 	slRequireCalibration(t)
 	s := NewMemStore()
 	setupMarket(s, "creatora", 100, 1_000_000_000)
-	if _, err := Buy(s, "holder", "creatora", 1000, big.NewInt(30)); err != nil {
+	if _, err := Buy(s, "holder", "creatora", 1000, tk(30)); err != nil {
 		t.Fatal(err) // cost = area(30) = 33,686
 	}
 	treasuryBefore := getMoney(s, kTreasury())
@@ -340,7 +340,7 @@ func TestSell_TaxDecay_Midpoint_FullRate_ToTreasury(t *testing.T) {
 	// 30: p = area(30) − area(20) = 12,025; K1 tax = ceil(12,025·0.075) = 902
 	// (gross, no cap); fee = floor(601.25) = 601 (300/301); net = 12,025 −
 	// 902 − 601 = 10,522.
-	rs, err := Sell(s, "holder", "creatora", 1000+ExitTaxDecayBlocks/2, big.NewInt(10))
+	rs, err := Sell(s, "holder", "creatora", 1000+ExitTaxDecayBlocks/2, tk(10))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,15 +364,15 @@ func TestSell_TaxDecay_Midpoint_FullRate_ToTreasury(t *testing.T) {
 func TestSell_OneTokenSell_RedeemsFullSlice_FullRateTax(t *testing.T) {
 	slRequireCalibration(t)
 	s, c := slSetupCurveMarket(t) // S=10, R=10,434
-	if _, err := Buy(s, "dusty", c, 2000, big.NewInt(1)); err != nil {
+	if _, err := Buy(s, "dusty", c, 2000, tk(1)); err != nil {
 		t.Fatal(err) // cost = area(11) − area(10) = 1,087
 	}
 	// Ten more tokens arrive above dusty's (S: 11 → 21).
-	if _, err := Buy(s, "later", c, 2001, big.NewInt(10)); err != nil {
+	if _, err := Buy(s, "later", c, 2001, tk(10)); err != nil {
 		t.Fatal(err)
 	}
 
-	rs, err := Sell(s, "dusty", c, 2001, big.NewInt(1))
+	rs, err := Sell(s, "dusty", c, 2001, tk(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,8 +387,8 @@ func TestSell_OneTokenSell_RedeemsFullSlice_FullRateTax(t *testing.T) {
 			rs.Gross, rs.Tax, rs.Fee, rs.Net)
 	}
 	// The reserve returned exactly to area(20) — the slice redeemed in full.
-	if got := getMoney(s, kReserve(c)); got.Cmp(Area(big.NewInt(20))) != 0 {
-		t.Fatalf("reserve = %s, want area(20) = %s", got, Area(big.NewInt(20)))
+	if got := getMoney(s, kReserve(c)); got.Cmp(Area(tk(20))) != 0 {
+		t.Fatalf("reserve = %s, want area(20) = %s", got, Area(tk(20)))
 	}
 }
 
@@ -408,10 +408,10 @@ func TestSell_WhaleTax_UnrecoverableAcrossTranchesAndAccounts(t *testing.T) {
 		t.Helper()
 		s := NewMemStore()
 		setupMarket(s, "creatora", 100, 1_000_000_000)
-		if _, err := Buy(s, "whale", "creatora", 1000, big.NewInt(200)); err != nil {
+		if _, err := Buy(s, "whale", "creatora", 1000, tk(200)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Buy(s, "fans", "creatora", 1010, big.NewInt(100)); err != nil {
+		if _, err := Buy(s, "fans", "creatora", 1010, tk(100)); err != nil {
 			t.Fatal(err)
 		}
 		return s, "creatora", getMoney(s, kTreasury())
@@ -487,10 +487,10 @@ func TestSell_WhaleTax_UnrecoverableAcrossTranchesAndAccounts(t *testing.T) {
 	{
 		s := NewMemStore()
 		setupMarket(s, "pumpmkt", 100, 1_000_000_000)
-		if _, err := Buy(s, "whale", "pumpmkt", 1000, big.NewInt(200)); err != nil {
+		if _, err := Buy(s, "whale", "pumpmkt", 1000, tk(200)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Buy(s, "fans", "pumpmkt", 1010, big.NewInt(400)); err != nil {
+		if _, err := Buy(s, "fans", "pumpmkt", 1010, tk(400)); err != nil {
 			t.Fatal(err)
 		}
 		single, _ := dump(t, s, "pumpmkt", "whale", 1, 1020)
@@ -498,10 +498,10 @@ func TestSell_WhaleTax_UnrecoverableAcrossTranchesAndAccounts(t *testing.T) {
 		for _, tranches := range []int64{2, 10, 50, 200} {
 			s2 := NewMemStore()
 			setupMarket(s2, "pumpmkt", 100, 1_000_000_000)
-			if _, err := Buy(s2, "whale", "pumpmkt", 1000, big.NewInt(200)); err != nil {
+			if _, err := Buy(s2, "whale", "pumpmkt", 1000, tk(200)); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := Buy(s2, "fans", "pumpmkt", 1010, big.NewInt(400)); err != nil {
+			if _, err := Buy(s2, "fans", "pumpmkt", 1010, tk(400)); err != nil {
 				t.Fatal(err)
 			}
 			taxN, _ := dump(t, s2, "pumpmkt", "whale", tranches, 1020)
@@ -524,7 +524,7 @@ func TestSell_WhaleTax_UnrecoverableAcrossTranchesAndAccounts(t *testing.T) {
 	// (OTC laundering off-curve still applies — RULING J residual truth #3 —
 	// but any ON-CHAIN split, same account or cross account, over-pays.)
 	s2, c2, _ := build(t)
-	if err := TransferCredits(s2, "whale", c2, "whale", "whalealt", 1015, big.NewInt(100)); err != nil {
+	if err := TransferCredits(s2, "whale", c2, "whale", "whalealt", 1015, tk(100)); err != nil {
 		t.Fatal(err)
 	}
 	taxW, _ := dump(t, s2, c2, "whale", 1, 1020)
@@ -550,13 +550,13 @@ func TestSell_WhaleTax_UnrecoverableAcrossTranchesAndAccounts(t *testing.T) {
 func TestSell_Guards(t *testing.T) {
 	t.Run("invalid-caller", func(t *testing.T) {
 		s, c := slSetupCurveMarket(t)
-		if _, err := Sell(s, "bad|pipe", c, 2000, big.NewInt(1)); errSymbol(err) != ErrAuth {
+		if _, err := Sell(s, "bad|pipe", c, 2000, tk(1)); errSymbol(err) != ErrAuth {
 			t.Fatalf("err = %v, want %s", err, ErrAuth)
 		}
 	})
 	t.Run("invalid-creator", func(t *testing.T) {
 		s, _ := slSetupCurveMarket(t)
-		if _, err := Sell(s, "hodler", "bad|pipe", 2000, big.NewInt(1)); errSymbol(err) != ErrInput {
+		if _, err := Sell(s, "hodler", "bad|pipe", 2000, tk(1)); errSymbol(err) != ErrInput {
 			t.Fatalf("err = %v, want %s", err, ErrInput)
 		}
 	})
@@ -571,10 +571,10 @@ func TestSell_Guards(t *testing.T) {
 	})
 	t.Run("insufficient-balance", func(t *testing.T) {
 		s, c := slSetupCurveMarket(t)
-		if _, err := Sell(s, "hodler", c, 2000, big.NewInt(11)); errSymbol(err) != ErrBalance {
+		if _, err := Sell(s, "hodler", c, 2000, tk(11)); errSymbol(err) != ErrBalance {
 			t.Fatalf("err = %v, want %s", err, ErrBalance)
 		}
-		if _, err := Sell(s, "stranger", c, 2000, big.NewInt(1)); errSymbol(err) != ErrBalance {
+		if _, err := Sell(s, "stranger", c, 2000, tk(1)); errSymbol(err) != ErrBalance {
 			t.Fatalf("stranger err = %v, want %s", err, ErrBalance)
 		}
 	})
@@ -591,7 +591,7 @@ func TestSell_Guards(t *testing.T) {
 		if Phase(s, c, late) != StateActive {
 			t.Fatal("fixture: a market nobody retired must be ACTIVE at every height")
 		}
-		if _, err := Sell(s, "hodler", c, late, big.NewInt(1)); err != nil {
+		if _, err := Sell(s, "hodler", c, late, tk(1)); err != nil {
 			t.Fatalf("Sell on an untouched ACTIVE market must work (curve rail open): %v", err)
 		}
 	})
@@ -600,20 +600,20 @@ func TestSell_Guards(t *testing.T) {
 		if err := Retire(s, c, c, 1999); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Sell(s, "hodler", c, 2000, big.NewInt(1)); errSymbol(err) != ErrState {
+		if _, err := Sell(s, "hodler", c, 2000, tk(1)); errSymbol(err) != ErrState {
 			t.Fatalf("err = %v, want %s (curve rail closes on Retire; Refund opens)", err, ErrState)
 		}
 	})
 	t.Run("closed-rail-closed", func(t *testing.T) {
 		s, c := slSetupCurveMarket(t)
 		setStr(s, kState(c), StateClosed)
-		if _, err := Sell(s, "hodler", c, 2000, big.NewInt(1)); errSymbol(err) != ErrState {
+		if _, err := Sell(s, "hodler", c, 2000, tk(1)); errSymbol(err) != ErrState {
 			t.Fatalf("err = %v, want %s", err, ErrState)
 		}
 	})
 	t.Run("overdue-rail-open", func(t *testing.T) {
 		s, c := slSetupCurveMarket(t)
-		if _, err := Sell(s, "hodler", c, 2100, big.NewInt(1)); err != nil {
+		if _, err := Sell(s, "hodler", c, 2100, tk(1)); err != nil {
 			t.Fatalf("OVERDUE sell failed: %v — grace is fully functional", err)
 		}
 	})
@@ -625,7 +625,7 @@ func TestSell_Guards(t *testing.T) {
 func TestSell_IgnoresGlobalPause(t *testing.T) {
 	s, c := slSetupCurveMarket(t)
 	setStr(s, kPaused(), "1")
-	if _, err := Sell(s, "hodler", c, 2000, big.NewInt(5)); err != nil {
+	if _, err := Sell(s, "hodler", c, 2000, tk(5)); err != nil {
 		t.Fatalf("Sell under global pause failed: %v — OUTFLOWS NEVER PAUSE", err)
 	}
 }
@@ -633,7 +633,7 @@ func TestSell_IgnoresGlobalPause(t *testing.T) {
 func TestSell_RejectedCallMutatesNothing(t *testing.T) {
 	s, c := slSetupCurveMarket(t)
 	before := hzSnapshotAll(s)
-	if _, err := Sell(s, "hodler", c, 2000, big.NewInt(11)); errSymbol(err) != ErrBalance {
+	if _, err := Sell(s, "hodler", c, 2000, tk(11)); errSymbol(err) != ErrBalance {
 		t.Fatalf("expected balance rejection, got %v", err)
 	}
 	if changed := hzChangedKeys(before, hzSnapshotAll(s)); len(changed) != 0 {
@@ -652,14 +652,14 @@ func TestSell_CorruptReserve_RefusedAndWindDownStillExits(t *testing.T) {
 	s := NewMemStore()
 	c := "creatora"
 	setupMarket(s, c, 100, 1_000_000_000)
-	if _, err := Buy(s, "victim", c, 200, big.NewInt(100)); err != nil {
+	if _, err := Buy(s, "victim", c, 200, tk(100)); err != nil {
 		t.Fatal(err)
 	}
 	// Corrupt the reserve to half the area — a state no writer can produce.
 	half := new(big.Int).Rsh(getMoney(s, kReserve(c)), 1)
 	setMoney(s, kReserve(c), half)
 
-	if _, err := Sell(s, "victim", c, 300, big.NewInt(10)); errSymbol(err) != ErrState {
+	if _, err := Sell(s, "victim", c, 300, tk(10)); errSymbol(err) != ErrState {
 		t.Fatalf("corrupt-reserve sell: err = %v, want %s — paying exact slices from an under-backed reserve robs the remaining holders", err, ErrState)
 	}
 	// The exit rail: the creator retires → the market is winding down (RULING
@@ -671,9 +671,9 @@ func TestSell_CorruptReserve_RefusedAndWindDownStillExits(t *testing.T) {
 	const wdBlock = 400 + GraceBlocks // FROZEN (inWindDown either way); the property under test is unchanged
 	// The victim owns the whole supply, so the GROSS pro-rata is the whole
 	// remaining reserve (half). RULING K2 carves the victim's exit tax from it.
-	gross := refundPayout(getMoney(s, kReserve(c)), big.NewInt(100), getMoney(s, kSupply(c)))
+	gross := refundPayout(getMoney(s, kReserve(c)), tk(100), getMoney(s, kSupply(c)))
 	wantNet := new(big.Int).Sub(gross, ExitTaxOn(gross, ExitTaxBpsAt(heldBlocksAt(s, c, "victim", wdBlock))))
-	payout, err := Refund(s, "victim", c, wdBlock, big.NewInt(100))
+	payout, err := Refund(s, "victim", c, wdBlock, tk(100))
 	if err != nil {
 		t.Fatalf("wind-down Refund on the corrupt market failed: %v — always-exitable broken", err)
 	}
@@ -690,7 +690,7 @@ func TestSell_RecordsPreTradeSpot_FirstWriterWins(t *testing.T) {
 	s, c := slSetupCurveMarket(t) // one obs already (buy at 1000, rate 1079)
 
 	// A sell in a NEW block records spotRate(S_before) = spot(10) = 1079.
-	rs, err := Sell(s, "hodler", c, 3000, big.NewInt(2))
+	rs, err := Sell(s, "hodler", c, 3000, tk(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -707,7 +707,7 @@ func TestSell_RecordsPreTradeSpot_FirstWriterWins(t *testing.T) {
 
 	// A second same-block trade offers a rate but the ring ignores it
 	// (first-writer-per-block, twap.go's own contract).
-	if _, err := Sell(s, "hodler", c, 3000, big.NewInt(2)); err != nil {
+	if _, err := Sell(s, "hodler", c, 3000, tk(2)); err != nil {
 		t.Fatal(err)
 	}
 	if n := getU64(s, kObsIdx(c)); n != 2 {
@@ -717,12 +717,12 @@ func TestSell_RecordsPreTradeSpot_FirstWriterWins(t *testing.T) {
 
 func TestQuoteSell_MatchesExecution_AndWritesNothing(t *testing.T) {
 	s, c := slSetupCurveMarket(t)
-	if _, err := Buy(s, "seller", c, 2000, big.NewInt(7)); err != nil {
+	if _, err := Buy(s, "seller", c, 2000, tk(7)); err != nil {
 		t.Fatal(err)
 	}
 
 	before := hzSnapshotAll(s)
-	q, err := QuoteSell(s, "seller", c, 2500, big.NewInt(7))
+	q, err := QuoteSell(s, "seller", c, 2500, tk(7))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -730,7 +730,7 @@ func TestQuoteSell_MatchesExecution_AndWritesNothing(t *testing.T) {
 		t.Fatalf("QuoteSell wrote state: %v", changed)
 	}
 
-	r, err := Sell(s, "seller", c, 2500, big.NewInt(7))
+	r, err := Sell(s, "seller", c, 2500, tk(7))
 	if err != nil {
 		t.Fatal(err)
 	}

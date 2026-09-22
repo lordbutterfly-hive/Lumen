@@ -23,7 +23,7 @@ import (
 
 func mustRegister(t *testing.T, s Store, creator string, block uint64, face, cap int64) {
 	t.Helper()
-	if err := Register(s, creator, creator, block, face, cap); err != nil {
+	if err := Register(s, creator, creator, block, face, cap*TokenScale); err != nil { // cap in WHOLE tokens (v6)
 		t.Fatalf("Register(%s) at block %d: %v", creator, block, err)
 	}
 }
@@ -35,7 +35,7 @@ func mustRegister(t *testing.T, s Store, creator string, block uint64, face, cap
 func TestRegister_HappyPath(t *testing.T) {
 	s := NewMemStore()
 	const block = uint64(100000)
-	if err := Register(s, "goodcreator", "goodcreator", block, 1000, 5000); err != nil {
+	if err := Register(s, "goodcreator", "goodcreator", block, 1000, 5000*TokenScale); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
@@ -57,7 +57,7 @@ func TestRegister_HappyPath(t *testing.T) {
 	if got := getU64(s, kFaceSetAt("goodcreator")); got != block {
 		t.Fatalf("faceSetAt = %d, want %d (registration starts the anti-rug clock)", got, block)
 	}
-	if got := getMoney(s, kCap("goodcreator")); got.Cmp(big.NewInt(5000)) != 0 {
+	if got := getMoney(s, kCap("goodcreator")); got.Cmp(tk(5000)) != 0 {
 		t.Fatalf("cap = %s, want 5000 (kCap must be money-typed, matching prepay.go's getMoney read)", got)
 	}
 	// UPDATED 2026-07-21 (ruled behaviour changed): this used to assert the
@@ -81,7 +81,7 @@ func TestRegister_HappyPath(t *testing.T) {
 // treasury, not to the reserve.
 func TestRegister_IsFreeAndMovesNoMoney(t *testing.T) {
 	s := NewMemStore()
-	if err := Register(s, "freecreator", "freecreator", 100, 1000, 1000); err != nil {
+	if err := Register(s, "freecreator", "freecreator", 100, 1000, 1000*TokenScale); err != nil {
 		t.Fatalf("Register with no fee must succeed: %v", err)
 	}
 	if got := getMoney(s, kTreasury()); !mIsZero(got) {
@@ -100,7 +100,7 @@ func TestRegister_IsFreeAndMovesNoMoney(t *testing.T) {
 
 func TestRegister_CallerMustEqualCreator(t *testing.T) {
 	s := NewMemStore()
-	err := Register(s, "impersonator", "victim", 100, 1000, 1000)
+	err := Register(s, "impersonator", "victim", 100, 1000, 1000*TokenScale)
 	if err == nil {
 		t.Fatal("expected rejection: caller != creator")
 	}
@@ -115,7 +115,7 @@ func TestRegister_CallerMustEqualCreator(t *testing.T) {
 func TestRegister_DuplicateRejected(t *testing.T) {
 	s := NewMemStore()
 	mustRegister(t, s, "dupcreator", 100, 1000, 1000)
-	err := Register(s, "dupcreator", "dupcreator", 200, 2000, 2000)
+	err := Register(s, "dupcreator", "dupcreator", 200, 2000, 2000*TokenScale)
 	if err == nil {
 		t.Fatal("expected rejection: already registered")
 	}
@@ -142,7 +142,7 @@ func TestRegister_FaceOutOfRange(t *testing.T) {
 	for i, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			creator := "facecreator" + string(rune('a'+i))
-			err := Register(s, creator, creator, 100, c.face, 1000)
+			err := Register(s, creator, creator, 100, c.face, 1000*TokenScale)
 			if err == nil {
 				t.Fatalf("face=%d: expected rejection", c.face)
 			}
@@ -155,10 +155,10 @@ func TestRegister_FaceOutOfRange(t *testing.T) {
 		})
 	}
 	// boundary values MUST succeed (inclusive range).
-	if err := Register(s, "faceboundlo", "faceboundlo", 100, MinFace, 1000); err != nil {
+	if err := Register(s, "faceboundlo", "faceboundlo", 100, MinFace, 1000*TokenScale); err != nil {
 		t.Fatalf("face == MinFace should succeed: %v", err)
 	}
-	if err := Register(s, "faceboundhi", "faceboundhi", 100, MaxFace, 1000); err != nil {
+	if err := Register(s, "faceboundhi", "faceboundhi", 100, MaxFace, 1000*TokenScale); err != nil {
 		t.Fatalf("face == MaxFace should succeed: %v", err)
 	}
 }
@@ -217,7 +217,7 @@ func TestRegister_InvalidCreatorAccountRejected(t *testing.T) {
 	// stops testing anything.
 	cases := []string{"", "a|b", "hive:al|ice", strings.Repeat("x", MaxAccountLen+1)}
 	for _, creator := range cases {
-		err := Register(s, creator, creator, 100, 1000, 1000)
+		err := Register(s, creator, creator, 100, 1000, 1000*TokenScale)
 		if err == nil {
 			t.Fatalf("creator=%q: expected rejection", creator)
 		}
@@ -230,7 +230,7 @@ func TestRegister_InvalidCreatorAccountRejected(t *testing.T) {
 func TestRegister_GloballyPausedRejected(t *testing.T) {
 	s := NewMemStore()
 	setStr(s, kPaused(), "1")
-	err := Register(s, "pausedcreator", "pausedcreator", 100, 1000, 1000)
+	err := Register(s, "pausedcreator", "pausedcreator", 100, 1000, 1000*TokenScale)
 	if err == nil {
 		t.Fatal("expected rejection while globally paused")
 	}
@@ -255,7 +255,7 @@ func TestRegister_ReRegisterAfterClosedSucceeds(t *testing.T) {
 	// below is a faithful stand-in for calling CloseIfDrained itself.
 	setStr(s, kState("returningcreator"), StateClosed)
 
-	if err := Register(s, "returningcreator", "returningcreator", 500000, 2000, 3000); err != nil {
+	if err := Register(s, "returningcreator", "returningcreator", 500000, 2000, 3000*TokenScale); err != nil {
 		t.Fatalf("re-registration after CLOSED should succeed: %v", err)
 	}
 	if got := getStr(s, kState("returningcreator")); got != StateActive {
@@ -308,10 +308,10 @@ func TestRegister_ReRegisterAfterAbandonedEscrowResolvedByThirdParty(t *testing.
 	// sit in [ceil(avg)/4, 2·face] — 15,000 does; the ask then spends
 	// ceil(10,000/15,000) = 1 credit, which is exactly the escrow pin this
 	// test is about.
-	mustRegister(t, s, creator, regBlock, 10_000, MaxCap)
+	mustRegister(t, s, creator, regBlock, 10_000, MaxCap/TokenScale)
 	// RULING A: Buy on the curve is the only issuance path (the PAR mint is
 	// deleted).
-	if _, err := Buy(s, asker, creator, regBlock+1, big.NewInt(5000)); err != nil {
+	if _, err := Buy(s, asker, creator, regBlock+1, tk(5000)); err != nil {
 		t.Fatalf("Buy: %v", err)
 	}
 
@@ -319,12 +319,12 @@ func TestRegister_ReRegisterAfterAbandonedEscrowResolvedByThirdParty(t *testing.
 	// observation is cleared first so the constant marker series owns both
 	// windows — resetObsRings/seedSettleObs, ask_test.go).
 	askBlock := seedSettleObs(s, creator, regBlock+10, big.NewInt(15_000))
-	askRes, err := askAt0(s, asker, creator, askBlock, big.NewInt(1), "abandoned-ask", MinAskDeadline)
+	askRes, err := askAt0(s, asker, creator, askBlock, tk(1), "abandoned-ask", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
-	if askRes.CreditsSpent.Cmp(big.NewInt(1)) != 0 {
-		t.Fatalf("sanity: CreditsSpent = %s, want 1 (ceil(10000/15000))", askRes.CreditsSpent)
+	if askRes.CreditsSpent.Cmp(big.NewInt(67)) != 0 { // v6 units: ceil(10000*100/15000)
+		t.Fatalf("sanity: CreditsSpent = %s, want 67 (ceil(10000*100/15000))", askRes.CreditsSpent)
 	}
 
 	// The market has now lapsed all the way to FROZEN, and the asker has
@@ -349,17 +349,17 @@ func TestRegister_ReRegisterAfterAbandonedEscrowResolvedByThirdParty(t *testing.
 	if got := Phase(s, creator, frozenBlock); got != StateFrozen {
 		t.Fatalf("sanity: phase = %s, want FROZEN", got)
 	}
-	if got := Supply(s, creator); got.Cmp(big.NewInt(5000)) != 0 {
+	if got := Supply(s, creator); got.Cmp(tk(5000)) != 0 {
 		t.Fatalf("sanity: supply = %s, want 5000 (still pinned by the PENDING escrow)", got)
 	}
 
 	// Refund the OTHER, non-escrowed 4,999 credits first, exactly as a real
 	// wind-down would (self-pull here; irrelevant to the point, just
 	// clearing the non-escrow supply so the escrow is the ONLY thing left).
-	if _, err := Refund(s, asker, creator, frozenBlock, big.NewInt(4999)); err != nil {
+	if _, err := Refund(s, asker, creator, frozenBlock, tk(4999)); err != nil {
 		t.Fatalf("Refund: %v", err)
 	}
-	if got := Supply(s, creator); got.Cmp(big.NewInt(1)) != 0 {
+	if got := Supply(s, creator); got.Cmp(tk(1)) != 0 {
 		t.Fatalf("supply after refunding the non-escrowed balance = %s, want 1 (only the escrow remains)", got)
 	}
 
@@ -391,8 +391,8 @@ func TestRegister_ReRegisterAfterAbandonedEscrowResolvedByThirdParty(t *testing.
 		t.Fatalf("ReclaimResult.Asker = %q, want %q — the ORIGINAL asker, not the rescuer", res.Asker, asker)
 	}
 	// The money went to the asker, not the rescuer.
-	if got := getMoney(s, kBal(creator, asker)); got.Cmp(big.NewInt(1)) != 0 {
-		t.Fatalf("asker balance after third-party reclaim = %s, want 1", got)
+	if got := getMoney(s, kBal(creator, asker)); got.Cmp(askRes.CreditsSpent) != 0 { // no owner bound here, so the whole escrow returns
+		t.Fatalf("asker balance after third-party reclaim = %s, want the whole escrow %s", got, askRes.CreditsSpent)
 	}
 	if got := getMoney(s, kBal(creator, rescuer)); got.Sign() != 0 {
 		t.Fatalf("rescuer balance = %s, want 0 (the caller is never paid)", got)
@@ -402,7 +402,7 @@ func TestRegister_ReRegisterAfterAbandonedEscrowResolvedByThirdParty(t *testing.
 	// OWN balance, not burned) — the asker (or anyone pushing on their
 	// behalf) must still actually refund them to reach zero. This is the
 	// REST of a normal wind-down, now unblocked.
-	if got := Supply(s, creator); got.Cmp(big.NewInt(1)) != 0 {
+	if got := Supply(s, creator); got.Cmp(tk(1)) != 0 {
 		t.Fatalf("supply after reclaim = %s, want 1 (reclaimed, not yet refunded)", got)
 	}
 	if _, err := RefundHolder(s, rescuer, creator, asker, reclaimBlock); err != nil {
@@ -442,7 +442,7 @@ func TestRegister_StillRejectedWhileActive_EvenIfLapsedIntoOverdueOrFrozen(t *te
 		s := NewMemStore()
 		mustRegister(t, s, "lapsedcreator", 100, 1000, 1000)
 		block := 100 + 30*BlocksPerDay + lapse
-		err := Register(s, "lapsedcreator", "lapsedcreator", block, 2000, 2000)
+		err := Register(s, "lapsedcreator", "lapsedcreator", block, 2000, 2000*TokenScale)
 		if err == nil {
 			t.Fatalf("lapse=%d: re-registration over a live (if lapsed) market must be rejected", lapse)
 		}
@@ -639,7 +639,7 @@ func TestRetire_C_RevenueBypassClosed(t *testing.T) {
 	// Buy some supply BEFORE retiring so the market has holders to wind down —
 	// and so the "inflows closed during the notice" assertions below are about
 	// a live market, not an empty one.
-	if _, err := Buy(s, "earlyfan", creator, regBlock+1, big.NewInt(200)); err != nil {
+	if _, err := Buy(s, "earlyfan", creator, regBlock+1, tk(200)); err != nil {
 		t.Fatalf("pre-retire Buy: %v", err)
 	}
 	// Retire while still comfortably ACTIVE (paidUntil far ahead), to prove
@@ -662,7 +662,7 @@ func TestRetire_C_RevenueBypassClosed(t *testing.T) {
 	if err := RequireInflowOpen(s, creator, inNotice); err == nil || errSymbol(err) != ErrState {
 		t.Fatalf("RequireInflowOpen inside the notice: err=%v, want ErrState (K3 closes inflows the instant a market retires)", err)
 	}
-	if _, err := Buy(s, "buyer", creator, inNotice, big.NewInt(500)); err == nil || errSymbol(err) != ErrState {
+	if _, err := Buy(s, "buyer", creator, inNotice, tk(500)); err == nil || errSymbol(err) != ErrState {
 		t.Fatalf("Buy inside the notice: err=%v, want ErrState (K3 drops the curve rail; exits route through Refund)", err)
 	}
 	// (Three Renew refusals used to sit here — the creator's, a fan's, and the
@@ -672,7 +672,7 @@ func TestRetire_C_RevenueBypassClosed(t *testing.T) {
 	// at all. The Buy and RequireInflowOpen refusals above are what close that
 	// door now.)
 	// And the exit rail IS open during the notice: earlyfan can Refund now.
-	if _, err := Refund(s, "earlyfan", creator, inNotice, big.NewInt(100)); err != nil {
+	if _, err := Refund(s, "earlyfan", creator, inNotice, tk(100)); err != nil {
 		t.Fatalf("Refund inside the notice: %v — the flat pro-rata exit must be open while a retired market winds down (K3)", err)
 	}
 
@@ -686,11 +686,11 @@ func TestRetire_C_RevenueBypassClosed(t *testing.T) {
 	}
 	// Buy refuses (routes through RequireInflowOpen) — no funding a dead
 	// market. (RULING A: Buy replaced the deleted PAR mint as the inflow.)
-	if _, err := Buy(s, "buyer", creator, probe, big.NewInt(400)); err == nil || errSymbol(err) != ErrState {
+	if _, err := Buy(s, "buyer", creator, probe, tk(400)); err == nil || errSymbol(err) != ErrState {
 		t.Fatalf("Buy after the notice: err=%v, want ErrState", err)
 	}
 	// Ask refuses (the inflow gate is the only phase check in ask.go).
-	if _, err := askAt0(s, "buyer", creator, probe, big.NewInt(1000), "cid", MinAskDeadline); err == nil || errSymbol(err) != ErrState {
+	if _, err := askAt0(s, "buyer", creator, probe, tk(1000), "cid", MinAskDeadline); err == nil || errSymbol(err) != ErrState {
 		t.Fatalf("Ask after the notice: err=%v, want ErrState", err)
 	}
 }
@@ -729,7 +729,7 @@ func TestRetire_ReRegisterAfterWindDownClearsMarker(t *testing.T) {
 	// CLOSED market, and the fresh incarnation must be ACTIVE — NOT dragged
 	// back to FROZEN by the stale marker.
 	reRegBlock := closeBlock + 100
-	if err := Register(s, creator, creator, reRegBlock, 2000, 2000); err != nil {
+	if err := Register(s, creator, creator, reRegBlock, 2000, 2000*TokenScale); err != nil {
 		t.Fatalf("re-Register after wind-down: %v", err)
 	}
 	if got := Phase(s, creator, reRegBlock); got != StateActive {
@@ -962,7 +962,7 @@ func TestSetFace_RegressionAnchorDoesNotSurviveReregistration(t *testing.T) {
 	// Old life: register at a HIGH face, then move it once so a non-zero
 	// anchor window opens and is persisted.
 	regBlock := uint64(1000)
-	mustRegister(t, s, creator, regBlock, 10000, MaxCap)
+	mustRegister(t, s, creator, regBlock, 10000, MaxCap/TokenScale)
 	if err := SetFace(s, creator, creator, regBlock+1, 15000); err != nil { // within 2x of 10000
 		t.Fatalf("old-life SetFace: %v", err)
 	}
@@ -1031,10 +1031,10 @@ func TestSetFace_RegressionAnchorDoesNotSurviveReregistration(t *testing.T) {
 func TestSetCap_HappyPath(t *testing.T) {
 	s := NewMemStore()
 	mustRegister(t, s, "capcreatorhp", 100, 1000, 1000)
-	if err := SetCap(s, "capcreatorhp", "capcreatorhp", 200, 5000); err != nil {
+	if err := SetCap(s, "capcreatorhp", "capcreatorhp", 200, 5000*TokenScale); err != nil {
 		t.Fatalf("SetCap: %v", err)
 	}
-	if got := getMoney(s, kCap("capcreatorhp")); got.Cmp(big.NewInt(5000)) != 0 {
+	if got := getMoney(s, kCap("capcreatorhp")); got.Cmp(tk(5000)) != 0 {
 		t.Fatalf("cap = %s, want 5000", got)
 	}
 }
@@ -1045,19 +1045,19 @@ func TestSetCap_HappyPath(t *testing.T) {
 func TestSetCap_BelowSupplyRejected(t *testing.T) {
 	s := NewMemStore()
 	mustRegister(t, s, "capsupplycreator", 100, 1000, 5000)
-	setMoney(s, kSupply("capsupplycreator"), big.NewInt(3000))
+	setMoney(s, kSupply("capsupplycreator"), tk(3000))
 
-	if err := SetCap(s, "capsupplycreator", "capsupplycreator", 200, 2999); err == nil {
+	if err := SetCap(s, "capsupplycreator", "capsupplycreator", 200, 2999*TokenScale); err == nil {
 		t.Fatal("expected rejection: cap below current supply")
 	} else if sym := errSymbol(err); sym != ErrCap {
 		t.Fatalf("want ErrCap, got %v", err)
 	}
-	if got := getMoney(s, kCap("capsupplycreator")); got.Cmp(big.NewInt(5000)) != 0 {
+	if got := getMoney(s, kCap("capsupplycreator")); got.Cmp(tk(5000)) != 0 {
 		t.Fatalf("cap mutated by a rejected SetCap: %s", got)
 	}
 
 	// exactly AT current supply is allowed (only strictly BELOW is rejected).
-	if err := SetCap(s, "capsupplycreator", "capsupplycreator", 200, 3000); err != nil {
+	if err := SetCap(s, "capsupplycreator", "capsupplycreator", 200, 3000*TokenScale); err != nil {
 		t.Fatalf("cap == current supply should succeed: %v", err)
 	}
 }
@@ -1076,7 +1076,7 @@ func TestSetCap_OutOfMinMaxRangeRejected(t *testing.T) {
 func TestSetCap_CreatorOnlyRejected(t *testing.T) {
 	s := NewMemStore()
 	mustRegister(t, s, "capcreatoronly", 100, 1000, 1000)
-	err := SetCap(s, "notthecreator", "capcreatoronly", 200, 5000)
+	err := SetCap(s, "notthecreator", "capcreatoronly", 200, 5000*TokenScale)
 	if err == nil || errSymbol(err) != ErrAuth {
 		t.Fatalf("want ErrAuth, got %v", err)
 	}
@@ -1084,7 +1084,7 @@ func TestSetCap_CreatorOnlyRejected(t *testing.T) {
 
 func TestSetCap_NoSuchMarketRejected(t *testing.T) {
 	s := NewMemStore()
-	err := SetCap(s, "ghost2", "ghost2", 100, 5000)
+	err := SetCap(s, "ghost2", "ghost2", 100, 5000*TokenScale)
 	if err == nil || errSymbol(err) != ErrNotFound {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
@@ -1094,7 +1094,7 @@ func TestSetCap_ClosedMarketRejected(t *testing.T) {
 	s := NewMemStore()
 	mustRegister(t, s, "capclosed", 100, 1000, 1000)
 	setStr(s, kState("capclosed"), StateClosed)
-	err := SetCap(s, "capclosed", "capclosed", 200, 5000)
+	err := SetCap(s, "capclosed", "capclosed", 200, 5000*TokenScale)
 	if err == nil || errSymbol(err) != ErrState {
 		t.Fatalf("want ErrState, got %v", err)
 	}
@@ -1105,7 +1105,7 @@ func TestSetCap_WorksWhileOverdueOrFrozen(t *testing.T) {
 		s := NewMemStore()
 		mustRegister(t, s, "capduringlapse", 100, 1000, 1000)
 		block := 100 + 30*BlocksPerDay + lapse
-		if err := SetCap(s, "capduringlapse", "capduringlapse", block, 5000); err != nil {
+		if err := SetCap(s, "capduringlapse", "capduringlapse", block, 5000*TokenScale); err != nil {
 			t.Fatalf("lapse=%d: SetCap should work regardless of billing phase: %v", lapse, err)
 		}
 	}
@@ -1473,13 +1473,13 @@ func TestRegister_RefusesToInheritReserveOrSupply(t *testing.T) {
 		mustRegister(t, s, creator, 100, 1000, 1_000_000)
 		// A real buy, then the market is (incorrectly) marked closed with the
 		// reserve still funded — the exact shape the defect was measured on.
-		if _, err := Buy(s, "holder", creator, 150, big.NewInt(100)); err != nil {
+		if _, err := Buy(s, "holder", creator, 150, tk(100)); err != nil {
 			t.Fatal(err)
 		}
 		reserveBefore := getMoney(s, kReserve(creator))
 		setStr(s, kState(creator), StateClosed)
 
-		err := Register(s, creator, creator, 500_000, 2000, 2000)
+		err := Register(s, creator, creator, 500_000, 2000, 2000*TokenScale)
 		if err == nil {
 			t.Fatal("re-registration over a funded reserve must be REFUSED — the new market would inherit the money")
 		}
@@ -1503,14 +1503,14 @@ func TestRegister_RefusesToInheritReserveOrSupply(t *testing.T) {
 		s := NewMemStore()
 		const creator = "strandedsupply"
 		mustRegister(t, s, creator, 100, 1000, 1_000_000)
-		setMoney(s, kSupply(creator), big.NewInt(42)) // tokens outstanding
+		setMoney(s, kSupply(creator), tk(42)) // tokens outstanding
 		setStr(s, kState(creator), StateClosed)
 
-		err := Register(s, creator, creator, 500_000, 2000, 2000)
+		err := Register(s, creator, creator, 500_000, 2000, 2000*TokenScale)
 		if err == nil || errSymbol(err) != ErrState {
 			t.Fatalf("re-registration over outstanding supply: err=%v, want ErrState", err)
 		}
-		if got := getMoney(s, kSupply(creator)); got.Cmp(big.NewInt(42)) != 0 {
+		if got := getMoney(s, kSupply(creator)); got.Cmp(tk(42)) != 0 {
 			t.Fatalf("supply = %s, want unchanged 42", got)
 		}
 	})
@@ -1522,20 +1522,20 @@ func TestRegister_RefusesToInheritReserveOrSupply(t *testing.T) {
 		const creator = "cleanreturn"
 		regBlock := uint64(1000)
 		mustRegister(t, s, creator, regBlock, 1000, 1_000_000)
-		if _, err := Buy(s, "holder", creator, regBlock+1, big.NewInt(100)); err != nil {
+		if _, err := Buy(s, "holder", creator, regBlock+1, tk(100)); err != nil {
 			t.Fatal(err)
 		}
 		if err := Retire(s, creator, creator, regBlock+2); err != nil {
 			t.Fatal(err)
 		}
 		windDown := regBlock + 2 + GraceBlocks
-		if _, err := Refund(s, "holder", creator, windDown, big.NewInt(100)); err != nil {
+		if _, err := Refund(s, "holder", creator, windDown, tk(100)); err != nil {
 			t.Fatalf("wind-down refund: %v", err)
 		}
 		if !CloseIfDrained(s, creator, windDown) {
 			t.Fatal("CloseIfDrained: not closed")
 		}
-		if err := Register(s, creator, creator, windDown+10, 2000, 2000); err != nil {
+		if err := Register(s, creator, creator, windDown+10, 2000, 2000*TokenScale); err != nil {
 			t.Fatalf("a genuinely wound-down market must re-register: %v", err)
 		}
 	})
@@ -1554,7 +1554,7 @@ func TestRegister_DoesNotResetTheEscrowSequence(t *testing.T) {
 	setU64(s, kSeq(creator), 7) // stand-in for seven resolved asks
 	setStr(s, kState(creator), StateClosed)
 
-	if err := Register(s, creator, creator, 500_000, 2000, 2000); err != nil {
+	if err := Register(s, creator, creator, 500_000, 2000, 2000*TokenScale); err != nil {
 		t.Fatalf("re-Register: %v", err)
 	}
 	if got := EscrowSeq(s, creator); got != 7 {
@@ -1575,10 +1575,10 @@ func TestRetire_NoticeDropsTheCurveRail_WindDownRailOpenThroughout(t *testing.T)
 	const creator = "railswitch"
 	regBlock := uint64(1000)
 	mustRegister(t, s, creator, regBlock, 1000, 1_000_000)
-	if _, err := Buy(s, "holderA", creator, regBlock+1, big.NewInt(200)); err != nil {
+	if _, err := Buy(s, "holderA", creator, regBlock+1, tk(200)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, "holderB", creator, regBlock+2, big.NewInt(200)); err != nil {
+	if _, err := Buy(s, "holderB", creator, regBlock+2, tk(200)); err != nil {
 		t.Fatal(err)
 	}
 	retireBlock := regBlock + 3
@@ -1596,10 +1596,10 @@ func TestRetire_NoticeDropsTheCurveRail_WindDownRailOpenThroughout(t *testing.T)
 	if got := Phase(s, creator, inside); got != StateOverdue {
 		t.Fatalf("phase inside the notice = %s, want OVERDUE (Phase still ladders)", got)
 	}
-	if _, err := Sell(s, "holderA", creator, inside, big.NewInt(100)); err == nil {
+	if _, err := Sell(s, "holderA", creator, inside, tk(100)); err == nil {
 		t.Fatal("the curve rail must be CLOSED during the retire notice (K3 drops it) — Sell should route to Refund")
 	}
-	payoutInside, err := Refund(s, "holderA", creator, inside, big.NewInt(100))
+	payoutInside, err := Refund(s, "holderA", creator, inside, tk(100))
 	if err != nil {
 		t.Fatalf("wind-down Refund inside the notice failed: %v — K3 opens the flat pro-rata rail the instant a market retires", err)
 	}
@@ -1614,10 +1614,10 @@ func TestRetire_NoticeDropsTheCurveRail_WindDownRailOpenThroughout(t *testing.T)
 	}
 
 	// --- at the boundary block: still the WIND-DOWN rail, same as the notice ---
-	if _, err := Sell(s, "holderA", creator, freeze, big.NewInt(1)); err == nil {
+	if _, err := Sell(s, "holderA", creator, freeze, tk(1)); err == nil {
 		t.Fatal("the curve rail must stay closed AT retiredAt+GraceBlocks")
 	}
-	payout, err := Refund(s, "holderA", creator, freeze, big.NewInt(50))
+	payout, err := Refund(s, "holderA", creator, freeze, tk(50))
 	if err != nil {
 		t.Fatalf("wind-down Refund at the freeze block failed: %v — a holder must never be trapped", err)
 	}

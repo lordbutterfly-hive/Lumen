@@ -183,14 +183,9 @@ func mpAgeWeight(s *MemStore, c string, block uint64) *big.Int {
 // many keys it matched. The matured key is TRANSPOSED (bal|<holder>|<creator>),
 // so the creator is a suffix and this cannot be a prefix scan.
 func mpMaturedWeight(s *MemStore, c string) (matched int, weight *big.Int) {
-	suffix := "|" + c
 	weight = big.NewInt(0)
-	for _, k := range s.Keys() {
-		if !strings.HasPrefix(k, "bal|") || !strings.HasSuffix(k, suffix) {
-			continue
-		}
+	for _, h := range hzMaturedHolders(s, c) {
 		matched++
-		h := k[len("bal|") : len(k)-len(suffix)]
 		bal := getMatured(s, c, h)
 		if bal.Sign() == 0 {
 			continue
@@ -397,13 +392,9 @@ func mpTotals(s *MemStore, c string, block uint64) (bal, capacity *big.Int) {
 	}
 	// Matured tokens count toward the balance and contribute ZERO capacity —
 	// their rate is 0 by definition, which is exactly what "matured" means.
-	suffix := "|" + c
-	for _, k := range s.Keys() {
-		if !strings.HasPrefix(k, "bal|") || !strings.HasSuffix(k, suffix) {
-			continue
-		}
+	for _, h := range hzMaturedHolders(s, c) {
 		matched++
-		bal.Add(bal, getMatured(s, c, k[len("bal|"):len(k)-len(suffix)]))
+		bal.Add(bal, getMatured(s, c, h))
 	}
 	mpAssertScanned(matched, s, c, "mpTotals")
 	return bal, capacity

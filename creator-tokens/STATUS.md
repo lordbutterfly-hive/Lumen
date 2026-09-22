@@ -3,6 +3,27 @@
 Per-creator token on a bonding curve. You buy a creator's token, spend it on
 their services, and the price moves with supply.
 
+> **2026-09-22 — v6: FRACTIONAL TOKENS (0.01 units). BUILT, PROVEN IN `go test`,
+> ON TESTNET, MAINNET PENDING THE OWNER'S SIGNATURE.** CID
+> `bafkreia2lumlku2qvq6hgqztvl64wxhzxpcyurgsapayaj54cdrn7gw7i4` (167,749 B,
+> reproducible: two clean builds, byte for byte; v5.1 was 159,539 B; the morning
+> candidate bafkreih5siwq… 167,142 B was superseded the same day, see below).
+> A token divides into 100 units; the wire is decimal token strings ("1.50"),
+> events are `v: 2`; the curve, reserves, clocks and fees are unchanged per whole
+> token; a lazy per-key migration scales v5.1 state x100 on first touch (proven on
+> the mainnet snapshot, 8 markets / 13 positions / the answered escrow).
+> **The marketplace door stays in WHOLE tokens** (scrutiny 2026-09-22 HIGH-1):
+> `bal|`, allowances, balanceOf/allowance, safeTransferFrom/approve and the
+> TransferSingle/Approval/tokenCreated events all keep the integer unit magi-market
+> decodes; the fraction below one token lives in the new `balf|` key and is
+> spendable only through Lumen's own rails. Full spec, checklist and deploy order:
+> `/mnt/o/LUMEN-DOCS/MERITUM-V6-FRACTIONAL-TOKENS-2026-09-22.md`.
+> The real-wasm harness (`testing/creator_tokens_escrow_test.go.govsc`) is GREEN on
+> this bytecode (fractional buy/transfer/sell, 42.64-credit escrow, 22.49-credit
+> fresh-market ask) and RED on v5.1 at the first v6 difference. Still to run before
+> any deploy: devnet, the indexer replay, the frontend (which MUST ship first). See `core/API.md`
+> "Token units (v6)".
+
 > **2026-09-12 — ONE UPDATE, FOUR CHANGES, BUILT AND PROVEN BY EXECUTION. NOT
 > DEPLOYED.** New CID `bafkreighvwezdaaatz6fhmtoboxxdp2hnknmljk6o3qaojim5ekhprfdzu`
 > (160,097 B, reproducible: two clean builds, byte for byte).

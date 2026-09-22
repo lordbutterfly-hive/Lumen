@@ -165,11 +165,25 @@ interface GoSell {
 }
 
 /** sell.go:170-271 sellCompute, money legs only. */
-function goSellCompute(supply: bigint, deltaS: bigint, maturing: bigint, heldBlocks: bigint): GoSell {
+/**
+ * `cohortLedger` = the rule sell.go has applied since 2026-09-08 ("THE COHORT
+ * LEDGER DECIDES"): the maturing tokens are drawn FIRST, off the TOP of the
+ * curve, and only their own slice is taxed, at the cohort's rate. A position
+ * with no `lots|` record reads as ONE cohort at its acq clock, which is what
+ * the data source synthesises (vsc-data-source.ts quoteSell), so the B block
+ * below must be modelled this way. The pro-rata share (matured.go
+ * maturingGrossShare) is what the pre-ledger contract charged and what the
+ * C block's cohort-less quoteSellBaseUnits still reproduces.
+ */
+function goSellCompute(supply: bigint, deltaS: bigint, maturing: bigint, heldBlocks: bigint, cohortLedger = false): GoSell {
   const taxBps = goExitTaxBpsAt(heldBlocks);
   const gross = goSellProceeds(supply, deltaS);
   const { fromMatured, fromMaturing } = goSplitDraw(maturing, deltaS);
-  const taxableGross = goMaturingGrossShare(gross, fromMaturing, deltaS);
+  const taxableGross = cohortLedger
+    ? fromMaturing === deltaS
+      ? gross
+      : goSellProceeds(supply, fromMaturing) // the maturing cohort's own slice, at the top of the curve
+    : goMaturingGrossShare(gross, fromMaturing, deltaS);
   const tax = goExitTaxOn(taxableGross, taxBps);
   const fee = goTradeFee(gross);
   return { gross, taxableGross, tax, fee, net: gross - tax - fee, taxBps, fromMaturing, fromMatured };
@@ -404,7 +418,7 @@ async function main(): Promise<void> {
 
   for (const n of [30, 40, 41, 100]) {
     const q = await sourceFor(mixed).quoteSell(CREATOR, SELLER, n);
-    const g = goSellCompute(1000n, BigInt(n), 40n, heldGo);
+    const g = goSellCompute(1000n, BigInt(n), 40n, heldGo, true); // the live data source synthesises one cohort -> ledger rule
     const label = n < 40 ? 'inside maturing' : n === 40 ? 'exactly at the boundary' : 'spanning both buckets';
     check(`B(${n}, ${label}): tax matches sell.go EXACTLY`, toBase(q.taxHbd) === Number(g.tax), `got ${toBase(q.taxHbd)} want ${g.tax}`);
     check(`B(${n}, ${label}): net matches sell.go EXACTLY`, toBase(q.netHbd) === Number(g.net), `got ${toBase(q.netHbd)} want ${g.net}`);

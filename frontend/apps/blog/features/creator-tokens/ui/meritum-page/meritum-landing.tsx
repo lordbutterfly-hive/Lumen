@@ -250,7 +250,7 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
 
   const handleBuy = async (usd: number, maxTotalUsd?: number, fundFromHive?: boolean): Promise<void> => {
     const local = buyQuote(usd, market);
-    if (local.tokens <= 0) throw new Error('That budget does not cover a whole token at the current price.');
+    if (local.tokens <= 0) throw new Error('That budget does not cover the smallest buy at the current price.');
     const authoritative = await live.quoteBuy(local.tokens);
     const cap = maxTotalUsd ?? usd;
     if (authoritative.totalDueHbd > cap) throw new Error('The price moved above your limit.');
@@ -470,7 +470,7 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
               ) : null}
               <div className="flex flex-col gap-3">
                 {market.services.map((sv) => {
-                  const quote = market.priceUsd > 0 ? serviceQuote(sv.usd, market.priceUsd) : null;
+                  const quote = market.priceUsd > 0 ? serviceQuote(sv.usd, market.priceUsd, market.rules) : null;
                   return (
                     <article
                       key={sv.key}

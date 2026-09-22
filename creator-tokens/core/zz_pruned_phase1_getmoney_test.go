@@ -69,6 +69,9 @@ func zp4MoneyKey(k string) bool {
 	if strings.HasPrefix(k, "mb|") {
 		return true // maturing balances
 	}
+	if strings.HasPrefix(k, "balf|") {
+		return true // v6: the matured remainder below one token, decimal units
+	}
 	if strings.HasPrefix(k, "m|") {
 		p := strings.Split(k, "|")
 		if len(p) == 3 {
@@ -103,7 +106,7 @@ func TestZP1_GetMoney_NoReachablePathPlantsAMalformedValue(t *testing.T) {
 		rng := rand.New(rand.NewSource(seed + 5000))
 		w := zp1NewWorld(seed)
 		for _, c := range w.creators {
-			_ = Register(w.s, c, c, w.block, MinFace+5000, 5_000_000)
+			_ = Register(w.s, c, c, w.block, MinFace+5000, 5_000_000*TokenScale)
 		}
 		for i := 0; i < steps; i++ {
 			zp1Step(t, rng, w)
@@ -215,9 +218,10 @@ func TestZP1_GetMoney_KeyFamiliesCannotAlias(t *testing.T) {
 	for _, a := range valid {
 		add(kFeeBal(a), "kFeeBal", a)
 		for _, b := range valid {
-			add(kBal(a, b), "kBal", a+","+b)           // mb|<creator>|<holder>   MONEY (base-10)
-			add(kMatured(a, b), "kMatured", a+","+b)   // bal|<holder>|<creator>  RAW LE BYTES
-			add(kAcqBlock(a, b), "kAcqBlock", a+","+b) // acq|<creator>|<holder>  u64
+			add(kBal(a, b), "kBal", a+","+b)                 // mb|<creator>|<holder>   MONEY (base-10)
+			add(kMatured(a, b), "kMatured", a+","+b)         // bal|<holder>|<creator>  RAW LE BYTES (whole tokens)
+			add(kMaturedFrac(a, b), "kMaturedFrac", a+","+b) // balf|<holder>|<creator> MONEY (0..99 units)
+			add(kAcqBlock(a, b), "kAcqBlock", a+","+b)       // acq|<creator>|<holder>  u64
 			for _, cc := range valid[:6] {
 				add(kAllowance(a, b, cc), "kAllowance", a+","+b+","+cc)
 			}
@@ -299,7 +303,7 @@ func TestZP1_GetMoney_BlastRadiusOfACorruptValue(t *testing.T) {
 		if err := Register(s, c, c, 1, MinFace+5000, MaxCap); err != nil {
 			t.Fatalf("Register: %v", err)
 		}
-		if _, err := Buy(s, h, c, 10, big.NewInt(10_000)); err != nil {
+		if _, err := Buy(s, h, c, 10, tk(10_000)); err != nil {
 			t.Fatalf("Buy: %v", err)
 		}
 		return s
@@ -363,13 +367,13 @@ func TestZP1_GetMoney_BlastRadiusOfACorruptValue(t *testing.T) {
 		var behaviour string
 		switch {
 		case p.key == kReserve(c):
-			_, err := Sell(s, h, c, 100, big.NewInt(1))
+			_, err := Sell(s, h, c, 100, tk(1))
 			behaviour = fmt.Sprintf("Sell -> %v", errOrOK(err))
 		case p.key == kSupply(c):
-			_, err := Sell(s, h, c, 100, big.NewInt(1))
+			_, err := Sell(s, h, c, 100, tk(1))
 			behaviour = fmt.Sprintf("Sell -> %v", errOrOK(err))
 		case p.key == kBal(c, h):
-			_, err := Sell(s, h, c, 100, big.NewInt(1))
+			_, err := Sell(s, h, c, 100, tk(1))
 			behaviour = fmt.Sprintf("Sell -> %v", errOrOK(err))
 		case p.key == kTreasury():
 			setStr(s, kOwner(), "zp4owner")

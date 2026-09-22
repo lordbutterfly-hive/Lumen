@@ -17,7 +17,7 @@ func TestTradeFee_Split_Exact(t *testing.T) {
 	}{
 		{"worked-example-54", 54, 2, 1, 1}, // 5% fee floors even; sum equality still holds
 		{"even-fee", 200, 10, 5, 5},
-		{"dust-no-fee", 9, 0, 0, 0},   // floor(0.9) — revenue absorbs the dust, never the reserve
+		{"dust-min-fee", 9, 1, 0, 1},  // v6: floor(0.9) = 0 is lifted to the one-base-unit minimum (params.go MinFeeBaseUnits); odd unit to the platform
 		{"one-unit-fee", 30, 1, 0, 1}, // odd unit → platform, creator floor 0 (floor(30·5%/1)=1)
 		{"zero", 0, 0, 0, 0},
 		{"worked-example-65", 65, 3, 1, 2}, // odd unit → platform

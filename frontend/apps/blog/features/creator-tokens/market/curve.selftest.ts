@@ -41,7 +41,7 @@
 
 import { resolveAskMaxCreditsBaseUnits, ASK_MAX_CREDITS_TOLERANCE_BPS } from './curve';
 import { askPayload } from '../lib/vsc/op-builders';
-import { humanToBaseUnits } from '../lib/contract-math';
+import { humanToBaseUnits, formatTokenAmount } from '../lib/contract-math';
 
 let failures = 0;
 let checks = 0;
@@ -64,6 +64,7 @@ check(
   `got ${resolveAskMaxCreditsBaseUnits(42)}`
 );
 check('0 tolerance returns the quote figure exactly', resolveAskMaxCreditsBaseUnits(42, 0) === 42);
+check('v6 cap rounds on the 0.01 grid: 0.29 -> 0.30, 42.64 -> 43.50, never a whole token up', resolveAskMaxCreditsBaseUnits(0.29, 200, true) === 0.3 && resolveAskMaxCreditsBaseUnits(42.64, 200, true) === 43.5 && resolveAskMaxCreditsBaseUnits(0.29, 200) === 1);
 check('1 token never rounds DOWN under tolerance', resolveAskMaxCreditsBaseUnits(1) >= 1);
 check('0 credits (unpriceable) resolves to 0, not a negative or NaN cap', resolveAskMaxCreditsBaseUnits(0) === 0);
 
@@ -91,8 +92,8 @@ check('the reproduced gap exceeds 200x, consistent with the measured 1,000x-18,0
 // helper function nothing signs.
 const payload = askPayload('hive:creator', 'selftest-ref', 800, fixedMaxCredits, 0);
 check(
-  'payload.maxCredits is the moneyString of the resolved, quote-derived cap',
-  payload.maxCredits === String(fixedMaxCredits),
+  'payload.maxCredits is the wire form of the resolved, quote-derived cap (an integer here, the shape v5.1 parses)',
+  payload.maxCredits === formatTokenAmount(fixedMaxCredits),
   `got ${JSON.stringify(payload.maxCredits)}`
 );
 check('payload.maxCredits is NOT the old HBD-milliunit figure', payload.maxCredits !== String(oldBuggyMaxCredits));

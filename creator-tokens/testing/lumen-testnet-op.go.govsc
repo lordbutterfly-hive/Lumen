@@ -1,0 +1,78 @@
+// lumen-testnet-op broadcasts ONE Hive-testnet operation signed with the Magi
+// testnet deployer identity (~/deploy-testnet/config/hiveConfig.json), for the
+// creator-tokens v6 rehearsal on Magi TESTNET only (chain id and API are
+// hard-wired to the testnet; it cannot reach mainnet).
+//
+//   lumen-testnet-op withdraw 25.000            # vsc.withdraw hbd L2 -> L1 (self)
+//   lumen-testnet-op call <action> '<payload>' [allowHbd]   # vsc.call on the creator-tokens contract
+//   lumen-testnet-op call-as <account> <wif> <action> '<payload>' [allowHbd]
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/vsc-eco/hivego"
+)
+
+const (
+	testnetAPI     = "https://testnet.techcoderx.com"
+	testnetChainID = "18dcf0a285365fc58b71f18b3d3fec954aa0c141c44e4e5cb4cf777b9eab274e"
+	netID          = "vsc-testnet"
+	contractID     = "vsc1BcaD8JrwJPAAN5cU1cHKCBdZrd7jz2WGt8"
+)
+
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: withdraw <amount> | call <action> <payload> [allowHbd] | call-as <account> <wif> <action> <payload> [allowHbd]")
+		os.Exit(2)
+	}
+	home, _ := os.UserHomeDir()
+	var cfg struct {
+		HiveID    string `json:"hiveId"`
+		ActiveKey string `json:"activeKey"`
+	}
+	b, err := os.ReadFile(filepath.Join(home, "deploy-testnet", "config", "hiveConfig.json"))
+	if err != nil {
+		panic(err)
+	}
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		panic(err)
+	}
+	account, wif := cfg.HiveID, cfg.ActiveKey
+	args := os.Args[1:]
+	var ops []hivego.HiveOperation
+	switch args[0] {
+	case "withdraw":
+		j, _ := json.Marshal(map[string]string{"net_id": netID, "from": "hive:" + account, "to": "hive:" + account, "amount": args[1], "asset": "hbd"})
+		ops = append(ops, hivego.CustomJsonOperation{RequiredAuths: []string{account}, RequiredPostingAuths: []string{}, Id: "vsc.withdraw", Json: string(j)})
+	case "call", "call-as":
+		if args[0] == "call-as" {
+			account, wif = args[1], args[2]
+			args = args[2:]
+		}
+		action, payload := args[1], args[2]
+		body := map[string]interface{}{
+			"net_id": netID, "contract_id": contractID, "action": action,
+			"payload": json.RawMessage(payload), "rc_limit": 40000, "intents": []interface{}{},
+		}
+		if len(args) > 3 && args[3] != "" {
+			body["intents"] = []map[string]interface{}{{"type": "transfer.allow", "args": map[string]string{"limit": args[3], "token": "hbd", "decimals": "3"}}}
+		}
+		j, _ := json.Marshal(body)
+		ops = append(ops, hivego.CustomJsonOperation{RequiredAuths: []string{account}, RequiredPostingAuths: []string{}, Id: "vsc.call", Json: string(j)})
+	default:
+		fmt.Fprintln(os.Stderr, "unknown op")
+		os.Exit(2)
+	}
+	hc := hivego.NewHiveRpc([]string{testnetAPI})
+	hc.ChainID = testnetChainID
+	txid, err := hc.Broadcast(ops, &wif)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "broadcast failed:", err)
+		os.Exit(1)
+	}
+	fmt.Println(txid)
+}

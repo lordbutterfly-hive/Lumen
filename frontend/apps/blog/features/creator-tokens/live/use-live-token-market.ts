@@ -1,5 +1,6 @@
 'use client';
 
+import { fractionalTokensUnder } from '../market/contract-rules';
 import { toast } from '@ui/components/hooks/use-toast';
 
 /**
@@ -549,6 +550,8 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
       // runUnderTxClaim closure boundary, so quote.creditsRequiredBaseUnits
       // would widen back to number|null inside the arrow.
       const creditsRequiredBaseUnits = quote.creditsRequiredBaseUnits;
+      // v6: the signed cap rounds on the 0.01 grid; before v6 it stays a whole number the live bytecode can parse.
+      const fractionalCap = fractionalTokensUnder(await source.readRules());
       await runUnderTxClaim(creator, signer, () => source.ask({
         creator,
         asker: signer,
@@ -561,7 +564,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
         // which rejects a missing or zero value rather than defaulting to
         // unlimited. It is what stops a creator spiking their price between
         // this user signing and the transaction executing.
-        maxCreditsBaseUnits: resolveAskMaxCreditsBaseUnits(creditsRequiredBaseUnits),
+        maxCreditsBaseUnits: resolveAskMaxCreditsBaseUnits(creditsRequiredBaseUnits, undefined, fractionalCap),
         // 0 is the reserved alias for the creator's legacy face price, so this
         // is always safe to pass through as-is.
         offeringId: input.offeringId

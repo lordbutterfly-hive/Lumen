@@ -40,7 +40,9 @@ import type { Ask, HolderPosition, MarketPrice } from '../../types';
 import { useTokenPriceChips } from '../../live/use-token-price-chips';
 import { healthWordFor } from '../../market/market-health';
 import { ratingStars, usdPrice } from '../../market/format';
-import { COMMISSION_BPS } from '../../lib/contract-math';
+import { COMMISSION_BPS,
+  toUnits, fromUnits, TOKEN_SCALE
+} from '../../lib/contract-math';
 import { useAskNotes } from '../../live/use-ask-notes';
 // ★★ THE FLOOR FIGURES ARE HIDDEN FOR LAUNCH (owner, 2026-08-27), on every
 // surface at once, from one flag. This screen led with one, carried one per row
@@ -190,10 +192,11 @@ const HoldingRow: FC<{ h: HolderPosition; price?: MarketPrice }> = ({ h, price }
  */
 const MISS_RECLAIM_SLICE_BPS = 2_500;
 function missSliceTokens(escrowTokens: number): number {
-  const t = Math.max(0, Math.floor(escrowTokens));
-  if (t === 0) return 0;
-  const commission = Math.floor((t * COMMISSION_BPS) / 10_000);
-  return Math.min(t, Math.max(1, Math.ceil((commission * MISS_RECLAIM_SLICE_BPS) / 10_000)));
+  // ask.go Reclaim on UNITS: ceil(commission x 25%), floored at one whole token (100 units), never more than the escrow.
+  const u = Math.max(0, toUnits(escrowTokens));
+  if (u === 0) return 0;
+  const commission = Math.floor((u * COMMISSION_BPS) / 10_000);
+  return fromUnits(Math.min(u, Math.max(TOKEN_SCALE, Math.ceil((commission * MISS_RECLAIM_SLICE_BPS) / 10_000))));
 }
 
 const askStyle: Record<string, { label: string; cls: string }> = {

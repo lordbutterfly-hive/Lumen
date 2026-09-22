@@ -172,7 +172,7 @@ func TestTwap_ProducerMajorityBoundedByMedianAndSpot(t *testing.T) {
 		if short.Cmp(big.NewInt(2000)) != 0 {
 			t.Fatalf("short ring not fully walked: AskRate = %s, want 2000", short)
 		}
-		spot := SpotRate(big.NewInt(supply))
+		spot := SpotRate(tk(supply))
 
 		settle, err := SettlementRate(s, c, Q)
 		if err != nil {

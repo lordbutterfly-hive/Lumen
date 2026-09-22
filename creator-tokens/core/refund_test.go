@@ -92,7 +92,7 @@ func TestRefundPrice_NormalRatio(t *testing.T) {
 	s := NewMemStore()
 	creator := "pricecreatorb"
 
-	setMoney(s, kSupply(creator), big.NewInt(1000))
+	setMoney(s, kSupply(creator), tk(1000))
 	setMoney(s, kReserve(creator), big.NewInt(700))
 	if got := RefundPrice(s, creator); got.Cmp(mZero()) != 0 {
 		// floor(700/1000) == 0: a below-par single-credit price legitimately
@@ -103,7 +103,7 @@ func TestRefundPrice_NormalRatio(t *testing.T) {
 		t.Fatalf("RefundPrice = %s, want 0 (floor(700/1000))", got)
 	}
 
-	setMoney(s, kSupply(creator), big.NewInt(9))
+	setMoney(s, kSupply(creator), tk(9))
 	setMoney(s, kReserve(creator), big.NewInt(4))
 	if got := RefundPrice(s, creator); got.Cmp(mZero()) != 0 {
 		t.Fatalf("RefundPrice = %s, want 0 (floor(4/9))", got)
@@ -125,11 +125,12 @@ func TestRefundPrice_NoParClamp_ReportsTheRealRatio(t *testing.T) {
 	// A ratio far above the deleted PAR=1 cap. Under the curve this is the
 	// NORMAL case, not a peg violation: area(S)/S is well above 1 at every
 	// supply (BasePrice alone is 1000 units/token).
-	setMoney(s, kSupply(creator), big.NewInt(10))
-	setMoney(s, kReserve(creator), big.NewInt(35))
+	setMoney(s, kSupply(creator), tk(10))
+	setMoney(s, kReserve(creator), big.NewInt(35_000)) // 35 HBD over 10 tokens
 
-	if price := RefundPrice(s, creator); price.Cmp(big.NewInt(3)) != 0 {
-		t.Fatalf("RefundPrice = %s, want floor(35/10) = 3 — the real ratio, NOT the deleted PAR clamp of 1", price)
+	// v6: supply is in units; the price is still per WHOLE token: floor(35000 x 100 / 1000 units) = 3500 (3.5 HBD per token).
+	if price := RefundPrice(s, creator); price.Cmp(big.NewInt(3500)) != 0 {
+		t.Fatalf("RefundPrice = %s, want floor(35000 x 100 / 1000 units) = 3500 per whole token — the real ratio, NOT the deleted PAR clamp of 1", price)
 	}
 
 	// And on a genuine curve state: a market whose reserve is exactly
@@ -137,10 +138,10 @@ func TestRefundPrice_NoParClamp_ReportsTheRealRatio(t *testing.T) {
 	// hundreds of times above the old cap.
 	s2 := NewMemStore()
 	setupMarket(s2, "curvemkt", 100, MaxCap)
-	if _, err := Buy(s2, "holder", "curvemkt", 200, big.NewInt(100)); err != nil {
+	if _, err := Buy(s2, "holder", "curvemkt", 200, tk(100)); err != nil {
 		t.Fatal(err)
 	}
-	want := mMulDiv(Area(big.NewInt(100)), big.NewInt(1), big.NewInt(100))
+	want := mMulDiv(Area(tk(100)), unitsScale, tk(100)) // per WHOLE token (v6: supply is in units)
 	if got := RefundPrice(s2, "curvemkt"); got.Cmp(want) != 0 {
 		t.Fatalf("RefundPrice on a curve market = %s, want floor(area(100)/100) = %s", got, want)
 	}
@@ -174,11 +175,11 @@ func TestRefund_K2_WindDownTaxMatchesCurveExit(t *testing.T) {
 	// --- the CURVE exit: fresh whale buys n, sells all n in the same block ---
 	sc := NewMemStore()
 	setupMarket(sc, "curvecrea", 100, MaxCap)
-	if _, err := Buy(sc, "whale", "curvecrea", 1000, big.NewInt(n)); err != nil {
+	if _, err := Buy(sc, "whale", "curvecrea", 1000, tk(n)); err != nil {
 		t.Fatal(err)
 	}
 	Rcurve := getMoney(sc, kReserve("curvecrea"))
-	sell, err := Sell(sc, "whale", "curvecrea", 1000, big.NewInt(n)) // fresh, τ=2000
+	sell, err := Sell(sc, "whale", "curvecrea", 1000, tk(n)) // fresh, τ=2000
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +193,7 @@ func TestRefund_K2_WindDownTaxMatchesCurveExit(t *testing.T) {
 	// --- the WIND-DOWN exit: fresh whale buys n, Retires, winds down ---
 	sw := NewMemStore()
 	setupMarket(sw, "windcrea", 100, MaxCap)
-	if _, err := Buy(sw, "whale", "windcrea", 1000, big.NewInt(n)); err != nil {
+	if _, err := Buy(sw, "whale", "windcrea", 1000, tk(n)); err != nil {
 		t.Fatal(err)
 	}
 	Rwind := getMoney(sw, kReserve("windcrea"))
@@ -206,10 +207,10 @@ func TestRefund_K2_WindDownTaxMatchesCurveExit(t *testing.T) {
 	feeCBefore := getMoney(sw, kFeeBal("windcrea"))
 	// Inside the retire notice (RULING K3: inWindDown → Refund open), still
 	// fresh (held 2 blocks ⇒ τ=2000). gross = floor(R·n/n) = R.
-	gross := refundPayout(Rwind, big.NewInt(n), getMoney(sw, kSupply("windcrea")))
+	gross := refundPayout(Rwind, tk(n), getMoney(sw, kSupply("windcrea")))
 	wdTaxBps := ExitTaxBpsAt(heldBlocksAt(sw, "windcrea", "whale", 1002))
 	wdTax := ExitTaxOn(gross, wdTaxBps)
-	net, err := Refund(sw, "whale", "windcrea", 1002, big.NewInt(n))
+	net, err := Refund(sw, "whale", "windcrea", 1002, tk(n))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,16 +251,16 @@ func TestRefund_K2_WindDownTaxMatchesCurveExit(t *testing.T) {
 	// --- and a SIX-WEEK holder pays ZERO on the wind-down ---
 	sp := NewMemStore()
 	setupMarket(sp, "patientcrea", 100, MaxCap)
-	if _, err := Buy(sp, "patient", "patientcrea", 1000, big.NewInt(n)); err != nil {
+	if _, err := Buy(sp, "patient", "patientcrea", 1000, tk(n)); err != nil {
 		t.Fatal(err)
 	}
 	if err := Retire(sp, "patientcrea", "patientcrea", 1000+ExitTaxDecayBlocks); err != nil {
 		t.Fatal(err)
 	}
 	wdBlock := 1000 + ExitTaxDecayBlocks + 1 // held the full six weeks ⇒ τ=0
-	grossP := refundPayout(getMoney(sp, kReserve("patientcrea")), big.NewInt(n), getMoney(sp, kSupply("patientcrea")))
+	grossP := refundPayout(getMoney(sp, kReserve("patientcrea")), tk(n), getMoney(sp, kSupply("patientcrea")))
 	treaP := getMoney(sp, kTreasury())
-	netP, err := Refund(sp, "patient", "patientcrea", wdBlock, big.NewInt(n))
+	netP, err := Refund(sp, "patient", "patientcrea", wdBlock, tk(n))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,9 +281,9 @@ func TestRefund_HappyPath_NoCommission(t *testing.T) {
 	// arithmetic is checkable by eye; refundPayout's proof is scale-free, so
 	// the ratio is a test convenience, not a claim about the live curve
 	// (where reserve == area(supply), far above supply).
-	setMoney(s, kSupply(creator), big.NewInt(1000))
+	setMoney(s, kSupply(creator), tk(1000))
 	setMoney(s, kReserve(creator), big.NewInt(1000))
-	setMoney(s, kBal(creator, "alice"), big.NewInt(300))
+	setMoney(s, kBal(creator, "alice"), tk(300))
 	forceWindDown(s, creator)
 
 	// WIND-DOWN BLOCK. Refund is the wind-down rail and is phase-routed to
@@ -299,8 +300,8 @@ func TestRefund_HappyPath_NoCommission(t *testing.T) {
 	// fresh (unclocked) holder pays the full 15%, so gross 100 → tax 15 → net
 	// 85. The reserve still drops by the full gross 100; the tax goes to
 	// treasury.
-	wantNet, gross, tax := wdNet(s, creator, "alice", wdBlock, big.NewInt(100))
-	payout, err := Refund(s, "alice", creator, wdBlock, big.NewInt(100))
+	wantNet, gross, tax := wdNet(s, creator, "alice", wdBlock, tk(100))
+	payout, err := Refund(s, "alice", creator, wdBlock, tk(100))
 	if err != nil {
 		t.Fatalf("Refund: %v", err)
 	}
@@ -310,10 +311,10 @@ func TestRefund_HappyPath_NoCommission(t *testing.T) {
 	if payout.Cmp(wantNet) != 0 {
 		t.Fatalf("payout = %s, want net %s (gross 100 − K2 tax 15; no commission)", payout, wantNet)
 	}
-	if got := getMoney(s, kBal(creator, "alice")); got.Cmp(big.NewInt(200)) != 0 {
+	if got := getMoney(s, kBal(creator, "alice")); got.Cmp(tk(200)) != 0 {
 		t.Fatalf("alice balance = %s, want 200", got)
 	}
-	if got := getMoney(s, kSupply(creator)); got.Cmp(big.NewInt(900)) != 0 {
+	if got := getMoney(s, kSupply(creator)); got.Cmp(tk(900)) != 0 {
 		t.Fatalf("supply = %s, want 900", got)
 	}
 	if got := getMoney(s, kReserve(creator)); got.Cmp(big.NewInt(900)) != 0 {
@@ -333,9 +334,9 @@ func TestRefund_HappyPath_NoCommission(t *testing.T) {
 func TestRefund_FullBalanceDrainsToZero(t *testing.T) {
 	s := NewMemStore()
 	creator := "refundcreatorb"
-	setMoney(s, kSupply(creator), big.NewInt(250))
+	setMoney(s, kSupply(creator), tk(250))
 	setMoney(s, kReserve(creator), big.NewInt(250))
-	setMoney(s, kBal(creator, "alice"), big.NewInt(250))
+	setMoney(s, kBal(creator, "alice"), tk(250))
 	forceWindDown(s, creator)
 
 	// WIND-DOWN BLOCK. Refund is the wind-down rail and is phase-routed to
@@ -348,8 +349,8 @@ func TestRefund_FullBalanceDrainsToZero(t *testing.T) {
 	const wdBlock = 50 + GraceBlocks + 1
 	// RULING K2: fresh holder → net = gross 250 − tax 38 = 212; the RESERVE
 	// still drains to exactly 0 (it is debited the full gross).
-	wantNet, _, _ := wdNet(s, creator, "alice", wdBlock, big.NewInt(250))
-	payout, err := Refund(s, "alice", creator, wdBlock, big.NewInt(250))
+	wantNet, _, _ := wdNet(s, creator, "alice", wdBlock, tk(250))
+	payout, err := Refund(s, "alice", creator, wdBlock, tk(250))
 	if err != nil {
 		t.Fatalf("Refund: %v", err)
 	}
@@ -376,9 +377,9 @@ func TestRefund_FullBalanceDrainsToZero(t *testing.T) {
 func TestRefund_BulkRefundNotCrippledByPerCreditRounding(t *testing.T) {
 	s := NewMemStore()
 	creator := "refundcreatorc"
-	setMoney(s, kSupply(creator), big.NewInt(1000))
+	setMoney(s, kSupply(creator), tk(1000))
 	setMoney(s, kReserve(creator), big.NewInt(999)) // ratio 0.999
-	setMoney(s, kBal(creator, "alice"), big.NewInt(1000))
+	setMoney(s, kBal(creator, "alice"), tk(1000))
 	forceWindDown(s, creator)
 
 	if price := RefundPrice(s, creator); !mIsZero(price) {
@@ -397,8 +398,8 @@ func TestRefund_BulkRefundNotCrippledByPerCreditRounding(t *testing.T) {
 	// of this test). RULING K2 then carves the fresh holder's tax: net = 999 −
 	// ceil(999·0.15) = 999 − 150 = 849. The bulk formula is what makes gross 999
 	// instead of credits×floor(999/1000)=0.
-	wantNet, gross, _ := wdNet(s, creator, "alice", wdBlock, big.NewInt(1000)) //K2:15%
-	payout, err := Refund(s, "alice", creator, wdBlock, big.NewInt(1000))
+	wantNet, gross, _ := wdNet(s, creator, "alice", wdBlock, tk(1000)) //K2:15%
+	payout, err := Refund(s, "alice", creator, wdBlock, tk(1000))
 	if err != nil {
 		t.Fatalf("Refund: %v", err)
 	}
@@ -425,12 +426,12 @@ func TestRefund_WorksWhileRetiredAndGloballyPaused(t *testing.T) {
 	setStr(s, kState(creator), StateFrozen)
 	setStr(s, kPaused(), "1") // global inbound pause set
 
-	setMoney(s, kSupply(creator), big.NewInt(500))
+	setMoney(s, kSupply(creator), tk(500))
 	setMoney(s, kReserve(creator), big.NewInt(500))
-	setMoney(s, kBal(creator, "alice"), big.NewInt(500))
+	setMoney(s, kBal(creator, "alice"), tk(500))
 
-	wantNet, _, _ := wdNet(s, creator, "alice", 50+GraceBlocks+1, big.NewInt(500))
-	payout, err := Refund(s, "alice", creator, 50+GraceBlocks+1, big.NewInt(500))
+	wantNet, _, _ := wdNet(s, creator, "alice", 50+GraceBlocks+1, tk(500))
+	payout, err := Refund(s, "alice", creator, 50+GraceBlocks+1, tk(500))
 	if err != nil {
 		t.Fatalf("Refund must succeed while FROZEN and globally paused: %v", err)
 	}
@@ -459,8 +460,8 @@ func TestRefundHolder_RegressionActiveRevertsLapseRefusesRetiredPays(t *testing.
 	const pusher = "h3thirdparty"
 	regBlock := uint64(1000)
 
-	mustRegister(t, s, creator, regBlock, 1000, MaxCap)
-	if _, err := Buy(s, holder, creator, regBlock+1, big.NewInt(2000)); err != nil {
+	mustRegister(t, s, creator, regBlock, 1000, MaxCap/TokenScale)
+	if _, err := Buy(s, holder, creator, regBlock+1, tk(2000)); err != nil {
 		t.Fatalf("Buy: %v", err)
 	}
 
@@ -491,10 +492,10 @@ func TestRefundHolder_RegressionActiveRevertsLapseRefusesRetiredPays(t *testing.
 	// UNCHANGED and is what is asserted here instead: in ACTIVE the holder's
 	// self-exit is Sell, and it works. What H3 gates is the PUSH (a stranger
 	// force-liquidating a live position), never the holder's own exit.
-	if _, err := Refund(s, holder, creator, activeBlock, big.NewInt(500)); errSymbol(err) != ErrState {
+	if _, err := Refund(s, holder, creator, activeBlock, tk(500)); errSymbol(err) != ErrState {
 		t.Fatalf("Refund in ACTIVE: err=%v, want %s (routed to the Sell rail, not open)", err, ErrState)
 	}
-	rs, err := Sell(s, holder, creator, activeBlock, big.NewInt(500))
+	rs, err := Sell(s, holder, creator, activeBlock, tk(500))
 	if err != nil {
 		t.Fatalf("the holder's OWN exit must always work — Sell in ACTIVE: %v", err)
 	}
@@ -570,9 +571,9 @@ func TestRefundHolder_WorksWhileRetiredAndGloballyPaused(t *testing.T) {
 	setStr(s, kState(creator), StateFrozen)
 	setStr(s, kPaused(), "1")
 
-	setMoney(s, kSupply(creator), big.NewInt(300))
+	setMoney(s, kSupply(creator), tk(300))
 	setMoney(s, kReserve(creator), big.NewInt(300))
-	setMoney(s, kBal(creator, "bob"), big.NewInt(300))
+	setMoney(s, kBal(creator, "bob"), tk(300))
 
 	// EXITTAX-1/NOTICE-1 (2026-07-22): the permissionless push now refuses while
 	// the holder's exit tax is still nonzero. bob is seeded via a raw setMoney
@@ -588,7 +589,7 @@ func TestRefundHolder_WorksWhileRetiredAndGloballyPaused(t *testing.T) {
 	// while FROZEN and globally paused (the outflow-never-pauses subject).
 	setU64(s, kAcqBlock(creator, "bob"), 1)
 	pushBlock := ExitTaxDecayBlocks + 2
-	wantNet, _, _ := wdNet(s, creator, "bob", pushBlock, big.NewInt(300))
+	wantNet, _, _ := wdNet(s, creator, "bob", pushBlock, tk(300))
 	payout, err := RefundHolder(s, "anyone_at_all", creator, "bob", pushBlock)
 	if err != nil {
 		t.Fatalf("RefundHolder must succeed while FROZEN and globally paused: %v", err)
@@ -606,9 +607,9 @@ func TestRefundHolder_WorksWhileRetiredAndGloballyPaused(t *testing.T) {
 func TestRefund_Guards(t *testing.T) {
 	s := NewMemStore()
 	creator := "refundcreatorf"
-	setMoney(s, kSupply(creator), big.NewInt(1000))
+	setMoney(s, kSupply(creator), tk(1000))
 	setMoney(s, kReserve(creator), big.NewInt(1000))
-	setMoney(s, kBal(creator, "alice"), big.NewInt(100))
+	setMoney(s, kBal(creator, "alice"), tk(100))
 
 	cases := []struct {
 		name    string
@@ -617,14 +618,14 @@ func TestRefund_Guards(t *testing.T) {
 		credits *big.Int
 		wantSym string
 	}{
-		{"empty caller", "", creator, big.NewInt(10), ErrAuth},
-		{"invalid caller (key delimiter)", "ALI|CE", creator, big.NewInt(10), ErrAuth},
-		{"invalid caller (empty)", "", creator, big.NewInt(10), ErrAuth},
-		{"invalid creator (key delimiter)", "alice", "X|Y", big.NewInt(10), ErrInput},
+		{"empty caller", "", creator, tk(10), ErrAuth},
+		{"invalid caller (key delimiter)", "ALI|CE", creator, tk(10), ErrAuth},
+		{"invalid caller (empty)", "", creator, tk(10), ErrAuth},
+		{"invalid creator (key delimiter)", "alice", "X|Y", tk(10), ErrInput},
 		{"nil credits", "alice", creator, nil, ErrInput},
-		{"zero credits", "alice", creator, big.NewInt(0), ErrInput},
+		{"zero credits", "alice", creator, tk(0), ErrInput},
 		{"negative credits", "alice", creator, big.NewInt(-5), ErrInput},
-		{"insufficient balance", "alice", creator, big.NewInt(101), ErrBalance},
+		{"insufficient balance", "alice", creator, tk(101), ErrBalance},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -642,10 +643,10 @@ func TestRefund_Guards(t *testing.T) {
 	}
 
 	// Every rejected call above must have left state completely untouched.
-	if got := getMoney(s, kBal(creator, "alice")); got.Cmp(big.NewInt(100)) != 0 {
+	if got := getMoney(s, kBal(creator, "alice")); got.Cmp(tk(100)) != 0 {
 		t.Fatalf("alice balance mutated by a rejected Refund: %s", got)
 	}
-	if got := getMoney(s, kSupply(creator)); got.Cmp(big.NewInt(1000)) != 0 {
+	if got := getMoney(s, kSupply(creator)); got.Cmp(tk(1000)) != 0 {
 		t.Fatalf("supply mutated by a rejected Refund: %s", got)
 	}
 	if got := getMoney(s, kReserve(creator)); got.Cmp(big.NewInt(1000)) != 0 {
@@ -659,12 +660,12 @@ func TestRefund_CorruptStateSupplyZeroButBalancePositive(t *testing.T) {
 	// Deliberately I3-violating: a balance with no supply behind it at all.
 	// Unreachable if the rest of the system maintains I3, but this file must
 	// not panic (division by zero) if it somehow happens.
-	setMoney(s, kBal(creator, "alice"), big.NewInt(50))
+	setMoney(s, kBal(creator, "alice"), tk(50))
 	setMoney(s, kReserve(creator), big.NewInt(50))
 	// kSupply(creator) left completely unset => 0.
 	forceWindDown(s, creator)
 
-	_, err := Refund(s, "alice", creator, 50+GraceBlocks+1, big.NewInt(10))
+	_, err := Refund(s, "alice", creator, 50+GraceBlocks+1, tk(10))
 	if err == nil {
 		t.Fatal("expected an error rather than a division-by-zero panic")
 	}
@@ -707,14 +708,14 @@ func TestRefund_LargeAmountsBeyondInt64(t *testing.T) {
 func TestRefundHolder_PaysHolderNotCaller(t *testing.T) {
 	s := NewMemStore()
 	creator := "refundcreatori"
-	setMoney(s, kSupply(creator), big.NewInt(700))
+	setMoney(s, kSupply(creator), tk(700))
 	setMoney(s, kReserve(creator), big.NewInt(700))
-	setMoney(s, kBal(creator, "holderx"), big.NewInt(400))
+	setMoney(s, kBal(creator, "holderx"), tk(400))
 	// The caller ALSO holds a balance in the same market, specifically to
 	// prove no cross-contamination: pushing holderx's refund must not touch
 	// callerz's own credits, even though both keys share the same "bal|
 	// creator|" prefix.
-	setMoney(s, kBal(creator, "callerz"), big.NewInt(300))
+	setMoney(s, kBal(creator, "callerz"), tk(300))
 
 	// H3 defect fix (2026-07-21): RefundHolder requires Phase==FROZEN/
 	// CLOSED. This creator was never Registered, so kPaidUntil defaults to
@@ -728,7 +729,7 @@ func TestRefundHolder_PaysHolderNotCaller(t *testing.T) {
 	setU64(s, kAcqBlock(creator, "holderx"), 1)
 	forceWindDown(s, creator) // A1: wind-down is reached by Retire, not by lapse
 	pushBlock := ExitTaxDecayBlocks + GraceBlocks
-	wantNet, _, _ := wdNet(s, creator, "holderx", pushBlock, big.NewInt(400))
+	wantNet, _, _ := wdNet(s, creator, "holderx", pushBlock, tk(400))
 	payout, err := RefundHolder(s, "callerz", creator, "holderx", pushBlock)
 	if err != nil {
 		t.Fatalf("RefundHolder: %v", err)
@@ -740,10 +741,10 @@ func TestRefundHolder_PaysHolderNotCaller(t *testing.T) {
 	if got := getMoney(s, kBal(creator, "holderx")); !mIsZero(got) {
 		t.Fatalf("holderx balance = %s, want 0 (fully drained)", got)
 	}
-	if got := getMoney(s, kBal(creator, "callerz")); got.Cmp(big.NewInt(300)) != 0 {
+	if got := getMoney(s, kBal(creator, "callerz")); got.Cmp(tk(300)) != 0 {
 		t.Fatalf("callerz balance = %s, want untouched 300 (caller must never be paid)", got)
 	}
-	if got := getMoney(s, kSupply(creator)); got.Cmp(big.NewInt(300)) != 0 {
+	if got := getMoney(s, kSupply(creator)); got.Cmp(tk(300)) != 0 {
 		t.Fatalf("supply = %s, want 300 (only holderx's 400 burned)", got)
 	}
 	if got := getMoney(s, kReserve(creator)); got.Cmp(big.NewInt(300)) != 0 {
@@ -754,9 +755,9 @@ func TestRefundHolder_PaysHolderNotCaller(t *testing.T) {
 func TestRefundHolder_ZeroBalanceNoop(t *testing.T) {
 	s := NewMemStore()
 	creator := "refundcreatorj"
-	setMoney(s, kSupply(creator), big.NewInt(1000))
+	setMoney(s, kSupply(creator), tk(1000))
 	setMoney(s, kReserve(creator), big.NewInt(1000))
-	setMoney(s, kBal(creator, "someoneelse"), big.NewInt(1000))
+	setMoney(s, kBal(creator, "someoneelse"), tk(1000))
 	// "unheldholder" (12 chars, valid) has no balance key set at all.
 
 	// H3 defect fix: RefundHolder now gates on Phase==FROZEN/CLOSED even for
@@ -770,7 +771,7 @@ func TestRefundHolder_ZeroBalanceNoop(t *testing.T) {
 	if !mIsZero(payout) {
 		t.Fatalf("payout = %s, want 0", payout)
 	}
-	if got := getMoney(s, kSupply(creator)); got.Cmp(big.NewInt(1000)) != 0 {
+	if got := getMoney(s, kSupply(creator)); got.Cmp(tk(1000)) != 0 {
 		t.Fatalf("supply mutated by a zero-balance push: %s", got)
 	}
 	if got := getMoney(s, kReserve(creator)); got.Cmp(big.NewInt(1000)) != 0 {
@@ -781,8 +782,8 @@ func TestRefundHolder_ZeroBalanceNoop(t *testing.T) {
 func TestRefundHolder_Guards(t *testing.T) {
 	s := NewMemStore()
 	creator := "refundcreatork"
-	setMoney(s, kBal(creator, "holdery"), big.NewInt(100))
-	setMoney(s, kSupply(creator), big.NewInt(100))
+	setMoney(s, kBal(creator, "holdery"), tk(100))
+	setMoney(s, kSupply(creator), tk(100))
 	setMoney(s, kReserve(creator), big.NewInt(100))
 
 	cases := []struct {
@@ -808,7 +809,7 @@ func TestRefundHolder_Guards(t *testing.T) {
 			}
 		})
 	}
-	if got := getMoney(s, kBal(creator, "holdery")); got.Cmp(big.NewInt(100)) != 0 {
+	if got := getMoney(s, kBal(creator, "holdery")); got.Cmp(tk(100)) != 0 {
 		t.Fatalf("holdery balance mutated by a rejected RefundHolder: %s", got)
 	}
 }
@@ -852,7 +853,7 @@ func TestCloseIfDrained_FrozenButSupplyNonzeroIsNoop(t *testing.T) {
 	creator := "closecreatorc"
 	setupMarket(s, creator, 100, MaxCap)
 	forceWindDown(s, creator)
-	setMoney(s, kSupply(creator), big.NewInt(1)) // still owes somebody
+	setMoney(s, kSupply(creator), tk(1)) // still owes somebody
 
 	block := uint64(50 + GraceBlocks + 1)
 	if CloseIfDrained(s, creator, block) {
@@ -1163,7 +1164,7 @@ func TestSolvency_NoParCap_FullUnwindDrainsTheWholeReserve(t *testing.T) {
 
 	// Still inert afterwards: supply is 0, no balance remains to present,
 	// and this package defines no admin/withdraw path to kReserve at all (I4).
-	if _, err := Refund(s, holder, creator, 50+GraceBlocks+1, big.NewInt(1)); err == nil {
+	if _, err := Refund(s, holder, creator, 50+GraceBlocks+1, tk(1)); err == nil {
 		t.Fatal("expected insufficient-balance: the holder's balance is fully drained")
 	} else if sym := errSymbol(err); sym != ErrBalance {
 		t.Fatalf("want ErrBalance, got %v", err)

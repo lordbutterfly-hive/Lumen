@@ -182,3 +182,15 @@ if (failures === 0) {
   console.error(`\nmeritum-notification-rows: ${failures}/${checks} CHECK(S) FAILED`);
   process.exit(1);
 }
+
+// v6 (2026-09-22): the indexer now carries decimal token strings ("1.50", "0.99") next to the
+// whole-token rows of the v5.1 era; both must read as numbers, never truncate to an integer.
+const v6 = meritumNotificationRows(
+  {
+    bought: [{ creator: 'hive:hbd-temp', actor: 'hive:lordbutterfly', minted: '1.50', total_due: '1638', indexer_ts: '2026-09-22T09:00:00', indexer_tx_hash: 'v6buy' }],
+    ordered: [{ ...asked, credits_spent: '0.99' }]
+  },
+  ['hive:hbd-temp']
+);
+ok('v6 decimal buy row keeps the fraction', byType(v6, 'buy')[0]?.msg === '@lordbutterfly bought 1.5 Meritum of yours for $1.64', byType(v6, 'buy')[0]?.msg ?? '');
+ok('v6 decimal order row keeps the fraction and pluralises', byType(v6, 'order')[0]?.msg === '@lordbutterfly ordered your "Let there be light!" for 0.99 tokens', byType(v6, 'order')[0]?.msg ?? '');

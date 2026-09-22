@@ -440,7 +440,9 @@ func (e *Engine) askIntent(asker, creator string, at askTarget) {
 	}
 	// tokenLegOf is what settlement prices — the whole posted face since the
 	// 2026-09-12 ruling; see its doc for why the indirection is kept.
-	creditsEstimate := ceilDivBig(tokenLegOf(face), rate)
+	// v6: credits are 0.01-token UNITS and rate is HBD per WHOLE token, so the
+	// estimate is ceil(face x TokenScale / rate) - exactly ask.go creditsForAsk.
+	creditsEstimate := ceilDivBig(new(big.Int).Mul(tokenLegOf(face), big.NewInt(core.TokenScale)), rate)
 	if creditsEstimate.Sign() <= 0 {
 		return
 	}
@@ -1494,7 +1496,7 @@ func (e *Engine) ensureCreditsForAsk(name, creator string, at askTarget) {
 		return
 	}
 	// tokenLegOf, not the bare face — see tokenLegOf's doc.
-	need := ceilDivBig(tokenLegOf(face), rate)
+	need := ceilDivBig(new(big.Int).Mul(tokenLegOf(face), big.NewInt(core.TokenScale)), rate) // v6 units
 	bal := core.BalanceOf(e.Store, creator, name)
 	if cmpBig(bal, need) >= 0 {
 		return
@@ -1582,7 +1584,7 @@ func (e *Engine) oneShotSequence(name string) {
 	// can, which will very likely then fail Ask's own balance guard: the
 	// same honest "couldn't quite afford it" outcome as before, on the
 	// curve). tokenLegOf, not the bare face — see tokenLegOf's doc.
-	need := ceilDivBig(tokenLegOf(at.Face), rate)
+	need := ceilDivBig(new(big.Int).Mul(tokenLegOf(at.Face), big.NewInt(core.TokenScale)), rate) // v6 units
 	if aff := e.maxAffordableTokens(target, actor.HBD); cmpBig(need, aff) > 0 {
 		need = aff
 	}

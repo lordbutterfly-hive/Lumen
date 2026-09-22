@@ -1,9 +1,6 @@
 package core
 
-import (
-	"math/big"
-	"testing"
-)
+import "testing"
 
 // TestBUYINT64_PreCommitGuard verifies the PRUNED-2026-07-22 fix: a token
 // quantity whose curve cost overflows int64 is rejected with a clean typed
@@ -16,7 +13,7 @@ func TestBUYINT64_PreCommitGuard(t *testing.T) {
 		creator = "int64creator"
 		block   = uint64(1000)
 	)
-	big30M := big.NewInt(30_000_000)
+	big30M := tk(30_000_000) // 30M tokens, in units (v6)
 
 	// (1) An ordinary Buy of an overflowing size on a live market: rejected
 	//     with ErrInput, and NOTHING committed (RULING G).
@@ -54,7 +51,7 @@ func TestBUYINT64_PreCommitGuard(t *testing.T) {
 	if err := Register(s3, creator, creator, block, MinFace, MaxCap); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if _, err := Buy(s3, "smallbuyer", creator, block+1, big.NewInt(1000)); err != nil {
+	if _, err := Buy(s3, "smallbuyer", creator, block+1, tk(1000)); err != nil {
 		t.Fatalf("a normal 1000-token Buy must still succeed, got %v", err)
 	}
 }

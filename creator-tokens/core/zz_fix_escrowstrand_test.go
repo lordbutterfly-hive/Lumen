@@ -40,7 +40,7 @@ import (
 func esFragmentedHolder(s Store, c, h string, n int, each int64, firstBlock, gap uint64) uint64 {
 	blk := firstBlock
 	for i := 0; i < n; i++ {
-		creditInflowAt(s, c, h, big.NewInt(each), blk, blk)
+		creditInflowAt(s, c, h, tk(each), blk, blk)
 		blk += gap
 	}
 	return blk
@@ -109,7 +109,7 @@ func esOverCapEscrow(t *testing.T, s *MemStore, c, asker string) (*AskResult, ui
 	// C-guard), then the holder's balance is REPLACED by a fragmented one so the
 	// escrow's own draw spans many cohorts.
 	block, _ := commissionMarket(t, s, c, asker)
-	setMoney(s, kBal(c, asker), big.NewInt(0))
+	setMoney(s, kBal(c, asker), tk(0))
 	lotsClear(s, c, asker)
 	// ★ SMALL cohorts, deliberately. 20 x 3 = 60 tokens against an ask that costs
 	// 50 here, so lotsDrawFreshest has to reach through ~17 of them — where 20
@@ -119,7 +119,7 @@ func esOverCapEscrow(t *testing.T, s *MemStore, c, asker string) (*AskResult, ui
 	// cannot do the bound's work either.
 	esFragmentedHolder(s, c, asker, 20, 3, block-25_000, 1_000)
 
-	res, err := askAt0(s, asker, c, block, big.NewInt(100), "strand-cid", MinAskDeadline)
+	res, err := askAt0(s, asker, c, block, tk(100), "strand-cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}

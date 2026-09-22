@@ -46,7 +46,7 @@ func x3Build(t *testing.T, N, M int64) (s *MemStore, creator string, block uint6
 	pfMarket(t, s, creator, t1)
 	pfBuy(t, s, "whale", creator, t0, N)
 	pfBuy(t, s, "alt", creator, t1, M)
-	if err := TransferCredits(s, "alt", creator, "alt", "whale", t1, big.NewInt(M)); err != nil {
+	if err := TransferCredits(s, "alt", creator, "alt", "whale", t1, tk(M)); err != nil {
 		t.Fatalf("TransferCredits: %v", err)
 	}
 	if err := Retire(s, creator, creator, t1); err != nil {
@@ -62,7 +62,7 @@ func x3Build(t *testing.T, N, M int64) (s *MemStore, creator string, block uint6
 func x3Terms(s *MemStore, c string, block uint64, refundCredits int64) (base, blendTax, cohortTax, honestTax *big.Int, blendBps uint64) {
 	reserve := getMoney(s, kReserve(c))
 	supply := getMoney(s, kSupply(c))
-	credits := big.NewInt(refundCredits)
+	credits := tk(refundCredits)
 	gross := refundPayout(reserve, credits, supply)
 	_, fromMaturing := splitDraw(s, c, "whale", credits)
 	base = maturingGrossShare(gross, fromMaturing, credits)
@@ -105,7 +105,7 @@ func TestX3_RefundLaunder_ClosedAtBothCeilings(t *testing.T) {
 	feeBefore := getMoney(s, kFeeBal(c))
 	treBefore := getMoney(s, kTreasury())
 	reserveBefore := getMoney(s, kReserve(c))
-	net, err := Refund(s, "whale", c, blk, big.NewInt(M))
+	net, err := Refund(s, "whale", c, blk, tk(M))
 	if err != nil {
 		t.Fatalf("Refund: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestX3_SingleCohortByteIdenticalToBlend(t *testing.T) {
 		if err := Retire(s, c, c, tR); err != nil {
 			t.Fatalf("Retire: %v", err)
 		}
-		credits := big.NewInt(1234) // partial refund
+		credits := tk(1234) // partial refund (whole tokens, in units)
 		reserve := getMoney(s, kReserve(c))
 		supply := getMoney(s, kSupply(c))
 		gross := refundPayout(reserve, credits, supply)
@@ -205,13 +205,13 @@ func TestX3_AgedRemainderNotOverCharged(t *testing.T) {
 	// cohort and does NOT graduate, so the remainder-with-a-stale-blend state
 	// this test is about is preserved, and it is still reachable in production
 	// by exactly this route.
-	if err := TransferCredits(s, "whale", c, "whale", "sink", blk, big.NewInt(M)); err != nil {
+	if err := TransferCredits(s, "whale", c, "whale", "sink", blk, tk(M)); err != nil {
 		t.Fatalf("TransferCredits M: %v", err)
 	}
 	// Now refund the aged remainder N.
 	reserve := getMoney(s, kReserve(c))
 	supply := getMoney(s, kSupply(c))
-	credits := big.NewInt(N)
+	credits := tk(N)
 	gross := refundPayout(reserve, credits, supply)
 	_, fromMaturing := splitDraw(s, c, "whale", credits)
 	base := maturingGrossShare(gross, fromMaturing, credits)

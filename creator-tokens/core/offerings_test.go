@@ -80,18 +80,18 @@ func TestOfferings_AskSettlesAtTheOfferingPrice(t *testing.T) {
 	// 4,000 tokens, not 400: the settlement spend cap refuses an ask costing
 	// more than 5% of supply, and the dear service deliberately costs ~20x the
 	// cheap one, so the market has to be deep enough to clear it.
-	if _, err := Buy(s, "buyer", c, 2000, big.NewInt(4000)); err != nil {
+	if _, err := Buy(s, "buyer", c, 2000, tk(4000)); err != nil {
 		t.Fatal(err)
 	}
 	// A settleable rate needs a genuinely spanning observation history (the
 	// long ring samples at most once per LongObsSpacing) — seedSettleObs
 	// builds one and returns the block to query at.
 	qb := seedSettleObs(s, c, 2000, SpotRate(getMoney(s, kSupply(c))))
-	cheapRes, err := Ask(s, "buyer", c, qb, big.NewInt(1_000_000), "q1", MinAskDeadline, cheap)
+	cheapRes, err := Ask(s, "buyer", c, qb, tk(1_000_000), "q1", MinAskDeadline, cheap)
 	if err != nil {
 		t.Fatalf("ask against the cheap offering: %v", err)
 	}
-	dearRes, err := Ask(s, "buyer", c, qb, big.NewInt(1_000_000), "q2", MinAskDeadline, dear)
+	dearRes, err := Ask(s, "buyer", c, qb, tk(1_000_000), "q2", MinAskDeadline, dear)
 	if err != nil {
 		t.Fatalf("ask against the dear offering: %v", err)
 	}
@@ -116,12 +116,12 @@ func TestOfferings_AskSettlesAtTheOfferingPrice(t *testing.T) {
 
 func TestOfferings_AskAgainstUnknownOrDeletedIsRefused(t *testing.T) {
 	s, c := offSetup(t)
-	if _, err := Buy(s, "buyer", c, 2000, big.NewInt(400)); err != nil {
+	if _, err := Buy(s, "buyer", c, 2000, tk(400)); err != nil {
 		t.Fatal(err)
 	}
 
 	// Never created.
-	_, err := Ask(s, "buyer", c, 2100, big.NewInt(1_000_000), "q", MinAskDeadline, 99)
+	_, err := Ask(s, "buyer", c, 2100, tk(1_000_000), "q", MinAskDeadline, 99)
 	if err == nil {
 		t.Fatal("ask against a never-created offering succeeded, want refusal")
 	}
@@ -140,7 +140,7 @@ func TestOfferings_AskAgainstUnknownOrDeletedIsRefused(t *testing.T) {
 	if got := OfferingPrice(s, c, id); got.Sign() != 0 {
 		t.Fatalf("deleted offering still prices at %s, want 0", got)
 	}
-	if _, err := Ask(s, "buyer", c, 2100, big.NewInt(1_000_000), "q", MinAskDeadline, id); err == nil {
+	if _, err := Ask(s, "buyer", c, 2100, tk(1_000_000), "q", MinAskDeadline, id); err == nil {
 		t.Fatal("ask against a deleted offering succeeded, want refusal")
 	}
 }
@@ -153,11 +153,11 @@ func TestOfferings_DeleteDoesNotStrandAnEscrow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, "buyer", c, 2000, big.NewInt(400)); err != nil {
+	if _, err := Buy(s, "buyer", c, 2000, tk(400)); err != nil {
 		t.Fatal(err)
 	}
 	qb := seedSettleObs(s, c, 2000, SpotRate(getMoney(s, kSupply(c))))
-	res, err := Ask(s, "buyer", c, qb, big.NewInt(1_000_000), "make me a video", MinAskDeadline, id)
+	res, err := Ask(s, "buyer", c, qb, tk(1_000_000), "make me a video", MinAskDeadline, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestOfferings_ReRegistrationClearsTheCatalogue(t *testing.T) {
 
 	// Wind the market all the way to CLOSED, then re-register.
 	setStr(s, kState(c), StateClosed)
-	if err := Register(s, c, c, 3000, 2500, 1000); err != nil {
+	if err := Register(s, c, c, 3000, 2500, 1000*TokenScale); err != nil {
 		t.Fatalf("re-register: %v", err)
 	}
 
@@ -514,7 +514,7 @@ func TestOfferings_ReRegistrationWipesTitleAnchorsToo(t *testing.T) {
 	}
 
 	setStr(s, kState(c), StateClosed)
-	if err := Register(s, c, c, 3000, 2500, 1000); err != nil {
+	if err := Register(s, c, c, 3000, 2500, 1000*TokenScale); err != nil {
 		t.Fatalf("re-register: %v", err)
 	}
 

@@ -957,9 +957,10 @@ function gatedEntrypointsFromContractSource(): GatedEntrypoints | null {
 //    ground-truth spec + the ACTUAL captured values.
 // ======================================================================
 
-type GoFieldKind = 'u64' | 'str' | 'money';
+type GoFieldKind = 'u64' | 'str' | 'money' | 'tokens';
 
-const SPEC_KIND_TO_GO: Record<JsonFieldType, GoFieldKind> = { number: 'u64', string: 'str', moneyString: 'money' };
+// v6: a tokenString is parsed by contract/parse TokenAmount (decimal tokens -> units); the Go fixture asserts the string verbatim like a money field.
+const SPEC_KIND_TO_GO: Record<JsonFieldType, GoFieldKind> = { number: 'u64', string: 'str', moneyString: 'money', tokenString: 'tokens' };
 
 interface GoFixtureField {
   name: string;

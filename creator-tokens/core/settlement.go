@@ -161,7 +161,9 @@ func SettlementRate(s Store, creator string, block uint64) (*big.Int, error) {
 	// area(S) the backing is the curve's average price, never above spot, so
 	// this can only fire on a corrupt reserve or a short window that has
 	// collapsed 4x under the backing inside an hour.
-	backing := mMulDivCeil(getMoney(s, kReserve(creator)), big.NewInt(1), supply)
+	// v6: supply is in UNITS and rate is HBD per WHOLE token, so the backing per
+	// token is ceil(R x TokenScale / supply); the tripwire compares like with like.
+	backing := mMulDivCeil(getMoney(s, kReserve(creator)), unitsScale, supply)
 	limit := new(big.Int).Mul(rate, new(big.Int).SetUint64(DivergenceRateMultiple))
 	if backing.Cmp(limit) > 0 {
 		return nil, newErr(ErrState, "backing per token exceeds 4x the settlement rate (divergence tripwire)")
@@ -228,7 +230,7 @@ func settleSpend(s Store, creator string, block uint64, face *big.Int) (*SettleQ
 	// the live window so a wallet can show the creator their floor and
 	// ceiling before it bites.
 	if face.Cmp(lo) < 0 {
-		return nil, newErr(ErrState, "face below half of one token's value (minimum-price guard): the smallest possible spend of 1 token would overcharge more than 2x")
+		return nil, newErr(ErrState, "face below half of one unit's value (minimum-price guard): the smallest possible spend of 0.01 token would overcharge more than 2x on the rounding alone")
 	}
 
 	// RULING C2 — the depth ceiling, measured against area(S), NEVER the
@@ -291,7 +293,7 @@ func settleSpend(s Store, creator string, block uint64, face *big.Int) (*SettleQ
 // inequalities settleSpend enforces, rearranged so both ends are readable as
 // numbers instead of only as refusals:
 //
-//	lo = ceil(rate/2)                                (RULING C4, exact over Z)
+//	lo = ceil(rate/200)                              (RULING C4, exact over Z; v6: half a base unit per whole token, in units)
 //	hi = floor(area(S)·MaxServiceFaceAreaBps/10000)  (RULING C2, exact over Z)
 //
 // ONE source of truth: settleSpend calls this, ServiceFaceRange exports it,
@@ -299,7 +301,11 @@ func settleSpend(s Store, creator string, block uint64, face *big.Int) (*SettleQ
 // output and means "no face works at this supply" (S == 1 at the compiled
 // curve).
 func serviceFaceBounds(rate, supply *big.Int) (lo, hi *big.Int) {
-	lo = mMulDivCeil(rate, big.NewInt(1), big.NewInt(2))
+	// v6: the smallest possible spend is ONE UNIT (rate / TokenScale of HBD),
+	// so the RULING C4 guard "no more than 2x overcharge on the rounding" is
+	// face >= ceil(rate / (2 x TokenScale)). MinFace (params.go) is the
+	// practical floor above this on every real market.
+	lo = mMulDivCeil(rate, big.NewInt(1), new(big.Int).Mul(big.NewInt(2), unitsScale))
 	hi = mMulDiv(Area(supply), new(big.Int).SetUint64(MaxServiceFaceAreaBps), big.NewInt(10000))
 	return lo, hi
 }

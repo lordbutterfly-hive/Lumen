@@ -34,14 +34,14 @@ func TestGRADFIX_NeverGraduatesLess(t *testing.T) {
 			n := int64(1 + rng.Intn(5000))
 			switch rng.Intn(4) {
 			case 0:
-				if _, err := Buy(s, h, c, blk, big.NewInt(n)); err != nil {
+				if _, err := Buy(s, h, c, blk, tk(n)); err != nil {
 					continue
 				}
 			case 1: // transfer IN (does not graduate the recipient)
-				if _, err := Buy(s, "src", c, blk, big.NewInt(n)); err != nil {
+				if _, err := Buy(s, "src", c, blk, tk(n)); err != nil {
 					continue
 				}
-				_ = TransferCredits(s, "src", c, "src", h, blk, big.NewInt(n))
+				_ = TransferCredits(s, "src", c, "src", h, blk, tk(n))
 			case 2: // transfer OUT (freshest-first debit, no graduation)
 				bal := totalBalance(s, c, h)
 				if bal.Sign() == 0 {

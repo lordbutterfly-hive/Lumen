@@ -1,5 +1,7 @@
 package core
 
+import "math/big"
+
 // Protocol constants. Every settable parameter has a hard cap AND a floor in
 // code — friend.tech's had neither (setProtocolFeePercent accepted any value),
 // and that is finding #5 of our own teardown.
@@ -201,8 +203,10 @@ const MaxHashLen int = 128
 // MinCap / MaxCap bound the creator-set outstanding-credit cap. The cap is the
 // speculation switch (SPEC §1.3): once exhausted, further demand must clear on
 // the secondary market above face.
-const MinCap int64 = 1
-const MaxCap int64 = 1_000_000_000
+// v6: caps are UNITS (params.go "TOKEN UNIT"). One whole token is the smallest
+// cap that means anything; the ceiling is the old 1e9 tokens in units.
+const MinCap int64 = 100
+const MaxCap int64 = 1_000_000_000 * 100
 
 // ---- escrow ----
 
@@ -683,17 +687,17 @@ const MaxServiceFaceAreaBps uint64 = 10000
 // sim result. What it DID have was a measured, documented product failure
 // that was filed as a tuning nuisance three separate times:
 //
-//   settlement.go SET-3 (2026-07-22), our own words: "UNSATISFIABLE for
-//   every supply below 10000/MaxSpendSupplyBps = 20 … Every newly launched
-//   market sat in that dead zone between registration and its 20th token."
-//   The fix exempted c == 1 and moved the edge instead of removing it: a
-//   service costing N tokens still needed S >= 20·N, so at launch (S = 1-6)
-//   only a one-token service could ever settle.
+//	settlement.go SET-3 (2026-07-22), our own words: "UNSATISFIABLE for
+//	every supply below 10000/MaxSpendSupplyBps = 20 … Every newly launched
+//	market sat in that dead zone between registration and its 20th token."
+//	The fix exempted c == 1 and moved the edge instead of removing it: a
+//	service costing N tokens still needed S >= 20·N, so at launch (S = 1-6)
+//	only a one-token service could ever settle.
 //
-//   sim/engine.go and cmd/sim/main.go, independently: "the settlement spend
-//   cap … binds on nearly every ask, so escrows stop being created at all",
-//   and the delivery guardrail could not be exercised at default population
-//   because of it.
+//	sim/engine.go and cmd/sim/main.go, independently: "the settlement spend
+//	cap … binds on nearly every ask, so escrows stop being created at all",
+//	and the delivery guardrail could not be exercised at default population
+//	because of it.
 //
 // WHY REMOVING IT IS SAFE — the three protections that actually do the work,
 // none of which is this cap:
@@ -744,3 +748,53 @@ const MaxSpendSupplyBps uint64 = 10000
 // refusal on an inflow during a highly abnormal move, safe by construction,
 // and it self-heals as the windows catch up.
 const DivergenceRateMultiple uint64 = 4
+
+// ---------------------------------------------------------------------------
+// TOKEN UNIT (v6, OWNER RULING 2026-09-22: "you cant price anything in usd if
+// tokens arent made into fractions of a token ... minimum 0.01").
+//
+// Under RULING I (July) a token was one indivisible unit: the curve priced
+// "the i-th token", balances, escrows and every guard counted whole tokens,
+// and a dollar-priced service rounded UP to the next whole token (ask.go
+// creditsForAsk), measured at up to +65% on a real service
+// (LUMEN-DOCS/MERITUM-TOKEN-MATH-QA-2026-09-21.md). v6 keeps the ruled price
+// schedule per whole token and makes the token divisible into TokenScale
+// units. State holds UNITS; the wire (payloads, events, read results) holds
+// TOKENS as decimal strings with at most TokenDecimals places, so a whole
+// number on the wire still means whole tokens and every pre-v6 client and
+// every indexed event row keeps its meaning.
+// ---------------------------------------------------------------------------
+
+// TokenDecimals is how many decimal places a token amount carries on the wire.
+const TokenDecimals = 2
+
+// TokenScale is the number of state units in one token: 10^TokenDecimals.
+const TokenScale int64 = 100
+
+// MinTradeUnits is the smallest amount a buy, sell, transfer, refund or ask
+// may move: one unit (0.01 token). Zero-amount calls are refused, as before.
+const MinTradeUnits int64 = 1
+
+var minTradeUnits = big.NewInt(MinTradeUnits)
+
+// belowMinTrade is THE amount floor every entry point applies (buy, sell,
+// transfer, the marketplace door, refund, and the read-side quote): nil or
+// less than MinTradeUnits. One predicate, so the constant is enforced rather
+// than merely declared (INFO-13 of the 2026-09-22 scrutiny).
+func belowMinTrade(v *big.Int) bool { return v == nil || v.Cmp(minTradeUnits) < 0 }
+
+// MinFeeBaseUnits is the floor on the trade fee, in HBD base units, whenever
+// the gross is positive. With whole tokens a trade grossed at least ~1 HBD, so
+// floor(gross x TradeFeeBps) never reached zero; a one-unit trade grosses
+// about ten base units and would pay no fee at all, so splitting a sale into
+// unit-sized pieces would shave the whole 5%. One base unit per trade makes
+// the split strictly dearer than the single sale (see zz_v6 tests).
+const MinFeeBaseUnits int64 = 1
+
+// MissReclaimFloorUnits is the v5.1 "one credit is the floor" deterrent
+// restated in units: on a missed ask the platform keeps at least one whole
+// token (TokenScale units), clamped to the escrow when the escrow is smaller.
+// The v5.1 reasoning stands (ask.go Reclaim): any percentage of a cheap
+// escrow rounds to nothing, and a token is the smallest deterrent that is not
+// nothing. A constant so the owner can lower it without touching the rule.
+const MissReclaimFloorUnits int64 = TokenScale

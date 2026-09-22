@@ -51,6 +51,15 @@ import "math/big"
 // feePlatform = fee − feeCreator. Pure — the caller books the parts.
 func tradeFeeOn(amount *big.Int) (fee, feeCreator, feePlatform *big.Int) {
 	fee = mMulBpsDiv(amount, TradeFeeBps)
+	// v6 (params.go MinFeeBaseUnits): a positive gross always pays at least one
+	// base unit. Whole tokens grossed >= ~1 HBD so the floor above never hit
+	// zero; a one-unit trade grosses about ten base units and would pay nothing,
+	// and splitting a sale into unit-sized pieces would shave the entire fee.
+	// The odd unit goes to the platform (the remainder rule below), so on a dust
+	// trade the creator's half is zero and the platform's is one.
+	if fee.Sign() == 0 && amount.Sign() > 0 {
+		fee = big.NewInt(MinFeeBaseUnits)
+	}
 	feeCreator = new(big.Int).Rsh(fee, 1)           // floor(fee/2)
 	feePlatform = new(big.Int).Sub(fee, feeCreator) // remainder — odd unit → platform
 	return fee, feeCreator, feePlatform

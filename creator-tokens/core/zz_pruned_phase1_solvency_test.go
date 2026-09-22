@@ -192,11 +192,17 @@ func zp1SumTokens(s *MemStore, creator string) (maturing, matured, escrowed *big
 			}
 			seen[strings.TrimPrefix(k, mbPrefix)] = true
 		case strings.HasPrefix(k, "bal|") && strings.HasSuffix(k, balSuffix):
-			n, ok := leToU64([]byte(v))
+			n, ok := leToU64([]byte(v)) // WHOLE tokens (v6)
 			if ok {
-				matured.Add(matured, new(big.Int).SetUint64(n))
+				matured.Add(matured, new(big.Int).Mul(new(big.Int).SetUint64(n), unitsScale))
 			}
 			h := strings.TrimSuffix(strings.TrimPrefix(k, "bal|"), balSuffix)
+			seen[h] = true
+		case strings.HasPrefix(k, "balf|") && strings.HasSuffix(k, balSuffix):
+			if n, ok := new(big.Int).SetString(v, 10); ok { // the 0..99-unit remainder (v6)
+				matured.Add(matured, n)
+			}
+			h := strings.TrimSuffix(strings.TrimPrefix(k, "balf|"), balSuffix)
 			seen[h] = true
 		case strings.HasPrefix(k, escPrefix):
 			rec, ok := unpackEscrow(v)
@@ -655,7 +661,7 @@ func TestZP1_H10_FourBucketSolvency_RandomWalk(t *testing.T) {
 		w := zp1NewWorld(seed)
 		// Bootstrap so the walk is not all rejections.
 		for _, c := range w.creators {
-			_ = Register(w.s, c, c, w.block, MinFace+5000, 5_000_000)
+			_ = Register(w.s, c, c, w.block, MinFace+5000, 5_000_000*TokenScale)
 		}
 		for i := 0; i < steps; i++ {
 			zp1Step(t, rng, w)
@@ -777,10 +783,10 @@ func TestZP1_H10_MinimalWitness_PendingEscrowIsUncounted(t *testing.T) {
 
 	in, out := big.NewInt(0), big.NewInt(0)
 
-	if err := Register(s, c, c, 100, 9090, 1_000_000); err != nil {
+	if err := Register(s, c, c, 100, 9090, 1_000_000*TokenScale); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	r, err := Buy(s, asker, c, 101, big.NewInt(1_000))
+	r, err := Buy(s, asker, c, 101, tk(1_000))
 	if err != nil {
 		t.Fatalf("Buy: %v", err)
 	}
@@ -801,7 +807,7 @@ func TestZP1_H10_MinimalWitness_PendingEscrowIsUncounted(t *testing.T) {
 		t.Fatalf("SettleSpend: %v", err)
 	}
 	before := zp1Sweep(t, s)
-	ar, err := Ask(s, asker, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(4)), "cid", MinAskDeadline, 0)
+	ar, err := Ask(s, asker, c, askBlock, new(big.Int).Mul(q.Credits, tk(4)), "cid", MinAskDeadline, 0)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}

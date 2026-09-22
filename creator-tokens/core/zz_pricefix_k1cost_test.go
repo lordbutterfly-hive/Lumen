@@ -15,11 +15,11 @@ func TestPFK1_AttackerCostVsHarm(t *testing.T) {
 	}
 	t0 := uint64(2000)
 	t1 := t0 + ExitTaxDecayBlocks
-	if _, err := Buy(s, bob, c, t0, big.NewInt(50000)); err != nil {
+	if _, err := Buy(s, bob, c, t0, tk(50000)); err != nil {
 		t.Fatal(err)
 	}
 	// attacker's cost to buy 50000 fresh at supply 50000:
-	br, err := Buy(s, mallory, c, t1, big.NewInt(50000))
+	br, err := Buy(s, mallory, c, t1, tk(50000))
 	if err != nil {
 		t.Fatal(err)
 	}

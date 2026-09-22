@@ -38,7 +38,7 @@ func TestZZBound_200DistinctBuys_LedgerBounded(t *testing.T) {
 
 	for i := 0; i < N; i++ {
 		blk := t0 + uint64(i) // a DISTINCT block every time — the unbounded shape
-		if _, err := Buy(s, h, c, blk, big.NewInt(1)); err != nil {
+		if _, err := Buy(s, h, c, blk, tk(1)); err != nil {
 			t.Fatalf("Buy #%d @%d: %v", i, blk, err)
 		}
 		if got := zvNumCohorts(s, c, h); got > MaxLots {
@@ -72,16 +72,16 @@ func TestZZBound_200AttackerGifts_VictimLedgerBounded(t *testing.T) {
 	zbMarket(t, s, c, t0+2*N+10)
 
 	// The victim holds an ordinary aged position first.
-	if _, err := Buy(s, victim, c, t0, big.NewInt(50_000)); err != nil {
+	if _, err := Buy(s, victim, c, t0, tk(50_000)); err != nil {
 		t.Fatal(err)
 	}
 	maxSeen := 0
 	for i := 0; i < N; i++ {
 		blk := t0 + 1 + uint64(i)
-		if _, err := Buy(s, attacker, c, blk, big.NewInt(1)); err != nil {
+		if _, err := Buy(s, attacker, c, blk, tk(1)); err != nil {
 			t.Fatalf("attacker Buy #%d: %v", i, err)
 		}
-		if err := TransferCredits(s, attacker, c, attacker, victim, blk, big.NewInt(1)); err != nil {
+		if err := TransferCredits(s, attacker, c, attacker, victim, blk, tk(1)); err != nil {
 			t.Fatalf("attacker gift #%d: %v", i, err)
 		}
 		got := zvNumCohorts(s, c, victim)
@@ -120,7 +120,7 @@ func TestZZBound_SizeFlatInInflowCount(t *testing.T) {
 	var samples []sample
 	for i := 0; i < 2000; i++ {
 		blk := t0 + uint64(i)
-		creditInflowAt(s, c, h, big.NewInt(1), blk, blk)
+		creditInflowAt(s, c, h, tk(1), blk, blk)
 		if n := i + 1; n == 1 || n == 64 || n == 65 || n == 100 || n == 500 || n == 2000 {
 			samples = append(samples, sample{n, zvNumCohorts(s, c, h), len(zvLotsStr(s, c, h))})
 		}
@@ -166,12 +166,12 @@ func TestZZBound_OverCapLegacyLedgerRepaired(t *testing.T) {
 	}
 
 	// One ordinary inflow repairs it.
-	creditInflowAt(s, c, h, big.NewInt(1), block, block)
+	creditInflowAt(s, c, h, tk(1), block, block)
 	got := zvNumCohorts(s, c, h)
 	if got > MaxLots {
 		t.Fatalf("over-cap legacy ledger NOT repaired: %d cohorts > MaxLots=%d", got, MaxLots)
 	}
-	want := new(big.Int).Add(total, big.NewInt(1))
+	want := new(big.Int).Add(total, tk(1))
 	if sum := zvSumLotsRaw(s, c, h); sum.Cmp(want) != 0 {
 		t.Fatalf("repair lost tokens: Σlots=%s want %s", sum, want)
 	}

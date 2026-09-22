@@ -272,12 +272,12 @@ func cfNewModel(cal cfCalib) *cfModel {
 }
 
 func (m *cfModel) excess() *big.Int {
-	return new(big.Int).Sub(m.R, curveAreaIn(m.S, m.cal.base, m.cal.lin, m.cal.quad, m.cal.den))
+	return new(big.Int).Sub(m.R, curveAreaUnitsIn(m.S, m.cal.base, m.cal.lin, m.cal.quad, m.cal.den))
 }
 
 func (m *cfModel) buy(n *big.Int) {
-	cost := curveBuyCostIn(m.S, n, m.cal.base, m.cal.lin, m.cal.quad, m.cal.den)
-	fee := mMulBpsDiv(cost, TradeFeeBps)
+	cost := curveBuyCostUnitsIn(m.S, n, m.cal.base, m.cal.lin, m.cal.quad, m.cal.den)
+	fee, _, _ := tradeFeeOn(cost) // v6: the one-base-unit minimum fee is part of the model
 	m.S = mAdd(m.S, n)
 	m.R = mAdd(m.R, cost) // curve leg ONLY (C-19)
 	m.sumCost = mAdd(m.sumCost, cost)
@@ -289,7 +289,7 @@ func (m *cfModel) buy(n *big.Int) {
 // return to the actor, which is all the non-profit property needs; the REAL
 // destination, the treasury, is asserted at layer 3).
 func (m *cfModel) sell(t *testing.T, r *rand.Rand, deltaS *big.Int, taxBps uint64) {
-	p, err := curveSellProceedsIn(m.S, deltaS, m.cal.base, m.cal.lin, m.cal.quad, m.cal.den)
+	p, err := curveSellProceedsUnitsIn(m.S, deltaS, m.cal.base, m.cal.lin, m.cal.quad, m.cal.den)
 	if err != nil {
 		t.Fatalf("model sell: %v", err)
 	}
@@ -311,7 +311,10 @@ func (m *cfModel) sell(t *testing.T, r *rand.Rand, deltaS *big.Int, taxBps uint6
 	net := new(big.Int).Sub(p, tax)
 	net.Sub(net, fee)
 	if net.Sign() < 0 {
-		t.Fatalf("model sell: negative net (p=%s tax=%s fee=%s τ=%d)", p, tax, fee, taxBps)
+		// v6: with the one-base-unit minimum fee a dust sale under a random
+		// calibration can owe more than it grosses; sell.go refuses it
+		// ("tax + fee exceed proceeds") and changes nothing, so neither does the model.
+		return
 	}
 	m.S = new(big.Int).Sub(m.S, deltaS)
 	m.R = new(big.Int).Sub(m.R, p) // curve leg ONLY (C-19)
@@ -1015,10 +1018,10 @@ func TestCurveFuzz_SellAfterTransferIn_WAUnderflowLocksTheExit(t *testing.T) {
 	setU64(s, kRegisteredAt(c), 1)
 
 	// alice buys 100 at block 1000; bob buys 100 at block 5000.
-	if _, err := Buy(s, "alice", c, 1000, cfBI(100)); err != nil {
+	if _, err := Buy(s, "alice", c, 1000, tk(100)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, "bob", c, 5000, cfBI(100)); err != nil {
+	if _, err := Buy(s, "bob", c, 5000, tk(100)); err != nil {
 		t.Fatal(err)
 	}
 	// The equality invariant holds: R = 140,656 + 224,684 = 365,340 =
@@ -1032,7 +1035,7 @@ func TestCurveFuzz_SellAfterTransferIn_WAUnderflowLocksTheExit(t *testing.T) {
 
 	// The one ordinary action that used to poison it: an OLDER holder sends
 	// to a NEWER one. Nothing exotic, no privileged role, no timing trick.
-	if err := TransferCredits(s, "alice", c, "alice", "bob", 5000, cfBI(100)); err != nil {
+	if err := TransferCredits(s, "alice", c, "alice", "bob", 5000, tk(100)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1040,7 +1043,7 @@ func TestCurveFuzz_SellAfterTransferIn_WAUnderflowLocksTheExit(t *testing.T) {
 	supBefore := getMoney(s, kSupply(c))
 	resBefore := getMoney(s, kReserve(c))
 
-	_, err := Sell(s, "bob", c, 5000, cfBI(200))
+	_, err := Sell(s, "bob", c, 5000, tk(200))
 
 	if err != nil {
 		t.Errorf("F-1 EXIT DoS CONFIRMED: bob holds %s tokens on a market with R=%s >= area(S=%s)=%s and the curve rail ACTIVE, "+
@@ -1159,14 +1162,14 @@ func TestCurveFuzz_EarlyBuyerProfitsWhenOthersBuy_ByDesign(t *testing.T) {
 		b := uint64(1_000_000)
 		setMoney(s, kCap(c), cfBI(MaxCap))
 		setU64(s, kRegisteredAt(c), 1)
-		alice, err := Buy(s, "alice", c, b, cfBI(100)) // cost = area(100) = 140,656, fee 7,032
+		alice, err := Buy(s, "alice", c, b, tk(100)) // cost = area(100) = 140,656, fee 7,032
 		if err != nil {
 			t.Fatal(err)
 		}
 		if alice.TotalDue.Cmp(cfBI(147_688)) != 0 {
 			t.Fatalf("alice paid %s, want 147688 (cost 140656 + fee 7032)", alice.TotalDue)
 		}
-		if _, err := Buy(s, "bob", c, b+10, cfBI(100)); err != nil { // cost = area(200)−area(100) = 224,684
+		if _, err := Buy(s, "bob", c, b+10, tk(100)); err != nil { // cost = area(200)−area(100) = 224,684
 			t.Fatal(err)
 		}
 		return s, c, alice
@@ -1178,7 +1181,7 @@ func TestCurveFuzz_EarlyBuyerProfitsWhenOthersBuy_ByDesign(t *testing.T) {
 	{
 		s, c, alice := build()
 		trea0 := getMoney(s, kTreasury())
-		sr, err := Sell(s, "alice", c, 1_000_011, cfBI(100))
+		sr, err := Sell(s, "alice", c, 1_000_011, tk(100))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1206,7 +1209,7 @@ func TestCurveFuzz_EarlyBuyerProfitsWhenOthersBuy_ByDesign(t *testing.T) {
 	{
 		s, c, alice := build()
 		sellBlock := uint64(1_000_000) + ExitTaxDecayBlocks + 1
-		sr, err := Sell(s, "alice", c, sellBlock, cfBI(100))
+		sr, err := Sell(s, "alice", c, sellBlock, tk(100))
 		if err != nil {
 			t.Fatal(err)
 		}

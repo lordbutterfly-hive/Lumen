@@ -72,7 +72,8 @@ import {
   EXIT_TAX_DECAY_BLOCKS,
   displayPricePerTokenBaseUnits,
   type AskRateEstimate,
-  settlementRateCurveBaseUnits
+  settlementRateCurveBaseUnits,
+  isUnitMultiple
 } from './contract-math';
 import {
   type CustomJsonOp,
@@ -124,7 +125,8 @@ import {
   kAcqBlock,
   kBal,
   kMatured,
-  decodeMaturedLeHex,
+  kMaturedFrac,
+  maturedTokensFromState,
   kCap,
   kEscrow,
   kFace,
@@ -156,10 +158,12 @@ import {
   toDid,
   toU64,
   unknownMarket,
-  STATE_CLOSED, assertTransferDestination, kLots, parseLots } from './vsc/reads';
+  STATE_CLOSED, assertTransferDestination, kLots, parseLots,
+  kUnitsHolder, kUnitsMarket, tokenCountFromState
+} from './vsc/reads';
 import { displayPriceUsd } from '../market/curve';
 import { marketHealthOf, windingDownOf } from '../market/market-health';
-import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, rulesForCode, windingDownUnder, askPricingUnder, spendGuardsUnder } from '../market/contract-rules';
+import { RULES_RETRY_MS, RULES_TTL_MS, closesIfDrainedUnder, rulesForCode, windingDownUnder, askPricingUnder, spendGuardsUnder, fractionalTokensUnder } from '../market/contract-rules';
 // ★ EXECUTION CONFIRMATION (2026-08-31, seventeen-unconfirmed-writes finding).
 // The money-moving writes confirm by polling the tx's own terminal status
 // through the SAME findTransaction query the wallet rail already runs
@@ -355,9 +359,21 @@ const NO_BUNDLE_BROADCASTER_MSG =
   'VscCreatorTokensDataSource: no bundle broadcaster wired: the one-signature launch needs bundleBroadcaster injected';
 
 /** Shared "n is a positive whole token count" guard — every buy/sell/refund/transfer amount on the curve is an integer (curve.go indexes price by the token ordinal; there is no fractional token). */
-function assertPositiveTokenCount(n: number, label: string): void {
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
-    throw new Error(`VscCreatorTokensDataSource: ${label} must be a positive whole number (tokens are integers on the curve)`);
+/** The state keys readMarketPricesBatch reads per creator; its chunk size is this list's length. */
+function marketPriceKeys(did: string): string[] {
+  return [kSupply(did), kUnitsMarket(did), kState(did), kRegisteredAt(did), kPaidUntil(did), kRetiredAt(did), kDelinquentUntil(did)];
+}
+
+function assertPositiveTokenCount(n: number, label: string, fractional = false): void {
+  // v6 (`fractional`): any positive multiple of 0.01. Before v6 the live
+  // bytecode holds whole tokens only, so a fraction is refused here rather
+  // than signed and bounced by the chain.
+  if (!Number.isFinite(n) || n <= 0 || (fractional ? !isUnitMultiple(n) : !Number.isInteger(n))) {
+    throw new Error(
+      fractional
+        ? `VscCreatorTokensDataSource: ${label} must be a positive multiple of 0.01 (the contract holds hundredths of a token)`
+        : `VscCreatorTokensDataSource: ${label} must be a positive whole number (tokens are integers on the curve until the v6 contract is live)`
+    );
   }
 }
 
@@ -544,7 +560,10 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // paidUntil COMPARED TO NOW, and a head we do not have is a phase we must
     // not guess. 100 keys per call (schema.graphql:813) / 6 = 16 creators per
     // request, and the 1 global key on top keeps it at 97.
-    const KEYS_PER_CREATOR = 6;
+    // The per-creator key list is built ONCE here and measured, never counted by hand: past
+    // MAX_STATE_KEYS_PER_REQUEST the node answers {} and every pill in the batch silently reads
+    // as "no market" (a hand-kept 6 survived the v6 flag key for a day).
+    const KEYS_PER_CREATOR = marketPriceKeys('hive:probe').length;
     const perRequest = Math.floor((VscCreatorTokensDataSource.MAX_STATE_KEYS_PER_REQUEST - 1) / KEYS_PER_CREATOR);
 
     // ★ BATCHES IN PARALLEL, not one after another. The old loop awaited each
@@ -567,7 +586,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         kPaused(),
         ...batch.flatMap((c) => {
           const did = toDid(c);
-          return [kSupply(did), kState(did), kRegisteredAt(did), kPaidUntil(did), kRetiredAt(did), kDelinquentUntil(did)];
+          return marketPriceKeys(did);
         })
       ];
       let state: Record<string, string | null>;
@@ -598,7 +617,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         // consistent with buildMarket/readMarketPricesBatch's other reads and
         // cannot drift. The finite/non-negative guard below is now defensive
         // (toU64 already returns a non-negative finite number) but kept.
-        const supply = toU64(state[kSupply(did)]);
+        const supply = tokenCountFromState(state[kSupply(did)], state[kUnitsMarket(did)]);
         if (!Number.isFinite(supply) || supply < 0) {
           out.set(c, { status: 'unknown', priceUsd: null, health: null });
           continue;
@@ -638,7 +657,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       kFaceAnchor(creator),
       kFaceAnchorAt(creator),
       kCap(creator),
-      kSupply(creator),
+      kSupply(creator), kUnitsMarket(creator),
       kReserve(creator),
       kPaidUntil(creator),
       kState(creator),
@@ -677,8 +696,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         // ★ 1000x TRAP: capTokens/supplyTokens are raw integer TOKEN counts
         // (core/curve.go — a token is a whole unit). toU64 reads the exact
         // on-chain integer; NEVER wrap these in baseUnitsToHuman().
-        capTokens: toU64(state[kCap(creator)]),
-        supplyTokens: toU64(state[kSupply(creator)]),
+        capTokens: tokenCountFromState(state[kCap(creator)], state[kUnitsMarket(creator)]),
+        supplyTokens: tokenCountFromState(state[kSupply(creator)], state[kUnitsMarket(creator)]),
         reserveBaseUnits: toU64(state[kReserve(creator)]),
         closedStored: state[kState(creator)] === STATE_CLOSED,
         globalInflowPaused: state[kPaused()] === '1',
@@ -772,7 +791,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   }
 
   async readHolderPosition(creator: string, holder: string): Promise<HolderPosition | null> {
-    const keys = [kRegisteredAt(creator), kSupply(creator), kReserve(creator), kBal(creator, holder), kAcqBlock(creator, holder), kLots(creator, holder)];
+    const keys = [kRegisteredAt(creator), kSupply(creator), kUnitsMarket(creator), kReserve(creator), kBal(creator, holder), kUnitsHolder(creator, holder), kAcqBlock(creator, holder), kLots(creator, holder), kMaturedFrac(creator, holder)];
     // rejects on failure — see interface doc. heldBlocks (below) needs a real
     // chain head (the exit tax RATE is time-dependent, holdclock.go), so this
     // read is genuinely incomplete without one — reject rather than guess.
@@ -791,7 +810,9 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (head === null) {
       throw new Error('VscCreatorTokensDataSource: cannot compute the exit tax (chain head unavailable)');
     }
-    const tokensMatured = decodeMaturedLeHex(maturedState[kMatured(creator, holder)]);
+    // v6: whole tokens from `bal|` (unchanged unit) plus the 0..99-unit remainder
+    // from `balf|`; the holder's migration flag plays no part (reads.ts).
+    const tokensMatured = maturedTokensFromState(maturedState[kMatured(creator, holder)], state[kMaturedFrac(creator, holder)]);
     if (tokensMatured === null) {
       // Undecodable ≠ zero. Reporting 0 here would tell a holder they own
       // nothing in the matured bucket and understate their exit value — the
@@ -800,9 +821,9 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     }
 
     // ★ 1000x TRAP: tokensHeld/supplyTokens are raw integer token counts.
-    const tokensMaturing = toU64(state[kBal(creator, holder)]);
+    const tokensMaturing = tokenCountFromState(state[kBal(creator, holder)], state[kUnitsHolder(creator, holder)]);
     const tokensHeld = tokensMaturing + tokensMatured;
-    const supplyTokens = toU64(state[kSupply(creator)]);
+    const supplyTokens = tokenCountFromState(state[kSupply(creator)], state[kUnitsMarket(creator)]);
     const reserveBaseUnits = toU64(state[kReserve(creator)]);
     const acqBlock = toU64(state[kAcqBlock(creator, holder)]);
     const heldBlocks = heldBlocksFromAcq(acqBlock, head, tokensMaturing, tokensMatured);
@@ -822,7 +843,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // position from before the ledger, the one cohort the contract's getLots
     // synthesises on the blended clock (head − heldBlocks reproduces that clock;
     // an unset clock reads as fresh, which lotRateBpsAt taxes at the maximum).
-    let lots = parseLots(state[kLots(creator, holder)]);
+    let lots = parseLots(state[kLots(creator, holder)], state[kUnitsHolder(creator, holder)]);
     if ((lots === null || lots.length === 0) && tokensMaturing > 0) {
       lots = [{ tokens: tokensMaturing, acqBlock: head - heldBlocks }];
     }
@@ -1094,7 +1115,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         kObsIdx(creator),
         kObsLongIdx(creator),
         kRegisteredAt(creator),
-        kSupply(creator),
+        kSupply(creator), kUnitsMarket(creator),
         ...obsKeys,
         ...obsLongKeys
       ]),
@@ -1141,7 +1162,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // not "we couldn't check" (which blames our read for their own market fact).
     if (faceBaseUnits <= 0) return unpriced('no_price_set', head);
 
-    const supplyTokens = toU64(state[kSupply(creator)]);
+    const supplyTokens = tokenCountFromState(state[kSupply(creator)], state[kUnitsMarket(creator)]);
     const obsIdxCount = toU64(state[kObsIdx(creator)]);
     const points = decodeObservationRing(obsKeys.map((k) => state[k]), obsIdxCount);
     const estimate: AskRateEstimate = points === null ? { rateBaseUnits: null, status: 'unavailable' } : askRateFromObservations(points, head);
@@ -1180,7 +1201,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (settlement.rateBaseUnits === null) {
       return unpriced(settlement.status, head);
     }
-    const creditsRequiredBaseUnits = creditsForAskBaseUnits(faceBaseUnits, settlement.rateBaseUnits);
+    const fractional = fractionalTokensUnder(await this.readRules());
+    const creditsRequiredBaseUnits = creditsForAskBaseUnits(faceBaseUnits, settlement.rateBaseUnits, fractional);
     // ★ H1 (2026-08-31): the rate passed above; now run settleSpend's OWN guards
     // (min-price, depth ceiling, spend cap, market-too-small). These fire on
     // healthy markets when the posted face is outside the window that moves with
@@ -1207,7 +1229,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       // by 1000 here — see types.ts's Quote.creditsRequired doc).
       creditsRequired: creditsRequiredBaseUnits,
       creditsRequiredBaseUnits,
-      commissionCredits: commissionOwedForBaseUnits(creditsRequiredBaseUnits),
+      commissionCredits: commissionOwedForBaseUnits(creditsRequiredBaseUnits, fractional),
       oracleStatus: settlement.status,
       asOfBlock: head
     };
@@ -1219,9 +1241,9 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   }
 
   async quoteBuy(creator: string, tokens: number): Promise<BuyQuote> {
-    assertPositiveTokenCount(tokens, 'tokens');
+    assertPositiveTokenCount(tokens, 'tokens', fractionalTokensUnder(await this.readRules()));
     const [state, head] = await Promise.all([
-      this.gql.getStateByKeys(this.config.contractId, [kRegisteredAt(creator), kSupply(creator), kCap(creator), kPaidUntil(creator), kState(creator), kPaused(), kRetiredAt(creator)]),
+      this.gql.getStateByKeys(this.config.contractId, [kRegisteredAt(creator), kSupply(creator), kUnitsMarket(creator), kCap(creator), kPaidUntil(creator), kState(creator), kPaused(), kRetiredAt(creator)]),
       this.gql.getHeadBlockCached()
     ]);
     if (toU64(state[kRegisteredAt(creator)]) === 0) {
@@ -1240,8 +1262,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (!(canInflowOpen(phase, globalInflowPaused) && retiredAtBlock === null)) {
       throw new Error('VscCreatorTokensDataSource: market inflow is not open (frozen, closed, retiring, or globally paused)');
     }
-    const supplyTokens = toU64(state[kSupply(creator)]);
-    const capTokens = toU64(state[kCap(creator)]);
+    const supplyTokens = tokenCountFromState(state[kSupply(creator)], state[kUnitsMarket(creator)]);
+    const capTokens = tokenCountFromState(state[kCap(creator)], state[kUnitsMarket(creator)]);
     if (supplyTokens + tokens > capTokens) {
       throw new Error('VscCreatorTokensDataSource: buy would exceed the market cap');
     }
@@ -1256,7 +1278,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   }
 
   async quoteSell(creator: string, seller: string, tokens: number): Promise<SellQuote> {
-    assertPositiveTokenCount(tokens, 'tokens');
+    assertPositiveTokenCount(tokens, 'tokens', fractionalTokensUnder(await this.readRules()));
     // F1 — BOTH BUCKETS (2026-08-27). sell.go:189 gates on
     // `totalBalance(s, creator, caller)`, which core/matured.go:145 defines as
     // maturing + matured. This read used to ask for kBal only, and kBal is the
@@ -1275,13 +1297,14 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     const [state, maturedState, head, rules] = await Promise.all([
       this.gql.getStateByKeys(this.config.contractId, [
         kRegisteredAt(creator),
-        kSupply(creator),
-        kBal(creator, seller),
+        kSupply(creator), kUnitsMarket(creator),
+        kBal(creator, seller), kUnitsHolder(creator, seller),
         kAcqBlock(creator, seller),
         kPaidUntil(creator),
         kState(creator),
         kRetiredAt(creator),
-        kLots(creator, seller)
+        kLots(creator, seller),
+        kMaturedFrac(creator, seller)
       ]),
       this.gql.getStateByKeysHex(this.config.contractId, [kMatured(creator, seller)]),
       this.gql.getHeadBlockCached(),
@@ -1293,7 +1316,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (head === null) {
       throw new Error('VscCreatorTokensDataSource: cannot price this sell (chain head unavailable)');
     }
-    const tokensMatured = decodeMaturedLeHex(maturedState[kMatured(creator, seller)]);
+    const tokensMatured = maturedTokensFromState(maturedState[kMatured(creator, seller)], state[kMaturedFrac(creator, seller)]);
     if (tokensMatured === null) {
       // Undecodable ≠ zero — the same choice readHolderPosition makes, for the
       // same reason, and it matters MORE here: defaulting to 0 on this path does
@@ -1305,7 +1328,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // sell.go sellCompute: balance checked first ("clearer error than the
     // rail for the common mistake") — and against the WHOLE position, not the
     // maturing bucket.
-    const tokensMaturing = toU64(state[kBal(creator, seller)]);
+    const tokensMaturing = tokenCountFromState(state[kBal(creator, seller)], state[kUnitsHolder(creator, seller)]);
     const bal = tokensMaturing + tokensMatured;
     if (bal < tokens) {
       throw new Error('VscCreatorTokensDataSource: insufficient tokens');
@@ -1323,7 +1346,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (windingDownOf({ phase, retiredAtBlock, rules })) {
       throw new Error('VscCreatorTokensDataSource: curve sell is closed while the market winds down; exit via refund() instead');
     }
-    const supplyTokens = toU64(state[kSupply(creator)]);
+    const supplyTokens = tokenCountFromState(state[kSupply(creator)], state[kUnitsMarket(creator)]);
     const acqBlock = toU64(state[kAcqBlock(creator, seller)]);
     const heldBlocks = heldBlocksFromAcq(acqBlock, head, tokensMaturing, tokensMatured);
     // F2 — sell.go:234-236 taxes ONLY the maturing share of the draw
@@ -1331,7 +1354,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // BALANCE is what goes in: quoteSellBaseUnits performs splitDraw itself,
     // the same shape refundNetBaseUnits already takes.
     // ★ COHORTS (2026-09-15): the ledger (or the contract's one-cohort synthesis) makes a partial sell's tax exact, freshest first.
-    let lots = parseLots(state[kLots(creator, seller)]);
+    let lots = parseLots(state[kLots(creator, seller)], state[kUnitsHolder(creator, seller)]);
     if ((lots === null || lots.length === 0) && tokensMaturing > 0) lots = [{ tokens: tokensMaturing, acqBlock: head - heldBlocks }];
     const cohorts = lots && lots.length > 0 ? { lots, block: head } : undefined;
     const q = quoteSellBaseUnits(supplyTokens, tokens, heldBlocks, tokensMaturing, cohorts);
@@ -1690,7 +1713,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async buy(input: BuyInput): Promise<HolderPosition> {
     this.assertBroadcaster();
-    assertPositiveTokenCount(input.tokens, 'tokens');
+    assertPositiveTokenCount(input.tokens, 'tokens', fractionalTokensUnder(await this.readRules()));
     // buy.go buyCompute — the exact area-step cost, fee and TotalDue.
     // quoteBuy() already runs every guard Buy itself would run (existence,
     // RequireInflowOpen incl. the RULING K3 retired check, and the cap
@@ -1781,7 +1804,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async sell(input: SellInput): Promise<HolderPosition> {
     this.assertBroadcaster();
-    assertPositiveTokenCount(input.tokens, 'tokens');
+    assertPositiveTokenCount(input.tokens, 'tokens', fractionalTokensUnder(await this.readRules()));
     // sell.go sellCompute — the exact area-step gross, K2 tax, fee and net.
     // quoteSell() already runs every guard Sell itself would run (balance,
     // the rail switch).
@@ -2025,7 +2048,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
      * creator's offering ids and then every offering price in two flat batches.
      */
     const keys = rows.flatMap((r) => [
-      kSupply(r.creator),
+      kSupply(r.creator), kUnitsMarket(r.creator),
       kFace(r.creator),
       kRegisteredAt(r.creator),
       kOfferEpoch(r.creator),
@@ -2061,7 +2084,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         // A market the chain has never registered cannot be shown, whatever the
         // index says — the index can lag, and chain state is the record.
         if (toU64(state[kRegisteredAt(r.creator)]) === 0) return null;
-        const supply = toU64(state[kSupply(r.creator)]);
+        const supply = tokenCountFromState(state[kSupply(r.creator)], state[kUnitsMarket(r.creator)]);
         // ★ THE DISPLAY PRICE, NOT THE ORACLE RATE (QA, 2026-08-20). This called
         // `spotRateBaseUnits`, which returns 0 at supply 0 by design — so a
         // freshly launched market showed "Token $0.00" on the directory while its
@@ -2318,6 +2341,10 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (!Number.isFinite(input.maxCreditsBaseUnits) || input.maxCreditsBaseUnits <= 0) {
       throw new Error('VscCreatorTokensDataSource: maxCreditsBaseUnits must be > 0');
     }
+    // The same rules-gated wire assert buy/sell/transfer/refund apply at this
+    // boundary (LOW-10, 2026-09-22): a cap off the 0.01 grid, or fractional
+    // under pre-v6 rules, is refused here rather than signed and bounced.
+    assertPositiveTokenCount(input.maxCreditsBaseUnits, 'maxCredits', fractionalTokensUnder(await this.readRules()));
     // ask.go Ask -> market.go RequireInflowOpen — the canAsk gate, identical
     // in shape to buy()'s canBuy guard above (same RequireInflowOpen
     // chokepoint on the Go side, same Market field pair on this side).
@@ -2584,7 +2611,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async refund(input: RefundInput): Promise<HolderPosition> {
     this.assertBroadcaster();
-    assertPositiveTokenCount(input.tokens, 'tokens');
+    assertPositiveTokenCount(input.tokens, 'tokens', fractionalTokensUnder(await this.readRules()));
     // Read the CURRENT position AND market BEFORE broadcasting (see
     // registerMarket's own doc) — the market read doubles as refund.go's own
     // rail-switch guard: Refund is the WIND-DOWN rail, open ONLY once the
@@ -2720,7 +2747,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (toDid(input.from) === toDidAccount) {
       throw new Error('VscCreatorTokensDataSource: from and to must be different accounts');
     }
-    assertPositiveTokenCount(input.tokens, 'tokens');
+    assertPositiveTokenCount(input.tokens, 'tokens', fractionalTokensUnder(await this.readRules()));
     // finding M-e: `to` is a genuine third-party DESTINATION distinct from
     // the signer (`from`) — same "reject a malformed destination before it
     // can strand funds" reasoning as refundHolder's holder guard above.

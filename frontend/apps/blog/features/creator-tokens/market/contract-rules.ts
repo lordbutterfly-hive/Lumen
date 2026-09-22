@@ -194,6 +194,26 @@ export const V5_CODE_CIDS: ReadonlySet<string> = new Set([
   // them apart, and an unlisted CID means v1 forever).
   'bafkreidmizk2flxzgksyt74ly7iix5ew4b5msuclbdzawhk57jau6e7erq'
 ]);
+/**
+ * v6 (2026-09-22, owner ruling: "you cannot price anything in USD if tokens are
+ * not made into fractions"). A token divides into TokenScale = 100 units
+ * (0.01). State holds UNITS (balances, lots, supply, cap, escrow credits); the
+ * wire speaks DECIMAL TOKEN STRINGS ("1.50"); events are v: 2. The curve is
+ * unchanged per whole token. A v5.1 key is scaled x100 the first time the
+ * contract touches it and flagged (`u6|c|h`, `m|c|u6`), so a reader MUST look
+ * at the flag beside every token key: an unflagged "2" is still 2.00 tokens, a
+ * flagged "200" is 2.00 tokens (reads.ts tokenCountFromState).
+ *
+ * Under every earlier rule set this client keeps sending whole tokens and
+ * refuses fractional input, because the live bytecode would refuse it.
+ * Built 2026-09-22, 167,749 B, two reproducible builds; on testnet since 2026-09-22,
+ * mainnet pending the owner's signature. The morning candidate (bafkreih5siwq…,
+ * 167,142 B) ran on testnet for a few hours and is deliberately NOT listed: it
+ * scaled `bal|` to units, which this client no longer reads that way.
+ */
+export const V6_CODE_CIDS: ReadonlySet<string> = new Set([
+  'bafkreia2lumlku2qvq6hgqztvl64wxhzxpcyurgsapayaj54cdrn7gw7i4' // v6: 0.01-token units, decimal wire, lazy x100 migration, whole-token marketplace door (bal| whole + balf| remainder)
+]);
 export const V2_FAST_TWIN_CODE_CID = 'bafkreih4eper5br4vqmgip6f5vykwmhuxtor4j2pqaw2ewdtwuirzf5h7y';
 
 /** How long a chain answer about the deployed code is trusted before it is asked again. Bounds the deploy gap (header, item 3). */
@@ -209,6 +229,7 @@ export const RULES_RETRY_MS = 15_000;
  */
 export function rulesForCode(code: string | null | undefined): ContractRules {
   if (typeof code !== 'string') return 'v1';
+  if (V6_CODE_CIDS.has(code)) return 'v6';
   if (V5_CODE_CIDS.has(code)) return 'v5';
   if (V4_CODE_CIDS.has(code)) return 'v4';
   if (V3_CODE_CIDS.has(code)) return 'v3';
@@ -222,7 +243,21 @@ export function rulesForCode(code: string | null | undefined): ContractRules {
  * `=== 'v2'` shape types.ts warns about, one version later.
  */
 export function hasNoSubscriptionUnder(rules: ContractRules): boolean {
-  return rules === 'v3' || rules === 'v4' || rules === 'v5';
+  return rules === 'v3' || rules === 'v4' || rules === 'v5' || rules === 'v6';
+}
+
+/**
+ * v6: token amounts may carry two decimals (0.01 steps) and go on the wire as
+ * decimal strings. Under every earlier rule set a token is indivisible and the
+ * client must not offer, quote or sign a fraction the chain would refuse.
+ */
+export function fractionalTokensUnder(rules: ContractRules): boolean {
+  return rules === 'v6';
+}
+
+/** The smallest token amount a buy, sell, send or ask may move under `rules`. */
+export function tokenStepUnder(rules: ContractRules): number {
+  return fractionalTokensUnder(rules) ? 0.01 : 1;
 }
 
 /**
@@ -232,7 +267,7 @@ export function hasNoSubscriptionUnder(rules: ContractRules): boolean {
  * the quote must keep mirroring or it promises asks the chain refuses.
  */
 export function askPricingUnder(rules: ContractRules): 'curve' | 'windowed' {
-  return rules === 'v4' || rules === 'v5' ? 'curve' : 'windowed';
+  return rules === 'v4' || rules === 'v5' || rules === 'v6' ? 'curve' : 'windowed';
 }
 
 /**
@@ -250,7 +285,7 @@ export interface SpendGuardBps {
 }
 
 export function spendGuardsUnder(rules: ContractRules): SpendGuardBps {
-  return rules === 'v5'
+  return rules === 'v5' || rules === 'v6'
     ? { faceAreaBps: 10_000, spendSupplyBps: 10_000 }
     : { faceAreaBps: 5_000, spendSupplyBps: 500 };
 }

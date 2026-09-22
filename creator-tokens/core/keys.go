@@ -275,7 +275,7 @@ func kOfferTitleSetAt(c string, e uint64, normTitle string) string {
 //     whatever sits at that key as little-endian uint64
 //     (magi-market/contract/internal.go:848-859). Our decimal ASCII "7" reads
 //     as 55; "100" as 3,158,065. Worse, any balance of 9+ digits (≥ 100,000,000
-//     — well inside MaxCap = 1e9) is a 9-byte value, and its decoder ABORTS
+//     — well inside MaxCap, 1e9 whole tokens) is a 9-byte value, and its decoder ABORTS
 //     past 8 bytes, trapping every market read against this contract for that
 //     holder.
 //
@@ -415,7 +415,7 @@ func kObsIdx(c string) string        { return "tw|" + c + "|n" }
 // `wacq` in the rulings — the hold clock the exit-tax RATE keys on (KEPT by
 // RULINGS A4 and J: the destination changed, the rate machinery never did).
 // Stored as a u64 block height; ALL arithmetic on it happens in big.Int
-// (bal·wacq ~ 1e9·1e10 = 1e19 > 2^64 — TinyGo u64 overflow is silent). Reset
+// (bal·wacq ~ 1e11·1e10 = 1e21 > 2^64 in units — TinyGo u64 overflow is silent). Reset
 // toward `now` on every inflow through creditInflow (holdclock.go) so a fresh
 // or sybil account always looks maximally fresh. Unset (0) reads as "never
 // clocked" and is treated as maximally FRESH, never as ancient — see

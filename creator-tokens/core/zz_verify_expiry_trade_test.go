@@ -19,22 +19,22 @@ func TestZZVerifyExpiry_TradeNormallyAfterExpiry(t *testing.T) {
 	// so the fresh buy at t1 and its own maturation are both covered.
 	tbKeepPaid(t, s, c, b1, t1+tbWindow)
 
-	if _, err := Buy(s, h, c, b1, big.NewInt(500)); err != nil {
+	if _, err := Buy(s, h, c, b1, tk(500)); err != nil {
 		t.Fatalf("first buy: %v", err)
 	}
-	if Graduate(s, c, h, t1).Cmp(big.NewInt(500)) != 0 {
+	if Graduate(s, c, h, t1).Cmp(tk(500)) != 0 {
 		t.Fatalf("graduate should move 500")
 	}
 	// Ledger cleared, 500 matured.
 	if zvHasLots(s, c, h) {
 		t.Fatalf("ledger not cleared before fresh buy: %q", zvLotsStr(s, c, h))
 	}
-	if MaturedOf(s, c, h).Cmp(big.NewInt(500)) != 0 {
+	if MaturedOf(s, c, h).Cmp(tk(500)) != 0 {
 		t.Fatalf("matured=%s want 500", MaturedOf(s, c, h))
 	}
 
 	// FRESH BUY of 300 on the cleared ledger.
-	if _, err := Buy(s, h, c, t1, big.NewInt(300)); err != nil {
+	if _, err := Buy(s, h, c, t1, tk(300)); err != nil {
 		t.Fatalf("fresh buy after expiry: %v", err)
 	}
 
@@ -43,14 +43,14 @@ func TestZZVerifyExpiry_TradeNormallyAfterExpiry(t *testing.T) {
 	if len(lots) != 1 {
 		t.Fatalf("fresh buy should yield exactly 1 new cohort, got %d: %q", len(lots), zvLotsStr(s, c, h))
 	}
-	if lots[0].count.Cmp(big.NewInt(300)) != 0 || lots[0].acq != t1 {
+	if lots[0].count.Cmp(tk(300)) != 0 || lots[0].acq != t1 {
 		t.Fatalf("new cohort = {%s,%d} want {300,%d}", lots[0].count, lots[0].acq, t1)
 	}
-	if got := zvSumLotsRaw(s, c, h); got.Cmp(big.NewInt(300)) != 0 {
+	if got := zvSumLotsRaw(s, c, h); got.Cmp(tk(300)) != 0 {
 		t.Fatalf("Σlots=%s want 300 (==maturing kBal)", got)
 	}
 	// The matured pile from the first life is untouched — no double count.
-	if MaturedOf(s, c, h).Cmp(big.NewInt(500)) != 0 {
+	if MaturedOf(s, c, h).Cmp(tk(500)) != 0 {
 		t.Fatalf("matured=%s want 500 (fresh buy must not disturb it)", MaturedOf(s, c, h))
 	}
 
@@ -72,13 +72,13 @@ func TestZZVerifyExpiry_TradeNormallyAfterExpiry(t *testing.T) {
 	// A sale of the fresh cohort RIGHT NOW pays the full exit tax — proof the
 	// fresh maturity clock genuinely restarted (not inherited maturity).
 	supplyBefore := new(big.Int).Set(Supply(s, c))
-	fresh, err := QuoteSell(s, h, c, t1, big.NewInt(300))
+	fresh, err := QuoteSell(s, h, c, t1, tk(300))
 	if err != nil {
 		t.Fatalf("quote fresh sell: %v", err)
 	}
 	// taxableGross is the maturing top slice (the 300 fresh tokens); matured
 	// tokens are not part of this draw (splitDraw takes maturing first).
-	wantTaxable, _ := SellProceeds(supplyBefore, big.NewInt(300))
+	wantTaxable, _ := SellProceeds(supplyBefore, tk(300))
 	wantTax := ExitTaxOn(wantTaxable, MaxExitTaxBps)
 	if fresh.Tax.Cmp(wantTax) != 0 {
 		t.Fatalf("fresh-cohort tax=%s want %s (full rate on its own slice)", fresh.Tax, wantTax)
@@ -94,26 +94,26 @@ func TestZZVerifyExpiry_TradeNormallyAfterExpiry(t *testing.T) {
 	if r := lotRateAt(t1, t2); r != 0 {
 		t.Fatalf("matured fresh cohort rate=%d want 0", r)
 	}
-	if Graduate(s, c, h, t2).Cmp(big.NewInt(300)) != 0 {
+	if Graduate(s, c, h, t2).Cmp(tk(300)) != 0 {
 		t.Fatalf("second graduation should move 300")
 	}
 	if zvHasLots(s, c, h) {
 		t.Fatalf("ORPHAN after second graduation: %q", zvLotsStr(s, c, h))
 	}
-	if MaturedOf(s, c, h).Cmp(big.NewInt(800)) != 0 {
+	if MaturedOf(s, c, h).Cmp(tk(800)) != 0 {
 		t.Fatalf("matured=%s want 800 (500 + 300)", MaturedOf(s, c, h))
 	}
 
 	// Sell out the whole 800 — zero tax, clean full exit.
 	supplyBefore = new(big.Int).Set(Supply(s, c))
-	r, err := Sell(s, h, c, t2, big.NewInt(800))
+	r, err := Sell(s, h, c, t2, tk(800))
 	if err != nil {
 		t.Fatalf("final full sell: %v", err)
 	}
 	if r.Tax.Sign() != 0 || r.TaxBps != 0 {
 		t.Fatalf("final full-exit tax=%s taxBps=%d MUST be 0", r.Tax, r.TaxBps)
 	}
-	zvAssertSellShape(t, r, supplyBefore, big.NewInt(800), "final full sell")
+	zvAssertSellShape(t, r, supplyBefore, tk(800), "final full sell")
 	zvAssertReserveEqualsArea(t, s, c, "after second-cycle full exit")
 	zvAssertNoOrphanLots(t, s, "after second-cycle full exit")
 	zvAssertPositionsSumToSupply(t, s, c, "after second-cycle full exit")

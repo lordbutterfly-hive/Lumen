@@ -111,7 +111,7 @@ func commissionMarket(t *testing.T, s Store, creator string, askers ...string) (
 	curveMarket(s, creator, 2000)
 	setMoney(s, kFace(creator), face)
 	for _, a := range askers {
-		setMoney(s, kBal(creator, a), big.NewInt(5_000_000))
+		setMoney(s, kBal(creator, a), tk(5_000_000))
 	}
 	block = seedSettleObs(s, creator, 1000, big.NewInt(4000))
 	activateMarket(s, creator, block)
@@ -119,8 +119,9 @@ func commissionMarket(t *testing.T, s Store, creator string, askers ...string) (
 }
 
 func curveMarket(s Store, creator string, supply int64) {
-	setMoney(s, kSupply(creator), big.NewInt(supply))
-	setMoney(s, kReserve(creator), Area(big.NewInt(supply)))
+	// supply is WHOLE tokens; state holds units (v6).
+	setMoney(s, kSupply(creator), tk(supply))
+	setMoney(s, kReserve(creator), Area(tk(supply)))
 }
 
 func mustBig(t *testing.T, s string) *big.Int {
@@ -141,12 +142,12 @@ func mustBig(t *testing.T, s string) *big.Int {
 func mkPendingEscrow(s Store, creator string, seq uint64, asker string, credits int64, deadline uint64, contentHash string, commissionHbd int64) {
 	saveEscrow(s, creator, seq, escrowRec{
 		asker:             asker,
-		credits:           big.NewInt(credits),
+		credits:           tk(credits), // tokens in the fixture, units in state (v6)
 		deadline:          deadline,
 		status:            askPending,
 		contentHash:       contentHash,
 		answerHash:        "",
-		commissionCredits: big.NewInt(commissionHbd),
+		commissionCredits: tk(commissionHbd),
 	})
 }
 
@@ -168,11 +169,11 @@ func TestAskHappyPath(t *testing.T) {
 	// C5 stays quiet: ceil(Area(100)/100) = 1407 <= 4·400 = 1600.
 	curveMarket(s, creator1, 100)
 	setMoney(s, kFace(creator1), big.NewInt(1000)) // 1.000 HBD
-	setMoney(s, kBal(creator1, asker1), big.NewInt(5000))
+	setMoney(s, kBal(creator1, asker1), tk(5000))
 	block := seedSettleObs(s, creator1, 1000, big.NewInt(400))
 	activateMarket(s, creator1, block)
 
-	maxCredits := big.NewInt(3)
+	maxCredits := tk(3)
 	commission := commissionOwedFor(big.NewInt(1000))
 	if commission.Cmp(big.NewInt(120)) != 0 {
 		t.Fatalf("sanity: commission = %s, want 120 (12%% of 1000)", commission)
@@ -185,8 +186,9 @@ func TestAskHappyPath(t *testing.T) {
 	if res.Seq != 0 {
 		t.Fatalf("Seq = %d, want 0", res.Seq)
 	}
-	if res.CreditsSpent.Cmp(big.NewInt(3)) != 0 {
-		t.Fatalf("CreditsSpent = %s, want 3 (ceil(1000/400))", res.CreditsSpent)
+	// v6: 1000/400 = 2.50 tokens exactly = 250 units (no whole-token ceil to 3).
+	if res.CreditsSpent.Cmp(big.NewInt(250)) != 0 {
+		t.Fatalf("CreditsSpent = %s, want 250 units (ceil(1000*100/400))", res.CreditsSpent)
 	}
 	// The commission is a carve out of those very credits (OWNER RULING
 	// 2026-09-12), not a second amount: 12% of 3 floors to 0 here, and the
@@ -202,8 +204,8 @@ func TestAskHappyPath(t *testing.T) {
 		t.Fatalf("RateUsed = %s, want 400 (the seeded settlement rate)", res.RateUsed)
 	}
 
-	if got := getMoney(s, kBal(creator1, asker1)); got.Cmp(big.NewInt(4997)) != 0 {
-		t.Fatalf("asker balance = %s, want 4997 (5000-3)", got)
+	if got := getMoney(s, kBal(creator1, asker1)); got.Cmp(new(big.Int).Sub(tk(5000), big.NewInt(250))) != 0 {
+		t.Fatalf("asker balance = %s, want 5000 tokens less the 250-unit spend", got)
 	}
 	if got := getU64(s, kSeq(creator1)); got != 1 {
 		t.Fatalf("kSeq = %d, want 1", got)
@@ -224,8 +226,8 @@ func TestAskHappyPath(t *testing.T) {
 	if rec.asker != asker1 {
 		t.Fatalf("escrow.asker = %q, want %q", rec.asker, asker1)
 	}
-	if rec.credits.Cmp(big.NewInt(3)) != 0 {
-		t.Fatalf("escrow.credits = %s, want 3", rec.credits)
+	if rec.credits.Cmp(big.NewInt(250)) != 0 { // v6: 1000/400 = 2.50 tokens = 250 units
+		t.Fatalf("escrow.credits = %s, want 250", rec.credits)
 	}
 	if rec.deadline != block+MinAskDeadline {
 		t.Fatalf("escrow.deadline = %d, want %d", rec.deadline, block+MinAskDeadline)
@@ -254,7 +256,7 @@ func TestAskMaxCreditsMissingOrZeroRejected(t *testing.T) {
 	s := NewMemStore()
 	// No market setup needed: the maxCredits guard fires before
 	// RequireInflowOpen is ever reached.
-	_, err := askAt0(s, asker1, creator1, 1000, big.NewInt(0), "cid", MinAskDeadline)
+	_, err := askAt0(s, asker1, creator1, 1000, tk(0), "cid", MinAskDeadline)
 	if err == nil {
 		t.Fatal("expected error for maxCredits=0")
 	}
@@ -298,13 +300,13 @@ func TestAskMaxCreditsSlippageGuard(t *testing.T) {
 	// quiet: ceil(Area(200)/200) = 1827 <= 4·500 = 2000.
 	curveMarket(s, creator1, 200)
 	setMoney(s, kFace(creator1), big.NewInt(1000)) // face the asker saw when they quoted/signed
-	setMoney(s, kBal(creator1, asker1), big.NewInt(1_000_000))
+	setMoney(s, kBal(creator1, asker1), tk(1_000_000))
 	block := seedSettleObs(s, creator1, 1000, big.NewInt(500))
 	activateMarket(s, creator1, block)
 
 	// The asker quotes at face=1000, rate=500: creditsForAsk = 2, and
 	// signs maxCredits=2 — willing to pay AT MOST what they quoted.
-	maxCredits := big.NewInt(2)
+	maxCredits := tk(2)
 
 	// ATTACK: the creator sneaks a face change into the same block, before
 	// the asker's already-signed ask executes — no different in kind from a
@@ -320,7 +322,7 @@ func TestAskMaxCreditsSlippageGuard(t *testing.T) {
 		t.Fatalf("symbol = %q, want %q (err=%v)", askErrSymbol(err), ErrInput, err)
 	}
 	// Total no-op: nothing moved.
-	if got := getMoney(s, kBal(creator1, asker1)); got.Cmp(big.NewInt(1_000_000)) != 0 {
+	if got := getMoney(s, kBal(creator1, asker1)); got.Cmp(tk(1_000_000)) != 0 {
 		t.Fatalf("asker balance changed on reverted ask: %s", got)
 	}
 	if got := getU64(s, kSeq(creator1)); got != 0 {
@@ -362,12 +364,12 @@ func TestAskCommissionIsCarvedFromCreditsNotChargedOnTop(t *testing.T) {
 	// The canonical S=100 / rate 400 fixture (TestAskHappyPath has the math).
 	curveMarket(s, creator1, 100)
 	setMoney(s, kFace(creator1), big.NewInt(1000))
-	setMoney(s, kBal(creator1, asker1), big.NewInt(5000))
+	setMoney(s, kBal(creator1, asker1), tk(5000))
 	block := seedSettleObs(s, creator1, 1000, big.NewInt(400))
 	activateMarket(s, creator1, block)
 
 	balBefore := getMoney(s, kBal(creator1, asker1))
-	res, err := askAt0(s, asker1, creator1, block, big.NewInt(10), "cid", MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, block, tk(10), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -432,7 +434,8 @@ func TestCreditsForAskCeilsNotFloors(t *testing.T) {
 
 		q := new(big.Int)
 		r := new(big.Int)
-		q.QuoRem(face, rate, r) // floor division for non-negative operands
+		// v6: credits are UNITS, ceil(face x TokenScale / rate).
+		q.QuoRem(new(big.Int).Mul(face, unitsScale), rate, r) // floor division for non-negative operands
 		wantCeil := new(big.Int).Set(q)
 		hasRemainder := r.Sign() != 0
 		if hasRemainder {
@@ -464,14 +467,14 @@ func TestAskCreditsRoundingWiredCorrectly(t *testing.T) {
 	// design, on a rate this depressed. Zero reserve keeps the tripwire
 	// quiet so the test can isolate its actual subject: the ceil wiring.
 	// S=250 clears the spend cap for 11 credits (11·10000 <= 250·500).
-	setMoney(s, kSupply(creator1), big.NewInt(250))
+	setMoney(s, kSupply(creator1), tk(250))
 	setMoney(s, kFace(creator1), big.NewInt(101))
-	setMoney(s, kBal(creator1, asker1), big.NewInt(1_000_000))
+	setMoney(s, kBal(creator1, asker1), tk(1_000_000))
 
 	askBlock := seedSettleObs(s, creator1, 1000, big.NewInt(10))
 	activateMarket(s, creator1, askBlock)
 
-	res, err := askAt0(s, asker1, creator1, askBlock, big.NewInt(20), "cid", MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, askBlock, tk(20), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -483,10 +486,11 @@ func TestAskCreditsRoundingWiredCorrectly(t *testing.T) {
 	// ruling only an 89-token leg was priced (9 credits) and the remaining 12%%
 	// was drawn separately in HBD; the ceiling wiring this test exists for is
 	// the same either way, and 101/10 exercises it with a real remainder.
-	if res.CreditsSpent.Cmp(big.NewInt(11)) != 0 {
-		t.Fatalf("CreditsSpent = %s, want 11 (ceil(101/10))", res.CreditsSpent)
+	// v6: 101/10 = 10.1 tokens exactly = 1010 units; the whole-token ceil to 11 is gone.
+	if res.CreditsSpent.Cmp(big.NewInt(1010)) != 0 {
+		t.Fatalf("CreditsSpent = %s, want 1010 units (ceil(101*100/10))", res.CreditsSpent)
 	}
-	if got := getMoney(s, kBal(creator1, asker1)); got.Cmp(big.NewInt(1_000_000-11)) != 0 {
+	if got := getMoney(s, kBal(creator1, asker1)); got.Cmp(new(big.Int).Sub(tk(1_000_000), big.NewInt(1010))) != 0 {
 		t.Fatalf("asker balance = %s, want %d", got, 1_000_000-11)
 	}
 	// The two legs re-sum to the credits taken, exactly: floor for the platform,
@@ -516,18 +520,19 @@ func TestAsk_PostedFaceIsTheBuyersTotal(t *testing.T) {
 	curveMarket(s, creator1, 1000)
 	const posted = int64(9090)
 	setMoney(s, kFace(creator1), big.NewInt(posted))
-	setMoney(s, kBal(creator1, asker1), big.NewInt(50_000))
+	setMoney(s, kBal(creator1, asker1), tk(50_000))
 	askBlock := seedSettleObs(s, creator1, 1000, big.NewInt(2000))
 	activateMarket(s, creator1, askBlock)
 
 	balBefore := getMoney(s, kBal(creator1, asker1))
-	res, err := askAt0(s, asker1, creator1, askBlock, big.NewInt(10), "cid", MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, askBlock, tk(10), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
 	// ceil(9090/2000) = 5 credits — the WHOLE posted price, priced once.
-	if res.CreditsSpent.Cmp(big.NewInt(5)) != 0 {
-		t.Fatalf("CreditsSpent = %s, want 5 (ceil(9090/2000) — the whole posted face)", res.CreditsSpent)
+	// v6: 9090/2000 = 4.545 tokens -> 455 units (4.55), not the whole-token ceil to 5.
+	if res.CreditsSpent.Cmp(big.NewInt(455)) != 0 {
+		t.Fatalf("CreditsSpent = %s, want 455 units (ceil(9090*100/2000) — the whole posted face)", res.CreditsSpent)
 	}
 	// THE BUYER PARTED WITH EXACTLY THAT AND NOTHING ELSE. This is the
 	// surcharge check in its new form: one asset, one debit.
@@ -578,11 +583,11 @@ func TestAskDeadlineOutOfBandRejected(t *testing.T) {
 	s := NewMemStore()
 	// No market setup needed: the deadline-band guard fires before
 	// RequireInflowOpen.
-	_, err := askAt0(s, asker1, creator1, 1000, big.NewInt(1), "cid", MinAskDeadline-1)
+	_, err := askAt0(s, asker1, creator1, 1000, tk(1), "cid", MinAskDeadline-1)
 	if err == nil || askErrSymbol(err) != ErrInput {
 		t.Fatalf("below MinAskDeadline: err=%v, want ErrInput", err)
 	}
-	_, err = askAt0(s, asker1, creator1, 1000, big.NewInt(1), "cid", MaxAskDeadline+1)
+	_, err = askAt0(s, asker1, creator1, 1000, tk(1), "cid", MaxAskDeadline+1)
 	if err == nil || askErrSymbol(err) != ErrInput {
 		t.Fatalf("above MaxAskDeadline: err=%v, want ErrInput", err)
 	}
@@ -653,7 +658,7 @@ func TestSettlementRate_CurvePricesWithNoHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SettlementRate refused a market with no observations: %v", err)
 	}
-	if want := SpotRate(big.NewInt(100)); got.Cmp(want) != 0 {
+	if want := SpotRate(tk(100)); got.Cmp(want) != 0 {
 		t.Fatalf("SettlementRate = %s, want spot %s (no window: the curve alone prices)", got, want)
 	}
 	if got.Cmp(big.NewInt(1)) == 0 {
@@ -706,10 +711,10 @@ func TestAsk_SettlesAtSpotWithNoHistory(t *testing.T) {
 	curveMarket(s, creator1, 100)
 	activateMarket(s, creator1, block)
 	setMoney(s, kFace(creator1), big.NewInt(1000))
-	setMoney(s, kBal(creator1, asker1), big.NewInt(5000))
-	spot := SpotRate(big.NewInt(100))
+	setMoney(s, kBal(creator1, asker1), tk(5000))
+	spot := SpotRate(tk(100))
 	wantCredits := creditsForAsk(big.NewInt(1000), spot)
-	res, err := askAt0(s, asker1, creator1, block, big.NewInt(1000), "cid", MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, block, tk(1000), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask with no oracle history must settle at spot, got: %v", err)
 	}
@@ -719,7 +724,7 @@ func TestAsk_SettlesAtSpotWithNoHistory(t *testing.T) {
 	if res.CreditsSpent.Cmp(wantCredits) != 0 {
 		t.Fatalf("CreditsSpent = %s, want %s", res.CreditsSpent, wantCredits)
 	}
-	if got := getMoney(s, kBal(creator1, asker1)); got.Cmp(new(big.Int).Sub(big.NewInt(5000), wantCredits)) != 0 {
+	if got := getMoney(s, kBal(creator1, asker1)); got.Cmp(new(big.Int).Sub(tk(5000), wantCredits)) != 0 {
 		t.Fatalf("asker balance = %s, want 5000 - %s", got, wantCredits)
 	}
 	if got := getU64(s, kSeq(creator1)); got != 1 {
@@ -740,11 +745,11 @@ func TestAsk_SettlesAtTWAPWhenAvailable(t *testing.T) {
 	// i.e. exactly rate/2 — so this fixture still sits ON the C4 boundary,
 	// which is the whole point of it.
 	setMoney(s, kFace(creator1), big.NewInt(1136))
-	setMoney(s, kBal(creator1, asker1), big.NewInt(5000))
+	setMoney(s, kBal(creator1, asker1), tk(5000))
 	askBlock := seedSettleObs(s, creator1, 1000, big.NewInt(2000))
 	activateMarket(s, creator1, askBlock)
 
-	wantCredits := creditsForAsk(big.NewInt(1000), big.NewInt(2000)) // ceil(tokenLeg 1000/2000) = 1
+	wantCredits := creditsForAsk(big.NewInt(1136), big.NewInt(2000)) // the posted face over the TWAP: ceil(1136*100/2000) = 57 units
 
 	res, err := askAt0(s, asker1, creator1, askBlock, wantCredits, "cid", MinAskDeadline)
 	if err != nil {
@@ -773,19 +778,19 @@ func TestAnswerHappyPath(t *testing.T) {
 	// ★ THE ESCROW SPLITS TWO WAYS (OWNER RULING 2026-09-12): 42 credits escrowed,
 	// 5 of them the platform's, so the creator receives 37 and the owner 5 — in
 	// TOKENS, on this market, not HBD into the treasury.
-	if res.CreditsToCreator.Cmp(big.NewInt(37)) != 0 {
+	if res.CreditsToCreator.Cmp(tk(37)) != 0 {
 		t.Fatalf("CreditsToCreator = %s, want 37 (42 escrowed − 5 commission)", res.CreditsToCreator)
 	}
-	if res.CommissionToOwner.Cmp(big.NewInt(5)) != 0 {
+	if res.CommissionToOwner.Cmp(tk(5)) != 0 {
 		t.Fatalf("CommissionToOwner = %s, want 5", res.CommissionToOwner)
 	}
 	if res.Owner != platform1 {
 		t.Fatalf("Owner = %q, want %q (who was actually credited)", res.Owner, platform1)
 	}
-	if got := totalBalance(s, creator1, creator1); got.Cmp(big.NewInt(37)) != 0 {
+	if got := totalBalance(s, creator1, creator1); got.Cmp(tk(37)) != 0 {
 		t.Fatalf("creator balance = %s, want 37", got)
 	}
-	if got := totalBalance(s, creator1, platform1); got.Cmp(big.NewInt(5)) != 0 {
+	if got := totalBalance(s, creator1, platform1); got.Cmp(tk(5)) != 0 {
 		t.Fatalf("owner balance = %s, want 5 (the commission, in tokens)", got)
 	}
 	if got := getMoney(s, kTreasury()); got.Sign() != 0 {
@@ -864,7 +869,7 @@ func TestAnswerWhileFrozenSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Answer while FROZEN must succeed, got: %v", err)
 	}
-	if res.CreditsToCreator.Cmp(big.NewInt(42)) != 0 {
+	if res.CreditsToCreator.Cmp(tk(42)) != 0 {
 		t.Fatalf("CreditsToCreator = %s, want 42", res.CreditsToCreator)
 	}
 }
@@ -879,7 +884,7 @@ func TestAnswerBooksCommissionExactlyOnce(t *testing.T) {
 	// The commission fixture, not the canonical one: 12%% of 3 credits is zero and
 	// this test would assert nothing (see commissionMarket's doc).
 	block, _ := commissionMarket(t, s, creator1, asker1)
-	maxCredits := big.NewInt(100)
+	maxCredits := tk(100)
 
 	askRes, err := askAt0(s, asker1, creator1, block, maxCredits, "cid", MinAskDeadline)
 	if err != nil {
@@ -929,10 +934,10 @@ func TestReclaimHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
-	if got.CreditsReturned.Cmp(big.NewInt(42)) != 0 {
+	if got.CreditsReturned.Cmp(tk(42)) != 0 {
 		t.Fatalf("reclaimed = %s, want 42 (full amount)", got.CreditsReturned)
 	}
-	if bal := getMoney(s, kBal(creator1, asker1)); bal.Cmp(big.NewInt(42)) != 0 {
+	if bal := getMoney(s, kBal(creator1, asker1)); bal.Cmp(tk(42)) != 0 {
 		t.Fatalf("asker balance = %s, want 42", bal)
 	}
 	rec, ok := loadEscrow(s, creator1, 0)
@@ -970,21 +975,23 @@ func TestReclaimByThirdPartyAfterWindowPaysAsker(t *testing.T) {
 	// 42 escrowed with a 7-credit commission; the 25%% miss slice rounds UP to 2,
 	// so 40 go back to the asker and 2 to the platform owner (OWNER RULING
 	// 2026-09-12 — the slice is tokens now, out of the same escrow).
-	if res.CreditsReturned.Cmp(big.NewInt(40)) != 0 {
-		t.Fatalf("CreditsReturned = %s, want 40 (42 escrowed less the 2-credit miss slice)", res.CreditsReturned)
+	// v6: the slice is ceil(700 units x 25%) = 175 units (1.75 tokens): the
+	// whole-token ceil to 2 is gone, and 175 is above the one-token floor.
+	if res.CreditsReturned.Cmp(big.NewInt(4025)) != 0 {
+		t.Fatalf("CreditsReturned = %s, want 4025 (4200 escrowed less the 175-unit miss slice)", res.CreditsReturned)
 	}
-	if res.CommissionRetainedCredits.Cmp(big.NewInt(2)) != 0 {
-		t.Fatalf("CommissionRetainedCredits = %s, want 2 (ceil(7*2500/10000))", res.CommissionRetainedCredits)
+	if res.CommissionRetainedCredits.Cmp(big.NewInt(175)) != 0 {
+		t.Fatalf("CommissionRetainedCredits = %s, want 175 (ceil(700*2500/10000))", res.CommissionRetainedCredits)
 	}
-	if got := totalBalance(s, creator1, platform1); got.Cmp(big.NewInt(2)) != 0 {
-		t.Fatalf("owner position = %s, want the 2-credit miss slice", got)
+	if got := totalBalance(s, creator1, platform1); got.Cmp(big.NewInt(175)) != 0 {
+		t.Fatalf("owner position = %s, want the 175-unit miss slice", got)
 	}
 
 	// The MONEY lands on the asker, never on rando1 (the caller) — this is
 	// the load-bearing part of the fix: permissionless does not mean
 	// redirectable.
-	if bal := getMoney(s, kBal(creator1, asker1)); bal.Cmp(big.NewInt(40)) != 0 {
-		t.Fatalf("asker balance = %s, want 40 (the escrow less the miss slice, credited to the ASKER)", bal)
+	if bal := getMoney(s, kBal(creator1, asker1)); bal.Cmp(big.NewInt(4025)) != 0 {
+		t.Fatalf("asker balance = %s, want 4025 units (the escrow less the miss slice, credited to the ASKER)", bal)
 	}
 	if bal := getMoney(s, kBal(creator1, rando1)); bal.Sign() != 0 {
 		t.Fatalf("caller (rando1) balance = %s, want 0 (caller must never be paid)", bal)
@@ -1083,7 +1090,7 @@ func TestReclaimBeforeWindowRejected(t *testing.T) {
 		t.Fatalf("reclaim at deadline+grace+1 should succeed: %v", err)
 	}
 
-	if bal := getMoney(s, kBal(creator1, asker1)); bal.Cmp(big.NewInt(42)) != 0 {
+	if bal := getMoney(s, kBal(creator1, asker1)); bal.Cmp(tk(42)) != 0 {
 		t.Fatalf("only the legal reclaim should have paid out: balance = %s, want 42", bal)
 	}
 }
@@ -1106,7 +1113,7 @@ func TestReclaimCommissionNetOfMissSlice(t *testing.T) {
 	s := NewMemStore()
 	bindOwner(s)
 	block, _ := commissionMarket(t, s, creator1, asker1, asker2)
-	maxCredits := big.NewInt(100)
+	maxCredits := tk(100)
 
 	seedRes, err := askAt0(s, asker2, creator1, block, maxCredits, "seed-cid", MinAskDeadline)
 	if err != nil {
@@ -1170,7 +1177,7 @@ func TestReclaimReturnsTheEscrowNetOfTheMissSlice(t *testing.T) {
 	s := NewMemStore()
 	bindOwner(s)
 	block, _ := commissionMarket(t, s, creator1, asker1)
-	maxCredits := big.NewInt(100)
+	maxCredits := tk(100)
 
 	balBefore := getMoney(s, kBal(creator1, asker1))
 	askRes, err := askAt0(s, asker1, creator1, block, maxCredits, "cid", MinAskDeadline)
@@ -1233,7 +1240,7 @@ func TestReclaimWorksWhenFrozenAndClosed(t *testing.T) {
 		if err != nil {
 			t.Fatalf("[%s] Reclaim must succeed regardless of phase, got: %v", phase, err)
 		}
-		if got.CreditsReturned.Cmp(big.NewInt(42)) != 0 {
+		if got.CreditsReturned.Cmp(tk(42)) != 0 {
 			t.Fatalf("[%s] reclaimed = %s, want 42", phase, got.CreditsReturned)
 		}
 	}
@@ -1325,18 +1332,18 @@ func TestAsk_FreeFormHashesAreLengthBounded(t *testing.T) {
 	s := NewMemStore()
 	curveMarket(s, creator1, 1000)
 	setMoney(s, kFace(creator1), big.NewInt(9090))
-	setMoney(s, kBal(creator1, asker1), big.NewInt(50_000))
+	setMoney(s, kBal(creator1, asker1), tk(50_000))
 	askBlock := seedSettleObs(s, creator1, 1000, big.NewInt(2000))
 	activateMarket(s, creator1, askBlock)
 
 	long := strings.Repeat("a", MaxHashLen+1)
-	if _, err := askAt0(s, asker1, creator1, askBlock, big.NewInt(10), long, MinAskDeadline); err == nil {
+	if _, err := askAt0(s, asker1, creator1, askBlock, tk(10), long, MinAskDeadline); err == nil {
 		t.Fatal("an over-long contentHash was accepted into a permanent record")
 	}
 	// Exactly at the cap is legal — the bound must not be off by one, or a
 	// legitimate 128-char address is refused.
 	atCap := strings.Repeat("a", MaxHashLen)
-	res, err := askAt0(s, asker1, creator1, askBlock, big.NewInt(10), atCap, MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, askBlock, tk(10), atCap, MinAskDeadline)
 	if err != nil {
 		t.Fatalf("a contentHash of exactly MaxHashLen was refused: %v", err)
 	}
@@ -1386,11 +1393,11 @@ func TestAsk_ControlByteInContentHashRefused(t *testing.T) {
 			s := NewMemStore()
 			curveMarket(s, creator1, 100)
 			setMoney(s, kFace(creator1), big.NewInt(1000))
-			setMoney(s, kBal(creator1, asker1), big.NewInt(5000))
+			setMoney(s, kBal(creator1, asker1), tk(5000))
 			block := seedSettleObs(s, creator1, 1000, big.NewInt(400))
 			activateMarket(s, creator1, block)
 
-			_, err := askAt0(s, asker1, creator1, block, big.NewInt(3), tc.hash, MinAskDeadline)
+			_, err := askAt0(s, asker1, creator1, block, tk(3), tc.hash, MinAskDeadline)
 			if err == nil {
 				t.Fatalf("Ask accepted contentHash %q — the emitted event would be invalid JSON "+
 					"and the indexer would silently drop it", tc.hash)
@@ -1406,10 +1413,10 @@ func TestAsk_ControlByteInContentHashRefused(t *testing.T) {
 	s := NewMemStore()
 	curveMarket(s, creator1, 100)
 	setMoney(s, kFace(creator1), big.NewInt(1000))
-	setMoney(s, kBal(creator1, asker1), big.NewInt(5000))
+	setMoney(s, kBal(creator1, asker1), tk(5000))
 	block := seedSettleObs(s, creator1, 1000, big.NewInt(400))
 	activateMarket(s, creator1, block)
-	if _, err := askAt0(s, asker1, creator1, block, big.NewInt(3), "a-b_c.d", MinAskDeadline); err != nil {
+	if _, err := askAt0(s, asker1, creator1, block, tk(3), "a-b_c.d", MinAskDeadline); err != nil {
 		t.Fatalf("a control-free hash was refused: %v — the guard is too wide", err)
 	}
 }
@@ -1466,7 +1473,7 @@ func TestReclaim_OutcomeIsIdenticalWhoeverPushesIt(t *testing.T) {
 		activateMarket(s, creator1, block)
 		// An aged pile that has cleared the window, so graduate() has real work
 		// to do — otherwise the comparison is vacuous.
-		setMoney(s, kBal(creator1, asker1), big.NewInt(1000))
+		setMoney(s, kBal(creator1, asker1), tk(1000))
 		setU64(s, kAcqBlock(creator1, asker1), 1)
 		mkPendingEscrow(s, creator1, 0, asker1, 42, deadline, "cid", 7)
 		return s

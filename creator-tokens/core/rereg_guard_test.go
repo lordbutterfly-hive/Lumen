@@ -1,9 +1,6 @@
 package core
 
-import (
-	"math/big"
-	"testing"
-)
+import "testing"
 
 // rereg_guard_test.go — regressions for the re-registration fixes of 2026-08-12,
 // plus a PINNED RESIDUAL that a scrutiny pass the same day proved is NOT closed
@@ -17,7 +14,7 @@ import (
 
 func rgMarket(t *testing.T, s *MemStore, c string, block uint64) {
 	t.Helper()
-	if err := Register(s, c, c, block, MinFace, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, block, MinFace, 1_000_000_000*TokenScale); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	// (Six prepaid subscription periods used to be bought here to keep the market
@@ -42,7 +39,7 @@ func TestReReg_RatingsDoNotSurviveReRegistration(t *testing.T) {
 
 	setStr(s, kState(c), StateClosed) // wound down
 	later := uint64(t0) + 10*hzLongGap
-	if err := Register(s, c, c, later, MinFace, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, later, MinFace, 1_000_000_000*TokenScale); err != nil {
 		t.Fatalf("re-register: %v", err)
 	}
 
@@ -70,7 +67,7 @@ func TestReReg_RatingResetIsBypassableByDeferral_KNOWN(t *testing.T) {
 	rgMarket(t, s, c, t0)
 	setStr(s, kState(c), StateClosed)
 	later := uint64(t0) + 10*hzLongGap
-	if err := Register(s, c, c, later, MinFace, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, later, MinFace, 1_000_000_000*TokenScale); err != nil {
 		t.Fatalf("re-register: %v", err)
 	}
 	if getU64(s, kRatingCount(c)) != 0 {
@@ -106,7 +103,7 @@ func TestReReg_DelinquencyEscapeIsRefused(t *testing.T) {
 	}
 
 	// Inside the window: refused.
-	if err := Register(s, c, c, convictedUntil-1, MinFace, 1_000_000_000); err == nil {
+	if err := Register(s, c, c, convictedUntil-1, MinFace, 1_000_000_000*TokenScale); err == nil {
 		t.Error("DELINQUENCY ESCAPE REOPENED: re-registration succeeded while a conviction " +
 			"was still active. See registerCheck in core/market.go.")
 	} else {
@@ -114,7 +111,7 @@ func TestReReg_DelinquencyEscapeIsRefused(t *testing.T) {
 	}
 
 	// The boundary block itself: lapsed (strict >), so allowed.
-	if err := Register(s, c, c, convictedUntil, MinFace, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, convictedUntil, MinFace, 1_000_000_000*TokenScale); err != nil {
 		t.Errorf("an EXPIRED conviction blocked re-registration at the boundary block: %v", err)
 	}
 
@@ -168,14 +165,14 @@ func TestResidual_BlendedClockLaundersSingleAccount_KNOWN(t *testing.T) {
 	// One block short of full maturity — where graduate() does NOT fire.
 	s := NewMemStore()
 	rgMarket(t, s, c, t0)
-	if _, err := Buy(s, whale, c, t0, big.NewInt(P)); err != nil {
+	if _, err := Buy(s, whale, c, t0, tk(P)); err != nil {
 		t.Fatalf("pile buy: %v", err)
 	}
 	at := uint64(t0) + ExitTaxDecayBlocks - 1
-	if _, err := Buy(s, whale, c, at, big.NewInt(F)); err != nil {
+	if _, err := Buy(s, whale, c, at, tk(F)); err != nil {
 		t.Fatalf("fresh buy: %v", err)
 	}
-	q, err := QuoteSell(s, whale, c, at, big.NewInt(F))
+	q, err := QuoteSell(s, whale, c, at, tk(F))
 	if err != nil {
 		t.Fatalf("quote: %v", err)
 	}

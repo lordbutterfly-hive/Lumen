@@ -46,13 +46,13 @@ func erWorld(t *testing.T, c, h string, pile, fresh int64) (*MemStore, uint64, u
 	}
 	t0 := uint64(10)
 	t1 := t0 + ExitTaxDecayBlocks
-	if _, err := Buy(s, h, c, t0, big.NewInt(pile)); err != nil {
+	if _, err := Buy(s, h, c, t0, tk(pile)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, "alt", c, t1, big.NewInt(fresh)); err != nil {
+	if _, err := Buy(s, "alt", c, t1, tk(fresh)); err != nil {
 		t.Fatal(err)
 	}
-	if err := TransferCredits(s, "alt", c, "alt", h, t1, big.NewInt(fresh)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", h, t1, tk(fresh)); err != nil {
 		t.Fatal(err)
 	}
 	askBlock := erSeedObs(s, c, t1+1)
@@ -94,7 +94,7 @@ func erRoundTripProbe(t *testing.T, pile, fresh int64) {
 
 	// What the fresh slice owes BEFORE the escrow round trip.
 	ctl := hzCloneStore(s)
-	qBefore, err := QuoteSell(ctl, h, c, askBlock, big.NewInt(fresh))
+	qBefore, err := QuoteSell(ctl, h, c, askBlock, tk(fresh))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func erRoundTripProbe(t *testing.T, pile, fresh int64) {
 		}
 	}
 	setMoney(s, kFace(c), face)
-	ar, err := Ask(s, h, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(1_000_000)), "cid", MinAskDeadline, 0)
+	ar, err := Ask(s, h, c, askBlock, new(big.Int).Mul(q.Credits, tk(1_000_000)), "cid", MinAskDeadline, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestER_ReclaimRoundTripCannotLaunder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ar, err := Ask(s, h, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(1_000_000)), "cid", MinAskDeadline, 0)
+	ar, err := Ask(s, h, c, askBlock, new(big.Int).Mul(q.Credits, tk(1_000_000)), "cid", MinAskDeadline, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestER_EscrowLotsKeyNeverOrphaned(t *testing.T) {
 				}
 			}
 			setMoney(s, kFace(c), face)
-			ar, err := Ask(s, h, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(1_000_000)), "cid", MinAskDeadline, 0)
+			ar, err := Ask(s, h, c, askBlock, new(big.Int).Mul(q.Credits, tk(1_000_000)), "cid", MinAskDeadline, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -281,7 +281,7 @@ func TestER_LegacyEscrowWithoutCohortRecordUnchanged(t *testing.T) {
 	if err := Register(s, c, c, 1, MinFace+5000, MaxCap); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, h, c, 1_000_000, big.NewInt(5000)); err != nil {
+	if _, err := Buy(s, h, c, 1_000_000, tk(5000)); err != nil {
 		t.Fatal(err)
 	}
 	at := uint64(1_500_000)
@@ -344,7 +344,7 @@ func TestER_EscrowRoundTripFuzzConservesCapacity(t *testing.T) {
 			continue
 		}
 		setMoney(s, kFace(c), face)
-		ar, err := Ask(s, h, c, askBlock, new(big.Int).Mul(q.Credits, big.NewInt(1_000_000)), "cid", MinAskDeadline, 0)
+		ar, err := Ask(s, h, c, askBlock, new(big.Int).Mul(q.Credits, tk(1_000_000)), "cid", MinAskDeadline, 0)
 		if err != nil {
 			continue
 		}

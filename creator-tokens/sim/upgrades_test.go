@@ -277,7 +277,7 @@ func TestFaceSpikeSandwichRejected(t *testing.T) {
 	const warmupRounds = 9
 	for i := 0; i < warmupRounds; i++ {
 		eng.Block = genesisBlock + uint64(i)*core.LongObsSpacing
-		eng.doBuy(asker, creator, big.NewInt(warmupBuy))
+		eng.doBuy(asker, creator, big.NewInt(warmupBuy*core.TokenScale))
 		if eng.haltErr != nil {
 			t.Fatalf("warm-up buy %d halted: %v", i, eng.haltErr)
 		}
@@ -285,12 +285,12 @@ func TestFaceSpikeSandwichRejected(t *testing.T) {
 	// The final observation, one more (safely un-clamped) gap later: this is
 	// also the asker's top-up to the balance the rest of the test expects.
 	eng.Block = genesisBlock + uint64(warmupRounds-1)*core.LongObsSpacing + 8000
-	eng.doBuy(asker, creator, big.NewInt(20))
+	eng.doBuy(asker, creator, big.NewInt(20*core.TokenScale))
 	if eng.haltErr != nil {
 		t.Fatalf("top-up buy halted: %v", eng.haltErr)
 	}
-	if got := core.BalanceOf(eng.Store, creator, asker); got.Cmp(big.NewInt(200)) != 0 {
-		t.Fatalf("asker credits = %s, want 200 (the warm-up/top-up buys did not land)", got)
+	if got := core.BalanceOf(eng.Store, creator, asker); got.Cmp(big.NewInt(200*core.TokenScale)) != 0 {
+		t.Fatalf("asker credits = %s, want 200 tokens in units (the warm-up/top-up buys did not land)", got)
 	}
 
 	// The asker quotes at face 4000 and signs a cap of exactly what that costs.

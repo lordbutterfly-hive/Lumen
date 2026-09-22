@@ -159,7 +159,7 @@ func TestWithdrawTreasury_NoPathToMarketReserve(t *testing.T) {
 	setStr(s, kOwner(), owner)
 	setMoney(s, kTreasury(), big.NewInt(5_000))
 	setMoney(s, kReserve(creator), big.NewInt(999_999))
-	setMoney(s, kSupply(creator), big.NewInt(999_999))
+	setMoney(s, kSupply(creator), tk(999_999))
 
 	if _, err := WithdrawTreasury(s, owner, big.NewInt(5_000)); err != nil {
 		t.Fatalf("WithdrawTreasury: %v", err)
@@ -167,7 +167,7 @@ func TestWithdrawTreasury_NoPathToMarketReserve(t *testing.T) {
 	if got := getMoney(s, kReserve(creator)); got.Cmp(big.NewInt(999_999)) != 0 {
 		t.Fatalf("REGRESSION: a market's reserve moved on a treasury withdrawal: %s, want untouched 999999", got)
 	}
-	if got := getMoney(s, kSupply(creator)); got.Cmp(big.NewInt(999_999)) != 0 {
+	if got := getMoney(s, kSupply(creator)); got.Cmp(tk(999_999)) != 0 {
 		t.Fatalf("REGRESSION: a market's supply moved on a treasury withdrawal: %s, want untouched 999999", got)
 	}
 }
@@ -197,7 +197,7 @@ func TestWithdrawTreasury_EndToEnd_RevenueNoLongerPermanentlyLocked(t *testing.T
 	// 2026-09-12 — the commission is tokens paid to the owner's own position, not
 	// HBD into the treasury). The exit tax, tested elsewhere, is the other
 	// remaining source.
-	buyRes, err := Buy(s, "asker", creator, regBlock+2, big.NewInt(5000))
+	buyRes, err := Buy(s, "asker", creator, regBlock+2, tk(5000))
 	if err != nil {
 		t.Fatalf("Buy: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestWithdrawTreasury_EndToEnd_RevenueNoLongerPermanentlyLocked(t *testing.T
 	// a face of 10,000 set below. ceil(10,000/15,000) = 1 credit.
 	setMoney(s, kFace(creator), big.NewInt(10_000))
 	askBlock := seedSettleObs(s, creator, regBlock+10, big.NewInt(15_000))
-	askRes, err := askAt0(s, "asker", creator, askBlock, big.NewInt(1), "cid", MinAskDeadline)
+	askRes, err := askAt0(s, "asker", creator, askBlock, tk(1), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}

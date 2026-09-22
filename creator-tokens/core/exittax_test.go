@@ -113,11 +113,11 @@ func TestExitTaxOn_Bounds_Property(t *testing.T) {
 func TestExitTaxOn_ChunkingNeverEvades_Property(t *testing.T) {
 	r := rand.New(rand.NewSource(9))
 	for i := 0; i < 5000; i++ {
-		S := big.NewInt(r.Int63n(100_000) + 200)
+		S := tk(r.Int63n(100_000) + 200) // supply in units (v6)
 		total := r.Int63n(150) + 1
 		bps := uint64(r.Int63n(int64(MaxExitTaxBps)) + 1)
 
-		whole, err := SellProceeds(S, big.NewInt(total))
+		whole, err := SellProceeds(S, tk(total))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,13 +129,13 @@ func TestExitTaxOn_ChunkingNeverEvades_Property(t *testing.T) {
 		remaining := total
 		for remaining > 0 {
 			c := r.Int63n(remaining) + 1
-			p, err := SellProceeds(cur, big.NewInt(c))
+			p, err := SellProceeds(cur, tk(c))
 			if err != nil {
 				t.Fatal(err)
 			}
 			sumP = mAdd(sumP, p)
 			sumTax = mAdd(sumTax, ExitTaxOn(p, bps))
-			cur.Sub(cur, big.NewInt(c))
+			cur.Sub(cur, tk(c))
 			remaining -= c
 		}
 		// Premise: the chunked proceeds telescope exactly (L4 equality).
@@ -209,7 +209,7 @@ func TestExitTax_NoCreatorExitTax_OneRuleForEveryone(t *testing.T) {
 	now := uint64(5_000_000)
 	age := ExitTaxDecayBlocks / 3 // a third of the way down the decay
 	for _, h := range []string{creator, "randomholder"} {
-		setMoney(s, kBal(creator, h), big.NewInt(100))
+		setMoney(s, kBal(creator, h), tk(100))
 		setU64(s, kAcqBlock(creator, h), now-age)
 	}
 	creatorRate := ExitTaxBpsAt(heldBlocksAt(s, creator, creator, now))

@@ -1,11 +1,14 @@
 'use client';
 
+import { fractionalTokensUnder } from '../../market/contract-rules';
 import { FC, useState, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { Service } from '../../market/token-detail';
 import { displayHandle, type LiveTokenMarket } from '../../live/adapt';
 import { buyQuote, minBuyUsd, sellQuote, serviceQuote, EXIT_FEE_MAX, MIN_NET_DEFAULT_TOLERANCE_BPS } from '../../market/curve';
-import { COMMISSION_BPS, TRADE_FEE_BPS } from '../../lib/contract-math';
+import { COMMISSION_BPS, TRADE_FEE_BPS,
+  toUnits, fromUnits, TOKEN_SCALE
+} from '../../lib/contract-math';
 
 /**
  * ★ DERIVED, NEVER TYPED OUT (2026-09-11). Both fee rows below read "Trade fee
@@ -42,13 +45,15 @@ const TRADE_FEE_PCT = `${Number((TRADE_FEE_BPS / 100).toFixed(2))}%`;
  */
 const MISS_RECLAIM_SLICE_BPS = 2_500; // core/params.go MissReclaimSliceBps — 25% of the HELD commission
 function missReclaimSliceTokens(escrowTokens: number, commissionTokens: number | null): number {
-  const tokens = Number.isFinite(escrowTokens) ? Math.max(0, Math.floor(escrowTokens)) : 0;
-  if (tokens <= 0) return 0;
+  // ask.go Reclaim, on UNITS: ceil(commission x 25%), floored at one whole
+  // token (MissReclaimFloorUnits = 100 units), never more than the escrow.
+  const units = Number.isFinite(escrowTokens) ? Math.max(0, toUnits(escrowTokens)) : 0;
+  if (units <= 0) return 0;
   const commission =
     commissionTokens !== null && Number.isFinite(commissionTokens)
-      ? Math.max(0, Math.floor(commissionTokens))
-      : Math.floor((tokens * COMMISSION_BPS) / 10_000);
-  return Math.min(tokens, Math.max(1, Math.ceil((commission * MISS_RECLAIM_SLICE_BPS) / 10_000)));
+      ? Math.max(0, toUnits(commissionTokens))
+      : Math.floor((units * COMMISSION_BPS) / 10_000);
+  return fromUnits(Math.min(units, Math.max(TOKEN_SCALE, Math.ceil((commission * MISS_RECLAIM_SLICE_BPS) / 10_000))));
 }
 /** The creator's half and Lumen's half of it, derived the same way — tradefee.go splits floor(fee/2) to the creator and the odd base unit to the platform. */
 const TRADE_FEE_HALF_PCT = `${Number((TRADE_FEE_BPS / 200).toFixed(2))}%`;
@@ -385,7 +390,7 @@ const BuyModal: FC<{
               land under the entered budget. Say so, using the two figures on screen. */}
           {q.tokens > 0 && usd > rows.totalUsd ? (
             <div className="mt-2 text-caption text-ink-14 font-ui">
-              You get the most whole tokens that fit your ${usd}.
+              You get the most tokens that fit your ${usd}.
             </div>
           ) : null}
         </div>
@@ -978,7 +983,7 @@ const AskModal: FC<{
   const priceBlocked = priceRefused || quoteUnreadable || askQuote.isLoading;
   // USER RULING 2026-07-27: the posted USD price is the buyer's TOTAL — 12%
   // is a SEPARATE HBD platform commission, never tokens (ask.go splitFace).
-  const q = serviceQuote(usd, m.priceUsd);
+  const q = serviceQuote(usd, m.priceUsd, m.rules);
   /**
    * ★★★ THE POSTED PRICE WAS PRINTED AS THE TOTAL, AND IT IS NOT (2026-08-27,
    * F-D). The card read "{usdWhole(usd)} total". What leaves the buyer is
@@ -1102,7 +1107,7 @@ const AskModal: FC<{
               "against aposted price of". Segments cannot have that happen to
               them, and askCostLine gives a test the whole sentence to read. Same
               pattern, same reason, as disclosure-copy.ts's positionSegments. */}
-          {askCostSegments(cost).map((seg, i) =>
+          {askCostSegments(cost, fractionalTokensUnder(m.rules)).map((seg, i) =>
             seg.strong ? (
               <strong key={i} className="tabular-nums text-ink-2 font-num">
                 {seg.text}

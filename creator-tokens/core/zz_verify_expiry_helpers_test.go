@@ -129,7 +129,7 @@ func zvAssertPositionsSumToSupply(t *testing.T, s *MemStore, c, label string) {
 // triggered (standalone Graduate, or as a side effect of Sell/Buy/Refund).
 func zvMature(t *testing.T, s *MemStore, c, h string, n int64, buyAt uint64) uint64 {
 	t.Helper()
-	if _, err := Buy(s, h, c, buyAt, big.NewInt(n)); err != nil {
+	if _, err := Buy(s, h, c, buyAt, tk(n)); err != nil {
 		t.Fatalf("zvMature buy: %v", err)
 	}
 	at := buyAt + tbWindow

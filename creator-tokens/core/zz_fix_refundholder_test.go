@@ -57,7 +57,7 @@ func rhBuild(t *testing.T, N, M int64) (s *MemStore, c string, t0, t1 uint64) {
 	pfMarket(t, s, c, t1)
 	pfBuy(t, s, "whale", c, t0, N)
 	pfBuy(t, s, "alt", c, t1, M)
-	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(M)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(M)); err != nil {
 		t.Fatalf("TransferCredits: %v", err)
 	}
 	if err := Retire(s, c, c, t1); err != nil {
@@ -86,7 +86,7 @@ func rhShape(t *testing.T, aged int64, greens []int64, gapDiv []uint64) (s *MemS
 		blk := base + ExitTaxDecayBlocks/gapDiv[i]
 		who := "g" + string(rune('a'+i))
 		pfBuy(t, s, who, c, blk, n)
-		if err := TransferCredits(s, who, c, who, "whale", blk, big.NewInt(n)); err != nil {
+		if err := TransferCredits(s, who, c, who, "whale", blk, tk(n)); err != nil {
 			t.Fatalf("transfer %d: %v", i, err)
 		}
 	}
@@ -214,7 +214,7 @@ func TestRHFix_A4_LegacyAndHomogeneousAreExact(t *testing.T) {
 		pfMarket(t, s, c, t0+ExitTaxDecayBlocks)
 		pfBuy(t, s, "whale", c, t0, 4000)
 		pfBuy(t, s, "alt", c, t0+1000, 1000)
-		if err := TransferCredits(s, "alt", c, "alt", "whale", t0+1000, big.NewInt(1000)); err != nil {
+		if err := TransferCredits(s, "alt", c, "alt", "whale", t0+1000, tk(1000)); err != nil {
 			t.Fatalf("TransferCredits: %v", err)
 		}
 		s.Delete(kLots(c, "whale")) // legacy: a pre-ledger position
@@ -520,7 +520,7 @@ func TestRHFix_B6_DustGiftGriefBoundedAtTheBackstop(t *testing.T) {
 			if RefundHolderTaxGateBlocked(s, c, "victim", t1) {
 				t.Fatalf("pile=%d: the victim's ripe pile was not pushable before the gift", pile)
 			}
-			if err := TransferCredits(s, "griefer", c, "griefer", "victim", t1, big.NewInt(dust)); err != nil {
+			if err := TransferCredits(s, "griefer", c, "griefer", "victim", t1, tk(dust)); err != nil {
 				t.Fatalf("gift: %v", err)
 			}
 			lo, hi := uint64(0), ExitTaxDecayBlocks+10

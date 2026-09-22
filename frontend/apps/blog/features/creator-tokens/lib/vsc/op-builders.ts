@@ -37,6 +37,7 @@
 // which the envelope alone cannot state) lives one layer out, in
 // ./broadcaster.ts.
 
+import { formatTokenAmount, isUnitMultiple } from '../contract-math';
 import { assertAuthContract, assertHashField, assertPayloadShape } from './payload-contract';
 import { rcLimitForAction } from './rc-budget';
 
@@ -330,7 +331,7 @@ export function askPayload(
   // the last chokepoint before the wire, so a doomed ask never reaches a
   // signature. See payload-contract.ts's assertHashField doc.
   assertHashField('contentHash', contentHash);
-  const payload: Record<string, unknown> = { creator, contentHash, deadlineBlocks, maxCredits: moneyStr(maxCreditsBaseUnits) };
+  const payload: Record<string, unknown> = { creator, contentHash, deadlineBlocks, maxCredits: intStr(maxCreditsBaseUnits) };
   // OMITTED, not sent as 0, when there is no named offering: absent and 0 mean
   // the same thing on-chain (the legacy `face` price), and omitting keeps the
   // payload byte-identical to every pre-shop ask. When a service IS named, the
@@ -586,8 +587,11 @@ function moneyStr(n: number): string {
  * they did not ask for. The caller must floor deliberately.
  */
 function intStr(n: number): string {
-  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
-    throw new Error(`op-builders: invalid token count ${JSON.stringify(n)} — must be a non-negative whole number (tokens are integers on the curve; floor before calling)`);
+  // v6: a token amount on the wire is a decimal token string with up to two
+  // places ("2", "1.50"); the data source has already refused anything off the
+  // 0.01 grid (and any fraction at all under pre-v6 rules).
+  if (!Number.isFinite(n) || n < 0 || !isUnitMultiple(n)) {
+    throw new Error(`op-builders: invalid token count ${JSON.stringify(n)}: must be a non-negative multiple of 0.01 (round to the unit grid before calling)`);
   }
-  return String(n);
+  return formatTokenAmount(n);
 }

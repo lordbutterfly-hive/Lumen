@@ -275,7 +275,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
 
   const handleBuy = async (usd: number, maxTotalUsd?: number, fundFromHive?: boolean): Promise<void> => {
     const local = buyQuote(usd, market);
-    if (local.tokens <= 0) throw new Error('That budget does not cover a whole token at the current price.');
+    if (local.tokens <= 0) throw new Error('That budget does not cover the smallest buy at the current price.');
     const authoritative = await live.quoteBuy(local.tokens);
     // The user's own ceiling wins. If live state has moved past it between the
     // preview and this click, REFUSE here rather than signing an allowance
@@ -913,7 +913,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                     service of every new market, which is noise beside a price. */}
                 {market.priceUsd > 0 ? (
                   <div className="text-caption tabular-nums text-ink-14 font-num">
-                    ≈ {tok(serviceQuote(sv.usd, market.priceUsd).tokens)} tokens
+                    ≈ {tok(serviceQuote(sv.usd, market.priceUsd, market.rules).tokens)} tokens
                   </div>
                 ) : (
                   <div className="text-caption text-ink-14 font-ui">token cost unavailable</div>

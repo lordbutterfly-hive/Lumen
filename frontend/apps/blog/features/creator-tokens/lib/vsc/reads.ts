@@ -130,6 +130,22 @@ export function kFaceAnchor(c: string): string {
 export function kFaceAnchorAt(c: string): string {
   return mk(c, 'faa');
 }
+/**
+ * v6 migration flags (core/migrate_v6.go): present ("1") once the contract has
+ * scaled that holder's `mb|`/`bal|`/`lots|` keys, or that market's `sup`/`cap`,
+ * to 0.01 units. Read them beside every token key: tokenCountFromState.
+ */
+export function kUnitsHolder(c: string, holder: string): string {
+  return `u6|${toDid(c)}|${toDid(holder)}`;
+}
+export function kUnitsMarket(c: string): string {
+  return mk(c, 'u6');
+}
+/** A token-count state value in TOKENS: units / 100 once its migration flag is set, the raw whole-token count before. */
+export function tokenCountFromState(raw: string | null | undefined, migratedFlag: string | null | undefined): number {
+  const n = toU64(raw);
+  return migratedFlag === '1' ? n / 100 : n;
+}
 export function kCap(c: string): string {
   return mk(c, 'cap');
 }
@@ -145,17 +161,18 @@ export function kLots(c: string, holder: string): string {
 }
 
 /** getLots' parser: malformed parts are skipped, the rest sorted freshest first; null when the key is absent or empty. */
-export function parseLots(raw: unknown): CohortLot[] | null {
+export function parseLots(raw: unknown, migratedFlag: string | null | undefined = null): CohortLot[] | null {
   if (typeof raw !== 'string' || raw === '') return null;
+  const scale = migratedFlag === '1' ? 100 : 1;
   const lots: CohortLot[] = [];
   for (const part of raw.split(';')) {
     if (part === '') continue;
     const fields = part.split(',');
     if (fields.length !== 2 || !/^\d+$/.test(fields[0]) || !/^\d+$/.test(fields[1])) continue;
-    const tokens = Number(fields[0]);
+    const count = Number(fields[0]);
     const acqBlock = Number(fields[1]);
-    if (!Number.isSafeInteger(tokens) || tokens <= 0 || !Number.isSafeInteger(acqBlock)) continue;
-    lots.push({ tokens, acqBlock });
+    if (!Number.isSafeInteger(count) || count <= 0 || !Number.isSafeInteger(acqBlock)) continue;
+    lots.push({ tokens: count / scale, acqBlock });
   }
   return sortLotsFreshestFirst(lots);
 }
@@ -260,6 +277,28 @@ export function kBal(c: string, holder: string): string {
 export function kMatured(c: string, holder: string): string {
   return `bal|${toDid(holder)}|${toDid(c)}`;
 }
+// v6 (2026-09-22): `bal|` keeps meaning WHOLE tokens (LE u64, byte for byte the
+// pre-v6 value, because magi-market decodes it as an integer with no decimals
+// hint); the remainder below one token, 0..99 UNITS as a decimal string, lives
+// here (core/matured.go kMaturedFrac). Same transposition as kMatured. Read with
+// the ordinary string encoding, like every other setMoney value.
+export function kMaturedFrac(c: string, holder: string): string {
+  return `balf|${toDid(holder)}|${toDid(c)}`;
+}
+
+/**
+ * The matured balance in TOKENS from its two keys: `bal|` (whole, hex-read LE)
+ * plus `balf|` (0..99 units, decimal). Neither key is scaled by the holder's
+ * v6 flag: `bal|` never changed unit and `balf|` never existed before v6, so
+ * this reads identically against a v5.1 market (no balf|, whole tokens) and a
+ * v6 one. Returns null, never 0, when the whole-token half is undecodable
+ * (see decodeMaturedLeHex); an absent key is a real zero.
+ */
+export function maturedTokensFromState(wholeHex: string | null | undefined, fracRaw: string | null | undefined): number | null {
+  const whole = decodeMaturedLeHex(wholeHex);
+  if (whole === null) return null;
+  return whole + toU64(fracRaw) / 100;
+}
 
 // Decode core/matured.go's wire form: little-endian uint64 with trailing
 // (high-order) zero bytes TRIMMED, supplied here as the node's hex encoding.
@@ -332,6 +371,10 @@ export interface ParsedEscrow {
    * divide — that would understate every escrowed amount by 1000x.
    */
   tokensEscrowed: number;
+  /** The commission carved inside the escrow, in tokens (floor(credits x 12%) on the contract's own unit). */
+  commissionTokens: number;
+  /** True for the v6 ten-field record (amounts were stored in 0.01 units). */
+  units: boolean;
   deadlineBlock: number;
   status: 'PENDING' | 'ANSWERED' | 'RECLAIMED' | 'DECLINED';
   /** The asker's hold clock, carried through the escrow so reclaiming cannot launder a fresh position into an aged, untaxed one. */
@@ -348,42 +391,28 @@ export interface ParsedEscrow {
 }
 
 export function parseEscrow(v: string): ParsedEscrow | null {
-  // ★★★ NINE fields (ask.go packEscrow:194-201; Go reads it back with
-  // strings.SplitN(v, "|", 9) and REFUSES len != 9). Re-verified against the
-  // DEPLOYED v2 contract 2026-08-31, not against this comment:
-  //
-  //   asker|credits|deadline|status|commissionHbd|acqBlock|offeringID|contentHash|answerHash
-  //
-  // ★ THIS PARSER READ EIGHT, AND THAT IS THE THIRD TIME THIS DRIFTED (7->8
-  // was fixed 2026-07-24; 6->7 the revision before). Against real nine-field
-  // state it put `offeringID` into `contentHash` and the pipe-joined
-  // `contentHash|answerHash` pair into `answerHash` — the same shape as both
-  // previous regressions, and it survived because the ONLY thing asserting the
-  // field count was the comment above, which was stale the moment offeringID
-  // was added on the Go side. There is now a GO-PACKED ROUND-TRIP FIXTURE
-  // (escrow-roundtrip.selftest.ts) built from a string packEscrow itself
-  // produced; a comment cannot drift a test.
-  //
-  // `acqBlock` was INSERTED before the two free-form fields: an escrow now
-  // carries the asker's hold clock so the credits it holds keep their
-  // acquisition age across the escrow round-trip (otherwise escrowing and
-  // reclaiming would launder a fresh position into an aged, untaxed one).
-  //
-  // THIS PARSER READ SEVEN. Against real eight-field state it silently put
-  // acqBlock into contentHash and a pipe-joined `contentHash|answerHash` pair
-  // into answerHash — the EXACT failure mode the six-to-seven migration
-  // documented one revision earlier, repeated. Only the first 7 delimiters
-  // are structural; the 8th field is "everything after" even if it contains
-  // a literal '|', matching SplitN's own semantics.
+  // ask.go packEscrow. Nine fields before v6 (credits in whole tokens); ten
+  // under v6, with the literal marker "u2" as the eighth field (credits and
+  // commission in 0.01 units). Both shapes coexist on chain after the update.
+  // Manual split (not String.split) to match Go's strings.SplitN: only the
+  // structural delimiters count, the answerHash is "everything after".
   const parts: string[] = [];
   let rest = v;
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 7; i++) {
     const idx = rest.indexOf('|');
     if (idx < 0) return null;
     parts.push(rest.slice(0, idx));
     rest = rest.slice(idx + 1);
   }
-  parts.push(rest);
+  let units = false;
+  if (rest.startsWith('u2|')) {
+    units = true;
+    rest = rest.slice(3);
+  }
+  const split = rest.indexOf('|');
+  if (split < 0) return null;
+  parts.push(rest.slice(0, split));
+  parts.push(rest.slice(split + 1));
   const [asker, creditsStr, deadlineStr, status, commissionHbdStr, acqBlockStr, offeringIdStr, contentHash, answerHash] = parts;
   const acqBlock = parseStrictBaseUnits(acqBlockStr);
   if (acqBlock === null) return null;
@@ -409,7 +438,8 @@ export function parseEscrow(v: string): ParsedEscrow | null {
   // null — i.e. silently disappear from the creator's inbox and the asker's
   // list, as if the ask had never existed.
   if (status !== 'PENDING' && status !== 'ANSWERED' && status !== 'RECLAIMED' && status !== 'DECLINED') return null;
-  return { asker, tokensEscrowed: creditsBaseUnits, deadlineBlock, status, acqBlock, offeringId, contentHash, answerHash };
+  const scale = units ? 100 : 1;
+  return { asker, tokensEscrowed: creditsBaseUnits / scale, commissionTokens: commissionHbdBaseUnits / scale, units, deadlineBlock, status, acqBlock, offeringId, contentHash, answerHash };
 }
 
 // ── Minimal GQL client — plain fetch, scoped to this feature. Same two

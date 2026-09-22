@@ -230,8 +230,10 @@ func refundMaturingCohortTax(s Store, c, h string, base, fromMaturing *big.Int, 
 	return tax
 }
 
-// RefundPrice is the CURRENT wind-down value of a single token:
-// floor(reserve/supply), in HBD base units. No error return by contract — an
+// RefundPrice is the CURRENT wind-down value of a single WHOLE token:
+// floor(reserve x TokenScale / supply-in-units), in HBD base units - the same
+// number floor(reserve/supply) gave when supply was counted in whole tokens
+// (v6: state holds 0.01 units; a per-unit figure floors to 0 or 1 everywhere). No error return by contract — an
 // unregistered or fully-drained creator simply reads supply == 0 and this
 // returns 0 without dividing, the same "degrade safely, never panic on bad
 // input" convention twap.go's RecordObs documents for its own no-error path.
@@ -245,7 +247,7 @@ func RefundPrice(s Store, creator string) *big.Int {
 	if mIsZero(supply) {
 		return mZero()
 	}
-	return refundPayout(getMoney(s, kReserve(creator)), big.NewInt(1), supply)
+	return refundPayout(getMoney(s, kReserve(creator)), unitsScale, supply)
 }
 
 // Refund burns `credits` out of the CALLER's own balance (the pull half —
@@ -297,7 +299,7 @@ func Refund(s Store, caller, creator string, block uint64, credits *big.Int, min
 	if !validAccount(creator) {
 		return nil, newErr(ErrInput, "invalid creator")
 	}
-	if credits == nil || credits.Sign() <= 0 {
+	if belowMinTrade(credits) {
 		return nil, newErr(ErrInput, "credits must be positive")
 	}
 

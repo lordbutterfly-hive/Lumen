@@ -77,11 +77,11 @@ func TestV51_OneCreditMissPaysTheOwnerAndNeverOverdraws(t *testing.T) {
 	if askerBal.Sign() != 0 {
 		t.Fatalf("asker balance = %s, want 0", askerBal)
 	}
-	if ownerBal.Cmp(big.NewInt(1)) != 0 {
-		t.Fatalf("owner balance = %s, want exactly the 1 credit the escrow held", ownerBal)
+	if ownerBal.Cmp(tk(1)) != 0 { // one token = 100 units (v6)
+		t.Fatalf("owner balance = %s, want exactly the 1 token the escrow held", ownerBal)
 	}
 	// Conservation: what left the escrow is exactly what it held.
-	if sum := new(big.Int).Add(askerBal, ownerBal); sum.Cmp(big.NewInt(1)) != 0 {
+	if sum := new(big.Int).Add(askerBal, ownerBal); sum.Cmp(tk(1)) != 0 {
 		t.Fatalf("escrow paid out %s against 1 credit held", sum)
 	}
 }
@@ -96,7 +96,7 @@ func TestV51_DeclineStillRefundsInFull(t *testing.T) {
 	if _, err := Decline(s, creator1, creator1, 100, 0); err != nil {
 		t.Fatalf("Decline: %v", err)
 	}
-	if bal := totalBalance(s, creator1, asker1); bal.Cmp(big.NewInt(1)) != 0 {
+	if bal := totalBalance(s, creator1, asker1); bal.Cmp(tk(1)) != 0 {
 		t.Fatalf("declined escrow returned %s, want the whole 1 credit", bal)
 	}
 	if ownerBal := totalBalance(s, creator1, Owner(s)); ownerBal.Sign() != 0 {

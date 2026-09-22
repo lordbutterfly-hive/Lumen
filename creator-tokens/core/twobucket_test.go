@@ -18,7 +18,7 @@ const tbWindow = ExitTaxDecayBlocks
 func tbMarket(t *testing.T, c string) *MemStore {
 	t.Helper()
 	s := NewMemStore()
-	if err := Register(s, c, c, 1000, 1000, 1_000_000_000); err != nil {
+	if err := Register(s, c, c, 1000, 1000, 1_000_000_000*TokenScale); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	return s
@@ -39,7 +39,7 @@ func tbKeepPaid(t *testing.T, s *MemStore, c string, from, to uint64) {
 // tbMature buys and then graduates, leaving the holder wholly matured.
 func tbMature(t *testing.T, s *MemStore, c, h string, n int64, buyAt uint64) uint64 {
 	t.Helper()
-	if _, err := Buy(s, h, c, buyAt, big.NewInt(n)); err != nil {
+	if _, err := Buy(s, h, c, buyAt, tk(n)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 	at := buyAt + tbWindow
@@ -49,7 +49,7 @@ func tbMature(t *testing.T, s *MemStore, c, h string, n int64, buyAt uint64) uin
 	// the market paid across the wait.
 	tbKeepPaid(t, s, c, buyAt, at)
 	graduate(s, c, h, at)
-	if MaturedOf(s, c, h).Cmp(big.NewInt(n)) != 0 {
+	if MaturedOf(s, c, h).Cmp(tk(n)) != 0 {
 		t.Fatalf("setup: expected %d matured, got %s", n, MaturedOf(s, c, h))
 	}
 	if MaturingOf(s, c, h).Sign() != 0 {
@@ -67,14 +67,14 @@ func TestTwoBucket_MaturedHolderCanSell(t *testing.T) {
 	s := tbMarket(t, c)
 	at := tbMature(t, s, c, h, 500, 1_000_000)
 
-	r, err := Sell(s, h, c, at, big.NewInt(200))
+	r, err := Sell(s, h, c, at, tk(200))
 	if err != nil {
 		t.Fatalf("a wholly-matured holder was refused the curve: %v", err)
 	}
 	if r.Tax.Sign() != 0 {
 		t.Fatalf("matured tokens paid %s exit tax — their rate is 0 by definition", r.Tax)
 	}
-	if got := BalanceOf(s, c, h); got.Cmp(big.NewInt(300)) != 0 {
+	if got := BalanceOf(s, c, h); got.Cmp(tk(300)) != 0 {
 		t.Fatalf("balance after selling 200 of 500 = %s, want 300", got)
 	}
 }
@@ -92,10 +92,10 @@ func TestTwoBucket_MaturedHolderIsNotTrappedInWindDown(t *testing.T) {
 	}
 	windDown := at + 1
 
-	if _, err := Sell(s, h, c, windDown, big.NewInt(1)); err == nil {
+	if _, err := Sell(s, h, c, windDown, tk(1)); err == nil {
 		t.Fatal("setup invalid: the curve rail must be closed during wind-down")
 	}
-	net, err := Refund(s, h, c, windDown, big.NewInt(500))
+	net, err := Refund(s, h, c, windDown, tk(500))
 	if err != nil {
 		t.Fatalf("TRAPPED: matured holder refused both rails — curve closed AND refund said %v", err)
 	}
@@ -124,13 +124,13 @@ func TestTwoBucket_MaturedHolderCanAsk(t *testing.T) {
 		if blk >= at {
 			break
 		}
-		if _, err := Buy(s, "hive:seeder", c, blk, big.NewInt(50)); err != nil {
+		if _, err := Buy(s, "hive:seeder", c, blk, tk(50)); err != nil {
 			t.Fatalf("seed buy at %d: %v", blk, err)
 		}
 	}
 
 	face := Face(s, c)
-	_, err := Ask(s, h, c, at, big.NewInt(5000), "contenthash", 864000, 0)
+	_, err := Ask(s, h, c, at, tk(5000), "contenthash", 864000, 0)
 
 	// Scoped deliberately: an Ask also needs a settlement rate, and building the
 	// oracle history for one is a fixture concern unrelated to buckets. What
@@ -156,14 +156,14 @@ func TestTwoBucket_PositionGuardSeesBothBuckets(t *testing.T) {
 	s := tbMarket(t, c)
 	tbMature(t, s, c, h, 500, 1_000_000)
 
-	if got := totalBalance(s, c, h); got.Cmp(big.NewInt(500)) != 0 {
+	if got := totalBalance(s, c, h); got.Cmp(tk(500)) != 0 {
 		t.Fatalf("totalBalance = %s, want 500 — a wholly-matured position is invisible "+
 			"to any guard that reads the maturing family alone", got)
 	}
-	if err := debitPosition(s, c, h, big.NewInt(501)); err == nil {
+	if err := debitPosition(s, c, h, tk(501)); err == nil {
 		t.Fatal("debitPosition allowed an over-draw — the guard must refuse")
 	}
-	if err := debitPosition(s, c, h, big.NewInt(500)); err != nil {
+	if err := debitPosition(s, c, h, tk(500)); err != nil {
 		t.Fatalf("debitPosition refused the exact position: %v", err)
 	}
 	if totalBalance(s, c, h).Sign() != 0 {
@@ -185,21 +185,21 @@ func TestTwoBucket_EscrowRoundTripPreservesMaturedBucket(t *testing.T) {
 	s := tbMarket(t, c)
 	at := tbMature(t, s, c, h, 500, 1_000_000)
 
-	fromMatured, fromMaturing := splitDraw(s, c, h, big.NewInt(500))
+	fromMatured, fromMaturing := splitDraw(s, c, h, tk(500))
 	if fromMaturing.Sign() != 0 {
 		t.Fatal("setup: the whole draw should come from the matured bucket")
 	}
 	// Exactly what Ask records, in the same order.
 	acq := holderAcqBlock(s, c, h)
 	setMoney(s, kEscrowMaturedLeg(c, 0), fromMatured)
-	if err := debitPosition(s, c, h, big.NewInt(500)); err != nil {
+	if err := debitPosition(s, c, h, tk(500)); err != nil {
 		t.Fatalf("debitPosition: %v", err)
 	}
 
 	// Exactly what Reclaim and Decline do.
-	returnEscrowToOwner(s, c, h, "", 0, big.NewInt(500), nil, acq, at)
+	returnEscrowToOwner(s, c, h, "", 0, tk(500), nil, acq, at)
 
-	if got := getMatured(s, c, h); got.Cmp(big.NewInt(500)) != 0 {
+	if got := getMatured(s, c, h); got.Cmp(tk(500)) != 0 {
 		t.Fatalf("matured bucket holds %s after the round trip, want 500 — the escrow "+
 			"demoted matured tokens into the maturing family", got)
 	}
@@ -209,7 +209,7 @@ func TestTwoBucket_EscrowRoundTripPreservesMaturedBucket(t *testing.T) {
 	// The property that actually matters is the money: a wholly-matured position
 	// owes nothing on exit. (maturedNow is deliberately NOT the assertion here —
 	// it reports on the MATURING bucket, which is now correctly empty.)
-	r, err := Sell(s, h, c, at, big.NewInt(500))
+	r, err := Sell(s, h, c, at, tk(500))
 	if err != nil {
 		t.Fatalf("sell: %v", err)
 	}
@@ -227,17 +227,17 @@ func TestTwoBucket_MixedEscrowSettlesEachLegOnItsOwnClock(t *testing.T) {
 	const c, h = "hive:alice", "hive:bob"
 	s := tbMarket(t, c)
 	at := tbMature(t, s, c, h, 400, 1_000_000)
-	if _, err := Buy(s, h, c, at, big.NewInt(400)); err != nil {
+	if _, err := Buy(s, h, c, at, tk(400)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 
-	fromMatured, fromMaturing := splitDraw(s, c, h, big.NewInt(800))
+	fromMatured, fromMaturing := splitDraw(s, c, h, tk(800))
 	if fromMatured.Sign() == 0 || fromMaturing.Sign() == 0 {
 		t.Fatal("setup: the draw should span both buckets")
 	}
 	acq := holderAcqBlock(s, c, h)
 	setMoney(s, kEscrowMaturedLeg(c, 0), fromMatured)
-	if err := debitPosition(s, c, h, big.NewInt(800)); err != nil {
+	if err := debitPosition(s, c, h, tk(800)); err != nil {
 		t.Fatalf("debitPosition: %v", err)
 	}
 
@@ -245,7 +245,7 @@ func TestTwoBucket_MixedEscrowSettlesEachLegOnItsOwnClock(t *testing.T) {
 	// a frozen mean aged as one pool, so the fresh half came back older than it
 	// had any right to be.
 	later := at + ExitTaxDecayBlocks/2
-	returnEscrowToOwner(s, c, h, "", 0, big.NewInt(800), nil, acq, later)
+	returnEscrowToOwner(s, c, h, "", 0, tk(800), nil, acq, later)
 
 	if got := getMatured(s, c, h); got.Cmp(fromMatured) != 0 {
 		t.Fatalf("matured leg came back as %s, want %s", got, fromMatured)
@@ -264,7 +264,7 @@ func TestTwoBucket_MixedEscrowSettlesEachLegOnItsOwnClock(t *testing.T) {
 	const carol = "hive:carol"
 	sc := tbMarket(t, c)
 	tbMature(t, sc, c, carol, 400, 1_000_000)
-	if _, err := Buy(sc, carol, c, at, big.NewInt(400)); err != nil {
+	if _, err := Buy(sc, carol, c, at, tk(400)); err != nil {
 		t.Fatalf("control buy: %v", err)
 	}
 
@@ -302,17 +302,17 @@ func TestTwoBucket_MixedSaleIsTaxedAtTheMarginalMaturingSlice(t *testing.T) {
 	at := tbMature(t, s, c, h, 400, 1_000_000)
 
 	// Fresh purchase on top of the matured position.
-	if _, err := Buy(s, h, c, at, big.NewInt(400)); err != nil {
+	if _, err := Buy(s, h, c, at, tk(400)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
-	if MaturingOf(s, c, h).Cmp(big.NewInt(400)) != 0 {
+	if MaturingOf(s, c, h).Cmp(tk(400)) != 0 {
 		t.Fatalf("expected 400 maturing, got %s", MaturingOf(s, c, h))
 	}
 
 	supplyBefore := getMoney(s, kSupply(c))
 
 	// Sell the whole 800: 400 matured (0%), 400 fresh (full rate), maturing first.
-	r, err := Sell(s, h, c, at, big.NewInt(800))
+	r, err := Sell(s, h, c, at, tk(800))
 	if err != nil {
 		t.Fatalf("sell: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestTwoBucket_MixedSaleIsTaxedAtTheMarginalMaturingSlice(t *testing.T) {
 		t.Fatal("setup invalid: the fresh half should carry a nonzero rate")
 	}
 	// The taxable base is EXACTLY the top-400 (maturing) curve slice.
-	topSlice, err := SellProceeds(supplyBefore, big.NewInt(400))
+	topSlice, err := SellProceeds(supplyBefore, tk(400))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,14 +346,14 @@ func TestTwoBucket_MixedSaleIsTaxedAtTheMarginalMaturingSlice(t *testing.T) {
 	// the matured 400 collects the SAME total tax as the single bundled 800.
 	s2 := tbMarket(t, c)
 	at2 := tbMature(t, s2, c, h, 400, 1_000_000)
-	if _, err := Buy(s2, h, c, at2, big.NewInt(400)); err != nil {
+	if _, err := Buy(s2, h, c, at2, tk(400)); err != nil {
 		t.Fatalf("buy2: %v", err)
 	}
-	rFresh, err := Sell(s2, h, c, at2, big.NewInt(400))
+	rFresh, err := Sell(s2, h, c, at2, tk(400))
 	if err != nil {
 		t.Fatalf("sell fresh: %v", err)
 	}
-	rMat, err := Sell(s2, h, c, at2, big.NewInt(400))
+	rMat, err := Sell(s2, h, c, at2, tk(400))
 	if err != nil {
 		t.Fatalf("sell matured: %v", err)
 	}
@@ -370,11 +370,11 @@ func TestTwoBucket_SellDrawsMaturingFirstAndSparesTheTradableBucket(t *testing.T
 	const c, h = "hive:alice", "hive:bob"
 	s := tbMarket(t, c)
 	at := tbMature(t, s, c, h, 400, 1_000_000)
-	if _, err := Buy(s, h, c, at, big.NewInt(400)); err != nil {
+	if _, err := Buy(s, h, c, at, tk(400)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 
-	r, err := Sell(s, h, c, at, big.NewInt(400)) // exactly the maturing half
+	r, err := Sell(s, h, c, at, tk(400)) // exactly the maturing half
 	if err != nil {
 		t.Fatalf("sell: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestTwoBucket_SellDrawsMaturingFirstAndSparesTheTradableBucket(t *testing.T
 	if MaturingOf(s, c, h).Sign() != 0 {
 		t.Fatal("the maturing bucket should have been drawn first and emptied")
 	}
-	if MaturedOf(s, c, h).Cmp(big.NewInt(400)) != 0 {
+	if MaturedOf(s, c, h).Cmp(tk(400)) != 0 {
 		t.Fatal("the matured bucket must be untouched — it backs listings and allowances")
 	}
 }
@@ -467,22 +467,22 @@ func TestTwoBucket_BuyItselfGraduatesTheOldPile(t *testing.T) {
 	const c, h = "hive:alice", "hive:bob"
 	s := tbMarket(t, c)
 	const t0 = 1_000_000
-	if _, err := Buy(s, h, c, t0, big.NewInt(100_000)); err != nil {
+	if _, err := Buy(s, h, c, t0, tk(100_000)); err != nil {
 		t.Fatalf("first buy: %v", err)
 	}
 	at := uint64(t0) + tbWindow
 	tbKeepPaid(t, s, c, t0, at)
 
 	// The ONLY graduation trigger in this test.
-	if _, err := Buy(s, h, c, at, big.NewInt(100)); err != nil {
+	if _, err := Buy(s, h, c, at, tk(100)); err != nil {
 		t.Fatalf("second buy: %v", err)
 	}
 
-	if got := MaturedOf(s, c, h); got.Cmp(big.NewInt(100_000)) != 0 {
+	if got := MaturedOf(s, c, h); got.Cmp(tk(100_000)) != 0 {
 		t.Fatalf("matured = %s, want 100000 — Buy did not graduate the aged pile before "+
 			"crediting the new purchase", got)
 	}
-	if got := MaturingOf(s, c, h); got.Cmp(big.NewInt(100)) != 0 {
+	if got := MaturingOf(s, c, h); got.Cmp(tk(100)) != 0 {
 		t.Fatalf("maturing = %s, want just the 100 fresh tokens", got)
 	}
 	if bps := ExitTaxBpsAt(heldBlocksAt(s, c, h, at)); bps != MaxExitTaxBps {
@@ -501,7 +501,7 @@ func TestTwoBucket_FreshBuyCannotRideAnAgedPile(t *testing.T) {
 	s := tbMarket(t, c)
 	at := tbMature(t, s, c, h, 100_000, 1_000_000)
 
-	if _, err := Buy(s, h, c, at, big.NewInt(100)); err != nil {
+	if _, err := Buy(s, h, c, at, tk(100)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 
@@ -516,7 +516,7 @@ func TestTwoBucket_FreshBuyCannotRideAnAgedPile(t *testing.T) {
 		t.Fatalf("fresh tokens carry %d bps, want the full %d", bps, MaxExitTaxBps)
 	}
 	// Sanity: the matured pile is still there and still owes nothing.
-	if MaturedOf(s, c, h).Cmp(big.NewInt(100_000)) != 0 {
+	if MaturedOf(s, c, h).Cmp(tk(100_000)) != 0 {
 		t.Fatal("graduation must not disturb the matured balance")
 	}
 }
@@ -556,7 +556,7 @@ func TestTwoBucket_PushSweepsAnAbandonedMaturedHolder(t *testing.T) {
 func TestTwoBucket_PushStillRefusesAFreshHolder(t *testing.T) {
 	const c, h = "hive:alice", "hive:bob"
 	s := tbMarket(t, c)
-	if _, err := Buy(s, h, c, 1_000_000, big.NewInt(500)); err != nil {
+	if _, err := Buy(s, h, c, 1_000_000, tk(500)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 	if err := Retire(s, c, c, 1_000_000); err != nil {
@@ -579,34 +579,34 @@ func TestTwoBucket_TransferDebitsBothBucketsAndKeepsMaturityIntact(t *testing.T)
 	const c, from, to = "hive:alice", "hive:bob", "hive:carol"
 	s := tbMarket(t, c)
 	at := tbMature(t, s, c, from, 400, 1_000_000)
-	if _, err := Buy(s, from, c, at, big.NewInt(400)); err != nil {
+	if _, err := Buy(s, from, c, at, tk(400)); err != nil {
 		t.Fatalf("buy: %v", err)
 	}
 	// 400 matured + 400 maturing. Move 600 — more than either bucket alone.
-	if err := TransferCredits(s, from, c, from, to, at, big.NewInt(600)); err != nil {
+	if err := TransferCredits(s, from, c, from, to, at, tk(600)); err != nil {
 		t.Fatalf("a transfer the guard admitted was refused by the debit: %v", err)
 	}
 
-	if got := BalanceOf(s, c, from); got.Cmp(big.NewInt(200)) != 0 {
+	if got := BalanceOf(s, c, from); got.Cmp(tk(200)) != 0 {
 		t.Fatalf("sender total = %s, want 200", got)
 	}
-	if got := BalanceOf(s, c, to); got.Cmp(big.NewInt(600)) != 0 {
+	if got := BalanceOf(s, c, to); got.Cmp(tk(600)) != 0 {
 		t.Fatalf("recipient total = %s, want 600", got)
 	}
 	// Maturing is drawn first, so the whole 400 maturing plus 200 matured moved.
-	if got := MaturedOf(s, c, to); got.Cmp(big.NewInt(200)) != 0 {
+	if got := MaturedOf(s, c, to); got.Cmp(tk(200)) != 0 {
 		t.Fatalf("recipient matured = %s, want 200 — matured tokens credited into the "+
 			"MATURING bucket would silently restart a 42-day clock on tokens that had "+
 			"already served it", got)
 	}
-	if got := MaturedOf(s, c, from); got.Cmp(big.NewInt(200)) != 0 {
+	if got := MaturedOf(s, c, from); got.Cmp(tk(200)) != 0 {
 		t.Fatalf("sender matured = %s, want 200", got)
 	}
 	// Conservation across the move.
-	if tot := mAdd(BalanceOf(s, c, from), BalanceOf(s, c, to)); tot.Cmp(big.NewInt(800)) != 0 {
+	if tot := mAdd(BalanceOf(s, c, from), BalanceOf(s, c, to)); tot.Cmp(tk(800)) != 0 {
 		t.Fatalf("total across both parties = %s, want 800", tot)
 	}
-	if Supply(s, c).Cmp(big.NewInt(800)) != 0 {
+	if Supply(s, c).Cmp(tk(800)) != 0 {
 		t.Fatal("a transfer changed supply")
 	}
 }
@@ -645,7 +645,7 @@ func TestTwoBucket_TransferDebitsBothBucketsAndKeepsMaturityIntact(t *testing.T)
 func tbAgeWithoutGraduating(t *testing.T, s *MemStore, c, h string, n int64) uint64 {
 	t.Helper()
 	const t0 = 1_000_000
-	if _, err := Buy(s, h, c, t0, big.NewInt(n)); err != nil {
+	if _, err := Buy(s, h, c, t0, tk(n)); err != nil {
 		t.Fatalf("setup buy: %v", err)
 	}
 	at := uint64(t0) + tbWindow
@@ -653,7 +653,7 @@ func tbAgeWithoutGraduating(t *testing.T, s *MemStore, c, h string, n int64) uin
 	if MaturedOf(s, c, h).Sign() != 0 {
 		t.Fatalf("setup: pile graduated before the leg ran — the test would be vacuous")
 	}
-	if MaturingOf(s, c, h).Cmp(big.NewInt(n)) != 0 {
+	if MaturingOf(s, c, h).Cmp(tk(n)) != 0 {
 		t.Fatalf("setup: expected %d maturing, got %s", n, MaturingOf(s, c, h))
 	}
 	return at
@@ -672,12 +672,12 @@ func TestTwoBucket_AnswerCannotRideAnAgedPile(t *testing.T) {
 		t.Fatalf("answer: %v", err)
 	}
 
-	if got := MaturedOf(s, c, c); got.Cmp(big.NewInt(100_000)) != 0 {
+	if got := MaturedOf(s, c, c); got.Cmp(tk(100_000)) != 0 {
 		t.Fatalf("creator matured = %s, want 100000 — Answer credited its payout into the "+
 			"creator's aged pile without graduating it first (F-C1); the aged tokens are "+
 			"re-aged and become taxable again", got)
 	}
-	if got := MaturingOf(s, c, c); got.Cmp(big.NewInt(100)) != 0 {
+	if got := MaturingOf(s, c, c); got.Cmp(tk(100)) != 0 {
 		t.Fatalf("creator maturing = %s, want 100 (only the fresh answer credit)", got)
 	}
 }
@@ -694,7 +694,7 @@ func TestTwoBucket_ReclaimCannotRideAnAgedPile(t *testing.T) {
 		t.Fatalf("reclaim: %v", err)
 	}
 
-	if got := MaturedOf(s, c, h); got.Cmp(big.NewInt(100_000)) != 0 {
+	if got := MaturedOf(s, c, h); got.Cmp(tk(100_000)) != 0 {
 		t.Fatalf("asker matured = %s, want 100000 — Reclaim returned credits into the "+
 			"asker's aged pile without graduating it first (F-C1); the aged tokens are "+
 			"re-aged and become taxable again", got)
@@ -713,7 +713,7 @@ func TestTwoBucket_DeclineCannotRideAnAgedPile(t *testing.T) {
 		t.Fatalf("decline: %v", err)
 	}
 
-	if got := MaturedOf(s, c, h); got.Cmp(big.NewInt(100_000)) != 0 {
+	if got := MaturedOf(s, c, h); got.Cmp(tk(100_000)) != 0 {
 		t.Fatalf("asker matured = %s, want 100000 — Decline returned credits into the "+
 			"asker's aged pile without graduating it first (F-C1); the aged tokens are "+
 			"re-aged and become taxable again", got)

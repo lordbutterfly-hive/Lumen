@@ -1,0 +1,88 @@
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE VIEW
+CREATE VIEW
+CREATE VIEW
+CREATE VIEW
+CREATE VIEW
+CREATE VIEW
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+=== balances
+    creator    |       holder        | tokens 
+---------------+---------------------+--------
+ hive:hbd-temp | hive:hbd-temp       |   2.48
+ hive:hbd-temp | hive:lordbutterfly  |   0.06
+ hive:hbd-temp | hive:lumencontracts |   0.31
+ hive:hbd-temp | hive:third          |   0.55
+(4 rows)
+
+=== price_history
+   block   | side | delta | supply_after 
+-----------+------+-------+--------------
+ 109636949 | buy  |     1 |            1
+ 110111621 | buy  |     1 |            2
+ 110200000 | buy  |  1.50 |         3.50
+ 110200020 | sell | -0.10 |         3.40
+(4 rows)
+
+=== earnings
+    creator    | service_tokens_earned | jobs_delivered | trade_fees_claimed_hbd 
+---------------+-----------------------+----------------+------------------------
+ hive:hbd-temp |                  1.88 |              2 |                      0
+(1 row)
+
+=== my_asks
+ seq |  status   | credits_spent 
+-----+-----------+---------------
+   0 | answered  | 1
+   1 | answered  | 0.99
+   2 | declined  | 0.49
+   3 | reclaimed | 0.20
+(4 rows)
+
+=== delivery
+    creator    | registered_block |         registered_ts         | answered_count | missed_count | declined_count | median_response_blocks | avg_rating | rating_count | completion_pct 
+---------------+------------------+-------------------------------+----------------+--------------+----------------+------------------------+------------+--------------+----------------
+ hive:hbd-temp |        109626197 | 2026-09-22 14:29:10.959962+00 |              2 |            1 |              1 |                    463 |       5.00 |            1 |             67
+(1 row)
+
+=== discovery
+    creator    | registered_block |         registered_ts         | answered_count | missed_count | declined_count | median_response_blocks | avg_rating | rating_count | completion_pct 
+---------------+------------------+-------------------------------+----------------+--------------+----------------+------------------------+------------+--------------+----------------
+ hive:hbd-temp |        109626197 | 2026-09-22 14:29:10.959962+00 |              2 |            1 |              1 |                    463 |       5.00 |            1 |             67
+(1 row)
+

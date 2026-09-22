@@ -81,6 +81,19 @@ views:
         -- answered pays the CREATOR, not the asker
         SELECT creator, creator AS holder, credits_to_creator::numeric FROM lumen_ct_answered_events
         UNION ALL
+        -- ... and the platform's commission slice goes to the account named by
+        -- commission_to (the contract owner), IN TOKENS on the same market
+        -- (core/matured.go settleEscrowSlice -> creditInflow, the same primitive
+        -- an ordinary holder's inflow uses). Missing until 2026-09-22: the sum of
+        -- this view fell short of circulating supply by every commission ever
+        -- paid, and the wind-down keeper could never sweep the owner's slice.
+        SELECT creator, commission_to AS holder, commission_credits::numeric FROM lumen_ct_answered_events
+          WHERE commission_to <> '' AND commission_credits::numeric > 0
+        UNION ALL
+        -- a reclaim after a miss keeps a slice for the owner named by retained_to
+        SELECT creator, retained_to AS holder, commission_retained_credits::numeric FROM lumen_ct_reclaimed_events
+          WHERE retained_to <> '' AND commission_retained_credits::numeric > 0
+        UNION ALL
         -- reclaim and decline return the escrow to the ASKER (never `actor`:
         -- reclaim is permissionless, so actor may be a keeper or a stranger)
         SELECT creator, asker AS holder, credits::numeric FROM lumen_ct_reclaimed_events

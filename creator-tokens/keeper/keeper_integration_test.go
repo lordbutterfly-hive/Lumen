@@ -121,7 +121,7 @@ func TestIntegration_DoubleSubmitRefundHolderIsHarmless(t *testing.T) {
 	if err := core.Register(store, creator, creator, registeredBlock, face, 1_000_000); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if _, err := core.Buy(store, holder, creator, registeredBlock+1, big.NewInt(5000)); err != nil {
+	if _, err := core.Buy(store, holder, creator, registeredBlock+1, tk(5000)); err != nil {
 		t.Fatalf("Buy: %v", err)
 	}
 
@@ -441,7 +441,7 @@ func TestIntegration_CloseIfDrainedWaitsForOutstandingEscrow(t *testing.T) {
 	// see the file doc's point 2. Mirrors cmd/keeper/main.go's own "danerin"
 	// demo market exactly (same face, same buy size, same TWAP seeding), so
 	// the two are cross-checked against each other, not just against hand math.
-	if _, err := core.Buy(store, holder, creator, registeredBlock+1, big.NewInt(600)); err != nil {
+	if _, err := core.Buy(store, holder, creator, registeredBlock+1, tk(600)); err != nil {
 		t.Fatalf("Buy: %v", err)
 	}
 
@@ -476,14 +476,14 @@ func TestIntegration_CloseIfDrainedWaitsForOutstandingEscrow(t *testing.T) {
 	// 1 credit (ceil(1000/1000) == 1), so 1 is the asker's own tight slippage
 	// cap, not an arbitrary round number. (Until the ruling this priced an 880
 	// token leg instead, which also ceiled to 1.)
-	askResult, err := core.Ask(store, holder, creator, askBlock, big.NewInt(1), "content-hash-1", core.MinAskDeadline, 0)
+	askResult, err := core.Ask(store, holder, creator, askBlock, tk(1), "content-hash-1", core.MinAskDeadline, 0)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
 	// face=1000, rate=1000 -> creditsForAsk = ceil(1000/1000) = 1 credit
 	// moves into escrow: the holder's LIQUID balance drops to 599, but Supply
 	// (I3) stays 600 -- the escrowed 1 credit is still outstanding.
-	if got := core.BalanceOf(store, creator, holder); got.Cmp(big.NewInt(599)) != 0 {
+	if got := core.BalanceOf(store, creator, holder); got.Cmp(tk(599)) != 0 {
 		t.Fatalf("holder balance after ask = %s, want 599", got)
 	}
 
@@ -527,7 +527,7 @@ func TestIntegration_CloseIfDrainedWaitsForOutstandingEscrow(t *testing.T) {
 	if got := core.BalanceOf(store, creator, holder); got.Sign() != 0 {
 		t.Fatalf("holder liquid balance after sweep 1 = %s, want 0 (fully refunded)", got)
 	}
-	if got := core.Supply(store, creator); got.Cmp(big.NewInt(1)) != 0 {
+	if got := core.Supply(store, creator); got.Cmp(tk(1)) != 0 {
 		t.Fatalf("supply after sweep 1 = %s, want 1 (still escrowed)", got)
 	}
 
@@ -557,7 +557,7 @@ func TestIntegration_CloseIfDrainedWaitsForOutstandingEscrow(t *testing.T) {
 	if _, err := core.Reclaim(store, holder, creator, reclaimBlock, askResult.Seq); err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
-	if got := core.BalanceOf(store, creator, holder); got.Cmp(big.NewInt(1)) != 0 {
+	if got := core.BalanceOf(store, creator, holder); got.Cmp(tk(1)) != 0 {
 		t.Fatalf("holder balance after reclaim = %s, want 1", got)
 	}
 

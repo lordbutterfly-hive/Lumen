@@ -63,8 +63,8 @@ import "math/big"
 //	debitBalance:   Sell (sell.go), TransferCredits sender (transfer.go),
 //	                Ask escrow-out (ask.go), Refund + RefundHolder (refund.go)
 //
-// big.Int IS MANDATORY on every intermediate: bal <= MaxCap = 1e9 and
-// wacq ~ 1e10 blocks gives bal·wacq ~ 1e19 > 2^64. TinyGo overflows u64
+// big.Int IS MANDATORY on every intermediate: bal <= MaxCap = 1e11 units and
+// wacq ~ 1e10 blocks gives bal·wacq ~ 1e21 > 2^64. TinyGo overflows u64
 // silently — an overflow here would REDUCE a computed age with no error
 // anywhere. Only the final wacq (a block height, provably <= block, C-13) is
 // stored as u64.

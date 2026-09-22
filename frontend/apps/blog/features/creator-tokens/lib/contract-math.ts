@@ -240,6 +240,62 @@ export const EXIT_TAX_DECAY_BLOCKS = 42 * BLOCKS_PER_DAY; // params.go ExitTaxDe
 export const ASSET_DECIMALS = 3;
 const SCALE = 10 ** ASSET_DECIMALS;
 
+// v6 TOKEN UNITS (params.go "TOKEN UNIT", 2026-09-22). A token divides into
+// TOKEN_SCALE units; the contract's state and curve run on units, the wire and
+// this module's public signatures speak tokens (a JS number that may carry two
+// decimals). Every function below converts at the edge with toUnits/fromUnits
+// and does its integer arithmetic on units, so a whole-token input produces
+// exactly the pre-v6 figure (Area(100 x S) == old Area(S)) and a fractional one
+// produces the contract's own floor/ceil.
+export const TOKEN_SCALE = 100; // params.go TokenScale
+export const TOKEN_DECIMALS = 2; // params.go TokenDecimals
+export const MIN_FEE_BASE_UNITS = 1; // params.go MinFeeBaseUnits: tradefee.go lifts a floored-to-zero fee to one base unit
+export const MIN_TRADE_TOKENS = 1 / TOKEN_SCALE; // params.go MinTradeUnits: 0.01
+
+/** Tokens -> units, rounded to the nearest unit (0.29 * 100 is 28.999... in floating point). */
+export function toUnits(tokens: number): number {
+  if (!Number.isFinite(tokens)) return 0;
+  return Math.round(tokens * TOKEN_SCALE);
+}
+export function fromUnits(units: number): number {
+  return units / TOKEN_SCALE;
+}
+/** Snaps a token amount to the 0.01 grid the contract can hold. */
+export function roundToUnits(tokens: number): number {
+  return fromUnits(toUnits(tokens));
+}
+/** True when `tokens` sits on the 0.01 grid (within floating-point noise). */
+export function isUnitMultiple(tokens: number): boolean {
+  if (!Number.isFinite(tokens)) return false;
+  const scaled = tokens * TOKEN_SCALE;
+  return Math.abs(scaled - Math.round(scaled)) < 1e-6;
+}
+/**
+ * The WIRE form of a token amount: a bare integer for whole tokens ("2"),
+ * otherwise exactly two places ("1.50", "0.01").
+ *
+ * WHY THE INTEGER FORM IS LOAD-BEARING (deploy order, contract-rules.ts): this
+ * client ships BEFORE the v6 bytecode activates. The live v5.1 parser refuses
+ * any decimal point, so a whole amount sent as "2.00" would fail every buy,
+ * sell, ask and send until activation. "2" is accepted by both bytecodes (v6
+ * reads it as 2.00 tokens), and a fraction can only reach this function under
+ * v6 rules (assertPositiveTokenCount refuses it before then). Never an
+ * exponent, never a sign, never more than two places.
+ */
+export function formatTokenAmount(tokens: number): string {
+  const units = toUnits(tokens);
+  if (units < 0) throw new Error(`formatTokenAmount: negative token amount ${tokens}`);
+  const whole = Math.floor(units / TOKEN_SCALE);
+  const frac = units % TOKEN_SCALE;
+  return frac === 0 ? String(whole) : `${whole}.${String(frac).padStart(2, '0')}`;
+}
+/** The contract's own DISPLAY form (core fmtTokens): always two places ("2.00"), what every v6 result and event prints. */
+export function formatTokenAmountFixed(tokens: number): string {
+  const units = toUnits(tokens);
+  if (units < 0) throw new Error(`formatTokenAmountFixed: negative token amount ${tokens}`);
+  return `${Math.floor(units / TOKEN_SCALE)}.${String(units % TOKEN_SCALE).padStart(2, '0')}`;
+}
+
 export function baseUnitsToHuman(value: string | number | null | undefined): number {
   if (value === null || value === undefined || value === '') return 0;
   const n = typeof value === 'number' ? value : Number(value);
@@ -339,10 +395,29 @@ function curvePyr(s: bigint): bigint {
   return (s * (s + 1n) * (2n * s + 1n)) / 6n;
 }
 
-/** curve.go Area(S): S·BasePrice + floor((lin·T(S) + quad·P(S))/den), in HBD base units. */
+/** curve.go AreaTokens(S) (curveAreaIn): S*BasePrice + floor((lin*T(S) + quad*P(S))/den), in HBD base units, S in WHOLE tokens. */
 function areaBig(s: bigint): bigint {
   if (s <= 0n) return 0n;
   return BIG_BASE * s + (BIG_LIN * curveTri(s) + BIG_QUAD * curvePyr(s)) / BIG_DEN;
+}
+const BIG_TOKEN_SCALE = BigInt(TOKEN_SCALE);
+/**
+ * curve.go Area(u) (curveAreaUnitsIn), u in UNITS: the whole-token area plus a
+ * linear slice of the token being filled, floor(step * r / 100), where step is
+ * that token's exact price. Area(100 * S) == areaBig(S) for every S, which is
+ * why the mainnet reserves survive the v6 migration untouched.
+ */
+function areaUnitsBig(u: bigint): bigint {
+  if (u <= 0n) return 0n;
+  const s = u / BIG_TOKEN_SCALE;
+  const r = u % BIG_TOKEN_SCALE;
+  const area = areaBig(s);
+  if (r === 0n) return area;
+  const step = areaBig(s + 1n) - area;
+  return area + (step * r) / BIG_TOKEN_SCALE;
+}
+function unitsBig(tokens: number): bigint {
+  return BigInt(toUnits(tokens));
 }
 
 /**
@@ -351,7 +426,7 @@ function areaBig(s: bigint): bigint {
  * trading state, so this doubles as "what the reserve must currently hold".
  */
 export function areaBaseUnits(supplyTokens: number): number {
-  return Number(areaBig(BigInt(Math.trunc(supplyTokens))));
+  return Number(areaUnitsBig(unitsBig(supplyTokens)));
 }
 
 /**
@@ -362,15 +437,15 @@ export function areaBaseUnits(supplyTokens: number): number {
  * steps whose inputs are bounded, and not fine for an equality on a reserve.
  */
 export function areaBaseUnitsBig(supplyTokens: number): bigint {
-  return areaBig(BigInt(Math.trunc(supplyTokens)));
+  return areaUnitsBig(unitsBig(supplyTokens));
 }
 
 /** curve.go BuyCost(S,n) = Area(S+n) − Area(S) — the EXACT integer area step (L1). */
 export function buyCostBaseUnits(supplyTokens: number, tokens: number): number {
-  const s = BigInt(Math.trunc(supplyTokens));
-  const n = BigInt(Math.trunc(tokens));
+  const s = unitsBig(supplyTokens);
+  const n = unitsBig(tokens);
   if (n <= 0n) return 0;
-  return Number(areaBig(s + n) - areaBig(s));
+  return Number(areaUnitsBig(s + n) - areaUnitsBig(s));
 }
 
 /**
@@ -380,17 +455,20 @@ export function buyCostBaseUnits(supplyTokens: number, tokens: number): number {
  * feature never accepts.
  */
 export function sellProceedsBaseUnits(supplyTokens: number, tokens: number): number | null {
-  const s = BigInt(Math.trunc(supplyTokens));
-  const k = BigInt(Math.trunc(tokens));
+  const s = unitsBig(supplyTokens);
+  const k = unitsBig(tokens);
   if (k <= 0n) return 0;
   if (k > s) return null;
-  return Number(areaBig(s) - areaBig(s - k));
+  return Number(areaUnitsBig(s) - areaUnitsBig(s - k));
 }
 
 /** curve.go SpotRate(S) = base + floor((lin·S + quad·S²)/den); 0 at S == 0, deliberately. */
 export function spotRateBaseUnits(supplyTokens: number): number {
-  const s = BigInt(Math.trunc(supplyTokens));
-  if (s <= 0n) return 0;
+  // curve.go SpotRate(u): the rate of the token being filled, ceil(u / 100),
+  // so a supply of 2.01 quotes token 3, exactly as a supply of 3 did before v6.
+  const u = unitsBig(supplyTokens);
+  if (u <= 0n) return 0;
+  const s = (u + BIG_TOKEN_SCALE - 1n) / BIG_TOKEN_SCALE;
   return Number(BIG_BASE + (BIG_LIN * s + BIG_QUAD * s * s) / BIG_DEN);
 }
 
@@ -462,7 +540,10 @@ export interface TradeFeeSplit {
 
 /** tradefee.go tradeFeeOn: floor(amount·TradeFeeBps/1e4), split floor(fee/2) to the creator, the odd unit to the platform. */
 export function tradeFeeOn(amountBaseUnits: number): TradeFeeSplit {
-  const feeBaseUnits = mulBpsFloor(amountBaseUnits, TRADE_FEE_BPS);
+  // tradefee.go: a fee that floors to zero on a dust trade is lifted to one base
+  // unit, so splitting a sale into unit sales is never cheaper than one sale.
+  let feeBaseUnits = mulBpsFloor(amountBaseUnits, TRADE_FEE_BPS);
+  if (feeBaseUnits === 0 && amountBaseUnits > 0) feeBaseUnits = MIN_FEE_BASE_UNITS;
   const feeCreatorBaseUnits = Math.floor(feeBaseUnits / 2);
   return { feeBaseUnits, feeCreatorBaseUnits, feePlatformBaseUnits: feeBaseUnits - feeCreatorBaseUnits };
 }
@@ -481,11 +562,11 @@ export function quoteBuyBaseUnits(supplyTokens: number, tokens: number): BuyQuot
   const costBaseUnits = buyCostBaseUnits(supplyTokens, tokens);
   const { feeBaseUnits } = tradeFeeOn(costBaseUnits);
   return {
-    tokens: Math.trunc(tokens),
+    tokens: roundToUnits(tokens),
     costBaseUnits,
     feeBaseUnits,
     totalDueBaseUnits: costBaseUnits + feeBaseUnits,
-    rateAfterBaseUnits: spotRateBaseUnits(supplyTokens + Math.trunc(tokens))
+    rateAfterBaseUnits: spotRateBaseUnits(roundToUnits(supplyTokens) + roundToUnits(tokens))
   };
 }
 
@@ -558,17 +639,19 @@ export interface CohortTax {
  * draw (more tokens than supply).
  */
 export function cohortExitTaxBaseUnits(supplyTokens: number, fromMaturing: number, lots: readonly CohortLot[], block: number): CohortTax | null {
+  // All counts in UNITS from here on; sellProceedsBaseUnits takes tokens, so
+  // convert back at the call with fromUnits (exact: units are integers).
   let tax = 0;
   let taxable = 0;
   let weighted = 0;
-  let remaining = Math.max(0, Math.trunc(fromMaturing));
-  let curTop = Math.trunc(supplyTokens);
+  let remaining = Math.max(0, toUnits(fromMaturing));
+  let curTop = toUnits(supplyTokens);
   if (remaining === 0) return { taxBaseUnits: 0, taxableBaseUnits: 0, effBps: 0 };
   for (const lot of sortLotsFreshestFirst(lots)) {
     if (remaining === 0) break;
-    const take = Math.min(Math.max(0, Math.trunc(lot.tokens)), remaining);
+    const take = Math.min(Math.max(0, toUnits(lot.tokens)), remaining);
     if (take === 0) continue;
-    const slice = sellProceedsBaseUnits(curTop, take);
+    const slice = sellProceedsBaseUnits(fromUnits(curTop), fromUnits(take));
     if (slice === null) return null;
     const rate = lotRateBpsAt(lot.acqBlock, block);
     tax += exitTaxOnBaseUnits(slice, rate);
@@ -578,7 +661,7 @@ export function cohortExitTaxBaseUnits(supplyTokens: number, fromMaturing: numbe
     remaining -= take;
   }
   if (remaining > 0) {
-    const slice = sellProceedsBaseUnits(curTop, remaining);
+    const slice = sellProceedsBaseUnits(fromUnits(curTop), fromUnits(remaining));
     if (slice === null) return null;
     tax += exitTaxOnBaseUnits(slice, MAX_EXIT_TAX_BPS);
     taxable += slice;
@@ -598,8 +681,8 @@ export function quoteSellBaseUnits(
 ): SellQuoteBaseUnits | null {
   const grossBaseUnits = sellProceedsBaseUnits(supplyTokens, tokens);
   if (grossBaseUnits === null) return null;
-  const soldTokens = Math.trunc(tokens);
-  const maturing = maturingTokens === undefined ? soldTokens : Math.trunc(maturingTokens);
+  const soldTokens = roundToUnits(tokens);
+  const maturing = maturingTokens === undefined ? soldTokens : roundToUnits(maturingTokens);
   const fromMaturing = Math.min(soldTokens, Math.max(0, maturing)); // splitDraw, maturing-first
   let taxBps = exitTaxBpsAt(heldBlocks);
   let taxableBaseUnits = maturingGrossShareBaseUnits(grossBaseUnits, fromMaturing, soldTokens);
@@ -634,22 +717,27 @@ export function quoteSellBaseUnits(
  * unaffordable, which the caller must surface rather than rounding up into a
  * transaction that reverts.
  */
-export function tokensAffordableForBudget(supplyTokens: number, budgetBaseUnits: number): number {
+export function tokensAffordableForBudget(supplyTokens: number, budgetBaseUnits: number, stepTokens = 1): number {
+  // Largest multiple of `stepTokens` (1 under whole-token rules, 0.01 under v6)
+  // whose TotalDue fits the budget. Binary search over the monotone TotalDue(n),
+  // counted in steps so the result always sits on the grid the contract holds.
   if (budgetBaseUnits <= 0) return 0;
-  if (quoteBuyBaseUnits(supplyTokens, 1).totalDueBaseUnits > budgetBaseUnits) return 0;
+  const step = stepTokens > 0 ? roundToUnits(stepTokens) : 1;
+  const due = (steps: number): number => quoteBuyBaseUnits(supplyTokens, roundToUnits(steps * step)).totalDueBaseUnits;
+  if (due(1) > budgetBaseUnits) return 0;
   let lo = 1;
   let hi = 2;
-  while (quoteBuyBaseUnits(supplyTokens, hi).totalDueBaseUnits <= budgetBaseUnits) {
+  while (due(hi) <= budgetBaseUnits) {
     lo = hi;
     hi *= 2;
-    if (hi > 1e9) return lo; // params.go's own practical ceiling is ~283k tokens
+    if (hi > 1e11) return roundToUnits(lo * step); // beyond MaxCap in units
   }
   while (lo < hi - 1) {
     const mid = Math.floor((lo + hi) / 2);
-    if (quoteBuyBaseUnits(supplyTokens, mid).totalDueBaseUnits <= budgetBaseUnits) lo = mid;
+    if (due(mid) <= budgetBaseUnits) lo = mid;
     else hi = mid;
   }
-  return lo;
+  return roundToUnits(lo * step);
 }
 
 // =====================================================================
@@ -795,7 +883,9 @@ export function deriveFaceBandBaseUnits(currentFaceBaseUnits: number, faceSetAtB
  * supply) triple is worth."
  */
 export function refundPayoutBaseUnits(reserveBaseUnits: number, tokens: number, supplyTokens: number): number {
-  return mulDivFloor(reserveBaseUnits, tokens, supplyTokens);
+  // refund.go refundPayout: floor(reserve * units / supply-units), the same
+  // ratio as before v6 for whole tokens, exact for fractions.
+  return mulDivFloor(reserveBaseUnits, toUnits(tokens), toUnits(supplyTokens));
 }
 
 /**
@@ -849,8 +939,10 @@ export function refundNetBaseUnits(
  */
 export function maturingGrossShareBaseUnits(grossBaseUnits: number, fromMaturing: number, totalTokens: number): number {
   if (fromMaturing <= 0 || grossBaseUnits <= 0 || totalTokens <= 0) return 0;
-  if (fromMaturing === totalTokens) return grossBaseUnits;
-  return mulDivCeil(grossBaseUnits, fromMaturing, totalTokens);
+  const fromU = toUnits(fromMaturing);
+  const totalU = toUnits(totalTokens);
+  if (fromU >= totalU) return grossBaseUnits;
+  return mulDivCeil(grossBaseUnits, fromU, totalU);
 }
 
 /**
@@ -917,8 +1009,13 @@ export function floorPricePerTokenBaseUnits(reserveBaseUnits: number, supplyToke
 }
 
 /** ask.go creditsForAsk: ceil(face/rate). rate is HBD base units per credit; caller guarantees rate > 0. */
-export function creditsForAskBaseUnits(faceBaseUnits: number, rateBaseUnitsPerCredit: number): number {
-  return mulDivCeil(faceBaseUnits, 1, rateBaseUnitsPerCredit);
+export function creditsForAskBaseUnits(faceBaseUnits: number, rateBaseUnitsPerCredit: number, fractional = false): number {
+  // ask.go creditsForAsk. v6 (`fractional`): ceil(face * 100 / rate) UNITS,
+  // returned as tokens with two decimals: a 1.000 HBD service at 1.015 HBD per
+  // token costs 0.99 tokens. Before v6: ceil(face / rate) WHOLE tokens, which is
+  // what the live bytecode still charges until the v6 CID is reported.
+  if (!fractional) return mulDivCeil(faceBaseUnits, 1, rateBaseUnitsPerCredit);
+  return fromUnits(mulDivCeil(faceBaseUnits, TOKEN_SCALE, rateBaseUnitsPerCredit));
 }
 
 /**
@@ -938,8 +1035,11 @@ export function creditsForAskBaseUnits(faceBaseUnits: number, rateBaseUnitsPerCr
  * is nothing to add on top of it. The WHOLE posted face is what
  * creditsForAskBaseUnits prices.
  */
-export function commissionOwedForBaseUnits(nBaseUnits: number): number {
-  return mulBpsFloor(nBaseUnits, COMMISSION_BPS);
+export function commissionOwedForBaseUnits(nBaseUnits: number, fractional = false): number {
+  // floor(credits * 12%): on whole tokens before v6, on units (returned as
+  // tokens) under v6, so 0.99 tokens carry a 0.11-token commission.
+  if (!fractional) return mulBpsFloor(nBaseUnits, COMMISSION_BPS);
+  return fromUnits(mulBpsFloor(toUnits(nBaseUnits), COMMISSION_BPS));
 }
 
 /**
@@ -1273,8 +1373,9 @@ export function settleSpendStatus(
   if (leg < lo) return 'price_below_floor';
   if (leg > hi) return 'price_above_ceiling';
   if (credits > 1) {
-    const lhs = BigInt(Math.trunc(credits)) * 10000n;
-    const rhs = BigInt(Math.trunc(supplyTokens)) * BigInt(bounds.spendSupplyBps);
+    // v6: compare in units so a fractional ask (0.29 tokens) is not truncated to zero.
+    const lhs = BigInt(toUnits(credits)) * 10000n;
+    const rhs = BigInt(toUnits(supplyTokens)) * BigInt(bounds.spendSupplyBps);
     if (lhs > rhs) return 'spend_cap';
   }
   return 'ok';

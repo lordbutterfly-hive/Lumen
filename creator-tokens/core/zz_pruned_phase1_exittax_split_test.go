@@ -85,7 +85,7 @@ func zp2Store(t *testing.T, supply, maturing, matured int64, heldBlocks uint64, 
 	setMoney(s, kCap(zp2Creator), big.NewInt(MaxCap))
 	setMoney(s, kFace(zp2Creator), big.NewInt(MinFace))
 	setMoney(s, kSupply(zp2Creator), big.NewInt(supply))
-	setMoney(s, kReserve(zp2Creator), Area(big.NewInt(supply)))
+	setMoney(s, kReserve(zp2Creator), Area(tk(supply)))
 	if maturing > 0 {
 		setMoney(s, kBal(zp2Creator, zp2Holder), big.NewInt(maturing))
 		if heldBlocks > zp2Block {

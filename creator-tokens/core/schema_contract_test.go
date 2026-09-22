@@ -169,12 +169,12 @@ func TestSchemaContract_Registered(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "registered", "magi-indexer/creator_tokens_mappings.yaml (KindRegistered) + :528-533 (ParseEvent dispatch)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (RegisteredEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (RegisteredEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_345_678, "magi-indexer/creator_tokens_mappings.yaml (RegisteredEvent.Block)")
 	scWantStr(t, evName, m, "face", "5000", "magi-indexer/creator_tokens_mappings.yaml (RegisteredEvent.Face)")
-	scWantStr(t, evName, m, "cap", "1000000", "magi-indexer/creator_tokens_mappings.yaml (RegisteredEvent.Cap)")
+	scWantStr(t, evName, m, "cap", "10000.00", "magi-indexer/creator_tokens_mappings.yaml (RegisteredEvent.Cap)")
 	scWantStr(t, evName, m, "feePaid", "10000", "magi-indexer/creator_tokens_mappings.yaml (RegisteredEvent.FeePaid)")
 	scWantFieldCount(t, evName, m, 8, ref)
 }
@@ -193,7 +193,7 @@ func TestSchemaContract_FaceChanged(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "faceChanged", "magi-indexer/creator_tokens_mappings.yaml (KindFaceChanged)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (FaceChangedEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (FaceChangedEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_500_000, "magi-indexer/creator_tokens_mappings.yaml (FaceChangedEvent.Block)")
@@ -209,12 +209,12 @@ func TestSchemaContract_CapChanged(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "capChanged", "magi-indexer/creator_tokens_mappings.yaml (KindCapChanged)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (CapChangedEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (CapChangedEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_500_100, "magi-indexer/creator_tokens_mappings.yaml (CapChangedEvent.Block)")
-	scWantStr(t, evName, m, "oldCap", "1000000", "magi-indexer/creator_tokens_mappings.yaml (CapChangedEvent.OldCap)")
-	scWantStr(t, evName, m, "newCap", "2000000", "magi-indexer/creator_tokens_mappings.yaml (CapChangedEvent.NewCap)")
+	scWantStr(t, evName, m, "oldCap", "10000.00", "magi-indexer/creator_tokens_mappings.yaml (CapChangedEvent.OldCap)")
+	scWantStr(t, evName, m, "newCap", "20000.00", "magi-indexer/creator_tokens_mappings.yaml (CapChangedEvent.NewCap)")
 	scWantFieldCount(t, evName, m, 7, ref)
 }
 
@@ -235,12 +235,12 @@ func TestSchemaContract_Transferred(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "transferred", "magi-indexer/creator_tokens_mappings.yaml (KindTransferred)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (TransferredEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "holderone", "magi-indexer/creator_tokens_mappings.yaml (TransferredEvent.Actor)")
 	scWantStr(t, evName, m, "to", "holdertwo", "magi-indexer/creator_tokens_mappings.yaml (TransferredEvent.To)")
 	scWantNum(t, evName, m, "block", 12_650_000, "magi-indexer/creator_tokens_mappings.yaml (TransferredEvent.Block)")
-	scWantStr(t, evName, m, "amount", "50000", "magi-indexer/creator_tokens_mappings.yaml (TransferredEvent.Amount)")
+	scWantStr(t, evName, m, "amount", "500.00", "magi-indexer/creator_tokens_mappings.yaml (TransferredEvent.Amount)")
 	scWantFieldCount(t, evName, m, 7, ref)
 }
 
@@ -251,16 +251,16 @@ func TestSchemaContract_Asked(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "asked", "magi-indexer/creator_tokens_mappings.yaml (KindAsked)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "holderone", "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_700_000, "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.Block)")
 	scWantNum(t, evName, m, "seq", 3, "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.Seq)")
-	scWantStr(t, evName, m, "creditsSpent", "42", "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.CreditsSpent)")
+	scWantStr(t, evName, m, "creditsSpent", "0.42", "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.CreditsSpent)")
 	// ★ commissionCredits, and it is a PARTITION of creditsSpent (2026-09-12):
 	// 42 credits left the buyer, 5 of which are the platform's. An indexer that
 	// adds the two together bills the buyer twice.
-	scWantStr(t, evName, m, "commissionCredits", "5", "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.CommissionCredits)")
+	scWantStr(t, evName, m, "commissionCredits", "0.05", "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.CommissionCredits)")
 	scWantStr(t, evName, m, "rate", "2000", "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.Rate)")
 	scWantNum(t, evName, m, "deadlineBlocks", 28800, "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.DeadlineBlocks)")
 	scWantStr(t, evName, m, "contentHash", "cid-realistic-hash-abc123", "magi-indexer/creator_tokens_mappings.yaml (AskedEvent.ContentHash)")
@@ -294,13 +294,13 @@ func TestSchemaContract_Answered(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "answered", "magi-indexer/creator_tokens_mappings.yaml (KindAnswered)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_710_000, "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.Block)")
 	scWantNum(t, evName, m, "seq", 3, "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.Seq)")
-	scWantStr(t, evName, m, "creditsToCreator", "42", "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.CreditsToCreator)")
-	scWantStr(t, evName, m, "commissionCredits", "6", "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.CommissionCredits)")
+	scWantStr(t, evName, m, "creditsToCreator", "0.42", "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.CreditsToCreator)")
+	scWantStr(t, evName, m, "commissionCredits", "0.06", "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.CommissionCredits)")
 	scWantStr(t, evName, m, "commissionTo", "lumencontracts", "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.CommissionTo)")
 	scWantStr(t, evName, m, "answerHash", "ans-realistic-hash-1", "magi-indexer/creator_tokens_mappings.yaml (AnsweredEvent.AnswerHash)")
 	scWantFieldCount(t, evName, m, 10, ref)
@@ -316,18 +316,18 @@ func TestSchemaContract_Reclaimed(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "reclaimed", "magi-indexer/creator_tokens_mappings.yaml (KindReclaimed)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "holderthree", "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_720_000, "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.Block)")
 	scWantNum(t, evName, m, "seq", 4, "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.Seq)")
-	scWantStr(t, evName, m, "credits", "58", "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.Credits)")
+	scWantStr(t, evName, m, "credits", "0.58", "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.Credits)")
 	// commissionRetainedCredits (USER RULING 1, 2026-07-28; tokens since
 	// 2026-09-12) — the miss slice the protocol KEPT. It is a SEPARATE field, not
 	// a shrunken `credits`, because the indexer folds the two to DIFFERENT
 	// HOLDERS: `credits` back to the asker, this one onto the owner's position.
 	// Drop it from the wire and every miss reclaim silently loses the slice.
-	scWantStr(t, evName, m, "commissionRetainedCredits", "2", "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.CommissionRetainedCredits)")
+	scWantStr(t, evName, m, "commissionRetainedCredits", "0.02", "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.CommissionRetainedCredits)")
 	scWantStr(t, evName, m, "retainedTo", "lumencontracts", "magi-indexer/creator_tokens_mappings.yaml (ReclaimedEvent.RetainedTo)")
 	// asker (2026-07-27) — WHO WAS PAID, which is not `actor`: reclaim is
 	// permissionless, so actor may be a keeper pushing an abandoned escrow. The
@@ -348,7 +348,7 @@ func TestSchemaContract_Rated(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "rated", "magi-indexer/creator_tokens_mappings.yaml (KindRated)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (RatedEvent.Creator)")
 	// actor IS the buyer here — rating.go refuses anyone else — which is why
 	// this event carries no separate asker field the way reclaimed/declined do.
@@ -379,14 +379,14 @@ func TestSchemaContract_Declined(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "declined", "magi-indexer/creator_tokens_mappings.yaml (KindDeclined)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (DeclinedEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (DeclinedEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_725_000, "magi-indexer/creator_tokens_mappings.yaml (DeclinedEvent.Block)")
 	scWantNum(t, evName, m, "seq", 5, "magi-indexer/creator_tokens_mappings.yaml (DeclinedEvent.Seq)")
 	// A decline returns the WHOLE escrow and retains nothing, so there is one
 	// money field, not two (the commissionHbd leg went with the HBD, 2026-09-12).
-	scWantStr(t, evName, m, "credits", "60", "magi-indexer/creator_tokens_mappings.yaml (DeclinedEvent.Credits)")
+	scWantStr(t, evName, m, "credits", "0.60", "magi-indexer/creator_tokens_mappings.yaml (DeclinedEvent.Credits)")
 	scWantStr(t, evName, m, "asker", "holderthree", "magi-indexer/creator_tokens_mappings.yaml (DeclinedEvent.Asker)")
 	scWantFieldCount(t, evName, m, 8, ref)
 }
@@ -410,11 +410,11 @@ func TestSchemaContract_Bought(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "bought", "magi-indexer/creator_tokens_mappings.yaml (KindBought)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (BoughtEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "holderthree", "magi-indexer/creator_tokens_mappings.yaml (BoughtEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_730_000, "magi-indexer/creator_tokens_mappings.yaml (BoughtEvent.Block)")
-	scWantStr(t, evName, m, "minted", "100", "magi-indexer/creator_tokens_mappings.yaml (BoughtEvent.Minted)")
+	scWantStr(t, evName, m, "minted", "1.00", "magi-indexer/creator_tokens_mappings.yaml (BoughtEvent.Minted)")
 	scWantStr(t, evName, m, "cost", "5050", "magi-indexer/creator_tokens_mappings.yaml (BoughtEvent.Cost)")
 	scWantStr(t, evName, m, "fee", "505", "magi-indexer/creator_tokens_mappings.yaml (BoughtEvent.Fee)")
 	scWantStr(t, evName, m, "totalDue", "5555", "magi-indexer/creator_tokens_mappings.yaml (BoughtEvent.TotalDue)")
@@ -431,11 +431,11 @@ func TestSchemaContract_Sold(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "sold", "magi-indexer/creator_tokens_mappings.yaml (KindSold)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (SoldEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "holderthree", "magi-indexer/creator_tokens_mappings.yaml (SoldEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_740_000, "magi-indexer/creator_tokens_mappings.yaml (SoldEvent.Block)")
-	scWantStr(t, evName, m, "sold", "50", "magi-indexer/creator_tokens_mappings.yaml (SoldEvent.Sold)")
+	scWantStr(t, evName, m, "sold", "0.50", "magi-indexer/creator_tokens_mappings.yaml (SoldEvent.Sold)")
 	scWantStr(t, evName, m, "gross", "2500", "magi-indexer/creator_tokens_mappings.yaml (SoldEvent.Gross)")
 	scWantStr(t, evName, m, "tax", "500", "magi-indexer/creator_tokens_mappings.yaml (SoldEvent.Tax)")
 	scWantStr(t, evName, m, "fee", "250", "magi-indexer/creator_tokens_mappings.yaml (SoldEvent.Fee)")
@@ -456,7 +456,7 @@ func TestSchemaContract_OfferingCreated(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "offeringCreated", "magi-indexer/creator_tokens_mappings.yaml (KindOfferingCreated)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (OfferingCreatedEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (OfferingCreatedEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_750_000, "magi-indexer/creator_tokens_mappings.yaml (OfferingCreatedEvent.Block)")
@@ -476,7 +476,7 @@ func TestSchemaContract_OfferingUpdated(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "offeringUpdated", "magi-indexer/creator_tokens_mappings.yaml (KindOfferingUpdated)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (OfferingUpdatedEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (OfferingUpdatedEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_760_000, "magi-indexer/creator_tokens_mappings.yaml (OfferingUpdatedEvent.Block)")
@@ -494,7 +494,7 @@ func TestSchemaContract_OfferingDeleted(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "offeringDeleted", "magi-indexer/creator_tokens_mappings.yaml (KindOfferingDeleted)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (OfferingDeletedEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (OfferingDeletedEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_770_000, "magi-indexer/creator_tokens_mappings.yaml (OfferingDeletedEvent.Block)")
@@ -509,11 +509,11 @@ func TestSchemaContract_Refunded(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "refunded", "magi-indexer/creator_tokens_mappings.yaml (KindRefunded)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (RefundedEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "holderfour", "magi-indexer/creator_tokens_mappings.yaml (RefundedEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_800_000, "magi-indexer/creator_tokens_mappings.yaml (RefundedEvent.Block)")
-	scWantStr(t, evName, m, "credits", "1000", "magi-indexer/creator_tokens_mappings.yaml (RefundedEvent.Credits)")
+	scWantStr(t, evName, m, "credits", "10.00", "magi-indexer/creator_tokens_mappings.yaml (RefundedEvent.Credits)")
 	scWantStr(t, evName, m, "payout", "950", "magi-indexer/creator_tokens_mappings.yaml (RefundedEvent.Payout)")
 	scWantFieldCount(t, evName, m, 7, ref)
 }
@@ -529,12 +529,12 @@ func TestSchemaContract_RefundPushed(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "refundPushed", "magi-indexer/creator_tokens_mappings.yaml (KindRefundPushed)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (RefundPushedEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "keeperbot1", "magi-indexer/creator_tokens_mappings.yaml (RefundPushedEvent.Actor)")
 	scWantStr(t, evName, m, "holder", "holderfive", "magi-indexer/creator_tokens_mappings.yaml (RefundPushedEvent.Holder)")
 	scWantNum(t, evName, m, "block", 12_810_000, "magi-indexer/creator_tokens_mappings.yaml (RefundPushedEvent.Block)")
-	scWantStr(t, evName, m, "creditsBurned", "300", "magi-indexer/creator_tokens_mappings.yaml (RefundPushedEvent.CreditsBurned)")
+	scWantStr(t, evName, m, "creditsBurned", "3.00", "magi-indexer/creator_tokens_mappings.yaml (RefundPushedEvent.CreditsBurned)")
 	scWantStr(t, evName, m, "payout", "285", "magi-indexer/creator_tokens_mappings.yaml (RefundPushedEvent.Payout)")
 	scWantFieldCount(t, evName, m, 8, ref)
 }
@@ -546,7 +546,7 @@ func TestSchemaContract_Closed(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "closed", "magi-indexer/creator_tokens_mappings.yaml (KindClosed)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (ClosedEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "keeperbot1", "magi-indexer/creator_tokens_mappings.yaml (ClosedEvent.Actor)")
 	scWantNum(t, evName, m, "block", 12_900_000, "magi-indexer/creator_tokens_mappings.yaml (ClosedEvent.Block)")
@@ -571,7 +571,7 @@ func TestSchemaContract_Retired(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "retired", "magi-indexer/creator_tokens_mappings.yaml (KindRetired)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "creator", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (RetiredEvent.Creator)")
 	scWantStr(t, evName, m, "actor", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (RetiredEvent.Actor)")
 	scWantNum(t, evName, m, "block", 13_000_000, "magi-indexer/creator_tokens_mappings.yaml (RetiredEvent.Block)")
@@ -585,7 +585,7 @@ func TestSchemaContract_TreasuryWithdrawn(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "treasuryWithdrawn", "magi-indexer/creator_tokens_mappings.yaml (KindTreasuryWithdrawn)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "actor", "ownerAccount", "magi-indexer/creator_tokens_mappings.yaml (TreasuryWithdrawnEvent.Actor)")
 	scWantStr(t, evName, m, "amount", "75000", "magi-indexer/creator_tokens_mappings.yaml (TreasuryWithdrawnEvent.Amount)")
 	scWantNum(t, evName, m, "block", 13_010_000, "magi-indexer/creator_tokens_mappings.yaml (TreasuryWithdrawnEvent.Block)")
@@ -608,7 +608,7 @@ func TestSchemaContract_TradeFeesClaimed(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "tradeFeesClaimed", "magi-indexer/creator_tokens_mappings.yaml (KindTradeFeesClaimed)")
-	scWantNum(t, evName, m, "v", 1, "magi-indexer/creator_tokens_mappings.yaml (envelope.V)")
+	scWantNum(t, evName, m, "v", 2, "magi-indexer/creator_tokens_mappings.yaml (envelope.V); v6 decimal token fields")
 	scWantStr(t, evName, m, "actor", "aliceperry", "magi-indexer/creator_tokens_mappings.yaml (TradeFeesClaimedEvent.Actor)")
 	scWantStr(t, evName, m, "amount", "1250", "magi-indexer/creator_tokens_mappings.yaml (TradeFeesClaimedEvent.Amount)")
 	scWantNum(t, evName, m, "block", 13_020_000, "magi-indexer/creator_tokens_mappings.yaml (TradeFeesClaimedEvent.Block)")
@@ -639,7 +639,7 @@ func TestSchemaContract_Init(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "init", ref)
-	scWantNum(t, evName, m, "v", 1, ref)
+	scWantNum(t, evName, m, "v", 2, ref)
 	scWantStr(t, evName, m, "owner", "ownerAccount", ref)
 	scWantFieldCount(t, evName, m, 3, ref)
 }
@@ -651,7 +651,7 @@ func TestSchemaContract_Paused(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "paused", ref)
-	scWantNum(t, evName, m, "v", 1, ref)
+	scWantNum(t, evName, m, "v", 2, ref)
 	scWantStr(t, evName, m, "actor", "ownerAccount", ref)
 	scWantFieldCount(t, evName, m, 3, ref)
 }
@@ -663,7 +663,7 @@ func TestSchemaContract_Unpaused(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "unpaused", ref)
-	scWantNum(t, evName, m, "v", 1, ref)
+	scWantNum(t, evName, m, "v", 2, ref)
 	scWantStr(t, evName, m, "actor", "ownerAccount", ref)
 	scWantFieldCount(t, evName, m, 3, ref)
 }
@@ -680,7 +680,7 @@ func TestSchemaContract_OwnerTransferInitiated(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "ownerTransferInitiated", ref)
-	scWantNum(t, evName, m, "v", 1, ref)
+	scWantNum(t, evName, m, "v", 2, ref)
 	scWantStr(t, evName, m, "currentOwner", "ownerAccount", ref)
 	scWantStr(t, evName, m, "pendingOwner", "candidateAccount", ref)
 	scWantFieldCount(t, evName, m, 4, ref)
@@ -693,7 +693,7 @@ func TestSchemaContract_OwnerChanged(t *testing.T) {
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "ownerChanged", ref)
-	scWantNum(t, evName, m, "v", 1, ref)
+	scWantNum(t, evName, m, "v", 2, ref)
 	scWantStr(t, evName, m, "previousOwner", "ownerAccount", ref)
 	scWantStr(t, evName, m, "newOwner", "candidateAccount", ref)
 	scWantFieldCount(t, evName, m, 4, ref)

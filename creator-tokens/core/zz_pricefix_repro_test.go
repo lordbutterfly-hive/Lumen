@@ -21,7 +21,7 @@ func pfMarket(t *testing.T, s *MemStore, c string, activeUntil uint64) {
 
 func pfBuy(t *testing.T, s *MemStore, who, c string, block uint64, n int64) {
 	t.Helper()
-	if _, err := Buy(s, who, c, block, big.NewInt(n)); err != nil {
+	if _, err := Buy(s, who, c, block, tk(n)); err != nil {
 		t.Fatalf("Buy(%s,%d@%d): %v", who, n, block, err)
 	}
 }
@@ -46,7 +46,7 @@ func TestPFRepro_PRICE1_TransferLaunder(t *testing.T) {
 
 	// alt transfers the fresh M into whale's aged pile. No graduate on transfer
 	// (F-C1), so the clocks blend.
-	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(M)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(M)); err != nil {
 		t.Fatalf("TransferCredits: %v", err)
 	}
 
@@ -62,7 +62,7 @@ func TestPFRepro_PRICE1_TransferLaunder(t *testing.T) {
 	// curve slice; the matured N owes 0. Computed directly off the curve at the
 	// sell supply.
 	supply := getMoney(s, kSupply(c))
-	topM, err := SellProceeds(supply, big.NewInt(M))
+	topM, err := SellProceeds(supply, tk(M))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,15 +99,15 @@ func TestPFRepro_PRICE2_Bundling(t *testing.T) {
 
 	// SPLIT PLAN: sell the fresh M first (top slice, taxed), then the matured N.
 	sSplit, c, blk := build(t)
-	qM, err := QuoteSell(sSplit, "whale", c, blk, big.NewInt(M))
+	qM, err := QuoteSell(sSplit, "whale", c, blk, tk(M))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rM, err := Sell(sSplit, "whale", c, blk, big.NewInt(M))
+	rM, err := Sell(sSplit, "whale", c, blk, tk(M))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rN, err := Sell(sSplit, "whale", c, blk, big.NewInt(N))
+	rN, err := Sell(sSplit, "whale", c, blk, tk(N))
 	if err != nil {
 		t.Fatal(err)
 	}

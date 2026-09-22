@@ -22,7 +22,7 @@ func TestPFPartB_CohortFloorExactAndHomogeneousNoOp(t *testing.T) {
 	pfMarket(t, s, c, t1)
 	pfBuy(t, s, "h", c, t1, 400) // one cohort, fresh
 	supply := getMoney(s, kSupply(c))
-	_, fromMat := splitDraw(s, c, "h", big.NewInt(400))
+	_, fromMat := splitDraw(s, c, "h", tk(400))
 	taxable, _ := SellProceeds(supply, fromMat)
 	bps := ExitTaxBpsAt(heldBlocksAt(s, c, "h", t1))
 	blend := ExitTaxOn(taxable, bps)
@@ -30,7 +30,7 @@ func TestPFPartB_CohortFloorExactAndHomogeneousNoOp(t *testing.T) {
 	if cohort.Cmp(blend) != 0 {
 		t.Fatalf("homogeneous: cohortTax %s != blendTax %s (floor must be a no-op)", cohort, blend)
 	}
-	r, _ := QuoteSell(s, "h", c, t1, big.NewInt(400))
+	r, _ := QuoteSell(s, "h", c, t1, tk(400))
 	if r.Tax.Cmp(ExitTaxOn(r.TaxableGross, r.TaxBps)) != 0 {
 		t.Fatalf("homogeneous: single-rate identity broke: tax %s != %s", r.Tax, ExitTaxOn(r.TaxableGross, r.TaxBps))
 	}
@@ -41,16 +41,16 @@ func TestPFPartB_CohortFloorExactAndHomogeneousNoOp(t *testing.T) {
 	pfMarket(t, s2, c, t1)
 	pfBuy(t, s2, "whale", c, t0, 4000) // aged cohort
 	pfBuy(t, s2, "alt", c, t1, 400)    // fresh
-	if err := TransferCredits(s2, "alt", c, "alt", "whale", t1, big.NewInt(400)); err != nil {
+	if err := TransferCredits(s2, "alt", c, "alt", "whale", t1, tk(400)); err != nil {
 		t.Fatal(err)
 	}
 	supply2 := getMoney(s2, kSupply(c))
-	_, fm2 := splitDraw(s2, c, "whale", big.NewInt(4400))
+	_, fm2 := splitDraw(s2, c, "whale", tk(4400))
 	taxable2, _ := SellProceeds(supply2, fm2)
 	bps2 := ExitTaxBpsAt(heldBlocksAt(s2, c, "whale", t1))
 	blend2 := ExitTaxOn(taxable2, bps2)
 	cohort2, _, _, _ := maturingCohortTax(s2, c, "whale", supply2, fm2, t1)
-	topM, _ := SellProceeds(supply2, big.NewInt(400))
+	topM, _ := SellProceeds(supply2, tk(400))
 	intended := ExitTaxOn(topM, MaxExitTaxBps)
 	if cohort2.Cmp(blend2) <= 0 {
 		t.Fatalf("heterogeneous: cohortTax %s must exceed blendTax %s (launder)", cohort2, blend2)
@@ -58,7 +58,7 @@ func TestPFPartB_CohortFloorExactAndHomogeneousNoOp(t *testing.T) {
 	if cohort2.Cmp(intended) != 0 {
 		t.Fatalf("heterogeneous: cohortTax %s != intended (fresh @1500 top slice) %s", cohort2, intended)
 	}
-	rq, _ := QuoteSell(s2, "whale", c, t1, big.NewInt(4400))
+	rq, _ := QuoteSell(s2, "whale", c, t1, tk(4400))
 	if rq.Tax.Cmp(cohort2) != 0 {
 		t.Fatalf("reported tax %s != max(blend,cohort) %s", rq.Tax, cohort2)
 	}
@@ -77,16 +77,16 @@ func TestPFPartB_MigrationSynthesis(t *testing.T) {
 	pfMarket(t, s, c, t1)
 	// Fabricate a LEGACY aged position with NO lots ledger: supply+reserve+bal+
 	// clock written raw, exactly the shape a pre-fix mainnet holder has.
-	setMoney(s, kSupply(c), big.NewInt(4000))
-	setMoney(s, kReserve(c), Area(big.NewInt(4000)))
-	setMoney(s, kBal(c, "whale"), big.NewInt(4000))
+	setMoney(s, kSupply(c), tk(4000))
+	setMoney(s, kReserve(c), Area(tk(4000)))
+	setMoney(s, kBal(c, "whale"), tk(4000))
 	setU64(s, kAcqBlock(c, "whale"), t0) // aged
 	if getStr(s, kLots(c, "whale")) != "" {
 		t.Fatal("precondition: legacy position must have no ledger")
 	}
 	// A legacy holder selling their own aged pile pays 0 (fully matured), same
 	// as the blend — synthesis must not invent tax.
-	q0, err := QuoteSell(s, "whale", c, t1, big.NewInt(4000))
+	q0, err := QuoteSell(s, "whale", c, t1, tk(4000))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,13 +96,13 @@ func TestPFPartB_MigrationSynthesis(t *testing.T) {
 	// Now a fresh transfer-in lands (post-fix): synthesises the legacy cohort and
 	// appends the fresh one, so the launder closes on the mixed sale.
 	pfBuy(t, s, "alt", c, t1, 400)
-	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(400)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(400)); err != nil {
 		t.Fatal(err)
 	}
 	supply := getMoney(s, kSupply(c))
-	topM, _ := SellProceeds(supply, big.NewInt(400))
+	topM, _ := SellProceeds(supply, tk(400))
 	intended := ExitTaxOn(topM, MaxExitTaxBps)
-	q1, err := QuoteSell(s, "whale", c, t1, big.NewInt(4400))
+	q1, err := QuoteSell(s, "whale", c, t1, tk(4400))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,11 +124,11 @@ func TestPFPartB_ConservationUnderCohortFloor(t *testing.T) {
 	pfMarket(t, s, c, t1)
 	pfBuy(t, s, "whale", c, t0, 4000)
 	pfBuy(t, s, "alt", c, t1, 400)
-	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(400)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(400)); err != nil {
 		t.Fatal(err)
 	}
 	rBefore := getMoney(s, kReserve(c))
-	r, err := Sell(s, "whale", c, t1, big.NewInt(4400), nil)
+	r, err := Sell(s, "whale", c, t1, tk(4400), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
