@@ -206,13 +206,13 @@ export const V5_CODE_CIDS: ReadonlySet<string> = new Set([
  *
  * Under every earlier rule set this client keeps sending whole tokens and
  * refuses fractional input, because the live bytecode would refuse it.
- * Built 2026-09-22, 167,736 B, two reproducible builds; on testnet since 2026-09-22,
+ * Built 2026-09-22, 167,749 B, two reproducible builds; on testnet since 2026-09-22,
  * mainnet pending the owner's signature. The morning candidate (bafkreih5siwq…,
  * 167,142 B) ran on testnet for a few hours and is deliberately NOT listed: it
  * scaled `bal|` to units, which this client no longer reads that way.
  */
 export const V6_CODE_CIDS: ReadonlySet<string> = new Set([
-  'bafkreifl4mfns6ta3alfca7a7h63j46i2jocnzbsgfjsxtxlxxy2hi5fzm' // v6: 0.01-token units, decimal wire, lazy x100 migration, whole-token marketplace door (bal| whole + balf| remainder)
+  'bafkreia2lumlku2qvq6hgqztvl64wxhzxpcyurgsapayaj54cdrn7gw7i4' // v6: 0.01-token units, decimal wire, lazy x100 migration, whole-token marketplace door (bal| whole + balf| remainder)
 ]);
 export const V2_FAST_TWIN_CODE_CID = 'bafkreih4eper5br4vqmgip6f5vykwmhuxtor4j2pqaw2ewdtwuirzf5h7y';
 

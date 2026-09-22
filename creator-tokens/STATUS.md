@@ -5,7 +5,7 @@ their services, and the price moves with supply.
 
 > **2026-09-22 — v6: FRACTIONAL TOKENS (0.01 units). BUILT, PROVEN IN `go test`,
 > ON TESTNET, MAINNET PENDING THE OWNER'S SIGNATURE.** CID
-> `bafkreifl4mfns6ta3alfca7a7h63j46i2jocnzbsgfjsxtxlxxy2hi5fzm` (167,736 B,
+> `bafkreia2lumlku2qvq6hgqztvl64wxhzxpcyurgsapayaj54cdrn7gw7i4` (167,749 B,
 > reproducible: two clean builds, byte for byte; v5.1 was 159,539 B; the morning
 > candidate bafkreih5siwq… 167,142 B was superseded the same day, see below).
 > A token divides into 100 units; the wire is decimal token strings ("1.50"),
