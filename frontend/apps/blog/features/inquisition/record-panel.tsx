@@ -112,9 +112,23 @@ const ago = (iso: string | null): string => {
  * ★ HBD, NOT USD. `total_payout_value` is HBD-denominated and the reward rate is
  * documented as HBD per rshare. HBD is soft-pegged to the dollar so the figures are
  * close, but the label has to say what the number is.
+ *
+ * ★ AND NO "$" IN FRONT OF IT (2026-09-22). The cells printed "$404" under a label reading
+ * "REWARDS LOST (HBD)", which states two units for one number. Under a label that names
+ * the unit the cell is the bare figure; in running text, where nothing else names it,
+ * the figure carries "HBD".
  */
-const hbd = (n: number): string =>
-  '$' + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: Math.abs(n) < 100 ? 2 : 0 });
+const hbdFigure = (n: number): string =>
+  Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: Math.abs(n) < 100 ? 2 : 0 });
+const hbd = (n: number): string => `${hbdFigure(n)} HBD`;
+
+/*
+ * ★ A SMALL SHARE IS NOT ZERO (2026-09-22). One decimal printed @antisocialist's 0.046%
+ * self-reward as a green "0.0%", which reads as "never voted for itself". Below 1% the
+ * share keeps two decimals, and a share too small for those says so.
+ */
+const sharePct = (p: number): string =>
+  p === 0 ? '0%' : p < 0.005 ? '<0.01%' : p < 1 ? `${p.toFixed(2)}%` : `${p.toFixed(1)}%`;
 
 /** The three who took the most MONEY. Belongs under the money cell and nowhere else. */
 const threeByValue = (list: { account: string; usd: number }[]): string =>
@@ -158,7 +172,7 @@ function cellsFor(r: RecordData): Cell[] {
     },
     {
       label: 'REWARDS LOST (HBD)',
-      value: r.removedUsd === null ? '—' : hbd(r.removedUsd),
+      value: r.removedUsd === null ? '—' : hbdFigure(r.removedUsd),
       exact:
         r.removedUsd === null
           ? 'not computed'
@@ -232,11 +246,11 @@ function cellsFor(r: RecordData): Cell[] {
     },
     {
       label: 'SELF-REWARD',
-      value: r.selfRewardPct === null ? '—' : `${r.selfRewardPct.toFixed(1)}%`,
+      value: r.selfRewardPct === null ? '—' : sharePct(r.selfRewardPct),
       exact:
         r.selfRewardUsd === null
           ? 'not computed'
-          : `${hbd(r.selfRewardUsd)} of every reward this account's posts have paid`,
+          : `${hbd(r.selfRewardUsd)} of all the rewards this account's posts have paid`,
       tone: r.selfRewardPct === null ? 'dim' : r.selfRewardPct >= 25 ? 'warn' : 'ok',
       body: "The share of this account's post rewards that came from its own votes, counted in money rather than in votes so it does not flatter whales."
     },
@@ -268,7 +282,7 @@ function cellsFor(r: RecordData): Cell[] {
     },
     {
       label: 'REWARDS REMOVED (HBD)',
-      value: r.removedFromOthersUsd === null ? '—' : hbd(r.removedFromOthersUsd),
+      value: r.removedFromOthersUsd === null ? '—' : hbdFigure(r.removedFromOthersUsd),
       exact:
         r.removedFromOthersUsd === null
           ? 'not computed'

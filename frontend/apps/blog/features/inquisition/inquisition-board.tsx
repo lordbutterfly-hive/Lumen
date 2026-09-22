@@ -734,19 +734,19 @@ function InquisitorTable({ rows }: { rows: InquisitorRow[] }) {
             <td className="px-[26px] py-[15px] text-right font-num text-body-sm tabular-nums">
               {/* ★ A SUB-CENT TOTAL IS NOTHING, AND IT RENDERED THREE DIFFERENT WAYS:
                   "$0", "-$0.00" and a dash, in one column. One rule now. */}
-              {/* ★ A DASH MEANS NOT COMPUTED. A real sub-cent total is "<$0.01", which is
+              {/* ★ A DASH MEANS NOT COMPUTED. A real sub-cent total is "<0.01", which is
                   a finding of its own: @prowler cast 91,569 downvotes for two-thousandths
                   of a cent. Rendering both as the same dash hid that. */}
               {row.removedUsd === null ? (
                 <span className="text-ink-14">&mdash;</span>
               ) : row.removedUsd < 0.005 ? (
-                <span className="text-ink-14">&lt;$0.01</span>
+                <span className="text-ink-14">&lt;0.01</span>
               ) : (
                 <span className="text-ink-ok-2">
-                  {'$' +
-                    row.removedUsd.toLocaleString(undefined, {
-                      maximumFractionDigits: row.removedUsd < 100 ? 2 : 0
-                    })}
+                  {/* ★ No "$": the header says HBD, and one number carries one unit. */}
+                  {row.removedUsd.toLocaleString(undefined, {
+                    maximumFractionDigits: row.removedUsd < 100 ? 2 : 0
+                  })}
                 </span>
               )}
             </td>
@@ -843,8 +843,8 @@ function DvTable({ rows }: { rows: DvRow[] }) {
               {row.removedUsd === null
                 ? '\u2014'
                 : row.removedUsd < 0.005
-                  ? '\u2212<$0.01'
-                  : '\u2212$' + (row.removedUsd >= 100 ? Math.round(row.removedUsd).toLocaleString() : row.removedUsd.toFixed(2))}
+                  ? '\u2212<0.01'
+                  : '\u2212' + (row.removedUsd >= 100 ? Math.round(row.removedUsd).toLocaleString() : row.removedUsd.toFixed(2))}
             </td>
             <td className="px-[26px] py-[15px] font-ui text-caption text-ink-10">
               {row.topSource ? (
