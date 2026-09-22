@@ -25,8 +25,10 @@
 # The indexer adds indexer_contract_id / indexer_block_height / indexer_tx_hash /
 # indexer_ts / indexer_id to every row automatically; none are declared here.
 #
-# MONEY IS A STRING, ALWAYS. Every HBD/token amount on our wire is a quoted
-# base-10 integer in base units (3 dp for HBD; whole integers for token counts).
+# MONEY IS A STRING, ALWAYS. Every HBD amount on our wire is a quoted base-10
+# integer in base units (3 dp); every TOKEN amount is a quoted decimal token
+# string with up to two places ("1.50") since v6 (2026-09-22; pre-v6 rows are
+# whole integers, "2", and the two shapes sum correctly under ::numeric).
 # Declaring one as `numeric` would push it through a float somewhere in the
 # pipeline, and this is a money contract. The views do their arithmetic with
 # explicit ::numeric casts instead.
