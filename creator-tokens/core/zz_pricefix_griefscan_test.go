@@ -22,7 +22,7 @@ func TestPFGriefScan_AttackerCostVsVictimHarm(t *testing.T) {
 		s := NewMemStore()
 		pfMarket(t, s, c, t1)
 		pfBuy(t, s, "victim", c, t0, N)
-		r, err := Sell(s, "victim", c, t1, big.NewInt(N), nil)
+		r, err := Sell(s, "victim", c, t1, tk(N), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -40,7 +40,7 @@ func TestPFGriefScan_AttackerCostVsVictimHarm(t *testing.T) {
 		pfBuy(t, s, "attacker", c, t1, g)
 		S := getMoney(s, kSupply(c))
 		attackerCost, _ := SellProceeds(S, tk(g)) // gift's curve value ~ what attacker sank
-		if err := TransferCredits(s, "attacker", c, "attacker", "victim", t1, big.NewInt(g)); err != nil {
+		if err := TransferCredits(s, "attacker", c, "attacker", "victim", t1, tk(g)); err != nil {
 			t.Fatal(err)
 		}
 		// Victim sells N (freshest-first will draw the gift first under the fix).
@@ -75,15 +75,15 @@ func TestPFGriefScan_VictimCanNeutralise(t *testing.T) {
 	pfMarket(t, s, c, t1)
 	pfBuy(t, s, "victim", c, t0, N)
 	pfBuy(t, s, "attacker", c, t1, g)
-	if err := TransferCredits(s, "attacker", c, "attacker", "victim", t1, big.NewInt(g)); err != nil {
+	if err := TransferCredits(s, "attacker", c, "attacker", "victim", t1, tk(g)); err != nil {
 		t.Fatal(err)
 	}
 	// Victim dumps the fresh gift to a burner (freshest-first sends the gift).
-	if err := TransferCredits(s, "victim", c, "victim", "burner", t1, big.NewInt(g)); err != nil {
+	if err := TransferCredits(s, "victim", c, "victim", "burner", t1, tk(g)); err != nil {
 		t.Fatal(err)
 	}
 	// Now victim sells their own aged pile.
-	r, err := Sell(s, "victim", c, t1, big.NewInt(N), nil)
+	r, err := Sell(s, "victim", c, t1, tk(N), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

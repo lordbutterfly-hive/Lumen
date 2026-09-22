@@ -135,7 +135,8 @@ import (
 // "contract-level events" section below for the six new EvInit/EvPaused/
 // EvUnpaused/EvRetired/EvTreasuryWithdrawn/EvTradeFeesClaimed constructors,
 // now wired into every one of those six entrypoints.
-const evSchemaVersion = 1
+// v6 (2026-09-22): token-denominated fields are decimal token strings (evTokens).
+const evSchemaVersion = 2
 
 // ---- shared encoding helpers -------------------------------------------
 
@@ -149,6 +150,15 @@ func evI64(v int64) string  { return strconv.FormatInt(v, 10) }
 // as an exact integer string end to end, chain to indexer to UI (see
 // ../magi-indexer/creator_tokens_mappings.yaml, which keeps every amount field as `string` for the
 // identical reason).
+// evTokens writes a TOKEN amount as the decimal token string the wire carries
+// (v6: state holds units, the wire holds tokens; money.go fmtTokens). The
+// indexer sums these fields as numerics across the whole history, so a
+// pre-v6 "2" and a v6 "1.50" add up correctly; emitting units would have
+// corrupted every balance on the day of the update. HBD fields stay evMoney.
+func evTokens(v *big.Int) string {
+	return fmtTokens(v)
+}
+
 func evMoney(v *big.Int) string {
 	if v == nil {
 		return "0"
@@ -216,7 +226,7 @@ func evOpen(name, creator, actor string, block uint64) string {
 func EvRegistered(creator, actor string, block uint64, face, cap int64, feePaid *big.Int) string {
 	return evOpen("registered", creator, actor, block) +
 		`,"face":"` + evI64(face) + `"` +
-		`,"cap":"` + evI64(cap) + `"` +
+		`,"cap":"` + evTokens(big.NewInt(cap)) + `"` +
 		`,"feePaid":"` + evMoney(feePaid) + `"}`
 }
 
@@ -245,8 +255,8 @@ func EvFaceChanged(creator, actor string, block uint64, oldFace, newFace int64) 
 // "KNOWN GAPS" note.
 func EvCapChanged(creator, actor string, block uint64, oldCap, newCap int64) string {
 	return evOpen("capChanged", creator, actor, block) +
-		`,"oldCap":"` + evI64(oldCap) + `"` +
-		`,"newCap":"` + evI64(newCap) + `"}`
+		`,"oldCap":"` + evTokens(big.NewInt(oldCap)) + `"` +
+		`,"newCap":"` + evTokens(big.NewInt(newCap)) + `"}`
 }
 
 // EvTransferred — TransferCredits (prepay.go). actor is the sender (`from`
@@ -260,7 +270,7 @@ func EvCapChanged(creator, actor string, block uint64, oldCap, newCap int64) str
 func EvTransferred(creator, actor, to string, block uint64, amount *big.Int) string {
 	return evOpen("transferred", creator, actor, block) +
 		`,"to":"` + evJSONEscape(to) + `"` +
-		`,"amount":"` + evMoney(amount) + `"}`
+		`,"amount":"` + evTokens(amount) + `"}`
 }
 
 // EvAsked — Ask (ask.go, [AGENT 3]). actor is the asker. seq is the escrow
@@ -292,8 +302,8 @@ func EvTransferred(creator, actor, to string, block uint64, amount *big.Int) str
 func EvAsked(creator, actor string, block, seq uint64, creditsSpent, commissionCredits, rate *big.Int, deadlineBlocks uint64, contentHash string, offeringID uint64) string {
 	return evOpen("asked", creator, actor, block) +
 		`,"seq":` + evU64(seq) +
-		`,"creditsSpent":"` + evMoney(creditsSpent) + `"` +
-		`,"commissionCredits":"` + evMoney(commissionCredits) + `"` +
+		`,"creditsSpent":"` + evTokens(creditsSpent) + `"` +
+		`,"commissionCredits":"` + evTokens(commissionCredits) + `"` +
 		`,"rate":"` + evMoney(rate) + `"` +
 		`,"deadlineBlocks":` + evU64(deadlineBlocks) +
 		`,"offeringId":` + evU64(offeringID) +
@@ -340,8 +350,8 @@ func EvAsked(creator, actor string, block, seq uint64, creditsSpent, commissionC
 func EvAnswered(creator, actor string, block, seq uint64, creditsToCreator, commissionCredits *big.Int, commissionTo, answerHash string) string {
 	return evOpen("answered", creator, actor, block) +
 		`,"seq":` + evU64(seq) +
-		`,"creditsToCreator":"` + evMoney(creditsToCreator) + `"` +
-		`,"commissionCredits":"` + evMoney(commissionCredits) + `"` +
+		`,"creditsToCreator":"` + evTokens(creditsToCreator) + `"` +
+		`,"commissionCredits":"` + evTokens(commissionCredits) + `"` +
 		`,"commissionTo":"` + evJSONEscape(commissionTo) + `"` +
 		`,"answerHash":"` + evJSONEscape(answerHash) + `"}`
 }
@@ -386,8 +396,8 @@ func EvAnswered(creator, actor string, block, seq uint64, creditsToCreator, comm
 func EvReclaimed(creator, actor string, block, seq uint64, credits, commissionRetainedCredits *big.Int, retainedTo, asker string) string {
 	return evOpen("reclaimed", creator, actor, block) +
 		`,"seq":` + evU64(seq) +
-		`,"credits":"` + evMoney(credits) + `"` +
-		`,"commissionRetainedCredits":"` + evMoney(commissionRetainedCredits) + `"` +
+		`,"credits":"` + evTokens(credits) + `"` +
+		`,"commissionRetainedCredits":"` + evTokens(commissionRetainedCredits) + `"` +
 		`,"retainedTo":"` + evJSONEscape(retainedTo) + `"` +
 		`,"asker":"` + evJSONEscape(asker) + `"}`
 }
@@ -416,7 +426,7 @@ func EvRated(creator, actor string, block, seq, score uint64) string {
 func EvDeclined(creator, actor string, block, seq uint64, credits *big.Int, asker string) string {
 	return evOpen("declined", creator, actor, block) +
 		`,"seq":` + evU64(seq) +
-		`,"credits":"` + evMoney(credits) + `"` +
+		`,"credits":"` + evTokens(credits) + `"` +
 		`,"asker":"` + evJSONEscape(asker) + `"}`
 }
 
@@ -428,7 +438,7 @@ func EvDeclined(creator, actor string, block, seq uint64, credits *big.Int, aske
 // `credits` whenever RefundPrice < PAR (I2).
 func EvRefunded(creator, actor string, block uint64, credits, payout *big.Int) string {
 	return evOpen("refunded", creator, actor, block) +
-		`,"credits":"` + evMoney(credits) + `"` +
+		`,"credits":"` + evTokens(credits) + `"` +
 		`,"payout":"` + evMoney(payout) + `"}`
 }
 
@@ -439,7 +449,7 @@ func EvRefunded(creator, actor string, block uint64, credits, payout *big.Int) s
 // single HiveDraw from the buyer.
 func EvBought(creator, actor string, block uint64, minted, cost, fee, totalDue *big.Int) string {
 	return evOpen("bought", creator, actor, block) +
-		`,"minted":"` + evMoney(minted) + `"` +
+		`,"minted":"` + evTokens(minted) + `"` +
 		`,"cost":"` + evMoney(cost) + `"` +
 		`,"fee":"` + evMoney(fee) + `"` +
 		`,"totalDue":"` + evMoney(totalDue) + `"}`
@@ -464,7 +474,7 @@ func EvBought(creator, actor string, block uint64, minted, cost, fee, totalDue *
 // duplicating them would create a second source of truth to drift.
 func EvSold(creator, actor string, block uint64, sold, gross, tax, fee, net, taxableGross *big.Int, taxBps, heldBlocks uint64) string {
 	return evOpen("sold", creator, actor, block) +
-		`,"sold":"` + evMoney(sold) + `"` +
+		`,"sold":"` + evTokens(sold) + `"` +
 		`,"gross":"` + evMoney(gross) + `"` +
 		`,"tax":"` + evMoney(tax) + `"` +
 		`,"fee":"` + evMoney(fee) + `"` +
@@ -491,7 +501,7 @@ func EvSold(creator, actor string, block uint64, sold, gross, tax, fee, net, tax
 func EvRefundPushed(creator, actor, holder string, block uint64, creditsBurned, payout *big.Int) string {
 	return evOpen("refundPushed", creator, actor, block) +
 		`,"holder":"` + evJSONEscape(holder) + `"` +
-		`,"creditsBurned":"` + evMoney(creditsBurned) + `"` +
+		`,"creditsBurned":"` + evTokens(creditsBurned) + `"` +
 		`,"payout":"` + evMoney(payout) + `"}`
 }
 
@@ -782,5 +792,5 @@ func EvMaturedMoved(creator, actor, from, to string, block uint64, amount *big.I
 	return evOpen("maturedMoved", creator, actor, block) +
 		`,"from":"` + evJSONEscape(from) + `"` +
 		`,"to":"` + evJSONEscape(to) + `"` +
-		`,"amount":"` + evMoney(amount) + `"}`
+		`,"amount":"` + evTokens(amount) + `"}`
 }

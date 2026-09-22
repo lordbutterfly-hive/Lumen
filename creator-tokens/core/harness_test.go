@@ -554,6 +554,7 @@ func hzBuy(t *testing.T, s Store, holder, creator string, block uint64, tokens i
 // ===========================================================================
 func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 	s := NewMemStore()
+	setStr(s, kOwner(), "hive:hzplatform") // v6: the commission leg only settles with an owner bound, as on mainnet
 
 	const (
 		alice = "alicecreates"
@@ -756,6 +757,13 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 		// blown), so the slice is exactly ceil(commission * MissReclaimSliceBps
 		// / 10000) and the asker gets the rest.
 		wantRetained := mMulDivCeil(a.res.CommissionCredits, new(big.Int).SetUint64(MissReclaimSliceBps), big.NewInt(10000))
+		// v6: the deterrent is floored at one whole token and clamped to the escrow (ask.go Reclaim).
+		if wantRetained.Cmp(big.NewInt(MissReclaimFloorUnits)) < 0 {
+			wantRetained = big.NewInt(MissReclaimFloorUnits)
+		}
+		if wantRetained.Cmp(a.res.CreditsSpent) > 0 {
+			wantRetained = new(big.Int).Set(a.res.CreditsSpent)
+		}
 		if gotRetained.Cmp(wantRetained) != 0 {
 			t.Fatalf("Reclaim(seq=%d): retained %s, want %s (%d bps of the %s commission)", a.res.Seq, gotRetained, wantRetained, MissReclaimSliceBps, a.res.CommissionCredits)
 		}
@@ -840,7 +848,7 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 		before := hzReserves(s, creators)
 		supply := Supply(s, alice)
 		reserve := Reserve(s, alice)
-		gross := refundPayout(reserve, tk(credits), supply)
+		gross := refundPayout(reserve, big.NewInt(credits), supply)
 		wantNet := new(big.Int).Sub(gross, ExitTaxOn(gross, ExitTaxBpsAt(heldBlocksAt(s, alice, caller, frozenBlock))))
 		payout, err := Refund(s, caller, alice, frozenBlock, big.NewInt(credits))
 		hzMustOK(t, err, label)
@@ -873,17 +881,19 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 		hzAssertConservation(t, s, creators, hbdIn, hbdOut, label)
 	}
 
-	refundSelf("holderone", 400, "wind-down: Refund(holderone, partial 400 of 1000)")
+	refundSelf("holderone", 400*TokenScale, "wind-down: Refund(holderone, partial 400 of 1000)") // credits in units
 	refundPush("hzkeeper", "holdertwo", "wind-down: RefundHolder(holdertwo, full)")
 	refundPush("hzkeeper", "holderthree", "wind-down: RefundHolder(holderthree, full)")
 	refundSelf("holderfour", BalanceOf(s, alice, "holderfour").Int64(), "wind-down: Refund(holderfour, full)")
 	refundPush("hzkeeper", "holderfive", "wind-down: RefundHolder(holderfive, full)")
 	refundPush("hzkeeper", alice, "wind-down: RefundHolder(alice's own earned credits)")
 	refundPush("hzkeeper", "holderone", "wind-down: RefundHolder(holderone, remainder)")
+	// v6: the platform owner holds the commission and miss slices of this lifecycle; sweep them too.
+	refundPush("hzkeeper", "hive:hzplatform", "wind-down: RefundHolder(the platform owner's commission and miss slices)")
 
 	// ---- CLOSE ----
 	if !CloseIfDrained(s, alice, frozenBlock) {
-		t.Fatal("CloseIfDrained returned false with supply == 0 while FROZEN")
+		t.Fatalf("CloseIfDrained returned false while FROZEN: supply=%s reserve=%s phase=%s retired=%v", Supply(s, alice), Reserve(s, alice), Phase(s, alice, frozenBlock), marketRetired(s, alice))
 	}
 	hzAssertPhase(t, s, alice, frozenBlock, StateClosed, "post-close")
 	if !CloseIfDrained(s, alice, frozenBlock) {
@@ -1133,8 +1143,8 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 		before := BalanceOf(s, creator, "holderc") // remainder after the 400 refund above
 		hzMustOK(t, TransferCredits(s, "holderc", creator, "holderc", "holderd", frozenTestBlock, tk(100)), "TransferCredits while FROZEN")
 		after := BalanceOf(s, creator, "holderc")
-		if new(big.Int).Sub(before, after).Cmp(big.NewInt(100)) != 0 {
-			t.Fatalf("holderc balance moved by %s, want -10000", new(big.Int).Sub(after, before))
+		if new(big.Int).Sub(before, after).Cmp(tk(100)) != 0 {
+			t.Fatalf("holderc balance moved by %s, want -100 tokens", new(big.Int).Sub(after, before))
 		}
 		if got := BalanceOf(s, creator, "holderd"); got.Cmp(tk(100)) != 0 {
 			t.Fatalf("holderd received %s, want 10000", got)
@@ -1290,7 +1300,7 @@ func TestHarness_FullWindDown_RandomOrderMixedRefundStyles(t *testing.T) {
 		t.Fatalf("Σ gross drained = %s, Σ curve costs = %s — dust or over-payment in a random-order full unwind", totalGrossDrained, totalCost)
 	}
 	if !CloseIfDrained(s, creator, refundBlock) {
-		t.Fatal("CloseIfDrained returned false with supply == 0 while FROZEN")
+		t.Fatalf("CloseIfDrained returned false while FROZEN: supply=%s reserve=%s phase=%s retired=%v", Supply(s, creator), Reserve(s, creator), Phase(s, creator, refundBlock), marketRetired(s, creator))
 	}
 	hzAssertPhase(t, s, creator, refundBlock, StateClosed, "final")
 

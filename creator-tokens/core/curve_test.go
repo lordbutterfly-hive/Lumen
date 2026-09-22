@@ -124,7 +124,7 @@ func TestCurve_ExportedValues_RulingI(t *testing.T) {
 		t.Errorf("BuyCost(0,1) = %s, want 1007 (BasePrice 1000 + floor(63021/8000) = 7)", got)
 	}
 	// sellProceeds(15,4) = area(15) − area(11) = 15948 − 11521 = 4427.
-	p, err := SellProceeds(cvB(15), cvB(4))
+	p, err := SellProceeds(tk(15), tk(4))
 	if err != nil {
 		t.Fatalf("SellProceeds(15,4): %v", err)
 	}
@@ -135,7 +135,7 @@ func TestCurve_ExportedValues_RulingI(t *testing.T) {
 	// EQUALITY, live: the same slice costs and returns the same amount, so a
 	// round trip is exactly zero-sum on the curve leg (fees/tax make it a
 	// loss).
-	p5, err := SellProceeds(cvB(15), cvB(5))
+	p5, err := SellProceeds(tk(15), tk(5))
 	if err != nil {
 		t.Fatalf("SellProceeds(15,5): %v", err)
 	}
@@ -143,14 +143,14 @@ func TestCurve_ExportedValues_RulingI(t *testing.T) {
 		t.Errorf("SellProceeds(15,5) = %s, want 5514 (= BuyCost(10,5) — L5 equality)", p5)
 	}
 	// spot(10) = 1000 + floor((63000·10 + 21·100)/8000 = 79.0125) = 1079.
-	if got := SpotRate(cvB(10)); got.Cmp(cvB(1079)) != 0 {
+	if got := SpotRate(tk(10)); got.Cmp(cvB(1079)) != 0 {
 		t.Errorf("SpotRate(10) = %s, want 1079", got)
 	}
 	// NO ZERO OR NEGATIVE MARGINAL PRICE in the first 50 tokens (RULING I's
 	// verified property) — and in fact every marginal step >= BasePrice.
-	prev := Area(cvB(0))
+	prev := AreaTokens(cvB(0))
 	for i := int64(1); i <= 50; i++ {
-		cur := Area(cvB(i))
+		cur := AreaTokens(cvB(i))
 		step := new(big.Int).Sub(cur, prev)
 		if step.Cmp(cvB(BasePrice)) < 0 {
 			t.Fatalf("marginal price of token %d = %s < BasePrice %d — RULING I's positivity check broken", i, step, BasePrice)
@@ -164,11 +164,11 @@ func TestCurve_ExportedValues_RulingI(t *testing.T) {
 	if got := BuyCost(tk(7), tk(0)); got.Sign() != 0 {
 		t.Errorf("BuyCost(S,0) = %s, want 0", got)
 	}
-	p0, err := SellProceeds(cvB(7), cvB(0))
+	p0, err := SellProceeds(tk(7), tk(0))
 	if err != nil || p0.Sign() != 0 {
 		t.Errorf("SellProceeds(S,0) = %s (err %v), want 0", p0, err)
 	}
-	if got := SpotRate(cvB(0)); got.Sign() != 0 {
+	if got := SpotRate(tk(0)); got.Sign() != 0 {
 		t.Errorf("SpotRate(0) = %s, want 0 (no supply, no traded rate — convention kept deliberately despite BasePrice)", got)
 	}
 }
@@ -251,7 +251,7 @@ func TestCurve_RoundingIsExercised_CompiledCalibration(t *testing.T) {
 }
 
 func TestCurve_SellProceeds_KExceedsSupplyRejected(t *testing.T) {
-	if _, err := SellProceeds(cvB(5), cvB(6)); errSymbol(err) != ErrArith {
+	if _, err := SellProceeds(tk(5), tk(6)); errSymbol(err) != ErrArith {
 		t.Fatalf("SellProceeds(5,6): err = %v, want %s (never garbage on k>S)", err, ErrArith)
 	}
 }

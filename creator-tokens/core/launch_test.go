@@ -62,7 +62,7 @@ func TestLaunch_IsExactlyRegisterThenBuy(t *testing.T) {
 		creator       = "launchcreator"
 		block         = uint64(500_000)
 		face    int64 = 1000
-		capVal  int64 = 1_000_000
+		capVal  int64 = 1_000_000 * TokenScale // one million tokens, in units (v6)
 	)
 	for _, n := range []int64{1, 2, 7, 100, 1000, 12345} {
 		atomicStore := NewMemStore()
@@ -75,7 +75,7 @@ func TestLaunch_IsExactlyRegisterThenBuy(t *testing.T) {
 		if err := Register(twoStepStore, creator, creator, block, face, capVal); err != nil {
 			t.Fatalf("n=%d: Register: %v", n, err)
 		}
-		buyRes, err := Buy(twoStepStore, creator, creator, block, big.NewInt(n))
+		buyRes, err := Buy(twoStepStore, creator, creator, block, tk(n))
 		if err != nil {
 			t.Fatalf("n=%d: Buy: %v", n, err)
 		}
@@ -349,7 +349,7 @@ func TestLaunch_ResidualSnipeAdvantage_Pinned(t *testing.T) {
 		if cost.Cmp(big.NewInt(c.wantCost)) != 0 {
 			t.Fatalf("area(%d) = %s, want %d — launch.go's documented snipe economics are now WRONG and must be recomputed", c.n, cost, c.wantCost)
 		}
-		end := big.NewInt(c.endSupply)
+		end := tk(c.endSupply)
 		proceeds, err := SellProceeds(end, n)
 		if err != nil {
 			t.Fatal(err)

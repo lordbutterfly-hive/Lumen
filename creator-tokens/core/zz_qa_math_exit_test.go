@@ -91,10 +91,12 @@ func TestQAMath_Exit_SplitVersusSingle(t *testing.T) {
 			if gross.Cmp(once.Gross) != 0 {
 				t.Fatalf("hold %d N %d: gross differs by path: %s vs %s", h, N, once.Gross, gross)
 			}
-			// The split pays at most (N-1) more base units of tax and (N-1) fewer of fee.
+			// The split pays at most (N-1) more base units of tax (ceil per sale), and
+			// its fee moves by under N base units either way: the floor per sale makes a
+			// large split cheaper, the one-base-unit minimum makes a dust split dearer.
 			dTax := new(big.Int).Sub(tax, once.Tax)
-			dFee := new(big.Int).Sub(once.Fee, fee)
-			if dTax.Sign() < 0 || dTax.Cmp(qaBig(N)) >= 0 || dFee.Sign() < 0 || dFee.Cmp(qaBig(N)) >= 0 {
+			dFee := new(big.Int).Abs(new(big.Int).Sub(once.Fee, fee))
+			if dTax.Sign() < 0 || dTax.Cmp(qaBig(N)) >= 0 || dFee.Cmp(qaBig(N)) >= 0 {
 				t.Fatalf("hold %d N %d: split moved tax by %s and fee by %s (bound is < %d base units each)", h, N, dTax, dFee, N)
 			}
 			// Reserve is drained by exactly gross on both paths, and both end at the same supply.
@@ -165,7 +167,7 @@ func TestQAMath_Exit_Conservation(t *testing.T) {
 		paid = mAdd(paid, r.Net)
 		kept = mAdd(kept, mAdd(r.Tax, r.Fee))
 	}
-	if getMoney(s, kSupply(c)).Cmp(qaBig(12)) != 0 {
+	if getMoney(s, kSupply(c)).Cmp(tk(12)) != 0 {
 		t.Fatalf("supply %s after selling everything bought, want 12", getMoney(s, kSupply(c)))
 	}
 	drained := new(big.Int).Sub(reserve1, getMoney(s, kReserve(c)))

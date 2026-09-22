@@ -53,7 +53,7 @@ func TestZZBound_PRICE1_LaunderStillClosed(t *testing.T) {
 	pfMarket(t, s, c, t1)
 	pfBuy(t, s, "whale", c, t0, N) // aged pile, fully matured at t1
 	pfBuy(t, s, "alt", c, t1, M)   // fresh slice
-	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(M)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(M)); err != nil {
 		t.Fatalf("TransferCredits: %v", err)
 	}
 
@@ -64,7 +64,7 @@ func TestZZBound_PRICE1_LaunderStillClosed(t *testing.T) {
 	}
 	intended := ExitTaxOn(topM, MaxExitTaxBps) // fresh M owes FULL freight on the dear top slice
 
-	q, err := QuoteSell(s, "whale", c, t1, big.NewInt(N+M))
+	q, err := QuoteSell(s, "whale", c, t1, tk(N+M))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestZZBound_PRICE1_LaunderClosedWithFloodedLedger(t *testing.T) {
 	// Now the launder: the big fresh slice lands. This inflow is over the cap.
 	blkM := t1 + uint64(MaxLots) + 100
 	pfBuy(t, s, "alt", c, blkM, M)
-	if err := TransferCredits(s, "alt", c, "alt", "whale", blkM, big.NewInt(M)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", "whale", blkM, tk(M)); err != nil {
 		t.Fatal(err)
 	}
 	if got := zvNumCohorts(s, c, "whale"); got > MaxLots {
@@ -154,13 +154,13 @@ func TestZZBound_PRICE1_LaunderClosedWithFloodedLedger(t *testing.T) {
 		t.Fatalf("LAUNDER RE-OPENED: freshest cohort (%s tokens, acq=%d) reads %d bps, want %d",
 			top.Count, top.Acq, top.Bps, MaxExitTaxBps)
 	}
-	if top.Count.Cmp(big.NewInt(M)) < 0 {
+	if top.Count.Cmp(tk(M)) < 0 {
 		t.Fatalf("the fresh M was split/diluted: freshest cohort holds only %s of %d", top.Count, M)
 	}
 	// And the aged pile is STILL a separate, still-matured cohort — the merge did
 	// not fold fresh into aged in either direction.
 	aged := rows[len(rows)-1]
-	if aged.Bps != 0 || aged.Count.Cmp(big.NewInt(N)) != 0 {
+	if aged.Bps != 0 || aged.Count.Cmp(tk(N)) != 0 {
 		t.Fatalf("aged cohort disturbed: count=%s (want %d) bps=%d (want 0)", aged.Count, N, aged.Bps)
 	}
 

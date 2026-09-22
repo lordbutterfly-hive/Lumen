@@ -62,7 +62,7 @@ func TestEvOpen_EnvelopeShape(t *testing.T) {
 	out := EvClosed("alice", "bob", 42)
 	m := decode(t, out)
 	wantStr(t, m, "type", "closed")
-	wantNum(t, m, "v", 1)
+	wantNum(t, m, "v", 2) // v6 schema: token fields are decimal token strings
 	wantStr(t, m, "creator", "alice")
 	wantStr(t, m, "actor", "bob")
 	wantNum(t, m, "block", 42)
@@ -143,12 +143,12 @@ func TestEvRegistered(t *testing.T) {
 	out := EvRegistered("alice", "alice", 100, 5000, 1000, big.NewInt(10_000))
 	m := decode(t, out)
 	wantStr(t, m, "type", "registered")
-	wantNum(t, m, "v", 1)
+	wantNum(t, m, "v", 2) // v6 schema: token fields are decimal token strings
 	wantStr(t, m, "creator", "alice")
 	wantStr(t, m, "actor", "alice")
 	wantNum(t, m, "block", 100)
 	wantStr(t, m, "face", "5000")
-	wantStr(t, m, "cap", "1000")
+	wantStr(t, m, "cap", "10.00")
 	wantStr(t, m, "feePaid", "10000")
 }
 
@@ -173,8 +173,8 @@ func TestEvCapChanged(t *testing.T) {
 	out := EvCapChanged("alice", "alice", 300, 1000, 2000)
 	m := decode(t, out)
 	wantStr(t, m, "type", "capChanged")
-	wantStr(t, m, "oldCap", "1000")
-	wantStr(t, m, "newCap", "2000")
+	wantStr(t, m, "oldCap", "10.00") // 1000 units = 10.00 tokens (v6)
+	wantStr(t, m, "newCap", "20.00")
 }
 
 func TestEvTransferred(t *testing.T) {
@@ -183,7 +183,7 @@ func TestEvTransferred(t *testing.T) {
 	wantStr(t, m, "type", "transferred")
 	wantStr(t, m, "actor", "bob")
 	wantStr(t, m, "to", "carol")
-	wantStr(t, m, "amount", "100")
+	wantStr(t, m, "amount", "1.00")
 }
 
 func TestEvAsked(t *testing.T) {
@@ -192,8 +192,8 @@ func TestEvAsked(t *testing.T) {
 	wantStr(t, m, "type", "asked")
 	wantStr(t, m, "actor", "bob")
 	wantNum(t, m, "seq", 7)
-	wantStr(t, m, "creditsSpent", "42")
-	wantStr(t, m, "commissionCredits", "1200")
+	wantStr(t, m, "creditsSpent", "0.42")
+	wantStr(t, m, "commissionCredits", "12.00")
 	wantStr(t, m, "rate", "1000000")
 	wantNum(t, m, "deadlineBlocks", 28800)
 	wantStr(t, m, "contentHash", "abc123hash")
@@ -204,11 +204,11 @@ func TestEvAnswered(t *testing.T) {
 	m := decode(t, out)
 	wantStr(t, m, "type", "answered")
 	wantNum(t, m, "seq", 7)
-	wantStr(t, m, "creditsToCreator", "42")
+	wantStr(t, m, "creditsToCreator", "0.42")
 	// commissionCredits + commissionTo replaced commissionHbd on 2026-09-12: the
 	// platform is paid in the creator's token, on a named account, so an indexer
 	// must be able to credit the right holder rather than a global HBD pot.
-	wantStr(t, m, "commissionCredits", "6")
+	wantStr(t, m, "commissionCredits", "0.06")
 	wantStr(t, m, "commissionTo", "platform1")
 	wantStr(t, m, "answerHash", "answerhash1")
 }
@@ -219,7 +219,7 @@ func TestEvAnswered_NilCommissionRendersZero(t *testing.T) {
 	// nil) must still render "0", not panic or emit a bare JSON null.
 	out := EvAnswered("alice", "alice", 700, 7, big.NewInt(42), nil, "", "answerhash1")
 	m := decode(t, out)
-	wantStr(t, m, "commissionCredits", "0")
+	wantStr(t, m, "commissionCredits", "0.00")
 	wantStr(t, m, "commissionTo", "")
 }
 
@@ -231,8 +231,8 @@ func TestEvReclaimed(t *testing.T) {
 	wantNum(t, m, "seq", 7)
 	// `credits` is the NET the asker got back and commissionRetainedCredits the
 	// slice the platform kept; together they are the whole escrow (2026-09-12).
-	wantStr(t, m, "credits", "40")
-	wantStr(t, m, "commissionRetainedCredits", "2")
+	wantStr(t, m, "credits", "0.40")
+	wantStr(t, m, "commissionRetainedCredits", "0.02")
 	wantStr(t, m, "retainedTo", "platform1")
 	wantStr(t, m, "asker", "carol")
 }
@@ -240,7 +240,7 @@ func TestEvReclaimed(t *testing.T) {
 func TestEvReclaimed_NilCommissionRendersZero(t *testing.T) {
 	out := EvReclaimed("alice", "bob", 800, 7, big.NewInt(42), nil, "", "carol")
 	m := decode(t, out)
-	wantStr(t, m, "commissionRetainedCredits", "0")
+	wantStr(t, m, "commissionRetainedCredits", "0.00")
 }
 
 func TestEvRefunded(t *testing.T) {
@@ -248,7 +248,7 @@ func TestEvRefunded(t *testing.T) {
 	m := decode(t, out)
 	wantStr(t, m, "type", "refunded")
 	wantStr(t, m, "actor", "bob")
-	wantStr(t, m, "credits", "100")
+	wantStr(t, m, "credits", "1.00")
 	wantStr(t, m, "payout", "95")
 }
 
@@ -258,7 +258,7 @@ func TestEvRefundPushed(t *testing.T) {
 	wantStr(t, m, "type", "refundPushed")
 	wantStr(t, m, "actor", "keeper1") // pusher
 	wantStr(t, m, "holder", "bob")    // recipient — never actor
-	wantStr(t, m, "creditsBurned", "300")
+	wantStr(t, m, "creditsBurned", "3.00")
 	wantStr(t, m, "payout", "285")
 }
 
@@ -420,7 +420,7 @@ func TestRegisterWithFirstBuy_FirstBuyResultDrivesBothEvents(t *testing.T) {
 	wantStr(t, boughtM, "creator", "aliceperry")
 	wantStr(t, boughtM, "actor", "aliceperry") // the creator buys their own first slice
 	wantNum(t, boughtM, "block", 100)
-	wantStr(t, boughtM, "minted", "100") // == the firstBuy argument, exactly
+	wantStr(t, boughtM, "minted", "100.00") // == the firstBuy argument (100 tokens), as the wire writes it
 
 	// Cross-check res.FirstBuy's amounts against the SAME curve math buy.go's
 	// buyCompute uses for an ordinary Buy of 100 tokens from a fresh (S=0)
@@ -512,7 +512,7 @@ func TestEvSchemaVersionIsStableAcrossAllEvents(t *testing.T) {
 	}
 	for _, out := range outs {
 		m := decode(t, out)
-		wantNum(t, m, "v", 1)
+		wantNum(t, m, "v", 2) // v6 schema: token fields are decimal token strings
 	}
 }
 

@@ -47,7 +47,7 @@ func zbFloodVictim(t *testing.T, c string, pile int64, gifts int) (s *MemStore, 
 	t1 := t0 + ExitTaxDecayBlocks
 	s = NewMemStore()
 	zbMarket(t, s, c, t1+uint64(gifts)+10)
-	if _, err := Buy(s, "victim", c, t0, big.NewInt(pile)); err != nil {
+	if _, err := Buy(s, "victim", c, t0, tk(pile)); err != nil {
 		t.Fatalf("victim buy: %v", err)
 	}
 	attackerCost = mZero()
@@ -87,7 +87,7 @@ func TestZZBound_FloodCannotReAgeVictimPile(t *testing.T) {
 		t.Fatalf("VICTIM RE-AGED: oldest cohort acq=%d, want the original %d (a merge moved the aged pile)",
 			oldest.acq, t0)
 	}
-	if oldest.count.Cmp(big.NewInt(pile)) != 0 {
+	if oldest.count.Cmp(tk(pile)) != 0 {
 		t.Fatalf("VICTIM PILE DISTURBED: oldest cohort holds %s, want %d", oldest.count, pile)
 	}
 	if bps := lotRateAt(oldest.acq, last); bps != 0 {

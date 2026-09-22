@@ -46,13 +46,13 @@ func erWorld(t *testing.T, c, h string, pile, fresh int64) (*MemStore, uint64, u
 	}
 	t0 := uint64(10)
 	t1 := t0 + ExitTaxDecayBlocks
-	if _, err := Buy(s, h, c, t0, big.NewInt(pile)); err != nil {
+	if _, err := Buy(s, h, c, t0, tk(pile)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, "alt", c, t1, big.NewInt(fresh)); err != nil {
+	if _, err := Buy(s, "alt", c, t1, tk(fresh)); err != nil {
 		t.Fatal(err)
 	}
-	if err := TransferCredits(s, "alt", c, "alt", h, t1, big.NewInt(fresh)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", h, t1, tk(fresh)); err != nil {
 		t.Fatal(err)
 	}
 	askBlock := erSeedObs(s, c, t1+1)

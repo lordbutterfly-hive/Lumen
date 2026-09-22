@@ -22,7 +22,7 @@ func TestZZVerifyExpiry_TradeNormallyAfterExpiry(t *testing.T) {
 	if _, err := Buy(s, h, c, b1, tk(500)); err != nil {
 		t.Fatalf("first buy: %v", err)
 	}
-	if Graduate(s, c, h, t1).Cmp(big.NewInt(500)) != 0 {
+	if Graduate(s, c, h, t1).Cmp(tk(500)) != 0 {
 		t.Fatalf("graduate should move 500")
 	}
 	// Ledger cleared, 500 matured.
@@ -43,10 +43,10 @@ func TestZZVerifyExpiry_TradeNormallyAfterExpiry(t *testing.T) {
 	if len(lots) != 1 {
 		t.Fatalf("fresh buy should yield exactly 1 new cohort, got %d: %q", len(lots), zvLotsStr(s, c, h))
 	}
-	if lots[0].count.Cmp(big.NewInt(300)) != 0 || lots[0].acq != t1 {
+	if lots[0].count.Cmp(tk(300)) != 0 || lots[0].acq != t1 {
 		t.Fatalf("new cohort = {%s,%d} want {300,%d}", lots[0].count, lots[0].acq, t1)
 	}
-	if got := zvSumLotsRaw(s, c, h); got.Cmp(big.NewInt(300)) != 0 {
+	if got := zvSumLotsRaw(s, c, h); got.Cmp(tk(300)) != 0 {
 		t.Fatalf("Σlots=%s want 300 (==maturing kBal)", got)
 	}
 	// The matured pile from the first life is untouched — no double count.
@@ -94,7 +94,7 @@ func TestZZVerifyExpiry_TradeNormallyAfterExpiry(t *testing.T) {
 	if r := lotRateAt(t1, t2); r != 0 {
 		t.Fatalf("matured fresh cohort rate=%d want 0", r)
 	}
-	if Graduate(s, c, h, t2).Cmp(big.NewInt(300)) != 0 {
+	if Graduate(s, c, h, t2).Cmp(tk(300)) != 0 {
 		t.Fatalf("second graduation should move 300")
 	}
 	if zvHasLots(s, c, h) {
@@ -113,7 +113,7 @@ func TestZZVerifyExpiry_TradeNormallyAfterExpiry(t *testing.T) {
 	if r.Tax.Sign() != 0 || r.TaxBps != 0 {
 		t.Fatalf("final full-exit tax=%s taxBps=%d MUST be 0", r.Tax, r.TaxBps)
 	}
-	zvAssertSellShape(t, r, supplyBefore, big.NewInt(800), "final full sell")
+	zvAssertSellShape(t, r, supplyBefore, tk(800), "final full sell")
 	zvAssertReserveEqualsArea(t, s, c, "after second-cycle full exit")
 	zvAssertNoOrphanLots(t, s, "after second-cycle full exit")
 	zvAssertPositionsSumToSupply(t, s, c, "after second-cycle full exit")

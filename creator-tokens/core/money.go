@@ -137,6 +137,10 @@ func parseTokens(s string) (*big.Int, error) {
 	return v, nil
 }
 
+// FmtTokens is fmtTokens for the wasm wrapper (contract/main.go), which
+// cannot see unexported helpers.
+func FmtTokens(units *big.Int) string { return fmtTokens(units) }
+
 // fmtTokens writes state UNITS as the decimal token string the wire carries:
 // always TokenDecimals places ("1.50", "0.01", "2.00"), never an exponent,
 // never a float. Events and read results use it for every token-denominated

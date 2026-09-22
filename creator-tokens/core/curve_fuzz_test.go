@@ -311,7 +311,10 @@ func (m *cfModel) sell(t *testing.T, r *rand.Rand, deltaS *big.Int, taxBps uint6
 	net := new(big.Int).Sub(p, tax)
 	net.Sub(net, fee)
 	if net.Sign() < 0 {
-		t.Fatalf("model sell: negative net (p=%s tax=%s fee=%s τ=%d)", p, tax, fee, taxBps)
+		// v6: with the one-base-unit minimum fee a dust sale under a random
+		// calibration can owe more than it grosses; sell.go refuses it
+		// ("tax + fee exceed proceeds") and changes nothing, so neither does the model.
+		return
 	}
 	m.S = new(big.Int).Sub(m.S, deltaS)
 	m.R = new(big.Int).Sub(m.R, p) // curve leg ONLY (C-19)

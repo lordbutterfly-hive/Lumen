@@ -157,6 +157,12 @@ func fzOrderInvariantDump(s *MemStore) string {
 			strings.HasPrefix(k, "fee|") || k == "treasury" {
 			continue
 		}
+		// The TWAP rings are first-writer-wins within a block (twap.go), so two
+		// buys in one block record whichever ran first; that is the feed's own
+		// rule, not a money-state divergence, and it is excluded here on purpose.
+		if strings.HasPrefix(k, "tw|") || strings.HasPrefix(k, "twl|") {
+			continue
+		}
 		v, _ := s.Get(k)
 		if v == "" {
 			continue
@@ -709,7 +715,7 @@ func fzActAsk(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) {
 	// fuzzer-picked value, since the fuzzer no longer controls the rate at
 	// all.
 	if res.RateUsed.Sign() > 0 && face.Sign() > 0 {
-		want := fzCeilDiv(face, res.RateUsed)
+		want := fzCeilDiv(new(big.Int).Mul(face, unitsScale), res.RateUsed) // v6: units
 		if res.CreditsSpent.Cmp(want) != 0 {
 			tr.dump(t, 200)
 			t.Fatalf("ROUNDING VIOLATION: Ask(face=%s rate=%s) CreditsSpent=%s, independent ceil=%s", face, res.RateUsed, res.CreditsSpent, want)
@@ -1511,6 +1517,20 @@ func TestFuzzOrderingImmunity(t *testing.T) {
 			for gi := 1; gi < len(group); gi++ {
 				if group[gi].dump != first {
 					tr.dump(t, 200)
+					// Name the lines that differ, so the cause is readable without a replay.
+					fl, gl := strings.Split(first, "\n"), strings.Split(group[gi].dump, "\n")
+					for li := 0; li < len(fl) || li < len(gl); li++ {
+						var a, b string
+						if li < len(fl) {
+							a = fl[li]
+						}
+						if li < len(gl) {
+							b = gl[li]
+						}
+						if a != b {
+							t.Logf("  DIFF line %d:\n    A: %s\n    B: %s", li, a, b)
+						}
+					}
 					t.Fatalf("trial %d: ORDERING NOT IMMUNE: op set %v — the SAME ops succeeded (%s) in every order, but final state differs by permutation.\n--- state A ---\n%s\n--- state B ---\n%s",
 						trial, subsetIDs, outcome, first, group[gi].dump)
 				}
@@ -1666,7 +1686,7 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 			// INDEPENDENT model of what the contract should charge — the face
 			// itself, ceiled by the rate, with no leg arithmetic at all.
 			tokenLeg := big.NewInt(face)
-			maxCredits := fzCeilDiv(tokenLeg, rate) // the asker's own cap == the exact expected spend
+			maxCredits := fzCeilDiv(new(big.Int).Mul(tokenLeg, unitsScale), rate) // the asker's own cap == the exact expected spend, in units
 			res, err := askAt0(s, asker, creator, askBlock, maxCredits, "cid", MinAskDeadline)
 			if err != nil {
 				t.Fatalf("iter %d: Ask(face=%d rate=%s): %v", i, face, rate, err)
@@ -1675,7 +1695,7 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 				t.Fatalf("iter %d: RateUsed = %s, want the seeded TWAP %s (min(short,long,spot) did not resolve to the marker)", i, res.RateUsed, rate)
 			}
 
-			want := fzCeilDiv(tokenLeg, rate)
+			want := fzCeilDiv(new(big.Int).Mul(tokenLeg, unitsScale), rate) // v6: units
 			if res.CreditsSpent.Cmp(want) != 0 {
 				t.Fatalf("iter %d: ROUNDING VIOLATION: face=%d (tokenLeg=%s) rate=%s got CreditsSpent=%s, independent ceil(tokenLeg/rate)=%s",
 					i, face, tokenLeg, rate, res.CreditsSpent, want)
@@ -1697,8 +1717,8 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 			// FEWER credit must always undershoot face.
 			oneLess := new(big.Int).Sub(res.CreditsSpent, big.NewInt(1))
 			if oneLess.Sign() > 0 {
-				got := new(big.Int).Mul(oneLess, rate)
-				if got.Cmp(tokenLeg) >= 0 {
+				got := new(big.Int).Mul(oneLess, rate) // units x HBD-per-token
+				if got.Cmp(new(big.Int).Mul(tokenLeg, unitsScale)) >= 0 { // v6: covers when >= face x TokenScale
 					t.Fatalf("iter %d: CreditsSpent=%s is not minimal for tokenLeg=%s at rate=%s: one less (%s) still covers it (%s)",
 						i, res.CreditsSpent, tokenLeg, rate, oneLess, got)
 				}

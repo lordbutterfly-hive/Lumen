@@ -35,7 +35,7 @@ func TestOF_CTORACLE01_SettlementWalkClosed(t *testing.T) {
 	const S = int64(9350)
 	const dump = int64(1349)
 	honest := SpotRate(tk(S))
-	depressed := SpotRate(big.NewInt(S - dump))
+	depressed := SpotRate(tk(S - dump))
 
 	build := func(attack bool) (short, long, spot, settle *big.Int) {
 		s := NewMemStore()
@@ -53,7 +53,11 @@ func TestOF_CTORACLE01_SettlementWalkClosed(t *testing.T) {
 		last := ofWriteShort(s, c, 1_000_000, rates)
 		stFillLong(s, c, last, stObsCount, honest) // long ring unmoved
 		q := last + MaxObsWeightBlocks             // marker dwell saturates the clamp
-		short, _ = AskRate(s, c, q)
+		var serr error
+		short, serr = AskRate(s, c, q)
+		if serr != nil {
+			t.Fatalf("AskRate: %v", serr)
+		}
 		long = honest // what the seeded long ring holds; settlement no longer reads it
 		spot = SpotRate(tk(S))
 		settle, _ = SettlementRate(s, c, q)
@@ -121,7 +125,7 @@ func TestOF_CTORACLE02_HonestGrowthKeepsShopOpen(t *testing.T) {
 
 	shortR, _ := AskRate(s, c, qq)
 	longR := stale // the seeded 7-day value the old min() would have picked
-	backing := mMulDivCeil(getMoney(s, kReserve(c)), big.NewInt(1), getMoney(s, kSupply(c)))
+	backing := mMulDivCeil(getMoney(s, kReserve(c)), unitsScale, getMoney(s, kSupply(c))) // per WHOLE token (v6)
 	oldMin := ofOldMin(shortR, longR, spot)
 	oldLimit := new(big.Int).Mul(oldMin, big.NewInt(int64(DivergenceRateMultiple)))
 	oldRefuses := backing.Cmp(oldLimit) > 0

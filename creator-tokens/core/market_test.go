@@ -391,8 +391,8 @@ func TestRegister_ReRegisterAfterAbandonedEscrowResolvedByThirdParty(t *testing.
 		t.Fatalf("ReclaimResult.Asker = %q, want %q — the ORIGINAL asker, not the rescuer", res.Asker, asker)
 	}
 	// The money went to the asker, not the rescuer.
-	if got := getMoney(s, kBal(creator, asker)); got.Cmp(tk(1)) != 0 {
-		t.Fatalf("asker balance after third-party reclaim = %s, want 1", got)
+	if got := getMoney(s, kBal(creator, asker)); got.Cmp(askRes.CreditsSpent) != 0 { // no owner bound here, so the whole escrow returns
+		t.Fatalf("asker balance after third-party reclaim = %s, want the whole escrow %s", got, askRes.CreditsSpent)
 	}
 	if got := getMoney(s, kBal(creator, rescuer)); got.Sign() != 0 {
 		t.Fatalf("rescuer balance = %s, want 0 (the caller is never paid)", got)

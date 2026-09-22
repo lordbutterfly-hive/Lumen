@@ -750,7 +750,7 @@ func TestZP1_H12_EndToEnd_EscrowRoundTripAcceleratesMaturity(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 	for _, h := range []string{attacker, control} {
-		if _, err := Buy(s, h, c, 10, big.NewInt(aged)); err != nil {
+		if _, err := Buy(s, h, c, 10, tk(aged)); err != nil {
 			t.Fatalf("Buy(%s): %v", h, err)
 		}
 	}
@@ -759,7 +759,7 @@ func TestZP1_H12_EndToEnd_EscrowRoundTripAcceleratesMaturity(t *testing.T) {
 		if n := Graduate(s, c, h, matureBlock); n.Cmp(big.NewInt(aged)) != 0 {
 			t.Fatalf("Graduate(%s) moved %s, want %d", h, n, aged)
 		}
-		if _, err := Buy(s, h, c, matureBlock, big.NewInt(fresh)); err != nil {
+		if _, err := Buy(s, h, c, matureBlock, tk(fresh)); err != nil {
 			t.Fatalf("fresh Buy(%s): %v", h, err)
 		}
 	}
@@ -914,7 +914,7 @@ func TestZP1_H12_EndToEnd_ZeroCostSelfAskLaunder(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 	for _, h := range []string{c, control} {
-		if _, err := Buy(s, h, c, 10, big.NewInt(aged)); err != nil {
+		if _, err := Buy(s, h, c, 10, tk(aged)); err != nil {
 			t.Fatalf("Buy(%s): %v", h, err)
 		}
 	}
@@ -923,7 +923,7 @@ func TestZP1_H12_EndToEnd_ZeroCostSelfAskLaunder(t *testing.T) {
 		if n := Graduate(s, c, h, matureBlock); n.Cmp(big.NewInt(aged)) != 0 {
 			t.Fatalf("Graduate(%s) moved %s", h, n)
 		}
-		if _, err := Buy(s, h, c, matureBlock, big.NewInt(fresh)); err != nil {
+		if _, err := Buy(s, h, c, matureBlock, tk(fresh)); err != nil {
 			t.Fatalf("fresh Buy(%s): %v", h, err)
 		}
 	}

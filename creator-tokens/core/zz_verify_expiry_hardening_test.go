@@ -27,7 +27,7 @@ func TestZZVerifyExpiry_LegacySynthesizedCohortAtMaturity(t *testing.T) {
 		t.Fatal("precondition: ledger must be absent (legacy position)")
 	}
 	syn := getLots(s, c, h)
-	if len(syn) != 1 || syn[0].count.Cmp(big.NewInt(500)) != 0 || syn[0].acq != b1 {
+	if len(syn) != 1 || syn[0].count.Cmp(tk(500)) != 0 || syn[0].acq != b1 {
 		t.Fatalf("synthesis = %v want one cohort {500,%d}", syn, b1)
 	}
 
@@ -35,12 +35,12 @@ func TestZZVerifyExpiry_LegacySynthesizedCohortAtMaturity(t *testing.T) {
 	supply := new(big.Int).Set(Supply(s, c))
 	taxable, _ := SellProceeds(supply, tk(500))
 	blendBefore := ExitTaxOn(taxable, ExitTaxBpsAt(heldBlocksAt(s, c, h, at-1)))
-	cohortBefore, _, _, _ := maturingCohortTax(s, c, h, supply, big.NewInt(500), at-1)
+	cohortBefore, _, _, _ := maturingCohortTax(s, c, h, supply, tk(500), at-1)
 	if cohortBefore.Cmp(blendBefore) != 0 {
 		t.Fatalf("legacy cohort tax %s != blend %s one block before maturity (backward-compat broken)", cohortBefore, blendBefore)
 	}
 	// At maturity: 0.
-	cohortAt, _, _, _ := maturingCohortTax(s, c, h, supply, big.NewInt(500), at)
+	cohortAt, _, _, _ := maturingCohortTax(s, c, h, supply, tk(500), at)
 	if cohortAt.Sign() != 0 {
 		t.Fatalf("legacy synthesized cohort tax at maturity = %s, MUST be 0", cohortAt)
 	}
@@ -95,7 +95,7 @@ func TestZZVerifyExpiry_DoubleGraduationIsNoop(t *testing.T) {
 	s := tbMarket(t, c)
 	b1 := uint64(1_000_000)
 	at := zvMature(t, s, c, h, 500, b1)
-	if Graduate(s, c, h, at).Cmp(big.NewInt(500)) != 0 {
+	if Graduate(s, c, h, at).Cmp(tk(500)) != 0 {
 		t.Fatal("first graduate")
 	}
 	if second := Graduate(s, c, h, at); second.Sign() != 0 {
@@ -132,7 +132,7 @@ func TestZZVerifyExpiry_TransferInOntoMaturedNotGraduated(t *testing.T) {
 	}
 
 	// No double count: aged 500 + fresh 100 both in the ledger, Σ==kBal==600.
-	if got := zvSumLotsRaw(s, c, h); got.Cmp(big.NewInt(600)) != 0 {
+	if got := zvSumLotsRaw(s, c, h); got.Cmp(tk(600)) != 0 {
 		t.Fatalf("Σlots=%s want 600 (aged 500 + gift 100)", got)
 	}
 	if MaturingOf(s, c, h).Cmp(tk(600)) != 0 {
@@ -164,7 +164,7 @@ func TestZZVerifyExpiry_TransferInOntoMaturedNotGraduated(t *testing.T) {
 	if !maturedNow(s, c, h, t2) {
 		t.Fatal("both cohorts past the window: must be matured at t2")
 	}
-	if Graduate(s, c, h, t2).Cmp(big.NewInt(600)) != 0 {
+	if Graduate(s, c, h, t2).Cmp(tk(600)) != 0 {
 		t.Fatal("graduate 600 at t2")
 	}
 	if zvHasLots(s, c, h) {

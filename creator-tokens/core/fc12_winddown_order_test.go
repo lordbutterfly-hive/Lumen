@@ -167,7 +167,7 @@ func TestWindDown_PayoutOrderIndependent(t *testing.T) {
 			// (h withdraws FIRST, before any dust accrues) — every holder is
 			// bounded BELOW by floor(R_open·c_h/S_open), so going later only ever
 			// helps. This pins the lower end of the spread to a known quantity.
-			wantMin := refundPayout(big.NewInt(fx.reserve), big.NewInt(fx.credits[h]), tk(supply))
+			wantMin := refundPayout(big.NewInt(fx.reserve), big.NewInt(fx.credits[h]), big.NewInt(supply)) // the model's own unit-free ledger
 			if big.NewInt(lo).Cmp(wantMin) != 0 {
 				t.Fatalf("%s holder %d: min gross across orders = %d, want the ratio-at-open slice %s (C-23 lower bound violated)", fx.name, h, lo, wantMin)
 			}

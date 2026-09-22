@@ -671,7 +671,7 @@ func TestSell_CorruptReserve_RefusedAndWindDownStillExits(t *testing.T) {
 	const wdBlock = 400 + GraceBlocks // FROZEN (inWindDown either way); the property under test is unchanged
 	// The victim owns the whole supply, so the GROSS pro-rata is the whole
 	// remaining reserve (half). RULING K2 carves the victim's exit tax from it.
-	gross := refundPayout(getMoney(s, kReserve(c)), big.NewInt(100), getMoney(s, kSupply(c)))
+	gross := refundPayout(getMoney(s, kReserve(c)), tk(100), getMoney(s, kSupply(c)))
 	wantNet := new(big.Int).Sub(gross, ExitTaxOn(gross, ExitTaxBpsAt(heldBlocksAt(s, c, "victim", wdBlock))))
 	payout, err := Refund(s, "victim", c, wdBlock, tk(100))
 	if err != nil {

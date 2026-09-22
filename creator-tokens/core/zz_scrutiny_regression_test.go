@@ -36,10 +36,10 @@ func TestSCRUT_A_TransferOutLaunder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(M)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(M)); err != nil {
 		t.Fatal(err)
 	}
-	if err := TransferCredits(s, "whale", c, "whale", "mule", t1, big.NewInt(M)); err != nil {
+	if err := TransferCredits(s, "whale", c, "whale", "mule", t1, tk(M)); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("mule ledger after wash: %v", zbLotsRate(s, c, "mule", t1))
@@ -68,15 +68,15 @@ func TestSCRUT_A2_TransferOutLaunder_Executed(t *testing.T) {
 		pfBuy(t, s, "alt", c, t1, M)
 		seller := "alt"
 		if wash {
-			if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(M)); err != nil {
+			if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(M)); err != nil {
 				t.Fatal(err)
 			}
-			if err := TransferCredits(s, "whale", c, "whale", "mule", t1, big.NewInt(M)); err != nil {
+			if err := TransferCredits(s, "whale", c, "whale", "mule", t1, tk(M)); err != nil {
 				t.Fatal(err)
 			}
 			seller = "mule"
 		}
-		r, err := Sell(s, seller, c, t1, big.NewInt(M), nil)
+		r, err := Sell(s, seller, c, t1, tk(M), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -107,10 +107,10 @@ func TestSCRUT_A3_TransferOutLaunder_RefundRail(t *testing.T) {
 		pfBuy(t, s, "alt", c, t1, M)
 		holder := "alt"
 		if wash {
-			if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(M)); err != nil {
+			if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(M)); err != nil {
 				t.Fatal(err)
 			}
-			if err := TransferCredits(s, "whale", c, "whale", "mule", t1, big.NewInt(M)); err != nil {
+			if err := TransferCredits(s, "whale", c, "whale", "mule", t1, tk(M)); err != nil {
 				t.Fatal(err)
 			}
 			holder = "mule"
@@ -123,7 +123,7 @@ func TestSCRUT_A3_TransferOutLaunder_RefundRail(t *testing.T) {
 	taxOf := func(wash bool) *big.Int {
 		s, holder := build(wash)
 		gross := refundPayout(getMoney(s, kReserve(c)), big.NewInt(M), getMoney(s, kSupply(c)))
-		net, err := Refund(s, holder, c, t1, big.NewInt(M), nil)
+		net, err := Refund(s, holder, c, t1, tk(M), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -152,13 +152,13 @@ func TestSCRUT_A4_ShelterIsReusable(t *testing.T) {
 	for day := 0; day < 30; day++ {
 		blk := t1 + uint64(day)*BlocksPerDay
 		mule, alt := fmt.Sprintf("mule%d", day), fmt.Sprintf("alt%d", day)
-		if _, err := Buy(s, alt, c, blk, big.NewInt(M)); err != nil {
+		if _, err := Buy(s, alt, c, blk, tk(M)); err != nil {
 			t.Fatal(err)
 		}
-		if err := TransferCredits(s, alt, c, alt, "whale", blk, big.NewInt(M)); err != nil {
+		if err := TransferCredits(s, alt, c, alt, "whale", blk, tk(M)); err != nil {
 			t.Fatal(err)
 		}
-		if err := TransferCredits(s, "whale", c, "whale", mule, blk, big.NewInt(M)); err != nil {
+		if err := TransferCredits(s, "whale", c, "whale", mule, blk, tk(M)); err != nil {
 			t.Fatal(err)
 		}
 		lastMule, lastBlk = mule, blk
@@ -189,7 +189,7 @@ func TestSCRUT_B_GraduationLaunder(t *testing.T) {
 		pfMarket(t, s, c, t1+3*ExitTaxDecayBlocks)
 		pfBuy(t, s, "whale", c, t0, N)
 		pfBuy(t, s, "alt", c, t1, M)
-		if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(M)); err != nil {
+		if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(M)); err != nil {
 			t.Fatal(err)
 		}
 		lo, hi := t1, t1+ExitTaxDecayBlocks
@@ -227,10 +227,10 @@ func TestSCRUT_D_SellFloorOverchargesAgedRemainder(t *testing.T) {
 	pfMarket(t, s, c, t1+10)
 	pfBuy(t, s, "whale", c, t0, N)
 	pfBuy(t, s, "alt", c, t1, M)
-	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(M)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(M)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Sell(s, "whale", c, t1, big.NewInt(M)); err != nil {
+	if _, err := Sell(s, "whale", c, t1, tk(M)); err != nil {
 		t.Fatal(err)
 	}
 	q, err := QuoteSell(s, "whale", c, t1, tk(N))
@@ -648,7 +648,7 @@ func TestSCRUT_I_DustFeeAndTax(t *testing.T) {
 		s3 := NewMemStore()
 		pfMarket(t, s3, c, t0+10)
 		pfBuy(t, s3, "h", c, t0, n)
-		r, err := Sell(s3, "h", c, t0, big.NewInt(n), nil)
+		r, err := Sell(s3, "h", c, t0, tk(n), nil)
 		if err != nil {
 			continue
 		}

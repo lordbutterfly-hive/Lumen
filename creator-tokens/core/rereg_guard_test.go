@@ -1,9 +1,6 @@
 package core
 
-import (
-	"math/big"
-	"testing"
-)
+import "testing"
 
 // rereg_guard_test.go — regressions for the re-registration fixes of 2026-08-12,
 // plus a PINNED RESIDUAL that a scrutiny pass the same day proved is NOT closed
@@ -168,11 +165,11 @@ func TestResidual_BlendedClockLaundersSingleAccount_KNOWN(t *testing.T) {
 	// One block short of full maturity — where graduate() does NOT fire.
 	s := NewMemStore()
 	rgMarket(t, s, c, t0)
-	if _, err := Buy(s, whale, c, t0, big.NewInt(P)); err != nil {
+	if _, err := Buy(s, whale, c, t0, tk(P)); err != nil {
 		t.Fatalf("pile buy: %v", err)
 	}
 	at := uint64(t0) + ExitTaxDecayBlocks - 1
-	if _, err := Buy(s, whale, c, at, big.NewInt(F)); err != nil {
+	if _, err := Buy(s, whale, c, at, tk(F)); err != nil {
 		t.Fatalf("fresh buy: %v", err)
 	}
 	q, err := QuoteSell(s, whale, c, at, tk(F))

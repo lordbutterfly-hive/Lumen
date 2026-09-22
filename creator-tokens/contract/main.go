@@ -304,6 +304,19 @@ func jsonU64Field(payload, key string) (uint64, bool) { return parse.U64Field(pa
 // established for the identical reason.
 func parseBigDecimal(s string) (*big.Int, bool) { return parse.BigDecimal(s) }
 
+// parseTokenAmount reads a TOKEN amount ("1.5", "2") into state units (v6, parse.TokenAmount).
+func parseTokenAmount(s string) (*big.Int, bool) { return parse.TokenAmount(s) }
+
+// i64FromTokenAmount is parseTokenAmount for the int64 cap fields: a cap on the
+// wire is whole tokens or a decimal ("250", "250.5"), stored as units.
+func i64FromTokenAmount(s string) (int64, bool) {
+	v, ok := parseTokenAmount(s)
+	if !ok || !v.IsInt64() {
+		return 0, false
+	}
+	return v.Int64(), true
+}
+
 // ===================================
 // Duplicated core internals (read-only, display/pricing preview ONLY)
 // ===================================
@@ -661,7 +674,7 @@ func Register(a *string) *string {
 		handleErr(inputErr("face overflows int64"))
 		return nil
 	}
-	capVal, ok := i64FromU64(jsonU64(payload, "cap"))
+	capVal, ok := i64FromTokenAmount(jsonStr(payload, "cap"))
 	if !ok {
 		handleErr(inputErr("cap overflows int64"))
 		return nil
@@ -672,7 +685,7 @@ func Register(a *string) *string {
 	// "registered" while quietly getting nothing.
 	var firstBuy *big.Int
 	if raw := jsonStr(payload, "firstBuy"); raw != "" {
-		firstBuy, ok = parseBigDecimal(raw)
+		firstBuy, ok = parseTokenAmount(raw)
 		if !ok {
 			handleErr(inputErr("invalid firstBuy"))
 			return nil
@@ -695,7 +708,7 @@ func Register(a *string) *string {
 	sdk.Log(core.EvRegistered(caller, caller, block, face, capVal, big.NewInt(0)))
 	minted := "0"
 	if res.FirstBuy != nil {
-		minted = res.FirstBuy.Minted.String()
+		minted = core.FmtTokens(res.FirstBuy.Minted)
 		// GAP CLOSED (2026-07-28): the atomic first buy moves real money and
 		// real tokens — core.RegisterWithFirstBuy calls core.Buy internally,
 		// which mutates kReserve, kFeeBal(creator) and kBal(creator,creator)
@@ -769,7 +782,7 @@ func SetCap(a *string) *string {
 	}
 	block := currentBlock()
 
-	newCap, ok := i64FromU64(jsonU64(payload, "newCap"))
+	newCap, ok := i64FromTokenAmount(jsonStr(payload, "newCap"))
 	if !ok {
 		handleErr(inputErr("newCap overflows int64"))
 		return nil
@@ -826,7 +839,7 @@ func Transfer(a *string) *string {
 		handleErr(inputErr("invalid destination address"))
 		return nil
 	}
-	amount, ok := parseBigDecimal(jsonStr(payload, "amount"))
+	amount, ok := parseTokenAmount(jsonStr(payload, "amount")) // tokens on the wire, units in state (v6)
 	if !ok {
 		handleErr(inputErr("invalid amount"))
 		return nil
@@ -842,7 +855,7 @@ func Transfer(a *string) *string {
 		return nil
 	}
 	sdk.Log(core.EvTransferred(creator, caller, to, block, amount))
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","from":"` + jsonEscape(caller) + `","to":"` + jsonEscape(to) + `","amount":"` + amount.String() + `"}`)
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","from":"` + jsonEscape(caller) + `","to":"` + jsonEscape(to) + `","amount":"` + core.FmtTokens(amount) + `"}`)
 }
 
 // isPayableAddress is the payee gate: a recognised address form that can also
@@ -1032,7 +1045,7 @@ func GraduateMatured(a *string) *string {
 		sdk.Log(core.EvTransferSingle(caller, "", caller, creator, moved))
 		sdk.Log(core.EvMaturedMoved(creator, caller, "", caller, currentBlock(), moved))
 	}
-	return strPtr(`{"graduated":"` + moved.String() + `"}`)
+	return strPtr(`{"graduated":"` + core.FmtTokens(moved) + `"}`)
 }
 
 // Payload: {"owner":"<acct>","spender":"<acct>","id":"<creator>"} — read-only.
@@ -1075,8 +1088,8 @@ func CreatorTokenBalance(a *string) *string {
 	payload := payloadStr(a)
 	creator := jsonStr(payload, "id")
 	account := jsonStr(payload, "account")
-	return strPtr(`{"matured":"` + core.MaturedOf(store, creator, account).String() +
-		`","maturing":"` + core.MaturingOf(store, creator, account).String() +
+	return strPtr(`{"matured":"` + core.FmtTokens(core.MaturedOf(store, creator, account)) +
+		`","maturing":"` + core.FmtTokens(core.MaturingOf(store, creator, account)) +
 		`","maturesAtBlock":` + u64s(core.MaturesAtBlock(store, creator, account)) + `}`)
 }
 
@@ -1141,7 +1154,7 @@ func Ask(a *string) *string {
 	creator := jsonStr(payload, "creator")
 	contentHash := jsonStr(payload, "contentHash")
 	deadlineBlocks := jsonU64(payload, "deadlineBlocks")
-	maxCredits, ok := parseBigDecimal(jsonStr(payload, "maxCredits"))
+	maxCredits, ok := parseTokenAmount(jsonStr(payload, "maxCredits"))
 	if !ok {
 		handleErr(inputErr("invalid maxCredits"))
 		return nil
@@ -1189,7 +1202,7 @@ func Ask(a *string) *string {
 	// overstate the holder's tradable balance permanently (scrutiny F2).
 	emitMaturedDelta(creator, caller, caller, block, maturedBefore)
 	sdk.Log(core.EvAsked(creator, caller, block, res.Seq, res.CreditsSpent, res.CommissionCredits, res.RateUsed, deadlineBlocks, contentHash, offeringID))
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(res.Seq) + `,"creditsSpent":"` + bigStr(res.CreditsSpent) + `","commissionCredits":"` + bigStr(res.CommissionCredits) + `","rate":"` + res.RateUsed.String() + `"}`)
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(res.Seq) + `,"creditsSpent":"` + core.FmtTokens(res.CreditsSpent) + `","commissionCredits":"` + core.FmtTokens(res.CommissionCredits) + `","rate":"` + res.RateUsed.String() + `"}`)
 }
 
 // Payload: {"seq":<uint64>,"answerHash":"<string>"}. Creator-only
@@ -1243,7 +1256,7 @@ func Answer(a *string) *string {
 	// what the platform got, and who the platform is — so the indexer can
 	// reconstruct the whole settlement from this one event.
 	sdk.Log(core.EvAnswered(caller, caller, block, seq, res.CreditsToCreator, res.CommissionToOwner, res.Owner, answerHash))
-	return strPtr(`{"creator":"` + jsonEscape(caller) + `","seq":` + u64s(seq) + `,"creditsToCreator":"` + bigStr(res.CreditsToCreator) + `","commissionToOwner":"` + bigStr(res.CommissionToOwner) + `","commissionTo":"` + jsonEscape(res.Owner) + `"}`)
+	return strPtr(`{"creator":"` + jsonEscape(caller) + `","seq":` + u64s(seq) + `,"creditsToCreator":"` + core.FmtTokens(res.CreditsToCreator) + `","commissionToOwner":"` + core.FmtTokens(res.CommissionToOwner) + `","commissionTo":"` + jsonEscape(res.Owner) + `"}`)
 }
 
 // Payload: {"creator":"<hive-account>","seq":<uint64>}. `creator` IS payload
@@ -1327,7 +1340,7 @@ func Decline(a *string) *string {
 		sdk.Log(core.EvMaturedMoved(creator, caller, "", res.Asker, block, res.Graduated))
 	}
 	sdk.Log(core.EvDeclined(creator, caller, block, seq, res.CreditsReturned, res.Asker))
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + bigStr(res.CreditsReturned) + `"}`)
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + core.FmtTokens(res.CreditsReturned) + `"}`)
 }
 
 //go:wasmexport rate
@@ -1419,7 +1432,7 @@ func Reclaim(a *string) *string {
 		sdk.Log(core.EvMaturedMoved(creator, caller, "", res.Asker, block, res.Graduated))
 	}
 	sdk.Log(core.EvReclaimed(creator, caller, block, seq, res.CreditsReturned, res.CommissionRetainedCredits, res.Owner, res.Asker))
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + bigStr(res.CreditsReturned) + `","commissionRetainedCredits":"` + bigStr(res.CommissionRetainedCredits) + `","retainedTo":"` + jsonEscape(res.Owner) + `"}`)
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + core.FmtTokens(res.CreditsReturned) + `","commissionRetainedCredits":"` + core.FmtTokens(res.CommissionRetainedCredits) + `","retainedTo":"` + jsonEscape(res.Owner) + `"}`)
 }
 
 // Payload: {"creator":"<hive-account>","credits":"<decimal big.Int credits
@@ -1472,7 +1485,7 @@ func Refund(a *string) *string {
 	block := currentBlock()
 
 	creator := jsonStr(payload, "creator")
-	credits, ok := parseBigDecimal(jsonStr(payload, "credits"))
+	credits, ok := parseTokenAmount(jsonStr(payload, "credits"))
 	if !ok {
 		handleErr(inputErr("invalid credits"))
 		return nil
@@ -1526,7 +1539,7 @@ func Refund(a *string) *string {
 	}
 	emitMaturedDelta(creator, caller, caller, block, maturedBefore)
 	sdk.Log(core.EvRefunded(creator, caller, block, credits, payout))
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","creditsBurned":"` + credits.String() + `","payoutHbd":"` + bigStr(payout) + `"}`)
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","creditsBurned":"` + core.FmtTokens(credits) + `","payoutHbd":"` + bigStr(payout) + `"}`)
 }
 
 // Payload: {"creator":"<hive-account>","tokens":"<decimal big.Int token
@@ -1552,7 +1565,7 @@ func Buy(a *string) *string {
 	block := currentBlock()
 
 	creator := jsonStr(payload, "creator")
-	tokens, ok := parseBigDecimal(jsonStr(payload, "tokens"))
+	tokens, ok := parseTokenAmount(jsonStr(payload, "tokens"))
 	if !ok {
 		handleErr(inputErr("invalid tokens"))
 		return nil
@@ -1573,7 +1586,7 @@ func Buy(a *string) *string {
 		sdk.Log(core.EvMaturedMoved(creator, caller, "", caller, block, res.Graduated))
 	}
 	sdk.Log(core.EvBought(creator, caller, block, res.Minted, res.Cost, res.Fee, res.TotalDue))
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","minted":"` + bigStr(res.Minted) +
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","minted":"` + core.FmtTokens(res.Minted) +
 		`","cost":"` + bigStr(res.Cost) + `","fee":"` + bigStr(res.Fee) +
 		`","totalDue":"` + bigStr(res.TotalDue) + `"}`)
 }
@@ -1603,7 +1616,7 @@ func Sell(a *string) *string {
 	block := currentBlock()
 
 	creator := jsonStr(payload, "creator")
-	tokens, ok := parseBigDecimal(jsonStr(payload, "tokens"))
+	tokens, ok := parseTokenAmount(jsonStr(payload, "tokens"))
 	if !ok {
 		handleErr(inputErr("invalid tokens"))
 		return nil
@@ -1646,7 +1659,7 @@ func Sell(a *string) *string {
 	// consumer verify tax == the charge instead of re-deriving a wrong one; the
 	// event (EvSold) has carried it since the two-bucket split and the JSON
 	// return did not.
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","sold":"` + bigStr(res.Sold) +
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","sold":"` + core.FmtTokens(res.Sold) +
 		`","gross":"` + bigStr(res.Gross) + `","tax":"` + bigStr(res.Tax) +
 		`","taxableGross":"` + bigStr(res.TaxableGross) +
 		`","net":"` + bigStr(res.Net) + `","taxBps":` + u64s(res.TaxBps) + `}`)
@@ -2021,7 +2034,7 @@ func Quote(a *string) *string {
 	// was renamed from commissionOwedHbd for exactly that reason. There is no HBD
 	// leg to quote any more, so a client no longer needs to check the buyer's HBD
 	// balance or build a transfer.allow intent for an ask.
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","rate":"` + q.Rate.String() + `","face":"` + face.String() + `","creditsPerAsk":"` + q.Credits.String() + `","commissionCredits":"` + q.CommissionCredits.String() + `","creditsToCreator":"` + new(big.Int).Sub(q.Credits, q.CommissionCredits).String() + `","phase":"` + jsonEscape(phase) + `","inflowsOpen":` + boolStr(inflowsOpen) + `}`)
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","rate":"` + q.Rate.String() + `","face":"` + face.String() + `","creditsPerAsk":"` + core.FmtTokens(q.Credits) + `","commissionCredits":"` + q.CommissionCredits.String() + `","creditsToCreator":"` + new(big.Int).Sub(q.Credits, q.CommissionCredits).String() + `","phase":"` + jsonEscape(phase) + `","inflowsOpen":` + boolStr(inflowsOpen) + `}`)
 }
 
 // Payload: {"creator":"<hive-account>","tokens":"<decimal big.Int token
@@ -2041,7 +2054,7 @@ func QuoteBuy(a *string) *string {
 	block := currentBlock()
 
 	creator := jsonStr(payload, "creator")
-	tokens, ok := parseBigDecimal(jsonStr(payload, "tokens"))
+	tokens, ok := parseTokenAmount(jsonStr(payload, "tokens"))
 	if !ok {
 		handleErr(inputErr("invalid tokens"))
 		return nil
@@ -2052,7 +2065,7 @@ func QuoteBuy(a *string) *string {
 		handleErr(err)
 		return nil
 	}
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","minted":"` + bigStr(res.Minted) +
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","minted":"` + core.FmtTokens(res.Minted) +
 		`","cost":"` + bigStr(res.Cost) + `","fee":"` + bigStr(res.Fee) +
 		`","totalDue":"` + bigStr(res.TotalDue) + `","rateAfter":"` + bigStr(res.RateRecorded) + `"}`)
 }
@@ -2082,7 +2095,7 @@ func QuoteSell(a *string) *string {
 
 	creator := jsonStr(payload, "creator")
 	holder := jsonStr(payload, "holder")
-	tokens, ok := parseBigDecimal(jsonStr(payload, "tokens"))
+	tokens, ok := parseTokenAmount(jsonStr(payload, "tokens"))
 	if !ok {
 		handleErr(inputErr("invalid tokens"))
 		return nil
@@ -2097,7 +2110,7 @@ func QuoteSell(a *string) *string {
 	// without the base it applies to cannot be checked against the amount beside
 	// it, which is exactly the defect this field closes.
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","holder":"` + jsonEscape(holder) +
-		`","sold":"` + bigStr(res.Sold) + `","gross":"` + bigStr(res.Gross) +
+		`","sold":"` + core.FmtTokens(res.Sold) + `","gross":"` + bigStr(res.Gross) +
 		`","tax":"` + bigStr(res.Tax) + `","taxableGross":"` + bigStr(res.TaxableGross) +
 		`","fee":"` + bigStr(res.Fee) +
 		`","net":"` + bigStr(res.Net) + `","taxBps":` + u64s(res.TaxBps) +

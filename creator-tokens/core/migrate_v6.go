@@ -17,10 +17,10 @@ import (
 // through this Store wrapper, which converts the record it is about to touch
 // the first time, marks it converted, and never touches it again:
 //
-//   holder-scoped  mb|<c>|<h>  bal|<h>|<c>  lots|<c>|<h>   flag u6|<c>|<h>
-//   market-scoped  m|<c>|sup   m|<c>|cap                    flag m|<c>|u6
-//   escrow-scoped  e|<c>|<seq> em|<c>|<seq> el|<c>|<seq>    the record's field
-//                  count: 9 fields = tokens (pre-v6), 10 fields = units
+//	holder-scoped  mb|<c>|<h>  bal|<h>|<c>  lots|<c>|<h>   flag u6|<c>|<h>
+//	market-scoped  m|<c>|sup   m|<c>|cap                    flag m|<c>|u6
+//	escrow-scoped  e|<c>|<seq> em|<c>|<seq> el|<c>|<seq>    the record's field
+//	               count: 9 fields = tokens (pre-v6), 10 fields = units
 //
 // Everything else (reserve, fees, treasury, TWAP, acq clocks, ratings,
 // counters, offerings, faces) is HBD or a block number and is not touched.

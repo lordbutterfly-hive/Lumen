@@ -52,10 +52,10 @@ func cloneStore(s *MemStore) *MemStore {
 // is what each caller asserts instead of the old "the clock went fresh".
 func bounceRefresh(t *testing.T, s Store, creator, x, y string, block uint64, amt int64) {
 	t.Helper()
-	if err := TransferCredits(s, x, creator, x, y, block, big.NewInt(amt)); err != nil {
+	if err := TransferCredits(s, x, creator, x, y, block, tk(amt)); err != nil {
 		t.Fatalf("bounce %s->%s: %v", x, y, err)
 	}
-	if err := TransferCredits(s, y, creator, y, x, block, big.NewInt(amt)); err != nil {
+	if err := TransferCredits(s, y, creator, y, x, block, tk(amt)); err != nil {
 		t.Fatalf("bounce %s->%s: %v", y, x, err)
 	}
 }

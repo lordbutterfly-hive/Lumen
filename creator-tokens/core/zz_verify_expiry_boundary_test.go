@@ -86,7 +86,7 @@ func TestZZVerifyExpiry_Boundary_OneBefore_NoGraduation(t *testing.T) {
 	if !zvHasLots(s, c, h) {
 		t.Fatal("ledger must survive a pre-maturity partial sell")
 	}
-	if got := zvSumLotsRaw(s, c, h); got.Cmp(big.NewInt(300)) != 0 {
+	if got := zvSumLotsRaw(s, c, h); got.Cmp(tk(300)) != 0 {
 		t.Fatalf("Σlots=%s want 300 (500-200)", got)
 	}
 	t.Logf("one-before sell 200: taxBps=%d tax=%s (nonzero), ledger intact Σ=300", r.TaxBps, r.Tax)
@@ -101,7 +101,7 @@ func TestZZVerifyExpiry_TransferInOnClearedLedger(t *testing.T) {
 	s := tbMarket(t, c)
 	b1 := uint64(1_000_000)
 	at := zvMature(t, s, c, h, 500, b1) // h fully matures
-	if Graduate(s, c, h, at).Cmp(big.NewInt(500)) != 0 {
+	if Graduate(s, c, h, at).Cmp(tk(500)) != 0 {
 		t.Fatal("graduate h")
 	}
 	// h now: matured=500, ledger cleared.
@@ -120,7 +120,7 @@ func TestZZVerifyExpiry_TransferInOnClearedLedger(t *testing.T) {
 
 	// A new, single, fresh cohort landed on h's cleared ledger.
 	lots := getLotsRaw(s, c, h)
-	if len(lots) != 1 || lots[0].count.Cmp(big.NewInt(120)) != 0 {
+	if len(lots) != 1 || lots[0].count.Cmp(tk(120)) != 0 {
 		t.Fatalf("expected one fresh cohort of 120 on h, got %v (%q)", lots, zvLotsStr(s, c, h))
 	}
 	if got := zvSumLotsRaw(s, c, h); got.Cmp(MaturingOf(s, c, h)) != 0 {
@@ -173,7 +173,7 @@ func TestZZVerifyExpiry_MergeAndMaturity(t *testing.T) {
 	if len(lots) != 6 {
 		t.Fatalf("expected 6 cohorts (1 merged + 5 distinct), got %d: %q", len(lots), zvLotsStr(s, c, h))
 	}
-	wantTotal := big.NewInt(300 + 5*50) // 550
+	wantTotal := tk(300 + 5*50) // 550 tokens, in units
 	if got := zvSumLotsRaw(s, c, h); got.Cmp(wantTotal) != 0 {
 		t.Fatalf("Σlots=%s want %s", got, wantTotal)
 	}

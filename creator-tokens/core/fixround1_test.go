@@ -43,15 +43,15 @@ func TestSell_ChunkingCannotEvade(t *testing.T) {
 		if err := Register(s, c, c, 1000, 1000, 1_000_000_000*TokenScale); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Buy(s, "whale", c, 1000, big.NewInt(W)); err != nil {
+		if _, err := Buy(s, "whale", c, 1000, tk(W)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Buy(s, "fans", c, 1000, big.NewInt(F)); err != nil {
+		if _, err := Buy(s, "fans", c, 1000, tk(F)); err != nil {
 			t.Fatal(err)
 		}
 		tax := mZero()
 		for _, k := range splits {
-			r, err := Sell(s, "whale", c, 1000, big.NewInt(k))
+			r, err := Sell(s, "whale", c, 1000, tk(k))
 			if err != nil {
 				t.Fatalf("W=%d F=%d split %d: %v", W, F, k, err)
 			}
@@ -142,13 +142,13 @@ func TestSell_ET1_Fuzz_ChunkNeverBeatsSingle(t *testing.T) {
 			if err := Register(s, c, c, 1000, 1000, 1_000_000_000*TokenScale); err != nil {
 				t.Fatal(err)
 			}
-			Buy(s, "w", c, 1000, big.NewInt(W))
+			Buy(s, "w", c, 1000, tk(W))
 			if F > 0 {
-				Buy(s, "f", c, 1000, big.NewInt(F))
+				Buy(s, "f", c, 1000, tk(F))
 			}
 			tax := mZero()
 			for _, k := range splits {
-				res, err := Sell(s, "w", c, 1000, big.NewInt(k))
+				res, err := Sell(s, "w", c, 1000, tk(k))
 				if err != nil {
 					t.Fatalf("iter %d: sell %d of W=%d: %v", iter, k, W, err)
 				}

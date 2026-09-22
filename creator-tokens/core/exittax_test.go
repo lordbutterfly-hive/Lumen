@@ -113,7 +113,7 @@ func TestExitTaxOn_Bounds_Property(t *testing.T) {
 func TestExitTaxOn_ChunkingNeverEvades_Property(t *testing.T) {
 	r := rand.New(rand.NewSource(9))
 	for i := 0; i < 5000; i++ {
-		S := big.NewInt(r.Int63n(100_000) + 200)
+		S := tk(r.Int63n(100_000) + 200) // supply in units (v6)
 		total := r.Int63n(150) + 1
 		bps := uint64(r.Int63n(int64(MaxExitTaxBps)) + 1)
 
@@ -135,7 +135,7 @@ func TestExitTaxOn_ChunkingNeverEvades_Property(t *testing.T) {
 			}
 			sumP = mAdd(sumP, p)
 			sumTax = mAdd(sumTax, ExitTaxOn(p, bps))
-			cur.Sub(cur, big.NewInt(c))
+			cur.Sub(cur, tk(c))
 			remaining -= c
 		}
 		// Premise: the chunked proceeds telescope exactly (L4 equality).

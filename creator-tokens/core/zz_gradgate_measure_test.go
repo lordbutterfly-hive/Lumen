@@ -53,7 +53,7 @@ func gradWorld(t *testing.T, aged, fresh int64) (s *MemStore, c string, t0, t1 u
 	pfMarket(t, s, c, t1+3*ExitTaxDecayBlocks)
 	pfBuy(t, s, "whale", c, t0, aged)
 	pfBuy(t, s, "alt", c, t1, fresh)
-	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(fresh)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(fresh)); err != nil {
 		t.Fatalf("TransferCredits: %v", err)
 	}
 	return s, c, t0, t1
@@ -80,11 +80,11 @@ func TestGRAD_1_StuckRipeCohort(t *testing.T) {
 	// WITH THE COHORT-GATED graduate(): the ripe cohort moves at t1 itself.
 	w := holderAcqBlock(s, c, "whale")
 	blendWouldBe := w + ExitTaxDecayBlocks
-	if got := Graduate(s, c, "whale", t1); got.Cmp(big.NewInt(aged)) != 0 {
+	if got := Graduate(s, c, "whale", t1); got.Cmp(tk(aged)) != 0 {
 		t.Fatalf("expected %d to graduate at t1, moved %s", aged, got)
 	}
 	t.Logf("  Graduate() at t1 -> %d (the ripe cohort)", aged)
-	if got := MaturedOf(s, c, "whale"); got.Cmp(big.NewInt(aged)) != 0 {
+	if got := MaturedOf(s, c, "whale"); got.Cmp(tk(aged)) != 0 {
 		t.Fatalf("balanceOf still %s after graduating", got)
 	}
 	if err := TransferMatured(s, c, "whale", "bob", "whale", tk(1)); err != nil {
@@ -93,7 +93,7 @@ func TestGRAD_1_StuckRipeCohort(t *testing.T) {
 	t.Logf("  ABI balanceOf now = %s ; safeTransferFrom(1) SUCCEEDS", MaturedOf(s, c, "whale"))
 	t.Logf("  the BLEND would not have released them until t1+%d = %.2f days later",
 		blendWouldBe-t1, float64(blendWouldBe-t1)*3.0/86400.0)
-	if getMoney(s, kSupply(c)).Cmp(big.NewInt(aged+fresh)) != 0 {
+	if getMoney(s, kSupply(c)).Cmp(tk(aged+fresh)) != 0 {
 		t.Fatalf("supply moved on a graduation: %s", getMoney(s, kSupply(c)))
 	}
 }
@@ -177,7 +177,7 @@ func TestGRAD_3_MoneyUnchangedOnEveryRail(t *testing.T) {
 			k := k
 			gradMoneyDiff(t, "SELL k="+big.NewInt(k).String()+" shape "+big.NewInt(aged).String(),
 				aged, fresh, func(t *testing.T, s *MemStore, c string, blk uint64) []*big.Int {
-					r, err := Sell(s, "whale", c, blk, big.NewInt(k))
+					r, err := Sell(s, "whale", c, blk, tk(k))
 					if err != nil {
 						t.Fatalf("Sell: %v", err)
 					}
@@ -188,7 +188,7 @@ func TestGRAD_3_MoneyUnchangedOnEveryRail(t *testing.T) {
 				})
 			gradMoneyDiff(t, "TRANSFER k="+big.NewInt(k).String()+" shape "+big.NewInt(aged).String(),
 				aged, fresh, func(t *testing.T, s *MemStore, c string, blk uint64) []*big.Int {
-					if err := TransferCredits(s, "whale", c, "whale", "bob", blk, big.NewInt(k)); err != nil {
+					if err := TransferCredits(s, "whale", c, "whale", "bob", blk, tk(k)); err != nil {
 						t.Fatalf("TransferCredits: %v", err)
 					}
 					// and what bob then owes selling all of it
@@ -203,7 +203,7 @@ func TestGRAD_3_MoneyUnchangedOnEveryRail(t *testing.T) {
 					if err := Retire(s, c, c, blk); err != nil {
 						t.Fatalf("Retire: %v", err)
 					}
-					net, err := Refund(s, "whale", c, blk, big.NewInt(k))
+					net, err := Refund(s, "whale", c, blk, tk(k))
 					if err != nil {
 						t.Fatalf("Refund: %v", err)
 					}
@@ -240,13 +240,13 @@ func gradEscrowWorld(t *testing.T, aged, fresh int64) (*MemStore, string, string
 	}
 	t0 := uint64(10)
 	t1 := t0 + ExitTaxDecayBlocks
-	if _, err := Buy(s, h, c, t0, big.NewInt(aged)); err != nil {
+	if _, err := Buy(s, h, c, t0, tk(aged)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Buy(s, "alt", c, t1, big.NewInt(fresh)); err != nil {
+	if _, err := Buy(s, "alt", c, t1, tk(fresh)); err != nil {
 		t.Fatal(err)
 	}
-	if err := TransferCredits(s, "alt", c, "alt", h, t1, big.NewInt(fresh)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", h, t1, tk(fresh)); err != nil {
 		t.Fatal(err)
 	}
 	askBlock := erSeedObs(s, c, t1+1)

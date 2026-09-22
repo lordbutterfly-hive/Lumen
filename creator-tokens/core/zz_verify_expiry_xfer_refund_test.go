@@ -16,7 +16,7 @@ func TestZZVerifyExpiry_TransferMaturedAfterExpiry(t *testing.T) {
 	s := tbMarket(t, c)
 	b1 := uint64(1_000_000)
 	at := zvMature(t, s, c, h, 500, b1)
-	if Graduate(s, c, h, at).Cmp(big.NewInt(500)) != 0 {
+	if Graduate(s, c, h, at).Cmp(tk(500)) != 0 {
 		t.Fatal("graduate 500")
 	}
 
@@ -54,7 +54,7 @@ func TestZZVerifyExpiry_TransferCreditsOfMaturedAfterExpiry(t *testing.T) {
 	s := tbMarket(t, c)
 	b1 := uint64(1_000_000)
 	at := zvMature(t, s, c, h, 500, b1)
-	if Graduate(s, c, h, at).Cmp(big.NewInt(500)) != 0 {
+	if Graduate(s, c, h, at).Cmp(tk(500)) != 0 {
 		t.Fatal("graduate 500")
 	}
 
@@ -87,7 +87,7 @@ func TestZZVerifyExpiry_RefundMaturedAfterExpiry(t *testing.T) {
 		at := zvMature(t, s, c, h, 500, b1)
 
 		if graduateFirst {
-			if Graduate(s, c, h, at).Cmp(big.NewInt(500)) != 0 {
+			if Graduate(s, c, h, at).Cmp(tk(500)) != 0 {
 				t.Fatal("graduate 500")
 			}
 		}

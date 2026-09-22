@@ -175,11 +175,11 @@ func TestRefund_K2_WindDownTaxMatchesCurveExit(t *testing.T) {
 	// --- the CURVE exit: fresh whale buys n, sells all n in the same block ---
 	sc := NewMemStore()
 	setupMarket(sc, "curvecrea", 100, MaxCap)
-	if _, err := Buy(sc, "whale", "curvecrea", 1000, big.NewInt(n)); err != nil {
+	if _, err := Buy(sc, "whale", "curvecrea", 1000, tk(n)); err != nil {
 		t.Fatal(err)
 	}
 	Rcurve := getMoney(sc, kReserve("curvecrea"))
-	sell, err := Sell(sc, "whale", "curvecrea", 1000, big.NewInt(n)) // fresh, τ=2000
+	sell, err := Sell(sc, "whale", "curvecrea", 1000, tk(n)) // fresh, τ=2000
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestRefund_K2_WindDownTaxMatchesCurveExit(t *testing.T) {
 	// --- the WIND-DOWN exit: fresh whale buys n, Retires, winds down ---
 	sw := NewMemStore()
 	setupMarket(sw, "windcrea", 100, MaxCap)
-	if _, err := Buy(sw, "whale", "windcrea", 1000, big.NewInt(n)); err != nil {
+	if _, err := Buy(sw, "whale", "windcrea", 1000, tk(n)); err != nil {
 		t.Fatal(err)
 	}
 	Rwind := getMoney(sw, kReserve("windcrea"))
@@ -210,7 +210,7 @@ func TestRefund_K2_WindDownTaxMatchesCurveExit(t *testing.T) {
 	gross := refundPayout(Rwind, tk(n), getMoney(sw, kSupply("windcrea")))
 	wdTaxBps := ExitTaxBpsAt(heldBlocksAt(sw, "windcrea", "whale", 1002))
 	wdTax := ExitTaxOn(gross, wdTaxBps)
-	net, err := Refund(sw, "whale", "windcrea", 1002, big.NewInt(n))
+	net, err := Refund(sw, "whale", "windcrea", 1002, tk(n))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,16 +251,16 @@ func TestRefund_K2_WindDownTaxMatchesCurveExit(t *testing.T) {
 	// --- and a SIX-WEEK holder pays ZERO on the wind-down ---
 	sp := NewMemStore()
 	setupMarket(sp, "patientcrea", 100, MaxCap)
-	if _, err := Buy(sp, "patient", "patientcrea", 1000, big.NewInt(n)); err != nil {
+	if _, err := Buy(sp, "patient", "patientcrea", 1000, tk(n)); err != nil {
 		t.Fatal(err)
 	}
 	if err := Retire(sp, "patientcrea", "patientcrea", 1000+ExitTaxDecayBlocks); err != nil {
 		t.Fatal(err)
 	}
 	wdBlock := 1000 + ExitTaxDecayBlocks + 1 // held the full six weeks ⇒ τ=0
-	grossP := refundPayout(getMoney(sp, kReserve("patientcrea")), big.NewInt(n), getMoney(sp, kSupply("patientcrea")))
+	grossP := refundPayout(getMoney(sp, kReserve("patientcrea")), tk(n), getMoney(sp, kSupply("patientcrea")))
 	treaP := getMoney(sp, kTreasury())
-	netP, err := Refund(sp, "patient", "patientcrea", wdBlock, big.NewInt(n))
+	netP, err := Refund(sp, "patient", "patientcrea", wdBlock, tk(n))
 	if err != nil {
 		t.Fatal(err)
 	}

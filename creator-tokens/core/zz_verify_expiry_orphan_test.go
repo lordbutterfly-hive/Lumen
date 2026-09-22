@@ -26,10 +26,10 @@ func TestZZVerifyExpiry_NoOrphanNoDoubleCount(t *testing.T) {
 	mustBuy(t, s, c, h3, b1+100_000, 100)
 
 	// ---- Phase B (@ t1): graduate the matured, fresh buy, both transfer rails ----
-	if Graduate(s, c, h1, t1).Cmp(big.NewInt(500)) != 0 {
+	if Graduate(s, c, h1, t1).Cmp(tk(500)) != 0 {
 		t.Fatal("graduate h1")
 	}
-	if Graduate(s, c, h2, t1).Cmp(big.NewInt(300)) != 0 {
+	if Graduate(s, c, h2, t1).Cmp(tk(300)) != 0 {
 		t.Fatal("graduate h2")
 	}
 	mustBuy(t, s, c, h1, t1, 200) // fresh cohort on h1's cleared ledger
@@ -47,10 +47,10 @@ func TestZZVerifyExpiry_NoOrphanNoDoubleCount(t *testing.T) {
 	assertLedgerMatchesMaturing(t, s, c, []string{h1, h2, h3}, "phase B")
 
 	// ---- Phase C (@ t2): everyone else matures; graduate all; verify totals ----
-	if Graduate(s, c, h1, t2).Cmp(big.NewInt(200)) != 0 {
+	if Graduate(s, c, h1, t2).Cmp(tk(200)) != 0 {
 		t.Fatal("graduate h1 fresh cohort")
 	}
-	if Graduate(s, c, h3, t2).Cmp(big.NewInt(100)) != 0 {
+	if Graduate(s, c, h3, t2).Cmp(tk(100)) != 0 {
 		t.Fatal("graduate h3")
 	}
 	// Matured bucket totals correct: h1=500-100+200=600, h2=300-150=150,
@@ -59,7 +59,7 @@ func TestZZVerifyExpiry_NoOrphanNoDoubleCount(t *testing.T) {
 		h    string
 		want int64
 	}{{h1, 600}, {h2, 150}, {h3, 350}} {
-		if got := MaturedOf(s, c, w.h); got.Cmp(big.NewInt(w.want)) != 0 {
+		if got := MaturedOf(s, c, w.h); got.Cmp(tk(w.want)) != 0 {
 			t.Fatalf("matured[%s]=%s want %d", w.h, got, w.want)
 		}
 	}
@@ -78,14 +78,14 @@ func TestZZVerifyExpiry_NoOrphanNoDoubleCount(t *testing.T) {
 		amt int64
 	}{{h1, 600}, {h2, 150}, {h3, 350}} {
 		supplyBefore := new(big.Int).Set(Supply(s, c))
-		r, err := Sell(s, w.h, c, t2, big.NewInt(w.amt))
+		r, err := Sell(s, w.h, c, t2, tk(w.amt))
 		if err != nil {
 			t.Fatalf("final sell %s: %v", w.h, err)
 		}
 		if r.Tax.Sign() != 0 || r.TaxBps != 0 {
 			t.Fatalf("final sell %s tax=%s taxBps=%d MUST be 0", w.h, r.Tax, r.TaxBps)
 		}
-		zvAssertSellShape(t, r, supplyBefore, big.NewInt(w.amt), "final sell "+w.h)
+		zvAssertSellShape(t, r, supplyBefore, tk(w.amt), "final sell "+w.h)
 	}
 	if Supply(s, c).Sign() != 0 || Reserve(s, c).Sign() != 0 {
 		t.Fatalf("after full drain supply=%s reserve=%s want 0/0", Supply(s, c), Reserve(s, c))

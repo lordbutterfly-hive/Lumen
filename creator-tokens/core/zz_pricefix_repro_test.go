@@ -46,7 +46,7 @@ func TestPFRepro_PRICE1_TransferLaunder(t *testing.T) {
 
 	// alt transfers the fresh M into whale's aged pile. No graduate on transfer
 	// (F-C1), so the clocks blend.
-	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(M)); err != nil {
+	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(M)); err != nil {
 		t.Fatalf("TransferCredits: %v", err)
 	}
 
@@ -103,11 +103,11 @@ func TestPFRepro_PRICE2_Bundling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rM, err := Sell(sSplit, "whale", c, blk, big.NewInt(M))
+	rM, err := Sell(sSplit, "whale", c, blk, tk(M))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rN, err := Sell(sSplit, "whale", c, blk, big.NewInt(N))
+	rN, err := Sell(sSplit, "whale", c, blk, tk(N))
 	if err != nil {
 		t.Fatal(err)
 	}

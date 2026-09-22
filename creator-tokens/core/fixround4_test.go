@@ -71,7 +71,7 @@ func TestOUTFLOWCLIFF1_SellClockFrontRun_GuardStops(t *testing.T) {
 	t1 := t0 + ExitTaxDecayBlocks // bob EXACTLY fully decayed => 0% tax
 
 	s := fr4Setup(t, MaxCap)
-	if _, err := Buy(s, "bob", "alice", t0, big.NewInt(B)); err != nil {
+	if _, err := Buy(s, "bob", "alice", t0, tk(B)); err != nil {
 		t.Fatalf("bob Buy: %v", err)
 	}
 	// ★ FIXTURE CHANGED (TOKEN MATURITY, 2026-07-27), attack UNCHANGED in shape,
@@ -152,13 +152,13 @@ func TestOUTFLOWCLIFF1_SellClockFrontRun_GuardStops(t *testing.T) {
 	// The front-run makes execution net fall below it, so the call REVERTS
 	// CLEANLY — nothing mutates (RULING G), R === area(S) untouched. ----
 	before := hzSnapshotAll(s)
-	if _, err := Sell(s, "bob", "alice", t1, big.NewInt(B), qBase.Net); errSymbol(err) != ErrInput {
+	if _, err := Sell(s, "bob", "alice", t1, tk(B), qBase.Net); errSymbol(err) != ErrInput {
 		t.Fatalf("guarded Sell: err = %v, want ErrInput (minNet floor must trip on the front-run)", err)
 	}
 	if changed := hzChangedKeys(before, hzSnapshotAll(s)); len(changed) != 0 {
 		t.Fatalf("a REFUSED guarded Sell mutated state: %v (RULING G: nothing mutates on a rejected call)", changed)
 	}
-	if got := BalanceOf(s, "alice", "bob"); got.Cmp(big.NewInt(B+1)) != 0 {
+	if got := BalanceOf(s, "alice", "bob"); got.Cmp(new(big.Int).Add(tk(B), tk(1))) != 0 {
 		t.Fatalf("bob balance after refused Sell = %s, want %d (B + the gift, untouched)", got, B+1)
 	}
 	fr4RArea(t, s, "alice")
@@ -166,7 +166,7 @@ func TestOUTFLOWCLIFF1_SellClockFrontRun_GuardStops(t *testing.T) {
 	// ---- NEVER TRAPPED: bob can still exit by opting out (nil floor). The
 	// outflow is always available; the guard only converts a silent loss into a
 	// caller-visible re-quote. ----
-	rOut, err := Sell(s, "bob", "alice", t1, big.NewInt(B), nil)
+	rOut, err := Sell(s, "bob", "alice", t1, tk(B), nil)
 	if err != nil {
 		t.Fatalf("opt-out Sell (nil floor) must always succeed: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestOUTFLOWCLIFF1_RefundClockFrontRun_GuardStops(t *testing.T) {
 	t1 := t0 + ExitTaxDecayBlocks
 
 	s := fr4Setup(t, MaxCap)
-	if _, err := Buy(s, "bob", "alice", t0, big.NewInt(B)); err != nil {
+	if _, err := Buy(s, "bob", "alice", t0, tk(B)); err != nil {
 		t.Fatalf("bob Buy: %v", err)
 	}
 	// ★ FIXTURE CHANGED (TOKEN MATURITY, 2026-07-27) — same reason as the Sell
@@ -228,7 +228,7 @@ func TestOUTFLOWCLIFF1_RefundClockFrontRun_GuardStops(t *testing.T) {
 
 	// THE FIX: guarded Refund with minNet = baseline net reverts cleanly.
 	before := hzSnapshotAll(s)
-	if _, err := Refund(s, "bob", "alice", t1, big.NewInt(B), grossBase); errSymbol(err) != ErrInput {
+	if _, err := Refund(s, "bob", "alice", t1, tk(B), grossBase); errSymbol(err) != ErrInput {
 		t.Fatalf("guarded Refund: err = %v, want ErrInput (minNet floor must trip)", err)
 	}
 	if changed := hzChangedKeys(before, hzSnapshotAll(s)); len(changed) != 0 {
@@ -237,7 +237,7 @@ func TestOUTFLOWCLIFF1_RefundClockFrontRun_GuardStops(t *testing.T) {
 	fr4RArea(t, s, "alice")
 
 	// Never trapped: opt-out Refund (nil floor) still exits.
-	net, err := Refund(s, "bob", "alice", t1, big.NewInt(B), nil)
+	net, err := Refund(s, "bob", "alice", t1, tk(B), nil)
 	if err != nil {
 		t.Fatalf("opt-out Refund (nil floor) must always succeed: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestOUTFLOWCLIFF1_HonestExitNeverBlocked(t *testing.T) {
 	t1 := t0 + ExitTaxDecayBlocks
 
 	s := fr4Setup(t, MaxCap)
-	if _, err := Buy(s, "bob", "alice", t0, big.NewInt(B)); err != nil {
+	if _, err := Buy(s, "bob", "alice", t0, tk(B)); err != nil {
 		t.Fatalf("bob Buy: %v", err)
 	}
 	q, err := QuoteSell(s, "bob", "alice", t1, tk(B))
@@ -277,7 +277,7 @@ func TestOUTFLOWCLIFF1_HonestExitNeverBlocked(t *testing.T) {
 	}
 	// minNet == the quoted net (boundary: net == floor is NOT below, so it must
 	// pass) — no front-run, so execution matches the quote exactly.
-	r, err := Sell(s, "bob", "alice", t1, big.NewInt(B), q.Net)
+	r, err := Sell(s, "bob", "alice", t1, tk(B), q.Net)
 	if err != nil {
 		t.Fatalf("honest guarded Sell (minNet == quoted net) must succeed: %v", err)
 	}

@@ -159,13 +159,13 @@ func TestXL_LaunderClosedAtEveryHopCount(t *testing.T) {
 		holder := "alt"
 		if hops > 0 {
 			// hop 1 is always INTO the aged pile — that is the launder's premise.
-			if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(M)); err != nil {
+			if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(M)); err != nil {
 				t.Fatal(err)
 			}
 			holder = "whale"
 			for i := 1; i < hops; i++ {
 				next := fmt.Sprintf("mule%d", i)
-				if err := TransferCredits(s, holder, c, holder, next, t1, big.NewInt(M)); err != nil {
+				if err := TransferCredits(s, holder, c, holder, next, t1, tk(M)); err != nil {
 					t.Fatal(err)
 				}
 				holder = next
@@ -200,13 +200,13 @@ func TestXL_LaunderClosedOnRefundRailMultiHop(t *testing.T) {
 		pfBuy(t, s, "alt", c, t1, M)
 		holder := "alt"
 		if hops > 0 {
-			if err := TransferCredits(s, "alt", c, "alt", "whale", t1, big.NewInt(M)); err != nil {
+			if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(M)); err != nil {
 				t.Fatal(err)
 			}
 			holder = "whale"
 			for i := 1; i < hops; i++ {
 				next := fmt.Sprintf("mule%d", i)
-				if err := TransferCredits(s, holder, c, holder, next, t1, big.NewInt(M)); err != nil {
+				if err := TransferCredits(s, holder, c, holder, next, t1, tk(M)); err != nil {
 					t.Fatal(err)
 				}
 				holder = next
@@ -216,7 +216,7 @@ func TestXL_LaunderClosedOnRefundRailMultiHop(t *testing.T) {
 			t.Fatal(err)
 		}
 		gross := refundPayout(getMoney(s, kReserve(c)), big.NewInt(M), getMoney(s, kSupply(c)))
-		net, err := Refund(s, holder, c, t1, big.NewInt(M), nil)
+		net, err := Refund(s, holder, c, t1, tk(M), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -300,17 +300,17 @@ func TestXL_GraduateNeverClearsAGreenCohort(t *testing.T) {
 			t.Errorf("N=%d: Graduate destroyed %s of owed tax", N, new(big.Int).Sub(qB.Tax, qA.Tax))
 		}
 		// The ripe pile DID bank (no grief), and the green cohort survived.
-		if moved.Cmp(big.NewInt(N)) != 0 {
+		if moved.Cmp(tk(N)) != 0 {
 			t.Errorf("N=%d: graduated %s, want the whole ripe pile %d", N, moved, N)
 		}
 		lots := getLotsRaw(s, c, "whale")
-		if len(lots) != 1 || lots[0].count.Cmp(big.NewInt(1000)) != 0 {
+		if len(lots) != 1 || lots[0].count.Cmp(tk(1000)) != 0 {
 			t.Errorf("N=%d: green cohort not preserved: %v", N, zbLotsRate(s, c, "whale", gb))
 		}
 		if lotRateAt(lots[0].acq, gb) == 0 {
 			t.Errorf("N=%d: the surviving cohort reads rate 0 — it was re-aged", N)
 		}
-		if got := getMatured(s, c, "whale"); got.Cmp(big.NewInt(N)) != 0 {
+		if got := getMatured(s, c, "whale"); got.Cmp(tk(N)) != 0 {
 			t.Errorf("N=%d: matured bucket %s, want %d", N, got, N)
 		}
 		if got := getMoney(s, kBal(c, "whale")); got.Cmp(tk(1000)) != 0 {
@@ -334,7 +334,7 @@ func TestXL_PartialGraduationEventuallyCompletes(t *testing.T) {
 	if err := TransferCredits(s, "alt", c, "alt", "whale", t1, tk(1000)); err != nil {
 		t.Fatal(err)
 	}
-	total := big.NewInt(101_000)
+	total := tk(101_000)
 	for _, blk := range []uint64{t1 + 20_000, t1 + 200_000, t1 + ExitTaxDecayBlocks - 1, t1 + ExitTaxDecayBlocks, t1 + 2*ExitTaxDecayBlocks} {
 		Graduate(s, c, "whale", blk)
 		Graduate(s, c, "whale", blk) // idempotent
@@ -383,7 +383,7 @@ func TestXL_DustGiftGriefMeasured(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := TransferCredits(s, "att", c, "att", "victim", t1, big.NewInt(g)); err != nil {
+			if err := TransferCredits(s, "att", c, "att", "victim", t1, tk(g)); err != nil {
 				t.Fatal(err)
 			}
 			qDust, err := QuoteSell(s, "victim", c, t1, big.NewInt(N+g))

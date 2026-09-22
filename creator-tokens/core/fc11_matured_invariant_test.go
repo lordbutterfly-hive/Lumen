@@ -63,7 +63,7 @@ func TestMatured_NeverExceedsSupplyOnAnyWritePath(t *testing.T) {
 			if total+n >= MaxCap {
 				break
 			}
-			if _, err := Buy(s, h, c, t0, big.NewInt(n)); err != nil {
+			if _, err := Buy(s, h, c, t0, tk(n)); err != nil {
 				t.Fatalf("iter %d buy %s: %v", iter, h, err)
 			}
 			total += n

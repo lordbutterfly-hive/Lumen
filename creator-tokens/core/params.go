@@ -685,17 +685,17 @@ const MaxServiceFaceAreaBps uint64 = 10000
 // sim result. What it DID have was a measured, documented product failure
 // that was filed as a tuning nuisance three separate times:
 //
-//   settlement.go SET-3 (2026-07-22), our own words: "UNSATISFIABLE for
-//   every supply below 10000/MaxSpendSupplyBps = 20 … Every newly launched
-//   market sat in that dead zone between registration and its 20th token."
-//   The fix exempted c == 1 and moved the edge instead of removing it: a
-//   service costing N tokens still needed S >= 20·N, so at launch (S = 1-6)
-//   only a one-token service could ever settle.
+//	settlement.go SET-3 (2026-07-22), our own words: "UNSATISFIABLE for
+//	every supply below 10000/MaxSpendSupplyBps = 20 … Every newly launched
+//	market sat in that dead zone between registration and its 20th token."
+//	The fix exempted c == 1 and moved the edge instead of removing it: a
+//	service costing N tokens still needed S >= 20·N, so at launch (S = 1-6)
+//	only a one-token service could ever settle.
 //
-//   sim/engine.go and cmd/sim/main.go, independently: "the settlement spend
-//   cap … binds on nearly every ask, so escrows stop being created at all",
-//   and the delivery guardrail could not be exercised at default population
-//   because of it.
+//	sim/engine.go and cmd/sim/main.go, independently: "the settlement spend
+//	cap … binds on nearly every ask, so escrows stop being created at all",
+//	and the delivery guardrail could not be exercised at default population
+//	because of it.
 //
 // WHY REMOVING IT IS SAFE — the three protections that actually do the work,
 // none of which is this cap:
