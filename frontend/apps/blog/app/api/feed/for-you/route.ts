@@ -853,6 +853,19 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  /*
+   * ★★★ A TOPIC IS A TAG, SO IT IS NEVER RANKED (2026-09-23, owner: "it can't rank topics
+   * because topics are topics. They're tags. It just shows the posts under those tags").
+   * Since early August a signed-in reader's /topics/<tag> went through the ranker per
+   * viewer|topic, which was never the intent: after every restart it rebuilt cold, showed
+   * "Ranking this topic is still warming up" and took seconds per topic, and it spent
+   * recsys time and memory on pages that should simply list the tag's newest posts. Every
+   * topic request, signed in or not, now answers with the tag's chain feed, newest first;
+   * the viewer's block list still applies to it (the response wrapper above).
+   */
+  if (topic) {
+    return fallback(chainObserver, limit, 'topic', 'topics are tags: newest posts first, never ranked', topic, viewer);
+  }
   if (!getRecsysConfig()) {
     return fallback(chainObserver, limit, 'unconfigured', 'RECSYS_FEED_URL is not set', topic, viewer);
   }

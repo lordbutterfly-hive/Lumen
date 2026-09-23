@@ -15,7 +15,6 @@ import { useTranslation } from '@/blog/i18n/client';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { useTokenPriceChips } from '@/blog/features/creator-tokens/live/use-token-price-chips';
 import { useRankLuminosity } from '@/blog/features/retention/hooks/use-rank-marks';
-import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useTopicSeed } from './topic-seed-context';
 import { fetchTopicPage, topicFeedKey, type TopicResponse } from './lib/topic-feed-client';
 
@@ -50,18 +49,12 @@ export default function TopicShell({ tag }: { tag: string }) {
   // viewer — see anonymousTopicSeed's header in lib/feed/topic-cache.ts), so
   // refetching it changes nothing and is pure waste.
   //
-  // A signed-in seed is NOT that: app/topics/[tag]/page.tsx seeds a signed-in
-  // reader from that SAME anonymous fallback memo (only block-filtered), never
-  // from a ranked or fully per-viewer answer — its own header comment says so
-  // — so it is provisional by construction and must still be refetched to pick
-  // up ranking and the reader's live block list; skipping it here would leave a
-  // signed-in viewer on a blocked/unranked page forever. `source === 'recsys'`
-  // additionally covers an already-ranked seed should one ever be introduced,
-  // exactly like home's `personalised` check. `isLoggedIn` comes from
-  // `useSessionIdentity`, backed by the same `getServerSessionUser()` cookie
-  // read that decided the seed itself server-side, so the two never disagree.
-  const { isLoggedIn } = useSessionIdentity();
-  const seedIsFinal = !!seed && (!isLoggedIn || seed.page.source === 'recsys');
+  // A signed-in seed used to be refetched to pick up RANKING. Topics are never ranked now
+  // (2026-09-23, see the topic branch in app/api/feed/for-you/route.ts): the route answers
+  // a signed-in reader with the same newest-first tag feed, and app/topics/[tag]/page.tsx
+  // already filters the seed by that reader's block list at request time (and drops the
+  // seed if the lookup times out). So the seed is final for everyone.
+  const seedIsFinal = !!seed;
 
   // Same infinite scroll as the main feed — a topic is the feed, filtered, so it
   // must not stop after one page either.
