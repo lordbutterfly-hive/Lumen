@@ -295,8 +295,20 @@ export default function LeftRail() {
          `vh` is the ADDRESS-BAR-EXPANDED height and the pill would hide behind
          the bar. The mobile drawer mounts this same nav inside its own
          `overflow-y-auto` column, which absorbs the height with room to spare
-         (`pt-12` + `pb-8` = 5rem against the 8rem subtracted here). */
-      className={cn('flex min-h-[calc(100dvh-8rem)] flex-col py-4', styles.rail)}
+         (`pt-12` + `pb-8` = 5rem against the 8rem subtracted here).
+         ★★ `md:-mb-20`: THE RAIL MUST NOT RIDE UP AT THE FOOT OF THE PAGE (2026-09-23, owner:
+         "when I scroll to bottom the left navbar starts moving up down ... left navbar needs to
+         be in place and not move"). The min-height above makes this nav end 21px above the
+         screen's bottom (107 + 772 = 879 of 900). Its sticky <aside> may never leave its grid
+         area, and every shell that mounts it ends that area 80px ABOVE the page's end (the
+         grid's `pb-20`). So in the last 59.5px of scroll the aside was shoved up with the page:
+         top 107 to 47.5, measured on production and on the preview, and back down whenever
+         lazy content below grew the page. The -80px bottom margin makes the aside (`h-fit`)
+         80px shorter than the nav it holds, so it always fits its area, while the nav still
+         paints its full height (the extra 80px overflows the aside into that same empty
+         padding). One place instead of the ~15 shells that copy the grid. `md:` only: below
+         `md` the rail is the drawer's, where there is no sticky aside. */
+      className={cn('flex min-h-[calc(100dvh-8rem)] flex-col py-4 md:-mb-20', styles.rail)}
       data-testid="left-rail-nav"
     >
       <ul className="flex flex-col gap-1">

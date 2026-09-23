@@ -246,6 +246,9 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
       <PopoverTrigger asChild ref={ref}>{children}</PopoverTrigger>
       <PopoverContent
         align="end"
+        // Keeps the card 8px off a phone's edges, the room `max-w-[calc(100vw-16px)]`
+        // below leaves for it; with Radix's default 0 it slid flush to the left edge.
+        collisionPadding={8}
         // ★ A FLOATING PANEL NEEDS ELEVATION AND THE HOUSE RADIUS (2026-08-10,
         // owner item Q-1). This was `rounded-md` (6px) with the shared
         // `shadow-md`, which against Lumen's white page read as no shadow at
@@ -253,7 +256,10 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
         // to tell from the page behind it. 14px is the product's row/button
         // radius, and `overflow-hidden` makes the first and last rows follow
         // the corner instead of squaring it off.
-        className="w-[360px] overflow-hidden rounded-card border-line-9 p-0 shadow-[0_12px_32px_rgba(20,18,10,0.14)]"
+        // ★ 360 -> 400px, capped 8px inside a phone's edges (2026-09-23, owner: "fit 6.5
+        // people like PeakD, not 5"). The width is what lets a message sit on one line; see
+        // the row note in `features/activity-log/list-item.tsx`.
+        className="w-[400px] max-w-[calc(100vw-16px)] overflow-hidden rounded-card border-line-9 p-0 shadow-[0_12px_32px_rgba(20,18,10,0.14)]"
         data-testid="notifications-popover-content"
       >
         <div className="flex items-center justify-between gap-3 border-b border-line-9 px-4 py-2.5">
@@ -313,8 +319,12 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
                   <BasePathLink
                     key={`lumen-${row.item.id ?? row.item.url}-${row.item.date}`}
                     href={`/${row.item.url}`}
-                    className="flex items-center gap-3 px-4 py-3 font-sans text-sm hover:bg-surface-21"
+                    className="flex items-center gap-3 px-4 py-2.5 font-sans text-sm hover:bg-surface-21"
                   >
+                    {/* The chain rows' unread-dot column (8px). Lumen rows never carry the
+                        dot, but without the column their avatars sat 20px left of every
+                        chain row's avatar in the same list. */}
+                    <span aria-hidden className="h-2 w-2 shrink-0" />
                     {/* ★ THE SAME FACE THE CHAIN ROWS SHOW (2026-08-16, owner).
                         `UserAvatarImg` resolves a lite account through /api/avatar
                         to their own initial rather than a shared default. */}
@@ -324,7 +334,10 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
                       alt={`${row.item.actor ?? row.item.url.replace(/^@/, '')} profile picture`}
                     />
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="text-ink-2">{row.item.msg}</span>
+                      {/* One line, as on the chain rows; the full sentence is the `title`. */}
+                      <span className="block truncate text-ink-2" title={row.item.msg}>
+                        {row.item.msg}
+                      </span>
                       <span className="flex items-center gap-1.5 text-caption text-ink-10">
                         {/* The Meritum mark, at the 16px the timestamp line can
                             carry — the same glyph the left rail uses for the

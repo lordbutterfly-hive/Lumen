@@ -554,7 +554,13 @@ export function ReplyTextbox({
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-4">
+        {/* ★ `flex-wrap` + a shrinkable gauge row (2026-09-23). On a 390px phone the Post and
+            Cancel buttons plus the Resource Credits gauge and label needed about 426px of the
+            box's 234px, nothing here could wrap or shrink, and the row ended at x=431: the whole
+            page became 431px wide, and on a phone that also pushed bottom-pinned UI (the post
+            bar) below the visible screen. Now the gauge drops to its own line when it does not
+            fit, and its label may wrap inside it. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex items-center gap-3">
             <Button
               ref={btnRef}
@@ -611,7 +617,7 @@ export function ReplyTextbox({
               sentence. `title` as well as the tooltip, so it is not
               mouse-only. */}
           {showResourceCredits ? (
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3">
               {/* ★ The SECOND copy of the same off-palette bar (2026-08-10, C-6).
                   The composer's Resource Credits gauge was `bg-[#0088FE]`,
                   measured rgb(0,136,254), and blue appears nowhere else in
@@ -624,7 +630,7 @@ export function ReplyTextbox({
                   uses for the identical gauge in the composer. */}
               <Progress
                 value={manabarsData?.rc.percentageValue ?? 0}
-                className="h-2 w-20 bg-[#ebebeb]"
+                className="h-2 w-20 shrink-0 bg-[#ebebeb]"
                 indicatorClassName="bg-surface-brand-12"
               />
               <TooltipProvider>

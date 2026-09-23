@@ -75,7 +75,7 @@ import parseDate from '@ui/lib/parse-date';
 import { buildSafePath } from '@ui/lib/sanitize-url';
 import { Link } from '@hive/ui';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { CircleSpinner } from 'react-spinners-kit';
 import { useInView } from 'react-intersection-observer';
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
@@ -99,6 +99,58 @@ import { authorTitleOf } from '@/blog/lib/author-title';
 
 // Maximum number of comments per page
 const MAX_COMMENTS_PER_PAGE = 50;
+
+/**
+ * The pinned post bar's edge-to-edge strip (see the post footer). It is the bar's
+ * `::before`, so switching it on never moves the bar's own box. Offsets reach from
+ * the bar's padding edge to the edge it should run to: the viewport below `md`
+ * (page `px-6` + card border + card `px-5`/`px-7` + bar border = 46px / 54px),
+ * and from `md` the post card's inner edge (card `px-7` + bar border = 29px),
+ * because the rails sit beside the card there.
+ */
+const POST_BAR_PIN_STRIP =
+  "before:pointer-events-none before:absolute before:-inset-y-px before:-left-[46px] before:-right-[46px] before:-z-10 before:border-t before:border-border before:bg-background before:opacity-0 before:shadow-[0_-8px_20px_-12px_rgb(20_18_10/0.25)] before:content-[''] motion-safe:before:transition-opacity sm:before:-left-[54px] sm:before:-right-[54px] md:before:-left-[29px] md:before:-right-[29px] dark:before:shadow-[0_-8px_20px_-10px_rgb(0_0_0/0.7)]";
+
+/**
+ * ★ ONE CHIP FOR EVERY CONTROL ON THE LEFT OF THE POST BAR (2026-09-23, owner: "something
+ * weird with the comment icon and fonts on left side, the whole bar doesn't seem uniform").
+ * Measured before this: reblog glyph 16px solid, comment glyph 18px outline, vote blade 22px
+ * line (three sizes; line weights 2.27 / 1.65 / 1.83px, each glyph's wall width in grid
+ * units times its rendered scale); left glyphs and the comment count near-black while the
+ * blade and its tally sat in the action grey; "Reply" 14px/400 red signed out but a 14px/500
+ * grey chip signed in. This is the feed card's action chip
+ * (medium-post-card.tsx): 36px tall, `rounded-control`, `text-ink-action` at rest and brand on
+ * hover, so every glyph and count on the bar wears the same colour as the blade beside them.
+ * `px-1` below `sm`: a phone bar has 266px inside its padding, and the feed's 10px chip padding
+ * pushed a normal post's counts onto a second line (measured 88px tall at 390, one line is 48).
+ * Full before/after table: /mnt/o/LUMEN-DOCS/POST-BAR-AND-NOTIF-CARD-FINISH-2026-09-23.md
+ */
+const POST_BAR_CHIP =
+  'flex h-9 items-center rounded-control px-1 font-medium text-ink-action transition-colors hover:bg-[#f4f5f7] hover:text-brand sm:px-2.5';
+
+/** Smooth, unless the reader asked the OS for less motion. */
+function postBarScrollBehavior(): ScrollBehavior {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+}
+
+/**
+ * Scroll `el` to just under the sticky site header. Not `scrollIntoView`: that honours
+ * `html { scroll-padding-top: 5rem }` (globals.css), which is the DESKTOP header's 80px,
+ * while the phone header is taller, so a phone landing would hide the target under it.
+ * The header's own bottom edge is the measurement that is right at every width (same
+ * selector `emoji-picker.tsx` uses for the same job).
+ */
+function siteHeaderClearance(): number {
+  const headerBottom = document.querySelector('header.sticky.top-0.z-40')?.getBoundingClientRect().bottom ?? 80;
+  return Math.max(headerBottom, 0) + 12;
+}
+function scrollUnderSiteHeader(el: Element, behavior: ScrollBehavior) {
+  const top = window.scrollY + el.getBoundingClientRect().top - siteHeaderClearance();
+  window.scrollTo({ top: Math.max(top, 0), behavior });
+}
+
+/** Any of these from the reader ends an automatic landing: they have taken over. */
+const READER_TAKES_OVER = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
 
 /** How many thread nodes one `/api/lite/posts/replies` call may ask about. Must
  *  match `MAX_PARENTS` in that route — asking about more is not an error there,
@@ -460,6 +512,133 @@ const PostContent = () => {
     triggerOnce: true,
     rootMargin: '800px 0px'
   });
+
+  /**
+   * The post bar (see the footer below) is pinned by CSS alone; this only tells
+   * it WHICH look to wear. Its sentinel sits right after it, so "sentinel below
+   * the viewport" is exactly "bar pinned". Above the viewport (reader is in the
+   * comments) the bar has docked and scrolled away, so it is not stuck.
+   */
+  const [postBarStuck, setPostBarStuck] = useState(false);
+  const { ref: postBarSentinelRef } = useInView({
+    onChange: (inView, entry) => setPostBarStuck(!inView && entry.boundingClientRect.top > 0)
+  });
+  /**
+   * While pinned, the bar covers the bottom of the viewport, so keyboard focus
+   * could land on a post link underneath it. A page-wide `scroll-padding-bottom`
+   * was tried and rejected: the browser then treats the bar's OWN controls as
+   * hidden too, and focus returning to them (closing the author card or the
+   * sign-in dialog) scrolled the page 400-800px, measured. This moves only focus
+   * that lands inside the post, under the bar, just clear of it.
+   */
+  const postBarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onFocusIn = (event: FocusEvent) => {
+      const bar = postBarRef.current;
+      const target = event.target;
+      if (!bar || !(target instanceof Element) || bar.contains(target)) return;
+      if (!bar.parentElement?.contains(target)) return;
+      const barBox = bar.getBoundingClientRect();
+      const box = target.getBoundingClientRect();
+      if (box.bottom > barBox.top && box.top < barBox.bottom) {
+        window.scrollBy({ top: box.bottom - barBox.top + 12 });
+      }
+    };
+    document.addEventListener('focusin', onFocusIn);
+    return () => document.removeEventListener('focusin', onFocusIn);
+  }, []);
+
+  /**
+   * ★ REPLY AND THE COMMENT COUNT TAKE THE READER DOWN (owner, 2026-09-23: "clicking on reply
+   * or the comment icon should scroll you down to bottom of page"). Both controls sit on the
+   * bar, which is pinned to the bottom of the screen while the post is read, but what they
+   * open lives BELOW the post: the reply box renders right under the post card (the
+   * `replyBoxRef` wrapper in the JSX) and the thread starts at the `#comments` anchor. Before
+   * this, Reply opened the box off-screen and the count was a link to the page it was on.
+   *
+   * Reply now always OPENS (it used to toggle, and a second click from a pinned bar far above
+   * the box closed an editor the reader could not see). The box's own Cancel still closes it.
+   * The editor is a dynamic import (`reply-textbox.tsx`), so its CodeMirror surface arrives
+   * after the box does: scroll to the box at once, focus the surface when it exists. Each
+   * click is one request, handled once, so a later re-render or a cross-tab `reply` flip
+   * never scrolls the page on its own.
+   */
+  const replyBoxRef = useRef<HTMLDivElement>(null);
+  const [replyRevealRequest, setReplyRevealRequest] = useState(0);
+  const handledReplyReveal = useRef(0);
+  /**
+   * ★ THE LANDING OUTLIVES THE EFFECT, ON PURPOSE (same pattern as `comments-section.tsx`'s
+   * re-pin). Measured on the preview: reopening the box focused CodeMirror's surface at 32ms
+   * and lost it in the same millisecond, because the editor's own mount effect ran again
+   * (React's development double-mount) and replaced the surface, while this effect's re-run
+   * had already marked the click handled. A one-shot `focus()` cannot survive that, and a
+   * one-shot scroll cannot survive what else was measured: a long post whose images were
+   * still loading above the box pushed it to 287px after a landing aimed at 138px. So the
+   * controller keeps placing focus until it has HELD for 1.5s, re-aims (at most twice) when a
+   * scroll ends off target, and stops for good the moment the reader touches, scrolls or types.
+   */
+  const replyLanding = useRef<{ stop: () => void } | null>(null);
+  useEffect(() => () => replyLanding.current?.stop(), []);
+  const openReplyFromBar = useCallback(() => {
+    setReply(true);
+    setReplyRevealRequest((n) => n + 1);
+  }, [setReply]);
+  useEffect(() => {
+    if (!reply || replyRevealRequest === handledReplyReveal.current || !replyBoxRef.current) return;
+    handledReplyReveal.current = replyRevealRequest;
+    replyLanding.current?.stop();
+    const behavior = postBarScrollBehavior();
+    scrollUnderSiteHeader(replyBoxRef.current, behavior);
+    const started = Date.now();
+    let timer = 0;
+    let heldTicks = 0;
+    let corrections = 0;
+    let scrollEnded = false;
+    const stop = () => {
+      window.clearInterval(timer);
+      window.removeEventListener('scrollend', reaim);
+      for (const evt of READER_TAKES_OVER) window.removeEventListener(evt, stop, true);
+      if (replyLanding.current === controller) replyLanding.current = null;
+    };
+    const reaim = () => {
+      scrollEnded = true;
+      const box = replyBoxRef.current;
+      if (!box || corrections >= 2) return;
+      const drift = box.getBoundingClientRect().top - siteHeaderClearance();
+      const atBottom = window.scrollY >= document.documentElement.scrollHeight - window.innerHeight - 1;
+      if (Math.abs(drift) <= 8 || (drift > 0 && atBottom)) return;
+      corrections += 1;
+      scrollUnderSiteHeader(box, behavior);
+    };
+    const tick = () => {
+      const surface = replyBoxRef.current?.querySelector<HTMLElement>('.cm-content');
+      if (surface && document.activeElement === surface) {
+        heldTicks += 1;
+        if (heldTicks >= 30 && (scrollEnded || Date.now() - started > 3000)) stop();
+      } else {
+        heldTicks = 0;
+        surface?.focus({ preventScroll: true });
+      }
+      if (Date.now() - started > 8000) stop();
+    };
+    const controller = { stop };
+    replyLanding.current = controller;
+    timer = window.setInterval(tick, 50);
+    window.addEventListener('scrollend', reaim);
+    for (const evt of READER_TAKES_OVER) window.addEventListener(evt, stop, { capture: true, passive: true });
+    tick();
+    // Deliberately NO cleanup: see the note on `replyLanding`. Unmount is handled above.
+  }, [reply, replyRevealRequest]);
+  const goToComments = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
+    // A new tab or window keeps the real link (`…#comments`), so let those through.
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const anchor = document.getElementById('comments');
+    if (!anchor) return;
+    event.preventDefault();
+    scrollUnderSiteHeader(anchor, postBarScrollBehavior());
+    // What a real fragment jump does for the keyboard: the next Tab continues from the thread.
+    anchor.focus({ preventScroll: true });
+  }, []);
 
   const { data: suggestionData } = useQuery({
     enabled: hiveSenseAvailable === true && suggestionsNearView,
@@ -1921,12 +2100,281 @@ const PostContent = () => {
                     </ul>
                   ) : null}
                 </div>
-                {/* Post Footer */}
+                {/* ★★ THE POST BAR (2026-09-23, owner: "the top bar should be the one shown"). The
+                    end-of-post card is two rows. TOP: the reading actions (reblog, reply, comment count)
+                    with the vote and payout; this row is the bar. BOTTOM: when, where and by whom, the
+                    author/moderator tools, and share.
+                    The bar is `position: sticky; bottom: 0` and a DIRECT child of this article wrapper,
+                    not of a card box: a sticky box never leaves its parent, so inside the card it could
+                    not reach the bottom of the screen. While its natural spot is below the fold the
+                    browser pins it to the viewport bottom; when the reader reaches the end of the post
+                    it docks exactly there and the two rows read as one card. No script decides pinned vs
+                    docked, so there is no snap and no layout shift. The sentinel observer only switches
+                    PAINT: pinned, the card's rounded top and side borders are dropped and a strip with a
+                    straight top rule runs edge to edge (the screen on phones, the post card from md,
+                    where the rails sit beside it); docked, it is the card's rounded top row again. The
+                    strip is a pseudo-element, so the bar's own box, and every control in it, stays put.
+                    Static while editing, so it never covers the editor.
+                    Spec: /mnt/o/LUMEN-DOCS/SPEC-POST-BOTTOM-BAR-2026-09-23.md */}
                 <div
-                  className="mt-5 rounded-lg border border-border bg-background-secondary/20 px-4 py-3 text-sm text-primary"
+                  ref={postBarRef}
+                  className={cn(
+                    'z-30 mt-5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border px-3 py-1 text-sm text-primary print:static sm:gap-x-3 sm:px-4',
+                    edit
+                      ? 'rounded-t-lg border-border bg-background'
+                      : cn(
+                          'sticky bottom-0 motion-safe:transition-[border-color,border-radius,background-color]',
+                          POST_BAR_PIN_STRIP,
+                          postBarStuck
+                            ? 'rounded-none border-transparent bg-transparent before:opacity-100'
+                            : 'rounded-t-lg border-border bg-background'
+                        )
+                  )}
+                  data-testid="post-footer-actions"
+                  data-stuck={postBarStuck ? 'true' : 'false'}
+                  role="group"
+                  aria-label={t('post_content.footer.post_bar_label')}
+                >
+                  {/* ★ ORDER (owner, 2026-09-23): upvote blade and count, then comments, then reblog,
+                      then Reply last ("move reply last behind comments and reblog"); the payout stays
+                      alone on the right.
+                      `-ml-2` hands back the blade's own 8px inset (its 38px target centres a 22px
+                      glyph), so the first glyph starts on the bar's padding edge, the same inset the
+                      payout ends at on the right. */}
+                  <div className="-ml-2 flex flex-wrap items-center" data-testid="comment-respons-header">
+                    {/* Every glyph on the bar is 22px at a 1.83px line: the blade's own size and
+                        weight (vote-control.module.css `.sm .btn svg`, stroke 2 on a 24 grid).
+                        The wrapper's right margin stands in for a chip's padding (the vote control
+                        has none after its tally), so the comment chip sits as far from the count as
+                        the chips sit from each other. */}
+                    <div className="mr-1.5 flex items-center sm:mr-2.5">
+                      {/* The REAL signer: a full Hive user's vote is a chain op, and
+                          our own vote table keys on the same value the read path sends.
+                          A display name is neither stable (it changes at upgrade) nor a
+                          Hive account. `author` here is a key, never display text. */}
+                      {/* ★ THE POST PAGE IS THE FULL-SIZE VARIANT (2026-08-14,
+                          Blade handoff): 28px glyph, 53x53 target, 18px tally.
+                          Everywhere else — feed cards, comments — takes the
+                          component's `sm` default. This is the ONLY call site
+                          that needs the prop.
+                          ★ SUPERSEDED for this one call site by the note directly
+                          below: the owner ruled on H2 and the footer takes `sm`. The
+                          handoff still governs the control everywhere it is full
+                          size. */}
+                      {/*
+                       * ★ ONE TYPE SIZE IN THE FOOTER ROW (2026-08-16, owner, QA H2).
+                       *
+                       * `size="default"` renders a 53x53 target with an 18px tally,
+                       * beside a 14px meta line and a 14px payout: three sizes in one
+                       * row, and a bordered block roughly 3x the height of the text it
+                       * sits next to, which is why the row read as two unrelated
+                       * components bolted together. `sm` is 38x38 with a 14.5px tally,
+                       * so the whole row lands on one size.
+                       *
+                       * This deliberately overrides the earlier "the post page passes
+                       * size=default" handoff note on VotesComponent: that decision
+                       * predates the footer being measured as a row, and the owner has
+                       * called it directly. The prop still exists and nothing else
+                       * changes, so restoring it is one word.
+                       */}
+                      <VotesComponentWrapper
+                        post={{ ...postData, author: litePost?.chainAuthor || postData.author }}
+                        type="post"
+                        size="sm"
+                      />
+                    </div>
+                    <TooltipProvider>
+                      <Tooltip>
+                        {/* ★ min-h-[24px] FOR THE HIT TARGET (2026-08-19, WCAG 2.2 AA
+                            2.5.8). This is the post page's OWN response-count control —
+                            a separate, unfixed sibling of `post-card-comment-tooltip.tsx`
+                            (the feed card's version, already fixed 2026-08-19). Measured
+                            27.6x22; the icon (h-4 w-4) plus text-sm line-height gave 22px
+                            with nothing setting a height. Measured live: the action row
+                            (`comment-respons-header`) stayed 36px, governed by the
+                            "Reply" chip's own h-9 — 0px cost. */}
+                        {/* ★★ `asChild` + a LABEL (2026-08-21, found by a keyboard-only pass).
+                          
+                            Without `asChild`, Radix renders its own <button> AROUND this <Link> — so
+                            the control was `<button><a/></button>`: interactive content nested inside
+                            interactive content, which is invalid HTML and gives TWO tab stops for one
+                            destination. Measured live: both the button and the link were reachable,
+                            and NEITHER carried an aria-label, so a screen reader announced "8, button"
+                            then "8, link" — a number with no noun attached.
+                          
+                            The note above already called this "a separate, unfixed sibling of
+                            post-card-comment-tooltip.tsx". It is now fixed the same way: `asChild`
+                            makes the Link itself the trigger (one stop, one element), and the label
+                            reuses the same translated string the tooltip shows, so the count is
+                            announced as "N responses" rather than as a bare digit. */}
+                        <TooltipTrigger asChild data-testid="comment-respons">
+                          <Link
+                            href={`${postData.url}#comments`}
+                            onClick={goToComments}
+                            aria-label={t('post_content.footer.responses', { responses: visibleCommentCount })}
+                            className={cn(POST_BAR_CHIP, 'gap-1 sm:gap-2')}
+                          >
+                            {/* ★ SAME SINGLE GLYPH AS THE FEED (owner, 2026-08-18). The
+                                post page carried the identical count-dependent swap that
+                                `post-card-comment-tooltip.tsx` did, so a reader clicking
+                                a card watched the comment mark change shape on arrival
+                                as well as between cards. The count beside it already
+                                says how many.
+                                ★ 22px, as on the feed card (was 18px here, beside a 16px reblog
+                                glyph and a 22px blade). Its walls are 2.2 of 24 units, 2.02px at
+                                22px against the blade's 1.83px: the feed card's exact pair. */}
+                            <Icons.comment className="h-[22px] w-[22px]" aria-hidden="true" />
+                            <span className="text-[17px] font-medium font-num">{visibleCommentCount}</span>
+                          </Link>
+                        </TooltipTrigger>
+                        <TooltipContent data-testid="post-footer-response-tooltip">
+                          <p>
+                            {visibleCommentCount === 0
+                              ? t('post_content.footer.no_responses')
+                              : visibleCommentCount === 1
+                                ? t('post_content.footer.response')
+                                : t('post_content.footer.responses', { responses: visibleCommentCount })}
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    <ReblogTrigger
+                      author={litePost?.chainAuthor || postData.author}
+                      permlink={postData.permlink}
+                      dataTestidTooltipContent="post-footer-reblog-tooltip"
+                      dataTestidTooltipIcon="post-footer-reblog-icon"
+                      isReblogged={isReblogged}
+                      className={POST_BAR_CHIP}
+                      iconClassName="h-[22px] w-[22px] stroke-2"
+                    />
+                    {/* ★ ONE REPLY, SIGNED IN OR OUT. Signed out it was a bare 14px/400 red word
+                        with no padding, the one control on the bar in neither the action grey nor
+                        the chip shape. `text-body-sm` (15px, the scale's "buttons, labels" step):
+                        its capitals stand 11.4px, against 11.7px for the 17px count digits beside
+                        it, where 14px stood 10.6px (cap height 0.76em in Lumen UI, digit height
+                        0.69em in Lumen Num, measured off the loaded faces). Same size by eye, two
+                        faces by rule. */}
+                    {identity.isLoggedIn ? (
+                      <button
+                        type="button"
+                        onClick={openReplyFromBar}
+                        className={cn(POST_BAR_CHIP, 'text-body-sm')}
+                        data-testid="comment-reply"
+                      >
+                        {t('post_content.footer.reply')}
+                      </button>
+                    ) : (
+                      <DialogLogin>
+                        <button type="button" className={cn(POST_BAR_CHIP, 'text-body-sm')} data-testid="comment-reply">
+                          {t('post_content.footer.reply')}
+                        </button>
+                      </DialogLogin>
+                    )}
+                  </div>
+                  {/* Payout, alone on the right. */}
+                  {/* ★ NO MORE INNER CARD (2026-08-16, QA defect H2). This used to
+                      be its own `rounded-md border border-border bg-background
+                      px-2.5 py-1.5` box sitting next to the plain-text meta info —
+                      measured as three different type sizes in one row (14px meta,
+                      18px vote tally, 20px payout) with three unaligned baselines,
+                      so it read as two unrelated components bolted together rather
+                      than one footer. The box is gone; `items-baseline` (not
+                      `items-center`) is what actually lines text baselines up,
+                      which centring the whole box never did. */}
+                  {/* ★ items-center, NOT items-baseline (owner, 2026-08-18: "upvotes on
+                      post are still not in line with dollar amount and vote numbers").
+                      `items-baseline` aligns every child on its own TEXT baseline. That
+                      is right for three runs of text and wrong the moment one child is a
+                      38px control: the vote component's baseline is its tally's, so the
+                      blade glyph above that tally was pushed up out of the row while the
+                      digits themselves looked correct. The dividers already carried
+                      `self-center` to escape this - a per-child override is the tell
+                      that the container rule was fighting its own contents. All three
+                      groups are the same 14px type, so centring them lines the text up
+                      exactly as baseline did, and lines the glyph up too. */}
+                  <div className="flex shrink-0 flex-nowrap items-center gap-2 text-sm">
+                    <DetailsCardHover
+                      post={postData}
+                      decline={parseFloat(postData.max_accepted_payout) === 0}
+                      post_page
+                    >
+                      <span
+                        data-testid="comment-payout"
+                        // ★ text-sm, not text-[20px] (2026-08-16, QA defect H2,
+                        // supersedes the 2026-08-14 note below). Bumping the payout to
+                        // 20px "one step above the tally" fixed one mismatch (payout
+                        // vs. tally) by introducing a THIRD size into a row that
+                        // already had two — this is the "three type sizes in one row"
+                        // finding. `text-sm` matches the meta info line, `font-bold`
+                        // keeps the money figure the visually heaviest thing in the
+                        // row without giving it its own size step.
+                        //
+                        // ★ text-ink-brand-8, not text-destructive (same defect): the
+                        // measured colour was raw Tailwind red-500 (rgb(239,68,68)),
+                        // and `ink-brand-8` is the token that is byte-identical to it
+                        // (globals.css) — already used for this exact figure's
+                        // DECLINED state two lines below (`!text-ink-8`) and for the
+                        // `post_page` decline branch in `details-card-hover.tsx`, so
+                        // this is the same family, not a new one.
+                        // ★★ GREEN, NOT RED (2026-08-20, owner-reported: "the payout there is red
+                        // instead of green ... that shows unprofessional as on feed payout is green").
+                        // The note above is right about its own question and never asked the bigger
+                        // one: it found raw Tailwind red-500 here and swapped in the token that is
+                        // byte-identical to it, which tokenised the red and left the money red.
+                        // Measured: this figure #ef4444, the feed card #2a6b44 — same number, two
+                        // opposite colours. `--ink-payout` is the feed card's own green, promoted to a
+                        // global token so these two cannot drift again.
+                        // ★★ 14px -> 15px + tabular-nums (2026-08-27, owner: "on the post
+                        // itself the payout is too small compared to the numbers next to
+                        // it"). THIS IS A REGRESSION FROM THE SAME DAY, not a reversal of
+                        // the 2026-08-16 ruling above. That ruling chose `text-sm` so the
+                        // payout would MATCH the tally and keep the row to two type sizes.
+                        // The tally was 14px then. On 2026-08-27 `.sm .tally` went 14px ->
+                        // 15px (vote-control.module.css, aligning the blade count with the
+                        // comment and reblog counts), which silently broke the pairing the
+                        // 08-16 note exists to protect and left the money the SMALLEST
+                        // number on its own row. Measured on the live post page before this
+                        // change: payout 14px/700, vote tally beside it 15px/500, every
+                        // comment payout below it 15px/700.
+                        // So this RESTORES that ruling's intent at the tally's new size —
+                        // still no third step (row meta stays 14px, tally and payout are
+                        // both 15px), still the heaviest thing in the row.
+                        // `tabular-nums` added to match the comment payouts, which have
+                        // always had it; without it the post's own figure was the only
+                        // money on the page with proportional digits.
+                        className={`text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))] hover:cursor-pointer ${
+                          parseFloat(postData.max_accepted_payout) === 0
+                            ? '!text-ink-8 line-through'
+                            : ''
+                        }`}
+                      >
+                        ${postData.payout?.toFixed(2)}
+                      </span>
+                    </DetailsCardHover>
+                    {/* ★★ THE SECOND VOTE COUNT IS GONE (owner, 2026-08-18: "we dont need
+                        both upvote numbers there. remove the one on the right").
+                        
+                        This row showed TWO counts that disagreed: the blade's tally (296)
+                        and `stats.total_votes` (297). Both were correct and they measure
+                        different things - the tally is upvotes, `total_votes` is every
+                        vote on the post including downvotes and zero-weight ones - but
+                        nothing on the row said so, so it read as the same number rendered
+                        twice and wrong once. One count, and it is the one attached to the
+                        control that changes it.
+
+                        ★ WHAT WENT WITH IT: this span was the trigger for
+                        `DetailsCardVoters`, the click-through to the full voter list.
+                        That affordance no longer exists anywhere on this row. It is a
+                        real loss, not a tidy-up - if it should come back, the place for
+                        it is the blade's own tally, not a second number. */}
+                  </div>
+                </div>
+                <div ref={postBarSentinelRef} aria-hidden className="-mt-px h-px" />
+                <div
+                  className="rounded-b-lg border border-t-0 border-border bg-background-secondary/20 px-4 py-2 text-sm text-primary"
                   data-testid="author-data-post-footer"
                 >
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                     {/* Meta info */}
                     {/* ★ text-ink-10, not text-muted-foreground (2026-08-16, QA
                         defect H2). `text-muted-foreground` resolves to
@@ -1938,11 +2386,10 @@ const PostContent = () => {
                         (see that badge's own comment, and the
                         `liteRepliesTruncated` notice below). */}
                     <div className="flex flex-wrap items-center gap-1.5 text-sm text-ink-10">
-                      <Icons.clock className="mr-1 h-4 w-4" />
                       <span title={String(parseDate(postData.created))} data-testid="post-footer-timestamp">
                         <TimeAgo date={postData.created} />
                       </span>
-                      <span className="mx-1">·</span>
+                      <span aria-hidden>·</span>
                       <span>{t('post_content.footer.in')}</span>
                       <span className="font-semibold text-destructive">
                         {postData.community_title ? (
@@ -1963,7 +2410,7 @@ const PostContent = () => {
                           </Link>
                         )}
                       </span>
-                      <span className="mx-1">·</span>
+                      <span aria-hidden>·</span>
                       <span>{t('post_content.footer.by')}</span>
                       <div className="flex items-center">
                         <UserPopoverCard
@@ -2000,164 +2447,9 @@ const PostContent = () => {
                         />
                       </div>
                     </div>
-                    {/* Stats */}
-                    {/* ★ NO MORE INNER CARD (2026-08-16, QA defect H2). This used to
-                        be its own `rounded-md border border-border bg-background
-                        px-2.5 py-1.5` box sitting next to the plain-text meta info —
-                        measured as three different type sizes in one row (14px meta,
-                        18px vote tally, 20px payout) with three unaligned baselines,
-                        so it read as two unrelated components bolted together rather
-                        than one footer. The box is gone; `items-baseline` (not
-                        `items-center`) is what actually lines text baselines up,
-                        which centring the whole box never did. */}
-                    {/* ★ items-center, NOT items-baseline (owner, 2026-08-18: "upvotes on
-                        post are still not in line with dollar amount and vote numbers").
-                        `items-baseline` aligns every child on its own TEXT baseline. That
-                        is right for three runs of text and wrong the moment one child is a
-                        38px control: the vote component's baseline is its tally's, so the
-                        blade glyph above that tally was pushed up out of the row while the
-                        digits themselves looked correct. The dividers already carried
-                        `self-center` to escape this - a per-child override is the tell
-                        that the container rule was fighting its own contents. All three
-                        groups are the same 14px type, so centring them lines the text up
-                        exactly as baseline did, and lines the glyph up too. */}
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
-                      {/* The REAL signer: a full Hive user's vote is a chain op, and
-                          our own vote table keys on the same value the read path sends.
-                          A display name is neither stable (it changes at upgrade) nor a
-                          Hive account. `author` here is a key, never display text. */}
-                      {/* ★ THE POST PAGE IS THE FULL-SIZE VARIANT (2026-08-14,
-                          Blade handoff): 28px glyph, 53x53 target, 18px tally.
-                          Everywhere else — feed cards, comments — takes the
-                          component's `sm` default. This is the ONLY call site
-                          that needs the prop.
-                          ★ SUPERSEDED for this one call site by the note directly
-                          below: the owner ruled on H2 and the footer takes `sm`. The
-                          handoff still governs the control everywhere it is full
-                          size. */}
-                      {/*
-                       * ★ ONE TYPE SIZE IN THE FOOTER ROW (2026-08-16, owner, QA H2).
-                       *
-                       * `size="default"` renders a 53x53 target with an 18px tally,
-                       * beside a 14px meta line and a 14px payout: three sizes in one
-                       * row, and a bordered block roughly 3x the height of the text it
-                       * sits next to, which is why the row read as two unrelated
-                       * components bolted together. `sm` is 38x38 with a 14.5px tally,
-                       * so the whole row lands on one size.
-                       *
-                       * This deliberately overrides the earlier "the post page passes
-                       * size=default" handoff note on VotesComponent: that decision
-                       * predates the footer being measured as a row, and the owner has
-                       * called it directly. The prop still exists and nothing else
-                       * changes, so restoring it is one word.
-                       */}
-                      <VotesComponentWrapper
-                        post={{ ...postData, author: litePost?.chainAuthor || postData.author }}
-                        type="post"
-                        size="sm"
-                      />
-                      <span className="h-4 w-px self-center bg-border" />
-                      <DetailsCardHover
-                        post={postData}
-                        decline={parseFloat(postData.max_accepted_payout) === 0}
-                        post_page
-                      >
-                        <span
-                          data-testid="comment-payout"
-                          // ★ text-sm, not text-[20px] (2026-08-16, QA defect H2,
-                          // supersedes the 2026-08-14 note below). Bumping the payout to
-                          // 20px "one step above the tally" fixed one mismatch (payout
-                          // vs. tally) by introducing a THIRD size into a row that
-                          // already had two — this is the "three type sizes in one row"
-                          // finding. `text-sm` matches the meta info line, `font-bold`
-                          // keeps the money figure the visually heaviest thing in the
-                          // row without giving it its own size step.
-                          //
-                          // ★ text-ink-brand-8, not text-destructive (same defect): the
-                          // measured colour was raw Tailwind red-500 (rgb(239,68,68)),
-                          // and `ink-brand-8` is the token that is byte-identical to it
-                          // (globals.css) — already used for this exact figure's
-                          // DECLINED state two lines below (`!text-ink-8`) and for the
-                          // `post_page` decline branch in `details-card-hover.tsx`, so
-                          // this is the same family, not a new one.
-                          // ★★ GREEN, NOT RED (2026-08-20, owner-reported: "the payout there is red
-                          // instead of green ... that shows unprofessional as on feed payout is green").
-                          // The note above is right about its own question and never asked the bigger
-                          // one: it found raw Tailwind red-500 here and swapped in the token that is
-                          // byte-identical to it, which tokenised the red and left the money red.
-                          // Measured: this figure #ef4444, the feed card #2a6b44 — same number, two
-                          // opposite colours. `--ink-payout` is the feed card's own green, promoted to a
-                          // global token so these two cannot drift again.
-                          // ★★ 14px -> 15px + tabular-nums (2026-08-27, owner: "on the post
-                          // itself the payout is too small compared to the numbers next to
-                          // it"). THIS IS A REGRESSION FROM THE SAME DAY, not a reversal of
-                          // the 2026-08-16 ruling above. That ruling chose `text-sm` so the
-                          // payout would MATCH the tally and keep the row to two type sizes.
-                          // The tally was 14px then. On 2026-08-27 `.sm .tally` went 14px ->
-                          // 15px (vote-control.module.css, aligning the blade count with the
-                          // comment and reblog counts), which silently broke the pairing the
-                          // 08-16 note exists to protect and left the money the SMALLEST
-                          // number on its own row. Measured on the live post page before this
-                          // change: payout 14px/700, vote tally beside it 15px/500, every
-                          // comment payout below it 15px/700.
-                          // So this RESTORES that ruling's intent at the tally's new size —
-                          // still no third step (row meta stays 14px, tally and payout are
-                          // both 15px), still the heaviest thing in the row.
-                          // `tabular-nums` added to match the comment payouts, which have
-                          // always had it; without it the post's own figure was the only
-                          // money on the page with proportional digits.
-                          className={`text-[17px] font-medium font-num text-[color:rgb(var(--ink-payout))] hover:cursor-pointer ${
-                            parseFloat(postData.max_accepted_payout) === 0
-                              ? '!text-ink-8 line-through'
-                              : ''
-                          }`}
-                        >
-                          ${postData.payout?.toFixed(2)}
-                        </span>
-                      </DetailsCardHover>
-                      {/* ★★ THE SECOND VOTE COUNT IS GONE (owner, 2026-08-18: "we dont need
-                          both upvote numbers there. remove the one on the right").
-                          
-                          This row showed TWO counts that disagreed: the blade's tally (296)
-                          and `stats.total_votes` (297). Both were correct and they measure
-                          different things - the tally is upvotes, `total_votes` is every
-                          vote on the post including downvotes and zero-weight ones - but
-                          nothing on the row said so, so it read as the same number rendered
-                          twice and wrong once. One count, and it is the one attached to the
-                          control that changes it.
-
-                          ★ WHAT WENT WITH IT: this span was the trigger for
-                          `DetailsCardVoters`, the click-through to the full voter list.
-                          That affordance no longer exists anywhere on this row. It is a
-                          real loss, not a tidy-up - if it should come back, the place for
-                          it is the blade's own tally, not a second number. */}
-                    </div>
-                  </div>
-                  {/* Actions Row */}
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3 text-sm">
-                    <div className="flex flex-wrap items-center gap-2" data-testid="comment-respons-header">
-                      <ReblogTrigger
-                        author={litePost?.chainAuthor || postData.author}
-                        permlink={postData.permlink}
-                        dataTestidTooltipContent="post-footer-reblog-tooltip"
-                        dataTestidTooltipIcon="post-footer-reblog-icon"
-                        isReblogged={isReblogged}
-                      />
+                    <div className="flex flex-wrap items-center gap-2">
                       {identity.isLoggedIn ? (
                         <>
-                          <button
-                            onClick={() => {
-                              setReply(!reply);
-                            }}
-                            /* Was `text-destructive` - raw Tailwind red-500, which is
-                               neither Lumen's brand red nor a colour used anywhere else
-                               here. Now the same chip every other action on this row
-                               wears. */
-                            className="flex h-9 items-center rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:bg-[#f4f5f7] hover:text-brand"
-                            data-testid="comment-reply"
-                          >
-                            {t('post_content.footer.reply')}
-                          </button>
                           {pinMutations.isLoading || unpinMutation.isLoading ? (
                             <div className="ml-2">
                               <CircleSpinner
@@ -2212,13 +2504,7 @@ const PostContent = () => {
                             />
                           ) : null}
                         </>
-                      ) : (
-                        <DialogLogin>
-                          <button className="flex items-center text-destructive" data-testid="comment-reply">
-                            {t('post_content.footer.reply')}
-                          </button>
-                        </DialogLogin>
-                      )}
+                      ) : null}
                       {/* ★ THE DELETE CONTROL COULD NEVER APPEAR ON A LUMEN POST.
                           `payout_at` is Hive's cashout time — a real post gets
                           seven days, and this gate means "still editable". A
@@ -2235,7 +2521,6 @@ const PostContent = () => {
                       viewerIsAuthor &&
                       (isLumenPost || new Date() < new Date(`${postData.payout_at}Z`)) ? (
                         <>
-                          <span className="mx-1">|</span>
                           <PostDeleteDialog
                             permlink={postData.permlink}
                             action={(permlink) => {
@@ -2263,7 +2548,6 @@ const PostContent = () => {
                       ) : null}
                       {viewerIsAuthor && !edit ? (
                         <>
-                          <span className="mx-1">|</span>
                           <button
                             onClick={() => {
                               setEdit(!edit);
@@ -2275,82 +2559,34 @@ const PostContent = () => {
                           </button>
                         </>
                       ) : null}
-                      <TooltipProvider>
-                        <Tooltip>
-                          {/* ★ min-h-[24px] FOR THE HIT TARGET (2026-08-19, WCAG 2.2 AA
-                              2.5.8). This is the post page's OWN response-count control —
-                              a separate, unfixed sibling of `post-card-comment-tooltip.tsx`
-                              (the feed card's version, already fixed 2026-08-19). Measured
-                              27.6x22; the icon (h-4 w-4) plus text-sm line-height gave 22px
-                              with nothing setting a height. Measured live: the action row
-                              (`comment-respons-header`) stayed 36px, governed by the
-                              "Reply" chip's own h-9 — 0px cost. */}
-                          {/* ★★ `asChild` + a LABEL (2026-08-21, found by a keyboard-only pass).
-                          
-                              Without `asChild`, Radix renders its own <button> AROUND this <Link> — so
-                              the control was `<button><a/></button>`: interactive content nested inside
-                              interactive content, which is invalid HTML and gives TWO tab stops for one
-                              destination. Measured live: both the button and the link were reachable,
-                              and NEITHER carried an aria-label, so a screen reader announced "8, button"
-                              then "8, link" — a number with no noun attached.
-                          
-                              The note above already called this "a separate, unfixed sibling of
-                              post-card-comment-tooltip.tsx". It is now fixed the same way: `asChild`
-                              makes the Link itself the trigger (one stop, one element), and the label
-                              reuses the same translated string the tooltip shows, so the count is
-                              announced as "N responses" rather than as a bare digit. */}
-                          <TooltipTrigger asChild data-testid="comment-respons">
-                            <Link href={postData.url} aria-label={t('post_content.footer.responses', { responses: visibleCommentCount })}
-                              className="flex min-h-[24px] cursor-pointer items-center text-muted-foreground transition-colors hover:text-foreground">
-                              {/* ★ SAME SINGLE GLYPH AS THE FEED (owner, 2026-08-18). The
-                                  post page carried the identical count-dependent swap that
-                                  `post-card-comment-tooltip.tsx` did, so a reader clicking
-                                  a card watched the comment mark change shape on arrival
-                                  as well as between cards. The count beside it already
-                                  says how many. */}
-                              <Icons.comment className="mr-1 h-4 w-4" />
-                              <span className="text-[17px] font-medium font-num">{visibleCommentCount}</span>
-                            </Link>
-                          </TooltipTrigger>
-                          <TooltipContent data-testid="post-footer-response-tooltip">
-                            <p>
-                              {visibleCommentCount === 0
-                                ? t('post_content.footer.no_responses')
-                                : visibleCommentCount === 1
-                                  ? t('post_content.footer.response')
-                                  : t('post_content.footer.responses', { responses: visibleCommentCount })}
-                            </p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
+                      {/* ★★ ONE SHARE CONTROL, NOT A STRIP OF BRAND LOGOS (owner, 2026-08-18:
+                          "the post card needs updating. its still on old hiveblog design").
+
+                          This was a bordered pill holding four social-network logos plus a
+                          link icon - the single most dated element on the page, and the one
+                          thing on this row that looked borrowed from another product. The
+                          four networks were not deleted: they moved INTO the share dialog,
+                          which previously offered only copy-link and copy-markdown. Every
+                          destination a reader could reach before, they can still reach.
+
+                          The chip matches the feed card's action chips exactly - same 36px
+                          box, same `rounded-control`, same `text-ink-action` at rest and
+                          brand on hover - so the post page and the feed now speak one
+                          language instead of two. */}
+                      <SharePost path={postData.url} title={displayTitle}>
+                        <span
+                          className="flex h-9 items-center gap-1.5 rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:bg-[#f4f5f7] hover:text-brand"
+                          data-testid="share-post"
+                        >
+                          <Icons.link className="h-[18px] w-[18px]" />
+                          {t('post_content.footer.share_form.share_this_link')}
+                        </span>
+                      </SharePost>
                     </div>
-                    {/* ★★ ONE SHARE CONTROL, NOT A STRIP OF BRAND LOGOS (owner, 2026-08-18:
-                        "the post card needs updating. its still on old hiveblog design").
-
-                        This was a bordered pill holding four social-network logos plus a
-                        link icon - the single most dated element on the page, and the one
-                        thing on this row that looked borrowed from another product. The
-                        four networks were not deleted: they moved INTO the share dialog,
-                        which previously offered only copy-link and copy-markdown. Every
-                        destination a reader could reach before, they can still reach.
-
-                        The chip matches the feed card's action chips exactly - same 36px
-                        box, same `rounded-control`, same `text-ink-action` at rest and
-                        brand on hover - so the post page and the feed now speak one
-                        language instead of two. */}
-                    <SharePost path={postData.url} title={displayTitle}>
-                      <span
-                        className="flex h-9 items-center gap-1.5 rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:bg-[#f4f5f7] hover:text-brand"
-                        data-testid="share-post"
-                      >
-                        <Icons.link className="h-[18px] w-[18px]" />
-                        {t('post_content.footer.share_form.share_this_link')}
-                      </span>
-                    </SharePost>
                   </div>
                 </div>
                 {reply && postData && user.isLoggedIn ? (
-                  <div className="mt-4 px-4">
+                  <div ref={replyBoxRef} className="mt-4 px-4">
                     <ReplyTextbox
                       editMode={false}
                       onSetReply={setReply}
@@ -2411,7 +2647,8 @@ const PostContent = () => {
               <Loading loading={postIsLoading} />
             )}
           </div>
-          <div id="comments" className="flex" />
+          {/* `tabIndex={-1}`: the post bar's comment count lands keyboard focus here (see `goToComments`). */}
+          <div id="comments" tabIndex={-1} className="flex outline-none" />
           {/* ★ A gated NSFW post must not leak through its own comment thread
               (2026-08-09). Measured before this: the body was correctly withheld
               while the replies still fetched 3 images, because comment bodies

@@ -91,7 +91,6 @@ const NotificationListItem = ({
    */
   isOwner?: boolean;
 }) => {
-  const { t } = useTranslation('common_blog');
   const pathname = usePathname();
   const username = pathname?.split('/')[1].replace('@', '') || '';
   /**
@@ -119,7 +118,7 @@ const NotificationListItem = ({
   return (
     <div
       className={cn(
-        'flex items-center gap-3 px-4 py-3 transition-colors hover:bg-background-secondary',
+        'flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-background-secondary',
         isUnread && 'bg-destructive/5'
       )}
       data-testid="notification-list-item"
@@ -151,11 +150,22 @@ const NotificationListItem = ({
         </div>
       )}
 
-      {/* Message content */}
+      {/* Message content.
+          ★★ ONE LINE PER MESSAGE, TWO LINES PER ROW (2026-09-23, owner: "fit 6.5 people like
+          PeakD, not 5 ... each in its own line; ours is chaotic"). Measured before this in the
+          bell at 1440: a 360px card, the REP pill in its own right-hand column, a 194px message
+          column, so all 50 messages wrapped to two ragged lines ("voted on your / post
+          ($0.09)"), rows 90-91px, 4.63 rows in the 420px list. Now the card is 400px, REP rides
+          on line 2 after the time, the message is one line with an ellipsis, and `title` keeps
+          the whole sentence one hover away (the link's accessible name is its full text, so a
+          screen reader still hears all of it). Spec: /mnt/o/LUMEN-DOCS/SPEC-POST-BOTTOM-BAR-
+          2026-09-23.md, Part B, variant V1. This row is also the community Activity log
+          dialog's row (list.tsx), so the change lands there too. */}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <Link
           href={`/${fixedUrl}`}
-          className="line-clamp-2 text-sm hover:text-destructive visited:text-ink-10"
+          title={msg}
+          className="block truncate text-sm hover:text-destructive visited:text-ink-10"
         >
           <span data-testid="notification-account-and-message">
             <strong data-testid="subscriber-name">{msg.split(' ')[0]}</strong>
@@ -166,52 +176,69 @@ const NotificationListItem = ({
                 : null}
           </span>
         </Link>
-        <span className="flex items-center gap-2 text-caption text-ink-10" data-testid="notification-timestamp">
-          <span className={color}>{icon}</span>
-          {/* One format for the whole list — see TimeAgo's `numeric` prop. */}
-          <TimeAgo date={date} numeric="always" />
+        {/* Line 2: kind icon, time, then REP. The timestamp keeps its own element and testid
+            so its text is still exactly the time. */}
+        <span className="flex min-w-0 items-center gap-2 text-caption text-ink-10">
+          <span className="flex shrink-0 items-center gap-2" data-testid="notification-timestamp">
+            <span className={color}>{icon}</span>
+            {/* One format for the whole list — see TimeAgo's `numeric` prop. */}
+            <TimeAgo date={date} numeric="always" />
+          </span>
+          {typeof rep === 'number' ? (
+            <>
+              <span aria-hidden>·</span>
+              <ReputationBadge rep={rep} />
+            </>
+          ) : null}
         </span>
       </div>
-
-      {/* ★ IT IS LABELLED "REP", SO IT HAS TO BE A REPUTATION (2026-09-11, owner:
-          "REP in notifications is not working properly"). It was
-          `notification.score` — hivemind's notification IMPORTANCE score, which
-          is payout-derived for a vote row (reading 25 for a voter of reputation
-          80) and on a different curve than the displayed reputation for a reply
-          row. The real number is resolved server-side; see
-          `/api/notifications/account` and `lib/hive-reputations.ts`. No `rep`,
-          no pill: a missing reputation is honest, a wrong one is the bug.
-          (Earlier, 2026-08-10 owner item Q-3: labelled text, not a
-          count-shaped chip, so it is not mistaken for an unread counter and a
-          screen reader announces more than the digits.) */}
-      {typeof rep === 'number' ? (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div
-                className="flex shrink-0 items-center gap-1 font-sans text-caption text-ink-10"
-                data-testid="notification-reputation-badge"
-                title={t('navigation.profile_notifications_tab_navbar.reputation_label')}
-                aria-label={`${t('navigation.profile_notifications_tab_navbar.reputation_label')} ${accountReputation(rep)}`}
-              >
-                <span aria-hidden className="uppercase tracking-wide">
-                  {t('navigation.profile_notifications_tab_navbar.reputation_label')}
-                </span>
-                <span aria-hidden className="font-semibold tabular-nums text-ink-2">
-                  {accountReputation(rep)}
-                </span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent side="left">
-              <p>
-                {t('navigation.profile_notifications_tab_navbar.reputation_label')}{' '}
-                {accountReputationPrecise(rep)}
-              </p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      ) : null}
     </div>
+  );
+};
+
+/* ★ IT IS LABELLED "REP", SO IT HAS TO BE A REPUTATION (2026-09-11, owner:
+   "REP in notifications is not working properly"). It was
+   `notification.score` — hivemind's notification IMPORTANCE score, which
+   is payout-derived for a vote row (reading 25 for a voter of reputation
+   80) and on a different curve than the displayed reputation for a reply
+   row. The real number is resolved server-side; see
+   `/api/notifications/account` and `lib/hive-reputations.ts`. No `rep`,
+   no pill: a missing reputation is honest, a wrong one is the bug.
+   (Earlier, 2026-08-10 owner item Q-3: labelled text, not a
+   count-shaped chip, so it is not mistaken for an unread counter and a
+   screen reader announces more than the digits.)
+   ★ 2026-09-23: it moved from its own right-hand column onto line 2, after the time
+   (`2 hours ago · REP 68`); that column is what squeezed every message onto two lines.
+   Same element, testid, title, label and tooltip; the tooltip opens above now, because
+   to the left it would sit on the time it follows. */
+const ReputationBadge = ({ rep }: { rep: number }) => {
+  const { t } = useTranslation('common_blog');
+  const label = t('navigation.profile_notifications_tab_navbar.reputation_label');
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="flex shrink-0 items-center gap-1 font-sans text-caption text-ink-10"
+            data-testid="notification-reputation-badge"
+            title={label}
+            aria-label={`${label} ${accountReputation(rep)}`}
+          >
+            <span aria-hidden className="uppercase tracking-wide">
+              {label}
+            </span>
+            <span aria-hidden className="font-semibold tabular-nums text-ink-2">
+              {accountReputation(rep)}
+            </span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          <p>
+            {label} {accountReputationPrecise(rep)}
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 };
 

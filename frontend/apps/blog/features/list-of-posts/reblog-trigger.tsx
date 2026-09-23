@@ -30,7 +30,9 @@ const ReblogTrigger = ({
   dataTestidTooltipContent,
   dataTestidTooltipIcon,
   isReblogged: isRebloggedProp,
-  showLabel = false
+  showLabel = false,
+  className,
+  iconClassName
 }: {
   author: string;
   permlink: string;
@@ -40,6 +42,10 @@ const ReblogTrigger = ({
   isReblogged?: boolean;
   /** Show label with styled button wrapper */
   showLabel?: boolean;
+  /** Icon-only variant: extra classes for the button (the post bar makes it a chip). */
+  className?: string;
+  /** Icon-only variant: extra classes for the glyph (size, stroke). */
+  iconClassName?: string;
 }) => {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
@@ -85,10 +91,14 @@ const ReblogTrigger = ({
           {reblogMutation.isLoading ? (
             <CircleSpinner loading={reblogMutation.isLoading} size={16} color="#dc2626" />
           ) : (
-            <Icons.forward
-              className={cn('h-4 w-4', {
+            // ★ The reblog loop, as on the post bar and every feed card (owner, 2026-09-23:
+            // "switch the top Reblog button to the loop icon too"). It was the share tray
+            // (`Icons.forward`), so one page drew the same action with two marks.
+            <Icons.reblog
+              className={cn('h-4 w-4 stroke-2', {
                 'text-destructive': isReblogged
               })}
+              aria-hidden="true"
               data-testid={dataTestidTooltipIcon}
             />
           )}
@@ -114,23 +124,46 @@ const ReblogTrigger = ({
             only place this icon-only variant renders): the action row
             (`comment-respons-header`, already 36px tall from the "Reply"
             chip's own h-9) was unchanged, 0px cost. */}
-        <TooltipTrigger
-          disabled={isReblogged || reblogMutation.isLoading}
-          aria-label={triggerLabel}
-          className="flex min-h-[24px] min-w-[24px] items-center justify-center"
-        >
+        {/* ★★ THE BUTTON IS THE DIALOG TRIGGER, NOT THE GLYPH INSIDE IT (2026-09-23, post
+            bar uniformity pass). This used to be a Radix button wrapping the dialog trigger,
+            and the trigger was the <svg>. So only the glyph's own pixels opened the dialog:
+            a click on the button's padding, or Enter on the focused button, targets the
+            button, and a click event bubbles up to ancestors, never down into the svg. That
+            dead ring was 4px around a 16px glyph; as the post bar's 36px chip around a 22px
+            glyph it would have been most of the control. Same nesting as the feed card's
+            reblog chip (medium-post-card.tsx): tooltip trigger, then the dialog trigger, then
+            one real <button>. Checked on the new nesting: Enter on the focused chip opens the
+            reblog dialog, and Cancel returns focus to the chip.
+            ★ THE GLYPH IS THE FEED'S REBLOG MARK (`Icons.reblog`, line work), not the
+            share-tray `Icons.forward`. The tray is a filled "press" icon whose walls are
+            3.4 of 24 units, 3.1px at the 22px the bar draws every icon at, against the vote
+            blade's 1.83px stroke; no size gives it both the bar's icon size and its line
+            weight. `Icons.reblog` at `stroke-2` is exactly the blade's weight, and it is the
+            mark readers already see for this action on every feed card. This icon-only
+            variant renders only in the post bar (content.tsx); the labelled header variant
+            above draws the same loop. */}
+        <TooltipTrigger asChild>
           <ReblogDialog author={author} permlink={permlink} action={dialogAction} isReblogged={isReblogged}>
-            {reblogMutation.isLoading ? (
-              <CircleSpinner loading={reblogMutation.isLoading} size={18} color="#dc2626" />
-            ) : (
-              <Icons.forward
-                className={cn('h-4 w-4 cursor-pointer', {
-                  'text-destructive': isReblogged,
-                  'cursor-default': isReblogged
-                })}
-                data-testid={dataTestidTooltipIcon}
-              />
-            )}
+            <button
+              type="button"
+              disabled={isReblogged || reblogMutation.isLoading}
+              aria-label={triggerLabel}
+              className={cn('flex min-h-[24px] min-w-[24px] items-center justify-center', className, {
+                'cursor-default': isReblogged
+              })}
+            >
+              {reblogMutation.isLoading ? (
+                <CircleSpinner loading={reblogMutation.isLoading} size={18} color="#dc2626" />
+              ) : (
+                <Icons.reblog
+                  className={cn('h-4 w-4', iconClassName, {
+                    'text-destructive': isReblogged
+                  })}
+                  aria-hidden="true"
+                  data-testid={dataTestidTooltipIcon}
+                />
+              )}
+            </button>
           </ReblogDialog>
         </TooltipTrigger>
         <TooltipContent data-testid={dataTestidTooltipContent}>

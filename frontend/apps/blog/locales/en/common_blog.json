@@ -830,6 +830,7 @@
       "you_reblogged": "You reblogged",
       "reply": "Reply",
       "edit": "Edit",
+      "post_bar_label": "Post actions",
       "no_responses": "No responses. ",
       "response": "1 response. ",
       "responses": "{{responses}} responses. ",
