@@ -63,6 +63,8 @@ export interface RecordData {
   downvoters: number;
   lastDownvote: string | null;
   removedUsd: number | null;
+  /** The figure is a minimum: part of the sum did not finish, or it was carried from an earlier build. */
+  removedUsdFloor?: boolean;
   topDownvoters: { account: string; usd: number }[];
   topByCount: { account: string; votes: number }[];
   selfRewardUsd: number | null;
@@ -72,6 +74,8 @@ export interface RecordData {
   castTargets: number;
   lastCast: string | null;
   removedFromOthersUsd: number | null;
+  /** Same as `removedUsdFloor`, for what this account's downvotes took. */
+  removedFromOthersFloor?: boolean;
   steemPosts: number | null;
   steemPartial: boolean;
   steemLastPost: string | null;
@@ -172,10 +176,15 @@ function cellsFor(r: RecordData): Cell[] {
     },
     {
       label: 'REWARDS LOST (HBD)',
-      value: r.removedUsd === null ? '—' : hbdFigure(r.removedUsd),
+      // ★ "+" = a minimum (2026-09-23, owner: "the max you extracted with a + that's the
+      // max limit"): the whole-history sum is too big to finish in one query, so it is
+      // summed in slices and a slice that did not answer leaves a floor.
+      value: r.removedUsd === null ? '—' : `${hbdFigure(r.removedUsd)}${r.removedUsdFloor ? '+' : ''}`,
       exact:
         r.removedUsd === null
           ? 'not computed'
+          : r.removedUsdFloor
+            ? `at least ${hbd(r.removedUsd)} · the full sum is too big to finish`
           : r.topDownvoters.length > 0
             ? `whole history · most taken by: ${threeByValue(r.topDownvoters)}`
             : 'whole history',
@@ -282,10 +291,15 @@ function cellsFor(r: RecordData): Cell[] {
     },
     {
       label: 'REWARDS REMOVED (HBD)',
-      value: r.removedFromOthersUsd === null ? '—' : hbdFigure(r.removedFromOthersUsd),
+      value:
+        r.removedFromOthersUsd === null
+          ? '—'
+          : `${hbdFigure(r.removedFromOthersUsd)}${r.removedFromOthersFloor ? '+' : ''}`,
       exact:
         r.removedFromOthersUsd === null
           ? 'not computed'
+          : r.removedFromOthersFloor
+            ? `at least ${hbd(r.removedFromOthersUsd)} · the full sum is too big to finish`
           : r.removedFromOthersUsd === 0
             ? 'took nothing off anybody'
             : 'whole history · taken off other accounts',

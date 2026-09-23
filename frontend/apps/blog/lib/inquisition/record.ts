@@ -47,7 +47,11 @@ export interface SlowHalf {
   partial: boolean;
 }
 
-export async function slowHalf(account: string, base: ProfileRecord): Promise<SlowHalf> {
+export async function slowHalf(
+  account: string,
+  base: ProfileRecord,
+  previous?: Record<string, unknown>
+): Promise<SlowHalf> {
   const [tally, ledger, steem, cast, removedByThem] = await Promise.all([
     downvoteTally(account).catch(() => null),
     /*
@@ -83,15 +87,37 @@ export async function slowHalf(account: string, base: ProfileRecord): Promise<Sl
   const removedUsd = ledger ? (tally?.downvotes === 0 ? 0 : ledger.removedUsd) : null;
   const removedFromOthersUsd = cast?.downvotes === 0 ? 0 : removedByThem ? removedByThem.value : null;
 
+  /*
+   * ★★ A FIGURE THAT DID NOT ANSWER KEEPS THE LAST ONE WE HAD, AS A MINIMUM (2026-09-23,
+   * owner: "fill those 13 as best as possible, with the max you extracted with a +").
+   * The biggest accounts' whole-history sums cannot finish inside the query cap, so they
+   * are summed offline in slices (scripts/inquisition) and written into the record; a
+   * weekly refresh that times out again used to put the dash straight back. Now it keeps
+   * the previous figure and marks it a floor ("+"), which stays true: these totals only
+   * grow. A figure computed fresh is exact again. Carried figures are not "partial", so a
+   * query known not to finish is not retried every day.
+   */
+  const prev = previous ?? {};
+  const prevNum = (key: string): number | null => {
+    const v = prev[key];
+    return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  };
+  const carryLedger = ledger === null && prevNum('removedUsd') !== null;
+  const carryRemoved =
+    removedByThem === null && cast?.downvotes !== 0 && prevNum('removedFromOthersUsd') !== null;
+  const carrySteem = steem === null && prevNum('steemPosts') !== null;
+
   // ★ A silent null is not a behaviour (2026-09-22: 102 records on disk were partial and
   // the log held three lines). Every half that did not answer is named here, once per
   // fill, so the nightly warm log says WHICH query is the one that never finishes.
   const missing = [
     tally === null ? 'downvote tally' : '',
-    ledger === null ? 'vote ledger' : '',
-    steem === null ? 'steem walk' : '',
+    ledger === null ? `vote ledger${carryLedger ? ' (kept the previous figure)' : ''}` : '',
+    steem === null ? `steem walk${carrySteem ? ' (kept the previous figure)' : ''}` : '',
     cast === null ? 'cast tally' : '',
-    removedByThem === null && cast?.downvotes !== 0 ? 'removed by them (did not answer)' : ''
+    removedByThem === null && cast?.downvotes !== 0
+      ? `removed by them (did not answer${carryRemoved ? '; kept the previous figure' : ''})`
+      : ''
   ].filter(Boolean);
   if (missing.length > 0) {
     logger.warn(`inquisition: record for @${account} is partial, missing ${missing.join(', ')}`);
@@ -103,20 +129,23 @@ export async function slowHalf(account: string, base: ProfileRecord): Promise<Sl
       downvotes: tally ? tally.downvotes : null,
       downvoters: tally ? tally.downvoters : 0,
       lastDownvote: tally?.lastDownvote ? new Date(tally.lastDownvote).toISOString() : null,
-      removedUsd,
-      topDownvoters: ledger?.topDownvoters ?? [],
-      topByCount: ledger?.topByCount ?? [],
-      selfRewardUsd: ledger ? ledger.selfRewardUsd : null,
-      selfRewardPct: ledger ? ledger.selfRewardPct : null,
+      removedUsd: carryLedger ? prevNum('removedUsd') : removedUsd,
+      removedUsdFloor: carryLedger,
+      topDownvoters: ledger ? ledger.topDownvoters : carryLedger ? (prev.topDownvoters as { account: string; usd: number }[] | undefined) ?? [] : [],
+      topByCount: ledger ? ledger.topByCount : carryLedger ? (prev.topByCount as { account: string; votes: number }[] | undefined) ?? [] : [],
+      selfRewardUsd: ledger ? ledger.selfRewardUsd : carryLedger ? prevNum('selfRewardUsd') : null,
+      selfRewardPct: ledger ? ledger.selfRewardPct : carryLedger ? prevNum('selfRewardPct') : null,
       // ★ The other direction, which the record used to leave out entirely.
       castVotes: cast ? cast.downvotes : null,
       castTargets: cast ? cast.targets : 0,
       lastCast: cast?.lastCast ? new Date(cast.lastCast).toISOString() : null,
-      removedFromOthersUsd,
-      steemPosts: steem ? steem.posts : null,
-      // ★ The walk's own saturation flag. Dropping it printed a floor as a total.
-      steemPartial: steem?.partial ?? false,
-      steemLastPost: steem?.lastPost ?? null
+      removedFromOthersUsd: carryRemoved ? prevNum('removedFromOthersUsd') : removedFromOthersUsd,
+      removedFromOthersFloor: carryRemoved,
+      steemPosts: steem ? steem.posts : carrySteem ? prevNum('steemPosts') : null,
+      // ★ The walk's own saturation flag. Dropping it printed a floor as a total. A carried
+      // count is a floor too.
+      steemPartial: steem ? steem.partial : carrySteem,
+      steemLastPost: steem ? steem.lastPost : carrySteem ? ((prev.steemLastPost as string | null) ?? null) : null
     },
     // ★ PARTIAL MEANS "A QUERY DID NOT ANSWER", never "the answer was NULL" (2026-09-22).
     // A ledger whose sum is NULL (no post of this account ever paid AND survived its
@@ -125,10 +154,10 @@ export async function slowHalf(account: string, base: ProfileRecord): Promise<Sl
     // night for nothing and kept 40-odd records "partial" indefinitely.
     partial:
       tally === null ||
-      ledger === null ||
-      steem === null ||
+      (ledger === null && !carryLedger) ||
+      (steem === null && !carrySteem) ||
       cast === null ||
-      (removedByThem === null && cast?.downvotes !== 0)
+      (removedByThem === null && cast?.downvotes !== 0 && !carryRemoved)
   };
 }
 
@@ -184,7 +213,8 @@ export function fillInBackground(account: string, base: ProfileRecord, refreshBa
   void underClaim(account, async () => {
     try {
       const fresh = refreshBase ? await profileRecord(account).catch(() => null) : null;
-      const filled = await slowHalf(account, fresh ?? base);
+      // `base` is the stored record on a refresh, so it is also what a timeout falls back to.
+      const filled = await slowHalf(account, fresh ?? base, base as unknown as Record<string, unknown>);
       writeRecord(account, filled.record, true, filled.partial);
     } catch (error) {
       logger.warn(`inquisition: background record fill failed for @${account}: ${String(error)}`);
@@ -202,7 +232,8 @@ export async function buildRecord(account: string): Promise<boolean> {
   await underClaim(account, async () => {
     const base = await profileRecord(account);
     if (!base) return;
-    const filled = await slowHalf(account, base);
+    const previous = readRecord<Record<string, unknown>>(account)?.record;
+    const filled = await slowHalf(account, base, previous);
     writeRecord(account, filled.record, true, filled.partial);
     built = true;
   });
