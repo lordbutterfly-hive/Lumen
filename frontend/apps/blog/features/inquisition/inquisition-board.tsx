@@ -123,9 +123,9 @@ const BOARDS: BoardDef[] = [
     tab: 'CROSSPOSTING',
     kicker: 'BOARD 05 \u00b7 OLD LOYALTIES',
     title: 'Crossposting',
-    meta: 'Steem posts in the last 90 days\nfrom two days of Steem authors',
+    meta: 'letters home in the last 90 days\nfrom two days of the old country\u2019s authors',
     blurb:
-      'Still keeping a foot in the old country. Posts put on Steem in the last ninety days, long after the leaving was done and staying became a choice. The count is a window rather than a lifetime on purpose: walked back to the fork, every prolific account hit the same page cap and the board ranked nothing. The lifetime figure, since six months after the fork, is on each profile\u2019s own record.'
+      'Still keeping a foot in the old country. Letters sent home in the last ninety days, long after the leaving was done and staying became a choice. The count is a window rather than a lifetime on purpose: walked back to the schism, every prolific account hit the same page cap and the board ranked nothing. The lifetime figure, since six months after the schism, is on each profile\u2019s own record.'
 
   }
 ];
@@ -580,7 +580,7 @@ export default function InquisitionBoard() {
             <p className="px-[26px] py-8 font-ui text-body-sm text-ink-10">
               {matches && data?.building === true
                 ? board === 'crossposting'
-                  ? 'Asking Steem\u2026'
+                  ? 'Writing to the old country\u2026'
                   : 'Counting\u2026'
                 : 'Nothing to confess.'}
             </p>
@@ -626,8 +626,8 @@ export default function InquisitionBoard() {
       {matches && board === 'crossposting' && typeof data?.scope === 'number' ? (
         <p className="mt-2 font-ui text-caption text-ink-14">
           {typeof data?.matched === 'number' ? String(data.matched) : String(data.scope)} of{' '}
-          {typeof data?.listed === 'number' ? String(data.listed) : '?'} accounts that posted on Steem in
-          the last two days, or were on this board last week, also publish to Hive.
+          {typeof data?.listed === 'number' ? String(data.listed) : '?'} accounts seen in the old country in
+          the last two days, or on this board last week, also publish to Hive.
         </p>
       ) : null}
 
@@ -945,17 +945,17 @@ function CrosspostTable({ rows }: { rows: CrosspostRow[] }) {
           <th className="px-[26px] py-3 font-normal">Account</th>
           <th
             className="px-[26px] py-3 text-right font-normal"
-            title="Posts published to Steem in the last 90 days. This is the ranking. The lifetime figure, since six months after the fork, is on the account's own record."
+            title="Posts published in the old country in the last 90 days. This is the ranking. The lifetime figure, since six months after the schism, is on the account's own record."
           >
-            Steem posts (90d)
+            Letters home (90d)
           </th>
-          <th className="px-[26px] py-3 text-right font-normal" title="Most recent post published to Steem">
-            Last Steem
+          <th className="px-[26px] py-3 text-right font-normal" title="Most recent post published in the old country">
+            Last letter home
           </th>
           <th className="px-[26px] py-3 text-right font-normal" title="Most recent post published to Hive">
             Last Hive
           </th>
-          <th className="px-[26px] py-3 text-right font-normal" title="Posts published to Hive since the 2020 fork">
+          <th className="px-[26px] py-3 text-right font-normal" title="Posts published to Hive since the 2020 schism">
             Hive posts
           </th>
         </tr>

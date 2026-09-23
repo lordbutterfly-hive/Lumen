@@ -210,7 +210,7 @@ function cellsFor(r: RecordData): Cell[] {
       body: 'A mute is free, personal and one-sided, so the stake behind the muters says more than the count does.'
     },
     {
-      label: 'STEEM',
+      label: 'CROSSPOSTING',
       /*
        * ★★ THE `+` IS NOT DECORATION — IT IS THE DIFFERENCE BETWEEN A COUNT AND A FLOOR.
        * The Steem walk is capped at `MAX_PROFILE_PAGES` pages and sets `partial` when it
@@ -234,8 +234,8 @@ function cellsFor(r: RecordData): Cell[] {
               : 'none since 2020-09-20',
       tone: r.steemPosts === null ? 'dim' : r.steemPosts > 0 ? 'warn' : 'ok',
       body: r.steemPartial
-        ? 'Posts published to Steem since six months after the fork, asked of Steem itself; the migration window is excluded because posting there then was rarely a choice. This account has posted there enough that the count stopped at its page limit, so the real figure is higher.'
-        : 'Posts published to Steem since six months after the fork, asked of Steem itself; the migration window is excluded because posting there then was rarely a choice.'
+        ? 'Letters home to the old country since six months after the schism, as the old country itself keeps them; the first six months are forgiven, because writing there then was rarely a choice. This account writes home often enough that the count stopped at its page limit, so the real figure is higher.'
+        : 'Letters home to the old country since six months after the schism, as the old country itself keeps them; the first six months are forgiven, because writing there then was rarely a choice.'
     },
     {
       label: 'KE RATIO',
