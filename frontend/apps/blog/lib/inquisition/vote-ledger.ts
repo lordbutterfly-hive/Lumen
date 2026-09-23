@@ -3,6 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { TYPES } from 'tedious';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 import { queryCapped, queryReader, querySlow } from './hivesql';
+import { readRecord } from './board-store';
 
 /**
  * ════ WHAT A DOWNVOTE REMOVED ════
@@ -395,13 +396,26 @@ export async function removedForMany(
   const deadline = Date.now() + budgetMs;
   for (const name of names) {
     if (Date.now() >= deadline) break;
+    let value: number | null = null;
     try {
-      const value =
+      value =
         kind === 'voter' ? await removedByVoter(name) : ((await voteLedger(name, 'background'))?.removedUsd ?? null);
-      if (value !== null && value !== undefined) out.set(name, value);
     } catch {
       // One unreadable account does not fail the column for the rest.
     }
+    /*
+     * ★ A ROW WHOSE QUERY CANNOT FINISH TAKES THE ACCOUNT'S RECORD (2026-09-23). The
+     * biggest downvoters (@spaminator, @mack-bot) never finish inside the cap, so every
+     * weekly rebuild put a dash on the top of this board. Their records are filled in
+     * slices (scripts/inquisition/fill-giants.js) with the same valuation, so the record's
+     * figure is the one to show.
+     */
+    if (value === null || value === undefined) {
+      const stored = readRecord<Record<string, unknown>>(name)?.record;
+      const fallback = stored?.[kind === 'voter' ? 'removedFromOthersUsd' : 'removedUsd'];
+      if (typeof fallback === 'number' && Number.isFinite(fallback)) value = fallback;
+    }
+    if (value !== null && value !== undefined) out.set(name, value);
   }
   return out;
 }
