@@ -492,13 +492,6 @@
         "shadow_draft_discard": "Discard"
       }
     },
-    "flag": {
-      "flag_post": "投稿を報告",
-      "flag_description": "この投稿を報告する理由を記載してください。コミュニティのモデレーターによって確認されます。",
-      "community_rules": "コミュニティ規則",
-      "cancel": "キャンセル",
-      "ok": "OK"
-    },
     "lite_replies_truncated": "一部の返信はここに表示されていません。このスレッドは一度に読み込める量を超えています。"
   },
   "submit_page": {

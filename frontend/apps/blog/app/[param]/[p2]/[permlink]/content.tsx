@@ -17,10 +17,8 @@ import { useDeletePostMutation } from '@/blog/features/post-editor/hooks/use-pos
 import PostForm from '@/blog/features/post-editor/post-form';
 import PostingLoader from '@/blog/features/post-editor/posting-loader';
 import { ReplyTextbox } from '@/blog/features/post-editor/reply-textbox';
-import { AlertDialogFlag } from '@/blog/features/post-rendering/alert-window-flag';
 import CommentsSection from '@/blog/features/post-rendering/comments-section';
 import ContextLinks from '@/blog/features/post-rendering/context-links';
-import FlagIcon from '@/blog/features/post-rendering/flag-icon';
 import MutePostDialog from '@/blog/features/post-rendering/mute-post-dialog';
 import PostBodySection from '@/blog/features/post-rendering/post-body-section';
 import { bodyWithThreeSpeakPlayer } from '@/blog/lib/post/threespeak-embed';
@@ -1292,9 +1290,9 @@ const PostContent = () => {
   /**
    * ★★★ THE POST-HEADER "···" OVERFLOW MENU (2026-08-16) — replaces the
    * standalone "Flag post" icon button that used to be alone in this slot.
-   * Three items, one trigger: Downvote (economic action, first), Flag post
-   * (moderation, second, only where flagging is even possible), a rule, then
-   * Block (user-level, last) — the spec's own ordering rationale.
+   * One trigger: Downvote (economic action, first), a rule, then Block
+   * (user-level, last). Flag post (report to community moderators) was the
+   * second item until 2026-09-23, when the owner removed flagging entirely.
    *
    * ★ WHY A HIDDEN SECOND `VotesComponent` RATHER THAN A NEW DIALOG. The
    * brief is explicit: reuse the EXISTING downvote weight popover / removal
@@ -1311,12 +1309,12 @@ const PostContent = () => {
    * with zero vote logic duplicated — `features/votes/**` is untouched.
    *
    * ★ NEVER NEST THE TRIGGER INSIDE THE DROPDOWN ITEM. Both the vote
-   * popover/removal dialog and `AlertDialogFlag` below are Radix primitives
-   * with their own portalled Content. A `DropdownMenuItem` whose default
+   * popover/removal dialog below is a Radix primitive with its own
+   * portalled Content (the removed flag dialog was one too). A `DropdownMenuItem` whose default
    * select behaviour closes (and Radix unmounts) `DropdownMenuContent` would
    * unmount a nested trigger in the same commit its own click is trying to
-   * open a dialog in — the mount race the brief warns about. Both proxies
-   * are mounted as SIBLINGS of the `DropdownMenu` instead (inside the same
+   * open a dialog in — the mount race the brief warns about. The proxy
+   * is mounted as a SIBLING of the `DropdownMenu` instead (inside the same
    * wrapper below, never inside `DropdownMenuContent`), so closing the menu
    * cannot touch them; `onSelect` only clicks a ref.
    *
@@ -1334,7 +1332,6 @@ const PostContent = () => {
   const hiddenDownvoteControlRef = useRef<HTMLDivElement>(null);
   // React 18's types do not know `inert` yet (19 does); the DOM does.
   const INERT = { inert: '' } as Record<string, string>;
-  const hiddenFlagTriggerRef = useRef<HTMLButtonElement>(null);
 
   // Same author correction as the footer `VotesComponentWrapper` call just
   // below (litePost carries the account that actually signed the post), so
@@ -1378,10 +1375,6 @@ const PostContent = () => {
     hiddenDownvoteControlRef.current
       ?.querySelector<HTMLButtonElement>('[data-testid="downvote-button"]')
       ?.click();
-  };
-  const openFlagDialog = () => {
-    overflowTriggerRef.current?.focus();
-    hiddenFlagTriggerRef.current?.click();
   };
 
   // Same target/name-space split as the byline's own Block (`ButtonsContainer`,
@@ -1491,7 +1484,7 @@ const PostContent = () => {
                           magazine feature. When `json_metadata.type` is `note`
                           the headline is dropped and the body speaks for itself;
                           the payout-in-HBD marker keeps its place beside the
-                          flag control, and every post without the marker renders
+                          overflow menu, and every post without the marker renders
                           exactly as it did before. */}
                       <h1
                         className={cn(
@@ -1552,12 +1545,11 @@ const PostContent = () => {
                           off a community, the same as the upvote arrow beside
                           it always was, and gating the whole trigger on
                           community membership would have made downvoting from
-                          this page impossible everywhere else. Flag post keeps
-                          its original `postInCommunity` gate below — reporting
-                          to community moderators only ever applied there. See
-                          the big comment above (before `isPending`) for why
-                          two Radix triggers are proxied through hidden
-                          siblings rather than nested inside the menu items. */}
+                          this page impossible everywhere else. (Flag post was
+                          removed from this menu on 2026-09-23.) See the big
+                          comment above (before `isPending`) for why the
+                          downvote trigger is proxied through a hidden sibling
+                          rather than nested inside the menu item. */}
                       <div
                         className={cn(
                           voteStyles.root,
@@ -1570,8 +1562,8 @@ const PostContent = () => {
                               `vote-control.module.css` uses for `.down.mine` —
                               slate, not `--destructive` — because the design
                               records disagreement rather than celebrating it,
-                              and because a red trigger here would read as the
-                              SAME action as Flag post. Reusing the token (via
+                              and because a red trigger here would read as a
+                              report to moderators. Reusing the token (via
                               `voteStyles` on the wrapper) keeps this
                               byte-identical and dark-mode aware instead of a
                               second, drifting hardcoded colour. */}
@@ -1622,8 +1614,7 @@ const PostContent = () => {
                             the same thing Radix's own MenuSubContent does internally for
                             exactly this reason: a closing menu must not steal focus from
                             whatever the selection just opened. Applies to every item in
-                            this menu, so it covers Flag post too, which proxies the same
-                            way.
+                            this menu.
                           */}
                           <DropdownMenuContent
                             align="end"
@@ -1639,26 +1630,6 @@ const PostContent = () => {
                                 ? t('post_content.footer.remove_downvote')
                                 : t('post_content.footer.downvote')}
                             </DropdownMenuItem>
-                            {/* Flag post — moderation, second. Same gate the
-                                standalone button always had: only where
-                                flagging is possible at all (a community post),
-                                and only once we know WHICH of the two states
-                                (signed out vs. signed in with community data
-                                loaded) applies, matching exactly what the old
-                                button rendered non-null for. Destructive
-                                styling reused from the design system (not
-                                invented here) so it stays the one item that
-                                visibly contacts moderation — Downvote above is
-                                deliberately NOT styled this way, see req. 3. */}
-                            {postInCommunity && (!identity.isLoggedIn || communityData) ? (
-                              <DropdownMenuItem
-                                data-testid="post-header-flag-menu-item"
-                                className="text-destructive focus:text-destructive"
-                                onSelect={openFlagDialog}
-                              >
-                                {t('post_content.flag.flag_post')}
-                              </DropdownMenuItem>
-                            ) : null}
                             {/* Block — user-level, last, separated. Same
                                 control already offered on feed cards
                                 (medium-post-card.tsx) and comments
@@ -1719,28 +1690,6 @@ const PostContent = () => {
                           </div>
                         ) : null}
 
-                        {/* Hidden proxy for the EXISTING flag dialog
-                            (AlertDialogFlag) / login prompt — the identical
-                            component and the identical branch the standalone
-                            button used to render, just not visible. */}
-                        {postInCommunity ? (
-                          <div className="hidden" aria-hidden="true">
-                            {!identity.isLoggedIn ? (
-                              <DialogLogin>
-                                <FlagIcon ref={hiddenFlagTriggerRef} onClick={() => {}} />
-                              </DialogLogin>
-                            ) : communityData ? (
-                              <AlertDialogFlag
-                                community={category}
-                                username={author}
-                                permlink={permlink}
-                                flagText={communityData.flag_text}
-                              >
-                                <FlagIcon ref={hiddenFlagTriggerRef} onClick={() => {}} />
-                              </AlertDialogFlag>
-                            ) : null}
-                          </div>
-                        ) : null}
                       </div>
                     </div>
                   ) : (
@@ -2492,7 +2441,6 @@ const PostContent = () => {
               userCanModerate={!!userCanModerate}
               mutedList={mutedListForThread}
               mutedListUnknown={mutedListUnknown}
-              flagText={communityData?.flag_text}
               discussionAuthor={author}
               discussionPermlink={permlink}
               observer={observer}

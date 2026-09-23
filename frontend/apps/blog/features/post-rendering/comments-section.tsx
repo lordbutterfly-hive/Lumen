@@ -34,7 +34,6 @@ interface CommentsSectionProps {
    *  `content.tsx`'s own doc comment on `mutedListUnknown`. Threaded through
    *  to `CommentList` -> `CommentListItem` alongside `mutedList` itself. */
   mutedListUnknown?: boolean;
-  flagText: string | undefined;
   discussionAuthor: string;
   discussionPermlink: string;
   observer: string;
@@ -48,7 +47,6 @@ const CommentsSection = memo(function CommentsSection({
   userCanModerate,
   mutedList,
   mutedListUnknown,
-  flagText,
   discussionAuthor,
   discussionPermlink,
   observer,
@@ -349,7 +347,6 @@ const CommentsSection = memo(function CommentsSection({
             mutedList={mutedList}
             mutedListUnknown={mutedListUnknown}
             data={paginatedDiscussionState.comments}
-            flagText={flagText}
             filteringEnabled={filteringEnabled}
             parent={postData}
             discussionAuthor={discussionAuthor}

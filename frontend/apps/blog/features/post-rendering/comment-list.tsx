@@ -131,7 +131,6 @@ const CommentList = ({
   parent,
   mutedList,
   mutedListUnknown,
-  flagText,
   discussionAuthor,
   discussionPermlink,
   observer,
@@ -148,7 +147,6 @@ const CommentList = ({
    *  `mutedListUnknown` doc comment. Threaded down alongside `mutedList`
    *  itself, including into the recursive `CommentList` call below. */
   mutedListUnknown?: boolean;
-  flagText: string | undefined;
   discussionAuthor: string;
   discussionPermlink: string;
   observer: string;
@@ -357,7 +355,6 @@ const CommentList = ({
                       key={`${commentKey}-item`}
                       mutedList={mutedList}
                       mutedListUnknown={mutedListUnknown}
-                      flagText={flagText}
                       discussionAuthor={discussionAuthor}
                       discussionPermlink={discussionPermlink}
                       observer={observer}
@@ -371,7 +368,6 @@ const CommentList = ({
                           unbounded depth that 500s the page. */}
                       {flattened ? null : (
                         <CommentList
-                          flagText={flagText}
                           highestAuthor={highestAuthor}
                           highestPermlink={highestPermlink}
                           permissionToMute={permissionToMute}

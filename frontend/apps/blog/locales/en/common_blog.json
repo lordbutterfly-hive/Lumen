@@ -869,14 +869,6 @@
         "shadow_draft_discard": "Discard"
       }
     },
-    "flag": {
-      "flag_post": "Flag post",
-      "flag_description": "Please provide a note regarding your decision to flag this post, it will be reviewed by community moderators.",
-      "community_rules": "Community rules",
-      "cancel": "Cancel",
-      "ok": "OK",
-      "lite_cannot_flag": "Reporting a post to its community moderators needs a full Hive account. Upgrade to report."
-    },
     "a_community": "a community",
     "lite_replies_truncated": "Some replies aren’t shown here. This thread is larger than we can load at once."
   },

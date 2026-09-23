@@ -93,7 +93,6 @@ interface CommentListProps {
   discussionPermlink: string;
   observer: string;
   parentAuthor: string;
-  flagText: string | undefined;
   filteringEnabled?: boolean;
   onCommnentLinkClick: (hash: string) => void;
   /**
@@ -223,7 +222,6 @@ const CommentListItem = memo(function CommentListItem({
   mutedListUnknown,
   parentPermlink,
   parentAuthor,
-  flagText,
   discussionAuthor,
   discussionPermlink,
   observer,

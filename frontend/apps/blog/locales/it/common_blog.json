@@ -492,13 +492,6 @@
         "shadow_draft_discard": "Discard"
       }
     },
-    "flag": {
-      "flag_post": "Segnala post",
-      "flag_description": "Si prega di fornire una nota riguardo alla tua decisione di segnalare questo post, sarà esaminato dai moderatori della comunità.",
-      "community_rules": "Regole della comunità",
-      "cancel": "Annulla",
-      "ok": "OK"
-    },
     "lite_replies_truncated": "Alcune risposte non sono mostrate qui: questa discussione è più grande di quanto possiamo caricare in una volta."
   },
   "submit_page": {
