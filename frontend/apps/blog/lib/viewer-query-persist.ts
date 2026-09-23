@@ -47,6 +47,9 @@ function isPersistedKey(key: readonly unknown[]): boolean {
     case 'retention': // own rank emblem (use-retention)
     case 'rank-marks': // author rank emblems on the page (use-rank-marks)
     case 'LumenNotifications': // Lumen bell rows (use-lumen-notifications)
+    case 'unreadNotifications': // the bell's chain count; the header polls it every 20 s anyway
+    case 'retention-nudge-notifications': // the feed nudge's 12 rows (5 min staleTime, retention-nudge.tsx)
+    case 'right-rail-builders-board': // 5 min staleTime, server roster refreshes every 10 min (builders.tsx)
       return true;
     case 'followingData': // only the ignore (mute) list, not browsed follow lists
       return third === 'ignore';
