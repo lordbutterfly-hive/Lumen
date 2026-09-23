@@ -52,9 +52,95 @@ lumensocial.net, www.lumensocial.net {
 	#
 	# Reverting the whole thing: restore Caddyfile.before-botblock-2026-09-06 and
 	# reload. No deploy, no restart, seconds.
-	@blockedbots header_regexp User-Agent (?i)(meta-webindexer|meta-externalagent|FacebookBot|ClaudeBot|anthropic-ai|GPTBot|OAI-SearchBot|ChatGPT-User|CCBot|Bytespider|Amazonbot|Applebot|PerplexityBot|YouBot|Diffbot|omgili|ImagesiftBot|Timpibot|cohere-ai|DataForSeoBot|AhrefsBot|SemrushBot|MJ12bot|DotBot|Barkrowler|SeekportBot|serpstatbot|ZoominfoBot|bingbot|BLEXBot|PetalBot|YandexBot|SeznamBot|Sogou|Exabot|magpie-crawler|TurnitinBot|Screaming.Frog)
+	# ★★★ 2026-09-16, owner ruling: "block all crawlers except the google
+	# one". THE LIST ABOVE FLIPPED FROM A DENYLIST TO AN ALLOWLIST.
+	#
+	# The 09-06 denylist worked: meta-webindexer went from 46.7 percent of all
+	# traffic to ZERO hits, verified in /var/log/lumen.log. But a denylist only
+	# stops names already on it. By 09-15 the two largest crawlers were
+	# ShapBot/0.1.0 (587 hits) and Claude-SearchBot/1.0 (124), neither on the
+	# list, both served 200. Traffic was still ~92 percent bots, and the Hive
+	# quota they compete for was being rate limited: 3 of 25 probe calls to
+	# api.openhive.network came back 429 from this box while the same probe from
+	# a home connection got 25 of 25.
+	#
+	# The rule is now the other way round: anything whose User-Agent identifies
+	# it as a crawler is refused UNLESS it is on the keep list below. A crawler
+	# invented tomorrow is blocked on arrival with no edit here.
+	#
+	# KEPT, and why:
+	#   Googlebot              the only crawler that demonstrably sends readers
+	#   Google-InspectionTool  Search Console live test, same account as above
+	#   the unfurlers          facebookexternalhit, Twitterbot, Discordbot,
+	#                          Slackbot, TelegramBot, WhatsApp, LinkedInBot,
+	#                          redditbot, Embedly, Iframely, Mastodon, Pleroma,
+	#                          Misskey, Bluesky. These fire because a HUMAN
+	#                          shared a link. Blocking them breaks how that link
+	#                          looks. They are not crawlers.
+	#   CUBOT                  ★ A PHONE BRAND, NOT A BOT. Its UA carries the
+	#                          literal string "bot" (CUBOT NOTE 20), so a bare
+	#                          "bot" match would refuse a real reader holding
+	#                          one. This is the one known false positive of
+	#                          matching "bot" as a substring, and matching it as
+	#                          a substring is not optional: Googlebot, bingbot,
+	#                          ShapBot and ClaudeBot all carry it mid-word too.
+	#
+	# Google-Extended and GoogleOther are deliberately NOT kept. They are
+	# Google AI-training and other-product fetchers, which take without sending
+	# readers, and that is the whole test this rule applies.
+	#
+	# ★ A request with NO User-Agent at all matches neither half and is still
+	# served. Left that way on purpose: some real clients send none, and the
+	# in-app crawler budget (lib/request-budget.ts) already covers that case.
+	#
+	# Reverting: restore Caddyfile.before-botallowlist-2026-09-16 for this rule
+	# alone, or Caddyfile.before-botblock-2026-09-06 to remove edge bot blocking
+	# entirely, then reload. No deploy, no restart, seconds.
+	@blockedbots {
+	# ★★ THE NAMED LIST IS BACK, AHEAD OF THE GENERIC ONE (2026-09-16, owner:
+	# "add those two bots in the blacklist as well"). ShapBot and Claude-SearchBot
+	# are now named outright, and so is every name the 09-06 denylist carried.
+	#
+	# ★ THIS IS NOT BELT-AND-BRACES, IT CLOSED A REAL HOLE I OPENED. Replacing
+	# the named list with a generic "looks like a crawler" pattern quietly lost the
+	# two names that contain no crawler word at all:
+	#     Barkrowler        "rowler", not "crawler"        -> was being served 200
+	#     Screaming.Frog    only caught while its UA still said "SEO Spider";
+	#                       "Screaming Frog SEO" alone     -> was being served 200
+	# Both verified 200 against the origin before this line went in, and 403 after.
+	# THE LESSON: a generic pattern is a floor, not a replacement. Any name that
+	# does not spell out what it is has to stay written down.
+		header_regexp botua User-Agent (?i)(ShapBot|Claude-SearchBot|meta-webindexer|meta-externalagent|FacebookBot|ClaudeBot|anthropic-ai|GPTBot|OAI-SearchBot|ChatGPT-User|CCBot|Bytespider|Amazonbot|Applebot|PerplexityBot|YouBot|Diffbot|omgili|ImagesiftBot|Timpibot|cohere-ai|DataForSeoBot|AhrefsBot|SemrushBot|MJ12bot|DotBot|Barkrowler|SeekportBot|serpstatbot|ZoominfoBot|bingbot|BLEXBot|PetalBot|YandexBot|SeznamBot|Sogou|Exabot|magpie-crawler|TurnitinBot|Screaming.Frog|Google-Extended|GoogleOther|bot|crawler|crawling|spider|scraper|scraping|indexer|slurp|archiver|feedfetcher)
+		not header_regexp keepua User-Agent (?i)(Googlebot|Google-InspectionTool|facebookexternalhit|Twitterbot|Discordbot|Slackbot|Slack-ImgProxy|TelegramBot|WhatsApp|LinkedInBot|redditbot|Embedly|Iframely|Mastodon|Pleroma|Misskey|Akkoma|Friendica|Bluesky|Pinterest|SkypeUriPreview|vkShare|CUBOT)
+	}
 	handle @blockedbots {
 		respond "Not served to automated indexers. Contact the site owner." 403 {
+			close
+		}
+	}
+
+	# DATACENTER CRAWL, BLOCKED BY NETWORK, NOT BY NAME (2026-09-23, owner: "if theyre
+	# useless and screw our page we blacklist or is there a better way"). The name list above
+	# only catches clients that say what they are. This crawl sent ordinary Chrome user agents
+	# from 1,500+ addresses, so it matched no name and stayed under every per-IP budget: in the
+	# hour before this rule, 4,692 of 5,104 page views came from two rented-server networks,
+	# Alibaba Cloud (47.74.0.0-47.87.255.255, ARIN AL-3) and OVH VPS (141.94.0.0/15,
+	# VPS-EU-WEST-RBX), crawling 2017-2018 posts. Each render called the Hive nodes several
+	# times; the nodes refused (1,493 failures in that hour) and real readers waited on retries.
+	# People do not browse from these server ranges. Page routes only: /api and static files
+	# are untouched. The address is the Cf-Connecting-Ip header set by Cloudflare.
+	# Reverting: restore Caddyfile.before-dcblock-2026-09-23 and reload.
+	@datacentercrawl {
+		header_regexp dcip Cf-Connecting-Ip ^(47\.(7[4-9]|8[0-7])\.|141\.9[45]\.)
+		not path /api/* /_next/* /favicon.ico /robots.txt /site.webmanifest
+		# Link-preview fetchers stay allowed even from these networks: a self-hosted
+		# Mastodon/Pleroma server can live on an OVH VPS. Googlebot is deliberately NOT in
+		# this list: the real one never comes from Alibaba Cloud or OVH, so a "Googlebot"
+		# from here is a spoof. (Checked 09-21..23: no preview bot came from these ranges.)
+		not header_regexp dckeep User-Agent (?i)(facebookexternalhit|Twitterbot|Discordbot|Slackbot|Slack-ImgProxy|TelegramBot|WhatsApp|LinkedInBot|redditbot|Embedly|Iframely|Mastodon|Pleroma|Misskey|Akkoma|Friendica|Bluesky|Pinterest|SkypeUriPreview|vkShare)
+	}
+	handle @datacentercrawl {
+		respond "Not served to automated clients from this network. Contact the site owner." 403 {
 			close
 		}
 	}
