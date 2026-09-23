@@ -48,11 +48,74 @@ zero-indexed 6. See :attr:`recsys.config.FreshnessConfig.position`.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Sequence
 
 from recsys.config import FreshnessConfig
 from recsys.contracts import ScoredCandidate
+
+
+def age_factor(created: datetime | None, now: datetime, half_life_hours: float) -> float:
+    """``0.5 ** (age_hours / half_life_hours)``, in ``(0, 1]``.
+
+    ``half_life_hours <= 0`` means the decay is off and returns ``1.0``. A post
+    with no timestamp is not discounted (there is no age to discount it by), and a
+    post dated in the future is treated as age zero: Hive's ``created`` is the
+    block time, so a future value is clock skew between the mirror and this host,
+    and clamping it can only ever give it the factor a brand-new post gets.
+    """
+    if half_life_hours <= 0 or created is None:
+        return 1.0
+    age_hours = max((now - created).total_seconds() / 3600.0, 0.0)
+    return 0.5 ** (age_hours / half_life_hours)
+
+
+def age_adjust(
+    scored: Sequence[ScoredCandidate],
+    config: FreshnessConfig,
+    now: datetime,
+) -> list[ScoredCandidate]:
+    """Discount every score by its post's age. See
+    :attr:`recsys.config.FreshnessConfig.score_half_life_hours` for the
+    production measurement this exists for.
+
+    ★ THIS IS WHAT DEMOTES AN OLD POST; THE SEAT BELOW ONLY PROMOTES A NEW ONE.
+    The score's earned signals are counts of attention accumulated since a post
+    was created, so without an age term an older post outranks a newer one of
+    the same standing simply for having been up longer, and it keeps the top of
+    the page until it drops out of the sourcing window.
+
+    ★ ``final`` AND ``interest_bonus`` ARE SCALED TOGETHER, so
+    ``final - interest_bonus`` (what :func:`recsys.core.rerank._earned` reads)
+    is scaled by the same factor and the re-ranker's split between earned score
+    and declared interest is unchanged. The three component percentiles are left
+    as they were: they describe the post, and ``age_factor`` records what was
+    applied on top of them.
+
+    Multiplying by a factor in ``(0, 1]`` keeps ``final`` in ``[0, 1]``, and posts
+    of the same age keep their relative order exactly, so this changes the page
+    only where ages differ. It never adds or drops a candidate.
+    """
+    half_life = config.score_half_life_hours
+    if half_life <= 0:
+        return list(scored)
+    out: list[ScoredCandidate] = []
+    for candidate in scored:
+        factor = age_factor(candidate.post.created, now, half_life)
+        score = candidate.score
+        out.append(
+            replace(
+                candidate,
+                score=replace(
+                    score,
+                    final=score.final * factor,
+                    interest_bonus=score.interest_bonus * factor,
+                    age_factor=score.age_factor * factor,
+                ),
+            )
+        )
+    return out
 
 
 def recent_candidates(

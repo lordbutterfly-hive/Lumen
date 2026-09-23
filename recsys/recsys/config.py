@@ -1425,11 +1425,47 @@ class FreshnessConfig:
     #: Posts one author may hold across the whole feed's freshness seats. Stops
     #: one account posting three times in an hour from taking every seat.
     max_posts_per_author: int = 1
+    #: ★★★ THE SCORE'S AGE HALF-LIFE, in hours (2026-09-23). Every scored
+    #: candidate's ``final`` is multiplied by ``0.5 ** (age_hours / this)``
+    #: before the re-ranker orders the page (see
+    #: :func:`recsys.core.freshness.age_adjust`). ``0`` turns it off and
+    #: reproduces the previous ordering exactly.
+    #:
+    #: THE DEFECT IT CLOSES. The seat above only PROMOTES a young post; nothing
+    #: DEMOTED an old one, and the score has no working age term. Its earned
+    #: signals (distinct engagers, independent vote signal) are counts of
+    #: attention ACCUMULATED since the post was created, so inside the sourcing
+    #: window an older post has simply had longer to collect them, and the
+    #: additive ``organic_recency`` bonus (0.10 on a 1-3 log scale, before the
+    #: percentile step) cannot offset that. Measured on production 2026-09-23,
+    #: 31 stored feeds: engagers rise with post age in 30 of 31 (median Spearman
+    #: 0.338); the #1 post's median age was 32.0h against 19.0h for the page;
+    #: 9 of 31 feeds led with a post over 48h old. The owner's feed led with an
+    #: 81.7h in-network post (score 0.949, 384 engagers) above a 3.0h one
+    #: (0.915): an old post held the top slot until it aged out of the 84h
+    #: in-network window, and the same author's previous posts had done the same.
+    #:
+    #: WHY 48. It is the half-life ``ScoreWeights.organic_half_life_hours``
+    #: already declares for freshness and the public feed explainer already
+    #: states ("a 48 hour half life"); this is the place it can take effect.
+    #: Replayed on those 31 feeds it takes the #1 post's median age from 32.0h
+    #: to 7.0h and leaves no post over 48h in any top five (was 23 slots).
+    #:
+    #: WHY THE SIMULATOR NEVER SHOWED THIS. ``simworld`` draws each post's
+    #: engagement independently of its age (see ``pooled_author_base``), so the
+    #: accumulation bias does not exist there, and every earlier recency sweep
+    #: measured in it saw only the cost of recency, never the defect.
+    score_half_life_hours: float = 48.0
 
     def __post_init__(self) -> None:
         if self.slots_per_page < 0:
             raise ValueError(
                 f"slots_per_page must be >= 0, got {self.slots_per_page}"
+            )
+        if self.score_half_life_hours < 0:
+            raise ValueError(
+                "score_half_life_hours must be >= 0 (0 = off), got "
+                f"{self.score_half_life_hours}"
             )
         if self.page_size <= 0:
             raise ValueError(f"page_size must be > 0, got {self.page_size}")

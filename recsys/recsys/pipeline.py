@@ -56,7 +56,7 @@ from recsys.core.exploration import (
 from recsys.core.flooding import cap_oon_flooding
 from recsys.core.graph_cred import compute_graph_cred
 from recsys.core.popular import insert_popular, select_popular
-from recsys.core.freshness import promote_fresh
+from recsys.core.freshness import age_adjust, promote_fresh
 from recsys.core.rerank import _FeedCounters, rerank
 from recsys.core.ring import detect_rings, ring_member_set
 from recsys.core.scoring import (
@@ -1940,6 +1940,14 @@ def _score(
         interest_percentiles=interest_lookup,
         viewer_percentiles=viewer_lookup,
     )
+    # ★★★ AGE, APPLIED TO THE SCORE ITSELF (2026-09-23). Without it an old post
+    # outranks a newer one of the same standing just for having had longer to
+    # collect engagement, and holds the top of the page until it leaves the
+    # sourcing window (production: an 81.7h post led the owner's feed over a
+    # 3.0h one). Applied here, before `rerank` and before the exploration early
+    # return, so every score this function hands out carries the same discount
+    # and the re-ranker orders on it. See `FreshnessConfig.score_half_life_hours`.
+    scored = age_adjust(scored, settings.freshness, now)
     # Ties resolve per-viewer, not alphabetically — see rerank._tie_break.
     # Session bucket: feeds vary between buckets and are stable within one, so a
     # refresh cannot re-roll exploration into a better draw.

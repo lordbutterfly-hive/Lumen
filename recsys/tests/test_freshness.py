@@ -308,3 +308,142 @@ def test_the_head_guard_evicts_EVERY_intruder_not_just_the_first() -> None:
     tail_keys = [c.post.key for c in out[5:]]
     assert all(k in tail_keys for k in promoted), "an intruder vanished"
     assert len({c.post.key for c in out}) == len(out), "a post was duplicated"
+
+
+# --------------------------------------------------------------------------
+# the age discount on the score itself (2026-09-23)
+# --------------------------------------------------------------------------
+#
+# ★ THE PRODUCTION DEFECT THESE PIN. On 2026-09-23 the owner's For You feed led
+# with an 81.7-hour-old in-network post (score 0.949, 384 engagers) above a
+# 3.0-hour-old one (0.915). The score's earned signals are counts accumulated
+# since the post was created, so an older post outranks a newer one of the same
+# standing for having been up longer, and nothing demoted it: the seat above
+# only promotes. It held the top slot until it aged out of the 84h in-network
+# window. `FreshnessConfig.score_half_life_hours` has the measurement.
+
+from recsys.config import DEFAULT_SETTINGS, Settings  # noqa: E402
+from recsys.core.freshness import age_adjust, age_factor  # noqa: E402
+from recsys.core.normalize import build_norm_context  # noqa: E402
+from recsys.pipeline import TrustPolicy, rank_feed  # noqa: E402
+from tests.fakes import FakeGateway, make_vote, make_viewer  # noqa: E402
+
+
+def test_the_age_factor_halves_at_the_half_life_and_is_off_at_zero():
+    assert age_factor(NOW, NOW, 48.0) == 1.0
+    assert age_factor(NOW - timedelta(hours=48), NOW, 48.0) == pytest.approx(0.5)
+    assert age_factor(NOW - timedelta(hours=96), NOW, 48.0) == pytest.approx(0.25)
+    assert age_factor(NOW - timedelta(hours=81.7), NOW, 48.0) == pytest.approx(0.3074, abs=1e-4)
+    assert age_factor(NOW - timedelta(hours=500), NOW, 0.0) == 1.0, "0 must mean off"
+    assert age_factor(None, NOW, 48.0) == 1.0
+    # Clock skew between the mirror and this host: clamped to age zero, so a
+    # future timestamp can never score better than a brand-new post.
+    assert age_factor(NOW + timedelta(hours=5), NOW, 48.0) == 1.0
+
+
+def test_the_half_life_ships_on_and_rejects_a_negative_value():
+    assert DEFAULT_SETTINGS.freshness.score_half_life_hours == 48.0
+    with pytest.raises(ValueError):
+        FreshnessConfig(score_half_life_hours=-1.0)
+
+
+def test_age_adjust_scales_final_and_the_interest_part_together():
+    """`rerank._earned` reads `final - interest_bonus`; both must move by the
+    same factor or the re-ranker's earned/declared-interest split would shift."""
+    post = make_post(author="a", permlink="p")
+    aged = type(post)(**{**post.__dict__, "created": NOW - timedelta(hours=48)})
+    sc = ScoredCandidate(
+        post=aged,
+        source=CandidateSource.IN_NETWORK,
+        score=ScoreBreakdown(vote_norm=0.7, rep_norm=0.6, organic=0.8, final=0.9, interest_bonus=0.2),
+    )
+    (out,) = age_adjust([sc], FreshnessConfig(), NOW)
+    assert out.score.final == pytest.approx(0.45)
+    assert out.score.interest_bonus == pytest.approx(0.1)
+    assert out.score.age_factor == pytest.approx(0.5)
+    # The component percentiles describe the post and are left alone.
+    assert (out.score.vote_norm, out.score.rep_norm, out.score.organic) == (0.7, 0.6, 0.8)
+    assert 0.0 <= out.score.final <= 1.0
+
+
+def test_age_adjust_changes_nothing_when_off_or_when_ages_are_equal():
+    feed = _feed(30, fresh_at={3: 2.0, 17: 5.0})
+    off = age_adjust(feed, FreshnessConfig(score_half_life_hours=0.0), NOW)
+    assert off == feed, "0 must reproduce the previous scores exactly"
+    same_age = [_sc(f"s{i}", f"p{i}", hours_old=10.0, score=1.0 - i / 100) for i in range(20)]
+    adjusted = age_adjust(same_age, FreshnessConfig(), NOW)
+    assert _keys(sorted(adjusted, key=lambda c: -c.score.final)) == _keys(same_age)
+    assert len(adjusted) == len(same_age), "never adds or drops a candidate"
+
+
+def _world(now):
+    """The production shape: one heavily engaged in-network post that is 81.7h
+    old, and seven in-network posts from the last day with less engagement."""
+    def post(author, hours_old, voters):
+        return make_post(
+            author, f"{author}-p",
+            created_min=int(round((now - EPOCH).total_seconds() / 60 - hours_old * 60)),
+            author_reputation=72.0,
+            # 5e9 rshares is above the 100 HP organic voter floor, so every vote counts.
+            votes=[make_vote(f"{author}-v{i}", 5_000_000_000) for i in range(voters)],
+        )
+    old = post("meno", 81.7, 300)
+    recent = [
+        post(name, hours, voters)
+        for name, hours, voters in (
+            ("viki", 3.0, 80), ("jon", 5.0, 70), ("bozz", 8.0, 90), ("behiver", 10.0, 60),
+            ("daveks", 14.0, 75), ("yechee", 18.0, 65), ("suezoe", 20.0, 85),
+        )
+    ]
+    viewer = make_viewer("reader", follows=frozenset(p.author for p in (old, *recent)))
+    return old, recent, viewer
+
+
+def _spread_norm():
+    # A spread wide enough that the posts above land at distinct percentiles
+    # (organic raws ~1.6-2.2, vote raws ~4.0-4.7, reputation 72).
+    n = 60
+    return build_norm_context(
+        [6.0 * i / n for i in range(n)],
+        [25.0 + 55.0 * i / n for i in range(n)],
+        [3.0 * i / n for i in range(n)],
+    )
+
+
+def test_an_old_heavily_engaged_post_no_longer_holds_the_top_of_the_feed():
+    """End to end through `rank_feed`, with the shipped settings.
+
+    ★ THE NEGATIVE CONTROL IS IN THE SAME TEST. With the half-life at 0 (the
+    behaviour before this fix) the 81.7h post leads the page, which is what
+    production served; with the shipped 48h it is out of the protected head
+    (one-indexed 1-5) and the page is led by the newest strong post. If the
+    world stopped reproducing the defect, the control would fail first and the
+    test could not pass vacuously.
+    """
+    now = EPOCH + timedelta(hours=100)
+    old, recent, viewer = _world(now)
+    gateway = FakeGateway(in_network=[old, *recent])
+
+    before = rank_feed(
+        viewer, gateway, _spread_norm(), now=now, since=EPOCH,
+        settings=Settings(freshness=FreshnessConfig(score_half_life_hours=0.0)),
+        trust_policy=TrustPolicy.WARN,
+    )
+    assert before[0].post.author == "meno", (
+        "control: without the age discount the 81.7h post must lead, as it did "
+        f"in production; got {[c.post.author for c in before]}"
+    )
+
+    after = rank_feed(
+        viewer, gateway, _spread_norm(), now=now, since=EPOCH,
+        trust_policy=TrustPolicy.WARN,
+    )
+    authors = [c.post.author for c in after]
+    assert "meno" not in authors[:5], f"the 81.7h post is still in the head: {authors}"
+    assert "meno" in authors, "the old post is discounted, never dropped"
+    assert sorted(authors) == sorted(c.post.author for c in before), "same posts served"
+    assert after[0].post.author == "viki", f"the newest strong post should lead: {authors}"
+    for c in after:
+        age_h = (now - c.post.created).total_seconds() / 3600
+        assert c.score.age_factor == pytest.approx(0.5 ** (age_h / 48.0))
+        assert 0.0 <= c.score.final <= 1.0

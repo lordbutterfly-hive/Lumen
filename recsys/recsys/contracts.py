@@ -467,6 +467,12 @@ class ScoreBreakdown:
     organic: float
     final: float
     interest_bonus: float = 0.0
+    #: ★ The age factor already applied to ``final`` and ``interest_bonus``
+    #: (2026-09-23, :func:`recsys.core.freshness.age_adjust`). ``1.0`` means none
+    #: was applied. Carried so ``final`` stays reconstructable from its parts
+    #: (``final / age_factor`` is the blend described above) and so a served
+    #: ranking can show how much of a post's position was its age.
+    age_factor: float = 1.0
 
 
 @dataclass(frozen=True)

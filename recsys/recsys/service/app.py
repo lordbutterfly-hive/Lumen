@@ -1445,6 +1445,9 @@ def serialize_scored(scored: ScoredCandidate) -> dict[str, Any]:
             "rep_norm": scored.score.rep_norm,
             "organic": scored.score.organic,
             "final": scored.score.final,
+            # The age discount already inside `final` (1.0 = none). See
+            # `FreshnessConfig.score_half_life_hours`.
+            "age_factor": scored.score.age_factor,
         },
     }
 
