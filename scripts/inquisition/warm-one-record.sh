@@ -7,10 +7,19 @@ a="$1"
 [ "$(date +%s)" -ge "$WARM_DEADLINE" ] && exit 0   # out of budget: leave it for the next run
 say() { echo "$(date -Is) $*" >> "$LOG"; }
 tmp=$(mktemp /tmp/lumen-warm-rec.XXXXXX)
-t0=$(date +%s); result=failed
+t0=$(date +%s); result=failed; down=0
 while :; do
   code=$(curl -s -o "$tmp" -w '%{http_code}' --max-time "$REC_MAX" "$BASE/record/$a" 2>/dev/null)
   if [ "$code" = "429" ]; then sleep 60; continue; fi
+  # ★ 000 = the app did not answer at all, i.e. it is restarting (the memory guard restarts
+  # it when MemAvailable drops below ~800MB; it did at 05:05 on 2026-09-23). That is not
+  # this account failing: wait for the app, up to two minutes, and ask again. Counting it
+  # as a failure burned 60 accounts in one second while the app was down.
+  if [ "$code" = "000" ]; then
+    down=$((down + 1))
+    if [ "$down" -le 24 ]; then sleep 5; t0=$(date +%s); continue; fi
+    say "rec $a: app did not answer for 2 minutes"; break
+  fi
   if [ "$code" != "200" ]; then say "rec $a HTTP $code"; break; fi
   case "$(cat "$tmp" 2>/dev/null)" in
     *'"unavailable":true'*) say "rec $a unavailable"; break ;;
