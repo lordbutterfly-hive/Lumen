@@ -41,6 +41,7 @@ import { SearchInput } from '@/blog/features/search/search-input';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useIntentPrefetch } from '@/blog/components/intent-prefetch';
 import HeaderTokenPill from '@/blog/features/creator-tokens/ui/header-token-pill';
+import { InquisitionSeal, useInquisitionArmed } from '@/blog/features/inquisition/inquisition-seal';
 
 // TODO i18n - move into locales/*/common_blog.json once copy is final
 const LABELS = {
@@ -90,6 +91,7 @@ const HeaderAvatar: FC<{ username: string }> = ({ username }) => (
 const AppHeader: FC = () => {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
+  const inquisitionArmed = useInquisitionArmed();
   const pathname = usePathname();
 
   /**
@@ -524,7 +526,9 @@ const AppHeader: FC = () => {
                 <UserMenu user={user}>
                   <TooltipTrigger
                     data-testid="profile-avatar-button"
-                    aria-label="Account menu"
+                    aria-label={
+                      inquisitionArmed ? `Account menu, ${t('navigation.inquisition_mode_on')}` : 'Account menu'
+                    }
                     className="cursor-pointer"
                   >
                     <div
@@ -544,6 +548,7 @@ const AppHeader: FC = () => {
                           as visual clutter around the avatar. The RC / voting / downvote
                           detail still appears on hover, in the restyled tooltip below. */}
                       <HeaderAvatar username={user?.username || ''} />
+                      {inquisitionArmed ? <InquisitionSeal label={t('navigation.inquisition_mode_on')} /> : null}
                     </div>
                   </TooltipTrigger>
                 </UserMenu>

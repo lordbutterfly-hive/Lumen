@@ -199,6 +199,7 @@
   },
   "navigation": {
     "skip_to_content": "Skip to content",
+    "inquisition_mode_on": "Inquisition mode is on",
     "main_nav_bar": {
       "posts": "Posts",
       "proposals": "Proposals",
