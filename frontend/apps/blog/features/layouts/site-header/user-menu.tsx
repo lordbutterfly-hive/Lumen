@@ -8,7 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@ui/components/dropdown-menu';
-import { ReactNode, useState } from 'react';
+import { ReactNode, useRef, useState } from 'react';
 import { Link, UserAvatarImg } from '@hive/ui';
 import BasePathLink from '../../../components/base-path-link';
 import LangToggle from '../lang-toggle';
@@ -308,6 +308,19 @@ const UserMenu = ({ children, user }: { children: ReactNode; user: User }) => {
   // so the Tab handler below can close the menu itself rather than relying
   // on Radix's own (Tab-swallowing) keyboard handling.
   const [open, setOpen] = useState(false);
+  /*
+   * ★ A MOUSE CHOICE DOES NOT HAND FOCUS BACK TO THE AVATAR (2026-09-23, owner: "when I
+   * click any option on the drop down menu on my profile pic the resource credit card
+   * shows up"). The avatar button is also the Tooltip trigger for the RC card. On close,
+   * Radix's DropdownMenu focuses its trigger again (react-dropdown-menu `onCloseAutoFocus`,
+   * `context.triggerRef.current?.focus()`), and Radix's Tooltip opens on any focus of its
+   * trigger unless the pointer is down on that trigger itself (react-tooltip `onFocus`),
+   * so every clicked item popped the card. After a pointer choice the focus return is
+   * skipped; a keyboard close (Enter, Escape, the Tab handler below) still returns focus
+   * to the avatar, which keyboard users need, and showing the card on keyboard focus is
+   * the tooltip doing its job.
+   */
+  const closedByPointer = useRef(false);
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
@@ -320,7 +333,15 @@ const UserMenu = ({ children, user }: { children: ReactNode; user: User }) => {
         align="end"
         className="w-[262px] rounded-2xl border border-line-9 bg-surface-1 p-2 shadow-[0_12px_34px_rgba(20,18,10,0.12)]"
         data-testid="user-profile-menu-content"
+        onPointerDown={() => {
+          closedByPointer.current = true;
+        }}
+        onCloseAutoFocus={(e) => {
+          if (closedByPointer.current) e.preventDefault();
+          closedByPointer.current = false;
+        }}
         onKeyDown={(e) => {
+          closedByPointer.current = false;
           // ★ TAB TRAP FIX (2026-08-13, O5 a11y build map item 1a). Radix's
           // own `@radix-ui/react-menu@2.1.4` swallows every Tab keypress by
           // design (ARIA menu pattern: arrow keys navigate a menu, not Tab)

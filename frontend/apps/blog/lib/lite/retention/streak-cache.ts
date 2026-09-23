@@ -18,6 +18,9 @@
  * vector), and the stale-while-revalidate window with its single-flight lock.
  */
 
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 export interface StreakCacheEntry {
   at: number;
   body: unknown;
@@ -56,8 +59,64 @@ export const STREAK_MAX_ENTRIES = 10_000;
  * takes an action (posts, comments) may see a stale number for up to one background
  * revalidation cycle — bounded by how often THIS account gets viewed, and self-correcting
  * within seconds of the next view once the background refresh lands.
+ *
+ * ★★ 30 MINUTES -> 30 DAYS, AND ON DISK (2026-09-23, owner: "on profile page the ember icon
+ * loads slowly, slower than everything else"). The rank chip waits on this route, and the
+ * cache was one Map per worker: three workers, every restart and every 30-minute gap started
+ * cold, so most profile views paid the full walk. Measured on production: @acidyo 14.8s,
+ * @antisocialist 6.1s cold then 0.1s warm, @starkerz 3.2s. Entries are now also written to
+ * `$LUMEN_CACHE_DIR/streak/<account>.json`, shared by the workers and surviving restarts,
+ * and a stale one is served for up to 30 days while the background refresh runs: a rank
+ * moves over weeks, and any view of the account refreshes it within seconds. Only the very
+ * first view of an account ever blocks on the walk.
  */
-export const STREAK_STALE_TTL_MS = 30 * 60 * 1000;
+export const STREAK_STALE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Shared, restart-proof copy of the positive entries. Unset (tests, local dev) = memory only. */
+const DISK_DIR = process.env.LUMEN_CACHE_DIR ? join(process.env.LUMEN_CACHE_DIR, 'streak') : null;
+let diskReady = false;
+
+function diskPath(account: string): string | null {
+  // Callers pass a validated account name (^[a-z0-9.-]{3,16}$): no separators can reach here.
+  return DISK_DIR ? join(DISK_DIR, `${account}.json`) : null;
+}
+
+function writeDisk(account: string, entry: StreakCacheEntry): void {
+  const file = diskPath(account);
+  if (!file || entry.notFound) return; // negatives stay short-lived and in memory only
+  try {
+    if (!diskReady) {
+      mkdirSync(DISK_DIR as string, { recursive: true });
+      diskReady = true;
+    }
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(entry));
+    renameSync(tmp, file); // atomic: another worker reads the whole old file or the whole new one
+  } catch {
+    // A cache that cannot be written is a slower page, not a broken one.
+  }
+}
+
+function readDisk(account: string): StreakCacheEntry | undefined {
+  const file = diskPath(account);
+  if (!file) return undefined;
+  try {
+    const entry = JSON.parse(readFileSync(file, 'utf8')) as StreakCacheEntry;
+    if (!entry || typeof entry.at !== 'number' || entry.body === undefined) return undefined;
+    return entry;
+  } catch {
+    return undefined; // ENOENT is the normal case for an account nobody has opened
+  }
+}
+
+/** The in-memory entry, else the shared disk copy (which then also warms this worker). */
+function lookup(account: string): StreakCacheEntry | undefined {
+  const hit = cache.get(account);
+  if (hit) return hit;
+  const fromDisk = readDisk(account);
+  if (fromDisk) cache.set(account, fromDisk);
+  return fromDisk;
+}
 
 const cache = new Map<string, StreakCacheEntry>();
 // Single-flight guard for background revalidation, keyed by account. Without this, every
@@ -68,6 +127,7 @@ const revalidating = new Set<string>();
 
 export function writeStreakCache(account: string, entry: StreakCacheEntry): void {
   cache.set(account, entry);
+  writeDisk(account, entry);
   // Map preserves insertion order, so the first key is the oldest — evict until bounded.
   while (cache.size > STREAK_MAX_ENTRIES) {
     const oldest = cache.keys().next().value;
@@ -78,7 +138,7 @@ export function writeStreakCache(account: string, entry: StreakCacheEntry): void
 
 /** A live entry, or undefined. */
 export function readStreakCache(account: string): StreakCacheEntry | undefined {
-  const hit = cache.get(account);
+  const hit = lookup(account);
   if (!hit) return undefined;
   const ttl = hit.notFound ? STREAK_NEG_TTL_MS : STREAK_TTL_MS;
   if (Date.now() - hit.at >= ttl) return undefined;
@@ -92,11 +152,11 @@ export function readStreakCache(account: string): StreakCacheEntry | undefined {
  * Deliberately excludes `notFound` entries: their TTL is already short (60s), and serving
  * a definitive-not-found answer "stale" buys nothing (re-checking existence is cheap — it
  * fails on the very first upstream call) while risking a renamed/recreated account being
- * told it does not exist for up to 30 minutes instead of 60 seconds.
+ * told it does not exist for up to the whole stale window instead of 60 seconds.
  *
  */
 export function readStaleStreakCache(account: string): StreakCacheEntry | undefined {
-  const hit = cache.get(account);
+  const hit = lookup(account);
   if (!hit || hit.notFound) return undefined;
   const age = Date.now() - hit.at;
   if (age < STREAK_TTL_MS || age >= STREAK_STALE_TTL_MS) return undefined;
