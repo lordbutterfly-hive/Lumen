@@ -1332,6 +1332,8 @@ const PostContent = () => {
    */
   const overflowTriggerRef = useRef<HTMLButtonElement>(null);
   const hiddenDownvoteControlRef = useRef<HTMLDivElement>(null);
+  // React 18's types do not know `inert` yet (19 does); the DOM does.
+  const INERT = { inert: '' } as Record<string, string>;
   const hiddenFlagTriggerRef = useRef<HTMLButtonElement>(null);
 
   // Same author correction as the footer `VotesComponentWrapper` call just
@@ -1559,7 +1561,7 @@ const PostContent = () => {
                       <div
                         className={cn(
                           voteStyles.root,
-                          'mt-1 shrink-0 cursor-pointer rounded-full border border-transparent p-1.5 text-muted-foreground transition-colors hover:border-border hover:bg-background-secondary hover:text-destructive'
+                          'relative mt-1 shrink-0 cursor-pointer rounded-full border border-transparent p-1.5 text-muted-foreground transition-colors hover:border-border hover:bg-background-secondary hover:text-destructive'
                         )}
                       >
                         <DropdownMenu>
@@ -1697,8 +1699,22 @@ const PostContent = () => {
                             the big comment above `isPending`. `showDownvote`
                             is passed ONLY to this instance, never to the
                             visible footer `VotesComponentWrapper` below. */}
+                        {/* ★★ LAID OVER THE "…" BUTTON, NOT `display:none` (2026-09-23, owner:
+                            "the downvote pop up runs to top left of screen"). The weight
+                            picker is a Popover anchored to the proxied downvote button, and
+                            a `display:none` element measures 0x0 at (0,0), so the picker
+                            opened in the top-left corner of the viewport. The proxy is now
+                            rendered, invisible (opacity 0), unclickable (pointer-events
+                            none) and `inert` (never focusable, never tabbed into; a
+                            script's `.click()` still fires, measured in Chrome), stacked on
+                            the "…" button so the picker opens where the reader clicked. */}
                         {votePost ? (
-                          <div ref={hiddenDownvoteControlRef} className="hidden" aria-hidden="true">
+                          <div
+                            ref={hiddenDownvoteControlRef}
+                            aria-hidden="true"
+                            {...INERT}
+                            className="pointer-events-none absolute inset-0 overflow-hidden opacity-0"
+                          >
                             <VotesComponent post={votePost} type="post" size="sm" showDownvote />
                           </div>
                         ) : null}
