@@ -58,6 +58,22 @@ USER recsys
 ENV PYTHONUNBUFFERED=1 \
     RECSYS_SERVICE_HOST=0.0.0.0 \
     RECSYS_SERVICE_PORT=8000
+# glibc: give freed memory back to the system (2026-09-23). The service handles every
+# request on its own thread and builds large temporary structures (a popular-posts set
+# alone is 150 posts with ~59,000 votes). glibc keeps what those requests free in its
+# per-thread arenas, and after the first large free it raises its mmap threshold, so
+# later large blocks come from the arenas too and stay there. Measured on the live
+# process: 375 MB taken from the system with 43 MB in use; malloc_trim(0) dropped the
+# RSS from 762 MB to 462 MB. That retention is why RSS climbed ~1 GB a day (0.4 GB fresh
+# to 5.7 GB after four days) with no Python objects accumulating.
+#   MALLOC_MMAP_THRESHOLD_  fixed at 128 KiB: large blocks are mmapped and returned on
+#                           free, and the dynamic threshold stops rising.
+#   MALLOC_TRIM_THRESHOLD_  128 KiB: free space at the top of a heap is released eagerly.
+#   MALLOC_ARENA_MAX        2: a thread per request no longer spreads retained memory
+#                           over up to 8 x cores arenas.
+ENV MALLOC_MMAP_THRESHOLD_=131072 \
+    MALLOC_TRIM_THRESHOLD_=131072 \
+    MALLOC_ARENA_MAX=2
 
 EXPOSE 8000
 
