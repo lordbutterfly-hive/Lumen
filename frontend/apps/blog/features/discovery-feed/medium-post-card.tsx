@@ -730,6 +730,19 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
   const rebloggerIntent = useIntentPrefetch(
     post.reblogged_by && post.reblogged_by.length > 0 ? `/@${post.reblogged_by[0]}` : ''
   );
+  /*
+   * ★★ THE POST LINKS WARM THE POST THEY OPEN (2026-09-23, owner: "the post load
+   * slower and jankier than peakd"). Measured on production, desktop, signed out:
+   * clicking a card's title left the feed frozen for 476ms (291ms server render
+   * of the post route, then ~180ms rendering it), while PeakD answers the same
+   * click in 15ms and shows the post at 148ms. With the route prefetched 450ms
+   * before the click the post showed 154ms after it, one request in total.
+   * The card's own pointer entry only warms the comments drawer (`engage()`), so
+   * the post itself was never prefetched. Same hook, same limiter and same
+   * mouse-only rule as the byline and the reblog line; called unconditionally for
+   * the same hook-order reason as `rebloggerIntent`.
+   */
+  const postIntent = useIntentPrefetch(href);
 
   /* ★ MOVED OUT (2026-08-26) to `./lib/post-rubric`, so the profile COMMENT card
      can use the identical rule instead of having no fallback at all. The spec,
@@ -1455,11 +1468,11 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
            * branch only runs when the body is missing.
            */}
           {isNote && !dek ? (
-            <Link href={href} className="block" data-testid="medium-card-note-title">
+            <Link href={href} className="block" data-testid="medium-card-note-title" {...postIntent}>
               <p className="line-clamp-4 font-lora text-lede text-ink-4">{displayTitle}</p>
             </Link>
           ) : isNote ? null : (
-            <Link href={href} className="block" data-testid="medium-card-title">
+            <Link href={href} className="block" data-testid="medium-card-title" {...postIntent}>
               <h2 className={cn(cardStyles.titleRow, 'text-title font-semibold tracking-title text-ink-2')}>
                 {/* ★★ THE CLAMP IS ON THE TITLE TEXT, NOT ON THE BOX THAT ALSO HOLDS THE DATE.
                      Measured 2026-08-20: with `line-clamp-2` on the h2 and the date inline
@@ -1494,7 +1507,7 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
           )}
 
           {isNote && dek ? (
-            <Link href={href} className="block" data-testid="medium-card-note">
+            <Link href={href} className="block" data-testid="medium-card-note" {...postIntent}>
               <p className="line-clamp-4 font-lora text-lede text-ink-4">{dek}</p>
             </Link>
           ) : dek ? (
@@ -1505,7 +1518,7 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
             // sequential Tab order (it stays clickable, and stays in a screen
             // reader's browse-mode link list) while the title link remains the
             // one real stop.
-            <Link href={href} className="mt-[10px] block" data-testid="medium-card-dek" tabIndex={-1}>
+            <Link href={href} className="mt-[10px] block" data-testid="medium-card-dek" tabIndex={-1} {...postIntent}>
               <p className="line-clamp-2 font-lora text-read text-ink-action">{dek}</p>
             </Link>
           ) : null}
@@ -1568,6 +1581,7 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
             data-testid="medium-card-thumbnail-failed"
             aria-label={displayTitle}
             tabIndex={-1}
+            {...postIntent}
           >
             <div
               className="flex h-[132px] w-[190px] flex-col items-center justify-center gap-1.5 rounded-card border border-dashed border-[#ded2c2] bg-[#f6efe6] text-label font-bold uppercase tracking-label text-ink-12"
@@ -1605,6 +1619,7 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
             // Same redundant-tab-stop removal as the dek link above — same
             // destination as the title link.
             tabIndex={-1}
+            {...postIntent}
           >
             <img
               ref={thumbnailImgRef}

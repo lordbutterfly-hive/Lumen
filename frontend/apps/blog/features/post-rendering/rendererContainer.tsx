@@ -49,6 +49,28 @@ import { isUrlWhitelisted } from '@hive/ui/config/lists/phishing';
  * the common "starts at h2" case, now nests with zero gap under the page's
  * h1 instead of skipping one.
  */
+/**
+ * ★ THE POST'S FIRST IMAGE LOADS FIRST, NOT LAST (2026-09-23, owner: "the post load slower
+ * and jankier than peakd"). The shared sanitizer marks every <img> `loading="lazy"`, which
+ * is right for a long comment thread but wrong for the image at the top of the post: a lazy
+ * image is only requested after layout, so on the live post page the text painted at 704ms,
+ * the image landed at 749-768ms and pushed every paragraph under it down (CLS 0.026,
+ * measured signed out on a fresh profile). PeakD marks the same image `loading="eager"
+ * fetchpriority="high"` and showed no shift there. Only the main post's FIRST image is
+ * promoted, on the rendered string like `demoteHeadings`, so the server HTML already carries
+ * it and the browser's preload scanner requests it while the page is still parsing; every
+ * other image, and every comment, stays lazy.
+ */
+function promoteFirstImage(html: string): string {
+  const start = html.indexOf('<img ');
+  if (start === -1) return html;
+  const end = html.indexOf('>', start);
+  if (end === -1) return html;
+  const tag = html.slice(start, end);
+  if (!tag.includes('loading="lazy"')) return html;
+  return html.slice(0, start) + tag.replace('loading="lazy"', 'loading="eager" fetchpriority="high"') + html.slice(end);
+}
+
 function demoteHeadings(html: string): string {
   const hasOwnH1 = /<h1[\s>]/.test(html);
   if (!hasOwnH1) return html;
@@ -266,7 +288,7 @@ const RendererContainer = ({
       // Only the standalone post page (mainPost) also renders its own page-level
       // h1 — comments, previews and community descriptions do not, so they are
       // left with their original heading levels.
-      return mainPost ? demoteHeadings(rendered) : rendered;
+      return mainPost ? promoteFirstImage(demoteHeadings(rendered)) : rendered;
     }
   }, [hiveRenderer, body, author, permlink, mainPost]);
 
