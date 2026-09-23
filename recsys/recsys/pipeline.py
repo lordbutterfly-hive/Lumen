@@ -198,6 +198,18 @@ class TrustSnapshot:
     #: package) — round-trip it through the snapshot store exactly like
     #: ``degraded``/``trusted_seeds``, no encoding decisions needed.
     built_at: datetime | None = None
+    #: ★ 2026-09-23: ONE VIEWER'S EDGES ON DEMAND. When set, the serving path
+    #: reads the requesting viewer's own outgoing edges through this callable
+    #: instead of scanning ``edges`` (which the service then leaves empty: the
+    #: full list was 133 MB of a 187 MB snapshot and every feed build walked all
+    #: 355k rows to keep one viewer's). It must return exactly the snapshot's rows
+    #: whose ``src`` is the argument; ``_viewer_affinity_lookup`` still filters on
+    #: ``src`` itself. ``None`` keeps the in-memory ``edges`` path (the batch and
+    #: every test fixture). Not part of equality: it is how the rows are fetched,
+    #: not what the snapshot is.
+    edges_for: Callable[[str], Sequence[EngagementEdge]] | None = field(
+        default=None, compare=False, repr=False
+    )
 
 
 def build_trust_snapshot(
@@ -2042,6 +2054,30 @@ def _interest_lookup(
     return lookup
 
 
+def _viewer_own_edges(account: str, snap: TrustSnapshot) -> Sequence[EngagementEdge]:
+    """The viewer's own outgoing edges from ``snap``: through ``snap.edges_for``
+    when the snapshot carries one (the service), else the in-memory ``edges``.
+
+    Only rows whose ``src`` is ``account`` are returned, whatever the source hands
+    back, so a faulty source cannot put another viewer's engagement into this
+    viewer's ranking. A source that fails (database down, lock timeout while a
+    batch rewrites the table) degrades to no viewer-own affinity for this build,
+    which is the same honest answer as a viewer with no history; it is logged."""
+    if snap.edges_for is None:
+        return snap.edges
+    try:
+        rows = snap.edges_for(account)
+    except Exception:  # noqa: BLE001 - any failure here must only cost personalisation
+        logger.warning(
+            "viewer affinity: could not read %s's own edges; ranking this build "
+            "without viewer-own affinity",
+            account,
+            exc_info=True,
+        )
+        return ()
+    return tuple(e for e in rows if e.src == account)
+
+
 def _viewer_affinity_lookup(
     viewer: ViewerProfile,
     snap: TrustSnapshot,
@@ -2061,10 +2097,13 @@ def _viewer_affinity_lookup(
     graph-cred, ALS, the norm sample or another viewer's ranking — see
     recsys/core/viewer_affinity.py for why that boundary is the whole point.
     """
-    if settings.weights.organic_viewer <= 0.0 or not snap.edges:
+    if settings.weights.organic_viewer <= 0.0:
+        return None
+    viewer_edges = _viewer_own_edges(viewer.account, snap)
+    if not viewer_edges:
         return None
 
-    author_aff = viewer_author_affinity(viewer.account, snap.edges, settings.real_graph, now)
+    author_aff = viewer_author_affinity(viewer.account, viewer_edges, settings.real_graph, now)
 
     # ★★★ SUBTRACT BANNED AND MUTED AUTHORS BEFORE RANKING (2026-08-24).
     #
@@ -2117,7 +2156,7 @@ def _viewer_affinity_lookup(
             author_topics.setdefault(cand.post.author, set()).update(keys)
     topic_aff = viewer_topic_affinity(
         viewer.account,
-        snap.edges,
+        viewer_edges,
         settings.real_graph,
         now,
         {a: tuple(t) for a, t in author_topics.items()},

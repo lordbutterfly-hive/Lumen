@@ -106,7 +106,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -248,10 +248,16 @@ def save_snapshot(
     )
 
 
-def load_snapshot(dsn: str | None = None) -> PersistedSnapshot | None:
+def load_snapshot(dsn: str | None = None, *, include_edges: bool = True) -> PersistedSnapshot | None:
     """Load the current trust snapshot, or ``None`` if nothing has ever been
     persisted (a first-ever deploy, or a store that hasn't seen a batch run
-    yet — a real, expected state, not an error)."""
+    yet — a real, expected state, not an error).
+
+    ``include_edges=False`` (2026-09-23) leaves ``edges`` empty: the serving
+    process reads one viewer's rows at a time through :func:`load_viewer_edges`
+    instead of holding all of them (355,156 rows on production, 133 MB of the
+    snapshot's 187 MB as Python objects, measured on a same-size local copy).
+    The batch keeps the default, since it reads the previous snapshot whole."""
     resolved = _resolve_dsn(dsn)
     conn = _connect(resolved)
     try:
@@ -263,7 +269,7 @@ def load_snapshot(dsn: str | None = None) -> PersistedSnapshot | None:
             graph_creds = _read_graph_creds(cur)
             ring_members = _read_ring_members(cur)
             als = _read_als(cur)
-            edges = _read_edges(cur)
+            edges = _read_edges(cur) if include_edges else ()
         conn.commit()
     finally:
         conn.close()
@@ -500,12 +506,55 @@ def _read_als(cur: psycopg.Cursor[Any]) -> ALSModel | None:
     )
 
 
+_EDGE_COLUMNS = (
+    "src, dst, replies, reply_backs, upvotes, reblogs, mentions, "
+    "profile_visits, post_opens, revisits, dwell_seconds, last_interaction"
+)
+
+#: Bounds one viewer lookup on the feed's request path. ``save_snapshot``
+#: rewrites ``trust_snapshot_edge`` with TRUNCATE inside its transaction, which
+#: holds an exclusive lock until the batch commits; a lookup that met that lock
+#: would otherwise wait for the whole batch. On timeout the caller ranks without
+#: the viewer's own affinity for that one build (see ``load_viewer_edges``).
+VIEWER_EDGES_TIMEOUT_MS = 1500
+
+
+def load_viewer_edges(
+    dsn: str | None, viewer: str, *, timeout_ms: int = VIEWER_EDGES_TIMEOUT_MS
+) -> tuple[EngagementEdge, ...]:
+    """The current snapshot's edges whose ``src`` is ``viewer``, and only those.
+
+    Served by the table's primary key ``(src, dst)``. The rows are exactly the
+    ones :func:`load_snapshot` would have returned for this viewer, so the
+    viewer-own affinity computed from them is identical (the snapshot-sourcing
+    invariant in ``recsys/core/viewer_affinity.py`` still holds: these are the
+    batch's banned/curator-filtered edges, never a fresher live query). Raises on
+    a database error or timeout; the caller decides how to degrade."""
+    if timeout_ms <= 0:
+        raise ValueError("timeout_ms must be positive: 0 means no limit in PostgreSQL")
+    resolved = _resolve_dsn(dsn)
+    conn = _connect(resolved)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {int(timeout_ms)}")
+            cur.execute(f"SET LOCAL lock_timeout = {int(timeout_ms)}")
+            cur.execute(
+                f"SELECT {_EDGE_COLUMNS} FROM trust_snapshot_edge WHERE src = %s ORDER BY dst",
+                (viewer,),
+            )
+            rows = cur.fetchall()
+        conn.commit()
+    finally:
+        conn.close()
+    return _edges_from_rows(rows)
+
+
 def _read_edges(cur: psycopg.Cursor[Any]) -> tuple[EngagementEdge, ...]:
-    cur.execute(
-        "SELECT src, dst, replies, reply_backs, upvotes, reblogs, mentions, "
-        "profile_visits, post_opens, revisits, dwell_seconds, last_interaction "
-        "FROM trust_snapshot_edge ORDER BY src, dst"
-    )
+    cur.execute(f"SELECT {_EDGE_COLUMNS} FROM trust_snapshot_edge ORDER BY src, dst")
+    return _edges_from_rows(cur.fetchall())
+
+
+def _edges_from_rows(rows: Sequence[tuple[Any, ...]]) -> tuple[EngagementEdge, ...]:
     return tuple(
         EngagementEdge(
             src=src,
@@ -534,7 +583,7 @@ def _read_edges(cur: psycopg.Cursor[Any]) -> tuple[EngagementEdge, ...]:
             revisits,
             dwell_seconds,
             last_interaction,
-        ) in cur.fetchall()
+        ) in rows
     )
 
 
@@ -544,5 +593,6 @@ __all__ = [
     "ensure_schema",
     "load_snapshot",
     "load_snapshot_meta",
+    "load_viewer_edges",
     "save_snapshot",
 ]

@@ -41,6 +41,7 @@ class _FakeStore:
     def __init__(self) -> None:
         self.stamp: tuple[datetime, bool, frozenset[str]] | None = (BUILT, False, SEEDS)
         self.full_loads = 0
+        self.include_edges_seen: list[bool] = []
         self.meta_error: Exception | None = None
 
     def load_snapshot_meta(self, dsn: str | None = None):  # type: ignore[no-untyped-def]
@@ -48,8 +49,11 @@ class _FakeStore:
             raise self.meta_error
         return self.stamp
 
-    def load_snapshot(self, dsn: str | None = None) -> PersistedSnapshot | None:
+    def load_snapshot(
+        self, dsn: str | None = None, *, include_edges: bool = True
+    ) -> PersistedSnapshot | None:
         self.full_loads += 1
+        self.include_edges_seen.append(include_edges)
         if self.stamp is None:
             return None
         built_at, degraded, seeds = self.stamp
@@ -82,6 +86,9 @@ def test_a_day_of_unchanged_refreshes_loads_the_snapshot_once(store: _FakeStore)
     cache.warm()
     first = cache.value
     assert first is not None and first.built_at == BUILT
+    # The service keeps edges in the database and reads them per viewer.
+    assert store.include_edges_seen == [False]
+    assert first.edges == () and first.edges_for is not None
     for _ in range(144):  # one day of 10-minute refreshes
         cache._rebuild()
     assert store.full_loads == 1, (

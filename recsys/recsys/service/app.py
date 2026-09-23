@@ -58,6 +58,7 @@ import os
 import re
 import secrets
 import threading
+from collections import OrderedDict
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -77,7 +78,7 @@ from recsys.author_prior_cache import (
 from recsys.config import DEFAULT_SETTINGS, HafsqlConfig, LiteConfig, Settings
 from recsys.core.exploration import post_engagers
 from recsys.io.seen_log import fetch_seen
-from recsys.contracts import NormContext, ScoredCandidate, ViewerProfile
+from recsys.contracts import EngagementEdge, NormContext, ScoredCandidate, ViewerProfile
 from recsys.db import store as recsys_store
 from recsys.io.hafsql import HafsqlClient
 from recsys.norm_builder import build_window_norm
@@ -596,6 +597,44 @@ class _SingleFlight(Generic[T]):
             return len(self._inflight)
 
 
+class _ViewerEdgeSource:
+    """One snapshot's per-viewer edge reader (``TrustSnapshot.edges_for``).
+
+    ★ 2026-09-23: THE SERVICE NO LONGER HOLDS EVERY EDGE. It held all 355,156 of
+    them (133 MB of the snapshot's 187 MB, measured on a same-size local copy) so
+    that each feed build could keep the requesting viewer's few dozen, scanning
+    the whole list to find them. Now each viewer's rows are read by primary key
+    (``recsys_store.load_viewer_edges``) the first time that viewer is ranked on
+    this snapshot and kept in a small LRU.
+
+    Keyed by the exact account string the pipeline asks for, and every entry is
+    that account's own rows, so nothing crosses between viewers. One instance
+    belongs to one loaded snapshot: a new batch builds a new snapshot and a new
+    source, so no row outlives the snapshot it came from. A failed read is not
+    cached; it raises to ``pipeline._viewer_own_edges``, which ranks that one build
+    without viewer-own affinity and logs it, and the next build tries again."""
+
+    def __init__(self, dsn: str, *, max_entries: int = 1_000) -> None:
+        self._dsn = dsn
+        self._max_entries = max_entries
+        self._entries: OrderedDict[str, tuple[EngagementEdge, ...]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def __call__(self, viewer: str) -> tuple[EngagementEdge, ...]:
+        with self._lock:
+            hit = self._entries.get(viewer)
+            if hit is not None:
+                self._entries.move_to_end(viewer)
+                return hit
+        rows = recsys_store.load_viewer_edges(self._dsn, viewer)
+        with self._lock:
+            self._entries[viewer] = rows
+            self._entries.move_to_end(viewer)
+            while len(self._entries) > self._max_entries:
+                self._entries.popitem(last=False)
+        return rows
+
+
 def _load_snapshot_fixed(
     dsn: str | None, current: TrustSnapshot | None = None
 ) -> TrustSnapshot | None:
@@ -672,10 +711,16 @@ def _load_snapshot_fixed(
         held = (current.built_at, current.degraded, current.trusted_seeds)
         if stamp is not None and stamp == held:
             return current
-    persisted = recsys_store.load_snapshot(resolved_dsn)
+    # Edges stay in the database and are read one viewer at a time (see
+    # `_ViewerEdgeSource`); the snapshot's own `edges` is left empty.
+    persisted = recsys_store.load_snapshot(resolved_dsn, include_edges=False)
     if persisted is None:
         return None
-    return replace(persisted.snapshot, built_at=persisted.built_at)
+    return replace(
+        persisted.snapshot,
+        built_at=persisted.built_at,
+        edges_for=_ViewerEdgeSource(resolved_dsn),
+    )
 
 
 def _default_now() -> datetime:
