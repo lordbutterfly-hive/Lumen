@@ -56,6 +56,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // A garbage `limit` must not turn into an unbounded upstream request.
   const limit = limitParam && Number.isFinite(Number(limitParam)) ? Math.min(Number(limitParam), 100) : 50;
   try {
+    /*
+     * ★ THE INDEPENDENT LOOKUPS START TOGETHER (2026-09-23, owner: "loading notifications
+     * it's super slow"). The reader's block list (effect A below) and the squatter list do
+     * not depend on the chain call, and awaiting the three one after another put their
+     * latencies end to end in front of every bell click. Both degrade open, as before.
+     */
+    const blockedKeysPromise = getLiteSession()
+      .then((session) => viewerBlockedKeySet(session.user))
+      .catch(() => new Set<string>());
+    const squattersReady = ensureSquatterList().catch(() => undefined);
     const notifications = await getAccountNotifications(account, Number.isFinite(lastId) ? lastId : null, limit);
 
     // ★★★ EFFECT (A) — THE VIEWER'S OWN BLOCK LIST (RENDER-06 fix, 2026-09-08).
@@ -78,13 +88,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     //
     // ★ DEGRADES OPEN: a Lumen DB hiccup or an anonymous caller must not turn
     // into a 502 or an empty bell — same posture as every other effect-A site.
-    let sessionUser: Awaited<ReturnType<typeof getLiteSession>>['user'] | undefined;
-    try {
-      sessionUser = (await getLiteSession()).user;
-    } catch {
-      sessionUser = undefined;
-    }
-    const blockedKeys = await viewerBlockedKeySet(sessionUser).catch(() => new Set<string>());
+    const blockedKeys = await blockedKeysPromise;
 
     let filtered = notifications;
     if (blockedKeys.size > 0 && Array.isArray(notifications) && notifications.length > 0) {
@@ -135,7 +139,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
      * inside" shape this file already documents; it needs the count derived from the
      * filtered list, which is its own change.
      */
-    await ensureSquatterList();
+    await squattersReady;
     if (Array.isArray(filtered)) {
       filtered = filtered.filter((n) => {
         const actor = notificationActor(n);

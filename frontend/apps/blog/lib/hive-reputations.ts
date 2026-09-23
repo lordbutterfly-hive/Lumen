@@ -1,4 +1,5 @@
 import { siteConfig } from '@ui/config/site';
+import { accountReputationPrecise } from '@ui/lib/reputation';
 
 /**
  * ★★★ THE NOTIFICATION "REP" WAS NEVER A REPUTATION (2026-09-11, owner: "REP in
@@ -28,7 +29,8 @@ import { siteConfig } from '@ui/config/site';
  * DEGRADES OPEN, ALWAYS: a node hiccup returns an empty map and the caller drops
  * the badge for that row. A missing badge is honest; a wrong one is the bug.
  */
-const TTL_MS = 10 * 60_000;
+// A reputation moves over days; 6 hours keeps repeat notification actors off the network.
+const TTL_MS = 6 * 60 * 60_000;
 const MAX_ENTRIES = 2_000;
 /** Hive's own list cap is 100 rows, so this bounds the batch at well over the worst case. */
 const MAX_BATCH = 100;
@@ -56,14 +58,25 @@ export async function reputationsFor(names: string[]): Promise<Map<string, numbe
 
   try {
     const batch = misses.slice(0, MAX_BATCH);
+    /*
+     * ★ `condenser_api.get_account_reputations`, NOT `bridge.get_profile` (2026-09-23,
+     * owner: "loading notifications it's super slow"). get_profile makes hivemind build a
+     * whole profile per name to hand back one number: 46 names took 1.29-1.55s on
+     * api.hive.blog, the same 46 through get_account_reputations 0.53s. (Not
+     * `condenser_api.get_accounts`: on Hive its `reputation` is 0 for every account, which
+     * would have drawn 25 on every badge; checked before this was written.) The call takes
+     * a LOWER BOUND, so a name that does not exist returns the next account alphabetically:
+     * only an exact name match is used. The raw value is converted with the formula every
+     * badge in the app uses (`accountReputationPrecise`, 2 decimals, get_profile's precision).
+     */
     const res = await fetch(siteConfig.endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(
         batch.map((account, id) => ({
           jsonrpc: '2.0',
-          method: 'bridge.get_profile',
-          params: { account },
+          method: 'condenser_api.get_account_reputations',
+          params: [account, 1],
           id
         }))
       ),
@@ -75,11 +88,16 @@ export async function reputationsFor(names: string[]): Promise<Map<string, numbe
 
     const expires = Date.now() + TTL_MS;
     for (const row of rows) {
-      const result = (row as { result?: { name?: unknown; reputation?: unknown } })?.result;
-      if (typeof result?.name !== 'string' || typeof result?.reputation !== 'number') continue;
-      const key = result.name.toLowerCase();
-      cache.set(key, { rep: result.reputation, expires });
-      out.set(key, result.reputation);
+      const id = (row as { id?: unknown })?.id;
+      const asked = typeof id === 'number' ? batch[id] : undefined;
+      const first = ((row as { result?: unknown })?.result as { account?: unknown; reputation?: unknown }[] | undefined)?.[0];
+      if (!asked || typeof first?.account !== 'string' || first.account.toLowerCase() !== asked) continue;
+      const raw = first.reputation;
+      if (typeof raw !== 'number' && typeof raw !== 'string') continue;
+      const rep = Number(accountReputationPrecise(raw, 2));
+      if (!Number.isFinite(rep)) continue;
+      cache.set(asked, { rep, expires });
+      out.set(asked, rep);
     }
 
     // Bounded, insertion-ordered — the key space is account names an anonymous
