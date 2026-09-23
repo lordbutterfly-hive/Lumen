@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily check that keeps the weekly Inquisition refresh off the reader path
+
+[Timer]
+# DAILY on purpose, for a WEEKLY refresh. The boards go stale after 7 days, so a
+# weekly timer would fire moments before the deadline and leave the rebuild to
+# whoever opens the page next. A daily ask costs five disk reads on the six days
+# nothing is stale, and on the seventh it does the work at 04:00 instead of in a
+# reader's face.
+OnCalendar=*-*-* 04:00:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

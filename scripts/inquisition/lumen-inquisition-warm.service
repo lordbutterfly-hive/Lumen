@@ -1,0 +1,14 @@
+[Unit]
+Description=Warm every Inquisition board column and every profile record behind them
+Documentation=file:/opt/lumen/warm-inquisition.sh
+After=lumen.service
+Wants=lumen.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lumen/warm-inquisition.sh
+# The two staged boards walk a hundred accounts each at up to 300s apiece, and the record
+# pass has its own nightly budget on top. Sixteen hours is slack so systemd never kills a
+# pass mid-account; the script stops itself long before, and what it does not reach it
+# picks up the next night, oldest first.
+TimeoutStartSec=16h
