@@ -123,7 +123,7 @@ const BOARDS: BoardDef[] = [
     tab: 'CROSSPOSTING',
     kicker: 'BOARD 05 \u00b7 OLD LOYALTIES',
     title: 'Crossposting',
-    meta: 'Steem posts in the last 90 days\nfrom Steem\u2019s recent authors',
+    meta: 'Steem posts in the last 90 days\nfrom two days of Steem authors',
     blurb:
       'Still keeping a foot in the old country. Posts put on Steem in the last ninety days, long after the leaving was done and staying became a choice. The count is a window rather than a lifetime on purpose: walked back to the fork, every prolific account hit the same page cap and the board ranked nothing. The lifetime figure, since six months after the fork, is on each profile\u2019s own record.'
 
@@ -626,8 +626,8 @@ export default function InquisitionBoard() {
       {matches && board === 'crossposting' && typeof data?.scope === 'number' ? (
         <p className="mt-2 font-ui text-caption text-ink-14">
           {typeof data?.matched === 'number' ? String(data.matched) : String(data.scope)} of{' '}
-          {typeof data?.listed === 'number' ? String(data.listed) : '?'} accounts on Steem&rsquo;s most
-          recent posts also publish to Hive.
+          {typeof data?.listed === 'number' ? String(data.listed) : '?'} accounts that posted on Steem in
+          the last two days, or were on this board last week, also publish to Hive.
         </p>
       ) : null}
 

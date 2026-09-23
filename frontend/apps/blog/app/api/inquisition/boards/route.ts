@@ -636,7 +636,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const res = serve<CrosspostRow & { _matched?: number; _listed?: number }>(board, 'crossposting', {
         stages: 1,
         rank: async () => {
-          const { rows, candidates, matched, failed } = await loadCrossposters(BOARD_ROWS);
+          // ★ Last build's rows stay candidates, so who is on the board does not depend on
+          // the hour it was rebuilt. The stored board is still the previous one here.
+          const carried = (readBoard<CrosspostRow>('crossposting')?.rows ?? []).map((r) => ({
+            account: r.account,
+            steemPosts: r.steemPosts
+          }));
+          const { rows, candidates, matched, failed } = await loadCrossposters(BOARD_ROWS, carried);
           if (failed || rows.length === 0) return null;
           /*
            * ★★ THE BOARD-LEVEL COUNTS RIDE ON EVERY ROW, NOT ON ROW ZERO. Stashing them

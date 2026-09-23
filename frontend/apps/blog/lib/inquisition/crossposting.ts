@@ -49,15 +49,30 @@ const logger = getLogger('app');
 
 const STEEM_ENDPOINTS = ['https://api.steemit.com', 'https://api.steem.fans'] as const;
 
-/** Four pages of 100 gave 340 distinct authors — enough breadth, still four requests. */
-const FEED_PAGES = 4;
+/**
+ * ★★ THE CANDIDATE SAMPLE IS TWO DAYS OF STEEM, NOT FOUR PAGES (2026-09-23). Four pages
+ * of 100 was about six hours of Steem at ~1,500 posts a day, and a prolific account that
+ * posts in bursts can be silent that long: @haejin, #1 on this board, had not posted for
+ * 19 hours when it rebuilt at 21:11 UTC on 09-22 and fell off it entirely. His gaps over
+ * the week before ran up to 20.6 hours. Forty-eight hours covers every one of them, and
+ * the page cap bounds the walk on a busy day (~30 pages at today's rate).
+ */
+const CANDIDATE_HOURS = 48;
+const FEED_MAX_PAGES = 60;
+
+/** Names per HiveSQL statement: two days of authors can approach the TDS 2,100-parameter limit. */
+const SQL_CHUNK = 1000;
 
 /**
  * Upstream requests the per-account counting pass may spend. The board is rebuilt once
- * once a week, so a few hundred requests to api.steemit.com is a reasonable ask;
- * doing it per reader would not be.
+ * a week, so this is a weekly ask of api.steemit.com; doing it per reader would not be.
+ *
+ * ★★ 600 → 1,500 (2026-09-23). Two days of candidates matched 509 accounts, and 600
+ * requests ran out before counting all of them: @sduttaskitchen (90 posts, newer than
+ * the last row's) was left uncounted and off the board while an account it outranks was
+ * on it. A board that ranks by a count has to count every candidate that could make it.
  */
-const STEEM_COUNT_BUDGET = 600;
+const STEEM_COUNT_BUDGET = 1500;
 const PAGE_LIMIT = 100;
 
 /**
@@ -133,22 +148,39 @@ async function steem(method: string, params: unknown, spend?: Spend): Promise<un
   throw last instanceof Error ? last : new Error('steem: every endpoint failed');
 }
 
-/** Distinct authors on Steem's most recent posts, with each one's latest post time. */
-async function recentSteemAuthors(): Promise<Map<string, string>> {
-  const authors = new Map<string, string>();
-  let start: { start_author?: string; start_permlink?: string } = {};
+interface SampledAuthor {
+  /** Latest post in the sample. */
+  last: string;
+  /** Posts in the sample, which orders the counting budget. */
+  posts: number;
+}
 
-  for (let page = 0; page < FEED_PAGES; page += 1) {
+/** Distinct authors of every Steem post in the last `CANDIDATE_HOURS`. */
+async function recentSteemAuthors(): Promise<Map<string, SampledAuthor>> {
+  const authors = new Map<string, SampledAuthor>();
+  // Steem's `created` is UTC without a zone, so compare in the same shape.
+  const cutoff = new Date(Date.now() - CANDIDATE_HOURS * 3_600_000).toISOString().slice(0, 19);
+  let start: { start_author?: string; start_permlink?: string } = {};
+  let reached = false;
+
+  for (let page = 0; page < FEED_MAX_PAGES && !reached; page += 1) {
     const query = { tag: '', limit: PAGE_LIMIT, ...start };
     const result = (await steem('condenser_api.get_discussions_by_created', [query])) as SteemPost[];
-    if (!Array.isArray(result) || result.length === 0) break;
+    if (!Array.isArray(result) || result.length === 0) {
+      reached = true;
+      break;
+    }
 
     for (const post of result) {
       const author = typeof post.author === 'string' ? post.author : null;
       const created = typeof post.created === 'string' ? post.created : null;
       if (!author || !created) continue;
+      if (created < cutoff) {
+        reached = true;
+        continue;
+      }
       const held = authors.get(author);
-      if (!held || created > held) authors.set(author, created);
+      authors.set(author, { last: !held || created > held.last ? created : held.last, posts: (held?.posts ?? 0) + 1 });
     }
 
     const last = result[result.length - 1];
@@ -157,10 +189,21 @@ async function recentSteemAuthors(): Promise<Map<string, string>> {
     if (start.start_author === last.author && start.start_permlink === last.permlink) break;
     start = { start_author: last.author, start_permlink: last.permlink };
   }
+  if (!reached) {
+    logger.warn(`inquisition: crossposting sample stopped at ${FEED_MAX_PAGES} pages, short of ${CANDIDATE_HOURS}h`);
+  }
   return authors;
 }
 
-export async function loadCrossposters(limit = 50): Promise<{
+/**
+ * `carried` is the previous board's rows. ★ THEY STAY CANDIDATES (2026-09-23): an account
+ * that ranked last week is asked again whether or not it posted inside the sample window,
+ * so the board's membership no longer depends on the hour it happened to be rebuilt.
+ */
+export async function loadCrossposters(
+  limit = 50,
+  carried: { account: string; steemPosts: number }[] = []
+): Promise<{
   rows: CrosspostRow[];
   asOf: string;
   candidates: number;
@@ -169,7 +212,7 @@ export async function loadCrossposters(limit = 50): Promise<{
 }> {
   if (!hiveSqlConfigured()) return { rows: [], asOf: nowIso(), candidates: 0, matched: 0, failed: true };
 
-  let steemAuthors: Map<string, string>;
+  let steemAuthors: Map<string, SampledAuthor>;
   try {
     steemAuthors = await recentSteemAuthors();
   } catch {
@@ -182,26 +225,33 @@ export async function loadCrossposters(limit = 50): Promise<{
    * are the one value in this feature that a third party controls: anybody can create a
    * Steem account and post under any name it will accept. Parameterised, a name is a
    * value and can never become syntax — and the `IN` list is built from placeholders
-   * only. The length is bounded by the feed sample, well under the TDS parameter limit.
+   * only, in chunks of `SQL_CHUNK` so two days of authors stays under the TDS limit.
    */
-  const names = [...steemAuthors.keys()].filter((n) => /^[a-z0-9.-]{3,16}$/.test(n));
+  const names = [...new Set([...steemAuthors.keys(), ...carried.map((c) => c.account)])].filter((n) =>
+    /^[a-z0-9.-]{3,16}$/.test(n)
+  );
   if (names.length === 0) return { rows: [], asOf: nowIso(), candidates: 0, matched: 0, failed: false };
 
-  const placeholders = names.map((_, i) => `@a${i}`).join(',');
-  // ★ This is a BACKGROUND build, so it queues on the slow lane. It was on the reader
-  // lane, which is the exact borrowing that broke every profile once already.
-  const rows = await querySlow<{ author: string; hive_posts: number; last_hive: string | Date }>(
-    `SELECT c.author, COUNT(*) AS hive_posts, MAX(c.created) AS last_hive
-     FROM Comments c WITH (NOLOCK)
-     WHERE c.depth = 0 AND c.author IN (${placeholders}) AND c.created > @fork
-     GROUP BY c.author`,
-    [
-      ...names.map((name, i) => ({ name: `a${i}`, type: TYPES.VarChar, value: name })),
-      { name: 'fork', type: TYPES.VarChar, value: HIVE_FORK_DATE }
-    ]
-  );
-  // ★ `null` is "we could not ask", never an empty board. See hivesql.ts.
-  if (rows === null) return { rows: [], asOf: nowIso(), candidates: names.length, matched: 0, failed: true };
+  const rows: { author: string; hive_posts: number; last_hive: string | Date }[] = [];
+  for (let i = 0; i < names.length; i += SQL_CHUNK) {
+    const part = names.slice(i, i + SQL_CHUNK);
+    const placeholders = part.map((_, j) => `@a${j}`).join(',');
+    // ★ This is a BACKGROUND build, so it queues on the slow lane. It was on the reader
+    // lane, which is the exact borrowing that broke every profile once already.
+    const got = await querySlow<{ author: string; hive_posts: number; last_hive: string | Date }>(
+      `SELECT c.author, COUNT(*) AS hive_posts, MAX(c.created) AS last_hive
+       FROM Comments c WITH (NOLOCK)
+       WHERE c.depth = 0 AND c.author IN (${placeholders}) AND c.created > @fork
+       GROUP BY c.author`,
+      [
+        ...part.map((name, j) => ({ name: `a${j}`, type: TYPES.VarChar, value: name })),
+        { name: 'fork', type: TYPES.VarChar, value: HIVE_FORK_DATE }
+      ]
+    );
+    // ★ `null` is "we could not ask", never an empty board. See hivesql.ts.
+    if (got === null) return { rows: [], asOf: nowIso(), candidates: names.length, matched: 0, failed: true };
+    rows.push(...got);
+  }
 
   /*
    * ★★ THE COUNT COSTS ONE WALK PER ACCOUNT, SO IT RUNS AGAINST A BUDGET. Each account's
@@ -212,8 +262,16 @@ export async function loadCrossposters(limit = 50): Promise<{
    * not run: fine once a week behind the board store, not fine per reader. Accounts past
    * the budget keep their row and report a count of -1, which the table renders as "not
    * counted" rather than as zero.
+   *
+   * ★ THE LIKELIEST TOP ROWS ARE COUNTED FIRST (2026-09-23). Two days of candidates is a
+   * larger matched set than six hours was, so the budget can run out; spend it on last
+   * week's count or the sample's posts scaled to ninety days, whichever is larger, so an
+   * account that runs out of budget is one that would not have made the board anyway.
    */
-  const matchedAccounts = rows.map((r) => r.author);
+  const prior = new Map(carried.map((c) => [c.account, c.steemPosts]));
+  const scale = (STEEM_WINDOW_DAYS * 24) / CANDIDATE_HOURS;
+  const likely = (a: string) => Math.max(prior.get(a) ?? 0, (steemAuthors.get(a)?.posts ?? 0) * scale);
+  const matchedAccounts = rows.map((r) => r.author).sort((a, b) => likely(b) - likely(a));
   const counts = new Map<string, SteemPresence>();
   let budget = STEEM_COUNT_BUDGET;
   for (const account of matchedAccounts) {
@@ -230,17 +288,28 @@ export async function loadCrossposters(limit = 50): Promise<{
     }
   }
 
-  const out: CrosspostRow[] = rows.map((r) => {
-    const counted = counts.get(r.author);
-    return {
-      account: r.author,
-      steemPosts: counted ? counted.posts : -1,
-      partial: counted?.partial ?? false,
-      lastSteem: counted?.lastPost || steemAuthors.get(r.author) || '',
-      lastHive: new Date(r.last_hive).toISOString(),
-      hivePosts: Number(r.hive_posts) || 0
-    };
-  });
+  // ★ Said, not silent: an uncounted account is invisible on the board.
+  if (counts.size < matchedAccounts.length) {
+    logger.warn(
+      `inquisition: crossposting counted ${counts.size} of ${matchedAccounts.length} matched accounts; the request budget ran out`
+    );
+  }
+
+  const out: CrosspostRow[] = rows
+    .map((r) => {
+      const counted = counts.get(r.author);
+      return {
+        account: r.author,
+        steemPosts: counted ? counted.posts : -1,
+        partial: counted?.partial ?? false,
+        lastSteem: counted?.lastPost || steemAuthors.get(r.author)?.last || '',
+        lastHive: new Date(r.last_hive).toISOString(),
+        hivePosts: Number(r.hive_posts) || 0
+      };
+    })
+    // ★ A carried account that has stopped posting to Steem counts 0 in the window: it is
+    // no longer crossposting, and a row reading "0" would say it still is.
+    .filter((row) => row.steemPosts !== 0);
 
   // ★ The count is the rank; recency breaks ties and has its own column.
   out.sort((a, b) => (b.steemPosts === a.steemPosts ? b.lastSteem.localeCompare(a.lastSteem) : b.steemPosts - a.steemPosts));
@@ -293,7 +362,13 @@ const MAX_PROFILE_PAGES = 40;
  * account at a time and can afford forty pages.
  */
 const STEEM_WINDOW_DAYS = 90;
-const STEEM_WINDOW_PAGES = 10;
+/*
+ * ★ TWENTY PAGES, SO THE CAP SITS ABOVE A THOUSAND (owner, 2026-09-23: "above 1000 would be
+ * clear for everyone except him"). Ten pages printed "991+" for both @haejin and
+ * @web2.support, a cap wearing a number; at twenty, only an account past ~2,000 posts in
+ * ninety days carries the "+".
+ */
+const STEEM_WINDOW_PAGES = 20;
 
 function windowStart(days: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
