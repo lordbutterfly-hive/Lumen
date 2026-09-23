@@ -162,11 +162,12 @@ status running ""
 
 # ★★ TWO RECORDS AT A TIME (2026-09-23, owner: "why is warm so slow. cant you batch
 # stuff"). Measured: an ordinary account builds in 6-9s, a prolific one ~46s, so one at a
-# time is ~17h for 5,000 records. Two in flight halves that. The route still guarantees one
+# time is ~17h for 5,000 records. Three in flight (owner, 2026-09-23: "go to 3") fill the
+# app's six slow-lane slots; a fourth would only queue behind them and behind readers. The route still guarantees one
 # build per account across the three workers, and each worker queues its own HiveSQL
 # statements, so two records is at most ~8 statements at once -- far below the 40-request
 # burst that got this IP blocked on 2026-09-19. Raise WARM_PARALLEL with that in mind.
-WARM_PARALLEL=${WARM_PARALLEL:-2}
+WARM_PARALLEL=${WARM_PARALLEL:-3}   # 3 fills the six slow-lane slots (2 per worker x 3); more only queues
 WARM_RESULTS=$(mktemp /tmp/lumen-warm-results.XXXXXX)
 export BASE REC_MAX LOG WARM_RESULTS WARM_PARALLEL
 export WARM_DEADLINE=$deadline WARM_STATUS=$STATUS WARM_STARTED=$started WARM_TOTAL=$total WARM_DUE=$due
