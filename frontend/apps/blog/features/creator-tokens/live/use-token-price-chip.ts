@@ -36,8 +36,20 @@ import { creatorMarketKey } from './use-live-token-market';
 import { marketHealthOf, soldOutOf } from '../market/market-health';
 import type { Market, MarketHealth } from '../types';
 
-const STALE_MS = 15_000;
-const REFETCH_MS = 30_000;
+/**
+ * ★ 10 MINUTES, NOT 30 SECONDS (2026-09-23, owner: "meritum lookup, again, why so many times.
+ * once per hour would be plenty"). The owner's signed-in home loads averaged 7.2 Magi GraphQL
+ * lookups at ~0.9s each (access log), and this chip polled every 30s on every open page (the
+ * 15s/30s had no recorded reason). The chip, the header pill, the user menu and the bylines
+ * only DISPLAY a price; the token page reads the same key through use-live-token-market.ts
+ * with its own live settings, and every buy/sell invalidates the key there, so a trade still
+ * refreshes this at once.
+ * Why 10 minutes and not the owner's hour: the v6 contract update activates on 2026-09-24
+ * (~21:00 CEST) and a chip must not show a pre-flip market for an hour after it. Raise to an
+ * hour once v6 is live and confirmed.
+ */
+const STALE_MS = 10 * 60_000;
+const REFETCH_MS = 10 * 60_000;
 
 export type TokenPriceChipStatus = 'unknown' | 'loading' | 'none' | 'ready';
 

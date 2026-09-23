@@ -36,7 +36,9 @@ export interface TokenPriceChips {
   isLoading: boolean;
 }
 
-const STALE_MS = 60_000;
+// 10 minutes for display (owner asked for hourly, 2026-09-23); see use-token-price-chip.ts for
+// why not an hour until the v6 flip is confirmed.
+const STALE_MS = 10 * 60_000;
 
 /** The state every handle starts in: asked for, not yet answered. */
 const PENDING: MarketPrice = { status: 'unknown', priceUsd: null, health: null };

@@ -125,17 +125,20 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
    * super slow"). Fetching only once the popover opened meant every bell click started a
    * fresh 1.7-4.4s request (chain call, block list, squatter list, reputations) and the
    * reader watched a spinner for all of it; PeakD's list is already there when you open
-   * it. Two seconds after the header mounts, once the page itself has loaded, the list is
-   * fetched in the background for a signed-in Hive reader, and it stays fresh for a
-   * minute, so opening the bell shows it at once and reopening does not ask again. Still
-   * never for a lite handle (see above), and still one request per page view, not a poll.
+   * it. The list now starts loading when the pointer reaches the bell (or keyboard focus
+   * does), a few hundred milliseconds before the click, and stays fresh for a minute, so
+   * reopening does not ask again. Never for a lite handle (see above).
+   *
+   * ★ NOT ON A TIMER ANY MORE (2026-09-23, same day, owner: "should home fire 20-26 api
+   * calls?"). The first version fetched it 2s after every page load, which added one more
+   * request to every page for readers who never opened the bell; the access log counted
+   * it at 1.0 per signed-in home load. Warming on approach keeps the head start and drops
+   * the call from pages where nobody reaches for the bell.
    */
   const [warm, setWarm] = useState(false);
-  useEffect(() => {
-    if (!username || !chainAccount) return;
-    const timer = window.setTimeout(() => setWarm(true), 2000);
-    return () => window.clearTimeout(timer);
-  }, [username, chainAccount]);
+  const warmUp = () => {
+    if (!warm) setWarm(true);
+  };
   const enabled = (open || warm) && !!username && chainAccount;
 
   /**
@@ -243,7 +246,9 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
         if (next) onOpened?.();
       }}
     >
-      <PopoverTrigger asChild ref={ref}>{children}</PopoverTrigger>
+      <PopoverTrigger asChild ref={ref} onPointerEnter={warmUp} onFocus={warmUp}>
+        {children}
+      </PopoverTrigger>
       <PopoverContent
         align="end"
         // Keeps the card 8px off a phone's edges, the room `max-w-[calc(100vw-16px)]`

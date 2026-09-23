@@ -28,7 +28,15 @@ export interface StreakCacheEntry {
   notFound?: boolean;
 }
 
-export const STREAK_TTL_MS = 5 * 60 * 1000;
+/**
+ * ★ ONCE A DAY (2026-09-23, owner: "why are we recomputing emblems every time, 1 time a day
+ * would prolly be plenty"). This was 5 minutes: past it, every read served the stored rank and
+ * started a background recompute that walks the account's Hive history (posts, comments,
+ * votes), and on a busy day those walks were part of the Hive node load that ended in refused
+ * calls and retries for everyone. A rank moves over days, so a day-old answer is still right
+ * for the emblem; readers never wait for a recompute either way (stale-while-revalidate below).
+ */
+export const STREAK_TTL_MS = 24 * 60 * 60 * 1000;
 // F-L15: a DEFINITIVE not-found is negative-cached, but for a SHORTER window than a
 // positive result and NEVER for a transient upstream failure (that returns 502 and is left
 // uncached, so a node hiccup can't pin a real account as missing for 5 minutes).

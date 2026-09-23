@@ -14,6 +14,7 @@ import { ServerAccountTierProvider } from '../features/wallet/lib/server-account
 import { OwnRankTierProvider } from '../features/retention/lib/own-rank-tier-context';
 import { fetchOwnRankTierSeed } from '../features/retention/lib/own-rank-tier-seed';
 import { Providers } from '../features/layouts/providers';
+import ViewerQueryPersistence from '../features/layouts/viewer-query-persistence';
 import { getServerSessionUser } from '../lib/server-session';
 import { Hydrate, dehydrate } from '@tanstack/react-query';
 import { getQueryClient } from '../lib/react-query';
@@ -949,6 +950,13 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 `useRouter()` call site at once. See components/offline-guard.tsx. */}
             <OfflineGuard>
               <ServerSessionProvider value={serverSession}>
+                {/* ★ FIRST, AND INSIDE THE SESSION PROVIDER (2026-09-23). Restores the reader's own
+                    data from the last page load (lib/viewer-query-persist.ts). It must read the
+                    server-known identity: placed higher up (in Providers) it saw no session until
+                    /api/users/me answered, restored at ~480 ms, and every call it was meant to save
+                    had already gone out at ~330 ms (measured on a local production build). Here it
+                    is the first child, so its effect runs before the header's and the feed's. */}
+                <ViewerQueryPersistence />
                 {/* ★ Renders only for a signed-in account that is itself flagged as a
                     name squatter; `null` for everybody else. See the component's own
                     note for why the notice lives here and not on `/@name`, which now
