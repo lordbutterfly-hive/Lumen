@@ -295,6 +295,24 @@ def load_snapshot(dsn: str | None = None) -> PersistedSnapshot | None:
     return PersistedSnapshot(snapshot=snapshot, built_at=built_at)
 
 
+def load_snapshot_meta(dsn: str | None = None) -> tuple[datetime, bool, frozenset[str]] | None:
+    """The current snapshot's version stamp, ``(built_at, degraded,
+    trusted_seeds)``, without loading the snapshot; ``None`` if nothing has
+    been persisted. :func:`save_snapshot` writes this row in the same
+    transaction as every other snapshot table, so an unchanged stamp means an
+    unchanged snapshot (read by ``recsys.service.app._load_snapshot_fixed`` to
+    skip reloading one it already holds)."""
+    resolved = _resolve_dsn(dsn)
+    conn = _connect(resolved)
+    try:
+        with conn.cursor() as cur:
+            meta = _read_meta(cur)
+        conn.commit()
+    finally:
+        conn.close()
+    return meta
+
+
 # ---------------------------------------------------------------------------
 # Writers — each owns exactly one table, called inside ONE transaction/cursor
 # from save_snapshot so a partial failure rolls back everything, never a
@@ -525,5 +543,6 @@ __all__ = [
     "PersistedSnapshot",
     "ensure_schema",
     "load_snapshot",
+    "load_snapshot_meta",
     "save_snapshot",
 ]

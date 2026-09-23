@@ -433,6 +433,7 @@ class _ViewerProfileCache:
                 return cached[1]
         profile = builder()
         with self._lock:
+            self._prune_expired_locked(time.monotonic())
             if account not in self._entries and len(self._entries) >= self._max_entries:
                 # Cheap unbounded-growth guard, not real LRU: evict whatever
                 # is oldest by insertion order (dicts preserve it, py3.7+).
@@ -440,6 +441,23 @@ class _ViewerProfileCache:
                 self._entries.pop(next(iter(self._entries)))
             self._entries[account] = (now_m, profile)
         return profile
+
+    def _prune_expired_locked(self, now_m: float) -> None:
+        """Drop every profile too old to ever be served again.
+
+        ★ 2026-09-23: EXPIRED PROFILES WERE KEPT UNTIL THE CACHE HELD
+        ``max_entries`` (10,000). ``get`` never serves an entry at or past
+        ``ttl_s``, it rebuilds, so an expired entry is pure weight, and every
+        viewer seen since the process started kept one: a profile carries the
+        viewer's whole follow set (a frozenset of up to thousands of names), so
+        the dict grew with the number of distinct viewers since boot rather than
+        with the viewers of the last ``ttl_s``. Pruning on every store bounds it
+        at the viewers seen within one TTL. Same shape as the popular-posts
+        cache fix (``HafsqlClient._prune_popular_locked``).
+        """
+        dead = [a for a, (ts, _) in self._entries.items() if now_m - ts >= self._ttl_s]
+        for a in dead:
+            del self._entries[a]
 
     def __len__(self) -> int:
         with self._lock:
@@ -578,10 +596,33 @@ class _SingleFlight(Generic[T]):
             return len(self._inflight)
 
 
-def _load_snapshot_fixed(dsn: str | None) -> TrustSnapshot | None:
+def _load_snapshot_fixed(
+    dsn: str | None, current: TrustSnapshot | None = None
+) -> TrustSnapshot | None:
     """Load the current :class:`TrustSnapshot`, applying a fix for a bug this
     builder found (and does not own the file to fix directly) in
     ``recsys.db.store.load_snapshot``.
+
+    ★★ ``current``: AN UNCHANGED SNAPSHOT IS NOT RELOADED (2026-09-23). The
+    background refresh called this every ``snapshot_refresh_s`` (10 min) and
+    rebuilt the whole snapshot each time, although the batch that writes it runs
+    weekly. Measured on the local recsys DB (354,584 edges, 17,059 graph creds):
+    one load is ~180 MB of live Python objects plus the driver's result set, and
+    reloading it every cycle while requests and the other caches allocated
+    alongside left the freed copies scattered over pymalloc arenas and glibc free
+    lists that were never returned: a harness running this reload loop with feed
+    requests and the other rebuilds climbed from 560 MB RSS to a plateau of about
+    755 MB within about 40 reloads while the live Python heap stayed at 183-193
+    MB; with this check it held 397-409 MB over 150 refresh cycles.
+    When the caller passes the snapshot it already holds, only its version stamp
+    (``trust_snapshot_meta``: built_at, degraded, trusted_seeds, written in the
+    same transaction as every other snapshot table by
+    ``recsys.db.store.save_snapshot``, the only writer) is read, and ``current``
+    itself is returned when the stamp matches. A new batch, a deleted snapshot
+    (stamp gone, falls through to the full load and its ``None``) and an
+    unreachable DB (raises, as before) are all still noticed within one refresh.
+    A hand edit of the snapshot tables that does not touch the stamp is no longer
+    picked up until a restart or the next batch.
 
     ★★ A CROSS-FILE BUG WORKED AROUND, NOT FIXED (found 2026-08-04, live-
     verified against a real recsys Postgres). ``load_snapshot`` returns a
@@ -626,6 +667,11 @@ def _load_snapshot_fixed(dsn: str | None) -> TrustSnapshot | None:
             _RECSYS_DSN_ENV,
         )
         return None
+    if current is not None:
+        stamp = recsys_store.load_snapshot_meta(resolved_dsn)
+        held = (current.built_at, current.degraded, current.trusted_seeds)
+        if stamp is not None and stamp == held:
+            return current
     persisted = recsys_store.load_snapshot(resolved_dsn)
     if persisted is None:
         return None
@@ -955,9 +1001,11 @@ class ServiceState:
         # `HafsqlClient`'s own kwarg semantics promise and what its tests pin.
         resolved_lite = lite_config if lite_config is not None else settings.lite
         gateway = HafsqlClient(resolved_hafsql_config, resolved_lite, recsys_dsn=resolved_dsn)
+        # Passes the snapshot the cache already holds, so an unchanged one is kept
+        # rather than rebuilt every cycle (see `_load_snapshot_fixed`'s `current`).
         snapshot_cache: _TimerCache[TrustSnapshot | None] = _TimerCache(
             "trust_snapshot",
-            lambda: _load_snapshot_fixed(resolved_dsn),
+            lambda: _load_snapshot_fixed(resolved_dsn, current=snapshot_cache.value),
             cfg.snapshot_refresh_s,
         )
         # Closes over the LOCAL `snapshot_cache` above (not `self`/`state`,
