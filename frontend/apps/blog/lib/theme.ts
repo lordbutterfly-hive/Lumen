@@ -47,6 +47,17 @@
 
 export const THEME_STORAGE_KEY = 'theme';
 
+/**
+ * ★★ INQUISITION MODE IS A SECOND PERSISTED SETTING, AND WHILE IT IS ON THE PAGE IS DARK
+ * (owner, 2026-09-23: "inquisition mode should persist if you turned it on just like your
+ * theme should persist if you set it dark or light"). It lives here, not in
+ * lib/inquisition/arm.ts, because the inline head script below has to read it before the
+ * first paint: an armed reader reloading /trending used to get a light page (only the
+ * boards and the profile strip re-applied dark), then dark again on the next profile.
+ * The reader's theme is never written by the mode; `'1'` here means "on", absent means off.
+ */
+export const INQUISITION_STORAGE_KEY = 'inquisition';
+
 export type Theme = 'light' | 'dark';
 
 /**
@@ -89,6 +100,15 @@ export function setTheme(theme: Theme): void {
   applyTheme(theme);
 }
 
+/** Whether Inquisition mode is on. */
+export function isInquisitionOn(): boolean {
+  try {
+    return localStorage.getItem(INQUISITION_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 export function readTheme(): Theme {
   if (typeof document === 'undefined') return 'light';
   return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
@@ -112,6 +132,11 @@ export function resolveTheme(): Theme {
     window.matchMedia('(prefers-color-scheme: dark)').matches
     ? 'dark'
     : 'light';
+}
+
+/** What the page shows: dark while Inquisition mode is on, otherwise the reader's theme. */
+export function displayTheme(): Theme {
+  return isInquisitionOn() ? 'dark' : resolveTheme();
 }
 
 /**
@@ -142,8 +167,8 @@ export function resolveTheme(): Theme {
  * guard and the env script that share this head.
  */
 export const THEME_INIT_SCRIPT = `(function(){try{
-var s=null;try{s=localStorage.getItem('${THEME_STORAGE_KEY}')}catch(e){}
-var d=s==='dark'||(s!=='light'&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);
+var s=null,a=false;try{s=localStorage.getItem('${THEME_STORAGE_KEY}');a=localStorage.getItem('${INQUISITION_STORAGE_KEY}')==='1'}catch(e){}
+var d=a||s==='dark'||(s!=='light'&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);
 var r=document.documentElement;
 r.classList.toggle('dark',d);r.dataset.theme=d?'dark':'light';r.style.colorScheme=d?'dark':'light';
 }catch(e){}})();`;
@@ -164,12 +189,13 @@ export function watchTheme(): () => void {
     } catch {
       /* blocked storage: treat as "no explicit choice" and follow the system */
     }
-    if (stored === 'light' || stored === 'dark') return;
+    if (stored === 'light' || stored === 'dark' || isInquisitionOn()) return;
     applyTheme(event.matches ? 'dark' : 'light');
   };
+  // ★ Either setting changing in another tab re-decides this one, the mode included.
   const onStorage = (event: StorageEvent) => {
-    if (event.key !== THEME_STORAGE_KEY) return;
-    applyTheme(event.newValue === 'dark' ? 'dark' : 'light');
+    if (event.key !== THEME_STORAGE_KEY && event.key !== INQUISITION_STORAGE_KEY) return;
+    applyTheme(displayTheme());
   };
   const mq = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
   mq?.addEventListener('change', onSystem);

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { applyTheme, resolveTheme } from '@/blog/lib/theme';
+import { applyTheme, displayTheme } from '@/blog/lib/theme';
 
 /**
  * ════ RE-ASSERTS THE THEME AFTER REACT REBUILDS <html> ════
@@ -30,12 +30,13 @@ import { applyTheme, resolveTheme } from '@/blog/lib/theme';
  *
  * ★ IT RE-DECIDES FROM STORAGE, NOT FROM THE DOM. `readTheme()` would ask the
  * element whose attributes have just been wiped and confidently answer "light".
- * `resolveTheme()` asks the same two sources the inline script asks, in the same
- * order, so the two can never disagree.
+ * `displayTheme()` asks the same sources the inline script asks (Inquisition mode,
+ * then the stated theme, then the system), in the same order, so the two can never
+ * disagree.
  */
 export default function ThemeKeeper() {
   useEffect(() => {
-    applyTheme(resolveTheme());
+    applyTheme(displayTheme());
   }, []);
   return null;
 }

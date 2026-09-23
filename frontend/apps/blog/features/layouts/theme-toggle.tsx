@@ -5,6 +5,7 @@ import { Icons } from '@ui/components/icons';
 import { cn } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import { readTheme, setTheme, watchTheme, type Theme } from '@/blog/lib/theme';
+import { disarm, isArmed } from '@/blog/lib/inquisition/arm';
 import styles from './theme-toggle.module.css';
 
 /**
@@ -50,6 +51,10 @@ export default function ThemeToggle() {
   }, []);
 
   const choose = (theme: Theme) => {
+    // ★ Inquisition mode means dark, so asking for light is asking to leave it (2026-09-23).
+    // Without this the page went light while the mode stayed on, and the next profile
+    // page put it back to dark.
+    if (theme === 'light' && isArmed()) disarm();
     setTheme(theme);
     setSelected(theme);
   };

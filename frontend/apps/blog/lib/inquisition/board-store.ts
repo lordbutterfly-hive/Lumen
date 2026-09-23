@@ -75,6 +75,9 @@ import { join } from 'node:path';
  */
 const DIR = process.env.LUMEN_CACHE_DIR || join(tmpdir(), 'lumen-inquisition');
 
+/** The same directory, for readers of files the warm script writes (warm-status.json). */
+export const CACHE_DIR = DIR;
+
 /** How long a built board is served before a refresh is kicked off behind the reader. */
 /*
  * ★ ONE WEEK (owner: "the update should happen 1 time per week for the data. not every 3
