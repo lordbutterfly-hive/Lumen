@@ -2912,7 +2912,9 @@ class HafsqlClient:
             )
             posts = self._hydrate(rows, timeout_ms=timeout_ms)
             with self._popular_cache_lock:
-                self._popular_cache[key] = (time.monotonic(), posts)
+                now = time.monotonic()
+                self._popular_cache[key] = (now, posts)
+                self._prune_popular_locked(now)
         except Exception:
             logger.exception("popular_posts: background refresh failed; serving the stale entry")
         finally:
@@ -3008,7 +3010,26 @@ class HafsqlClient:
         posts = self._hydrate(rows, timeout_ms=timeout_ms)
         with self._popular_cache_lock:
             self._popular_cache[key] = (now, posts)
+            self._prune_popular_locked(now)
         return posts
+
+    def _prune_popular_locked(self, now: float) -> None:
+        """Drop every popular-posts entry too old to ever be served again.
+
+        ★ 2026-09-23: THE CACHE NEVER DROPPED AN ENTRY. Its key is ``since`` bucketed
+        to ``_popular_cache_bucket_s`` (300s), and ``since`` moves with the clock, so
+        every five minutes in which the popular lane ran added a new key, and nothing
+        removed the old ones. One entry is ``source_limit`` (150) hydrated posts with
+        their full vote lists: measured inside the live container at 59,376 votes and
+        25.2 MB. An entry older than ``_popular_max_stale_s`` cannot be served (an exact
+        hit needs age < TTL, the stale fallback needs age < max stale), so it is pure
+        weight. Pruning on every store bounds the dict at about
+        max_stale / bucket + 1 entries per limit (5 at the defaults). Caller holds
+        ``_popular_cache_lock``.
+        """
+        dead = [k for k, (ts, _) in self._popular_cache.items() if now - ts >= self._popular_max_stale_s]
+        for k in dead:
+            del self._popular_cache[k]
 
     def author_first_post(
         self, authors: frozenset[str], *, horizon_days: int, now: datetime | None = None
