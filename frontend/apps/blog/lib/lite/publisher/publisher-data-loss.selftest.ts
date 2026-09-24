@@ -49,6 +49,7 @@ globalThis.fetch = (async () => {
   throw new Error('network disabled in self-test');
 }) as unknown as typeof fetch;
 
+import { DELETED_BODY } from '@transaction/lib/deleted-body';
 import { User } from '@smart-signer/types/common';
 import { liteConfig } from '../config';
 import { query } from '../db/pool';
@@ -100,6 +101,8 @@ function fakeBroadcaster(opts: { canDelete?: boolean } = {}): FakeBroadcaster {
       if (pinned && pinned !== parent) {
         throw new Error('The parent of a comment cannot change.');
       }
+      // hived's comment_operation::validate (hive_operations.cpp:109), as the real chain says it.
+      if (op.body.length === 0) throw new Error('Body is empty');
       parentOf.set(op.permlink, parent);
       fake.ops.push({ ...op });
       fake.onChain.add(op.permlink);
@@ -538,8 +541,11 @@ async function b4TakedownOfReply(): Promise<void> {
   );
   const lastOp = fake.ops[fake.ops.length - 1];
   check(
-    'B4 the soft-delete blanked the reply on chain',
-    lastOp?.permlink === replyPermlink && lastOp.body === '',
+    // DELETED_BODY, never '': hived rejects an empty body ("Body is empty"), and this
+    // fake broadcaster never validates, so an empty body here passed while the real
+    // chain would have refused it.
+    'B4 the soft-delete blanked the reply on chain (with a body Hive accepts)',
+    lastOp?.permlink === replyPermlink && lastOp.body === DELETED_BODY && DELETED_BODY.trim() !== '',
     `last op = ${JSON.stringify(lastOp && { permlink: lastOp.permlink, body: lastOp.body })}`
   );
 }

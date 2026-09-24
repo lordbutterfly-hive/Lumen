@@ -5,6 +5,7 @@ import * as jobs from '../repositories/publish-job-repository';
 import * as posts from '../repositories/post-repository';
 import { repointToFreshContainer } from '../content/post-service';
 import { CommentOp, getBroadcaster, hasBroadcaster } from './broadcaster';
+import { DELETED_BODY } from '@transaction/lib/deleted-body';
 import { buildFooter, buildJsonMetadata } from './footer';
 import { ensureContainerPublished, isContainerPermlink } from './container';
 import { noteBroadcast, pauseForCommentInterval } from './pace';
@@ -104,7 +105,10 @@ function buildCommentOp(job: PublishJob): CommentOp {
   // Soft delete (§D.6): used when Hive refuses a real delete_comment. Blank the
   // title too, and mark the metadata, so our own renderer can show "[deleted]"
   // instead of an empty card — an empty body alone reads as a broken post.
-  const body = deleting ? '' : `${p.body}${buildFooter(p.displayName)}`;
+  // ★ The body is DELETED_BODY, never '': hived rejects an empty body outright
+  // ("Body is empty", hive_operations.cpp:109), so a '' soft delete could never land
+  // on chain (found 2026-09-24; no delete job had run on prod yet).
+  const body = deleting ? DELETED_BODY : `${p.body}${buildFooter(p.displayName)}`;
   const jsonMetadata = JSON.stringify({
     ...buildJsonMetadata({
       tags: p.tags,
