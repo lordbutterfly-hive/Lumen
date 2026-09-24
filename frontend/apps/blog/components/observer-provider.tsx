@@ -165,9 +165,25 @@ export interface InitialFeedPage {
   lanes?: unknown[];
 }
 
+/** `/api/streak/marks`' answer shape: account (lowercased) -> its rank snapshot. */
+export type RankMarksRecord = Record<string, { tier: string; rankNumber: number; showMark: boolean }>;
+
+/**
+ * The feed's rank marks, read on the server with the page (lib/rank-marks-read.ts).
+ * `accounts` is every account that was ASKED, so an account missing from `marks` means
+ * "no mark", not "not asked". `at` is when it was read.
+ */
+export interface RankMarksSeed {
+  accounts: string[];
+  marks: RankMarksRecord;
+  at: number;
+}
+
 export interface InitialFeedSeed {
   page: InitialFeedPage;
   at: number;
+  /** Absent when the server read failed or ran past its budget: the client fetches as before. */
+  marks?: RankMarksSeed;
 }
 
 const InitialFeedContext = createContext<InitialFeedSeed | null>(null);

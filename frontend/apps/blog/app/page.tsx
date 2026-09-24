@@ -31,6 +31,7 @@ import { prefetchHomeFeed, newHomeFeedTrace } from '@/blog/lib/feed/feed-prefetc
 import { recordFeedServe } from '@/blog/lib/feed/feed-cache';
 import { renderTimer, renderTimingEnabled } from '@ui/lib/render-timing';
 import { getServerSessionUser } from '@/blog/lib/server-session';
+import { seedRankMarks } from '@/blog/lib/rank-marks-read';
 
 /**
  * ★★ ONE `getServerSessionUser` UNSEAL PER REQUEST, NOT TWO (2026-09-06,
@@ -109,6 +110,15 @@ export default async function HomePage() {
   // `renderTimingEnabled()` is one env property read, no allocation.
   const trace = renderTimingEnabled() ? newHomeFeedTrace() : undefined;
   const feed = await prefetchHomeFeed(viewer, timer, trace);
+  // ★ The feed's rank marks (byline emblems, avatar glow) are read here so they ship in the
+  // HTML instead of one client call after hydration (lib/rank-marks-read.ts, `seedRankMarks`).
+  // Started before the serve record below and awaited after it, so the two run together.
+  // Never rejects, capped at 60 ms; null means the client asks as before.
+  // `LUMEN_HOME_RANK_SEED=off` turns it off without a build (the client then asks, as before).
+  const marksSeed =
+    feed && process.env.LUMEN_HOME_RANK_SEED !== 'off'
+      ? seedRankMarks(feed.page.entries.map((e) => e.author))
+      : Promise.resolve(null);
   // ★★★ THE SSR PATH IS A DELIVERY, AND NOTHING WAS RECORDING IT (2026-09-13).
   //
   // `recordFeedServe` lived ONLY in `/api/feed/for-you`, on the reasoning that
@@ -156,8 +166,13 @@ export default async function HomePage() {
   // session value can never forge a second field on this line.
   // The `??` fallbacks are for the flag-OFF shape only, where `trace` is absent
   // and `done()` is the shared no-op: nothing here is ever logged in that case.
+  // Awaited before the timing line so `marks=` below is its real cost to this render (for
+  // a signed-in reader it overlaps the serve record above, so the stage covers both).
+  const marks = await marksSeed;
+  timer.mark('marks');
   timer.done({
     user: viewer || 'anon',
+    seeded: marks ? 'yes' : 'no',
     stored: trace?.stored ?? 'skip',
     ranked: String(trace?.ranked ?? false),
     source: trace?.source ?? 'none',
@@ -180,7 +195,7 @@ export default async function HomePage() {
     trim: `${trace?.trimMs ?? -1}ms`
   });
   return (
-    <InitialFeedProvider value={feed}>
+    <InitialFeedProvider value={feed && marks ? { ...feed, marks } : feed}>
       <HomeShell showIntro={!signedIn} />
     </InitialFeedProvider>
   );

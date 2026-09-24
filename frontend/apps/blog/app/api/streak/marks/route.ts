@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { listRankMarks } from '@/blog/lib/lite/repositories/hive-retention-repository';
-import { isKeylessLiteName } from '@/blog/lib/lite/render/lite-identity';
+import { rankMarkAccounts, readRankMarks } from '@/blog/lib/rank-marks-read';
 
 const logger = getLogger('app');
 
@@ -34,59 +33,18 @@ const logger = getLogger('app');
  * returning a floor value, so a consumer cannot mistake "not computed" for "lowest rank".
  */
 
-/** Bound the fan-in. A feed page is ~20 authors; this is generous and caps abuse. */
-const MAX_ACCOUNTS = 60;
-const USERNAME_RE = /^[a-z0-9.-]{3,16}$/;
-
 export async function GET(req: NextRequest) {
   const raw = req.nextUrl.searchParams.get('users') ?? '';
-  // Validated the same way the single-account route validates, so this cannot be used to
-  // fan arbitrary strings at the database.
-  const accounts = raw
-    .split(',')
-    .map((a) => a.trim().toLowerCase())
-    .filter((a) => USERNAME_RE.test(a))
-    .slice(0, MAX_ACCOUNTS);
+  // Validated, deduped and capped at 60 (`rankMarkAccounts`), the same way the single-account
+  // route validates, so this cannot be used to fan arbitrary strings at the database.
+  const accounts = rankMarkAccounts(raw.split(','));
 
   if (accounts.length === 0) return NextResponse.json({ marks: {} });
 
   try {
-    const rows = await listRankMarks(accounts);
-    /**
-     * ★★★ THE WRITE GUARD DOES NOT REPAIR WHAT WAS ALREADY WRITTEN (2026-09-11).
-     *
-     * `/api/streak/[user]` now refuses to COMPUTE a rank for a keyless Lumen name, which
-     * stops new rows. It does nothing about rows already in `lumen_hive_rank`, and this
-     * route had no identity check at all: `lumen_hive_rank.account` is a bare `citext`
-     * name, so a row computed from a SQUATTER's chain account is returned under the
-     * victim's handle for the full 7-day TTL.
-     *
-     * Measured on production 2026-09-11, before this guard existed:
-     *   /api/streak/marks?users=chadmasters,luxattack,meritimusdoublus,arsha
-     *   -> chadmasters: tier "spark" rank 1, meritimusdoublus: tier "spark" rank 1,
-     *      luxattack: "unranked"  (arsha, uncontested, correctly absent)
-     * Three real impersonated users, each carrying a standing derived entirely from the
-     * account that took their name, on a public unauthenticated endpoint.
-     *
-     * Filtering on READ is the half that self-heals: it repairs the existing rows
-     * immediately on deploy instead of waiting out the TTL, and it keeps working if a
-     * future squatter is detected after a rank was already snapshotted. The stale rows
-     * should still be deleted (see the ops note in the fix report), but correctness no
-     * longer depends on someone remembering to.
-     *
-     * Omitted, never zeroed: this route's own contract is that an absent account means
-     * "not computed", and a consumer must not read a suppressed mark as rung one.
-     */
-    const keyless = await Promise.all(rows.map((r) => isKeylessLiteName(r.account)));
-    const marks: Record<string, { tier: string; rankNumber: number; showMark: boolean }> = {};
-    rows.forEach((r, i) => {
-      if (keyless[i]) return;
-      marks[r.account.toLowerCase()] = {
-        tier: r.tier,
-        rankNumber: r.rankNumber,
-        showMark: r.showMark
-      };
-    });
+    // The keyless-name (squatter) filter lives in `readRankMarks`, shared with the home
+    // page's server seed; its note there says why it filters on read (2026-09-11).
+    const marks = await readRankMarks(accounts);
     return NextResponse.json(
       { marks },
       // Short public cache: a rank changes slowly, a feed page is requested often, and
