@@ -6,7 +6,8 @@ import { runPublisherOnce, lastPauseReason, ProcessOutcome } from '@/blog/lib/li
 import { countPending } from '@/blog/lib/lite/repositories/publish-job-repository';
 import { withAdvisoryLock } from '@/blog/lib/lite/db/pool';
 import { installWifBroadcaster } from '@/blog/lib/lite/publisher/hive-broadcaster';
-import { hasBroadcaster } from '@/blog/lib/lite/publisher/broadcaster';
+import { getBroadcaster, hasBroadcaster } from '@/blog/lib/lite/publisher/broadcaster';
+import { maintainQuoteContainer } from '@/blog/lib/lite/publisher/container';
 
 /** Arbitrary but fixed key: all drains across all processes contend on this one. */
 const DRAIN_LOCK = 971_020_301;
@@ -58,6 +59,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // second overlapping drain would ignore the 3-second interval and get its
   // transactions rejected. Skipping is correct: the queue is still there next tick.
   let repaired = 0;
+  let quoteContainer: string | undefined;
   const ran = await withAdvisoryLock(DRAIN_LOCK, async () => {
     // Inside the lock: the sweep reserves container slots, and two overlapping sweeps
     // each committed a slot reservation (sometimes a whole container) that no post ever
@@ -72,6 +74,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // response now says which — see ProcessOutcome's note for what an operator
       // used to see instead.
       if (outcome === 'idle' || outcome === 'paused') break;
+    }
+    // ★ The quote reblog container (spec v2 7.3) is kept published HERE, on an idle
+    // queue: production drives the publisher through this route (lumen-publisher.service
+    // POSTs it every 60 s), not through run-worker.ts, so upkeep that lived only in the
+    // worker loop would never run on prod and Hive users could never quote. 'off' unless
+    // LITE_QUOTE_REBLOGS_ENABLED=yes; idempotent (one root, only when none is live).
+    if (counts.idle > 0) {
+      quoteContainer = await maintainQuoteContainer(getBroadcaster()).catch((error) => {
+        logger.warn(error, 'Publisher drain: quote container upkeep failed');
+        return 'waiting';
+      });
     }
     return true;
   });
@@ -88,6 +101,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     status: stalled ? 'paused' : 'ok',
     ...counts,
     repaired,
+    ...(quoteContainer && quoteContainer !== 'off' ? { quoteContainer } : {}),
     ...(stalled ? { reason: lastPauseReason, pending: await countPending() } : {})
   });
 }
