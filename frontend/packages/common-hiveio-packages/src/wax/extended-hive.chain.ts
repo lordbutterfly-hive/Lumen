@@ -124,11 +124,11 @@ export interface Entry {
    */
   _quote?: QuoteOverlay;
   /**
-   * On the profile's merged Posts tab only: this entry is a REBLOG, at this position
-   * in the owner's blog stream (`condenser_api.get_blog_entries` entry id). The client
-   * pages on from it (lib/profile/profile-merge.ts). Not a chain field.
+   * On the profile's merged Posts tab only: this entry is a REBLOG, at this position in
+   * the owner's blog stream counted from the newest. The client pages on from it
+   * (lib/profile/profile-merge.ts). Not a chain field.
    */
-  _blogEntryId?: number;
+  _blogOffset?: number;
 }
 
 /** A reblog's comment, as the card shows it above the post (quote reblog spec v2 3.2). */

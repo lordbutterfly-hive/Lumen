@@ -68,17 +68,18 @@ function bridgeSort(query: AccountEntryQuery): string {
 
 /**
  * The next cursor after a server-rendered merged page: own posts resume after the last
- * own post shown; the blog stream resumes just past the oldest reblog shown (reblogs
- * carry `_blogEntryId`), or from the newest when none was shown. The same rule as
+ * own post shown; the blog stream resumes just past the deepest reblog shown (reblogs
+ * carry `_blogOffset`, their position from the newest), or from the newest when none
+ * was shown (every reblog there is then older than this page). The same rule as
  * `mergeProfilePage`, read off the page itself.
  */
 function mergedSeedCursor(seed: Entry[]): { author: string; permlink: string; blog?: number } {
-  const lastOwn = [...seed].reverse().find((e) => e._blogEntryId === undefined);
-  const ids = seed.map((e) => e._blogEntryId).filter((id): id is number => typeof id === 'number');
+  const lastOwn = [...seed].reverse().find((e) => e._blogOffset === undefined);
+  const offsets = seed.map((e) => e._blogOffset).filter((o): o is number => typeof o === 'number');
   return {
     author: lastOwn?.author ?? '',
     permlink: lastOwn?.permlink ?? '',
-    ...(ids.length > 0 ? { blog: Math.min(...ids) - 1 } : {})
+    ...(offsets.length > 0 ? { blog: Math.max(...offsets) + 1 } : {})
   };
 }
 
