@@ -1,11 +1,12 @@
 'use client';
 
-import env from '@beam-australia/react-env';
+import { quoteReblogsEnabled } from '@/blog/lib/quote-reblog/quote-flag';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { transactionService } from '@transaction/index';
 import { quoteCommentBody } from '@transaction/lib/quote-ops';
 import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
 import { configuredSiteDomain } from '@ui/config/public-vars';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import type { Preferences } from '@/blog/lib/utils';
 import {
   publishQuote,
@@ -23,10 +24,7 @@ import {
  * Lumen publisher (`/api/quotes/lite`).
  */
 
-/** Off unless `REACT_APP_QUOTE_REBLOGS=yes` (the server has its own switch). */
-export function quoteReblogsEnabled(): boolean {
-  return env('QUOTE_REBLOGS') === 'yes';
-}
+export { quoteReblogsEnabled };
 
 /** What the popup knows about the post, for the link line under the comment. */
 export interface QuoteTargetInfo {
@@ -39,6 +37,8 @@ export interface QuoteTargetInfo {
   displayAuthor: string;
   /** Set for a Lumen post: named by handle, without @, in the link line. */
   liteHandle: string | null;
+  /** The post itself, for the small card in the popup. */
+  entry?: Entry;
 }
 
 const JSON_POST: HeadersInit = { 'Content-Type': 'application/json', [csrfHeaderName]: '1' };
@@ -112,7 +112,13 @@ export function quoteErrorText(error: unknown): string {
       return "Reblog comments aren't available right now.";
     case 'account_restricted':
       return "Your account can't post right now.";
+    case 'unauthorized':
+    case 'hive_login_required':
+      return 'Please sign in again.';
     default:
+      // A server code nobody wrote words for reads as a raw token ("server_error");
+      // a wallet's own message ("user rejected the request") is already readable.
+      if (error instanceof QuoteFlowError) return 'Something went wrong. Please try again.';
       return error instanceof Error && error.message ? error.message : 'Something went wrong. Please try again.';
   }
 }

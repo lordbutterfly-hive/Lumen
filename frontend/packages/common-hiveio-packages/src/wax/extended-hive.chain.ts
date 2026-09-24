@@ -118,6 +118,28 @@ export interface Entry {
    * itself a moment later. Attaching it during SSR is what removes that flash.
    */
   _lite?: LiteIdentity;
+  /**
+   * The reblogger's comment on this post (a quote reblog), attached SERVER-SIDE for a
+   * reblog entry whose reblogger has a live one. Not a chain field.
+   */
+  _quote?: QuoteOverlay;
+  /**
+   * On the profile's merged Posts tab only: this entry is a REBLOG, at this position
+   * in the owner's blog stream (`condenser_api.get_blog_entries` entry id). The client
+   * pages on from it (lib/profile/profile-merge.ts). Not a chain field.
+   */
+  _blogEntryId?: number;
+}
+
+/** A reblog's comment, as the card shows it above the post (quote reblog spec v2 3.2). */
+export interface QuoteOverlay {
+  /** Who reblogged (the name the "reblogged" line shows). */
+  quoter: string;
+  /** The comment on chain: its page is /@author/permlink. */
+  author: string;
+  permlink: string;
+  /** The comment's text, without the link line Lumen adds on chain. */
+  body: string;
 }
 
 /** The person behind a Lumen proxy post, and the account that actually signed it. */

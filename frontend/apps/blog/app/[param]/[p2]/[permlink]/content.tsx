@@ -1289,7 +1289,8 @@ const PostContent = () => {
         title: litePost?.title || postData.title,
         category: postData.category,
         displayAuthor: litePost?.author ?? postData.author,
-        liteHandle: litePost ? litePost.author : null
+        liteHandle: litePost ? litePost.author : null,
+        entry: postData
       }
     : undefined;
   const isLumenNativePost =

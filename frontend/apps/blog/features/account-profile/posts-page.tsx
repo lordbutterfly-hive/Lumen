@@ -11,6 +11,11 @@ import { trimEntriesForSeed } from '@/blog/lib/feed/seed-trim';
 import { anonymousAccountPostsSeed } from '@/blog/lib/feed/account-posts-seed-cache';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { getAccountPostsCached } from '@/blog/lib/cached-api';
+import { DATA_LIMIT } from '@transaction/lib/bridge-api';
+import { fetchProfilePage } from '@/blog/lib/profile/profile-page';
+import { quoteReblogsEnabled } from '@/blog/lib/quote-reblog/quote-flag';
+import { attachQuotes } from '@/blog/lib/lite/content/quote-attach';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 import {
   postsPrefetchBudgetMs,
   POSTS_PREFETCH_BUDGET_MS
@@ -116,7 +121,10 @@ const PostsPage = async ({
   // touches for one reader. Signed-in readers never read this shared cache
   // (their block list and own vote are per-request), which `isSignedIn ? null`
   // now enforces by construction rather than by a guard further down.
-  const anonSeed = isSignedIn ? null : anonymousAccountPostsSeed(query, username);
+  // The Posts tab is own posts AND reblogs when reblog comments are on (spec v2 7.8),
+  // rendered here the same way the client pages it (`sort=profile`).
+  const merged = query === 'posts' && quoteReblogsEnabled();
+  const anonSeed = isSignedIn ? null : anonymousAccountPostsSeed(merged ? 'profile' : query, username);
   const hasAnonSeed = Boolean(anonSeed && anonSeed.length > 0);
   const budgetMs = hasAnonSeed ? POSTS_PREFETCH_BUDGET_MS : postsPrefetchBudgetMs(isSignedIn);
   let initialPosts = null;
@@ -124,7 +132,9 @@ const PostsPage = async ({
   let seedUsed = false;
   let budgetTimer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const postsPromise = getAccountPostsCached(query, username, observer);
+    const postsPromise = merged
+      ? fetchProfilePage(username, observer, { post: null, blog: null }, DATA_LIMIT).then((page) => page?.entries ?? null)
+      : getAccountPostsCached(query, username, observer);
     const raced = await Promise.race([
       postsPromise,
       new Promise<typeof BUDGET_EXPIRED>((resolve) => {
@@ -145,6 +155,11 @@ const PostsPage = async ({
     // Resolve Lumen identities before this reaches the browser, so a lite post
     // never renders under the shared publishing account and then corrects itself.
     if (initialPosts) await attachLiteIdentities(initialPosts);
+    // A reblog's comment rides on its entry (decoration: a failure leaves the page as is).
+    if (initialPosts && merged) {
+      const plain: Entry[] = initialPosts;
+      initialPosts = await attachQuotes(plain).catch(() => plain);
+    }
     timer.mark('attach');
     // ★ THE READER'S OWN BLOCK LIST, SERVER-SIDE (2026-08-23).
     //

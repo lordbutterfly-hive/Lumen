@@ -14,6 +14,7 @@ import {
   AlertDialogTrigger
 } from '@ui/components/alert-dialog';
 import { Button } from '@ui/components/button';
+import { Dialog, DialogContentBare, DialogTitle, DialogTrigger } from '@ui/components/dialog';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '@/blog/components/dialog-login';
@@ -97,20 +98,20 @@ export const ReblogDialog = forwardRef<HTMLButtonElement, ReblogDialogProps>(fun
   const shouldDisableAction = isReblogged || (needsQuery && isCheckingReblog);
 
   if (quoteTarget && quoteReblogsEnabled()) {
+    // Lumen's modal look (the Meritum share sheet's ModalShell), not the generic alert.
     return (
-      <AlertDialog open={open} onOpenChange={setOpen}>
-        <AlertDialogTrigger asChild ref={ref} {...triggerProps}>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild ref={ref} {...triggerProps}>
           {children}
-        </AlertDialogTrigger>
-        <AlertDialogContent className="flex flex-col gap-6 sm:rounded-r-xl">
-          <AlertDialogHeader className="gap-2">
-            <div className="flex items-center justify-between">
-              <AlertDialogTitle data-testid="reblog-dialog-header">{t('alert_dialog_reblog.title')}</AlertDialogTitle>
-              <AlertDialogCancel className="border-none hover:text-ink-brand-3" data-testid="reblog-dialog-close">
-                X
-              </AlertDialogCancel>
-            </div>
-          </AlertDialogHeader>
+        </DialogTrigger>
+        <DialogContentBare
+          aria-describedby={undefined}
+          overlayClassName="bg-[rgba(20,18,10,0.4)] backdrop-blur-[2px] dark:bg-[rgba(4,5,7,0.72)]"
+          wrapperClassName="p-5 py-12"
+          style={{ width: 520 }}
+          className="max-h-[calc(100dvh-6rem)] max-w-full overflow-y-auto overscroll-contain rounded-panel bg-surface-1 shadow-[0_20px_60px_rgba(20,18,10,0.25)] focus:outline-none dark:shadow-[0_24px_70px_rgba(0,0,0,0.75)] dark:ring-1 dark:ring-[var(--line-strong)]"
+        >
+          <DialogTitle className="sr-only">Reblog</DialogTitle>
           {identity.isLoggedIn ? (
             <QuoteReblogPanel
               open={open}
@@ -121,17 +122,18 @@ export const ReblogDialog = forwardRef<HTMLButtonElement, ReblogDialogProps>(fun
                 action(true);
                 setOpen(false);
               }}
-              onDone={() => setOpen(false)}
+              onClose={() => setOpen(false)}
             />
           ) : (
-            <AlertDialogFooter className="gap-2 sm:flex-row-reverse">
+            <div className="flex flex-col items-start gap-4 p-6">
+              <p className="font-ui text-[20px] font-medium leading-[28px] text-ink-2">Reblog</p>
               <DialogLogin>
                 <Button data-testid="reblog-dialog-ok">{t('alert_dialog_reblog.action')}</Button>
               </DialogLogin>
-            </AlertDialogFooter>
+            </div>
           )}
-        </AlertDialogContent>
-      </AlertDialog>
+        </DialogContentBare>
+      </Dialog>
     );
   }
 

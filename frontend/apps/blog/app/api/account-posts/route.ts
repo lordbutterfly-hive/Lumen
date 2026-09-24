@@ -3,6 +3,8 @@ import { getLogger } from '@ui/lib/logging';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { getAccountPostsPage, DATA_LIMIT } from '@transaction/lib/bridge-api';
 import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
+import { attachQuotes } from '@/blog/lib/lite/content/quote-attach';
+import { fetchProfilePage } from '@/blog/lib/profile/profile-page';
 import {
   applyOwnerBlocksToAuthoredEntries,
   filterBlockedForViewer,
@@ -27,7 +29,7 @@ const AUTHOR_SHAPE = /^[a-z0-9][a-z0-9.-]{1,31}$/;
 /** What `getAccountPosts` accepts. An allow-list rather than passthrough,
  *  because unlike the hardcoded call sites elsewhere in the app, this value
  *  now arrives as a browser-controlled query parameter. */
-const ALLOWED_SORTS = new Set(['blog', 'posts', 'feed', 'replies', 'comments', 'payout']);
+const ALLOWED_SORTS = new Set(['blog', 'posts', 'feed', 'replies', 'comments', 'payout', 'profile']);
 
 /** Loose on purpose -- this is a PAGINATION CURSOR (a prior page's own
  *  `author`/`permlink`), not a permlink being created, and real Hive
@@ -103,6 +105,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const startAuthor = (req.nextUrl.searchParams.get('start_author') ?? '').trim().replace(/^@/, '');
   const startPermlink = (req.nextUrl.searchParams.get('start_permlink') ?? '').trim();
   const limitParam = Number(req.nextUrl.searchParams.get('limit'));
+  // `sort=profile` only: where to resume the owner's blog stream (lib/profile/profile-merge.ts).
+  const blogStartRaw = req.nextUrl.searchParams.get('blog_start');
+  const blogStart = blogStartRaw === null || blogStartRaw === '' ? null : Number(blogStartRaw);
 
   if (!sort || !account) {
     return NextResponse.json({ error: 'sort_and_account_required' }, { status: 400 });
@@ -127,6 +132,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (Boolean(startAuthor) !== Boolean(startPermlink)) {
     return NextResponse.json({ error: 'invalid_cursor' }, { status: 400 });
   }
+  if (blogStart !== null && !(Number.isInteger(blogStart) && blogStart >= -1)) {
+    return NextResponse.json({ error: 'invalid_cursor' }, { status: 400 });
+  }
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : undefined;
 
   try {
@@ -143,10 +151,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // — so the page size and the cursor computed from that array are both post-filter,
     // which is exactly what breaks paging (see the long note further down). This variant
     // reports the node's own count and last entry alongside the filtered entries.
-    const page = await getAccountPostsPage(sort, account, observer, startAuthor, startPermlink, limit).catch(
-      () => null
-    );
-    let entries: Entry[] | null = page?.entries ?? null;
+    // The profile Posts tab: own posts AND reblogs, merged (quote reblog spec v2 7.8).
+    const profile =
+      sort === 'profile'
+        ? await fetchProfilePage(
+            account,
+            observer,
+            { post: startAuthor ? { author: startAuthor, permlink: startPermlink } : null, blog: blogStart },
+            limit ?? DATA_LIMIT
+          ).catch((error) => {
+            logger.warn(error, 'profile page merge failed for %s', account);
+            return null;
+          })
+        : null;
+    const page =
+      sort === 'profile'
+        ? null
+        : await getAccountPostsPage(sort, account, observer, startAuthor, startPermlink, limit).catch(() => null);
+    let entries: Entry[] | null = sort === 'profile' ? (profile?.entries ?? null) : (page?.entries ?? null);
     // ★ THE READ FAILED -- SAY SO. See the doc comment above: this used to be
     // indistinguishable from "this account genuinely has nothing posted".
     if (!entries) return NextResponse.json({ entries: [], degraded: 'upstream_empty' });
@@ -163,6 +185,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // touched: `container-posts.ts` rules that `/@ecency.waves` must still list
     // its posts — a destination somebody asked for by name is not a feed.
     if (sort === 'feed') entries = filterContainerEntries(entries);
+    // A reblog's comment (quote reblog spec v2 3.2) rides on the entry, for the card to
+    // show above the post. Decoration only: on any failure the page stays as it was.
+    if (sort === 'feed' || sort === 'blog' || sort === 'profile') {
+      const plain = entries;
+      entries = await attachQuotes(entries).catch((error) => {
+        logger.warn(error, 'account posts: quote comments not attached (sort=%s)', sort);
+        return plain;
+      });
+    }
     // ★★★ "COULD NOT CHECK" IS NOT "HAS NOTHING TO SHOW" (2026-08-13, adversarial
     // review S2). `applyOwnerBlocksToAuthoredEntries` fails CLOSED per parent —
     // right, and it stays — but it does so by returning FEWER entries and throwing
@@ -233,7 +264,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // below. Measuring the page here counted none of them: a page of 20 with one banned
   // author read as 19, `hasMore` went false, and the rest of the account was unreachable.
   const rawCount = page?.rawCount ?? 0;
-  const nextCursor = page?.rawCursor ?? null;
+  // The profile merge keeps two cursors: own posts (author/permlink) and the blog stream.
+  const nextCursor: { author: string; permlink: string; blog?: number } | null = profile
+    ? { author: profile.next.post?.author ?? '', permlink: profile.next.post?.permlink ?? '', blog: profile.next.blog ?? undefined }
+    : (page?.rawCursor ?? null);
   // ★ THE SERVER DECIDES "WAS THE PAGE FULL", NOT THE CLIENT (2026-08-23).
   //
   // The first version of this returned `rawCount` and let the client compare it to its own
@@ -246,12 +280,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   //
   // Only this route knows the limit it actually used, so only this route can answer the
   // question. The client follows the answer.
-  const hasMore = rawCount >= (limit ?? DATA_LIMIT);
+  const hasMore = profile ? profile.hasMore : rawCount >= (limit ?? DATA_LIMIT);
 
   const viewerSession = await getLiteSession();
   const blockedKeys = await viewerBlockedKeySet(viewerSession.user).catch(() => new Set<string>());
   if (blockedKeys.size > 0) {
     entries = await filterBlockedForViewer(entries, blockedKeys);
+    // A reblog (with or without a comment) BY someone the reader blocked is theirs too.
+    entries = entries.filter((e) => {
+      const reblogger = e.reblogged_by?.[0]?.toLowerCase();
+      return !reblogger || !blockedKeys.has(`h:${reblogger}`);
+    });
   }
 
   // Lumen-local vote/reblog counts -- see `mergeLumenEngagement`'s own doc for

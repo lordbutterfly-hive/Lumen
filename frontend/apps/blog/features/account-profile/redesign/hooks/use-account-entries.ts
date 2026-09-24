@@ -7,6 +7,7 @@ import {
   type InfiniteScrollSentinel
 } from '@/blog/features/discovery-feed/hooks/use-infinite-scroll-sentinel';
 import { fetchAccountPostsPage } from '@/blog/lib/lite/client/account-posts-fetch';
+import { quoteReblogsEnabled } from '@/blog/lib/quote-reblog/quote-flag';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { StaleTime } from '@/blog/lib/react-query';
 import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
@@ -16,16 +17,17 @@ import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lu
 export type AccountEntryQuery = 'posts' | 'comments';
 
 /**
- * ★ A PROFILE SHOWS WHAT THAT PERSON WROTE (owner ruling, 2026-08-08).
+ * ★ WHAT THE POSTS TAB READS.
  *
- * Hive's `sort: 'blog'` returns own posts PLUS reblogs; `sort: 'posts'` is
- * author-only. Lumen wants author-only here — **reblogs surface in the
- * Following feed on the home page instead**, which is where someone looks to
- * see what the people they follow are passing along.
- *
- * This was briefly switched to 'blog' and reverted the same day. It is not an
- * oversight; do not "fix" it. The seed in
- * `app/[param]/(user-profile)/page.tsx` must match whatever this says.
+ * 2026-08-08 the owner ruled a profile shows only what the person WROTE (`sort:
+ * 'posts'`), because Hive's `sort: 'blog'` mixed in reblogs with no way to say why.
+ * 2026-09-24, with reblog comments, the owner reversed that: "allow plain reblogs on
+ * your profile", and a reblog with a comment shows the comment above the post. So
+ * when reblog comments are on (`quoteReblogsEnabled`), the tab reads `sort:
+ * 'profile'`: own posts AND reblogs merged newest first (lib/profile/profile-merge.ts;
+ * `sort: 'blog'` alone is not enough, it drops the person's own community posts).
+ * With it off, author-only as before. The server-rendered first page
+ * (features/account-profile/posts-page.tsx) follows the same switch.
  */
 const BRIDGE_SORT_FOR_QUERY: Record<AccountEntryQuery, string> = {
   posts: 'posts',
@@ -43,13 +45,39 @@ const BRIDGE_SORT_FOR_QUERY: Record<AccountEntryQuery, string> = {
  */
 export interface AccountEntriesPage {
   entries: Entry[];
-  nextCursor: { author: string; permlink: string } | null;
+  nextCursor: { author: string; permlink: string; blog?: number } | null;
   hasMore: boolean;
 }
 
 interface PageParam {
   author?: string;
   permlink?: string;
+  /** Merged profile Posts tab only: where to resume the owner's blog stream. */
+  blog?: number;
+}
+
+/**
+ * The Posts tab reads own posts AND reblogs (`sort=profile`, lib/profile/profile-merge.ts)
+ * when reblog comments are on; the server renders its first page the same way.
+ */
+function bridgeSort(query: AccountEntryQuery): string {
+  return query === 'posts' && quoteReblogsEnabled() ? 'profile' : BRIDGE_SORT_FOR_QUERY[query];
+}
+
+/**
+ * The next cursor after a server-rendered merged page: own posts resume after the last
+ * own post shown; the blog stream resumes just past the oldest reblog shown (reblogs
+ * carry `_blogEntryId`), or from the newest when none was shown. The same rule as
+ * `mergeProfilePage`, read off the page itself.
+ */
+function mergedSeedCursor(seed: Entry[]): { author: string; permlink: string; blog?: number } {
+  const lastOwn = [...seed].reverse().find((e) => e._blogEntryId === undefined);
+  const ids = seed.map((e) => e._blogEntryId).filter((id): id is number => typeof id === 'number');
+  return {
+    author: lastOwn?.author ?? '',
+    permlink: lastOwn?.permlink ?? '',
+    ...(ids.length > 0 ? { blog: Math.min(...ids) - 1 } : {})
+  };
 }
 
 /**
@@ -142,11 +170,13 @@ export function useAccountEntries(
         return { entries: liteEntries, nextCursor: null, hasMore: liteEntries.length > 0 };
       }
       return await fetchAccountPostsPage(
-        BRIDGE_SORT_FOR_QUERY[query],
+        bridgeSort(query),
         username,
         observer,
         pageParam?.author ?? '',
-        pageParam?.permlink ?? ''
+        pageParam?.permlink ?? '',
+        undefined,
+        pageParam?.blog
       );
     },
     getNextPageParam: (lastPage) => {
@@ -163,7 +193,7 @@ export function useAccountEntries(
         return id ? { permlink: id.toUpperCase() } : undefined;
       }
       if (!lastPage.hasMore || !lastPage.nextCursor) return undefined;
-      return { author: lastPage.nextCursor.author, permlink: lastPage.nextCursor.permlink };
+      return { author: lastPage.nextCursor.author, permlink: lastPage.nextCursor.permlink, blog: lastPage.nextCursor.blog };
     },
     enabled: Boolean(username),
     // ★ Never seed a lite profile from the SSR prefetch. That prefetch is the
@@ -178,7 +208,11 @@ export function useAccountEntries(
           pages: [
             {
               entries: seed,
-              nextCursor: seedLast ? { author: seedLast.author, permlink: seedLast.permlink } : null,
+              nextCursor: !seedLast
+                ? null
+                : bridgeSort(query) === 'profile'
+                  ? mergedSeedCursor(seed)
+                  : { author: seedLast.author, permlink: seedLast.permlink },
               hasMore: seed.length > 0
             }
           ],

@@ -15,6 +15,8 @@
  *       container; a permlink already used outside a quote container is refused
  *   S6  removal plan: delete when Hive allows it, blank when it has replies, nothing
  *       when there is nothing (or only a blank) on chain
+ *   S7  feed decoration: a reblog entry gets its reblogger's LIVE comment; no comment,
+ *       no reblog or a pending one get nothing; an upgraded account is found by its id
  *
  * SAFETY: refuses unless LITE_DATABASE_URL ends in `_selftest`; truncates the quote,
  * container, block, rate and user tables.
@@ -57,6 +59,8 @@ import * as containers from '../repositories/container-repository';
 import * as quotes from '../repositories/quote-repository';
 import { block } from '../repositories/block-repository';
 import { confirmHiveQuote, confirmHiveQuoteRemoved, planHiveQuoteRemoval, prepareHiveQuote } from './quote-service';
+import { attachQuotes } from './quote-attach';
+import * as users from '../repositories/user-repository';
 
 const PUB = liteConfig.frontendAccount;
 let failures = 0;
@@ -169,6 +173,30 @@ async function main(): Promise<void> {
   put('alice', permlink, { parent_author: PUB, parent_permlink: c.hivePermlink, depth: 1, json_metadata: marker, body: 'Back again.', net_rshares: '1200' });
   check('net-positive votes: blank', (await planHiveQuoteRemoval('alice', 'bob', 'how-rc-works'))?.mode === 'blank');
   check('nothing on chain: nothing to remove', (await planHiveQuoteRemoval('zed', 'bob', 'how-rc-works')) === null);
+
+  console.log('S7  feed decoration');
+  type E = Parameters<typeof attachQuotes>[0][number];
+  const up = await users.createUser({ displayName: 'upgraded' });
+  await users.markUpgraded(up.userId, 'ursula');
+  await quotes.insertQuote({ quoter: { userId: up.userId }, targetAuthor: 'bob', targetPermlink: 'p2', quoteAuthor: 'ursula', quotePermlink: 'lumen-rq-u', containerAuthor: PUB, containerPermlink: c.hivePermlink, bodyCache: 'From an upgraded account.', state: 'live' });
+  await quotes.insertQuote({ quoter: { hive: 'carl' }, targetAuthor: 'bob', targetPermlink: 'p3', quoteAuthor: 'carl', quotePermlink: 'lumen-rq-c', containerAuthor: PUB, containerPermlink: c.hivePermlink, bodyCache: 'still pending', state: 'pending' });
+  const page = [
+    { author: 'bob', permlink: 'how-rc-works', reblogged_by: ['alice'] },
+    { author: 'bob', permlink: 'p2', reblogged_by: ['ursula'] },
+    { author: 'bob', permlink: 'p3', reblogged_by: ['carl'] },
+    { author: 'bob', permlink: 'p4', reblogged_by: ['dora'] },
+    { author: 'bob', permlink: 'how-rc-works' }
+  ] as unknown as E[];
+  await attachQuotes(page);
+  check("alice's live comment rides on her reblog", page[0]._quote?.body === 'Back again.' && page[0]._quote?.author === 'alice' && page[0]._quote?.quoter === 'alice', JSON.stringify(page[0]._quote));
+  check("an upgraded account's comment is found by its Lumen id", page[1]._quote?.body === 'From an upgraded account.', JSON.stringify(page[1]._quote));
+  check('a pending comment, no comment, or no reblog: nothing attached', !page[2]._quote && !page[3]._quote && !page[4]._quote);
+  await block({ hive: 'bob' }, { hive: 'alice' });
+  const page2 = (await attachQuotes([
+    { author: 'bob', permlink: 'how-rc-works', reblogged_by: ['alice'] },
+    { author: 'bob', permlink: 'p2', reblogged_by: ['ursula'] }
+  ] as unknown as E[])) as E[];
+  check("D7: bob blocked alice, so alice's quote of bob's post is withheld; ursula's stays", page2.length === 1 && page2[0].permlink === 'p2', JSON.stringify(page2.map((e) => e.permlink)));
 
   await query('TRUNCATE lumen_quote, lumen_container, lumen_block, rate_counter, lumen_user CASCADE');
   console.log(failures === 0 ? `PASS — ${checks} checks` : `FAIL — ${failures} of ${checks} checks failed`);

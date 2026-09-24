@@ -59,19 +59,22 @@ export async function fetchAccountPostsPage(
   observer: string,
   startAuthor = '',
   startPermlink = '',
-  limit?: number
-): Promise<{ entries: Entry[]; nextCursor: { author: string; permlink: string } | null; hasMore: boolean }> {
+  limit?: number,
+  /** `sort=profile` only: where to resume the owner's blog stream. */
+  blogStart?: number
+): Promise<{ entries: Entry[]; nextCursor: { author: string; permlink: string; blog?: number } | null; hasMore: boolean }> {
   const params = new URLSearchParams({ sort, account });
   if (observer) params.set('observer', observer);
   if (startAuthor) params.set('start_author', startAuthor);
   if (startPermlink) params.set('start_permlink', startPermlink);
   if (limit) params.set('limit', String(limit));
+  if (typeof blogStart === 'number') params.set('blog_start', String(blogStart));
 
   const res = await fetch(`/api/account-posts?${params.toString()}`);
   if (!res.ok) throw new Error(`account posts ${res.status}`);
   const body = (await res.json().catch(() => null)) as {
     entries?: Entry[] | null;
-    nextCursor?: { author: string; permlink: string } | null;
+    nextCursor?: { author: string; permlink: string; blog?: number } | null;
     hasMore?: boolean;
     degraded?: string | boolean;
   } | null;

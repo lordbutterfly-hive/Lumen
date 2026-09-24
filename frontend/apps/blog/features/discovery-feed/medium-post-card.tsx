@@ -1044,6 +1044,25 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
         </div>
       ) : null}
 
+      {/* A reblog WITH a comment (quote reblog spec v2 3.2): the reblogger's words sit
+          above the post they are about. "Reply" opens the comment itself, where its
+          replies thread. Attached server-side (`attachQuotes`), so it renders on the
+          first paint. */}
+      {post._quote ? (
+        <div className="mb-3" data-testid="medium-card-quote">
+          <p className="whitespace-pre-line font-lora text-read text-ink-2" data-testid="medium-card-quote-text">
+            {post._quote.body}
+          </p>
+          <Link
+            href={`/lumen/@${post._quote.author}/${post._quote.permlink}`}
+            className="mt-1 inline-block font-ui text-caption text-ink-14 hover:text-ink-2 hover:underline"
+            data-testid="medium-card-quote-reply"
+          >
+            Reply
+          </Link>
+        </div>
+      ) : null}
+
       {/* Byline row.
 
           ★★★ NO-WRAP, AND THE COMMUNITY IS THE PART THAT GIVES (2026-08-25, owner:
@@ -1817,7 +1836,8 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
                       title: displayTitle,
                       category: post.category,
                       displayAuthor,
-                      liteHandle: liteOverlay ? displayAuthor : null
+                      liteHandle: liteOverlay ? displayAuthor : null,
+                      entry: post
                     }}
                   >
                     <button

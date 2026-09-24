@@ -1,23 +1,43 @@
 'use client';
 
 import { useEffect, useId, useState } from 'react';
-import { CircleSpinner } from 'react-spinners-kit';
-import { Button } from '@ui/components/button';
-import { Textarea } from '@ui/components/textarea';
+import { UserAvatarImg } from '@hive/ui';
 import { toast } from '@ui/components/hooks/use-toast';
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
+import { cn } from '@ui/lib/utils';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { DEFAULT_PREFERENCES, type Preferences } from '@/blog/lib/utils';
 import { QUOTE_MAX_CHARS } from '@/blog/lib/quote-reblog/quote-flow';
 import { quoteErrorText, useMyQuote, useQuoteMutations, type QuoteTargetInfo } from './hooks/use-quote-reblog';
+import { MiniPostCard } from './mini-post-card';
+
+/** Where the comment goes, in two lines (owner, 2026-09-24: "you can't write an essay"). */
+const COPY = {
+  title: 'Reblog',
+  hint: 'Add a comment and it shows above this post on your profile and in your followers’ feeds. Leave it empty to just reblog.',
+  hintReblogged: 'You reblogged this. A comment shows above it on your profile and in your followers’ feeds.',
+  placeholder: 'Add a comment (optional)',
+  reblog: 'Reblog',
+  save: 'Save comment',
+  remove: 'Remove comment',
+  undo: 'Undo reblog',
+  publishing: 'Publishing to Hive',
+  waitingWallet: 'Waiting for your wallet…',
+  saving: 'Saving…'
+};
+
+const PILL_PRIMARY =
+  'rounded-full bg-surface-brand-12 px-5 py-2 font-ui text-[14px] font-medium text-ink-27 hover:bg-surface-brand-16 disabled:opacity-50';
+const PILL_SECONDARY =
+  'rounded-full bg-surface-11 px-4 py-2 font-ui text-[14px] font-medium text-ink-4 hover:bg-surface-16 disabled:opacity-50';
 
 /**
- * The body of the reblog popup when quote reblogs are on (spec v2 3.1): ONE reblog
- * button, an optional comment. Empty box: a plain reblog, exactly as before. Text: a
- * reblog with a comment. Once reblogged, the same popup edits or removes the comment or
- * undoes the reblog (the comment always goes with it). The text survives a cancelled
- * approval or a failed save.
+ * The reblog popup when reblog comments are on (spec v2 3.1), in Lumen's modal style
+ * (the Meritum share sheet's header, close button and pills). ONE Reblog button, an
+ * optional comment, and the post as a small card. Empty: a plain reblog, exactly as
+ * before. Once reblogged, the same popup edits or removes the comment or undoes the
+ * reblog (the comment always goes with it). The text survives a cancelled approval.
  */
 export function QuoteReblogPanel({
   open,
@@ -25,14 +45,14 @@ export function QuoteReblogPanel({
   isReblogged,
   checking,
   onPlainReblog,
-  onDone
+  onClose
 }: {
   open: boolean;
   target: QuoteTargetInfo;
   isReblogged: boolean;
   checking: boolean;
   onPlainReblog: () => void;
-  onDone: () => void;
+  onClose: () => void;
 }) {
   const boxId = useId();
   const { user } = useUserClient();
@@ -64,7 +84,7 @@ export function QuoteReblogPanel({
     try {
       await work();
       toast({ title: done, variant: 'success' });
-      onDone();
+      onClose();
     } catch (e) {
       setError(quoteErrorText(e));
     }
@@ -80,82 +100,101 @@ export function QuoteReblogPanel({
   const undoReblog = () => run(() => remove.mutateAsync({ target: ref, undoReblog: true }), 'Reblog undone');
 
   return (
-    <div className="flex flex-col gap-4" data-testid="quote-reblog-panel">
-      <p className="text-sm text-muted-foreground" data-testid="reblog-dialog-description">
-        {isReblogged
-          ? existing
-            ? 'You reblogged this post with a comment.'
-            : 'You reblogged this post. You can add a comment to it.'
-          : lite
-            ? 'Your reblog stays on Lumen. A comment is published to Hive through Lumen.'
-            : 'This post will be added to your blog and shared with your followers.'}
+    <div className="p-6" data-testid="quote-reblog-panel">
+      <div className="flex items-center gap-3">
+        <h3 className="font-ui text-[20px] font-medium leading-[28px] text-ink-2">{COPY.title}</h3>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="ml-auto flex h-8 w-8 items-center justify-center rounded-control bg-surface-11 font-ui text-[16px] text-ink-7 hover:bg-surface-16"
+          data-testid="reblog-dialog-close"
+        >
+          ×
+        </button>
+      </div>
+      <p className="mt-1 font-ui text-caption text-ink-14" data-testid="reblog-dialog-description">
+        {isReblogged ? COPY.hintReblogged : COPY.hint}
       </p>
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor={boxId} className="sr-only">
-          Add a comment (optional)
-        </label>
-        <Textarea
-          id={boxId}
-          value={caption}
-          onChange={(e) => {
-            setTouched(true);
-            setCaption(e.target.value);
-          }}
-          placeholder="Add a comment (optional)"
-          rows={3}
-          disabled={busy}
-          className="resize-none text-base"
-          data-testid="quote-reblog-comment"
+      <div className="mt-4 flex gap-3">
+        <UserAvatarImg
+          username={user.username}
+          src={user.avatarUrl || undefined}
+          pixelSize={32}
+          radiusClassName="rounded-full"
+          className="mt-1 shrink-0"
         />
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>{existing?.state === 'pending' ? 'Publishing to Hive' : ''}</span>
-          <span className={tooLong ? 'text-destructive' : ''} data-testid="quote-reblog-count">
-            {text.length} / {QUOTE_MAX_CHARS}
-          </span>
+        <div className="min-w-0 flex-1">
+          <label htmlFor={boxId} className="sr-only">
+            {COPY.placeholder}
+          </label>
+          <textarea
+            id={boxId}
+            value={caption}
+            onChange={(e) => {
+              setTouched(true);
+              setCaption(e.target.value);
+            }}
+            placeholder={COPY.placeholder}
+            rows={3}
+            disabled={busy}
+            className="block w-full resize-none rounded-control bg-surface-11 px-3.5 py-3 font-lora text-[16px] leading-[25px] text-ink-2 placeholder:text-ink-14 focus:outline-none focus:ring-1 focus:ring-line-9 disabled:opacity-60"
+            data-testid="quote-reblog-comment"
+          />
+          <div className="mt-1 flex items-center justify-between font-ui text-caption text-ink-14">
+            <span>{existing?.state === 'pending' ? COPY.publishing : ''}</span>
+            <span className={cn(tooLong && 'text-destructive')} data-testid="quote-reblog-count">
+              {text.length} / {QUOTE_MAX_CHARS}
+            </span>
+          </div>
         </div>
       </div>
 
-      <div className="rounded-md border border-border px-3 py-2 text-sm">
-        <div className="text-muted-foreground">{target.displayAuthor}</div>
-        <div className="font-medium">{target.title || 'this post'}</div>
+      <div className="mt-3">
+        <MiniPostCard entry={target.entry} title={target.title} displayAuthor={target.displayAuthor} />
       </div>
 
       {error ? (
-        <p className="text-sm text-destructive" role="alert" data-testid="quote-reblog-error">
+        <p className="mt-3 font-ui text-caption text-destructive" role="alert" data-testid="quote-reblog-error">
           {error}
         </p>
       ) : null}
 
-      <div className="flex flex-wrap justify-end gap-2">
+      <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
         {busy ? (
-          <span className="mr-auto flex items-center gap-2 text-sm text-muted-foreground">
-            <CircleSpinner loading size={14} color="currentColor" />
-            {lite ? 'Saving...' : 'Waiting for your wallet...'}
-          </span>
+          <span className="mr-auto font-ui text-caption text-ink-14">{lite ? COPY.saving : COPY.waitingWallet}</span>
+        ) : isReblogged ? (
+          <button
+            type="button"
+            onClick={undoReblog}
+            className="mr-auto font-ui text-[14px] text-ink-14 underline-offset-4 hover:text-ink-2 hover:underline"
+            data-testid="quote-reblog-undo"
+          >
+            {COPY.undo}
+          </button>
         ) : null}
         {isReblogged ? (
           <>
-            <Button variant="outline" disabled={busy} onClick={undoReblog} data-testid="quote-reblog-undo">
-              Undo reblog
-            </Button>
             {existing ? (
-              <Button variant="outline" disabled={busy} onClick={removeComment} data-testid="quote-reblog-remove">
-                Remove comment
-              </Button>
+              <button type="button" disabled={busy} onClick={removeComment} className={PILL_SECONDARY} data-testid="quote-reblog-remove">
+                {COPY.remove}
+              </button>
             ) : null}
-            <Button
+            <button
+              type="button"
               disabled={busy || !text || tooLong || text === existing?.body}
               onClick={saveComment}
+              className={PILL_PRIMARY}
               data-testid="quote-reblog-save"
             >
-              Save comment
-            </Button>
+              {COPY.save}
+            </button>
           </>
         ) : (
-          <Button disabled={busy || tooLong} onClick={reblog} data-testid="reblog-dialog-ok">
-            Reblog
-          </Button>
+          <button type="button" disabled={busy || tooLong} onClick={reblog} className={PILL_PRIMARY} data-testid="reblog-dialog-ok">
+            {COPY.reblog}
+          </button>
         )}
       </div>
     </div>

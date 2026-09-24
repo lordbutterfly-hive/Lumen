@@ -3,11 +3,10 @@ import PostsPage from '@/blog/features/account-profile/posts-page';
 import { extractUsernameFromParam, isUsernameValid } from '@/blog/utils/validate-links';
 import { notFound } from 'next/navigation';
 
-// 'posts' (author-only) — NOT 'blog', which also pulls in reblogs.
-//
-// ★ OWNER RULING, 2026-08-08: a profile shows what that person WROTE. Reblogs
-// belong in the Following feed on the home page, not here. This was briefly
-// changed to 'blog' and reverted the same day — do not "fix" it again.
+// 'posts': the Posts tab. With reblog comments on (2026-09-24, owner: "allow plain
+// reblogs on your profile") PostsPage renders it as own posts AND reblogs merged
+// (`sort=profile`); with them off, author-only as the 2026-08-08 ruling had it. See
+// BRIDGE_SORT_FOR_QUERY in use-account-entries.ts.
 //
 // This prefetch SEEDS page 1 of the redesigned Posts tab (PostsPage ->
 // InitialPostsProvider -> ProfilePostsList -> useAccountEntries's

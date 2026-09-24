@@ -205,6 +205,18 @@ const PostListItem = memo(
               </span>
             </div>
           ) : null}
+          {/* The reblogger's comment above the post (quote reblog spec v2 3.2). */}
+          {post._quote ? (
+            <div className="pb-1" data-testid="list-item-quote">
+              <p className="whitespace-pre-line font-lora text-read text-ink-2">{post._quote.body}</p>
+              <Link
+                href={`/lumen/@${post._quote.author}/${post._quote.permlink}`}
+                className="mt-1 inline-block font-ui text-caption text-ink-14 hover:text-ink-2 hover:underline"
+              >
+                Reply
+              </Link>
+            </div>
+          ) : null}
           <CardHeader className="px-0 py-1">
             <div className="flex items-center text-body-sm">
               {nsfw === 'show' && post.blacklists.length < 1 && !blacklistCheck ? (
@@ -409,7 +421,8 @@ const PostListItem = memo(
                                   title: displayTitle,
                                   category: post.category,
                                   displayAuthor,
-                                  liteHandle: liteOverlay ? displayAuthor : null
+                                  liteHandle: liteOverlay ? displayAuthor : null,
+                                  entry: post
                                 }}
                               >
                                 <button
