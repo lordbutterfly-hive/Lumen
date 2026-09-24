@@ -16,6 +16,8 @@ import {
 import {
   hardRatioBound,
   markViewerTainted,
+  isOverHardBound,
+  hardRecentDeliveriesBound,
   recordFeedSeen,
   seenImpressionRatios,
   sweepFeedSeen,
@@ -998,21 +1000,29 @@ async function maybeGuardSeen(viewer: string): Promise<void> {
     const rows = await seenImpressionRatios(24);
     const warn = warnRatioBound();
     const hard = hardRatioBound();
+    const hardRecent = hardRecentDeliveriesBound();
     for (const row of rows) {
-      if (row.perPost <= warn) continue;
+      if (row.perPost <= warn && row.recentDeliveries <= hardRecent) continue;
+      // The ratio is formatted here, not with `%.1f`: the logger does not support
+      // precision specifiers and printed the literal `%.1f`, losing the number.
       logger.error(
-        'feed-cache: SEEN COUNTER OVER-RECORDING for %s — %.1f impressions per ' +
-          'distinct post in 24h (%d impressions / %d posts). Warn bound %d, hard ' +
-          'bound %d. A reader cannot legitimately see the same post this often ' +
-          'under a 2-impression rule; something that is not a reader is recording.',
+        'feed-cache: SEEN COUNTER OVER-RECORDING for %s — %s impressions per ' +
+          'distinct post in 24h, changed pages only (%d impressions / %d posts, ' +
+          '%d deliveries in 24h, %d in 3h). Warn bound %d, hard bound %d, 3h delivery ' +
+          'bound %d. A reader ' +
+          'cannot legitimately see the same post this often under a 2-impression ' +
+          'rule; something that is not a reader is recording.',
         row.viewer,
-        row.perPost,
+        row.perPost.toFixed(1),
         row.impressions,
         row.distinctPosts,
+        row.deliveries,
+        row.recentDeliveries,
         warn,
-        hard
+        hard,
+        hardRecent
       );
-      if (row.perPost > hard) {
+      if (isOverHardBound(row)) {
         const marked = await markViewerTainted(row.viewer);
         logger.error(
           'feed-cache: SUPPRESSION DISABLED for %s — %d aggregate rows marked ' +

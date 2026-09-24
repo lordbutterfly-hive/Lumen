@@ -126,9 +126,14 @@ export async function recordFeedSeen(
 export interface SeenRatioRow {
   viewer: string;
   distinctPosts: number;
+  /** Rows of the pages that CHANGED, in the window (see `seenImpressionRatios`). */
   impressions: number;
   /** `impressions / distinctPosts` — THE guard number. */
   perPost: number;
+  /** Every recorded delivery in the window, changed or not. */
+  deliveries: number;
+  /** Deliveries in the last 3 hours. The volume guard reads THIS, see below. */
+  recentDeliveries: number;
 }
 
 /**
@@ -148,20 +153,76 @@ export interface SeenRatioRow {
  * One indexed aggregate per call. Intended for `/health` and for the
  * before/after measurement, not for the request path.
  */
+/*
+ * ★★★ MEASURED FROM THE SERVED LOG, ONE WINDOW, CHANGED PAGES ONLY (2026-09-24).
+ *
+ * This used to read `sum(impressions) / count(*)` from `lumen_feed_seen` over rows
+ * touched in the window. Two things were wrong with that, both diagnosed in
+ * LUMEN-DOCS/FEED-REPEATS-ROOT-CAUSE-2026-09-18.md and left unfixed until now:
+ *
+ *  1. `impressions` is a LIFETIME count (8-day TTL), so a "per day" ratio carried
+ *     days of history: antisocialist read 7.11 from two deliveries in 24h.
+ *  2. A reload inside the stored feed's freshness window returns the byte-identical
+ *     page, and every such reload stamped all ~30 posts again. A person who opens
+ *     home often therefore crossed 8 "per day" while the ranking could not move.
+ *
+ * The owner's account crossed it on 2026-09-15, got every seen row tainted, and
+ * has had NO suppression since: recsys filters tainted rows out (seen_log.py), so
+ * one post held #1 for 25-35 deliveries at a time. A tainted viewer's feed cannot
+ * rotate, so the ratio could never fall and the sweep could never clear it.
+ *
+ * Now: impressions come from `lumen_feed_served` inside the window only, and a
+ * delivery counts only when its page differs from the viewer's previous delivery.
+ * Measured on production before this shipped (24h): owner 27 deliveries, 13
+ * changed pages, 113 posts -> 10.15 old measure, 3.81 this one; every other
+ * viewer 1.00-1.67. Suppression itself still counts every delivery (the reader did
+ * see the page); only this guard stops treating an unchanged reload as evidence of
+ * a broken recorder.
+ *
+ * ★ WHAT THE GUARD STILL CATCHES. The bug it was written for, a background poll
+ * recording page 1 every 3 minutes, delivers identical pages, which this ratio no
+ * longer counts. So the guard also bounds delivery VOLUME, over the last 3 hours
+ * (`recentDeliveries`, see `hardRecentDeliveriesBound`). Not 24 hours: the served
+ * log keeps only the newest 2,000 rows per viewer (`sweepServedFeeds`), so a poll's
+ * 24h count is trimmed to ~44-66 deliveries and a daily bound would never fire;
+ * 3 hours of it survives the trim.
+ */
 export async function seenImpressionRatios(withinHours = 24): Promise<SeenRatioRow[]> {
   const hours = Math.max(1, Math.trunc(withinHours));
   const { rows } = await query<{
     viewer: string;
     distinct_posts: string;
     impressions: string;
+    deliveries: string;
+    recent_deliveries: string;
   }>(
-    `SELECT viewer,
-            count(*)         AS distinct_posts,
-            sum(impressions) AS impressions
-       FROM lumen_feed_seen
-      WHERE last_served_at > now() - ($1::int * INTERVAL '1 hour')
-      GROUP BY viewer
-      ORDER BY sum(impressions)::numeric / NULLIF(count(*), 0) DESC`,
+    `WITH pages AS (
+       SELECT viewer, served_at,
+              string_agg(post_key, ',' ORDER BY "position") AS sig,
+              count(*) AS n
+         FROM lumen_feed_served
+        WHERE served_at > now() - ($1::int * INTERVAL '1 hour')
+        GROUP BY viewer, served_at
+     ), marked AS (
+       SELECT viewer, n, served_at,
+              sig IS DISTINCT FROM lag(sig) OVER (PARTITION BY viewer ORDER BY served_at) AS changed
+         FROM pages
+     ), per_viewer AS (
+       SELECT viewer,
+              COALESCE(sum(n) FILTER (WHERE changed), 0) AS impressions,
+              count(*) AS deliveries,
+              count(*) FILTER (WHERE served_at > now() - INTERVAL '3 hours') AS recent_deliveries
+         FROM marked
+        GROUP BY viewer
+     ), posts AS (
+       SELECT viewer, count(DISTINCT post_key) AS distinct_posts
+         FROM lumen_feed_served
+        WHERE served_at > now() - ($1::int * INTERVAL '1 hour')
+        GROUP BY viewer
+     )
+     SELECT v.viewer, p.distinct_posts, v.impressions, v.deliveries, v.recent_deliveries
+       FROM per_viewer v JOIN posts p USING (viewer)
+      ORDER BY v.impressions::numeric / NULLIF(p.distinct_posts, 0) DESC`,
     [hours]
   );
   return rows.map((r) => {
@@ -171,9 +232,16 @@ export async function seenImpressionRatios(withinHours = 24): Promise<SeenRatioR
       viewer: r.viewer,
       distinctPosts,
       impressions,
-      perPost: distinctPosts === 0 ? 0 : impressions / distinctPosts
+      perPost: distinctPosts === 0 ? 0 : impressions / distinctPosts,
+      deliveries: Number(r.deliveries) || 0,
+      recentDeliveries: Number(r.recent_deliveries) || 0
     };
   });
+}
+
+/** Over either hard bound: the viewer's recording is treated as broken. */
+export function isOverHardBound(row: SeenRatioRow): boolean {
+  return row.perPost > hardRatioBound() || row.recentDeliveries > hardRecentDeliveriesBound();
 }
 
 /**
@@ -256,17 +324,15 @@ export async function sweepFeedSeen(opts: SeenSweepOptions): Promise<SeenSweepRe
     [ttlDays]
   );
 
+  // ★ THE SAME MEASURE AS THE GUARD (2026-09-24). This had its own copy of the
+  // old lifetime-count ratio, so fixing the guard alone would still have left a
+  // tainted reader tainted. One function decides both "taint" and "clear".
+  const stillOver = (await seenImpressionRatios(24)).filter(isOverHardBound).map((r) => r.viewer);
   const untainted = await query(
     `UPDATE lumen_feed_seen SET tainted = false
       WHERE tainted = true
-        AND viewer NOT IN (
-          SELECT viewer FROM lumen_feed_seen
-           WHERE last_served_at > now() - INTERVAL '24 hours'
-           GROUP BY viewer
-          HAVING sum(impressions)::numeric / NULLIF(count(*), 0)
-                 > $1::numeric
-        )`,
-    [hardRatioBound()]
+        AND NOT (viewer = ANY($1::text[]))`,
+    [stillOver]
   );
 
   return {
@@ -296,4 +362,16 @@ export function hardRatioBound(): number {
 export function warnRatioBound(): number {
   const raw = Number(process.env.FEED_SEEN_MAX_IMPRESSIONS_PER_POST_PER_DAY);
   return Number.isFinite(raw) && raw > 0 ? raw : 4;
+}
+
+/**
+ * Above this many recorded deliveries in 3 hours, something that is not a person is
+ * asking for the feed. Measured on production 2026-09-24 over every viewer's retained
+ * served log: the most any real reader had in any 3 hours was 13 (the owner; next
+ * 8). A 3-minute poll records 60 in 3 hours, and still 44 after the 2,000-row trim
+ * with 45-post pages. 30 sits above the first with a 2x margin and below the second.
+ */
+export function hardRecentDeliveriesBound(): number {
+  const raw = Number(process.env.FEED_SEEN_HARD_DELIVERIES_PER_3H);
+  return Number.isFinite(raw) && raw > 0 ? raw : 30;
 }
