@@ -15,6 +15,9 @@
  *       container; a permlink already used outside a quote container is refused
  *   S6  removal plan: delete when Hive allows it, blank when it has replies, nothing
  *       when there is nothing (or only a blank) on chain
+ *   S8  reconcile: a Hive user's comment that was never confirmed is indexed from the
+ *       quote container's replies; a known one, one without a marker, or a lite one is
+ *       left alone
  *   S7  feed decoration: a reblog entry gets its reblogger's LIVE comment; no comment,
  *       no reblog or a pending one get nothing; an upgraded account is found by its id
  *
@@ -41,6 +44,11 @@ const deletedOnChain = new Set<string>();
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
   const body = JSON.parse(String(init?.body ?? '{}')) as { method?: string; params?: [string, string] };
+  if (body.method === 'condenser_api.get_content_replies') {
+    const [pa, pp] = body.params ?? ['', ''];
+    const replies = [...chain.values()].filter((c) => c.parent_author === pa && c.parent_permlink === pp);
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: replies }), { status: 200 });
+  }
   if (body.method !== 'condenser_api.get_content') return realFetch(_url as string, init as RequestInit);
   const [a, p] = body.params ?? ['', ''];
   const hit = chain.get(`${a}/${p}`);
@@ -64,7 +72,7 @@ import { liteConfig } from '../config';
 import * as containers from '../repositories/container-repository';
 import * as quotes from '../repositories/quote-repository';
 import { block } from '../repositories/block-repository';
-import { confirmHiveQuote, confirmHiveQuoteRemoved, planHiveQuoteRemoval, prepareHiveQuote } from './quote-service';
+import { confirmHiveQuote, confirmHiveQuoteRemoved, planHiveQuoteRemoval, prepareHiveQuote, reconcileHiveQuotes } from './quote-service';
 import { attachQuotes } from './quote-attach';
 import * as users from '../repositories/user-repository';
 
@@ -213,6 +221,17 @@ async function main(): Promise<void> {
     { author: 'bob', permlink: 'p2', reblogged_by: ['ursula'] }
   ] as unknown as E[])) as E[];
   check("D7: bob blocked alice, so alice's quote of bob's post is withheld; ursula's stays", page2.length === 1 && page2[0].permlink === 'p2', JSON.stringify(page2.map((e) => e.permlink)));
+
+  console.log('S8  reconcile');
+  const zoePermlink = quotes.quotePermlinkFor('bob', 'p9');
+  put('bob', 'p9', {});
+  put('zoe', zoePermlink, { parent_author: PUB, parent_permlink: rolledTo.hivePermlink, depth: 1, body: 'Never confirmed.', json_metadata: JSON.stringify({ type: 'lumen_quote', quote_of: { author: 'bob', permlink: 'p9' } }) });
+  put('yan', quotes.quotePermlinkFor('bob', 'p8'), { parent_author: PUB, parent_permlink: rolledTo.hivePermlink, depth: 1, body: 'No marker.', json_metadata: '{}' });
+  const r1 = await reconcileHiveQuotes();
+  check('the unconfirmed comment is indexed, live', r1.indexed === 1 && (await quotes.findActive({ hive: 'zoe' }, 'bob', 'p9'))?.state === 'live', JSON.stringify(r1));
+  check('one without a marker is left alone', !(await quotes.findActive({ hive: 'yan' }, 'bob', 'p8')));
+  const r2 = await reconcileHiveQuotes();
+  check('a second run finds nothing new', r2.indexed === 0 && r2.checked === 0, JSON.stringify(r2));
 
   await query('TRUNCATE lumen_quote, lumen_container, lumen_block, rate_counter, lumen_user CASCADE');
   console.log(failures === 0 ? `PASS — ${checks} checks` : `FAIL — ${failures} of ${checks} checks failed`);

@@ -8,6 +8,7 @@ import { withAdvisoryLock } from '@/blog/lib/lite/db/pool';
 import { installWifBroadcaster } from '@/blog/lib/lite/publisher/hive-broadcaster';
 import { getBroadcaster, hasBroadcaster } from '@/blog/lib/lite/publisher/broadcaster';
 import { maintainQuoteContainer } from '@/blog/lib/lite/publisher/container';
+import { reconcileHiveQuotes } from '@/blog/lib/lite/content/quote-service';
 
 /** Arbitrary but fixed key: all drains across all processes contend on this one. */
 const DRAIN_LOCK = 971_020_301;
@@ -16,6 +17,13 @@ const logger = getLogger('app');
 
 /** Hard ceiling per call, so one request can never run unbounded. */
 const MAX_BATCH = 25;
+
+/**
+ * How often an idle drain looks for Hive users' reblog comments that were never
+ * confirmed (`reconcileHiveQuotes`). One container read each time; per worker process.
+ */
+const QUOTE_RECONCILE_EVERY_MS = 10 * 60_000;
+let lastQuoteReconcile = 0;
 
 /**
  * POST /api/lite/publisher/drain — ops trigger for the publish outbox.
@@ -85,6 +93,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         logger.warn(error, 'Publisher drain: quote container upkeep failed');
         return 'waiting';
       });
+      if (quoteContainer === 'ready' && Date.now() - lastQuoteReconcile > QUOTE_RECONCILE_EVERY_MS) {
+        lastQuoteReconcile = Date.now();
+        await reconcileHiveQuotes().catch((error) => logger.warn(error, 'Publisher drain: quote reconcile failed'));
+      }
     }
     return true;
   });

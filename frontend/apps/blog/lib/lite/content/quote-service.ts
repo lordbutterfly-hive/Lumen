@@ -17,7 +17,7 @@ import { resolvePostOwnerActor } from '../social/post-owner';
 import { actorKey, type FollowActor } from '../social/follow-actor';
 import { execOn, withTransaction } from '../db/pool';
 import * as posts from '../repositories/post-repository';
-import { findUserById } from '../repositories/user-repository';
+import { findUserById, findUserByHiveAccountName } from '../repositories/user-repository';
 import { reblog, unreblog } from '../repositories/engagement-repository';
 import * as rateLimit from '../antispam/rate-limit';
 import { checkLiteActor } from '../auth/account-status';
@@ -489,5 +489,44 @@ export async function isQuoteComment(author: string, permlink: string): Promise<
   if (!postId) return false;
   const row = await posts.getPostById(postId);
   return row?.parentRef?.type === 'quote';
+}
+
+/**
+ * Index Hive users' reblog comments that never reached `confirmHiveQuote` (the tab was
+ * closed after broadcasting; spec v2 4, C6). Reads the newest published quote
+ * container's replies once, and runs every NEW `lumen-rq-` child carrying a quote
+ * marker through the same checks a confirm does (the target, blocks, the parent). A
+ * child without a marker is left alone: nothing says which post it is about.
+ */
+export async function reconcileHiveQuotes(): Promise<{ checked: number; indexed: number }> {
+  const publisher = liteConfig.frontendAccount;
+  if (!liteConfig.quoteReblogsEnabled || !publisher) return { checked: 0, indexed: 0 };
+  const container = await containers.latestPublished(publisher, 'quote');
+  if (!container) return { checked: 0, indexed: 0 };
+  const res = await fetch(siteConfig.endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', method: 'condenser_api.get_content_replies', params: [container.hiveAuthor, container.hivePermlink], id: 1 }),
+    signal: AbortSignal.timeout(HIVE_READ_TIMEOUT_MS * 2)
+  });
+  if (!res.ok) throw new Error(`get_content_replies failed: HTTP ${res.status}`);
+  const data = (await res.json()) as { result?: ChainComment[]; error?: unknown };
+  if (data.error) throw new Error(`get_content_replies error: ${JSON.stringify(data.error).slice(0, 200)}`);
+  const known = await quotes.indexedCoordsInContainer(container.hiveAuthor, container.hivePermlink);
+  let checked = 0;
+  let indexed = 0;
+  for (const reply of data.result ?? []) {
+    if (reply.author === publisher || !reply.permlink.startsWith('lumen-rq-')) continue;
+    if (known.has(`${reply.author}/${reply.permlink}`)) continue;
+    const of = parseMeta(reply.json_metadata).quote_of as { author?: unknown; permlink?: unknown } | undefined;
+    if (typeof of?.author !== 'string' || typeof of?.permlink !== 'string') continue;
+    checked++;
+    const upgraded = await findUserByHiveAccountName(reply.author);
+    const quoter: FollowActor = upgraded ? { userId: upgraded.userId } : { hive: reply.author };
+    const result = await confirmHiveQuote(quoter, reply.author, of.author, of.permlink).catch(() => null);
+    if (result?.ok) indexed++;
+  }
+  if (indexed > 0) logger.info({ container: container.hivePermlink, checked, indexed }, 'quote reconcile indexed missed quotes');
+  return { checked, indexed };
 }
 

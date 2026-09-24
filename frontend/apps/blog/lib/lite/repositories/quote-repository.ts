@@ -277,6 +277,16 @@ export async function quotesForQuoterTargets(
   return out;
 }
 
+/** Every comment already indexed under one quote container (`author/permlink` keys). */
+export async function indexedCoordsInContainer(containerAuthor: string, containerPermlink: string): Promise<Set<string>> {
+  const { rows } = await query<{ quote_author: string; quote_permlink: string }>(
+    `SELECT DISTINCT quote_author, quote_permlink FROM lumen_quote
+      WHERE container_author = $1 AND container_permlink = $2`,
+    [containerAuthor, containerPermlink]
+  );
+  return new Set(rows.map((r) => `${r.quote_author}/${r.quote_permlink}`));
+}
+
 /** Live quotes of one post, newest first (the post page's "N quotes" list). */
 export async function liveQuotesOfTarget(targetAuthor: string, targetPermlink: string, limit = 20): Promise<LumenQuote[]> {
   const { rows } = await query<QuoteRow>(
