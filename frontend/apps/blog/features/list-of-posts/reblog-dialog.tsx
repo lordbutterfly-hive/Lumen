@@ -19,6 +19,8 @@ import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useTranslation } from '@/blog/i18n/client';
 import { useRebloggedByQuery } from './hooks/use-reblogged-by-query';
+import { QuoteReblogPanel } from './quote-reblog-panel';
+import { quoteReblogsEnabled, type QuoteTargetInfo } from './hooks/use-quote-reblog';
 
 interface ReblogDialogProps extends Omit<ComponentPropsWithoutRef<typeof AlertDialogTrigger>, 'asChild' | 'children'> {
   children: ReactNode;
@@ -27,6 +29,12 @@ interface ReblogDialogProps extends Omit<ComponentPropsWithoutRef<typeof AlertDi
   action: (dialogResponse: boolean) => void;
   /** Optional: skip the query if reblog status is already known */
   isReblogged?: boolean;
+  /**
+   * The post, for a reblog WITH a comment (quote reblog spec v2 3.1). When given and
+   * quote reblogs are switched on, the popup carries the optional comment box and, once
+   * reblogged, lets the person edit or remove the comment or undo the reblog.
+   */
+  quoteTarget?: QuoteTargetInfo;
 }
 
 /**
@@ -57,6 +65,7 @@ export const ReblogDialog = forwardRef<HTMLButtonElement, ReblogDialogProps>(fun
     permlink,
     action,
     isReblogged: isRebloggedProp,
+    quoteTarget,
     ...triggerProps
   },
   ref
@@ -86,6 +95,45 @@ export const ReblogDialog = forwardRef<HTMLButtonElement, ReblogDialogProps>(fun
   const isReblogged = isRebloggedProp ?? isRebloggedQuery;
   // Disable the OK button while checking reblog status (only when dialog does its own query)
   const shouldDisableAction = isReblogged || (needsQuery && isCheckingReblog);
+
+  if (quoteTarget && quoteReblogsEnabled()) {
+    return (
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogTrigger asChild ref={ref} {...triggerProps}>
+          {children}
+        </AlertDialogTrigger>
+        <AlertDialogContent className="flex flex-col gap-6 sm:rounded-r-xl">
+          <AlertDialogHeader className="gap-2">
+            <div className="flex items-center justify-between">
+              <AlertDialogTitle data-testid="reblog-dialog-header">{t('alert_dialog_reblog.title')}</AlertDialogTitle>
+              <AlertDialogCancel className="border-none hover:text-ink-brand-3" data-testid="reblog-dialog-close">
+                X
+              </AlertDialogCancel>
+            </div>
+          </AlertDialogHeader>
+          {identity.isLoggedIn ? (
+            <QuoteReblogPanel
+              open={open}
+              target={quoteTarget}
+              isReblogged={!!isReblogged}
+              checking={needsQuery && isCheckingReblog}
+              onPlainReblog={() => {
+                action(true);
+                setOpen(false);
+              }}
+              onDone={() => setOpen(false)}
+            />
+          ) : (
+            <AlertDialogFooter className="gap-2 sm:flex-row-reverse">
+              <DialogLogin>
+                <Button data-testid="reblog-dialog-ok">{t('alert_dialog_reblog.action')}</Button>
+              </DialogLogin>
+            </AlertDialogFooter>
+          )}
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>

@@ -1280,6 +1280,18 @@ const PostContent = () => {
    */
   const onChainParentPermlink = thisPost?.parent_permlink ?? postData?.parent_permlink ?? '';
   const isQuoteComment = postDepth === 1 && containerFamilyOf(onChainParentPermlink) === 'quote';
+  // The post for a reblog WITH a comment (quote reblog spec v2 3.1): on-chain author
+  // for the chain, the Lumen name and title for the link line under the comment.
+  const reblogQuoteTarget = postData
+    ? {
+        author: litePost?.chainAuthor || postData.author,
+        permlink: postData.permlink,
+        title: litePost?.title || postData.title,
+        category: postData.category,
+        displayAuthor: litePost?.author ?? postData.author,
+        liteHandle: litePost ? litePost.author : null
+      }
+    : undefined;
   const isLumenNativePost =
     !isQuoteComment &&
     (Boolean(litePostIdOf(postData)) || (postDepth === 1 && containerFamilyOf(onChainParentPermlink) === 'lite'));
@@ -1994,7 +2006,7 @@ const PostContent = () => {
                         />
                       ) : null}
                       {/* Reblog Button in Header */}
-                      {!commentSite && (
+                      {!commentSite && !isQuoteComment && (
                         <ReblogTrigger
                           author={litePost?.chainAuthor || postData.author}
                           permlink={postData.permlink}
@@ -2002,6 +2014,7 @@ const PostContent = () => {
                           dataTestidTooltipIcon="post-header-reblog-icon"
                           isReblogged={isReblogged}
                           showLabel
+                          quoteTarget={reblogQuoteTarget}
                         />
                       )}
                     </div>
@@ -2248,15 +2261,19 @@ const PostContent = () => {
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
-                    <ReblogTrigger
-                      author={litePost?.chainAuthor || postData.author}
-                      permlink={postData.permlink}
-                      dataTestidTooltipContent="post-footer-reblog-tooltip"
-                      dataTestidTooltipIcon="post-footer-reblog-icon"
-                      isReblogged={isReblogged}
-                      className={POST_BAR_CHIP}
-                      iconClassName="h-[22px] w-[22px] stroke-2"
-                    />
+                    {/* No reblog of a reblog comment (owner decision 8). */}
+                    {!isQuoteComment && (
+                      <ReblogTrigger
+                        author={litePost?.chainAuthor || postData.author}
+                        permlink={postData.permlink}
+                        dataTestidTooltipContent="post-footer-reblog-tooltip"
+                        dataTestidTooltipIcon="post-footer-reblog-icon"
+                        isReblogged={isReblogged}
+                        className={POST_BAR_CHIP}
+                        iconClassName="h-[22px] w-[22px] stroke-2"
+                        quoteTarget={reblogQuoteTarget}
+                      />
+                    )}
                     {/* ★ ONE REPLY, SIGNED IN OR OUT. Signed out it was a bare 14px/400 red word
                         with no padding, the one control on the bar in neither the action grey nor
                         the chip shape. `text-body-sm` (15px, the scale's "buttons, labels" step):

@@ -91,9 +91,10 @@ const PostListItem = memo(
 
   const handleReblog = async () => {
     try {
-      await reblogMutation.mutateAsync({ author: post.author, permlink: post.permlink, username: user.username });
+      // ON-CHAIN author: a Lumen-table entry carries the writer's handle as `author` (P1).
+      await reblogMutation.mutateAsync({ author: post._lite?.chainAuthor ?? post.author, permlink: post.permlink, username: user.username });
     } catch (error) {
-      handleError(error, { method: 'reblog', params: { author: post.author, permlink: post.permlink, username: user.username } });
+      handleError(error, { method: 'reblog', params: { author: post._lite?.chainAuthor ?? post.author, permlink: post.permlink, username: user.username } });
     }
   };
 
@@ -398,7 +399,19 @@ const PostListItem = memo(
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <div className="flex items-center">
-                              <ReblogDialog author={post.author} permlink={post.permlink} action={dialogAction}>
+                              <ReblogDialog
+                                author={post._lite?.chainAuthor ?? post.author}
+                                permlink={post.permlink}
+                                action={dialogAction}
+                                quoteTarget={{
+                                  author: post._lite?.chainAuthor ?? post.author,
+                                  permlink: post.permlink,
+                                  title: displayTitle,
+                                  category: post.category,
+                                  displayAuthor,
+                                  liteHandle: liteOverlay ? displayAuthor : null
+                                }}
+                              >
                                 <button
                                   disabled={reblogMutation.isLoading}
                                   className={cn(

@@ -9,6 +9,7 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useRebloggedByQuery } from './hooks/use-reblogged-by-query';
 import { useReblogMutation } from './hooks/use-reblog-mutation';
 import { ReblogDialog } from './reblog-dialog';
+import { quoteReblogsEnabled, type QuoteTargetInfo } from './hooks/use-quote-reblog';
 import { useTranslation } from '@/blog/i18n/client';
 
 /**
@@ -32,7 +33,8 @@ const ReblogTrigger = ({
   isReblogged: isRebloggedProp,
   showLabel = false,
   className,
-  iconClassName
+  iconClassName,
+  quoteTarget
 }: {
   author: string;
   permlink: string;
@@ -46,6 +48,8 @@ const ReblogTrigger = ({
   className?: string;
   /** Icon-only variant: extra classes for the glyph (size, stroke). */
   iconClassName?: string;
+  /** The post, for a reblog with a comment (see ReblogDialog). */
+  quoteTarget?: QuoteTargetInfo;
 }) => {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
@@ -56,6 +60,9 @@ const ReblogTrigger = ({
     isRebloggedProp !== undefined ? '' : user.username
   );
   const isReblogged = isRebloggedProp ?? isRebloggedQuery;
+  // With reblog comments on, a reblogged post's button stays live: it opens the same
+  // popup to edit or remove the comment, or undo the reblog (spec v2 3.1).
+  const lockWhenReblogged = isReblogged && !(quoteTarget && quoteReblogsEnabled());
 
   const reblogMutation = useReblogMutation();
 
@@ -77,13 +84,14 @@ const ReblogTrigger = ({
 
   if (showLabel) {
     return (
-      <ReblogDialog author={author} permlink={permlink} action={dialogAction} isReblogged={isReblogged}>
+      <ReblogDialog author={author} permlink={permlink} action={dialogAction} isReblogged={isReblogged} quoteTarget={quoteTarget}>
         <button
-          disabled={isReblogged || reblogMutation.isLoading}
+          disabled={lockWhenReblogged || reblogMutation.isLoading}
           className={cn(
             'flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-background-secondary hover:text-foreground',
             {
-              'cursor-default text-destructive': isReblogged,
+              'text-destructive': isReblogged,
+              'cursor-default': lockWhenReblogged,
               'cursor-not-allowed opacity-50': reblogMutation.isLoading
             }
           )}
@@ -143,13 +151,13 @@ const ReblogTrigger = ({
             variant renders only in the post bar (content.tsx); the labelled header variant
             above draws the same loop. */}
         <TooltipTrigger asChild>
-          <ReblogDialog author={author} permlink={permlink} action={dialogAction} isReblogged={isReblogged}>
+          <ReblogDialog author={author} permlink={permlink} action={dialogAction} isReblogged={isReblogged} quoteTarget={quoteTarget}>
             <button
               type="button"
-              disabled={isReblogged || reblogMutation.isLoading}
+              disabled={lockWhenReblogged || reblogMutation.isLoading}
               aria-label={triggerLabel}
               className={cn('flex min-h-[24px] min-w-[24px] items-center justify-center', className, {
-                'cursor-default': isReblogged
+                'cursor-default': lockWhenReblogged
               })}
             >
               {reblogMutation.isLoading ? (

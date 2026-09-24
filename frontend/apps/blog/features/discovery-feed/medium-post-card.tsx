@@ -203,6 +203,11 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
   // No-op for ordinary Hive posts.
   const liteOverlay = useLiteOverlay(post);
   const displayAuthor = liteOverlay?.author ?? post.author;
+  // ★ ON-CHAIN author for chain operations (reblog). An entry built from Lumen's own
+  // table carries the writer's HANDLE as `author`; the post on Hive is signed by the
+  // publishing account (`_lite.chainAuthor`). Sending the handle reblogged a post that
+  // does not exist (quote reblog spec v2, problem P1).
+  const chainAuthor = post._lite?.chainAuthor ?? post.author;
   // ★ DECODE BEFORE DISPLAY (2026-08-13). Titles arrive from the chain exactly as
   // whatever client wrote them, and several Hive clients store HTML entities in
   // `json_metadata` — so `&#039;` and `&acute;` were printed literally on the card.
@@ -887,11 +892,11 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
 
   const handleReblog = async () => {
     try {
-      await reblogMutation.mutateAsync({ author: post.author, permlink: post.permlink, username: user.username });
+      await reblogMutation.mutateAsync({ author: chainAuthor, permlink: post.permlink, username: user.username });
     } catch (error) {
       handleError(error, {
         method: 'reblog',
-        params: { author: post.author, permlink: post.permlink, username: user.username }
+        params: { author: chainAuthor, permlink: post.permlink, username: user.username }
       });
     }
   };
@@ -1802,7 +1807,19 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <ReblogDialog author={post.author} permlink={post.permlink} action={dialogAction}>
+                  <ReblogDialog
+                    author={chainAuthor}
+                    permlink={post.permlink}
+                    action={dialogAction}
+                    quoteTarget={{
+                      author: chainAuthor,
+                      permlink: post.permlink,
+                      title: displayTitle,
+                      category: post.category,
+                      displayAuthor,
+                      liteHandle: liteOverlay ? displayAuthor : null
+                    }}
+                  >
                     <button
                       disabled={reblogMutation.isLoading}
                       className={cn(
