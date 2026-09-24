@@ -175,7 +175,11 @@ SERVER_ID="$($SSH $HOST 'cat /opt/lumen/app/apps/blog/.next/BUILD_ID 2>/dev/null
 HEALTH="$(curl -s --max-time 10 -H "$QA_HDR" https://lumensocial.net/api/health)"
 grep -q '"status":"ok"' <<<"$HEALTH" && chk "/api/health ok" PASS || chk "/api/health ok ($HEALTH)" FAIL
 # ★ The real wasm proof. /api/health only checks connectivity.
-$SSH "$HOST" "tail -200 /var/log/lumen.log | grep -c 'cache warm:'" | grep -qv '^0$' \
+# Counted from the LAST cluster start, not the last 200 lines: the warm-up step above
+# logs dozens of render lines after boot and pushed the boot lines out of a fixed
+# window (false FAIL, 2026-09-24). Anchoring on the restart also means an old boot's
+# lines can never pass for this one's.
+$SSH "$HOST" "awk '/\\[cluster\\] primary/{n=0} /cache warm:/{n++} END{print n+0}' /var/log/lumen.log" | grep -qv '^0$' \
   && chk "cache warm lines present (wax wasm path intact)" PASS \
   || chk "cache warm lines present (wax wasm path intact)" FAIL
 # ★ CACHE-BUSTER (2026-09-05): the QA header bypasses Souin but NOT Cloudflare's HTML

@@ -71,16 +71,28 @@ const PostPage = async ({
 }) => {
   if (!isValidUserParam(p2)) notFound();
 
+  /*
+   * ★ EVERY STEP OF THIS RENDER, IN ORDER (2026-09-24). MEASUREMENT ONLY. The `post-page`
+   * line below times only the parallel chain fan-out, and on quiet traffic whole renders
+   * ran 250-1000 ms longer than that line (Caddy origin time vs its `total`). This line
+   * names where the rest goes: the awaits before the fan-out and every database step
+   * after it. Each stage is the time since the previous mark. A no-op unless
+   * `LUMEN_RENDER_TIMING=yes`, same as every other `renderTimer`.
+   */
+  const steps = renderTimer('post-steps');
   const username = p2.replace('%40', '').replace('@', '');
   const community = param;
   const validUser = await isUsernameValid(username);
+  steps.mark('valid');
   if (!validUser) notFound();
   if (!isPermlinkValid(permlink)) notFound();
 
   const observer = await getObserverFromCookies();
+  steps.mark('observer');
   // Who is looking, for the one case it changes the answer: a moderator-limited post is
   // still served to its own author.
   const viewerUserId = (await getLiteSession()).user?.userId;
+  steps.mark('session');
 
   const isLoggedIn = observer !== DEFAULT_OBSERVER;
 
@@ -165,6 +177,7 @@ const PostPage = async ({
         ? timed('community', getCommunityCached(community, observer, { correctSubscribers: false }))
         : Promise.resolve(null)
     ]);
+    steps.mark('fanout');
 
     if (timingOn) {
       // `slowest` is the whole question a deadline would have to answer: capping
@@ -214,6 +227,7 @@ const PostPage = async ({
     } else if (!postData) {
       postData = await liteEntryForPermlinkCached(permlink, observer, viewerUserId);
     }
+    steps.mark('lite');
     if (postResult.status === 'rejected') {
       logger.error(postResult.reason, 'Error fetching post data:');
     }
@@ -225,6 +239,7 @@ const PostPage = async ({
     // right on first paint too. `liteEntryForPost` already sets `_lite` on the pretty-URL
     // path, so this is skipped whenever that ran.
     if (postData && !postData._lite) await attachLiteIdentities([postData]);
+    steps.mark('identity');
 
     /**
      * ★★★ THE THREAD WAS FILTERED AND THE POST ITSELF WAS NOT (2026-09-11).
@@ -251,6 +266,7 @@ const PostPage = async ({
       await ensureSquatterList();
       if (isBannedEntry(postData)) postData = null;
     }
+    steps.mark('squatter');
 
     // ★★★ MERGE LUMEN ENGAGEMENT INTO THE SSR SEED (T3d, 2026-09-04 perf pass).
     //
@@ -277,6 +293,7 @@ const PostPage = async ({
     if (postData) {
       postData = (await mergeLumenEngagement([postData]))[0] ?? postData;
     }
+    steps.mark('engage');
 
     discussionData = discussionResult.status === 'fulfilled' ? (discussionResult.value ?? null) : null;
 
@@ -290,6 +307,7 @@ const PostPage = async ({
         discussionData = await getDiscussionCached(chain.author, chain.permlink, observer).catch(() => null);
       }
     }
+    steps.mark('chaincoord');
     if (discussionResult.status === 'rejected') {
       logger.error(discussionResult.reason, 'Error fetching discussion data:');
     }
@@ -334,13 +352,16 @@ const PostPage = async ({
     // separately and is what gates the 404 — the reader just gets no comments.
     try {
       discussionData = await attachLiteIdentitiesToDiscussion(discussionData);
+      steps.mark('discid');
       // ★ THE SSR TWIN OF THE FILTER ON `/api/discussion` (2026-09-10). Patching only
       // the route left the server-rendered page serving the squatter's reply -- the
       // audit found the taunt in this page's HTML while the API for the same post
       // correctly omitted it. Two paths build the same thread; both must filter.
       await ensureSquatterList();
       discussionData = withoutBannedDiscussion(discussionData) ?? discussionData;
+      steps.mark('discban');
       discussionData = await applyOwnerBlocksToDiscussion(discussionData);
+      steps.mark('blocks');
 
       // ★★★ MERGE LUMEN ENGAGEMENT INTO THE SSR SEED TOO (T3d, 2026-09-04 perf
       // pass) — same fix as `postData` above, same reason, its own missed
@@ -361,6 +382,7 @@ const PostPage = async ({
         const mergedValues = await mergeLumenEngagement(discussionKeys.map((key) => beforeMerge[key]));
         discussionData = Object.fromEntries(discussionKeys.map((key, i) => [key, mergedValues[i]]));
       }
+      steps.mark('discengage');
     } catch (error) {
       logger.error(error, 'owner-block filter failed for %s; serving no thread', permlink);
       discussionData = null;
@@ -381,6 +403,11 @@ const PostPage = async ({
   } catch (error) {
     logger.error(error, 'Error in PostPage:');
   }
+  steps.done({
+    user: username,
+    anon: isLoggedIn ? 'false' : 'true',
+    comments: discussionData ? Object.keys(discussionData).length : 0
+  });
 
   // Skip 404 when navigating from post creation — the client has optimistic data
   // in React Query cache that will render while Hivemind indexes the post.

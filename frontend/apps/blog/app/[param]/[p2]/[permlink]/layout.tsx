@@ -10,6 +10,7 @@ import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
 import { isValidUserParam } from '@/blog/utils/validate-links';
 import { getLogger } from '@ui/lib/logging';
+import { renderTimer } from '@ui/lib/render-timing';
 
 const logger = getLogger('app');
 
@@ -137,10 +138,16 @@ export async function generateMetadata({
   }
   const author = params.p2.replace('%40', '').replace('@', '');
   const permlink = params?.permlink;
+  // ★ MEASUREMENT ONLY (2026-09-24): this runs beside the page render and the <head> waits
+  // for it, so its awaits and the body clean-up below are timed as their own line. A
+  // no-op unless `LUMEN_RENDER_TIMING=yes`.
+  const meta = renderTimer('post-meta');
   const observer = await getObserverFromCookies();
+  meta.mark('observer');
   // Same viewer the page uses, so an author's own limited post gets its real title and
   // the cached resolver actually dedupes (it keys on the whole argument list).
   const viewerUserId = (await getLiteSession()).user?.userId;
+  meta.mark('session');
 
   try {
     // Use cached version - deduplicated with page's prefetch within the same request
@@ -169,7 +176,9 @@ export async function generateMetadata({
     // title Hivemind synthesises for any comment. A crawler never runs JavaScript, so
     // unlike the page itself this cannot be corrected later: whatever is emitted here
     // is what every share preview and search result shows, forever.
+    meta.mark('post');
     if (post && !post._lite) await attachLiteIdentities([post]);
+    meta.mark('identity');
 
     // ★ NOT `siteConfig.name` WHEN THERE IS NO REAL TITLE (audit item 15). A
     // Hive COMMENT's own `title` field is conventionally empty (only the
@@ -197,6 +206,8 @@ export async function generateMetadata({
     const rawDescription =
       post?.json_metadata?.summary || post?.json_metadata?.description || post?.body || '';
     const description = cleanForMeta(rawDescription).slice(0, 160).trimEnd();
+    meta.mark('clean');
+    meta.done({ user: author, chars: rawDescription.length });
     /**
      * ★★★ THE POST'S OWN LINK-PREVIEW CARD (2026-08-18).
      *
