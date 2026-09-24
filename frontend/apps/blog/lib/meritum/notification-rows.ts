@@ -35,7 +35,9 @@ export type LumenNotificationType =
   /** Seller: a buyer reclaimed after the deadline; the contract wrote a miss. */
   | 'missed'
   /** Somebody reblogged this reader's post with a comment (quote reblog spec v2 7.7). */
-  | 'quote';
+  | 'quote'
+  /** Somebody replied to a Lumen account's post or reblog comment (decision D10). */
+  | 'reply';
 
 export interface LumenNotificationRow {
   /**

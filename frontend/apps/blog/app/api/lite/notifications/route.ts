@@ -9,6 +9,7 @@ import * as dmMessages from '@/blog/lib/lite/repositories/dm-message-repository'
 import { viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { actorKey } from '@/blog/lib/lite/social/follow-actor';
 import * as quotes from '@/blog/lib/lite/repositories/quote-repository';
+import { replyNoticesFor } from '@/blog/lib/lite/notifications/reply-notices';
 import { liteConfig } from '@/blog/lib/lite/config';
 import { listByUser } from '@/blog/lib/lite/repositories/credential-repository';
 import { walletDid } from '@/blog/lib/lite/wallet/did-pkh';
@@ -284,7 +285,29 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       logger.error(e, 'quote notifications lookup failed');
     }
 
-    const merged = [...followRows, ...dmRows, ...meritumRows, ...quoteRows].sort(
+    // Replies to a Lumen account's posts and reblog comments (decision D10). A Hive
+    // account's replies come from Hive's own notifications, so only lite accounts.
+    let replyRows: Array<{ id: string; type: 'reply'; msg: string; url: string; date: string; actor: string; source: 'lumen' }> = [];
+    if (actor.userId) {
+      try {
+        const notices = await replyNoticesFor(actor.userId);
+        replyRows = notices
+          .filter((n) => !blockedKeys.has(n.actorKey))
+          .map((n) => ({
+            id: n.id,
+            type: 'reply' as const,
+            msg: `${n.actor} replied to your ${n.toQuote ? 'reblog comment' : 'post'}`,
+            url: n.url,
+            date: n.date,
+            actor: n.actor,
+            source: 'lumen' as const
+          }));
+      } catch (e) {
+        logger.error(e, 'reply notifications lookup failed');
+      }
+    }
+
+    const merged = [...followRows, ...dmRows, ...meritumRows, ...quoteRows, ...replyRows].sort(
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
     );
     return NextResponse.json({ notifications: merged });

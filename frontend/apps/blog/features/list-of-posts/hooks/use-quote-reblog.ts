@@ -132,8 +132,9 @@ export function useMyQuote(target: ChainRef | null, enabled: boolean) {
     enabled: enabled && !!target,
     staleTime: 0,
     queryFn: async () => {
+      if (!target) return null;
       const r = await call<{ quote: { state: string; body: string } | null }>(
-        `/api/quotes/mine?author=${encodeURIComponent(target!.author)}&permlink=${encodeURIComponent(target!.permlink)}`
+        `/api/quotes/mine?author=${encodeURIComponent(target.author)}&permlink=${encodeURIComponent(target.permlink)}`
       );
       return r.ok ? r.value.quote : null;
     }

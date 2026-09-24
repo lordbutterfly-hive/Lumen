@@ -17,6 +17,8 @@ const COPY = {
   title: 'Reblog',
   hint: 'Add a comment and it shows above this post on your profile and in your followers’ feeds. Leave it empty to just reblog.',
   hintReblogged: 'You reblogged this. A comment shows above it on your profile and in your followers’ feeds.',
+  hintOrphan: 'Your reblog was undone somewhere else, but your comment is still on Hive. Reblog again or remove it.',
+  reblogAgain: 'Reblog again',
   placeholder: 'Add a comment (optional)',
   reblog: 'Reblog',
   save: 'Save comment',
@@ -63,8 +65,11 @@ export function QuoteReblogPanel({
     StorageTTL.PERMANENT
   );
   const ref = { author: target.author, permlink: target.permlink };
-  const mine = useMyQuote(ref, open && isReblogged);
+  // Read even when not reblogged: a reblog undone on another site (PeakD) leaves the
+  // comment on Hive, and only its writer is told (decision D8).
+  const mine = useMyQuote(ref, open);
   const existing = mine.data ?? null;
+  const orphan = !isReblogged && !!existing;
   const { save, remove } = useQuoteMutations(lite, user.username, preferences);
 
   const [caption, setCaption] = useState('');
@@ -114,7 +119,7 @@ export function QuoteReblogPanel({
         </button>
       </div>
       <p className="mt-1 font-ui text-caption text-ink-14" data-testid="reblog-dialog-description">
-        {isReblogged ? COPY.hintReblogged : COPY.hint}
+        {orphan ? COPY.hintOrphan : isReblogged ? COPY.hintReblogged : COPY.hint}
       </p>
 
       <div className="mt-4 flex gap-3">
@@ -189,6 +194,21 @@ export function QuoteReblogPanel({
               data-testid="quote-reblog-save"
             >
               {COPY.save}
+            </button>
+          </>
+        ) : orphan ? (
+          <>
+            <button type="button" disabled={busy} onClick={removeComment} className={PILL_SECONDARY} data-testid="quote-reblog-remove">
+              {COPY.remove}
+            </button>
+            <button
+              type="button"
+              disabled={busy || !text || tooLong}
+              onClick={() => run(() => save.mutateAsync({ target, caption: text, alreadyReblogged: false }), 'Reblogged with your comment')}
+              className={PILL_PRIMARY}
+              data-testid="quote-reblog-again"
+            >
+              {COPY.reblogAgain}
             </button>
           </>
         ) : (

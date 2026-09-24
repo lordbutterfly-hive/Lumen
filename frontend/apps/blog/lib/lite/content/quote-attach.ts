@@ -13,16 +13,21 @@ import { blockedPairsAmong, pairKey } from '../repositories/block-repository';
  * a Lumen post), never the handle a card shows. Returns the page WITHOUT any quote whose
  * post's owner has blocked the quoter (decision D7).
  */
+/** Who reblogged this entry (the name the "reblogged" line shows), or '' for none. */
+function rebloggerOf(entry: Entry): string {
+  return entry.reblogged_by?.[0] ?? '';
+}
+
 export async function attachQuotes<T extends Entry>(entries: T[]): Promise<T[]> {
-  const reblogs = entries.filter((e) => (e.reblogged_by?.length ?? 0) > 0);
+  const reblogs = entries.filter((e) => rebloggerOf(e) !== '');
   if (reblogs.length === 0) return entries;
-  const names = [...new Set(reblogs.map((e) => e.reblogged_by![0].toLowerCase()))];
+  const names = [...new Set(reblogs.map((e) => rebloggerOf(e).toLowerCase()))];
   const keyOf = new Map(names.map((n) => [n, `h:${n}`]));
   for (const u of await findUsersByHiveAccountNames(names)) {
     if (u.hiveAccountName) keyOf.set(u.hiveAccountName.toLowerCase(), `u:${u.userId}`);
   }
   const pairs = reblogs.map((e) => ({
-    quoterKey: keyOf.get(e.reblogged_by![0].toLowerCase())!,
+    quoterKey: keyOf.get(rebloggerOf(e).toLowerCase()) ?? `h:${rebloggerOf(e).toLowerCase()}`,
     targetAuthor: e._lite?.chainAuthor ?? e.author,
     targetPermlink: e.permlink
   }));
@@ -32,7 +37,7 @@ export async function attachQuotes<T extends Entry>(entries: T[]): Promise<T[]> 
     const p = pairs[i];
     const q = live.get(`${p.quoterKey}|${p.targetAuthor}/${p.targetPermlink}`);
     if (!q) return;
-    const overlay: QuoteOverlay = { quoter: e.reblogged_by![0], author: q.quoteAuthor, permlink: q.quotePermlink, body: q.bodyCache };
+    const overlay: QuoteOverlay = { quoter: rebloggerOf(e), author: q.quoteAuthor, permlink: q.quotePermlink, body: q.bodyCache };
     e._quote = overlay;
     // The post's owner as a block-graph node: the writer for a Lumen post, else its author.
     quoted.push({ entry: e, ownerKey: e._lite?.userId ? `u:${e._lite.userId}` : `h:${e.author.toLowerCase()}`, quoterKey: p.quoterKey });

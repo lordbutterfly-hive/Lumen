@@ -942,3 +942,36 @@ export async function filterPermanentlyFailed(
   );
   return new Set(res.rows.map((r) => r.post_id));
 }
+
+/**
+ * Lumen replies to this person's own posts, comments and reblog comments, newest first,
+ * never their own (a lite user's reply notifications, quote reblog decision D10). A
+ * reply names its parent by Lumen id (`lite`) or by on-chain coordinates under the
+ * publishing account (`chain`).
+ */
+export async function listLumenRepliesTo(
+  userId: string,
+  publisher: string,
+  limit: number
+): Promise<{ reply: LumenPost; parentPostId: string; parentPermlink: string | null; parentIsQuote: boolean }[]> {
+  const { rows } = await query<PostRow & { parent_post_id: string; parent_permlink_resolved: string | null; parent_is_quote: boolean }>(
+    `SELECT r.*, mine.post_id AS parent_post_id, mine.hive_permlink AS parent_permlink_resolved,
+            (mine.parent_ref ->> 'type') IS NOT DISTINCT FROM 'quote' AS parent_is_quote
+       FROM lumen_post mine
+       JOIN lumen_post r
+         ON (r.parent_ref ->> 'type' = 'lite' AND upper(r.parent_ref ->> 'id') = mine.post_id)
+         OR (r.parent_ref ->> 'type' = 'chain' AND r.parent_ref ->> 'author' = $2 AND r.parent_ref ->> 'permlink' = mine.hive_permlink)
+      WHERE mine.user_id = $1 AND r.user_id <> $1
+        AND r.deleted_locally = false AND r.feed_visibility = 'visible'
+      ORDER BY r.created_at DESC
+      LIMIT $3`,
+    [userId, publisher, Math.max(1, Math.min(50, limit))]
+  );
+  return rows.map((r) => ({
+    reply: mapPost(r),
+    parentPostId: r.parent_post_id,
+    parentPermlink: r.parent_permlink_resolved,
+    parentIsQuote: r.parent_is_quote
+  }));
+}
+

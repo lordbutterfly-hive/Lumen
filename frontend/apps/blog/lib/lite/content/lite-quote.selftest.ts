@@ -24,7 +24,8 @@
  *       "hide all content" on the quoter hides it, reinstating restores it; a single
  *       quote can be hidden and restored by quote id (logged)
  *   L12 notifications: a Hive author and a Lumen author each see the quotes of their
- *       posts, removed and hidden ones are not listed, a self-quote notifies nobody
+ *       posts, removed and hidden ones are not listed, a self-quote notifies nobody;
+ *       a Lumen reply to a reblog comment reaches its writer (D10), their own does not
  *
  * SAFETY: refuses unless LITE_DATABASE_URL ends in `_selftest`; truncates tables.
  *
@@ -74,6 +75,7 @@ import { buildPermlink } from '../publisher/permlink';
 import { runPublisherOnce } from '../publisher/worker';
 import { createLitePost } from './post-service';
 import { isQuoteComment, removeLiteQuote, saveLiteQuote } from './quote-service';
+import { replyNoticesFor } from '../notifications/reply-notices';
 import { moderatePost, moderateQuote, moderateUser } from '../moderation/moderation-service';
 
 const PUB = liteConfig.frontendAccount;
@@ -311,6 +313,12 @@ async function main(): Promise<void> {
   const selfQ = await saveLiteQuote(sessionOf(erin), SESSION_REF, PUB, erinPermlink, 'My own post, quoted.');
   const erinAfter = await quotes.recentQuotesOfOwner({ userId: erin }, PUB);
   check('a self-quote is allowed (D6) and notifies nobody', selfQ.ok && erinAfter.length === 1, JSON.stringify(erinAfter.map((n) => n.quoterName)));
+  // D10: erin replies (on Lumen) to alice's published reblog comment on bob/race.
+  const raceQuote = (await quotes.findActive({ userId: alice }, 'bob', 'race'))!;
+  const replyRes = await createLitePost(sessionOf(erin), { tier: 'normal', body: 'Agreed!', parentRef: { type: 'lite', id: raceQuote.litePostId! } }, SESSION_REF);
+  await createLitePost(sessionOf(alice), { tier: 'normal', body: 'Thanks, me.', parentRef: { type: 'lite', id: raceQuote.litePostId! } }, SESSION_REF);
+  const notices = await replyNoticesFor(alice);
+  check("erin's reply to alice's reblog comment reaches alice, named, as a reply to a reblog comment", replyRes.status === 'ok' && notices.length === 1 && notices[0].actor === 'erin' && notices[0].toQuote && notices[0].actorKey === `u:${erin}`, JSON.stringify(notices));
 
   await query('TRUNCATE lumen_user, lumen_container, lumen_quote, lumen_block, rate_counter CASCADE');
   console.log(failures === 0 ? `PASS — ${checks} checks` : `FAIL — ${failures} of ${checks} checks failed`);

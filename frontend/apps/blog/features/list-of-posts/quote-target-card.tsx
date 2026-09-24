@@ -17,7 +17,7 @@ export function QuoteTargetCard({ metadata, observer }: { metadata: unknown; obs
     queryKey: ['quote-target', of?.author ?? '', of?.permlink ?? '', observer],
     enabled: !!of,
     staleTime: 60_000,
-    queryFn: () => getPost(of!.author, of!.permlink, observer)
+    queryFn: () => (of ? getPost(of.author, of.permlink, observer) : Promise.resolve(null))
   });
   const overlay = useLiteOverlay(entry ?? null);
   if (!of || !entry) return null;
