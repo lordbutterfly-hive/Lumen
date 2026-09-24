@@ -3,6 +3,7 @@ import type { IHiveChainInterface } from '@hiveio/wax';
 import { getLogger } from '@ui/lib/logging';
 import { siteConfig } from '@ui/config/site';
 import { liteConfig } from '../config';
+import { hiveAllowsDelete } from '../hive-delete-rule';
 import { CommentOp, PostBroadcaster, setBroadcaster } from './broadcaster';
 
 const logger = getLogger('app');
@@ -234,9 +235,7 @@ export const hiveBroadcaster: PostBroadcaster = {
       };
       const post = data.result;
       if (!post) return false;
-      const netRshares = Number(post.net_rshares ?? 0);
-      const cashedOut = post.cashout_time === '1969-12-31T23:59:59';
-      return (post.children ?? 0) === 0 && netRshares <= 0 && !cashedOut;
+      return hiveAllowsDelete(post);
     } catch {
       return false;
     }

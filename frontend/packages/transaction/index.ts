@@ -56,6 +56,7 @@ import { getLogger } from '@hive/ui/lib/logging';
 // normal (non-`type`) import, it cannot reintroduce the WASM bundle the
 // split above exists to avoid.
 import { LUMEN_APP_METADATA } from './lib/attribution';
+import { DELETED_BODY, blankedJsonMetadata, undoReblogOperation } from './lib/quote-ops';
 
 const logger = getLogger('app');
 
@@ -675,6 +676,13 @@ export class TransactionService {
     }, transactionOptions);
   }
 
+  /** Undo a reblog (hivemind removes it from their blog). See `undoReblogOperation`. */
+  async unreblog(username: string, permlink: string, transactionOptions: TransactionOptions = {}) {
+    return await this.processHiveAppOperation((builder) => {
+      builder.pushOperation(undoReblogOperation(this.signerOptions.username, username, permlink));
+    }, transactionOptions);
+  }
+
   async follow(username: string, transactionOptions: TransactionOptions = {}) {
     const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
@@ -869,6 +877,17 @@ export class TransactionService {
       jsonMetadata: { app: LUMEN_APP_METADATA }
     };
 
+    await this.applyCommentRewards(replyOperationData, preferences);
+
+    const reply = new ReplyOperation(replyOperationData);
+
+    return await this.processHiveAppOperation((builder) => {
+      builder.pushOperation(reply);
+    }, transactionOptions);
+  }
+
+  /** The person's comment reward setting, as `comment()` has always applied it. */
+  private async applyCommentRewards(replyOperationData: IReplyData, preferences: Preferences) {
     if (preferences.comment_rewards === '100%') {
       replyOperationData.percentHbd = 0;
     }
@@ -882,11 +901,102 @@ export class TransactionService {
       const { createAsset } = await import('./lib/utils');
       replyOperationData.maxAcceptedPayout = await createAsset('0', 'HBD');
     }
+  }
 
-    const reply = new ReplyOperation(replyOperationData);
-
+  /**
+   * Quote reblog (spec v2 section 4): the reblog and the comment in ONE transaction,
+   * so the person approves once and Hive applies both or neither.
+   *
+   * - `reblog` null: comment only (they reblogged earlier; a second reblog op would be
+   *   ignored by hivemind anyway).
+   * - `edit` true: the same permlink under its original parent (a comment's parent can
+   *   never change); no reward options, which Hive fixes at creation.
+   * - `comment` null: a plain reblog, which is exactly `reblog()`.
+   *
+   * The server said where the comment goes and what it must carry (/api/quotes/prepare);
+   * this only signs it. The server re-verifies everything on chain afterwards.
+   */
+  async quoteReblog(
+    input: {
+      reblog: { author: string; permlink: string } | null;
+      comment: {
+        parentAuthor: string;
+        parentPermlink: string;
+        permlink: string;
+        body: string;
+        jsonMetadata: Record<string, unknown>;
+        edit: boolean;
+      } | null;
+    },
+    preferences: Preferences,
+    transactionOptions: TransactionOptions = {}
+  ) {
+    if (!input.reblog && !input.comment) throw new Error('quoteReblog: nothing to sign');
+    const { FollowOperation, ReplyOperation } = await loadWax();
+    const account = this.signerOptions.username;
+    let reply: InstanceType<typeof ReplyOperation> | null = null;
+    if (input.comment) {
+      const c = input.comment;
+      const data: IReplyData = {
+        parentAuthor: c.parentAuthor,
+        parentPermlink: c.parentPermlink,
+        author: account,
+        permlink: c.permlink,
+        body: c.body,
+        jsonMetadata: { ...c.jsonMetadata, app: LUMEN_APP_METADATA }
+      };
+      if (!c.edit) await this.applyCommentRewards(data, preferences);
+      reply = new ReplyOperation(data);
+    }
     return await this.processHiveAppOperation((builder) => {
-      builder.pushOperation(reply);
+      if (input.reblog) {
+        builder.pushOperation(
+          new FollowOperation().reblog(account, input.reblog.author, input.reblog.permlink).authorize(account)
+        );
+      }
+      if (reply) builder.pushOperation(reply);
+    }, transactionOptions);
+  }
+
+  /**
+   * Remove a quote comment, and optionally undo the reblog with it, in ONE transaction.
+   * `mode` comes from a fresh chain read just before (`delete` only when Hive allows it:
+   * no replies, no net-positive votes, not paid out). If a vote lands in between, Hive
+   * refuses the whole transaction and nothing changes; the caller retries with `blank`.
+   */
+  async removeQuote(
+    input: {
+      permlink: string;
+      parentAuthor: string;
+      parentPermlink: string;
+      existingJsonMetadata: unknown;
+      mode: 'delete' | 'blank';
+      undoReblog: { author: string; permlink: string } | null;
+    },
+    transactionOptions: TransactionOptions = {}
+  ) {
+    const { ReplyOperation } = await loadWax();
+    const account = this.signerOptions.username;
+    const blank =
+      input.mode === 'blank'
+        ? new ReplyOperation({
+            parentAuthor: input.parentAuthor,
+            parentPermlink: input.parentPermlink,
+            author: account,
+            permlink: input.permlink,
+            body: DELETED_BODY,
+            jsonMetadata: blankedJsonMetadata(input.existingJsonMetadata, LUMEN_APP_METADATA)
+          })
+        : null;
+    return await this.processHiveAppOperation((builder) => {
+      if (input.undoReblog) {
+        builder.pushOperation(undoReblogOperation(account, input.undoReblog.author, input.undoReblog.permlink));
+      }
+      if (blank) {
+        builder.pushOperation(blank);
+      } else {
+        builder.pushOperation({ delete_comment_operation: { author: account, permlink: input.permlink } });
+      }
     }, transactionOptions);
   }
 

@@ -10,6 +10,11 @@
  *       another post; then the real one goes live and counts toward its container
  *   S3  confirm twice: one row, counted once; an edit refreshes the card text
  *   S4  removed: refused while the text is still there; accepted once blanked
+ *   S5  after a blank: confirm refuses it; prepare edits it under its OWN container even
+ *       after a roll; a re-quote is not counted twice; a new quote goes to the newest
+ *       container; a permlink already used outside a quote container is refused
+ *   S6  removal plan: delete when Hive allows it, blank when it has replies, nothing
+ *       when there is nothing (or only a blank) on chain
  *
  * SAFETY: refuses unless LITE_DATABASE_URL ends in `_selftest`; truncates the quote,
  * container, block, rate and user tables.
@@ -39,13 +44,14 @@ globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
   return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: hit ?? empty }), { status: 200 });
 }) as typeof fetch;
 
+import { DELETED_BODY } from '@transaction/lib/deleted-body';
 import { query } from '../db/pool';
 import { runMigrations } from '../db/migrate';
 import { liteConfig } from '../config';
 import * as containers from '../repositories/container-repository';
 import * as quotes from '../repositories/quote-repository';
 import { block } from '../repositories/block-repository';
-import { confirmHiveQuote, confirmHiveQuoteRemoved, prepareHiveQuote } from './quote-service';
+import { confirmHiveQuote, confirmHiveQuoteRemoved, planHiveQuoteRemoval, prepareHiveQuote } from './quote-service';
 
 const PUB = liteConfig.frontendAccount;
 let failures = 0;
@@ -125,9 +131,39 @@ async function main(): Promise<void> {
   console.log('S4  removed');
   const still = await confirmHiveQuoteRemoved(alice, 'bob', 'how-rc-works');
   check("text still on chain: 'still_on_chain'", !still.ok && still.reason === 'still_on_chain');
-  put('alice', permlink, { parent_author: PUB, parent_permlink: c.hivePermlink, depth: 1, json_metadata: JSON.stringify({ deleted: true }), body: '' });
+  // The real blank a Hive user signs (removeQuote, mode 'blank'): DELETED_BODY, marker kept.
+  put('alice', permlink, { parent_author: PUB, parent_permlink: c.hivePermlink, depth: 1, json_metadata: marker, body: DELETED_BODY });
   const removed = await confirmHiveQuoteRemoved(alice, 'bob', 'how-rc-works');
   check('blanked: removed, and the person may quote again', removed.ok && removed.value.removed && (await quotes.findActive(alice, 'bob', 'how-rc-works')) === null);
+
+  console.log('S5  after a blank');
+  const rolledTo = await containers.ensureLiveContainer(PUB, 'quote', 2, 1);
+  await containers.markPublished(rolledTo.containerId);
+  check('(setup) a newer quote container is published', rolledTo.containerId !== c.containerId && (await containers.latestPublished(PUB, 'quote'))?.containerId === rolledTo.containerId);
+  const blankConfirm = await confirmHiveQuote(alice, 'alice', 'bob', 'how-rc-works');
+  check("confirming a blanked comment: 'not_on_chain', never live", !blankConfirm.ok && blankConfirm.reason === 'not_on_chain');
+  const reprep = await prepareHiveQuote(alice, 'alice', 'bob', 'how-rc-works');
+  check('prepare edits the blanked comment under its OWN container, not the newest', reprep.ok && reprep.value.edit && reprep.value.parentPermlink === c.hivePermlink, JSON.stringify(reprep));
+  check('...and hands out the clean marker (no `deleted`)', reprep.ok && !('deleted' in reprep.value.jsonMetadata) && reprep.value.jsonMetadata.type === 'lumen_quote');
+  check('remove plan for a blanked comment: nothing to remove', (await planHiveQuoteRemoval('alice', 'bob', 'how-rc-works')) === null);
+  put('alice', permlink, { parent_author: PUB, parent_permlink: c.hivePermlink, depth: 1, json_metadata: marker, body: 'Back again.\n\nReblogged from @bob: [x](https://x)' });
+  const requote = await confirmHiveQuote(alice, 'alice', 'bob', 'how-rc-works');
+  check('the re-quote goes live as a new row', requote.ok && requote.value.state === 'live' && live.ok && requote.value.quoteId !== live.value.quoteId);
+  check('...and the same comment is not counted twice', (await containers.findByPermlink(PUB, c.hivePermlink))?.childCount === 1);
+  const carol = await prepareHiveQuote({ hive: 'carol' }, 'carol', 'bob', 'how-rc-works');
+  check('a new quote goes to the newest published container, as a create', carol.ok && !carol.value.edit && carol.value.parentPermlink === rolledTo.hivePermlink, JSON.stringify(carol));
+  put('erin', permlink, { parent_author: 'bob', parent_permlink: 'how-rc-works', depth: 1 });
+  const taken = await prepareHiveQuote({ hive: 'erin' }, 'erin', 'bob', 'how-rc-works');
+  check("their permlink is already a plain reply: 'wrong_parent'", !taken.ok && taken.reason === 'wrong_parent');
+
+  console.log('S6  removal plan');
+  const p1 = await planHiveQuoteRemoval('alice', 'bob', 'how-rc-works');
+  check('no replies, no votes: delete', p1?.mode === 'delete' && p1.parentPermlink === c.hivePermlink && p1.permlink === permlink, JSON.stringify(p1));
+  put('alice', permlink, { parent_author: PUB, parent_permlink: c.hivePermlink, depth: 1, json_metadata: marker, body: 'Back again.', children: 2 });
+  check('it has replies: blank', (await planHiveQuoteRemoval('alice', 'bob', 'how-rc-works'))?.mode === 'blank');
+  put('alice', permlink, { parent_author: PUB, parent_permlink: c.hivePermlink, depth: 1, json_metadata: marker, body: 'Back again.', net_rshares: '1200' });
+  check('net-positive votes: blank', (await planHiveQuoteRemoval('alice', 'bob', 'how-rc-works'))?.mode === 'blank');
+  check('nothing on chain: nothing to remove', (await planHiveQuoteRemoval('zed', 'bob', 'how-rc-works')) === null);
 
   await query('TRUNCATE lumen_quote, lumen_container, lumen_block, rate_counter, lumen_user CASCADE');
   console.log(failures === 0 ? `PASS — ${checks} checks` : `FAIL — ${failures} of ${checks} checks failed`);
