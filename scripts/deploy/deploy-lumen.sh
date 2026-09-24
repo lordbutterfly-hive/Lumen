@@ -153,6 +153,17 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
+# ★ WARM EVERY WORKER BEFORE READERS DO (2026-09-24). Each of the 3 cluster workers
+# loads a route's server code on that route's first request, so the first readers
+# after a deploy paid up to ~1.2 s per route per worker (home 1.2 s, post 0.7 s,
+# creator page 0.8 s, Inquisition 1.0 s; 0.05-0.3 s once warm). Six loopback hits per
+# route land two on each worker (round-robin), with a cache-buster so every one is a
+# real render. A/B on production, 4 restarts alternating, first 3 hits per route
+# after the step: without p50 174/161 ms, p90 880/982 ms; with p50 69/80 ms, p90
+# 202/289 ms. Costs ~15-19 s here. Read-only GETs; no page records a view.
+echo "==> warm the workers (main routes, loopback)"
+$SSH "$HOST" 'for r in / /@lordbutterfly /@lordbutterfly/wallet /@lordbutterfly/followers /photography/@lordbutterfly/product-photography-attempt-no-1 /topics/photography /inquisition /m/lordbutterfly; do for k in 1 2 3 4 5 6; do curl -s -o /dev/null --max-time 20 "http://127.0.0.1:3000$r?warm=$k$(date +%s%N)"; done; done'
+
 fail=0
 chk() { printf '%-52s %s\n' "$1" "$2"; [ "$2" = FAIL ] && fail=1; return 0; }
 
