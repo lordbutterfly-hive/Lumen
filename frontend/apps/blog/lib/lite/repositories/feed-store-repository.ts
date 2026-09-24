@@ -187,6 +187,17 @@ export async function findStoredFeed(viewer: string): Promise<StoredFeed | null>
   return rows[0] ? mapRow(rows[0]) : null;
 }
 
+/**
+ * Just the freshness stamp of a viewer's stored row: one primary-key read, no
+ * payload. Lets a worker holding an in-memory copy ask "has anyone built a newer
+ * one?" without pulling the hundreds-of-KB row (see `readViewerFeed`).
+ */
+export async function findStoredFeedBuiltAt(viewer: string): Promise<Date | null> {
+  if (!viewer) return null;
+  const { rows } = await query<{ built_at: Date }>(`SELECT built_at FROM lumen_feed_store WHERE viewer = $1`, [viewer]);
+  return rows[0]?.built_at ?? null;
+}
+
 export interface PutStoredFeedInput {
   viewer: string;
   feedVersion: string;

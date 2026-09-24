@@ -4,6 +4,7 @@ import { liteConfig } from '@/blog/lib/lite/config';
 import {
   deleteStoredFeed,
   findStoredFeed,
+  findStoredFeedBuiltAt,
   putStoredFeed,
   sweepStoredFeeds
 } from '@/blog/lib/lite/repositories/feed-store-repository';
@@ -311,7 +312,32 @@ export async function readViewerFeed(viewer: string): Promise<CachedFeed | undef
   if (!viewer) return undefined;
 
   const hot = feedCache.get(viewer);
-  if (hot) return hot;
+  if (hot) {
+    /*
+     * ★★★ A WORKER'S COPY MUST NOT OUTLIVE A NEWER BUILD (2026-09-24). Production
+     * runs three workers and this Map is per worker, with no expiry. A rebuild
+     * (the route's refresh, the home page's, the warmer) writes the store and the
+     * memory of the ONE worker that ran it; the other two kept answering with
+     * whatever they had loaded, until they restarted. Measured for the owner: a
+     * refresh at 13:11Z found a 9.4h-old copy in its worker while the store was
+     * 3.4h old, and at 13:12:45Z another worker served the old page (vikisecrets
+     * #1, 10 of 10 already seen) one minute after the store held the new one.
+     *
+     * So a memory hit now asks the store for its stamp only (one primary-key read,
+     * no payload) and falls through to the full read when the stored row is newer.
+     * 5 s of slack: a build's memory stamp (app clock) and its row's `built_at`
+     * (database clock, stamped at write) differ by a few ms, and two real builds of
+     * one viewer are ~10 s apart at the least. A failed stamp read keeps the old
+     * behaviour: the memory copy is served.
+     */
+    if (!storeEnabled() || pendingInvalidation.has(viewer)) return hot;
+    try {
+      const builtAt = await findStoredFeedBuiltAt(viewer);
+      if (!builtAt || builtAt.getTime() <= hot.at + 5_000) return hot;
+    } catch {
+      return hot;
+    }
+  }
 
   if (!storeEnabled()) return undefined;
   // A delete is queued for this viewer: whatever is still on disk is retired,
