@@ -497,11 +497,11 @@ export async function isQuoteComment(author: string, permlink: string): Promise<
  * marker through the same checks a confirm does (the target, blocks, the parent). A
  * child without a marker is left alone: nothing says which post it is about.
  */
-export async function reconcileHiveQuotes(): Promise<{ checked: number; indexed: number }> {
+export async function reconcileHiveQuotes(): Promise<{ checked: number; indexed: number; refreshed: number }> {
   const publisher = liteConfig.frontendAccount;
-  if (!liteConfig.quoteReblogsEnabled || !publisher) return { checked: 0, indexed: 0 };
+  if (!liteConfig.quoteReblogsEnabled || !publisher) return { checked: 0, indexed: 0, refreshed: 0 };
   const container = await containers.latestPublished(publisher, 'quote');
-  if (!container) return { checked: 0, indexed: 0 };
+  if (!container) return { checked: 0, indexed: 0, refreshed: 0 };
   const res = await fetch(siteConfig.endpoint, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -511,12 +511,29 @@ export async function reconcileHiveQuotes(): Promise<{ checked: number; indexed:
   if (!res.ok) throw new Error(`get_content_replies failed: HTTP ${res.status}`);
   const data = (await res.json()) as { result?: ChainComment[]; error?: unknown };
   if (data.error) throw new Error(`get_content_replies error: ${JSON.stringify(data.error).slice(0, 200)}`);
-  const known = await quotes.indexedCoordsInContainer(container.hiveAuthor, container.hivePermlink);
+  const [known, live] = await Promise.all([
+    quotes.indexedCoordsInContainer(container.hiveAuthor, container.hivePermlink),
+    quotes.liveQuotesInContainer(container.hiveAuthor, container.hivePermlink)
+  ]);
   let checked = 0;
   let indexed = 0;
+  let refreshed = 0;
   for (const reply of data.result ?? []) {
     if (reply.author === publisher || !reply.permlink.startsWith('lumen-rq-')) continue;
-    if (known.has(`${reply.author}/${reply.permlink}`)) continue;
+    const coords = `${reply.author}/${reply.permlink}`;
+    if (known.has(coords)) {
+      // Edited or blanked on another site (PeakD): the card's copy of the text follows
+      // the chain, or the feed and the profile show words that are no longer there.
+      const row = live.get(coords);
+      if (row && isBlanked(reply)) {
+        await quotes.setState(row.quoteId, 'removed', '');
+        refreshed++;
+      } else if (row && captionOf(reply.body) !== row.bodyCache) {
+        await quotes.setState(row.quoteId, 'live', captionOf(reply.body));
+        refreshed++;
+      }
+      continue;
+    }
     const of = parseMeta(reply.json_metadata).quote_of as { author?: unknown; permlink?: unknown } | undefined;
     if (typeof of?.author !== 'string' || typeof of?.permlink !== 'string') continue;
     checked++;
@@ -525,7 +542,7 @@ export async function reconcileHiveQuotes(): Promise<{ checked: number; indexed:
     const result = await confirmHiveQuote(quoter, reply.author, of.author, of.permlink).catch(() => null);
     if (result?.ok) indexed++;
   }
-  if (indexed > 0) logger.info({ container: container.hivePermlink, checked, indexed }, 'quote reconcile indexed missed quotes');
-  return { checked, indexed };
+  if (indexed > 0 || refreshed > 0) logger.info({ container: container.hivePermlink, checked, indexed, refreshed }, 'quote reconcile');
+  return { checked, indexed, refreshed };
 }
 

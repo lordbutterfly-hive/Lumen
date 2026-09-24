@@ -17,7 +17,7 @@
  *       when there is nothing (or only a blank) on chain
  *   S8  reconcile: a Hive user's comment that was never confirmed is indexed from the
  *       quote container's replies; a known one, one without a marker, or a lite one is
- *       left alone
+ *       left alone; an edit or a blank made on another site updates or removes the card
  *   S7  feed decoration: a reblog entry gets its reblogger's LIVE comment; no comment,
  *       no reblog or a pending one get nothing; an upgraded account is found by its id
  *
@@ -231,7 +231,17 @@ async function main(): Promise<void> {
   check('the unconfirmed comment is indexed, live', r1.indexed === 1 && (await quotes.findActive({ hive: 'zoe' }, 'bob', 'p9'))?.state === 'live', JSON.stringify(r1));
   check('one without a marker is left alone', !(await quotes.findActive({ hive: 'yan' }, 'bob', 'p8')));
   const r2 = await reconcileHiveQuotes();
-  check('a second run finds nothing new', r2.indexed === 0 && r2.checked === 0, JSON.stringify(r2));
+  check('a second run finds nothing new', r2.indexed === 0 && r2.checked === 0 && r2.refreshed === 0, JSON.stringify(r2));
+  // Edited on another site: the card text follows the chain.
+  put('zoe', zoePermlink, { ...chain.get(`zoe/${zoePermlink}`), body: 'Edited on PeakD.' });
+  const r3 = await reconcileHiveQuotes();
+  check('an edit made elsewhere refreshes the card text', r3.refreshed === 1 && (await quotes.findActive({ hive: 'zoe' }, 'bob', 'p9'))?.bodyCache === 'Edited on PeakD.', JSON.stringify(r3));
+  // Blanked on another site: the quote is removed, not shown with its old words.
+  put('zoe', zoePermlink, { ...chain.get(`zoe/${zoePermlink}`), body: '[deleted]' });
+  const r4 = await reconcileHiveQuotes();
+  check('a blank made elsewhere removes the quote', r4.refreshed === 1 && !(await quotes.findActive({ hive: 'zoe' }, 'bob', 'p9')), JSON.stringify(r4));
+  const r5 = await reconcileHiveQuotes();
+  check('...and a further run changes nothing', r5.refreshed === 0 && r5.indexed === 0, JSON.stringify(r5));
 
   await query('TRUNCATE lumen_quote, lumen_container, lumen_block, rate_counter, lumen_user CASCADE');
   console.log(failures === 0 ? `PASS — ${checks} checks` : `FAIL — ${failures} of ${checks} checks failed`);

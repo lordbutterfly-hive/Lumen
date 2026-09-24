@@ -115,6 +115,8 @@ export function quoteErrorText(error: unknown): string {
     case 'unauthorized':
     case 'hive_login_required':
       return 'Please sign in again.';
+    case 'not_on_chain':
+      return "Hive hasn't shown your comment yet. Please try again in a minute.";
     default:
       // A server code nobody wrote words for reads as a raw token ("server_error");
       // a wallet's own message ("user rejected the request") is already readable.

@@ -163,6 +163,25 @@ async function main(): Promise<void> {
     check('never seen on chain after the retries: a refusal, not a silent success', e instanceof QuoteFlowError && e.code === 'not_on_chain');
   }
 
+  {
+    // Found on the testnet: an edit confirmed while the node still had the OLD text.
+    const { deps, calls } = fake({ confirms: [ok({ bodyCache: 'the OLD caption', state: 'live' }), ok({ bodyCache: 'the OLD caption', state: 'live' }), ok({ bodyCache: 'Great read.', state: 'live' })] });
+    const r = await publishQuote(deps, { ...input, alreadyReblogged: true });
+    check('an edit: the OLD text on chain is not "saved"; asked again until the new text shows', r.bodyCache === 'Great read.' && calls.confirms === 3 && calls.sleeps.length === 2, `${calls.confirms} ${r.bodyCache}`);
+  }
+  {
+    const { deps } = fake({ confirms: [ok({ bodyCache: 'the OLD caption', state: 'live' })] });
+    const e = await rejects(publishQuote(deps, { ...input, alreadyReblogged: true }));
+    check('an edit that never shows up: a refusal, not "saved" with the old text', e instanceof QuoteFlowError && e.code === 'not_on_chain');
+  }
+  {
+    // The caption itself holds the cut line: the server caches the text BEFORE it.
+    const tricky = 'Line one\n\nReblogged from somewhere I liked';
+    const { deps } = fake({ confirms: [ok({ bodyCache: 'Line one', state: 'live' })] });
+    const r = await publishQuote(deps, { ...input, caption: tricky });
+    check("a caption the server's rule shortens still matches (same rule on both sides)", r.bodyCache === 'Line one');
+  }
+
   console.log('remove');
   {
     const { deps, calls } = fake({});

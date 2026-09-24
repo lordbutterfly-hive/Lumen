@@ -23,8 +23,11 @@ export function quoteCaption(body: string): string {
 
 /** Hive's "one comment every 3 seconds per account" (hive_evaluator_social.cpp:213). */
 const COMMENT_INTERVAL_WAIT_MS = 3500;
-/** The node answering the server may be a block behind the one that took the broadcast. */
-const CONFIRM_TRIES = 4;
+/**
+ * The node answering the server may be a block behind the one that took the broadcast.
+ * 6 tries 1.5 s apart cover two 3-second blocks.
+ */
+const CONFIRM_TRIES = 6;
 const CONFIRM_GAP_MS = 1500;
 
 /** A post's ON-CHAIN coordinates (for a Lumen post: the publishing account, never the handle). */
@@ -103,12 +106,24 @@ async function signWithIntervalRetry(deps: QuoteFlowDeps, sign: () => Promise<vo
   }
 }
 
-/** Ask until the server sees it on chain (node lag), then give its answer. */
-async function confirmWithLag(deps: QuoteFlowDeps, target: ChainRef) {
+/**
+ * Ask until the server sees THIS text on chain (node lag), then give its answer.
+ *
+ * An EDIT is the case that needs the text check: the comment already exists, so a node a
+ * block behind answers with the OLD text, the server caches that, and the feed and the
+ * profile kept showing the old comment while the popup said "saved" (found on the
+ * testnet, 2026-09-24). Still the old text after every try: a refusal, never a success.
+ */
+async function confirmWithLag(deps: QuoteFlowDeps, target: ChainRef, expected: string) {
+  const pending = (r: ApiResult<{ bodyCache: string; state: string }>) =>
+    r.ok ? r.value.bodyCache !== expected : r.error === 'not_on_chain';
   let last = await deps.confirm(target);
-  for (let i = 1; i < CONFIRM_TRIES && !last.ok && last.error === 'not_on_chain'; i++) {
+  for (let i = 1; i < CONFIRM_TRIES && pending(last); i++) {
     await deps.sleep(CONFIRM_GAP_MS);
     last = await deps.confirm(target);
+  }
+  if (last.ok && last.value.bodyCache !== expected) {
+    throw new QuoteFlowError('not_on_chain', 'Hive does not show the new text yet.');
   }
   return last;
 }
@@ -134,6 +149,9 @@ export async function publishQuote(
   const prepared = await deps.prepare(input.target);
   if (!prepared.ok) refused(prepared);
   const plan = prepared.value;
+  const body = input.bodyFor(caption);
+  // What the server's card cache says once the chain has THIS text (its `captionOf`).
+  const expected = quoteCaption(body).slice(0, QUOTE_MAX_CHARS);
   const sign = () =>
     deps.signQuote({
       reblog: input.alreadyReblogged ? null : input.target,
@@ -141,7 +159,7 @@ export async function publishQuote(
         parentAuthor: plan.parentAuthor,
         parentPermlink: plan.parentPermlink,
         permlink: plan.permlink,
-        body: input.bodyFor(caption),
+        body,
         jsonMetadata: plan.jsonMetadata,
         edit: plan.edit
       }
@@ -151,11 +169,11 @@ export async function publishQuote(
     await signWithIntervalRetry(deps, sign);
   } catch (error) {
     const landed = await deps.confirm(input.target).catch(() => null);
-    if (landed?.ok && landed.value.state === 'live' && landed.value.bodyCache === caption) return landed.value;
+    if (landed?.ok && landed.value.state === 'live' && landed.value.bodyCache === expected) return landed.value;
     throw error;
   }
 
-  const confirmed = await confirmWithLag(deps, input.target);
+  const confirmed = await confirmWithLag(deps, input.target, expected);
   if (!confirmed.ok) refused(confirmed);
   return confirmed.value;
 }

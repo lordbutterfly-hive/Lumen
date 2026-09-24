@@ -287,6 +287,16 @@ export async function indexedCoordsInContainer(containerAuthor: string, containe
   return new Set(rows.map((r) => `${r.quote_author}/${r.quote_permlink}`));
 }
 
+/** The LIVE quotes under one container, keyed `author/permlink` (the reconciler's text check). */
+export async function liveQuotesInContainer(containerAuthor: string, containerPermlink: string): Promise<Map<string, LumenQuote>> {
+  const { rows } = await query<QuoteRow>(
+    `SELECT * FROM lumen_quote
+      WHERE container_author = $1 AND container_permlink = $2 AND state = 'live'`,
+    [containerAuthor, containerPermlink]
+  );
+  return new Map(rows.map((r) => [`${r.quote_author}/${r.quote_permlink}`, map(r)]));
+}
+
 /** Live quotes of one post, newest first (the post page's "N quotes" list). */
 export async function liveQuotesOfTarget(targetAuthor: string, targetPermlink: string, limit = 20): Promise<LumenQuote[]> {
   const { rows } = await query<QuoteRow>(
