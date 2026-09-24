@@ -3,6 +3,8 @@ import { getLogger } from '@ui/lib/logging';
 import { getByText } from '@transaction/lib/hive-api';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
+import { filterContainerEntries } from '@/blog/lib/moderation/container-posts';
+import { containerFamilyOf } from '@/blog/lib/lite/container-family';
 import { ensureSquatterList } from '@/blog/lib/lite/moderation/squatter-list';
 import { hivesenseSearchPosts } from '@/blog/lib/search/hivesense-search';
 
@@ -99,7 +101,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
      * filters nobody.
      */
     await ensureSquatterList();
-    const visible = filterBannedEntries(merged);
+    // Reblog comments and Lumen's container posts are not search results (quote
+    // reblog decision D12): a reblog comment is found through the post it is about.
+    const visible = filterContainerEntries(filterBannedEntries(merged)).filter(
+      (e) => !(e.depth === 1 && containerFamilyOf(e.parent_permlink) === 'quote')
+    );
     return NextResponse.json(visible, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'search lookup failed for "%s"', pattern);
