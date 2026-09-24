@@ -15,6 +15,9 @@ import {
 import { ParentRef } from '@/blog/lib/lite/types';
 import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
+import { quoteReblogsEnabled } from '@/blog/lib/quote-reblog/quote-flag';
+import { liteReblogItems, mergeLiteProfile, parseLiteCursor } from '@/blog/lib/profile/lite-profile';
+import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
 
 const logger = getLogger('app');
 
@@ -238,7 +241,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Not a Lumen account: an empty list, not a 404. This route is asked about
     // every profile the reader opens, most of which are ordinary Hive accounts.
     if (!user) return NextResponse.json({ entries: [] });
-    const list = await getLiteUserPosts(user.userId, { limit, before, kind, visibleOnly: true });
+    // With reblog comments on, the Posts tab also lists their reblogs (lib/profile/lite-profile.ts).
+    const mergedProfile = kind === 'posts' && quoteReblogsEnabled();
+    const cursor = mergedProfile ? parseLiteCursor(before) : null;
+    const list = await getLiteUserPosts(user.userId, { limit, before: cursor ? cursor.postsBefore : before, kind, visibleOnly: true });
     // ONE user query for the page, not one per post. Names are resolved live rather
     // than read off the row so an upgraded author's back catalogue shows their new
     // Hive name (see render/current-name.ts).
@@ -327,13 +333,27 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     //
     // ★ DEGRADES OPEN, matching every other effect-A site: a Lumen DB hiccup must
     // not blank this profile tab.
+    let nextBefore: string | null | undefined;
+    if (mergedProfile && cursor) {
+      const createdById = new Map(list.map((p) => [p.postId, p.createdAt.getTime()]));
+      const own = entries.map((entry) => ({ entry, ms: createdById.get(litePostIdOf(entry) ?? '') ?? 0 }));
+      const reblogs = await liteReblogItems(user.userId, user.displayName, cursor.time, limit).catch((error) => {
+        logger.warn(error, 'lite profile reblogs not merged for %s', author);
+        return { items: [], full: false };
+      });
+      await attachLiteIdentities(reblogs.items.map((i) => i.entry)).catch(() => undefined);
+      const merged = mergeLiteProfile(own, reblogs.items, limit, list.length >= limit, reblogs.full);
+      entries = merged.entries;
+      nextBefore = merged.nextBefore;
+    }
+
     const viewerSession = await getLiteSession();
     const blockedKeys = await viewerBlockedKeySet(viewerSession.user).catch(() => new Set<string>());
     if (blockedKeys.size > 0) {
       entries = await filterBlockedForViewer(entries, blockedKeys);
     }
 
-    return NextResponse.json({ entries });
+    return NextResponse.json(nextBefore === undefined ? { entries } : { entries, nextBefore });
   } catch (error) {
     logger.error(error, 'Lite author posts failed');
     return NextResponse.json({ error: 'server_error' }, { status: 500 });

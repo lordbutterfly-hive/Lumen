@@ -140,6 +140,8 @@ export interface QuoteOverlay {
   permlink: string;
   /** The comment's text, without the link line Lumen adds on chain. */
   body: string;
+  /** A lite quote Lumen has not published to Hive yet ("Publishing to Hive"). */
+  pending?: boolean;
 }
 
 /** The person behind a Lumen proxy post, and the account that actually signed it. */

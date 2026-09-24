@@ -73,7 +73,7 @@ import { CommentOp, PostBroadcaster, setBroadcaster } from '../publisher/broadca
 import { buildPermlink } from '../publisher/permlink';
 import { runPublisherOnce } from '../publisher/worker';
 import { createLitePost } from './post-service';
-import { removeLiteQuote, saveLiteQuote } from './quote-service';
+import { isQuoteComment, removeLiteQuote, saveLiteQuote } from './quote-service';
 import { moderatePost, moderateQuote, moderateUser } from '../moderation/moderation-service';
 
 const PUB = liteConfig.frontendAccount;
@@ -271,6 +271,7 @@ async function main(): Promise<void> {
   put('dave', 'lumen-rq-0000000000000000', { parent_author: PUB, parent_permlink: 'lumen-q-01bbb', depth: 1 });
   const qq = await saveLiteQuote(sessionOf(alice), SESSION_REF, 'dave', 'lumen-rq-0000000000000000', 'x');
   check("a quote: 'is_a_quote' (A22)", !qq.ok && qq.reason === 'is_a_quote');
+  check("a plain reblog of a reblog comment is refused too (A22): Hive user's and Lumen's", (await isQuoteComment('dave', 'lumen-rq-0000000000000000')) && (await isQuoteComment(PUB, q1!.quotePermlink)) && !(await isQuoteComment('bob', 'how-rc-works')));
   await block({ hive: 'frank' }, { userId: erin });
   put('frank', 'mine');
   const blk = await saveLiteQuote(sessionOf(erin), SESSION_REF, 'frank', 'mine', 'x');

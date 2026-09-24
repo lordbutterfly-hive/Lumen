@@ -75,6 +75,41 @@ export async function unreblog(rebloggerUserId: string, author: string, permlink
  * so a reload showed the post as never voted. One statement rather than four, because
  * the vote button asks per post and a feed asks per card.
  */
+/**
+ * A Lumen account's own active reblogs, newest first, older than `before` when given
+ * (the lite profile lists them with their posts; quote reblog spec v2 3.3).
+ */
+export async function listReblogsOf(
+  rebloggerUserId: string,
+  before: Date | null,
+  limit: number
+): Promise<{ targetAuthor: string; targetPermlink: string; createdAt: Date }[]> {
+  const { rows } = await query<{ target_author: string; target_permlink: string; created_at: Date }>(
+    `SELECT target_author, target_permlink, created_at FROM lumen_reblog
+      WHERE reblogger_user_id = $1 AND active AND ($2::timestamptz IS NULL OR created_at < $2)
+      ORDER BY created_at DESC
+      LIMIT $3`,
+    [rebloggerUserId, before, Math.max(1, Math.min(100, limit))]
+  );
+  return rows.map((r) => ({ targetAuthor: r.target_author, targetPermlink: r.target_permlink, createdAt: r.created_at }));
+}
+
+/** Several Lumen accounts' newest active reblogs (a lite viewer's Following feed, D9). */
+export async function listReblogsOfUsers(
+  userIds: string[],
+  limit: number
+): Promise<{ userId: string; targetAuthor: string; targetPermlink: string; createdAt: Date }[]> {
+  if (userIds.length === 0) return [];
+  const { rows } = await query<{ reblogger_user_id: string; target_author: string; target_permlink: string; created_at: Date }>(
+    `SELECT reblogger_user_id, target_author, target_permlink, created_at FROM lumen_reblog
+      WHERE reblogger_user_id = ANY($1::text[]) AND active
+      ORDER BY created_at DESC
+      LIMIT $2`,
+    [userIds, Math.max(1, Math.min(100, limit))]
+  );
+  return rows.map((r) => ({ userId: r.reblogger_user_id, targetAuthor: r.target_author, targetPermlink: r.target_permlink, createdAt: r.created_at }));
+}
+
 export interface LiteEngagement {
   /** The user's own active vote weight (-10000..10000), or null if they have none. */
   weight: number | null;

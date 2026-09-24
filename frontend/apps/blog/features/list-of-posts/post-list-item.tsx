@@ -209,12 +209,16 @@ const PostListItem = memo(
           {post._quote ? (
             <div className="pb-1" data-testid="list-item-quote">
               <p className="whitespace-pre-line font-lora text-read text-ink-2">{post._quote.body}</p>
-              <Link
-                href={`/lumen/@${post._quote.author}/${post._quote.permlink}`}
-                className="mt-1 inline-block font-ui text-caption text-ink-14 hover:text-ink-2 hover:underline"
-              >
-                Reply
-              </Link>
+              {post._quote.pending ? (
+                <span className="mt-1 inline-block font-ui text-caption text-ink-14">Publishing to Hive</span>
+              ) : (
+                <Link
+                  href={`/lumen/@${post._quote.author}/${post._quote.permlink}`}
+                  className="mt-1 inline-block font-ui text-caption text-ink-14 hover:text-ink-2 hover:underline"
+                >
+                  Reply
+                </Link>
+              )}
             </div>
           ) : null}
           <CardHeader className="px-0 py-1">

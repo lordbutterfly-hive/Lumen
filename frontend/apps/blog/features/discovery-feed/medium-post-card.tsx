@@ -1053,13 +1053,19 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
           <p className="whitespace-pre-line font-lora text-read text-ink-2" data-testid="medium-card-quote-text">
             {post._quote.body}
           </p>
-          <Link
-            href={`/lumen/@${post._quote.author}/${post._quote.permlink}`}
-            className="mt-1 inline-block font-ui text-caption text-ink-14 hover:text-ink-2 hover:underline"
-            data-testid="medium-card-quote-reply"
-          >
-            Reply
-          </Link>
+          {post._quote.pending ? (
+            <span className="mt-1 inline-block font-ui text-caption text-ink-14" data-testid="medium-card-quote-pending">
+              Publishing to Hive
+            </span>
+          ) : (
+            <Link
+              href={`/lumen/@${post._quote.author}/${post._quote.permlink}`}
+              className="mt-1 inline-block font-ui text-caption text-ink-14 hover:text-ink-2 hover:underline"
+              data-testid="medium-card-quote-reply"
+            >
+              Reply
+            </Link>
+          )}
         </div>
       ) : null}
 

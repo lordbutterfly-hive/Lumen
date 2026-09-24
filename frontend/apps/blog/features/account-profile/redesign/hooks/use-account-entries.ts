@@ -46,6 +46,8 @@ const BRIDGE_SORT_FOR_QUERY: Record<AccountEntryQuery, string> = {
 export interface AccountEntriesPage {
   entries: Entry[];
   nextCursor: { author: string; permlink: string; blog?: number } | null;
+  /** Lite profiles merged with reblogs: the server's next cursor (null = the end). */
+  liteBefore?: string | null;
   hasMore: boolean;
 }
 
@@ -115,12 +117,12 @@ async function fetchLiteAuthorEntries(
   username: string,
   query: AccountEntryQuery,
   before?: string
-): Promise<Entry[]> {
+): Promise<{ entries: Entry[]; nextBefore?: string | null }> {
   const params = new URLSearchParams({ author: username, kind: query, limit: '20' });
   if (before) params.set('before', before);
   const res = await fetch(`/api/lite/posts?${params.toString()}`);
   if (!res.ok) throw new Error(`lite posts ${res.status}`);
-  const body = (await res.json()) as { entries?: Entry[]; degraded?: string | boolean };
+  const body = (await res.json()) as { entries?: Entry[]; nextBefore?: string | null; degraded?: string | boolean };
   // ★ THROW ON `degraded`, EXACTLY AS THE CHAIN BRANCH DOES (2026-08-13,
   // adversarial review S2). `account-posts-fetch.ts` already refuses to turn a
   // failed read into "no posts"; this lite twin was answering `[]` for the same
@@ -129,7 +131,7 @@ async function fetchLiteAuthorEntries(
   // error branch the caller already has (`profile-comments-list.tsx`,
   // `profile-posts-list.tsx`); a genuinely empty lite account never sets the flag.
   if (body.degraded) throw new Error(`lite posts degraded: ${body.degraded}`);
-  return body.entries ?? [];
+  return { entries: body.entries ?? [], ...('nextBefore' in body ? { nextBefore: body.nextBefore ?? null } : {}) };
 }
 
 export function useAccountEntries(
@@ -166,8 +168,13 @@ export function useAccountEntries(
     // now reports `hasMore` and `nextCursor` from the RAW page and this follows them.
     queryFn: async ({ pageParam }: { pageParam?: PageParam }): Promise<AccountEntriesPage> => {
       if (lite) {
-        const liteEntries = (await fetchLiteAuthorEntries(username, query, pageParam?.permlink)) ?? [];
-        return { entries: liteEntries, nextCursor: null, hasMore: liteEntries.length > 0 };
+        const lite = await fetchLiteAuthorEntries(username, query, pageParam?.permlink);
+        return {
+          entries: lite.entries,
+          nextCursor: null,
+          hasMore: lite.nextBefore !== undefined ? lite.nextBefore !== null : lite.entries.length > 0,
+          ...(lite.nextBefore !== undefined ? { liteBefore: lite.nextBefore } : {})
+        };
       }
       return await fetchAccountPostsPage(
         bridgeSort(query),
@@ -187,6 +194,8 @@ export function useAccountEntries(
       // server-side cursor, so it still reads its own last VISIBLE entry — correct
       // there, because that route applies no filter this hook cannot see.
       if (lite) {
+        // Merged with reblogs: the server says where the next page starts.
+        if (lastPage.liteBefore !== undefined) return lastPage.liteBefore ? { permlink: lastPage.liteBefore } : undefined;
         const last = lastPage.entries[lastPage.entries.length - 1];
         if (!last?.permlink) return undefined;
         const id = /^(?:lite|lumen)-(.+)$/i.exec(last.permlink)?.[1];

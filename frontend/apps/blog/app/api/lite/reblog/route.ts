@@ -6,7 +6,7 @@ import { requireActiveLiteUser, requireLiteUser } from '@/blog/lib/lite/http/act
 import { enforceReblogRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { reblog, unreblog } from '@/blog/lib/lite/repositories/engagement-repository';
 import { checkEngagementTarget } from '@/blog/lib/lite/content/engagement-target';
-import { removeLiteQuote } from '@/blog/lib/lite/content/quote-service';
+import { isQuoteComment, removeLiteQuote } from '@/blog/lib/lite/content/quote-service';
 
 const logger = getLogger('app');
 
@@ -41,6 +41,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const actor = undo ? await requireLiteUser(session.user, session) : await requireActiveLiteUser(session.user, session);
   if (!actor.ok) return actor.response;
   const user = actor.user;
+
+  // No reblog of a reblog comment (owner decision 8, spec v2 8.4 A22): a Hive user's
+  // (`lumen-rq-`) or a Lumen one (a lite post that is a quote).
+  if (!undo && (await isQuoteComment(author.toLowerCase(), permlink))) {
+    return NextResponse.json({ error: 'quote_target_not_allowed' }, { status: 409 });
+  }
 
   // F-L34 — undo is a withdrawal and stays ungated; adding a reblog is not.
   if (!undo) {

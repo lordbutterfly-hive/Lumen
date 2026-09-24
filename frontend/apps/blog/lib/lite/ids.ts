@@ -53,3 +53,25 @@ export function ulid(): string {
 export function nonce(): string {
   return randomBytes(32).toString('base64url');
 }
+
+/**
+ * The smallest ULID of millisecond `ms`: every id minted at or after `ms` sorts at or
+ * above it, so `post_id < ulidFloor(t)` means "created before t". Used by the lite
+ * profile's merged paging (own posts and reblogs share one time cursor).
+ */
+export function ulidFloor(ms: number): string {
+  return encodeTime(ms) + '0'.repeat(16);
+}
+
+/** The millisecond a ULID was minted at (its first 10 Crockford characters). */
+export function ulidTime(id: string): number | null {
+  const head = id.slice(0, TIME_CHARS).toUpperCase();
+  if (head.length !== TIME_CHARS) return null;
+  let ms = 0;
+  for (const ch of head) {
+    const v = CROCKFORD.indexOf(ch);
+    if (v < 0) return null;
+    ms = ms * 32 + v;
+  }
+  return ms;
+}

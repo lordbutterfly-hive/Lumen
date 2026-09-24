@@ -1,5 +1,6 @@
 import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
 import { isContainerPermlink } from '@/blog/lib/lite/publisher/container';
+import { containerFamilyOf } from '@/blog/lib/lite/container-family';
 
 /**
  * ★★★ A COMMENT URL OPENS THE POST AND SCROLLS TO THE COMMENT — there is no
@@ -38,6 +39,9 @@ export interface RedirectableEntry {
   url?: string;
   permlink?: string;
   json_metadata?: unknown;
+  author?: string;
+  parent_author?: string;
+  parent_permlink?: string;
 }
 
 export function commentPageRedirectTarget(postData: RedirectableEntry | null | undefined): string | null {
@@ -50,6 +54,11 @@ export function commentPageRedirectTarget(postData: RedirectableEntry | null | u
   if (!url.startsWith('/') || hash <= 0) return null;
   const rootPath = url.slice(0, hash);
   const rootPermlink = rootPath.slice(rootPath.lastIndexOf('/') + 1);
+  // A reply straight under a reblog comment (quote reblog spec v2 6.2) opens the
+  // comment's own page at that reply; the quote container itself is never a page.
+  if (depth === 2 && containerFamilyOf(rootPermlink) === 'quote' && postData.parent_author && postData.parent_permlink && postData.author && postData.permlink) {
+    return `/lumen/@${postData.parent_author}/${postData.parent_permlink}#@${postData.author}/${postData.permlink}`;
+  }
   if (!rootPermlink || isContainerPermlink(rootPermlink)) return null;
   return url;
 }

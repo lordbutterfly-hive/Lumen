@@ -12,6 +12,10 @@ import { resolvePublicNames, resolvePublicAvatars } from '@/blog/lib/lite/render
 import { filterBlockedForViewer, viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { getAccountPosts } from '@transaction/lib/bridge-api';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
+import { quoteReblogsEnabled } from '@/blog/lib/quote-reblog/quote-flag';
+import { followeeReblogEntries } from '@/blog/lib/profile/lite-profile';
+import { attachQuotes } from '@/blog/lib/lite/content/quote-attach';
+import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
 import type { User } from '@smart-signer/types/common';
 
 const logger = getLogger('app');
@@ -69,11 +73,6 @@ function cachePut(viewer: string, entries: Entry[]): void {
     if (oldest !== undefined) cache.delete(oldest);
   }
   cache.set(viewer, { entries, at: Date.now() });
-}
-
-/** Newest first, on the field every Entry carries. */
-function byCreatedDesc(a: Entry, b: Entry): number {
-  return new Date(b.created).getTime() - new Date(a.created).getTime();
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -192,8 +191,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           // weaker second retry loop stacked on top of a stronger one -- and
           // this route already runs one such call per author in parallel via
           // `Promise.all` below, so the doubling applied to every author at once.
-          const r = await getAccountPosts('posts', author, author, '', '');
-          return { ok: true, entries: (r ?? []).slice(0, PER_CHAIN_AUTHOR) };
+          // With reblog comments on, also their reblogs (D9): the blog stream carries
+          // them (`reblogged_by`); the posts stream carries their community posts.
+          const [own, blog] = await Promise.all([
+            getAccountPosts('posts', author, author, '', ''),
+            quoteReblogsEnabled() ? getAccountPosts('blog', author, author, '', '').catch(() => null) : Promise.resolve(null)
+          ]);
+          const reblogs = (blog ?? []).filter((e) => e.author !== author).slice(0, PER_CHAIN_AUTHOR);
+          return { ok: true, entries: [...(own ?? []).slice(0, PER_CHAIN_AUTHOR), ...reblogs] };
         } catch (error) {
           // One unreachable author must not empty the whole feed.
           logger.warn('following feed: chain author %s failed: %o', author, error);
@@ -224,7 +229,27 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // See LiteIdentity.avatarUrl.
     const avatars = await resolvePublicAvatars(liteRows);
     const liteEntries = liteRows.map((p) => dbPostToEntry(p, names.get(p.postId), undefined, avatars.get(p.postId)));
-    const entries = [...liteEntries, ...chainPages.flat()].sort(byCreatedDesc).slice(0, limit);
+    // D9: Lumen followees' reblogs (with their comments), placed by when they reblogged.
+    const liteReblogs = quoteReblogsEnabled() && liteIds.length > 0 ? await followeeReblogEntries(liteIds, limit).catch(() => []) : [];
+    let entries = [
+      ...[...liteEntries, ...chainPages.flat()].map((entry) => ({ entry, ms: new Date(entry.created).getTime() })),
+      ...liteReblogs
+    ]
+      .sort((a, b) => b.ms - a.ms)
+      .map((t) => t.entry)
+      .slice(0, limit);
+    if (quoteReblogsEnabled()) {
+      await attachLiteIdentities(entries).catch(() => undefined);
+      // Hive followees' reblogs get their comment here (a Lumen reblog already has it);
+      // a quote withheld by D7 leaves the page.
+      const plain = entries;
+      entries = await attachQuotes(plain.filter((e) => !e._quote))
+        .then((decorated) => {
+          const kept = new Set<Entry>(decorated);
+          return plain.filter((e) => e._quote || kept.has(e));
+        })
+        .catch(() => plain);
+    }
 
     // ★ THE CACHE STORES THE RAW (UNFILTERED) PAGE, keyed per-viewer. Filtering
     // is applied on every read (here and on the cache-hit branch above) rather

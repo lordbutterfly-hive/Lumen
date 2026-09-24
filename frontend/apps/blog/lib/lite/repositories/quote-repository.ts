@@ -240,6 +240,43 @@ export async function liveQuotesForPairs(
   return out;
 }
 
+/**
+ * One quoter's quotes on these posts that a reader may see: live, and, for their own
+ * profile, still-publishing lite quotes (spec v2 3.5, shown with "Publishing to Hive").
+ */
+export async function visibleQuotesOfQuoter(
+  quoterKey: string,
+  targets: { author: string; permlink: string }[]
+): Promise<Map<string, LumenQuote>> {
+  const out = new Map<string, LumenQuote>();
+  if (targets.length === 0) return out;
+  const { rows } = await query<QuoteRow>(
+    `SELECT q.* FROM lumen_quote q
+       JOIN unnest($2::text[], $3::text[]) AS t(a, pl) ON q.target_author = t.a AND q.target_permlink = t.pl
+      WHERE q.quoter_key = $1 AND q.state IN ('live', 'pending')`,
+    [quoterKey, targets.map((t) => t.author), targets.map((t) => t.permlink)]
+  );
+  for (const r of rows) out.set(`${r.target_author}/${r.target_permlink}`, map(r));
+  return out;
+}
+
+/** Visible (live or still-publishing) quotes for (quoter, post) pairs; keyed `<quoterKey>|<author>/<permlink>`. */
+export async function quotesForQuoterTargets(
+  pairs: { quoterKey: string; author: string; permlink: string }[]
+): Promise<Map<string, LumenQuote>> {
+  const out = new Map<string, LumenQuote>();
+  if (pairs.length === 0) return out;
+  const { rows } = await query<QuoteRow>(
+    `SELECT q.* FROM lumen_quote q
+       JOIN unnest($1::text[], $2::text[], $3::text[]) AS p(k, a, pl)
+         ON q.quoter_key = p.k AND q.target_author = p.a AND q.target_permlink = p.pl
+      WHERE q.state IN ('live', 'pending')`,
+    [pairs.map((p) => p.quoterKey), pairs.map((p) => p.author), pairs.map((p) => p.permlink)]
+  );
+  for (const r of rows) out.set(`${r.quoter_key}|${r.target_author}/${r.target_permlink}`, map(r));
+  return out;
+}
+
 /** Live quotes of one post, newest first (the post page's "N quotes" list). */
 export async function liveQuotesOfTarget(targetAuthor: string, targetPermlink: string, limit = 20): Promise<LumenQuote[]> {
   const { rows } = await query<QuoteRow>(
