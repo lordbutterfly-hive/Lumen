@@ -40,6 +40,12 @@ export const liteConfig = {
   /** Master kill-switch — lite accounts stay dark until infra + legal sign-off. */
   enabled: process.env.LITE_ACCOUNTS_ENABLED === 'yes',
   /**
+   * Quote reblogs ("reblog with a comment", spec LUMEN-DOCS/SPEC-QUOTE-REBLOG-v2). OFF by
+   * default and switched on LAST, after migrations 0049/0050 and the recsys guards are
+   * live. Read by the publisher (keeps a quote container published) and the quote API.
+   */
+  quoteReblogsEnabled: process.env.LITE_QUOTE_REBLOGS_ENABLED === 'yes',
+  /**
    * Session lifetime — matches the oidc.ts 14-day convention (spec §A.5).
    *
    * WIRED AGAIN (F-L37, 2026-08-11), mechanically different from before. J6

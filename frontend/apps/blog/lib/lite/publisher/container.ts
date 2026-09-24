@@ -132,6 +132,22 @@ function permanentContainerFailure(message: string): boolean {
   );
 }
 
+/**
+ * Keep one quote container PUBLISHED (quote reblog spec v2 7.3), for Hive users, who sign
+ * their reblog comment under it themselves and so never reserve a slot first. Called
+ * from the publisher's idle tick, inside the same lock as every other broadcast. Rolls
+ * at 90% so the next root is on chain before the current one fills. 'off' when quote
+ * reblogs are switched off or no publishing account is configured.
+ */
+export async function maintainQuoteContainer(broadcaster: PostBroadcaster): Promise<ContainerReadiness | 'off'> {
+  const author = liteConfig.frontendAccount;
+  if (!liteConfig.quoteReblogsEnabled || !author) return 'off';
+  const max = liteConfig.containerMaxChildren;
+  const live = await containers.ensureLiveContainer(author, 'quote', max, Math.max(1, Math.floor(max * 0.9)));
+  if (live.publishedAt) return 'ready';
+  return ensureContainerPublished(broadcaster, author, live.hivePermlink);
+}
+
 export async function ensureContainerPublished(
   broadcaster: PostBroadcaster,
   author: string,

@@ -200,3 +200,81 @@ export async function findLive(hiveAuthor: string, family: ContainerFamily = 'li
   );
   return res.rows[0] ? map(res.rows[0]) : null;
 }
+
+/*
+ * ── Quote container SUPPLY (2026-09-24, quote reblog spec v2 7.3) ─────────────────────
+ * A Hive user signs their own reblog comment under a quote container, so one must
+ * already be PUBLISHED when they ask; nobody reserves a slot for them first. Only the
+ * publisher holds the posting key, so the publisher keeps one ready from its idle tick
+ * (`maintainQuoteContainer` in publisher/container.ts). These are its primitives.
+ */
+
+/**
+ * The container a Hive user's reblog comment should go under: the newest PUBLISHED one
+ * of the family, open or already closed for reservations (a closed container still
+ * accepts replies on chain; closing only stops new reservations). Null when none has
+ * been published yet.
+ */
+export async function latestPublished(hiveAuthor: string, family: ContainerFamily): Promise<LumenContainer | null> {
+  const res = await query<ContainerRow>(
+    `SELECT * FROM lumen_container
+      WHERE hive_author = $1 AND ${familyPredicate(family)}
+        AND published_at IS NOT NULL AND status IN ('open', 'closed')
+      ORDER BY published_at DESC
+      LIMIT 1`,
+    [hiveAuthor]
+  );
+  return res.rows[0] ? map(res.rows[0]) : null;
+}
+
+/**
+ * Make sure a live container of the family exists, opening a fresh row (child_count 0,
+ * nothing reserved) when there is none or the live one has reached `rollAt` children.
+ * Rolling EARLY is the point: the next root is published while the current one still
+ * has room, so a Hive user never waits on Hive's five-minute root-post rule. Returns
+ * the live container (possibly still 'opening', i.e. not on chain yet).
+ */
+export async function ensureLiveContainer(
+  hiveAuthor: string,
+  family: ContainerFamily,
+  maxChildren: number,
+  rollAt: number
+): Promise<LumenContainer> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const live = await findLive(hiveAuthor, family);
+    if (live && live.childCount < rollAt) return live;
+    if (live) {
+      await query(
+        `UPDATE lumen_container SET status = 'closed', closed_at = now()
+          WHERE container_id = $1 AND status IN ('opening', 'open') AND published_at IS NOT NULL`,
+        [live.containerId]
+      );
+      // An unpublished live container is never closed for being "full": its children
+      // have nowhere else to go until its root is on chain. Keep waiting on it.
+      if (!live.publishedAt) return live;
+    }
+    const containerId = ulid();
+    try {
+      const created = await query<ContainerRow>(
+        family === 'quote'
+          ? `INSERT INTO lumen_container (container_id, hive_author, hive_permlink, status, child_count, max_children, family)
+             VALUES ($1, $2, $3, 'opening', 0, $4, 'quote') RETURNING *`
+          : `INSERT INTO lumen_container (container_id, hive_author, hive_permlink, status, child_count, max_children)
+             VALUES ($1, $2, $3, 'opening', 0, $4) RETURNING *`,
+        [containerId, hiveAuthor, containerPermlink(containerId, family), maxChildren]
+      );
+      return map(created.rows[0]);
+    } catch (error) {
+      if ((error as { code?: string }).code !== '23505') throw error;
+    }
+  }
+  throw new Error('Could not ensure a live container after repeated contention');
+}
+
+/** A Hive user's confirmed reblog comment counts toward its container's size. */
+export async function incrementChildCount(hiveAuthor: string, hivePermlink: string): Promise<void> {
+  await query(
+    `UPDATE lumen_container SET child_count = child_count + 1 WHERE hive_author = $1 AND hive_permlink = $2`,
+    [hiveAuthor, hivePermlink]
+  );
+}
