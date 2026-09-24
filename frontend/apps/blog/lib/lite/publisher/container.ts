@@ -1,7 +1,8 @@
 import { getLogger } from '@ui/lib/logging';
 import { liteConfig } from '../config';
 import * as containers from '../repositories/container-repository';
-import { containerPermlink } from '../repositories/container-repository';
+import { CONTAINER_PREFIX, containerPermlink } from '../repositories/container-repository';
+import type { ContainerFamily } from '../types';
 import { CommentOp, PostBroadcaster } from './broadcaster';
 import { noteBroadcast, pauseForCommentInterval } from './pace';
 
@@ -20,9 +21,23 @@ const logger = getLogger('app');
 
 export { containerPermlink };
 
-/** Marker so the worker can recognise a container parent without a DB round-trip. */
+/**
+ * Marker so the worker can recognise a container parent without a DB round-trip.
+ * Both families (2026-09-24): the publisher must open a quote container root before a
+ * lite quote goes under it, and the comment redirect must never send a reader to a
+ * container root of either kind. Code that means "this is a Lumen POST" must NOT use
+ * this: it wants {@link containerFamilyOf} === 'lite' (a `lumen-q-` child is a reblog
+ * comment, not a post).
+ */
 export function isContainerPermlink(permlink: string): boolean {
-  return permlink.startsWith('lumen-c-');
+  return containerFamilyOf(permlink) !== null;
+}
+
+/** Which family a container permlink belongs to, or null when it is not a container. */
+export function containerFamilyOf(permlink: string): ContainerFamily | null {
+  if (permlink.startsWith(CONTAINER_PREFIX.lite)) return 'lite';
+  if (permlink.startsWith(CONTAINER_PREFIX.quote)) return 'quote';
+  return null;
 }
 
 /**
@@ -41,21 +56,23 @@ export function isContainerPermlink(permlink: string): boolean {
  */
 export type ContainerReadiness = 'ready' | 'waiting' | 'absent';
 
-/** Reserve a slot for a new post; returns the parent to publish it under. */
-export async function reserveContainerParent(): Promise<{ author: string; permlink: string }> {
+/** Reserve a slot for a new post (or, with `family: 'quote'`, a reblog comment). */
+export async function reserveContainerParent(
+  family: ContainerFamily = 'lite'
+): Promise<{ author: string; permlink: string }> {
   const author = liteConfig.frontendAccount;
   if (!author) throw new Error('LITE_FRONTEND_ACCOUNT_* is not configured — no container owner');
-  const container = await containers.reserveChildSlot(author, liteConfig.containerMaxChildren);
+  const container = await containers.reserveChildSlot(author, liteConfig.containerMaxChildren, family);
   return { author: container.hiveAuthor, permlink: container.hivePermlink };
 }
 
-function containerTitle(): string {
+function containerTitle(family: ContainerFamily): string {
   // Human-readable and stable per container; the date is informational only.
   const now = new Date();
   const stamp = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(
     now.getUTCDate()
   ).padStart(2, '0')}`;
-  return `Lumen posts — ${stamp}`;
+  return family === 'quote' ? `Lumen reblog comments ${stamp}` : `Lumen posts — ${stamp}`;
 }
 
 const CONTAINER_BODY = [
@@ -69,20 +86,28 @@ const CONTAINER_BODY = [
   'other. It is the same mechanism Snaps, Waves and Threads use.'
 ].join('\n');
 
+// Spec v2 section 2.3. Says only what is true of every reply under it: a quote
+// comment may earn rewards (it is the writer's own comment), so no "declines" line.
+const QUOTE_CONTAINER_BODY = [
+  'This post collects the comments people added when reblogging on Lumen. Each reply',
+  'is one person\'s comment on the post it links to.'
+].join('\n');
+
 /** The container's own root-post operation. No author footer — it is not a user post. */
-function buildContainerOp(containerId: string, author: string): CommentOp {
+function buildContainerOp(containerId: string, author: string, family: ContainerFamily): CommentOp {
   return {
     parentAuthor: '',
     parentPermlink: 'lumen',
     author,
-    permlink: containerPermlink(containerId),
-    title: containerTitle(),
-    body: CONTAINER_BODY,
+    permlink: containerPermlink(containerId, family),
+    title: containerTitle(family),
+    body: family === 'quote' ? QUOTE_CONTAINER_BODY : CONTAINER_BODY,
     jsonMetadata: JSON.stringify({
       app: 'lumen/1.0',
       format: 'markdown',
       tags: ['lumen'],
-      lumen_container: containerId
+      lumen_container: containerId,
+      ...(family === 'quote' ? { lumen_container_family: 'quote' } : {})
     }),
     declinePayout: true
   };
@@ -146,7 +171,7 @@ export async function ensureContainerPublished(
   try {
     // The container root counts against the same 3 s interval its children use.
     await pauseForCommentInterval();
-    await broadcaster.broadcastComment(buildContainerOp(container.containerId, author));
+    await broadcaster.broadcastComment(buildContainerOp(container.containerId, author, container.family));
     noteBroadcast();
     await containers.markPublished(container.containerId);
     logger.info('Opened Lumen container %s/%s', author, permlink);

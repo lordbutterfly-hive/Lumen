@@ -221,6 +221,9 @@ export interface LumenPost {
  * (HIVE_MIN_ROOT_COMMENT_INTERVAL) but replies at one per 3 seconds
  * (HIVE_MIN_REPLY_INTERVAL). Rotates when `childCount` reaches `maxChildren`.
  */
+/** Which kind of replies a container collects (quote reblog spec v2, section 2). */
+export type ContainerFamily = 'lite' | 'quote';
+
 export interface LumenContainer {
   containerId: string;
   hiveAuthor: string;
@@ -228,6 +231,8 @@ export interface LumenContainer {
   /** opening = root post not on chain yet; open = accepting children; closed = full. */
   /** 'failed' = retired: it could not be opened and must never be retried (migration 0020). */
   status: 'opening' | 'open' | 'closed' | 'failed';
+  /** 'lite' = `lumen-c-` (Lumen posts); 'quote' = `lumen-q-` (reblog comments). Migration 0049. */
+  family: ContainerFamily;
   childCount: number;
   maxChildren: number;
   openedAt: Date;

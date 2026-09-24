@@ -1,7 +1,7 @@
 import { User } from '@smart-signer/types/common';
 import { getLogger } from '@ui/lib/logging';
 import { liteConfig } from '../config';
-import { BeneficiaryRoute, LumenPost, ParentRef, PostTier, PublishPayload, SessionRef } from '../types';
+import { BeneficiaryRoute, ContainerFamily, LumenPost, ParentRef, PostTier, PublishPayload, SessionRef } from '../types';
 import * as posts from '../repositories/post-repository';
 import * as publishJobs from '../repositories/publish-job-repository';
 import * as rateLimit from '../antispam/rate-limit';
@@ -165,10 +165,10 @@ async function publishParentFor(post: LumenPost): Promise<OnChainParent> {
   return explicitParent(post.parentRef) ?? (await containerParentFor(post.postId));
 }
 
-async function containerParentFor(postId: string): Promise<OnChainParent> {
+async function containerParentFor(postId: string, family: ContainerFamily = 'lite'): Promise<OnChainParent> {
   const pinned = await posts.getPublishParent(postId);
   if (pinned) return pinned;
-  const container = await reserveContainerParent();
+  const container = await reserveContainerParent(family);
   // First-write-wins: a concurrent job's value is returned instead, if it got there
   // first, and the slot we just reserved is simply left unused.
   return posts.pinPublishParent(postId, container.author, container.permlink);
@@ -197,7 +197,9 @@ export async function repointToFreshContainer(postId: string): Promise<boolean> 
   if (container?.status !== 'failed') return false;
 
   if (!(await posts.unpinPublishParent(postId))) return false;
-  const parent = await containerParentFor(postId);
+  // Same FAMILY as the container it leaves: a reblog comment must land in a quote
+  // container again, never among Lumen posts (quote reblog spec v2, section 2).
+  const parent = await containerParentFor(postId, container.family);
   const refreshed = (await posts.getPostById(postId)) ?? post;
   // The queued job carries a frozen payload naming the dead parent; it has to be
   // rewritten too, or the worker keeps broadcasting toward the retired container.

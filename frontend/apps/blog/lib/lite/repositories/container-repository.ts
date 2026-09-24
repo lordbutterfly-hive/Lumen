@@ -1,6 +1,6 @@
 import { query } from '../db/pool';
 import { ulid } from '../ids';
-import { LumenContainer } from '../types';
+import { ContainerFamily, LumenContainer } from '../types';
 
 interface ContainerRow {
   container_id: string;
@@ -21,6 +21,9 @@ function map(r: ContainerRow): LumenContainer {
     hiveAuthor: r.hive_author,
     hivePermlink: r.hive_permlink,
     status: r.status as LumenContainer['status'],
+    // From the permlink, which every row has, rather than the `family` column, which only
+    // exists after migration 0049 (see `familyPredicate`).
+    family: (r.hive_permlink.startsWith(CONTAINER_PREFIX.quote) ? 'quote' : 'lite') as ContainerFamily,
     childCount: Number(r.child_count),
     maxChildren: Number(r.max_children),
     openedAt: r.opened_at,
@@ -30,9 +33,26 @@ function map(r: ContainerRow): LumenContainer {
   };
 }
 
+/** Permlink prefix per family: `lumen-c-` holds Lumen posts, `lumen-q-` holds reblog comments. */
+export const CONTAINER_PREFIX: Record<ContainerFamily, string> = { lite: 'lumen-c-', quote: 'lumen-q-' };
+
+/**
+ * ★ FAMILY IS SELECTED BY PERMLINK PREFIX, NOT BY THE `family` COLUMN (2026-09-24).
+ * The column arrives with migration 0049, and migrations are an explicit ops step, not a
+ * boot step. Filtering on the column would make this code break every lite post on a
+ * server where the code landed before the migration. The prefix identifies the family
+ * on every row that has ever existed, so lite reservations behave exactly as they did,
+ * with or without the migration. The column is written only for quote containers (which
+ * exist only once quote reblogs are switched on, after the migration) and backs the
+ * per-(account, family) live index.
+ */
+function familyPredicate(family: ContainerFamily): string {
+  return `hive_permlink LIKE '${CONTAINER_PREFIX[family]}%'`;
+}
+
 /** Permlink derived from the id, so a child payload can name its parent early. */
-export function containerPermlink(containerId: string): string {
-  return `lumen-c-${containerId.toLowerCase()}`;
+export function containerPermlink(containerId: string, family: ContainerFamily = 'lite'): string {
+  return `${CONTAINER_PREFIX[family]}${containerId.toLowerCase()}`;
 }
 
 /**
@@ -54,7 +74,8 @@ export function containerPermlink(containerId: string): string {
  */
 export async function reserveChildSlot(
   hiveAuthor: string,
-  maxChildren: number
+  maxChildren: number,
+  family: ContainerFamily = 'lite'
 ): Promise<LumenContainer> {
   for (let attempt = 0; attempt < 4; attempt++) {
     const taken = await query<ContainerRow>(
@@ -64,6 +85,7 @@ export async function reserveChildSlot(
                 SELECT container_id
                   FROM lumen_container
                  WHERE hive_author = $1
+                   AND ${familyPredicate(family)}
                    AND status IN ('opening', 'open')
                    AND child_count < max_children
                  ORDER BY opened_at
@@ -80,6 +102,7 @@ export async function reserveChildSlot(
       `UPDATE lumen_container
           SET status = 'closed', closed_at = now()
         WHERE hive_author = $1
+          AND ${familyPredicate(family)}
           AND status IN ('opening', 'open')
           AND child_count >= max_children`,
       [hiveAuthor]
@@ -87,16 +110,27 @@ export async function reserveChildSlot(
 
     const containerId = ulid();
     try {
-      const created = await query<ContainerRow>(
-        `INSERT INTO lumen_container
-           (container_id, hive_author, hive_permlink, status, child_count, max_children)
-         VALUES ($1, $2, $3, 'opening', 1, $4)
-         RETURNING *`,
-        [containerId, hiveAuthor, containerPermlink(containerId), maxChildren]
-      );
+      // A lite row relies on the column's default ('lite') and names no column the
+      // pre-0049 schema lacks; only a quote row writes `family` (see `familyPredicate`).
+      const created =
+        family === 'quote'
+          ? await query<ContainerRow>(
+              `INSERT INTO lumen_container
+                 (container_id, hive_author, hive_permlink, status, child_count, max_children, family)
+               VALUES ($1, $2, $3, 'opening', 1, $4, 'quote')
+               RETURNING *`,
+              [containerId, hiveAuthor, containerPermlink(containerId, family), maxChildren]
+            )
+          : await query<ContainerRow>(
+              `INSERT INTO lumen_container
+                 (container_id, hive_author, hive_permlink, status, child_count, max_children)
+               VALUES ($1, $2, $3, 'opening', 1, $4)
+               RETURNING *`,
+              [containerId, hiveAuthor, containerPermlink(containerId), maxChildren]
+            );
       return map(created.rows[0]);
     } catch (error) {
-      // Lost the create race (unique violation on the live-container index) — loop
+      // Lost the create race (unique violation on the per-family live-container index) — loop
       // and reserve a slot in whichever container the winner created.
       const code = (error as { code?: string }).code;
       if (code !== '23505') throw error;
@@ -155,11 +189,11 @@ export async function recordError(containerId: string, message: string): Promise
   ]);
 }
 
-/** Live container for an account, if any (diagnostics / admin views). */
-export async function findLive(hiveAuthor: string): Promise<LumenContainer | null> {
+/** Live container of one family for an account, if any (diagnostics, quote targeting). */
+export async function findLive(hiveAuthor: string, family: ContainerFamily = 'lite'): Promise<LumenContainer | null> {
   const res = await query<ContainerRow>(
     `SELECT * FROM lumen_container
-      WHERE hive_author = $1 AND status IN ('opening', 'open')
+      WHERE hive_author = $1 AND ${familyPredicate(family)} AND status IN ('opening', 'open')
       ORDER BY opened_at
       LIMIT 1`,
     [hiveAuthor]
