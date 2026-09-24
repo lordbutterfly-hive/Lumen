@@ -408,7 +408,6 @@ export default function InquisitionBoard() {
           armed ? 'border-line-brand-10' : 'border-line-9'
         )}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/inquisition/header.png"
           alt=""

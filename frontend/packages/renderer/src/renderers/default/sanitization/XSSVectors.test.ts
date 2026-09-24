@@ -592,9 +592,11 @@ describe('XSS Security Tests', () => {
 
         it('should strip query strings from YouTube iframe', () => {
             const sanitizer = createSanitizer();
-            const input = '<iframe src="https://www.youtube.com/embed/abc123?autoplay=1&controls=0"></iframe>';
+            // A real 11-character id: since the iframe hardening (c6a31e6) anything else is
+            // not a YouTube embed at all and is rejected before query strings matter.
+            const input = '<iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&controls=0"></iframe>';
             const output = sanitizer.sanitize(input);
-            expect(output).to.include('youtube.com/embed/abc123');
+            expect(output).to.include('youtube.com/embed/dQw4w9WgXcQ');
             expect(output).to.not.include('autoplay');
         });
 

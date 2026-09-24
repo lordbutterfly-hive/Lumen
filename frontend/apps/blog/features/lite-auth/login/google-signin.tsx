@@ -626,8 +626,6 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onCode, codeFlow, promptFlow, idTo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nonce, promptFailed, idTokenFlow]);
 
-  if (!googleConfigured()) return null;
-
   /**
    * ★ ONE ROW, NOT A PILL INSIDE A PILL (2026-08-10, owner, second pass; superseded
    * 2026-08-28, then extended again the same day for `promptFlow`).
@@ -938,6 +936,10 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onCode, codeFlow, promptFlow, idTo
     };
     window.addEventListener('message', onMessage);
   };
+
+  // After every hook (rules of hooks): the callbacks above are only defined, never run,
+  // so returning here draws exactly what the earlier early return did.
+  if (!googleConfigured()) return null;
 
   if (idTokenFlow || codeFlow || (promptFlow && !promptFailed)) {
     return (

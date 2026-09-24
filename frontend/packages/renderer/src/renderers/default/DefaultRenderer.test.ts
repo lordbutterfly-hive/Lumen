@@ -74,73 +74,73 @@ describe('DefaultRender', () => {
             name: 'Spotify playlist link should be embedded correctly',
             raw: 'https://open.spotify.com/playlist/1zLvUhumbFIEdfxYQcgUxk',
             expected:
-                '<p><div class="videoWrapper"><iframe src="https://open.spotify.com/embed/playlist/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
+                '<p><div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://open.spotify.com/embed/playlist/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
         },
         {
             name: 'Spotify track link should be embedded correctly',
             raw: 'https://open.spotify.com/track/3Qm86XLflmIXVm1wcwkgDK',
             expected:
-                '<p><div class="videoWrapper"><iframe src="https://open.spotify.com/embed/track/3Qm86XLflmIXVm1wcwkgDK" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
+                '<p><div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://open.spotify.com/embed/track/3Qm86XLflmIXVm1wcwkgDK" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
         },
         {
             name: 'Spotify album link should be embedded correctly',
             raw: 'https://open.spotify.com/album/1zLvUhumbFIEdfxYQcgUxk',
             expected:
-                '<p><div class="videoWrapper"><iframe src="https://open.spotify.com/embed/album/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
+                '<p><div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://open.spotify.com/embed/album/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
         },
         {
             name: 'Spotify episode link should be embedded correctly',
             raw: 'https://open.spotify.com/episode/1zLvUhumbFIEdfxYQcgUxk',
             expected:
-                '<p><div class="videoWrapper"><iframe src="https://open.spotify.com/embed-podcast/episode/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
+                '<p><div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://open.spotify.com/embed-podcast/episode/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
         },
         {
             name: 'Spotify show link should be embedded correctly',
             raw: 'https://open.spotify.com/show/1zLvUhumbFIEdfxYQcgUxk',
             expected:
-                '<p><div class="videoWrapper"><iframe src="https://open.spotify.com/embed-podcast/show/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
+                '<p><div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://open.spotify.com/embed-podcast/show/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
         },
         {
             name: 'Spotify artist link should be embedded correctly',
             raw: 'https://open.spotify.com/artist/1zLvUhumbFIEdfxYQcgUxk',
             expected:
-                '<p><div class="videoWrapper"><iframe src="https://open.spotify.com/embed/artist/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
+                '<p><div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://open.spotify.com/embed/artist/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
         },
         {
             name: 'Spotify embed playlist via iframe should be embedded correctly',
             raw: '<iframe src="https://open.spotify.com/embed/playlist/1zLvUhumbFIEdfxYQcgUxk" width="640" height="360" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe>',
             expected:
-                '<div class="videoWrapper"><iframe src="https://open.spotify.com/embed/playlist/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
+                '<div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://open.spotify.com/embed/playlist/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
         },
         {
             name: 'Spotify embed track via iframe should be embedded correctly',
             raw: '<iframe src="https://open.spotify.com/embed/track/3Qm86XLflmIXVm1wcwkgDK" width="640" height="360" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe>',
             expected:
-                '<div class="videoWrapper"><iframe src="https://open.spotify.com/embed/track/3Qm86XLflmIXVm1wcwkgDK" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
+                '<div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://open.spotify.com/embed/track/3Qm86XLflmIXVm1wcwkgDK" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
         },
         {
             name: 'Spotify embed album via iframe should be embedded correctly',
             raw: '<iframe src="https://open.spotify.com/embed/album/1zLvUhumbFIEdfxYQcgUxk" width="640" height="360" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe>',
             expected:
-                '<div class="videoWrapper"><iframe src="https://open.spotify.com/embed/album/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
+                '<div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://open.spotify.com/embed/album/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
         },
         {
             name: 'Spotify embed episode via iframe should be embedded correctly',
             raw: '<iframe src="https://open.spotify.com/embed-podcast/episode/1zLvUhumbFIEdfxYQcgUxk" width="640" height="360" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe>',
             expected:
-                '<div class="videoWrapper"><iframe src="https://open.spotify.com/embed-podcast/episode/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
+                '<div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://open.spotify.com/embed-podcast/episode/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
         },
         {
             name: 'Spotify embed show via iframe should be embedded correctly',
             raw: '<iframe src="https://open.spotify.com/embed-podcast/show/1zLvUhumbFIEdfxYQcgUxk" width="640" height="360" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe>',
             expected:
-                '<div class="videoWrapper"><iframe src="https://open.spotify.com/embed-podcast/show/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
+                '<div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://open.spotify.com/embed-podcast/show/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
         },
         {
             name: 'Spotify embed artist via iframe should be embedded correctly',
             raw: '<iframe src="https://open.spotify.com/embed/artist/1zLvUhumbFIEdfxYQcgUxk" width="640" height="360" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe>',
             expected:
-                '<div class="videoWrapper"><iframe src="https://open.spotify.com/embed/artist/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
+                '<div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://open.spotify.com/embed/artist/1zLvUhumbFIEdfxYQcgUxk" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
         },
         {
             name: 'Youtube link with www should be embedded correctly',
@@ -177,25 +177,25 @@ describe('DefaultRender', () => {
             name: 'Youtube embed via iframe should be embedded correctly',
             raw: '<iframe width="560" height="315" src="https://www.youtube.com/embed/0nFkmd-A7jA" frameborder="0" allowfullscreen></iframe>',
             expected:
-                '<div class="videoWrapper"><iframe src="https://www.youtube.com/embed/0nFkmd-A7jA" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
+                '<div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://www.youtube.com/embed/0nFkmd-A7jA" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
         },
         {
             name: 'Vimeo link via iframe should be embedded correctly',
             raw: '<iframe src="https://player.vimeo.com/video/174544848?byline=0" width="640" height="360" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe>',
             expected:
-                '<div class="videoWrapper"><iframe frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen" src="https://player.vimeo.com/video/174544848" width="640" height="480"></iframe></div>'
+                '<div class="videoWrapper"><iframe frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen" sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://player.vimeo.com/video/174544848" width="640" height="480"></iframe></div>'
         },
         {
             name: 'Vimeo link should be embedded correctly',
             raw: 'https://vimeo.com/174544848',
             expected:
-                '<p><div class="videoWrapper"><iframe src="https://player.vimeo.com/video/174544848" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
+                '<p><div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://player.vimeo.com/video/174544848" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
         },
         {
             name: 'Vimeo link without player should be embedded correctly',
             raw: 'https://vimeo.com/174544848',
             expected:
-                '<p><div class="videoWrapper"><iframe src="https://player.vimeo.com/video/174544848" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
+                '<p><div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://player.vimeo.com/video/174544848" width="640" height="480" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe></div></p>'
         }
     ];
 

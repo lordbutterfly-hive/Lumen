@@ -62,7 +62,9 @@ function load(...parts: string[]): Source {
 }
 
 const delegated = load('features', 'wallet', 'components', 'delegated-out-panel.tsx');
-const walletHistory = load('features', 'wallet', 'components', 'account-history-list.tsx');
+// The wallet history's rendering moved into the card it shares with the public wallet
+// (7ba450d, 2026-09-18); account-history-list.tsx is now a one-line wrapper around it.
+const walletHistory = load('features', 'wallet', 'components', 'history-card.tsx');
 const profileCommunities = load('app', '[param]', '(user-profile)', 'communities', 'content.tsx');
 const communityDir = load('app', 'communities', 'content.tsx');
 const notifications = load('features', 'activity-log', 'notification-content.tsx');
@@ -122,7 +124,7 @@ console.log('\n── 0. THE INSTRUMENT. A scan that read nothing, or that read 
   check(
     '★ NEGATIVE CONTROL: live code survived stripping in every scanned file',
     delegated.code.includes("t('wallet.delegated.none')") &&
-      walletHistory.code.includes("t('wallet.history.error')") &&
+      walletHistory.code.includes('t(errorKey)') &&
       profileCommunities.code.includes('<SubscriptionList data={data} />') &&
       communityDir.code.includes('<CommunitiesListSkeleton />') &&
       notifications.code.includes('<NotificationsTabFooter') &&
@@ -153,8 +155,8 @@ console.log('\n── 1. CLUSTER A: a failed read is never "you have none". Ever
     {
       label: 'the reference implementation (wallet history) still has it',
       src: walletHistory,
-      error: "t('wallet.history.error')",
-      empty: "t('wallet.history.empty')"
+      error: 't(errorKey)',
+      empty: 't(`wallet.history.empty_${group}`)'
     },
     {
       label: 'F16 — the delegations panel',
