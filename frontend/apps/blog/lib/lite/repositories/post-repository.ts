@@ -1,4 +1,4 @@
-import { query } from '../db/pool';
+import { Exec, query } from '../db/pool';
 import { ulid } from '../ids';
 import {
   BeneficiaryRoute,
@@ -79,8 +79,9 @@ export interface CreatePostInput {
   shard?: string | null;
 }
 
-export async function createPost(input: CreatePostInput): Promise<LumenPost> {
-  const { rows } = await query<PostRow>(
+/** `exec` joins a caller's transaction (the quote reblog writes several rows as one). */
+export async function createPost(input: CreatePostInput, exec: Exec = query): Promise<LumenPost> {
+  const { rows } = await exec<PostRow>(
     `INSERT INTO lumen_post (
        post_id, user_id, display_name_snapshot, parent_ref, tier, title, body,
        tags, community, beneficiaries, thumbnail_url, summary, feed_visibility, shard
@@ -152,7 +153,9 @@ export async function getUserPosts(
          AND ($4::boolean = false OR feed_visibility = 'visible')
          AND ($5::text = 'all'
               OR ($5::text = 'posts'    AND parent_ref IS NULL)
-              OR ($5::text = 'comments' AND parent_ref IS NOT NULL))
+              -- A quote reblog is not a comment on the Comments tab (spec v2 7.5).
+              OR ($5::text = 'comments' AND parent_ref IS NOT NULL
+                  AND parent_ref ->> 'type' IS DISTINCT FROM 'quote'))
      ORDER BY post_id DESC LIMIT $3`,
     [userId, opts.before ?? null, opts.limit, visibleOnly, kind]
   );
@@ -624,9 +627,10 @@ export async function setPublishParent(
 export async function pinPublishParent(
   postId: string,
   author: string,
-  permlink: string
+  permlink: string,
+  exec: Exec = query
 ): Promise<{ author: string; permlink: string }> {
-  const res = await query<{ publish_parent_author: string; publish_parent_permlink: string }>(
+  const res = await exec<{ publish_parent_author: string; publish_parent_permlink: string }>(
     `UPDATE lumen_post
         SET publish_parent_author = COALESCE(publish_parent_author, $2),
             publish_parent_permlink = COALESCE(publish_parent_permlink, $3)

@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { query } from '../db/pool';
+import { Exec, query } from '../db/pool';
 import { ulid } from '../ids';
 
 /**
@@ -105,8 +105,8 @@ export interface NewQuote {
  * person per post while it exists, `ux_quote_live`). `created: false` means the
  * existing row came back and nothing was written.
  */
-export async function insertQuote(input: NewQuote): Promise<{ quote: LumenQuote; created: boolean }> {
-  const { rows } = await query<QuoteRow>(
+export async function insertQuote(input: NewQuote, exec: Exec = query): Promise<{ quote: LumenQuote; created: boolean }> {
+  const { rows } = await exec<QuoteRow>(
     `INSERT INTO lumen_quote
        (quote_id, quoter_user_id, quoter_hive, target_author, target_permlink, quote_author, quote_permlink,
         container_author, container_permlink, lite_post_id, body_cache, state)
@@ -130,14 +130,19 @@ export async function insertQuote(input: NewQuote): Promise<{ quote: LumenQuote;
     ]
   );
   if (rows[0]) return { quote: map(rows[0]), created: true };
-  const existing = await findActive(input.quoter, input.targetAuthor, input.targetPermlink);
+  const existing = await findActive(input.quoter, input.targetAuthor, input.targetPermlink, exec);
   if (!existing) throw new Error('quote insert conflicted but no active row was found');
   return { quote: existing, created: false };
 }
 
 /** This person's current quote on this post (pending, live or hidden), if any. */
-export async function findActive(quoter: Quoter, targetAuthor: string, targetPermlink: string): Promise<LumenQuote | null> {
-  const { rows } = await query<QuoteRow>(
+export async function findActive(
+  quoter: Quoter,
+  targetAuthor: string,
+  targetPermlink: string,
+  exec: Exec = query
+): Promise<LumenQuote | null> {
+  const { rows } = await exec<QuoteRow>(
     `SELECT * FROM lumen_quote
       WHERE quoter_key = $1 AND target_author = $2 AND target_permlink = $3
         AND state IN ('pending', 'live', 'hidden')`,
@@ -171,12 +176,21 @@ export async function setState(quoteId: string, state: QuoteState, bodyCache?: s
   return rows[0] ? map(rows[0]) : null;
 }
 
-/** A lite quote published by the publisher: its real permlink replaces the placeholder. */
-export async function markPublished(quoteId: string, quotePermlink: string): Promise<void> {
+/** A lite quote reached Hive (the publisher published its post): pending -> live. */
+export async function markLitePublished(litePostId: string): Promise<void> {
   await query(
-    `UPDATE lumen_quote SET state = 'live', quote_permlink = $2, updated_at = now()
-      WHERE quote_id = $1 AND state = 'pending'`,
-    [quoteId, quotePermlink]
+    `UPDATE lumen_quote SET state = 'live', updated_at = now()
+      WHERE lite_post_id = $1 AND state = 'pending'`,
+    [litePostId]
+  );
+}
+
+/** The quote whose lite post this is moved to `state` (deleted, target gone, moderated). */
+export async function setStateByLitePost(litePostId: string, state: QuoteState): Promise<void> {
+  await query(
+    `UPDATE lumen_quote SET state = $2, updated_at = now()
+      WHERE lite_post_id = $1 AND state IN ('pending', 'live', 'hidden')`,
+    [litePostId, state]
   );
 }
 

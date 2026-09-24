@@ -6,6 +6,7 @@ import { requireActiveLiteUser, requireLiteUser } from '@/blog/lib/lite/http/act
 import { enforceReblogRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { reblog, unreblog } from '@/blog/lib/lite/repositories/engagement-repository';
 import { checkEngagementTarget } from '@/blog/lib/lite/content/engagement-target';
+import { removeLiteQuote } from '@/blog/lib/lite/content/quote-service';
 
 const logger = getLogger('app');
 
@@ -54,6 +55,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
     }
     if (undo) {
+      // A quote is a reblog with a comment: undoing the reblog removes the comment too
+      // (quote reblog spec v2 7.4). No quote: nothing extra happens.
+      await removeLiteQuote(user.userId, author.toLowerCase(), permlink, false);
       await unreblog(user.userId, author, permlink);
       return NextResponse.json({ ok: true, reblogged: false });
     }

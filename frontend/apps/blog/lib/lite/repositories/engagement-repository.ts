@@ -1,6 +1,6 @@
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { getLogger } from '@ui/lib/logging';
-import { query } from '../db/pool';
+import { Exec, query } from '../db/pool';
 import { liteConfig } from '../config';
 
 const logger = getLogger('app');
@@ -41,8 +41,13 @@ export async function removeVote(voterUserId: string, author: string, permlink: 
   );
 }
 
-export async function reblog(rebloggerUserId: string, author: string, permlink: string): Promise<boolean> {
-  const { rowCount } = await query(
+export async function reblog(
+  rebloggerUserId: string,
+  author: string,
+  permlink: string,
+  exec: Exec = query
+): Promise<boolean> {
+  const { rowCount } = await exec(
     `INSERT INTO lumen_reblog (reblogger_user_id, target_author, target_permlink)
      VALUES ($1, $2, $3)
      ON CONFLICT (reblogger_user_id, target_author, target_permlink)

@@ -1,9 +1,11 @@
 import { User } from '@smart-signer/types/common';
 import { getLogger } from '@ui/lib/logging';
 import { liteConfig } from '../config';
-import { BeneficiaryRoute, ContainerFamily, LumenPost, ParentRef, PostTier, PublishPayload, SessionRef } from '../types';
+import { BeneficiaryRoute, ContainerFamily, FeedVisibility, LumenPost, ParentRef, PostTier, PublishPayload, SessionRef } from '../types';
 import * as posts from '../repositories/post-repository';
 import * as publishJobs from '../repositories/publish-job-repository';
+import * as quotes from '../repositories/quote-repository';
+import type { Exec } from '../db/pool';
 import * as rateLimit from '../antispam/rate-limit';
 import { checkLiteActor } from '../auth/account-status';
 import { buildPermlink } from '../publisher/permlink';
@@ -94,6 +96,12 @@ export interface CreatePostRequest {
   thumbnailUrl?: string;
   parentRef?: ParentRef;
   editOfPostId?: string;
+  /**
+   * Internal: set only by the quote service when it edits a lite quote's text. A quote
+   * edited through /api/lite/posts would drop its link line and leave the quote index
+   * stale, so the edit fork refuses a quote without it.
+   */
+  quoteEdit?: boolean;
 }
 
 export type CreatePostResult =
@@ -137,7 +145,14 @@ function explicitParent(parentRef: ParentRef | null): OnChainParent | null {
   if (parentRef?.type === 'lite') {
     return { author: liteConfig.frontendAccount, permlink: buildPermlink(parentRef.id) };
   }
+  // A quote is NOT published under the post it quotes: it goes under a quote container
+  // (containerFamilyFor below), like an ordinary post under a Lumen container.
   return null;
+}
+
+/** Which container family a post without an explicit parent goes under. */
+function containerFamilyFor(parentRef: ParentRef | null): ContainerFamily {
+  return parentRef?.type === 'quote' ? 'quote' : 'lite';
 }
 
 /**
@@ -162,7 +177,7 @@ function explicitParent(parentRef: ParentRef | null): OnChainParent | null {
 async function publishParentFor(post: LumenPost): Promise<OnChainParent> {
   const pinned = await posts.getPublishParent(post.postId);
   if (pinned) return pinned;
-  return explicitParent(post.parentRef) ?? (await containerParentFor(post.postId));
+  return explicitParent(post.parentRef) ?? (await containerParentFor(post.postId, containerFamilyFor(post.parentRef)));
 }
 
 async function containerParentFor(postId: string, family: ContainerFamily = 'lite'): Promise<OnChainParent> {
@@ -242,8 +257,48 @@ function buildPayload(post: LumenPost, parent: OnChainParent | null): PublishPay
     // whichever renderer reads it, pre- or post-publish, and lays it out without
     // repeating the title as the excerpt. A reply is never marked: nothing reads
     // a reply's title as a headline, so there is nothing for the marker to fix.
-    isNote: post.tier === 'normal' && !post.parentRef
+    isNote: post.tier === 'normal' && !post.parentRef,
+    ...(post.parentRef?.type === 'quote' ? { quoteOf: post.parentRef.target } : {})
   };
+}
+
+/**
+ * A lite quote reblog's post (spec v2 8.1): the row, its pinned quote-container parent
+ * and its create job, inside the CALLER's transaction (the quote service writes the
+ * quote index row and the reblog in the same one, so all of it lands or none does).
+ * Every check (account, caption, target, blocks, rate) is the caller's.
+ */
+export async function createQuotePostRows(
+  exec: Exec,
+  input: {
+    userId: string;
+    displayName: string;
+    body: string;
+    target: { author: string; permlink: string };
+    feedVisibility: FeedVisibility;
+  },
+  parent: OnChainParent
+): Promise<LumenPost> {
+  const post = await posts.createPost(
+    {
+      userId: input.userId,
+      displayNameSnapshot: input.displayName,
+      tier: 'normal',
+      title: '',
+      body: input.body,
+      tags: [],
+      parentRef: { type: 'quote', target: input.target },
+      feedVisibility: input.feedVisibility,
+      shard: liteConfig.frontendAccount || null
+    },
+    exec
+  );
+  const pinned = await posts.pinPublishParent(post.postId, parent.author, parent.permlink, exec);
+  await publishJobs.enqueue(
+    { postId: post.postId, jobType: 'create', idempotencyKey: `${post.postId}:create`, payload: buildPayload(post, pinned) },
+    exec
+  );
+  return post;
 }
 
 export async function createLitePost(
@@ -325,6 +380,9 @@ export async function createLitePost(
     // it on an edit (`editLitePost` never sets `parentRef`) — so `isReply` above,
     // derived from THIS request, is wrong for an edited reply. The row being
     // edited is the only true record of whether it is one.
+    if (existing.parentRef?.type === 'quote' && !req.quoteEdit) {
+      return { status: 'error', code: 'not_found', message: 'Post not found.' };
+    }
     const editIsReply = isReplyRequest(existing.parentRef);
     const editTitle = editIsReply
       ? ''
@@ -741,6 +799,8 @@ export async function deleteLitePost(userId: string, postId: string): Promise<De
   }
 
   const post = (await posts.markDeleted(postId, userId)) ?? existing;
+  // A lite quote's post: the quote goes with it (spec v2 7.4).
+  if (existing.parentRef?.type === 'quote') await quotes.setStateByLitePost(postId, 'removed');
 
   if (!post.hivePermlink) {
     // Never broadcast: drop the queued create outright.

@@ -133,7 +133,13 @@ export type PublishMode = 'proxy' | 'direct';
 
 export type ParentRef =
   | { type: 'lite'; id: string }
-  | { type: 'chain'; author: string; permlink: string };
+  | { type: 'chain'; author: string; permlink: string }
+  /**
+   * A lite QUOTE reblog (spec v2 8.1): published under a quote container (`lumen-q-`),
+   * never under the post it quotes. `target` is the quoted post's on-chain coordinates.
+   * Only the quote service writes it; `/api/lite/posts` can never produce one.
+   */
+  | { type: 'quote'; target: { author: string; permlink: string } };
 
 export interface BeneficiaryRoute {
   account: string;
@@ -168,6 +174,8 @@ export interface PublishPayload {
   postId: string;
   /** A top-level short post with no title of its own (§H4) — see `buildJsonMetadata`. */
   isNote: boolean;
+  /** A quote reblog: the post it quotes, written into the metadata marker (spec v2 2.3). */
+  quoteOf?: { author: string; permlink: string };
 }
 
 export interface PublishJob {

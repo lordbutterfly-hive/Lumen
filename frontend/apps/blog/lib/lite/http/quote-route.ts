@@ -35,6 +35,9 @@ export async function readHiveQuoteRequest(req: NextRequest): Promise<HiveQuoteR
 
 const STATUS: Record<QuoteRefusal, number> = {
   disabled: 404,
+  empty: 422,
+  account_restricted: 403,
+  rejected: 422,
   not_found: 404,
   not_a_post: 422,
   is_a_quote: 422,

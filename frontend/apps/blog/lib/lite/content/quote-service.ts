@@ -1,4 +1,7 @@
+import type { User } from '@smart-signer/types/common';
 import { siteConfig } from '@ui/config/site';
+import { configuredSiteDomain } from '@ui/config/public-vars';
+import { quoteLinkLine, type QuoteTarget } from '@transaction/lib/quote-link';
 import { DELETED_BODY } from '@transaction/lib/deleted-body';
 import { getLogger } from '@ui/lib/logging';
 import { QUOTE_MAX_CHARS } from '@/blog/lib/quote-reblog/quote-flow';
@@ -11,6 +14,18 @@ import { isBlocked } from '../repositories/block-repository';
 import { checkAndConsume } from '../repositories/rate-limit-repository';
 import { resolvePostOwnerActor } from '../social/post-owner';
 import { actorKey, type FollowActor } from '../social/follow-actor';
+import { execOn, withTransaction } from '../db/pool';
+import * as posts from '../repositories/post-repository';
+import { findUserById } from '../repositories/user-repository';
+import { reblog, unreblog } from '../repositories/engagement-repository';
+import * as rateLimit from '../antispam/rate-limit';
+import { checkLiteActor } from '../auth/account-status';
+import { reserveContainerParent } from '../publisher/container';
+import { buildPermlink } from '../publisher/permlink';
+import { litePostIdOf } from '../render/lite-post-id';
+import { createLitePost, createQuotePostRows, deleteLitePost } from './post-service';
+import { preScreen } from './pre-screen';
+import type { SessionRef } from '../types';
 
 const logger = getLogger('app');
 
@@ -28,6 +43,9 @@ const QUOTES_PER_DAY = 100;
 
 export type QuoteRefusal =
   | 'disabled'
+  | 'empty'
+  | 'account_restricted'
+  | 'rejected'
   | 'not_found'
   | 'not_a_post'
   | 'is_a_quote'
@@ -46,6 +64,8 @@ export type QuoteResult<T> = { ok: true; value: T } | { ok: false; reason: Quote
 interface ChainComment {
   author: string;
   permlink: string;
+  title: string;
+  category: string;
   parent_author: string;
   parent_permlink: string;
   depth: number;
@@ -309,3 +329,142 @@ export async function confirmHiveQuoteRemoved(
   await quotes.setState(existing.quoteId, 'removed', '');
   return { ok: true, value: { removed: true } };
 }
+
+// ── Lite users (spec v2 8): Lumen publishes the quote for them ─────────────────
+
+/**
+ * What the link line under the caption points at. A Lumen post is named by its
+ * writer's handle (never `@`: a handle is not a Hive account) and linked at its Lumen
+ * address; a Hive post by `@author`.
+ */
+async function linkTargetFor(target: ChainComment): Promise<QuoteTarget> {
+  const origin = configuredSiteDomain.replace(/\/+$/, '');
+  const litePostId =
+    target.author === liteConfig.frontendAccount ? litePostIdOf({ permlink: target.permlink }) : undefined;
+  const row = litePostId ? await posts.getPostById(litePostId) : null;
+  const writer = row ? await findUserById(row.userId) : null;
+  const shown = writer?.displayName ?? target.author;
+  return {
+    author: target.author,
+    permlink: target.permlink,
+    title: target.title,
+    url: `${origin}/${target.category || 'hive'}/@${shown}/${target.permlink}`,
+    lite: writer ? { handle: writer.displayName } : null
+  };
+}
+
+/** Thrown inside the transaction to roll it back when a quote already exists (A15). */
+class AlreadyQuoted extends Error {
+  constructor(readonly quote: quotes.LumenQuote) {
+    super('already quoted');
+  }
+}
+
+/**
+ * A LITE user's quote on a post: create it, or edit their existing one. Lumen publishes
+ * it through the publisher under a quote container (8.1), so it shows at once as
+ * `pending` and turns `live` when it reaches Hive. The post row, its pinned parent, its
+ * publish job, the quote index row and the reblog are written in ONE database
+ * transaction: all of it lands or none does, and a double submit gets the first one.
+ */
+export async function saveLiteQuote(
+  sessionUser: User | undefined,
+  session: SessionRef,
+  targetAuthor: string,
+  targetPermlink: string,
+  rawCaption: string
+): Promise<QuoteResult<quotes.LumenQuote>> {
+  if (!liteConfig.quoteReblogsEnabled) return { ok: false, reason: 'disabled' };
+  const actor = await checkLiteActor(sessionUser, session);
+  if (!actor.ok) return { ok: false, reason: 'account_restricted' };
+  const { userId, displayName } = actor.user;
+  const caption = rawCaption.trim();
+  if (!caption) return { ok: false, reason: 'empty' };
+  if (caption.length > QUOTE_MAX_CHARS) return { ok: false, reason: 'too_long' };
+
+  const target = await readChainComment(targetAuthor, targetPermlink);
+  if (!target) return { ok: false, reason: 'not_found' };
+  const refusal = quotable(target);
+  if (refusal) return { ok: false, reason: refusal };
+  const quoter = { userId };
+  const owner = await resolvePostOwnerActor(targetAuthor, targetPermlink);
+  if (owner && (await isBlocked(owner, quoter))) return { ok: false, reason: 'blocked' };
+  const screen = preScreen({ title: '', body: caption });
+  if (screen.action === 'reject') return { ok: false, reason: 'rejected' };
+  const body = `${caption}\n\n${quoteLinkLine(await linkTargetFor(target))}`;
+
+  const existing = await quotes.findActive(quoter, targetAuthor, targetPermlink);
+  if (existing) {
+    // Their quote from before an upgrade to a Hive account is theirs to edit with their keys.
+    if (!existing.litePostId) return { ok: false, reason: 'wrong_author' };
+    const edited = await createLitePost(
+      sessionUser,
+      { tier: 'normal', body, editOfPostId: existing.litePostId, quoteEdit: true },
+      session
+    );
+    if (edited.status === 'error') {
+      return { ok: false, reason: edited.code === 'edit_rate_limited' ? 'rate_limited' : 'rejected' };
+    }
+    return { ok: true, value: (await quotes.setState(existing.quoteId, existing.state, caption)) ?? existing };
+  }
+
+  // A quote counts against the daily comment allowance (8.1).
+  const rate = await rateLimit.enforcePostRate(userId, 'comment');
+  if (!rate.ok) return { ok: false, reason: 'rate_limited' };
+  const parent = await reserveContainerParent('quote');
+  try {
+    const quote = await withTransaction(async (client) => {
+      const exec = execOn(client);
+      const post = await createQuotePostRows(
+        exec,
+        { userId, displayName, body, target: { author: targetAuthor, permlink: targetPermlink }, feedVisibility: screen.feedVisibility },
+        parent
+      );
+      const { quote: row, created } = await quotes.insertQuote(
+        {
+          quoter,
+          targetAuthor,
+          targetPermlink,
+          quoteAuthor: liteConfig.frontendAccount,
+          quotePermlink: buildPermlink(post.postId),
+          containerAuthor: parent.author,
+          containerPermlink: parent.permlink,
+          litePostId: post.postId,
+          bodyCache: caption,
+          state: 'pending'
+        },
+        exec
+      );
+      if (!created) throw new AlreadyQuoted(row);
+      // A quote is a reblog with a comment: the reblog comes with it.
+      await reblog(userId, targetAuthor, targetPermlink, exec);
+      return row;
+    });
+    logger.info({ userId, target: `${targetAuthor}/${targetPermlink}` }, 'lite quote queued');
+    return { ok: true, value: quote };
+  } catch (error) {
+    if (error instanceof AlreadyQuoted) return { ok: true, value: error.quote };
+    throw error;
+  }
+}
+
+/**
+ * A lite user removes their quote on a post (its post is deleted: cancelled if still
+ * queued, deleted or blanked on Hive otherwise), and undoes the reblog too when asked.
+ * Like every withdrawal, not gated on the switch, the target, blocks or suspension.
+ */
+export async function removeLiteQuote(
+  userId: string,
+  targetAuthor: string,
+  targetPermlink: string,
+  undoReblog: boolean
+): Promise<{ removed: boolean }> {
+  const existing = await quotes.findActive({ userId }, targetAuthor, targetPermlink);
+  let removed = false;
+  if (existing?.litePostId) {
+    removed = (await deleteLitePost(userId, existing.litePostId)).status === 'ok';
+  }
+  if (undoReblog) await unreblog(userId, targetAuthor, targetPermlink);
+  return { removed };
+}
+

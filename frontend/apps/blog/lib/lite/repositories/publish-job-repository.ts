@@ -1,4 +1,4 @@
-import { query } from '../db/pool';
+import { Exec, query } from '../db/pool';
 import { ulid } from '../ids';
 import {
   PublishJob,
@@ -49,8 +49,8 @@ export interface EnqueueInput {
 }
 
 /** Idempotent enqueue: a duplicate idempotency_key is a no-op (returns null). */
-export async function enqueue(input: EnqueueInput): Promise<PublishJob | null> {
-  const { rows } = await query<JobRow>(
+export async function enqueue(input: EnqueueInput, exec: Exec = query): Promise<PublishJob | null> {
+  const { rows } = await exec<JobRow>(
     `INSERT INTO publish_job (job_id, post_id, job_type, idempotency_key, payload_snapshot)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (idempotency_key) DO NOTHING

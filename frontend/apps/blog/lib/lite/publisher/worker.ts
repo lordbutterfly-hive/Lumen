@@ -8,6 +8,8 @@ import { CommentOp, getBroadcaster, hasBroadcaster } from './broadcaster';
 import { DELETED_BODY } from '@transaction/lib/deleted-body';
 import { buildFooter, buildJsonMetadata } from './footer';
 import { ensureContainerPublished, isContainerPermlink } from './container';
+import { quoteTargetGone } from './quote-target';
+import * as quotes from '../repositories/quote-repository';
 import { noteBroadcast, pauseForCommentInterval } from './pace';
 import { checkRc } from './rc-guard';
 import { enforcePublisherGlobalRate } from '../antispam/rate-limit';
@@ -115,7 +117,8 @@ function buildCommentOp(job: PublishJob): CommentOp {
       userId: p.userId,
       postId: p.postId,
       displayName: p.displayName,
-      isNote: p.isNote
+      isNote: p.isNote,
+      quoteOf: p.quoteOf
     }),
     ...(deleting ? { deleted: true } : {})
   });
@@ -489,6 +492,18 @@ export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome
         return 'failed';
       }
 
+      // A quote of a post that is gone would point at nothing (spec v2 8.4, A10). The
+      // post goes with it, so the orphan sweep never re-queues it.
+      if (job.jobType === 'create' && job.payloadSnapshot.quoteOf) {
+        const gone = await quoteTargetGone(broadcaster, job.payloadSnapshot.quoteOf);
+        if (gone) {
+          await jobs.markTerminal(job.jobId, `the reblogged post ${gone}`, 'rejected');
+          await posts.markDeleted(job.postId, live.userId);
+          await quotes.setStateByLitePost(job.postId, 'removed');
+          return 'failed';
+        }
+      }
+
       if (!(await takeGlobalBroadcastBudget())) {
         await jobs.hold(job.jobId, 'held: the platform-wide daily broadcast ceiling is reached');
         return 'failed';
@@ -503,6 +518,8 @@ export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome
     await posts.markPostPublished(job.postId, author, permlink, {
       pruneBody: liteConfig.pruneBodyAfterPublish
     });
+    // A lite quote reblog is on Hive now: its card stops saying "Publishing to Hive".
+    if (job.jobType === 'create' && job.payloadSnapshot.quoteOf) await quotes.markLitePublished(job.postId);
     return 'processed';
   } catch (error) {
     const retriable = isRetriable(error);

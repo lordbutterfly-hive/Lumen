@@ -18,6 +18,7 @@ export function buildJsonMetadata(p: {
   postId: string;
   displayName: string;
   isNote: boolean;
+  quoteOf?: { author: string; permlink: string };
 }): Record<string, unknown> {
   return {
     app: 'lumen/1.0',
@@ -26,6 +27,9 @@ export function buildJsonMetadata(p: {
     lumen_user_id: p.userId,
     lumen_post_id: p.postId,
     lite_display_name: p.displayName,
-    ...(p.isNote ? { type: NOTE_METADATA_TYPE } : {})
+    ...(p.isNote ? { type: NOTE_METADATA_TYPE } : {}),
+    // A quote reblog's marker (spec v2 2.3). Secondary: the quote container parent is
+    // what identifies it, since any edit elsewhere could rewrite this.
+    ...(p.quoteOf ? { type: 'lumen_quote', quote_of: p.quoteOf } : {})
   };
 }
