@@ -8,6 +8,7 @@ import { QUOTE_MAX_CHARS } from '@/blog/lib/quote-reblog/quote-flow';
 import { liteConfig } from '../config';
 import { containerFamilyOf } from '../container-family';
 import { hiveAllowsDelete } from '../hive-delete-rule';
+import { isMissingPostError } from '../hive-missing-post';
 import * as containers from '../repositories/container-repository';
 import * as quotes from '../repositories/quote-repository';
 import { isBlocked } from '../repositories/block-repository';
@@ -89,13 +90,12 @@ async function readChainComment(author: string, permlink: string): Promise<Chain
   if (!res.ok) throw new Error(`get_content failed: HTTP ${res.status}`);
   const data = (await res.json()) as {
     result?: ChainComment;
-    error?: { data?: { extension?: { assertion_expression?: string } } };
+    error?: unknown;
   };
   if (data.error) {
-    // Current nodes answer a missing comment with this exact assertion, not an empty
-    // result (the publisher's `postExists` reads it the same way). Anything else is a
-    // real failure and must not be read as "absent".
-    if (data.error.data?.extension?.assertion_expression === `Post ${author}/${permlink} does not exist`) return null;
+    // Current nodes answer a missing or deleted comment with an error, not an empty
+    // result (see hive-missing-post.ts). Anything else is a real failure.
+    if (isMissingPostError(data.error, author, permlink)) return null;
     throw new Error(`get_content error: ${JSON.stringify(data.error).slice(0, 200)}`);
   }
   const post = data.result;
@@ -475,5 +475,19 @@ export async function removeLiteQuote(
   }
   if (undoReblog) await unreblog(userId, targetAuthor, targetPermlink);
   return { removed };
+}
+
+/**
+ * Is this a reblog comment (never itself reblogged or quoted, decision 8)? A Hive
+ * user's has the deterministic `lumen-rq-` permlink; a Lumen one is a lite post whose
+ * row is a quote. Read from our own table, no chain call.
+ */
+export async function isQuoteComment(author: string, permlink: string): Promise<boolean> {
+  if (permlink.startsWith('lumen-rq-')) return true;
+  if (author !== liteConfig.frontendAccount) return false;
+  const postId = litePostIdOf({ permlink });
+  if (!postId) return false;
+  const row = await posts.getPostById(postId);
+  return row?.parentRef?.type === 'quote';
 }
 

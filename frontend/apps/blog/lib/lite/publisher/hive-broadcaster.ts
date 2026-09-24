@@ -4,6 +4,7 @@ import { getLogger } from '@ui/lib/logging';
 import { siteConfig } from '@ui/config/site';
 import { liteConfig } from '../config';
 import { hiveAllowsDelete } from '../hive-delete-rule';
+import { isMissingPostError } from '../hive-missing-post';
 import { CommentOp, PostBroadcaster, setBroadcaster } from './broadcaster';
 
 const logger = getLogger('app');
@@ -267,8 +268,9 @@ export const hiveBroadcaster: PostBroadcaster = {
     };
 
     if (data.error) {
-      const assertion = data.error.data?.extension?.assertion_expression ?? '';
-      if (assertion === `Post ${author}/${permlink} does not exist`) return false;
+      // Missing OR deleted (a deleted comment answers "was deleted N time(s)"; before
+      // this, a retried delete job threw here forever instead of seeing it was done).
+      if (isMissingPostError(data.error, author, permlink)) return false;
       throw new Error(`get_content error: ${JSON.stringify(data.error).slice(0, 300)}`);
     }
     return data.result?.author === author && data.result?.permlink === permlink;

@@ -36,6 +36,8 @@ if (!/_selftest(\?.*)?$/.test(DB_URL)) {
 
 type Fixture = Record<string, unknown>;
 const chain = new Map<string, Fixture>();
+/** Comments the node answers "was deleted" for (a real delete_comment landed). */
+const deletedOnChain = new Set<string>();
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
   const body = JSON.parse(String(init?.body ?? '{}')) as { method?: string; params?: [string, string] };
@@ -44,6 +46,10 @@ globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
   const hit = chain.get(`${a}/${p}`);
   // A missing comment is answered the way current nodes answer it (testnet hived 1.28.3,
   // seen 2026-09-24): an assertion error, not an empty shell.
+  if (deletedOnChain.has(`${a}/${p}`)) {
+    const error = { code: -31999, data: `Post ${a}/${p} was deleted 1 time(s)`, message: 'Invalid parameters' };
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error }), { status: 200 });
+  }
   if (!hit) {
     const error = { code: -32602, message: 'Assert Exception', data: { code: 10, extension: { assertion_expression: `Post ${a}/${p} does not exist` } } };
     return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error }), { status: 200 });
@@ -173,6 +179,16 @@ async function main(): Promise<void> {
   put('alice', permlink, { parent_author: PUB, parent_permlink: c.hivePermlink, depth: 1, json_metadata: marker, body: 'Back again.', net_rshares: '1200' });
   check('net-positive votes: blank', (await planHiveQuoteRemoval('alice', 'bob', 'how-rc-works'))?.mode === 'blank');
   check('nothing on chain: nothing to remove', (await planHiveQuoteRemoval('zed', 'bob', 'how-rc-works')) === null);
+  // A real delete_comment landed: the node now answers "was deleted", not "does not exist".
+  chain.delete(`alice/${permlink}`);
+  deletedOnChain.add(`alice/${permlink}`);
+  check('deleted on chain: nothing left to remove', (await planHiveQuoteRemoval('alice', 'bob', 'how-rc-works')) === null);
+  const deletedNow = await confirmHiveQuoteRemoved(alice, 'bob', 'how-rc-works');
+  check('deleted on chain: the quote is marked removed', deletedNow.ok && deletedNow.value.removed, JSON.stringify(deletedNow));
+  deletedOnChain.delete(`alice/${permlink}`);
+  // (Quote again, so S7 has alice's live comment to attach.)
+  put('alice', permlink, { parent_author: PUB, parent_permlink: rolledTo.hivePermlink, depth: 1, json_metadata: marker, body: 'Back again.' });
+  check('(setup) quoted again after the delete', (await confirmHiveQuote(alice, 'alice', 'bob', 'how-rc-works')).ok);
 
   console.log('S7  feed decoration');
   type E = Parameters<typeof attachQuotes>[0][number];
