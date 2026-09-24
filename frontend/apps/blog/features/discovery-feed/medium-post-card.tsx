@@ -1017,14 +1017,16 @@ const MediumPostCard = memo(function MediumPostCard({ post, mark, price, luminos
           `bridge.get_account_posts({ sort: 'feed' })` specifically because that
           endpoint (unlike `get_ranked_posts`) carries `reblogged_by`, live-verified
           against api.hive.blog 2026-08-06. Mirrors the classic feed's own marker
-          (post-list-item.tsx: Icons.forward + t('cards.reblogged')) so a reblog
-          reads the same way everywhere in the app. */}
+          (post-list-item.tsx: Icons.reblog + t('cards.reblogged')) so a reblog
+          reads the same way everywhere in the app. The loop mark (2026-09-24), the
+          same glyph as the card's and the post bar's reblog button; this line used
+          to draw the old share-tray icon. */}
       {post.reblogged_by && post.reblogged_by.length > 0 ? (
         <div
           className="mb-2.5 flex items-center gap-1.5 text-caption font-medium text-ink-10"
           data-testid="medium-card-reblogged-by"
         >
-          <Icons.forward className="h-3.5 w-3.5 shrink-0" />
+          <Icons.reblog className="h-3.5 w-3.5 shrink-0" />
           <Link
             href={`/@${post.reblogged_by[0]}`}
             className="hover:underline"

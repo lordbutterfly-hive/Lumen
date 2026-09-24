@@ -24,7 +24,7 @@ function getNotificationIcon(type: string) {
       };
     case 'reblog':
       return {
-        icon: <Icons.forward className="h-4 w-4" />,
+        icon: <Icons.reblog className="h-4 w-4" />,
         color: 'text-ink-info-5'
       };
     case 'reply':

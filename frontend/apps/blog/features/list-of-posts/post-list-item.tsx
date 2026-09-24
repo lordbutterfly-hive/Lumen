@@ -191,7 +191,7 @@ const PostListItem = memo(
           ) : null}
           {post.reblogged_by ? (
             <div className="flex items-center gap-2 py-1 text-sm">
-              <Icons.forward className="h-4 w-4" />
+              <Icons.reblog className="h-4 w-4" />
               <span data-testid="reblogged-label">
                 <Link
                   href={`/@${post.reblogged_by[0]}`}
@@ -408,7 +408,7 @@ const PostListItem = memo(
                                   data-testid="post-card-reblog-count"
                                   aria-label={`${t('cards.post_card.reblog')} ${displayTitle}`}
                                 >
-                                  <Icons.forward className="h-4 w-4 sm:mr-1" aria-hidden="true" />
+                                  <Icons.reblog className="h-4 w-4 sm:mr-1" aria-hidden="true" />
                                   <span className="font-num">{reblogCount}</span>
                                 </button>
                               </ReblogDialog>

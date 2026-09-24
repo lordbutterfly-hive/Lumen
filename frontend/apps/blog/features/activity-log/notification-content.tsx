@@ -339,7 +339,7 @@ const NotificationActivities = ({
           {t('navigation.profile_notifications_tab_navbar.upvotes')}
         </TabsTrigger>
         <TabsTrigger value="reblogs" className="gap-1.5">
-          <Icons.forward className="h-3 w-3 text-ink-info-9" />
+          <Icons.reblog className="h-3 w-3 text-ink-info-9" />
           {t('navigation.profile_notifications_tab_navbar.reblogs')}
         </TabsTrigger>
       </TabsList>
