@@ -87,8 +87,17 @@ async function readChainComment(author: string, permlink: string): Promise<Chain
     signal: AbortSignal.timeout(HIVE_READ_TIMEOUT_MS)
   });
   if (!res.ok) throw new Error(`get_content failed: HTTP ${res.status}`);
-  const data = (await res.json()) as { result?: ChainComment; error?: unknown };
-  if (data.error) throw new Error(`get_content error: ${JSON.stringify(data.error).slice(0, 200)}`);
+  const data = (await res.json()) as {
+    result?: ChainComment;
+    error?: { data?: { extension?: { assertion_expression?: string } } };
+  };
+  if (data.error) {
+    // Current nodes answer a missing comment with this exact assertion, not an empty
+    // result (the publisher's `postExists` reads it the same way). Anything else is a
+    // real failure and must not be read as "absent".
+    if (data.error.data?.extension?.assertion_expression === `Post ${author}/${permlink} does not exist`) return null;
+    throw new Error(`get_content error: ${JSON.stringify(data.error).slice(0, 200)}`);
+  }
   const post = data.result;
   // get_content answers an empty shell (author '') for a comment that does not exist.
   return post && post.author ? post : null;

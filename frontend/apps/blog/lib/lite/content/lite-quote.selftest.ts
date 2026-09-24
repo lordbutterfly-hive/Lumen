@@ -45,8 +45,12 @@ globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
   if (body.method !== 'condenser_api.get_content') throw new Error('network disabled in self-test');
   const [a, p] = body.params ?? ['', ''];
   const hit = chain.get(`${a}/${p}`);
-  const empty = { author: '', permlink: '', parent_author: '', parent_permlink: '', depth: 0, body: '', json_metadata: '', title: '', category: '', children: 0, net_rshares: 0, cashout_time: '' };
-  return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: hit ?? empty }), { status: 200 });
+  // Missing: an assertion error, as current nodes answer it (not an empty shell).
+  if (!hit) {
+    const error = { code: -32602, message: 'Assert Exception', data: { code: 10, extension: { assertion_expression: `Post ${a}/${p} does not exist` } } };
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error }), { status: 200 });
+  }
+  return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: hit }), { status: 200 });
 }) as typeof fetch;
 
 import { DELETED_BODY } from '@transaction/lib/deleted-body';

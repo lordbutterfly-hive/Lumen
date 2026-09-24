@@ -40,8 +40,13 @@ globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
   if (body.method !== 'condenser_api.get_content') return realFetch(_url as string, init as RequestInit);
   const [a, p] = body.params ?? ['', ''];
   const hit = chain.get(`${a}/${p}`);
-  const empty = { author: '', permlink: '', parent_author: '', parent_permlink: '', depth: 0, body: '', json_metadata: '', children: 0, net_rshares: 0, cashout_time: '' };
-  return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: hit ?? empty }), { status: 200 });
+  // A missing comment is answered the way current nodes answer it (testnet hived 1.28.3,
+  // seen 2026-09-24): an assertion error, not an empty shell.
+  if (!hit) {
+    const error = { code: -32602, message: 'Assert Exception', data: { code: 10, extension: { assertion_expression: `Post ${a}/${p} does not exist` } } };
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error }), { status: 200 });
+  }
+  return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: hit }), { status: 200 });
 }) as typeof fetch;
 
 import { DELETED_BODY } from '@transaction/lib/deleted-body';
