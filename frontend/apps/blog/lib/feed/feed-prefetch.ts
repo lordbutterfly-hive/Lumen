@@ -7,7 +7,8 @@ import { filterContainerEntries } from '@/blog/lib/moderation/container-posts';
 import { ensureSquatterList } from '@/blog/lib/lite/moderation/squatter-list';
 import { filterBlockedForViewer, viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
-import { readViewerFeed, feedBands, feedVersion } from '@/blog/lib/feed/feed-cache';
+import { readViewerFeed, feedBands, feedVersion, FEED_FRESH_MS } from '@/blog/lib/feed/feed-cache';
+import { refreshViewerFeedBehind } from '@/blog/lib/feed/refresh-behind';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
 import type { InitialFeedSeed, InitialFeedPage } from '@/blog/components/observer-provider';
@@ -362,6 +363,8 @@ interface StoredFeedRead {
   readMs: number;
   blockMs: number | 'timeout';
   trimMs: number;
+  /** The stored row's built size, on a hit: a background rebuild keeps the same size. */
+  builtLimit?: number;
 }
 
 /**
@@ -519,7 +522,7 @@ async function finishStoredFeed(
     lanes: stored.lanes
   };
   const trimMs = elapsedOf(trimWatch);
-  return { seed: { page, at: stored.at }, outcome: 'hit', readMs, blockMs, trimMs };
+  return { seed: { page, at: stored.at }, outcome: 'hit', readMs, blockMs, trimMs, builtLimit: stored.builtLimit };
 }
 
 /**
@@ -588,6 +591,22 @@ export async function prefetchHomeFeed(
           trace.source = 'recsys';
           trace.ranked = true;
           trace.count = stored.seed.page.entries.length;
+        }
+        // Served as the reader's ranking, rebuilt behind them when it is past the
+        // fresh window, exactly as the API route does (see `refreshViewerFeedBehind`).
+        // Hive logins only: a lite reader's store key differs from this `viewer`.
+        // `getLiteSession` is request-cached and already resolved by the block
+        // filter above, so this adds no unseal.
+        const age = Date.now() - stored.seed.at;
+        if (age >= FEED_FRESH_MS) {
+          try {
+            const session = await getLiteSession();
+            if (session.user && session.user.account_tier !== 'lite') {
+              refreshViewerFeedBehind({ viewer, isLite: false, userId: session.user.userId ?? '' }, stored.builtLimit ?? 0, age);
+            }
+          } catch {
+            // No session to rebuild for: the page is served exactly as before.
+          }
         }
         return stored.seed;
       }

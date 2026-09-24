@@ -93,7 +93,7 @@ function fakeEntry(author: string, permlink: string): Entry {
 interface MockState {
   sessionDelays: number[];
   sessionUser: unknown;
-  storedRow: { entries: Entry[]; at: number; version: string } | null;
+  storedRow: { entries: Entry[]; at: number; version: string; builtLimit?: number } | null;
   readDelayMs: number;
   abandonMs: number;
   feedVersionValue: string;
@@ -111,6 +111,7 @@ interface MockState {
   blockedKeySets: Array<Set<string>>;
   trendingPosts: Entry[];
   trendingDelayMs: number;
+  refreshCalls: Array<{ viewer: string; isLite: boolean; ageMs: number; limit: number }>;
 }
 
 const state: MockState = {
@@ -123,7 +124,8 @@ const state: MockState = {
   blockDelays: [],
   blockedKeySets: [],
   trendingPosts: [],
-  trendingDelayMs: 0
+  trendingDelayMs: 0,
+  refreshCalls: []
 };
 
 function resetState(): void {
@@ -137,6 +139,7 @@ function resetState(): void {
   state.blockedKeySets = [];
   state.trendingPosts = [];
   state.trendingDelayMs = 0;
+  state.refreshCalls = [];
 }
 
 function nextDelay(queue: number[]): number {
@@ -191,7 +194,17 @@ const feedCacheMock = {
     return state.storedRow;
   },
   feedBands: (): { abandonMs: number } => ({ abandonMs: state.abandonMs }),
-  feedVersion: (): string => state.feedVersionValue
+  feedVersion: (): string => state.feedVersionValue,
+  FEED_FRESH_MS: 5 * 60_000
+};
+
+// The home page's "rebuilt behind them" (2026-09-24). The real module reads the
+// warmer's registered builder; this records what the home prefetch asked for.
+const refreshBehindMock = {
+  refreshViewerFeedBehind: (candidate: { viewer: string; isLite: boolean }, limit: number, ageMs: number): boolean => {
+    state.refreshCalls.push({ viewer: candidate.viewer, isLite: candidate.isLite, ageMs, limit });
+    return true;
+  }
 };
 
 // ★ MOCKED TOO, EVEN THOUGH `DEFAULT_OBSERVER` ITSELF IS A PLAIN STRING
@@ -223,6 +236,7 @@ injectMock('@/blog/lib/lite/repositories/engagement-repository', engagementRepos
 injectMock('@/blog/lib/lite/social/block-filter', blockFilterMock);
 injectMock('@/blog/lib/lite/http/session', sessionMock);
 injectMock('@/blog/lib/feed/feed-cache', feedCacheMock);
+injectMock('@/blog/lib/feed/refresh-behind', refreshBehindMock);
 injectMock('@/blog/lib/utils', utilsMock);
 
 // Required AFTER every dependency it pulls in at runtime has a fake already
@@ -335,6 +349,7 @@ async function main(): Promise<void> {
     );
     check('both stored entries are present, unfiltered (nothing was blocked)', result?.page.entries.length === 2, JSON.stringify(result?.page.entries));
     check("the trace agrees: stored='hit', source='recsys'", trace.stored === 'hit' && trace.source === 'recsys', JSON.stringify(trace));
+    check('a FRESH stored hit starts no background rebuild', state.refreshCalls.length === 0, JSON.stringify(state.refreshCalls));
   }
 
   // ── 4. EXISTING BEHAVIOUR UNCHANGED: fast fallback still filters ───────
@@ -372,6 +387,30 @@ async function main(): Promise<void> {
       JSON.stringify(result?.page)
     );
   }
+
+  // ── 6. A stale stored hit is served AND rebuilt behind the reader ──────
+  section('6. a stored hit past the 5-minute fresh window is still served, and starts one background rebuild');
+  {
+    resetState();
+    state.storedRow = { entries: [fakeEntry('alice', 'p1')], at: Date.now() - 10 * 60_000, version: 'v1', builtLimit: 45 };
+    state.blockedKeySets = [new Set()];
+    const result = await feedPrefetch.prefetchHomeFeed('viewer6');
+    check('the stale stored ranking is still what the reader gets', result?.page.source === 'recsys', JSON.stringify(result?.page));
+    check(
+      'exactly one rebuild was started, for this viewer, as a Hive reader',
+      state.refreshCalls.length === 1 && state.refreshCalls[0].viewer === 'viewer6' && state.refreshCalls[0].isLite === false,
+      JSON.stringify(state.refreshCalls)
+    );
+    check('the rebuild was told how old the page was', (state.refreshCalls[0]?.ageMs ?? 0) >= 10 * 60_000 - 1000, JSON.stringify(state.refreshCalls));
+    check('the rebuild keeps the replaced row\'s size (builtLimit 45)', state.refreshCalls[0]?.limit === 45, JSON.stringify(state.refreshCalls));
+
+    resetState();
+    state.storedRow = { entries: [fakeEntry('alice', 'p1')], at: Date.now() - 10 * 60_000, version: 'v1' };
+    state.blockedKeySets = [new Set()];
+    state.sessionUser = { userId: 'lite-1', account_tier: 'lite' };
+    await feedPrefetch.prefetchHomeFeed('lite-1');
+    check('a lite reader starts no rebuild (their store key differs from this viewer)', state.refreshCalls.length === 0, JSON.stringify(state.refreshCalls));
+  }
 }
 
 main()
@@ -379,7 +418,7 @@ main()
     out('');
     out(
       failures === 0
-        ? `PASS — ${checks} checks: empty-home floor and bounded fallback block filter both proven, fast paths unchanged`
+        ? `PASS — ${checks} checks: empty-home floor and bounded fallback block filter both proven, fast paths unchanged, stale hits rebuilt behind the reader`
         : `FAIL — ${failures} of ${checks} checks failed`
     );
     // eslint-disable-next-line no-console

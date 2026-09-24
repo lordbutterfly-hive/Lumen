@@ -161,8 +161,13 @@ done
 # real render. A/B on production, 4 restarts alternating, first 3 hits per route
 # after the step: without p50 174/161 ms, p90 880/982 ms; with p50 69/80 ms, p90
 # 202/289 ms. Costs ~15-19 s here. Read-only GETs; no page records a view.
+# ★ The feed API route is in the list too (2026-09-24): loading that module is what
+# registers the feed builder and starts the viewer warmer in each worker
+# (`startViewerWarmer` runs at the route's module scope), and the home page's
+# background refresh needs that builder. Without it, a fresh deploy had no warmer and
+# no home refresh in a worker until some reader happened to call the API there.
 echo "==> warm the workers (main routes, loopback)"
-$SSH "$HOST" 'for r in / /@lordbutterfly /@lordbutterfly/wallet /@lordbutterfly/followers /photography/@lordbutterfly/product-photography-attempt-no-1 /topics/photography /inquisition /m/lordbutterfly; do for k in 1 2 3 4 5 6; do curl -s -o /dev/null --max-time 20 "http://127.0.0.1:3000$r?warm=$k$(date +%s%N)"; done; done'
+$SSH "$HOST" 'for r in / /@lordbutterfly /@lordbutterfly/wallet /@lordbutterfly/followers /photography/@lordbutterfly/product-photography-attempt-no-1 /topics/photography /inquisition /m/lordbutterfly; do for k in 1 2 3 4 5 6; do curl -s -o /dev/null --max-time 20 "http://127.0.0.1:3000$r?warm=$k$(date +%s%N)"; done; done; for k in 1 2 3 4 5 6; do curl -s -o /dev/null --max-time 20 "http://127.0.0.1:3000/api/feed/for-you?tag=photography&limit=30&warm=$k$(date +%s%N)"; done'
 
 fail=0
 chk() { printf '%-52s %s\n' "$1" "$2"; [ "$2" = FAIL ] && fail=1; return 0; }
