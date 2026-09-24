@@ -8,6 +8,8 @@ import { findUsersByIds } from '@/blog/lib/lite/repositories/user-repository';
 import * as dmMessages from '@/blog/lib/lite/repositories/dm-message-repository';
 import { viewerBlockedKeySet } from '@/blog/lib/lite/social/block-filter';
 import { actorKey } from '@/blog/lib/lite/social/follow-actor';
+import * as quotes from '@/blog/lib/lite/repositories/quote-repository';
+import { liteConfig } from '@/blog/lib/lite/config';
 import { listByUser } from '@/blog/lib/lite/repositories/credential-repository';
 import { walletDid } from '@/blog/lib/lite/wallet/did-pkh';
 import {
@@ -248,7 +250,41 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       logger.error(e, 'meritum notifications lookup failed');
     }
 
-    const merged = [...followRows, ...dmRows, ...meritumRows].sort(
+    // "<name> reblogged your post with a comment" (quote reblog spec v2 7.7). One Lumen
+    // row per quote; the bell drops Hive's own reblog and mention rows for it (they
+    // carry `quoteOf` / the comment's url to match on).
+    let quoteRows: Array<{
+      id: string;
+      type: 'quote';
+      msg: string;
+      url: string;
+      date: string;
+      actor: string;
+      source: 'lumen';
+      quoteOf: string;
+    }> = [];
+    try {
+      const notices = await quotes.recentQuotesOfOwner(actor as { hive?: string; userId?: string }, liteConfig.frontendAccount, 20);
+      quoteRows = notices
+        .filter((n) => !blockedKeys.has(n.quote.quoterKey))
+        .map((n) => {
+          const caption = n.quote.bodyCache.length > 80 ? `${n.quote.bodyCache.slice(0, 79).trimEnd()}…` : n.quote.bodyCache;
+          return {
+            id: `quote:${n.quote.quoteId}`,
+            type: 'quote' as const,
+            msg: `${n.quoterName} reblogged your post with a comment: ${caption}`,
+            url: `lumen/@${n.quote.quoteAuthor}/${n.quote.quotePermlink}`,
+            date: n.quote.createdAt.toISOString(),
+            actor: n.quoterName,
+            source: 'lumen' as const,
+            quoteOf: `${n.quote.targetAuthor}/${n.quote.targetPermlink}`
+          };
+        });
+    } catch (e) {
+      logger.error(e, 'quote notifications lookup failed');
+    }
+
+    const merged = [...followRows, ...dmRows, ...meritumRows, ...quoteRows].sort(
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
     );
     return NextResponse.json({ notifications: merged });

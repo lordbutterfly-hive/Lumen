@@ -4,6 +4,7 @@ import * as blocks from '../repositories/block-repository';
 import * as posts from '../repositories/post-repository';
 import { liteConfig } from '../config';
 import { litePostIdOf } from '../render/lite-post-id';
+import { containerFamilyOf } from '../container-family';
 import { FollowActor, actorKey, sessionActor } from './follow-actor';
 import { actorForDisplayedName, buildEntryActorResolver } from './block-actor';
 import {
@@ -141,7 +142,18 @@ export async function applyOwnerBlocksToThread<T extends Entry>(entries: T[]): P
   // this function already answers "no thread" rather than an unfiltered one when
   // its OWN Lumen-block resolution throws (see `[permlink]/page.tsx` and
   // `/api/discussion`'s "FAIL EMPTY, NEVER FAIL OPEN").
-  const root = entries.find((entry) => !parentCoordKey(entry));
+  // The thread's root: the top-level post, or, on a REBLOG COMMENT's own page (quote
+  // reblog spec v2 5), the comment itself. It is a depth-1 child of a quote container
+  // that the fetched thread does not include, so without this the quoter's Hive mutes
+  // never reached the replies under their comment. Any other comment page is unchanged.
+  const root =
+    entries.find((entry) => !parentCoordKey(entry)) ??
+    entries.find(
+      (entry) =>
+        entry.depth === 1 &&
+        containerFamilyOf(entry.parent_permlink) === 'quote' &&
+        !byCoord.has(parentCoordKey(entry) ?? '')
+    );
   const rootOwnerName = root ? await ownerHiveNameOfEntry(root) : null;
   const chainMuted = rootOwnerName
     ? await ownerChainMutedNamesOrThrow({ hive: rootOwnerName })

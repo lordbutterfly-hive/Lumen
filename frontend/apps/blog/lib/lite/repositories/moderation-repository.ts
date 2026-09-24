@@ -7,7 +7,7 @@ import { ulid } from '../ids';
  * rewriting history.
  */
 
-export type ModerationTargetType = 'user' | 'post';
+export type ModerationTargetType = 'user' | 'post' | 'quote';
 
 export type ModerationActionName =
   | 'suspend'

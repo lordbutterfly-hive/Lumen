@@ -176,6 +176,32 @@ export async function setState(quoteId: string, state: QuoteState, bodyCache?: s
   return rows[0] ? map(rows[0]) : null;
 }
 
+/**
+ * Moderation of a whole account (spec v2 7.6): hide every quote by this Lumen user, or
+ * restore them (a lite quote back to `live` once on Hive, else `pending`; a quote they
+ * signed with their own Hive key back to `live`). Removed quotes stay removed.
+ */
+export async function setStateForUser(userId: string, hide: boolean): Promise<number> {
+  const { rowCount } = hide
+    ? await query(
+        `UPDATE lumen_quote SET state = 'hidden', updated_at = now()
+          WHERE quoter_user_id = $1 AND state IN ('pending', 'live')`,
+        [userId]
+      )
+    : await query(
+        `UPDATE lumen_quote q
+            SET state = CASE
+                  WHEN q.lite_post_id IS NULL THEN 'live'
+                  WHEN (SELECT p.hive_permlink FROM lumen_post p WHERE p.post_id = q.lite_post_id) IS NULL THEN 'pending'
+                  ELSE 'live'
+                END,
+                updated_at = now()
+          WHERE q.quoter_user_id = $1 AND q.state = 'hidden'`,
+        [userId]
+      );
+  return rowCount ?? 0;
+}
+
 /** A lite quote reached Hive (the publisher published its post): pending -> live. */
 export async function markLitePublished(litePostId: string): Promise<void> {
   await query(
@@ -237,3 +263,46 @@ export async function liveQuotesByQuoter(quoterKey: string, before: Date | null,
   );
   return rows.map(map);
 }
+
+/** A quote of one of this person's posts, for their notifications (spec v2 7.7). */
+export interface QuoteNotice {
+  quote: LumenQuote;
+  /** Who quoted, as the bell names them (Hive name, else Lumen handle). */
+  quoterName: string;
+}
+
+/**
+ * The newest live (or, for a lite quoter, still-publishing) quotes of this person's
+ * posts, never their own (decision D6: quoting yourself notifies nobody). A Hive author
+ * owns the posts under their name; a Lumen author owns the Lumen posts (published by
+ * `publisher`) whose rows are theirs.
+ */
+export async function recentQuotesOfOwner(
+  owner: { hive?: string; userId?: string },
+  publisher: string,
+  limit = 20
+): Promise<QuoteNotice[]> {
+  const ownKey = owner.userId ? `u:${owner.userId}` : `h:${String(owner.hive).toLowerCase()}`;
+  const { rows } = owner.userId
+    ? await query<QuoteRow & { quoter_name: string | null }>(
+        `SELECT q.*, COALESCE(q.quoter_hive, u.hive_account_name, u.display_name) AS quoter_name
+           FROM lumen_quote q
+           JOIN lumen_post p ON p.post_id = lumen_permlink_post_id(q.target_permlink)
+           LEFT JOIN lumen_user u ON u.user_id = q.quoter_user_id
+          WHERE q.target_author = $2 AND p.user_id = $1 AND q.state IN ('live', 'pending') AND q.quoter_key <> $3
+          ORDER BY q.created_at DESC
+          LIMIT $4`,
+        [owner.userId, publisher, ownKey, limit]
+      )
+    : await query<QuoteRow & { quoter_name: string | null }>(
+        `SELECT q.*, COALESCE(q.quoter_hive, u.hive_account_name, u.display_name) AS quoter_name
+           FROM lumen_quote q
+           LEFT JOIN lumen_user u ON u.user_id = q.quoter_user_id
+          WHERE q.target_author = $1 AND q.state IN ('live', 'pending') AND q.quoter_key <> $2
+          ORDER BY q.created_at DESC
+          LIMIT $3`,
+        [String(owner.hive).toLowerCase(), ownKey, limit]
+      );
+  return rows.map((r) => ({ quote: map(r), quoterName: r.quoter_name ?? 'someone' }));
+}
+

@@ -54,6 +54,8 @@ export interface LumenNotification {
    */
   actor?: string;
   source?: 'lumen';
+  /** A `quote` row: the reblogged post (`author/permlink`), to drop Hive's duplicate rows. */
+  quoteOf?: string;
 }
 
 /** The old single-timestamp mark, read once to seed the id set and never written again. */

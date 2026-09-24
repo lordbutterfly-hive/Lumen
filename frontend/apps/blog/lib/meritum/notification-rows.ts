@@ -33,7 +33,9 @@ export type LumenNotificationType =
   /** Seller: the buyer scored a delivery. */
   | 'rated'
   /** Seller: a buyer reclaimed after the deadline; the contract wrote a miss. */
-  | 'missed';
+  | 'missed'
+  /** Somebody reblogged this reader's post with a comment (quote reblog spec v2 7.7). */
+  | 'quote';
 
 export interface LumenNotificationRow {
   /**

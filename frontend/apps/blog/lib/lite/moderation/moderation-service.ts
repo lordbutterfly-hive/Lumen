@@ -4,6 +4,8 @@ import * as users from '../repositories/user-repository';
 import * as posts from '../repositories/post-repository';
 import * as publishJobs from '../repositories/publish-job-repository';
 import * as log from '../repositories/moderation-repository';
+import * as quotes from '../repositories/quote-repository';
+import type { LumenQuote } from '../repositories/quote-repository';
 import { revivePublish, takeDownPost } from '../content/post-service';
 
 const logger = getLogger('app');
@@ -63,12 +65,15 @@ export async function moderateUser(input: {
 
   let postsHidden = 0;
   let postsRestored = 0;
+  let quotesChanged = 0;
   if (input.hideContent) {
     if (reinstating) {
       postsRestored = await posts.setFeedVisibilityForUser(input.userId, 'visible');
     } else {
       postsHidden = await posts.setFeedVisibilityForUser(input.userId, 'hidden');
     }
+    // "Hide all content" includes their reblog comments, lite or Hive-signed (spec v2 7.6).
+    quotesChanged = await quotes.setStateForUser(input.userId, !reinstating);
   }
 
   // ★★★ REINSTATING MUST ALSO PUT THE UNPUBLISHED WORK BACK ON THE ROAD (2026-08-10).
@@ -101,7 +106,7 @@ export async function moderateUser(input: {
     targetId: input.userId,
     action: input.action,
     reason: input.reason ?? null,
-    detail: { jobsHeld, jobsReleased, postsHidden, postsRestored, postsRequeued, postsOnChain }
+    detail: { jobsHeld, jobsReleased, postsHidden, postsRestored, postsRequeued, postsOnChain, quotesChanged }
   });
 
   logger.info(
@@ -151,6 +156,12 @@ export async function moderatePost(input: {
   // A takedown only makes sense alongside hiding it here; restoring visibility does
   // not un-delete anything on chain, and pretending otherwise would be a lie.
   const wantsTakedown = Boolean(input.takedown) && input.visibility === 'hidden';
+  // A lite quote's post (spec v2 7.6): its quote follows it, hidden while the post is
+  // moderated, gone with a takedown, back when the post is visible again.
+  if (post.parentRef?.type === 'quote') {
+    const state = input.visibility === 'visible' ? (post.hivePermlink ? 'live' : 'pending') : wantsTakedown ? 'removed' : 'hidden';
+    await quotes.setStateByLitePost(post.postId, state);
+  }
   // ★ A post that has NOT reached Hive yet must be stopped from doing so, whatever else
   // this call does. Hiding it only in our database left the queued job untouched, so
   // the worker broadcast the removed content minutes later — permanent and public,
@@ -208,3 +219,33 @@ export async function moderatePost(input: {
 }
 
 export const listActions = log.listActions;
+
+/**
+ * Hide or restore ONE reblog comment on Lumen (spec v2 7.6), for a Hive user's quote,
+ * which Lumen cannot take off the chain: every Lumen surface drops a hidden quote. A
+ * lite quote is moderated through its post (`moderatePost`), which also handles Hive.
+ * A removed quote stays removed. Logged like any moderation action.
+ */
+export async function moderateQuote(input: {
+  actor: string;
+  quoteId: string;
+  hidden: boolean;
+  reason?: string | null;
+}): Promise<LumenQuote | null> {
+  const existing = await quotes.findById(input.quoteId);
+  if (!existing) return null;
+  if (existing.state === 'removed') return existing;
+  const published = existing.litePostId ? Boolean((await posts.getPostById(existing.litePostId))?.hivePermlink) : true;
+  const updated = await quotes.setState(existing.quoteId, input.hidden ? 'hidden' : published ? 'live' : 'pending');
+  await log.recordAction({
+    actor: input.actor,
+    targetType: 'quote',
+    targetId: existing.quoteId,
+    action: input.hidden ? 'hide' : 'unhide',
+    reason: input.reason ?? null,
+    detail: { quote: `${existing.quoteAuthor}/${existing.quotePermlink}`, target: `${existing.targetAuthor}/${existing.targetPermlink}` }
+  });
+  logger.info('Moderation: quote %s %s by %s', existing.quoteId, input.hidden ? 'hidden' : 'restored', input.actor);
+  return updated;
+}
+

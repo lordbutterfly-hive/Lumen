@@ -20,6 +20,11 @@
  *       accepts, the marker kept
  *   L9  refusals: switched off, empty, too long, a comment, a quote, the owner's block
  *   L10 a Lumen (lite) post quoted: named by handle without @, linked at its Lumen URL
+ *   L11 moderation: hiding the quote's post hides the quote, unhiding restores it;
+ *       "hide all content" on the quoter hides it, reinstating restores it; a single
+ *       quote can be hidden and restored by quote id (logged)
+ *   L12 notifications: a Hive author and a Lumen author each see the quotes of their
+ *       posts, removed and hidden ones are not listed, a self-quote notifies nobody
  *
  * SAFETY: refuses unless LITE_DATABASE_URL ends in `_selftest`; truncates tables.
  *
@@ -69,6 +74,7 @@ import { buildPermlink } from '../publisher/permlink';
 import { runPublisherOnce } from '../publisher/worker';
 import { createLitePost } from './post-service';
 import { removeLiteQuote, saveLiteQuote } from './quote-service';
+import { moderatePost, moderateQuote, moderateUser } from '../moderation/moderation-service';
 
 const PUB = liteConfig.frontendAccount;
 let failures = 0;
@@ -147,7 +153,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   await runMigrations();
-  await query('TRUNCATE lumen_user, lumen_container, lumen_quote, lumen_block, rate_counter CASCADE');
+  await query('TRUNCATE lumen_user, lumen_container, lumen_quote, lumen_block, rate_counter, lumen_moderation_action CASCADE');
   setBroadcaster(fake);
   const alice = (await users.createUser({ displayName: 'alice' })).userId;
   const erin = (await users.createUser({ displayName: 'erin' })).userId;
@@ -278,6 +284,32 @@ async function main(): Promise<void> {
   const r10 = await saveLiteQuote(sessionOf(alice), SESSION_REF, PUB, erinPermlink, 'Lovely.');
   const lite10 = r10.ok && r10.value.litePostId ? await posts.getPostById(r10.value.litePostId) : null;
   check('named by handle, no @, linked at its Lumen URL', !!lite10 && lite10.body.includes(`Reblogged from a post by erin on Lumen: [Photos from the coast](`) && lite10.body.includes(`/lumen/@erin/${erinPermlink})`) && !lite10.body.includes('@erin:') && !lite10.body.includes(`@${PUB}`), JSON.stringify(lite10?.body));
+
+  console.log('L11 moderation');
+  const q11 = r10.ok ? r10.value : null;
+  const stateOf = async () => (q11 ? (await quotes.findById(q11.quoteId))?.state : undefined);
+  await moderatePost({ actor: 'selftest', postId: q11!.litePostId!, visibility: 'hidden', reason: 'test' });
+  check("hiding the quote's post hides the quote", (await stateOf()) === 'hidden');
+  await moderatePost({ actor: 'selftest', postId: q11!.litePostId!, visibility: 'visible' });
+  check('unhiding restores it (not on Hive yet: pending)', (await stateOf()) === 'pending');
+  await moderateUser({ actor: 'selftest', userId: alice, action: 'suspend', reason: 'test', hideContent: true });
+  check('"hide all content" on the quoter hides it', (await stateOf()) === 'hidden');
+  await moderateUser({ actor: 'selftest', userId: alice, action: 'reinstate', hideContent: true });
+  check('reinstating restores it', (await stateOf()) === 'pending');
+  await moderateQuote({ actor: 'selftest', quoteId: q11!.quoteId, hidden: true, reason: 'test' });
+  check('one quote hidden by id', (await stateOf()) === 'hidden');
+  await moderateQuote({ actor: 'selftest', quoteId: q11!.quoteId, hidden: false });
+  const { rows: logged } = await query<{ n: string }>(`SELECT count(*)::text n FROM lumen_moderation_action WHERE target_type = 'quote' AND target_id = $1`, [q11!.quoteId]);
+  check('...restored, and both actions are in the moderation log', (await stateOf()) === 'pending' && logged[0].n === '2', logged[0].n);
+
+  console.log('L12 notifications');
+  const bobSees = await quotes.recentQuotesOfOwner({ hive: 'bob' }, PUB);
+  check("bob (Hive author) sees alice's live quote of his post, not the removed ones", bobSees.some((n) => n.quote.targetPermlink === 'race' && n.quoterName === 'alice') && !bobSees.some((n) => n.quote.targetPermlink === 'how-rc-works'), JSON.stringify(bobSees.map((n) => [n.quote.targetPermlink, n.quote.state])));
+  const erinSees = await quotes.recentQuotesOfOwner({ userId: erin }, PUB);
+  check("erin (Lumen author) sees alice's quote of her Lumen post, by alice's handle", erinSees.length === 1 && erinSees[0].quoterName === 'alice', JSON.stringify(erinSees.map((n) => n.quoterName)));
+  const selfQ = await saveLiteQuote(sessionOf(erin), SESSION_REF, PUB, erinPermlink, 'My own post, quoted.');
+  const erinAfter = await quotes.recentQuotesOfOwner({ userId: erin }, PUB);
+  check('a self-quote is allowed (D6) and notifies nobody', selfQ.ok && erinAfter.length === 1, JSON.stringify(erinAfter.map((n) => n.quoterName)));
 
   await query('TRUNCATE lumen_user, lumen_container, lumen_quote, lumen_block, rate_counter CASCADE');
   console.log(failures === 0 ? `PASS — ${checks} checks` : `FAIL — ${failures} of ${checks} checks failed`);

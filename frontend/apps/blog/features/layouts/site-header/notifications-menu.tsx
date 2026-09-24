@@ -197,7 +197,18 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
       { kind: 'lumen'; at: number; item: LumenNotification } | { kind: 'chain'; at: number; item: IAccountNotification & { rep?: number } }
     > = [];
     for (const item of lumenItems) rows.push({ kind: 'lumen', at: notifiedAt(item.date), item });
-    for (const item of notifications ?? []) rows.push({ kind: 'chain', at: notifiedAt(item.date), item });
+    // A reblog WITH a comment arrives from Hive as a "reblog" row plus a "mention" row
+    // (the comment names the author). Lumen's own "reblogged your post with a comment"
+    // row replaces both (quote reblog spec v2 7.7).
+    const quoteRows = lumenItems.filter((i) => i.type === 'quote' && i.quoteOf);
+    const replacedReblogs = new Set(quoteRows.map((q) => `${(q.actor ?? '').toLowerCase()}|@${q.quoteOf}`));
+    const replacedMentions = new Set(quoteRows.map((q) => q.url.replace(/^lumen\//, '')));
+    for (const item of notifications ?? []) {
+      const who = /^@([a-z0-9.-]+)/.exec(item.msg ?? '')?.[1] ?? '';
+      if (item.type === 'reblog' && replacedReblogs.has(`${who}|${item.url}`)) continue;
+      if (item.type === 'mention' && replacedMentions.has(item.url)) continue;
+      rows.push({ kind: 'chain', at: notifiedAt(item.date), item });
+    }
     return rows.sort((a, b) => b.at - a.at);
   }, [lumenItems, notifications]);
 
