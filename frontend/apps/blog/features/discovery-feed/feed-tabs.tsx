@@ -812,15 +812,13 @@ function ForYouFeed({ ssrCardCount = Number.POSITIVE_INFINITY }: { ssrCardCount?
      never hit and would only add bookkeeping. The saving is the two redundant
      passes, and the hooks themselves now memoise the maps they return. */
   const authors = shown.map((e) => e.author);
-  // The server read these with the page when it could (`InitialFeedSeed.marks`); the hooks
-  // use that only while it covers every author shown.
-  const marks = useRankMarks(authors, initialFeed?.marks);
+  const marks = useRankMarks(authors);
   /* One market read for the whole page (3 state keys per creator, chunked at 33
      inside the data source). Threaded to the cards exactly like `useRankMarks`
      beside it — a per-card fetch is the N+1 that cost this feed 30s a load. */
   const { prices } = useTokenPriceChips(authors);
   /* §2 rank luminosity for the avatar glow — shares `useRankMarks`' request. */
-  const luminosity = useRankLuminosity(authors, initialFeed?.marks);
+  const luminosity = useRankLuminosity(authors);
 
   // Posts the silent poll found that are not on the reader's page yet. Filtered the
   // same way the list is, so the button can never offer posts that would render as

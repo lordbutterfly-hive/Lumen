@@ -5,8 +5,6 @@ import { useQuery } from '@tanstack/react-query';
 import { LeagueTier } from '../types';
 import { TIERS } from '../lib/tiers';
 import { useOwnRankTierSeed } from '../lib/own-rank-tier-context';
-import type { RankMarksSeed } from '@/blog/components/observer-provider';
-import { seededRankMarks } from '@/blog/lib/rank-marks-seed';
 
 /**
  * Byline marks for a page of authors, in ONE request.
@@ -35,11 +33,10 @@ function toTier(raw: string): LeagueTier | null {
   return (Object.values(LeagueTier) as string[]).includes(raw) ? (raw as LeagueTier) : null;
 }
 
-export function useRankMarks(authors: string[], seed?: RankMarksSeed | null): Map<string, RankMark> {
+export function useRankMarks(authors: string[]): Map<string, RankMark> {
   // Sorted + deduped so two pages with the same authors in a different order share one
   // cache entry rather than issuing two identical requests.
   const key = [...new Set(authors.filter(Boolean).map((a) => a.toLowerCase()))].sort();
-  const initialData = seededRankMarks(key, seed);
 
   const { data } = useQuery({
     queryKey: ['rank-marks', key.join(',')],
@@ -54,9 +51,7 @@ export function useRankMarks(authors: string[], seed?: RankMarksSeed | null): Ma
     // A rank moves over weeks. Re-fetching per navigation would be pure waste.
     staleTime: 10 * 60 * 1000,
     // The mark is decoration: a failed read must render nothing, never retry-storm.
-    retry: false,
-    initialData,
-    initialDataUpdatedAt: initialData ? seed?.at : undefined
+    retry: false
   });
 
   /*
@@ -129,11 +124,8 @@ const RANK_LUMINOSITY: Record<number, number> = {
 };
 
 /** `account` (lowercased) -> `--l`, the §2 luminosity for that rank. */
-export function useRankLuminosity(authors: string[], seed?: RankMarksSeed | null): Map<string, number> {
+export function useRankLuminosity(authors: string[]): Map<string, number> {
   const key = [...new Set(authors.filter(Boolean).map((a) => a.toLowerCase()))].sort();
-  // Same seed rule as `useRankMarks`; both hooks share the cache entry, so the caller
-  // passes both the same seed.
-  const initialData = seededRankMarks(key, seed);
 
   const { data } = useQuery({
     // ★ THE SAME KEY `useRankMarks` USES, deliberately: both hooks want the same
@@ -149,9 +141,7 @@ export function useRankLuminosity(authors: string[], seed?: RankMarksSeed | null
     },
     enabled: key.length > 0,
     staleTime: 10 * 60 * 1000,
-    retry: false,
-    initialData,
-    initialDataUpdatedAt: initialData ? seed?.at : undefined
+    retry: false
   });
 
   // ★ T3j: memoised on the query result for the same reason as `useRankMarks`
