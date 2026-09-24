@@ -3,6 +3,7 @@
 // module on every page. `@hiveio/wax` ships exactly ONE entry point
 // (wasm/dist/bundle/web.js) that bundles that WASM module — there is no lighter
 // "just the operation-builder classes" import path, so ANY plain, non-`type`
+import { mergeEditJsonMetadata } from './lib/edit-metadata';
 import { mergePostingJsonMetadata } from './lib/merge-posting-json-metadata';
 // import from '@hiveio/wax' anywhere in this file's static graph drags the whole
 // thing along. Every name below that this file only ever uses as a TYPE is
@@ -894,9 +895,11 @@ export class TransactionService {
     parentPermlink: string,
     permlink: string,
     body: string,
-    transactionOptions: TransactionOptions = {}
+    transactionOptions: TransactionOptions = {},
+    existingJsonMetadata?: unknown
   ) {
     const { ReplyOperation } = await loadWax();
+    // Keeps the comment's own metadata keys; only `app` is refreshed (see edit-metadata.ts).
     const reply = new ReplyOperation({
       parentAuthor,
       parentPermlink,
@@ -909,7 +912,7 @@ export class TransactionService {
       // finding and same fix as `comment()` above: every EDIT of a full
       // account's comment was re-wiping any app identification the comment
       // may have carried, on every single save.
-      jsonMetadata: { app: LUMEN_APP_METADATA },
+      jsonMetadata: mergeEditJsonMetadata(existingJsonMetadata, LUMEN_APP_METADATA),
       permlink
     });
 

@@ -84,7 +84,10 @@ CREATE TABLE hafsql.operation_comment_view (
     permlink         text,
     parent_author    text,
     parent_permlink  text,
-    json_metadata    jsonb
+    json_metadata    jsonb,
+    -- Read by the trust-graph edge queries (2026-09-24). Defaulted to NOW so the
+    -- fixture's existing inserts, which predate it, are unchanged.
+    "timestamp"      timestamptz DEFAULT '2026-08-10 12:00:00+00'
 );
 CREATE TABLE hafsql.reblogs (
     account_name     varchar,
@@ -469,6 +472,40 @@ def test_with_no_publishers_every_identity_is_the_chain_account(db: Any) -> None
     assert _engagement(db, lite=False)["pub/lumen-c-1"] == 0.0
 
 
+# ---------------------------------------------------------------------------
+# Quote reblogs (2026-09-24, spec v2 6.1): reblog comments live under `lumen-q-`
+# ---------------------------------------------------------------------------
+
+
+def test_a_lite_REBLOG_COMMENT_is_never_recalled_as_a_post(db: Any) -> None:
+    """A lite user's reblog comment is published by the publisher under a `lumen-q-`
+    container and carries `lumen_user_id` like every lite row, so before the parent
+    check `_LITE_POST` admitted it as a For You candidate. Rigged to rank: it has
+    three distinct commenters, more than the lite post used as the control."""
+    _post(db, PUB, "lumen-q-1", "", "general", app=APP)  # the quote container root
+    _comment(db, PUB, "lumen-quote-1", PUB, "lumen-q-1", uid=U_D, app=APP)  # D's reblog comment
+    for who in ("x1", "x2", "x3"):
+        _comment(db, who, f"xq-{who}", PUB, "lumen-quote-1")
+    recalled = _recall(db, lite=True)
+    assert "pub/lumen-quote-1" not in recalled
+    assert "pub/lumen-p1" in recalled  # control: a lite POST under `lumen-c-` still is
+
+
+def test_a_reblog_comment_adds_no_reply_edge_onto_the_publisher(db: Any) -> None:
+    """A Hive user's reblog comment is a reply to the publisher's `lumen-q-` root,
+    which carries no writer id, so it resolved to the publisher: every quoter became
+    a 5.0-weight reply edge onto one hub account."""
+    _post(db, PUB, "lumen-q-1", "", "general", app=APP)
+    _comment(db, "quoter", "lumen-rq-abc", PUB, "lumen-q-1")
+    rows = db.execute(
+        hafsql._SQL_REPLY_EDGES_WITH_LITE,
+        {"since": SINCE, "until": NOW + timedelta(days=1), "lite_publishers": [PUB], "lite_app": APP},
+    ).fetchall()
+    edges = {(src, dst) for src, dst, *_ in rows}
+    assert ("quoter", PUB) not in edges
+    assert ("bob", U_A) in edges  # control: a Hive reply to a lite post still reaches its writer
+
+
 def test_the_container_prefix_is_the_one_popular_config_declares() -> None:
     """`recsys.core.popular.is_container_post` drops containers from the lane on
     `PopularConfig.lumen_container_prefix`; this SQL identifies a container CHILD
@@ -477,3 +514,7 @@ def test_the_container_prefix_is_the_one_popular_config_declares() -> None:
     from recsys.config import PopularConfig
 
     assert hafsql._LITE_CONTAINER_PREFIX == PopularConfig().lumen_container_prefix
+    # `_LITE_POST` embeds the same prefix as a literal (some call sites bind only
+    # two lite parameters), so pin the literal to the config too.
+    assert hafsql._LITE_POST_CONTAINER_PREFIX == PopularConfig().lumen_container_prefix
+    assert f"starts_with({{t}}parent_permlink, '{hafsql._LITE_POST_CONTAINER_PREFIX}')" in hafsql._LITE_POST

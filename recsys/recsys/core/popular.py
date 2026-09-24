@@ -96,7 +96,9 @@ def is_container_post(
     return bool(
         lite_publishers
         and post.author in lite_publishers
-        and post.permlink.startswith(popular.lumen_container_prefix)
+        and post.permlink.startswith(
+            (popular.lumen_container_prefix, popular.lumen_quote_container_prefix)
+        )
     )
 
 

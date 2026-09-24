@@ -1,8 +1,9 @@
 import { getLogger } from '@ui/lib/logging';
 import { liteConfig } from '../config';
 import * as containers from '../repositories/container-repository';
-import { CONTAINER_PREFIX, containerPermlink } from '../repositories/container-repository';
+import { containerPermlink } from '../repositories/container-repository';
 import type { ContainerFamily } from '../types';
+import { containerFamilyOf, isContainerPermlink } from '../container-family';
 import { CommentOp, PostBroadcaster } from './broadcaster';
 import { noteBroadcast, pauseForCommentInterval } from './pace';
 
@@ -22,23 +23,12 @@ const logger = getLogger('app');
 export { containerPermlink };
 
 /**
- * Marker so the worker can recognise a container parent without a DB round-trip.
- * Both families (2026-09-24): the publisher must open a quote container root before a
- * lite quote goes under it, and the comment redirect must never send a reader to a
- * container root of either kind. Code that means "this is a Lumen POST" must NOT use
- * this: it wants {@link containerFamilyOf} === 'lite' (a `lumen-q-` child is a reblog
- * comment, not a post).
+ * Re-exported from the pure `../container-family` module (client-safe). Both families
+ * count as containers here (2026-09-24): the publisher must open a quote container's
+ * root before a lite quote goes under it, and the comment redirect must never send a
+ * reader to a container root of either kind.
  */
-export function isContainerPermlink(permlink: string): boolean {
-  return containerFamilyOf(permlink) !== null;
-}
-
-/** Which family a container permlink belongs to, or null when it is not a container. */
-export function containerFamilyOf(permlink: string): ContainerFamily | null {
-  if (permlink.startsWith(CONTAINER_PREFIX.lite)) return 'lite';
-  if (permlink.startsWith(CONTAINER_PREFIX.quote)) return 'quote';
-  return null;
-}
+export { containerFamilyOf, isContainerPermlink };
 
 /**
  * The outcome of {@link ensureContainerPublished}, which the worker MUST branch on

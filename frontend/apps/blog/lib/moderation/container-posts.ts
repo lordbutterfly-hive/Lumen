@@ -1,4 +1,5 @@
 import type { Entry } from '@hive/common-hiveio-packages/wax';
+import { containerFamilyOf } from '@/blog/lib/lite/container-family';
 
 /**
  * ROLLING CONTAINER POSTS, and why they must never reach an algorithmic feed.
@@ -73,7 +74,16 @@ export function isContainerEntry(entry: Entry | null | undefined): boolean {
   if (!entry) return false;
   const author = (entry.author || '').toLowerCase();
   const chainAuthor = (entry._lite?.chainAuthor || '').toLowerCase();
-  return CONTAINER_ACCOUNTS.has(author) || CONTAINER_ACCOUNTS.has(chainAuthor);
+  if (CONTAINER_ACCOUNTS.has(author) || CONTAINER_ACCOUNTS.has(chainAuthor)) return true;
+  /*
+   * ★ LUMEN'S OWN SHELLS TOO (2026-09-24, quote reblog spec v2 6.2). Our publishing
+   * account cannot go on the author list (every lite post is signed by it), so Lumen's
+   * container ROOTS are matched by what they are instead: a root post (no parent) whose
+   * permlink is a container permlink of either family, `lumen-c-` (Lumen posts) or
+   * `lumen-q-` (reblog comments). A lite post is `lumen-<ulid>` and a reply is never a
+   * root, so the contents are never touched, only the shell, the same rule as above.
+   */
+  return !entry.parent_author && containerFamilyOf(entry.permlink) !== null;
 }
 
 /** Drop container shells from a feed page. Order and identity of the rest are untouched. */

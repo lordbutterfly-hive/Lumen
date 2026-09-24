@@ -277,6 +277,11 @@ const ALLOWLIST: Record<string, string[]> = {
   // names, never written after module load: a second copy per layer is a
   // second identical constant, not a second cache.
   'apps/blog/lib/moderation/container-posts.ts': ['CONTAINER_ACCOUNTS'],
+  // SAFE (2026-09-24): the two container permlink prefixes (`lumen-c-`, `lumen-q-`),
+  // read-only, never mutated; reachable via container-posts.ts, which uses them to
+  // keep Lumen's own container roots out of feeds. A second module copy holds the
+  // same two strings and cannot diverge.
+  'apps/blog/lib/lite/container-family.ts': ['CONTAINER_PREFIX'],
   'apps/blog/lib/lite/config.ts': ['FRONTEND_ACCOUNTS', 'ACCOUNT_CREATOR_ACCOUNTS', 'liteConfig'],
   'packages/smart-signer/lib/session.ts': ['sessionOptions'],
   'apps/blog/lib/request-budget.ts': [

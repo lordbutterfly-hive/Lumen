@@ -3161,13 +3161,18 @@ def test_a_container_post_can_never_win_the_popularity_lane() -> None:
         author="hbd-temp", permlink="lumen-c-01kzj8284fmc7tp1f549mc7zef",
         commenters=crowd(100, "d"), rebloggers=crowd(17, "rd"),
     )
+    # 2026-09-24: quote reblogs' container (reblog comments), same publisher.
+    ours_q = make_attributed_post(
+        author="hbd-temp", permlink="lumen-q-01kzj8284fmc7tp1f549mc7zef",
+        commenters=crowd(95, "q"), rebloggers=crowd(16, "rq"),
+    )
     # The only genuine post, and the WEAKEST on every raw number.
     real = make_attributed_post(
         author="tarazkp", permlink="a-real-post",
         commenters=crowd(9, "e"), rebloggers=crowd(2, "re"),
     )
 
-    pool = [peak, waves, leo, ours, real]
+    pool = [peak, waves, leo, ours, ours_q, real]
     picked = select_popular(
         pool,
         excluded_for=lambda a: frozenset({a}),
@@ -3190,6 +3195,7 @@ def test_a_container_post_can_never_win_the_popularity_lane() -> None:
         (waves, "ecency.waves waves-"),
         (leo, "leothreads leothread-"),
         (ours, "our own lumen-c- container"),
+        (ours_q, "our own lumen-q- (reblog comments) container"),
     ):
         assert is_container_post(post, cfg, publishers), f"{why} not detected"
 

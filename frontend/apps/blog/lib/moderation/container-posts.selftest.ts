@@ -53,8 +53,14 @@ check('an ordinary author is never caught, whatever THEY name a post',
   !isContainerEntry(entry('bob', 'snap-container-happy-accident')) &&
   !isContainerEntry(entry('carol', 'leothread-my-holiday')));
 check('★ our own publisher is NOT on the list, or the lite product would vanish',
-  !isContainerEntry(entry('hbd-temp', 'lumen-01kzj8284fmc7tp1f549mc7zef')) &&
-  !isContainerEntry(entry('hbd-temp', 'lumen-c-01kzj8284fmc7tp1f549mc7zef')));
+  !isContainerEntry(entry('hbd-temp', 'lumen-01kzj8284fmc7tp1f549mc7zef')));
+// ★ 2026-09-24: Lumen's own container ROOTS (both families) are shells and are caught by
+// permlink, never by author; a lite post under them is untouched.
+check("our own container ROOTS are caught, of both families (lumen-c- posts, lumen-q- reblog comments)",
+  isContainerEntry(entry('hbd-temp', 'lumen-c-01kzj8284fmc7tp1f549mc7zef')) &&
+  isContainerEntry(entry('hbd-temp', 'lumen-q-01kzj8284fmc7tp1f549mc7zef')));
+check('a reply that merely sits under a container is never a shell',
+  !isContainerEntry({ ...entry('alice', 'lumen-q-looking-name'), parent_author: 'hbd-temp' } as unknown as Parameters<typeof isContainerEntry>[0]));
 check('case and empties are handled rather than crashing',
   isContainerEntry(entry('ECENCY.WAVES')) && !isContainerEntry(null) && !isContainerEntry(undefined));
 

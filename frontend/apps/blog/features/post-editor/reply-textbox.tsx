@@ -314,7 +314,8 @@ export function ReplyTextbox({
           body: text,
           discussionAuthor,
           discussionPermlink,
-          observer
+          observer,
+          jsonMetadata: comment.json_metadata
         };
         try {
           await updateCommentMutation.mutateAsync(updateCommentParams);

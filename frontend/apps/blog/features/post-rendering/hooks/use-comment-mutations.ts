@@ -316,8 +316,10 @@ export function useUpdateCommentMutation() {
       discussionAuthor: string;
       discussionPermlink: string;
       observer: string;
+      /** The comment's current json_metadata, kept on edit (see `updateComment`). */
+      jsonMetadata?: unknown;
     }) => {
-      const { parentAuthor, parentPermlink, permlink, body, discussionPermlink } = params;
+      const { parentAuthor, parentPermlink, permlink, body, discussionPermlink, jsonMetadata } = params;
 
       // LITE fork: a keyless lite account has no Hive key — its session deliberately
       // carries a poison-pill signer — so the wax path below cannot work for it. The
@@ -350,7 +352,8 @@ export function useUpdateCommentMutation() {
         attributedBody,
         {
           observe: false
-        }
+        },
+        jsonMetadata
       );
 
       logger.info('Done update comment transaction: %o', { discussionPermlink, broadcastResult });

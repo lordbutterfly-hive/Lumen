@@ -3504,6 +3504,9 @@ class PopularConfig:
     #: new publisher account is covered the day it is configured, with no second
     #: list to keep in sync.
     lumen_container_prefix: str = "lumen-c-"
+    #: Quote-reblog containers (2026-09-24): roots that collect reblog comments. Same
+    #: publisher accounts, same reason to never surface the empty shell.
+    lumen_quote_container_prefix: str = "lumen-q-"
 
     #: ★★★ THE RESERVED SLOT (2026-08-09, owner: "lock in 1 popular post inside
     #: top 10, force it in, make sure it cant show up twice, always sub 5 spot").

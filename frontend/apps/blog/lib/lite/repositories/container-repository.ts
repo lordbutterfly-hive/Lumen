@@ -1,6 +1,7 @@
 import { query } from '../db/pool';
 import { ulid } from '../ids';
 import { ContainerFamily, LumenContainer } from '../types';
+import { CONTAINER_PREFIX } from '../container-family';
 
 interface ContainerRow {
   container_id: string;
@@ -33,8 +34,7 @@ function map(r: ContainerRow): LumenContainer {
   };
 }
 
-/** Permlink prefix per family: `lumen-c-` holds Lumen posts, `lumen-q-` holds reblog comments. */
-export const CONTAINER_PREFIX: Record<ContainerFamily, string> = { lite: 'lumen-c-', quote: 'lumen-q-' };
+export { CONTAINER_PREFIX };
 
 /**
  * ★ FAMILY IS SELECTED BY PERMLINK PREFIX, NOT BY THE `family` COLUMN (2026-09-24).

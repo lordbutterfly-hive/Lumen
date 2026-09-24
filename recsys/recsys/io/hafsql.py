@@ -296,11 +296,22 @@ _PostRow = tuple[str, str, str, datetime, "list[str] | None", "str | None"]
 # Both the author AND the parent must be publishers — json_metadata is
 # attacker-controlled, so the claim is only honoured inside our own containers.
 # With `lite_publishers` empty, `= ANY('{}')` is false and lite sourcing is off.
+#
+# ★ ONLY UNDER A POST CONTAINER (2026-09-24, quote reblog spec v2 6.1). The parent must
+# be a `lumen-c-` container. Quote reblogs put reblog COMMENTS under `lumen-q-`
+# containers of the same publisher, and a lite user's one carries `lumen_user_id` like
+# every lite row, so without this every lite reblog comment became a For You candidate.
+# It also closes the gap this file already flags (1412): a lite reply to a lite post
+# (parent `lumen-<ulid>`) is not a post either. A literal, not a placeholder: some call
+# sites bind only `lite_publishers`/`lite_app`, and psycopg raises on an unbound one.
+# `test_container_prefix_is_the_one_popular_config_declares` pins it to the config.
+_LITE_POST_CONTAINER_PREFIX = "lumen-c-"
 _LITE_POST = """(
     {t}author = ANY(%(lite_publishers)s)
     AND {t}parent_author = ANY(%(lite_publishers)s)
     AND {t}json_metadata->>'app' = %(lite_app)s
     AND {t}json_metadata->>'lumen_user_id' IS NOT NULL
+    AND starts_with({t}parent_permlink, 'lumen-c-')
 )"""
 
 
@@ -822,6 +833,11 @@ SELECT src, dst, COUNT(*), MAX(ts) FROM (
       AND r.author <> r.parent_author
       AND r.timestamp >= %(since)s
     AND r.timestamp < %(until)s
+      -- ★ Not a reply to a person (2026-09-24, quote reblog spec v2 6.1): a reblog
+      -- comment sits under a `lumen-q-` container of the publishing account, and
+      -- with no writer id there it resolved to the publisher, turning every
+      -- quoter into a 5.0-weight reply edge onto one hub account.
+      AND NOT starts_with(r.parent_permlink, 'lumen-q-')
 ) e
 GROUP BY src, dst
 """

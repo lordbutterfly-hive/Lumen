@@ -49,6 +49,7 @@ import {
 import { fetchDiscussion } from '@/blog/lib/lite/client/discussion-fetch';
 import { isBlockedEntry, useLumenBlock, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
 import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
+import { containerFamilyOf } from '@/blog/lib/lite/container-family';
 import { fetchLiteEntryByPermlink } from '@/blog/lib/lite/client/lite-post-fetch';
 import { fetchLiteEngagement } from '@/blog/lib/lite/client/lite-engagement';
 import { Entry } from '@hive/common-hiveio-packages/wax';
@@ -1270,9 +1271,18 @@ const PostContent = () => {
    * unconditionally carries `lumen_post_id` — so this is strictly narrower,
    * never a regression for lite.
    */
+  /*
+   * ★ A REBLOG COMMENT IS NEVER A LUMEN POST (2026-09-24, quote reblog spec v2 6.2). A
+   * depth-1 child of a `lumen-q-` container is somebody's comment on a post they
+   * reblogged. A lite user's one carries `lumen_post_id` like every lite row, so without
+   * this it would render as a full Lumen post, with a Reblog button that would let a
+   * reader quote a quote (owner decision 8: never).
+   */
+  const onChainParentPermlink = thisPost?.parent_permlink ?? postData?.parent_permlink ?? '';
+  const isQuoteComment = postDepth === 1 && containerFamilyOf(onChainParentPermlink) === 'quote';
   const isLumenNativePost =
-    Boolean(litePostIdOf(postData)) ||
-    (postDepth === 1 && (thisPost?.parent_permlink ?? postData?.parent_permlink ?? '').startsWith('lumen-c-'));
+    !isQuoteComment &&
+    (Boolean(litePostIdOf(postData)) || (postDepth === 1 && containerFamilyOf(onChainParentPermlink) === 'lite'));
   // `postDepth !== 0` on its own, kept under its own name for the ONE place
   // below that must still ask it directly: which EDITOR to open. A Lumen post
   // genuinely IS a depth>0 Hive comment on chain (the whole reason it needs
