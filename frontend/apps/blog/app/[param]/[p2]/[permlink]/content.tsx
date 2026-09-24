@@ -12,6 +12,8 @@ import PendingIndexingMessage from '@/blog/components/pending-indexing-message';
 import ChangeTitleDialog from '@/blog/features/community-profile/change-title-dialog';
 import DetailsCardHover from '@/blog/features/list-of-posts/details-card-hover';
 import ReblogTrigger from '@/blog/features/list-of-posts/reblog-trigger';
+import { QuoteTargetCard } from '@/blog/features/list-of-posts/quote-target-card';
+import { quoteCaption } from '@/blog/lib/quote-reblog/quote-flow';
 import { useRebloggedByQuery } from '@/blog/features/list-of-posts/hooks/use-reblogged-by-query';
 import { useDeletePostMutation } from '@/blog/features/post-editor/hooks/use-post-mutation';
 import PostForm from '@/blog/features/post-editor/post-form';
@@ -1895,10 +1897,14 @@ const PostContent = () => {
                       </div>
                     </div>
                   ) : (
-                    <ContextLinks
-                      data={postData}
-                      noContext={!!discussionState && !discussionState.some((e) => e.depth === 1)}
-                    />
+                    // A reblog comment's page is the comment above the post it is about
+                    // (quote reblog spec v2 3.4), never "a comment's thread" in its container.
+                    isQuoteComment ? null : (
+                      <ContextLinks
+                        data={postData}
+                        noContext={!!discussionState && !discussionState.some((e) => e.depth === 1)}
+                      />
+                    )
                   )}
                   {postData._optimistic && (
                     // ★ `_publishFailed` PASSED THROUGH (2026-08-28, false-text audit
@@ -2087,7 +2093,7 @@ const PostContent = () => {
                   <div className="px-2 py-6">{t('post_content.body.copyright')}</div>
                 ) : (
                   <PostBodySection
-                    body={bodyWithThreeSpeakPlayer(postData.body, postData.json_metadata)}
+                    body={bodyWithThreeSpeakPlayer(isQuoteComment ? quoteCaption(postData.body) : postData.body, postData.json_metadata)}
                     author={postData.author}
                     permlink={postData.permlink}
                     mainPost={postData.depth === 0}
@@ -2099,6 +2105,7 @@ const PostContent = () => {
                     onShowNsfwContent={handleShowNsfwContent}
                   />
                 )}
+                {isQuoteComment && postData ? <QuoteTargetCard metadata={postData.json_metadata} observer={observer} /> : null}
                 {/* ★ "posted via lumen" — the attribution line, under the post body and above
                     the tags. OUTSIDE the branch above on purpose: that ternary also renders the
                     muted, legal-block and copyright stand-ins, and an attribution under a post

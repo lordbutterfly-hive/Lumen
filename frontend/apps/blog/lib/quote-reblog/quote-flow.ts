@@ -11,6 +11,16 @@
 /** Caption length (decision D4). The server's card cache clips to the same number. */
 export const QUOTE_MAX_CHARS = 280;
 
+/**
+ * A reblog comment's own words: its body up to the link line Lumen appends on chain
+ * ("Reblogged from ..."), which also drops the "Posted via Lumen" footer after it. ONE
+ * rule for the server's card cache and the comment's page.
+ */
+export function quoteCaption(body: string): string {
+  const cut = body.search(/\n\s*\n(?:Reblogged from |Reblogged by |\[Reblogged)/);
+  return (cut >= 0 ? body.slice(0, cut) : body).trim();
+}
+
 /** Hive's "one comment every 3 seconds per account" (hive_evaluator_social.cpp:213). */
 const COMMENT_INTERVAL_WAIT_MS = 3500;
 /** The node answering the server may be a block behind the one that took the broadcast. */

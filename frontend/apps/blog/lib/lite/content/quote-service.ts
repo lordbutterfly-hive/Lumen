@@ -4,7 +4,7 @@ import { configuredSiteDomain } from '@ui/config/public-vars';
 import { quoteLinkLine, type QuoteTarget } from '@transaction/lib/quote-link';
 import { DELETED_BODY } from '@transaction/lib/deleted-body';
 import { getLogger } from '@ui/lib/logging';
-import { QUOTE_MAX_CHARS } from '@/blog/lib/quote-reblog/quote-flow';
+import { QUOTE_MAX_CHARS, quoteCaption } from '@/blog/lib/quote-reblog/quote-flow';
 import { liteConfig } from '../config';
 import { containerFamilyOf } from '../container-family';
 import { hiveAllowsDelete } from '../hive-delete-rule';
@@ -258,8 +258,7 @@ export async function planHiveQuoteRemoval(
  * for the card cache. The chain body stays the source of truth.
  */
 export function captionOf(body: string): string {
-  const cut = body.search(/\n\s*\n(?:Reblogged from |Reblogged by |\[Reblogged)/);
-  return (cut >= 0 ? body.slice(0, cut) : body).trim().slice(0, QUOTE_MAX_CHARS);
+  return quoteCaption(body).slice(0, QUOTE_MAX_CHARS);
 }
 
 /**
