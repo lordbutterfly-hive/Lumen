@@ -93,7 +93,9 @@ async function initSigner(): Promise<Signer> {
     default: BeekeeperFactory;
   }).default;
 
-  const chain = await createHiveChain({ apiEndpoint: siteConfig.endpoint });
+  // The chain id too: without it wax signs for MAINNET, and on a testnet build every
+  // publisher broadcast failed with "missing required posting authority".
+  const chain = await createHiveChain({ apiEndpoint: siteConfig.endpoint, chainId: siteConfig.chainId });
 
   // inMemory: the WIF is never persisted to the beekeeper storage root.
   const beekeeper = await createBeekeeper({ inMemory: true });

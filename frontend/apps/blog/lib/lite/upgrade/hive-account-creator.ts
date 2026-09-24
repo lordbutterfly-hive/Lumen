@@ -128,7 +128,7 @@ let chainPromise: Promise<IHiveChainInterface> | null = null;
 function getChain(): Promise<IHiveChainInterface> {
   if (!chainPromise) {
     chainPromise = loadWax()
-      .then(({ createHiveChain }) => createHiveChain({ apiEndpoint: siteConfig.endpoint }))
+      .then(({ createHiveChain }) => createHiveChain({ apiEndpoint: siteConfig.endpoint, chainId: siteConfig.chainId }))
       .catch((error) => {
         chainPromise = null; // a node outage must not poison the module for its lifetime
         throw error;

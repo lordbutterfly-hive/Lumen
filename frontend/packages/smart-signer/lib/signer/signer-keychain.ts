@@ -3,6 +3,7 @@ import { TTransactionPackType, IOnlineSignatureProvider } from '@hiveio/wax';
 import KeychainProvider from '@hiveio/wax-signers-keychain';
 
 import { getLogger } from '@hive/ui/lib/logging';
+import { siteConfig } from '@hive/ui/config/site';
 import { getChain } from '@transaction/lib/chain';
 import { assertDigestMatches } from '@smart-signer/lib/signer/assert-digest';
 import { verifyAuthorityOrThrow } from '@smart-signer/lib/signer/verify-authority';
@@ -83,6 +84,19 @@ async function verifiesOnGlobalChain(txApiJson: Parameters<typeof verifyAuthorit
   }
 }
 
+/**
+ * The legacy JSON Keychain signs. Keychain signs the LEGACY serialization, where an
+ * asset's symbol name is part of the signed bytes, and on the Hive testnet that name is
+ * TESTS / TBD (the testnet node's own `condenser_api.get_transaction_hex` writes
+ * "TESTS"), while wax's legacy JSON always says HIVE / HBD. Only the testnet build is
+ * touched; a transaction without assets is unchanged.
+ */
+function legacyTxFor(legacyJson: string, rpcChainId?: string): unknown {
+  const testnet = siteConfig.chainEnv === 'testnet' && rpcChainId === siteConfig.chainId;
+  const json = testnet ? legacyJson.replaceAll(' HIVE"', ' TESTS"').replaceAll(' HBD"', ' TBD"') : legacyJson;
+  return JSON.parse(json);
+}
+
 async function signViaKeychainOnNode(
   username: string,
   authTx: { toLegacyApi(): string; transaction: { signatures: string[] } },
@@ -108,7 +122,7 @@ async function signViaKeychainOnNode(
     new Promise<KeychainSignTxResponse>((resolve, reject) => {
       keychain.requestSignTx(
         username,
-        JSON.parse(authTx.toLegacyApi()),
+        legacyTxFor(authTx.toLegacyApi(), rpcChainId),
         role,
         (res: KeychainSignTxResponse) => (res?.error ? reject(keychainError(res)) : resolve(res)),
         rpcArg
@@ -185,6 +199,16 @@ export class SignerKeychain extends Signer {
       assertDigestMatches(digest, authTx.sigDigest, 'Keychain');
 
       const role = requiredKeyType ?? this.keyType;
+
+      // ★ A build pointed at a Hive TESTNET must sign for THAT chain, every transaction
+      // (login included), not only the ones whose caller passes a node. Without this,
+      // Keychain signed for mainnet, the testnet check below rejected it, and sign-in
+      // never completed (local testnet build, 2026-09-24). Mainnet builds: unchanged.
+      const testnetNode = siteConfig.chainEnv !== 'mainnet' ? siteConfig.endpoint : undefined;
+      if (!rpcEndpoint && testnetNode) {
+        rpcEndpoint = testnetNode;
+        rpcChainId = siteConfig.chainId;
+      }
 
       if (rpcEndpoint) {
         // ★★★ SIGN AGAINST THE NODE WE WILL BROADCAST TO (2026-08-18).
