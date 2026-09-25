@@ -6,6 +6,8 @@ import {
 import { checkLiteActorById, checkSessionValidity } from '../auth/account-status';
 import { isBannedAuthor } from '@/blog/lib/moderation/banned-authors';
 import * as users from '../repositories/user-repository';
+import { findByMethodAndRef } from '../repositories/credential-repository';
+import { walletRefForDid } from '../wallet/did-credential';
 import { isBlocked } from '../repositories/block-repository';
 import { isFollowing } from '../repositories/follow-repository';
 import * as dmKeys from '../repositories/dm-key-repository';
@@ -132,6 +134,10 @@ export type DmActorResolution =
  *  - `h:<name>` -> a real Hive account (or a Lumen account that owns that Hive name) ->
  *                 actor {hive}, returned verbatim (NOT canonicalised to a userId) so it
  *                 matches the `h:` key already stored in the thread.
+ *  - `did:pkh:…` -> the Lumen account that has that wallet bound -> actor {userId}.
+ *                 A Meritum escrow names its buyer only by wallet, so this is how a
+ *                 creator reaches a wallet buyer. A wallet no Lumen account holds is
+ *                 `not_found`, which the compose screen shows as "not set up yet".
  *  - anything else -> `resolveFollowTarget`, exactly as first contact does today.
  *
  * Returns the same `{ ok, actor } | { ok:false, error }` shape `resolveFollowTarget` does,
@@ -140,6 +146,16 @@ export type DmActorResolution =
 export async function resolveDmActor(param: string): Promise<DmActorResolution> {
   const raw = param.trim();
   if (!raw) return { ok: false, error: 'invalid_name' };
+
+  // Before the bare-name fallthrough, which would lowercase the DID (corrupting a
+  // base58 address) and then ask Hive whether an account by that name exists.
+  if (raw.startsWith('did:pkh:')) {
+    const ref = walletRefForDid(raw);
+    if (!ref) return { ok: false, error: 'invalid_name' };
+    const credential = await findByMethodAndRef(ref.method, ref.externalRef);
+    if (!credential) return { ok: false, error: 'not_found' };
+    return { ok: true, actor: { userId: credential.userId } };
+  }
 
   const uMatch = /^u:(.+)$/.exec(raw);
   if (uMatch) {
@@ -356,6 +372,31 @@ export async function listThreads(
         : null
     }))
   };
+}
+
+export type ThreadWithOutcome =
+  | { ok: true; threadId: string | null }
+  | { ok: false; status: number; error: string };
+
+/**
+ * The caller's existing conversation with one person, named in any form
+ * `resolveDmActor` takes (a Meritum buyer arrives as `h:<name>` or `did:pkh:…`).
+ * Lets "Message" open the thread that already exists instead of starting over.
+ * Only the caller's OWN thread id is returned, never the other side's actor key: for a
+ * wallet that key is a Lumen user id, and handing it out would link the wallet to the
+ * account for anyone who asked.
+ */
+export async function findThreadWith(
+  sessionUser: User | undefined,
+  session: SessionRef,
+  param: string
+): Promise<ThreadWithOutcome> {
+  const from = await actorFor(sessionUser, false, session);
+  if (!from.ok) return from;
+  const target = await resolveDmActor(param);
+  if (!target.ok) return { ok: true, threadId: null };
+  const thread = await dmThreads.getThreadByPair(actorKey(from.actor), actorKey(target.actor));
+  return { ok: true, threadId: thread?.threadId ?? null };
 }
 
 // ── read: one thread's messages ────────────────────────────────────────────────
