@@ -29,6 +29,7 @@ import {
   getPublicKeyBase64,
   hasStoredKeypair,
   installKeypair,
+  newPrivateKeyBase64,
   publicKeyOfPrivateBase64,
   storedKeyVersion
 } from '../lib/dm-crypto';
@@ -60,6 +61,8 @@ interface RawLastMessage {
   nonce: string;
   ciphertext: string;
   senderActorKey: string;
+  senderKeyVersion?: number;
+  recipientKeyVersion?: number;
 }
 
 interface RawThread {
@@ -120,6 +123,66 @@ async function fetchPublicKeyFor(actorParam: string): Promise<{ publicKey: strin
   return { publicKey: body.public_key ?? null, keyVersion: body.key_version ?? 1 };
 }
 
+/** The key an identity had at one earlier version (see `decryptWithHistory`), or null. */
+async function fetchPublicKeyAt(actorParam: string, keyVersion: number): Promise<string | null> {
+  const res = await fetch(`/api/lite/dm/keys?actor=${encodeURIComponent(actorParam)}&version=${keyVersion}`);
+  if (!res.ok) throw new Error(`DM key read failed: HTTP ${res.status}`);
+  return ((await res.json()) as KeyResponse).public_key ?? null;
+}
+
+interface SealedMessage {
+  nonce: string;
+  ciphertext: string;
+  senderActorKey?: string;
+  senderKeyVersion?: number;
+  recipientKeyVersion?: number;
+}
+
+/**
+ * ★★ OLD MESSAGES STAY READABLE WHEN THE OTHER SIDE STARTS OVER (2026-09-25). Each message
+ * is sealed between the two keys that were current when it was sent. Ours is unchanged
+ * unless WE started over; theirs may have moved on, so when their current key fails, their
+ * key at the version stamped on the message is tried (the server keeps every version since
+ * migration 0046). AES-GCM rejects a wrong key outright, so a failed try never shows garbage.
+ */
+async function decryptWithHistory(
+  myActorKey: string,
+  otherActorKey: string,
+  current: { publicKey: string | null; keyVersion: number } | null,
+  m: SealedMessage,
+  cache: Map<number, Promise<string | null>>
+): Promise<string> {
+  if (current?.publicKey) {
+    try {
+      return await decrypt(myActorKey, current.publicKey, m.nonce, m.ciphertext);
+    } catch {
+      /* sealed to an earlier key of theirs, perhaps: below */
+    }
+  }
+  const theirs =
+    m.senderActorKey === myActorKey
+      ? [m.recipientKeyVersion]
+      : m.senderActorKey === otherActorKey
+        ? [m.senderKeyVersion]
+        : [m.senderKeyVersion, m.recipientKeyVersion];
+  for (const version of theirs) {
+    if (!version || (current?.publicKey && version === current.keyVersion)) continue;
+    let pending = cache.get(version);
+    if (!pending) {
+      pending = fetchPublicKeyAt(otherActorKey, version).catch(() => null);
+      cache.set(version, pending);
+    }
+    const publicKey = await pending;
+    if (!publicKey) continue;
+    try {
+      return await decrypt(myActorKey, publicKey, m.nonce, m.ciphertext);
+    } catch {
+      /* not this one */
+    }
+  }
+  throw new Error('undecryptable');
+}
+
 /* ---------- own registration ---------- */
 
 interface OwnKeyResponse {
@@ -139,13 +202,43 @@ async function fetchOwnKey(): Promise<OwnKeyResponse | null> {
   }
 }
 
-async function postOwnKey(publicKey: string, backup?: DmKeyBackup | null): Promise<boolean> {
-  const res = await fetch('/api/lite/dm/keys', {
-    method: 'POST',
-    headers: JSON_POST,
-    body: JSON.stringify(backup ? { publicKey, backup: JSON.stringify(backup) } : { publicKey })
-  });
-  return res.ok;
+// TODO i18n - shown by the compose dialog and the reply box when a send is refused.
+export const NOT_CURRENT_KEY =
+  "This device doesn't have your current messaging key. Open your inbox to unlock it or start over, then send again.";
+
+/**
+ * ★★ NOTHING IS SENT WITH A KEY THAT IS NOT THE ACCOUNT'S CURRENT ONE (2026-09-25). A
+ * recipient decrypts with the sender's CURRENT registered key, so a message sealed with a
+ * stale key in this browser (left from before a start over on another device) could never
+ * be read by anyone. One small read per send, and a refusal that says what to do.
+ */
+async function assertLocalKeyIsCurrent(actorKey: string): Promise<void> {
+  const own = await fetchOwnKey();
+  const localPub = (await hasStoredKeypair(actorKey)) ? await getPublicKeyBase64(actorKey) : null;
+  if (!own?.public_key || !localPub || own.public_key !== localPub) throw new Error(NOT_CURRENT_KEY);
+}
+
+interface PostedKey {
+  /** The server stored or kept THIS public key for the account (not someone else's). */
+  mine: boolean;
+  keyVersion: number | null;
+  /** 409: the account already has a different key and this was not a start over. */
+  refused: boolean;
+}
+
+/**
+ * Register this browser's public key (optionally with its backup). `mine` is checked
+ * against what the server answers, not assumed from a 200: two devices setting up a new
+ * account at the same moment both get a 200, and only one of them is the key stored.
+ */
+async function postOwnKey(publicKey: string, backup?: DmKeyBackup | null, startOver = false): Promise<PostedKey> {
+  const body: Record<string, unknown> = { publicKey };
+  if (backup) body.backup = JSON.stringify(backup);
+  if (startOver) body.startOver = true;
+  const res = await fetch('/api/lite/dm/keys', { method: 'POST', headers: JSON_POST, body: JSON.stringify(body) });
+  if (!res.ok) return { mine: false, keyVersion: null, refused: res.status === 409 };
+  const json = (await res.json().catch(() => ({}))) as { public_key?: string; key_version?: number };
+  return { mine: json.public_key === publicKey, keyVersion: json.key_version ?? null, refused: false };
 }
 
 type BackupResult = 'saved' | 'device-only' | 'skipped';
@@ -166,7 +259,7 @@ function backUpOwnKey(user: User, actorKey: string, interactive: boolean): Promi
     try {
       const backup = await makeBackup(user, await exportPrivateKeyBase64(actorKey), interactive);
       if (!backup) return 'skipped';
-      return (await postOwnKey(await getPublicKeyBase64(actorKey), backup)) ? 'saved' : 'skipped';
+      return (await postOwnKey(await getPublicKeyBase64(actorKey), backup)).mine ? 'saved' : 'skipped';
     } catch (error) {
       return error instanceof DeviceOnlyError ? 'device-only' : 'skipped';
     } finally {
@@ -217,6 +310,12 @@ export interface OwnDmRegistration {
   actionError: string | null;
   unlock: () => Promise<boolean>;
   backUp: () => Promise<boolean>;
+  /**
+   * The ONLY way an account's key ever changes: a new key on this device, registered with
+   * the server's explicit start-over flag. Messages sent before stay unreadable. Offered
+   * where this device cannot get the current key (orphaned, or locked but unopenable).
+   */
+  startOver: () => Promise<boolean>;
   loggedIn: boolean;
   sessionUnavailable: boolean;
   /** Retry / force a registration attempt (e.g. after a failure). */
@@ -291,15 +390,30 @@ export function useOwnDmRegistration(): OwnDmRegistration {
         return false;
       }
 
-      if (own.public_key && !hasLocal && actorKey.startsWith('h:')) {
+      if (own.public_key) {
+        // ★★★ THE ACCOUNT HAS A KEY AND IT IS NOT THIS BROWSER'S (2026-09-25): none here,
+        // or a different one (left from before a start over elsewhere). Registering
+        // anything here would replace the account's key and make its whole history
+        // unreadable. This used to happen for every lite account ("its old per-device
+        // rule") and for any browser holding a stale key. Now it is the same honest
+        // state for everyone, with "start over" as the only way to a new key.
         setState('orphaned');
         return false;
       }
 
-      // No key anywhere, or (lite, or a key already here) a key without a backup: this
-      // browser's key is registered, made here first if there is none.
+      // No key anywhere: the first device for this account registers its key, made here
+      // if there is none, then backs it up.
       const publicKey = localPub ?? (await getPublicKeyBase64(actorKey));
-      if (!(await postOwnKey(publicKey))) throw new Error('DM key registration failed');
+      const posted = await postOwnKey(publicKey);
+      if (!posted.mine) {
+        // Another device registered first (a 200 carrying its key, or a 409): read once
+        // more and settle as orphaned or locked. Anything else is a real failure.
+        if (posted.refused || posted.keyVersion !== null) {
+          setState('idle');
+          return false;
+        }
+        throw new Error('DM key registration failed');
+      }
       setBackedUp(false);
       void hasBackupMethod(user).then(setBackupPossible);
       setState('ready');
@@ -366,6 +480,36 @@ export function useOwnDmRegistration(): OwnDmRegistration {
     }
   }, [actorKey, user]);
 
+  const startOver = useCallback(async (): Promise<boolean> => {
+    if (!actorKey) return false;
+    setWorking(true);
+    setActionError(null);
+    try {
+      // Made in memory, installed only after the server accepts it: a refused or failed
+      // start over leaves this browser exactly as it was.
+      const privateKey = newPrivateKeyBase64();
+      const posted = await postOwnKey(publicKeyOfPrivateBase64(privateKey), null, true);
+      if (!posted.mine || posted.keyVersion === null) throw new Error('start_over_failed');
+      await installKeypair(actorKey, privateKey, posted.keyVersion);
+      setBackedUp(false);
+      setDeviceOnly(false);
+      setState('ready');
+      void hasBackupMethod(user).then(setBackupPossible);
+      void backUpOwnKey(user, actorKey, true).then((r) => {
+        if (r === 'saved') setBackedUp(true);
+        if (r === 'device-only') setDeviceOnly(true);
+      });
+      void qc.invalidateQueries({ queryKey: ['dm-threads'] });
+      void qc.invalidateQueries({ queryKey: ['dm-thread'] });
+      return true;
+    } catch {
+      setActionError("That didn't go through. Nothing changed; you can try again.");
+      return false;
+    } finally {
+      setWorking(false);
+    }
+  }, [actorKey, user, qc]);
+
   return {
     ready: state === 'ready',
     orphaned: state === 'orphaned',
@@ -380,6 +524,7 @@ export function useOwnDmRegistration(): OwnDmRegistration {
     actionError,
     unlock,
     backUp,
+    startOver,
     loggedIn,
     sessionUnavailable,
     ensure
@@ -433,7 +578,7 @@ export function useDmKeyOnSignIn(): void {
         if (await hasStoredKeypair(actorKey)) return;
         const own = await fetchOwnKey();
         if (!own || own.public_key) return;
-        if (!(await postOwnKey(await getPublicKeyBase64(actorKey)))) return;
+        if (!(await postOwnKey(await getPublicKeyBase64(actorKey))).mine) return;
         await backUpOwnKey(userRef.current, actorKey, false);
       } catch {
         /* see above: the inbox reports the state, sign-in is never blocked */
@@ -476,6 +621,42 @@ export function useRecipientKey(actorParam: string | null): RecipientKeyState {
 
 /* ---------- send ---------- */
 
+/**
+ * Seal with this browser's (checked current) key and POST. The server refuses a message
+ * sealed to a recipient key that is no longer theirs (`recipient_key_changed`: they started
+ * over after it was read), so it is sealed again to their current key, once.
+ */
+async function sealAndSend(
+  myActorKey: string,
+  recipientActor: string,
+  recipientKey: { publicKey: string; keyVersion: number },
+  plaintext: string
+): Promise<{ res: Response; rekeyed: boolean }> {
+  await assertLocalKeyIsCurrent(myActorKey);
+  const senderKeyVersion = await storedKeyVersion(myActorKey);
+  let key = recipientKey;
+  for (let attempt = 0; ; attempt++) {
+    const { nonce, ciphertext } = await encrypt(myActorKey, key.publicKey, plaintext);
+    const res = await fetch('/api/lite/dm/send', {
+      method: 'POST',
+      headers: JSON_POST,
+      body: JSON.stringify({
+        recipientActor,
+        nonce,
+        ciphertext,
+        senderKeyVersion,
+        recipientKeyVersion: key.keyVersion
+      })
+    });
+    if (res.status !== 409 || attempt > 0) return { res, rekeyed: attempt > 0 };
+    const refusal = (await res.clone().json().catch(() => ({}))) as { error?: string };
+    if (refusal.error !== 'recipient_key_changed') return { res, rekeyed: false };
+    const fresh = await fetchPublicKeyFor(recipientActor);
+    if (!fresh.publicKey) return { res, rekeyed: false };
+    key = { publicKey: fresh.publicKey, keyVersion: fresh.keyVersion };
+  }
+}
+
 export interface SendInput {
   /** Handle (new conversation) or `otherActorKey` (reply) - the server resolves it. */
   recipientActor: string;
@@ -495,19 +676,14 @@ export function useSendMessage() {
   return useMutation({
     mutationFn: async (input: SendInput) => {
       if (!myActorKey) throw new Error('You must be signed in to send a message.');
-      const ownKeyVersion = await storedKeyVersion(myActorKey);
-      const { nonce, ciphertext } = await encrypt(myActorKey, input.recipientPublicKey, input.plaintext);
-      const res = await fetch('/api/lite/dm/send', {
-        method: 'POST',
-        headers: JSON_POST,
-        body: JSON.stringify({
-          recipientActor: input.recipientActor,
-          nonce,
-          ciphertext,
-          senderKeyVersion: ownKeyVersion,
-          recipientKeyVersion: input.recipientKeyVersion
-        })
-      });
+      const { res, rekeyed } = await sealAndSend(
+        myActorKey,
+        input.recipientActor,
+        { publicKey: input.recipientPublicKey, keyVersion: input.recipientKeyVersion },
+        input.plaintext
+      );
+      // The compose dialog's cached copy of their key was stale: drop it.
+      if (rekeyed) void qc.invalidateQueries({ queryKey: ['dm-key'] });
       if (!res.ok) {
         let reason = `HTTP ${res.status}`;
         try {
@@ -561,7 +737,7 @@ export function useDmThreads() {
       const body = (await res.json()) as { threads?: RawThread[] };
       const raw = body.threads ?? [];
 
-      const keyCache = new Map<string, string | null>();
+      const keyCache = new Map<string, { publicKey: string | null; keyVersion: number } | null>();
       const summaries: DmThreadSummary[] = [];
       for (const t of raw) {
         let preview: string | null = null;
@@ -570,22 +746,18 @@ export function useDmThreads() {
 
         if (t.lastMessage) {
           lastFromMe = myActorKey !== null && t.lastMessage.senderActorKey === myActorKey;
-          let pub = keyCache.get(t.otherActorKey);
-          if (pub === undefined) {
+          let current = keyCache.get(t.otherActorKey);
+          if (current === undefined) {
             try {
-              pub = (await fetchPublicKeyFor(t.otherActorKey)).publicKey;
+              current = await fetchPublicKeyFor(t.otherActorKey);
             } catch {
-              pub = null;
+              current = null;
             }
-            keyCache.set(t.otherActorKey, pub);
+            keyCache.set(t.otherActorKey, current);
           }
-          if (pub) {
-            try {
-              preview = await decrypt(myActorKey, pub, t.lastMessage.nonce, t.lastMessage.ciphertext);
-            } catch {
-              previewUndecryptable = true;
-            }
-          } else {
+          try {
+            preview = await decryptWithHistory(myActorKey, t.otherActorKey, current, t.lastMessage, new Map());
+          } catch {
             previewUndecryptable = true;
           }
         }
@@ -686,23 +858,25 @@ export function useDmThread(threadId: string | null) {
       const otherActorKey = body.otherActorKey ?? null;
 
       // One key read for the whole thread: the counterparty is the same for every
-      // message, and ECDH is symmetric, so a single public key decrypts them all.
-      let counterpartyPub: string | null = null;
+      // message, and ECDH is symmetric, so their current key decrypts every message sealed
+      // since they last started over; earlier ones use the version on the message.
+      let counterparty: { publicKey: string | null; keyVersion: number } | null = null;
       if (otherActorKey) {
         try {
-          counterpartyPub = (await fetchPublicKeyFor(otherActorKey)).publicKey;
+          counterparty = await fetchPublicKeyFor(otherActorKey);
         } catch {
-          counterpartyPub = null;
+          counterparty = null;
         }
       }
+      const earlierKeys = new Map<number, Promise<string | null>>();
 
       const messages: DmMessage[] = [];
       for (const m of body.messages ?? []) {
         let text: string | null = null;
         let undecryptable = false;
-        if (counterpartyPub) {
+        if (otherActorKey) {
           try {
-            text = await decrypt(myActorKey, counterpartyPub, m.nonce, m.ciphertext);
+            text = await decryptWithHistory(myActorKey, otherActorKey, counterparty, m, earlierKeys);
           } catch {
             undecryptable = true;
           }
@@ -737,19 +911,7 @@ export function useDmThread(threadId: string | null) {
         if (!myActorKey) throw new Error('You must be signed in to send a message.');
         const { publicKey, keyVersion } = await fetchPublicKeyFor(otherActorKey);
         if (!publicKey) throw new Error('The other person has no messaging key registered.');
-        const ownKeyVersion = await storedKeyVersion(myActorKey);
-        const { nonce, ciphertext } = await encrypt(myActorKey, publicKey, plaintext);
-        const res = await fetch('/api/lite/dm/send', {
-          method: 'POST',
-          headers: JSON_POST,
-          body: JSON.stringify({
-            recipientActor: otherActorKey,
-            nonce,
-            ciphertext,
-            senderKeyVersion: ownKeyVersion,
-            recipientKeyVersion: keyVersion
-          })
-        });
+        const { res } = await sealAndSend(myActorKey, otherActorKey, { publicKey, keyVersion }, plaintext);
         if (!res.ok) throw new Error(`Reply failed: HTTP ${res.status}`);
         await q.refetch();
         void qc.invalidateQueries({ queryKey: ['dm-threads'] });

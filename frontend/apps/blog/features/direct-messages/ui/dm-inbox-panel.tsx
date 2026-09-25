@@ -50,6 +50,11 @@ const COPY = {
   turnOn: 'Turn on',
   waiting: (via: string) => `Waiting for ${via}…`,
   deviceOnly: 'Your wallet signs differently each time, so your messages stay on this device only.',
+  startOverLink: 'Lost that device? Start over here',
+  startOverWarn:
+    "Starting over makes a new messaging key on this device. You won't be able to read your messages from before, on any device; the people you talked to still can. New messages work right away.",
+  startOverConfirm: 'Start over',
+  startOverCancel: 'Cancel',
   signedOut: 'Sign in to read your messages.'
 };
 
@@ -63,6 +68,7 @@ function labelForActor(actorKey: string, name: string | null): string {
 
 const DmInboxPanel: FC<{ to?: string | null }> = ({ to = null }) => {
   const registration = useOwnDmRegistration();
+  const [confirmStartOver, setConfirmStartOver] = useState(false);
   const { threads, isLoading, isError, loggedIn, refetch } = useDmThreads();
   const [openThreadId, setOpenThreadId] = useState<string | null>(null);
   const [composeTo, setComposeTo] = useState<string | null>(null);
@@ -123,6 +129,41 @@ const DmInboxPanel: FC<{ to?: string | null }> = ({ to = null }) => {
       {registration.actionError}
     </p>
   ) : null;
+  // ★ The only way to a new key, and it says what it costs before the press (2026-09-25).
+  // Offered where this device cannot get the account's current key: orphaned, or locked.
+  const startOver = confirmStartOver ? (
+    <div className="mt-3 rounded-control border border-line-warn-1 bg-surface-1 px-4 py-3" data-testid="dm-start-over-confirm">
+      <p className="font-ui text-caption text-ink-2">{COPY.startOverWarn}</p>
+      <div className="mt-2 flex gap-2">
+        <button
+          type="button"
+          onClick={() => void registration.startOver().then((ok) => ok && setConfirmStartOver(false))}
+          disabled={registration.working}
+          className="rounded-control bg-surface-brand-12 px-3 py-1.5 font-ui text-caption font-medium text-ink-27 hover:bg-surface-brand-16 disabled:opacity-50"
+          data-testid="dm-start-over-yes"
+        >
+          {COPY.startOverConfirm}
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirmStartOver(false)}
+          className="rounded-control border border-line-11 px-3 py-1.5 font-ui text-caption font-medium text-ink-7 hover:bg-surface-16"
+        >
+          {COPY.startOverCancel}
+        </button>
+      </div>
+    </div>
+  ) : (
+    <button
+      type="button"
+      onClick={() => setConfirmStartOver(true)}
+      className="mt-2 block font-ui text-caption text-ink-10 underline-offset-2 hover:text-ink-2 hover:underline"
+      data-testid="dm-start-over"
+    >
+      {COPY.startOverLink}
+    </button>
+  );
+
   const status = registration.locked ? (
     <div
       className="rounded-panel border border-line-9 bg-surface-1 px-5 py-3 font-ui text-caption text-ink-2"
@@ -131,13 +172,19 @@ const DmInboxPanel: FC<{ to?: string | null }> = ({ to = null }) => {
       {COPY.locked(via)}
       <div>{button(COPY.unlock, () => void registration.unlock(), 'dm-unlock')}</div>
       {actionError}
+      {startOver}
     </div>
   ) : registration.orphaned ? (
     // ★ NOT an error, and deliberately ranked above one: nothing failed. This
     // browser simply does not hold the key, and the honest thing is to say so
     // rather than mint a new one and silently end the existing conversations.
-    <div className="rounded-panel border border-line-warn-1 bg-surface-warn-2 px-5 py-3 font-ui text-caption font-medium text-ink-warn-3">
+    <div
+      className="rounded-panel border border-line-warn-1 bg-surface-warn-2 px-5 py-3 font-ui text-caption font-medium text-ink-warn-3"
+      data-testid="dm-orphaned"
+    >
       {COPY.otherDevice}
+      {startOver}
+      {actionError}
     </div>
   ) : registration.error ? (
     <div className="rounded-panel border border-line-warn-1 bg-surface-warn-2 px-5 py-3 font-ui text-caption font-medium text-ink-warn-3">

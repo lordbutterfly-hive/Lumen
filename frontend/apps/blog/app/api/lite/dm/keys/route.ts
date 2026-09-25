@@ -4,7 +4,7 @@ import { guardRead, guardWrite, guardBodySize } from '@/blog/lib/lite/http/guard
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { enforceDmKeyLookupRate } from '@/blog/lib/lite/antispam/rate-limit';
-import { getOwnKey, lookupPublicKey, registerOwnKey } from '@/blog/lib/lite/dm/dm-service';
+import { getOwnKey, lookupPublicKey, lookupPublicKeyAtVersion, registerOwnKey } from '@/blog/lib/lite/dm/dm-service';
 
 const logger = getLogger('app');
 
@@ -16,6 +16,7 @@ const logger = getLogger('app');
  * GET  /api/lite/dm/keys?actor=<handle>  -> { public_key, key_version } | { public_key: null }
  *        Public: a public key is public. Returns null (200) when the identity has not
  *        registered one yet, so the compose UI can show an honest "not set up yet".
+ *        With `&version=<n>`: that earlier version instead, for reading old messages.
  * POST /api/lite/dm/keys { publicKey, backup? } -> register/rotate the CALLER'S OWN key
  *        (authed). The actor is the session, never a client claim. `backup` is the private
  *        key already encrypted in the browser (see migration 0052); stored verbatim.
@@ -51,8 +52,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const actor = req.nextUrl.searchParams.get('actor')?.trim();
   if (!actor) return NextResponse.json({ error: 'actor_required' }, { status: 400 });
 
+  const versionParam = req.nextUrl.searchParams.get('version');
+  const version = versionParam === null ? null : Number(versionParam);
+  if (version !== null && !(Number.isInteger(version) && version >= 1)) {
+    return NextResponse.json({ error: 'invalid_version' }, { status: 400 });
+  }
+
   try {
-    const key = await lookupPublicKey(actor);
+    const key = version === null ? await lookupPublicKey(actor) : await lookupPublicKeyAtVersion(actor, version);
     if (!key) return NextResponse.json({ public_key: null });
     return NextResponse.json({ public_key: key.publicKey, key_version: key.keyVersion });
   } catch (error) {
@@ -72,7 +79,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
 
   try {
-    const result = await registerOwnKey(session.user, session, body?.publicKey, body?.backup);
+    const result = await registerOwnKey(session.user, session, body?.publicKey, body?.backup, body?.startOver === true);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
     return NextResponse.json({ ok: true, public_key: result.publicKey, key_version: result.keyVersion });
   } catch (error) {

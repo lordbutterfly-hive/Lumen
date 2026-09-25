@@ -82,10 +82,17 @@ export async function getPublicKeyAtVersion(
  * the loser of the race fails its insert rather than silently writing a second row at
  * the same version, and the read-back below then returns whichever key actually won.
  */
+export class KeyReplaceRefusedError extends Error {
+  constructor() {
+    super('key_exists');
+  }
+}
+
 export async function registerPublicKey(
   actor: FollowActor,
   publicKey: string,
-  backup: string | null = null
+  backup: string | null = null,
+  startOver = false
 ): Promise<DmPublicKey> {
   const current = await getPublicKey(actor);
   if (current && current.publicKey === publicKey) {
@@ -95,6 +102,17 @@ export async function registerPublicKey(
     if (backup) await setBackupIfMissing(actor, current.keyVersion, backup);
     return current;
   }
+  /*
+   * ★★★ A DIFFERENT KEY NEVER REPLACES THE CURRENT ONE UNLESS THE OWNER ASKED (2026-09-25).
+   * A new version makes the account's whole history unreadable to its owner: the private
+   * key those messages were sealed with is not on the device that made the new one. (The
+   * people they wrote to keep reading, through the versions kept here.) Before this, any
+   * signed-in POST of a different key appended one silently: how `daveks` lost theirs
+   * (2026-09-13), and what an old browser tab still running the previous client would do
+   * after a deploy. Now only an explicit "start over" from the inbox, which says what it
+   * costs before the press, may do it.
+   */
+  if (current && !startOver) throw new KeyReplaceRefusedError();
 
   const nextVersion = (current?.keyVersion ?? 0) + 1;
   const { rows } = await query<{ public_key: string; key_version: number }>(

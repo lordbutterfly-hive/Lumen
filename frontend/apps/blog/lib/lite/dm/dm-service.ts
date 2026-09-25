@@ -200,7 +200,8 @@ export async function registerOwnKey(
   sessionUser: User | undefined,
   session: SessionRef,
   publicKey: unknown,
-  backup?: unknown
+  backup?: unknown,
+  startOver = false
 ): Promise<RegisterKeyOutcome> {
   const from = await actorFor(sessionUser, true, session);
   if (!from.ok) return from;
@@ -216,12 +217,19 @@ export async function registerOwnKey(
   if (hasBackup && (typeof backup !== 'string' || backup.length === 0 || backup.length > MAX_BACKUP_CHARS)) {
     return { ok: false, status: 400, error: 'invalid_backup' };
   }
-  const stored = await dmKeys.registerPublicKey(
-    from.actor,
-    publicKey,
-    typeof backup === 'string' ? backup : null
-  );
-  return { ok: true, publicKey: stored.publicKey, keyVersion: stored.keyVersion };
+  try {
+    const stored = await dmKeys.registerPublicKey(
+      from.actor,
+      publicKey,
+      typeof backup === 'string' ? backup : null,
+      startOver
+    );
+    return { ok: true, publicKey: stored.publicKey, keyVersion: stored.keyVersion };
+  } catch (error) {
+    // 409: this account already has a different key; only an explicit start over replaces it.
+    if (error instanceof dmKeys.KeyReplaceRefusedError) return { ok: false, status: 409, error: 'key_exists' };
+    throw error;
+  }
 }
 
 export type OwnKeyOutcome =
@@ -238,6 +246,20 @@ export async function getOwnKey(sessionUser: User | undefined, session: SessionR
   const from = await actorFor(sessionUser, false, session);
   if (!from.ok) return from;
   return { ok: true, key: await dmKeys.getOwnKeyWithBackup(from.actor) };
+}
+
+/**
+ * The public key a named identity had at one version, or null. What lets someone keep
+ * reading a conversation after the OTHER side started over: their old messages were
+ * sealed with the other side's key at the version stamped on each message.
+ */
+export async function lookupPublicKeyAtVersion(
+  actorName: string,
+  keyVersion: number
+): Promise<{ publicKey: string; keyVersion: number } | null> {
+  const target = await resolveDmActor(actorName);
+  if (!target.ok) return null;
+  return dmKeys.getPublicKeyAtVersion(target.actor, keyVersion);
 }
 
 /** The public key registered for a named identity, or null if unregistered / unknown. */
@@ -308,6 +330,17 @@ export async function sendMessage(
   // user cannot message someone they themselves have blocked.
   if (await isBlocked(recipient, sender)) return { ok: false, status: 403, error: 'blocked' };
   if (await isBlocked(sender, recipient)) return { ok: false, status: 403, error: 'blocked' };
+
+  // ★★ SEALED TO THE RECIPIENT'S CURRENT KEY OR NOT STORED (2026-09-25). Threads decrypt
+  // with the recipient's current key first, so a message sealed to a version they have
+  // since replaced (a compose dialog open across their start over) would be unreadable to
+  // BOTH sides. The version always comes from this server's own key read, so a mismatch
+  // means the sender's copy is stale: the client re-reads and seals again.
+  const recipientCurrent = await dmKeys.getPublicKey(recipient);
+  if (!recipientCurrent) return { ok: false, status: 409, error: 'recipient_no_key' };
+  if (recipientCurrent.keyVersion !== input.recipientKeyVersion) {
+    return { ok: false, status: 409, error: 'recipient_key_changed' };
+  }
 
   const senderKey = actorKey(sender);
   const recipientKey = actorKey(recipient);

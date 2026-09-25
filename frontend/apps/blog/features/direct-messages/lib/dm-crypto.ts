@@ -300,6 +300,15 @@ export async function exportPrivateKeyBase64(actorKey: string): Promise<string> 
   return bytesToBase64((await requireStoredKeypair(actorKey)).privateKey);
 }
 
+/**
+ * A brand-new private key (base64), NOT stored. Only "start over" uses it: the key is
+ * installed with `installKeypair` after the server has accepted its public half, so a
+ * refused start over changes nothing in this browser.
+ */
+export function newPrivateKeyBase64(): string {
+  return bytesToBase64(x25519.utils.randomPrivateKey());
+}
+
 /** The public key (base64) a private key (base64) belongs to. Pure; stores nothing. */
 export function publicKeyOfPrivateBase64(privateKeyB64: string): string {
   return bytesToBase64(x25519.getPublicKey(base64ToBytes(privateKeyB64)));
