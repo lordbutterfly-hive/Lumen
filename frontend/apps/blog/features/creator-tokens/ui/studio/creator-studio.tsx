@@ -2,6 +2,7 @@
 
 import { cn } from '@ui/lib/utils';
 import { UserAvatarImg } from '@ui/components';
+import { Link } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { displayHandle, dueLabelFor } from '../../live/adapt';
 import { FC, useState, useEffect, useMemo, useRef } from 'react';
@@ -350,8 +351,25 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; note: string | null; noteU
         </button>
       </div>
       <div className="mb-3 rounded-control border border-line-9 bg-surface-16 px-3.5 py-3 text-caption text-ink-8 font-ui">
-        <div>
-          From <strong>@{displayHandle(ask.asker)}</strong> · reference <span className="font-mono">{ask.contentHash || '—'}</span>
+        {/* ★ MESSAGE THE BUYER, FROM THE ORDER (owner, 2026-09-25: "when making a
+            request and writing something to the person they can't respond because
+            Inbox is completely separate from the actual request"). Opens the inbox
+            on the conversation with whoever placed this order: the existing thread,
+            or compose to them when there is none. `ask.asker` goes as-is, a Hive
+            buyer as `hive:<name>` and a wallet buyer as `did:pkh:…`, which the
+            inbox resolves to the Lumen account holding that wallet. Same pill as the
+            header's "Launch your token", one size down to sit in this caption box. */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            From <strong>@{displayHandle(ask.asker)}</strong> · reference <span className="font-mono">{ask.contentHash || '—'}</span>
+          </div>
+          <Link
+            href={`/inbox?to=${encodeURIComponent(ask.asker)}`}
+            className="-my-1 shrink-0 whitespace-nowrap rounded-full border border-line-brand-10 bg-surface-1 px-3 py-[3px] font-ui text-caption font-medium text-ink-brand-6 transition-colors hover:bg-surface-brand-12 hover:text-ink-27"
+            data-testid="answer-modal-message"
+          >
+            Message
+          </Link>
         </div>
         {/* The buyer's message, filed on Lumen behind the same reference the chain
             holds (use-ask-notes). Absent and unavailable are different answers. */}
@@ -1071,10 +1089,11 @@ const CreatorStudio: FC = () => {
   // Inbox sub-tab: paid-ask REQUESTS (money + deadlines) vs direct MESSAGES (off-chain,
   // no money). Kept separate, never merged — see the toggle note in the Inbox section.
   const [inboxTab, setInboxTab] = useState<'requests' | 'messages'>(() => {
-    // ★ Deep-link the Messages sub-tab (2026-09-05): the bell's "New message" row links to
+    // ★ Deep-link the Messages sub-tab (2026-09-05): the bell's "New message" row linked to
     // /creators/studio?section=inbox&tab=messages, so it must land on Messages (not the
     // default Requests) for the unread state to clear on arrival. Same lazy-init +
-    // window-guard pattern as `section` above.
+    // window-guard pattern as `section` above. Since 2026-09-25 that row links to /inbox,
+    // which every account has; this stays for links already sent and saved.
     if (typeof window === 'undefined') return 'requests';
     try {
       return new URLSearchParams(window.location.search).get('tab') === 'messages' ? 'messages' : 'requests';
