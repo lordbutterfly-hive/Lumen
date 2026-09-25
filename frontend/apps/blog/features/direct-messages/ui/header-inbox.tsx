@@ -35,7 +35,10 @@ const HeaderInbox: FC = () => {
       <Link
         href="/inbox"
         aria-label={count > 0 ? COPY.unread(count) : COPY.inbox}
-        className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'relative h-10 w-10 rounded-control px-0 max-[359px]:hidden')}
+        className={cn(
+          buttonVariants({ variant: 'ghost', size: 'sm' }),
+          'relative h-10 w-10 rounded-control px-0 max-[359px]:hidden'
+        )}
         data-testid="nav-inbox"
       >
         <Icons.comment className="h-5 w-5 text-ink-2" />

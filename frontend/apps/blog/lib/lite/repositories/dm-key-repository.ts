@@ -82,17 +82,27 @@ export async function getPublicKeyAtVersion(
  * the loser of the race fails its insert rather than silently writing a second row at
  * the same version, and the read-back below then returns whichever key actually won.
  */
-export async function registerPublicKey(actor: FollowActor, publicKey: string): Promise<DmPublicKey> {
+export async function registerPublicKey(
+  actor: FollowActor,
+  publicKey: string,
+  backup: string | null = null
+): Promise<DmPublicKey> {
   const current = await getPublicKey(actor);
-  if (current && current.publicKey === publicKey) return current;
+  if (current && current.publicKey === publicKey) {
+    // Same key again: only its first backup is stored. A later one could only be
+    // another copy of the same private key, and replacing a working backup with an
+    // unreadable one would end the account's other devices.
+    if (backup) await setBackupIfMissing(actor, current.keyVersion, backup);
+    return current;
+  }
 
   const nextVersion = (current?.keyVersion ?? 0) + 1;
   const { rows } = await query<{ public_key: string; key_version: number }>(
-    `INSERT INTO lumen_dm_key (user_id, hive, public_key, key_version)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO lumen_dm_key (user_id, hive, public_key, key_version, backup)
+     VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT DO NOTHING
      RETURNING public_key, key_version`,
-    [actor.userId ?? null, actor.hive ?? null, publicKey, nextVersion]
+    [actor.userId ?? null, actor.hive ?? null, publicKey, nextVersion, backup]
   );
   if (rows[0]) return { publicKey: rows[0].public_key, keyVersion: rows[0].key_version };
   // Lost a race with another tab: the row at `nextVersion` already exists. Read back
@@ -113,4 +123,30 @@ export async function registerPublicKey(actor: FollowActor, publicKey: string): 
  */
 export async function hasRegisteredKey(actor: FollowActor): Promise<boolean> {
   return (await getPublicKey(actor)) !== null;
+}
+
+async function setBackupIfMissing(actor: FollowActor, keyVersion: number, backup: string): Promise<void> {
+  await query(
+    `UPDATE lumen_dm_key SET backup = $3, updated_at = now()
+      WHERE actor_key = $1 AND key_version = $2 AND backup IS NULL`,
+    [actorKey(actor), keyVersion, backup]
+  );
+}
+
+export interface DmOwnKey extends DmPublicKey {
+  /** The encrypted backup of this version's private key, or null when there is none. */
+  backup: string | null;
+}
+
+/** The identity's CURRENT key with its backup. For the owner only (see dm-service). */
+export async function getOwnKeyWithBackup(actor: FollowActor): Promise<DmOwnKey | null> {
+  const { rows } = await query<{ public_key: string; key_version: number; backup: string | null }>(
+    `SELECT public_key, key_version, backup FROM lumen_dm_key
+      WHERE actor_key = $1
+      ORDER BY key_version DESC
+      LIMIT 1`,
+    [actorKey(actor)]
+  );
+  const row = rows[0];
+  return row ? { publicKey: row.public_key, keyVersion: row.key_version, backup: row.backup } : null;
 }

@@ -70,8 +70,11 @@ interface StoredKeypair {
   publicKeyB64: string;
   keyVersion: number;
   createdAt: number;
-  /** 'random' = per-device fallback; 'derived' = deterministic from an account signature. */
-  origin?: 'random' | 'derived';
+  /**
+   * 'random' = made on this device; 'derived' = deterministic from an account signature;
+   * 'restored' = installed from the account's encrypted backup (see dm-key-backup).
+   */
+  origin?: 'random' | 'derived' | 'restored';
 }
 
 /* ---------- base64 (binary-safe, no Node Buffer) ---------- */
@@ -281,11 +284,46 @@ async function requireStoredKeypair(actorKey: string): Promise<DmKeypair> {
 }
 
 // TODO i18n - shown as-is by the compose dialog and the reply box when a send is refused.
-export const NO_LOCAL_KEY = "Private messaging isn't set up on this device, so this was not sent.";
+export const NO_LOCAL_KEY = "Messaging isn't set up on this device yet. Open your inbox to set it up, then send again.";
 
 /** The stored keypair's version for the send payload; throws NO_LOCAL_KEY rather than minting one. */
 export async function storedKeyVersion(actorKey: string): Promise<number> {
   return (await requireStoredKeypair(actorKey)).keyVersion;
+}
+
+/**
+ * The stored private key, base64, for ONE purpose: `dm-key-backup` encrypts it to the
+ * account's own posting key (or a wallet-signature key) before it is uploaded. Refuses
+ * rather than minting when this browser holds no key.
+ */
+export async function exportPrivateKeyBase64(actorKey: string): Promise<string> {
+  return bytesToBase64((await requireStoredKeypair(actorKey)).privateKey);
+}
+
+/** The public key (base64) a private key (base64) belongs to. Pure; stores nothing. */
+export function publicKeyOfPrivateBase64(privateKeyB64: string): string {
+  return bytesToBase64(x25519.getPublicKey(base64ToBytes(privateKeyB64)));
+}
+
+/**
+ * Put a private key recovered from the account's backup into this browser's slot for
+ * `actorKey`, replacing whatever was there. The caller has already checked that its
+ * public half is the account's CURRENT registered key, so this can only install the
+ * key everyone is encrypting to, never a stranger's.
+ */
+export async function installKeypair(actorKey: string, privateKeyB64: string, keyVersion: number): Promise<void> {
+  if (!actorKey) throw new Error('A signed-in identity is required for messaging keys');
+  const privateKey = base64ToBytes(privateKeyB64);
+  if (privateKey.length !== 32) throw new Error('Not a messaging key');
+  const publicKey = x25519.getPublicKey(privateKey);
+  await idbPut(selfKeyId(actorKey), {
+    privateKeyB64: bytesToBase64(privateKey),
+    publicKeyB64: bytesToBase64(publicKey),
+    keyVersion,
+    createdAt: Date.now(),
+    origin: 'restored'
+  });
+  cached.set(actorKey, { privateKey, publicKey, keyVersion });
 }
 
 export async function getPublicKeyBase64(actorKey: string, opts?: KeypairOptions): Promise<string> {

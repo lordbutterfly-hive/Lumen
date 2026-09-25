@@ -187,11 +187,20 @@ export type RegisterKeyOutcome =
   | { ok: true; publicKey: string; keyVersion: number }
   | { ok: false; status: number; error: string };
 
-/** Register or rotate the CALLER'S OWN public key. Only the public half is ever sent. */
+/** Matches the DB's `ck_dm_key_backup`. A backup is a few hundred characters. */
+export const MAX_BACKUP_CHARS = 4096;
+
+/**
+ * Register or rotate the CALLER'S OWN public key. Only the public half is ever sent, plus
+ * optionally a BACKUP of the private half that the browser has already encrypted (to the
+ * account's own posting key, or under a wallet-signature key). The backup is opaque here:
+ * bounded by size, stored verbatim, never opened and never logged.
+ */
 export async function registerOwnKey(
   sessionUser: User | undefined,
   session: SessionRef,
-  publicKey: unknown
+  publicKey: unknown,
+  backup?: unknown
 ): Promise<RegisterKeyOutcome> {
   const from = await actorFor(sessionUser, true, session);
   if (!from.ok) return from;
@@ -203,8 +212,32 @@ export async function registerOwnKey(
   ) {
     return { ok: false, status: 400, error: 'invalid_public_key' };
   }
-  const stored = await dmKeys.registerPublicKey(from.actor, publicKey);
+  const hasBackup = backup !== undefined && backup !== null;
+  if (hasBackup && (typeof backup !== 'string' || backup.length === 0 || backup.length > MAX_BACKUP_CHARS)) {
+    return { ok: false, status: 400, error: 'invalid_backup' };
+  }
+  const stored = await dmKeys.registerPublicKey(
+    from.actor,
+    publicKey,
+    typeof backup === 'string' ? backup : null
+  );
   return { ok: true, publicKey: stored.publicKey, keyVersion: stored.keyVersion };
+}
+
+export type OwnKeyOutcome =
+  | { ok: true; key: { publicKey: string; keyVersion: number; backup: string | null } | null }
+  | { ok: false; status: number; error: string };
+
+/**
+ * The CALLER'S OWN current key and its backup, so a device without the private half can
+ * restore it. Owner only: the backup cannot be opened without the account's posting key
+ * or wallet, but nobody else has a reason to hold it. Readable while suspended, like the
+ * caller's own messages.
+ */
+export async function getOwnKey(sessionUser: User | undefined, session: SessionRef): Promise<OwnKeyOutcome> {
+  const from = await actorFor(sessionUser, false, session);
+  if (!from.ok) return from;
+  return { ok: true, key: await dmKeys.getOwnKeyWithBackup(from.actor) };
 }
 
 /** The public key registered for a named identity, or null if unregistered / unknown. */

@@ -17,16 +17,32 @@
  * existing thread.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
-import { decrypt, encrypt, getPublicKeyBase64, hasStoredKeypair, storedKeyVersion } from '../lib/dm-crypto';
-
-// Actor keys whose public key this browser has already registered in this session, so
-// repeated compose/inbox mounts don't each re-POST (see useOwnDmRegistration). Cleared
-// on reload, where one idempotent re-register is harmless.
-const registeredThisSession = new Set<string>();
+import type { User } from '@smart-signer/types/common';
+import {
+  decrypt,
+  encrypt,
+  exportPrivateKeyBase64,
+  getPublicKeyBase64,
+  hasStoredKeypair,
+  installKeypair,
+  publicKeyOfPrivateBase64,
+  storedKeyVersion
+} from '../lib/dm-crypto';
+import {
+  DeviceOnlyError,
+  backupViaFor,
+  canOpen,
+  hasBackupMethod,
+  makeBackup,
+  openBackup,
+  parseBackup,
+  type BackupVia,
+  type DmKeyBackup
+} from '../lib/dm-key-backup';
 
 const JSON_POST: HeadersInit = { 'Content-Type': 'application/json', [csrfHeaderName]: '1' };
 
@@ -106,97 +122,194 @@ async function fetchPublicKeyFor(actorParam: string): Promise<{ publicKey: strin
 
 /* ---------- own registration ---------- */
 
+interface OwnKeyResponse {
+  public_key: string | null;
+  key_version?: number;
+  backup?: string | null;
+}
+
+/** The caller's own current key and backup; null when the read failed (not "no key"). */
+async function fetchOwnKey(): Promise<OwnKeyResponse | null> {
+  try {
+    const res = await fetch('/api/lite/dm/keys?own=1');
+    if (!res.ok) return null;
+    return (await res.json()) as OwnKeyResponse;
+  } catch {
+    return null;
+  }
+}
+
+async function postOwnKey(publicKey: string, backup?: DmKeyBackup | null): Promise<boolean> {
+  const res = await fetch('/api/lite/dm/keys', {
+    method: 'POST',
+    headers: JSON_POST,
+    body: JSON.stringify(backup ? { publicKey, backup: JSON.stringify(backup) } : { publicKey })
+  });
+  return res.ok;
+}
+
+type BackupResult = 'saved' | 'device-only' | 'skipped';
+
+// One backup attempt per identity at a time: the header and an open inbox can both reach
+// this on the first page after sign-in, and two would mean two Keychain approvals.
+const backupInFlight = new Map<string, Promise<BackupResult>>();
+
+/**
+ * Upload the encrypted backup of THIS browser's key (see `../lib/dm-key-backup`). Best
+ * effort: a refusal, a closed popup or a login that cannot make one leaves the key
+ * working on this device and the inbox offering to try again.
+ */
+function backUpOwnKey(user: User, actorKey: string, interactive: boolean): Promise<BackupResult> {
+  const pending = backupInFlight.get(actorKey);
+  if (pending) return pending;
+  const work = (async (): Promise<BackupResult> => {
+    try {
+      const backup = await makeBackup(user, await exportPrivateKeyBase64(actorKey), interactive);
+      if (!backup) return 'skipped';
+      return (await postOwnKey(await getPublicKeyBase64(actorKey), backup)) ? 'saved' : 'skipped';
+    } catch (error) {
+      return error instanceof DeviceOnlyError ? 'device-only' : 'skipped';
+    } finally {
+      backupInFlight.delete(actorKey);
+    }
+  })();
+  backupInFlight.set(actorKey, work);
+  return work;
+}
+
+// TODO i18n - names for the one approval a backup or an unlock takes.
+const VIA_LABEL: Record<BackupVia, string> = {
+  keychain: 'Hive Keychain',
+  peakvault: 'PeakVault',
+  metamask: 'MetaMask',
+  wif: 'your posting key',
+  wallet: 'your wallet'
+};
+
 export interface OwnDmRegistration {
   /** The browser's public key is registered server-side and messaging is usable. */
   ready: boolean;
   registering: boolean;
   error: boolean;
   /**
-   * A key is registered for this identity but the private half is not in THIS
-   * browser, so messaging is set up somewhere else. Registering here would append
-   * a new key version and make the existing messages unreadable to their owner,
-   * so it is refused and surfaced instead of done silently.
+   * A key is registered for this identity, the private half is not in THIS browser, and
+   * there is no backup this login can open. Registering here would append a new key
+   * version and make the existing messages unreadable to their owner, so it is refused
+   * and surfaced instead of done silently.
    */
   orphaned: boolean;
+  /**
+   * The account's key lives on another device AND has a backup this login can open:
+   * one approval (`unlock`) installs it here. Nothing is minted in this state, ever.
+   */
+  locked: boolean;
+  /** This device holds the key and no backup exists yet; `backUp` would make one. */
+  canBackUp: boolean;
+  /** A wallet that signs the fixed message differently each time: this device only. */
+  deviceOnly: boolean;
+  /** Who the one approval goes to, for the copy ("Hive Keychain", "your wallet"). */
+  approvalLabel: string | null;
+  /** A wallet backup takes two signatures (the second proves they match), not one approval. */
+  viaWallet: boolean;
+  /** An unlock or backup is waiting on the signer. */
+  working: boolean;
+  /** Why the last unlock or backup did not go through, if it did not. */
+  actionError: string | null;
+  unlock: () => Promise<boolean>;
+  backUp: () => Promise<boolean>;
   loggedIn: boolean;
   sessionUnavailable: boolean;
   /** Retry / force a registration attempt (e.g. after a failure). */
   ensure: () => Promise<boolean>;
 }
 
+type RegState = 'idle' | 'registering' | 'ready' | 'error' | 'orphaned' | 'locked';
+
 /**
- * Ensures THIS browser has a keypair and that its PUBLIC key is registered. Called
- * by any surface that needs the viewer to be able to send or receive (the compose
- * modal, the inbox, a thread) - never by the bare Message button, so merely viewing
- * a profile registers nothing. Registration is idempotent server-side (an upsert).
+ * Ensures THIS browser can send and receive: its key is the account's registered key,
+ * or the account has none yet and this browser registers one. Called by any surface
+ * that needs the viewer to be able to send or receive (the compose modal, the inbox, a
+ * thread) - never by the bare Message button, so merely viewing a profile registers
+ * nothing. It never prompts on its own; `unlock` and `backUp` are for a press.
+ *
+ * ★★★ NEVER MINT OVER AN EXISTING REGISTRATION (2026-09-13), AND NEVER OVER A BACKUP
+ * (2026-09-25). On a second device, a cleared profile or a private window there is no
+ * local key, and the old flow generated a fresh one and registered it, appending a
+ * version and leaving every earlier message unreadable to its own owner and to everyone
+ * who wrote to them. Production, 2026-09-13 06:12: `daveks`. Now:
+ *
+ *  - this browser's key IS the registered key: ready;
+ *  - a backup exists: locked (this login can open it) or orphaned (it cannot). Never a
+ *    new key, whatever the tier;
+ *  - a key exists without a backup: as before. A Hive account is orphaned; a lite one
+ *    re-registers this browser's key (its old per-device rule);
+ *  - no key anywhere: register this browser's key, then try the backup.
+ *
+ * The own-key read comes BEFORE the local check on purpose: the header may be making
+ * this browser's key at the same moment, and it stores the key before registering it,
+ * so a registered key seen here is already in local storage if it is ours.
  */
 export function useOwnDmRegistration(): OwnDmRegistration {
+  const qc = useQueryClient();
   const { user, isHydrated, sessionUnavailable } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
   const actorKey = loggedIn ? actorKeyOf(user) : null;
-  const [state, setState] = useState<'idle' | 'registering' | 'ready' | 'error' | 'orphaned'>('idle');
+  const via = loggedIn ? backupViaFor(user) : null;
+  const [state, setState] = useState<RegState>('idle');
+  const [backedUp, setBackedUp] = useState<boolean | null>(null);
+  const [backupPossible, setBackupPossible] = useState(false);
+  const [deviceOnly, setDeviceOnly] = useState(false);
+  const [working, setWorking] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const ensure = useCallback(async (): Promise<boolean> => {
     if (!loggedIn || !actorKey) return false;
-    // Already registered this identity in this session: resolve without another POST.
-    if (registeredThisSession.has(actorKey)) {
-      setState('ready');
-      return true;
-    }
     setState('registering');
     try {
-      // ★★★ NEVER MINT OVER AN EXISTING REGISTRATION (2026-09-13).
-      //
-      // `getPublicKeyBase64` creates and stores a keypair when this browser has
-      // none. On a second device, a cleared profile or a private window that is
-      // ALWAYS true, so the old flow generated a fresh key and registered it —
-      // appending a version and leaving every earlier message unreadable to its
-      // own owner, silently and with no undo. Production, 2026-09-13 06:12:
-      // `daveks` did exactly that, and it broke the history for the people who
-      // had messaged them as well as for them.
-      //
-      // So ask first, and only in the case that matters: no local private half,
-      // but a key already registered under this identity. A read failure is not
-      // a licence to overwrite — `hasStoredKeypair` returns false when it cannot
-      // tell, and the lookup failing leaves `registered` null, which falls
-      // through to the normal path rather than blocking a first-time user.
+      const own = await fetchOwnKey();
       const hasLocal = await hasStoredKeypair(actorKey);
-      // Hive actors only: the lookup route resolves a HANDLE, and a lite `u:<id>`
-      // has no handle form. Pure-lite accounts hold no user-held secret either, so
-      // cross-device keys are impossible for them by construction and there is no
-      // second device whose history this could protect.
-      if (!hasLocal && actorKey.startsWith('h:')) {
-        const registered = await fetch(`/api/lite/dm/keys?actor=${encodeURIComponent(actorKey.slice(2))}`)
-          .then((r) => (r.ok ? (r.json() as Promise<{ public_key: string | null }>) : null))
-          .catch(() => null);
-        if (registered && registered.public_key !== null) {
-          // ★ UNLESS THE KEY IS THIS BROWSER'S (2026-09-25). Another registration on
-          // the same page (the header's sign-in key, `useDmKeyOnSignIn`, or a second
-          // mounted surface) can make and register this browser's key while the
-          // lookup above is in flight. That key is ours, so nothing is elsewhere:
-          // without this the inbox said "set up on another device" on the very device
-          // that had just set it up. Checked only once a local key exists, so it can
-          // never mint one here.
-          if ((await hasStoredKeypair(actorKey)) && (await getPublicKeyBase64(actorKey)) === registered.public_key) {
-            registeredThisSession.add(actorKey);
-            setState('ready');
-            return true;
-          }
-          // Their messages are readable on the device that holds the key. Minting
-          // here would end that, so refuse and let the UI say so.
-          setState('orphaned');
-          return false;
-        }
+      const localPub = hasLocal ? await getPublicKeyBase64(actorKey) : null;
+
+      if (own === null) {
+        // Could not tell. A key already here was registered when it was made, so it
+        // still works; without one, making a key now could replace a backed-up one.
+        if (!hasLocal) throw new Error('own key read failed');
+        setState('ready');
+        return true;
       }
-      const publicKey = await getPublicKeyBase64(actorKey);
-      const res = await fetch('/api/lite/dm/keys', {
-        method: 'POST',
-        headers: JSON_POST,
-        body: JSON.stringify({ publicKey })
-      });
-      if (!res.ok) throw new Error(`DM key registration failed: HTTP ${res.status}`);
-      registeredThisSession.add(actorKey);
+
+      if (own.public_key && localPub === own.public_key) {
+        setBackedUp(Boolean(own.backup));
+        if (!own.backup) void hasBackupMethod(user).then(setBackupPossible);
+        setState('ready');
+        return true;
+      }
+
+      if (own.public_key && own.backup) {
+        const backup = parseBackup(own.backup);
+        setState(backup && canOpen(user, backup) ? 'locked' : 'orphaned');
+        return false;
+      }
+
+      if (own.public_key && !hasLocal && actorKey.startsWith('h:')) {
+        setState('orphaned');
+        return false;
+      }
+
+      // No key anywhere, or (lite, or a key already here) a key without a backup: this
+      // browser's key is registered, made here first if there is none.
+      const publicKey = localPub ?? (await getPublicKeyBase64(actorKey));
+      if (!(await postOwnKey(publicKey))) throw new Error('DM key registration failed');
+      setBackedUp(false);
+      void hasBackupMethod(user).then(setBackupPossible);
       setState('ready');
+      if (!own.public_key) {
+        // The first device for this account: its backup, as at sign-in (see useDmKeyOnSignIn).
+        void backUpOwnKey(user, actorKey, false).then((r) => {
+          if (r === 'saved') setBackedUp(true);
+          if (r === 'device-only') setDeviceOnly(true);
+        });
+      }
       return true;
     } catch {
       // A failed registration is a real, visible state: the UI tells the viewer their
@@ -204,21 +317,83 @@ export function useOwnDmRegistration(): OwnDmRegistration {
       setState('error');
       return false;
     }
-  }, [loggedIn, actorKey]);
+  }, [loggedIn, actorKey, user]);
 
   useEffect(() => {
     if (loggedIn && state === 'idle') void ensure();
   }, [loggedIn, state, ensure]);
 
+  const unlock = useCallback(async (): Promise<boolean> => {
+    if (!actorKey) return false;
+    setWorking(true);
+    setActionError(null);
+    try {
+      const own = await fetchOwnKey();
+      const backup = parseBackup(own?.backup);
+      if (!own?.public_key || !backup) throw new Error("There is no backup to unlock. Open Lumen on the device you first used.");
+      const privateKey = await openBackup(user, backup);
+      // Only the account's CURRENT key may be installed: a backup that opens to anything
+      // else is refused before it touches this browser.
+      if (publicKeyOfPrivateBase64(privateKey) !== own.public_key) {
+        throw new Error("That backup belongs to an older messaging key, so it can't unlock your current messages.");
+      }
+      await installKeypair(actorKey, privateKey, own.key_version ?? 1);
+      setBackedUp(true);
+      setState('ready');
+      void qc.invalidateQueries({ queryKey: ['dm-threads'] });
+      void qc.invalidateQueries({ queryKey: ['dm-thread'] });
+      return true;
+    } catch (error) {
+      setActionError(unlockFailure(error));
+      return false;
+    } finally {
+      setWorking(false);
+    }
+  }, [actorKey, user, qc]);
+
+  const backUp = useCallback(async (): Promise<boolean> => {
+    if (!actorKey) return false;
+    setWorking(true);
+    setActionError(null);
+    try {
+      const result = await backUpOwnKey(user, actorKey, true);
+      if (result === 'saved') setBackedUp(true);
+      else if (result === 'device-only') setDeviceOnly(true);
+      else setActionError("That didn't go through. Nothing changed; you can try again.");
+      return result === 'saved';
+    } finally {
+      setWorking(false);
+    }
+  }, [actorKey, user]);
+
   return {
     ready: state === 'ready',
     orphaned: state === 'orphaned',
+    locked: state === 'locked',
     registering: state === 'registering',
     error: state === 'error',
+    canBackUp: state === 'ready' && backedUp === false && backupPossible && !deviceOnly,
+    deviceOnly,
+    approvalLabel: via ? VIA_LABEL[via] : null,
+    viaWallet: via === 'wallet',
+    working,
+    actionError,
+    unlock,
+    backUp,
     loggedIn,
     sessionUnavailable,
     ensure
   };
+}
+
+function unlockFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (message === 'wrong_wallet') return 'Connect the wallet you use for Lumen, then try again.';
+  if (message === 'cannot_open_backup' || message === 'This memo is not for this key') {
+    return "This sign-in can't open your backup. Sign in the way you did on your first device.";
+  }
+  if (message.includes('older messaging key') || message.includes('no backup')) return message;
+  return "That didn't unlock. Nothing changed; you can try again.";
 }
 
 /**
@@ -229,42 +404,37 @@ export function useOwnDmRegistration(): OwnDmRegistration {
  * Ethereum wallet) becomes reachable by merely using Lumen, not only after finding
  * the Studio. It registers a key only when the account has NONE yet:
  *
- *  - This browser already holds a key for the account: nothing to do, it was
- *    registered when it was made. Re-posting it here would, for an account also used
- *    on a second device, swap the registered key back and forth on every page load.
- *  - Another device already registered one: left alone. Replacing it would make the
- *    existing conversations unreadable (the daveks case in `useOwnDmRegistration`).
- *    The inbox shows that state when the reader opens it.
- *  - No key anywhere: make one here and register it.
+ *  - This browser already holds a key for the account: nothing to do.
+ *  - The account has a key (on another device, backed up or not): left alone. The
+ *    inbox offers the unlock, or says where the key is.
+ *  - No key anywhere: make one here, register it, then upload its backup: one approval
+ *    for Keychain, PeakVault or MetaMask, none for a WIF login with a stored key, and for
+ *    a wallet only if it is already connected (the wallet picker needs a press, so
+ *    otherwise the inbox offers it).
  *
  * Waits for the server's answer on who is signed in (`clientAnswered`), so a stale
  * cached identity from a previous sign-in can never register a key for the wrong
  * account. Any failure is silent: signing in never fails over messaging, and the
  * inbox states the honest reason when it is opened.
  */
+const signInHandled = new Set<string>();
+
 export function useDmKeyOnSignIn(): void {
   const { user, isHydrated, clientAnswered } = useUserClient();
   const actorKey = isHydrated && clientAnswered && user.isLoggedIn ? actorKeyOf(user) : null;
+  const userRef = useRef(user);
+  userRef.current = user;
 
   useEffect(() => {
-    if (!actorKey || registeredThisSession.has(actorKey)) return;
+    if (!actorKey || signInHandled.has(actorKey)) return;
+    signInHandled.add(actorKey);
     void (async () => {
       try {
         if (await hasStoredKeypair(actorKey)) return;
-        // Same lookup form `useOwnDmRegistration` uses: a Hive actor by handle (which
-        // also finds an upgraded account's key under its Lumen id), a lite one by id.
-        const lookup = actorKey.startsWith('h:') ? actorKey.slice(2) : actorKey;
-        const found = await fetch(`/api/lite/dm/keys?actor=${encodeURIComponent(lookup)}`);
-        if (!found.ok) return;
-        const body = (await found.json()) as KeyResponse;
-        if (body.public_key !== null) return;
-        const publicKey = await getPublicKeyBase64(actorKey);
-        const res = await fetch('/api/lite/dm/keys', {
-          method: 'POST',
-          headers: JSON_POST,
-          body: JSON.stringify({ publicKey })
-        });
-        if (res.ok) registeredThisSession.add(actorKey);
+        const own = await fetchOwnKey();
+        if (!own || own.public_key) return;
+        if (!(await postOwnKey(await getPublicKeyBase64(actorKey)))) return;
+        await backUpOwnKey(userRef.current, actorKey, false);
       } catch {
         /* see above: the inbox reports the state, sign-in is never blocked */
       }
