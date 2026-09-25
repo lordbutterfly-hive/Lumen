@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
 import { lumenNotificationsQuery } from '@/blog/features/layouts/site-header/use-lumen-notifications';
@@ -50,20 +50,22 @@ export function useInboxAskNews(username: string) {
   const { data, isSuccess } = useQuery(lumenNotificationsQuery(username));
   const rows = useMemo(() => (data ?? []).filter((r) => r.id && INBOX_ASK_TYPES.has(r.type)), [data]);
   const [marks, setMarks] = useState<SeenMarks | null>(null);
+  const marksRef = useRef<SeenMarks | null>(null);
+  marksRef.current = marks;
 
   // Another account signed in on this page: its own set, read afresh below.
   useEffect(() => setMarks(null), [username]);
   useEffect(() => {
-    if (!username || !isSuccess) return;
-    setMarks((current) => {
-      if (current) return current;
-      const stored = readMarks(username);
-      if (stored) return stored;
-      const seeded = marksAfterOpen(rows, { ids: [], seenAt: 0 }, Date.now());
-      setStorageItem(marksKey(username), seeded, StorageTTL.PERMANENT);
-      return seeded;
-    });
-  }, [username, isSuccess, rows]);
+    if (!username || !isSuccess || marks) return;
+    const stored = readMarks(username);
+    if (stored) {
+      setMarks(stored);
+      return;
+    }
+    const seeded = marksAfterOpen(rows, { ids: [], seenAt: 0 }, Date.now());
+    setStorageItem(marksKey(username), seeded, StorageTTL.PERMANENT);
+    setMarks(seeded);
+  }, [username, isSuccess, rows, marks]);
   useEffect(() => {
     if (!username) return;
     const onSeen = (e: Event) => {
@@ -76,15 +78,15 @@ export function useInboxAskNews(username: string) {
   const count = marks ? unreadCount(rows, marks) : 0;
 
   // Called when the Asks tab is showing: everything it shows is now seen.
+  // ★ Stored FIRST, then announced: the other holder re-reads storage when told, so the
+  // write must already be there. (It was made inside a state updater, which React may run
+  // later than the announcement: measured, the envelope kept 1 of 3 until the next page.)
   const markSeen = useCallback(() => {
     if (!username) return;
-    setMarks((current) => {
-      const next = marksAfterOpen(rows, current ?? { ids: [], seenAt: 0 }, Date.now());
-      setStorageItem(marksKey(username), next, StorageTTL.PERMANENT);
-      return next;
-    });
-    // After this state update, outside it: the other holders re-read what was just stored.
-    queueMicrotask(() => window.dispatchEvent(new CustomEvent(SEEN_EVENT, { detail: username })));
+    const next = marksAfterOpen(rows, marksRef.current ?? readMarks(username) ?? { ids: [], seenAt: 0 }, Date.now());
+    setStorageItem(marksKey(username), next, StorageTTL.PERMANENT);
+    setMarks(next);
+    window.dispatchEvent(new CustomEvent(SEEN_EVENT, { detail: username }));
   }, [username, rows]);
 
   return { count, markSeen };
