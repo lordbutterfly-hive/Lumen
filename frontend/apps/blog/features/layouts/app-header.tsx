@@ -457,7 +457,7 @@ const AppHeader: FC = () => {
           {/* The inbox, for every signed-in account, left of the bell so the bell
               keeps its place (the cluster is right-aligned). Same control shape and
               badge as the bell; see header-inbox.tsx. */}
-          {identity.isLoggedIn ? <HeaderInbox /> : null}
+          {identity.isLoggedIn ? <HeaderInbox notificationsUser={bellUsername ?? ''} /> : null}
 
           {identity.isLoggedIn ? (
             /* Item 12: the bell used to be a Link to /@{user}/notifications

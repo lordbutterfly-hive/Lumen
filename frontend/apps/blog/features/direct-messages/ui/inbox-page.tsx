@@ -4,7 +4,9 @@ import { FC, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import PageShell from '@/blog/features/layouts/page-shell';
 import PageMasthead from '@/blog/features/layouts/page-masthead';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useDmUnread } from '../live/use-direct-messages';
+import { useInboxAskNews } from '../live/use-inbox-ask-news';
 import DmInboxPanel from './dm-inbox-panel';
 
 // The asks list carries the wallet's Meritum code; it loads when the tab is opened, not
@@ -38,7 +40,9 @@ const COPY = {
  *
  * Messages are marked read only while the Messages tab is showing, exactly as the Studio
  * does, so a message that arrives while the reader is on Asks keeps its badge. The count
- * is a dependency so one arriving while Messages is open clears as well.
+ * is a dependency so one arriving while Messages is open clears as well. New ask activity
+ * works the same way on the Asks tab (use-inbox-ask-news.ts), and each tab shows its own
+ * count, which together are the header's red number.
  */
 const InboxPage: FC<{ to: string | null; view: InboxView }> = ({ to, view: initialView }) => {
   const [view, setView] = useState<InboxView>(initialView);
@@ -46,6 +50,12 @@ const InboxPage: FC<{ to: string | null; view: InboxView }> = ({ to, view: initi
   useEffect(() => {
     if (view === 'messages' && count > 0) void markRead();
   }, [view, count, markRead]);
+  // The same account name the header's badge counts under (app-header's bellUsername).
+  const { user } = useUserClient();
+  const { count: askCount, markSeen: markAsksSeen } = useInboxAskNews(user.username ?? '');
+  useEffect(() => {
+    if (view === 'asks' && askCount > 0) markAsksSeen();
+  }, [view, askCount, markAsksSeen]);
 
   const choose = (next: InboxView) => {
     setView(next);
@@ -79,9 +89,12 @@ const InboxPage: FC<{ to: string | null; view: InboxView }> = ({ to, view: initi
             data-testid={`inbox-tab-${id}`}
           >
             {label}
-            {id === 'messages' && count > 0 ? (
-              <span className="ml-1.5 rounded-full bg-surface-brand-12 px-1.5 text-caption tabular-nums text-ink-27 font-num">
-                {count}
+            {(id === 'messages' ? count : askCount) > 0 ? (
+              <span
+                className="ml-1.5 rounded-full bg-surface-brand-12 px-1.5 text-caption tabular-nums text-ink-27 font-num"
+                data-testid={`inbox-tab-${id}-count`}
+              >
+                {id === 'messages' ? count : askCount}
               </span>
             ) : null}
           </button>

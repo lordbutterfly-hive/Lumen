@@ -65,8 +65,13 @@ const marksKey = (username: string) => `lumen-notifications-seen-ids:${username}
 
 const NO_MARKS: SeenMarks = { ids: [], seenAt: 0 };
 
-export function useLumenNotifications(username: string) {
-  const { data } = useQuery({
+/**
+ * The one read behind the bell's Lumen rows, shared by name so any other reader of the
+ * same rows (the inbox's badge, use-inbox-ask-news.ts) is answered from this cache and
+ * never makes a second request.
+ */
+export function lumenNotificationsQuery(username: string) {
+  return {
     queryKey: ['LumenNotifications', username],
     queryFn: async (): Promise<LumenNotification[]> => {
       const res = await fetch(`/api/lite/notifications?hive=${encodeURIComponent(username)}`);
@@ -80,7 +85,11 @@ export function useLumenNotifications(username: string) {
     // navigation, and a follower list does not change fast enough to justify a
     // request per route change. Worst case the badge is a minute behind.
     staleTime: 60_000
-  });
+  };
+}
+
+export function useLumenNotifications(username: string) {
+  const { data } = useQuery(lumenNotificationsQuery(username));
 
   /**
    * ★★★ UNREAD IS "NOT YET SHOWN ON THIS DEVICE", NOT "NEWER THAN THE LAST OPEN"

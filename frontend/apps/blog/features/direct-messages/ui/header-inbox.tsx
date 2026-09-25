@@ -7,17 +7,19 @@ import { cn } from '@ui/lib/utils';
 import { Icons } from '@ui/components/icons';
 import TooltipContainer from '@ui/components/tooltip-container';
 import { useDmKeyOnSignIn, useDmUnread } from '../live/use-direct-messages';
+import { useInboxAskNews } from '../live/use-inbox-ask-news';
 
 // TODO i18n - staged copy.
 const COPY = {
   inbox: 'Inbox',
-  unread: (n: number) => `Inbox (${n} unread)`
+  unread: (n: number) => `Inbox (${n} new)`
 };
 
 /**
  * The header's inbox control, beside the notifications bell, for every signed-in
  * account (owner, 2026-09-25: "give everyone a inbox top right"). A link to /inbox
- * with the unread-message count, drawn exactly like the bell: the same ghost icon
+ * with the count of what is new there (unread messages plus new ask activity), drawn
+ * exactly like the bell: the same ghost icon
  * button, the same filled icon weight, the same badge. The glyph is a letter (`mail`).
  *
  * It is also where a signed-in account gets its messaging key (`useDmKeyOnSignIn`),
@@ -27,9 +29,13 @@ const COPY = {
  * fifth 40px control pushed the page 21px sideways there (measured, 320px viewport).
  * The bell's "New message" rows still lead to /inbox at that width.
  */
-const HeaderInbox: FC = () => {
+const HeaderInbox: FC<{ notificationsUser: string }> = ({ notificationsUser }) => {
   useDmKeyOnSignIn();
-  const { count } = useDmUnread();
+  // The red number is everything new in the inbox: unread messages and new ask activity
+  // (use-inbox-ask-news.ts; owner, 2026-09-26: "if you get anything in inbox ... you should").
+  const { count: messages } = useDmUnread();
+  const { count: asks } = useInboxAskNews(notificationsUser);
+  const count = messages + asks;
   return (
     <TooltipContainer title={COPY.inbox}>
       <Link
