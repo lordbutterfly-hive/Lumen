@@ -38,7 +38,10 @@ const COPY = {
   signedOut: 'Sign in to read your messages.'
 };
 
-function labelForActor(actorKey: string): string {
+function labelForActor(actorKey: string, name: string | null): string {
+  // The server resolves each side's Lumen handle; the old fallbacks stay for an account
+  // it cannot find.
+  if (name) return `@${name}`;
   if (actorKey.startsWith('h:')) return `@${actorKey.slice(2)}`;
   return 'a Lumen member';
 }
@@ -145,7 +148,7 @@ const DmInboxPanel: FC<{ to?: string | null }> = ({ to = null }) => {
             >
               <div className="flex items-center justify-between gap-3">
                 <span className="font-ui text-[15px] leading-[24px] font-medium text-ink-2">
-                  {labelForActor(t.otherActorKey)}
+                  {labelForActor(t.otherActorKey, t.otherName)}
                 </span>
                 {t.status === 'request' ? (
                   <span className="rounded-full bg-surface-warn-2 px-2.5 py-0.5 font-ui text-caption font-medium text-ink-warn-3">

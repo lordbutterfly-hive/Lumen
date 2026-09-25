@@ -37,6 +37,7 @@ export async function GET(
       thread_id: result.threadId,
       status: result.status,
       otherActorKey: result.otherActorKey,
+      otherName: result.otherName,
       messages: result.messages
     });
   } catch (error) {

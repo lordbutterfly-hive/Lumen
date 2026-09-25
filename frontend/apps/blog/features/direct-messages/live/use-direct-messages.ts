@@ -49,6 +49,8 @@ interface RawLastMessage {
 interface RawThread {
   threadId: string;
   otherActorKey: string;
+  /** The other side's Lumen handle (or Hive name), resolved by the server. */
+  otherName?: string | null;
   status: string;
   lastMessage?: RawLastMessage | null;
 }
@@ -72,6 +74,7 @@ interface RawMessage {
 interface RawMessagesResponse {
   status?: string;
   otherActorKey?: string;
+  otherName?: string | null;
   messages?: RawMessage[];
 }
 
@@ -358,6 +361,7 @@ export function useSendMessage() {
 export interface DmThreadSummary {
   threadId: string;
   otherActorKey: string;
+  otherName: string | null;
   status: string;
   /** Decrypted preview of the last message, or null when there is nothing to show. */
   preview: string | null;
@@ -419,6 +423,7 @@ export function useDmThreads() {
         summaries.push({
           threadId: t.threadId,
           otherActorKey: t.otherActorKey,
+          otherName: t.otherName ?? null,
           status: t.status,
           preview,
           previewUndecryptable,
@@ -490,6 +495,7 @@ export interface DmMessage {
 export interface DmThreadData {
   status: string | null;
   otherActorKey: string | null;
+  otherName: string | null;
   messages: DmMessage[];
 }
 
@@ -503,7 +509,7 @@ export function useDmThread(threadId: string | null) {
     queryKey: ['dm-thread', threadId, myActorKey],
     enabled: Boolean(threadId) && loggedIn,
     queryFn: async (): Promise<DmThreadData> => {
-      if (!myActorKey) return { status: null, otherActorKey: null, messages: [] };
+      if (!myActorKey) return { status: null, otherActorKey: null, otherName: null, messages: [] };
       const res = await fetch(`/api/lite/dm/threads/${encodeURIComponent(threadId as string)}/messages`);
       if (!res.ok) throw new Error(`DM messages read failed: HTTP ${res.status}`);
       const body = (await res.json()) as RawMessagesResponse;
@@ -544,7 +550,7 @@ export function useDmThread(threadId: string | null) {
       // Server returns newest-first (message_id DESC); reverse to chronological so the
       // newest message sits at the BOTTOM - the normal DM reading order.
       messages.reverse();
-      return { status: body.status ?? null, otherActorKey, messages };
+      return { status: body.status ?? null, otherActorKey, otherName: body.otherName ?? null, messages };
     }
   });
 
@@ -591,6 +597,7 @@ export function useDmThread(threadId: string | null) {
   return {
     status: q.data?.status ?? null,
     otherActorKey: q.data?.otherActorKey ?? null,
+    otherName: q.data?.otherName ?? null,
     messages: q.data?.messages ?? [],
     isLoading: q.isInitialLoading,
     isError: q.isError,

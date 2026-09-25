@@ -27,10 +27,12 @@ const COPY = {
   privacy: "Encrypted on your device. Lumen can't read it."
 };
 
-function labelForActor(actorKey: string | null): string {
+function labelForActor(actorKey: string | null, name: string | null): string {
+  // The server resolves each side's Lumen handle (owner, 2026-09-25: show the handle,
+  // not "a Lumen member"); the old fallbacks stay for an account it cannot find.
+  if (name) return `@${name}`;
   if (!actorKey) return 'this person';
   if (actorKey.startsWith('h:')) return `@${actorKey.slice(2)}`;
-  // A lite (`u:<id>`) counterparty has no handle to show; name them by role, not id.
   return 'a Lumen member';
 }
 
@@ -78,7 +80,7 @@ const DmThreadView: FC<{ threadId: string; onBack?: () => void }> = ({ threadId,
             </button>
           ) : null}
           <span className="font-ui text-[15px] leading-[24px] font-medium text-ink-2">
-            {labelForActor(thread.otherActorKey)}
+            {labelForActor(thread.otherActorKey, thread.otherName)}
           </span>
         </div>
         {thread.status === 'request' ? (

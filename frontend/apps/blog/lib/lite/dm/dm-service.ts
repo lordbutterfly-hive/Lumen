@@ -325,10 +325,26 @@ export interface DmMessageView {
   readAt: string | null;
 }
 
+/**
+ * The name to show for each actor key: the Lumen handle a `u:` account uses TODAY (so a
+ * rename shows at once), or the Hive name of an `h:` one. Same lookup the bell's DM rows
+ * make. A missing account maps to nothing, and the client falls back to its old label.
+ */
+async function namesFor(keys: string[]): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  const ids = Array.from(new Set(keys.filter((k) => k.startsWith('u:')).map((k) => k.slice(2))));
+  const found = ids.length ? await users.findUsersByIds(ids) : [];
+  for (const u of found) names.set(`u:${u.userId}`, u.displayName);
+  for (const k of keys) if (k.startsWith('h:')) names.set(k, k.slice(2));
+  return names;
+}
+
 export interface DmThreadView {
   threadId: string;
   status: dmThreads.DmThreadStatus;
   otherActorKey: string;
+  /** The other side's Lumen handle (or Hive name); null if it cannot be found. */
+  otherName: string | null;
   isRequester: boolean;
   lastMessageAt: string;
   lastMessage: DmMessageView | null;
@@ -349,6 +365,7 @@ export async function listThreads(
 
   const callerKey = actorKey(from.actor);
   const items = await dmThreads.listThreadsWithLastMessage(callerKey, { limit: THREADS_LIMIT });
+  const names = await namesFor(items.map((t) => t.otherKey));
 
   return {
     ok: true,
@@ -356,6 +373,7 @@ export async function listThreads(
       threadId: t.threadId,
       status: t.status,
       otherActorKey: t.otherKey,
+      otherName: names.get(t.otherKey) ?? null,
       isRequester: t.isRequester,
       lastMessageAt: t.lastMessageAt.toISOString(),
       lastMessage: t.lastMessage
@@ -410,6 +428,7 @@ export type ListMessagesOutcome =
       threadId: string;
       status: dmThreads.DmThreadStatus;
       otherActorKey: string;
+      otherName: string | null;
       messages: DmMessageView[];
     }
   | { ok: false; status: number; error: string };
@@ -442,11 +461,14 @@ export async function listThreadMessages(
   const before = typeof opts.before === 'string' && opts.before.length > 0 ? opts.before : undefined;
 
   const messages = await dmMessages.listMessages(threadId, { limit, before });
+  const otherActorKey = thread.actorAKey === callerKey ? thread.actorBKey : thread.actorAKey;
+  const names = await namesFor([otherActorKey]);
   return {
     ok: true,
     threadId,
     status: thread.status,
-    otherActorKey: thread.actorAKey === callerKey ? thread.actorBKey : thread.actorAKey,
+    otherActorKey,
+    otherName: names.get(otherActorKey) ?? null,
     messages: messages.map((m) => ({
       messageId: m.messageId,
       senderActorKey: m.senderKey,
