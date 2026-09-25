@@ -202,10 +202,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         return {
           type: 'dm' as const,
           msg: name ? `New message from ${isHive ? '@' : ''}${name}` : 'New message from a Lumen member',
-          // The recipient's own Studio inbox, deep-linked to the MESSAGES sub-tab so the
-          // click lands where the message is read and the unread state clears (the tab
-          // defaults to Requests otherwise). Not the sender's profile, unlike a follow row.
-          url: 'creators/studio?section=inbox&tab=messages',
+          // The recipient's inbox (/inbox), which every signed-in account has, so the
+          // click lands where the message is read and the unread state clears. It used
+          // to be the Studio's Messages tab, which a reader with no Meritum never had.
+          // Not the sender's profile, unlike a follow row.
+          url: 'inbox',
           date: s.at instanceof Date ? s.at.toISOString() : String(s.at),
           // Only a Hive sender has a handle the bell can draw an avatar from; a lite sender
           // falls back to the monogram, and is named generically in `msg`.

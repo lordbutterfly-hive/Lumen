@@ -3,8 +3,10 @@
 import { FC, useEffect, useMemo, useState } from 'react';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import ModalShell from '@/blog/features/creator-tokens/ui/modal-shell';
+import { displayHandle } from '@/blog/features/creator-tokens/live/adapt';
 import {
   MAX_MESSAGE_CHARS,
+  dmRecipientActor,
   useOwnDmRegistration,
   useRecipientKey,
   useSendMessage
@@ -27,9 +29,9 @@ const COPY = {
   placeholder: (h: string) => `Write to @${h}…`,
   privacy: "Encrypted on your device. Lumen and the server can't read it.",
   signIn: 'Sign in to send a message.',
-  checking: 'Checking whether this creator can receive messages…',
-  notSetUp: "This creator hasn't set up messaging yet, so you can't message them right now.",
-  keyError: "We couldn't check this creator's messaging right now. Try again in a moment.",
+  checking: 'Checking whether they can receive messages…',
+  notSetUp: "They haven't set up messaging on Lumen yet, so you can't message them right now.",
+  keyError: "We couldn't check their messaging right now. Try again in a moment.",
   selfMessage: "This is you, so there's no one to message here.",
   noKeystore: 'Private messaging needs local storage this browser has turned off, so it is unavailable here.',
   send: 'Send message',
@@ -60,11 +62,10 @@ const DmComposeModal: FC<{ recipientHandle: string; onClose: () => void }> = ({ 
     () => (recipientHandle.startsWith('hive:') ? recipientHandle.slice('hive:'.length) : recipientHandle),
     [recipientHandle]
   );
-  const recipientActor = useMemo(
-    () => (recipientHandle.startsWith('hive:') ? `h:${recipientHandle.slice('hive:'.length)}` : recipientHandle),
-    [recipientHandle]
-  );
-  const displayName = bareName;
+  const recipientActor = useMemo(() => dmRecipientActor(recipientHandle), [recipientHandle]);
+  // A wallet (a Meritum buyer known only by `did:pkh:…`) is shown the way the order
+  // itself shows it, as a shortened address; a handle is shown as itself.
+  const displayName = useMemo(() => displayHandle(recipientHandle), [recipientHandle]);
 
   const isSelf = loggedIn && !!user.username && user.username.toLowerCase() === bareName.toLowerCase();
 

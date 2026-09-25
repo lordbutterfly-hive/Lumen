@@ -83,6 +83,17 @@ function actorKeyOf(user: { userId?: string; username: string }): string | null 
   return null;
 }
 
+/**
+ * The server form of a recipient named by a display handle. `hive:<name>` (how the
+ * token pages and a Meritum escrow name a Hive account) becomes the `h:<name>`
+ * escape, which `resolveDmActor` routes to the real Hive account and never to a
+ * name-colliding lite squatter (IDA-02, see dm-compose-modal.tsx). Bare handles and
+ * wallet DIDs pass through unchanged.
+ */
+export function dmRecipientActor(handle: string): string {
+  return handle.startsWith('hive:') ? `h:${handle.slice('hive:'.length)}` : handle;
+}
+
 async function fetchPublicKeyFor(actorParam: string): Promise<{ publicKey: string | null; keyVersion: number }> {
   const res = await fetch(`/api/lite/dm/keys?actor=${encodeURIComponent(actorParam)}`);
   if (!res.ok) throw new Error(`DM key read failed: HTTP ${res.status}`);
@@ -156,6 +167,18 @@ export function useOwnDmRegistration(): OwnDmRegistration {
           .then((r) => (r.ok ? (r.json() as Promise<{ public_key: string | null }>) : null))
           .catch(() => null);
         if (registered && registered.public_key !== null) {
+          // ★ UNLESS THE KEY IS THIS BROWSER'S (2026-09-25). Another registration on
+          // the same page (the header's sign-in key, `useDmKeyOnSignIn`, or a second
+          // mounted surface) can make and register this browser's key while the
+          // lookup above is in flight. That key is ours, so nothing is elsewhere:
+          // without this the inbox said "set up on another device" on the very device
+          // that had just set it up. Checked only once a local key exists, so it can
+          // never mint one here.
+          if ((await hasStoredKeypair(actorKey)) && (await getPublicKeyBase64(actorKey)) === registered.public_key) {
+            registeredThisSession.add(actorKey);
+            setState('ready');
+            return true;
+          }
           // Their messages are readable on the device that holds the key. Minting
           // here would end that, so refuse and let the UI say so.
           setState('orphaned');
@@ -193,6 +216,57 @@ export function useOwnDmRegistration(): OwnDmRegistration {
     sessionUnavailable,
     ensure
   };
+}
+
+/**
+ * ★★ A KEY ON SIGN-IN, FOR EVERY ACCOUNT TYPE, WITHOUT EVER REPLACING ONE (2026-09-25,
+ * owner: "they need to login into lumen to get the key").
+ *
+ * Mounted once in the header, so any signed-in account (Hive, Google, Bitcoin or
+ * Ethereum wallet) becomes reachable by merely using Lumen, not only after finding
+ * the Studio. It registers a key only when the account has NONE yet:
+ *
+ *  - This browser already holds a key for the account: nothing to do, it was
+ *    registered when it was made. Re-posting it here would, for an account also used
+ *    on a second device, swap the registered key back and forth on every page load.
+ *  - Another device already registered one: left alone. Replacing it would make the
+ *    existing conversations unreadable (the daveks case in `useOwnDmRegistration`).
+ *    The inbox shows that state when the reader opens it.
+ *  - No key anywhere: make one here and register it.
+ *
+ * Waits for the server's answer on who is signed in (`clientAnswered`), so a stale
+ * cached identity from a previous sign-in can never register a key for the wrong
+ * account. Any failure is silent: signing in never fails over messaging, and the
+ * inbox states the honest reason when it is opened.
+ */
+export function useDmKeyOnSignIn(): void {
+  const { user, isHydrated, clientAnswered } = useUserClient();
+  const actorKey = isHydrated && clientAnswered && user.isLoggedIn ? actorKeyOf(user) : null;
+
+  useEffect(() => {
+    if (!actorKey || registeredThisSession.has(actorKey)) return;
+    void (async () => {
+      try {
+        if (await hasStoredKeypair(actorKey)) return;
+        // Same lookup form `useOwnDmRegistration` uses: a Hive actor by handle (which
+        // also finds an upgraded account's key under its Lumen id), a lite one by id.
+        const lookup = actorKey.startsWith('h:') ? actorKey.slice(2) : actorKey;
+        const found = await fetch(`/api/lite/dm/keys?actor=${encodeURIComponent(lookup)}`);
+        if (!found.ok) return;
+        const body = (await found.json()) as KeyResponse;
+        if (body.public_key !== null) return;
+        const publicKey = await getPublicKeyBase64(actorKey);
+        const res = await fetch('/api/lite/dm/keys', {
+          method: 'POST',
+          headers: JSON_POST,
+          body: JSON.stringify({ publicKey })
+        });
+        if (res.ok) registeredThisSession.add(actorKey);
+      } catch {
+        /* see above: the inbox reports the state, sign-in is never blocked */
+      }
+    })();
+  }, [actorKey]);
 }
 
 /* ---------- recipient key ---------- */
@@ -363,6 +437,42 @@ export function useDmThreads() {
     sessionUnavailable,
     refetch: q.refetch
   };
+}
+
+export interface DmThreadWith {
+  /** `none` = no conversation yet; `error` = the lookup failed (sending still lands in the right thread). */
+  status: 'idle' | 'loading' | 'found' | 'none' | 'error';
+  threadId: string | null;
+}
+
+/**
+ * The viewer's existing thread with one person (`recipientActor` in the server form,
+ * see `dmRecipientActor`), so "Message" on a Meritum order opens the conversation
+ * that already exists. Keyed under 'dm-threads', so a send (which invalidates that
+ * prefix) re-asks, and the thread a first message just created is found.
+ */
+export function useDmThreadWith(recipientActor: string | null): DmThreadWith {
+  const { user, isHydrated } = useUserClient();
+  const loggedIn = isHydrated && user.isLoggedIn;
+  const myActorKey = loggedIn ? actorKeyOf(user) : null;
+
+  const q = useQuery({
+    queryKey: ['dm-threads', myActorKey, 'with', recipientActor],
+    enabled: loggedIn && Boolean(recipientActor),
+    retry: 1,
+    queryFn: async (): Promise<string | null> => {
+      const res = await fetch(`/api/lite/dm/threads?with=${encodeURIComponent(recipientActor as string)}`);
+      if (!res.ok) throw new Error(`DM thread lookup failed: HTTP ${res.status}`);
+      const body = (await res.json()) as { thread_id?: string | null };
+      return body.thread_id ?? null;
+    }
+  });
+
+  if (!recipientActor || !loggedIn) return { status: 'idle', threadId: null };
+  if (q.data) return { status: 'found', threadId: q.data };
+  if (q.isError) return { status: 'error', threadId: null };
+  if (q.data === null) return { status: 'none', threadId: null };
+  return { status: 'loading', threadId: null };
 }
 
 /* ---------- one thread ---------- */

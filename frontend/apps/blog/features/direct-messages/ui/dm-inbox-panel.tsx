@@ -1,13 +1,18 @@
 'use client';
 
-import { FC, useEffect, useState } from 'react';
-import { useDmThreads, useOwnDmRegistration } from '../live/use-direct-messages';
+import { FC, useEffect, useRef, useState } from 'react';
+import { dmRecipientActor, useDmThreadWith, useDmThreads, useOwnDmRegistration } from '../live/use-direct-messages';
+import DmComposeModal from './dm-compose-modal';
 import DmThreadView from './dm-thread-view';
 
 /**
- * The creator's DM inbox, mounted inside the Studio's Inbox section alongside (never
- * merged with) the paid-ask escrow cards. Asks carry money and deadlines; DMs do not,
- * so they stay visually and structurally separate.
+ * The DM inbox. Mounted on /inbox for every signed-in account, and inside the Studio's
+ * Inbox section alongside (never merged with) the paid-ask escrow cards. Asks carry
+ * money and deadlines; DMs do not, so they stay visually and structurally separate.
+ *
+ * `to` (from /inbox?to=, which the Meritum order popup links to) names one person:
+ * their existing conversation opens, or, when there is none yet, the compose dialog
+ * opens to them and the conversation opens once the first message is sent.
  *
  * Mounting this is what registers the creator's own public key (so senders can
  * encrypt to them) and decrypts every preview locally. The server stores only
@@ -38,10 +43,29 @@ function labelForActor(actorKey: string): string {
   return 'a Lumen member';
 }
 
-const DmInboxPanel: FC = () => {
+const DmInboxPanel: FC<{ to?: string | null }> = ({ to = null }) => {
   const registration = useOwnDmRegistration();
   const { threads, isLoading, isError, loggedIn, refetch } = useDmThreads();
   const [openThreadId, setOpenThreadId] = useState<string | null>(null);
+  const [composeTo, setComposeTo] = useState<string | null>(null);
+  const withThread = useDmThreadWith(to ? dmRecipientActor(to) : null);
+  // What has been done for `to` so far, so each step happens once: open the existing
+  // thread, or open compose once and then the thread the first message created (the
+  // send invalidates the lookup, which then finds it). Closing compose without
+  // sending leaves the list, and nothing reopens it.
+  const handled = useRef<'thread' | 'compose' | null>(null);
+  useEffect(() => {
+    if (!to) return;
+    if (withThread.threadId && handled.current !== 'thread') {
+      handled.current = 'thread';
+      setOpenThreadId(withThread.threadId);
+    } else if ((withThread.status === 'none' || withThread.status === 'error') && handled.current === null) {
+      // A failed lookup still composes: the server files the message into the
+      // existing thread by pair either way, so nothing is split.
+      handled.current = 'compose';
+      setComposeTo(to);
+    }
+  }, [to, withThread.threadId, withThread.status]);
 
   // Register this creator's public key on mount (idempotent). Without it, other
   // users see "hasn't set up messaging yet" on this creator's Message button.
@@ -55,87 +79,98 @@ const DmInboxPanel: FC = () => {
     return <p className="py-6 text-center font-ui text-caption text-ink-10">{COPY.signedOut}</p>;
   }
 
+  // The compose dialog sits at ONE place in the tree for both views: the thread its
+  // first message created opens behind it while it still says "Message sent", and a
+  // dialog that moved in the tree would be remounted and lose that state.
+  const compose = composeTo ? <DmComposeModal recipientHandle={composeTo} onClose={() => setComposeTo(null)} /> : null;
+
   if (openThreadId) {
     return (
-      <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
-        <DmThreadView threadId={openThreadId} onBack={() => setOpenThreadId(null)} />
-      </div>
+      <>
+        <div key="thread" className="rounded-panel border border-line-9 bg-surface-1 p-5">
+          <DmThreadView threadId={openThreadId} onBack={() => setOpenThreadId(null)} />
+        </div>
+        {compose}
+      </>
     );
   }
 
   return (
-    <div className="flex flex-col gap-2.5" data-testid="dm-inbox-panel">
-      {registration.orphaned ? (
-        // ★ NOT an error, and deliberately ranked above one: nothing failed. This
-        // browser simply does not hold the key, and the honest thing is to say so
-        // rather than mint a new one and silently end the existing conversations.
-        <div className="rounded-panel border border-line-warn-1 bg-surface-warn-2 px-5 py-3 font-ui text-caption font-medium text-ink-warn-3">
-          {COPY.otherDevice}
-        </div>
-      ) : registration.error ? (
-        <div className="rounded-panel border border-line-warn-1 bg-surface-warn-2 px-5 py-3 font-ui text-caption font-medium text-ink-warn-3">
-          {COPY.keystoreBlocked}
-        </div>
-      ) : registration.registering ? (
-        <div className="rounded-panel border border-line-9 bg-surface-1 px-5 py-3 font-ui text-caption text-ink-10">
-          {COPY.registering}
-        </div>
-      ) : null}
+    <>
+      <div key="list" className="flex flex-col gap-2.5" data-testid="dm-inbox-panel">
+        {registration.orphaned ? (
+          // ★ NOT an error, and deliberately ranked above one: nothing failed. This
+          // browser simply does not hold the key, and the honest thing is to say so
+          // rather than mint a new one and silently end the existing conversations.
+          <div className="rounded-panel border border-line-warn-1 bg-surface-warn-2 px-5 py-3 font-ui text-caption font-medium text-ink-warn-3">
+            {COPY.otherDevice}
+          </div>
+        ) : registration.error ? (
+          <div className="rounded-panel border border-line-warn-1 bg-surface-warn-2 px-5 py-3 font-ui text-caption font-medium text-ink-warn-3">
+            {COPY.keystoreBlocked}
+          </div>
+        ) : registration.registering ? (
+          <div className="rounded-panel border border-line-9 bg-surface-1 px-5 py-3 font-ui text-caption text-ink-10">
+            {COPY.registering}
+          </div>
+        ) : null}
 
-      {isLoading ? (
-        <div className="rounded-panel border border-line-9 bg-surface-1 py-6 text-center font-ui text-caption text-ink-10">
-          {COPY.loading}
-        </div>
-      ) : isError ? (
-        <div className="rounded-panel border border-line-9 bg-surface-1 py-6 text-center">
-          <p className="font-ui text-caption text-ink-brand-2">{COPY.failed}</p>
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            className="mt-2 rounded-control border border-line-12 bg-surface-1 px-3 py-1.5 font-ui text-caption font-medium text-ink-2 hover:border-line-28"
-          >
-            {COPY.retry}
-          </button>
-        </div>
-      ) : threads.length === 0 ? (
-        <div className="rounded-panel border border-line-9 bg-surface-1 py-6 text-center">
-          <p className="font-serif text-sm italic text-ink-14">{COPY.empty}</p>
-        </div>
-      ) : (
-        threads.map((t) => (
-          <button
-            key={t.threadId}
-            type="button"
-            onClick={() => setOpenThreadId(t.threadId)}
-            className="w-full rounded-panel border border-line-9 bg-surface-1 p-4 text-left transition-colors hover:border-line-28"
-            data-testid="dm-thread-row"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <span className="font-ui text-[15px] leading-[24px] font-medium text-ink-2">
-                {labelForActor(t.otherActorKey)}
-              </span>
-              {t.status === 'request' ? (
-                <span className="rounded-full bg-surface-warn-2 px-2.5 py-0.5 font-ui text-caption font-medium text-ink-warn-3">
-                  {COPY.request}
+        {isLoading ? (
+          <div className="rounded-panel border border-line-9 bg-surface-1 py-6 text-center font-ui text-caption text-ink-10">
+            {COPY.loading}
+          </div>
+        ) : isError ? (
+          <div className="rounded-panel border border-line-9 bg-surface-1 py-6 text-center">
+            <p className="font-ui text-caption text-ink-brand-2">{COPY.failed}</p>
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              className="mt-2 rounded-control border border-line-12 bg-surface-1 px-3 py-1.5 font-ui text-caption font-medium text-ink-2 hover:border-line-28"
+            >
+              {COPY.retry}
+            </button>
+          </div>
+        ) : threads.length === 0 ? (
+          <div className="rounded-panel border border-line-9 bg-surface-1 py-6 text-center">
+            <p className="font-serif text-sm italic text-ink-14">{COPY.empty}</p>
+          </div>
+        ) : (
+          threads.map((t) => (
+            <button
+              key={t.threadId}
+              type="button"
+              onClick={() => setOpenThreadId(t.threadId)}
+              className="w-full rounded-panel border border-line-9 bg-surface-1 p-4 text-left transition-colors hover:border-line-28"
+              data-testid="dm-thread-row"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-ui text-[15px] leading-[24px] font-medium text-ink-2">
+                  {labelForActor(t.otherActorKey)}
                 </span>
-              ) : null}
-            </div>
-            <div className="mt-1 truncate font-ui text-caption text-ink-10">
-              {t.previewUndecryptable ? (
-                <span className="italic text-ink-14">{COPY.undecryptable}</span>
-              ) : t.preview ? (
-                <>
-                  {t.lastFromMe ? COPY.you : ''}
-                  {t.preview}
-                </>
-              ) : (
-                <span className="text-ink-14">{COPY.noPreview}</span>
-              )}
-            </div>
-          </button>
-        ))
-      )}
-    </div>
+                {t.status === 'request' ? (
+                  <span className="rounded-full bg-surface-warn-2 px-2.5 py-0.5 font-ui text-caption font-medium text-ink-warn-3">
+                    {COPY.request}
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-1 truncate font-ui text-caption text-ink-10">
+                {t.previewUndecryptable ? (
+                  <span className="italic text-ink-14">{COPY.undecryptable}</span>
+                ) : t.preview ? (
+                  <>
+                    {t.lastFromMe ? COPY.you : ''}
+                    {t.preview}
+                  </>
+                ) : (
+                  <span className="text-ink-14">{COPY.noPreview}</span>
+                )}
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+      {compose}
+    </>
   );
 };
 

@@ -41,6 +41,7 @@ import { SearchInput } from '@/blog/features/search/search-input';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useIntentPrefetch } from '@/blog/components/intent-prefetch';
 import HeaderTokenPill from '@/blog/features/creator-tokens/ui/header-token-pill';
+import HeaderInbox from '@/blog/features/direct-messages/ui/header-inbox';
 import { InquisitionSeal, useInquisitionArmed } from '@/blog/features/inquisition/inquisition-seal';
 
 // TODO i18n - move into locales/*/common_blog.json once copy is final
@@ -452,6 +453,11 @@ const AppHeader: FC = () => {
               </DialogLogin>
             )}
           </TooltipContainer>
+
+          {/* The inbox, for every signed-in account, left of the bell so the bell
+              keeps its place (the cluster is right-aligned). Same control shape and
+              badge as the bell; see header-inbox.tsx. */}
+          {identity.isLoggedIn ? <HeaderInbox /> : null}
 
           {identity.isLoggedIn ? (
             /* Item 12: the bell used to be a Link to /@{user}/notifications
