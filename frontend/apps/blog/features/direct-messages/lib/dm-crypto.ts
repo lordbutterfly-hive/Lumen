@@ -260,6 +260,34 @@ export async function hasStoredKeypair(actorKey: string): Promise<boolean> {
   }
 }
 
+/**
+ * ★★ THIS BROWSER'S EXISTING KEYPAIR, OR A REFUSAL. NEVER A NEW ONE (2026-09-25).
+ *
+ * `encrypt` and `decrypt` used `getOrCreateKeypair`, so merely OPENING the inbox on a
+ * second device minted a keypair there (decrypting each preview needs a private key),
+ * while the inbox said "we have not created a new key here". On the next load
+ * `useOwnDmRegistration` found that local key, skipped its other-device check and
+ * registered it: a new key version, and every earlier message unreadable to its owner
+ * and to everyone who wrote to them. The daveks loss by another road. Measured locally
+ * on a Hive account: open the inbox on a second browser, reload, key version 1 -> 2.
+ *
+ * Only the registration paths mint (`getPublicKeyBase64`, behind their own checks).
+ * Reading and writing use the key that is already here, and without one they fail
+ * the way an undecryptable message already does, honestly and without side effects.
+ */
+async function requireStoredKeypair(actorKey: string): Promise<DmKeypair> {
+  if (actorKey && (await hasStoredKeypair(actorKey))) return getOrCreateKeypair(actorKey);
+  throw new Error(NO_LOCAL_KEY);
+}
+
+// TODO i18n - shown as-is by the compose dialog and the reply box when a send is refused.
+export const NO_LOCAL_KEY = "Private messaging isn't set up on this device, so this was not sent.";
+
+/** The stored keypair's version for the send payload; throws NO_LOCAL_KEY rather than minting one. */
+export async function storedKeyVersion(actorKey: string): Promise<number> {
+  return (await requireStoredKeypair(actorKey)).keyVersion;
+}
+
 export async function getPublicKeyBase64(actorKey: string, opts?: KeypairOptions): Promise<string> {
   const { publicKey } = await getOrCreateKeypair(actorKey, opts);
   return bytesToBase64(publicKey);
@@ -288,7 +316,7 @@ export async function encrypt(
   recipientPublicKeyBase64: string,
   plaintext: string
 ): Promise<{ nonce: string; ciphertext: string }> {
-  const { privateKey } = await getOrCreateKeypair(actorKey);
+  const { privateKey } = await requireStoredKeypair(actorKey);
   const recipientPub = base64ToBytes(recipientPublicKeyBase64);
   const shared = x25519.getSharedSecret(privateKey, recipientPub);
   const key = await deriveMessageKey(shared);
@@ -310,7 +338,7 @@ export async function decrypt(
   nonce: string,
   ciphertext: string
 ): Promise<string> {
-  const { privateKey } = await getOrCreateKeypair(actorKey);
+  const { privateKey } = await requireStoredKeypair(actorKey);
   const counterpartyPub = base64ToBytes(counterpartyPublicKeyBase64);
   const shared = x25519.getSharedSecret(privateKey, counterpartyPub);
   const key = await deriveMessageKey(shared);

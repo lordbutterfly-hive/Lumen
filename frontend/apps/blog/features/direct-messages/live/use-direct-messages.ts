@@ -21,7 +21,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
-import { decrypt, encrypt, getOrCreateKeypair, getPublicKeyBase64, hasStoredKeypair } from '../lib/dm-crypto';
+import { decrypt, encrypt, getPublicKeyBase64, hasStoredKeypair, storedKeyVersion } from '../lib/dm-crypto';
 
 // Actor keys whose public key this browser has already registered in this session, so
 // repeated compose/inbox mounts don't each re-POST (see useOwnDmRegistration). Cleared
@@ -322,7 +322,7 @@ export function useSendMessage() {
   return useMutation({
     mutationFn: async (input: SendInput) => {
       if (!myActorKey) throw new Error('You must be signed in to send a message.');
-      const own = await getOrCreateKeypair(myActorKey);
+      const ownKeyVersion = await storedKeyVersion(myActorKey);
       const { nonce, ciphertext } = await encrypt(myActorKey, input.recipientPublicKey, input.plaintext);
       const res = await fetch('/api/lite/dm/send', {
         method: 'POST',
@@ -331,7 +331,7 @@ export function useSendMessage() {
           recipientActor: input.recipientActor,
           nonce,
           ciphertext,
-          senderKeyVersion: own.keyVersion,
+          senderKeyVersion: ownKeyVersion,
           recipientKeyVersion: input.recipientKeyVersion
         })
       });
@@ -561,7 +561,7 @@ export function useDmThread(threadId: string | null) {
         if (!myActorKey) throw new Error('You must be signed in to send a message.');
         const { publicKey, keyVersion } = await fetchPublicKeyFor(otherActorKey);
         if (!publicKey) throw new Error('The other person has no messaging key registered.');
-        const own = await getOrCreateKeypair(myActorKey);
+        const ownKeyVersion = await storedKeyVersion(myActorKey);
         const { nonce, ciphertext } = await encrypt(myActorKey, publicKey, plaintext);
         const res = await fetch('/api/lite/dm/send', {
           method: 'POST',
@@ -570,7 +570,7 @@ export function useDmThread(threadId: string | null) {
             recipientActor: otherActorKey,
             nonce,
             ciphertext,
-            senderKeyVersion: own.keyVersion,
+            senderKeyVersion: ownKeyVersion,
             recipientKeyVersion: keyVersion
           })
         });
