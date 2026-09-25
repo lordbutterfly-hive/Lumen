@@ -44,12 +44,13 @@ import type { Market, MarketHealth } from '../types';
  * only DISPLAY a price; the token page reads the same key through use-live-token-market.ts
  * with its own live settings, and every buy/sell invalidates the key there, so a trade still
  * refreshes this at once.
- * Why 10 minutes and not the owner's hour: the v6 contract update activates on 2026-09-24
- * (~21:00 CEST) and a chip must not show a pre-flip market for an hour after it. Raise to an
- * hour once v6 is live and confirmed.
+ * Why it was 10 minutes and not the owner's hour: the v6 contract update activated on
+ * 2026-09-24 (~21:00 CEST) and a chip must not show a pre-flip market for an hour after it.
+ * ★ AN HOUR NOW (2026-09-25): v6 confirmed live on mainnet (findContract returns the v6 code
+ * CID at block 110,226,900, activation was 110,200,093), so the owner's hour applies.
  */
-const STALE_MS = 10 * 60_000;
-const REFETCH_MS = 10 * 60_000;
+const STALE_MS = 60 * 60_000;
+const REFETCH_MS = 60 * 60_000;
 
 export type TokenPriceChipStatus = 'unknown' | 'loading' | 'none' | 'ready';
 

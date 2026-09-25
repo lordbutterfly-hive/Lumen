@@ -402,6 +402,9 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
 
   const invalidate = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: creatorMarketKey(creator) });
+    // The feed's batched price chips (use-token-price-chips.ts) hold prices for an hour, so a
+    // reader's own trade must refresh them too, or the feed shows the pre-trade price.
+    queryClient.invalidateQueries({ queryKey: ['creator-tokens', 'prices'] });
     queryClient.invalidateQueries({ queryKey: positionKey(creator, positionAccount ?? undefined) });
     // ★ THE BALANCE TOO. Every mutation below routes through this callback, and
     // until 2026-08-21 none of them touched the spending-power query — so the
