@@ -438,12 +438,52 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     /* fall through to a direct, uncached attempt */
   }
 
+  /**
+   * ★★★ A READ THAT NEVER ANSWERS POISONS ITS BODY FOR EVERY LATER READER (found live
+   * 2026-09-25: "meritum pill took 15 seconds"). `cachedRead` above makes every
+   * identical request JOIN the one read in flight. When the timeout fires while a
+   * COMPRESSED body is being read, `upstream.text()` can stay pending forever:
+   * reproduced locally on Node 20.20.2 (prod) and on Node 22, 34-40 of 6,000 reads
+   * timed around the deadline, br, gzip and deflate alike, and 0 of 8,000 when the
+   * reply is uncompressed. The Magi node sits behind Cloudflare, which compresses.
+   * One such read stayed in a worker's in-flight map from 2026-09-24 18:17Z
+   * (inspector, 09-25: one pending promise, keyed by the exact body that hung), so
+   * that body hung for ~1 in 3 readers until a restart. Caddy: 181 reads hung 60 s+
+   * from 09-24 14:10Z to the 09-25 13:55Z restart, 0 in the 20,559 before (09-22 on).
+   *
+   * Two changes, both inside this one call:
+   *  - `Accept-Encoding: identity`: the node answers uncompressed, so the path that
+   *    hangs is never taken. The replies are a few hundred bytes of JSON.
+   *  - The timeout ends OUR wait, not only the request: whatever the fetch does after
+   *    the abort, this promise settles at `UPSTREAM_TIMEOUT_MS`, so the in-flight
+   *    entry is always released. Same `TimeoutError` as `AbortSignal.timeout` gave,
+   *    so `withRetry` and the catches below see exactly what they saw before.
+   */
   async function fetchUpstream(): Promise<{ status: number; text: string; contentType: string }> {
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError')),
+      UPSTREAM_TIMEOUT_MS
+    );
+    const deadline = new Promise<never>((_, reject) => {
+      controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true });
+    });
+    const call = readUpstream(controller.signal);
+    // Lost the race to the deadline: its late rejection (if it ever comes) is expected.
+    call.catch(() => {});
+    try {
+      return await Promise.race([call, deadline]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function readUpstream(signal: AbortSignal): Promise<{ status: number; text: string; contentType: string }> {
     const upstream = await fetch(upstreamUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Accept-Encoding': 'identity' },
       body: JSON.stringify({ query, variables: typeof variables === 'object' && variables !== null ? variables : {} }),
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      signal,
       // ★ MEASURED LIVE (2026-08-11): without this, Next's Data Cache served a
       // SECOND identical-body request back in 0ms instead of re-querying the
       // node — confirmed by timing two back-to-back calls against the real
