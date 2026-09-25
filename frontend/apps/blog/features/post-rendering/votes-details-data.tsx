@@ -4,7 +4,7 @@ import BasePathLink from '../../components/base-path-link';
 import { useActiveVotesQuery } from '../../components/hooks/use-active-votes';
 import { useTranslation } from '@/blog/i18n/client';
 
-const VotersDetailsData = ({ post }: { post: Entry }) => {
+const VotersDetailsData = ({ post, onShowAll }: { post: Entry; onShowAll?: () => void }) => {
   const { t } = useTranslation('common_blog');
   const { data } = useActiveVotesQuery(post.author, post.permlink);
 
@@ -57,9 +57,24 @@ const VotersDetailsData = ({ post }: { post: Entry }) => {
             </BasePathLink>
           </li>
         ))}
-      {votes && votes.length > 20 && post.stats ? (
-        <li className="pt-1.5 text-sm text-ink-10">
-          {t('post_content.footer.and_more', { value: post.stats.total_votes - 20 })}
+      {/* ★ "AND N MORE" OPENS THE FULL LIST (2026-09-25, owner). It was plain text with
+          nothing behind it. The count is the upvotes left after these 20, the same
+          roster as the list above: `stats.total_votes` also counts downvotes, which
+          this list deliberately leaves out. */}
+      {votes && votes.length > 20 ? (
+        <li className="pt-1.5 text-sm">
+          {onShowAll ? (
+            <button
+              type="button"
+              onClick={onShowAll}
+              className="text-ink-10 underline-offset-2 hover:text-ink-brand-7 hover:underline"
+              data-testid="list-of-voters-show-all"
+            >
+              {t('post_content.footer.and_more', { value: votes.length - 20 })}
+            </button>
+          ) : (
+            <span className="text-ink-10">{t('post_content.footer.and_more', { value: votes.length - 20 })}</span>
+          )}
         </li>
       ) : null}
     </ul>

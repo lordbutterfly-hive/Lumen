@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { cn } from '@ui/lib/utils';
 import { watchArm } from '@/blog/lib/inquisition/arm';
-import { KE_BAND_TONE, type KeBand } from '@/blog/lib/inquisition/types';
+import { KE_BAND_TONE, TONE_TEXT_CLASS, type KeBand } from '@/blog/lib/inquisition/types';
 
 /**
  * ════ THE RECORD ════
@@ -95,13 +95,7 @@ interface Cell {
   body: string;
 }
 
-const TONE: Record<Tone, string> = {
-  ok: 'text-ink-ok-2',
-  plain: 'text-ink-2',
-  warn: 'text-ink-warn-3',
-  accent: 'text-ink-brand-6',
-  dim: 'text-ink-14'
-};
+const TONE: Record<Tone, string> = TONE_TEXT_CLASS;
 
 const ago = (iso: string | null): string => {
   if (!iso) return 'never';

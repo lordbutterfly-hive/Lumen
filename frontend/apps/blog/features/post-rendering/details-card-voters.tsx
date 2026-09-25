@@ -4,9 +4,13 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@hive/ui/componen
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { ReactNode, useRef, useState } from 'react';
 import VotersDetailsData from './votes-details-data';
+import PostVotersDialog from './post-voters-dialog';
 
 const DetailsCardVoters = ({ post, children }: { post: Entry; children: ReactNode }) => {
   const [open, setOpen] = useState(false);
+  // The full list lives OUTSIDE the hover card: the card unmounts its content the
+  // moment the pointer leaves it, which would take a dialog opened from inside with it.
+  const [showAll, setShowAll] = useState(false);
   const isHovering = useRef(false);
 
   const handleMouseEnter = () => {
@@ -22,25 +26,35 @@ const DetailsCardVoters = ({ post, children }: { post: Entry; children: ReactNod
   };
 
   return (
-    <HoverCard open={open}>
-      <HoverCardTrigger
-        asChild
-        className="hover:cursor-pointer"
-        data-testid="comment-votes"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        onClick={() => setOpen(!open)}
-      >
-        {children}
-      </HoverCardTrigger>
-      <HoverCardContent
-        className="flex w-auto flex-col"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-      >
-        <VotersDetailsData post={post} />
-      </HoverCardContent>
-    </HoverCard>
+    <>
+      <HoverCard open={open}>
+        <HoverCardTrigger
+          asChild
+          className="hover:cursor-pointer"
+          data-testid="comment-votes"
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          onClick={() => setOpen(!open)}
+        >
+          {children}
+        </HoverCardTrigger>
+        <HoverCardContent
+          className="flex w-auto flex-col"
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        >
+          <VotersDetailsData
+            post={post}
+            onShowAll={() => {
+              isHovering.current = false;
+              setOpen(false);
+              setShowAll(true);
+            }}
+          />
+        </HoverCardContent>
+      </HoverCard>
+      {showAll ? <PostVotersDialog post={post} open={showAll} onOpenChange={setShowAll} /> : null}
+    </>
   );
 };
 

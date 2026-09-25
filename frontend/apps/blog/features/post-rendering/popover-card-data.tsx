@@ -20,6 +20,24 @@ import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { hiveChainService } from '@transaction/lib/hive-chain-service';
 import { Icons } from '@ui/components/icons';
 import { accountReputation } from '@hive/ui';
+import { useQuery } from '@tanstack/react-query';
+import { cn } from '@ui/lib/utils';
+import { useInquisitionArmed } from '@/blog/features/inquisition/inquisition-seal';
+import { KE_BAND_TONE, TONE_TEXT_CLASS, type KeBand } from '@/blog/lib/inquisition/types';
+
+/**
+ * KE for the author card, read from the same Inquisition record the profile strip
+ * prints, so the two never disagree. Only fetched while Inquisition mode is on (the
+ * number belongs to that mode), and never prefetched on hover: the record route
+ * spends the reader's shared request budget (lib/request-budget.ts BUDGETED_API).
+ */
+async function fetchRecordKe(account: string): Promise<{ ke: number | null; band: KeBand }> {
+  const res = await fetch(`/api/inquisition/record/${encodeURIComponent(account)}`);
+  if (!res.ok) throw new Error(`record ${res.status}`);
+  const json = (await res.json()) as { ke?: unknown; band?: KeBand; unavailable?: boolean; unconfigured?: boolean };
+  if (json.unavailable || json.unconfigured) throw new Error('record unavailable');
+  return { ke: typeof json.ke === 'number' ? json.ke : null, band: json.band ?? 'unknown' };
+}
 
 interface PopoverCardDataProps {
   author: string;
@@ -47,12 +65,34 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
   // publishing account and present its followers, HP and bio as this person's. Both
   // hooks disable themselves on an empty name, so pass one.
   const chainAuthor = liteName ? '' : author;
-  const follows = useFollowsQuery(chainAuthor);
   const { data: account, isLoading } = useAccountQuery(chainAuthor);
+  // ★ ONE REPLY, ONE PAINT (2026-09-25, owner: "have it load relatively fast all
+  // together, not that it loads 1 number then another"). The follower counts already
+  // ride on the account reply (getAccountFull's follow_stats), so the separate
+  // follow-count request only runs when that half of the account read failed. The
+  // card below waits for everything it prints, then shows it in one frame.
+  const follows = useFollowsQuery(account && !account.follow_stats ? chainAuthor : '');
+  const followStats = account?.follow_stats ?? follows.data;
   const following = useFollowingInfiniteQuery(user.username || '', 1000, 'blog', ['blog']);
   const mute = useFollowingInfiniteQuery(user.username, 1000, 'ignore', ['ignore']);
   const about = account?.profile?.about ?? null;
-  const { data: dynamicData } = useDynamicGlobalData();
+  const { data: dynamicData, isError: dynamicFailed } = useDynamicGlobalData();
+  const armed = useInquisitionArmed();
+  const record = useQuery({
+    queryKey: ['inquisitionRecordKe', chainAuthor],
+    queryFn: () => fetchRecordKe(chainAuthor),
+    enabled: armed && Boolean(chainAuthor),
+    retry: false,
+    staleTime: 10 * 60_000
+  });
+  // `data`/`isError`, not `isLoading`: react-query v4 reports a disabled query as loading.
+  const dynamicPending = dynamicData === undefined && !dynamicFailed;
+  const recordPending = armed && Boolean(chainAuthor) && record.data === undefined && !record.isError;
+  const followsPending = Boolean(account) && !account?.follow_stats && follows.data === undefined && !follows.isError;
+  const cardReady = Boolean(account) && !isLoading && !dynamicPending && !recordPending && !followsPending;
+  const cardPending = isLoading || (Boolean(account) && !cardReady);
+  const ke = record.data?.ke ?? null;
+  const keTone = TONE_TEXT_CLASS[record.data ? KE_BAND_TONE[record.data.band] ?? 'dim' : 'dim'];
   const hiveChain = hiveChainService.reuseHiveChain();
   const delegated_hive =
     dynamicData && account && hiveChain
@@ -158,7 +198,7 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
             ) : null}
           </div>
         </div>
-      ) : account && !isLoading ? (
+      ) : account && cardReady ? (
         <>
           {/* Header with avatar and name */}
           <div className="flex items-start gap-3 border-b border-border p-4">
@@ -244,18 +284,35 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
               {/* Stats */}
               <div className="grid grid-cols-3 gap-2 border-b border-border p-3" translate="no">
                 <div className="flex flex-col items-center" data-testid="user-followers">
-                  <span className="text-lg font-semibold text-foreground">{follows.data?.follower_count ?? '—'}</span>
+                  <span className="text-lg font-semibold text-foreground">{followStats?.follower_count ?? '—'}</span>
                   <span className="text-caption text-muted-foreground">{t('post_content.header.hover_author.followers')}</span>
                 </div>
                 <div className="flex flex-col items-center" data-testid="user-following">
-                  <span className="text-lg font-semibold text-foreground">{follows.data?.following_count ?? '—'}</span>
+                  <span className="text-lg font-semibold text-foreground">{followStats?.following_count ?? '—'}</span>
                   <span className="text-caption text-muted-foreground">{t('post_content.header.hover_author.following')}</span>
                 </div>
                 <div className="flex flex-col items-center" data-testid="user-hp">
-                  <span className="text-lg font-semibold text-foreground">{numberWithCommas(hp.toFixed(0))}</span>
+                  <span className="text-lg font-semibold text-foreground">
+                    {dynamicData ? numberWithCommas(hp.toFixed(0)) : '—'}
+                  </span>
                   <span className="text-caption text-muted-foreground" title="Hive Power after delegations">HP</span>
                 </div>
               </div>
+
+              {/* KE, in Inquisition mode only: the same figure and colour as the profile strip. */}
+              {armed ? (
+                <div
+                  className="flex items-center justify-center gap-1.5 border-b border-border p-2 text-caption text-muted-foreground"
+                  data-testid="user-ke"
+                  title={record.isError ? 'KE could not be read just now' : ke === null ? 'No stake held' : undefined}
+                >
+                  <span>KE</span>
+                  <span className={cn('text-sm font-semibold tabular-nums font-num', keTone)}>
+                    {ke === null ? '—' : ke.toFixed(2)}
+                  </span>
+                  {ke !== null && record.data ? <span>· {record.data.band}</span> : null}
+                </div>
+              ) : null}
 
               {/* About */}
               {about && (
@@ -276,7 +333,7 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
             </>
           )}
         </>
-      ) : isLoading ? (
+      ) : cardPending ? (
         <div className="flex items-center justify-center p-8">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
         </div>

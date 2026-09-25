@@ -107,8 +107,13 @@ export default function ProposalSupportFooter({
       aria-label={canRemoveOnHover ? t('proposals.card.remove_vote_aria') : undefined}
       className={cn(
         'group rounded-control px-5 py-2.5 font-sans text-caption font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+        /* ★ ORANGE WHEN YOU HAVE VOTED (2026-09-25, owner: "when a proposal is voted by
+           me it should have orange pill, just a visual thing"). The warm light,
+           `surface-warn-10`, at rest; hover/focus still turns to the "Remove vote" hint
+           below, unchanged. Orange is not red: this is not the destructive colour the
+           note further down rules out for this state. */
         isSupported
-          ? 'border border-line-11 bg-surface-1 text-ink-7 hover:border-line-brand-10 hover:bg-surface-brand-1 hover:text-ink-brand-6 focus-visible:border-line-brand-10 focus-visible:bg-surface-brand-1 focus-visible:text-ink-brand-6'
+          ? 'border border-surface-warn-10 bg-surface-warn-10 text-ink-27 hover:border-line-brand-10 hover:bg-surface-brand-1 hover:text-ink-brand-6 focus-visible:border-line-brand-10 focus-visible:bg-surface-brand-1 focus-visible:text-ink-brand-6'
           : 'border border-line-11 bg-surface-1 text-ink-7 hover:bg-surface-16'
       )}
     >

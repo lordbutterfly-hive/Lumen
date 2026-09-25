@@ -84,6 +84,15 @@ export const KE_BAND_TONE: Record<KeBand, 'ok' | 'plain' | 'warn' | 'accent' | '
   unknown: 'dim'
 };
 
+/** Text colour per tone: the profile strip and the author card print a figure in the same ink. */
+export const TONE_TEXT_CLASS: Record<'ok' | 'plain' | 'warn' | 'accent' | 'dim', string> = {
+  ok: 'text-ink-ok-2',
+  plain: 'text-ink-2',
+  warn: 'text-ink-warn-3',
+  accent: 'text-ink-brand-6',
+  dim: 'text-ink-14'
+};
+
 export function keBand(value: number | null): KeBand {
   if (value === null || !Number.isFinite(value)) return 'unknown';
   if (value < 1) return 'net holder';

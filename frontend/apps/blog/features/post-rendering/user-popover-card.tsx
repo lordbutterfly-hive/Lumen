@@ -6,6 +6,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { Icons } from '@ui/components/icons';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
 import { QuillMark } from './quill-mark';
+import { useAuthorCardPrefetch } from './use-author-card-prefetch';
 
 export interface UserPopoverCardProps {
   /**
@@ -38,6 +39,8 @@ export function UserPopoverCard({
 }: UserPopoverCardProps) {
   const { t } = useTranslation('common_blog');
   const shownName = liteName || author;
+  // A lite author has no chain account to warm (the card shows only the name).
+  const prefetch = useAuthorCardPrefetch(liteName ? '' : author);
 
   return (
     <>
@@ -52,7 +55,11 @@ export function UserPopoverCard({
             byte-identical before and after. Not applied via a wrapper — this
             IS the interactive element (a Popover trigger, not a plain link),
             so growing its own box is the only way to grow its target. */}
-        <button className="flex min-h-[24px] items-center gap-1 hover:cursor-pointer">
+        <button
+          className="flex min-h-[24px] items-center gap-1 hover:cursor-pointer"
+          onPointerEnter={prefetch.onPointerEnter}
+          onPointerLeave={prefetch.onPointerLeave}
+        >
           {withImage && (
             <UserAvatar username={shownName} size="normal" src={liteAvatarUrl} lite={Boolean(liteName)} />
           )}
