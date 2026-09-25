@@ -18,7 +18,7 @@ const COPY = {
   title: 'Inbox',
   intro: {
     messages: "Private messages with anyone on Lumen. They are encrypted on your device, so Lumen can't read them.",
-    asks: 'Your requests to creators: what you asked, whether they answered, and anything left for you to do.'
+    asks: 'Meritum asks you made and, if you have a token, the ones made to you: whether each was answered, and anything left to do.'
   },
   tabs: [
     ['messages', 'Messages'],
