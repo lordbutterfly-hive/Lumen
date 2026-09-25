@@ -8,13 +8,13 @@ import StudioRequests from '@/blog/features/creator-tokens/ui/studio/studio-requ
 
 // TODO i18n - staged copy, the wallet's and the Studio's own sentences for the same states.
 const COPY = {
-  toYou: 'Asks to you',
-  yours: 'Your asks',
+  toYou: 'Requests to you',
+  yours: 'Your requests',
   unavailable: 'Meritum isn’t available on this build yet.',
   accountsFailed:
-    'We couldn’t check which wallets are linked to this account, so we can’t list your asks. Nothing is wrong with them. Reload in a moment.',
+    'We couldn’t check which wallets are linked to this account, so we can’t list your requests. Nothing is wrong with them. Reload in a moment.',
   accountsLoading: 'Checking which wallets are linked to this account…',
-  toYouFailed: 'Asks made to you couldn’t be checked just now. This is not an empty list.',
+  toYouFailed: 'Requests made to you couldn’t be checked just now. This is not an empty list.',
   retry: 'Try again'
 };
 
@@ -38,14 +38,14 @@ const YourAsks: FC = () => {
 };
 
 /**
- * The inbox's Asks tab (owner, 2026-09-25: "if i made a request currently I need to open
+ * The inbox's Meritum tab (owner, 2026-09-25: "if i made a request currently I need to open
  * my wallet and go to meritum to check if he responded. so put that in the inbox but
  * separate it from other normal messages"; of a creator's incoming ones: "both stay").
  *
- *  - Asks to you: a creator's incoming requests, the Studio's own list (`StudioRequests`,
+ *  - Requests to you: a creator's incoming requests, the Studio's own list (`StudioRequests`,
  *    with its "Deliver and get paid" dialog), shown when the account has a market. The
  *    Studio keeps its copy. A market read that failed says so; it never reads as "none".
- *  - Your asks: the wallet's own list (`MyAsksList`). The wallet keeps its copy.
+ *  - Your requests: the wallet's own list (`MyAsksList`). The wallet keeps its copy.
  */
 const InboxAsks: FC = () => {
   const studio = useLiveStudio();

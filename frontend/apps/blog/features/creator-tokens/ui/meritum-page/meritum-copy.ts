@@ -59,7 +59,7 @@ export const MERITUM_PAGE_COPY = {
   askPlacedBody: (handle: string) =>
     `Your request to @${handle} is placed and waiting for their answer. There is nothing more to do in your wallet: the tokens are already held in escrow.`,
   askPlacedDue: (handle: string, due: string) => `@${handle} has until ${due} to answer.`,
-  askPlacedTrack: 'Track it in your Inbox → Asks',
+  askPlacedTrack: 'Track it in your Inbox → Meritum',
   askPlacedTrackHref: '/inbox?view=asks',
   askPlacedDismiss: 'Dismiss'
 } as const;
