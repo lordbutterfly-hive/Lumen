@@ -43,8 +43,8 @@ const COPY = {
   locked: (via: string) =>
     `Your messages are locked on this device. Unlock them once with ${via} and they stay readable here.`,
   unlock: 'Unlock messages',
-  backUp: (via: string) =>
-    `Your messages are only on this device for now. Turn them on for your other devices with one approval from ${via}.`,
+  // A Hive backup asks for nothing (see makeBackup); this shows only if the automatic one failed.
+  backUp: 'Your messages are only on this device for now. Turn them on for your other devices.',
   backUpWallet:
     'Your messages are only on this device for now. Turn them on for your other devices: your wallet asks you to sign twice, and the second signature checks that it signs the same way each time.',
   turnOn: 'Turn on',
@@ -206,7 +206,7 @@ const DmInboxPanel: FC<{ to?: string | null }> = ({ to = null }) => {
       className="rounded-panel border border-line-9 bg-surface-1 px-5 py-3 font-ui text-caption text-ink-10"
       data-testid="dm-backup-offer"
     >
-      {registration.viaWallet ? COPY.backUpWallet : COPY.backUp(via)}
+      {registration.viaWallet ? COPY.backUpWallet : COPY.backUp}
       <div>{button(COPY.turnOn, () => void registration.backUp(), 'dm-backup-turn-on')}</div>
       {actionError}
     </div>

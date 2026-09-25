@@ -76,9 +76,11 @@ export const MERITUM_TYPES: ReadonlySet<LumenNotificationType> = new Set<LumenNo
 
 /** Where a seller goes to act on an order: the Studio inbox, Requests sub-tab. */
 export const SELLER_INBOX_URL = 'creators/studio?section=inbox&tab=requests';
-/** Where a buyer sees their own orders: the wallet's Meritum tab, asks list. */
-/** /wallet/tokens is a permanent redirect to the wallet's Meritum tab; `view=asks` lands on the Asks sub-tab. */
-export const BUYER_ASKS_URL = 'wallet?tab=meritum&view=asks';
+/**
+ * Where a buyer sees their own orders: the inbox's Asks tab (2026-09-25, owner: "put that
+ * in the inbox"). The wallet's Meritum tab still lists them too.
+ */
+export const BUYER_ASKS_URL = 'inbox?view=asks';
 
 // ── The indexer's rows, as Hasura returns them ──────────────────────────────
 // Every numeric column arrives as a JSON number for `numeric` views and as a

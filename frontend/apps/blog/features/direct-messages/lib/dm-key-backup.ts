@@ -8,7 +8,8 @@
  * or reading changes. What changes is that the device which makes an account's key also
  * uploads a BACKUP of it, encrypted here, in the browser, before it leaves:
  *
- *   Hive account   a Hive memo to the account's OWN posting public key. Opening it takes
+ *   Hive account   a Hive memo to the account's OWN posting public key, written here from
+ *                  a one-time key, so making it asks nothing of anyone. Opening it takes
  *                  the account's posting key: one approval in Keychain (or PeakVault, or
  *                  the MetaMask Hive snap), or the stored key of a WIF login.
  *   Wallet account AES-GCM under a key derived from the wallet's signature over a fixed
@@ -145,16 +146,13 @@ async function postingKeyOf(username: string): Promise<string> {
 }
 
 interface HiveCipher {
-  /** The posting public key this login encrypts to. */
-  key: string;
-  encryptToSelf(text: string): Promise<string>;
   decrypt(memo: string): Promise<string>;
 }
 
 /**
- * The signer behind this login, reduced to encrypt-to-self and decrypt. `interactive`
- * false means "only if it needs no typing": a WIF login without a stored key is skipped
- * rather than prompted for (an extension's approval popup is still allowed, see caller).
+ * The signer behind this login, reduced to decrypt (making a backup needs none, see
+ * `makeBackup`). `interactive` false means "only if it needs no typing": a WIF login
+ * without a stored key is skipped rather than prompted for.
  */
 async function hiveCipher(user: User, via: BackupVia, interactive: boolean): Promise<HiveCipher | null> {
   const username = user.username;
@@ -162,12 +160,7 @@ async function hiveCipher(user: User, via: BackupVia, interactive: boolean): Pro
     const wif = storedWif(username) ?? (interactive ? await askForWif() : null);
     if (!wif) return null;
     const memo = await import('./hive-memo');
-    const key = memo.publicKeyOfWif(wif);
-    return {
-      key,
-      encryptToSelf: (text) => memo.encodeMemo(wif, key, text),
-      decrypt: (m) => memo.decodeMemo(wif, m)
-    };
+    return { decrypt: (m) => memo.decodeMemo(wif, m) };
   }
   // The extension signers load only here, on demand: they carry wax, which must not
   // reach every page (see smart-signer/lib/signer/signer.ts).
@@ -176,25 +169,13 @@ async function hiveCipher(user: User, via: BackupVia, interactive: boolean): Pro
       via === 'keychain'
         ? (await import('@hiveio/wax-signers-keychain')).default.for(username, 'posting')
         : (await import('@hiveio/wax-signers-peakvault')).default.for(username, 'posting');
-    const key = await postingKeyOf(username);
-    return {
-      key,
-      // A PUBLIC KEY as the recipient, never the account name: Keychain turns an
-      // account-name recipient into a signature request, not an encryption.
-      encryptToSelf: (text) => provider.encryptData(text, key),
-      decrypt: (m) => provider.decryptData(m.startsWith('#') ? m : `#${m}`)
-    };
+    return { decrypt: (m) => provider.decryptData(m.startsWith('#') ? m : `#${m}`) };
   }
   if (via === 'metamask') {
     const env = (await import('@beam-australia/react-env')).default;
     const MetaMaskProvider = (await import('@hiveio/wax-signers-metamask')).default;
     const provider = await MetaMaskProvider.for(0, 'posting', env('METAMASK_SNAP_LOCATION'));
-    const key = await provider.getPublicKey('posting');
-    return {
-      key,
-      encryptToSelf: (text) => provider.encryptData(text, key),
-      decrypt: (m) => provider.decryptData(m)
-    };
+    return { decrypt: (m) => provider.decryptData(m) };
   }
   return null;
 }
@@ -275,8 +256,9 @@ export async function hasBackupMethod(user: User): Promise<boolean> {
 
 /**
  * Encrypt a messaging private key (base64) into a backup, or null when this login
- * cannot (and would have to ask for something it may not ask for here). A wallet that
- * signs the fixed message two different ways throws DeviceOnlyError.
+ * cannot (and would have to ask for something it may not ask for here). A Hive backup
+ * asks nothing of anyone; a wallet one takes two signatures, and a wallet that signs the
+ * fixed message two different ways throws DeviceOnlyError.
  */
 export async function makeBackup(
   user: User,
@@ -301,15 +283,24 @@ export async function makeBackup(
     );
     return { v: 1, kind: 'wallet', did: wallet.did, iv: B64.enc(iv), ct: B64.enc(ct) };
   }
-  const cipher = await hiveCipher(user, via, interactive);
-  if (!cipher) return null;
-  const memo = await cipher.encryptToSelf(privateKeyB64);
+  /*
+   * ★★ NO SIGNER IS ASKED TO MAKE A HIVE BACKUP (2026-09-25). It used to go through
+   * Keychain's requestEncodeWithKeys, whose approval window is titled "Encode Multisig",
+   * lists a public key, and prints the message being encoded: the messaging PRIVATE key,
+   * in plain view (owner: "keychain showed me a key ... might spook people"). Encrypting
+   * to a public key needs no private key, so it is done here from a one-time key. The
+   * memo is the same standard format and opens the same way (one approval to decode).
+   * A stored WIF names its own key exactly; otherwise the chain's posting key.
+   */
+  const memo = await import('./hive-memo');
+  const wif = via === 'wif' ? storedWif(user.username) : null;
+  const key = wif ? memo.publicKeyOfWif(wif) : await postingKeyOf(user.username);
   return {
     v: 1,
     kind: 'hive',
     account: user.username,
-    key: cipher.key,
-    memo: memo.startsWith('#') ? memo : `#${memo}`
+    key,
+    memo: await memo.encodeMemoToKey(key, privateKeyB64)
   };
 }
 

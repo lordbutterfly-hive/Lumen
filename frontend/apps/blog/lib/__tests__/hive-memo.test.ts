@@ -8,7 +8,7 @@
 import { randomBytes } from 'crypto';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
-import { decodeMemo, encodeMemo, publicKeyOfWif } from '../../features/direct-messages/lib/hive-memo';
+import { decodeMemo, encodeMemo, encodeMemoToKey, publicKeyOfWif } from '../../features/direct-messages/lib/hive-memo';
 
 let checks = 0;
 let failures = 0;
@@ -74,8 +74,24 @@ async function main() {
   ok('ours decodes in the reference', (await me.provider.decryptData(ours)) === secret);
   ok('ours decodes here', (await decodeMemo(wif, ours)) === secret);
 
+  // How every messaging-key backup is now made (2026-09-25): sealed from a one-time key,
+  // so no signer is asked. The account's own posting key must open it, in the reference
+  // (what Keychain's requestVerifyKey does) and here.
+  const sealed = await encodeMemoToKey(me.pub, secret);
+  ok('a one-time-key memo is a "#" memo without the text in it', sealed.startsWith('#') && !sealed.includes(secret));
+  ok('a one-time-key memo is not from the account key', sealed !== ours && (await encodeMemoToKey(me.pub, secret)) !== sealed);
+  ok('a one-time-key memo opens in the reference with the account key', (await me.provider.decryptData(sealed)) === secret);
+  ok('a one-time-key memo opens here with the account key', (await decodeMemo(wif, sealed)) === secret);
+
   const strangerWif = randomWif();
   const stranger = await walletFor(strangerWif);
+  let strangerSealed = false;
+  try {
+    strangerSealed = (await stranger.provider.decryptData(sealed)) === secret;
+  } catch {
+    strangerSealed = false;
+  }
+  ok('a different key cannot open a one-time-key memo', !strangerSealed);
   let strangerHere = false;
   try {
     strangerHere = (await decodeMemo(strangerWif, ours)) === secret;

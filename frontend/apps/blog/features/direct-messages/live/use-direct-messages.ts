@@ -243,6 +243,35 @@ async function postOwnKey(publicKey: string, backup?: DmKeyBackup | null, startO
 
 type BackupResult = 'saved' | 'device-only' | 'skipped';
 
+/**
+ * ★ A HIVE LOGIN'S BACKUP IS MADE WITHOUT ASKING (2026-09-25). Making one needs only the
+ * account's posting PUBLIC key (see `makeBackup`), so there is nothing to approve and no
+ * reason to wait for a press: a key that has no backup yet gets one the next time its
+ * device opens Lumen. A wallet backup takes two signatures and stays behind "Turn on".
+ */
+function backsUpSilently(user: User): boolean {
+  const via = backupViaFor(user);
+  return via !== null && via !== 'wallet';
+}
+
+// Remembers, per device and account, that the server already holds a backup, so the
+// header does not re-read the key on every page load once there is nothing left to do.
+const backupSeenKey = (actorKey: string) => `lumen-dm-backup:${actorKey}`;
+function backupSeen(actorKey: string): boolean {
+  try {
+    return window.localStorage.getItem(backupSeenKey(actorKey)) === '1';
+  } catch {
+    return false;
+  }
+}
+function markBackupSeen(actorKey: string): void {
+  try {
+    window.localStorage.setItem(backupSeenKey(actorKey), '1');
+  } catch {
+    /* blocked storage: the header just checks again next page load */
+  }
+}
+
 // One backup attempt per identity at a time: the header and an open inbox can both reach
 // this on the first page after sign-in, and two would mean two Keychain approvals.
 const backupInFlight = new Map<string, Promise<BackupResult>>();
@@ -379,7 +408,14 @@ export function useOwnDmRegistration(): OwnDmRegistration {
 
       if (own.public_key && localPub === own.public_key) {
         setBackedUp(Boolean(own.backup));
-        if (!own.backup) void hasBackupMethod(user).then(setBackupPossible);
+        if (own.backup) markBackupSeen(actorKey);
+        else if (backsUpSilently(user)) {
+          // Nothing to approve (see backsUpSilently); the offer appears only if it failed.
+          void backUpOwnKey(user, actorKey, false).then((r) => {
+            if (r === 'saved') setBackedUp(true);
+            else void hasBackupMethod(user).then(setBackupPossible);
+          });
+        } else void hasBackupMethod(user).then(setBackupPossible);
         setState('ready');
         return true;
       }
@@ -549,13 +585,13 @@ function unlockFailure(error: unknown): string {
  * Ethereum wallet) becomes reachable by merely using Lumen, not only after finding
  * the Studio. It registers a key only when the account has NONE yet:
  *
- *  - This browser already holds a key for the account: nothing to do.
+ *  - This browser already holds the account's key: nothing, except that a Hive login
+ *    whose key has no backup yet makes one (it asks nothing; see backsUpSilently).
  *  - The account has a key (on another device, backed up or not): left alone. The
  *    inbox offers the unlock, or says where the key is.
- *  - No key anywhere: make one here, register it, then upload its backup: one approval
- *    for Keychain, PeakVault or MetaMask, none for a WIF login with a stored key, and for
- *    a wallet only if it is already connected (the wallet picker needs a press, so
- *    otherwise the inbox offers it).
+ *  - No key anywhere: make one here, register it, then upload its backup: no approval
+ *    for a Hive login, and for a wallet only if it is already connected (the wallet
+ *    picker needs a press, so otherwise the inbox offers it).
  *
  * Waits for the server's answer on who is signed in (`clientAnswered`), so a stale
  * cached identity from a previous sign-in can never register a key for the wrong
@@ -575,7 +611,17 @@ export function useDmKeyOnSignIn(): void {
     signInHandled.add(actorKey);
     void (async () => {
       try {
-        if (await hasStoredKeypair(actorKey)) return;
+        if (await hasStoredKeypair(actorKey)) {
+          // A key made before backups existed, or whose backup did not go through: a Hive
+          // login backs it up now, asking nothing (see backsUpSilently), once per device.
+          if (!backsUpSilently(userRef.current) || backupSeen(actorKey)) return;
+          const own = await fetchOwnKey();
+          if (!own?.public_key || own.public_key !== (await getPublicKeyBase64(actorKey))) return;
+          if (own.backup || (await backUpOwnKey(userRef.current, actorKey, false)) === 'saved') {
+            markBackupSeen(actorKey);
+          }
+          return;
+        }
         const own = await fetchOwnKey();
         if (!own || own.public_key) return;
         if (!(await postOwnKey(await getPublicKeyBase64(actorKey))).mine) return;

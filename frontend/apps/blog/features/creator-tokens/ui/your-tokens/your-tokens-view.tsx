@@ -34,7 +34,7 @@ import { FC, useState } from 'react';
 import { Link } from '@hive/ui';
 import { UserAvatarImg } from '@ui/components';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { useLivePortfolio } from '../../live/use-live-portfolio';
+import { useLivePortfolio, type LivePortfolio } from '../../live/use-live-portfolio';
 import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
 import type { Ask, HolderPosition, MarketPrice } from '../../types';
 import { useTokenPriceChips } from '../../live/use-token-price-chips';
@@ -391,6 +391,41 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
 };
 
 /**
+ * The buyer's asks: what they asked for, whether it was answered, the creator's delivery
+ * note, and the reclaim and rating that follow. The wallet's Asks tab and the inbox's
+ * Asks tab (features/direct-messages/ui/inbox-page.tsx, owner 2026-09-25: "put that in
+ * the inbox but separate it from other normal messages") render this same list from the
+ * same `useLivePortfolio`, so the two can never disagree.
+ */
+export const MyAsksList: FC<{ p: LivePortfolio }> = ({ p }) => (
+  <div className="flex flex-col gap-2.5">
+    {p.isLoading ? (
+      <Unavailable>Loading…</Unavailable>
+    ) : p.asksUnavailable ? (
+      <Unavailable>
+        We can’t load your asks right now. The index that lists them is unreachable. Nothing is lost; a
+        creator’s own page still shows the asks made to them.
+      </Unavailable>
+    ) : p.asks.length === 0 ? (
+      <p className="py-8 text-center font-serif text-sm italic text-ink-14">
+        No asks yet. Spend your tokens on a creator’s service from their token page.
+      </p>
+    ) : (
+      p.asks.map((a) => (
+        <AskCard
+          key={a.id}
+          a={a}
+          busy={p.isReclaiming}
+          rating={p.isRating}
+          onReclaim={() => p.reclaim({ creator: a.creator, seq: a.seq, deadlineBlock: a.deadlineBlock })}
+          onRate={(score) => p.rate({ creator: a.creator, seq: a.seq, score })}
+        />
+      ))
+    )}
+  </div>
+);
+
+/**
  * ★ SPLIT (2026-09-08, wallet Magi tab). The portfolio body is now
  * `YourTokensBody`, reused verbatim by the wallet's Meritum tab
  * (features/wallet/components/meritum/meritum-panel.tsx); `YourTokensView`
@@ -606,31 +641,7 @@ export const YourTokensBody: FC = () => {
               </p>
             </>
           ) : (
-            <div className="flex flex-col gap-2.5">
-              {p.isLoading ? (
-                <Unavailable>Loading…</Unavailable>
-              ) : p.asksUnavailable ? (
-                <Unavailable>
-                  We can’t load your asks right now. The index that lists them is unreachable. Nothing is lost; a
-                  creator’s own page still shows the asks made to them.
-                </Unavailable>
-              ) : p.asks.length === 0 ? (
-                <p className="py-8 text-center font-serif text-sm italic text-ink-14">
-                  No asks yet. Spend your tokens on a creator’s service from their token page.
-                </p>
-              ) : (
-                p.asks.map((a) => (
-                  <AskCard
-                    key={a.id}
-                    a={a}
-                    busy={p.isReclaiming}
-                    rating={p.isRating}
-                    onReclaim={() => p.reclaim({ creator: a.creator, seq: a.seq, deadlineBlock: a.deadlineBlock })}
-                    onRate={(score) => p.rate({ creator: a.creator, seq: a.seq, score })}
-                  />
-                ))
-              )}
-            </div>
+            <MyAsksList p={p} />
           )}
         </>
       )}

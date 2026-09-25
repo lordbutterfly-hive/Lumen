@@ -82,6 +82,7 @@ export const Icons = {
      to a hairline bell. The pencil is now the LINE cut (see above) and the bell
      is FILLED, which is the owner's explicit pairing. */
   bell: CI.pressNotifications,
+  mail: CI.pressMail,
   reblog: CI.reblog,
   moreHorizontal: CI.pressMore,
   layoutList: CI.layoutList,

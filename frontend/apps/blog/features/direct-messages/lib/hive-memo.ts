@@ -2,10 +2,10 @@
  * Hive memo encryption (the `#...` format Keychain, PeakVault, beekeeper and the Hive
  * wallets all read), for the one login that holds its key in the page: WIF.
  *
- * Every other Hive signer encrypts and decrypts memos itself (Keychain's
- * requestEncodeWithKeys / requestVerifyKey, and so on). A WIF login has no extension,
- * and the only other implementation Lumen ships is beekeeper, which is a WebAssembly
- * build loaded on the server only. So this is the format, written once:
+ * Encrypting TO a public key needs no private key of the account's (`encodeMemoToKey`),
+ * so every messaging-key backup is written here, with no signer asked. Opening one needs
+ * the posting key: an extension decodes it itself (Keychain's requestVerifyKey, and so
+ * on) and a WIF login decodes it here. This is the format, written once:
  *
  *   shared  = sha512( x( ECDH(priv, otherPub) ) )
  *   ek      = sha512( nonce_u64_le || shared );  key = ek[0..32], iv = ek[32..48]
@@ -136,7 +136,20 @@ async function derive(priv32: Uint8Array, otherPub33: Uint8Array, nonce8: Uint8A
 
 /** Encrypt `text` from the WIF's key to `toPublicKey`, as a "#..." memo. */
 export async function encodeMemo(wif: string, toPublicKey: string, text: string): Promise<string> {
-  const priv = privateKeyFromWif(wif);
+  return encodeFrom(privateKeyFromWif(wif), toPublicKey, text);
+}
+
+/**
+ * Encrypt `text` to `toPublicKey` from a ONE-TIME key made here and then dropped, so no
+ * signer is asked for anything: only the holder of `toPublicKey`'s private key can open
+ * it. This is the ordinary shape of a memo a site hands a user to decode (Keychain's
+ * requestVerifyKey), and a decoder picks the sender's key from the memo itself.
+ */
+export async function encodeMemoToKey(toPublicKey: string, text: string): Promise<string> {
+  return encodeFrom(secp256k1.utils.randomPrivateKey(), toPublicKey, text);
+}
+
+async function encodeFrom(priv: Uint8Array, toPublicKey: string, text: string): Promise<string> {
   const from = secp256k1.getPublicKey(priv, true);
   const to = publicKeyFromString(toPublicKey);
   const nonce = crypto.getRandomValues(new Uint8Array(8));

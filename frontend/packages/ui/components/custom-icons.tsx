@@ -405,6 +405,10 @@ export const FILLED_PATHS: Record<string, string> = {
     '<path d="M10.6 5.8h9.8v2.4h-9.8Zm0 10h9.8v2.4h-9.8Z"></path> <path d="M5.2 5.9 6.4 7.1 8.9 4.6l1.7 1.7-4.2 4.2L3.5 7.6Zm0 9 1.2 1.2 2.5-2.5 1.7 1.7-4.2 4.2-2.9-2.9Z"></path>',
   image: '<path fill-rule="evenodd" d="M2.4 4.6h19.2v14.8H2.4Zm2.6 2.6v9.6h14v-9.6Z"></path> <path d="M5.4 16.8 9.6 11l3 3.6 2.6-2.2 3.8 4.4Z"></path> <circle cx="15.6" cy="9.8" r="1.5"></circle>',
   keys: '<path d="M5.4 10.6h13.2v10.8H5.4Z"></path> <path d="M8.2 10.6V7.4a3.8 3.8 0 0 1 7.6 0v3.2h-2.8V7.4a1 1 0 0 0-2 0v3.2Z"></path>',
+  // The inbox (2026-09-25, owner: "it needs to be a letter icon, like a mail letter"). It
+  // used `comment`, which reads as "reply to a post". Same 2.2 frame as `comment`, the
+  // flap drawn from the outer corners so the letter reads at 20px.
+  mail: '<path fill-rule="evenodd" d="M2.4 4.6h19.2v14.8H2.4Zm2.2 2.2v10.4h14.8V6.8Z"></path> <path d="M2.4 4.6h3.2L12 9.8l6.4-5.2h3.2v1L12 13.2 2.4 5.6Z"></path>',
   link: '<path d="M4.4 12a4.6 4.6 0 0 1 4.6-4.6h2.6v2.8H9A1.8 1.8 0 0 0 9 14h2.6v2.6H9A4.6 4.6 0 0 1 4.4 12Z"></path> <path d="M19.6 12a4.6 4.6 0 0 0-4.6-4.6h-2.6v2.8H15A1.8 1.8 0 0 1 15 14h-2.6v2.6H15A4.6 4.6 0 0 0 19.6 12Z"></path> <path d="M8.4 10.8h7.2v2.4H8.4Z"></path>',
   menu: '<path d="M2.4 5h19.2v3.2H2.4Zm0 5.4h19.2v3.2H2.4Zm0 5.4h19.2v3.2H2.4Z"></path>',
   meritum: '<path d="M12 1.8 19.2 12 12 22.2 4.8 12Z"></path>',
@@ -455,6 +459,7 @@ export const pressSearch = makeFilled('search');
 export const pressMenu = makeFilled('menu');
 export const pressComment = makeFilled('comment');
 export const pressNotifications = makeFilled('notifications');
+export const pressMail = makeFilled('mail');
 export const pressClose = makeFilled('close');
 export const pressCheck = makeFilled('check');
 export const pressAdd = makeFilled('add');
