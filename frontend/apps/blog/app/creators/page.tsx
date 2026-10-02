@@ -1,6 +1,32 @@
 import type { Metadata } from 'next';
+import { cookies } from 'next/headers';
 import CreatorsView from '@/blog/features/creator-tokens/ui/creators/creators-view';
 import MeritumIntro from '@/blog/features/creator-tokens/ui/meritum/intro/meritum-intro';
+import {
+  MERITUM_INTRO_OPEN_COOKIE,
+  MERITUM_INTRO_OPEN_VALUE
+} from '@/blog/features/creator-tokens/ui/meritum/intro/intro-state';
+import { readCreatorMarketSummary } from '@/blog/lib/meritum/server-market';
+import { getServerSessionUser } from '@/blog/lib/server-session';
+
+/**
+ * Longest the page waits on the chain to know whether the reader has a token.
+ * Past it the card renders open and the client's own read folds it; a slow Magi
+ * node must never hold up the page (the summary's own timeout is 5 s).
+ */
+const HAS_TOKEN_DEADLINE_MS = 1_000;
+
+async function hasMarketWithinDeadline(username: string): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), HAS_TOKEN_DEADLINE_MS);
+  });
+  try {
+    return await Promise.race([readCreatorMarketSummary(username).then((s) => s?.registered === true), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export const metadata: Metadata = {
   // The page now LEADS with the Meritum intro, so the title names the product
@@ -36,6 +62,12 @@ export const metadata: Metadata = {
  * intro is the answer to "what is this?", the list is the answer to "who is
  * here?", and the page needs both.
  */
-export default function CreatorsPage() {
-  return <CreatorsView intro={<MeritumIntro />} />;
+export default async function CreatorsPage() {
+  const session = await getServerSessionUser();
+  const initialOpen = cookies().get(MERITUM_INTRO_OPEN_COOKIE)?.value === MERITUM_INTRO_OPEN_VALUE;
+  // A lite account's market is keyed by its wallet, which the session does not
+  // carry; for those the client's read decides (meritum-intro.tsx).
+  const initialHasToken =
+    session.isLoggedIn && session.accountTier === 'full' ? await hasMarketWithinDeadline(session.username) : false;
+  return <CreatorsView intro={<MeritumIntro initialHasToken={initialHasToken} initialOpen={initialOpen} />} />;
 }

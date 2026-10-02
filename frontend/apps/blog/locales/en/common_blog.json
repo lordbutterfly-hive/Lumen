@@ -2291,7 +2291,9 @@
       "no_liquidity": "No liquidity setup.",
       "no_engineering": "No complicated token engineering.",
       "no_gatekeeping": "No pitch deck. No permission. No waiting.",
-      "live_pill": "Live in seconds"
+      "live_pill": "Live in seconds",
+      "show": "Show",
+      "hide": "Hide"
     }
   },
   "meritum_eligibility": {

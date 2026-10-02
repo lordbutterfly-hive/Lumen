@@ -1,10 +1,16 @@
 'use client';
 
+import { useState } from 'react';
 import { Link } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useTokenAccounts } from '../../../live/use-token-accounts';
+import { useTokenPriceChip } from '../../../live/use-token-price-chip';
 import { MeritumTicker } from '../ticker/meritum-ticker';
 import MeritumHoldersBand from './meritum-holders-band';
 import { CreatorTokenLaurel } from '../../creator-token-laurel';
+import { MERITUM_INTRO_OPEN_COOKIE, MERITUM_INTRO_OPEN_VALUE, readMeritumIntroOpen } from './intro-state';
 import styles from './meritum-intro.module.css';
 
 /**
@@ -66,10 +72,55 @@ function ArrowIcon() {
   );
 }
 
-export default function MeritumIntro() {
-  const { t } = useTranslation('common_blog');
+const HERO_WASH =
+  'bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)]';
 
-  return (
+export interface MeritumIntroProps {
+  /** Server's answer for a Hive account (app/creators/page.tsx); the chain read below overrides it once it lands. */
+  initialHasToken?: boolean;
+  /** The reader's saved choice, read from MERITUM_INTRO_OPEN_COOKIE on the server. */
+  initialOpen?: boolean;
+}
+
+/**
+ * ★ A READER WHO ALREADY HAS A TOKEN GETS THE CARD FOLDED (owner, 2026-10-02).
+ *
+ * The card sells launching, and a creator who has launched has read it. For them
+ * it folds into one bar at the top of the page so the creator list moves up; the
+ * bar opens it, and whichever way they leave it is how it stays (cookie, see
+ * ./intro-state.ts). Everyone without a token sees the card exactly as before.
+ *
+ * "Has a token" is the header pill's own answer (header-token-pill.tsx): the same
+ * account expression and `useTokenPriceChip` status 'ready', so this page and the
+ * header can never disagree. Until that read lands, the server's answer for a Hive
+ * account holds the first paint, so a creator does not watch the card collapse.
+ */
+export default function MeritumIntro({ initialHasToken = false, initialOpen = false }: MeritumIntroProps) {
+  const { t } = useTranslation('common_blog');
+  const identity = useSessionIdentity();
+  const { user } = useUserClient();
+  const isLite = user.account_tier === 'lite';
+  const tokenAccounts = useTokenAccounts();
+  const signingAccount = tokenAccounts.accounts.find((a) => a.canSign) ?? null;
+  const priceAccount = (isLite ? signingAccount?.id : identity.username) ?? identity.username;
+  const chip = useTokenPriceChip(identity.isLoggedIn ? priceAccount : '');
+  const hasToken =
+    identity.isLoggedIn && (chip.status === 'ready' || (chip.status !== 'none' && initialHasToken));
+  const [open, setOpen] = useState(() => readMeritumIntroOpen() ?? initialOpen);
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    try {
+      document.cookie = next
+        ? `${MERITUM_INTRO_OPEN_COOKIE}=${MERITUM_INTRO_OPEN_VALUE}; path=/; max-age=31536000; samesite=lax`
+        : `${MERITUM_INTRO_OPEN_COOKIE}=; path=/; max-age=0; samesite=lax`;
+    } catch {
+      // Cookies blocked: the toggle still works for this visit.
+    }
+  };
+
+  const card = (
     /*
      * ★ THE HERO WEARS LUMEN'S OWN MASTHEAD WASH, NOT THE HANDOFF'S CREAM SLAB.
      *
@@ -93,9 +144,7 @@ export default function MeritumIntro() {
      * header-token-pill, profile-token-card all use `bg-surface-warn-2`). It was
      * only wrong as a full-bleed page surface.
      */
-    <section
-      className={`${styles.card} border border-line-warn-3 accent-rail bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)]`}
-    >
+    <section id="meritum-intro-card" className={`${styles.card} border border-line-warn-3 accent-rail ${HERO_WASH}`}>
       {/* ★ THE MARK IN THE EMPTY RIGHT SIDE (owner, 2026-09-08). Everything that
           makes this a watermark rather than an image — the 22% brand ink, the
           container query that decides whether there is room for it at all, and
@@ -211,5 +260,39 @@ export default function MeritumIntro() {
 
       <MeritumHoldersBand />
     </section>
+  );
+
+  if (!hasToken) return card;
+
+  return (
+    <div>
+      {/* Folded, the card's <h1> is gone, so the page keeps its heading here. */}
+      {open ? null : <h1 className="sr-only">{t('meritum.intro.headline')}</h1>}
+      {/* The whole bar is the control: one big target for a thumb. Same frame,
+          wash and rail as the card, so open or shut it reads as the same thing.
+          The chevron is the offerings board's own (offerings-board.tsx). The
+          focus ring is pulled INSIDE: the frame's clip-path cuts anything drawn
+          outside it, and the global ring's 2px offset was invisible here. */}
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-controls="meritum-intro-card"
+        className={`${styles.card} flex w-full items-center gap-2 border border-line-warn-3 accent-rail ${HERO_WASH} px-6 py-4 text-left focus-visible:outline-offset-[-4px] sm:px-11`}
+        data-testid="meritum-intro-toggle"
+      >
+        <span className="flex flex-1 items-center gap-2 font-ui text-label font-medium uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
+          <CreatorTokenLaurel size={18} className="shrink-0" />
+          {t('meritum.intro.eyebrow')}
+        </span>
+        <span className="font-ui text-caption font-medium text-meritum-ink-3">
+          {open ? t('meritum.intro.hide') : t('meritum.intro.show')}
+        </span>
+        <span aria-hidden className={`inline-block text-meritum-ink-3 transition-transform ${open ? 'rotate-180' : ''}`}>
+          ▾
+        </span>
+      </button>
+      {open ? <div className="mt-3">{card}</div> : null}
+    </div>
   );
 }
