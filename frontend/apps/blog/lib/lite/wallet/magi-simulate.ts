@@ -10,7 +10,7 @@
  * `simCallFromSwapOp`). The query text below is byte-for-byte the SDK's
  * (rc.ts:220), which is also the shape rc-budget.ts:160-200 documents.
  */
-import { BALANCE_QUERY } from './magi-balance';
+import { BALANCE_QUERY, consensusRc } from './magi-balance';
 
 export const SIMULATE_QUERY =
   'query($input: SimulateContractCallsInput!) { simulateContractCalls(input: $input) { success err err_msg rc_used } }';
@@ -62,7 +62,11 @@ export async function readAccountRcViaProxy(account: string): Promise<bigint> {
   if (rc === null || rc === undefined || (typeof amount !== 'number' && typeof amount !== 'string')) {
     throw new Error(`Magi: no resource-credit record for ${account}`);
   }
-  return BigInt(amount);
+  // The node can under-report a never-spent account's RC; see consensusRc.
+  const maxRcs = Number(prop(rc, 'max_rcs'));
+  const hbd = Number(prop(prop(data, 'getAccountBalance'), 'hbd'));
+  if (!Number.isFinite(maxRcs) || !Number.isFinite(hbd)) return BigInt(amount);
+  return BigInt(consensusRc(account, Number(amount), maxRcs, hbd).amount);
 }
 
 /** Simulate one call as `caller` with the given rc_limit. Never signs, never submits. */

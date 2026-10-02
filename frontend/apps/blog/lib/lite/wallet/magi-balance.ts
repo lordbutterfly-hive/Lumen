@@ -68,6 +68,37 @@ export function getsFreeResourceCredits(account: string): boolean {
 }
 
 /**
+ * ★★ THE NODE UNDER-REPORTS RC FOR AN ACCOUNT THAT HAS NEVER SPENT ANY (2026-10-02).
+ *
+ * go-vsc-node `getAccountRC` (modules/gql/gqlgen/schema.resolvers.go, the
+ * `r.Rc.GetRecord` ErrNoDocuments branch) returns BEFORE it adds the HBD balance,
+ * so an account whose only Magi activity is deposits reads the bare free 10,000
+ * however much HBD it holds. Consensus does not do this: `GetAvailableRCs` and
+ * `CanConsume` (rc-system.go) count balance + free − frozen for every account.
+ * Measured live on both mainnet nodes: a hive: account holding 70,000 HBD with
+ * no Magi tx yet read amount 10,000 / max_rcs 10,000, and the launch gate refused
+ * a 3-offer launch that simulateContractCalls ran clean as that account (8,299 RC
+ * used).
+ *
+ * `maxRcs − amount` is the frozen part in both of the node's branches, so the
+ * chain's figure is rebuilt from it. A response that already matches consensus
+ * passes through untouched, and this can only ever RAISE a reading the node got
+ * wrong, never invent credit: a bare name (no `hive:`) gets no free part here,
+ * so the node's own figure wins.
+ */
+export function consensusRc(
+  account: string,
+  amount: number,
+  maxRcs: number,
+  hbdBaseUnits: number
+): { amount: number; maxRcs: number } {
+  const consensusMax = hbdBaseUnits + (getsFreeResourceCredits(account) ? RC_HIVE_FREE_AMOUNT : 0);
+  if (maxRcs >= consensusMax) return { amount, maxRcs };
+  const frozen = Math.max(0, maxRcs - amount);
+  return { amount: consensusMax - frozen, maxRcs: consensusMax };
+}
+
+/**
  * ★ EXPORTED so the same-origin proxy can allowlist it by exact string.
  * `app/api/creator-tokens/gql/route.ts` imports this and matches on identity,
  * the same single-source-of-truth arrangement it already has with reads.ts's
@@ -246,8 +277,12 @@ export async function readMagiSpendingPower(gqlUrl: string, rawAccount: string):
         };
   const rc: MagiResourceCredits = {
     account,
-    amount: asNumber(prop(rcNode, 'amount'), 'amount'),
-    maxRcs: asNumber(prop(rcNode, 'max_rcs'), 'max_rcs')
+    ...consensusRc(
+      account,
+      asNumber(prop(rcNode, 'amount'), 'amount'),
+      asNumber(prop(rcNode, 'max_rcs'), 'max_rcs'),
+      balance.hbdBaseUnits
+    )
   };
 
   return { balance, rc, cannotTransact: rc.amount <= 0 };

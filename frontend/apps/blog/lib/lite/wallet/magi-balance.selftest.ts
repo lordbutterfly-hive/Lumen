@@ -11,11 +11,13 @@
 import {
   RC_HIVE_FREE_AMOUNT,
   checkAffordable,
+  consensusRc,
   rcReserveBaseUnits,
   getsFreeResourceCredits,
   readMagiSpendingPower,
   type MagiSpendingPower
 } from './magi-balance';
+import { checkLaunchRcBudget } from '../../../features/creator-tokens/lib/vsc/rc-budget';
 
 let failures = 0;
 let checks = 0;
@@ -74,6 +76,31 @@ async function main(): Promise<void> {
     );
     restore();
   }
+
+  // ── the node under-reports a never-spent account (2026-10-02) ───────────────
+  {
+    // REAL mainnet response shape, 2026-10-02: 70 HBD deposited, no Magi tx yet,
+    // so getAccountRC skips the HBD (schema.resolvers.go no-record branch).
+    stubFetch({
+      data: {
+        getAccountBalance: { account: 'hive:carol', block_height: 110406655, hbd: 70000 },
+        getAccountRC: { account: 'hive:carol', amount: 10000, max_rcs: 10000 }
+      }
+    });
+    const p = await readMagiSpendingPower('http://x', 'hive:carol');
+    check('a never-spent account reads the CONSENSUS RC (hbd + free), not the node figure', p.rc.amount === 80000 && p.rc.maxRcs === 80000, JSON.stringify(p.rc));
+    check('and nothing is reserved from its HBD for an rc_limit inside the free part', rcReserveBaseUnits(p, 9824) === 0);
+    // The symptom: the 3-offer launch gate refused on the node figure, passes on consensus.
+    check('3-offer launch gate: blocked on the raw node figure (the bug)', !checkLaunchRcBudget({ offerCount: 3, availableRc: 10000, balanceBaseUnits: 70000, firstBuyHbdBaseUnits: 0 }).ok);
+    check('3-offer launch gate: open on the corrected figure', checkLaunchRcBudget({ offerCount: 3, availableRc: p.rc.amount, balanceBaseUnits: p.balance.hbdBaseUnits, firstBuyHbdBaseUnits: 0 }).ok);
+    check('3-offer launch gate with a 9.822 HBD first buy: open on the corrected figure', checkLaunchRcBudget({ offerCount: 3, availableRc: p.rc.amount, balanceBaseUnits: p.balance.hbdBaseUnits, firstBuyHbdBaseUnits: 9822 }).ok);
+    restore();
+  }
+  check('consensusRc: a response that matches consensus passes through (frozen kept)', JSON.stringify(consensusRc('hive:a', 40935, 44344, 34344)) === JSON.stringify({ amount: 40935, maxRcs: 44344 }));
+  check('consensusRc: under-reported max is rebuilt and frozen is kept', JSON.stringify(consensusRc('hive:a', 9000, 10000, 70000)) === JSON.stringify({ amount: 79000, maxRcs: 80000 }));
+  check('consensusRc: a wallet identity gets no free part', JSON.stringify(consensusRc('did:pkh:eip155:1:0xabc', 0, 0, 5000)) === JSON.stringify({ amount: 5000, maxRcs: 5000 }));
+  check('consensusRc: a bare name never gains the free part', JSON.stringify(consensusRc('carol', 10000, 10000, 0)) === JSON.stringify({ amount: 10000, maxRcs: 10000 }));
+  check('consensusRc: no balance, node figure stands', JSON.stringify(consensusRc('hive:a', 10000, 10000, 0)) === JSON.stringify({ amount: 10000, maxRcs: 10000 }));
 
   // ── the wallet identity with nothing: the state that shapes the product ─────
   {

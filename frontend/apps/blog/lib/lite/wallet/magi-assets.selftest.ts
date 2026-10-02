@@ -67,6 +67,16 @@ const balNull = { data: { getAccountBalance: null, getAccountRC: { account: 'hiv
 const b = parseMagiAssets(balNull, 'hive:bob');
 check('balance null beside rc row == zero balance with real rc', b.hbdBaseUnits === 0 && b.rc.amount === 10000);
 
+// REAL mainnet shape 2026-10-02: HBD deposited, no Magi tx yet, the node skips the HBD.
+const neverSpent = {
+  data: {
+    getAccountBalance: { ...full.data.getAccountBalance, account: 'hive:carol', hbd: 70000 },
+    getAccountRC: { account: 'hive:carol', amount: 10000, max_rcs: 10000 }
+  }
+};
+const ns = parseMagiAssets(neverSpent, 'hive:carol');
+check('never-spent account: rc is hbd + free (consensus), not the node 10,000', ns.rc.amount === 80000 && ns.rc.maxRcs === 80000);
+
 check('rc null beside a balance row throws', throws(() => parseMagiAssets({ data: { getAccountBalance: full.data.getAccountBalance, getAccountRC: null } }, 'hive:alice')));
 check('graphql errors throw', throws(() => parseMagiAssets({ errors: [{ message: 'boom' }] }, 'hive:alice')));
 check('non-numeric field throws', throws(() => parseMagiAssets({ data: { getAccountBalance: { ...full.data.getAccountBalance, hbd: 'x' }, getAccountRC: full.data.getAccountRC } }, 'hive:alice')));

@@ -19,6 +19,8 @@
  * missing is "no Magi account yet", also zero.
  */
 
+import { consensusRc } from './magi-balance';
+
 export const MAGI_ASSETS_QUERY = `query MagiAccountAssets($account: String!) {
   getAccountBalance(account: $account) { account block_height hbd hbd_savings pending_hbd_unstaking hive hive_consensus consensus_unstaking }
   getAccountRC(account: $account) { account amount max_rcs }
@@ -103,12 +105,19 @@ export function parseMagiAssets(json: unknown, account: string): MagiAssets {
   // (magi-balance.ts:197-232), never an unknown.
   if (balMissing && rcMissing) return zeroAssets(account);
   if (rcMissing) throw new Error(`Magi assets read: the node has no resource-credit record for ${account}`);
-  const rc = { amount: asInt(prop(rcNode, 'amount'), 'amount'), maxRcs: asInt(prop(rcNode, 'max_rcs'), 'max_rcs') };
+  const hbdBaseUnits = balMissing ? 0 : asInt(prop(bal, 'hbd'), 'hbd');
+  // The node can under-report a never-spent account's RC; see consensusRc.
+  const rc = consensusRc(
+    account,
+    asInt(prop(rcNode, 'amount'), 'amount'),
+    asInt(prop(rcNode, 'max_rcs'), 'max_rcs'),
+    hbdBaseUnits
+  );
   if (balMissing) return { ...zeroAssets(account), rc };
   return {
     account,
     blockHeight: asInt(prop(bal, 'block_height'), 'block_height'),
-    hbdBaseUnits: asInt(prop(bal, 'hbd'), 'hbd'),
+    hbdBaseUnits,
     hbdSavingsBaseUnits: asInt(prop(bal, 'hbd_savings'), 'hbd_savings'),
     hbdUnstakingBaseUnits: asIntOrZero(prop(bal, 'pending_hbd_unstaking'), 'pending_hbd_unstaking'),
     hiveBaseUnits: asInt(prop(bal, 'hive'), 'hive'),
