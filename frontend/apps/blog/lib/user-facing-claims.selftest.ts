@@ -295,7 +295,7 @@ console.log('\n── 4. F5 / F6 / F7 / F15 / F17: the remaining claims.\n');
 {
   // F5 — discovery-ranking.ts hid the ordering tabs because the corpus is null.
   check('★ F5: the /creators description no longer claims an order', !creatorsPage.code.includes('ranked by how reliably they deliver'));
-  check('…and still describes the page', /Browse creators, hold a creator’s token, and spend it on their work\./.test(creatorsPage.code));
+  check('…and still describes the page', /Browse creators, hold the tokens you believe in, and decide for yourself how to use them\./.test(creatorsPage.code));
 
   // F6 — refund.go: net = gross - ExitTaxOn(...), up to MaxExitTaxBps = 2000.
   check('★ F6: the launch terms no longer promise a bare refund', !s('meritum_launch.term_stop_value').includes('Everyone holding is refunded.'));

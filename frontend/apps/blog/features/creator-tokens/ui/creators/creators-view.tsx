@@ -19,17 +19,15 @@ import { creatorPagePath } from '@/blog/lib/meritum/creator-handle';
 // TODO i18n — staged copy; move to locales/*/common_blog.json once final.
 const COPY = {
   title: 'Discover creators',
-  sub: 'People who offer their time and expertise. Hold their token, spend it on their work: a question, a review, a day of building.',
   /**
-   * ★ THE MASTHEAD ADVERTISED A RANKING THE PAGE WAS NOT DOING (2026-08-28,
-   * false-text audit F5). "Ranked by how reliably they deliver" was rendered
-   * unconditionally, including on the corpus where `rankingAvailable` is false
-   * and the sort row a few hundred lines down is REMOVED for exactly that
-   * reason — every card reading "No deliveries yet" under a sentence promising
-   * they were ordered by delivery. Gated on the same signal as the tabs, so it
-   * returns with the corpus and there is no second flag to remember.
+   * ★ MERITUM IS NOT A TASKS MARKET (owner, 2026-10-02: "we're not building
+   * fiverr"). This used to sell the token as payment for work ("spend it on their
+   * work: a question, a review, a day of building") and add "Ranked by how
+   * reliably they deliver." The point is giving the token utility and letting
+   * people decide how they use it, so the line says that and the ranking clause
+   * is gone with the sort tabs.
    */
-  subRanked: ' Ranked by how reliably they deliver.',
+  sub: 'Every creator here has their own Meritum token. Hold the ones you believe in, and decide for yourself how to use them.',
   answers: 'Answers',
   newHere: 'New here',
   newHereSub: 'Just launched, so not ranked by reliability yet.',
@@ -375,7 +373,6 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro, viewerHasToken = false }) 
       <PageMasthead title={COPY.title} headingLevel={intro ? 'h2' : 'h1'}>
         <p className="max-w-[660px] text-caption text-ink-10 font-ui">
           {COPY.sub}
-          {rankingAvailable ? COPY.subRanked : ''}
         </p>
       </PageMasthead>
 

@@ -44,7 +44,7 @@ export async function generateMetadata({ params }: { params: { handle: string } 
   const shown = displayHandle(handle);
   const title = `@${shown} on Lumen`;
   // The Hive `about`, verbatim, or a sentence that makes no claim about the person.
-  const description = profile.about ?? `The Meritum of @${shown} on Lumen: buy the token, spend it on their work.`;
+  const description = profile.about ?? `The Meritum of @${shown} on Lumen: hold the token and decide for yourself how to use it.`;
   const url = creatorPageUrl(siteDomain(), handle);
   const card = creatorCardPath(handle, summary?.priceUsd ?? 0);
   return {

@@ -6,6 +6,7 @@ import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useTokenAccounts } from '../live/use-token-accounts';
 import { useTokenPriceChip } from '../live/use-token-price-chip';
+import { useRememberHasToken } from '../live/use-viewer-has-token';
 import { usdPrice } from '../market/format';
 import { CreatorTokenLaurel } from './creator-token-laurel';
 import { healthWordFor } from '../market/market-health';
@@ -75,6 +76,9 @@ const HeaderTokenPill: FC = () => {
   // signed out (use-token-price-chip.ts treats that as 'unknown' and this
   // component never renders on 'unknown' anyway).
   const chip = useTokenPriceChip(identity.isLoggedIn ? priceAccount : '');
+  // Mounted on every page, so this is where /creators learns "has a token" for
+  // its next first paint (use-viewer-has-token.ts).
+  useRememberHasToken(identity.isLoggedIn ? chip.status : 'unknown', identity.username);
 
   if (!identity.isLoggedIn) return null;
   if (chip.status === 'unknown') return null;

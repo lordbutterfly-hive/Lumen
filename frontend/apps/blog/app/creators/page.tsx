@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import CreatorsView from '@/blog/features/creator-tokens/ui/creators/creators-view';
 import MeritumIntro from '@/blog/features/creator-tokens/ui/meritum/intro/meritum-intro';
 import {
+  MERITUM_HAS_TOKEN_COOKIE,
   MERITUM_INTRO_OPEN_COOKIE,
   MERITUM_INTRO_OPEN_VALUE
 } from '@/blog/features/creator-tokens/ui/meritum/intro/intro-state';
@@ -11,18 +12,20 @@ import { getServerSessionUser } from '@/blog/lib/server-session';
 
 /**
  * Longest the page waits on the chain to know whether the reader has a token.
- * Past it the card renders open and the client's own read folds it; a slow Magi
- * node must never hold up the page (the summary's own timeout is 5 s).
+ * Past it the page uses what this browser remembered for the account (else the
+ * card renders open and the client's own read folds it); a slow Magi node must
+ * never hold up the page (the summary's own timeout is 5 s).
  */
 const HAS_TOKEN_DEADLINE_MS = 1_000;
 
-async function hasMarketWithinDeadline(username: string): Promise<boolean> {
+/** The chain's answer: true / false, or null when it gave none (deadline, shed read, node down). */
+async function hasMarketWithinDeadline(username: string): Promise<boolean | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<boolean>((resolve) => {
-    timer = setTimeout(() => resolve(false), HAS_TOKEN_DEADLINE_MS);
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), HAS_TOKEN_DEADLINE_MS);
   });
   try {
-    return await Promise.race([readCreatorMarketSummary(username).then((s) => s?.registered === true), deadline]);
+    return await Promise.race([readCreatorMarketSummary(username).then((s) => (s === null ? null : s.registered)), deadline]);
   } finally {
     clearTimeout(timer);
   }
@@ -44,7 +47,7 @@ export const metadata: Metadata = {
   // on `rankingAvailable` the way the masthead can, so the clause is simply gone
   // rather than made conditional.
   description:
-    'Launch a Meritum token in seconds. Browse creators, hold a creator’s token, and spend it on their work.'
+    'Launch a Meritum token in seconds. Browse creators, hold the tokens you believe in, and decide for yourself how to use them.'
 };
 
 /**
@@ -64,11 +67,16 @@ export const metadata: Metadata = {
  */
 export default async function CreatorsPage() {
   const session = await getServerSessionUser();
-  const initialOpen = cookies().get(MERITUM_INTRO_OPEN_COOKIE)?.value === MERITUM_INTRO_OPEN_VALUE;
-  // A lite account's market is keyed by its wallet, which the session does not
-  // carry; for those the client's read decides (meritum-intro.tsx).
-  const initialHasToken =
-    session.isLoggedIn && session.accountTier === 'full' ? await hasMarketWithinDeadline(session.username) : false;
+  const jar = cookies();
+  const initialOpen = jar.get(MERITUM_INTRO_OPEN_COOKIE)?.value === MERITUM_INTRO_OPEN_VALUE;
+  // The chain answers for a Hive account. A lite account's market is keyed by
+  // its wallet, which the session does not carry, and a slow read gives no
+  // answer; both fall back to what this browser last saw for THIS account
+  // (intro-state.ts). A definite chain answer always wins.
+  const remembered = session.isLoggedIn && jar.get(MERITUM_HAS_TOKEN_COOKIE)?.value === session.username;
+  const chainAnswer =
+    session.isLoggedIn && session.accountTier === 'full' ? await hasMarketWithinDeadline(session.username) : null;
+  const initialHasToken = session.isLoggedIn && (chainAnswer ?? remembered);
   return (
     <CreatorsView
       viewerHasToken={initialHasToken}

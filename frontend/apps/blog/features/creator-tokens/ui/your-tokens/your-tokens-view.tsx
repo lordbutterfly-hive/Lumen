@@ -654,7 +654,7 @@ const YourTokensView: FC = () => {
     <div className="flex flex-col gap-5 pt-[26px]">
       <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
         <div className="mb-1.5 font-ui text-lg font-medium text-ink-2">Find more creators</div>
-        <p className="mb-4 font-ui text-[14px] leading-[22px] text-ink-10">Hold their token, spend it on their work.</p>
+        <p className="mb-4 font-ui text-[14px] leading-[22px] text-ink-10">Hold the tokens you believe in, and decide for yourself how to use them.</p>
         <Link href="/creators" className="block rounded-control bg-surface-brand-12 py-3 text-center text-sm font-medium text-ink-27 font-ui hover:bg-surface-brand-16">
           Discover creators →
         </Link>
