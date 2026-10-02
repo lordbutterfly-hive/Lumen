@@ -289,7 +289,7 @@ export function adaptOfferings(offerings: Offering[], descriptions?: Map<number,
     desc: descriptions?.get(o.offeringId) ?? '',
     usd: usdFromHbd(o.priceHbd),
     status: 'live' as const,
-    cta: 'Request'
+    cta: 'Order'
   }));
 }
 

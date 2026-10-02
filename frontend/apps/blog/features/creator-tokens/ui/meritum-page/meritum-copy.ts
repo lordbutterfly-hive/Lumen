@@ -21,7 +21,7 @@ export const MERITUM_PAGE_COPY = {
   stats: { price: 'Price', marketCap: 'Market cap', issued: 'Tokens issued', holders: 'Holders', firstTrade: 'First trade' },
   asksTitle: 'What you can buy',
   asksSub: 'Priced in dollars, paid in Meritum',
-  request: 'Request',
+  request: 'Order',
   rollingOut: 'Rolling out',
   notPriceable: 'Not priceable yet',
   windingDown: 'Winding down',

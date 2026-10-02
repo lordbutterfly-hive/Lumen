@@ -89,9 +89,9 @@ export const MOCK_TOKEN_DETAIL: TokenMarketDetail = {
   services: [
     { key: 'ask', name: 'Ask a question', desc: 'One private question, answered within your deadline — or your tokens back.', usd: 10, status: 'live', cta: 'Ask' },
     { key: 'dev-day', name: 'Hire me as a dev for a day', desc: 'A full day of focused development work.', usd: 600, status: 'live', cta: 'Book' },
-    { key: 'code-review', name: 'Review my code', desc: 'A written review of a repo or pull request.', usd: 80, status: 'live', cta: 'Request' },
+    { key: 'code-review', name: 'Review my code', desc: 'A written review of a repo or pull request.', usd: 80, status: 'live', cta: 'Order' },
     { key: 'opinion', name: 'Give your opinion', desc: 'A candid take on your idea, plan or design.', usd: 25, status: 'live', cta: 'Ask' },
-    { key: 'project-review', name: 'Write a project review', desc: 'A structured written assessment of your project.', usd: 150, status: 'rolling_out', cta: 'Request' }
+    { key: 'project-review', name: 'Write a project review', desc: 'A structured written assessment of your project.', usd: 150, status: 'rolling_out', cta: 'Order' }
   ],
   position: { tokens: 12, valueUsd: 50.4, floorValueUsd: 25.2, heldDays: 4 }
 };

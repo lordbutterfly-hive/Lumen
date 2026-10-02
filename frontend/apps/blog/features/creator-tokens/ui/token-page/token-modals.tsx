@@ -1043,13 +1043,13 @@ const AskModal: FC<{
   const blockedByCredits = askSpending.affordability(0, 'ask') === 'no_resource_credits';
   const canAsk = canAffordTokens && !blockedByCredits && !priceBlocked;
   return (
-    <ModalShell width={500} onClose={onClose} title={`Ask @${displayHandle(m.handle)}`}>
-      <ModalHead title={`Ask @${displayHandle(m.handle)}`} onClose={onClose} />
+    <ModalShell width={500} onClose={onClose} title={`Order from @${displayHandle(m.handle)}`}>
+      <ModalHead title={`Order from @${displayHandle(m.handle)}`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
         <textarea
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          placeholder={`What do you want to ask @${displayHandle(m.handle)}?`}
+          placeholder={`Anything @${displayHandle(m.handle)} should know about your order?`}
           className="h-[120px] w-full resize-y rounded-xl border border-line-11 px-4 py-3.5 font-ui text-[15px] leading-[24px] text-ink-2 outline-none focus-visible:outline-none focus:border-line-brand-10"
         />
         <div className="my-2 mb-3.5 text-caption text-ink-14 font-ui">
@@ -1140,7 +1140,7 @@ const AskModal: FC<{
             )}
         </div>
         )}
-        <label className="mb-2 block text-caption font-medium text-ink-10 font-ui">Answer due within</label>
+        <label className="mb-2 block text-caption font-medium text-ink-10 font-ui">Due within</label>
         <div className="mb-4 flex items-center gap-3.5">
           <input
             type="range"
@@ -1204,7 +1204,7 @@ const AskModal: FC<{
               ? `You need ${cost.tokens} @${displayHandle(m.handle)} tokens. Buy some first`
               : blockedByCredits
                 ? 'You need a little HBD on Magi for the network fee'
-                : `Send question for ${cost.tokens} ${cost.tokens === 1 ? 'token' : 'tokens'}`}
+                : `Order for ${cost.tokens} ${cost.tokens === 1 ? 'token' : 'tokens'}`}
         </button>
         {/* ★ CONFIRMING INDICATOR (2026-09-01), the token-page twin of the Studio's
             sticky banner. Every money write now WAITS for the chain to confirm

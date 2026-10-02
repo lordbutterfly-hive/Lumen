@@ -368,7 +368,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         <div className="flex flex-col gap-3.5">
           {[
             'Buy the creator’s token. The price rises as more is bought.',
-            'Spend tokens on their work. A question, a code review, a day of building, priced in dollars.',
+            'Use tokens on what the creator offers, priced in dollars.',
             HOW_IT_WORKS_RESERVE_LINE
           ].map((line, i) => (
             <div key={i} className="flex gap-3">

@@ -68,7 +68,7 @@ import type { CreatorProfileFields } from '@/blog/lib/meritum/profile-fields';
 
 const HOW_THIS_WORKS_LINES: readonly string[] = [
   'Buy the creator’s token. The price rises as more is bought.',
-  'Spend tokens on their work. A question, a code review, a day of building, priced in dollars.',
+  'Use tokens on what the creator offers, priced in dollars.',
   HOW_IT_WORKS_RESERVE_LINE
 ];
 
