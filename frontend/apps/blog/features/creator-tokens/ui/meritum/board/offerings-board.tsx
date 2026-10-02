@@ -51,7 +51,7 @@
  * because animating a board nobody is looking at is pure battery.
  */
 
-import { FC, useEffect, useMemo, useRef, useState } from 'react';
+import { FC, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import BasePathLink from '@/blog/components/base-path-link';
 import { UserAvatarImg } from '@ui/components';
 import { cn } from '@ui/lib/utils';
@@ -105,10 +105,11 @@ function useDescription(creator: string, offeringId: number, open: boolean): str
   return text;
 }
 
-/** The shell's own `sticky top-[var(--rail-sticky-top)]`, in px. The list can never be taller than what is left below it. */
-const STICKY_TOP_PX = 96;
 /** Breathing room under the list so it never ends flush with the window edge. */
 const BOTTOM_GUTTER_PX = 24;
+
+/** feed-tabs.tsx's guard: measure before paint in the browser, no server warning. */
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 /**
  * ★★★ THE CAP IS MEASURED, NOT GUESSED (2026-09-11, owner: "what happens if it's
@@ -133,22 +134,40 @@ const BOTTOM_GUTTER_PX = 24;
  * would read the UNPINNED position while the page is scrolled to the top, which
  * is larger than the pinned one, and would cap the list too aggressively until
  * the reader scrolled. The offset within the aside is the same whether pinned or
- * not, so `STICKY_TOP_PX + offset` is the pinned top at all times.
+ * not, so `pinned top + offset` is the pinned top of the list at all times.
+ *
+ * ★★ AND NOW IT IS ACTUALLY APPLIED (2026-10-02). The hook above shipped on
+ * 2026-09-11 but its result was never passed to the list, which kept the
+ * `100vh - 22rem` guess; at 1440x900 the list still ended at 972px. Wiring it
+ * up exposed three more things, all fixed here:
+ *   - the pinned top is READ from the aside's own computed `top`
+ *     (`--rail-sticky-top`, 107px today), not a copy of it (it said 96);
+ *   - it measures when the list MOUNTS (`active`), because on first render the
+ *     board is still "Loading…" and there is no list to measure;
+ *   - it re-measures when the aside changes size, because what sits above the
+ *     list (the launch card, hidden for creators who have a token) can change
+ *     after the first paint.
  */
-function useViewportCap(ref: React.RefObject<HTMLElement>): number | undefined {
+function useViewportCap(ref: React.RefObject<HTMLElement>, active: boolean): number | undefined {
   const [cap, setCap] = useState<number | undefined>(undefined);
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
+    const el = ref.current;
+    const aside = el?.closest('aside');
+    if (!active || !el || !aside) return;
     const measure = () => {
-      const el = ref.current;
-      const aside = el?.closest('aside');
-      if (!el || !aside) return;
+      const pinnedTop = parseFloat(getComputedStyle(aside).top) || 0;
       const offsetInAside = el.getBoundingClientRect().top - aside.getBoundingClientRect().top;
-      setCap(Math.max(160, window.innerHeight - STICKY_TOP_PX - offsetInAside - BOTTOM_GUTTER_PX));
+      setCap(Math.max(160, Math.floor(window.innerHeight - pinnedTop - offsetInAside - BOTTOM_GUTTER_PX)));
     };
     measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(aside);
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
-  }, [ref]);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [ref, active]);
   return cap;
 }
 
@@ -272,7 +291,8 @@ const BoardRow: FC<{
 const OfferingsBoard: FC = () => {
   const { rows, isLoading, unavailable } = useOfferingBoard();
   const listRef = useRef<HTMLUListElement>(null);
-  const cap = useViewportCap(listRef);
+  const listMounted = !(unavailable || rows.length === 0);
+  const cap = useViewportCap(listRef, listMounted);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [hovered, setHovered] = useState(false);
   const [tabHidden, setTabHidden] = useState(false);
@@ -317,9 +337,10 @@ const OfferingsBoard: FC = () => {
         <ul
           // Constraint 3: bounded to the viewport and scrolled internally, so an
           // expanded description can never carry the sticky rail off-screen.
-          // `top-24` (6rem) + the launch card and this card's own chrome above the
-          // list. Generous rather than exact: too small only costs an early
-          // scrollbar, too large puts rows below the fold with no way to reach them.
+          // The measured cap (useViewportCap) wins once the list is on screen; the
+          // class is only the first-paint fallback before that measurement.
+          ref={listRef}
+          style={cap !== undefined ? { maxHeight: cap } : undefined}
           className="max-h-[calc(100vh-22rem)] overflow-y-auto overscroll-contain"
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
