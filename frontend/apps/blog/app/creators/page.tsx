@@ -69,5 +69,10 @@ export default async function CreatorsPage() {
   // carry; for those the client's read decides (meritum-intro.tsx).
   const initialHasToken =
     session.isLoggedIn && session.accountTier === 'full' ? await hasMarketWithinDeadline(session.username) : false;
-  return <CreatorsView intro={<MeritumIntro initialHasToken={initialHasToken} initialOpen={initialOpen} />} />;
+  return (
+    <CreatorsView
+      viewerHasToken={initialHasToken}
+      intro={<MeritumIntro initialHasToken={initialHasToken} initialOpen={initialOpen} />}
+    />
+  );
 }

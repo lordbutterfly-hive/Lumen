@@ -3,10 +3,7 @@
 import { useState } from 'react';
 import { Link } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
-import { useSessionIdentity } from '@/blog/features/layouts/server-session';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { useTokenAccounts } from '../../../live/use-token-accounts';
-import { useTokenPriceChip } from '../../../live/use-token-price-chip';
+import { useViewerHasToken } from '../../../live/use-viewer-has-token';
 import { MeritumTicker } from '../ticker/meritum-ticker';
 import MeritumHoldersBand from './meritum-holders-band';
 import { CreatorTokenLaurel } from '../../creator-token-laurel';
@@ -90,22 +87,13 @@ export interface MeritumIntroProps {
  * bar opens it, and whichever way they leave it is how it stays (cookie, see
  * ./intro-state.ts). Everyone without a token sees the card exactly as before.
  *
- * "Has a token" is the header pill's own answer (header-token-pill.tsx): the same
- * account expression and `useTokenPriceChip` status 'ready', so this page and the
- * header can never disagree. Until that read lands, the server's answer for a Hive
- * account holds the first paint, so a creator does not watch the card collapse.
+ * "Has a token" is `useViewerHasToken`, the header pill's own answer, shared with
+ * this page's right rail. Until the chain read lands, the server's answer for a
+ * Hive account holds the first paint, so a creator does not watch the card collapse.
  */
 export default function MeritumIntro({ initialHasToken = false, initialOpen = false }: MeritumIntroProps) {
   const { t } = useTranslation('common_blog');
-  const identity = useSessionIdentity();
-  const { user } = useUserClient();
-  const isLite = user.account_tier === 'lite';
-  const tokenAccounts = useTokenAccounts();
-  const signingAccount = tokenAccounts.accounts.find((a) => a.canSign) ?? null;
-  const priceAccount = (isLite ? signingAccount?.id : identity.username) ?? identity.username;
-  const chip = useTokenPriceChip(identity.isLoggedIn ? priceAccount : '');
-  const hasToken =
-    identity.isLoggedIn && (chip.status === 'ready' || (chip.status !== 'none' && initialHasToken));
+  const hasToken = useViewerHasToken(initialHasToken);
   const [open, setOpen] = useState(() => readMeritumIntroOpen() ?? initialOpen);
 
   const toggle = () => {
@@ -277,7 +265,7 @@ export default function MeritumIntro({ initialHasToken = false, initialOpen = fa
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        aria-controls="meritum-intro-card"
+        aria-controls={open ? 'meritum-intro-card' : undefined}
         className={`${styles.card} flex w-full items-center gap-2 border border-line-warn-3 accent-rail ${HERO_WASH} px-6 py-4 text-left focus-visible:outline-offset-[-4px] sm:px-11`}
         data-testid="meritum-intro-toggle"
       >

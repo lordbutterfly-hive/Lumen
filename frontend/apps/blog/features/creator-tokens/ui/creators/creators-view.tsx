@@ -11,6 +11,7 @@ import { displayHandle, routeHandle, usdFromHbd } from '../../live/adapt';
 import type { CreatorSummary } from '../../types';
 import { deliveryMarks, pctLabel, ratingStars, usdCompact, usdPrice } from '../../market/format';
 import { resolveDiscoveryControls, type DiscoverySort } from '../../market/discovery-ranking';
+import { useViewerHasToken } from '../../live/use-viewer-has-token';
 import TokenShell from '../token-shell';
 import OfferingsBoard from '../meritum/board/offerings-board';
 import { creatorPagePath } from '@/blog/lib/meritum/creator-handle';
@@ -109,6 +110,16 @@ const SORTS: { id: Sort; label: string }[] = [
   { id: 'fastest', label: 'Fastest' },
   { id: 'new', label: 'New' }
 ];
+
+/**
+ * ★ THE SORT TABS AND THE "ANSWERS" PILL ARE OFF (owner, 2026-10-02: "remove the
+ * whole most reliable fastest and new tab, hide it, we will bring it back later").
+ * They had switched themselves on once the first creators got a delivery record
+ * (`rankingAvailable`), and then "Fastest"/"New" barely changed the order while
+ * "Answers" hid every creator without a record yet. With the row gone the list
+ * keeps the indexer's own order and nobody is filtered out. Flip to bring it back.
+ */
+const DISCOVERY_CONTROLS_ENABLED = false;
 
 const DeliveryStrip: FC<{ marks: boolean[] }> = ({ marks }) => (
   <div className="mb-2.5 flex gap-1">
@@ -253,10 +264,15 @@ interface CreatorsViewProps {
    * marketing card that a different screen may want to omit.
    */
   intro?: ReactNode;
+  /** Server's answer for a Hive account (app/creators/page.tsx), held until the chain read lands. */
+  viewerHasToken?: boolean;
 }
 
-const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
+const CreatorsView: FC<CreatorsViewProps> = ({ intro, viewerHasToken = false }) => {
   const { t } = useTranslation('common_blog');
+  // A creator who already has a token has no use for "Launch your Meritum"
+  // (owner, 2026-10-02); the board below it moves up.
+  const hasToken = useViewerHasToken(viewerHasToken);
   const [sort, setSort] = useState<Sort>('reliable');
   const [showNew, setShowNew] = useState(true);
   const [answersOnly, setAnswersOnly] = useState(false);
@@ -312,16 +328,21 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
 
   const rightRail = (
     <div className="flex flex-col gap-5 pt-[26px]">
-      <div className="rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]">
-        <div className="mb-1.5 font-ui text-lg font-medium text-ink-2">{COPY.launchTitle}</div>
-        <p className="mb-4 font-ui text-[14px] leading-[22px] text-ink-10">{COPY.launchSub}</p>
-        <Link
-          href="/creators/launch"
-          className="block rounded-control bg-surface-brand-12 py-3 text-center text-sm font-medium text-ink-27 font-ui hover:bg-surface-brand-16"
+      {hasToken ? null : (
+        <div
+          className="rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(26,22,18,0.035),0_3px_12px_-6px_rgba(70,46,30,0.13)]"
+          data-testid="creators-launch-box"
         >
-          {COPY.launchCta}
-        </Link>
-      </div>
+          <div className="mb-1.5 font-ui text-lg font-medium text-ink-2">{COPY.launchTitle}</div>
+          <p className="mb-4 font-ui text-[14px] leading-[22px] text-ink-10">{COPY.launchSub}</p>
+          <Link
+            href="/creators/launch"
+            className="block rounded-control bg-surface-brand-12 py-3 text-center text-sm font-medium text-ink-27 font-ui hover:bg-surface-brand-16"
+          >
+            {COPY.launchCta}
+          </Link>
+        </div>
+      )}
       {/* ★ UNDER THE LAUNCH PILL, IN THE RIGHT RAIL (owner, 2026-09-11). It shipped
           in the LEFT rail first, which was wrong twice over: that rail is shared
           navigation on every creator-token screen, and it is 200px, which is not
@@ -385,7 +406,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
           them read "No deliveries yet". Same rule the ACTIVE market state
           follows a few lines down — a notice on a page that already states the
           fact is noise. */}
-      {rankingAvailable ? (
+      {DISCOVERY_CONTROLS_ENABLED && rankingAvailable ? (
       <div className="my-5 flex flex-wrap items-center justify-between gap-4">
         {/* ★ WARM TAB TREATMENT (illumination SPEC.md §1, owner 2026-08-21: "fill the
            creators, wallet tokens and proposals tab bar gap"). Track on --amb-1 so it
