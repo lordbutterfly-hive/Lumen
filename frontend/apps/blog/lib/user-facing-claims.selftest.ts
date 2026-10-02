@@ -138,7 +138,10 @@ console.log('\n── 0. THE INSTRUMENT. A scan that read nothing, or that read 
       // that cannot change without the FEATURE changing. The opening tag is
       // that part; the prop list is not.
       loginDialog.code.includes('<LumenLogin embedded') &&
-      creatorsPage.code.includes('<CreatorsView intro={<MeritumIntro />} />') &&
+      // Opening tags only (the note above): the intro and view gained props on
+      // 2026-10-02 (initialHasToken / viewerHasToken) without the feature changing.
+      creatorsPage.code.includes('<CreatorsView') &&
+      creatorsPage.code.includes('<MeritumIntro') &&
       helpMd.raw.includes('## Will I earn anything?')
   );
 }
