@@ -177,6 +177,7 @@ import { buyExecutedIn, parseLedgerRows, payoutExecutedIn, type LedgerRow } from
 import { readMagiSpendingPower } from '@/blog/lib/lite/wallet/magi-balance';
 import { depositIntentOf, hbdString, planHiveTopUp, rcLimitOf, type GatewayDepositIntent } from '@/blog/lib/meritum/hive-topup';
 import { rcLimitForAction } from './vsc/rc-budget';
+import { sizeOpByDryRun } from './vsc/rc-dry-run';
 
 /**
  * ★★★ HOW LONG WE WAIT FOR THE CHAIN TO CONFIRM A REGISTER, AND WHY IT IS
@@ -3006,7 +3007,11 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
   private async broadcast(op: CustomJsonOp): Promise<string> {
     if (!this.broadcaster) throw new Error(NO_BROADCASTER_MSG);
-    return this.broadcaster(op);
+    // ★ 2026-10-05: size rc_limit from a dry run of this exact call. A fixed row
+    // failed at gas for a real transfer (cost grows with the lots moved); see
+    // vsc/rc-dry-run.ts. Falls back to the op as built when it cannot measure.
+    const signer = op.required_auths[0];
+    return this.broadcaster(signer ? await sizeOpByDryRun(op, toDid(signer)) : op);
   }
 
   private assertBundleBroadcaster(): void {

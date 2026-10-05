@@ -214,10 +214,36 @@
  * pointed at a different question (it runs the app's OWN pricing functions
  * against live chain state rather than reimplementing them).
  */
+/**
+ * ★★★★ RE-MEASURED ON MAINNET 2026-10-05, after `transfer` failed at gas for a
+ * real holder (txs e9f86902..., fba5b738..., `gas_limit_hit` at the 2,497 limit; the
+ * dry run of the same call used 2,529). Two cost terms the testnet tables above
+ * could not see:
+ *
+ *   1. THE STATE HIGH-WATER MARK. A new byte costs 19 RC only while it pushes the
+ *      contract past its all-time largest state size (go-vsc-node
+ *      contract_session.go IncSize); below it, 1 RC. Mainnet sits AT the mark
+ *      (the failed call's output: currentSize 4177 == maxSize 4177), so every key
+ *      a call creates pays 19x there, while the churned testnet contract paid 1x.
+ *   2. LOTS MOVED. A transfer carries the sender's cohorts to the recipient one by
+ *      one, and each one costs about 1,700 RC to a 90-character wallet DID and
+ *      about 820 to a Hive name (mainnet, lordbutterfly's market, 3 lots):
+ *        to a BTC DID: 1 lot 3,753, 2 lots 5,445, 3 lots 7,221
+ *        to hive:maestroask: 1 lot 2,529, 3 lots 4,174
+ *      A holder may carry up to MaxLots = 64 (core/holdclock_lots.go:181), so no
+ *      fixed row covers a transfer. The row below is the one-lot worst case, and
+ *      every single write is now sized from a dry run of the exact call before it
+ *      is signed (sizeRcLimitFromDryRun below, vsc/rc-dry-run.ts).
+ *
+ * The other rows were re-checked the same day as a Hive caller on mainnet and all
+ * hold: createOffering (64-char title) 3,896, sell 3,246, buy as a new holder
+ * 2,517, setOfferingPrice 2,113, setOfferingTitle 2,104, deleteOffering 523,
+ * claimTradeFees 151.
+ */
 export const RC_COST_BY_ACTION: Readonly<Record<string, number>> = Object.freeze({
   buy: 3_412,
   sell: 3_982,
-  transfer: 1_997,
+  transfer: 3_753,
   register: 7_859,
   createOffering: 5_693,
   setOfferingPrice: 4_383,
@@ -280,6 +306,39 @@ export function launchHbdToHold(input: { offerCount: number; firstBuyHbdBaseUnit
 export function rcLimitForAction(action: string): number {
   const measured = RC_COST_BY_ACTION[action] ?? RC_COST_FALLBACK;
   return Math.max(NODE_MIN_RC_LIMIT, Math.ceil(measured * RC_SAFETY_MARGIN));
+}
+
+export type DryRunSizing =
+  | { kind: 'keep' }
+  | { kind: 'raise'; rcLimit: number }
+  | { kind: 'short'; rcLimit: number; addBaseUnits: number };
+
+/**
+ * The `rc_limit` for one call, from a dry run of that exact call (2026-10-05).
+ * A table row cannot cover a call whose cost depends on the caller's state (a
+ * transfer pays per lot moved, see the 10-05 note above), so the declared limit
+ * is checked against what the call really uses, plus the same 25% margin.
+ *
+ *   keep  : the declared limit already clears the measured cost with margin
+ *   raise : declare more, never above what the account has available
+ *   short : the account cannot cover the call at all; `addBaseUnits` is how much
+ *           to add so it can (1 HBD = 1,000 credits)
+ *
+ * `availableRc` null means it could not be read: the declared limit is kept when
+ * it covers the cost, and raised to the margin when it does not, because
+ * keeping a limit below the cost is a certain out-of-gas failure.
+ */
+export function sizeRcLimitFromDryRun(input: { declared: number; rcUsed: number; availableRc: number | null }): DryRunSizing {
+  const want = Math.max(NODE_MIN_RC_LIMIT, Math.ceil(input.rcUsed * RC_SAFETY_MARGIN));
+  if (want <= input.declared) return { kind: 'keep' };
+  if (input.availableRc === null) {
+    return input.rcUsed <= input.declared ? { kind: 'keep' } : { kind: 'raise', rcLimit: want };
+  }
+  if (input.rcUsed > input.availableRc) {
+    return { kind: 'short', rcLimit: want, addBaseUnits: want - input.availableRc };
+  }
+  const rcLimit = Math.min(want, input.availableRc);
+  return rcLimit > input.declared ? { kind: 'raise', rcLimit } : { kind: 'keep' };
 }
 
 /**
