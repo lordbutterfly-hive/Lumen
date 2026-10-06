@@ -276,7 +276,6 @@ describe('iframe allowlist security', function () {
             ['https://nftshowroom.com/embed/undersound_come-musica_quincy-jones', 'https://nftshowroom.com/embed/undersound_come-musica_quincy-jones'],
             ['https://embed.peakd.com/hive-139531/@asgarth/re-fjworld-tjm20x', 'https://embed.peakd.com/hive-139531/@asgarth/re-fjworld-tjm20x'],
             ['https://embed.peakd.com/@asgarth/re-fjworld-tjm20x', 'https://embed.peakd.com/@asgarth/re-fjworld-tjm20x'],
-            ['https://aureal-embed.web.app/2088949', 'https://aureal-embed.web.app/2088949'],
             [
                 'https://embed.truvvl.com/@borivan/firemens-saves-our-live-respect-firemen-20211124t133726812z',
                 'https://embed.truvvl.com/@borivan/firemens-saves-our-live-respect-firemen-20211124t133726812z'
@@ -300,7 +299,7 @@ describe('iframe allowlist security', function () {
         });
 
         const realHosts =
-            /^https:\/\/(?:www\.skatehype\.com|www\.bitchute\.com|odysee\.com|ipfs\.skatehive\.app|nftshowroom\.com|embed\.peakd\.com|aureal-embed\.web\.app|embed\.truvvl\.com|www\.youtube-nocookie\.com)\//;
+            /^https:\/\/(?:www\.skatehype\.com|www\.bitchute\.com|odysee\.com|ipfs\.skatehive\.app|nftshowroom\.com|embed\.peakd\.com|embed\.truvvl\.com|www\.youtube-nocookie\.com)\//;
         const hostile = [
             'https://www.skatehype.com.evil.com/ifplay.php?v=1',
             'https://www.skatehype.com@evil.com/ifplay.php?v=1',
@@ -471,5 +470,6 @@ describe('iframe allowlist security', function () {
 
     describe('arbitrary iframe', () => {
         it('BLOCKS an entirely unknown host', () => blocked('https://evil.example/phish'));
+        it('BLOCKS Aureal, whose player cannot play (its API serves an invalid certificate)', () => blocked('https://aureal-embed.web.app/2088949'));
     });
 });

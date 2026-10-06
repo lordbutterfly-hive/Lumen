@@ -1695,6 +1695,46 @@
   max-height: 75vw;
 }
 
+/* ★ CARD-STYLE EMBEDS GET A BOX THAT FITS THEM, NOT THE 16:9 VIDEO BOX (2026-10-06).
+   Every pasted iframe is wrapped in .videoWrapper (HtmlDOMParser), and the sanitizer
+   only lets that one class through, so the size is chosen here by the iframe's src,
+   which the allowlist has already rebuilt to a fixed prefix. Content heights measured
+   inside each embed in Chrome (desktop column 519px / phone 285px):
+   - Spotify only lays out at fixed heights; at 16:9 (291px) it fell back to its 152px
+     card and left a white gap. 352px is its standard full player.
+   - NFT Showroom: 416-484px / 291-292px in a fitted box (its content stretches into a
+     taller one) -> square, at least 320px for phones.
+   - PeakD post embed: 408-641px / 569-623px (follows the post text) -> 640px.
+   max-height is lifted because the 75vw cap above would cut a 352px box on a phone. */
+#articleBody .videoWrapper:has(> iframe[src^='https://open.spotify.com/']),
+.prose .videoWrapper:has(> iframe[src^='https://open.spotify.com/']) {
+  height: 352px;
+  padding-bottom: 0;
+}
+
+#articleBody .videoWrapper:has(> iframe[src^='https://nftshowroom.com/']),
+.prose .videoWrapper:has(> iframe[src^='https://nftshowroom.com/']) {
+  height: auto;
+  padding-bottom: 0;
+  aspect-ratio: 1 / 1;
+  min-height: 320px;
+}
+
+#articleBody .videoWrapper:has(> iframe[src^='https://embed.peakd.com/']),
+.prose .videoWrapper:has(> iframe[src^='https://embed.peakd.com/']) {
+  height: 640px;
+  padding-bottom: 0;
+}
+
+#articleBody .videoWrapper:has(> iframe[src^='https://open.spotify.com/']) iframe,
+.prose .videoWrapper:has(> iframe[src^='https://open.spotify.com/']) iframe,
+#articleBody .videoWrapper:has(> iframe[src^='https://nftshowroom.com/']) iframe,
+.prose .videoWrapper:has(> iframe[src^='https://nftshowroom.com/']) iframe,
+#articleBody .videoWrapper:has(> iframe[src^='https://embed.peakd.com/']) iframe,
+.prose .videoWrapper:has(> iframe[src^='https://embed.peakd.com/']) iframe {
+  max-height: none;
+}
+
 #articleBody .youtube-facade,
 .prose .youtube-facade {
   position: absolute;

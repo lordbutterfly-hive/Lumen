@@ -99,7 +99,6 @@ const baseMiddleware = createMiddleware({
       'https://ipfs.skatehive.app',
       'https://nftshowroom.com',
       'https://embed.peakd.com',
-      'https://aureal-embed.web.app',
       'https://embed.truvvl.com',
       'https://www.youtube-nocookie.com',
       // Rumble players, pasted or looked up from a page link (2026-10-06).

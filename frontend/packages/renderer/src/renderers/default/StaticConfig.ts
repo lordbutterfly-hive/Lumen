@@ -20,7 +20,7 @@
  * - Spotify embeds (playlists, shows, episodes, albums, tracks, artists)
  * - 3speak video embeds
  * - SkateHype, BitChute, Odysee, Skatehive IPFS videos, NFT Showroom, PeakD post
- *   embeds, Aureal, Truvvl and youtube-nocookie players
+ *   embeds, Truvvl and youtube-nocookie players
  */
 export class StaticConfig {
     public static sanitization = {
@@ -288,13 +288,11 @@ export class StaticConfig {
                     return m ? `https://embed.peakd.com/${m[1] ? `${m[1]}/` : ''}@${m[2]}/${m[3]}` : null;
                 }
             },
-            {
-                re: /^https:\/\/aureal-embed\.web\.app\/\d{1,12}\/?(?:[?#].*)?$/i,
-                fn: (src: string) => {
-                    const m = src.match(/^https:\/\/aureal-embed\.web\.app\/(\d{1,12})(?:[/?#]|$)/i);
-                    return m ? `https://aureal-embed.web.app/${m[1]}` : null;
-                }
-            },
+            // Aureal (aureal-embed.web.app) was added 2026-10-06 and removed the same day: its
+            // player renders but cannot play, because Aureal's own API (api.aureal.one)
+            // serves an invalid TLS certificate (measured, also outside Lumen). A dead
+            // player is worse than the plain "(Unsupported ...)" line, so it stays blocked
+            // with the other dead hosts until that changes.
             {
                 re: /^https:\/\/embed\.truvvl\.com\/@[a-z0-9.-]{3,16}\/[a-z0-9-]{1,255}\/?(?:[?#].*)?$/i,
                 fn: (src: string) => {
