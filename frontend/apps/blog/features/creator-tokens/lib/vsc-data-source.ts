@@ -119,6 +119,7 @@ import './vsc/price-display.selftest';
 // not only when somebody happens to import them.
 import './vsc/spender-shape.selftest';
 import { MagiIndexerClient } from './vsc/hasura';
+import { TOKEN_ACTIVITY_PAGE_SIZE, type TokenActivityCursor, type TokenActivityGroup, type TokenActivityPage, type TokenActivityScope } from './vsc/token-activity';
 import {
   CreatorTokensGqlClient,
   buildAskFromParsed,
@@ -1040,6 +1041,13 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       // claiming nobody holds a token it could not read.
       return unavailable;
     }
+  }
+
+  async readTokenActivity(scope: TokenActivityScope, group: TokenActivityGroup, cursor: TokenActivityCursor | null): Promise<TokenActivityPage> {
+    if (!this.indexer) throw new Error('VscCreatorTokensDataSource: token activity needs the Magi indexer (CREATOR_TOKENS_INDEXER_URL)');
+    // Every log keys accounts as ledger ids; a bare Hive name would match nothing.
+    const wire: TokenActivityScope = scope.kind === 'token' ? { kind: 'token', creator: toDid(scope.creator) } : { kind: 'account', account: toDid(scope.account) };
+    return this.indexer.tokenActivityPage(wire, group, cursor, TOKEN_ACTIVITY_PAGE_SIZE);
   }
 
   async readDeliveryRecord(creator: string): Promise<DeliveryRecord> {

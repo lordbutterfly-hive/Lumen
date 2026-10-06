@@ -53,6 +53,7 @@ export default function MagiHistoryList({
   const accountId = toMagiAccountId(account);
   const config = getCreatorTokensConfig();
   const netId = config?.netId ?? null;
+  const meritumContractId = config?.contractId ?? null;
   /**
    * ★ THE THREE CONTRACTS THIS APP ITSELF DEPLOYS AGAINST, named. A reader who
    * just bought a Meritum token should not have to recognise
@@ -75,7 +76,7 @@ export default function MagiHistoryList({
     const byKey = new Map<string, MagiHistoryEntry>();
     for (const page of data?.pages ?? []) {
       for (const tx of page) {
-        for (const entry of describeMagiTransaction(tx, accountId, group, contractNames)) {
+        for (const entry of describeMagiTransaction(tx, accountId, group, contractNames, meritumContractId)) {
           // Offset paging can hand the same transaction back on two pages when
           // a new one lands mid-read. First copy wins; they are identical.
           if (!byKey.has(entry.key)) byKey.set(entry.key, entry);
@@ -83,7 +84,7 @@ export default function MagiHistoryList({
       }
     }
     return [...byKey.values()];
-  }, [data, accountId, group, contractNames]);
+  }, [data, accountId, group, contractNames, meritumContractId]);
 
   return (
     <div className={CARD_CLASS} data-testid="wallet-magi-history">

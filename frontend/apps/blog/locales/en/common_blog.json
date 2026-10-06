@@ -1756,7 +1756,9 @@
           "other": "{{type}}",
           "withdraw_to": "Withdrew from Magi",
           "contract_action_known": "{{contract}}: {{action}}",
-          "contract_call_known": "{{contract}} contract call"
+          "contract_call_known": "{{contract}} contract call",
+          "meritum_sent": "Sent Meritum",
+          "meritum_received": "Received Meritum"
         },
         "contracts": {
           "meritum": "Meritum",

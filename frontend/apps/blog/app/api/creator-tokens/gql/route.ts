@@ -3,7 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { CONTRACT_OUTPUT_QUERY, CONTRACT_QUERY, HEAD_QUERY, STATE_QUERY, STATE_QUERY_HEX } from '@/blog/features/creator-tokens/lib/vsc/reads';
 import { BALANCE_QUERY } from '@/blog/lib/lite/wallet/magi-balance';
 import { MAGI_ASSETS_QUERY } from '@/blog/lib/lite/wallet/magi-assets';
-import { MAGI_TRANSACTIONS_QUERY, MAGI_TRANSACTIONS_MAX_OFFSET } from '@/blog/lib/lite/wallet/magi-transactions';
+import { MAGI_TRANSACTIONS_QUERY, MAGI_TRANSACTIONS_QUERY_PREVIOUS, MAGI_TRANSACTIONS_MAX_OFFSET } from '@/blog/lib/lite/wallet/magi-transactions';
 import { SIMULATE_QUERY } from '@/blog/lib/lite/wallet/magi-simulate';
 import { getServerSessionUser } from '@/blog/lib/server-session';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
@@ -99,6 +99,8 @@ const ALLOWED_QUERIES = new Set<string>([
   // nothing. Its variables are bounded below, because `limit`/`offset` on a
   // node-side scan are exactly the two knobs an amplifier would reach for.
   MAGI_TRANSACTIONS_QUERY,
+  // The pre-2026-10-06 text (no `required_auths`), for tabs opened before that deploy. See its doc.
+  MAGI_TRANSACTIONS_QUERY_PREVIOUS,
   SIMULATE_QUERY
 ]);
 
@@ -324,7 +326,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // wallet's Magi tab is read by its owner, but `/@name/wallet` shows the same
   // PUBLIC chain history to a logged-out visitor, exactly like the balance
   // reads above it — gating this would break that page for everyone.
-  if (query === MAGI_TRANSACTIONS_QUERY) {
+  if (query === MAGI_TRANSACTIONS_QUERY || query === MAGI_TRANSACTIONS_QUERY_PREVIOUS) {
     const problem = validateTransactionVariables(variablesObj);
     if (problem) {
       return NextResponse.json({ errors: [{ message: problem }] }, { status: 400 });

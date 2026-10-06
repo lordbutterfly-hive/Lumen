@@ -20,6 +20,16 @@
  * below is parsed explicitly rather than trusted — see `num`.
  */
 
+import {
+  buildTokenActivityQuery,
+  mergeTokenActivityPage,
+  parseTokenActivityResponse,
+  type TokenActivityCursor,
+  type TokenActivityGroup,
+  type TokenActivityPage,
+  type TokenActivityScope
+} from './token-activity';
+
 /** One row of `lumen_ct_balances` — the holder -> creators reverse index. */
 export interface HasuraBalanceRow {
   creator: string;
@@ -383,6 +393,25 @@ export class MagiIndexerClient {
     const rows = rowsOf(data, 'contract_logs');
     if (rows.length === 0) return null;
     return numOrNull(field(rows[0], 'block_height'));
+  }
+
+  /**
+   * One page of token activity (token-activity.ts has the whole design). Reads
+   * the RAW event tables, which, unlike the views above, carry the indexer's
+   * own `indexer_contract_id`, so this read IS scoped to this client's
+   * contract. Throws on any failure: a failed read must never render as "no
+   * transactions".
+   */
+  async tokenActivityPage(
+    scope: TokenActivityScope,
+    group: TokenActivityGroup,
+    cursor: TokenActivityCursor | null,
+    limit: number
+  ): Promise<TokenActivityPage> {
+    const { query, variables, sources } = buildTokenActivityQuery(scope, group, cursor, limit, this.contractId || null);
+    if (sources.length === 0) return { events: [], next: null };
+    const data = await this.query(query, variables);
+    return mergeTokenActivityPage(parseTokenActivityResponse({ data }, sources), sources, cursor, limit);
   }
 
   /** The ranked creator list. Ordering lives in the VIEW, deliberately — so a client cannot quietly re-rank on price or volume. */

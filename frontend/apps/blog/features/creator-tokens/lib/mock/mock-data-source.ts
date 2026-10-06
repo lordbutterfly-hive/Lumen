@@ -1,6 +1,7 @@
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
 import type { AnswerInput, Ask, AskInput, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, CreateOfferingInput, CreatorAskHistoryResult, CreatorAskRow, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchOfferingResult, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput, CreatorPublicStats } from '../../types';
 import type { CreatorTokensDataSource } from '../creator-tokens-data-source';
+import type { TokenActivityPage } from '../vsc/token-activity';
 import {
   BLOCKS_PER_DAY,
   RECLAIM_GRACE_BLOCKS,
@@ -495,6 +496,13 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     await delay(120);
     // The mock has no holder index; an honest "unavailable" drops the section.
     return { creator, holders: [], holderCount: 0, firstTradeTs: null, source: 'unavailable' };
+  }
+
+  async readTokenActivity(): Promise<TokenActivityPage> {
+    await delay(120);
+    // The mock keeps no event history. Empty, which the creator page renders
+    // as no section and the wallet as its "nothing yet" line.
+    return { events: [], next: null };
   }
 
   async readDeliveryRecord(creator: string): Promise<DeliveryRecord> {

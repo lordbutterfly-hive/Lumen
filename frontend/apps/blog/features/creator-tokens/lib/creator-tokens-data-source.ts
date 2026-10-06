@@ -1,5 +1,6 @@
 import env from '@beam-australia/react-env';
 import type { AnswerInput, Ask, AskInput, BoardCreator, BuyInput, BuyQuote, ClaimTradeFeesInput, CloseIfDrainedInput, ContractRules, CreateOfferingInput, CreatorAskHistoryResult, CreatorAsksResult, CreatorSummary, DeclineInput, DeleteOfferingInput, DeliveryRecord, HolderPosition, IndexerHealth, LaunchMarketInput, LaunchResult, Market, MarketPrice, MyAsksResult, Offering, PricePoint, Quote, RateInput, ReclaimInput, RefundHolderInput, RefundInput, RegisterMarketInput, RetireInput, SellInput, SellQuote, SetCapInput, SetFaceInput, SetOfferingPriceInput, SetOfferingTitleInput, TransferTokensInput, WalletPositionsResult, WithdrawTreasuryInput, CreatorPublicStats} from '../types';
+import type { TokenActivityCursor, TokenActivityGroup, TokenActivityPage, TokenActivityScope } from './vsc/token-activity';
 import { MockCreatorTokensDataSource } from './mock/mock-data-source';
 import { hiveFundedTransactionBroadcaster, hiveTransactionBroadcaster, hiveTransactionBundleBroadcaster } from './vsc/broadcaster';
 import { routingBroadcaster } from './vsc/wallet-broadcaster';
@@ -79,6 +80,13 @@ export interface CreatorTokensDataSource {
   readDeliveryRecord(creator: string): Promise<DeliveryRecord>;
   /** Holders, holder count and first trade for the creator page. `source: 'unavailable'` on an indexer outage — never an empty answer dressed as data. */
   readCreatorPublicStats(creator: string): Promise<CreatorPublicStats>;
+  /**
+   * One page of token movements (buys, sells, sends, orders, cash-outs), newest
+   * first, for one token or for one holder's account; `cursor` null = the
+   * newest page. Indexer-backed; REJECTS on any failure, so a screen can tell
+   * "couldn't load" from "nothing happened". See vsc/token-activity.ts.
+   */
+  readTokenActivity(scope: TokenActivityScope, group: TokenActivityGroup, cursor: TokenActivityCursor | null): Promise<TokenActivityPage>;
   /**
    * Client-side preview of what Ask() would charge right now. Never authoritative — see Quote.asOfBlock doc. Rejects on a genuine read failure; a resolved oracleStatus other than 'ok' means AskRate()/SettlementRate() itself would refuse to price (RULING C: no PAR fallback any more — see Quote.rate's doc), so the caller must disable the ask action, not merely treat it as informational.
    *

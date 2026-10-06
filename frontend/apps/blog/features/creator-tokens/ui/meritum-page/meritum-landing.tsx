@@ -22,6 +22,7 @@ import CreatorTokenLaurel from '../creator-token-laurel';
 import TokenShell from '../token-shell';
 import CurvePanel from './curve-panel';
 import ShareSheet from './share-sheet';
+import TokenActivityList from '../token-activity/token-activity-list';
 import { MERITUM_PAGE_COPY as COPY } from './meritum-copy';
 import { creatorCardPath, creatorPagePath, loginThenReturnTo, routeHandleOf, type CreatorPageAction } from '@/blog/lib/meritum/creator-handle';
 import { holdersHeadline, monthLabel, shapeHolders } from '@/blog/lib/meritum/holders';
@@ -625,6 +626,9 @@ const MeritumLanding: FC<{ handle: string; profile: CreatorProfileFields; shareU
               ) : null}
             </section>
           ) : null}
+
+          {/* ── transactions: who sent what to whom, under the holders (owner, 2026-10-06) ── */}
+          <TokenActivityList scope={{ kind: 'token', creator: handle }} variant="page" />
 
           <p className="font-ui text-[13px] leading-[1.58] text-ink-14">{honestNote()}</p>
         </div>

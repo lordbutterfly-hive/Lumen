@@ -24,6 +24,8 @@ import { useTokenAccounts } from '@/blog/features/creator-tokens/live/use-token-
 import { useTokenPriceChip } from '@/blog/features/creator-tokens/live/use-token-price-chip';
 import { healthWordFor } from '@/blog/features/creator-tokens/market/market-health';
 import { usdPrice } from '@/blog/features/creator-tokens/market/format';
+import { displayHandle } from '@/blog/features/creator-tokens/live/adapt';
+import TokenActivityList from '@/blog/features/creator-tokens/ui/token-activity/token-activity-list';
 
 const SECONDARY_BUTTON_CLASS =
   'lm-press rounded-card border border-line-11 px-4 py-2 text-caption font-medium text-ink-7 transition-colors hover:bg-surface-16';
@@ -82,6 +84,32 @@ export default function MeritumPanel() {
       ) : null}
 
       <YourTokensBody />
+
+      {/* ★ What this wallet sent, received, bought, sold and ordered, under
+          everything above (owner, 2026-10-06: "on meritum tab underneath you
+          should show as well for my wallet what i sent whom etc. follow our
+          hive wallet design"). One list per Magi account, never merged, the
+          Magi tab's rule (magi-panel.tsx): a Hive account and a bound wallet
+          are different accounts. Rendered only once the accounts are known;
+          every state before that is already explained by the body above. */}
+      {identity.isLoggedIn && !tokenAccounts.isLoading && !tokenAccounts.failed
+        ? tokenAccounts.accounts.map((account) => (
+            <TokenActivityList
+              key={account.id}
+              scope={{ kind: 'account', account: account.id }}
+              variant="wallet"
+              accountLabel={
+                tokenAccounts.accounts.length > 1
+                  ? account.kind === 'hive'
+                    ? t('wallet.magi.account_hive', { name: displayHandle(account.id) })
+                    : account.kind === 'evm'
+                      ? t('wallet.magi.account_evm')
+                      : t('wallet.magi.account_btc')
+                  : undefined
+              }
+            />
+          ))
+        : null}
     </div>
   );
 }

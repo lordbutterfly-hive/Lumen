@@ -46,6 +46,26 @@ export const MAGI_TRANSACTIONS_QUERY = `query MagiAccountTransactions($account: 
     first_seen
     status
     type
+    required_auths
+    ledger { amount asset from memo to type }
+    ops { data index type }
+  }
+}`;
+
+/**
+ * The text above before `required_auths` was added (2026-10-06). Still
+ * allowlisted by the proxy so a wallet tab opened before that deploy keeps
+ * loading instead of turning into "Couldn't load" on its next poll; it asks
+ * for strictly less. Safe to drop from the allowlist one release later.
+ */
+export const MAGI_TRANSACTIONS_QUERY_PREVIOUS = `query MagiAccountTransactions($account: String!, $limit: Int!, $offset: Int!, $byType: [String!]) {
+  findTransaction(filterOptions: { byAccount: $account, limit: $limit, offset: $offset, byType: $byType }) {
+    id
+    anchr_height
+    anchr_ts
+    first_seen
+    status
+    type
     ledger { amount asset from memo to type }
     ops { data index type }
   }
@@ -80,6 +100,12 @@ export interface MagiTransaction {
   status: MagiTransactionStatus;
   /** Where the transaction came from: `hive` (an L1 custom_json) or `vsc`. */
   origin: string;
+  /**
+   * Who signed it (`hive:<name>` or a `did:pkh:…`). The only place a contract
+   * call names its CALLER: a Meritum transfer's payload carries the creator,
+   * the recipient and the amount, but not the sender.
+   */
+  requiredAuths: string[];
   ledger: MagiLedgerEvent[];
   ops: MagiTransactionOp[];
 }
@@ -141,12 +167,14 @@ export function parseMagiTransactions(json: unknown): MagiTransaction[] {
     const statusRaw = asString(prop(raw, 'status'));
     const ledgerRaw = prop(raw, 'ledger');
     const opsRaw = prop(raw, 'ops');
+    const authsRaw = prop(raw, 'required_auths');
     out.push({
       id,
       anchorHeight: asNumber(prop(raw, 'anchr_height')),
       timestamp: normalizeMagiTimestamp(prop(raw, 'anchr_ts'), prop(raw, 'first_seen')),
       status: (STATUSES.includes(statusRaw) ? statusRaw : 'UNCONFIRMED') as MagiTransactionStatus,
       origin: asString(prop(raw, 'type')),
+      requiredAuths: Array.isArray(authsRaw) ? authsRaw.filter((a): a is string => typeof a === 'string' && a.length > 0) : [],
       ledger: Array.isArray(ledgerRaw)
         ? ledgerRaw
             .filter((entry) => entry !== null && entry !== undefined)

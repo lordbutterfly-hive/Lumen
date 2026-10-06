@@ -2,6 +2,7 @@ import Big from 'big.js';
 import type { MagiTransaction, MagiTransactionOp } from '@/blog/lib/lite/wallet/magi-transactions';
 import type { HistoryCategory } from './history-groups';
 import type { HistoryTone } from './account-history';
+import { meritumTransferPayload, namedTokenAmount } from '../../creator-tokens/lib/vsc/token-activity';
 
 /**
  * Turning one Magi transaction into the rows the wallet's Magi tab shows.
@@ -234,7 +235,9 @@ export function describeMagiOperation(
   tx: MagiTransaction,
   op: MagiTransactionOp,
   account: string,
-  contractNames: MagiContractNames = {}
+  contractNames: MagiContractNames = {},
+  /** The Meritum contract this build talks to, so its token transfers can be read (see the `call` case). */
+  meritumContractId: string | null = null
 ): MagiHistoryEntry {
   const data = op.data;
   const from = typeof data.from === 'string' ? data.from : '';
@@ -323,6 +326,28 @@ export function describeMagiOperation(
     case 'call_contract': {
       const action = typeof data.action === 'string' && data.action.length > 0 ? data.action : '';
       const contractId = typeof data.contract_id === 'string' ? data.contract_id : '';
+      // ★ A MERITUM TRANSFER MOVES TOKENS, NOT LEDGER MONEY (owner, 2026-10-06:
+      // "the meritum stuff doesnt show any numbers on transfers"). Its ledger is
+      // EMPTY (measured on mainnet, tx ba3a4d54…), so `contractCallAmount`
+      // below found nothing and the row said "No funds moved" about 8 tokens
+      // that did move. The amount, the token and the recipient are in the
+      // call's own payload; the sender is the transaction's signer.
+      if (meritumContractId && contractId === meritumContractId && action === 'transfer') {
+        const transfer = meritumTransferPayload(data.payload);
+        if (transfer) {
+          const sender = tx.requiredAuths[0] ?? '';
+          const incoming = transfer.to === account && sender !== account;
+          const outgoing = sender === account && transfer.to !== account;
+          return {
+            ...base,
+            labelKey: `${LABEL_PREFIX}${incoming ? 'meritum_received' : 'meritum_sent'}`,
+            category: incoming ? 'in' : outgoing ? 'out' : 'market',
+            tone: toneFor(incoming ? 'credit' : outgoing ? 'debit' : 'neutral'),
+            counterparty: incoming ? counterpartyFor(sender, 'from') : counterpartyFor(transfer.to, 'to'),
+            amountText: namedTokenAmount(transfer.amount, transfer.creator)
+          };
+        }
+      }
       const known = contractNames[contractId];
       const moved = contractCallAmount(tx, account);
       return {
@@ -368,13 +393,14 @@ export function describeMagiTransaction(
   tx: MagiTransaction,
   account: string,
   group: MagiHistoryGroup = 'all',
-  contractNames: MagiContractNames = {}
+  contractNames: MagiContractNames = {},
+  meritumContractId: string | null = null
 ): MagiHistoryEntry[] {
   const wanted = MAGI_GROUP_OP_TYPES[group];
   return tx.ops
     .filter((op) => wanted.length === 0 || wanted.includes(op.type))
     .sort((a, b) => a.index - b.index)
-    .map((op) => describeMagiOperation(tx, op, account, contractNames));
+    .map((op) => describeMagiOperation(tx, op, account, contractNames, meritumContractId));
 }
 
 /**
