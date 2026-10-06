@@ -8,6 +8,7 @@ import {Log} from '../../../Log';
 import {LinkSanitizer} from '../../../security/LinkSanitizer';
 import {Localization, LocalizationOptions} from '../Localization';
 import {AssetEmbedder, AssetEmbedderOptions} from './AssetEmbedder';
+import {AbstractEmbedder} from './embedders/AbstractEmbedder';
 import {YoutubeEmbedder} from './embedders/YoutubeEmbedder';
 import {AccountNameValidator} from './utils/AccountNameValidator';
 import linksRe, {any as linksAny} from './utils/Links';
@@ -229,6 +230,16 @@ export class HtmlDOMParser {
         if (url) this.reportIframeLink(url);
 
         if (!this.mutate) {
+            return;
+        }
+
+        // A pasted single-video YouTube iframe becomes the embed marker a bare YouTube
+        // link produces, so it renders as the same facade (see
+        // YoutubeEmbedder.getVideoIdFromIframeSrc for the measurement behind this).
+        const youtubeId = YoutubeEmbedder.getVideoIdFromIframeSrc(url);
+        if (youtubeId && child.parentNode) {
+            const marker = (child.ownerDocument as Document).createTextNode(AbstractEmbedder.getEmbedMarker(youtubeId, 'youtube'));
+            child.parentNode.replaceChild(marker, child);
             return;
         }
 

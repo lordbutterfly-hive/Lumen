@@ -7,6 +7,7 @@ import { getRenderer, getPreviewRenderer } from './lib/renderer';
 import ScrollToElement from './scroll-to-element';
 import { cn } from '@ui/lib/utils';
 import { isUrlWhitelisted } from '@hive/ui/config/lists/phishing';
+import { isRumbleEmbedId, parseRumblePage } from '@/blog/lib/post/rumble-embed';
 
 /**
  * ★★★ ONE H1 PER POST PAGE (2026-08-11, audit item 8). The post page already
@@ -201,6 +202,22 @@ const RendererContainer = ({
     return iframe;
   };
 
+  /** A Rumble player for an id `/api/embed/rumble` answered with (re-checked by the caller). */
+  const rumblePlayer = (embedId: string) => {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'videoWrapper';
+    const iframe = document.createElement('iframe');
+    iframe.width = '640';
+    iframe.height = '360';
+    iframe.src = `https://rumble.com/embed/${embedId}/`;
+    iframe.setAttribute('allowfullscreen', 'allowfullscreen');
+    iframe.setAttribute('frameborder', '0');
+    iframe.setAttribute('sandbox', EMBED_SANDBOX);
+    iframe.setAttribute('allow', EMBED_ALLOW);
+    wrapper.appendChild(iframe);
+    return wrapper;
+  };
+
   const handleYoutubeFacadeClick = (e: Event) => {
     const target = e.currentTarget as HTMLElement;
     const videoId = safeYoutubeId(target.dataset.youtubeId);
@@ -262,6 +279,23 @@ const RendererContainer = ({
       });
     }
 
+    // Rumble PAGE links render as a `rumble-facade` (a plain "Watch on Rumble" link):
+    // their player id differs from the page id and only Rumble's oEmbed maps them, so it
+    // is looked up here, after load, and the player swapped in. Any failure leaves the
+    // link. See lib/post/rumble-embed.ts.
+    let rumbleCancelled = false;
+    ref.current?.querySelectorAll<HTMLElement>('.rumble-facade').forEach((facade) => {
+      const page = facade.dataset.rumblePage;
+      if (!parseRumblePage(page)) return;
+      fetch(`/api/embed/rumble?page=${encodeURIComponent(page as string)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { embedId?: unknown } | null) => {
+          if (rumbleCancelled || !facade.isConnected || !data || !isRumbleEmbedId(data.embedId)) return;
+          facade.replaceWith(rumblePlayer(data.embedId));
+        })
+        .catch(() => {});
+    });
+
     const rootEl = ref.current;
     const pluginCleanups: (() => void)[] = [];
     if (rootEl) {
@@ -272,6 +306,7 @@ const RendererContainer = ({
     }
 
     return () => {
+      rumbleCancelled = true;
       pluginCleanups.forEach((cleanup) => cleanup());
       if (previewMode) {
         youtubeFacades?.forEach((facade) => {

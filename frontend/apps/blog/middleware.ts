@@ -101,7 +101,9 @@ const baseMiddleware = createMiddleware({
       'https://embed.peakd.com',
       'https://aureal-embed.web.app',
       'https://embed.truvvl.com',
-      'https://www.youtube-nocookie.com'
+      'https://www.youtube-nocookie.com',
+      // Rumble players, pasted or looked up from a page link (2026-10-06).
+      'https://rumble.com'
     ],
     reportUri: '/api/csp-report'
   }
@@ -295,7 +297,10 @@ export const config = {
   // max-age=60` (it is a viewer-independent spot price) while this middleware
   // was still minting a Set-Cookie onto it, which only worked because Next's
   // header merge lets `no-store` win. Same fix as the four names before it.
+  // ★ `api/embed/rumble` added 2026-10-06. Maps a Rumble page link to its player id: the
+  // same answer for every reader, no cookie or session read, served `public` so a browser
+  // keeps it. Same rule as the names above.
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|fonts/|images/|api/avatar|api/trending-tags|api/streak/marks|api/creator-profile|api/market-prices).*)'
+    '/((?!_next/static|_next/image|favicon\\.ico|fonts/|images/|api/avatar|api/trending-tags|api/streak/marks|api/creator-profile|api/market-prices|api/embed/rumble).*)'
   ]
 };

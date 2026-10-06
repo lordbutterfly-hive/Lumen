@@ -3,6 +3,7 @@ import {LocalizationOptions} from '../Localization';
 import {AbstractEmbedder} from './embedders/AbstractEmbedder';
 import {BitChuteEmbedder} from './embedders/BitChuteEmbedder';
 import {InstagramEmbedder} from './embedders/InstagramEmbedder';
+import {RumbleEmbedder} from './embedders/RumbleEmbedder';
 import {SpotifyEmbedder} from './embedders/SpotifyEmbedder';
 import {ThreeSpeakEmbedder} from './embedders/ThreeSpeakEmbedder';
 import {TwitchEmbedder} from './embedders/TwitchEmbedder';
@@ -28,7 +29,8 @@ export class AssetEmbedder {
             new ThreeSpeakEmbedder(),
             new InstagramEmbedder(),
             new TwitterEmbedder(),
-            new BitChuteEmbedder()
+            new BitChuteEmbedder(),
+            new RumbleEmbedder()
         ];
     }
 

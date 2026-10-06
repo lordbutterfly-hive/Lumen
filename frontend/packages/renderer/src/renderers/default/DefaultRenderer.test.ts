@@ -174,10 +174,12 @@ describe('DefaultRender', () => {
                 '<p><div class="videoWrapper"><div class="youtube-facade" data-youtube-id="0nFkmd-A7jA" data-width="640" data-height="480"><img src="https://img.youtube.com/vi/0nFkmd-A7jA/hqdefault.jpg" alt="YouTube video thumbnail" loading="eager" /><button class="youtube-play-btn" aria-label="Play video"><svg viewBox="0 0 68 48" width="68" height="48"><path class="youtube-play-bg" d="M66.52 7.74c-.78-2.93-2.49-5.41-5.42-6.19C55.79.13 34 0 34 0S12.21.13 6.9 1.55c-2.93.78-4.63 3.26-5.42 6.19C.06 13.05 0 24 0 24s.06 10.95 1.48 16.26c.78 2.93 2.49 5.41 5.42 6.19C12.21 47.87 34 48 34 48s21.79-.13 27.1-1.55c2.93-.78 4.64-3.26 5.42-6.19C67.94 34.95 68 24 68 24s-.06-10.95-1.48-16.26z" fill="#f00"/><path d="M45 24 27 14v20" fill="#fff"/></svg></button></div></div></p>'
         },
         {
+            // A pasted YouTube iframe renders as the same facade as a bare link (2026-10-06,
+            // see YoutubeEmbedder.getVideoIdFromIframeSrc).
             name: 'Youtube embed via iframe should be embedded correctly',
             raw: '<iframe width="560" height="315" src="https://www.youtube.com/embed/0nFkmd-A7jA" frameborder="0" allowfullscreen></iframe>',
             expected:
-                '<div class="videoWrapper"><iframe sandbox="allow-scripts allow-same-origin allow-presentation" allow="fullscreen; picture-in-picture; encrypted-media" src="https://www.youtube.com/embed/0nFkmd-A7jA" width="640" height="480" frameborder="0" allowfullscreen="allowfullscreen" webkitallowfullscreen="webkitallowfullscreen" mozallowfullscreen="mozallowfullscreen"></iframe></div>'
+                '<div class="videoWrapper"><div class="youtube-facade" data-youtube-id="0nFkmd-A7jA" data-width="640" data-height="480"><img src="https://img.youtube.com/vi/0nFkmd-A7jA/hqdefault.jpg" alt="YouTube video thumbnail" loading="eager" /><button class="youtube-play-btn" aria-label="Play video"><svg viewBox="0 0 68 48" width="68" height="48"><path class="youtube-play-bg" d="M66.52 7.74c-.78-2.93-2.49-5.41-5.42-6.19C55.79.13 34 0 34 0S12.21.13 6.9 1.55c-2.93.78-4.63 3.26-5.42 6.19C.06 13.05 0 24 0 24s.06 10.95 1.48 16.26c.78 2.93 2.49 5.41 5.42 6.19C12.21 47.87 34 48 34 48s21.79-.13 27.1-1.55c2.93-.78 4.64-3.26 5.42-6.19C67.94 34.95 68 24 68 24s-.06-10.95-1.48-16.26z" fill="#f00"/><path d="M45 24 27 14v20" fill="#fff"/></svg></button></div></div>'
         },
         {
             name: 'Vimeo link via iframe should be embedded correctly',

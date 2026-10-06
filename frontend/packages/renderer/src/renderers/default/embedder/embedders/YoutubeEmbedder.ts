@@ -4,8 +4,33 @@ import {AbstractEmbedder, EmbedMetadata} from './AbstractEmbedder';
 export class YoutubeEmbedder extends AbstractEmbedder {
     public type = 'youtube';
 
-    private static readonly linkRegex = /https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/(embed|shorts)\/)([A-Za-z0-9_-]+)[^ ]*/i;
-    private static readonly idRegex = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/(embed|shorts)\/)([A-Za-z0-9_-]+)/i;
+    /**
+     * Group 2 is the 11-character video id (group 1 is unused, kept so callers that
+     * read `[2]` stay correct). Accepted 2026-10-06 beyond www./bare youtube.com and
+     * youtu.be: `m.` and `music.` hosts, `/live/` links, and share links where `v=` is
+     * not the first query parameter (`watch?feature=share&v=`). The `(?:[^\s&#]*&)*`
+     * run is linear: every repetition must end on a `&` it cannot itself contain.
+     */
+    private static readonly linkRegex =
+        /https?:\/\/(?:(?:www|m|music)\.)?(?:youtube\.com\/(watch\?(?:[^\s&#]*&)*v=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])[^ ]*/i;
+    private static readonly idRegex = /(?:youtube\.com\/(watch\?(?:[^\s&#]*&)*v=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])/i;
+
+    /**
+     * ★ A PASTED `<iframe src=".../embed/<id>">` IS TURNED INTO THE SAME FACADE A BARE
+     * LINK GETS (2026-10-06). Measured in Chrome on a cold cache: a YouTube iframe that
+     * arrives in the server-rendered post HTML ignores every click (player stuck in
+     * `unstarted-mode`, 6 of 6 runs), while the same post on PeakD plays 2 of 2 and the
+     * facade path, whose iframe `rendererContainer.tsx` builds after the page has
+     * loaded, plays 3 of 3. Not the sandbox, not size or visibility, not an overlay:
+     * each was measured. Returns the id for a single-video embed only; a playlist
+     * (`videoseries`) has no facade and stays a pasted iframe.
+     */
+    public static getVideoIdFromIframeSrc(src: string | null): string | undefined {
+        if (!src) return undefined;
+        const m = src.match(/^(?:https?:)?\/\/(?:(?:www|m)\.)?youtube\.com\/embed\/([A-Za-z0-9_-]{11})(?:[/?#&]|$)/i);
+        if (!m || m[1].toLowerCase() === 'videoseries') return undefined;
+        return m[1];
+    }
 
     public static getYoutubeMetadataFromLink(data: string): {id: string; url: string; thumbnail: string} | undefined {
         if (!data) {

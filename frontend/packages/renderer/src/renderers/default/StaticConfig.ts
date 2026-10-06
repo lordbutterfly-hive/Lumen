@@ -49,11 +49,17 @@ export class StaticConfig {
                     if (!src) {
                         return null;
                     }
-                    const m = src.match(/https:\/\/player\.vimeo\.com\/video\/([0-9]+)/);
-                    if (!m || m.length !== 2) {
+                    // 2026-10-06: the protocol-relative `//player.vimeo.com` form was accepted
+                    // by `re` but rejected here (this match demanded `https:`), so it rendered
+                    // "(Unsupported ...)". And an unlisted video's `h=` privacy hash, which
+                    // Vimeo's own embed code carries, was dropped, leaving a player that
+                    // refuses the video. Both kept now, the host still a literal.
+                    const m = src.match(/^(?:https?:)?\/\/player\.vimeo\.com\/video\/(\d{1,12})(?:[/?#]|$)/i);
+                    if (!m) {
                         return null;
                     }
-                    return 'https://player.vimeo.com/video/' + m[1];
+                    const h = src.match(/[?&]h=([0-9a-f]{6,20})(?:[&#]|$)/i);
+                    return 'https://player.vimeo.com/video/' + m[1] + (h ? `?h=${h[1]}` : '');
                 }
             },
             {
@@ -64,13 +70,17 @@ export class StaticConfig {
                 // could embed an iframe pointing at a registerable look-alike host for
                 // phishing. Now only a real youtube embed id passes and the host is
                 // rebuilt from a literal, exactly as vimeo/3speak already do.
-                re: /^(?:https?:)?\/\/www\.youtube\.com\/embed\/[\w-]{11}(?:[/?#].*)?$/i,
+                // 2026-10-06: a pasted single-video YouTube iframe no longer reaches this
+                // entry in a normal render (HtmlDOMParser turns it into the facade first);
+                // a playlist (`videoseries`) still does. Host widened to bare and `m.`
+                // youtube.com, which rendered "(Unsupported ...)"; still rebuilt to www.
+                re: /^(?:https?:)?\/\/(?:(?:www|m)\.)?youtube\.com\/embed\/[\w-]{11}(?:[/?#].*)?$/i,
                 fn: (src: string) => {
                     if (!src) return null;
                     // Exactly an 11-char youtube id (or the literal `videoseries` for a
                     // playlist, also 11), captured with a hard boundary so no trailing
                     // attacker chars fold into the rebuilt path.
-                    const m = src.match(/^(?:https?:)?\/\/www\.youtube\.com\/embed\/([\w-]{11})(?:[/?#]|$)/i);
+                    const m = src.match(/^(?:https?:)?\/\/(?:(?:www|m)\.)?youtube\.com\/embed\/([\w-]{11})(?:[/?#]|$)/i);
                     if (!m) return null;
                     if (m[1].toLowerCase() === 'videoseries') {
                         const list = src.match(/[?&]list=([\w-]{10,40})(?:[&#]|$)/i);
@@ -290,6 +300,18 @@ export class StaticConfig {
                 fn: (src: string) => {
                     const m = src.match(/^https:\/\/embed\.truvvl\.com\/@([a-z0-9.-]{3,16})\/([a-z0-9-]{1,255})(?:[/?#]|$)/i);
                     return m ? `https://embed.truvvl.com/@${m[1]}/${m[2]}` : null;
+                }
+            },
+            {
+                // A pasted Rumble player. `pub` is the publisher's revenue id from Rumble's
+                // own embed code, kept when it is plain alphanumerics. Bare rumble.com links
+                // go through RumbleEmbedder. Added 2026-10-06.
+                re: /^(?:https?:)?\/\/(?:www\.)?rumble\.com\/embed\/[a-z0-9]{4,20}\/?(?:[?#].*)?$/i,
+                fn: (src: string) => {
+                    const m = src.match(/^(?:https?:)?\/\/(?:www\.)?rumble\.com\/embed\/([a-z0-9]{4,20})(?:[/?#]|$)/i);
+                    if (!m) return null;
+                    const pub = src.match(/[?&]pub=([a-z0-9]{1,20})(?:[&#]|$)/i);
+                    return `https://rumble.com/embed/${m[1]}/` + (pub ? `?pub=${pub[1]}` : '');
                 }
             },
             {
