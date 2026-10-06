@@ -10,9 +10,13 @@ import {AbstractEmbedder, EmbedMetadata} from './AbstractEmbedder';
  * - https://x.com/username/status/TWEET_ID
  * - https://www.twitter.com/username/status/TWEET_ID
  * - https://www.x.com/username/status/TWEET_ID
+ * - https://mobile.x.com/username/status/TWEET_ID
+ * - the same path on an X mirror (goyimx.com, nitter.net, xcancel.com, ...)
  *
  * Note: Both twitter.com and x.com are supported to handle the rebrand.
  * All embeds use platform.twitter.com which remains the stable embed domain.
+ * A mirror link is shown through X's own player by its tweet id, so the mirror
+ * site itself is never loaded (goyimx.com also refuses framing).
  */
 export class TwitterEmbedder extends AbstractEmbedder {
     public type = 'twitter';
@@ -21,9 +25,10 @@ export class TwitterEmbedder extends AbstractEmbedder {
      * Matches Twitter/X status URLs including trailing path segments,
      * query params and fragments (e.g. /photo/1?s=20#top).
      * Tweet IDs are numeric, typically 19 digits (allow 1-20 for safety).
-     * Capture group 1: domain (twitter|x), group 2: tweet ID.
+     * Capture group 1: domain, group 2: tweet ID.
      */
-    private static readonly linkRegex = /https?:\/\/(?:www\.)?(twitter|x)\.com\/(?:\w+)\/status\/(\d{1,20})[^\s]*/i;
+    private static readonly linkRegex =
+        /https?:\/\/(?:(?:www|mobile)\.)?(twitter\.com|x\.com|goyimx\.com|nitter\.net|nitter\.poast\.org|xcancel\.com|fxtwitter\.com|vxtwitter\.com|fixupx\.com|fixvx\.com)\/(?:\w+)\/status\/(\d{1,20})[^\s]*/i;
 
     public getEmbedMetadata(input: string | HTMLObjectElement): EmbedMetadata | undefined {
         const data = typeof input === 'string' ? input : input.data;

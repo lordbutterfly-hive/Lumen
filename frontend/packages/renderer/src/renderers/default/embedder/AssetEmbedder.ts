@@ -1,6 +1,7 @@
 import ow from 'ow';
 import {LocalizationOptions} from '../Localization';
 import {AbstractEmbedder} from './embedders/AbstractEmbedder';
+import {BitChuteEmbedder} from './embedders/BitChuteEmbedder';
 import {InstagramEmbedder} from './embedders/InstagramEmbedder';
 import {SpotifyEmbedder} from './embedders/SpotifyEmbedder';
 import {ThreeSpeakEmbedder} from './embedders/ThreeSpeakEmbedder';
@@ -26,7 +27,8 @@ export class AssetEmbedder {
             new SpotifyEmbedder(),
             new ThreeSpeakEmbedder(),
             new InstagramEmbedder(),
-            new TwitterEmbedder()
+            new TwitterEmbedder(),
+            new BitChuteEmbedder()
         ];
     }
 

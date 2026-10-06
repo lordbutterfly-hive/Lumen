@@ -89,6 +89,183 @@ describe('iframe allowlist security', function () {
             expect(iframeSrcs(html)[0]).to.match(/^https:\/\/w\.soundcloud\.com\/player\/\?url=https%3A%2F%2Fapi\.soundcloud\.com%2Ftracks%2F257659076/);
         });
         it('BLOCKS a non-soundcloud url param', () => blocked('https://w.soundcloud.com/player/?url=https%3A%2F%2Fevil.com%2Fx&auto_play=false'));
+
+        // The three forms below were BLOCKED by the 09-04 check; each input is a real
+        // src from Lumen's "Blocked iframe" log (09-21 to 10-06).
+        const decodedUrl = (html: string): string => {
+            const src = (iframeSrcs(html)[0] || '').replace(/&amp;/g, '&');
+            const m = src.match(/^https:\/\/w\.soundcloud\.com\/player\/\?url=([^&]+)&/);
+            return m ? decodeURIComponent(m[1]) : `(no soundcloud player: ${src})`;
+        };
+        it('renders the URN id form of SoundCloud share code, unchanged', () => {
+            const src =
+                'https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/playlists/soundcloud%253Aplaylists%253A2110977434&color=%23040404&auto_play=true&hide_related=false';
+            expect(decodedUrl(r.render(`<iframe src="${src}"></iframe>`))).to.equal('https://api.soundcloud.com/playlists/soundcloud%3Aplaylists%3A2110977434');
+        });
+        it('renders a private track with its secret token', () => {
+            const src = 'https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/tracks/128779094%3Fsecret_token%3Ds-VzBvf&color=%23ff5500&auto_play=false';
+            expect(decodedUrl(r.render(`<iframe src="${src}"></iframe>`))).to.equal('https://api.soundcloud.com/tracks/128779094?secret_token=s-VzBvf');
+        });
+        it('renders a plain soundcloud.com permalink', () => {
+            const src = 'https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/thylacinew/piany-pianino&auto_play=false&hide_related=false';
+            expect(decodedUrl(r.render(`<iframe src="${src}"></iframe>`))).to.equal('https://soundcloud.com/thylacinew/piany-pianino');
+        });
+        it('never autoplays, even when the author asked for it', () => {
+            const src = 'https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/tracks/soundcloud%253Atracks%253A2367631499&auto_play=true';
+            const out = (iframeSrcs(r.render(`<iframe src="${src}"></iframe>`))[0] || '').replace(/&amp;/g, '&');
+            expect(out).to.contain('auto_play=false');
+            expect(out).to.not.contain('auto_play=true');
+        });
+        const hostileSoundCloud = [
+            'https://w.soundcloud.com/player/?url=https%3A//soundcloud.com.evil.com/a/b',
+            'https://w.soundcloud.com/player/?url=https%3A//soundcloud.com@evil.com/a/b',
+            'https://w.soundcloud.com/player/?url=https%3A//evil.com/soundcloud.com/a/b',
+            'https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/a/b/c/d',
+            'https://w.soundcloud.com/player/?url=https%3A//soundcloud.com/a/..%252F..%252Fevil',
+            'https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/tracks/1%3Fsecret_token%3Ds-x%2526evil%253D1',
+            'https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/tracks/soundcloud%253Aplaylists%253A1',
+            'https://w.soundcloud.com/player/?url=javascript:alert(1)'
+        ];
+        for (const src of hostileSoundCloud) {
+            it(`BLOCKS ${src}`, () => blocked(src));
+        }
+    });
+
+    /**
+     * ★ PLAYERS ADDED 2026-10-06. Each valid input is a real src from Lumen's
+     * "Blocked iframe" log or a real post; each must rebuild to exactly the
+     * expected src. Then every hostile variant of every host must leave no iframe
+     * pointing anywhere but the real hosts.
+     */
+    describe('players added 2026-10-06', () => {
+        const valid: Array<[string, string]> = [
+            ['https://www.skatehype.com/ifplay.php?v=35202', 'https://www.skatehype.com/ifplay.php?v=35202'],
+            ['//skatehype.com/ifplay.php?v=35202&autoplay=1', 'https://www.skatehype.com/ifplay.php?v=35202'],
+            ['https://www.bitchute.com/embed/Ap7lxto3Hl7X/', 'https://www.bitchute.com/embed/Ap7lxto3Hl7X/'],
+            ['https://old.bitchute.com/embed/Ap7lxto3Hl7X', 'https://www.bitchute.com/embed/Ap7lxto3Hl7X/'],
+            [
+                'https://odysee.com/$/embed/2021-12-12-00-12-27/d5a15676ab9d66c16ce850c2b4d1c24f2ed7f3c6?r=BaCwYAN2K9zLKf1R25N9Av64xcZiASPC',
+                'https://odysee.com/$/embed/2021-12-12-00-12-27/d5a15676ab9d66c16ce850c2b4d1c24f2ed7f3c6'
+            ],
+            [
+                'https://odysee.com/$/embed/@SmaragdisRubor:3/sneak:44?r=AvrrBitehAHvACDTSZqeyFTf7xX9qEYj&autoplay=true',
+                'https://odysee.com/$/embed/@SmaragdisRubor:3/sneak:44'
+            ],
+            [
+                'https://odysee.com/%24/embed/%40criptomonedastv%3A6%2FHBC-Septiembre-23-2026%3A1?r=FUDCGuukwy6i6mWNNcrXHPqCUjaLLeNp',
+                'https://odysee.com/$/embed/@criptomonedastv:6/HBC-Septiembre-23-2026:1'
+            ],
+            [
+                'https://ipfs.skatehive.app/ipfs/QmPdsChTSXQkqu3FLJHcAjqdLCqq5bCcnC1dKwCB8oLA1S?pinataGatewayToken=nxHSFa1jQsiF7IHeXWH',
+                'https://ipfs.skatehive.app/ipfs/QmPdsChTSXQkqu3FLJHcAjqdLCqq5bCcnC1dKwCB8oLA1S'
+            ],
+            [
+                'https://ipfs.skatehive.app/ipfs/bafybeihmjw3sgcopgwvmnzlq3cskld3dokp55yleaz3carsltp4zqdh4em',
+                'https://ipfs.skatehive.app/ipfs/bafybeihmjw3sgcopgwvmnzlq3cskld3dokp55yleaz3carsltp4zqdh4em'
+            ],
+            ['https://nftshowroom.com/embed/undersound_come-musica_quincy-jones', 'https://nftshowroom.com/embed/undersound_come-musica_quincy-jones'],
+            ['https://embed.peakd.com/hive-139531/@asgarth/re-fjworld-tjm20x', 'https://embed.peakd.com/hive-139531/@asgarth/re-fjworld-tjm20x'],
+            ['https://embed.peakd.com/@asgarth/re-fjworld-tjm20x', 'https://embed.peakd.com/@asgarth/re-fjworld-tjm20x'],
+            ['https://aureal-embed.web.app/2088949', 'https://aureal-embed.web.app/2088949'],
+            [
+                'https://embed.truvvl.com/@borivan/firemens-saves-our-live-respect-firemen-20211124t133726812z',
+                'https://embed.truvvl.com/@borivan/firemens-saves-our-live-respect-firemen-20211124t133726812z'
+            ],
+            ['https://www.youtube-nocookie.com/embed/hME4bzrPkGk?start=10', 'https://www.youtube-nocookie.com/embed/hME4bzrPkGk']
+        ];
+        for (const [input, expected] of valid) {
+            it(`renders ${input}`, () => {
+                const srcs = iframeSrcs(r.render(`<iframe src="${input}"></iframe>`)).map((s) => s.replace(/&amp;/g, '&'));
+                expect(srcs).to.deep.equal([expected]);
+            });
+        }
+
+        it('renders the real skatehype post body (@miguelurbina) as a sandboxed player', () => {
+            const body =
+                "<div style='position:relative;padding-bottom:56.25%;height:0;overflow:hidden'><iframe style='position:absolute;top:0;left:0;width:100%;height:100%' allowfullscreen src='https://www.skatehype.com/ifplay.php?v=35202' name='hype35202'></iframe><br>\n</div>";
+            const html = r.render(body);
+            expect(iframeSrcs(html)).to.deep.equal(['https://www.skatehype.com/ifplay.php?v=35202']);
+            expect(html).to.match(/<iframe[^>]*\ssandbox="allow-scripts allow-same-origin allow-presentation"/);
+            expect(html).to.not.contain('Unsupported');
+        });
+
+        const realHosts =
+            /^https:\/\/(?:www\.skatehype\.com|www\.bitchute\.com|odysee\.com|ipfs\.skatehive\.app|nftshowroom\.com|embed\.peakd\.com|aureal-embed\.web\.app|embed\.truvvl\.com|www\.youtube-nocookie\.com)\//;
+        const hostile = [
+            'https://www.skatehype.com.evil.com/ifplay.php?v=1',
+            'https://www.skatehype.com@evil.com/ifplay.php?v=1',
+            'https://evil.com/www.skatehype.com/ifplay.php?v=1',
+            'https://www-skatehype.com/ifplay.php?v=1',
+            'https://www.skatehype.com/ifplay.php?v=1"><iframe src="https://evil.com"></iframe>',
+            'https://www.skatehype.com/ifplay.php?v=1x',
+            'https://www.bitchute.com.evil.com/embed/Ap7lxto3Hl7X/',
+            'https://bitchute.com@evil.com/embed/Ap7lxto3Hl7X/',
+            'https://www.bitchute.com/embed/Ap7lxto3Hl7X/../../evil',
+            'https://www.bitchute.com/embed/a"onload="x/',
+            'https://odysee.com.evil.com/$/embed/name/d5a15676ab9d66c16ce850c2b4d1c24f2ed7f3c6',
+            'https://odysee.com@evil.com/$/embed/name/d5a15676ab9d66c16ce850c2b4d1c24f2ed7f3c6',
+            'https://odysee.com/$/embed/../d5a15676ab9d66c16ce850c2b4d1c24f2ed7f3c6',
+            'https://odysee.com/%24/embed/..%2F..%2Fevil/d5a15676ab9d66c16ce850c2b4d1c24f2ed7f3c6',
+            'https://odysee.com/$/embed/name/d5a15676ab9d66c16ce850c2b4d1c24f2ed7f3c6/extra',
+            'https://odysee.com/%24/embed/%40x%3A1%2Fy%3A1%22%3E%3Cscript%3E',
+            'https://ipfs.skatehive.app.evil.com/ipfs/QmPdsChTSXQkqu3FLJHcAjqdLCqq5bCcnC1dKwCB8oLA1S',
+            'https://ipfs.skatehive.app/ipfs/QmPdsChTSXQkqu3FLJHcAjqdLCqq5bCcnC1dKwCB8oLA1S/../../evil',
+            'https://ipfs.skatehive.app/ipns/evil.com',
+            'http://ipfs.skatehive.app/ipfs/QmPdsChTSXQkqu3FLJHcAjqdLCqq5bCcnC1dKwCB8oLA1S',
+            'https://nftshowroom.com.evil.com/embed/x',
+            'https://nftshowroom.com/embed/x/../../evil',
+            'https://embed.peakd.com.evil.com/@a/b',
+            'https://embed.peakd.com/@asgarth/../../evil',
+            'https://embed.peakd.com/../@asgarth/x',
+            'https://aureal-embed.web.app.evil.com/1',
+            'https://aureal-embed-web.app/1',
+            'https://embed.truvvl.com.evil.com/@a/b',
+            'https://www.youtube-nocookie.com.evil.com/embed/hME4bzrPkGk',
+            'https://www-youtube-nocookie.com/embed/hME4bzrPkGk',
+            'javascript:alert(1)//www.skatehype.com/ifplay.php?v=1'
+        ];
+        for (const input of hostile) {
+            it(`never points an iframe at a non-allowlisted host for: ${input}`, () => {
+                for (const wrapped of [input, `<iframe src="${input}"></iframe>`]) {
+                    for (const src of iframeSrcs(r.render(wrapped))) {
+                        const safe = realHosts.test(src) && !src.includes('..') && !src.includes('"');
+                        expect(safe, `rendered iframe escaped the allowlist: ${src} (from ${wrapped})`).to.equal(true);
+                    }
+                }
+            });
+        }
+    });
+
+    describe('BitChute bare links', () => {
+        it('renders a bare bitchute.com/video link as the bitchute player', () => {
+            const srcs = iframeSrcs(r.render('Watch this https://www.bitchute.com/video/Ap7lxto3Hl7X/ now'));
+            expect(srcs).to.deep.equal(['https://www.bitchute.com/embed/Ap7lxto3Hl7X/']);
+        });
+        it('the bitchute player carries the sandbox', () => {
+            const html = r.render('https://www.bitchute.com/video/Ap7lxto3Hl7X/');
+            expect(html).to.match(/<iframe[^>]*\ssandbox="allow-scripts allow-same-origin allow-presentation"/);
+        });
+        it('does NOT embed a bitchute look-alike', () => {
+            expect(iframeSrcs(r.render('https://www.bitchute.com.evil.com/video/Ap7lxto3Hl7X/'))).to.have.length(0);
+            expect(iframeSrcs(r.render('https://evilbitchute.com/video/Ap7lxto3Hl7X/'))).to.have.length(0);
+        });
+    });
+
+    describe('X mirror links', () => {
+        it('renders the goyimx.com link through the X player by tweet id', () => {
+            const srcs = iframeSrcs(r.render('https://goyimx.com/Thefactsdude/status/2103488248148320301#m'));
+            expect(srcs).to.deep.equal(['https://platform.twitter.com/embed/Tweet.html?id=2103488248148320301']);
+        });
+        it('renders nitter / xcancel / fxtwitter / mobile.x.com links the same way', () => {
+            for (const host of ['nitter.net', 'xcancel.com', 'fxtwitter.com', 'mobile.x.com']) {
+                const srcs = iframeSrcs(r.render(`https://${host}/someone/status/2103488248148320301`));
+                expect(srcs, host).to.deep.equal(['https://platform.twitter.com/embed/Tweet.html?id=2103488248148320301']);
+            }
+        });
+        it('does NOT embed a non-mirror host that merely ends in a mirror name', () => {
+            expect(iframeSrcs(r.render('https://evilgoyimx.com/a/status/2103488248148320301'))).to.have.length(0);
+            expect(iframeSrcs(r.render('https://goyimx.com.evil.com/a/status/2103488248148320301'))).to.have.length(0);
+        });
     });
 
     describe('Spotify', () => {

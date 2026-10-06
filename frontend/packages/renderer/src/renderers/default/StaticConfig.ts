@@ -19,6 +19,8 @@
  * - Twitch.tv video players
  * - Spotify embeds (playlists, shows, episodes, albums, tracks, artists)
  * - 3speak video embeds
+ * - SkateHype, BitChute, Odysee, Skatehive IPFS videos, NFT Showroom, PeakD post
+ *   embeds, Aureal, Truvvl and youtube-nocookie players
  */
 export class StaticConfig {
     public static sanitization = {
@@ -78,10 +80,17 @@ export class StaticConfig {
                 }
             },
             {
-                // Dot escaped + the `url=` param VALIDATED to an api.soundcloud.com
-                // resource (2026-09-04). The host was already hardcoded in fn, but the
-                // old code embedded the raw attacker `url=` value; now only a real
-                // soundcloud tracks/playlists/users resource may ride in the player.
+                // Dot escaped + the `url=` param VALIDATED to a soundcloud resource
+                // (2026-09-04). The host was already hardcoded in fn, but the old code
+                // embedded the raw attacker `url=` value; now only a real soundcloud
+                // resource may ride in the player, rebuilt from its validated parts.
+                //
+                // Widened 2026-10-06: the 09-04 check accepted only `api.soundcloud.com/
+                // <kind>/<digits>` and blocked 11 real players on Lumen in 15 days. The
+                // other forms SoundCloud itself emits are accepted too: the URN id its
+                // current share code uses (`<kind>/soundcloud%3A<kind>%3A<digits>`), a
+                // private track's `?secret_token=s-...`, and a plain soundcloud.com
+                // permalink (`/<user>/<track>`, `/<user>/sets/<name>`).
                 re: /^https:\/\/w\.soundcloud\.com\/player\/.*/i,
                 fn: (src: string) => {
                     if (!src) {
@@ -97,10 +106,21 @@ export class StaticConfig {
                     } catch {
                         return null;
                     }
-                    if (!/^https:\/\/api\.soundcloud\.com\/(tracks|playlists|users)\/\d{1,20}$/i.test(decoded)) {
+                    let resource: string | null = null;
+                    const api = decoded.match(/^https:\/\/api\.soundcloud\.com\/(tracks|playlists|users)\/(\d{1,20})(?:\?secret_token=(s-[A-Za-z0-9]{1,32}))?$/i);
+                    const urn = decoded.match(/^https:\/\/api\.soundcloud\.com\/(tracks|playlists|users)\/soundcloud%3A(tracks|playlists|users)%3A(\d{1,20})$/i);
+                    const permalink = decoded.match(/^https:\/\/(?:www\.|m\.)?soundcloud\.com\/([\w-]{1,100})\/([\w-]{1,200})(?:\/([\w-]{1,200}))?\/?$/i);
+                    if (api) {
+                        resource = `https://api.soundcloud.com/${api[1]}/${api[2]}` + (api[3] ? `?secret_token=${api[3]}` : '');
+                    } else if (urn && urn[1].toLowerCase() === urn[2].toLowerCase()) {
+                        resource = `https://api.soundcloud.com/${urn[1]}/soundcloud%3A${urn[2]}%3A${urn[3]}`;
+                    } else if (permalink) {
+                        resource = `https://soundcloud.com/${permalink[1]}/${permalink[2]}` + (permalink[3] ? `/${permalink[3]}` : '');
+                    }
+                    if (!resource) {
                         return null;
                     }
-                    return `https://w.soundcloud.com/player/?url=${encodeURIComponent(decoded)}&auto_play=false&hide_related=false&show_comments=true&show_user=true&show_reposts=false&visual=true`;
+                    return `https://w.soundcloud.com/player/?url=${encodeURIComponent(resource)}&auto_play=false&hide_related=false&show_comments=true&show_user=true&show_reposts=false&visual=true`;
                 }
             },
             {
@@ -190,6 +210,94 @@ export class StaticConfig {
                         return null;
                     }
                     return `https://platform.twitter.com/embed/Tweet.html?id=${match[1]}`;
+                }
+            },
+            // ★ Players added 2026-10-06 from Lumen's own "Blocked iframe" log (09-21 to
+            // 10-06: 250 distinct players blocked). Same rule as every entry above: the
+            // `re` is anchored with escaped dots, and the fn re-validates the id with a
+            // strict charset and REBUILDS the src from a hardcoded host, so nothing an
+            // author writes beyond the validated id reaches the page. Each host was
+            // checked to allow framing (no X-Frame-Options / frame-ancestors).
+            {
+                // SkateHype's auto-posts (146 distinct videos blocked in 15 days).
+                re: /^(?:https?:)?\/\/(?:www\.)?skatehype\.com\/ifplay\.php\?v=\d{1,10}(?:[&#].*)?$/i,
+                fn: (src: string) => {
+                    const m = src.match(/^(?:https?:)?\/\/(?:www\.)?skatehype\.com\/ifplay\.php\?v=(\d{1,10})(?:[&#]|$)/i);
+                    return m ? `https://www.skatehype.com/ifplay.php?v=${m[1]}` : null;
+                }
+            },
+            {
+                // A pasted BitChute player. Bare bitchute.com/video/ links go through BitChuteEmbedder.
+                re: /^(?:https?:)?\/\/(?:(?:www|old)\.)?bitchute\.com\/embed\/[\w-]{6,32}\/?(?:[?#].*)?$/i,
+                fn: (src: string) => {
+                    const m = src.match(/^(?:https?:)?\/\/(?:(?:www|old)\.)?bitchute\.com\/embed\/([\w-]{6,32})(?:[/?#]|$)/i);
+                    return m ? `https://www.bitchute.com/embed/${m[1]}/` : null;
+                }
+            },
+            {
+                // Odysee writes the path both plain (`$/embed/...`) and percent-encoded
+                // (`%24/embed/%40chan%3A6%2Fname%3A1`), so it is decoded before matching.
+                // Two shapes: `<name>/<40-hex claim id>` and `@<channel>:<id>/<name>:<id>`.
+                // No dots in names, so the rebuilt path can never contain `..`.
+                re: /^https:\/\/odysee\.com\/(?:\$|%24)\/embed\//i,
+                fn: (src: string) => {
+                    const m = src.match(/^https:\/\/odysee\.com\/([^?#]+)/i);
+                    if (!m) return null;
+                    let path: string;
+                    try {
+                        path = decodeURIComponent(m[1]);
+                    } catch {
+                        return null;
+                    }
+                    const p = path.match(/^\$\/embed\/((?:@[\w-]{1,100}:[0-9a-f]{1,40}\/[\w-]{1,200}:[0-9a-f]{1,40})|(?:[\w-]{1,200}\/[0-9a-f]{40}))$/i);
+                    return p ? `https://odysee.com/$/embed/${p[1]}` : null;
+                }
+            },
+            {
+                // Skatehive's IPFS gateway serves the video file itself. A
+                // `pinataGatewayToken` some posts carry is dropped: the gateway serves
+                // without it (measured 2026-10-06), and it is someone's credential.
+                re: /^https:\/\/ipfs\.skatehive\.app\/ipfs\/(?:Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{50,100})(?:[?#].*)?$/,
+                fn: (src: string) => {
+                    const m = src.match(/^https:\/\/ipfs\.skatehive\.app\/ipfs\/(Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{50,100})(?:[?#]|$)/);
+                    return m ? `https://ipfs.skatehive.app/ipfs/${m[1]}` : null;
+                }
+            },
+            {
+                re: /^https:\/\/nftshowroom\.com\/embed\/[\w-]{1,200}\/?(?:[?#].*)?$/i,
+                fn: (src: string) => {
+                    const m = src.match(/^https:\/\/nftshowroom\.com\/embed\/([\w-]{1,200})(?:[/?#]|$)/i);
+                    return m ? `https://nftshowroom.com/embed/${m[1]}` : null;
+                }
+            },
+            {
+                // PeakD's post embed: `[<community or tag>/]@<account>/<permlink>`.
+                re: /^https:\/\/embed\.peakd\.com\/(?:[\w-]{1,50}\/)?@[a-z0-9.-]{3,16}\/[a-z0-9-]{1,255}\/?(?:[?#].*)?$/i,
+                fn: (src: string) => {
+                    const m = src.match(/^https:\/\/embed\.peakd\.com\/(?:([\w-]{1,50})\/)?@([a-z0-9.-]{3,16})\/([a-z0-9-]{1,255})(?:[/?#]|$)/i);
+                    return m ? `https://embed.peakd.com/${m[1] ? `${m[1]}/` : ''}@${m[2]}/${m[3]}` : null;
+                }
+            },
+            {
+                re: /^https:\/\/aureal-embed\.web\.app\/\d{1,12}\/?(?:[?#].*)?$/i,
+                fn: (src: string) => {
+                    const m = src.match(/^https:\/\/aureal-embed\.web\.app\/(\d{1,12})(?:[/?#]|$)/i);
+                    return m ? `https://aureal-embed.web.app/${m[1]}` : null;
+                }
+            },
+            {
+                re: /^https:\/\/embed\.truvvl\.com\/@[a-z0-9.-]{3,16}\/[a-z0-9-]{1,255}\/?(?:[?#].*)?$/i,
+                fn: (src: string) => {
+                    const m = src.match(/^https:\/\/embed\.truvvl\.com\/@([a-z0-9.-]{3,16})\/([a-z0-9-]{1,255})(?:[/?#]|$)/i);
+                    return m ? `https://embed.truvvl.com/@${m[1]}/${m[2]}` : null;
+                }
+            },
+            {
+                // YouTube's privacy-enhanced player. Kept on youtube-nocookie, the author's choice.
+                re: /^(?:https?:)?\/\/www\.youtube-nocookie\.com\/embed\/[\w-]{11}(?:[/?#].*)?$/i,
+                fn: (src: string) => {
+                    const m = src.match(/^(?:https?:)?\/\/www\.youtube-nocookie\.com\/embed\/([\w-]{11})(?:[/?#]|$)/i);
+                    return m ? `https://www.youtube-nocookie.com/embed/${m[1]}` : null;
                 }
             }
         ],
