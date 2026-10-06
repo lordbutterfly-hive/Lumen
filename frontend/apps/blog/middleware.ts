@@ -89,7 +89,19 @@ const baseMiddleware = createMiddleware({
       // renderer emits play.* while older cached HTML may still carry the apex.
       'https://play.3speak.tv',
       'https://3speak.tv',
-      'https://odysee.com'
+      'https://odysee.com',
+      // ★ Players added to the renderer allowlist 2026-10-06 (StaticConfig.ts
+      // iframeWhitelist + BitChuteEmbedder). The renderer list decides what HTML is
+      // emitted; THIS list decides whether the browser loads it. A host in only one
+      // of the two renders an empty box, so they move together.
+      'https://www.skatehype.com',
+      'https://www.bitchute.com',
+      'https://ipfs.skatehive.app',
+      'https://nftshowroom.com',
+      'https://embed.peakd.com',
+      'https://aureal-embed.web.app',
+      'https://embed.truvvl.com',
+      'https://www.youtube-nocookie.com'
     ],
     reportUri: '/api/csp-report'
   }
