@@ -229,22 +229,18 @@ const RendererContainer = ({
   };
 
   useEffect(() => {
+    // ★ CLICK-TO-LOAD ON EVERY PAGE, NOT ONLY THE EDITOR PREVIEW (2026-10-06). Published
+    // posts used to swap each facade for a YouTube iframe on mount. Measured in Chrome on
+    // a cold cache, on a post with five embeds: that iframe ignored the reader's first
+    // click (2 of 2; PeakD, same post, plays on the first click 2 of 2), while an iframe
+    // built AT the click with autoplay plays on that one click, with sound (2 of 2, at 7
+    // and 19 s after load). A light post was unaffected. So the thumbnail now stays until
+    // it is clicked, exactly as the preview already did, and no YouTube player code loads
+    // for a video nobody plays.
     const youtubeFacades = ref.current?.querySelectorAll('.youtube-facade');
-    if (previewMode) {
-      youtubeFacades?.forEach((facade) => {
-        facade.addEventListener('click', handleYoutubeFacadeClick);
-      });
-    } else {
-      youtubeFacades?.forEach((facade) => {
-        const el = facade as HTMLElement;
-        const videoId = safeYoutubeId(el.dataset.youtubeId);
-        const width = el.dataset.width || '640';
-        const height = el.dataset.height || '480';
-        if (videoId) {
-          el.replaceWith(youtubeIframe(videoId, width, height, false));
-        }
-      });
-    }
+    youtubeFacades?.forEach((facade) => {
+      facade.addEventListener('click', handleYoutubeFacadeClick);
+    });
     // ★ SCOPED TO ref.current, NOT `document` (2026-08-13, audit O6 item 1).
     // `id="articleBody"` is not unique — every post body and every comment
     // body on the page renders one — so a `document`-wide query here let one
@@ -308,11 +304,9 @@ const RendererContainer = ({
     return () => {
       rumbleCancelled = true;
       pluginCleanups.forEach((cleanup) => cleanup());
-      if (previewMode) {
-        youtubeFacades?.forEach((facade) => {
-          facade.removeEventListener('click', handleYoutubeFacadeClick);
-        });
-      }
+      youtubeFacades?.forEach((facade) => {
+        facade.removeEventListener('click', handleYoutubeFacadeClick);
+      });
     };
   }, [body, hiveRenderer, previewMode]);
 
