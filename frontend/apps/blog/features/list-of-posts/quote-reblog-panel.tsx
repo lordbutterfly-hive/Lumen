@@ -123,9 +123,13 @@ export function QuoteReblogPanel({
       </p>
 
       <div className="mt-4 flex gap-3">
+        {/* `user.avatarUrl` is the picture stored in the session cookie at LOGIN, so a
+            lite user who changed theirs kept seeing the old one here until they signed in
+            again. `lite` sends a Lumen account through `/api/avatar`, which reads the
+            current picture and is refreshed when it changes (see `refreshUserAvatar`). */}
         <UserAvatarImg
           username={user.username}
-          src={user.avatarUrl || undefined}
+          lite={user.account_tier === 'lite'}
           pixelSize={32}
           radiusClassName="rounded-full"
           className="mt-1 shrink-0"

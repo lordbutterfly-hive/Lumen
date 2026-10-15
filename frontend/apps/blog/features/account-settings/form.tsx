@@ -10,6 +10,7 @@ import { DEFAULT_SETTINGS, Settings, processAndUploadImg, validation } from './l
 import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
 import { useUpdateProfileMutation } from './hooks/use-update-profile-mutation';
+import { refreshUserAvatar } from '@ui/lib/avatar-utils';
 import {
   Select,
   SelectContent,
@@ -115,6 +116,9 @@ const Field = ({
   );
 };
 
+/** Same wait as the profile re-read in use-update-profile-mutation.ts. */
+const AVATAR_REFRESH_DELAY_MS = 4000;
+
 const SettingsForm = ({ username }: { username: string }) => {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
@@ -217,6 +221,9 @@ const SettingsForm = ({ username }: { username: string }) => {
       // that isn't a real URL is dropped), so showing the submitted value would tell
       // the user something was saved that was not.
       await queryClient.invalidateQueries({ queryKey: ['liteProfile', username] });
+      // Same day-old avatar copy as the Hive branch below, here under `/api/avatar`. No
+      // wait: the picture is our own row and the save above has already written it.
+      if (settings.profile_image !== profileSettings.profile_image) void refreshUserAvatar(username);
       toast({ title: t('settings_page.changes_saved'), variant: 'success' });
       return;
     }
@@ -246,6 +253,13 @@ const SettingsForm = ({ username }: { username: string }) => {
 
     try {
       await updateProfileMutation.mutateAsync(updateProfileParams);
+      // A new picture is invisible here until the browser's day-old copy of this name's
+      // avatar is replaced; see `refreshUserAvatar`. The wait matches the mutation's own
+      // re-read: the image host reads the account from its own node, which can trail the
+      // one that confirmed this save.
+      if (settings.profile_image !== profileSettings.profile_image) {
+        setTimeout(() => void refreshUserAvatar(username), AVATAR_REFRESH_DELAY_MS);
+      }
 
       toast({
         title: t('settings_page.changes_saved'),

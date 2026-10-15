@@ -104,6 +104,55 @@ export function getUserAvatarDirectUrl(
 }
 
 /**
+ * ★ A NEW PICTURE MUST REPLACE THE ONE THE BROWSER ALREADY HOLDS (2026-10-15, owner:
+ * "when i added a profile pic it showed up on peakd but it didnt on lumen").
+ *
+ * Both avatar URLs above are keyed by NAME, not by picture. The image host answers
+ * `/u/<name>/avatar/<size>` with a 302 marked `max-age=86400`, and `/api/avatar` sends the
+ * same day-long lifetime. A new account that browsed Lumen before choosing a picture has
+ * the default one cached under those URLs for 24 hours, so saving a new picture changed
+ * nothing this browser could see. Measured on `hivewatchcerts` (created 14:36 UTC, picture
+ * set 14:46): both hosts already served the new picture, Lumen kept the old one.
+ *
+ * `refreshUserAvatar` re-fetches every size past the cache, so later page loads get the new
+ * picture, then bumps a per-tab version that `UserAvatarImg` adds to the URL: an image
+ * already shown in this document is reused by URL without asking the cache again.
+ */
+const AVATAR_SIZES = ['small', 'medium', 'large'] as const;
+const avatarVersions = new Map<string, number>();
+const avatarListeners = new Set<() => void>();
+
+export function getAvatarVersion(username: string): number {
+  return avatarVersions.get(username) ?? 0;
+}
+
+export function subscribeAvatarVersions(listener: () => void): () => void {
+  avatarListeners.add(listener);
+  return () => {
+    avatarListeners.delete(listener);
+  };
+}
+
+export function withAvatarVersion(url: string, version: number): string {
+  if (!version) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}v=${version}`;
+}
+
+export async function refreshUserAvatar(username: string): Promise<void> {
+  if (!username || typeof window === 'undefined') return;
+  await Promise.allSettled(
+    AVATAR_SIZES.flatMap((size) => [
+      // `no-cors` with credentials is the request an <img> without `crossorigin` makes,
+      // so the fresh response lands on the same cache entry the <img> reads.
+      fetch(getUserAvatarDirectUrl(username, size), { cache: 'reload', mode: 'no-cors', credentials: 'include' }),
+      fetch(getUserAvatarUrl(username, size), { cache: 'reload' })
+    ])
+  );
+  avatarVersions.set(username, Date.now());
+  avatarListeners.forEach((listener) => listener());
+}
+
+/**
  * Get a user avatar URL with specific dimensions using internal API endpoint (prevents caching)
  * @param username - The Hive username
  * @param width - Image width

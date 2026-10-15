@@ -1,8 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { cn } from '@ui/lib/utils';
-import { getUserAvatarDirectUrl, getUserAvatarUrl } from '@ui/lib/avatar-utils';
+import {
+  getAvatarVersion,
+  getUserAvatarDirectUrl,
+  getUserAvatarUrl,
+  subscribeAvatarVersions,
+  withAvatarVersion
+} from '@ui/lib/avatar-utils';
 
 type AvatarApiSize = 'small' | 'medium' | 'large';
 
@@ -192,6 +198,20 @@ export function UserAvatarImg({
   );
   const imgRef = useRef<HTMLImageElement>(null);
 
+  // Bumped by `refreshUserAvatar` after this account saves a new picture; 0 (no change to
+  // the URL) on the server and until then.
+  const version = useSyncExternalStore(
+    subscribeAvatarVersions,
+    () => getAvatarVersion(username),
+    () => 0
+  );
+  // A bump, or a `lite`/`src` that arrives after mount (the header learns the account
+  // tier when `/api/users/me` answers), starts the chain again from the right stage;
+  // `useState` above only reads them once.
+  useEffect(() => {
+    setStage(lite && !src ? 'proxy' : 'direct');
+  }, [version, lite, src]);
+
   /**
    * ★★★ A BLOCKED REQUEST NEVER FIRES `onError` (2026-08-13, reported: "follow
    * notifications are missing profile pics in the bell").
@@ -345,7 +365,11 @@ export function UserAvatarImg({
       {stage !== 'failed' ? (
         <img
           ref={imgRef}
-          src={stage === 'direct' ? src || getUserAvatarDirectUrl(username, apiSize) : getUserAvatarUrl(username, apiSize)}
+          src={
+            stage === 'direct'
+              ? src || withAvatarVersion(getUserAvatarDirectUrl(username, apiSize), version)
+              : withAvatarVersion(getUserAvatarUrl(username, apiSize), version)
+          }
           /*
            * ★ ALWAYS EMPTY ALT, EVEN WHEN A CALLER PASSED ONE (2026-08-16).
            *
