@@ -469,12 +469,26 @@ const CommentListItem = memo(function CommentListItem({
    * focus-return against the new overlay's focus-trap, and the menu wins,
    * leaving the "just-opened" dialog with no focus inside it. Deferring one
    * tick lets the menu's close (and its own focus handling) finish first.
+   *
+   * ★★ THE TICK DOES NOT DECIDE THE ORDER ON ITS OWN (2026-10-08, owner: "it
+   * flashes the slider and disappears"). The menu sends focus back to "···" on
+   * its own timer when it unmounts, and that timer can fire AFTER the picker has
+   * opened: with the mouse moved onto "Downvote" before the click (as a person
+   * does), 3 of 3 desktop runs opened the picker, then focus landed on "···", the
+   * picker read that as focus leaving it and closed about 160 ms later. A plain
+   * click with no mouse travel happened to run in the other order, which is why
+   * it passed. So when Downvote is what closes the menu, the menu does not move
+   * focus at all (`downvoteTakesFocusRef`, read by `onCloseAutoFocus` on the
+   * menu below): the picker or the removal dialog takes it, in either order.
    */
+  const downvoteTakesFocusRef = useRef(false);
   const handleDownvoteSelect = () => {
     setDownvoteMenuActivated(true);
     if (vote_downvoted) {
+      downvoteTakesFocusRef.current = true;
       setTimeout(() => setDownvoteRemovalOpen(true), 0);
     } else if (enableDownvoteSlider) {
+      downvoteTakesFocusRef.current = true;
       setTimeout(() => setDownvoteWeightOpen(true), 0);
     } else {
       // Same as votes-component.tsx's own one-shot branch (below the vests
@@ -1249,7 +1263,18 @@ const CommentListItem = memo(function CommentListItem({
                                   </button>
                                 </PopoverAnchor>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-52">
+                              <DropdownMenuContent
+                                align="end"
+                                className="w-52"
+                                onCloseAutoFocus={(event) => {
+                                  // Downvote opened the picker or the removal dialog, which
+                                  // takes focus itself; see `downvoteTakesFocusRef`.
+                                  if (downvoteTakesFocusRef.current) {
+                                    downvoteTakesFocusRef.current = false;
+                                    event.preventDefault();
+                                  }
+                                }}
+                              >
                                 {identity.isLoggedIn ? (
                                   <>
                                     {/* ★ item 5: no destructive classes here — Downvote is
@@ -1326,8 +1351,11 @@ const CommentListItem = memo(function CommentListItem({
                                       same 180° `.down svg` applies in vote-control.module.css
                                       — reproduced with a plain transform since that module's
                                       rotation rule is scoped to a class this button does not
-                                      carry (see the colour note above). */}
-                                  <span className="inline-block rotate-180">
+                                      carry (see the colour note above). Its SIZE comes from
+                                      that module too (`.btn svg`, 22px at `.sm`), so without
+                                      `.btn` the svg had no size and the button showed no
+                                      glyph at all (2026-10-08); given the same 22px here. */}
+                                  <span className="inline-block rotate-180 [&_svg]:h-[22px] [&_svg]:w-[22px]">
                                     <BladeGlyph />
                                   </span>
                                 </button>
