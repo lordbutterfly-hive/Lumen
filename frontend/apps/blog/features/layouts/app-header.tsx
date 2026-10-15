@@ -39,6 +39,7 @@ import NotificationsMenu from '@/blog/features/layouts/site-header/notifications
 import MobileNav from '@/blog/features/layouts/mobile-nav';
 import { SearchInput } from '@/blog/features/search/search-input';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
+import { useServerAccountTier } from '@/blog/features/wallet/lib/server-account-tier-context';
 import { useIntentPrefetch } from '@/blog/components/intent-prefetch';
 import HeaderTokenPill from '@/blog/features/creator-tokens/ui/header-token-pill';
 import HeaderInbox from '@/blog/features/direct-messages/ui/header-inbox';
@@ -76,9 +77,16 @@ const LABELS = {
  * fast path the feed got on 2026-08-10. `UserAvatarImg` tries
  * `images.hive.blog` first and only falls back to the proxy on error.
  */
-const HeaderAvatar: FC<{ username: string }> = ({ username }) => (
+/*
+ * ★ `lite` (2026-10-15): a Lumen account's handle was free on Hive when it was taken, so
+ * anyone can register it there later and the image host would then hand the header the
+ * squatter's face by name. `lite` sends it through `/api/avatar`, which resolves the name
+ * to the Lumen account first (see UserAvatarImg's `lite` prop).
+ */
+const HeaderAvatar: FC<{ username: string; lite: boolean }> = ({ username, lite }) => (
   <UserAvatarImg
     username={username || ''}
+    lite={lite}
     pixelSize={36}
     className="z-30"
   />
@@ -117,6 +125,11 @@ const AppHeader: FC = () => {
    * link to somebody who is already signed in.
    */
   const identity = useSessionIdentity();
+  // Same rule as use-logged-user.tsx: the client's tier once it has answered, the tier the
+  // server read from the cookie before then, so the first paint is already right.
+  const serverAccountTier = useServerAccountTier();
+  const isLite =
+    identity.clientAnswered || user?.isLoggedIn ? user?.account_tier === 'lite' : serverAccountTier === 'lite';
   /*
    * ★★ THE READER'S OWN PROFILE, WARMED ON HOVER (2026-09-05, snappiness phase
    * 4b). The owner's complaint covered this control by name: reaching for the
@@ -553,7 +566,7 @@ const AppHeader: FC = () => {
                           default, plus red/green/blue concentric rings on hover) were removed
                           as visual clutter around the avatar. The RC / voting / downvote
                           detail still appears on hover, in the restyled tooltip below. */}
-                      <HeaderAvatar username={user?.username || ''} />
+                      <HeaderAvatar username={user?.username || ''} lite={isLite} />
                       {inquisitionArmed ? <InquisitionSeal label={t('navigation.inquisition_mode_on')} /> : null}
                     </div>
                   </TooltipTrigger>
@@ -602,7 +615,7 @@ const AppHeader: FC = () => {
               className="inline-flex items-center justify-center"
               {...ownProfileIntent}
             >
-              <HeaderAvatar username={identity.username} />
+              <HeaderAvatar username={identity.username} lite={isLite} />
             </Link>
           ) : (
             /* ★★★ ONE LOGIN SURFACE, EVERYWHERE (owner ruling 2026-09-03). This was

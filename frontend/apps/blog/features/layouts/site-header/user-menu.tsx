@@ -78,8 +78,9 @@ const LOGOUT_ROW_CLASS = cn(ROW_CLASS, 'text-destructive hover:text-destructive 
  * proxy) directly on every render; now tries `images.hive.blog` first and
  * only falls back to the proxy on error, same as everywhere else.
  */
-const MenuAvatar = ({ username }: { username: string }) => (
-  <UserAvatarImg username={username || ''} pixelSize={38} />
+const MenuAvatar = ({ username, lite }: { username: string; lite: boolean }) => (
+  // `lite`: see HeaderAvatar in app-header.tsx.
+  <UserAvatarImg username={username || ''} lite={lite} pixelSize={38} />
 );
 
 /**
@@ -130,7 +131,7 @@ const AccountMenuContent = ({ user }: { user: User }) => {
           (smart-signer/types/common.ts) carries none, and inventing one here
           would be exactly the placeholder text rule 5 forbids. */}
       <div className="flex items-center gap-3 px-3 pb-2.5 pt-2.5">
-        <MenuAvatar username={user.username} />
+        <MenuAvatar username={user.username} lite={user.account_tier === 'lite'} />
         <div className="min-w-0">
           <div
             className="truncate font-sans text-[15px] leading-[24px] font-bold text-ink-2"
