@@ -1,11 +1,12 @@
 'use client';
 
 import { FC, useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Dialog, DialogClose, DialogContentBare, DialogDescription, DialogTitle } from '@ui/components/dialog';
 import { Button } from '@ui/components/button';
 import { Icons } from '@ui/components/icons';
 import { cn } from '@ui/lib/utils';
+import { clearViewerQueries } from '@/blog/lib/viewer-query-persist';
 
 /**
  * ★★★ THE SIGNUP INTEREST PICKER.
@@ -48,6 +49,16 @@ interface InterestOption {
    */
   group?: string;
   tags: string[];
+}
+
+interface InterestsBody {
+  interests?: InterestOption[];
+  selected?: string[];
+  max?: number;
+  min?: number;
+  eligible?: boolean;
+  asked?: boolean;
+  blankSlate?: boolean;
 }
 
 /**
@@ -94,6 +105,7 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
   const [min, setMin] = useState(3);
   const [saving, setSaving] = useState(false);
   const autoOpened = useRef(false);
+  const queryClient = useQueryClient();
 
   // ★ NO CLIENT AUTH STATE. `useUserClient()` was measured reporting logged-OUT
   // for a session the same page's `/api/users/me` reported logged-IN — the
@@ -117,15 +129,7 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
     queryFn: async () => {
       const res = await fetch('/api/lite/interests');
       if (!res.ok) throw new Error(`interests ${res.status}`);
-      return (await res.json()) as {
-        interests?: InterestOption[];
-        selected?: string[];
-        max?: number;
-        min?: number;
-        eligible?: boolean;
-        asked?: boolean;
-        blankSlate?: boolean;
-      };
+      return (await res.json()) as InterestsBody;
     },
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: false,
@@ -177,11 +181,17 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
   const save = async (interests: string[]) => {
     setSaving(true);
     try {
-      await fetch('/api/lite/interests', {
+      const res = await fetch('/api/lite/interests', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-csrf-token': '1' },
         body: JSON.stringify({ interests })
       });
+      if (res.ok) {
+        const saved = (await res.json().catch(() => null)) as { selected?: string[] } | null;
+        queryClient.setQueryData<InterestsBody>(['liteInterests'], (old) =>
+          old ? { ...old, asked: true, selected: saved?.selected ?? interests } : old
+        );
+      }
       // Force the ranked feed to rebuild NOW, behind this spinner, with the
       // picks included. Without `refresh=1` the reader would land on the generic
       // feed they had a moment ago and the picker would look like it did nothing.
@@ -189,6 +199,16 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
     } finally {
       setSaving(false);
       setOpen(false);
+      // ★ THE RELOAD MUST NOT BRING BACK THE OLD ANSWER (2026-10-15, owner: new
+      // accounts get the picker again after choosing, and "Skip for now" does
+      // nothing). `liteInterests` is kept in sessionStorage across page loads
+      // (lib/viewer-query-persist.ts), restored BEFORE this component asks, and
+      // fresh for 5 minutes, so the reload below handed back the pre-save
+      // `asked: false` without asking the server and the picker opened again.
+      // The cache entry was set to the saved answer above, so a store write
+      // already scheduled in this tab saves the new answer; the stored copy is
+      // dropped here so the next load asks the server.
+      clearViewerQueries();
       // The feed page reads through the same cache we just filled.
       if (typeof window !== 'undefined') window.location.reload();
     }
