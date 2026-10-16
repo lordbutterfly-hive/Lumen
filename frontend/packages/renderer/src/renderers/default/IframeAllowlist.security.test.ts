@@ -403,6 +403,37 @@ describe('iframe allowlist security', function () {
             expect(iframeSrcs(html)).to.have.length(0);
         });
 
+        // The three raw iframes prod logged as "(Unsupported ...)" up to 2026-10-16, verbatim.
+        it('renders a pasted play.3speak.tv embed iframe whose slash is written %2F (@asgarth)', () => {
+            const html = r.render('<iframe src="https://play.3speak.tv/embed?v=asgarth%2F6ckoaoti&mode=iframe"></iframe>');
+            expect(iframeSrcs(html)).to.deep.equal(['https://play.3speak.tv/embed?v=asgarth/6ckoaoti&amp;mode=iframe&amp;layout=desktop']);
+            expect(html).to.not.contain('Unsupported');
+        });
+        it('renders a pasted play.3speak.tv watch iframe, rebuilt to the embed player (@angeluxx, @theworldaroundme)', () => {
+            const a = r.render(
+                '<iframe src="https://play.3speak.tv/watch?v=angeluxx/ibwnjo64&mode=iframe" width="360" height="640" frameborder="0" allowfullscreen></iframe>'
+            );
+            expect(iframeSrcs(a)).to.deep.equal(['https://play.3speak.tv/embed?v=angeluxx/ibwnjo64&amp;mode=iframe&amp;layout=desktop']);
+            const b = r.render(
+                '<iframe src="https://play.3speak.tv/watch?v=theworldaroundme/pjl03lck&mode=iframe" width="100%" height="500" frameborder="0" allowfullscreen></iframe>'
+            );
+            expect(iframeSrcs(b)).to.deep.equal(['https://play.3speak.tv/embed?v=theworldaroundme/pjl03lck&amp;mode=iframe&amp;layout=desktop']);
+        });
+        it('keeps only the account/permlink pair of a pasted id, never what follows it', () => {
+            const html = r.render('<iframe src="https://play.3speak.tv/embed?v=asgarth%2F6ckoaoti%23https%3A%2F%2Fevil.com%2F&mode=iframe"></iframe>');
+            expect(iframeSrcs(html)).to.deep.equal(['https://play.3speak.tv/embed?v=asgarth/6ckoaoti&amp;mode=iframe&amp;layout=desktop']);
+        });
+        it('BLOCKS a pasted 3speak iframe whose id is not an account/permlink pair', () => {
+            blocked('https://play.3speak.tv/embed?v=%22onload%3Dalert(1)&mode=iframe');
+            blocked('https://play.3speak.tv/embed?v=%E0%A4%A&mode=iframe');
+            blocked('https://play.3speak.tv/watch?v=Asgarth/6ckoaoti');
+        });
+        it('BLOCKS other 3speak subdomains on the raw-iframe path', () => {
+            blocked('https://www.3speak.tv/embed?v=asgarth/6ckoaoti');
+            blocked('https://evil.3speak.tv/embed?v=asgarth/6ckoaoti');
+            blocked('https://play.3speak.online/embed?v=asgarth/6ckoaoti');
+        });
+
         /**
          * ★★★ THE HOST CHANGE MUST NOT HAVE OPENED A DOOR (2026-09-10). The emitted
          * host moved from `3speak.tv` to `play.3speak.tv`, and every one of these is a

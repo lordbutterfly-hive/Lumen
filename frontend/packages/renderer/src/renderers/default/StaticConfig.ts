@@ -22,6 +22,30 @@
  * - SkateHype, BitChute, Odysee, Skatehive IPFS videos, NFT Showroom, PeakD post
  *   embeds, Truvvl and youtube-nocookie players
  */
+
+/**
+ * A pasted 3speak `<iframe>` src (`embed` or `watch`, any accepted 3speak host) rebuilt to
+ * the player, or null ("(Unsupported ...)"). The id is URL-decoded first because 3speak's
+ * share code writes the slash as `%2F`, then must START with a Hive `account/permlink`
+ * pair, and only that pair is kept: the same rule ThreeSpeakEmbedder.linkRegex applies to
+ * bare links, so a raw iframe can put no more into the hardcoded origin than a bare link can.
+ */
+function threeSpeakPlayerSrc(src: string): string | null {
+    // eslint-disable-next-line security/detect-unsafe-regex
+    const match = src?.match(/^(?:https?:)?\/\/(?:play\.3speak\.tv|3speak\.(?:tv|online|co))\/(?:embed|watch)\?v=([^&\s]+)/i);
+    if (!match) return null;
+    let decoded: string;
+    try {
+        decoded = decodeURIComponent(match[1]);
+    } catch {
+        return null;
+    }
+    const id = decoded.match(/^[a-z0-9][a-z0-9.-]{1,15}\/[a-z0-9][a-z0-9-]*/);
+    if (!id) return null;
+    // `mode=iframe&layout=desktop`: 3speak's embed mode + strict 16:9 (see ThreeSpeakEmbedder.processEmbed).
+    return `https://play.3speak.tv/embed?v=${id[0]}&mode=iframe&layout=desktop`;
+}
+
 export class StaticConfig {
     public static sanitization = {
         iframeWhitelist: [
@@ -179,35 +203,28 @@ export class StaticConfig {
                 // ★ THE EMITTED HOST IS `play.3speak.tv` — see ThreeSpeakEmbedder.processEmbed
                 // for the measurement; `3speak.tv/embed` renders the SPA's "PAGE NOT FOUND".
                 //
-                // ★★ THE ACCEPTED-INPUT SIDE IS DELIBERATELY *NOT* WIDENED TO `play.`/`www.`
-                // (2026-09-10, after the owner raised tibfox's "iframes by default are a
-                // phishing gate"). It was, briefly, on the reasoning that `play.3speak.tv` is
-                // the host `json_metadata.video.url` carries. It is — but this rule governs a
-                // RAW `<iframe>` an author typed into a post body, and NO real 3speak post
-                // uses one: the body is a bare URL (checked on @badadib/testvid-846 and
-                // @daveks/bugaboo-falls-695), which reaches the page through
-                // ThreeSpeakEmbedder, never through here. Widening it therefore bought
-                // nothing and grew the raw-iframe surface, which is the exact surface the
-                // concern is about. This stays as narrow as it was.
-                re: /^(?:https?:)?\/\/(?:3speak\.(?:tv|online|co))\/embed\?v=([^&\s]+)/i,
-                fn: (src: string) => {
-                    if (!src) return null;
-                    const match = src.match(/3speak\.(?:tv|online|co)\/embed\?v=([^&\s]+)/i);
-                    if (!match || match.length !== 2) return null;
-                    // `mode=iframe&layout=desktop`: 3speak's embed mode + strict 16:9 (see ThreeSpeakEmbedder.processEmbed).
-                    return `https://play.3speak.tv/embed?v=${match[1]}&mode=iframe&layout=desktop`;
-                }
+                // ★★ `play.3speak.tv` IS ACCEPTED HERE SINCE 2026-10-16 (owner: "fix this",
+                // on `(Unsupported https://play.3speak.tv/embed?v=asgarth%2F6ckoaoti&mode=iframe)`).
+                // On 2026-09-10 this rule was kept to the bare `3speak.` hosts because no real
+                // post was known to paste a raw 3speak `<iframe>`. That premise is now false;
+                // three posts in prod logs do, and all three rendered "(Unsupported ...)":
+                //   @asgarth/peakd-update-a-new-homepage-and-better-everyday-tools
+                //       play.3speak.tv/embed?v=asgarth%2F6ckoaoti&mode=iframe
+                //   @angeluxx/my-experience-playing-holo-swarm-one-of-the-new-holozing-gam-muxjtlo2
+                //       play.3speak.tv/watch?v=angeluxx/ibwnjo64&mode=iframe
+                //   @theworldaroundme/the-friendliest-cows-ever-mufrmqf6
+                //       play.3speak.tv/watch?v=theworldaroundme/pjl03lck&mode=iframe
+                // Only the exact `play.` subdomain is added. The raw-iframe surface stays what
+                // tibfox's "iframes by default are a phishing gate" concern asked for: the src is
+                // rebuilt from one literal origin, and the id must pass the same `account/permlink`
+                // charset bare links get (threeSpeakPlayerSrc), so nothing else is interpolated.
+                re: /^(?:https?:)?\/\/(?:play\.3speak\.tv|3speak\.(?:tv|online|co))\/embed\?v=([^&\s]+)/i,
+                fn: (src: string) => threeSpeakPlayerSrc(src)
             },
             {
                 // eslint-disable-next-line security/detect-unsafe-regex
-                re: /^(?:https?:)?\/\/(?:3speak\.(?:tv|online|co))\/watch\?v=([^&\s]+)/i,
-                fn: (src: string) => {
-                    if (!src) return null;
-                    const match = src.match(/3speak\.(?:tv|online|co)\/watch\?v=([^&\s]+)/i);
-                    if (!match || match.length !== 2) return null;
-                    // `mode=iframe&layout=desktop`: 3speak's embed mode + strict 16:9 (see ThreeSpeakEmbedder.processEmbed).
-                    return `https://play.3speak.tv/embed?v=${match[1]}&mode=iframe&layout=desktop`;
-                }
+                re: /^(?:https?:)?\/\/(?:play\.3speak\.tv|3speak\.(?:tv|online|co))\/watch\?v=([^&\s]+)/i,
+                fn: (src: string) => threeSpeakPlayerSrc(src)
             },
             {
                 re: /^(?:https:)\/\/(?:www\.)?(twitter|x)\.com\/(?:\w+\/status|status)\/(\d{1,20})/i,
