@@ -2,9 +2,11 @@
 
 import type { ComponentProps } from 'react';
 import type { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
+import { Icons } from '@ui/components/icons';
 import { useTranslation } from '@/blog/i18n/client';
 import { WalletFigures } from '../lib/wallet-derived';
 import { formatTokenAmount } from '../lib/format-amount';
+import { HIVE_MARKET_SWAP_URL } from '../lib/wallet-endpoint';
 import TokenIcon from './token-icon';
 import type SendDialogComponent from './dialogs/send-dialog';
 import { lazyWalletDialog } from './dialogs/shared/lazy-wallet-dialog';
@@ -21,6 +23,9 @@ const CARD_CLASS = 'mb-3 rounded-panel border border-line-9 bg-surface-1 p-5';
 // action colour, at a radius no other control on the page shared.
 const SEND_BUTTON_CLASS =
   'flex items-center gap-1.5 rounded-card bg-surface-brand-12 px-[18px] py-2.5 text-[14px] leading-[22px] font-medium text-ink-27 transition-colors hover:bg-surface-brand-17';
+// Outlined twin of Send: same height (9px padding + 1px border = Send's 10px).
+const TRADE_BUTTON_CLASS =
+  'lm-press flex items-center gap-1.5 rounded-card border border-line-11 bg-surface-1 px-[18px] py-[9px] text-[14px] leading-[22px] font-medium text-ink-7 transition-colors hover:bg-surface-16';
 
 export default function HiveTokenCard({
   username,
@@ -82,6 +87,19 @@ export default function HiveTokenCard({
               </button>
             }
           />
+          {/* HIVE <-> HBD has no screen of its own on Lumen; this hands off to
+              the internal market on HiveHub, as PeakD's wallet does. */}
+          <a
+            href={HIVE_MARKET_SWAP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={TRADE_BUTTON_CLASS}
+            title={t('wallet.trade_title')}
+            data-testid="wallet-trade-hive-link"
+          >
+            {t('wallet.trade')}
+            <Icons.externalLink className="h-3.5 w-3.5" aria-hidden />
+          </a>
         </div>
       </div>
 

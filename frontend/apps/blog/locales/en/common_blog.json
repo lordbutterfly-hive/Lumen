@@ -1395,6 +1395,8 @@
     "loading": "Loading wallet…",
     "login_required": "Log in to see your Hive wallet.",
     "login_button": "Log in",
+    "trade": "Trade",
+    "trade_title": "Swap HIVE and HBD on the Hive internal market (HiveHub, opens in a new tab)",
     "hive_card": {
       "name": "HIVE",
       "description": "Hive's primary token",

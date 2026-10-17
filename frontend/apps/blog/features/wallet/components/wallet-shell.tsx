@@ -10,7 +10,8 @@ import { parseWalletTab, type WalletTab } from '../lib/wallet-tab';
 /**
  * Wallet page shell — same fixed 3-column grid as
  * features/discovery-feed/home-shell.tsx (200 / 1fr / 312, gap 44, max-width
- * 1720, symmetric 44px gutters, centered, both rails sticky/locked).
+ * 1720, symmetric 44px gutters, centered, left rail sticky/locked; the right
+ * rail scrolls with the page, see below).
  *
  * ★ TABS (owner ruling 2026-09-08). The centre column is `WalletTabs`: Hive
  * (the existing `WalletContent`, untouched), Magi, Meritum. This shell owns the
@@ -87,8 +88,14 @@ export default function WalletShell({ initialTab, fallbackTab = 'hive' }: { init
         <WalletTabs tab={tab} onTabChange={onTabChange} />
       </main>
 
+      {/* ★ NOT STICKY (owner, 2026-10-17: "i cant scroll below savings"). The
+          rail (two price cards + Advanced) is taller than a laptop viewport, and
+          a sticky aside taller than the viewport pins its top and hides its
+          bottom until the end of the page, so the Advanced rows under Savings
+          could not be reached. It now scrolls with the page, the same call the
+          owner made for the home rail on 2026-09-15 (right-rail/builders.tsx). */}
       {showRightRail ? (
-        <aside className="sticky top-[var(--rail-sticky-top)] hidden h-fit bg-background-secondary xl:block">
+        <aside className="hidden h-fit bg-background-secondary xl:block">
           <WalletRightRail />
         </aside>
       ) : null}

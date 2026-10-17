@@ -2,8 +2,10 @@
 
 import type { ComponentProps } from 'react';
 import Big from 'big.js';
+import { Icons } from '@ui/components/icons';
 import { useTranslation } from '@/blog/i18n/client';
 import { formatTokenAmount } from '../lib/format-amount';
+import { HIVE_MARKET_SWAP_URL } from '../lib/wallet-endpoint';
 import TokenIcon from './token-icon';
 import type SendDialogComponent from './dialogs/send-dialog';
 import { lazyWalletDialog } from './dialogs/shared/lazy-wallet-dialog';
@@ -18,6 +20,9 @@ const CARD_CLASS = 'mb-3 rounded-panel border border-line-9 bg-surface-1 p-5';
 // Same button as the HIVE card's Send — see hive-token-card.tsx (W-2/W-3).
 const SEND_BUTTON_CLASS =
   'flex items-center gap-1.5 rounded-card bg-surface-brand-12 px-[18px] py-2.5 text-[14px] leading-[22px] font-medium text-ink-27 transition-colors hover:bg-surface-brand-17';
+// Same Trade button as the HIVE card's — see hive-token-card.tsx.
+const TRADE_BUTTON_CLASS =
+  'lm-press flex items-center gap-1.5 rounded-card border border-line-11 bg-surface-1 px-[18px] py-[9px] text-[14px] leading-[22px] font-medium text-ink-7 transition-colors hover:bg-surface-16';
 
 export default function HbdTokenCard({ username, liquidHbd }: { username: string; liquidHbd: Big }) {
   const { t } = useTranslation('common_blog');
@@ -58,6 +63,17 @@ export default function HbdTokenCard({ username, liquidHbd }: { username: string
               </button>
             }
           />
+          <a
+            href={HIVE_MARKET_SWAP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={TRADE_BUTTON_CLASS}
+            title={t('wallet.trade_title')}
+            data-testid="wallet-trade-hbd-link"
+          >
+            {t('wallet.trade')}
+            <Icons.externalLink className="h-3.5 w-3.5" aria-hidden />
+          </a>
         </div>
       </div>
     </div>

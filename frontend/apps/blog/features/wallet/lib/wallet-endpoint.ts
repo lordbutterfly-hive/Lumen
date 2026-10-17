@@ -19,6 +19,15 @@ export function getDelegationsUrl(username: string): string {
   return host ? `${host}/@${username}/delegations` : '#';
 }
 
+/**
+ * Where "Trade" on the HIVE and HBD cards goes: HiveHub's swap page on the
+ * Hive internal market (HIVE <-> HBD). Same destination PeakD's wallet uses for
+ * its "Market" action on both tokens. The route takes no query parameters, so
+ * the reader picks the direction and amount there; it signs with their own
+ * Keychain / HiveSigner, nothing passes through Lumen.
+ */
+export const HIVE_MARKET_SWAP_URL = 'https://hivehub.dev/market/swap';
+
 export function getMarketStatsUrl(): string {
   const host = getWalletHost();
   return host ? `${host}/market` : '#';
