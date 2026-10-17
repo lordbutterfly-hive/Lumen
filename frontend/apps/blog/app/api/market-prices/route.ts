@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { cachedRead } from '@/blog/lib/server-read-cache';
 import { withRetry } from '@transaction/lib/retry';
+import { getChain } from '@transaction/lib/chain';
+import { withHiveRetry } from '@smart-signer/lib/hive-network-error';
 
 const logger = getLogger('app');
 
@@ -57,11 +59,35 @@ async function fetchCoingecko(url: string, label: string, init: RequestInit): Pr
   );
 }
 
+/**
+ * ★ HBD IS VALUED ON HIVE'S OWN MARKET, NOT ON COINGECKO (2026-10-17).
+ * CoinGecko's HBD price comes from outside exchanges, and on 2026-10-17 every
+ * ticker it had was Upbit (HBD/BTC, $2.92 while HIVE/HBD on the internal market
+ * put HBD at $0.97). Upbit had flagged HBD for possible delisting and halted
+ * deposits and withdrawals the day before, so nobody could arbitrage it back,
+ * and every HBD balance on the wallet was valued at about 3x. The internal
+ * market is where an HBD holder can actually sell, so its last trade is the
+ * price (`latest`, in HBD per HIVE). Its own leg: a failed ticker returns null
+ * and the hook falls back to CoinGecko rather than failing the price cards.
+ */
+async function fetchInternalMarketTicker(): Promise<{ latest: string } | null> {
+  try {
+    const ticker = await withHiveRetry(
+      async () => (await getChain()).api.market_history_api.get_ticker({}),
+      'market_history_api.get_ticker'
+    );
+    return { latest: ticker.latest };
+  } catch (error) {
+    logger.warn(error, 'internal market ticker lookup failed');
+    return null;
+  }
+}
+
 export async function GET(): Promise<NextResponse> {
   try {
     const data = await cachedRead('market-prices', CACHE_MS, async () => {
       const init = { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), cache: 'no-store' as const };
-      const [simple, chart] = await Promise.all([
+      const [simple, chart, internal] = await Promise.all([
         fetchCoingecko(
           // `bitcoin` added 2026-09-08 for the wallet's Magi tab (BTC held on Magi is priced
           // off the same feed as HIVE/HBD); the hook keeps its "never coerce to 0" rule.
@@ -69,9 +95,10 @@ export async function GET(): Promise<NextResponse> {
           'coingecko.simple',
           init
         ),
-        fetchCoingecko(`${COINGECKO_BASE}/coins/hive/market_chart?vs_currency=usd&days=7`, 'coingecko.chart', init)
+        fetchCoingecko(`${COINGECKO_BASE}/coins/hive/market_chart?vs_currency=usd&days=7`, 'coingecko.chart', init),
+        fetchInternalMarketTicker()
       ]);
-      return { simple, chart };
+      return { simple, chart, internal };
     });
     return NextResponse.json(data, {
       headers: { 'cache-control': 'public, max-age=60, stale-while-revalidate=300' }

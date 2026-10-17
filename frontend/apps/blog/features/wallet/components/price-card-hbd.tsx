@@ -30,9 +30,9 @@ export default function PriceCardHbd() {
             evidence. Only a real error earns that word now. */}
         {isLoading
           ? t('wallet.market.loading')
-          : isError || !data
+          : isError || !data || data.hbdExchangeUsd === null
             ? t('wallet.market.unavailable')
-            : t('wallet.market.hbd_source', { price: data.hbdUsd.toFixed(3) })}
+            : t('wallet.market.hbd_source', { price: data.hbdExchangeUsd.toFixed(3) })}
       </div>
     </div>
   );

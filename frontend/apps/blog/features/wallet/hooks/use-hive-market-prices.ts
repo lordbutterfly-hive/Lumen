@@ -4,7 +4,14 @@ export interface HiveMarketPrices {
   hiveUsd: number;
   hiveBtc: number;
   hiveUsd24hChange: number;
+  /**
+   * What 1 HBD is worth, for valuing balances: Hive's internal market (HIVE
+   * price / HBD-per-HIVE of the last trade), CoinGecko only if that read fails.
+   * See `fetchInternalMarketTicker` in app/api/market-prices/route.ts.
+   */
   hbdUsd: number;
+  /** CoinGecko's outside-exchange HBD price, for the HBD card's side note only. Null when absent. */
+  hbdExchangeUsd: number | null;
   /**
    * BTC/USD, for Bitcoin held on Magi (wallet Magi tab, 2026-09-08). Null when
    * CoinGecko omits it: the HIVE/HBD cards must not fail because one extra id
@@ -62,9 +69,10 @@ export function useHiveMarketPrices() {
       // stops handing every reader's IP to a third party. Everything below this line
       // is unchanged: same two payload shapes, same refusal to coerce a missing
       // price to 0.
-      const { simple, chart } = (await fetchJson('/api/market-prices')) as {
+      const { simple, chart, internal } = (await fetchJson('/api/market-prices')) as {
         simple: SimplePriceResponse;
         chart: MarketChartResponse;
+        internal?: { latest?: string } | null;
       };
 
       // A 200 with a missing/zero price (soft rate-limit, partial payload, schema
@@ -72,9 +80,19 @@ export function useHiveMarketPrices() {
       // whole account's Estimated Value as a fabricated dollar figure (a LIE).
       // Throw so the query goes to isError and the UI shows "—"/unavailable.
       const hiveUsd = simple.hive?.usd;
-      const hbdUsd = simple.hive_dollar?.usd;
-      if (typeof hiveUsd !== 'number' || hiveUsd <= 0 || typeof hbdUsd !== 'number' || hbdUsd <= 0) {
-        throw new Error('CoinGecko returned no usable HIVE/HBD price');
+      const exchangeRaw = simple.hive_dollar?.usd;
+      const hbdExchangeUsd = typeof exchangeRaw === 'number' && exchangeRaw > 0 ? exchangeRaw : null;
+      if (typeof hiveUsd !== 'number' || hiveUsd <= 0) {
+        throw new Error('CoinGecko returned no usable HIVE price');
+      }
+      // ★ HBD from the internal market (2026-10-17): CoinGecko had HBD at $2.92
+      // off a single halted exchange while it sold for $0.97 on Hive. CoinGecko
+      // is now only the fallback, and its absence alone no longer fails the cards
+      // (it can drop HBD entirely if that exchange delists it).
+      const hbdPerHive = Number(internal?.latest);
+      const hbdUsd = Number.isFinite(hbdPerHive) && hbdPerHive > 0 ? hiveUsd / hbdPerHive : hbdExchangeUsd;
+      if (hbdUsd === null) {
+        throw new Error('No usable HBD price from the internal market or CoinGecko');
       }
       const hiveBtc = simple.hive?.btc ?? 0;
       const btcRaw = simple.bitcoin?.usd;
@@ -89,7 +107,7 @@ export function useHiveMarketPrices() {
         .slice(-bucketCount)
         .map(([, price]) => price);
 
-      return { hiveUsd, hiveBtc, hiveUsd24hChange, hbdUsd, btcUsd, hiveSparkline };
+      return { hiveUsd, hiveBtc, hiveUsd24hChange, hbdUsd, hbdExchangeUsd, btcUsd, hiveSparkline };
     },
     staleTime: 60_000,
     refetchInterval: 60_000,
