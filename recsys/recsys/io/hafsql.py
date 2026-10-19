@@ -1580,12 +1580,18 @@ SELECT cp.identity AS author,
                        -- the single largest cost driver measured above. Same
                        -- row set either way (live-verified byte-identical
                        -- output) since the view is an unfiltered INNER JOIN.
-                       SELECT ((o.body_binary::jsonb -> 'value') ->> 'voter') AS voter,
-                              ((o.body_binary::jsonb -> 'value') ->> 'rshares')::numeric AS rshares
+                       -- HAFSQL schema of 2026-10-05: the op body is the jsonb
+                       -- `body_value` (the op's value object itself, without
+                       -- the old type/value wrapper) and the type is the `op_type_id`
+                       -- column; the old binary body column and the id-to-type
+                       -- function are gone. `op_type_id = 72` matches the mirror's
+                       -- partial index on (author, permlink) for types 0/1/72.
+                       SELECT (o.body_value ->> 'voter') AS voter,
+                              (o.body_value ->> 'rshares')::numeric AS rshares
                        FROM hafd.operations o
-                       WHERE hafd.operation_id_to_type_id(o.id) = 72  -- effective_comment_vote
-                         AND ((o.body_binary::jsonb -> 'value') ->> 'author') = cp.author
-                         AND ((o.body_binary::jsonb -> 'value') ->> 'permlink') = cp.permlink
+                       WHERE o.op_type_id = 72  -- effective_comment_vote
+                         AND (o.body_value ->> 'author') = cp.author
+                         AND (o.body_value ->> 'permlink') = cp.permlink
                    ) v
                    WHERE v.rshares > {_VOTER_MIN_RSHARES_SQL} AND v.voter <> cp.author
                      AND NOT EXISTS (
@@ -1608,13 +1614,13 @@ SELECT cp.identity AS author,
                        -- the votes subquery above (smaller effect here since
                        -- comment volume per post is far lower than vote
                        -- volume, but the same waste, so the same fix).
-                       SELECT ((o2.body_binary::jsonb -> 'value') ->> 'author') AS author
+                       -- Same 2026-10-05 schema; `op_type_id = 1` matches the
+                       -- partial index on (parent_author, parent_permlink).
+                       SELECT (o2.body_value ->> 'author') AS author
                        FROM hafd.operations o2
-                       WHERE hafd.operation_id_to_type_id(o2.id) = 1  -- comment
-                         AND ((o2.body_binary::jsonb -> 'value') ->> 'parent_author')
-                             = cp.author
-                         AND ((o2.body_binary::jsonb -> 'value') ->> 'parent_permlink')
-                             = cp.permlink
+                       WHERE o2.op_type_id = 1  -- comment
+                         AND (o2.body_value ->> 'parent_author') = cp.author
+                         AND (o2.body_value ->> 'parent_permlink') = cp.permlink
                    ) rc
                    WHERE rc.author <> cp.author
                      AND NOT EXISTS (

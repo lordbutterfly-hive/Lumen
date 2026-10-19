@@ -1735,10 +1735,14 @@ def test_author_engagement_sql_exclusion_and_hydration_joins_stay_on_chain_autho
     # votes/comments read `hafd.operations` directly (PERF: bypasses the
     # blocks-joining views) but the join KEY is unchanged — chain author +
     # permlink, matched against the CTE's `cp.author`/`cp.permlink`.
-    assert "((o.body_binary::jsonb -> 'value') ->> 'author') = cp.author" in sql
-    assert "((o.body_binary::jsonb -> 'value') ->> 'permlink') = cp.permlink" in sql
-    assert "((o2.body_binary::jsonb -> 'value') ->> 'parent_author')" in sql
-    assert "((o2.body_binary::jsonb -> 'value') ->> 'parent_permlink')" in sql
+    assert "(o.body_value ->> 'author') = cp.author" in sql
+    assert "(o.body_value ->> 'permlink') = cp.permlink" in sql
+    assert "(o2.body_value ->> 'parent_author') = cp.author" in sql
+    assert "(o2.body_value ->> 'parent_permlink') = cp.permlink" in sql
+    # HAFSQL schema of 2026-10-05: neither the old binary column nor the old
+    # type function exists on the mirror any more; either one fails the query.
+    assert "body_binary" not in sql
+    assert "operation_id_to_type_id" not in sql
     assert "WHERE r.author = cp.author AND r.permlink = cp.permlink" in sql
 
 
