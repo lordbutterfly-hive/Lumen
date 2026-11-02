@@ -33,7 +33,7 @@ export const imageFile = (flags = 'i') => new RegExp(imagePath, flags);
 // Matches a URL that has already been through an image-resize proxy of the
 // `/p/<hash>?format=...` shape (see @hive/ui's proxifyImageSrc). `format` is
 // the one query param that function unconditionally appends to every URL it
-// builds (mode/width/height are omitted for GIFs), so its presence -- not
+// builds (GIFs never get width/height), so its presence -- not
 // just the `/p/` path -- is what actually means "already proxied". The path
 // alone isn't enough: Hive's own raw image storage uses the identical
 // `/p/<hash>` shape (no query string) for unprocessed uploads, so testing on

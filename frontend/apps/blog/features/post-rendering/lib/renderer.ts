@@ -1,5 +1,5 @@
 import { DefaultRenderer, TablePlugin, InstagramResizePlugin, TwitterResizePlugin } from '@hive/renderer';
-import { proxifyImageSrc } from '@ui/lib/proxify-images';
+import { proxifyImageSrc, isGifUrl } from '@ui/lib/proxify-images';
 
 import imageUserBlocklist from '@hive/ui/config/lists/image-user-blocklist';
 
@@ -33,6 +33,14 @@ function isLinkSafe(url: string): boolean {
   }
 }
 
+// A GIF in a post or comment body asks for NO width: that is what makes
+// `proxifyImageSrc` return the proxy's animated original. With a width the
+// proxy resizes it and only the first frame survives (see the GIF note in
+// packages/ui/lib/proxify-images.ts).
+function bodyImageWidth(url: string, width: number): number {
+  return isGifUrl(url) ? 0 : width;
+}
+
 const renderDefaultOptions = {
   baseUrl: configuredSiteDomain,
   breaks: false,
@@ -64,7 +72,7 @@ const renderDefaultOptions = {
   // byte-identical output (both just returned the native resolution) while
   // 1100 (the audit's original, narrower reference point) forced a real
   // downscale and a meaningfully smaller file.
-  imageProxyFn: (url: string) => proxifyImageSrc(url, 1420, 0),
+  imageProxyFn: (url: string) => proxifyImageSrc(url, bodyImageWidth(url, 1420), 0),
   // ★ AND A 1x CANDIDATE BESIDE IT (2026-08-21) — what hive.blog actually serves.
   //
   // The width above is a 2x figure, and until now it was the ONLY width offered:
@@ -81,13 +89,13 @@ const renderDefaultOptions = {
   // was an overshoot here.
   //
   // Returns `undefined` when the two widths collapse to the same url, which is not
-  // an edge case: `proxifyImageSrc` omits width for GIFs (resizing them breaks the
-  // animation), returns relative urls untouched, and passes already-proxied urls
+  // an edge case: GIFs get no width (see `bodyImageWidth`), `proxifyImageSrc`
+  // returns relative urls untouched, and it passes already-proxied urls
   // straight through. In every one of those the second candidate would be a byte-
   // for-byte duplicate of the first, so no srcset is emitted at all.
   imageSrcSetFn: (url: string) => {
-    const oneX = proxifyImageSrc(url, 768, 0);
-    const twoX = proxifyImageSrc(url, 1420, 0);
+    const oneX = proxifyImageSrc(url, bodyImageWidth(url, 768), 0);
+    const twoX = proxifyImageSrc(url, bodyImageWidth(url, 1420), 0);
     if (!oneX || !twoX || oneX === twoX) return undefined;
     // A comma or a space inside a candidate breaks srcset parsing outright, and a
     // quote would break out of the attribute. Ours never contain any (base58 hash
@@ -137,7 +145,7 @@ export function getRenderer(author: string = ''): DefaultRenderer {
 export function getPreviewRenderer(token: string, author: string = ''): DefaultRenderer {
   const options = {
     ...renderDefaultOptions,
-    imageProxyFn: (url: string) => proxifyImageSrc(url, 1420, 0, 'match', token),
+    imageProxyFn: (url: string) => proxifyImageSrc(url, bodyImageWidth(url, 1420), 0, 'match', token),
     // ★ THE SRCSET NEEDS THE TOKEN TOO (2026-08-21). Spreading
     // `renderDefaultOptions` brings in an `imageSrcSetFn` that builds its
     // candidates WITHOUT the preview token — and the token is the whole reason
@@ -147,8 +155,8 @@ export function getPreviewRenderer(token: string, author: string = ''): DefaultR
     // image fail to load in the preview only. Same widths as above, same
     // `undefined` contract; `'match'` matches the proxy fn beside it.
     imageSrcSetFn: (url: string) => {
-      const oneX = proxifyImageSrc(url, 768, 0, 'match', token);
-      const twoX = proxifyImageSrc(url, 1420, 0, 'match', token);
+      const oneX = proxifyImageSrc(url, bodyImageWidth(url, 768), 0, 'match', token);
+      const twoX = proxifyImageSrc(url, bodyImageWidth(url, 1420), 0, 'match', token);
       if (!oneX || !twoX || oneX === twoX) return undefined;
       if (/[\s,"'<>]/.test(oneX) || /[\s,"'<>]/.test(twoX)) return undefined;
       return `${oneX} 1x, ${twoX} 2x`;

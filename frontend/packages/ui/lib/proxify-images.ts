@@ -30,6 +30,11 @@ export function getLatestUrl(str: string): string {
   return last;
 }
 
+/** True when the URL's path ends in `.gif` (a query string after it is fine). */
+export function isGifUrl(url: string): boolean {
+  return /\.gif($|\?)/i.test(getLatestUrl(url));
+}
+
 export function proxifyImageSrc(url?: string, width = 0, height = 0, format = 'webp', token?: string) {
   if (!url || typeof url !== 'string') {
     return '';
@@ -65,8 +70,8 @@ export function proxifyImageSrc(url?: string, width = 0, height = 0, format = 'w
   // NOT necessarily "already proxied" -- it's also the exact path shape Hive's
   // own raw image storage uses for uploads, since proxyBase (images.hive.blog)
   // is both the CDN and the resize proxy. `format` is the one option this
-  // function unconditionally sets on every URL it builds (mode/width/height
-  // are omitted for GIFs, see below), so its presence -- not the path alone --
+  // function unconditionally sets on every URL it builds (GIFs never get
+  // width/height, see below), so its presence -- not the path alone --
   // is what actually means "already went through this function". Matching on
   // the path alone would wrongly treat every raw Hive-hosted upload as
   // pre-proxied and skip resizing/reformatting it entirely.
@@ -100,21 +105,29 @@ export function proxifyImageSrc(url?: string, width = 0, height = 0, format = 'w
   const encodedUrl = realUrl.replace(/ /g, '%20');
   const pHash = extractPHash(encodedUrl);
 
-  // Detect GIF URLs - the resize proxy is unsafe for GIFs in two ways
-  // (verified empirically against the live proxy, not just from the original
-  // comment here): asking it to resize (width/height) collapses the
-  // animation to a single static frame, AND asking it to `mode=fit` with NO
-  // width/height (which is what a naive "just skip the dimensions" fix would
-  // send) hits a proxy-side bug that inflates the file 45-63x instead of
-  // passing it through (a 66KB/3-frame source came back as a 4.1MB/97-"frame"
-  // response). So GIFs get `format` only -- no mode, no width, no height --
-  // which reproduces the original bytes untouched.
-  const isGif = /\.gif($|\?)/i.test(realUrl);
+  // ★ GIFs (2026-11-02: every GIF in every post and comment was a still).
+  //
+  // images.hive.blog passes a GIF's original bytes through ONLY for
+  // `format=match&mode=fit` with no width/height (imagehoster src/proxy.ts,
+  // `isGifOriginalPassthrough`). Every other shape goes through Sharp, which
+  // reads the first frame only. `mode` defaults to `cover` when absent, so the
+  // `format=match`-only URL built here from 2026-08-12 on was a still too.
+  // Measured on 13 GIFs from live Hive posts and comments (klipy, tenor, giphy,
+  // files.peakd.com, images.ecency.com): `format=match` alone returned 1 frame
+  // for every animated one; `format=match&mode=fit` returned the original bytes
+  // for 12, and an animated re-encode (44 of 45 frames) for one giphy file. It
+  // is also the exact URL the proxy's own legacy `/0x0/<url>` route redirects
+  // to, so the object is shared with hive.blog and PeakD.
+  //
+  // So: no size asked (post and comment bodies, see renderer.ts) gets the
+  // animated original. A size asked (feed cards, thumbnails, covers, avatars)
+  // keeps the first-frame still it had before: the proxy cannot resize a GIF
+  // and keep it moving, and a card should not pull a multi-MB original (one
+  // GIF in the reported comment thread is 5.6 MB).
+  const isGif = isGifUrl(realUrl);
 
   const options: ProxyOptions = {
-    // 'match' passes GIF bytes through unchanged regardless of what format
-    // the caller/default asked for; converting to webp would flatten it same
-    // as resizing would.
+    // 'match' keeps a GIF a GIF; converting it to webp would flatten it.
     format: isGif ? 'match' : format
   };
 
@@ -128,6 +141,8 @@ export function proxifyImageSrc(url?: string, width = 0, height = 0, format = 'w
     if (height > 0) {
       options.height = height;
     }
+  } else if (width === 0 && height === 0) {
+    options.mode = 'fit';
   }
 
   const qs = querystring.stringify(options);
